@@ -130,3 +130,21 @@ test("the orchestrator gets Nexus's helper agents, which only read", async () =>
     }
   } finally { stop(); delete process.env.FAKE_ARGS; }
 });
+
+test("only the user or an orchestrator may update or stop updating the Nexus server", async () => {
+  const { store, stop } = setup();
+  try {
+    const { execFileSync } = await import("node:child_process");
+    const cli = join(dirname(fileURLToPath(import.meta.url)), "../../../packages/cli/bin/nexus.js");
+    for (const role of ["worker", "conversation"] as const) {
+      store.writeSession({ protocol: 1, id: `s-${role}`, project: "p", role, runtime: "external", cwd: store.dir, launched_by: "external", created_at: new Date().toISOString() });
+      for (const sub of ["update", "cancel"]) {
+        assert.throws(
+          () => execFileSync(process.execPath, [cli, "server", sub], { env: { ...process.env, NEXUS_SESSION: `s-${role}`, NEXUS_DIR: store.dir, NEXUS_PORT: "1" }, stdio: "pipe" }),
+          (e: { stderr: Buffer }) => new RegExp(`only the user or an orchestrator may ${sub}`).test(e.stderr.toString()),
+          `${role} ${sub}`,
+        );
+      }
+    }
+  } finally { stop(); }
+});

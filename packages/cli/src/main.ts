@@ -207,6 +207,17 @@ const commands: Record<string, () => void | Promise<void>> = {
       console.log(`Nexus ${s.commit} "${s.subject}" from ${s.root} (${s.live ? "live worktree" : `development checkout, branch ${s.branch}`})`);
       return printUpdate(s.update);
     }
+    if (sub === "update" || sub === "cancel") {
+      // Restarting Nexus restarts every agent's runtime: the user's call, which an orchestrator may carry out when
+      // asked. A worker or a thinking partner never may (they run on the very server they would restart).
+      const sid = o.session ?? process.env.NEXUS_SESSION;
+      if (sid) {
+        const dir = process.env.NEXUS_DIR ?? findNexusDir();
+        let role: string | undefined;
+        try { role = dir ? new ProjectStore(dir).readSession(sid).role : undefined; } catch { role = undefined; }
+        if (role !== "orchestrator") throw new UsageError(`only the user or an orchestrator may ${sub} the Nexus server, not a ${role ?? "session"}`);
+      }
+    }
     if (sub === "update") return printUpdate(await server("POST", "/api/server/update", { now: !!o.now, ref: o.ref }));
     if (sub === "cancel") return printUpdate(await server("POST", "/api/server/cancel"));
     throw new UsageError("nexus server status|update|cancel");
