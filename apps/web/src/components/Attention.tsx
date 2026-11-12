@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { attentionKey, type AttentionItem, type ProjectSummary } from "../api.ts";
 import { TimeAgo } from "./ui.tsx";
 
@@ -195,13 +196,15 @@ export function NotifyToggle({ supported, on, toggle, push, toast, busy, dismiss
         </svg>
         <span className="hidden sm:inline">{on ? "notify" : "notify off"}</span>
       </button>
-      {toast && (
+      {/* Into <body>: the header's backdrop blur would otherwise make it the box `fixed` positions against. */}
+      {toast && createPortal(
         <div
           role="status" onClick={dismiss}
           className={`fixed inset-x-4 bottom-[calc(1rem+env(safe-area-inset-bottom))] z-[60] mx-auto max-w-md rounded-lg border bg-zinc-900 px-4 py-3 text-sm shadow-2xl sm:inset-x-auto sm:right-6 ${toast.kind === "error" ? "border-red-500/40 text-red-200" : "border-emerald-500/40 text-emerald-200"}`}
         >
           {toast.text}
-        </div>
+        </div>,
+        document.body,
       )}
     </>
   );
