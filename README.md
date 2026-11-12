@@ -99,8 +99,9 @@ proxy or from another address needs the access token once (it sets a cookie for 
    the bell: notifications arrive even with Nexus closed. "Send a test notification" in the panel checks it.
 
 "Replace token" in the panel signs every remote device out. To have Nexus start with Windows, without a console
-window: `powershell -ExecutionPolicy Bypass -File scripts\autostart.ps1` (`-Remove` undoes it; the log goes to
-`%APPDATA%\Nexus\server.log`).
+window, run from the live instance: `powershell -ExecutionPolicy Bypass -File C:\Code\Nexus-live\scripts\autostart.ps1`
+(`-Remove` undoes it; the log goes to `%APPDATA%\Nexus\server.log`). To start it once without a window:
+`wscript C:\Code\Nexus-live\scripts\start-hidden.vbs`.
 
 ## Reporting from an agent started by hand
 
