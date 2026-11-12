@@ -2,6 +2,7 @@
 // nothing here is ever written back (state.json, if kept, is only a cache of this).
 import { ORCHESTRATOR_ONLY, type Event, type InboxEntry, type Note, type ProjectFile, type QueueFile, type QueueStatus, type ReviewItem, type RunFile, type RuntimeFile, type SessionFile, type StepDef, type StepStatus } from "./schemas.ts";
 import { ProjectStore, revisionHash } from "./store.ts";
+import { ENDED_RUN_STATES, type Segment } from "./times.ts";
 
 export interface CheckView { name: string; ok: boolean; summary?: string; at: string }
 export interface AnswerView { id: string; text: string; at: string; escalate?: boolean; continue?: boolean; session: string; by: "orchestrator" | "user" }
@@ -19,7 +20,10 @@ export interface AttentionItem {
 }
 export interface StepView extends StepDef {
   status: StepStatus;
+  /** started_at: the first step.started (a resumed step keeps it); finished_at: its latest done or failed. */
   started_at?: string; finished_at?: string;
+  /** Its stretches at work, one per step.started; see times.ts for durations. */
+  segments: Segment[];
   progress?: { text: string; pct?: number; at: string };
   session?: string;
   summary?: string; reason?: string; commit?: string;
@@ -120,6 +124,14 @@ export function loadProjectState(store: ProjectStore): ProjectState {
 
   for (const q of queues.values()) {
     q.questions = [...questions.values()].filter((x) => x.queue === q.id);
+    // A run that halted, finished or was stopped ends the stretch of the step it left without an outcome.
+    if (q.run && ENDED_RUN_STATES.has(q.run.state)) {
+      const ended = q.run.ended_at ?? q.run.updated_at;
+      for (const st of q.steps) {
+        const open = st.segments.at(-1);
+        if (open && open.end === undefined && open.start <= ended) open.end = ended;
+      }
+    }
     // A step at work comes first; otherwise the latest stop (an older stop may have been taken up again since).
     q.current_step = (q.steps.find((s) => s.status === "running" || s.status === "waiting" || s.status === "review")
       ?? q.steps.findLast((s) => s.status === "stopped"))?.id;
@@ -177,7 +189,7 @@ function initQueue(q: QueueFile, notes: Note[]): QueueView {
     steps: q.steps.map((s) => ({
       ...s,
       status: s.status ?? "pending",
-      review_items: [], checks: [], timeline: [], messages: [],
+      review_items: [], checks: [], timeline: [], messages: [], segments: [],
       notes: notes.filter((n) => n.step === s.id),
     })),
   };
@@ -213,7 +225,12 @@ function apply(
     case "step.started": {
       const q = queueOf(e.queue); const st = stepOf(q, e.step);
       if (!q || !st) return;
-      st.status = "running"; st.started_at = e.at; st.session = e.session;
+      // Started again without an outcome in between (a halted or interrupted turn): the earlier stretch ended with the
+      // step's last event before this one.
+      const open = st.segments.at(-1);
+      if (open && open.end === undefined) open.end = st.timeline.at(-2)?.at ?? e.at;
+      st.segments.push({ start: e.at });
+      st.status = "running"; st.started_at ??= e.at; st.session = e.session;
       st.finished_at = undefined; st.reason = undefined;
       if (!TERMINAL_QUEUE.has(q.status)) { q.status = "running"; q.status_reason = undefined; }
       return;
@@ -239,6 +256,7 @@ function apply(
       const policy = st.review?.policy ?? q.review_policy ?? "continue";
       st.status = policy === "wait" ? "review" : "done";
       st.finished_at = e.at; st.summary = e.summary; st.commit = e.commit;
+      endSegment(st, e.at);
       if (q.steps.every((x) => FINISHED_STEP.has(x.status))) q.status = "done";
       else if (policy === "wait") q.status = "waiting";
       return;
@@ -247,12 +265,14 @@ function apply(
       const q = queueOf(e.queue); const st = stepOf(q, e.step);
       if (!q || !st) return;
       st.status = "failed"; st.finished_at = e.at; st.reason = e.reason;
+      endSegment(st, e.at);
       return;
     }
     case "queue.stop": {
       const q = queueOf(e.queue); const st = stepOf(q, e.step);
       if (!q) return;
       q.status = "stopped"; q.status_reason = `${e.condition}: ${e.reason}`;
+      for (const x of q.steps) endSegment(x, e.at);
       if (st && !FINISHED_STEP.has(st.status)) { st.status = "stopped"; st.reason = e.reason; }
       return;
     }
@@ -314,6 +334,11 @@ function apply(
     default:
       return;
   }
+}
+
+function endSegment(st: StepView, at: string): void {
+  const open = st.segments.at(-1);
+  if (open && open.end === undefined) open.end = at;
 }
 
 function resume(x: QuestionView, queues: Map<string, QueueView>, e: Event): void {

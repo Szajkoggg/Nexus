@@ -1,0 +1,69 @@
+// When steps and runs started and ended, how long they took, and how that reads. Pure and free of Node: the dashboard
+// imports this module directly (`@nexus/protocol/times`), so it must import nothing at run time.
+
+/** A stretch in which a step was at work: from a step.started to its outcome, a stop, or the run ending. */
+export interface Segment { start: string; end?: string }
+
+export interface StepTimes {
+  /** The first step.started. */
+  started?: string;
+  /** When its last stretch ended; absent while it is at work. */
+  ended?: string;
+  /** At work now: the elapsed time grows. */
+  running: boolean;
+  /** From the first start to the end (or to now while at work). */
+  duration_ms?: number;
+  /** The sum of its stretches at work; differs from the duration only when it was started more than once. */
+  working_ms?: number;
+  /** How many times it was started. */
+  segments: number;
+}
+
+const ms = (iso: string) => Date.parse(iso);
+
+export function stepTimes(segments: readonly Segment[], now: number): StepTimes {
+  const first = segments[0];
+  if (!first) return { running: false, segments: 0 };
+  const last = segments[segments.length - 1]!;
+  const running = last.end === undefined;
+  const end = running ? now : ms(last.end!);
+  const working = segments.reduce((sum, s) => sum + Math.max(0, (s.end === undefined ? now : ms(s.end)) - ms(s.start)), 0);
+  return {
+    started: first.start, ended: running ? undefined : last.end, running,
+    duration_ms: Math.max(0, end - ms(first.start)), working_ms: working, segments: segments.length,
+  };
+}
+
+/** The run's states that mean it is not going (it may be resumed later). */
+export const ENDED_RUN_STATES: ReadonlySet<string> = new Set(["finished", "halted", "paused"]);
+
+export interface RunTimes { started: string; ended?: string; running: boolean; total_ms: number }
+
+/** A run's span: from its start to when it finished, halted or was stopped (or to now while it goes). */
+export function runTimes(run: { state: string; started_at: string; ended_at?: string; updated_at: string }, now: number): RunTimes {
+  const ended = ENDED_RUN_STATES.has(run.state) ? (run.ended_at ?? run.updated_at) : undefined;
+  return { started: run.started_at, ended, running: !ended, total_ms: Math.max(0, (ended ? ms(ended) : now) - ms(run.started_at)) };
+}
+
+/** "<1 min", "12 min", "1 h 12 min", "3 h", "2 d 5 h". Minutes are rounded down, so a running clock never jumps ahead. */
+export function formatDuration(duration: number): string {
+  const min = Math.floor(duration / 60_000);
+  if (min < 1) return "<1 min";
+  if (min < 60) return `${min} min`;
+  const h = Math.floor(min / 60), m = min % 60;
+  if (h < 24) return m ? `${h} h ${m} min` : `${h} h`;
+  const d = Math.floor(h / 24), rh = h % 24;
+  return rh ? `${d} d ${rh} h` : `${d} d`;
+}
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const two = (n: number) => String(n).padStart(2, "0");
+
+/** A local time: "14:02" today, "11 Nov 14:02" on another day this year, "11 Nov 2025 14:02" in another year. */
+export function formatClock(iso: string, now: Date): string {
+  const t = new Date(iso);
+  const clock = `${two(t.getHours())}:${two(t.getMinutes())}`;
+  if (t.getFullYear() === now.getFullYear() && t.getMonth() === now.getMonth() && t.getDate() === now.getDate()) return clock;
+  const day = `${t.getDate()} ${MONTHS[t.getMonth()]}`;
+  return t.getFullYear() === now.getFullYear() ? `${day} ${clock}` : `${day} ${t.getFullYear()} ${clock}`;
+}

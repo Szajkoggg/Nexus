@@ -1,5 +1,5 @@
 import type { QueueView, StepView } from "../api.ts";
-import { StatusBadge, TimeAgo, toneOf } from "./ui.tsx";
+import { StatusBadge, StepTimes, TimeAgo, toneOf } from "./ui.tsx";
 import { RunChip } from "./Run.tsx";
 
 export function QueueRow({ queue, onQueue, onStep }: {
@@ -50,7 +50,7 @@ function StepCard({ step, current, onClick }: { step: StepView; current: boolean
   return (
     <button
       onClick={onClick}
-      className={`group flex h-28 w-52 shrink-0 flex-col rounded-lg p-3 text-left ring-1 transition hover:brightness-125 ${t.ring} ${t.bg} ${current ? "ring-2" : ""}`}
+      className={`group flex h-32 w-52 shrink-0 flex-col rounded-lg p-3 text-left ring-1 transition hover:brightness-125 ${t.ring} ${t.bg} ${current ? "ring-2" : ""}`}
     >
       <div className="flex items-center gap-2 text-xs">
         <span className={`h-2 w-2 shrink-0 rounded-full ${t.dot}`} />
@@ -62,7 +62,8 @@ function StepCard({ step, current, onClick }: { step: StepView; current: boolean
         </span>
       </div>
       <div className="mt-1.5 line-clamp-2 text-sm font-medium leading-snug text-zinc-100">{step.title}</div>
-      {line && <div className="mt-auto line-clamp-1 text-xs text-zinc-500">{line.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\*\*|`/g, "")}</div>}
+      <div className="mt-auto text-[11px] text-zinc-500"><StepTimes step={step} compact /></div>
+      {line && <div className="line-clamp-1 text-xs text-zinc-500">{line.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\*\*|`/g, "")}</div>}
       {step.progress?.pct !== undefined && step.status === "running" && (
         <div className="mt-1 h-1 overflow-hidden rounded bg-zinc-800">
           <div className="h-full bg-blue-400" style={{ width: `${step.progress.pct}%` }} />

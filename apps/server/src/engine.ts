@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import {
+  ENDED_RUN_STATES,
   ActionError, ProjectStore, USER_SESSION, ensureUserSession, loadProjectState, newId, normPath, now, readUsage,
   writeUsage, CLAUDE_EFFORTS, type Effort, type InboxView, type ProjectState, type QueueView, type RunFile, type SessionFile, type StepView,
 } from "@nexus/protocol";
@@ -477,7 +478,13 @@ export class Engine {
   }
 
   private writeRun(queueId: string, run: RunFile): void {
-    this.store.writeRun(queueId, { ...run, updated_at: now() });
+    // ended_at: set when the run stops going (finished, halted, paused), kept while it stays stopped, cleared when it
+    // goes on, so the dashboard can show when it ended and how long it took.
+    const old = this.store.readRun(queueId);
+    const ended = ENDED_RUN_STATES.has(run.state)
+      ? (old && ENDED_RUN_STATES.has(old.state) && old.ended_at ? old.ended_at : now())
+      : undefined;
+    this.store.writeRun(queueId, { ...run, ended_at: ended, updated_at: now() });
   }
 
   private queue(state: ProjectState, id: string): QueueView {

@@ -153,13 +153,20 @@ Every line:
 
 The server validates every event against the writer's role and ignores (and reports) what that role may not do.
 
+**Step times** are derived from these events. A step's `started_at` is its first `step.started`; each `step.started`
+opens a stretch at work (`segments` in the state), which ends at the step's `step.done` or `step.failed`, at a
+`queue.stop` of its queue, at the run's `ended_at` when the run stopped going with the step still open, or, when the
+step is started again without any of these, at the step's last event before the new start. The dashboard shows the
+duration from the first start to the end (elapsed while at work) and, for a step started more than once, the working
+time as the sum of the stretches (`packages/protocol/src/times.ts`).
+
 ## Server-owned runtime files
 
 Written only by the server's queue engine; agents never touch them.
 
 | File | What |
 |---|---|
-| `queues/<id>/run.yaml` | The engine's intent for a queue: `session`, `state` (`running`, `pausing`, `paused`, `halted`, `finished`, `usage_wait`), `reason`, the `step` it last opened, `nudged`, `resume_at` |
+| `queues/<id>/run.yaml` | The engine's intent for a queue: `session`, `state` (`running`, `pausing`, `paused`, `halted`, `finished`, `usage_wait`), `reason`, the `step` it last opened, `nudged`, `resume_at`, `started_at`, `ended_at` (when it last stopped going: set when it becomes `finished`, `halted` or `paused`, kept while it stays so, removed when it goes on; older files without it fall back to `updated_at`) |
 | `sessions/<id>/runtime.json` | A launched session's live facts: process state and pid, model, context tokens and window, turns, cost |
 | `sessions/<id>/delivered.jsonl` | What the server handed to the session (notes put into a step turn, inbox entries injected or sent as a turn); counts as read |
 | `sessions/<id>/activity.jsonl` | A condensed record of the agent's stream: turns, tool calls, texts (clipped to 600 characters), tool errors, tagged with queue and step |

@@ -265,6 +265,8 @@ export const RunFile = z.object({
   nudged: z.boolean().optional(),
   started_at: Time,
   updated_at: Time,
+  /** When it last stopped going: became finished, halted or paused. Cleared when it goes on again. */
+  ended_at: Time.optional(),
   resume_at: Time.optional(), // usage_wait: when the window resets
   /** Stopped only for a Nexus update: the server resumes it by itself when it starts again. */
   resume_after_restart: z.boolean().optional(),

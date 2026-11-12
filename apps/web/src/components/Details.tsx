@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { Event } from "@nexus/protocol";
 import { act, enc, fileUrl, type ProjectState, type QuestionView, type QueueView, type StepView } from "../api.ts";
-import { Button, Composer, Expandable, Markdown, Section, StatusBadge, TimeAgo } from "./ui.tsx";
+import { Button, Composer, Expandable, Markdown, Section, StatusBadge, StepTimes, TimeAgo } from "./ui.tsx";
 import { Activity, RunControls } from "./Run.tsx";
 import { draftKey } from "../drafts.ts";
 
@@ -25,8 +25,7 @@ export function StepDetail({ project, queue, step, onChanged }: Props & { step: 
       </h2>
       <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-zinc-500">
         <StatusBadge status={step.status} />
-        {step.started_at && <span>started <TimeAgo at={step.started_at} /></span>}
-        {step.finished_at && <span>finished <TimeAgo at={step.finished_at} /></span>}
+        <StepTimes step={step} />
         {step.commit && <span className="font-mono">{step.commit}</span>}
         {session && <span>by {session.title ?? session.id.slice(-8)} ({session.runtime})</span>}
       </div>

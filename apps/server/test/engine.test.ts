@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  ProjectStore, addNote, answerAsUser, approveQueue, loadProjectState, routeAnswers, sendMessage, type StepDef,
+  ProjectStore, addNote, answerAsUser, approveQueue, loadProjectState, routeAnswers, runTimes, sendMessage, type StepDef,
 } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 
@@ -48,6 +48,12 @@ for (const runtime of ["claude", "codex"] as const) {
       const q = queue();
       assert.deepEqual(q.steps.map((s) => s.status), ["done", "done"]);
       assert.equal(q.status, "done");
+      // The finished run records when it ended, after its last step's outcome.
+      const run = q.run!;
+      assert.ok(run.ended_at, "a finished run records its finish time");
+      assert.ok(run.ended_at >= run.started_at && run.ended_at >= q.steps[1]!.finished_at!);
+      assert.equal(runTimes(run, Date.now()).ended, run.ended_at);
+      assert.deepEqual(q.steps.map((s) => s.segments.length), [1, 1]);
       const turns = received().filter((m) => m.text.startsWith("[Nexus] Queue"));
       assert.equal(turns.length, 2);
       assert.match(turns[1]!.text, /step Q2 \(2 of 2\)[\s\S]*Keep the debris as it is\./);
@@ -111,6 +117,7 @@ for (const runtime of ["claude", "codex"] as const) {
       engine.start("Q", { runtime });
       await until("the run to halt", () => queue().run?.state === "halted");
       assert.equal(queue().status, "stopped");
+      assert.ok(queue().run!.ended_at, "a halted run records when it halted");
       assert.equal(queue().steps[1]!.status, "pending");
     } finally { engine.shutdown(); }
   });
@@ -125,8 +132,12 @@ for (const runtime of ["claude", "codex"] as const) {
       assert.equal(queue().run?.state, "pausing");
       await until("the pause", () => queue().run?.state === "paused");
       assert.deepEqual(queue().steps.map((s) => s.status), ["done", "pending"]);
+      const paused = queue().run!.ended_at;
+      assert.ok(paused, "a paused run records when it stopped going");
       engine.resume("Q");
+      assert.equal(queue().run!.ended_at, undefined, "going on clears it");
       await until("the run to finish", () => queue().run?.state === "finished");
+      assert.ok(queue().run!.ended_at! > paused);
     } finally { engine.shutdown(); delete process.env.FAKE_SLOW_MS; }
   });
 }

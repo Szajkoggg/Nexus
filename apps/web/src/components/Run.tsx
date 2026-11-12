@@ -1,7 +1,7 @@
 // Running queues through Nexus-launched sessions: controls, live activity, sessions and usage.
 import { useState } from "react";
 import { act, enc, useFetch, type ActivityEntry, type ProjectState, type QueueView, type SessionView, type Usage } from "../api.ts";
-import { Button, Section, TimeAgo } from "./ui.tsx";
+import { Button, RunTimes, Section, TimeAgo } from "./ui.tsx";
 import { EffortSelect, ModelSelect } from "./Settings.tsx";
 
 const RUN_TONE: Record<string, string> = {
@@ -62,6 +62,7 @@ export function RunControls({ project, queue, onChanged }: { project: ProjectSta
             {run.step && <span className="font-mono text-xs text-zinc-400">at {run.step}</span>}
             <span className="text-xs text-zinc-500">since <TimeAgo at={run.updated_at} /></span>
           </div>
+          <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-zinc-400"><RunTimes run={run} /></div>
           {run.reason && <p className="mt-1 text-zinc-300">{run.reason}</p>}
           {runSession && <p className="mt-1 text-xs text-zinc-500">Session: {runSession.title ?? runSession.id} {runSession.live?.model ? `· ${runSession.live.model}` : ""}{runSession.effort ? ` · ${runSession.effort} effort` : ""} <ContextBar s={runSession} /></p>}
           {run.state === "usage_wait" && run.resume_at && <p className="mt-1 text-xs text-zinc-500">Resumes by itself at {new Date(run.resume_at).toLocaleTimeString()}.</p>}

@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { readDraft, writeDraft } from "../drafts.ts";
 import ReactMarkdown from "react-markdown";
+import { formatClock, formatDuration, runTimes, stepTimes } from "@nexus/protocol/times";
+import type { QueueView, StepView } from "../api.ts";
 
 // ---------------------------------------------------------------- status colours
 
@@ -57,6 +59,55 @@ export function TimeAgo({ at }: { at?: string }) {
   const d = (now - Date.parse(at)) / 1000;
   const text = d < 60 ? "just now" : d < 3600 ? `${Math.floor(d / 60)} min ago` : d < 86400 ? `${Math.floor(d / 3600)} h ago` : `${Math.floor(d / 86400)} d ago`;
   return <time dateTime={at} title={new Date(at).toLocaleString()} className="whitespace-nowrap">{text}</time>;
+}
+
+/** An absolute local time: "14:02" today, with the date on another day. The full date and time on hover. */
+export function Clock({ at }: { at: string }) {
+  const now = useNow();
+  return <time dateTime={at} title={new Date(at).toLocaleString()} className="whitespace-nowrap">{formatClock(at, new Date(now))}</time>;
+}
+
+const sameDay = (a: string, b: string) => new Date(a).toDateString() === new Date(b).toDateString();
+
+const STEP_END: Record<string, string> = { done: "finished", review: "finished", failed: "failed", stopped: "stopped" };
+
+/** When a step started and ended and how long it took; while it is at work, the elapsed time, updating live. */
+export function StepTimes({ step, compact }: { step: StepView; compact?: boolean }) {
+  const now = useNow(15_000);
+  const t = stepTimes(step.segments, now);
+  if (!t.started) return null;
+  const took = formatDuration(t.duration_ms!);
+  if (compact) {
+    return (
+      <span title={`started ${new Date(t.started).toLocaleString()}${t.ended ? `, ended ${new Date(t.ended).toLocaleString()}` : ""}`} className="whitespace-nowrap">
+        {t.running ? "since " : ""}<Clock at={t.started} />{t.ended && sameDay(t.started, t.ended) && <>–{formatClock(t.ended, new Date(t.ended))}</>} · {took}
+      </span>
+    );
+  }
+  return (
+    <>
+      <span>started <Clock at={t.started} /></span>
+      {t.ended && <span>{STEP_END[step.status] ?? "ended"} <Clock at={t.ended} /></span>}
+      <span>{t.running ? `${took} so far` : `took ${took}`}</span>
+      {t.segments > 1 && <span title="The sum of the stretches it was at work">working {formatDuration(t.working_ms!)}, started {t.segments} times</span>}
+    </>
+  );
+}
+
+const RUN_END: Record<string, string> = { finished: "finished", halted: "halted", paused: "paused" };
+
+/** When the queue's run started and ended (finished, halted or stopped), and its total time. */
+export function RunTimes({ run }: { run: NonNullable<QueueView["run"]> }) {
+  const now = useNow(15_000);
+  const t = runTimes(run, now);
+  const end = run.state === "paused" && run.reason === "stopped by the user" ? "stopped" : RUN_END[run.state] ?? "ended";
+  return (
+    <>
+      <span>started <Clock at={t.started} /></span>
+      {t.ended && <span>{end} <Clock at={t.ended} /></span>}
+      <span>{t.running ? `${formatDuration(t.total_ms)} so far` : `${formatDuration(t.total_ms)} in total`}</span>
+    </>
+  );
 }
 
 export function Section({ title, children, aside }: { title: string; children: ReactNode; aside?: ReactNode }) {
