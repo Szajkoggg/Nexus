@@ -1,0 +1,100 @@
+// What is open in the dashboard, kept in the browser history so that Back closes the topmost layer.
+//
+// Each history entry Nexus writes carries a Nav in its state: the hash (project, and the queue or step whose drawer is
+// open), the stack of open layers (bottom first), and its depth: how many entries Nexus pushed above the entry the
+// app started from. Opening a layer pushes one entry; closing pops back to the entry before it, so Back and a close
+// button do the same thing and no dead entries pile up. Switching within a kind of layer (another step, another
+// conversation) replaces the entry. With nothing open, Back leaves the app.
+//
+// This part is pure (no window, no history) and unit tested; nav.ts applies its steps to the browser.
+
+/** A layer is a kind, optionally with a value: "chat", "settings", "item" (the queue or step drawer), "conversation:<id>". */
+export type Layer = string;
+export interface Nav { hash: string; layers: Layer[]; depth: number }
+
+export type Step =
+  | { op: "none" }
+  | { op: "push" | "replace"; to: Nav }
+  /** Go back `steps` entries; then, if given, apply what `then` makes of the entry arrived at. */
+  | { op: "back"; steps: number; then?: (arrived: Nav) => Step[] }
+  /** One after the other. */
+  | { op: "seq"; steps: Step[] };
+
+export const kindOf = (layer: Layer) => layer.split(":")[0]!;
+const valueOf = (layer: Layer) => layer.includes(":") ? layer.slice(layer.indexOf(":") + 1) : undefined;
+
+/** The value of the open layer of a kind ("conversation" → its id), or undefined when none is open. */
+export function layerValue(nav: Nav, kind: string): string | undefined {
+  const l = nav.layers.find((x) => kindOf(x) === kind);
+  return l === undefined ? undefined : valueOf(l) ?? "";
+}
+export const isOpen = (nav: Nav, kind: string) => nav.layers.some((x) => kindOf(x) === kind);
+
+/** A hash with a queue in it has the queue or step drawer open. */
+export const hasItem = (hash: string) => hash.replace(/^#\/?/, "").split("/").filter(Boolean).length > 1;
+
+/** Opens a layer on top (at a new hash, for the drawer); the same kind on top is switched in place instead. */
+export function open(cur: Nav, layer: Layer, hash = cur.hash): Step {
+  const top = cur.layers.at(-1);
+  if (top === layer && hash === cur.hash) return { op: "none" };
+  if (top !== undefined && kindOf(top) === kindOf(layer)) return { op: "replace", to: { ...cur, hash, layers: [...cur.layers.slice(0, -1), layer] } };
+  return { op: "push", to: { hash, layers: [...cur.layers, layer], depth: cur.depth + 1 } };
+}
+
+/**
+ * Closes the layer of a kind and everything above it. When Nexus pushed their entries, that is going back; when it
+ * did not (the app started with them open), the current entry is rewritten without them (at `closedHash` when the
+ * drawer closes).
+ */
+export function close(cur: Nav, kind: string, closedHash = cur.hash): Step {
+  const i = cur.layers.findIndex((x) => kindOf(x) === kind);
+  if (i < 0) return { op: "none" };
+  const k = cur.layers.length - i;
+  if (cur.depth >= k) return { op: "back", steps: k };
+  return { op: "replace", to: { hash: closedHash, layers: cur.layers.slice(0, i), depth: cur.depth } };
+}
+
+/** Closes the topmost layer (Escape). */
+export function closeTop(cur: Nav, closedHash: string): Step {
+  const top = cur.layers.at(-1);
+  return top === undefined ? { op: "none" } : close(cur, kindOf(top), kindOf(top) === "item" ? closedHash : cur.hash);
+}
+
+/**
+ * Closes a layer and then opens something else from where that leaves the user: another project from the picker
+ * (`layer` undefined: only the hash changes, in place), or an item of another project from the waiting list (the
+ * project first, in place, then the item on top, so Back closes the item and stays in that project).
+ */
+export function closeThen(cur: Nav, kind: string, hash: string, layer?: Layer): Step {
+  const after = (arrived: Nav): Step[] => {
+    const base = hash.replace(/^(#\/[^/]+).*$/, "$1");
+    const steps: Step[] = [];
+    const at: Nav = { ...arrived, hash: layer ? base : hash };
+    if (!hasItem(at.hash)) at.layers = at.layers.filter((l) => kindOf(l) !== "item");
+    if (at.hash !== arrived.hash) steps.push({ op: "replace", to: at });
+    if (layer) steps.push(open(at, layer, hash));
+    return steps;
+  };
+  const closing = close(cur, kind);
+  if (closing.op === "back") return { ...closing, then: after };
+  const arrived = closing.op === "replace" ? closing.to : cur;
+  return { op: "seq", steps: [...(closing.op === "none" ? [] : [closing]), ...after(arrived)] };
+}
+
+/**
+ * The Nav of a history entry. Entries Nexus wrote carry it; others (the first page load, a hash typed by hand) get
+ * one from the hash and the query (?chat, ?settings… open a layer at load), with depth 0.
+ */
+export function navOf(state: unknown, hash: string, query: string): Nav {
+  const s = (state as { nexus?: Partial<Nav> } | null)?.nexus;
+  if (s && Array.isArray(s.layers) && typeof s.depth === "number") {
+    // The hash is the truth for the drawer: a hash edited by hand on a Nexus entry still opens or closes it.
+    const layers = s.layers.filter((l) => typeof l === "string" && (kindOf(l) !== "item" || hasItem(hash)));
+    if (hasItem(hash) && !layers.some((l) => kindOf(l) === "item")) layers.unshift("item");
+    return { hash, layers, depth: s.depth };
+  }
+  const q = new URLSearchParams(query);
+  const layers: Layer[] = hasItem(hash) ? ["item"] : [];
+  for (const k of ["ideas", "chat", "settings", "remote", "waiting", "projects"]) if (q.has(k)) layers.push(k);
+  return { hash, layers, depth: 0 };
+}

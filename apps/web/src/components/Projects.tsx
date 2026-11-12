@@ -1,6 +1,7 @@
 // Switching projects: tabs on a wide screen; on a narrow one, a picker that opens from the current project's name.
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { nav } from "../nav.ts";
 import type { ProjectSummary } from "../api.ts";
 
 const Waiting = ({ n }: { n: number }) =>
@@ -32,18 +33,13 @@ export function ProjectTabs({ projects, current, onPick }: { projects: ProjectSu
  * (each with its count and dot), a second tap switches. What waits in other projects is counted by the waiting
  * button beside it.
  */
-export function ProjectPicker({ projects, current, onPick }: { projects: ProjectSummary[]; current?: string; onPick: (id: string) => void }) {
-  const [open, setOpen] = useState(() => new URLSearchParams(location.search).has("projects"));
+export function ProjectPicker({ projects, current, open, onPick }: { projects: ProjectSummary[]; current?: string; open: boolean; onPick: (id: string) => void }) {
+  // Open is a layer in the history (nav.ts): Back closes the list.
+  const setOpen = (v: boolean) => (v ? nav.open("projects") : nav.close("projects"));
   const button = useRef<HTMLButtonElement>(null);
   // The header blurs what is behind it, which would trap fixed children; the list goes to the body, just below it.
   const [top, setTop] = useState(0);
   useEffect(() => { if (open) setTop(button.current?.closest("header")?.getBoundingClientRect().bottom ?? 0); }, [open]);
-  useEffect(() => {
-    if (!open) return;
-    const key = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
-    window.addEventListener("keydown", key);
-    return () => window.removeEventListener("keydown", key);
-  }, [open]);
   const here = projects.find((p) => p.id === current);
   const single = projects.length < 2;
   return (
@@ -72,7 +68,7 @@ export function ProjectPicker({ projects, current, onPick }: { projects: Project
               <li key={p.id}>
                 <button
                   role="option" aria-selected={p.id === current}
-                  onClick={() => { setOpen(false); onPick(p.id); }}
+                  onClick={() => (p.id === current ? setOpen(false) : onPick(p.id))}
                   className={`flex min-h-12 w-full items-center gap-3 px-4 text-left text-sm ${p.id === current ? "bg-zinc-800/80 text-zinc-50" : "text-zinc-300 active:bg-zinc-800"}`}
                 >
                   <span className={`w-4 shrink-0 text-sky-400 ${p.id === current ? "" : "invisible"}`}>✓</span>

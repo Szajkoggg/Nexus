@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import type { QueueStatus } from "@nexus/protocol";
 import { useLive, useProjectState, useProjects, type AttentionItem, type QueueView } from "./api.ts";
 import { QueueRow } from "./components/QueueRow.tsx";
@@ -9,6 +9,8 @@ import { ContextBar, UsageMeter } from "./components/Run.tsx";
 import { ChatPanel, ConversationsButton, ConversationsPanel, OrchestratorButton, useOrchestrator } from "./components/Chat.tsx";
 import { RemoteButton, RemotePanel } from "./components/Remote.tsx";
 import { ProjectPicker, ProjectTabs } from "./components/Projects.tsx";
+import { isOpen } from "./layers.ts";
+import { nav, useNav } from "./nav.ts";
 import { SettingsButton, SettingsPanel, UpdatePill, useServer } from "./components/Settings.tsx";
 
 const GROUPS: { title: string; statuses: QueueStatus[]; collapsible?: boolean }[] = [
@@ -17,19 +19,14 @@ const GROUPS: { title: string; statuses: QueueStatus[]; collapsible?: boolean }[
   { title: "Planned", statuses: ["approved", "proposed", "draft"] },
 ];
 
-/** The selection lives in the URL hash: #/<project>[/<queue>[/<step>]]. */
+/**
+ * The selection lives in the URL hash: #/<project>[/<queue>[/<step>]]; what is open over it, in the history entry
+ * (nav.ts), so that Back closes the topmost layer.
+ */
 function useRoute() {
-  const parse = () => location.hash.replace(/^#\/?/, "").split("/").map(decodeURIComponent).filter(Boolean);
-  const [parts, setParts] = useState(parse);
-  useEffect(() => {
-    const f = () => setParts(parse());
-    window.addEventListener("hashchange", f);
-    return () => window.removeEventListener("hashchange", f);
-  }, []);
-  const go = useCallback((...p: (string | undefined)[]) => {
-    location.hash = "/" + p.filter((x): x is string => !!x).map(encodeURIComponent).join("/");
-  }, []);
-  return { project: parts[0], queue: parts[1], step: parts[2], go };
+  const n = useNav();
+  const parts = n.hash.replace(/^#\/?/, "").split("/").map(decodeURIComponent).filter(Boolean);
+  return { project: parts[0], queue: parts[1], step: parts[2], nav: n };
 }
 
 export function App() {
@@ -50,11 +47,12 @@ export function App() {
   const notify = useNotifications(projects);
   const orchestrator = useOrchestrator(projectId, tick);
   const server = useServer(tick);
-  const [ideasOpen, setIdeasOpen] = useState(() => new URLSearchParams(location.search).has("ideas"));
-  const [settingsOpen, setSettingsOpen] = useState(() => new URLSearchParams(location.search).has("settings"));
-  const [remoteOpen, setRemoteOpen] = useState(() => new URLSearchParams(location.search).has("remote"));
-  const [chatOpen, setChatOpen] = useState(() => new URLSearchParams(location.search).has("chat"));
-  const [waitingOpen, setWaitingOpen] = useState(() => new URLSearchParams(location.search).has("waiting"));
+  // Each panel is a layer in the browser history: opening pushes an entry, closing (or Back) pops it.
+  const ideasOpen = isOpen(route.nav, "ideas");
+  const settingsOpen = isOpen(route.nav, "settings");
+  const remoteOpen = isOpen(route.nav, "remote");
+  const chatOpen = isOpen(route.nav, "chat");
+  const waitingOpen = isOpen(route.nav, "waiting");
 
   const byGroup = useMemo(() => {
     const order = (q: QueueView) => q.updated ?? q.updated_at ?? "";
@@ -66,7 +64,7 @@ export function App() {
 
   const queue = state?.queues.find((q) => q.id === route.queue);
   const step = queue?.steps.find((s) => s.id === route.step);
-  const close = useCallback(() => route.go(projectId), [route, projectId]);
+  const close = () => nav.close("item");
 
   return (
     <div className="flex min-h-full flex-col">
@@ -75,17 +73,17 @@ export function App() {
         <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-2 gap-y-2.5 px-4 py-3 sm:flex-nowrap sm:gap-4">
           {/* On a phone the project picker takes the wordmark's place: the current project is what matters there. */}
           <span className="hidden text-lg font-semibold tracking-tight text-zinc-50 sm:inline">Nexus</span>
-          {projects && <ProjectTabs projects={projects} current={projectId} onPick={(id) => route.go(id)} />}
-          {projects && <ProjectPicker projects={projects} current={projectId} onPick={(id) => route.go(id)} />}
-          <WaitingButton projects={projects} onClick={() => setWaitingOpen(true)} />
+          {projects && <ProjectTabs projects={projects} current={projectId} onPick={(id) => nav.project(id)} />}
+          {projects && <ProjectPicker projects={projects} current={projectId} open={isOpen(route.nav, "projects")} onPick={(id) => nav.project(id)} />}
+          <WaitingButton projects={projects} onClick={() => nav.open("waiting")} />
           <div className="basis-full sm:hidden" />
           <UpdatePill info={server} />
-          {projectId && <ConversationsButton onClick={() => setIdeasOpen(true)} />}
-          {projectId && <OrchestratorButton view={orchestrator} onClick={() => setChatOpen(true)} />}
+          {projectId && <ConversationsButton onClick={() => nav.open("ideas")} />}
+          {projectId && <OrchestratorButton view={orchestrator} onClick={() => nav.open("chat")} />}
           <UsageMeter version={tick} />
           <NotifyToggle {...notify} />
-          {state && <SettingsButton onClick={() => setSettingsOpen(true)} />}
-          <RemoteButton onClick={() => setRemoteOpen(true)} />
+          {state && <SettingsButton onClick={() => nav.open("settings")} />}
+          <RemoteButton onClick={() => nav.open("remote")} />
           <span className={`ml-auto flex items-center gap-1.5 text-xs sm:ml-0 ${connected ? "text-zinc-500" : "text-orange-400"}`} title={connected ? "Live updates on" : "Reconnecting"}>
             <span className={`h-2 w-2 rounded-full ${connected ? "bg-emerald-500" : "bg-orange-500"}`} />
             <span className="hidden sm:inline">{connected ? "live" : "offline"}</span>
@@ -107,7 +105,7 @@ export function App() {
         )}
 
         {state && state.attention.length > 0 && (
-          <AttentionPanel items={state.attention} onOpen={(a: AttentionItem) => route.go(projectId, a.queue, a.step)} />
+          <AttentionPanel items={state.attention} onOpen={(a: AttentionItem) => { if (projectId && a.queue) nav.item(projectId, a.queue, a.step); }} />
         )}
 
         {state && byGroup.map((g) => {
@@ -127,7 +125,7 @@ export function App() {
               {hidden && g.queues.length > 0 && (
                 <div className="flex flex-wrap gap-2">
                   {g.queues.map((q) => (
-                    <button key={q.id} onClick={() => route.go(projectId, q.id)} className="flex items-center gap-2 rounded-lg border border-zinc-800 px-3 py-1.5 text-sm text-zinc-400 hover:border-zinc-700 hover:text-zinc-200">
+                    <button key={q.id} onClick={() => projectId && nav.item(projectId, q.id)} className="flex items-center gap-2 rounded-lg border border-zinc-800 px-3 py-1.5 text-sm text-zinc-400 hover:border-zinc-700 hover:text-zinc-200">
                       <span className="font-mono text-zinc-500">{q.id}</span>{q.title}<StatusBadge status={q.status} />
                     </button>
                   ))}
@@ -135,7 +133,7 @@ export function App() {
               )}
               <div className="space-y-3">
                 {shown.map((q) => (
-                  <QueueRow key={q.id} queue={q} onQueue={() => route.go(projectId, q.id)} onStep={(s) => route.go(projectId, q.id, s)} />
+                  <QueueRow key={q.id} queue={q} onQueue={() => projectId && nav.item(projectId, q.id)} onStep={(s) => projectId && nav.item(projectId, q.id, s)} />
                 ))}
               </div>
               {g.queues.length === 0 && <p className="text-sm text-zinc-600">Nothing here.</p>}
@@ -170,22 +168,22 @@ export function App() {
 
       {ideasOpen && projectId && state && (
         <ConversationsPanel project={projectId} name={state.project.name} version={tick} defaultRuntime={state.project.conversations.runtime}
-          onClose={() => setIdeasOpen(false)} onChanged={() => setTick((t) => t + 1)} />
+          onClose={() => nav.close("ideas")} onChanged={() => setTick((t) => t + 1)} />
       )}
 
       {chatOpen && projectId && (
-        <ChatPanel project={projectId} name={state?.project.name ?? projectId} view={orchestrator} onClose={() => setChatOpen(false)} onChanged={() => setTick((t) => t + 1)} />
+        <ChatPanel project={projectId} name={state?.project.name ?? projectId} view={orchestrator} onClose={() => nav.close("chat")} onChanged={() => setTick((t) => t + 1)} />
       )}
 
-      <Drawer open={settingsOpen && !!state} onClose={() => setSettingsOpen(false)}>
+      <Drawer open={settingsOpen && !!state} onClose={() => nav.close("settings")}>
         {state && <SettingsPanel key={state.project.id} project={state.project} onChanged={() => { reload(); setTick((t) => t + 1); }} server={server} />}
       </Drawer>
 
-      <Drawer open={waitingOpen} onClose={() => setWaitingOpen(false)}>
-        <WaitingList projects={projects ?? []} onOpen={(w) => { setWaitingOpen(false); route.go(w.project, w.queue, w.step); }} />
+      <Drawer open={waitingOpen} onClose={() => nav.close("waiting")}>
+        <WaitingList projects={projects ?? []} onOpen={(w) => nav.closeThenItem("waiting", w.project, w.queue, w.step)} />
       </Drawer>
 
-      <Drawer open={remoteOpen} onClose={() => setRemoteOpen(false)}>
+      <Drawer open={remoteOpen} onClose={() => nav.close("remote")}>
         <RemotePanel version={tick} />
       </Drawer>
 

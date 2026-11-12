@@ -207,13 +207,8 @@ export function Button({ children, onClick, disabled, variant = "primary" }: {
 
 // ---------------------------------------------------------------- drawer
 
+/** A panel from the right. Escape and Back close it through nav.ts, which knows which layer is on top. */
 export function Drawer({ open, onClose, children }: { open: boolean; onClose: () => void; children: ReactNode }) {
-  useEffect(() => {
-    if (!open) return;
-    const key = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", key);
-    return () => window.removeEventListener("keydown", key);
-  }, [open, onClose]);
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-40 flex justify-end">

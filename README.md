@@ -13,6 +13,10 @@ any work. A partner reads the whole project and writes only in the project's not
 can record what you decide; "Hand to orchestrator" has it summarize the conversation into the orchestrator's chat,
 which turns it into queues.
 
+**Back.** The back button (on a phone also the back gesture) closes what is open on top: a chat, the Ideas panel or
+a conversation in it, Settings, a queue or step. With nothing open it leaves Nexus. Escape does the same on a
+computer.
+
 **Drafts.** Text typed but not sent (to the orchestrator, in a conversation, to a running agent, a step's note, an
 answer, the words with an approval) stays in its box when you close the panel, open something else, switch project
 or reload, also when a phone's browser drops the tab. Each box keeps its own text; sending clears it, a failed send

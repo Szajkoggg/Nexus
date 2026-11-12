@@ -332,6 +332,19 @@ The user's answers, 2026-11-12:
 | Watch the usage limits? | Yes; pause before the limit, resume when it resets |
 | Where does `.nexus/` live? | In the project's main checkout, git-ignored |
 
+### Back closes the topmost layer
+
+Everything the dashboard opens over the queue list is a layer kept in the browser history, so the phone's back
+button, the back gesture, the browser's Back and Escape all close the topmost one, and Back leaves the app only when
+nothing is open. Each history entry Nexus writes carries `{hash, layers, depth}` in `history.state`: the hash is the
+route (`#/<project>[/<queue>[/<step>]]`, the queue or step drawer being the layer `item`), `layers` the open stack
+(`chat`, `ideas`, `conversation:<id>`, `settings`, `remote`, `waiting`, `projects`), `depth` how many entries Nexus
+pushed. Opening pushes one entry; a close button goes back to it, so Back never reopens what was closed and no dead
+entries pile up; switching within a kind (another step, another conversation) replaces the entry. Switching
+projects is not a layer: it rewrites the entry in place. A page loaded with something open (a hash with a step,
+`?chat`) has no entry to go back to, so closing it rewrites the entry instead. The rules are pure
+(`apps/web/src/layers.ts`, unit tested); `nav.ts` applies them to `window.history`.
+
 ### Drafts stay in the browser
 
 Unsent text in the dashboard's boxes is kept in `localStorage` (`nexus.drafts`: one map from a target key to the

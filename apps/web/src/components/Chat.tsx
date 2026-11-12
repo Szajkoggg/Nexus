@@ -4,6 +4,8 @@ import type { ChatEntry, RuntimeFile, SessionFile } from "@nexus/protocol";
 import { act, enc, useFetch } from "../api.ts";
 import { Button, Composer, Markdown, TimeAgo } from "./ui.tsx";
 import { draftKey } from "../drafts.ts";
+import { layerValue } from "../layers.ts";
+import { nav, useNav } from "../nav.ts";
 import { EffortSelect, ModelSelect, useEfforts } from "./Settings.tsx";
 
 interface View { session: SessionFile | null; state: "working" | "idle" | "exited"; runtime: RuntimeFile | null; chat: ChatEntry[]; model: string | null; effort: string | null }
@@ -18,13 +20,6 @@ const Close = ({ onClose }: { onClose: () => void }) => (
   </button>
 );
 
-function useEscape(onClose: () => void) {
-  useEffect(() => {
-    const key = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", key);
-    return () => window.removeEventListener("keydown", key);
-  }, [onClose]);
-}
 
 /** A chat: its header, the messages, and the composer. */
 function ChatColumn({ title, over, view, status, actions, empty, draft, placeholder, onSend, onBack }: {
@@ -122,7 +117,6 @@ export function OrchestratorButton({ view, onClick }: { view: View | undefined; 
 export function ChatPanel({ project, name, view, onClose, onChanged }: {
   project: string; name: string; view: View | undefined; onClose: () => void; onChanged: () => void;
 }) {
-  useEscape(onClose);
   return (
     <Panel onClose={onClose}>
       <ChatColumn
@@ -166,10 +160,11 @@ export function ConversationsButton({ onClick }: { onClick: () => void }) {
 export function ConversationsPanel({ project, name, version, onClose, onChanged, defaultRuntime }: {
   project: string; name: string; version: unknown; onClose: () => void; onChanged: () => void; defaultRuntime: "claude" | "codex";
 }) {
-  useEscape(onClose);
   const list = useFetch<ConversationItem[]>(`/api/projects/${enc(project)}/conversations`, version);
-  const [open, setOpen] = useState<string>();
-  const [creating, setCreating] = useState(false);
+  // The open conversation (or the new-conversation form) is a layer above the panel: Back returns to the list.
+  const layer = layerValue(useNav(), "conversation");
+  const creating = layer === "new";
+  const open = creating ? undefined : layer;
   const [showArchived, setShowArchived] = useState(false);
   const view = useFetch<ConversationView>(open ? `/api/projects/${enc(project)}/conversations/${enc(open)}` : undefined, version);
   const current = list?.find((c) => c.id === open);
@@ -185,11 +180,11 @@ export function ConversationsPanel({ project, name, version, onClose, onChanged,
           </div>
           <span className="sm:hidden"><Close onClose={onClose} /></span>
         </div>
-        <div className="p-3"><Button onClick={() => { setCreating(true); setOpen(undefined); }}>New conversation</Button></div>
+        <div className="p-3"><Button onClick={() => nav.open("conversation:new")}>New conversation</Button></div>
         <ul className="scroll-thin flex-1 overflow-y-auto px-2 pb-3">
           {shown.map((c) => (
             <li key={c.id}>
-              <button onClick={() => { setOpen(c.id); setCreating(false); }}
+              <button onClick={() => nav.open(`conversation:${c.id}`)}
                 className={`w-full rounded-lg px-3 py-2 text-left text-sm ${c.id === open ? "bg-zinc-800 text-zinc-50" : "text-zinc-300 hover:bg-zinc-800/60"} ${c.archived ? "opacity-50" : ""}`}>
                 <span className="flex items-center gap-2">
                   {c.state === "working" && <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-blue-400" />}
@@ -208,11 +203,11 @@ export function ConversationsPanel({ project, name, version, onClose, onChanged,
         )}
       </nav>
 
-      {creating && <NewConversation project={project} defaultRuntime={defaultRuntime} onBack={() => setCreating(false)} onClose={onClose}
-        onCreated={(id) => { setCreating(false); setOpen(id); onChanged(); }} />}
+      {creating && <NewConversation project={project} defaultRuntime={defaultRuntime} onBack={() => nav.close("conversation")} onClose={onClose}
+        onCreated={(id) => { nav.open(`conversation:${id}`); onChanged(); }} />}
       {!creating && open && current && (
         <ChatColumn
-          over={`${name} · ideas`} title={current.title ?? "Conversation"} view={view} status={stateText(view)} onBack={() => setOpen(undefined)}
+          over={`${name} · ideas`} title={current.title ?? "Conversation"} view={view} status={stateText(view)} onBack={() => nav.close("conversation")}
           actions={<>
             <Button variant="quiet" onClick={() => {
               if (confirm("Hand this conversation to the orchestrator? The partner writes a summary (decisions, open questions, proposed work), which goes into the orchestrator's chat.")) {
