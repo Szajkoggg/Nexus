@@ -8,11 +8,11 @@
 // and the held queues resume at once.
 import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, openSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { nexusHome, now } from "@nexus/protocol";
+import { now } from "@nexus/protocol";
 
 const run = promisify(execFile);
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -36,8 +36,11 @@ export interface UpdateStatus {
 async function git(...args: string[]): Promise<string> {
   return (await run("git", args, { cwd: ROOT, windowsHide: true })).stdout.trim();
 }
+/** npm through this Node (npm-cli.js beside it), so no shell is needed for npm.cmd on Windows. */
 async function npm(...args: string[]): Promise<void> {
-  await run(process.platform === "win32" ? "npm.cmd" : "npm", args, { cwd: ROOT, windowsHide: true, shell: process.platform === "win32", maxBuffer: 32 * 1024 * 1024 });
+  const cli = join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
+  if (existsSync(cli)) await run(process.execPath, [cli, ...args], { cwd: ROOT, windowsHide: true, maxBuffer: 32 * 1024 * 1024 });
+  else await run("npm", args, { cwd: ROOT, windowsHide: true, maxBuffer: 32 * 1024 * 1024 });
 }
 const hashOf = (file: string) => (existsSync(file) ? createHash("sha256").update(readFileSync(file)).digest("hex") : "");
 
@@ -126,11 +129,10 @@ export class Lifecycle {
   private restart(): void {
     this.status.phase = "restarting";
     this.note("restarting");
-    mkdirSync(nexusHome(), { recursive: true });
-    const log = openSync(join(nexusHome(), "server.log"), "a");
+    // The successor writes its own log (NEXUS_LOG): see main.ts.
     spawn(process.execPath, [MAIN], {
-      cwd: ROOT, detached: true, windowsHide: true, stdio: ["ignore", log, log],
-      env: { ...process.env, NEXUS_WAIT_PORT: "60" },
+      cwd: ROOT, detached: true, windowsHide: true, stdio: "ignore",
+      env: { ...process.env, NEXUS_WAIT_PORT: "60", NEXUS_LOG: process.env.NEXUS_LOG ?? "1" },
     }).unref();
     for (const p of this.parts()) p.shutdown();
     setTimeout(() => process.exit(0), 300);

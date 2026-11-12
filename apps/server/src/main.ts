@@ -1,6 +1,6 @@
 // The Nexus server: reads every registered project's .nexus/ directory, serves the dashboard and its API,
 // and tells connected dashboards when a project's files change. It writes nothing in phase 1.
-import { createReadStream, existsSync, realpathSync, statSync } from "node:fs";
+import { createReadStream, createWriteStream, existsSync, mkdirSync, realpathSync, statSync } from "node:fs";
 import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Readable } from "node:stream";
@@ -21,6 +21,20 @@ import {
   AttentionWatch, allowed, auth, authCookie, isLocal, loginPage, push, pushDevices, pushKey, qrSvg, rotateToken,
   subscribe, tailscaleInfo, tokenMatches, unsubscribe,
 } from "./remote.ts";
+
+// NEXUS_LOG: the server writes its own log (1: <NEXUS_HOME>/server.log, or a path). Node opens it shared, so a
+// successor after an update can append while its predecessor still holds it (a shell's `>>` would lock it).
+if (process.env.NEXUS_LOG) {
+  const file = process.env.NEXUS_LOG === "1" ? join(nexusHome(), "server.log") : process.env.NEXUS_LOG;
+  mkdirSync(dirname(file), { recursive: true });
+  const log = createWriteStream(file, { flags: "a" });
+  for (const stream of [process.stdout, process.stderr]) {
+    const write = stream.write.bind(stream) as (chunk: unknown, ...rest: unknown[]) => boolean;
+    stream.write = ((chunk: unknown, ...rest: unknown[]) => { log.write(chunk as string); return write(chunk, ...rest); }) as typeof stream.write;
+  }
+  process.on("uncaughtException", (err) => { log.write(`${new Date().toISOString()} uncaught: ${err.stack ?? err}\n`); process.exit(1); });
+  console.log(`---- ${new Date().toISOString()} pid ${process.pid}`);
+}
 
 const PORT = Number(process.env.NEXUS_PORT ?? 4317);
 const HOST = process.env.NEXUS_HOST ?? "127.0.0.1";
