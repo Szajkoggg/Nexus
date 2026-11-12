@@ -297,6 +297,11 @@ The user's answers, 2026-11-12:
 - **Codex runs commands in PowerShell**, where npm's `nexus.ps1` is blocked by the execution policy: Nexus therefore
   puts its own `nexus.cmd` first on the agents' PATH. The sandboxed shell can run it and write to `.nexus/`.
 
+- **Remote access needs no open port.** The server keeps listening on 127.0.0.1; Tailscale Serve relays the tailnet's
+  https requests to it. Requests relayed by a proxy count as remote and need the access token; this machine does
+  not. Push works through the browsers' own push services (Web Push with VAPID), so a phone gets notifications with
+  Nexus closed once it is installed to the home screen.
+
 ## Open questions
 
 1. **The orchestrator on Codex.** The orchestrator runs on Claude Code only: its read-only guarantee rests on Claude

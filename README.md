@@ -7,7 +7,11 @@ user, a per-project orchestrator agent and the working agents.
 - [docs/DESIGN.md](docs/DESIGN.md): concepts, architecture, decisions, phases
 - [docs/PROTOCOL.md](docs/PROTOCOL.md): the `.nexus/` files, events and the `nexus` CLI
 
-**Status: phase 5** (Codex adapter). Runs can use Codex as well as Claude Code: the runtime is chosen per run (or
+**Status: phase 6** (remote access). Nexus can be used from a phone while the PC is on: through Tailscale (your own
+devices only, no open ports), signing in once with an access token (a QR code on the PC does it), installable as an
+app, with push notifications when something waits for you. See "Remote access" below.
+
+Phase 5 (Codex adapter): Runs can use Codex as well as Claude Code: the runtime is chosen per run (or
 by the project's default), and everything works the same way: step turns, notes, messages into the running turn
 (`turn/steer`), questions, stop and resume, continuing a session's thread, context fill and the Codex usage window.
 Needs the Codex CLI (`npm i -g @openai/codex`), signed in with `codex login`.
@@ -61,6 +65,24 @@ npm run typecheck
 ```
 
 `NEXUS_PORT` and `NEXUS_HOST` change where the server listens (default `127.0.0.1:4317`, this machine only).
+
+## Remote access
+
+The server listens on this PC only. Everything from this PC works without signing in; anything that comes through a
+proxy or from another address needs the access token once (it sets a cookie for a year).
+
+1. Install Tailscale on the PC and sign in (`winget install tailscale.tailscale`); install the Tailscale app on the
+   phone and sign in with the same account.
+2. In the Tailscale admin console, under DNS, turn on MagicDNS and HTTPS certificates.
+3. Publish Nexus to your tailnet only: `tailscale serve --bg 4317` (not `funnel`, which would make it public).
+4. On the PC, open the dashboard's Remote access panel (the phone icon in the header): it shows the address, the
+   token and a QR code. Scan it with the phone: it opens Nexus and signs in.
+5. On the phone, add Nexus to the home screen (iPhone: Share, Add to Home Screen), open it from there and turn on
+   the bell: notifications arrive even with Nexus closed. "Send a test notification" in the panel checks it.
+
+"Replace token" in the panel signs every remote device out. To have Nexus start with Windows, without a console
+window: `powershell -ExecutionPolicy Bypass -File scripts\autostart.ps1` (`-Remove` undoes it; the log goes to
+`%APPDATA%\Nexus\server.log`).
 
 ## Reporting from an agent started by hand
 

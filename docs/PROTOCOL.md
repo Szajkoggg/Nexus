@@ -289,7 +289,19 @@ Writes (JSON bodies only; a request with a foreign `Origin` is refused):
 | `POST /api/projects/:id/orchestrator/reset` | | The next message starts a new orchestrator session |
 
 Also `GET /api/projects/:id/sessions/:session/activity?queue=&step=&limit=`, `GET /api/projects/:id/orchestrator`
-(its session, state and chat) and `GET /api/usage`.
+(its session, state and chat), `GET /api/usage` and `GET /api/codex/models`.
+
+**Remote access.** A request is local when it comes from a loopback address without proxy headers
+(`X-Forwarded-For`, `Forwarded`, `X-Forwarded-Host`, `Tailscale-User-Login`). Anything else, pages, API and the
+WebSocket alike, needs the `nexus_auth` cookie holding the token from `<NEXUS_HOME>/auth.json`, set by
+`POST /login` (form field `token`) or `GET /login?token=`. `GET /api/remote` gives the Tailscale address, the devices
+receiving push and, to local requests only, the token, a sign-in link and its QR code; `POST /api/remote/rotate`
+(local only) replaces the token.
+
+**Push.** `GET /api/push/key` (the VAPID public key), `POST /api/push/subscribe` (`subscription`, `label`),
+`POST /api/push/unsubscribe` (`endpoint`), `POST /api/push/test`. Keys and subscriptions are in
+`<NEXUS_HOME>/push.json`. Whatever newly appears in a project's "waiting for you" list is pushed to every device; the
+list as found when the server starts is the baseline.
 
 ## The orchestrator
 

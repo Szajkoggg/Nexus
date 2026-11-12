@@ -8,3 +8,8 @@ createRoot(document.getElementById("root")!).render(
     <App />
   </StrictMode>,
 );
+
+// The service worker carries push notifications. Browsers allow it on https and on localhost only.
+if ("serviceWorker" in navigator && window.isSecureContext) {
+  navigator.serviceWorker.register("/sw.js").catch(() => { /* notifications stay in-tab */ });
+}

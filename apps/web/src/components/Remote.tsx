@@ -1,0 +1,105 @@
+// Remote access: how a phone reaches this dashboard, signs in, and gets notifications.
+import { useState } from "react";
+import { useFetch } from "../api.ts";
+import { Button, Section } from "./ui.tsx";
+
+interface Remote {
+  local: boolean;
+  tailscale: { tailscale: boolean; url?: string; detail?: string };
+  base: string | null;
+  token?: string;
+  login_url?: string;
+  qr?: string;
+  devices: { endpoint: string; label?: string; added_at: string }[];
+}
+
+export function RemoteButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button onClick={onClick} title="Remote access" className="rounded-md p-1.5 text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="7" y="2" width="10" height="20" rx="2" /><path d="M11 18h2" /></svg>
+    </button>
+  );
+}
+
+export function RemotePanel({ version }: { version: unknown }) {
+  const [base, setBase] = useState("");
+  const [bump, setBump] = useState(0);
+  const r = useFetch<Remote>(`/api/remote${base ? `?base=${encodeURIComponent(base)}` : ""}`, `${String(version)}-${bump}`);
+  const [reveal, setReveal] = useState(false);
+  const [note, setNote] = useState<string>();
+  if (!r) return <p className="text-sm text-zinc-500">Loading…</p>;
+
+  const post = async (url: string) => {
+    const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+    return res.json() as Promise<Record<string, unknown>>;
+  };
+
+  return (
+    <div>
+      <h2 className="pr-8 text-xl font-semibold text-zinc-50">Remote access</h2>
+      <p className="mt-1 text-sm text-zinc-400">Use Nexus from your phone while this PC is on. It stays private: only your own devices on your Tailscale network can reach it, and each signs in once with the access token.</p>
+
+      {!r.local && <Section title="This device"><p className="text-sm text-zinc-300">You are signed in remotely. The token and the QR code are shown only on the PC.</p></Section>}
+
+      {r.local && (
+        <>
+          <Section title="1. Tailscale">
+            {r.tailscale.url ? (
+              <p className="text-sm text-emerald-300">Tailscale is running. This PC is <span className="font-mono">{r.tailscale.url}</span></p>
+            ) : (
+              <p className="text-sm text-amber-300">{r.tailscale.detail ?? "Tailscale is not available."}</p>
+            )}
+            <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-zinc-400">
+              <li>Install Tailscale on this PC and sign in: <code className="text-zinc-300">winget install tailscale.tailscale</code></li>
+              <li>Install the Tailscale app on your phone and sign in with the same account.</li>
+              <li>In the Tailscale admin console, under DNS, turn on MagicDNS and HTTPS certificates.</li>
+              <li>Publish Nexus to your tailnet (not the internet): <code className="text-zinc-300">tailscale serve --bg 4317</code></li>
+            </ol>
+          </Section>
+
+          <Section title="2. Sign the phone in">
+            {!r.tailscale.url && (
+              <label className="mb-3 block text-xs text-zinc-400">
+                Address the phone uses (if not Tailscale's)
+                <input value={base} onChange={(e) => setBase(e.target.value.trim())} placeholder="https://my-pc.tailnet.ts.net"
+                  className="mt-1 block w-full rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm text-zinc-200 placeholder:text-zinc-600" />
+              </label>
+            )}
+            {r.qr && r.login_url ? (
+              <div className="flex flex-wrap items-start gap-4">
+                <div className="w-44 shrink-0 rounded-lg bg-zinc-950 p-2" dangerouslySetInnerHTML={{ __html: r.qr }} />
+                <div className="min-w-0 text-sm text-zinc-400">
+                  <p>Scan with the phone's camera: it opens Nexus and signs in. Then add it to the home screen (Share → Add to Home Screen on iPhone) to get notifications.</p>
+                  <p className="mt-2 break-all font-mono text-xs text-zinc-500">{r.base}/login</p>
+                </div>
+              </div>
+            ) : <p className="text-sm text-zinc-500">The QR code appears once the address is known.</p>}
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+              <span className="text-zinc-400">Access token:</span>
+              <code className="rounded bg-zinc-950 px-2 py-0.5 text-zinc-200">{reveal ? r.token : "••••••••••••"}</code>
+              <Button variant="quiet" onClick={() => setReveal(!reveal)}>{reveal ? "Hide" : "Show"}</Button>
+              <Button variant="danger" onClick={() => {
+                if (confirm("Replace the access token? Every remote device is signed out and must sign in again.")) {
+                  void post("/api/remote/rotate").then(() => { setBump((b) => b + 1); setNote("A new token is in place; remote devices are signed out."); });
+                }
+              }}>Replace token</Button>
+            </div>
+          </Section>
+        </>
+      )}
+
+      <Section title="3. Notifications">
+        <p className="text-sm text-zinc-400">On each device, turn on the bell in the header. Nexus then sends a notification when something waits for you: a question, a stop, a queue to approve, a review.</p>
+        {r.devices.length > 0 ? (
+          <ul className="mt-2 space-y-1 text-sm text-zinc-300">
+            {r.devices.map((d) => <li key={d.endpoint}>{d.label ?? "Device"} <span className="text-xs text-zinc-500">since {new Date(d.added_at).toLocaleDateString()}</span></li>)}
+          </ul>
+        ) : <p className="mt-2 text-sm text-zinc-500">No device receives notifications yet.</p>}
+        {r.devices.length > 0 && (
+          <div className="mt-2"><Button variant="quiet" onClick={() => void post("/api/push/test").then((x) => setNote(`Test sent to ${String(x.sent)} device(s).`))}>Send a test notification</Button></div>
+        )}
+      </Section>
+      {note && <p className="mt-4 text-sm text-sky-300">{note}</p>}
+    </div>
+  );
+}

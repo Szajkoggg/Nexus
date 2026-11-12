@@ -7,6 +7,7 @@ import { Drawer, StatusBadge, TimeAgo } from "./components/ui.tsx";
 import { AttentionPanel, NotifyToggle, useNotifications } from "./components/Attention.tsx";
 import { ContextBar, UsageMeter } from "./components/Run.tsx";
 import { ChatPanel, OrchestratorButton, useOrchestrator } from "./components/Chat.tsx";
+import { RemoteButton, RemotePanel } from "./components/Remote.tsx";
 
 const GROUPS: { title: string; statuses: QueueStatus[]; collapsible?: boolean }[] = [
   { title: "Finished", statuses: ["done", "cancelled"], collapsible: true },
@@ -46,6 +47,7 @@ export function App() {
 
   const notify = useNotifications(projects);
   const orchestrator = useOrchestrator(projectId, tick);
+  const [remoteOpen, setRemoteOpen] = useState(() => new URLSearchParams(location.search).has("remote"));
   const [chatOpen, setChatOpen] = useState(() => new URLSearchParams(location.search).has("chat"));
 
   const byGroup = useMemo(() => {
@@ -62,8 +64,8 @@ export function App() {
 
   return (
     <div className="flex min-h-full flex-col">
-      <header className="sticky top-0 z-30 border-b border-zinc-800 bg-zinc-950/90 backdrop-blur">
-        <div className="mx-auto flex max-w-7xl items-center gap-4 px-4 py-3">
+      <header className="sticky top-0 z-30 border-b border-zinc-800 bg-zinc-950/90 pt-[env(safe-area-inset-top)] backdrop-blur">
+        <div className="mx-auto flex max-w-7xl items-center gap-2 px-4 py-3 sm:gap-4">
           <span className="text-lg font-semibold tracking-tight text-zinc-50">Nexus</span>
           <nav className="scroll-thin flex flex-1 gap-1 overflow-x-auto">
             {projects?.map((p) => (
@@ -81,9 +83,10 @@ export function App() {
           {projectId && <OrchestratorButton view={orchestrator} onClick={() => setChatOpen(true)} />}
           <UsageMeter version={tick} />
           <NotifyToggle {...notify} />
+          <RemoteButton onClick={() => setRemoteOpen(true)} />
           <span className={`flex items-center gap-1.5 text-xs ${connected ? "text-zinc-500" : "text-orange-400"}`} title={connected ? "Live updates on" : "Reconnecting"}>
             <span className={`h-2 w-2 rounded-full ${connected ? "bg-emerald-500" : "bg-orange-500"}`} />
-            {connected ? "live" : "offline"}
+            <span className="hidden sm:inline">{connected ? "live" : "offline"}</span>
           </span>
         </div>
       </header>
@@ -166,6 +169,10 @@ export function App() {
       {chatOpen && projectId && (
         <ChatPanel project={projectId} name={state?.project.name ?? projectId} view={orchestrator} onClose={() => setChatOpen(false)} onChanged={() => setTick((t) => t + 1)} />
       )}
+
+      <Drawer open={remoteOpen} onClose={() => setRemoteOpen(false)}>
+        <RemotePanel version={tick} />
+      </Drawer>
 
       <Drawer open={!!(state && queue)} onClose={close}>
         {state && queue && (step

@@ -12,9 +12,10 @@ export function useOrchestrator(project: string | undefined, version: unknown) {
 
 export function OrchestratorButton({ view, onClick }: { view: View | undefined; onClick: () => void }) {
   return (
-    <button onClick={onClick} className="flex items-center gap-2 rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-200 hover:border-zinc-500 hover:bg-zinc-900">
+    <button onClick={onClick} title="Orchestrator" className="flex shrink-0 items-center gap-2 rounded-lg border border-zinc-700 px-2.5 py-1.5 sm:px-3 text-sm text-zinc-200 hover:border-zinc-500 hover:bg-zinc-900">
       <span className={`h-2 w-2 rounded-full ${view?.state === "working" ? "animate-pulse bg-blue-400" : view?.session ? "bg-emerald-500" : "bg-zinc-600"}`} />
-      Orchestrator
+      <span className="hidden sm:inline">Orchestrator</span>
+      <svg className="sm:hidden" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1.1-4.6A8 8 0 1 1 21 12Z" /></svg>
     </button>
   );
 }
@@ -38,7 +39,7 @@ export function ChatPanel({ project, name, view, onClose, onChanged }: {
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <aside className="relative flex h-full w-full max-w-2xl flex-col border-l border-zinc-800 bg-zinc-900 shadow-2xl">
+      <aside className="relative flex h-full w-full max-w-2xl flex-col border-l border-zinc-800 bg-zinc-900 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] shadow-2xl">
         <header className="flex flex-wrap items-center gap-3 border-b border-zinc-800 px-5 py-3">
           <div className="min-w-0">
             <div className="text-xs text-zinc-500">{name}</div>

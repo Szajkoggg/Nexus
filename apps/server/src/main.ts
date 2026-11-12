@@ -5,7 +5,7 @@ import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Readable } from "node:stream";
 import { Hono } from "hono";
-import { serve } from "@hono/node-server";
+import { serve, type HttpBindings } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { WebSocketServer, type WebSocket } from "ws";
 import chokidar from "chokidar";
@@ -16,6 +16,10 @@ import {
 import { Engine } from "./engine.ts";
 import { Orchestrator } from "./orchestrator.ts";
 import { listCodexModels } from "./codex.ts";
+import {
+  AttentionWatch, allowed, auth, authCookie, isLocal, loginPage, push, pushDevices, pushKey, qrSvg, rotateToken,
+  subscribe, tailscaleInfo, tokenMatches, unsubscribe,
+} from "./remote.ts";
 
 const PORT = Number(process.env.NEXUS_PORT ?? 4317);
 const HOST = process.env.NEXUS_HOST ?? "127.0.0.1";
@@ -70,6 +74,7 @@ function changed(id: string): void {
         e.state = undefined;
       }
     }
+    if (e) { const s = stateOf(e); if (s) watch.check({ id, name: s.project.name }, s.attention); }
     const msg = JSON.stringify({ type: "changed", project: id });
     for (const s of sockets) if (s.readyState === s.OPEN) s.send(msg);
   }, 150));
@@ -105,7 +110,28 @@ const MIME: Record<string, string> = {
 
 // ---------------------------------------------------------------- HTTP
 
-const app = new Hono();
+const app = new Hono<{ Bindings: HttpBindings }>();
+const watch = new AttentionWatch();
+
+// Remote devices sign in once with the access token; this machine needs nothing (src/remote.ts).
+const OPEN = new Set(["/login", "/manifest.webmanifest", "/sw.js"]);
+app.use("*", async (c, next) => {
+  if (OPEN.has(c.req.path) || c.req.path.startsWith("/icons/") || allowed(c.env.incoming)) return next();
+  if (c.req.path.startsWith("/api/")) return c.json({ error: "sign in first" }, 401);
+  return c.redirect("/login");
+});
+const secure = (c: { req: { header: (n: string) => string | undefined } }) => c.req.header("x-forwarded-proto") === "https" || !!c.req.header("tailscale-user-login");
+app.get("/login", (c) => {
+  const t = c.req.query("token");
+  if (t && tokenMatches(t)) { c.header("set-cookie", authCookie(secure(c))); return c.redirect("/"); }
+  return c.html(loginPage(t ? "That token is not valid (it may have been replaced)." : undefined));
+});
+app.post("/login", async (c) => {
+  const form = await c.req.parseBody();
+  if (!tokenMatches(typeof form.token === "string" ? form.token.trim() : undefined)) return c.html(loginPage("That token is not valid."), 401);
+  c.header("set-cookie", authCookie(secure(c)));
+  return c.redirect("/");
+});
 
 app.get("/api/projects", (c) => {
   refreshRegistry();
@@ -210,6 +236,34 @@ app.get("/api/projects/:id/sessions/:session/activity", (c) => {
 });
 
 app.get("/api/usage", (c) => c.json(readUsage() ?? null));
+
+// Remote access: shown and changed only from this machine.
+app.get("/api/remote", async (c) => {
+  const local = isLocal(c.env.incoming);
+  const ts = await tailscaleInfo();
+  const base = (c.req.query("base") || ts.url || "").replace(/\/$/, "");
+  const login = local && base ? `${base}/login?token=${encodeURIComponent(auth().token)}` : undefined;
+  return c.json({
+    local, tailscale: ts, base: base || null, devices: pushDevices(),
+    token: local ? auth().token : undefined, login_url: login, qr: login ? await qrSvg(login) : undefined,
+  });
+});
+app.post("/api/remote/rotate", (c) => {
+  if (!isLocal(c.env.incoming)) return c.json({ error: "only from this machine" }, 403);
+  rotateToken();
+  return c.json({ ok: true });
+});
+app.get("/api/push/key", (c) => c.json({ key: pushKey() }));
+app.post("/api/push/subscribe", async (c) => {
+  const b = (await c.req.json().catch(() => ({}))) as { subscription?: unknown; label?: unknown };
+  try { subscribe(b.subscription, b.label); return c.json({ ok: true }); } catch (e) { return c.json({ error: (e as Error).message }, 400); }
+});
+app.post("/api/push/unsubscribe", async (c) => {
+  const b = (await c.req.json().catch(() => ({}))) as { endpoint?: unknown };
+  unsubscribe(b.endpoint);
+  return c.json({ ok: true });
+});
+app.post("/api/push/test", async (c) => c.json({ sent: await push({ title: "Nexus", body: "Notifications reach this device.", url: "/", tag: "test" }) }));
 app.get("/api/codex/models", async (c) => c.json(await listCodexModels()));
 
 // The orchestrator chat.
@@ -229,6 +283,9 @@ if (existsSync(WEB_DIST)) {
 // ---------------------------------------------------------------- start
 
 refreshRegistry();
+// The first look at each project is the baseline for push notifications: old news is not pushed after a restart.
+for (const e of projects.values()) { const s = stateOf(e); if (s) watch.check({ id: e.id, name: s.project.name }, s.attention); }
+auth(); // creates the access token on the first start
 const server = serve({ fetch: app.fetch, port: PORT, hostname: HOST }, (info) => {
   console.log(`Nexus server on http://${HOST}:${info.port} (${projects.size} project(s); registry in ${nexusHome()})`);
   if (!existsSync(WEB_DIST)) console.log("No built dashboard: run the web dev server (npm run dev) or npm start.");
@@ -240,7 +297,7 @@ process.on("SIGTERM", shutdown);
 
 const wss = new WebSocketServer({ noServer: true });
 server.on("upgrade", (req, socket, head) => {
-  if (req.url !== "/ws") { socket.destroy(); return; }
+  if (req.url !== "/ws" || !allowed(req)) { socket.destroy(); return; }
   wss.handleUpgrade(req, socket, head, (ws) => {
     sockets.add(ws);
     ws.on("close", () => sockets.delete(ws));
