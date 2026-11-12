@@ -4,7 +4,9 @@
 //   done   report the step done              ask     ask a blocking question, then end the turn
 //   noop   end the turn without an outcome   stop    report a stop condition
 //   fail   report the step failed            slow    work for FAKE_SLOW_MS (default 1500), then done
-// An answer ("[Nexus] Answer …") makes it report the current step done. Every message it receives is appended to
+// An answer ("[Nexus] Answer …") makes it report the current step done.
+// As an orchestrator (any other message): "FAKE-DRAFT:" followed by YAML drafts that queue; "FAKE-NEXUS: [args]"
+// runs `nexus` with those arguments; a "[Nexus] A worker asked … (qid X; …" notice is answered with "fake answer". Every message it receives is appended to
 // FAKE_LOG (one JSON line: text and priority), so tests can see what reached the agent and how.
 import { execFileSync } from "node:child_process";
 import { appendFileSync } from "node:fs";
@@ -15,6 +17,10 @@ const CLI = join(dirname(fileURLToPath(import.meta.url)), "../../../packages/cli
 const log = process.env.FAKE_LOG;
 const out = (m: unknown) => process.stdout.write(JSON.stringify(m) + "\n");
 const nexus = (...args: string[]) => execFileSync(process.execPath, [CLI, ...args], { env: process.env, stdio: "ignore" });
+const nexusOut = (args: string[], input?: string): string => {
+  try { return execFileSync(process.execPath, [CLI, ...args], { env: process.env, input, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] }).trim(); }
+  catch (e) { return `nexus failed: ${String((e as { stderr?: string }).stderr ?? e).trim()}`; }
+};
 
 let step: string | undefined;
 let busy = false;
@@ -44,6 +50,12 @@ async function turn(text: string): Promise<void> {
     nexus("step", "done", step, "--summary", `fake finished ${step} after an answer`);
     return turnEnd("answered");
   }
+  const draft = /FAKE-DRAFT:\s*\n([\s\S]*)$/.exec(text);
+  if (draft) return turnEnd(nexusOut(["queue", "draft", "-"], draft[1]));
+  const run = /FAKE-NEXUS: (\[.*\])/.exec(text);
+  if (run) return turnEnd(nexusOut(JSON.parse(run[1]!) as string[]));
+  const asked = /A worker asked[\s\S]*?\(qid (\S+);/.exec(text);
+  if (asked) return turnEnd(nexusOut(["answer", asked[1]!, "fake answer", "--continue"]));
   turnEnd("ok"); // a nudge, a message sent while idle, anything else
 }
 

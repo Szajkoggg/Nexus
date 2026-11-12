@@ -7,7 +7,12 @@ user, a per-project orchestrator agent and the working agents.
 - [docs/DESIGN.md](docs/DESIGN.md): concepts, architecture, decisions, phases
 - [docs/PROTOCOL.md](docs/PROTOCOL.md): the `.nexus/` files, events and the `nexus` CLI
 
-**Status: phase 3** (Claude Code adapter and queue engine). An approved queue can be started from the dashboard:
+**Status: phase 4** (orchestrator chat). Each project has an orchestrator in the dashboard's chat: it reads the
+project, drafts queues for your approval, starts and steers runs (choosing to continue a session that has the
+right context, or a fresh one), answers workers' questions whose answer is settled and passes the rest to you, and
+tells you when a run halts or finishes. It can read everything and edit nothing.
+
+Phase 3 (Claude Code adapter and queue engine): An approved queue can be started from the dashboard:
 Nexus launches Claude Code (with your own subscription login), drives it step by step, puts your notes into each
 step's opening, delivers messages and answers into the running turn, holds on questions and reviews, and pauses,
 stops and resumes on request. The dashboard shows the agent's activity per step, each session's context fill and
@@ -45,13 +50,13 @@ list of registered projects is in `%APPDATA%/Nexus/projects.yaml` (`NEXUS_HOME` 
 ```sh
 npm start        # builds the dashboard, serves it and the API on http://127.0.0.1:4317
 npm run dev      # development: API on :4317, dashboard with hot reload on http://localhost:5173
-npm test         # protocol and importer tests
+npm test         # protocol, importer, engine and orchestrator tests (the last two run a fake `claude`)
 npm run typecheck
 ```
 
 `NEXUS_PORT` and `NEXUS_HOST` change where the server listens (default `127.0.0.1:4317`, this machine only).
 
-## Reporting from an agent (until Nexus launches them itself)
+## Reporting from an agent started by hand
 
 ```sh
 nexus attach --runtime claude --queue W --title "cliffs worker"   # prints a session id

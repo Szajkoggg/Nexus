@@ -58,7 +58,13 @@ export const ProjectFile = z.object({
     }).prefault({}),
     codex: z.record(z.string(), z.unknown()).default({}),
   }).prefault({}),
-  orchestrator: z.object({ runtime: Runtime, session: Id.nullable() }).optional(),
+  orchestrator: z.object({
+    runtime: Runtime.default("claude"),
+    session: Id.nullable().default(null),
+    model: z.string().optional(),
+    /** Tell the orchestrator when a worker asks, or a run halts or finishes (it starts if needed). */
+    notify: z.boolean().default(true),
+  }).optional(),
 });
 export type ProjectFile = z.infer<typeof ProjectFile>;
 
@@ -185,10 +191,11 @@ export const Event = z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("queue.report"), queue: Id, path: z.string(), summary: z.string() }),
   z.object({ ...base, type: z.literal("change.proposed"), queue: Id, patch: z.unknown(), reason: z.string() }),
   z.object({ ...base, type: z.literal("queue.drafted"), queue: Id, definition: z.unknown() }),
+  /** An orchestrator asks the engine to act on a queue's run; `use_session` continues an existing session. */
   z.object({
     ...base, type: z.literal("session.request"),
-    action: z.enum(["start", "resume", "fork", "pause", "stop"]), target: z.string(),
-    queue: Id.optional(), reason: z.string(),
+    action: z.enum(["start", "resume", "pause", "stop"]), queue: Id,
+    use_session: Id.optional(), model: z.string().optional(), reason: z.string(),
   }),
   z.object({ ...base, type: z.literal("log"), level: z.enum(["info", "warn", "error"]), text: z.string() }),
   /** The user (or orchestrator) accepts a step waiting in review. */
@@ -252,6 +259,19 @@ export const RuntimeFile = z.object({
   updated_at: Time,
 });
 export type RuntimeFile = z.infer<typeof RuntimeFile>;
+
+/** sessions/<orchestrator>/applied.jsonl: the server's result for each orchestrator request (queue.drafted, session.request). */
+export const Applied = z.object({ at: Time, event: Id, ok: z.boolean(), message: z.string() });
+export type Applied = z.infer<typeof Applied>;
+
+/** sessions/<orchestrator>/chat.jsonl: the conversation shown in the dashboard. */
+export const ChatEntry = z.object({
+  at: Time,
+  from: z.enum(["user", "orchestrator", "nexus"]),
+  kind: z.enum(["message", "tool", "error"]).default("message"),
+  text: z.string(),
+});
+export type ChatEntry = z.infer<typeof ChatEntry>;
 
 /** <NEXUS_HOME>/usage.json: the subscription's windows, from the last report of any session. */
 export const UsageFile = z.object({

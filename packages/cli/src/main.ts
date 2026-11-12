@@ -1,6 +1,7 @@
 // The `nexus` command. Agents report through it; the user (or Nexus itself) also uses it for setup.
 // Every agent-side command validates its input and appends one event to the session's own log.
 import { readFileSync, existsSync } from "node:fs";
+import YAML from "yaml";
 import { basename, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { execFileSync } from "node:child_process";
@@ -27,6 +28,8 @@ Agent commands (session from NEXUS_SESSION or --session):
   nexus report <queue> --file <path> --summary <text>
   nexus log <text> [--level info|warn|error]
   nexus answer <qid> <text> [--escalate] [--continue|--wait]     (orchestrator only)
+  nexus queue draft <file.yaml|->                                 (orchestrator only) create or change a queue
+  nexus run <queue> start|pause|resume|stop --reason <text> [--use-session <id>] [--model <m>]   (orchestrator only)
   (--queue <id> picks the queue when the session has none or the step id is ambiguous)
 
 Setup:
@@ -45,6 +48,7 @@ const { values: o, positionals: args } = parseArgs({
     condition: { type: "string" }, pct: { type: "string" }, label: { type: "string" },
     kind: { type: "string" }, round: { type: "string" }, ok: { type: "boolean" }, fail: { type: "boolean" },
     option: { type: "string", multiple: true }, "can-continue": { type: "boolean" },
+    "use-session": { type: "string" }, model: { type: "string" },
     topics: { type: "string" }, files: { type: "string" }, file: { type: "string" }, level: { type: "string" },
     escalate: { type: "boolean" }, continue: { type: "boolean" }, wait: { type: "boolean" },
     id: { type: "string" }, name: { type: "string" }, prefix: { type: "string" },
@@ -105,6 +109,62 @@ function stepEvent(type: string, step: string | undefined, extra: () => Record<s
   console.log(`ok: ${type} ${queue}/${step}`);
 }
 
+/** What an orchestrator needs to see: every queue, run, open question and worker session with its context card. */
+function overview(state: ReturnType<typeof loadProjectState>): void {
+  const pct = (t?: number, w?: number) => (t && w ? `${Math.round((100 * t) / w)} % context` : "context unknown");
+  const done = state.queues.filter((q) => q.status === "done" || q.status === "cancelled");
+  console.log(`
+Queues (${state.queues.length - done.length} open; finished: ${done.map((q) => q.id).join(", ") || "none"})`);
+  for (const q of state.queues.filter((x) => !done.includes(x))) {
+    const run = q.run ? `; run ${q.run.state}${q.run.step ? ` at ${q.run.step}` : ""} in session ${q.run.session}${q.run.reason ? ` (${q.run.reason})` : ""}` : "";
+    console.log(`- ${q.id} [${q.status}] ${q.title}: revision ${q.revision}, ${q.approved ? "approved" : "not approved"}${run}`);
+    console.log(`  steps: ${q.steps.map((x) => `${x.id} ${x.status}`).join(", ")}`);
+    if (q.status_reason && q.status !== "running") console.log(`  why: ${q.status_reason.replace(/\s+/g, " ").slice(0, 300)}`);
+  }
+  const open = state.questions.filter((x) => x.state === "open" || x.state === "escalated");
+  console.log(`
+Open questions (${open.length})`);
+  for (const x of open) console.log(`- ${x.qid} [${x.state}] ${x.queue ?? ""}${x.step ? `/${x.step}` : ""}: ${x.text}`);
+  const workers = state.sessions.filter((x) => x.role === "worker");
+  console.log(`
+Worker sessions (${workers.length})`);
+  for (const w of workers) {
+    const busy = state.queues.find((q) => q.run?.session === w.id && ["running", "pausing", "usage_wait"].includes(q.run.state));
+    console.log(`- ${w.id} "${w.title ?? ""}" ${w.runtime}${w.launched_by === "nexus" ? "" : " (external)"}, ${w.live?.state ?? "not live"}, ${w.live?.model ?? w.model ?? "model ?"}, ${pct(w.live?.context_tokens, w.live?.context_window)}${busy ? `, running queue ${busy.id}` : ", free"}`);
+    if (w.context) console.log(`  knows: ${w.context.topics.join(", ") || "-"}; ${w.context.text.replace(/\s+/g, " ").slice(0, 300)}`);
+  }
+  const attention = state.attention.filter((a) => a.kind !== "question");
+  if (attention.length) {
+    console.log(`
+Waiting for the user`);
+    for (const a of attention) console.log(`- ${a.kind} ${a.queue ?? ""}${a.step ? `/${a.step}` : ""}: ${a.text.replace(/\s+/g, " ").slice(0, 160)}`);
+  }
+}
+
+function orchestrator(st: ProjectStore): SessionFile {
+  const s = session(st);
+  if (s.role !== "orchestrator") throw new UsageError("only an orchestrator session may do this");
+  return s;
+}
+
+/** The server carries out an orchestrator's request when it sees the event; this waits for its result. */
+function waitApplied(st: ProjectStore, session: string, event: string, ms = 15_000): { ok: boolean; message: string } | undefined {
+  const until = Date.now() + ms;
+  const pause = new Int32Array(new SharedArrayBuffer(4));
+  while (Date.now() < until) {
+    const a = st.readApplied(session).entries.find((x) => x.event === event);
+    if (a) return a;
+    Atomics.wait(pause, 0, 0, 150);
+  }
+  return undefined;
+}
+
+function report(r: { ok: boolean; message: string } | undefined): void {
+  if (!r) { console.log("sent; the Nexus server has not answered yet (is it running?). Check later with `nexus status`."); return; }
+  if (!r.ok) throw new UsageError(r.message);
+  console.log(`ok: ${r.message}`);
+}
+
 const list = (v?: string) => (v ? v.split(",").map((x) => x.trim()).filter(Boolean) : []);
 const readText = (v: string) => (v === "-" ? readFileSync(0, "utf8").trim() : v);
 
@@ -122,6 +182,7 @@ const commands: Record<string, () => void> = {
     const sid = o.session ?? process.env.NEXUS_SESSION;
     const s = sid ? state.sessions.find((x) => x.id === sid) : undefined;
     console.log(`project ${state.project.name} (${state.project.id})`);
+    if (s?.role === "orchestrator") return overview(state);
     if (s) console.log(`session ${s.id}: ${s.role}, ${s.runtime}, queue ${s.queue ?? "-"}`);
     const queues = s?.queue ? state.queues.filter((q) => q.id === s.queue) : state.queues.filter((q) => ["running", "waiting", "stopped"].includes(q.status));
     for (const q of queues) {
@@ -235,6 +296,28 @@ const commands: Record<string, () => void> = {
     const st = store(); const s = session(st);
     emit(st, s, { type: "log", level: (o.level ?? "info") as "info", text: need(args[1], "<text>") });
     console.log("ok");
+  },
+
+  queue() {
+    if (args[1] !== "draft") throw new UsageError("nexus queue draft <file.yaml|->");
+    const st = store(); const s = orchestrator(st);
+    const src = need(args[2], "<file.yaml|->");
+    const text = src === "-" ? readFileSync(0, "utf8") : readFileSync(normPath(src), "utf8");
+    let definition: unknown;
+    try { definition = YAML.parse(text); } catch (e) { throw new UsageError(`not valid YAML: ${(e as Error).message}`); }
+    const id = (definition as { id?: unknown } | null)?.id;
+    if (typeof id !== "string") throw new UsageError("the queue needs an id");
+    const e = emit(st, s, { type: "queue.drafted", queue: id, definition });
+    report(waitApplied(st, s.id, e.id));
+  },
+
+  run() {
+    const st = store(); const s = orchestrator(st);
+    const queue = need(args[1], "<queue>");
+    const action = need(args[2], "start|pause|resume|stop");
+    if (!["start", "pause", "resume", "stop"].includes(action)) throw new UsageError("the action is start, pause, resume or stop");
+    const e = emit(st, s, { type: "session.request", action, queue, use_session: o["use-session"], model: o.model, reason: need(o.reason, "--reason") });
+    report(waitApplied(st, s.id, e.id));
   },
 
   answer() {

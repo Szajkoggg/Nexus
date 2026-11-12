@@ -3,6 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "bin": { "nexus": "bin/nexus.js" },
-  "dependencies": { "@nexus/protocol": "*" }
+  "bin": {
+    "nexus": "bin/nexus.js"
+  },
+  "dependencies": {
+    "@nexus/protocol": "*",
+    "yaml": "^2.8.0"
+  }
 }

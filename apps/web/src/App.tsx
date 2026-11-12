@@ -6,6 +6,7 @@ import { QueueDetail, StepDetail } from "./components/Details.tsx";
 import { Drawer, StatusBadge, TimeAgo } from "./components/ui.tsx";
 import { AttentionPanel, NotifyToggle, useNotifications } from "./components/Attention.tsx";
 import { ContextBar, UsageMeter } from "./components/Run.tsx";
+import { ChatPanel, OrchestratorButton, useOrchestrator } from "./components/Chat.tsx";
 
 const GROUPS: { title: string; statuses: QueueStatus[]; collapsible?: boolean }[] = [
   { title: "Finished", statuses: ["done", "cancelled"], collapsible: true },
@@ -44,6 +45,8 @@ export function App() {
   });
 
   const notify = useNotifications(projects);
+  const orchestrator = useOrchestrator(projectId, tick);
+  const [chatOpen, setChatOpen] = useState(() => new URLSearchParams(location.search).has("chat"));
 
   const byGroup = useMemo(() => {
     const order = (q: QueueView) => q.updated ?? q.updated_at ?? "";
@@ -75,6 +78,7 @@ export function App() {
               </button>
             ))}
           </nav>
+          {projectId && <OrchestratorButton view={orchestrator} onClick={() => setChatOpen(true)} />}
           <UsageMeter version={tick} />
           <NotifyToggle {...notify} />
           <span className={`flex items-center gap-1.5 text-xs ${connected ? "text-zinc-500" : "text-orange-400"}`} title={connected ? "Live updates on" : "Reconnecting"}>
@@ -158,6 +162,10 @@ export function App() {
           </section>
         )}
       </main>
+
+      {chatOpen && projectId && (
+        <ChatPanel project={projectId} name={state?.project.name ?? projectId} view={orchestrator} onClose={() => setChatOpen(false)} onChanged={() => setTick((t) => t + 1)} />
+      )}
 
       <Drawer open={!!(state && queue)} onClose={close}>
         {state && queue && (step

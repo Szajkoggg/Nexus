@@ -9,7 +9,7 @@ import { monotonicFactory } from "ulid";
 import YAML from "yaml";
 import type { z } from "zod";
 import {
-  Activity, Delivery, Event, InboxEntry, NoteMeta, ProjectFile, QueueFile, RegistryFile, RunFile, RuntimeFile, SessionFile, UsageFile,
+  Activity, Applied, ChatEntry, Delivery, Event, InboxEntry, NoteMeta, ProjectFile, QueueFile, RegistryFile, RunFile, RuntimeFile, SessionFile, UsageFile,
   type Note,
 } from "./schemas.ts";
 
@@ -181,6 +181,12 @@ export class ProjectStore {
 
   readActivity(sessionId: string): JsonlRead<Activity> { return readJsonl(join(this.sessionDir(sessionId), "activity.jsonl"), Activity); }
   appendActivity(sessionId: string, a: Activity): void { appendJsonl(join(this.sessionDir(sessionId), "activity.jsonl"), Activity.parse(a)); }
+
+  readApplied(sessionId: string): JsonlRead<Applied> { return readJsonl(join(this.sessionDir(sessionId), "applied.jsonl"), Applied); }
+  appendApplied(sessionId: string, a: Applied): void { appendJsonl(join(this.sessionDir(sessionId), "applied.jsonl"), Applied.parse(a)); }
+
+  readChat(sessionId: string): JsonlRead<ChatEntry> { return readJsonl(join(this.sessionDir(sessionId), "chat.jsonl"), ChatEntry); }
+  appendChat(sessionId: string, c: z.input<typeof ChatEntry>): void { appendJsonl(join(this.sessionDir(sessionId), "chat.jsonl"), ChatEntry.parse(c)); }
 
   readRuntime(sessionId: string): RuntimeFile | undefined {
     const f = join(this.sessionDir(sessionId), "runtime.json");

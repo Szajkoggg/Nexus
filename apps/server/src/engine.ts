@@ -139,12 +139,20 @@ export class Engine {
     if (current) {
       switch (current.status) {
         case "running":
-        case "pending":
+        case "pending": {
+          // Something for the agent is on its way (a message, or an answer not yet routed to its inbox): the next
+          // turn brings it, so this is not a turn without an outcome.
+          const s = state.sessions.find((x) => x.id === run.session);
+          const unread = s?.inbox.some((m) => !m.read_at);
+          const unrouted = state.questions.some((x) => x.session === run.session && x.state === "answered"
+            && !s?.inbox.some((m) => m.type === "answer" && m.qid === x.qid));
+          if (unread || unrouted) return;
           // The turn ended and the step has no outcome: ask once, then hand it to the user.
           if (run.nudged) return this.halt(queueId, `step ${current.id} ended twice without an outcome`);
           this.writeRun(queueId, { ...run, nudged: true });
           live.proc.send(`[Nexus] Your turn ended, but step ${current.id} has no outcome yet. Continue the step if work remains; otherwise report it with \`nexus step done ${current.id} --summary "…"\`, \`nexus step failed\`, \`nexus stop\`, or ask with \`nexus ask\` and end your turn.`);
           return;
+        }
         case "waiting":
           return; // a blocking question: its answer arrives through the inbox and starts the next turn
         case "review":

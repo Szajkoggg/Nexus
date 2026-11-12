@@ -14,6 +14,7 @@ import {
   readRegistry, readUsage, routeAnswers, sendMessage, setQueueSettings, type ProjectState,
 } from "@nexus/protocol";
 import { Engine } from "./engine.ts";
+import { Orchestrator } from "./orchestrator.ts";
 
 const PORT = Number(process.env.NEXUS_PORT ?? 4317);
 const HOST = process.env.NEXUS_HOST ?? "127.0.0.1";
@@ -21,7 +22,7 @@ const WEB_DIST = resolve(dirname(fileURLToPath(import.meta.url)), "../../web/dis
 
 // ---------------------------------------------------------------- projects
 
-interface Entry { id: string; root: string; store: ProjectStore; engine: Engine; state?: ProjectState; error?: string }
+interface Entry { id: string; root: string; store: ProjectStore; engine: Engine; orchestrator: Orchestrator; state?: ProjectState; error?: string }
 const projects = new Map<string, Entry>();
 
 function refreshRegistry(): void {
@@ -29,7 +30,8 @@ function refreshRegistry(): void {
   for (const p of reg.projects) {
     if (projects.has(p.id)) continue;
     const store = ProjectStore.forRoot(p.root);
-    projects.set(p.id, { id: p.id, root: p.root, store, engine: new Engine(store, () => changed(p.id)) });
+    const engine = new Engine(store, () => changed(p.id));
+    projects.set(p.id, { id: p.id, root: p.root, store, engine, orchestrator: new Orchestrator(store, engine, () => changed(p.id)) });
     watchProject(p.id, store.dir);
   }
   for (const id of projects.keys()) if (!reg.projects.some((p) => p.id === id)) projects.delete(id);
@@ -59,6 +61,9 @@ function changed(id: string): void {
       if (s) {
         try { if (routeAnswers(e.store, s) > 0) e.state = undefined; }
         catch (err) { console.error(`routing answers in ${id}: ${(err as Error).message}`); }
+        try { const fresh = stateOf(e); if (fresh) e.orchestrator.onChange(fresh); }
+        catch (err) { console.error(`orchestrator in ${id}: ${(err as Error).message}`); }
+        e.state = undefined;
         try { const fresh = stateOf(e); if (fresh) e.engine.onChange(fresh); }
         catch (err) { console.error(`engine in ${id}: ${(err as Error).message}`); }
         e.state = undefined;
@@ -202,6 +207,15 @@ app.get("/api/projects/:id/sessions/:session/activity", (c) => {
 
 app.get("/api/usage", (c) => c.json(readUsage() ?? null));
 
+// The orchestrator chat.
+const orchestratorOf = (st: ProjectStore) => [...projects.values()].find((e) => e.store === st)!.orchestrator;
+app.get("/api/projects/:id/orchestrator", (c) => {
+  const e = projects.get(c.req.param("id"));
+  return e ? c.json(e.orchestrator.view()) : c.json({ error: "unknown project" }, 404);
+});
+app.post("/api/projects/:id/orchestrator/messages", act((st, b) => orchestratorOf(st).say(b.text)));
+app.post("/api/projects/:id/orchestrator/reset", act((st) => orchestratorOf(st).reset()));
+
 if (existsSync(WEB_DIST)) {
   app.use("/*", serveStatic({ root: WEB_DIST.replaceAll("\\", "/") }));
   app.get("*", serveStatic({ path: join(WEB_DIST, "index.html").replaceAll("\\", "/") }));
@@ -215,7 +229,7 @@ const server = serve({ fetch: app.fetch, port: PORT, hostname: HOST }, (info) =>
   if (!existsSync(WEB_DIST)) console.log("No built dashboard: run the web dev server (npm run dev) or npm start.");
 });
 
-const shutdown = () => { for (const e of projects.values()) e.engine.shutdown(); process.exit(0); };
+const shutdown = () => { for (const e of projects.values()) { e.engine.shutdown(); e.orchestrator.shutdown(); } process.exit(0); };
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
 

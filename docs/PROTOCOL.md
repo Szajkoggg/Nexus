@@ -147,7 +147,7 @@ Every line:
 | `queue.report` | `queue`, `path`, `summary` | The worker's report of the whole queue, written when it ends (done or stopped) |
 | `change.proposed` | `queue`, `patch`, `reason` | A proposed change to a queue definition (needs a new approval) |
 | `queue.drafted` | `queue`, `definition` | Orchestrator only: a new or changed draft queue |
-| `session.request` | `action` (start, resume, fork, pause, stop), `target`, `queue?`, `reason` | Orchestrator only: asks the engine to act on a session |
+| `session.request` | `action` (start, resume, pause, stop), `queue`, `use_session?`, `model?`, `reason` | Orchestrator only: asks the engine to act on a queue's run (`use_session` continues an existing session) |
 | `log` | `level`, `text` | Anything else worth keeping |
 
 The server validates every event against the writer's role and ignores (and reports) what that role may not do.
@@ -162,6 +162,8 @@ Written only by the server's queue engine; agents never touch them.
 | `sessions/<id>/runtime.json` | A launched session's live facts: process state and pid, model, context tokens and window, turns, cost |
 | `sessions/<id>/delivered.jsonl` | What the server handed to the session (notes put into a step turn, inbox entries injected or sent as a turn); counts as read |
 | `sessions/<id>/activity.jsonl` | A condensed record of the agent's stream: turns, tool calls, texts, tool errors, tagged with queue and step |
+| `sessions/<orchestrator>/applied.jsonl` | The server's result for each orchestrator request (`queue.drafted`, `session.request`), and the notices it has sent the orchestrator; the CLI waits for the result and prints it |
+| `sessions/<orchestrator>/chat.jsonl` | The chat shown in the dashboard: the user's messages, the orchestrator's texts and tool calls, Nexus notices |
 | `<NEXUS_HOME>/usage.json` | The subscription's windows (5-hour, 7-day: utilization and reset time) from the latest `rate_limit_event` |
 
 A session launched by Nexus has `launched_by: nexus`, `runtime: claude`, `native_id` (Claude's session UUID, chosen
@@ -282,8 +284,26 @@ Writes (JSON bodies only; a request with a foreign `Origin` is refused):
 | `POST /api/projects/:id/questions/:qid/answer` | `text`, `continue?` | The user's answer, routed to the asker |
 | `POST /api/projects/:id/queues/:q/run` | `action` (`start`, `pause`, `resume`, `stop`), `model?`, `session?` | Runs the queue through a Nexus-launched session (`session` continues an existing one) |
 | `POST /api/projects/:id/queues/:q/steps/:s/accept` | `text?` | Accepts a step waiting in review |
+| `POST /api/projects/:id/orchestrator/messages` | `text` | A chat message to the orchestrator (starts or wakes it) |
+| `POST /api/projects/:id/orchestrator/reset` | | The next message starts a new orchestrator session |
 
-Also `GET /api/projects/:id/sessions/:session/activity?queue=&step=&limit=` and `GET /api/usage`.
+Also `GET /api/projects/:id/sessions/:session/activity?queue=&step=&limit=`, `GET /api/projects/:id/orchestrator`
+(its session, state and chat) and `GET /api/usage`.
+
+## The orchestrator
+
+`project.yaml` holds `orchestrator: { runtime, session, model?, notify }`. The orchestrator is a Claude Code session
+launched in the project's checkout with `--permission-mode dontAsk`, allowed only `Read`, `Grep`, `Glob`,
+`Bash(nexus:*)` and read-only git commands, and with `Edit`, `Write` and `NotebookEdit` disallowed: anything else is
+refused without a prompt. Its briefing (appended system prompt) explains its role, the commands and the queue YAML.
+
+- `nexus queue draft <file|->` sends a queue definition (YAML) as `queue.drafted`. The server writes it: a new queue
+  becomes `proposed` (or `draft`); a change to an existing queue's steps, checks or stop conditions makes a new
+  revision, which needs the user's approval again.
+- `nexus run <queue> start|pause|resume|stop --reason … [--use-session <id>] [--model <m>]` sends `session.request`.
+  Starting an unapproved revision is refused.
+- With `notify` on, the server tells the orchestrator (starting it if needed) when a worker asks a question and when a
+  run halts or finishes; the chat shows these notices.
 
 ## How the engine runs a Claude Code session
 

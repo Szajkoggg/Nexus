@@ -11,6 +11,7 @@ export interface ClaudeOptions {
   model?: string;
   permissionMode: string;
   allowedTools: string[];
+  disallowedTools?: string[];
   appendSystemPrompt?: string;
   env: Record<string, string>;
 }
@@ -56,6 +57,7 @@ export class ClaudeSession extends EventEmitter<Events> {
     ];
     if (options.model) args.push("--model", options.model);
     if (options.appendSystemPrompt) args.push("--append-system-prompt", options.appendSystemPrompt);
+    if (options.disallowedTools?.length) args.push("--disallowedTools", options.disallowedTools.join(","));
     if (options.allowedTools.length) args.push("--allowedTools", ...options.allowedTools); // variadic: keep last
     // NEXUS_CLAUDE replaces the binary (tests use a fake written in TypeScript or JavaScript, run by this Node).
     const bin = process.env.NEXUS_CLAUDE ?? "claude";

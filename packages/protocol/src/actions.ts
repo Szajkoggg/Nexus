@@ -2,7 +2,7 @@
 // writer of queue definitions, notes and inboxes (docs/PROTOCOL.md, "Rules").
 import { existsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import { USER_SESSION, type InboxEntry, type QueueFile, type ReviewPolicy, type SessionFile } from "./schemas.ts";
+import { QueueFile, USER_SESSION, type InboxEntry, type ReviewPolicy, type SessionFile } from "./schemas.ts";
 import { ProjectStore, newId, now, revisionHash } from "./store.ts";
 import { loadProjectState, type ProjectState } from "./state.ts";
 
@@ -118,4 +118,52 @@ export function routeAnswers(store: ProjectStore, state: ProjectState = loadProj
     }
   }
   return routed;
+}
+
+// ---------------------------------------------------------------- queue drafts (from an orchestrator)
+
+/**
+ * Writes a queue an orchestrator drafted. A new queue becomes `proposed` (or `draft` if it says so). A change to an
+ * existing queue's steps, checks or stop conditions makes a new revision, which needs the user's approval again;
+ * the approvals, history, run and the steps' recorded states are kept.
+ */
+export function applyDraft(store: ProjectStore, definition: unknown): string {
+  const input = (definition ?? {}) as Record<string, unknown>;
+  const parsed = QueueFile.safeParse({ protocol: 1, status: "proposed", ...input });
+  if (!parsed.success) throw new ActionError(parsed.error.issues.map((i) => `${i.path.join(".") || "queue"}: ${i.message}`).join("; "));
+  const draft = parsed.data;
+  if (draft.status !== "draft" && draft.status !== "proposed") throw new ActionError("a drafted queue's status is draft or proposed");
+  if (!/^[A-Za-z0-9][\w.-]{0,31}$/.test(draft.id)) throw new ActionError("a queue id is 1-32 letters, digits, dots, dashes or underscores");
+  const ids = draft.steps.map((s) => s.id);
+  if (new Set(ids).size !== ids.length) throw new ActionError("step ids must be unique");
+  if (!draft.steps.length) throw new ActionError("a queue needs at least one step");
+
+  let old: QueueFile | undefined;
+  try { old = store.readQueue(draft.id); } catch { old = undefined; }
+  const at = now();
+  if (!old) {
+    store.writeQueue({ ...draft, revision: 1, approvals: [], history: [], created_at: at, updated_at: at });
+    return `queue ${draft.id} created as ${draft.status} (revision 1); the user approves it in the dashboard`;
+  }
+  const steps = draft.steps.map((s) => {
+    const before = old!.steps.find((o) => o.id === s.id);
+    return { ...s, status: s.status ?? before?.status, status_note: s.status_note ?? before?.status_note };
+  });
+  const next: QueueFile = {
+    ...old,
+    title: draft.title, description: draft.description ?? old.description, track: draft.track ?? old.track,
+    worktree: draft.worktree ?? old.worktree, branch: draft.branch ?? old.branch, base: draft.base ?? old.base,
+    review_policy: draft.review_policy ?? old.review_policy,
+    stop_conditions: draft.stop_conditions, checks: draft.checks, steps, updated_at: at,
+  };
+  const changed = revisionHash(next) !== revisionHash(old);
+  if (changed) {
+    next.revision = old.revision + 1;
+    next.history = [...old.history, { revision: old.revision, hash: revisionHash(old), replaced_at: at }];
+    if (["draft", "proposed", "approved"].includes(old.status)) next.status = draft.status;
+  }
+  store.writeQueue(next);
+  return changed
+    ? `queue ${draft.id} updated to revision ${next.revision}; it needs the user's approval again`
+    : `queue ${draft.id} updated (no change to steps, checks or stop conditions: the approval stands)`;
 }
