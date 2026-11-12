@@ -1,0 +1,98 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  ActionError, ProjectStore, addNote, answerAsUser, approveQueue, deleteNote, loadProjectState, newId, now,
+  routeAnswers, sendMessage, setQueueSettings, type Event, type SessionFile,
+} from "../src/index.ts";
+
+function setup() {
+  const root = mkdtempSync(join(tmpdir(), "nexus-actions-"));
+  const st = ProjectStore.init(root, { id: "p", name: "P", root, defaults: {} as never, runtimes: {} });
+  st.writeQueue({
+    protocol: 1, id: "Q", title: "Queue", revision: 1, status: "proposed", stop_conditions: [], checks: [],
+    steps: [{ id: "Q1", title: "One", goal: "", acceptance: [] }, { id: "Q2", title: "Two", goal: "", acceptance: [] }],
+    approvals: [], history: [],
+  });
+  const session = (role: SessionFile["role"]): SessionFile => {
+    const s: SessionFile = { protocol: 1, id: newId(), project: "p", role, runtime: "external", cwd: root, launched_by: "external", created_at: now(), queue: "Q" };
+    st.writeSession(s);
+    return s;
+  };
+  const emit = (s: SessionFile, body: Record<string, unknown>) =>
+    st.appendEvent({ v: 1, id: newId(), at: now(), session: s.id, ...body } as Event);
+  return { st, session, emit };
+}
+
+test("approving a proposed queue records the words and pins the revision once", () => {
+  const { st } = setup();
+  assert.equal(loadProjectState(st).attention[0]?.kind, "approval");
+  approveQueue(st, "Q", "  Rendben, mehet.  ");
+  const q = loadProjectState(st).queues[0]!;
+  assert.equal(q.approved, true);
+  assert.equal(q.status, "approved");
+  assert.equal(q.approvals[0]!.words, "Rendben, mehet.");
+  assert.throws(() => approveQueue(st, "Q"), (e: ActionError) => e.status === 409);
+  assert.equal(loadProjectState(st).attention.length, 0);
+});
+
+test("a note can be withdrawn only before it is delivered", () => {
+  const { st, session, emit } = setup();
+  const keep = addNote(st, "Q", "Q2", "keep the debris");
+  const drop = addNote(st, "Q", "Q2", "never mind");
+  assert.throws(() => addNote(st, "Q", "Q9", "x"), (e: ActionError) => e.status === 404);
+  assert.throws(() => addNote(st, "Q", "Q2", "   "), /empty/);
+  deleteNote(st, "Q", "Q2", drop);
+  assert.deepEqual(loadProjectState(st).queues[0]!.steps[1]!.notes.map((n) => n.id), [keep]);
+
+  emit(session("worker"), { type: "note.read", note: keep });
+  assert.throws(() => deleteNote(st, "Q", "Q2", keep), (e: ActionError) => e.status === 409);
+});
+
+test("answers reach the asker's inbox exactly once; escalations go to the user", () => {
+  const { st, session, emit } = setup();
+  const w = session("worker"); const o = session("orchestrator");
+  emit(w, { type: "step.started", queue: "Q", step: "Q1" });
+  emit(w, { type: "question.asked", queue: "Q", step: "Q1", qid: "q1", text: "Vertical joints only?", can_continue: false });
+  emit(o, { type: "answer.given", qid: "q1", text: "This is the user's call.", escalate: true });
+
+  let s = loadProjectState(st);
+  assert.equal(s.questions[0]!.state, "escalated");
+  assert.equal(s.attention.find((a) => a.kind === "question")?.qid, "q1");
+  assert.equal(routeAnswers(st), 0); // an escalation is not an answer
+
+  answerAsUser(st, "q1", "Vertical only.", true);
+  assert.equal(routeAnswers(st), 0); // answerAsUser already routed it
+  s = loadProjectState(st);
+  assert.equal(s.questions[0]!.state, "answered");
+  assert.equal(s.questions[0]!.answers.at(-1)!.by, "user");
+  assert.equal(s.queues[0]!.steps[0]!.status, "running");
+  const inbox = s.sessions.find((x) => x.id === w.id)!.inbox;
+  assert.equal(inbox.length, 1);
+  assert.deepEqual([inbox[0]!.type, inbox[0]!.from], ["answer", "user"]);
+});
+
+test("a message to a running session shows on its step until it is read", () => {
+  const { st, session, emit } = setup();
+  const w = session("worker");
+  emit(w, { type: "step.started", queue: "Q", step: "Q1" });
+  const id = sendMessage(st, w.id, "Use the grassland settings too.", { queue: "Q", step: "Q1" });
+  let m = loadProjectState(st).queues[0]!.steps[0]!.messages;
+  assert.equal(m.length, 1);
+  assert.equal(m[0]!.read_at, undefined);
+  emit(w, { type: "message.read", message: id });
+  m = loadProjectState(st).queues[0]!.steps[0]!.messages;
+  assert.ok(m[0]!.read_at);
+  assert.throws(() => sendMessage(st, "nobody", "x"), (e: ActionError) => e.status === 404);
+});
+
+test("review policy can be set and cleared", () => {
+  const { st } = setup();
+  setQueueSettings(st, "Q", { review_policy: "wait" });
+  assert.equal(st.readQueue("Q").review_policy, "wait");
+  setQueueSettings(st, "Q", { review_policy: null });
+  assert.equal(st.readQueue("Q").review_policy, undefined);
+  assert.throws(() => setQueueSettings(st, "Q", { review_policy: "sometimes" }));
+});

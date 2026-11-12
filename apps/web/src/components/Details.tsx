@@ -1,12 +1,18 @@
+import { useState } from "react";
 import type { Event } from "@nexus/protocol";
-import { fileUrl, type ProjectState, type QuestionView, type QueueView, type StepView } from "../api.ts";
-import { Expandable, Markdown, Section, StatusBadge, TimeAgo } from "./ui.tsx";
+import { act, enc, fileUrl, type ProjectState, type QuestionView, type QueueView, type StepView } from "../api.ts";
+import { Composer, Expandable, Markdown, Section, StatusBadge, TimeAgo } from "./ui.tsx";
+
+interface Props { project: ProjectState; queue: QueueView; onChanged: () => void }
 
 // ---------------------------------------------------------------- step
 
-export function StepDetail({ project, queue, step }: { project: ProjectState; queue: QueueView; step: StepView }) {
+export function StepDetail({ project, queue, step, onChanged }: Props & { step: StepView }) {
   const id = project.project.id;
   const questions = queue.questions.filter((q) => q.step === step.id);
+  const live = (step.status === "running" || step.status === "waiting") && step.session;
+  const session = live ? project.sessions.find((s) => s.id === step.session) : undefined;
+  const notesOpen = step.status === "pending" || step.status === "stopped";
   return (
     <div>
       <div className="text-xs text-zinc-500">
@@ -20,6 +26,7 @@ export function StepDetail({ project, queue, step }: { project: ProjectState; qu
         {step.started_at && <span>started <TimeAgo at={step.started_at} /></span>}
         {step.finished_at && <span>finished <TimeAgo at={step.finished_at} /></span>}
         {step.commit && <span className="font-mono">{step.commit}</span>}
+        {session && <span>by {session.title ?? session.id.slice(-8)} ({session.runtime})</span>}
       </div>
 
       {(step.summary || step.reason || step.progress) && (
@@ -31,6 +38,19 @@ export function StepDetail({ project, queue, step }: { project: ProjectState; qu
           )}
         </div>
       )}
+
+      {live && session && (
+        <Section title="Message the running agent" aside={<span className="text-xs text-zinc-600">read at its next check-in</span>}>
+          <Composer
+            placeholder="Delivered to the agent without stopping it…"
+            button="Send"
+            onSubmit={async (text) => { await act(id, "POST", `/sessions/${enc(session.id)}/messages`, { text, queue: queue.id, step: step.id }); onChanged(); }}
+          />
+        </Section>
+      )}
+
+      {questions.length > 0 && <Section title="Questions">{questions.map((q) => <Question key={q.qid} q={q} project={id} onChanged={onChanged} />)}</Section>}
+
       {step.status_note && (
         <Section title="Recorded state">
           <Expandable text={step.status_note} />
@@ -81,22 +101,46 @@ export function StepDetail({ project, queue, step }: { project: ProjectState; qu
         </Section>
       )}
 
-      {questions.length > 0 && <Section title="Questions">{questions.map((q) => <Question key={q.qid} q={q} />)}</Section>}
-
       <Section title="Notes" aside={<span className="text-xs text-zinc-600">delivered when the step starts</span>}>
-        {step.notes.length === 0 && <p className="text-sm text-zinc-600">None. (Adding notes from the dashboard comes in phase 2; for now: <code className="text-zinc-400">nexus note {queue.id} {step.id} "…"</code>)</p>}
         <div className="space-y-2">
           {step.notes.map((n) => (
             <div key={n.id} className="rounded-lg border border-zinc-800 p-3">
-              <div className="mb-1 flex gap-2 text-xs text-zinc-500">
+              <div className="mb-1 flex items-center gap-2 text-xs text-zinc-500">
                 <span>from {n.from}</span><TimeAgo at={n.at} />
-                <span className={`ml-auto ${n.read_at ? "text-emerald-400" : "text-sky-400"}`}>{n.read_at ? "read" : "not yet delivered"}</span>
+                <span className={`ml-auto ${n.read_at ? "text-emerald-400" : "text-sky-400"}`}>{n.read_at ? "delivered" : "waiting for the step"}</span>
+                {!n.read_at && <WithdrawNote project={id} queue={queue.id} step={step.id} note={n.id} onChanged={onChanged} />}
               </div>
               <Markdown>{n.body}</Markdown>
             </div>
           ))}
+          {step.notes.length === 0 && !notesOpen && <p className="text-sm text-zinc-600">None.</p>}
         </div>
+        {notesOpen && (
+          <div className="mt-3">
+            <Composer
+              placeholder={`A note for ${step.id}: the agent reads it when it starts this step…`}
+              button="Add note"
+              onSubmit={async (text) => { await act(id, "POST", `/queues/${enc(queue.id)}/steps/${enc(step.id)}/notes`, { text }); onChanged(); }}
+            />
+          </div>
+        )}
       </Section>
+
+      {step.messages.length > 0 && (
+        <Section title="Messages sent while it ran">
+          <div className="space-y-2">
+            {step.messages.map((m) => (
+              <div key={m.id} className="rounded-lg border border-zinc-800 p-3 text-sm">
+                <div className="mb-1 flex gap-2 text-xs text-zinc-500">
+                  <span>from {m.from}</span><TimeAgo at={m.at} />
+                  <span className={`ml-auto ${m.read_at ? "text-emerald-400" : "text-sky-400"}`}>{m.read_at ? "read" : "not read yet"}</span>
+                </div>
+                {m.type === "message" && <Markdown>{m.text}</Markdown>}
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
 
       {step.timeline.length > 0 && (
         <Section title="Timeline">
@@ -116,6 +160,19 @@ export function StepDetail({ project, queue, step }: { project: ProjectState; qu
   );
 }
 
+function WithdrawNote({ project, queue, step, note, onChanged }: { project: string; queue: string; step: string; note: string; onChanged: () => void }) {
+  const [error, setError] = useState<string>();
+  return (
+    <>
+      {error && <span className="text-red-400">{error}</span>}
+      <button
+        className="text-zinc-500 hover:text-red-300"
+        onClick={() => act(project, "DELETE", `/queues/${enc(queue)}/steps/${enc(step)}/notes/${enc(note)}`).then(onChanged, (e: Error) => setError(e.message))}
+      >withdraw</button>
+    </>
+  );
+}
+
 function describe(e: Event): string {
   switch (e.type) {
     case "step.progress": return e.text + (e.pct !== undefined ? ` (${e.pct}%)` : "");
@@ -131,30 +188,62 @@ function describe(e: Event): string {
   }
 }
 
-function Question({ q }: { q: QuestionView }) {
+export function Question({ q, project, onChanged }: { q: QuestionView; project: string; onChanged: () => void }) {
+  const open = q.state === "open" || q.state === "escalated";
+  const tone = q.state === "escalated" ? "border-violet-500/40 bg-violet-500/5" : open ? "border-amber-500/30 bg-amber-500/5" : "border-zinc-800";
   return (
-    <div className="mb-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm">
-      <div className="mb-1 flex gap-2 text-xs text-zinc-500">
-        <StatusBadge status={q.state === "open" ? "waiting" : q.state === "escalated" ? "review" : "done"} label={q.state} />
-        {q.can_continue && <span>· worker continues meanwhile</span>}
+    <div className={`mb-2 rounded-lg border p-3 text-sm ${tone}`}>
+      <div className="mb-1 flex flex-wrap gap-2 text-xs text-zinc-500">
+        <StatusBadge status={q.state === "open" ? "waiting" : q.state === "escalated" ? "review" : "done"} label={q.state === "escalated" ? "for you" : q.state} />
+        {q.queue && <span className="font-mono">{q.queue}{q.step ? `/${q.step}` : ""}</span>}
+        <span>{q.can_continue ? "the worker goes on meanwhile" : "the worker waits"}</span>
         <span className="ml-auto"><TimeAgo at={q.asked_at} /></span>
       </div>
       <p className="text-zinc-100">{q.text}</p>
       {q.options && <ul className="mt-1 list-disc pl-5 text-zinc-400">{q.options.map((o) => <li key={o}>{o}</li>)}</ul>}
-      {q.answers.map((a, i) => (
-        <p key={i} className="mt-2 border-t border-zinc-800 pt-2 text-zinc-300">
-          <span className="text-zinc-500">{a.escalate ? "Escalated: " : "Answer: "}</span>{a.text}
-        </p>
+      {q.answers.map((a) => (
+        <div key={a.id} className="mt-2 border-t border-zinc-800 pt-2 text-zinc-300">
+          <span className="text-zinc-500">{a.escalate ? "Passed to you by the orchestrator: " : `Answer (${a.by}): `}</span>
+          <Markdown className="inline [&_p]:inline [&_p]:m-0">{a.text}</Markdown>
+        </div>
       ))}
+      {open && (
+        <div className="mt-3">
+          <AnswerBox q={q} project={project} onChanged={onChanged} />
+        </div>
+      )}
     </div>
+  );
+}
+
+function AnswerBox({ q, project, onChanged }: { q: QuestionView; project: string; onChanged: () => void }) {
+  const [goOn, setGoOn] = useState(true);
+  return (
+    <Composer
+      rows={2}
+      placeholder="Your answer…"
+      button="Answer"
+      extra={
+        <label className="flex items-center gap-1.5 text-xs text-zinc-400">
+          <input type="checkbox" checked={goOn} onChange={(e) => setGoOn(e.target.checked)} className="accent-sky-500" />
+          the worker may go on
+        </label>
+      }
+      onSubmit={async (text) => { await act(project, "POST", `/questions/${enc(q.qid)}/answer`, { text, continue: goOn }); onChanged(); }}
+    />
   );
 }
 
 // ---------------------------------------------------------------- queue
 
-export function QueueDetail({ project, queue }: { project: ProjectState; queue: QueueView }) {
+export function QueueDetail({ project, queue, onChanged }: Props) {
+  const id = project.project.id;
   const latest = queue.approvals.at(-1);
   const inherited = project.project.defaults.stop_conditions;
+  const [error, setError] = useState<string>();
+  const setPolicy = (review_policy: string | null) =>
+    act(id, "PATCH", `/queues/${enc(queue.id)}`, { review_policy }).then(onChanged, (e: Error) => setError(e.message));
+
   return (
     <div>
       <div className="text-xs text-zinc-500">{project.project.name}</div>
@@ -175,17 +264,49 @@ export function QueueDetail({ project, queue }: { project: ProjectState; queue: 
       {queue.report && (
         <Section title="Queue report">
           <p className="text-sm text-zinc-300">{queue.report.summary}</p>
-          <a className="text-sm text-sky-400 underline" href={fileUrl(project.project.id, queue.report.path)} target="_blank" rel="noreferrer">Open the report</a>
+          <a className="text-sm text-sky-400 underline" href={fileUrl(id, queue.report.path)} target="_blank" rel="noreferrer">Open the report</a>
         </Section>
       )}
-      {queue.approvals.length > 0 && (
-        <Section title="Approvals">
-          {queue.approvals.map((a, i) => (
-            <p key={i} className="text-sm text-zinc-300">r{a.revision} · <TimeAgo at={a.at} />{a.words && <> · <q className="italic">{a.words}</q></>}</p>
-          ))}
-        </Section>
-      )}
-      {queue.questions.length > 0 && <Section title="Questions">{queue.questions.map((q) => <Question key={q.qid} q={q} />)}</Section>}
+      {queue.questions.length > 0 && <Section title="Questions">{queue.questions.map((q) => <Question key={q.qid} q={q} project={id} onChanged={onChanged} />)}</Section>}
+
+      <Section title="Approval">
+        {queue.approvals.map((a, i) => (
+          <p key={i} className="mb-1 text-sm text-zinc-300">
+            r{a.revision} · <TimeAgo at={a.at} />{a.words && <> · <q className="italic">{a.words}</q></>}
+          </p>
+        ))}
+        {!queue.approved && (
+          <div className="mt-2">
+            <p className="mb-2 text-sm text-zinc-400">
+              Approving pins revision {queue.revision}: its steps, acceptance criteria, checks and stop conditions. A later change needs a new approval.
+            </p>
+            <Composer
+              rows={2}
+              allowEmpty
+              placeholder="Your words with the approval (optional)…"
+              button={`Approve revision ${queue.revision}`}
+              onSubmit={async (words) => { await act(id, "POST", `/queues/${enc(queue.id)}/approve`, { words }); onChanged(); }}
+            />
+          </div>
+        )}
+      </Section>
+
+      <Section title="Settings">
+        <label className="flex flex-wrap items-center gap-2 text-sm text-zinc-300">
+          After each step
+          <select
+            value={queue.review_policy ?? ""}
+            onChange={(e) => void setPolicy(e.target.value || null)}
+            className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm"
+          >
+            <option value="">project default ({project.project.defaults.review_policy === "wait" ? "wait for review" : "go on"})</option>
+            <option value="continue">go on to the next step</option>
+            <option value="wait">wait for my review</option>
+          </select>
+        </label>
+        {error && <p className="mt-1 text-xs text-red-400">{error}</p>}
+      </Section>
+
       {queue.description && <Section title="Description"><Expandable text={queue.description} lines={6} /></Section>}
 
       <Section title="Stop conditions">

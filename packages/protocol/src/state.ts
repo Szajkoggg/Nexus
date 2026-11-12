@@ -1,14 +1,21 @@
 // Derives the dashboard's view of a project from its files. Pure apart from reading through the store;
 // nothing here is ever written back (state.json, if kept, is only a cache of this).
-import { ORCHESTRATOR_ONLY, type Event, type Note, type ProjectFile, type QueueFile, type QueueStatus, type ReviewItem, type SessionFile, type StepDef, type StepStatus } from "./schemas.ts";
+import { ORCHESTRATOR_ONLY, type Event, type InboxEntry, type Note, type ProjectFile, type QueueFile, type QueueStatus, type ReviewItem, type SessionFile, type StepDef, type StepStatus } from "./schemas.ts";
 import { ProjectStore, revisionHash } from "./store.ts";
 
 export interface CheckView { name: string; ok: boolean; summary?: string; at: string }
+export interface AnswerView { id: string; text: string; at: string; escalate?: boolean; continue?: boolean; session: string; by: "orchestrator" | "user" }
 export interface QuestionView {
   qid: string; session: string; queue?: string; step?: string; text: string; options?: string[];
   can_continue: boolean; asked_at: string;
   state: "open" | "answered" | "escalated" | "withdrawn";
-  answers: { text: string; at: string; escalate?: boolean; continue?: boolean; session: string }[];
+  answers: AnswerView[];
+}
+export type InboxView = InboxEntry & { read_at?: string };
+export interface AttentionItem {
+  kind: "question" | "stopped" | "approval" | "review" | "failed";
+  queue?: string; step?: string; qid?: string;
+  text: string; at?: string;
 }
 export interface StepView extends StepDef {
   status: StepStatus;
@@ -19,6 +26,8 @@ export interface StepView extends StepDef {
   review_items: (ReviewItem & { at: string; round?: number })[];
   checks: CheckView[];
   notes: (Note & { read_at?: string })[];
+  /** Messages sent to a session about this step while it ran. */
+  messages: (InboxView & { session: string })[];
   timeline: Event[];
 }
 export interface QueueView extends Omit<QueueFile, "steps"> {
@@ -37,12 +46,15 @@ export interface SessionView extends SessionFile {
   last_event?: string;
   context?: { text: string; topics: string[]; files: string[]; at: string };
   event_count: number;
+  inbox: InboxView[];
 }
 export interface ProjectState {
   project: ProjectFile;
   queues: QueueView[];
   sessions: SessionView[];
   questions: QuestionView[];
+  /** What waits for the user, newest first. */
+  attention: AttentionItem[];
   warnings: string[];
   generated_at: string;
 }
@@ -71,10 +83,12 @@ export function loadProjectState(store: ProjectStore): ProjectState {
       const s = store.readSession(id);
       const r = store.readEvents(id);
       warnings.push(...r.errors);
-      sessions.set(id, { ...s, event_count: r.entries.length });
+      const inbox = store.readInbox(id);
+      warnings.push(...inbox.errors);
+      sessions.set(id, { ...s, event_count: r.entries.length, inbox: inbox.entries });
       for (const e of r.entries) {
         if (e.session !== id) { warnings.push(`session ${id}: event ${e.id} claims session ${e.session}; ignored`); continue; }
-        if (ORCHESTRATOR_ONLY.has(e.type) && s.role !== "orchestrator") {
+        if (ORCHESTRATOR_ONLY.has(e.type) && s.role === "worker") {
           warnings.push(`session ${id}: ${e.type} is for orchestrators; ignored`); continue;
         }
         events.push(e);
@@ -91,14 +105,42 @@ export function loadProjectState(store: ProjectStore): ProjectState {
     q.current_step = q.steps.find((s) => s.status === "running" || s.status === "waiting" || s.status === "review" || s.status === "stopped")?.id;
   }
 
+  // Messages sent to sessions, shown on the step they were about.
+  for (const s of sessions.values()) {
+    for (const m of s.inbox) {
+      if (m.type !== "message" || !m.queue || !m.step) continue;
+      queues.get(m.queue)?.steps.find((x) => x.id === m.step)?.messages.push({ ...m, session: s.id });
+    }
+  }
+
   return {
     project,
     queues: [...queues.values()],
     sessions: [...sessions.values()],
     questions: [...questions.values()],
+    attention: attentionOf([...queues.values()], [...questions.values()]),
     warnings,
     generated_at: new Date().toISOString(),
   };
+}
+
+function attentionOf(queues: QueueView[], questions: QuestionView[]): AttentionItem[] {
+  const out: AttentionItem[] = [];
+  for (const x of questions) {
+    if (x.state !== "open" && x.state !== "escalated") continue;
+    const by = x.answers.at(-1);
+    out.push({ kind: "question", queue: x.queue, step: x.step, qid: x.qid, text: x.text, at: by?.at ?? x.asked_at });
+  }
+  for (const q of queues) {
+    if (q.status === "stopped") out.push({ kind: "stopped", queue: q.id, step: q.current_step, text: q.status_reason ?? "Stopped", at: q.updated ?? q.updated_at });
+    if (q.status === "proposed") out.push({ kind: "approval", queue: q.id, text: q.title, at: q.updated_at });
+    if (q.status === "cancelled" || q.status === "done") continue;
+    for (const s of q.steps) {
+      if (s.status === "review") out.push({ kind: "review", queue: q.id, step: s.id, text: s.summary ?? s.title, at: s.finished_at });
+      if (s.status === "failed") out.push({ kind: "failed", queue: q.id, step: s.id, text: s.reason ?? s.title, at: s.finished_at });
+    }
+  }
+  return out.sort((a, b) => (b.at ?? "").localeCompare(a.at ?? ""));
 }
 
 function initQueue(q: QueueFile, notes: Note[]): QueueView {
@@ -114,7 +156,7 @@ function initQueue(q: QueueFile, notes: Note[]): QueueView {
     steps: q.steps.map((s) => ({
       ...s,
       status: s.status ?? "pending",
-      review_items: [], checks: [], timeline: [],
+      review_items: [], checks: [], timeline: [], messages: [],
       notes: notes.filter((n) => n.step === s.id),
     })),
   };
@@ -211,9 +253,17 @@ function apply(
     case "answer.given": {
       const x = questions.get(e.qid);
       if (!x) { warnings.push(`answer ${e.id} to unknown question ${e.qid}`); return; }
-      x.answers.push({ text: e.text, at: e.at, escalate: e.escalate, continue: e.continue, session: e.session });
+      x.answers.push({
+        id: e.id, text: e.text, at: e.at, escalate: e.escalate, continue: e.continue, session: e.session,
+        by: s?.role === "user" ? "user" : "orchestrator",
+      });
       x.state = e.escalate ? "escalated" : "answered";
       if (!e.escalate) resume(x, queues, e);
+      return;
+    }
+    case "message.read": {
+      const m = s?.inbox.find((x) => x.id === e.message);
+      if (m) m.read_at = e.at;
       return;
     }
     case "note.read": {

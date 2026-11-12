@@ -7,9 +7,10 @@ user, a per-project orchestrator agent and the working agents.
 - [docs/DESIGN.md](docs/DESIGN.md): concepts, architecture, decisions, phases
 - [docs/PROTOCOL.md](docs/PROTOCOL.md): the `.nexus/` files, events and the `nexus` CLI
 
-**Status: phase 1** (protocol and read-only dashboard). Agents started by hand can report through `nexus`; the
-dashboard shows every registered project's queues live. Launching agents, notes from the dashboard and the
-orchestrator chat come in the next phases.
+**Status: phase 2** (notes, approvals, questions). Agents started by hand report through `nexus`; the dashboard
+shows every registered project's queues live, gathers what waits for the user (questions, stops, approvals,
+reviews) with optional browser notifications, and lets the user leave notes on steps, message a running agent,
+answer questions and approve queues. Launching agents and the orchestrator chat come in the next phases.
 
 ## Requirements
 
@@ -57,7 +58,8 @@ nexus review add W3 tmp/review/w3/sheet.png --label "Sheet, round 1"
 nexus step done W3 --summary "No floating body on any fixture"
 ```
 
-`nexus --help` lists every command.
+`nexus status` is also how a hand-started agent receives what the user sends: notes for its queue's steps, messages
+and answers to its questions. Each is shown once and recorded as delivered. `nexus --help` lists every command.
 
 ## Layout
 

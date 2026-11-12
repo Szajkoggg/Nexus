@@ -152,9 +152,18 @@ Every line:
 
 The server validates every event against the writer's role and ignores (and reports) what that role may not do.
 
+## The user's session
+
+The server keeps one session with id `user` and role `user` for what the user does in the dashboard. Its event log
+holds the user's answers (`answer.given`). Like an orchestrator, it may write the events workers may not.
+
 ## Inbox: `sessions/<id>/inbox.jsonl`
 
-Written by the server, read by the session's adapter or hook.
+Written by the server, read by the session's adapter or hook. A `message` may name the `queue` and `step` it is
+about, so the dashboard shows it on that step. The server **routes answers**: every final `answer.given` (not an
+escalation), from the orchestrator or the user, is appended to the asking session's inbox once, with the id
+`answer-<event id>`. The session records each entry it has seen with `message.read`; `nexus status` shows the unread
+ones and records them.
 
 ```json
 {"v":1,"id":"01JD...","at":"...","type":"message","from":"user","text":"Use the grassland settings for the bench too."}
@@ -235,3 +244,20 @@ Report with `nexus`. End the step with `nexus step done`, `nexus step failed` or
 ```
 
 The template is a project setting, so each project can phrase it in its own terms.
+
+## Server API
+
+Reads: `GET /api/projects` (with each project's "waiting for you" list), `GET /api/projects/:id/state`,
+`GET /api/projects/:id/file?path=` (files under the project, its worktree directory or a session's directory only).
+Live: a WebSocket at `/ws` sends `{"type":"changed","project":id}` and `{"type":"projects"}`.
+
+Writes (JSON bodies only; a request with a foreign `Origin` is refused):
+
+| Request | Body | Effect |
+|---|---|---|
+| `POST /api/projects/:id/queues/:q/steps/:s/notes` | `text` | A note from the user for the step |
+| `DELETE /api/projects/:id/queues/:q/steps/:s/notes/:note` | | Withdraws a note not yet delivered |
+| `POST /api/projects/:id/sessions/:session/messages` | `text`, `queue?`, `step?` | A message to a session's inbox |
+| `POST /api/projects/:id/queues/:q/approve` | `words?` | Approves the current revision |
+| `PATCH /api/projects/:id/queues/:q` | `review_policy` (`continue`, `wait` or null) | Queue settings |
+| `POST /api/projects/:id/questions/:qid/answer` | `text`, `continue?` | The user's answer, routed to the asker |

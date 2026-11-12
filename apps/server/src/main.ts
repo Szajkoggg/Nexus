@@ -9,7 +9,10 @@ import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { WebSocketServer, type WebSocket } from "ws";
 import chokidar from "chokidar";
-import { ProjectStore, loadProjectState, nexusHome, readRegistry, type ProjectState } from "@nexus/protocol";
+import {
+  ActionError, ProjectStore, addNote, answerAsUser, approveQueue, deleteNote, loadProjectState, nexusHome,
+  readRegistry, routeAnswers, sendMessage, setQueueSettings, type ProjectState,
+} from "@nexus/protocol";
 
 const PORT = Number(process.env.NEXUS_PORT ?? 4317);
 const HOST = process.env.NEXUS_HOST ?? "127.0.0.1";
@@ -48,7 +51,15 @@ function changed(id: string): void {
   pending.set(id, setTimeout(() => {
     pending.delete(id);
     const e = projects.get(id);
-    if (e) { e.state = undefined; e.error = undefined; }
+    if (e) {
+      e.state = undefined; e.error = undefined;
+      // Deliver new answers to the sessions that asked. Its own inbox writes come back here and route nothing.
+      const s = stateOf(e);
+      if (s) {
+        try { if (routeAnswers(e.store, s) > 0) e.state = undefined; }
+        catch (err) { console.error(`routing answers in ${id}: ${(err as Error).message}`); }
+      }
+    }
     const msg = JSON.stringify({ type: "changed", project: id });
     for (const s of sockets) if (s.readyState === s.OPEN) s.send(msg);
   }, 150));
@@ -95,6 +106,7 @@ app.get("/api/projects", (c) => {
       id: e.id, root: e.root, name: s?.project.name ?? e.id, error: e.error,
       running: count("running"), waiting: count("waiting"), stopped: count("stopped"),
       open_questions: s?.questions.filter((q) => q.state === "open" || q.state === "escalated").length ?? 0,
+      attention: s?.attention ?? [],
     };
   }));
 });
@@ -123,6 +135,46 @@ app.get("/api/projects/:id/file", (c) => {
     headers: { "content-type": type, "cache-control": "no-cache", "x-content-type-options": "nosniff" },
   });
 });
+
+// ---------------------------------------------------------------- writes (the user's actions)
+
+/**
+ * Writes accept JSON only and only from this server's own pages: a cross-site form cannot send JSON without a
+ * preflight this server never grants, and a stray Origin is refused outright.
+ */
+app.use("/api/*", async (c, next) => {
+  if (c.req.method === "GET" || c.req.method === "HEAD") return next();
+  const origin = c.req.header("origin");
+  if (origin && new URL(origin).host !== c.req.header("host")) return c.json({ error: "cross-origin write refused" }, 403);
+  if (!c.req.header("content-type")?.startsWith("application/json")) return c.json({ error: "JSON only" }, 415);
+  return next();
+});
+
+type Body = Record<string, unknown>;
+function act(handler: (store: ProjectStore, body: Body, p: (name: string) => string) => unknown) {
+  return async (c: import("hono").Context) => {
+    const e = projects.get(c.req.param("id") ?? "");
+    if (!e) return c.json({ error: "unknown project" }, 404);
+    const body = (await c.req.json().catch(() => ({}))) as Body;
+    try {
+      const result = handler(e.store, body, (n) => c.req.param(n) ?? "");
+      changed(e.id);
+      return c.json({ ok: true, result: result ?? null });
+    } catch (err) {
+      if (err instanceof ActionError) return c.json({ error: err.message }, err.status as 400);
+      console.error(err);
+      return c.json({ error: (err as Error).message }, 500);
+    }
+  };
+}
+
+app.post("/api/projects/:id/queues/:queue/steps/:step/notes", act((st, b, p) => addNote(st, p("queue"), p("step"), b.text)));
+app.delete("/api/projects/:id/queues/:queue/steps/:step/notes/:note", act((st, _b, p) => deleteNote(st, p("queue"), p("step"), p("note"))));
+app.post("/api/projects/:id/sessions/:session/messages", act((st, b, p) =>
+  sendMessage(st, p("session"), b.text, { queue: b.queue as string | undefined, step: b.step as string | undefined })));
+app.post("/api/projects/:id/queues/:queue/approve", act((st, b, p) => approveQueue(st, p("queue"), b.words)));
+app.patch("/api/projects/:id/queues/:queue", act((st, b, p) => setQueueSettings(st, p("queue"), b)));
+app.post("/api/projects/:id/questions/:qid/answer", act((st, b, p) => answerAsUser(st, p("qid"), b.text, b.continue)));
 
 if (existsSync(WEB_DIST)) {
   app.use("/*", serveStatic({ root: WEB_DIST.replaceAll("\\", "/") }));

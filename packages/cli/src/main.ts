@@ -134,8 +134,19 @@ const commands: Record<string, () => void> = {
       const open = q.questions.filter((x) => x.state === "open" || x.state === "escalated");
       for (const x of open) console.log(`  question ${x.qid} [${x.state}]: ${x.text}`);
     }
-    const answered = state.questions.filter((x) => x.session === sid && x.state === "answered");
-    for (const x of answered) console.log(`\nanswer to ${x.qid} ("${x.text}"): ${x.answers.at(-1)?.text}`);
+    // The session's inbox: messages and answers not yet seen. Shown here is delivered, so each is recorded as read.
+    for (const m of s?.inbox.filter((x) => !x.read_at) ?? []) {
+      if (m.type === "answer") {
+        const q = state.questions.find((x) => x.qid === m.qid);
+        const how = m.continue === true ? " (go on)" : m.continue === false ? " (wait before going on)" : "";
+        console.log(`\nanswer from the ${m.from} to ${m.qid}${q ? ` ("${q.text}")` : ""}${how}:\n${m.text}`);
+      } else if (m.type === "message") {
+        console.log(`\nmessage from the ${m.from}${m.step ? ` about ${m.queue}/${m.step}` : ""} (${m.at}):\n${m.text}`);
+      } else {
+        console.log(`\nSTOP requested by the ${m.from}${m.text ? `: ${m.text}` : ""}. Finish the current action, then stop and report.`);
+      }
+      st.appendEvent({ v: 1, id: newId(), at: now(), session: s!.id, type: "message.read", message: m.id });
+    }
     if (s?.queue) {
       const q = state.queues.find((x) => x.id === s.queue);
       for (const step of q?.steps ?? []) for (const n of step.notes.filter((x) => !x.read_at)) {

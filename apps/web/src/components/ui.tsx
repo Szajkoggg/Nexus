@@ -85,6 +85,56 @@ export function Expandable({ text, lines = 3 }: { text: string; lines?: number }
   );
 }
 
+// ---------------------------------------------------------------- writing
+
+/** A text box with a submit button. Ctrl+Enter submits. Keeps the text if the submit fails. */
+export function Composer({ placeholder, button, onSubmit, allowEmpty = false, rows = 3, extra }: {
+  placeholder: string; button: string; onSubmit: (text: string) => Promise<void>;
+  allowEmpty?: boolean; rows?: number; extra?: ReactNode;
+}) {
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+  const submit = async () => {
+    if (busy || (!allowEmpty && !text.trim())) return;
+    setBusy(true); setError(undefined);
+    try { await onSubmit(text.trim()); setText(""); }
+    catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div>
+      <textarea
+        value={text} rows={rows} placeholder={placeholder}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); void submit(); } }}
+        className="w-full resize-y rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-sky-500 focus:outline-none"
+      />
+      <div className="mt-2 flex flex-wrap items-center gap-3">
+        <Button onClick={submit} disabled={busy || (!allowEmpty && !text.trim())}>{busy ? "Sending…" : button}</Button>
+        {extra}
+        <span className="text-xs text-zinc-600">Ctrl+Enter</span>
+        {error && <span className="text-xs text-red-400">{error}</span>}
+      </div>
+    </div>
+  );
+}
+
+export function Button({ children, onClick, disabled, variant = "primary" }: {
+  children: ReactNode; onClick: () => void; disabled?: boolean; variant?: "primary" | "quiet" | "danger";
+}) {
+  const style = {
+    primary: "bg-sky-600 text-white hover:bg-sky-500",
+    quiet: "bg-zinc-800 text-zinc-200 hover:bg-zinc-700",
+    danger: "text-red-300 hover:bg-red-500/10",
+  }[variant];
+  return (
+    <button onClick={onClick} disabled={disabled} className={`rounded-md px-3 py-1.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-40 ${style}`}>
+      {children}
+    </button>
+  );
+}
+
 // ---------------------------------------------------------------- drawer
 
 export function Drawer({ open, onClose, children }: { open: boolean; onClose: () => void; children: ReactNode }) {

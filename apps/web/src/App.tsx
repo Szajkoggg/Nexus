@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { QueueStatus } from "@nexus/protocol";
-import { useLive, useProjectState, useProjects, type QueueView } from "./api.ts";
+import { useLive, useProjectState, useProjects, type AttentionItem, type QueueView } from "./api.ts";
 import { QueueRow } from "./components/QueueRow.tsx";
 import { QueueDetail, StepDetail } from "./components/Details.tsx";
 import { Drawer, StatusBadge, TimeAgo } from "./components/ui.tsx";
+import { AttentionPanel, NotifyToggle, useNotifications } from "./components/Attention.tsx";
 
 const GROUPS: { title: string; statuses: QueueStatus[]; collapsible?: boolean }[] = [
   { title: "Finished", statuses: ["done", "cancelled"], collapsible: true },
@@ -39,6 +40,8 @@ export function App() {
     if (m.type === "changed") reloadProjects();
   });
 
+  const notify = useNotifications(projects);
+
   const byGroup = useMemo(() => {
     const order = (q: QueueView) => q.updated ?? q.updated_at ?? "";
     return GROUPS.map((g) => ({
@@ -64,12 +67,12 @@ export function App() {
                 className={`flex shrink-0 items-center gap-2 rounded-lg px-3 py-1.5 text-sm ${p.id === projectId ? "bg-zinc-800 text-zinc-50" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"}`}
               >
                 {p.name}
+                {p.attention.length > 0 && <span className="rounded-full bg-amber-500/20 px-1.5 text-xs text-amber-300" title="Waiting for you">{p.attention.length}</span>}
                 {p.running > 0 && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-400" title={`${p.running} running`} />}
-                {(p.waiting > 0 || p.open_questions > 0) && <span className="h-1.5 w-1.5 rounded-full bg-amber-400" title="waiting or questions" />}
-                {p.stopped > 0 && <span className="h-1.5 w-1.5 rounded-full bg-orange-400" title={`${p.stopped} stopped`} />}
               </button>
             ))}
           </nav>
+          <NotifyToggle {...notify} />
           <span className={`flex items-center gap-1.5 text-xs ${connected ? "text-zinc-500" : "text-orange-400"}`} title={connected ? "Live updates on" : "Reconnecting"}>
             <span className={`h-2 w-2 rounded-full ${connected ? "bg-emerald-500" : "bg-orange-500"}`} />
             {connected ? "live" : "offline"}
@@ -88,6 +91,10 @@ export function App() {
             <summary className="cursor-pointer">{state.warnings.length} warning(s) reading the project files</summary>
             <ul className="mt-2 list-disc pl-5 text-xs text-amber-200/80">{state.warnings.map((w, i) => <li key={i}>{w}</li>)}</ul>
           </details>
+        )}
+
+        {state && state.attention.length > 0 && (
+          <AttentionPanel items={state.attention} onOpen={(a: AttentionItem) => route.go(projectId, a.queue, a.step)} />
         )}
 
         {state && byGroup.map((g) => {
@@ -123,14 +130,14 @@ export function App() {
           );
         })}
 
-        {state && state.sessions.length > 0 && (
+        {state && state.sessions.some((s) => s.role !== "user") && (
           <section className="mb-8">
             <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-400">Sessions</h2>
             <div className="overflow-x-auto rounded-xl border border-zinc-800">
               <table className="w-full text-left text-sm">
                 <thead className="text-xs text-zinc-500"><tr>{["Session", "Role", "Runtime", "Queue", "Branch", "Last event"].map((h) => <th key={h} className="px-3 py-2 font-medium">{h}</th>)}</tr></thead>
                 <tbody>
-                  {state.sessions.map((s) => (
+                  {state.sessions.filter((s) => s.role !== "user").map((s) => (
                     <tr key={s.id} className="border-t border-zinc-800/80">
                       <td className="px-3 py-2"><span className="text-zinc-200">{s.title ?? s.id.slice(-8)}</span></td>
                       <td className="px-3 py-2 text-zinc-400">{s.role}</td>
@@ -148,7 +155,9 @@ export function App() {
       </main>
 
       <Drawer open={!!(state && queue)} onClose={close}>
-        {state && queue && (step ? <StepDetail project={state} queue={queue} step={step} /> : <QueueDetail project={state} queue={queue} />)}
+        {state && queue && (step
+          ? <StepDetail project={state} queue={queue} step={step} onChanged={reload} />
+          : <QueueDetail project={state} queue={queue} onChanged={reload} />)}
       </Drawer>
     </div>
   );

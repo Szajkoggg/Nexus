@@ -19,7 +19,9 @@ export const StepStatus = z.enum([
 ]);
 export type StepStatus = z.infer<typeof StepStatus>;
 
-export const Role = z.enum(["worker", "orchestrator"]);
+/** `user` is the one session the server keeps for what the user does in the dashboard (answers, for now). */
+export const Role = z.enum(["worker", "orchestrator", "user"]);
+export const USER_SESSION = "user";
 export type Role = z.infer<typeof Role>;
 
 export const Runtime = z.enum(["claude", "codex", "external"]);
@@ -184,7 +186,7 @@ export type Event = z.infer<typeof Event>;
 export type EventType = Event["type"];
 export type EventOf<T extends EventType> = Extract<Event, { type: T }>;
 
-/** Event types only an orchestrator session may write. */
+/** Event types a worker session may not write (orchestrators and the user may). */
 export const ORCHESTRATOR_ONLY: ReadonlySet<EventType> = new Set([
   "answer.given", "queue.drafted", "session.request",
 ]);
@@ -194,7 +196,8 @@ export const ORCHESTRATOR_ONLY: ReadonlySet<EventType> = new Set([
 const ibase = { v: z.literal(1), id: Id, at: Time, from: z.enum(["user", "orchestrator", "nexus"]) };
 
 export const InboxEntry = z.discriminatedUnion("type", [
-  z.object({ ...ibase, type: z.literal("message"), text: z.string() }),
+  z.object({ ...ibase, type: z.literal("message"), text: z.string(), queue: Id.optional(), step: Id.optional() }),
+  /** `id` is "answer-" + the answer.given event's id, so routing the same answer twice is detectable. */
   z.object({ ...ibase, type: z.literal("answer"), qid: Id, text: z.string(), continue: z.boolean().optional() }),
   z.object({ ...ibase, type: z.literal("stop"), text: z.string().optional() }),
 ]);

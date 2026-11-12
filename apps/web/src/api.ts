@@ -1,13 +1,25 @@
 // Data access for the dashboard: the server's HTTP API and its change notifications.
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ProjectState } from "@nexus/protocol";
+import type { AttentionItem, ProjectState } from "@nexus/protocol";
 
-export type { ProjectState, QueueView, StepView, QuestionView, SessionView } from "@nexus/protocol";
+export type { AttentionItem, ProjectState, QueueView, StepView, QuestionView, SessionView } from "@nexus/protocol";
 
 export interface ProjectSummary {
   id: string; name: string; root: string; error?: string;
   running: number; waiting: number; stopped: number; open_questions: number;
+  attention: AttentionItem[];
 }
+
+/** A write to the server. Resolves when it is done; rejects with the server's reason. */
+export async function act(project: string, method: "POST" | "PATCH" | "DELETE", path: string, body: unknown = {}): Promise<void> {
+  const r = await fetch(`/api/projects/${encodeURIComponent(project)}${path}`, {
+    method, headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+  });
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? r.statusText);
+}
+
+export const enc = encodeURIComponent;
+export const attentionKey = (a: AttentionItem) => [a.kind, a.queue, a.step, a.qid].join("/");
 
 export const fileUrl = (project: string, path: string) =>
   `/api/projects/${encodeURIComponent(project)}/file?path=${encodeURIComponent(path)}`;
