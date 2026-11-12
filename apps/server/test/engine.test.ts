@@ -2,9 +2,10 @@
 // scenario runs with both.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   ProjectStore, addNote, answerAsUser, approveQueue, loadProjectState, routeAnswers, runTimes, sendMessage, type StepDef,
@@ -168,6 +169,40 @@ test("Codex gets the effort on every turn and the project's reviewer when the th
     const calls = readFileSync(process.env.FAKE_ARGS, "utf8").trim().split("\n").map((l) => JSON.parse(l) as Record<string, unknown>);
     assert.deepEqual(calls.filter((c) => c.method === "thread/start").map((c) => [c.approvalPolicy, c.approvalsReviewer]), [["on-request", "auto_review"]]);
     assert.deepEqual(calls.filter((c) => c.method === "turn/start").map((c) => c.effort), ["medium", "medium"]);
+  } finally { engine.shutdown(); delete process.env.FAKE_ARGS; }
+});
+
+test("Codex in a queue's own worktree may write the worktree's git paths, and no more of the repository's .git", async () => {
+  const { store, engine, queue, until } = setup(["done", "done"]);
+  process.env.FAKE_ARGS = join(dirname(process.env.FAKE_LOG!), "args.log");
+  const root = store.readProject().root;
+  const git = (...a: string[]) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.invalid", ...a], { cwd: root, stdio: "ignore" });
+  git("init", "-q", "-b", "main"); writeFileSync(join(root, "a.txt"), "a\n"); git("add", "a.txt"); git("commit", "-qm", "init");
+  store.writeQueue({ ...store.readQueue("Q"), worktree: "auto" });
+  try {
+    engine.start("Q", { runtime: "codex" });
+    await until("the run to finish", () => queue().run?.state === "finished");
+    const wt = store.readQueue("Q").worktree!;
+    const gitDir = join(root, ".git"), mine = (p: string) => normalize(p).toLowerCase();
+    const want = [store.dir, join(gitDir, "worktrees", "Q"), join(gitDir, "objects"), join(gitDir, "refs"), join(gitDir, "logs")].map(mine);
+    const calls = readFileSync(process.env.FAKE_ARGS, "utf8").trim().split("\n").map((l) => JSON.parse(l) as { method: string; writableRoots: string[] | null; cwd?: string });
+    const start = calls.filter((c) => c.method === "thread/start"), turns = calls.filter((c) => c.method === "turn/start");
+    assert.equal(mine(start[0]!.cwd!), mine(wt));
+    assert.deepEqual(start.map((c) => c.writableRoots?.map(mine)), [want], "the thread's sandbox config carries the roots");
+    assert.deepEqual(turns.map((c) => c.writableRoots?.map(mine)), [want, want], "every turn's sandbox policy carries them");
+  } finally { engine.shutdown(); delete process.env.FAKE_ARGS; }
+});
+
+test("Codex in the project's own checkout gets no git roots: its .git lies inside it", async () => {
+  const { store, engine, queue, until } = setup(["done"]);
+  process.env.FAKE_ARGS = join(dirname(process.env.FAKE_LOG!), "args.log");
+  execFileSync("git", ["init", "-q"], { cwd: store.readProject().root, stdio: "ignore" });
+  try {
+    engine.start("Q", { runtime: "codex" });
+    await until("the run to finish", () => queue().run?.state === "finished");
+    const calls = readFileSync(process.env.FAKE_ARGS, "utf8").trim().split("\n").map((l) => JSON.parse(l) as { method: string; writableRoots: string[] | null });
+    assert.deepEqual(calls.filter((c) => c.method === "turn/start").map((c) => c.writableRoots), [[]]);
+    assert.equal(calls.find((c) => c.method === "thread/start")!.writableRoots, null, "no roots, no sandbox config");
   } finally { engine.shutdown(); delete process.env.FAKE_ARGS; }
 });
 

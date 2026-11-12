@@ -225,7 +225,8 @@ the user into a Markdown queue, though a project may still copy it there.
   step turn). Signed in with the user's ChatGPT login.
 - **Unattended permissions**: each project sets the permission mode per role and runtime. Workers usually need
   edit and shell rights in their worktree, and write access to the main checkout's `.nexus/` (for Codex, an added
-  writable root).
+  writable root). A Codex worker in a queue's own worktree also gets that worktree's git paths as writable roots, so
+  that it can commit there (see the findings).
 - Hooks are installed per project only for the observe-only path and for session-start context; the Nexus-launched
   path does not depend on them.
 
@@ -388,6 +389,14 @@ the text across. Drafts untouched for 14 days are pruned when the page loads.
   arrive per request, and the rate limits arrive as a weekly window.
 - **Codex runs commands in PowerShell**, where npm's `nexus.ps1` is blocked by the execution policy: Nexus therefore
   puts its own `nexus.cmd` first on the agents' PATH. The sandboxed shell can run it and write to `.nexus/`.
+- **Codex can commit in a worktree only with its git paths writable.** A linked worktree's git directory lies in the
+  main checkout's `.git`, outside the worktree, so under `workspace-write` `git commit` failed on
+  `.git/worktrees/<name>/index.lock` (probe with Codex 0.167.2 on Windows, `gpt-6-luna`). With exactly four paths
+  added as writable roots it committed without an escalation request: the worktree's own git directory
+  (`.git/worktrees/<name>`: index, HEAD) and the repository's `objects`, `refs` and `logs`. The rest of `.git`
+  (config, hooks) stays read-only. Nexus asks git for the paths (`rev-parse --git-dir --git-common-dir`) and adds them
+  only when the git directory lies outside the working directory; the roots work both in the thread's config
+  (`sandbox_workspace_write.writable_roots`) and in a turn's sandbox policy, and Nexus sends both.
 
 - **Remote access needs no open port.** The server keeps listening on 127.0.0.1; Tailscale Serve relays the tailnet's
   https requests to it. Requests relayed by a proxy count as remote and need the access token; this machine does

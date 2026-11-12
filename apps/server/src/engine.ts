@@ -13,7 +13,7 @@ import {
 } from "@nexus/protocol";
 import type { AgentProcess, StreamFacts } from "./agent.ts";
 import { ClaudeSession } from "./claude.ts";
-import { CodexSession } from "./codex.ts";
+import { CodexSession, gitWritableRoots } from "./codex.ts";
 
 interface Live { proc: AgentProcess; session: string }
 
@@ -334,7 +334,7 @@ export class Engine {
       proc = new CodexSession({
         cwd: session.cwd, model: session.model ?? codex.model, effort: session.effort ?? codex.effort, instructions: WORKER_BRIEFING, env,
         threadId: session.native_id, sandbox: codex.sandbox, approvalPolicy: codex.approval_policy, approvalsReviewer: codex.approvals_reviewer,
-        writableRoots: inside ? [] : [this.store.dir],
+        writableRoots: [...(inside ? [] : [this.store.dir]), ...gitWritableRoots(session.cwd)],
       });
     } else {
       const claude = project.runtimes.claude;

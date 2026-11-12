@@ -2,8 +2,10 @@
 // session, signed in with the user's own ChatGPT login. The app-server is marked experimental: the methods used here
 // (initialize, thread/start, thread/resume, turn/start, turn/steer, turn/interrupt) were checked against Codex CLI
 // 0.167.2 with `codex app-server generate-ts`.
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
+import { existsSync } from "node:fs";
+import { join, relative, resolve, isAbsolute } from "node:path";
 import { agentEnv, type AgentEvents, type AgentOptions, type AgentProcess, type Priority } from "./agent.ts";
 
 export interface CodexOptions extends AgentOptions {
@@ -13,11 +15,33 @@ export interface CodexOptions extends AgentOptions {
   approvalPolicy: "never" | "on-request" | "untrusted";
   /** Who decides requests to leave the sandbox: `auto_review` lets Codex's reviewer decide them by risk. */
   approvalsReviewer?: "user" | "auto_review" | "guardian_subagent";
-  /** Directories the sandbox may write besides the working directory (the project's .nexus, for a worktree). */
+  /**
+   * Directories the sandbox may write besides the working directory: for a worktree, the project's .nexus and the
+   * worktree's git paths (gitWritableRoots).
+   */
   writableRoots: string[];
 }
 
 type Json = Record<string, any>;
+
+/**
+ * What a sandboxed Codex needs to commit in a git worktree whose git directory lies outside it: the worktree's own git
+ * directory (index, HEAD) and the repository's objects, refs and logs; nothing else of the repository's .git (not its
+ * config or hooks). Empty for anything but a linked worktree (`git worktree add`) whose git directory lies outside
+ * it. Checked live with Codex 0.167.2 on Windows: without these the commit fails on `index.lock`; with them it commits
+ * without an escalation request.
+ */
+export function gitWritableRoots(cwd: string): string[] {
+  let gitDir: string, common: string;
+  try {
+    const out = execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    [gitDir, common] = out.trim().split(/\r?\n/).map((p) => resolve(p)) as [string, string];
+  } catch { return []; }
+  const rel = relative(resolve(cwd), gitDir);
+  if (!rel || (!rel.startsWith("..") && !isAbsolute(rel))) return []; // the git directory is inside the working directory
+  if (!common || gitDir === common) return []; // not a linked worktree: nothing probed, nothing given
+  return [gitDir, ...["objects", "refs", "logs"].map((d) => join(common, d)).filter((d) => existsSync(d))];
+}
 
 export class CodexSession extends EventEmitter<AgentEvents> implements AgentProcess {
   state: "working" | "idle" | "exited" = "idle";
@@ -92,6 +116,8 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
         cwd: o.cwd, model: o.model ?? null, sandbox: o.sandbox, approvalPolicy: o.approvalPolicy,
         ...(o.approvalsReviewer ? { approvalsReviewer: o.approvalsReviewer } : {}),
         developerInstructions: o.instructions ?? null,
+        // The thread's own sandbox settings carry the roots too; every turn also sends them in its sandbox policy.
+        ...(o.sandbox === "workspace-write" && o.writableRoots.length ? { config: { "sandbox_workspace_write.writable_roots": o.writableRoots } } : {}),
       };
       const r = o.threadId
         ? await this.request("thread/resume", { threadId: o.threadId, ...common, excludeTurns: true })
