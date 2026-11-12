@@ -1,4 +1,5 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { readDraft, writeDraft } from "../drafts.ts";
 import ReactMarkdown from "react-markdown";
 
 // ---------------------------------------------------------------- status colours
@@ -87,18 +88,36 @@ export function Expandable({ text, lines = 3 }: { text: string; lines?: number }
 
 // ---------------------------------------------------------------- writing
 
-/** A text box with a submit button. Ctrl+Enter submits. Keeps the text if the submit fails. */
-export function Composer({ placeholder, button, onSubmit, allowEmpty = false, rows = 3, extra }: {
-  placeholder: string; button: string; onSubmit: (text: string) => Promise<void>;
+/**
+ * A text box with a submit button. Ctrl+Enter submits. What is typed is kept as a draft under `draft` (see drafts.ts)
+ * until it is sent: it survives closing the panel, a reload, and is never shown for another target. A failed submit
+ * keeps it.
+ */
+export function Composer(props: ComposerProps) {
+  // Keyed by the draft so that moving to another step or conversation starts from that target's own text.
+  return <ComposerBox key={props.draft} {...props} />;
+}
+
+interface ComposerProps {
+  draft: string; placeholder: string; button: string; onSubmit: (text: string) => Promise<void>;
   allowEmpty?: boolean; rows?: number; extra?: ReactNode;
-}) {
-  const [text, setText] = useState("");
+}
+
+function ComposerBox({ draft, placeholder, button, onSubmit, allowEmpty = false, rows = 3, extra }: ComposerProps) {
+  const [text, setText] = useState(() => readDraft(draft));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const current = useRef(text);
+  const change = (value: string) => { current.current = value; setText(value); writeDraft(draft, value); };
   const submit = async () => {
     if (busy || (!allowEmpty && !text.trim())) return;
+    const sent = text;
     setBusy(true); setError(undefined);
-    try { await onSubmit(text.trim()); setText(""); }
+    try {
+      await onSubmit(sent.trim());
+      // Whatever was typed while it was sending stays.
+      if (current.current === sent) change("");
+    }
     catch (e) { setError((e as Error).message); }
     finally { setBusy(false); }
   };
@@ -106,7 +125,7 @@ export function Composer({ placeholder, button, onSubmit, allowEmpty = false, ro
     <div>
       <textarea
         value={text} rows={rows} placeholder={placeholder}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => change(e.target.value)}
         onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); void submit(); } }}
         className="w-full resize-y rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-sky-500 focus:outline-none"
       />

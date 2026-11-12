@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { ChatEntry, RuntimeFile, SessionFile } from "@nexus/protocol";
 import { act, enc, useFetch } from "../api.ts";
 import { Button, Composer, Markdown, TimeAgo } from "./ui.tsx";
+import { draftKey } from "../drafts.ts";
 import { EffortSelect, ModelSelect, useEfforts } from "./Settings.tsx";
 
 interface View { session: SessionFile | null; state: "working" | "idle" | "exited"; runtime: RuntimeFile | null; chat: ChatEntry[]; model: string | null; effort: string | null }
@@ -26,9 +27,9 @@ function useEscape(onClose: () => void) {
 }
 
 /** A chat: its header, the messages, and the composer. */
-function ChatColumn({ title, over, view, status, actions, empty, placeholder, onSend, onBack }: {
+function ChatColumn({ title, over, view, status, actions, empty, draft, placeholder, onSend, onBack }: {
   title: string; over: string; view: View | undefined; status: string; actions?: ReactNode; empty: ReactNode;
-  placeholder: string; onSend: (text: string) => Promise<void>; onBack?: () => void;
+  draft: string; placeholder: string; onSend: (text: string) => Promise<void>; onBack?: () => void;
 }) {
   const end = useRef<HTMLDivElement>(null);
   const [showTools, setShowTools] = useState(false);
@@ -62,7 +63,7 @@ function ChatColumn({ title, over, view, status, actions, empty, placeholder, on
         <div ref={end} />
       </div>
       <footer className="border-t border-zinc-800 p-4">
-        <Composer rows={3} placeholder={placeholder} button="Send" onSubmit={onSend} />
+        <Composer rows={3} draft={draft} placeholder={placeholder} button="Send" onSubmit={onSend} />
       </footer>
     </div>
   );
@@ -140,6 +141,7 @@ export function ChatPanel({ project, name, view, onClose, onChanged }: {
           <p>Plan queues with the orchestrator, ask where things stand, or have it start a run.</p>
           <p className="mt-1 text-zinc-600">It reads the project and works through <code>nexus</code>; it never edits files or approves queues.</p>
         </>}
+        draft={draftKey(project, "orchestrator")}
         placeholder="Message the orchestrator…"
         onSend={async (text) => { await act(project, "POST", "/orchestrator/messages", { text }); onChanged(); }}
       />
@@ -226,6 +228,7 @@ export function ConversationsPanel({ project, name, version, onClose, onChanged,
               The partner reads the project{view?.notes_dir ? <> and writes notes only in <code>{view.notes_dir}</code></> : <>; it writes nothing until a notes folder is set in the project's settings</>}. It starts no work: hand the conversation to the orchestrator for that.
             </p>
           </>}
+          draft={draftKey(project, "conversation", open)}
           placeholder="Think out loud…"
           onSend={async (text) => { await act(project, "POST", `/conversations/${enc(open)}/messages`, { text }); onChanged(); }}
         />

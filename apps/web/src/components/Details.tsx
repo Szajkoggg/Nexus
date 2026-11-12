@@ -3,6 +3,7 @@ import type { Event } from "@nexus/protocol";
 import { act, enc, fileUrl, type ProjectState, type QuestionView, type QueueView, type StepView } from "../api.ts";
 import { Button, Composer, Expandable, Markdown, Section, StatusBadge, TimeAgo } from "./ui.tsx";
 import { Activity, RunControls } from "./Run.tsx";
+import { draftKey } from "../drafts.ts";
 
 interface Props { project: ProjectState; queue: QueueView; onChanged: () => void }
 
@@ -45,6 +46,7 @@ export function StepDetail({ project, queue, step, onChanged }: Props & { step: 
       {live && session && (
         <Section title="Message the running agent" aside={<span className="text-xs text-zinc-600">read at its next check-in</span>}>
           <Composer
+            draft={draftKey(id, "message", queue.id, step.id)}
             placeholder="Delivered to the agent without stopping it…"
             button="Send"
             onSubmit={async (text) => { await act(id, "POST", `/sessions/${enc(session.id)}/messages`, { text, queue: queue.id, step: step.id }); onChanged(); }}
@@ -121,6 +123,7 @@ export function StepDetail({ project, queue, step, onChanged }: Props & { step: 
         {notesOpen && (
           <div className="mt-3">
             <Composer
+              draft={draftKey(id, "note", queue.id, step.id)}
               placeholder={`A note for ${step.id}: the agent reads it when it starts this step…`}
               button="Add note"
               onSubmit={async (text) => { await act(id, "POST", `/queues/${enc(queue.id)}/steps/${enc(step.id)}/notes`, { text }); onChanged(); }}
@@ -239,6 +242,7 @@ function AnswerBox({ q, project, onChanged }: { q: QuestionView; project: string
   return (
     <Composer
       rows={2}
+      draft={draftKey(project, "answer", q.qid)}
       placeholder="Your answer…"
       button="Answer"
       extra={
@@ -301,6 +305,7 @@ export function QueueDetail({ project, queue, onChanged }: Props) {
             <Composer
               rows={2}
               allowEmpty
+              draft={draftKey(id, "approval", queue.id)}
               placeholder="Your words with the approval (optional)…"
               button={`Approve revision ${queue.revision}`}
               onSubmit={async (words) => { await act(id, "POST", `/queues/${enc(queue.id)}/approve`, { words }); onChanged(); }}

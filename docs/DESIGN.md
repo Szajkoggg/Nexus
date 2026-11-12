@@ -332,6 +332,16 @@ The user's answers, 2026-11-12:
 | Watch the usage limits? | Yes; pause before the limit, resume when it resets |
 | Where does `.nexus/` live? | In the project's main checkout, git-ignored |
 
+### Drafts stay in the browser
+
+Unsent text in the dashboard's boxes is kept in `localStorage` (`nexus.drafts`: one map from a target key to the
+text and when it was last touched), not in `.nexus/`: a draft is the user's half-typed thought on one device, the
+server has no use for it, and keeping it out of the files keeps "one writer per file" and the files' meaning intact.
+The key names the project and the target (`<project>/orchestrator`, `/conversation/<id>`, `/message/<queue>/<step>`,
+`/note/<queue>/<step>`, `/answer/<qid>`, `/approval/<queue>`), each part URI-encoded. `Composer` is keyed by it, so
+moving from one step or conversation to another remounts the box with that target's own text instead of carrying
+the text across. Drafts untouched for 14 days are pruned when the page loads.
+
 ## Findings from building phase 3
 
 - **Context fill and usage limits are in the stream.** Every `assistant` message carries its usage (input, cache

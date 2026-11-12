@@ -13,6 +13,12 @@ any work. A partner reads the whole project and writes only in the project's not
 can record what you decide; "Hand to orchestrator" has it summarize the conversation into the orchestrator's chat,
 which turns it into queues.
 
+**Drafts.** Text typed but not sent (to the orchestrator, in a conversation, to a running agent, a step's note, an
+answer, the words with an approval) stays in its box when you close the panel, open something else, switch project
+or reload, also when a phone's browser drops the tab. Each box keeps its own text; sending clears it, a failed send
+keeps it. Drafts live in that browser only (not on the server, not on your other devices) and are dropped after 14
+days untouched.
+
 **Status: phase 6** (remote access). Nexus can be used from a phone while the PC is on: through Tailscale (your own
 devices only, no open ports), signing in once with an access token (a QR code on the PC does it), installable as an
 app, with push notifications when something waits for you. See "Remote access" below.
