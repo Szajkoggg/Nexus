@@ -1,6 +1,6 @@
 // The Nexus server: reads every registered project's .nexus/ directory, serves the dashboard and its API,
 // and tells connected dashboards when a project's files change. It writes nothing in phase 1.
-import { createReadStream, createWriteStream, existsSync, mkdirSync, realpathSync, statSync } from "node:fs";
+import { createReadStream, createWriteStream, existsSync, mkdirSync, realpathSync, statSync, type WriteStream } from "node:fs";
 import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Readable } from "node:stream";
@@ -18,33 +18,48 @@ import { Engine } from "./engine.ts";
 import { Orchestrator } from "./orchestrator.ts";
 import { Conversations } from "./conversations.ts";
 import { listModels } from "./models.ts";
-import { Standby, smokeCheck } from "./handover.ts";
+import { Standby, refuseHandoverDir, smokeCheck, takeHandoverEnv } from "./handover.ts";
 import { Lifecycle, version } from "./lifecycle.ts";
 import {
   AttentionWatch, allowed, auth, authCookie, isLocal, loginPage, push, pushDevices, pushKey, qrSvg, rotateToken,
   subscribe, tailscaleInfo, tokenMatches, unsubscribe,
 } from "./remote.ts";
 
+// Started by an update (src/handover.ts): NEXUS_HANDOVER names the folder to take over through. It is read once and
+// removed from the environment, so nothing this server starts inherits it: an agent's test server that inherited it
+// would take the live predecessor's folder for its own.
+const HANDOVER = takeHandoverEnv();
+
 // NEXUS_LOG: the server writes its own log (1: <NEXUS_HOME>/server.log, or a path). Node opens it shared, so a
 // successor after an update can append while its predecessor still holds it (a shell's `>>` would lock it).
+let log: WriteStream | undefined;
 if (process.env.NEXUS_LOG) {
   const file = process.env.NEXUS_LOG === "1" ? join(nexusHome(), "server.log") : process.env.NEXUS_LOG;
   mkdirSync(dirname(file), { recursive: true });
-  const log = createWriteStream(file, { flags: "a" });
+  log = createWriteStream(file, { flags: "a" });
+  const logTo = log;
   for (const stream of [process.stdout, process.stderr]) {
     const write = stream.write.bind(stream) as (chunk: unknown, ...rest: unknown[]) => boolean;
-    stream.write = ((chunk: unknown, ...rest: unknown[]) => { log.write(chunk as string); return write(chunk, ...rest); }) as typeof stream.write;
+    stream.write = ((chunk: unknown, ...rest: unknown[]) => { logTo.write(chunk as string); return write(chunk, ...rest); }) as typeof stream.write;
   }
-  process.on("uncaughtException", (err) => { log.write(`${new Date().toISOString()} uncaught: ${err.stack ?? err}\n`); process.exit(1); });
+  process.on("uncaughtException", (err) => { logTo.write(`${new Date().toISOString()} uncaught: ${err.stack ?? err}\n`); process.exit(1); });
   console.log(`---- ${new Date().toISOString()} pid ${process.pid}`);
+}
+
+// A backstop: a hand-over folder that is not this NEXUS_HOME's is not ours. Refuse it before anything is written or
+// started, and exit non-zero: a real predecessor then sees a failure and rolls back.
+const refusal = HANDOVER ? refuseHandoverDir(HANDOVER) : undefined;
+if (refusal) {
+  console.error(`refusing to take over: ${refusal}; exiting without starting`);
+  if (log) await new Promise<void>((r) => log!.end(() => r()));
+  process.exit(1);
 }
 
 const PORT = Number(process.env.NEXUS_PORT ?? 4317);
 const HOST = process.env.NEXUS_HOST ?? "127.0.0.1";
 const WEB_DIST = resolve(dirname(fileURLToPath(import.meta.url)), "../../web/dist");
-// Started by an update (src/handover.ts): read-only until the predecessor hands over. A plain start, or one by an
-// older server that does not hand over, is active at once.
-const HANDOVER = process.env.NEXUS_HANDOVER;
+// Started by an update: read-only until the predecessor hands over. A plain start, or one by an older server that
+// does not hand over, is active at once.
 /** Only an active server builds engines, recovers runs, starts agents or writes under a project's .nexus/. */
 let active = !HANDOVER;
 /** Waiting to take over (NEXUS_HANDOVER): until then a failure goes to failed.json for the predecessor. */

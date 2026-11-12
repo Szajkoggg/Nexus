@@ -349,6 +349,10 @@ build), listens on the port again and resumes the held queues. The update then e
 `error` of the form `<reason>; rolled back to <commit>` (a development checkout: `<reason>; this server goes on
 (a development checkout is not moved)`). A push notification titled "Nexus: update failed" goes to every device.
 
+A successor removes `NEXUS_HANDOVER` from its environment as soon as it starts, and no agent's environment ever
+contains it. A folder that is not inside `<NEXUS_HOME>/handover` is refused: the successor logs
+`refusing to take over: …` and exits with code 1, writing nothing.
+
 ## Conversations
 
 `project.yaml` holds `conversations: { notes_dir?, runtime, model?, effort? }`. A conversation is a session with

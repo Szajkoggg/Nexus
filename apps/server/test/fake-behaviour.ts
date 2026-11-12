@@ -61,9 +61,12 @@ export function longReply(label: string): string {
   return parts.join("\n\n");
 }
 
-/** Records how the runtime was started or asked (FAKE_ARGS, one JSON line each), for the tests. */
-export function recordArgs(what: unknown): void {
-  if (process.env.FAKE_ARGS) appendFileSync(process.env.FAKE_ARGS, JSON.stringify(what) + "\n");
+/**
+ * Records how the runtime was started or asked (FAKE_ARGS, one JSON line each), for the tests, with what of its
+ * environment the tests check (`handover`: NEXUS_HANDOVER, which no runtime may inherit).
+ */
+export function recordArgs(what: Record<string, unknown>): void {
+  if (process.env.FAKE_ARGS) appendFileSync(process.env.FAKE_ARGS, JSON.stringify({ ...what, handover: process.env.NEXUS_HANDOVER ?? null }) + "\n");
 }
 
 /**

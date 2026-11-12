@@ -7,14 +7,15 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ProjectStore, approveQueue, loadProjectState, routeAnswers, writeRegistry, type StepDef } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
-import { handOver } from "../src/handover.ts";
+import { handOver, refuseHandoverDir, takeHandoverEnv, withoutHandover } from "../src/handover.ts";
+import { agentEnv } from "../src/agent.ts";
+import { MAIN, serverEnv, spawnServer } from "./helpers.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const MAIN = join(here, "../src/main.ts");
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -65,16 +66,15 @@ async function heldProject() {
 function server(home: string, port: number, env: Record<string, string> = {}) {
   const fakeArgs = join(home, "..", `server-${port}-args.log`);
   let out = "";
-  const child: ChildProcess = spawn(process.execPath, [MAIN], {
-    env: { ...process.env, NEXUS_HOME: home, NEXUS_PORT: String(port), FAKE_ARGS: fakeArgs, NEXUS_LOG: "", ...env },
-    stdio: ["ignore", "pipe", "pipe"], windowsHide: true,
-  });
+  // Without NEXUS_HANDOVER from this process (helpers.ts); a test that needs one passes it in `env`.
+  const child: ChildProcess = spawnServer({ NEXUS_HOME: home, NEXUS_PORT: String(port), FAKE_ARGS: fakeArgs, NEXUS_LOG: "", ...env }, ["ignore", "pipe", "pipe"]);
   child.stdout!.on("data", (d) => { out += d; });
   child.stderr!.on("data", (d) => { out += d; });
   let code: number | null | undefined;
   child.on("exit", (c) => { code = c; });
+  const records = () => (existsSync(fakeArgs) ? readFileSync(fakeArgs, "utf8").trim().split("\n").map((l) => JSON.parse(l) as { argv?: string[]; handover: string | null }) : []);
   return {
-    child, out: () => out, exitCode: () => code, startedAgent: () => existsSync(fakeArgs),
+    child, out: () => out, exitCode: () => code, startedAgent: () => existsSync(fakeArgs), records,
     stop: () => { if (code === undefined) child.kill(); },
   };
 }
@@ -219,3 +219,108 @@ test("a start by an old-style predecessor (no hand-over, the port freed as it ex
     assert.match(s.out(), new RegExp(`Nexus server on http://127.0.0.1:${port}`));
   } finally { s.stop(); if (old.listening) old.close(); }
 });
+
+// ---------------------------------------------------------------- NEXUS_HANDOVER is consumed once
+
+test("NEXUS_HANDOVER is taken once and removed; agents' environments never have it; only this home's folders pass", () => {
+  const env: NodeJS.ProcessEnv = { NEXUS_HANDOVER: "x", Nexus_Handover: "y", PATH: "p" };
+  assert.equal(takeHandoverEnv(env), "x");
+  assert.deepEqual(Object.keys(env), ["PATH"], "every spelling is gone");
+  assert.equal(takeHandoverEnv(env), undefined, "read once");
+  assert.deepEqual(Object.keys(withoutHandover({ nexus_handover: "z", A: "1" })), ["A"]);
+
+  const saved = process.env.NEXUS_HANDOVER;
+  process.env.NEXUS_HANDOVER = "C:/somewhere/handover/x";
+  try { assert.equal(agentEnv({ NEXUS_SESSION: "s" }).NEXUS_HANDOVER, undefined, "the second guard"); }
+  finally { if (saved === undefined) delete process.env.NEXUS_HANDOVER; else process.env.NEXUS_HANDOVER = saved; }
+
+  const base = mkdtempSync(join(tmpdir(), "nexus-handover-"));
+  const savedHome = process.env.NEXUS_HOME;
+  try {
+    for (const home of [join(base, "home"), join(base, "home") + sep]) {
+      process.env.NEXUS_HOME = home;
+      assert.equal(refuseHandoverDir(join(base, "home", "handover", "01ABC")), undefined, `inside (${home})`);
+      assert.equal(refuseHandoverDir(join(base, "home", "handover", "01ABC") + sep), undefined, "a trailing separator");
+      assert.match(refuseHandoverDir(join(base, "home", "handover"))!, /is not under/, "the folder itself is not a hand-over");
+      assert.match(refuseHandoverDir(join(base, "home", "handover-other", "01ABC"))!, /is not under/, "a sibling with the same prefix");
+      assert.match(refuseHandoverDir(join(base, "home", "handover", "..", "elsewhere"))!, /is not under/, "resolved before comparing");
+      assert.match(refuseHandoverDir(join(base, "elsewhere", "handover", "01ABC"))!, /is not under/);
+      if (process.platform === "win32") assert.equal(refuseHandoverDir(join(base, "HOME", "HANDOVER", "01ABC")), undefined, "case-insensitive on Windows");
+    }
+  } finally { if (savedHome === undefined) delete process.env.NEXUS_HOME; else process.env.NEXUS_HOME = savedHome; }
+});
+
+test("after taking over, the server's own environment and its agents' have no NEXUS_HANDOVER", async () => {
+  const { home, store } = await heldProject();
+  const dir = handoverDir(home, process.pid);
+  const port = await freePort();
+  const s = server(home, port, { NEXUS_HANDOVER: dir });
+  try {
+    await until("the ready signal", () => existsSync(join(dir, "ready.json")), 30_000, () => `; output: ${s.out()}`);
+    writeFileSync(join(dir, "released.json"), JSON.stringify({ at: new Date().toISOString(), log: [] }));
+    await until("the resumed queue to finish", () => store.readRun("Q")?.state === "finished", 30_000, () => `; output: ${s.out()}`);
+    // The model list is asked from a runtime started with the server's own environment, not an agent's.
+    const ask = new AbortController();
+    void fetch(`http://127.0.0.1:${port}/api/models/claude`, { signal: ask.signal }).catch(() => {});
+    const own = () => s.records().find((r) => r.argv && !r.argv.includes("--session-id") && !r.argv.includes("--resume"));
+    await until("the runtime started with the server's environment", () => !!own(), 30_000, () => `; records: ${JSON.stringify(s.records())}`);
+    ask.abort();
+    const agents = s.records().filter((r) => r !== own());
+    assert.ok(agents.length > 0, "an agent was started for the resumed queue");
+    assert.deepEqual(agents.map((r) => r.handover), agents.map(() => null), "no agent inherited it");
+    assert.equal(own()!.handover, null, "the server removed it from its own environment");
+  } finally { s.stop(); }
+});
+
+test("a server given a hand-over folder outside its NEXUS_HOME writes nothing there and exits non-zero with the reason", async () => {
+  const { base, home, files } = await heldProject();
+  const before = files();
+  const foreign = join(base, "elsewhere", "handover", "01FOREIGN"); // like the live instance's folder seen from a test home
+  mkdirSync(foreign, { recursive: true });
+  writeFileSync(join(foreign, "predecessor.json"), JSON.stringify({ pid: process.pid, commit: "live123", subject: "the live one", at: new Date().toISOString() }));
+  const listing = () => readdirSync(foreign).map((f) => `${f}:${readFileSync(join(foreign, f), "utf8")}`);
+  const was = listing();
+  const port = await freePort();
+  const s = server(home, port, { NEXUS_HANDOVER: foreign });
+  try {
+    await until("the server to exit", () => s.exitCode() !== undefined, 30_000, () => `; output: ${s.out()}`);
+    assert.notEqual(s.exitCode(), 0);
+    assert.match(s.out(), /refusing to take over: the hand-over folder .*01FOREIGN is not under .*handover; exiting without starting/);
+    assert.deepEqual(listing(), was, "nothing written in the foreign folder");
+    assert.deepEqual(files(), before, "the held run is untouched");
+    assert.ok(!s.startedAgent(), "no agent started");
+    assert.ok(!existsSync(join(home, "auth.json")), "it did not start at all");
+    await fetch(`http://127.0.0.1:${port}/api/server`).then(() => assert.fail("it must not listen"), () => {});
+  } finally { s.stop(); }
+});
+
+for (const trailing of [false, true]) {
+  test(`a real hand-over to main.ts reaches ready (NEXUS_HOME ${trailing ? "with" : "without"} a trailing separator)`, async () => {
+    const base = mkdtempSync(join(tmpdir(), "nexus-handover-"));
+    const home = join(base, "home") + (trailing ? sep : "");
+    const savedHome = process.env.NEXUS_HOME;
+    process.env.NEXUS_HOME = home;
+    let pid: number | undefined;
+    try {
+      const port = await freePort();
+      const notes: string[] = [];
+      const result = await handOver({
+        command: [process.execPath, MAIN], cwd: join(here, "..", "..", ".."),
+        env: serverEnv({ NEXUS_HOME: home, NEXUS_PORT: String(port), NEXUS_LOG: "" }),
+        version: { commit: "old1234", subject: "the old version" },
+        release: async () => {}, note: (n) => notes.push(n), log: () => notes,
+        timeoutMs: 30_000,
+      });
+      pid = result.pid;
+      assert.equal(result.outcome, "ready", notes.join(" | "));
+      let phase = "";
+      for (const t = Date.now(); phase !== "updated" && Date.now() - t < 15_000; await sleep(200)) {
+        phase = ((await (await fetch(`http://127.0.0.1:${port}/api/server`)).json()) as { update: { phase: string } }).update.phase;
+      }
+      assert.equal(phase, "updated", "released, it took over");
+    } finally {
+      if (pid) try { process.kill(pid); } catch { /* gone */ }
+      if (savedHome === undefined) delete process.env.NEXUS_HOME; else process.env.NEXUS_HOME = savedHome;
+    }
+  });
+}

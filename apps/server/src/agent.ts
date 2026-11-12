@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { EventEmitter } from "node:events";
 import { nexusHome } from "@nexus/protocol";
+import { withoutHandover } from "./handover.ts";
 
 export type Priority = "now" | "next" | "later";
 
@@ -77,9 +78,13 @@ export function ensureShims(): string {
   return bin;
 }
 
-/** The environment for an agent's process: ours, the session's variables, and the shims first on the PATH. */
+/**
+ * The environment for an agent's process: ours, the session's variables, and the shims first on the PATH. Never
+ * NEXUS_HANDOVER (main.ts already removes it from ours; this is the second guard): a test server an agent starts
+ * would take the folder for its own.
+ */
 export function agentEnv(extra: Record<string, string>): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env, ...extra };
+  const env = withoutHandover({ ...process.env, ...extra });
   const key = Object.keys(env).find((k) => k.toUpperCase() === "PATH") ?? "PATH";
   const sep = process.platform === "win32" ? ";" : ":";
   env[key] = `${ensureShims()}${sep}${env[key] ?? ""}`;

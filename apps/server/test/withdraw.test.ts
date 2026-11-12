@@ -2,7 +2,6 @@
 // process on a free port, and the engine against the fake `claude`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -10,6 +9,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ActionError, ProjectStore, approveQueue, loadProjectState, routeAnswers, withdrawApproval, writeRegistry } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
+import { spawnServer } from "./helpers.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -45,9 +45,7 @@ test("the API takes a withdrawal only from the dashboard's page, and refuses a s
   const { root, store } = project();
   writeRegistry({ protocol: 1, projects: [{ id: "p", root }] });
   const port = await freePort();
-  const child = spawn(process.execPath, [join(here, "../src/main.ts")], {
-    env: { ...process.env, NEXUS_PORT: String(port), NEXUS_LOG: "" }, stdio: "ignore", windowsHide: true,
-  });
+  const child = spawnServer({ NEXUS_PORT: String(port), NEXUS_LOG: "" });
   const base = `http://127.0.0.1:${port}`;
   const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>
     fetch(base + path, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });

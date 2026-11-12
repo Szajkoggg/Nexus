@@ -12,7 +12,7 @@
 // any project's .nexus/. Without ready.json the predecessor rolls back (src/lifecycle.ts) and never releases.
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { ProjectStore, loadProjectState, newId, nexusHome, now, readRegistry } from "@nexus/protocol";
 
 /** How long a predecessor waits for its successor's ready signal. */
@@ -37,6 +37,43 @@ const write = (dir: string, name: string, value: unknown) => {
   renameSync(f + ".tmp", f);
 };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// ---------------------------------------------------------------- the variable
+
+const VAR = "NEXUS_HANDOVER";
+
+/**
+ * Reads NEXUS_HANDOVER once and removes it from the environment, so that nothing this server starts (agents, and
+ * through them test servers, npm, git) inherits it and takes the predecessor's folder for its own.
+ */
+export function takeHandoverEnv(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const value = env[VAR];
+  for (const k of Object.keys(env)) if (k.toUpperCase() === VAR) delete env[k];
+  delete env[VAR]; // process.env on Windows matches names case-insensitively
+  return value || undefined;
+}
+
+/** A copy of an environment without NEXUS_HANDOVER (in any case). */
+export function withoutHandover(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const out: NodeJS.ProcessEnv = {};
+  for (const [k, v] of Object.entries(env)) if (k.toUpperCase() !== VAR) out[k] = v;
+  return out;
+}
+
+/**
+ * Why a successor must not use this hand-over folder, or undefined when it is one of this NEXUS_HOME's. A backstop
+ * only: it cannot catch a stray server that runs without NEXUS_HOME (its home is then the real one).
+ */
+export function refuseHandoverDir(dir: string): string | undefined {
+  const fold = (p: string) => (process.platform === "win32" ? p.toLowerCase() : p);
+  const root = resolve(nexusHome(), "handover");
+  const prefix = fold(root.endsWith(sep) ? root : root + sep);
+  const target = fold(resolve(dir));
+  if (target.startsWith(prefix) && target.length > prefix.length) return undefined;
+  return `the hand-over folder ${resolve(dir)} is not under ${root}`;
+}
+
+// ---------------------------------------------------------------- helpers
 
 export function isAlive(pid: number): boolean {
   try { process.kill(pid, 0); return true; } catch (e) { return (e as NodeJS.ErrnoException).code === "EPERM"; }

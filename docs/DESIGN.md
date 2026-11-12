@@ -325,6 +325,15 @@ after 60 s the predecessor stops that successor, along with any agents it had re
 successor had resumed come back paused ("the Nexus server restarted"), as after any crash. Updating to such a
 version is not supported; do it with `live.ps1`.
 
+**The variable is consumed once.** A successor reads `NEXUS_HANDOVER` at start and deletes it from `process.env`
+before anything else runs, so nothing it starts inherits it. `agentEnv()` also removes it, as a second guard, and
+tests start `main.ts` only through `test/helpers.ts`, which strips it. Removing the variable is the real protection.
+As a backstop, a successor refuses a folder that is not under `<NEXUS_HOME>/handover`: both paths are resolved, the
+comparison is case-insensitive on Windows, and the folder must lie strictly inside, ending in a separator. A refused
+successor logs why and exits non-zero before writing or starting anything, so a real predecessor sees a failure and
+rolls back. The backstop cannot catch a stray server that runs without `NEXUS_HOME`, since that server's home is the
+real one.
+
 ## Tech stack
 
 | Part | Choice |
@@ -462,6 +471,15 @@ the text across. Drafts untouched for 14 days are pruned when the page loads.
   - `node_modules` has to be compared with the lock the update installed, not the one it started from.
   - On Windows a pid can still show as a process for a few seconds after it exits, so the probe recorded every pid
     and checked them again after killing.
+- **The hand-over variable leaked to agents and their test servers.** After the live instance's first hand-over
+  (2026-11-13, 00:22), it kept `NEXUS_HANDOVER` in its environment, and every agent it started inherited it. At
+  00:24:52 a worker's test started `main.ts` with its own environment. `withdraw.test.ts` did that, and so did
+  `handover.test.ts` for a plain start; which one ran then is not recorded. That test server took the
+  live predecessor's folder (`%APPDATA%\Nexus\handover\…`) for its own, passed its smoke check, and overwrote
+  `ready.json` there. No harm followed, because that hand-over was already released. But the test server then took
+  over as if it were the live successor. During a real update it could have answered for the real successor. The
+  same test on the old code, with `NEXUS_HANDOVER` pointing at a decoy folder, wrote `ready.json` into the decoy. The
+  whole suite on the new code, inheriting the same decoy, wrote nothing there (see "The variable is consumed once").
 
 - **Queue drafts go through files, not heredocs.** On 2026-11-12 an orchestrator could not upload a long queue
   revision: `cd … && nexus queue draft - <<'EOF'` was refused in `dontAsk` mode (a chained command does not match
