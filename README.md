@@ -57,11 +57,27 @@ nexus import Dev/Workflow/QUEUE.md --prefix D       # a second file whose queue 
 `project add` creates `.nexus/` in the project with its own `.gitignore`, so the project's files are untouched. The
 list of registered projects is in `%APPDATA%/Nexus/projects.yaml` (`NEXUS_HOME` overrides the directory).
 
-## Running
+## Running: a live instance, and development beside it
+
+The Nexus that serves real projects runs from its own worktree, so working on Nexus never interrupts an agent:
+
+```sh
+powershell -ExecutionPolicy Bypass -File scripts/live.ps1    # creates C:/Code/Nexus-live (a worktree on main), installs, builds
+cd ../Nexus-live && npm start                                 # the live instance on http://127.0.0.1:4317
+```
+
+To bring a new version to it: commit to `main` here, then `nexus server update` (or "Update Nexus" in the settings
+panel). Running steps finish first and no new step starts meanwhile; then the live worktree moves to `main`,
+installs what changed, builds and restarts itself, and the queues it held go on by themselves. Queues paused by you,
+stopped by a stop condition, waiting for an answer or for the usage window stay as they are. `--now` stops the
+running steps instead of waiting (they continue where they were); `nexus server cancel` gives up waiting. If the
+update fails, the old version keeps running and the held queues go on. After a restart the server writes its log
+to `%APPDATA%\Nexus\server.log`.
 
 ```sh
 npm start        # builds the dashboard, serves it and the API on http://127.0.0.1:4317
-npm run dev      # development: API on :4317, dashboard with hot reload on http://localhost:5173
+npm run dev      # development, apart from the live instance: API on :4318 with data in %APPDATA%\Nexus-dev,
+                 # dashboard with hot reload on http://localhost:5173
 npm test         # protocol, importer, engine and orchestrator tests (the last two run a fake `claude`)
 npm run typecheck
 ```

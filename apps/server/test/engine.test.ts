@@ -167,3 +167,72 @@ test("an unapproved revision cannot start", () => {
   assert.throws(() => engine.start("Q"), /approve/);
   engine.shutdown();
 });
+
+// ---------------------------------------------------------------- updates of Nexus itself
+
+/** A queue's run, written as a test fixture. */
+function fixtureRun(store: ProjectStore, id: string, state: "paused" | "halted", reason: string) {
+  store.writeQueue({ protocol: 1, id, title: id, revision: 1, status: "approved", stop_conditions: [], checks: [], steps: [{ id: `${id}1`, title: "x", goal: "FAKE: done", acceptance: [] }], approvals: [], history: [] });
+  approveQueue(store, id);
+  store.writeSession({ protocol: 1, id: `s-${id}`, project: "p", role: "worker", runtime: "claude", native_id: "00000000-0000-4000-8000-000000000000", cwd: store.dir, launched_by: "nexus", created_at: new Date().toISOString() });
+  const t = new Date().toISOString();
+  store.writeRun(id, { protocol: 1, session: `s-${id}`, state, reason, started_at: t, updated_at: t });
+}
+
+test("an update holds a running queue at its step's end; the next server resumes it, and only it", async () => {
+  process.env.FAKE_SLOW_MS = "1500";
+  const { store, engine, queue, until } = setup(["slow", "done"]);
+  fixtureRun(store, "R", "paused", "paused by the user");
+  fixtureRun(store, "H", "halted", "fake condition: fake stop");
+  let next: Engine | undefined;
+  try {
+    engine.start("Q");
+    await until("the step to run", () => queue().steps[0]!.status === "running");
+    assert.deepEqual(engine.drainForUpdate(false), ["Q"]);
+    assert.equal(queue().run?.state, "pausing");
+    assert.throws(() => engine.start("R"), /updating/);
+    await until("the hold", () => queue().run?.state === "paused" && engine.idle());
+    assert.deepEqual(queue().steps.map((s) => s.status), ["done", "pending"]);
+    engine.shutdown();
+
+    // The restart: a new engine on the same files.
+    next = new Engine(store, () => { routeAnswers(store); next!.onChange(loadProjectState(store)); });
+    await until("the resumed run to finish", () => queue().run?.state === "finished");
+    assert.equal(store.readRun("R")?.state, "paused", "a queue the user paused stays paused");
+    assert.equal(store.readRun("H")?.state, "halted", "a halted queue stays halted");
+  } finally { engine.shutdown(); next?.shutdown(); delete process.env.FAKE_SLOW_MS; }
+});
+
+test("pausing during an update, or a stop condition met, keeps a queue from resuming after the restart", async () => {
+  process.env.FAKE_SLOW_MS = "1200";
+  const a = setup(["slow", "done"]);
+  try {
+    a.engine.start("Q");
+    await a.until("the step to run", () => a.queue().steps[0]!.status === "running");
+    a.engine.drainForUpdate(false);
+    a.engine.pause("Q");
+    await a.until("the pause", () => a.queue().run?.state === "paused");
+    assert.equal(a.queue().run?.resume_after_restart, undefined, "the user's pause wins");
+  } finally { a.engine.shutdown(); delete process.env.FAKE_SLOW_MS; }
+
+  const b = setup(["stop", "done"]);
+  try {
+    b.engine.start("Q");
+    b.engine.drainForUpdate(false);
+    await b.until("the halt", () => b.queue().run?.state === "halted");
+    assert.equal(b.queue().run?.resume_after_restart, undefined, "a stop condition is not undone by a restart");
+  } finally { b.engine.shutdown(); }
+});
+
+test("a cancelled update lets the held queue go on", async () => {
+  process.env.FAKE_SLOW_MS = "1200";
+  const { engine, queue, until } = setup(["slow", "done"]);
+  try {
+    engine.start("Q");
+    await until("the step to run", () => queue().steps[0]!.status === "running");
+    engine.drainForUpdate(false);
+    engine.cancelDrain();
+    assert.equal(queue().run?.state, "running");
+    await until("the run to finish", () => queue().run?.state === "finished");
+  } finally { engine.shutdown(); delete process.env.FAKE_SLOW_MS; }
+});

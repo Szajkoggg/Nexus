@@ -89,11 +89,14 @@ export class Orchestrator {
     const s = this.session();
     if (!s) return;
     this.applyRequests(s);
-    if (state.project.orchestrator?.notify === false) return;
+    if (state.project.orchestrator?.notify === false || this.engine.draining) return; // told after an update's restart
     this.notify(state, s);
   }
 
   shutdown(): void { this.proc?.kill(); }
+
+  /** Not in the middle of a turn. */
+  idle(): boolean { return !this.proc || this.proc.state !== "working"; }
 
   // ---------------------------------------------------------------- the session
 

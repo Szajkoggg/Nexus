@@ -43,7 +43,7 @@ export function SettingsButton({ onClick }: { onClick: () => void }) {
 
 interface Orch { model: string | null; effort: string | null }
 
-export function SettingsPanel({ project, onChanged }: { project: ProjectFile; onChanged: () => void }) {
+export function SettingsPanel({ project, onChanged, server }: { project: ProjectFile; onChanged: () => void; server?: ServerInfo }) {
   const orch = useFetch<Orch>(`/api/projects/${encodeURIComponent(project.id)}/orchestrator`, project);
   const [f, setF] = useState(() => ({
     name: project.name,
@@ -166,6 +166,68 @@ export function SettingsPanel({ project, onChanged }: { project: ProjectFile; on
         <Button onClick={save} disabled={busy}>{busy ? "Saving…" : "Save"}</Button>
         {msg && <span className={`text-sm ${msg.ok ? "text-emerald-300" : "text-red-300"}`}>{msg.text}</span>}
       </div>
+
+      <ServerSection info={server} onChanged={onChanged} />
     </div>
+  );
+}
+
+// ---------------------------------------------------------------- Nexus itself
+
+export interface ServerInfo {
+  commit: string; subject: string; live: boolean; branch: string | null; root: string;
+  update: { phase: "idle" | "draining" | "updating" | "restarting" | "failed"; held: string[]; waiting: string[]; log: string[]; error?: string; now?: boolean };
+}
+
+export function useServer(version: unknown) {
+  return useFetch<ServerInfo>("/api/server", version);
+}
+
+/** A pill in the header while Nexus updates itself. */
+export function UpdatePill({ info }: { info: ServerInfo | undefined }) {
+  const u = info?.update;
+  if (!u || u.phase === "idle") return null;
+  const text = u.phase === "draining" ? (u.waiting.length ? `updating: waiting for ${u.waiting.length} project${u.waiting.length > 1 ? "s" : ""}` : "updating")
+    : u.phase === "failed" ? "update failed" : u.phase;
+  return <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs ring-1 ${u.phase === "failed" ? "text-red-300 ring-red-500/40" : "animate-pulse text-sky-300 ring-sky-500/40"}`}>{text}</span>;
+}
+
+export function ServerSection({ info, onChanged }: { info: ServerInfo | undefined; onChanged: () => void }) {
+  const [msg, setMsg] = useState<string>();
+  if (!info) return null;
+  const u = info.update;
+  const call = async (path: string, body: unknown = {}) => {
+    setMsg(undefined);
+    const r = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    if (!r.ok) setMsg((await r.json().catch(() => ({}))).error ?? r.statusText);
+    onChanged();
+  };
+  const busy = u.phase === "draining" || u.phase === "updating" || u.phase === "restarting";
+  return (
+    <Section title="Nexus">
+      <p className="text-sm text-zinc-300">
+        <span className="font-mono">{info.commit}</span> {info.subject}
+      </p>
+      <p className="mt-1 text-xs text-zinc-500">
+        {info.live ? "Live instance" : `Development checkout (branch ${info.branch}): an update rebuilds and restarts it without moving it`} · <span className="font-mono">{info.root}</span>
+      </p>
+      {u.phase !== "idle" && (
+        <div className="mt-3 rounded-lg bg-zinc-950 p-3 text-xs text-zinc-400">
+          <div className="mb-1 text-zinc-200">Update: {u.phase}{u.held.length ? `; holding ${u.held.join(", ")}` : ""}{u.waiting.length ? `; waiting for ${u.waiting.join(", ")}` : ""}</div>
+          {u.log.map((l, i) => <div key={i} className="font-mono">{l}</div>)}
+          {u.error && <div className="mt-1 whitespace-pre-wrap text-red-300">{u.error}</div>}
+        </div>
+      )}
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {!busy && <Button onClick={() => void call("/api/server/update")}>Update Nexus</Button>}
+        {!busy && <Button variant="quiet" onClick={() => { if (confirm("Stop the running steps now? They continue from where they were after the restart.")) void call("/api/server/update", { now: true }); }}>Update now</Button>}
+        {u.phase === "draining" && <Button variant="quiet" onClick={() => void call("/api/server/cancel")}>Cancel</Button>}
+      </div>
+      <p className="mt-2 text-xs text-zinc-500">
+        Update Nexus lets every running step finish (new steps wait), moves this instance to the newest commit on main,
+        builds it and restarts. The queues it held go on by themselves; paused or stopped ones stay as they are.
+      </p>
+      {msg && <p className="mt-2 text-xs text-red-300">{msg}</p>}
+    </Section>
   );
 }

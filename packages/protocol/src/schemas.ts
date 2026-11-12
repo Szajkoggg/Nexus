@@ -248,6 +248,8 @@ export const RunFile = z.object({
   started_at: Time,
   updated_at: Time,
   resume_at: Time.optional(), // usage_wait: when the window resets
+  /** Stopped only for a Nexus update: the server resumes it by itself when it starts again. */
+  resume_after_restart: z.boolean().optional(),
 });
 export type RunFile = z.infer<typeof RunFile>;
 

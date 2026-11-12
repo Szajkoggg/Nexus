@@ -38,6 +38,13 @@ Setup:
   nexus import <file.md> [--prefix <text>] [--dry-run] [--replace]
   nexus attach [--role worker|orchestrator] [--runtime claude|codex|external] [--queue <id>] [--title <text>]
   nexus note <queue> <step> <text> [--from user|orchestrator]
+
+The server (NEXUS_PORT, default 4317):
+  nexus server status                 version, and an update in progress
+  nexus server update [--now] [--ref <commit|branch>]
+                                      let running steps finish (or stop them with --now), move the live worktree to
+                                      <ref> (default main), build, restart; queues held for it go on by themselves
+  nexus server cancel                 give up waiting; the held queues go on
 `;
 
 const { values: o, positionals: args } = parseArgs({
@@ -54,7 +61,7 @@ const { values: o, positionals: args } = parseArgs({
     id: { type: "string" }, name: { type: "string" }, prefix: { type: "string" },
     "dry-run": { type: "boolean" }, replace: { type: "boolean" },
     role: { type: "string" }, runtime: { type: "string" }, title: { type: "string" }, from: { type: "string" },
-    help: { type: "boolean", short: "h" },
+    help: { type: "boolean", short: "h" }, now: { type: "boolean" }, ref: { type: "string" },
   },
 });
 
@@ -175,7 +182,36 @@ function gitBranch(cwd: string): string | null {
 
 // ---------------------------------------------------------------- commands
 
-const commands: Record<string, () => void> = {
+/** Talks to the running server; only `nexus server` does, everything else is files. */
+async function server(method: "GET" | "POST", path: string, body?: unknown): Promise<Record<string, any>> {
+  const url = `http://127.0.0.1:${process.env.NEXUS_PORT ?? 4317}${path}`;
+  let r: Response;
+  try { r = await fetch(url, { method, headers: { "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined }); }
+  catch { throw new UsageError(`no Nexus server answers at ${url}`); }
+  const j = (await r.json().catch(() => ({}))) as Record<string, any>;
+  if (!r.ok) throw new UsageError(j.error ?? `${r.status} ${r.statusText}`);
+  return j;
+}
+
+function printUpdate(u: Record<string, any>): void {
+  console.log(`update: ${u.phase}${u.held?.length ? `; holding ${u.held.join(", ")}` : ""}${u.waiting?.length ? `; waiting for ${u.waiting.join(", ")}` : ""}`);
+  for (const l of u.log ?? []) console.log(`  ${l}`);
+  if (u.error) console.log(`  error: ${u.error}`);
+}
+
+const commands: Record<string, () => void | Promise<void>> = {
+  async server() {
+    const sub = args[1] ?? "status";
+    if (sub === "status") {
+      const s = await server("GET", "/api/server");
+      console.log(`Nexus ${s.commit} "${s.subject}" from ${s.root} (${s.live ? "live worktree" : `development checkout, branch ${s.branch}`})`);
+      return printUpdate(s.update);
+    }
+    if (sub === "update") return printUpdate(await server("POST", "/api/server/update", { now: !!o.now, ref: o.ref }));
+    if (sub === "cancel") return printUpdate(await server("POST", "/api/server/cancel"));
+    throw new UsageError("nexus server status|update|cancel");
+  },
+
   status() {
     const st = store();
     const state = loadProjectState(st);
@@ -403,7 +439,7 @@ try {
   if (!cmd || o.help) { console.log(HELP); process.exit(0); }
   const run = commands[cmd];
   if (!run) throw new UsageError(`unknown command "${cmd}" (nexus --help)`);
-  run();
+  await run();
 } catch (e) {
   if (e instanceof UsageError) { console.error(`nexus: ${e.message}`); process.exit(2); }
   throw e;

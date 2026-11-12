@@ -8,7 +8,7 @@ import { AttentionPanel, NotifyToggle, useNotifications } from "./components/Att
 import { ContextBar, UsageMeter } from "./components/Run.tsx";
 import { ChatPanel, OrchestratorButton, useOrchestrator } from "./components/Chat.tsx";
 import { RemoteButton, RemotePanel } from "./components/Remote.tsx";
-import { SettingsButton, SettingsPanel } from "./components/Settings.tsx";
+import { SettingsButton, SettingsPanel, UpdatePill, useServer } from "./components/Settings.tsx";
 
 const GROUPS: { title: string; statuses: QueueStatus[]; collapsible?: boolean }[] = [
   { title: "Finished", statuses: ["done", "cancelled"], collapsible: true },
@@ -48,6 +48,7 @@ export function App() {
 
   const notify = useNotifications(projects);
   const orchestrator = useOrchestrator(projectId, tick);
+  const server = useServer(tick);
   const [settingsOpen, setSettingsOpen] = useState(() => new URLSearchParams(location.search).has("settings"));
   const [remoteOpen, setRemoteOpen] = useState(() => new URLSearchParams(location.search).has("remote"));
   const [chatOpen, setChatOpen] = useState(() => new URLSearchParams(location.search).has("chat"));
@@ -82,6 +83,7 @@ export function App() {
               </button>
             ))}
           </nav>
+          <UpdatePill info={server} />
           {projectId && <OrchestratorButton view={orchestrator} onClick={() => setChatOpen(true)} />}
           <UsageMeter version={tick} />
           <NotifyToggle {...notify} />
@@ -174,7 +176,7 @@ export function App() {
       )}
 
       <Drawer open={settingsOpen && !!state} onClose={() => setSettingsOpen(false)}>
-        {state && <SettingsPanel key={state.project.id} project={state.project} onChanged={reload} />}
+        {state && <SettingsPanel key={state.project.id} project={state.project} onChanged={() => { reload(); setTick((t) => t + 1); }} server={server} />}
       </Drawer>
 
       <Drawer open={remoteOpen} onClose={() => setRemoteOpen(false)}>

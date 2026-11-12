@@ -24,6 +24,8 @@ export class Engine {
   private readonly changed: () => void;
   private timers = new Map<string, NodeJS.Timeout>();
   private busy = new Set<string>();
+  /** Set while Nexus drains for an update: nothing new starts. */
+  draining = false;
 
   constructor(store: ProjectStore, changed: () => void) {
     this.store = store;
@@ -34,6 +36,7 @@ export class Engine {
   // ---------------------------------------------------------------- user actions
 
   start(queueId: string, opts: StartOptions = {}): RunFile {
+    if (this.draining) throw new ActionError("Nexus is updating; start the queue after the restart", 409);
     const state = loadProjectState(this.store);
     const q = this.queue(state, queueId);
     if (!q.approved) throw new ActionError("approve the queue's current revision first", 409);
@@ -53,9 +56,10 @@ export class Engine {
 
   pause(queueId: string): void {
     const run = this.run(queueId);
-    if (run.state === "running" || run.state === "usage_wait") {
+    // Also a queue held for an update: the user's pause wins, so the restart does not resume it.
+    if (run.state === "running" || run.state === "usage_wait" || run.resume_after_restart) {
       const working = this.live.get(run.session)?.proc.state === "working";
-      this.writeRun(queueId, { ...run, state: working ? "pausing" : "paused", reason: "paused by the user" });
+      this.writeRun(queueId, { ...run, state: working ? "pausing" : "paused", reason: "paused by the user", resume_after_restart: undefined });
     }
   }
 
@@ -68,18 +72,58 @@ export class Engine {
     if (!q.approved) throw new ActionError("approve the queue's current revision first", 409);
     const session = this.sessionFile(state, run.session);
     this.ensureProcess(session);
-    this.writeRun(queueId, { ...run, state: "running", reason: undefined, nudged: false });
-    // A step left unfinished (stopped, failed, interrupted) is continued rather than skipped.
+    this.writeRun(queueId, { ...run, state: "running", reason: undefined, nudged: false, resume_after_restart: undefined });
+    // A step left unfinished (stopped, failed, interrupted) is continued rather than skipped; one waiting for an
+    // answer just waits on (the answer arrives through the inbox).
     const open = q.steps.find((s) => s.id === run.step && !["done", "skipped", "review"].includes(s.status));
-    if (open) this.openStep(queueId, open, q, "continue");
+    if (open?.status === "waiting") this.changed();
+    else if (open) this.openStep(queueId, open, q, "continue");
     else this.advance(queueId);
+  }
+
+  // ---------------------------------------------------------------- updates of Nexus itself
+
+  /**
+   * Gets ready for a restart: running queues stop at the end of their current step (or at once with `now`) and are
+   * marked to be resumed by the next server. Queues paused, halted, waiting for the usage window or pausing at the
+   * user's request are left alone: a restart does not resume them.
+   */
+  drainForUpdate(now: boolean): string[] {
+    this.draining = true;
+    const held: string[] = [];
+    for (const id of this.store.queueIds()) {
+      const run = this.store.readRun(id);
+      if (!run || run.state !== "running") continue;
+      const working = this.live.get(run.session)?.proc.state === "working";
+      const reason = "the Nexus server is updating; it goes on by itself afterwards";
+      this.writeRun(id, { ...run, state: working && !now ? "pausing" : "paused", reason, resume_after_restart: true });
+      held.push(id);
+    }
+    if (now) for (const [, l] of this.live) if (l.proc.state === "working") l.proc.kill();
+    return held;
+  }
+
+  /** No agent of this project is in the middle of a turn. */
+  idle(): boolean {
+    return ![...this.live.values()].some((l) => l.proc.state === "working");
+  }
+
+  /** The update did not happen: the queues it held go on now. */
+  cancelDrain(): void {
+    this.draining = false;
+    for (const id of this.store.queueIds()) {
+      const run = this.store.readRun(id);
+      if (!run?.resume_after_restart) continue;
+      if (run.state === "pausing") this.writeRun(id, { ...run, state: "running", reason: undefined, resume_after_restart: undefined });
+      else if (run.state === "paused") { try { this.resume(id); } catch (e) { this.halt(id, (e as Error).message); } }
+    }
   }
 
   /** Interrupts the running turn and pauses the run. */
   stopNow(queueId: string, text?: string): void {
     const run = this.run(queueId);
     const live = this.live.get(run.session);
-    this.writeRun(queueId, { ...run, state: "paused", reason: "stopped by the user" });
+    this.writeRun(queueId, { ...run, state: "paused", reason: "stopped by the user", resume_after_restart: undefined });
     if (live && live.proc.state === "working") {
       live.proc.send(
         `[Nexus] The user asks you to stop now${text ? `: ${text}` : "."} Leave the work in a consistent state, record where you are with \`nexus step progress\`, and end your turn. Do not start anything new.`,
@@ -235,7 +279,7 @@ export class Engine {
   private halt(queueId: string, reason: string): void {
     const run = this.store.readRun(queueId);
     if (!run || run.state === "halted") return;
-    this.writeRun(queueId, { ...run, state: "halted", reason });
+    this.writeRun(queueId, { ...run, state: "halted", reason, resume_after_restart: undefined });
   }
 
   // ---------------------------------------------------------------- sessions and processes
@@ -390,7 +434,18 @@ export class Engine {
   private recoverAfterRestart(): void {
     for (const q of this.store.queueIds()) {
       const run = this.store.readRun(q);
-      if (run && ["running", "pausing"].includes(run.state)) this.writeRun(q, { ...run, state: "paused", reason: "the Nexus server restarted; resume to continue" });
+      if (run?.resume_after_restart) {
+        // Held for an update: resumed shortly, once this server is up.
+        this.writeRun(q, { ...run, state: "paused", reason: "resuming after the Nexus update" });
+        setTimeout(() => {
+          const r = this.store.readRun(q);
+          if (!r?.resume_after_restart) return;
+          try { this.resume(q); } catch (e) { this.halt(q, `could not resume after the update: ${(e as Error).message}`); }
+          this.changed();
+        }, 1500);
+      } else if (run && ["running", "pausing"].includes(run.state)) {
+        this.writeRun(q, { ...run, state: "paused", reason: "the Nexus server restarted; resume to continue" });
+      }
       if (run?.state === "usage_wait" && run.resume_at) this.scheduleResume(q, run.resume_at);
     }
     for (const s of this.store.sessionIds()) {

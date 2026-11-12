@@ -16,6 +16,7 @@ import {
 import { Engine } from "./engine.ts";
 import { Orchestrator } from "./orchestrator.ts";
 import { listCodexModels } from "./codex.ts";
+import { Lifecycle, version } from "./lifecycle.ts";
 import {
   AttentionWatch, allowed, auth, authCookie, isLocal, loginPage, push, pushDevices, pushKey, qrSvg, rotateToken,
   subscribe, tailscaleInfo, tokenMatches, unsubscribe,
@@ -111,6 +112,13 @@ const MIME: Record<string, string> = {
 // ---------------------------------------------------------------- HTTP
 
 const app = new Hono<{ Bindings: HttpBindings }>();
+const lifecycle = new Lifecycle(() => [...projects.values()].map((e) => ({
+  id: e.id,
+  idle: () => e.engine.idle() && e.orchestrator.idle(),
+  drain: (now: boolean) => e.engine.drainForUpdate(now),
+  cancel: () => e.engine.cancelDrain(),
+  shutdown: () => { e.engine.shutdown(); e.orchestrator.shutdown(); },
+})), () => { for (const s of sockets) if (s.readyState === s.OPEN) s.send(JSON.stringify({ type: "server" })); });
 const watch = new AttentionWatch();
 
 // Remote devices sign in once with the access token; this machine needs nothing (src/remote.ts).
@@ -187,6 +195,18 @@ app.use("/api/*", async (c, next) => {
   return next();
 });
 
+// While an update drains, nothing new starts: no run, no orchestrator turn.
+app.use("/api/projects/:id/*", async (c, next) => {
+  if (c.req.method === "POST" && lifecycle.busy) {
+    const orchestrator = c.req.path.endsWith("/orchestrator/messages");
+    const action = c.req.path.endsWith("/run") ? ((await c.req.json().catch(() => ({}))) as { action?: string }).action : undefined;
+    if (orchestrator || action === "start" || action === "resume") {
+      return c.json({ error: "Nexus is updating; try again in a moment" }, 409);
+    }
+  }
+  return next();
+});
+
 type Body = Record<string, unknown>;
 function act(handler: (store: ProjectStore, body: Body, p: (name: string) => string) => unknown) {
   return async (c: import("hono").Context) => {
@@ -238,6 +258,17 @@ app.get("/api/projects/:id/sessions/:session/activity", (c) => {
 });
 
 app.get("/api/usage", (c) => c.json(readUsage() ?? null));
+
+// Nexus itself: its version, and updating it without cutting off running work (src/lifecycle.ts).
+app.get("/api/server", async (c) => c.json({ ...(await version()), update: lifecycle.status }));
+app.post("/api/server/update", async (c) => {
+  const b = (await c.req.json().catch(() => ({}))) as { now?: unknown; ref?: unknown };
+  try { return c.json(lifecycle.start({ now: b.now === true, ref: typeof b.ref === "string" ? b.ref : undefined })); }
+  catch (e) { return c.json({ error: (e as Error).message }, 409); }
+});
+app.post("/api/server/cancel", (c) => {
+  try { lifecycle.cancel(); return c.json(lifecycle.status); } catch (e) { return c.json({ error: (e as Error).message }, 409); }
+});
 
 // Remote access: shown and changed only from this machine.
 app.get("/api/remote", async (c) => {
@@ -297,6 +328,13 @@ auth(); // creates the access token on the first start
 const server = serve({ fetch: app.fetch, port: PORT, hostname: HOST }, (info) => {
   console.log(`Nexus server on http://${HOST}:${info.port} (${projects.size} project(s); registry in ${nexusHome()})`);
   if (!existsSync(WEB_DIST)) console.log("No built dashboard: run the web dev server (npm run dev) or npm start.");
+});
+// After an update the successor starts while its predecessor still holds the port: it waits (NEXUS_WAIT_PORT seconds).
+let portTries = Number(process.env.NEXUS_WAIT_PORT ?? 0) * 2;
+server.on("error", (err: NodeJS.ErrnoException) => {
+  if (err.code === "EADDRINUSE" && portTries-- > 0) { setTimeout(() => server.listen(PORT, HOST), 500); return; }
+  console.error(`cannot listen on ${HOST}:${PORT}: ${err.message}`);
+  process.exit(1);
 });
 
 const shutdown = () => { for (const e of projects.values()) { e.engine.shutdown(); e.orchestrator.shutdown(); } process.exit(0); };
