@@ -120,7 +120,9 @@ export function loadProjectState(store: ProjectStore): ProjectState {
 
   for (const q of queues.values()) {
     q.questions = [...questions.values()].filter((x) => x.queue === q.id);
-    q.current_step = q.steps.find((s) => s.status === "running" || s.status === "waiting" || s.status === "review" || s.status === "stopped")?.id;
+    // A step at work comes first; otherwise the latest stop (an older stop may have been taken up again since).
+    q.current_step = (q.steps.find((s) => s.status === "running" || s.status === "waiting" || s.status === "review")
+      ?? q.steps.findLast((s) => s.status === "stopped"))?.id;
   }
 
   // Messages sent to sessions, shown on the step they were about.

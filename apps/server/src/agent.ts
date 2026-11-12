@@ -44,6 +44,8 @@ export interface AgentProcess extends EventEmitter<AgentEvents> {
 export interface AgentOptions {
   cwd: string;
   model?: string;
+  /** low, medium, high, xhigh (and max for Claude Code). */
+  effort?: string;
   /** Instructions added to the runtime's own system prompt. */
   instructions?: string;
   env: Record<string, string>;

@@ -2,7 +2,7 @@
 // writer of queue definitions, notes and inboxes (docs/PROTOCOL.md, "Rules").
 import { existsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import { QueueFile, USER_SESSION, type InboxEntry, type ReviewPolicy, type SessionFile } from "./schemas.ts";
+import { ProjectFile, QueueFile, USER_SESSION, type InboxEntry, type ReviewPolicy, type SessionFile } from "./schemas.ts";
 import { ProjectStore, newId, now, revisionHash } from "./store.ts";
 import { loadProjectState, type ProjectState } from "./state.ts";
 
@@ -166,4 +166,45 @@ export function applyDraft(store: ProjectStore, definition: unknown): string {
   return changed
     ? `queue ${draft.id} updated to revision ${next.revision}; it needs the user's approval again`
     : `queue ${draft.id} updated (no change to steps, checks or stop conditions: the approval stands)`;
+}
+
+// ---------------------------------------------------------------- project settings
+
+/** Drops null and empty-string values, so a settings form can clear an optional field. */
+function pruned(o: unknown): Record<string, unknown> {
+  if (!o || typeof o !== "object" || Array.isArray(o)) return {};
+  return Object.fromEntries(Object.entries(o as Record<string, unknown>).filter(([, v]) => v !== null && v !== ""));
+}
+function merged(base: object, patch: unknown): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...base };
+  for (const [k, v] of Object.entries((patch ?? {}) as Record<string, unknown>)) {
+    if (v === null || v === "") delete out[k]; else out[k] = v;
+  }
+  return out;
+}
+
+/**
+ * Changes a project's settings: its name, defaults, runtimes and whether the orchestrator is notified. The
+ * orchestrator's own model and effort go through the orchestrator (they also restart its process); its session,
+ * the project's id and root never change here.
+ */
+export function updateSettings(store: ProjectStore, patch: unknown): void {
+  const p = store.readProject();
+  const b = pruned(patch) as Record<string, any>;
+  const next = {
+    ...p,
+    name: typeof b.name === "string" && b.name.trim() ? b.name.trim() : p.name,
+    defaults: merged(p.defaults, b.defaults),
+    runtimes: {
+      default: b.runtimes?.default ?? p.runtimes.default,
+      claude: merged(p.runtimes.claude, b.runtimes?.claude),
+      codex: merged(p.runtimes.codex, b.runtimes?.codex),
+    },
+    orchestrator: b.orchestrator?.notify === undefined
+      ? p.orchestrator
+      : { runtime: "claude" as const, session: null, ...p.orchestrator, notify: !!b.orchestrator.notify },
+  };
+  const r = ProjectFile.safeParse(next);
+  if (!r.success) throw new ActionError(r.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "));
+  store.writeProject(r.data);
 }

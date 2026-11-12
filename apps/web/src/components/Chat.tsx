@@ -4,7 +4,7 @@ import type { ChatEntry, RuntimeFile, SessionFile } from "@nexus/protocol";
 import { act, enc, useFetch } from "../api.ts";
 import { Button, Composer, Markdown, TimeAgo } from "./ui.tsx";
 
-interface View { session: SessionFile | null; state: "working" | "idle" | "exited"; runtime: RuntimeFile | null; chat: ChatEntry[] }
+interface View { session: SessionFile | null; state: "working" | "idle" | "exited"; runtime: RuntimeFile | null; chat: ChatEntry[]; model: string | null; effort: string | null }
 
 export function useOrchestrator(project: string | undefined, version: unknown) {
   return useFetch<View>(project ? `/api/projects/${enc(project)}/orchestrator` : undefined, version);
@@ -47,7 +47,7 @@ export function ChatPanel({ project, name, view, onClose, onChanged }: {
           </div>
           <span className="text-xs text-zinc-500">
             {view?.state === "working" ? "working…" : view?.session ? (view.state === "idle" ? "ready" : "asleep: wakes with your next message") : "starts with your first message"}
-            {rt?.model ? ` · ${rt.model.replace(/^claude-/, "")}` : ""}{pct !== undefined ? ` · ${pct}% context` : ""}
+            {rt?.model ? ` · ${rt.model.replace(/^claude-/, "")}` : view?.model ? ` · ${view.model}` : ""}{view?.effort ? ` · ${view.effort} effort` : ""}{pct !== undefined ? ` · ${pct}% context` : ""}
           </span>
           <span className="ml-auto flex items-center gap-2">
             <label className="flex items-center gap-1.5 text-xs text-zinc-400">

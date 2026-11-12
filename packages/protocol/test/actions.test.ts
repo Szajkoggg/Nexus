@@ -96,3 +96,20 @@ test("review policy can be set and cleared", () => {
   assert.equal(st.readQueue("Q").review_policy, undefined);
   assert.throws(() => setQueueSettings(st, "Q", { review_policy: "sometimes" }));
 });
+
+test("project settings: set, clear with an empty value, and refuse what the schema does not allow", async () => {
+  const { st } = setup();
+  const { updateSettings } = await import("../src/actions.ts");
+  updateSettings(st, { runtimes: { default: "codex", claude: { effort: "high", permission_mode: "auto", model: "opus" }, codex: { effort: "xhigh", approval_policy: "on-request", approvals_reviewer: "auto_review" } }, defaults: { usage_pause_threshold: 0.8 } });
+  let p = st.readProject();
+  assert.equal(p.runtimes.default, "codex");
+  assert.deepEqual([p.runtimes.claude.effort, p.runtimes.claude.permission_mode, p.runtimes.claude.model], ["high", "auto", "opus"]);
+  assert.deepEqual([p.runtimes.codex.effort, p.runtimes.codex.approvals_reviewer], ["xhigh", "auto_review"]);
+  assert.equal(p.defaults.usage_pause_threshold, 0.8);
+  updateSettings(st, { runtimes: { claude: { model: "", effort: null } } });
+  p = st.readProject();
+  assert.deepEqual([p.runtimes.claude.model, p.runtimes.claude.effort, p.runtimes.claude.permission_mode], [undefined, undefined, "auto"]);
+  assert.throws(() => updateSettings(st, { runtimes: { codex: { effort: "max" } } }), /effort/);
+  assert.throws(() => updateSettings(st, { runtimes: { claude: { permission_mode: "yolo" } } }), /permission_mode/);
+  assert.equal(st.readProject().runtimes.codex.effort, "xhigh", "a refused change leaves the settings as they were");
+});

@@ -131,6 +131,35 @@ for (const runtime of ["claude", "codex"] as const) {
   });
 }
 
+test("model and effort reach Claude Code as flags, and are kept on the session", async () => {
+  const { store, engine, queue, until } = setup(["done"]);
+  process.env.FAKE_ARGS = join(dirname(process.env.FAKE_LOG!), "args.log");
+  try {
+    engine.start("Q", { runtime: "claude", model: "sonnet", effort: "high" });
+    await until("the run to finish", () => queue().run?.state === "finished");
+    const argv = (JSON.parse(readFileSync(process.env.FAKE_ARGS, "utf8").trim().split("\n")[0]!) as { argv: string[] }).argv;
+    assert.equal(argv[argv.indexOf("--model") + 1], "sonnet");
+    assert.equal(argv[argv.indexOf("--effort") + 1], "high");
+    const s = loadProjectState(store).sessions.find((x) => x.id === queue().run!.session)!;
+    assert.deepEqual([s.model, s.effort], ["sonnet", "high"]);
+  } finally { engine.shutdown(); delete process.env.FAKE_ARGS; }
+});
+
+test("Codex gets the effort on every turn and the project's reviewer when the thread starts; max is refused", async () => {
+  const { store, engine, queue, until } = setup(["done", "done"]);
+  process.env.FAKE_ARGS = join(dirname(process.env.FAKE_LOG!), "args.log");
+  const p = store.readProject();
+  store.writeProject({ ...p, runtimes: { ...p.runtimes, codex: { ...p.runtimes.codex, effort: "medium", approval_policy: "on-request", approvals_reviewer: "auto_review" } } });
+  try {
+    assert.throws(() => engine.start("Q", { runtime: "codex", effort: "max" }), /Codex takes effort/);
+    engine.start("Q", { runtime: "codex" });
+    await until("the run to finish", () => queue().run?.state === "finished");
+    const calls = readFileSync(process.env.FAKE_ARGS, "utf8").trim().split("\n").map((l) => JSON.parse(l) as Record<string, unknown>);
+    assert.deepEqual(calls.filter((c) => c.method === "thread/start").map((c) => [c.approvalPolicy, c.approvalsReviewer]), [["on-request", "auto_review"]]);
+    assert.deepEqual(calls.filter((c) => c.method === "turn/start").map((c) => c.effort), ["medium", "medium"]);
+  } finally { engine.shutdown(); delete process.env.FAKE_ARGS; }
+});
+
 test("an unapproved revision cannot start", () => {
   const { store, engine } = setup(["done"]);
   const q = store.readQueue("Q");

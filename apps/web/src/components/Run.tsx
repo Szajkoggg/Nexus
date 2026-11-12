@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { act, enc, useFetch, type ActivityEntry, type ProjectState, type QueueView, type SessionView, type Usage } from "../api.ts";
 import { Button, Section, TimeAgo } from "./ui.tsx";
+import { CLAUDE_EFFORTS, CODEX_EFFORTS } from "./Settings.tsx";
 
 const RUN_TONE: Record<string, string> = {
   running: "text-blue-300 bg-blue-500/10 ring-blue-500/40",
@@ -33,10 +34,13 @@ const CLAUDE_MODELS = ["opus", "sonnet", "haiku"];
 export function RunControls({ project, queue, onChanged }: { project: ProjectState; queue: QueueView; onChanged: () => void }) {
   const id = project.project.id;
   const [model, setModel] = useState("");
+  const [effort, setEffort] = useState("");
   const [runtime, setRuntime] = useState<"claude" | "codex">(project.project.runtimes.default);
   const codexModels = useFetch<string[]>(runtime === "codex" ? "/api/codex/models" : undefined, runtime);
   const suggestions = runtime === "codex" ? codexModels ?? [] : CLAUDE_MODELS;
   const defaultModel = project.project.runtimes[runtime].model;
+  const defaultEffort = project.project.runtimes[runtime].effort;
+  const efforts: readonly string[] = runtime === "codex" ? CODEX_EFFORTS : CLAUDE_EFFORTS;
   const [session, setSession] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
@@ -63,7 +67,7 @@ export function RunControls({ project, queue, onChanged }: { project: ProjectSta
             <span className="text-xs text-zinc-500">since <TimeAgo at={run.updated_at} /></span>
           </div>
           {run.reason && <p className="mt-1 text-zinc-300">{run.reason}</p>}
-          {runSession && <p className="mt-1 text-xs text-zinc-500">Session: {runSession.title ?? runSession.id} {runSession.live?.model ? `· ${runSession.live.model}` : ""} <ContextBar s={runSession} /></p>}
+          {runSession && <p className="mt-1 text-xs text-zinc-500">Session: {runSession.title ?? runSession.id} {runSession.live?.model ? `· ${runSession.live.model}` : ""}{runSession.effort ? ` · ${runSession.effort} effort` : ""} <ContextBar s={runSession} /></p>}
           {run.state === "usage_wait" && run.resume_at && <p className="mt-1 text-xs text-zinc-500">Resumes by itself at {new Date(run.resume_at).toLocaleTimeString()}.</p>}
         </div>
       )}
@@ -87,7 +91,7 @@ export function RunControls({ project, queue, onChanged }: { project: ProjectSta
           </label>
           <label className="text-xs text-zinc-400">
             <span className="mb-1 block">Runtime</span>
-            <select value={runtime} onChange={(e) => { setRuntime(e.target.value as "claude" | "codex"); setModel(""); }} disabled={!!session} className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm text-zinc-200 disabled:opacity-50">
+            <select value={runtime} onChange={(e) => { setRuntime(e.target.value as "claude" | "codex"); setModel(""); setEffort(""); }} disabled={!!session} className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm text-zinc-200 disabled:opacity-50">
               <option value="claude">Claude Code</option>
               <option value="codex">Codex</option>
             </select>
@@ -101,7 +105,14 @@ export function RunControls({ project, queue, onChanged }: { project: ProjectSta
             />
             <datalist id={`models-${queue.id}`}>{suggestions.map((m) => <option key={m} value={m} />)}</datalist>
           </label>
-          <Button disabled={busy} onClick={() => call({ action: "start", model: model || undefined, session: session || undefined, runtime: session ? undefined : runtime })}>
+          <label className="text-xs text-zinc-400">
+            <span className="mb-1 block">Effort</span>
+            <select value={effort} onChange={(e) => setEffort(e.target.value)} className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm text-zinc-200">
+              <option value="">{session ? "as before" : defaultEffort ? `default: ${defaultEffort}` : "default"}</option>
+              {efforts.map((x) => <option key={x} value={x}>{x}</option>)}
+            </select>
+          </label>
+          <Button disabled={busy} onClick={() => call({ action: "start", model: model || undefined, effort: effort || undefined, session: session || undefined, runtime: session ? undefined : runtime })}>
             {run ? "Start a new run" : "Start"}
           </Button>
         </div>

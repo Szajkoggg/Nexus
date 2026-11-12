@@ -8,6 +8,7 @@ import { AttentionPanel, NotifyToggle, useNotifications } from "./components/Att
 import { ContextBar, UsageMeter } from "./components/Run.tsx";
 import { ChatPanel, OrchestratorButton, useOrchestrator } from "./components/Chat.tsx";
 import { RemoteButton, RemotePanel } from "./components/Remote.tsx";
+import { SettingsButton, SettingsPanel } from "./components/Settings.tsx";
 
 const GROUPS: { title: string; statuses: QueueStatus[]; collapsible?: boolean }[] = [
   { title: "Finished", statuses: ["done", "cancelled"], collapsible: true },
@@ -47,6 +48,7 @@ export function App() {
 
   const notify = useNotifications(projects);
   const orchestrator = useOrchestrator(projectId, tick);
+  const [settingsOpen, setSettingsOpen] = useState(() => new URLSearchParams(location.search).has("settings"));
   const [remoteOpen, setRemoteOpen] = useState(() => new URLSearchParams(location.search).has("remote"));
   const [chatOpen, setChatOpen] = useState(() => new URLSearchParams(location.search).has("chat"));
 
@@ -83,6 +85,7 @@ export function App() {
           {projectId && <OrchestratorButton view={orchestrator} onClick={() => setChatOpen(true)} />}
           <UsageMeter version={tick} />
           <NotifyToggle {...notify} />
+          {state && <SettingsButton onClick={() => setSettingsOpen(true)} />}
           <RemoteButton onClick={() => setRemoteOpen(true)} />
           <span className={`flex items-center gap-1.5 text-xs ${connected ? "text-zinc-500" : "text-orange-400"}`} title={connected ? "Live updates on" : "Reconnecting"}>
             <span className={`h-2 w-2 rounded-full ${connected ? "bg-emerald-500" : "bg-orange-500"}`} />
@@ -154,7 +157,7 @@ export function App() {
                       <td className="px-3 py-2 text-zinc-400">{s.role}</td>
                       <td className="px-3 py-2 text-zinc-400">{s.runtime}{s.launched_by === "external" ? " (external)" : ""}</td>
                       <td className="px-3 py-2 font-mono text-zinc-400">{s.queue ?? "-"}</td>
-                      <td className="px-3 py-2 text-zinc-400">{s.live ? `${s.live.state}${s.live.model ? ` · ${s.live.model.replace(/^claude-/, "")}` : ""}` : "-"}</td>
+                      <td className="px-3 py-2 text-zinc-400">{s.live ? `${s.live.state}${s.live.model ? ` · ${s.live.model.replace(/^claude-/, "")}` : ""}${s.effort ? ` · ${s.effort}` : ""}` : "-"}</td>
                       <td className="px-3 py-2"><ContextBar s={s} /></td>
                       <td className="px-3 py-2 text-zinc-500">{s.last_event ? <>{s.last_event} · <TimeAgo at={s.last_event_at} /></> : "-"}</td>
                     </tr>
@@ -169,6 +172,10 @@ export function App() {
       {chatOpen && projectId && (
         <ChatPanel project={projectId} name={state?.project.name ?? projectId} view={orchestrator} onClose={() => setChatOpen(false)} onChanged={() => setTick((t) => t + 1)} />
       )}
+
+      <Drawer open={settingsOpen && !!state} onClose={() => setSettingsOpen(false)}>
+        {state && <SettingsPanel key={state.project.id} project={state.project} onChanged={reload} />}
+      </Drawer>
 
       <Drawer open={remoteOpen} onClose={() => setRemoteOpen(false)}>
         <RemotePanel version={tick} />

@@ -10,7 +10,7 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { WebSocketServer, type WebSocket } from "ws";
 import chokidar from "chokidar";
 import {
-  ActionError, ProjectStore, addNote, answerAsUser, approveQueue, deleteNote, loadProjectState, nexusHome,
+  ActionError, Effort, ProjectStore, addNote, updateSettings, answerAsUser, approveQueue, deleteNote, loadProjectState, nexusHome,
   readRegistry, readUsage, routeAnswers, sendMessage, setQueueSettings, type ProjectState,
 } from "@nexus/protocol";
 import { Engine } from "./engine.ts";
@@ -220,6 +220,7 @@ app.post("/api/projects/:id/queues/:queue/run", act((st, b, p) => {
   switch (b.action) {
     case "start": return engine.start(q, {
       model: (b.model as string) || undefined, session: (b.session as string) || undefined,
+      effort: Effort.safeParse(b.effort).success ? (b.effort as Effort) : undefined,
       runtime: b.runtime === "codex" || b.runtime === "claude" ? b.runtime : undefined,
     });
     case "pause": return engine.pause(q);
@@ -279,6 +280,8 @@ app.get("/api/projects/:id/orchestrator", (c) => {
 });
 app.post("/api/projects/:id/orchestrator/messages", act((st, b) => orchestratorOf(st).say(b.text)));
 app.post("/api/projects/:id/orchestrator/reset", act((st) => orchestratorOf(st).reset()));
+app.post("/api/projects/:id/orchestrator/settings", act((st, b) => orchestratorOf(st).settings(b.model, b.effort)));
+app.patch("/api/projects/:id/settings", act((st, b) => updateSettings(st, b)));
 
 if (existsSync(WEB_DIST)) {
   app.use("/*", serveStatic({ root: WEB_DIST.replaceAll("\\", "/") }));

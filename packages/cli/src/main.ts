@@ -29,7 +29,7 @@ Agent commands (session from NEXUS_SESSION or --session):
   nexus log <text> [--level info|warn|error]
   nexus answer <qid> <text> [--escalate] [--continue|--wait]     (orchestrator only)
   nexus queue draft <file.yaml|->                                 (orchestrator only) create or change a queue
-  nexus run <queue> start|pause|resume|stop --reason <text> [--use-session <id>] [--runtime claude|codex] [--model <m>]   (orchestrator only)
+  nexus run <queue> start|pause|resume|stop --reason <text> [--use-session <id>] [--runtime claude|codex] [--model <m>] [--effort <e>]   (orchestrator only)
   (--queue <id> picks the queue when the session has none or the step id is ambiguous)
 
 Setup:
@@ -48,7 +48,7 @@ const { values: o, positionals: args } = parseArgs({
     condition: { type: "string" }, pct: { type: "string" }, label: { type: "string" },
     kind: { type: "string" }, round: { type: "string" }, ok: { type: "boolean" }, fail: { type: "boolean" },
     option: { type: "string", multiple: true }, "can-continue": { type: "boolean" },
-    "use-session": { type: "string" }, model: { type: "string" },
+    "use-session": { type: "string" }, model: { type: "string" }, effort: { type: "string" },
     topics: { type: "string" }, files: { type: "string" }, file: { type: "string" }, level: { type: "string" },
     escalate: { type: "boolean" }, continue: { type: "boolean" }, wait: { type: "boolean" },
     id: { type: "string" }, name: { type: "string" }, prefix: { type: "string" },
@@ -316,7 +316,7 @@ const commands: Record<string, () => void> = {
     const queue = need(args[1], "<queue>");
     const action = need(args[2], "start|pause|resume|stop");
     if (!["start", "pause", "resume", "stop"].includes(action)) throw new UsageError("the action is start, pause, resume or stop");
-    const e = emit(st, s, { type: "session.request", action, queue, use_session: o["use-session"], model: o.model, runtime: o.runtime, reason: need(o.reason, "--reason") });
+    const e = emit(st, s, { type: "session.request", action, queue, use_session: o["use-session"], model: o.model, effort: o.effort, runtime: o.runtime, reason: need(o.reason, "--reason") });
     report(waitApplied(st, s.id, e.id));
   },
 

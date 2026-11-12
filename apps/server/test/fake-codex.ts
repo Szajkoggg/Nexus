@@ -2,7 +2,7 @@
 // uses and sends the notifications Nexus reads. What it does with a message is in fake-behaviour.ts; a turn/steer
 // is recorded with priority "next", like Claude's mid-turn messages.
 import { randomUUID } from "node:crypto";
-import { record, respond, type Fake } from "./fake-behaviour.ts";
+import { record, recordArgs, respond, type Fake } from "./fake-behaviour.ts";
 
 const out = (m: unknown) => process.stdout.write(JSON.stringify(m) + "\n");
 const notify = (method: string, params: unknown) => out({ method, params });
@@ -35,12 +35,13 @@ process.stdin.on("data", (d: string) => {
     const text = () => (m.params?.input ?? []).map((x: { text?: string }) => x.text ?? "").join("\n");
     switch (m.method) {
       case "initialize": reply({ userAgent: "fake-codex" }); break;
-      case "thread/start": threadId = randomUUID(); reply({ thread: { id: threadId }, model: "fake-codex-model" }); break;
+      case "thread/start": recordArgs({ method: m.method, model: m.params.model, approvalsReviewer: m.params.approvalsReviewer ?? null, approvalPolicy: m.params.approvalPolicy }); threadId = randomUUID(); reply({ thread: { id: threadId }, model: "fake-codex-model" }); break;
       case "thread/resume": threadId = m.params.threadId; reply({ thread: { id: threadId }, model: "fake-codex-model" }); break;
       case "account/rateLimits/read":
         reply({ rateLimits: { primary: { usedPercent: 5, windowDurationMins: 10080, resetsAt: Math.floor(Date.now() / 1000) + 86400 }, secondary: null } });
         break;
       case "turn/start": {
+        recordArgs({ method: m.method, effort: m.params.effort ?? null });
         const t = text();
         record(t, null, !!turnId);
         if (turnId) { fail("a turn is already running"); break; }

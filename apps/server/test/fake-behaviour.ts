@@ -26,6 +26,11 @@ export function record(text: string, priority: string | null, busy: boolean): vo
 
 export interface Fake { step?: string }
 
+/** Records how the runtime was started or asked (FAKE_ARGS, one JSON line each), for the tests. */
+export function recordArgs(what: unknown): void {
+  if (process.env.FAKE_ARGS) appendFileSync(process.env.FAKE_ARGS, JSON.stringify(what) + "\n");
+}
+
 /** Does what the message asks and returns the agent's reply. `tool` reports a shell command it ran. */
 export async function respond(fake: Fake, text: string, tool: (command: string) => void): Promise<string> {
   const m = /step (\S+) \(\d+ of \d+\)/.exec(text);

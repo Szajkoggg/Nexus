@@ -4,7 +4,7 @@
 // permission mode dontAsk with a read-only allow list.
 import { randomUUID } from "node:crypto";
 import {
-  ActionError, ProjectStore, applyDraft, loadProjectState, newId, now, type ChatEntry, type Event, type ProjectState, type SessionFile,
+  ActionError, Effort, ProjectStore, applyDraft, loadProjectState, newId, now, type ChatEntry, type Event, type ProjectState, type SessionFile,
 } from "@nexus/protocol";
 import { ClaudeSession } from "./claude.ts";
 import type { Engine } from "./engine.ts";
@@ -21,6 +21,8 @@ export class Orchestrator {
   private readonly engine: Engine;
   private readonly changed: () => void;
   private applying = false;
+  /** New settings wait for the running turn to end; the next message starts a process with them. */
+  private restartAfterTurn = false;
 
   constructor(store: ProjectStore, engine: Engine, changed: () => void) {
     this.store = store;
@@ -37,8 +39,11 @@ export class Orchestrator {
 
   view() {
     const s = this.session();
+    const o = this.store.readProject().orchestrator;
     return {
       session: s ?? null,
+      model: s?.model ?? o?.model ?? null,
+      effort: s?.effort ?? o?.effort ?? null,
       state: this.proc?.state ?? "exited",
       runtime: s ? this.store.readRuntime(s.id) ?? null : null,
       chat: s ? this.store.readChat(s.id).entries.slice(-300) : [],
@@ -51,6 +56,24 @@ export class Orchestrator {
     const s = this.ensure();
     this.store.appendChat(s.id, { at: now(), from: "user", text: text.trim() });
     this.deliver(text.trim());
+  }
+
+  /**
+   * The orchestrator's model and effort. They apply from the next message: the conversation goes on (resumed) in a
+   * process started with them. An empty value means the runtime's default.
+   */
+  settings(model: unknown, effort: unknown): void {
+    const m = typeof model === "string" && model.trim() ? model.trim() : undefined;
+    const e = effort === undefined || effort === null || effort === "" ? undefined : Effort.safeParse(effort);
+    if (e && !e.success) throw new ActionError(`effort is one of ${Effort.options.join(", ")}`);
+    const p = this.store.readProject();
+    this.store.writeProject({ ...p, orchestrator: { runtime: "claude", notify: true, session: null, ...p.orchestrator, model: m, effort: e?.data } });
+    const s = this.session();
+    if (s) this.store.writeSession({ ...s, model: m, effort: e?.data });
+    if (!this.proc || this.proc.state === "exited") return;
+    if (this.proc.state === "working") { this.restartAfterTurn = true; return; }
+    this.proc.kill();
+    this.proc = undefined;
   }
 
   /** Ends the current orchestrator session and starts the next message in a new one (the old transcript stays). */
@@ -80,7 +103,8 @@ export class Orchestrator {
     if (!s) {
       s = {
         protocol: 1, id: newId(), project: project.id, role: "orchestrator", runtime: "claude", native_id: randomUUID(),
-        title: "Orchestrator", cwd: project.root, launched_by: "nexus", created_at: now(), model: project.orchestrator?.model,
+        title: "Orchestrator", cwd: project.root, launched_by: "nexus", created_at: now(),
+        model: project.orchestrator?.model, effort: project.orchestrator?.effort,
       };
       this.store.writeSession(s);
       this.store.writeProject({ ...project, orchestrator: { runtime: "claude", notify: true, ...project.orchestrator, session: s.id } });
@@ -93,7 +117,7 @@ export class Orchestrator {
     const project = this.store.readProject();
     const resume = this.store.readRuntime(s.id) !== undefined;
     const proc = new ClaudeSession({
-      cwd: s.cwd, uuid: s.native_id!, resume, model: s.model,
+      cwd: s.cwd, uuid: s.native_id!, resume, model: s.model, effort: s.effort,
       permissionMode: "dontAsk",
       allowedTools: READ_ONLY_TOOLS,
       disallowedTools: NEVER,
@@ -116,7 +140,11 @@ export class Orchestrator {
       if (f.costUsd !== undefined) patch.cost_usd = f.costUsd;
       if (Object.keys(patch).length) this.runtime(s.id, patch);
     });
-    proc.on("turnEnd", () => { this.runtime(s.id, { state: "idle" }); this.changed(); });
+    proc.on("turnEnd", () => {
+      this.runtime(s.id, { state: "idle" });
+      if (this.restartAfterTurn && this.proc === proc) { this.restartAfterTurn = false; proc.kill(); this.proc = undefined; }
+      this.changed();
+    });
     proc.on("exit", () => { this.runtime(s.id, { state: "exited" }); if (this.proc === proc) this.proc = undefined; this.changed(); });
   }
 
@@ -153,7 +181,7 @@ export class Orchestrator {
     if (e.type !== "session.request") return "ignored";
     switch (e.action) {
       case "start": {
-        const run = this.engine.start(e.queue, { session: e.use_session, model: e.model, runtime: e.runtime });
+        const run = this.engine.start(e.queue, { session: e.use_session, model: e.model, effort: e.effort, runtime: e.runtime });
         return `queue ${e.queue} started in session ${run.session}`;
       }
       case "pause": this.engine.pause(e.queue); return `queue ${e.queue} pauses after its current step`;
@@ -209,7 +237,7 @@ Your job: plan the work with the user as queues of steps, keep the queues and th
 Commands (\`nexus\` is on PATH; your session is set in the environment):
 - nexus status                                   every queue, step, run, open question and session, with context cards
 - nexus queue draft - <<'EOF' ... EOF            create or change a queue from YAML (format below); a new or changed queue waits for the user's approval
-- nexus run <queue> start --reason "..." [--use-session <id>] [--runtime claude|codex] [--model <model>]   start an approved queue (--use-session continues an existing session; the runtime defaults to the project's)
+- nexus run <queue> start --reason "..." [--use-session <id>] [--runtime claude|codex] [--model <model>] [--effort low|medium|high|xhigh|max]   start an approved queue (--use-session continues an existing session; runtime, model and effort default to the project's)
 - nexus run <queue> pause|resume|stop --reason "..."
 - nexus answer <qid> "<answer>" [--continue|--wait]            answer a worker's question whose answer is already settled
 - nexus answer <qid> "<framing, options, recommendation>" --escalate   pass it to the user
@@ -236,6 +264,8 @@ steps:
     review:                    # optional
       prepare: Before/after shots of ...
       policy: wait             # optional, this step only
+
+Choosing model and effort for a run: say which and why when you start it. Hard design, debugging or open-ended work deserves a strong model at high effort; mechanical steps (renames, measurements, sheets) do well with less. Codex takes effort low to xhigh; Claude Code also max. Without --model and --effort the project's defaults apply.
 
 Choosing a session for a run: \`nexus status\` shows each session's context card (topics, files, context fill). Continue a session (--use-session) when it worked on closely related things and its context is below ${threshold} %; otherwise start a fresh one and put what it needs into the queue's description and goals. Never give one session two running queues.
 

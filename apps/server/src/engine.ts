@@ -8,7 +8,7 @@ import { existsSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import {
   ActionError, ProjectStore, USER_SESSION, ensureUserSession, loadProjectState, newId, normPath, now, readUsage,
-  writeUsage, type InboxView, type ProjectState, type QueueView, type RunFile, type SessionFile, type StepView,
+  writeUsage, CODEX_EFFORTS, type Effort, type InboxView, type ProjectState, type QueueView, type RunFile, type SessionFile, type StepView,
 } from "@nexus/protocol";
 import type { AgentProcess, StreamFacts } from "./agent.ts";
 import { ClaudeSession } from "./claude.ts";
@@ -16,7 +16,7 @@ import { CodexSession } from "./codex.ts";
 
 interface Live { proc: AgentProcess; session: string }
 
-export interface StartOptions { model?: string; session?: string; runtime?: "claude" | "codex" }
+export interface StartOptions { model?: string; effort?: Effort; session?: string; runtime?: "claude" | "codex" }
 
 export class Engine {
   private readonly live = new Map<string, Live>();   // by Nexus session id
@@ -42,8 +42,8 @@ export class Engine {
     if (!q.steps.some((s) => s.status !== "done" && s.status !== "skipped")) throw new ActionError("no step left to run", 409);
 
     const session = opts.session
-      ? this.reuseSession(state, opts.session, queueId, opts.model)
-      : this.newSession(state, q, opts.runtime ?? state.project.runtimes.default, opts.model);
+      ? this.reuseSession(state, opts.session, queueId, opts.model, opts.effort)
+      : this.newSession(state, q, opts.runtime ?? state.project.runtimes.default, opts.model, opts.effort);
     const run: RunFile = { protocol: 1, session: session.id, state: "running", started_at: now(), updated_at: now() };
     this.store.writeRun(queueId, run);
     this.ensureProcess(session);
@@ -240,7 +240,8 @@ export class Engine {
 
   // ---------------------------------------------------------------- sessions and processes
 
-  private newSession(state: ProjectState, q: QueueView, runtime: "claude" | "codex", model?: string): SessionFile {
+  private newSession(state: ProjectState, q: QueueView, runtime: "claude" | "codex", model?: string, effort?: Effort): SessionFile {
+    if (runtime === "codex" && effort && !CODEX_EFFORTS.includes(effort)) throw new ActionError(`Codex takes effort ${CODEX_EFFORTS.join(", ")}`);
     const cwd = this.worktreeFor(state, q);
     const s: SessionFile = {
       protocol: 1, id: newId(), project: state.project.id, role: "worker", runtime,
@@ -248,17 +249,19 @@ export class Engine {
       native_id: runtime === "claude" ? randomUUID() : null,
       title: `${q.id} worker`, cwd, branch: gitBranch(cwd), queue: q.id, launched_by: "nexus", created_at: now(),
       model: model ?? state.project.runtimes[runtime].model,
+      effort: effort ?? state.project.runtimes[runtime].effort,
     };
     this.store.writeSession(s);
     return s;
   }
 
-  private reuseSession(state: ProjectState, id: string, queueId: string, model?: string): SessionFile {
+  private reuseSession(state: ProjectState, id: string, queueId: string, model?: string, effort?: Effort): SessionFile {
     const s = this.sessionFile(state, id);
     if (s.runtime === "external" || s.launched_by !== "nexus" || !s.native_id) throw new ActionError("only a session Nexus launched (and started at least once) can be continued", 409);
     const busy = state.queues.find((q) => q.id !== queueId && q.run?.session === id && ["running", "pausing", "usage_wait"].includes(q.run.state));
     if (busy) throw new ActionError(`that session is running queue ${busy.id}`, 409);
-    const updated: SessionFile = { ...s, queue: queueId, model: model ?? s.model };
+    if (s.runtime === "codex" && effort && !CODEX_EFFORTS.includes(effort)) throw new ActionError(`Codex takes effort ${CODEX_EFFORTS.join(", ")}`);
+    const updated: SessionFile = { ...s, queue: queueId, model: model ?? s.model, effort: effort ?? s.effort };
     this.store.writeSession(updated);
     return updated;
   }
@@ -273,8 +276,8 @@ export class Engine {
       const codex = project.runtimes.codex;
       const inside = normPath(this.store.dir).toLowerCase().startsWith(normPath(session.cwd).toLowerCase() + "/");
       proc = new CodexSession({
-        cwd: session.cwd, model: session.model ?? codex.model, instructions: WORKER_BRIEFING, env,
-        threadId: session.native_id, sandbox: codex.sandbox, approvalPolicy: codex.approval_policy,
+        cwd: session.cwd, model: session.model ?? codex.model, effort: session.effort ?? codex.effort, instructions: WORKER_BRIEFING, env,
+        threadId: session.native_id, sandbox: codex.sandbox, approvalPolicy: codex.approval_policy, approvalsReviewer: codex.approvals_reviewer,
         writableRoots: inside ? [] : [this.store.dir],
       });
     } else {
@@ -285,6 +288,7 @@ export class Engine {
         uuid: session.native_id!,
         resume: transcriptExists,
         model: session.model ?? claude.model,
+        effort: session.effort ?? claude.effort,
         permissionMode: claude.permission_mode,
         allowedTools: ["Bash(nexus:*)", ...claude.allowed_tools],
         appendSystemPrompt: WORKER_BRIEFING,

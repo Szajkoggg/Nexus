@@ -12,6 +12,7 @@ export interface ClaudeOptions {
   uuid: string;
   resume: boolean;
   model?: string;
+  effort?: string;
   permissionMode: string;
   allowedTools: string[];
   disallowedTools?: string[];
@@ -38,6 +39,7 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
       "--permission-mode", options.permissionMode,
     ];
     if (options.model) args.push("--model", options.model);
+    if (options.effort) args.push("--effort", options.effort);
     if (options.appendSystemPrompt) args.push("--append-system-prompt", options.appendSystemPrompt);
     if (options.disallowedTools?.length) args.push("--disallowedTools", options.disallowedTools.join(","));
     if (options.allowedTools.length) args.push("--allowedTools", ...options.allowedTools); // variadic: keep last

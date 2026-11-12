@@ -25,6 +25,11 @@ export const USER_SESSION = "user";
 export type Role = z.infer<typeof Role>;
 
 export const Runtime = z.enum(["claude", "codex", "external"]);
+
+/** How hard the model thinks. Claude Code takes all five (--effort); Codex takes low to xhigh (a turn's effort). */
+export const Effort = z.enum(["low", "medium", "high", "xhigh", "max"]);
+export type Effort = z.infer<typeof Effort>;
+export const CODEX_EFFORTS: readonly Effort[] = ["low", "medium", "high", "xhigh"];
 export type Runtime = z.infer<typeof Runtime>;
 
 // ---------------------------------------------------------------- registry (Nexus-level, not per project)
@@ -54,20 +59,26 @@ export const ProjectFile = z.object({
     default: z.enum(["claude", "codex"]).default("claude"),
     claude: z.object({
       model: z.string().optional(),
+      effort: Effort.optional(),
       permission_mode: z.enum(["acceptEdits", "auto", "bypassPermissions", "dontAsk", "manual", "plan"]).default("acceptEdits"),
       /** Added to every Nexus-launched session; `Bash(nexus:*)` is always allowed. */
       allowed_tools: z.array(z.string()).default([]),
     }).prefault({}),
     codex: z.object({
       model: z.string().optional(),
+      effort: Effort.exclude(["max"]).optional(),
       sandbox: z.enum(["read-only", "workspace-write", "danger-full-access"]).default("workspace-write"),
+      /** `never`: anything outside the sandbox is refused. `on-request` with an `auto_review` reviewer: Codex's own
+       *  reviewer decides each request by its risk, like Claude Code's auto mode. */
       approval_policy: z.enum(["never", "on-request", "untrusted"]).default("never"),
+      approvals_reviewer: z.enum(["user", "auto_review", "guardian_subagent"]).optional(),
     }).prefault({}),
   }).prefault({}),
   orchestrator: z.object({
     runtime: Runtime.default("claude"),
     session: Id.nullable().default(null),
     model: z.string().optional(),
+    effort: Effort.optional(),
     /** Tell the orchestrator when a worker asks, or a run halts or finishes (it starts if needed). */
     notify: z.boolean().default(true),
   }).optional(),
@@ -155,6 +166,8 @@ export const SessionFile = z.object({
   forked_from: Id.nullable().optional(),
   /** The model asked for when Nexus launched it (an alias or a full name); kept for resuming. */
   model: z.string().optional(),
+  /** The effort asked for when Nexus launched it; kept for resuming. */
+  effort: Effort.optional(),
 });
 export type SessionFile = z.infer<typeof SessionFile>;
 
@@ -201,7 +214,8 @@ export const Event = z.discriminatedUnion("type", [
   z.object({
     ...base, type: z.literal("session.request"),
     action: z.enum(["start", "resume", "pause", "stop"]), queue: Id,
-    use_session: Id.optional(), model: z.string().optional(), runtime: z.enum(["claude", "codex"]).optional(), reason: z.string(),
+    use_session: Id.optional(), model: z.string().optional(), effort: Effort.optional(),
+    runtime: z.enum(["claude", "codex"]).optional(), reason: z.string(),
   }),
   z.object({ ...base, type: z.literal("log"), level: z.enum(["info", "warn", "error"]), text: z.string() }),
   /** The user (or orchestrator) accepts a step waiting in review. */

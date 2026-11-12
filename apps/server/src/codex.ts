@@ -11,6 +11,8 @@ export interface CodexOptions extends AgentOptions {
   threadId?: string | null;
   sandbox: "read-only" | "workspace-write" | "danger-full-access";
   approvalPolicy: "never" | "on-request" | "untrusted";
+  /** Who decides requests to leave the sandbox: `auto_review` lets Codex's reviewer decide them by risk. */
+  approvalsReviewer?: "user" | "auto_review" | "guardian_subagent";
   /** Directories the sandbox may write besides the working directory (the project's .nexus, for a worktree). */
   writableRoots: string[];
 }
@@ -86,7 +88,11 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
       await this.request("initialize", { clientInfo: { name: "nexus", title: "Nexus", version: "0.1.0" }, capabilities: { experimentalApi: true, requestAttestation: false } });
       this.notify("initialized", {});
       const o = this.options;
-      const common = { cwd: o.cwd, model: o.model ?? null, sandbox: o.sandbox, approvalPolicy: o.approvalPolicy, developerInstructions: o.instructions ?? null };
+      const common = {
+        cwd: o.cwd, model: o.model ?? null, sandbox: o.sandbox, approvalPolicy: o.approvalPolicy,
+        ...(o.approvalsReviewer ? { approvalsReviewer: o.approvalsReviewer } : {}),
+        developerInstructions: o.instructions ?? null,
+      };
       const r = o.threadId
         ? await this.request("thread/resume", { threadId: o.threadId, ...common, excludeTurns: true })
         : await this.request("thread/start", common);
@@ -107,7 +113,9 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
     const sandboxPolicy = o.sandbox === "workspace-write"
       ? { type: "workspaceWrite", writableRoots: o.writableRoots, networkAccess: false, excludeTmpdirEnvVar: false, excludeSlashTmp: false }
       : undefined;
-    void this.request("turn/start", { threadId: this.threadId, input: input(text), ...(sandboxPolicy ? { sandboxPolicy } : {}) })
+    void this.request("turn/start", {
+      threadId: this.threadId, input: input(text), ...(sandboxPolicy ? { sandboxPolicy } : {}), ...(o.effort ? { effort: o.effort } : {}),
+    })
       .then((r) => { this.turnId = r.turn?.id ?? this.turnId; })
       .catch((err) => {
         this.emit("activity", { kind: "error", text: `turn/start: ${(err as Error).message}` });

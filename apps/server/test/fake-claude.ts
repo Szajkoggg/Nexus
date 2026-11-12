@@ -1,6 +1,8 @@
 // A stand-in for `claude -p --input-format stream-json --output-format stream-json`, for testing without a model.
 // What it does is in fake-behaviour.ts.
-import { record, respond, type Fake } from "./fake-behaviour.ts";
+import { record, recordArgs, respond, type Fake } from "./fake-behaviour.ts";
+
+recordArgs({ argv: process.argv.slice(2) });
 
 const out = (m: unknown) => process.stdout.write(JSON.stringify(m) + "\n");
 const fake: Fake = {};

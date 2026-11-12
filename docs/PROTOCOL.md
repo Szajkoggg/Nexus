@@ -58,8 +58,8 @@ defaults:
   worktree_dir: C:/Code/GameDev/ProjectHoneycomb.worktrees
 runtimes:
   default: claude                      # the runtime a run uses when its start names none
-  claude: { model: opus, permission_mode: acceptEdits, allowed_tools: [] }
-  codex:  { model: gpt-6-astra, sandbox: workspace-write, approval_policy: never }
+  claude: { model: opus, effort: high, permission_mode: auto, allowed_tools: [] }
+  codex:  { model: gpt-6-astra, effort: high, sandbox: workspace-write, approval_policy: on-request, approvals_reviewer: auto_review }
 orchestrator:
   runtime: claude
   session: 01JD...                     # its current session id
@@ -287,6 +287,8 @@ Writes (JSON bodies only; a request with a foreign `Origin` is refused):
 | `POST /api/projects/:id/queues/:q/steps/:s/accept` | `text?` | Accepts a step waiting in review |
 | `POST /api/projects/:id/orchestrator/messages` | `text` | A chat message to the orchestrator (starts or wakes it) |
 | `POST /api/projects/:id/orchestrator/reset` | | The next message starts a new orchestrator session |
+| `POST /api/projects/:id/orchestrator/settings` | `model`, `effort` (empty: the default) | The orchestrator's model and effort, from its next message on |
+| `PATCH /api/projects/:id/settings` | `name`, `runtimes`, `defaults`, `orchestrator.notify` (an empty value clears a field) | Project settings, checked against the schema |
 
 Also `GET /api/projects/:id/sessions/:session/activity?queue=&step=&limit=`, `GET /api/projects/:id/orchestrator`
 (its session, state and chat), `GET /api/usage` and `GET /api/codex/models`.

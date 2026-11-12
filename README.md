@@ -27,10 +27,12 @@ step's opening, delivers messages and answers into the running turn, holds on qu
 stops and resumes on request. The dashboard shows the agent's activity per step, each session's context fill and
 the subscription's usage windows.
 
-Per project, `.nexus/project.yaml` sets `runtimes.default` (`claude` or `codex`); `runtimes.claude` the default
-`model`, the `permission_mode` (default `acceptEdits`) and extra `allowed_tools` (the project's own
-`.claude/settings.json` applies as well); `runtimes.codex` the `model`, the `sandbox` (default `workspace-write`) and
-the `approval_policy` (default `never`).
+Per project, the dashboard's settings panel (the gear icon) sets the default runtime; for Claude Code workers the
+model, effort, permission mode and extra allowed tools (the project's own `.claude/settings.json` applies as well);
+for Codex workers the model, effort, sandbox and what happens when an agent needs to leave the sandbox; the
+orchestrator's model and effort; and the defaults. For unattended runs, Claude Code's `auto` permission mode and
+Codex's auto review are the recommended settings: routine actions run, risky ones are refused, nobody is asked.
+A run can override model and effort when it starts, and the orchestrator chooses them when it starts runs.
 
 ## Requirements
 
