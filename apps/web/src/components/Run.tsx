@@ -26,9 +26,12 @@ export function RetryNote({ run, className = "mt-1 text-xs" }: { run: NonNullabl
   return <p className={`${className} text-amber-300`}>↻ {line[0]!.toUpperCase() + line.slice(1)}</p>;
 }
 
+/** A run that halted although its queue is done (or cancelled): it has ended; nothing waits on it. */
+const endedHalt = (queue: QueueView) => queue.run?.state === "halted" && (queue.status === "done" || queue.status === "cancelled");
+
 export function RunChip({ queue }: { queue: QueueView }) {
   const r = queue.run;
-  if (!r || r.state === "finished") return null;
+  if (!r || r.state === "finished" || endedHalt(queue)) return null;
   return (
     <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs ring-1 ${RUN_TONE[r.state]}`}>
       {r.state === "running" && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-400" />}
@@ -61,18 +64,23 @@ export function RunControls({ project, queue, onChanged }: { project: ProjectSta
     && !project.queues.some((q) => q.id !== queue.id && q.run?.session === s.id && ["running", "pausing", "usage_wait", "retry_wait"].includes(q.run.state)));
   const runSession = run ? project.sessions.find((s) => s.id === run.session) : undefined;
   const canStart = queue.approved && !active && queue.status !== "done" && queue.status !== "cancelled";
+  const ended = endedHalt(queue);
+  // Shown as finished: the label, its colour and the times say "ended", and there is nothing to resume.
+  const shown = run && ended ? { ...run, state: "finished" as const } : run;
 
   return (
     <Section title="Run with Nexus">
       {run && (
         <div className="mb-3 rounded-lg bg-zinc-800/50 p-3 text-sm">
           <div className="flex flex-wrap items-center gap-2">
-            <span className={`rounded-full px-2 py-0.5 text-xs ring-1 ${RUN_TONE[run.state]}`}>{RUN_LABEL[run.state]}</span>
+            <span className={`rounded-full px-2 py-0.5 text-xs ring-1 ${RUN_TONE[shown!.state]}`}>{ended ? "ended" : RUN_LABEL[run.state]}</span>
             {run.step && <span className="font-mono text-xs text-zinc-400">at {run.step}</span>}
             <span className="text-xs text-zinc-500">since <TimeAgo at={run.updated_at} /></span>
           </div>
-          <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-zinc-400"><RunTimes run={run} /></div>
-          {run.reason && <p className="mt-1 text-zinc-300">{run.reason}</p>}
+          <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-zinc-400"><RunTimes run={shown!} /></div>
+          {run.reason && (ended
+            ? <p className="mt-1 text-xs text-zinc-500">The queue is done. The run's last note: {run.reason}</p>
+            : <p className="mt-1 text-zinc-300">{run.reason}</p>)}
           {runSession && <p className="mt-1 text-xs text-zinc-500">Session: {runSession.title ?? runSession.id} {runSession.live?.model ? `· ${runSession.live.model}` : ""}{runSession.effort ? ` · ${runSession.effort} effort` : ""} <ContextBar s={runSession} /></p>}
           {run.state === "usage_wait" && run.resume_at && <p className="mt-1 text-xs text-zinc-500">Resumes by itself at {new Date(run.resume_at).toLocaleTimeString()}.</p>}
           <RetryNote run={run} />
@@ -81,7 +89,7 @@ export function RunControls({ project, queue, onChanged }: { project: ProjectSta
       <div className="flex flex-wrap items-center gap-2">
         {active && run?.state !== "pausing" && <Button variant="quiet" disabled={busy} onClick={() => call({ action: "pause" })}>Pause after this step</Button>}
         {active && <Button variant="danger" disabled={busy} onClick={() => call({ action: "stop" })}>Stop now</Button>}
-        {run && (run.state === "paused" || run.state === "halted") && <Button disabled={busy || !queue.approved} onClick={() => call({ action: "resume" })}>Resume</Button>}
+        {run && !ended && (run.state === "paused" || run.state === "halted") && <Button disabled={busy || !queue.approved} onClick={() => call({ action: "resume" })}>Resume</Button>}
       </div>
       {canStart && (!run || run.state === "finished" || run.state === "halted" || run.state === "paused") && (
         <div className={`${run ? "mt-4 border-t border-zinc-800 pt-3" : ""} flex flex-wrap items-end gap-3`}>

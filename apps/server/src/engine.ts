@@ -331,6 +331,20 @@ export class Engine {
     this.writeRun(queueId, { ...run, state: "halted", reason, resume_after_restart: undefined, resume_at: undefined });
   }
 
+  /** The queue has no step left: every step is done or skipped. */
+  private nothingLeft(queueId: string): boolean {
+    const q = loadProjectState(this.store).queues.find((x) => x.id === queueId);
+    return !!q && q.steps.length > 0 && q.steps.every((s) => s.status === "done" || s.status === "skipped");
+  }
+
+  /** Ends a going run as finished (its last step is done). */
+  private finish(queueId: string): void {
+    const run = this.store.readRun(queueId);
+    if (!run || (run.state !== "running" && run.state !== "pausing")) return;
+    this.clearTimer(queueId);
+    this.writeRun(queueId, { ...run, state: "finished", reason: undefined, retries: undefined, failure: undefined, resume_at: undefined });
+  }
+
   /**
    * A turn of the run's session failed (or its process ended without Nexus asking). Passing: try the turn again
    * after a growing delay, at most RETRY_LIMIT times in a row. A usage limit with a reset time: wait for it.
@@ -441,7 +455,12 @@ export class Engine {
       this.writeRuntime(session.id, { state: "exited" });
       this.store.appendActivity(session.id, { at: now(), kind: code === 0 || byNexus ? "exit" : "error", text: `process exited (${code ?? "signal"})${byNexus ? ", ended by Nexus" : ""}`, ...tag() });
       if (this.live.get(session.id) === l) this.live.delete(session.id);
-      if (!byNexus) for (const q of runsOf()) this.turnFailed(q, { kind: "passing", code: "processExited", text: `the runtime's process exited (${code ?? "signal"})` });
+      if (!byNexus) for (const q of runsOf()) {
+        // The agent finished the queue's last step and its process then ended (the CLI closing, killed, or crashing
+        // after the report): nothing is left to run, so the run is finished, not a failure to retry.
+        if (this.nothingLeft(q)) { this.finish(q); continue; }
+        this.turnFailed(q, { kind: "passing", code: "processExited", text: `the runtime's process exited (${code ?? "signal"})` });
+      }
       this.changed();
     });
     return l;

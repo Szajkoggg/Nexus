@@ -93,3 +93,35 @@ test("a half-written final line is skipped, a bad line is reported", () => {
   assert.equal(s.queues[0]!.steps[0]!.status, "running");
   assert.equal(s.warnings.length, 1);
 });
+
+test("a done queue waits for nothing: no item for a halted run, nor for a failed step", () => {
+  const { st, q, session, emit } = setup();
+  st.writeQueue({ ...q, steps: [{ id: "Q1", title: "One", goal: "", acceptance: [] }, { id: "Q2", title: "Two", goal: "", acceptance: [] }] });
+  const w = session("worker");
+  emit(w, { type: "step.started", queue: "Q", step: "Q1" });
+  emit(w, { type: "step.done", queue: "Q", step: "Q1", summary: "ok" });
+  emit(w, { type: "step.started", queue: "Q", step: "Q2" });
+  emit(w, { type: "step.done", queue: "Q", step: "Q2", summary: "ok" });
+  // The agent's process ended after its last report, and the run was halted for it (as before this fix).
+  st.writeRun("Q", { protocol: 1, session: w.id, state: "halted", reason: "the turn failed 6 times in a row", step: "Q2", started_at: now(), updated_at: now() });
+  let s = loadProjectState(st);
+  assert.equal(s.queues[0]!.status, "done");
+  assert.deepEqual(s.attention, []);
+  // The same queue running: the halt is news.
+  st.writeQueue({ ...q, steps: [...q.steps, { id: "Q3", title: "Three", goal: "", acceptance: [] }], review_policy: "continue" });
+  s = loadProjectState(st);
+  assert.notEqual(s.queues[0]!.status, "done");
+  assert.equal(s.attention.some((a) => a.kind === "stopped"), true);
+
+  // A done queue with a failed step is treated alike: no item.
+  const b = setup();
+  b.st.writeQueue({ ...b.q, steps: [{ id: "Q1", title: "One", goal: "", acceptance: [] }, { id: "Q2", title: "Two", goal: "", acceptance: [] }] });
+  const w2 = b.session("worker");
+  b.emit(w2, { type: "step.started", queue: "Q", step: "Q1" });
+  b.emit(w2, { type: "step.failed", queue: "Q", step: "Q1", reason: "no" });
+  b.emit(w2, { type: "step.started", queue: "Q", step: "Q2" });
+  b.emit(w2, { type: "step.done", queue: "Q", step: "Q2", summary: "ok" });
+  s = loadProjectState(b.st);
+  assert.equal(s.queues[0]!.status, "done");
+  assert.deepEqual(s.attention, []);
+});

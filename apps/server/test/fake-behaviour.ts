@@ -3,6 +3,7 @@
 //   done   report the step done              ask     ask a blocking question, then end the turn
 //   noop   end the turn without an outcome   stop    report a stop condition
 //   fail   report the step failed            slow    work for FAKE_SLOW_MS (default 1500), then done
+//   doneexit  report the step done, then the process exits on a signal before its turn ends
 // A failure of the runtime, then done: "<kind><n>" fails the step's first n turns (counted in a file beside
 // FAKE_LOG, so a new process goes on counting), "<kind>" every turn. Kinds: overloaded, network (passing), auth
 // (lasting), limit (a usage limit resetting FAKE_RESET_MS, default 1500, later), crash (the process exits mid-turn).
@@ -69,7 +70,7 @@ export function recordArgs(what: unknown): void {
  * Does what the message asks and returns the agent's reply, or the failure the runtime should show for this turn.
  * `tool` reports a shell command it ran.
  */
-export async function respond(fake: Fake, text: string, tool: (command: string) => void): Promise<string | { fail: FakeFailure }> {
+export async function respond(fake: Fake, text: string, tool: (command: string) => void): Promise<string | { fail: FakeFailure } | { exit: true }> {
   const m = /step (\S+) \(\d+ of \d+\)/.exec(text);
   if (text.startsWith("[Nexus] Queue") && m) {
     const step = (fake.step = m[1]!);
@@ -82,6 +83,7 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
     if (behaviour === "slow") await new Promise((r) => setTimeout(r, Number(process.env.FAKE_SLOW_MS ?? 1500)));
     if (behaviour === "done" || behaviour === "slow") nexus("step", "done", step, "--summary", `fake finished ${step}`);
     if (behaviour === "fail") nexus("step", "failed", step, "--reason", "fake failure");
+    if (behaviour === "doneexit") { nexus("step", "done", step, "--summary", `fake finished ${step}, then exits`); return { exit: true }; }
     if (behaviour === "stop") nexus("stop", step, "--condition", "fake condition", "--reason", "fake stop");
     if (behaviour === "ask") nexus("ask", "Which way?", "--step", step);
     return `step ${step}: ${behaviour}`;

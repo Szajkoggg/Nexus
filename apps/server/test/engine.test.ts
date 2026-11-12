@@ -445,3 +445,26 @@ test("a cancelled update lets the held queue go on", async () => {
     await until("the run to finish", () => queue().run?.state === "finished");
   } finally { engine.shutdown(); delete process.env.FAKE_SLOW_MS; }
 });
+
+for (const runtime of ["claude", "codex"] as const) {
+  test(`${runtime}: an agent that exits after the last step.done finishes the run: no retry, no new process, nothing waits`, async () => {
+    const { store, engine, queue, until } = setup(["done", "doneexit"]);
+    process.env.FAKE_ARGS = join(dirname(process.env.FAKE_LOG!), "args.log");
+    const seen = new Set<string>();
+    const watch = setInterval(() => { const s = store.readRun("Q")?.state; if (s) seen.add(s); }, 20);
+    try {
+      engine.start("Q", { runtime });
+      await until("the run to finish", () => queue().run?.state === "finished");
+      await new Promise((r) => setTimeout(r, 1500)); // time enough for a retry or a new process, were there one
+      const q = queue();
+      assert.equal(q.status, "done");
+      assert.equal(q.run?.state, "finished");
+      assert.ok(!seen.has("retry_wait") && !seen.has("halted"), `states seen: ${[...seen].join(", ")}`);
+      const starts = readFileSync(process.env.FAKE_ARGS, "utf8").trim().split("\n").map((l) => JSON.parse(l) as { argv?: string[]; method?: string })
+        .filter((a) => a.argv || a.method === "thread/start" || a.method === "thread/resume");
+      assert.equal(starts.length, 1, "one process start");
+      assert.deepEqual(loadProjectState(store).attention, [], "nothing waits for the user");
+      assert.ok(q.run?.ended_at);
+    } finally { clearInterval(watch); engine.shutdown(); delete process.env.FAKE_ARGS; }
+  });
+}

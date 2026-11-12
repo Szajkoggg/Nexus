@@ -13,7 +13,7 @@ async function turn(text: string): Promise<void> {
   out({ type: "system", subtype: "init", model: "fake-model", session_id: "fake" });
   const reply = await respond(fake, text, (command) =>
     out({ type: "assistant", message: { content: [{ type: "tool_use", name: "Bash", input: { command } }] }, parent_tool_use_id: null }));
-  if (typeof reply !== "string") return fail(reply.fail);
+  if (typeof reply !== "string") return "exit" in reply ? exitOnSignal() : fail(reply.fail);
   out({ type: "assistant", message: { content: [{ type: "text", text: reply }], usage: { input_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: 90 } }, parent_tool_use_id: null });
   out({ type: "result", subtype: "success", is_error: false, result: reply, num_turns: 1, total_cost_usd: 0, modelUsage: { fake: { contextWindow: 1000 } } });
 }
@@ -23,6 +23,9 @@ async function turn(text: string): Promise<void> {
  * SDKRateLimitEvent, SDKResultSuccess with is_error and api_error_status): the CLI's own retries, a synthetic
  * assistant message naming the error, and a result marked as an error.
  */
+/** Ends the process as a signal would, before the turn's result: the CLI killed, or closing by itself. */
+function exitOnSignal(): void { process.kill(process.pid, "SIGTERM"); }
+
 function fail(kind: FakeFailure): void {
   if (kind === "crash") process.exit(3);
   const error = { overloaded: "overloaded", network: "unknown", auth: "authentication_failed", limit: "rate_limit" }[kind];

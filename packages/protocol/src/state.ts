@@ -164,7 +164,9 @@ function attentionOf(queues: QueueView[], questions: QuestionView[]): AttentionI
     out.push({ kind: "question", queue: x.queue, step: x.step, qid: x.qid, text: x.text, at: by?.at ?? x.asked_at });
   }
   for (const q of queues) {
-    if (q.run?.state === "halted" && q.status !== "stopped") out.push({ kind: "stopped", queue: q.id, step: q.run.step, text: q.run.reason ?? "The run halted", at: q.run.updated_at });
+    // A finished queue does not wait for the user, whatever its last run says (a halt after its last step is done,
+    // as an unasked exit of the agent could leave it); a done queue with a failed step is treated alike below.
+    if (q.run?.state === "halted" && q.status !== "stopped" && q.status !== "done" && q.status !== "cancelled") out.push({ kind: "stopped", queue: q.id, step: q.run.step, text: q.run.reason ?? "The run halted", at: q.run.updated_at });
     if (q.status === "stopped") out.push({ kind: "stopped", queue: q.id, step: q.current_step, text: q.status_reason ?? "Stopped", at: q.updated ?? q.updated_at });
     if (q.status === "proposed") out.push({ kind: "approval", queue: q.id, text: q.title, at: q.updated_at });
     if (q.status === "cancelled" || q.status === "done") continue;

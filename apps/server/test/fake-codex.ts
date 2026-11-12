@@ -14,7 +14,7 @@ async function runTurn(id: string, text: string): Promise<void> {
   notify("turn/started", { threadId, turn: { id, status: "inProgress", items: [] } });
   const reply = await respond(fake, text, (command) =>
     notify("item/started", { threadId, turnId: id, item: { type: "commandExecution", id: randomUUID(), command: `"powershell.exe" -Command '${command}'`, status: "inProgress" } }));
-  if (typeof reply !== "string") return fail(id, reply.fail);
+  if (typeof reply !== "string") return "exit" in reply ? exitOnSignal() : fail(id, reply.fail);
   notify("item/completed", { threadId, turnId: id, item: { type: "agentMessage", id: randomUUID(), text: reply } });
   notify("thread/tokenUsage/updated", { threadId, turnId: id, tokenUsage: { last: { inputTokens: 120 }, total: { inputTokens: 120 }, modelContextWindow: 2000 } });
   turnId = undefined;
@@ -26,6 +26,9 @@ async function runTurn(id: string, text: string): Promise<void> {
  * TurnCompletedNotification whose turn has status "failed" and a TurnError with codexErrorInfo; a usage limit comes
  * after account/rateLimits/updated shows a full window).
  */
+/** Ends the process as a signal would, before turn/completed: the app-server killed, or closing by itself. */
+function exitOnSignal(): void { process.kill(process.pid, "SIGTERM"); }
+
 function fail(id: string, kind: FakeFailure): void {
   if (kind === "crash") process.exit(3);
   const info = { overloaded: "serverOverloaded", network: { responseStreamDisconnected: { httpStatusCode: null } }, auth: "unauthorized", limit: "usageLimitExceeded" }[kind];
