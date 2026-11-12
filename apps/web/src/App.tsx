@@ -9,7 +9,7 @@ import { ContextBar, UsageMeter } from "./components/Run.tsx";
 import { ChatPanel, ConversationsButton, ConversationsPanel, OrchestratorButton, useOrchestrator } from "./components/Chat.tsx";
 import { RemoteButton, RemotePanel } from "./components/Remote.tsx";
 import { ProjectPicker, ProjectTabs } from "./components/Projects.tsx";
-import { isOpen } from "./layers.ts";
+import { isOpen, panelOrder } from "./layers.ts";
 import { nav, useNav } from "./nav.ts";
 import { SettingsButton, SettingsPanel, UpdatePill, useServer } from "./components/Settings.tsx";
 
@@ -182,14 +182,15 @@ export function App() {
         )}
       </main>
 
-      {ideasOpen && projectId && state && (
-        <ConversationsPanel project={projectId} name={state.project.name} version={tick} defaultRuntime={state.project.conversations.runtime}
-          onClose={() => nav.close("ideas")} onChanged={() => setTick((t) => t + 1)} />
-      )}
-
-      {chatOpen && projectId && (
-        <ChatPanel project={projectId} name={state?.project.name ?? projectId} view={orchestrator} onClose={() => nav.close("chat")} onChanged={() => setTick((t) => t + 1)} />
-      )}
+      {/* The chat and the Ideas panel stack in the order they were opened: the later one lies on top. */}
+      {panelOrder(route.nav).map((p) => p === "ideas"
+        ? ideasOpen && projectId && state && (
+          <ConversationsPanel key="ideas" project={projectId} name={state.project.name} version={tick} defaultRuntime={state.project.conversations.runtime}
+            onClose={() => nav.close("ideas")} onChanged={() => setTick((t) => t + 1)} />
+        )
+        : chatOpen && projectId && (
+          <ChatPanel key="chat" project={projectId} name={state?.project.name ?? projectId} view={orchestrator} onClose={() => nav.close("chat")} onChanged={() => setTick((t) => t + 1)} />
+        ))}
 
       <Drawer open={settingsOpen && !!state} onClose={() => nav.close("settings")}>
         {state && <SettingsPanel key={state.project.id} project={state.project} onChanged={() => { reload(); setTick((t) => t + 1); }} server={server} />}

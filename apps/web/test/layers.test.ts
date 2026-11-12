@@ -1,7 +1,7 @@
 // The history of open layers: Back closes the topmost; a close button does the same; nothing piles up.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { close, closeThen, closeTop, isOpen, layerValue, navOf, open, type Nav, type Step } from "../src/layers.ts";
+import { close, closeThen, closeTop, isOpen, layerValue, navOf, open, panelOrder, type Nav, type Step } from "../src/layers.ts";
 
 /** A browser history in memory, to play the steps against. */
 function browser(start: Nav) {
@@ -165,4 +165,27 @@ test("what belongs to a layer closes with it: an image with its step, a conversa
   b.apply(open(b.cur(), "item", "#/p/Q/Q1"));
   b.apply(close(b.cur(), "ideas"));
   assert.deepEqual(b.cur(), { hash: "#/p/Q/Q1", layers: ["item"], depth: 1 }, "the step opened beside it stays");
+});
+
+test("the chat and the Ideas panel stack in the order opened; a conversation counts as Ideas", () => {
+  assert.deepEqual(panelOrder(home), []);
+  const b = browser(home);
+  b.apply(open(b.cur(), "chat"));
+  b.apply(open(b.cur(), "ideas"));
+  b.apply(open(b.cur(), "conversation:01ABC"));
+  assert.deepEqual(panelOrder(b.cur()), ["chat", "ideas"], "Ideas, opened last, on top");
+  b.back();
+  assert.deepEqual(panelOrder(b.cur()), ["chat", "ideas"], "Back to the list: Ideas still on top");
+  b.back();
+  assert.deepEqual(panelOrder(b.cur()), ["chat"]);
+
+  const c = browser(home);
+  c.apply(open(c.cur(), "ideas"));
+  c.apply(open(c.cur(), "conversation:01ABC"));
+  c.apply(open(c.cur(), "chat"));
+  assert.deepEqual(panelOrder(c.cur()), ["ideas", "chat"], "the chat, opened last, on top");
+  c.back();
+  assert.deepEqual(panelOrder(c.cur()), ["ideas"]);
+  // With the step drawer and others in the stack, only the two panels are ordered.
+  assert.deepEqual(panelOrder({ hash: "#/p/Q", layers: ["item", "conversation:x", "waiting", "chat"], depth: 4 }), ["ideas", "chat"]);
 });

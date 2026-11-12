@@ -125,3 +125,14 @@ export function navOf(state: unknown, hash: string, query: string): Nav {
   for (const k of ["ideas", "chat", "settings", "remote", "waiting", "projects"]) if (q.has(k)) layers.push(k);
   return { hash, layers, depth: 0 };
 }
+
+export type SidePanel = "chat" | "ideas";
+
+/**
+ * The chat and the Ideas panel that are open, bottom first: the one opened last lies on top, on a phone (both over
+ * the page) and on a wide screen (both on the right). A conversation counts as the Ideas panel it belongs to.
+ */
+export function panelOrder(nav: Nav): SidePanel[] {
+  const at = (p: SidePanel) => nav.layers.findIndex((l) => (p === "ideas" ? kindOf(l) === "ideas" || kindOf(l) === "conversation" : kindOf(l) === p));
+  return (["chat", "ideas"] as const).filter((p) => at(p) >= 0).sort((a, b) => at(a) - at(b));
+}
