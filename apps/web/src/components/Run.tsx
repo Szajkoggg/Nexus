@@ -11,10 +11,11 @@ const RUN_TONE: Record<string, string> = {
   halted: "text-orange-300 bg-orange-500/10 ring-orange-500/40",
   finished: "text-emerald-300 bg-emerald-500/10 ring-emerald-500/30",
   usage_wait: "text-amber-300 bg-amber-500/10 ring-amber-500/40",
+  retry_wait: "text-amber-300 bg-amber-500/10 ring-amber-500/40",
 };
 const RUN_LABEL: Record<string, string> = {
   running: "running", pausing: "pausing after this step", paused: "paused", halted: "halted",
-  finished: "finished", usage_wait: "waiting for the usage window",
+  finished: "finished", usage_wait: "waiting for the usage window", retry_wait: "waiting to retry",
 };
 
 export function RunChip({ queue }: { queue: QueueView }) {
@@ -41,7 +42,7 @@ export function RunControls({ project, queue, onChanged }: { project: ProjectSta
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const run = queue.run;
-  const active = run && ["running", "pausing", "usage_wait"].includes(run.state);
+  const active = run && ["running", "pausing", "usage_wait", "retry_wait"].includes(run.state);
   const call = async (body: Record<string, unknown>) => {
     setBusy(true); setError(undefined);
     try { await act(id, "POST", `/queues/${enc(queue.id)}/run`, body); onChanged(); }
@@ -49,7 +50,7 @@ export function RunControls({ project, queue, onChanged }: { project: ProjectSta
     finally { setBusy(false); }
   };
   const reusable = project.sessions.filter((s) => s.role === "worker" && s.runtime !== "external" && s.launched_by === "nexus" && s.native_id
-    && !project.queues.some((q) => q.id !== queue.id && q.run?.session === s.id && ["running", "pausing", "usage_wait"].includes(q.run.state)));
+    && !project.queues.some((q) => q.id !== queue.id && q.run?.session === s.id && ["running", "pausing", "usage_wait", "retry_wait"].includes(q.run.state)));
   const runSession = run ? project.sessions.find((s) => s.id === run.session) : undefined;
   const canStart = queue.approved && !active && queue.status !== "done" && queue.status !== "cancelled";
 
@@ -65,7 +66,7 @@ export function RunControls({ project, queue, onChanged }: { project: ProjectSta
           <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-zinc-400"><RunTimes run={run} /></div>
           {run.reason && <p className="mt-1 text-zinc-300">{run.reason}</p>}
           {runSession && <p className="mt-1 text-xs text-zinc-500">Session: {runSession.title ?? runSession.id} {runSession.live?.model ? `· ${runSession.live.model}` : ""}{runSession.effort ? ` · ${runSession.effort} effort` : ""} <ContextBar s={runSession} /></p>}
-          {run.state === "usage_wait" && run.resume_at && <p className="mt-1 text-xs text-zinc-500">Resumes by itself at {new Date(run.resume_at).toLocaleTimeString()}.</p>}
+          {(run.state === "usage_wait" || run.state === "retry_wait") && run.resume_at && <p className="mt-1 text-xs text-zinc-500">Resumes by itself at {new Date(run.resume_at).toLocaleTimeString()}.</p>}
         </div>
       )}
       <div className="flex flex-wrap items-center gap-2">
@@ -121,9 +122,9 @@ export function RunControls({ project, queue, onChanged }: { project: ProjectSta
 
 const KIND_STYLE: Record<string, string> = {
   tool: "text-zinc-300", text: "text-zinc-100", tool_error: "text-red-300", error: "text-red-300",
-  turn_start: "text-zinc-500", turn_end: "text-zinc-500", exit: "text-zinc-500",
+  turn_start: "text-zinc-500", turn_end: "text-zinc-500", exit: "text-zinc-500", retry: "text-amber-300",
 };
-const KIND_ICON: Record<string, string> = { tool: "›", text: "¶", tool_error: "✗", error: "!", turn_start: "▸", turn_end: "■", exit: "■" };
+const KIND_ICON: Record<string, string> = { tool: "›", text: "¶", tool_error: "✗", error: "!", turn_start: "▸", turn_end: "■", exit: "■", retry: "↻" };
 
 /** What the agent did during a step, from the runtime's stream. */
 export function Activity({ project, session, queue, step, version }: { project: string; session: string; queue: string; step: string; version: unknown }) {

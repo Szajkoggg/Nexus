@@ -51,7 +51,10 @@ Phase 3 (Claude Code adapter and queue engine): An approved queue can be started
 Nexus launches Claude Code (with your own subscription login), drives it step by step, puts your notes into each
 step's opening, delivers messages and answers into the running turn, holds on questions and reviews, and pauses,
 stops and resumes on request. The dashboard shows the agent's activity per step, each session's context fill and
-the subscription's usage windows.
+the subscription's usage windows. A turn that fails for a passing reason (the service overloaded, the network, a
+crashed runtime) is tried again by itself after 1, 2, 4, 8 and 16 minutes ("waiting to retry"); a usage limit waits
+for its window; anything else, or a sixth failure in a row, halts the run with the reason. Pausing or stopping
+cancels a pending retry.
 
 Per project, the dashboard's settings panel (the gear icon) sets the default runtime; for Claude Code workers the
 model, effort, permission mode and extra allowed tools (the project's own `.claude/settings.json` applies as well);
@@ -94,7 +97,8 @@ cd ../Nexus-live && npm start                                 # the live instanc
 
 To bring a new version to it: commit to `main` here, then `nexus server update` (or "Update Nexus" in the settings
 panel). Running steps finish first and no new step starts meanwhile; then the live worktree moves to `main`,
-installs what changed, builds and restarts itself, and the queues it held go on by themselves. Queues paused by you,
+installs what changed, builds and restarts itself, and the queues it held (also those waiting to retry) go on by
+themselves. Queues paused by you,
 stopped by a stop condition, waiting for an answer or for the usage window stay as they are. `--now` stops the
 running steps instead of waiting (they continue where they were); `nexus server cancel` gives up waiting. If the
 update fails, the old version keeps running and the held queues go on. That includes a new version that does not

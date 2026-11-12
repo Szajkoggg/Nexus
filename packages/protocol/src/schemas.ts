@@ -270,9 +270,10 @@ export const RunFile = z.object({
   /**
    * running: the engine drives the steps. pausing: stop after the current step. paused: user paused or the server
    * restarted. halted: a stop, failure or stall; needs the user. finished: the last step is done.
-   * usage_wait: waiting for the subscription window to reset.
+   * usage_wait: waiting for the subscription window to reset. retry_wait: a turn failed for a passing reason (the
+   * service overloaded, the network, a crashed runtime); the turn is tried again at resume_at.
    */
-  state: z.enum(["running", "pausing", "paused", "halted", "finished", "usage_wait"]),
+  state: z.enum(["running", "pausing", "paused", "halted", "finished", "usage_wait", "retry_wait"]),
   reason: z.string().optional(),
   step: Id.optional(),        // the step the engine last opened
   nudged: z.boolean().optional(),
@@ -280,7 +281,9 @@ export const RunFile = z.object({
   updated_at: Time,
   /** When it last stopped going: became finished, halted or paused. Cleared when it goes on again. */
   ended_at: Time.optional(),
-  resume_at: Time.optional(), // usage_wait: when the window resets
+  resume_at: Time.optional(), // usage_wait: when the window resets; retry_wait: when the turn is tried again
+  /** Turns that failed in a row for a passing reason; cleared by a turn that ends well and by a new step. */
+  retries: z.number().int().optional(),
   /** Stopped only for a Nexus update: the server resumes it by itself when it starts again. */
   resume_after_restart: z.boolean().optional(),
 });
@@ -295,7 +298,7 @@ export type Delivery = z.infer<typeof Delivery>;
 /** sessions/<id>/activity.jsonl: a condensed record of what the agent did, from the runtime's stream. */
 export const Activity = z.object({
   at: Time,
-  kind: z.enum(["turn_start", "text", "tool", "tool_error", "turn_end", "error", "exit"]),
+  kind: z.enum(["turn_start", "text", "tool", "tool_error", "turn_end", "error", "exit", "retry"]),
   text: z.string(),
   queue: Id.optional(),
   step: Id.optional(),

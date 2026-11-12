@@ -136,7 +136,7 @@ Open questions (${open.length})`);
   console.log(`
 Worker sessions (${workers.length})`);
   for (const w of workers) {
-    const busy = state.queues.find((q) => q.run?.session === w.id && ["running", "pausing", "usage_wait"].includes(q.run.state));
+    const busy = state.queues.find((q) => q.run?.session === w.id && ["running", "pausing", "usage_wait", "retry_wait"].includes(q.run.state));
     console.log(`- ${w.id} "${w.title ?? ""}" ${w.runtime}${w.launched_by === "nexus" ? "" : " (external)"}, ${w.live?.state ?? "not live"}, ${w.live?.model ?? w.model ?? "model ?"}, ${pct(w.live?.context_tokens, w.live?.context_window)}${busy ? `, running queue ${busy.id}` : ", free"}`);
     if (w.context) console.log(`  knows: ${w.context.topics.join(", ") || "-"}; ${w.context.text.replace(/\s+/g, " ").slice(0, 300)}`);
   }

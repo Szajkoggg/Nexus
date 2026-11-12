@@ -2,7 +2,7 @@
 // uses and sends the notifications Nexus reads. What it does with a message is in fake-behaviour.ts; a turn/steer
 // is recorded with priority "next", like Claude's mid-turn messages.
 import { randomUUID } from "node:crypto";
-import { record, recordArgs, respond, type Fake } from "./fake-behaviour.ts";
+import { record, recordArgs, respond, type Fake, type FakeFailure } from "./fake-behaviour.ts";
 
 const out = (m: unknown) => process.stdout.write(JSON.stringify(m) + "\n");
 const notify = (method: string, params: unknown) => out({ method, params });
@@ -14,10 +14,30 @@ async function runTurn(id: string, text: string): Promise<void> {
   notify("turn/started", { threadId, turn: { id, status: "inProgress", items: [] } });
   const reply = await respond(fake, text, (command) =>
     notify("item/started", { threadId, turnId: id, item: { type: "commandExecution", id: randomUUID(), command: `"powershell.exe" -Command '${command}'`, status: "inProgress" } }));
+  if (typeof reply !== "string") return fail(id, reply.fail);
   notify("item/completed", { threadId, turnId: id, item: { type: "agentMessage", id: randomUUID(), text: reply } });
   notify("thread/tokenUsage/updated", { threadId, turnId: id, tokenUsage: { last: { inputTokens: 120 }, total: { inputTokens: 120 }, modelContextWindow: 2000 } });
   turnId = undefined;
   notify("turn/completed", { threadId, turn: { id, status: "completed", items: [] } });
+}
+
+/**
+ * A failed turn as codex app-server writes it (generate-ts of Codex 0.167.2: ErrorNotification with willRetry,
+ * TurnCompletedNotification whose turn has status "failed" and a TurnError with codexErrorInfo; a usage limit comes
+ * after account/rateLimits/updated shows a full window).
+ */
+function fail(id: string, kind: FakeFailure): void {
+  if (kind === "crash") process.exit(3);
+  const info = { overloaded: "serverOverloaded", network: { responseStreamDisconnected: { httpStatusCode: null } }, auth: "unauthorized", limit: "usageLimitExceeded" }[kind];
+  const message = { overloaded: "The server is overloaded", network: "stream disconnected before completion", auth: "401 Unauthorized", limit: "You have hit your usage limit." }[kind];
+  const error = { message, codexErrorInfo: info, additionalDetails: null, misalignment: null };
+  if (kind === "overloaded" || kind === "network") notify("error", { error, willRetry: true, threadId, turnId: id });
+  if (kind === "limit") {
+    const resetsAt = Math.ceil((Date.now() + Number(process.env.FAKE_RESET_MS ?? 1500)) / 1000);
+    notify("account/rateLimits/updated", { rateLimits: { primary: { usedPercent: 100, windowDurationMins: 300, resetsAt }, secondary: null } });
+  }
+  turnId = undefined;
+  notify("turn/completed", { threadId, turn: { id, status: "failed", items: [], error } });
 }
 
 let buffer = "";
@@ -36,7 +56,7 @@ process.stdin.on("data", (d: string) => {
     switch (m.method) {
       case "initialize": reply({ userAgent: "fake-codex" }); break;
       case "thread/start": recordArgs({ method: m.method, model: m.params.model, approvalsReviewer: m.params.approvalsReviewer ?? null, approvalPolicy: m.params.approvalPolicy, sandbox: m.params.sandbox, cwd: m.params.cwd, writableRoots: m.params.config?.["sandbox_workspace_write.writable_roots"] ?? null }); threadId = randomUUID(); reply({ thread: { id: threadId }, model: "fake-codex-model" }); break;
-      case "thread/resume": threadId = m.params.threadId; reply({ thread: { id: threadId }, model: "fake-codex-model" }); break;
+      case "thread/resume": recordArgs({ method: m.method, threadId: m.params.threadId }); threadId = m.params.threadId; reply({ thread: { id: threadId }, model: "fake-codex-model" }); break;
       case "account/rateLimits/read":
         reply({ rateLimits: { primary: { usedPercent: 5, windowDurationMins: 10080, resetsAt: Math.floor(Date.now() / 1000) + 86400 }, secondary: null } });
         break;

@@ -19,8 +19,15 @@ export interface StreamFacts {
   nativeId?: string;
 }
 
-/** What the agent did, condensed for the dashboard. */
-export interface ActivityItem { kind: "turn_start" | "text" | "tool" | "tool_error" | "turn_end" | "error"; text: string }
+/** What the agent did, condensed for the dashboard. `retry`: the runtime retries a request by itself. */
+export interface ActivityItem { kind: "turn_start" | "text" | "tool" | "tool_error" | "turn_end" | "error" | "retry"; text: string }
+
+/**
+ * Why a turn failed, read from the runtime's codes. `passing`: worth trying the turn again later (overloaded, a short
+ * rate limit, the network). `lasting`: needs the user (authentication, an invalid request, a refusal, anything
+ * unknown). `usage`: a subscription limit with a known reset time (`resetsAt`). See DESIGN.md, "Failures".
+ */
+export interface TurnFailure { kind: "passing" | "lasting" | "usage"; code: string; text: string; resetsAt?: string }
 
 export interface AgentEvents {
   /** For the activity log: short forms (a text is clipped). */
@@ -28,7 +35,8 @@ export interface AgentEvents {
   /** A text the agent wrote, whole: what a chat shows. */
   message: [string];
   facts: [StreamFacts];
-  turnEnd: [{ ok: boolean; text: string }];
+  /** `ok` false with no failure: the turn was interrupted (Nexus asked for it). */
+  turnEnd: [{ ok: boolean; text: string; failure?: TurnFailure }];
   exit: [number | null];
 }
 

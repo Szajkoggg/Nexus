@@ -6,7 +6,7 @@ import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from "node:c
 import { EventEmitter } from "node:events";
 import { existsSync } from "node:fs";
 import { join, relative, resolve, isAbsolute } from "node:path";
-import { agentEnv, type AgentEvents, type AgentOptions, type AgentProcess, type Priority } from "./agent.ts";
+import { agentEnv, type AgentEvents, type AgentOptions, type AgentProcess, type Priority, type TurnFailure } from "./agent.ts";
 
 export interface CodexOptions extends AgentOptions {
   /** The thread to resume; a new thread is started without one. */
@@ -23,6 +23,27 @@ export interface CodexOptions extends AgentOptions {
 }
 
 type Json = Record<string, any>;
+
+/** CodexErrorInfo values worth trying again: overloaded, the server's own error, the network, a short rate limit. */
+const CODEX_PASSING = new Set([
+  "serverOverloaded", "internalServerError", "rateLimitExceeded", "httpConnectionFailed", "responseStreamConnectionFailed",
+  "responseStreamDisconnected", "responseTooManyFailedAttempts",
+]);
+
+/**
+ * Tells a failed turn's reason from its TurnError (`turn.error` of `turn/completed` with status `failed`). The shapes
+ * are from `codex app-server generate-ts` of Codex 0.167.2: TurnError { message, codexErrorInfo, additionalDetails },
+ * CodexErrorInfo a string or a one-key object (`{ httpConnectionFailed: { httpStatusCode } }`). A usage limit is a
+ * `usage` failure when the last rate limits name a window that is full and when it resets; otherwise it is waited out
+ * like a short rate limit.
+ */
+export function classifyCodexError(error: Json | null | undefined, resetsAt?: string): TurnFailure {
+  const info = error?.codexErrorInfo;
+  const code = typeof info === "string" ? info : info && typeof info === "object" ? Object.keys(info)[0] ?? "unknown" : "unknown";
+  const text = clip(String(error?.message ?? "the turn failed") + (error?.additionalDetails ? ` (${error.additionalDetails})` : ""), 300);
+  if (code === "usageLimitExceeded") return resetsAt && Date.parse(resetsAt) > Date.now() ? { kind: "usage", code, text, resetsAt } : { kind: "passing", code, text };
+  return { kind: CODEX_PASSING.has(code) ? "passing" : "lasting", code, text };
+}
 
 /**
  * What a sandboxed Codex needs to commit in a git worktree whose git directory lies outside it: the worktree's own git
@@ -56,6 +77,8 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
   /** Messages waiting for the running turn to end (or for the thread to be ready). */
   private readonly queue: string[] = [];
   private lastStderr = "";
+  /** The last rate-limit windows: when a full one resets. */
+  private limits: { usedPercent: number; resetsAt?: string }[] = [];
 
   constructor(options: CodexOptions) {
     super();
@@ -146,7 +169,7 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
       .catch((err) => {
         this.emit("activity", { kind: "error", text: `turn/start: ${(err as Error).message}` });
         this.state = "idle";
-        this.emit("turnEnd", { ok: false, text: (err as Error).message });
+        this.emit("turnEnd", { ok: false, text: (err as Error).message, failure: { kind: "lasting", code: "turnStartRejected", text: clip((err as Error).message, 300) } });
       });
   }
 
@@ -199,10 +222,12 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
       case "turn/completed": {
         const status = p.turn?.status as string;
         const ok = status === "completed";
+        // Interrupted: Nexus asked for it (turn/interrupt). Anything else that is not completed is a failure.
+        const failure = ok || status === "interrupted" ? undefined : classifyCodexError(p.turn?.error, this.fullWindowResets());
         this.turnId = undefined;
         this.state = "idle";
-        this.emit("activity", { kind: "turn_end", text: ok ? "turn ended" : `turn ${status}${p.turn?.error?.message ? `: ${clip(p.turn.error.message, 300)}` : ""}` });
-        this.emit("turnEnd", { ok, text: status });
+        this.emit("activity", { kind: "turn_end", text: ok ? "turn ended" : failure ? `turn failed (${failure.kind}, ${failure.code}): ${failure.text}` : `turn ${status}` });
+        this.emit("turnEnd", { ok, text: status, failure });
         const next = this.queue.shift();
         if (next !== undefined && this.state === "idle") this.startTurn(next);
         return;
@@ -235,7 +260,9 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
         this.rateLimits(p.rateLimits);
         return;
       case "error":
-        if (!p.willRetry) this.emit("activity", { kind: "error", text: clip(p.error?.message ?? "error", 400) });
+        // willRetry: Codex retries by itself; recorded, not counted against Nexus's own retries.
+        if (p.willRetry) this.emit("activity", { kind: "retry", text: clip(`Codex retries a request: ${p.error?.message ?? "error"}`, 400) });
+        else this.emit("activity", { kind: "error", text: clip(p.error?.message ?? "error", 400) });
         return;
       default:
         return;
@@ -245,14 +272,21 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
   private rateLimits(r: Json | undefined): void {
     if (!r) return;
     const usage: Record<string, { utilization: number; resets_at?: string }> = {};
+    this.limits = [];
     for (const w of [r.primary, r.secondary]) {
       if (!w) continue;
+      this.limits.push({ usedPercent: w.usedPercent ?? 0, resetsAt: w.resetsAt ? new Date(w.resetsAt * 1000).toISOString() : undefined });
       usage[`codex_${duration(w.windowDurationMins)}`] = {
         utilization: (w.usedPercent ?? 0) / 100,
         resets_at: w.resetsAt ? new Date(w.resetsAt * 1000).toISOString() : undefined,
       };
     }
     if (Object.keys(usage).length) this.emit("facts", { usage });
+  }
+
+  /** When the latest full window (100 % used) resets, if the rate limits said so. */
+  private fullWindowResets(): string | undefined {
+    return this.limits.filter((w) => w.usedPercent >= 100 && w.resetsAt).map((w) => w.resetsAt!).sort().at(-1);
   }
 }
 

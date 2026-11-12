@@ -3,12 +3,16 @@
 //   done   report the step done              ask     ask a blocking question, then end the turn
 //   noop   end the turn without an outcome   stop    report a stop condition
 //   fail   report the step failed            slow    work for FAKE_SLOW_MS (default 1500), then done
+// A failure of the runtime, then done: "<kind><n>" fails the step's first n turns (counted in a file beside
+// FAKE_LOG, so a new process goes on counting), "<kind>" every turn. Kinds: overloaded, network (passing), auth
+// (lasting), limit (a usage limit resetting FAKE_RESET_MS, default 1500, later), crash (the process exits mid-turn).
+// Each fake writes the failure the way its runtime does (fake-claude.ts, fake-codex.ts).
 // An answer ("[Nexus] Answer …") makes it report the current step done. As an orchestrator: "FAKE-DRAFT:" followed by
 // YAML drafts that queue; "FAKE-NEXUS: [args]" runs `nexus` with those arguments; a "[Nexus] A worker asked … (qid X;"
 // notice is answered with "fake answer". "FAKE-LONG" is answered with longReply("Reply"); a hand-over with
 // longReply("SUMMARY").
 import { execFileSync } from "node:child_process";
-import { appendFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -26,6 +30,20 @@ export function record(text: string, priority: string | null, busy: boolean): vo
 }
 
 export interface Fake { step?: string }
+
+export type FakeFailure = "overloaded" | "network" | "auth" | "limit" | "crash";
+
+/** Whether this turn of the step fails, and how (see the header). */
+function failure(step: string, behaviour: string): FakeFailure | undefined {
+  const m = /^(overloaded|network|auth|limit|crash)(\d*)$/.exec(behaviour);
+  if (!m) return undefined;
+  if (!m[2]) return m[1] as FakeFailure;
+  const file = join(dirname(process.env.FAKE_LOG ?? "."), `fake-fails-${step}`);
+  const n = existsSync(file) ? Number(readFileSync(file, "utf8")) : 0;
+  if (n >= Number(m[2])) return undefined;
+  writeFileSync(file, String(n + 1));
+  return m[1] as FakeFailure;
+}
 
 /**
  * A long Markdown reply (over 3000 characters: headings, paragraphs, a list, a code block, non-ASCII letters), the
@@ -47,14 +65,20 @@ export function recordArgs(what: unknown): void {
   if (process.env.FAKE_ARGS) appendFileSync(process.env.FAKE_ARGS, JSON.stringify(what) + "\n");
 }
 
-/** Does what the message asks and returns the agent's reply. `tool` reports a shell command it ran. */
-export async function respond(fake: Fake, text: string, tool: (command: string) => void): Promise<string> {
+/**
+ * Does what the message asks and returns the agent's reply, or the failure the runtime should show for this turn.
+ * `tool` reports a shell command it ran.
+ */
+export async function respond(fake: Fake, text: string, tool: (command: string) => void): Promise<string | { fail: FakeFailure }> {
   const m = /step (\S+) \(\d+ of \d+\)/.exec(text);
   if (text.startsWith("[Nexus] Queue") && m) {
     const step = (fake.step = m[1]!);
     const behaviour = /FAKE: (\w+)/.exec(text)?.[1] ?? "done";
     nexus("step", "start", step);
     tool(`nexus step start ${step}`);
+    const fail = failure(step, behaviour);
+    if (fail) return { fail };
+    if (/^(overloaded|network|auth|limit|crash)/.test(behaviour)) nexus("step", "done", step, "--summary", `fake finished ${step} after failures`);
     if (behaviour === "slow") await new Promise((r) => setTimeout(r, Number(process.env.FAKE_SLOW_MS ?? 1500)));
     if (behaviour === "done" || behaviour === "slow") nexus("step", "done", step, "--summary", `fake finished ${step}`);
     if (behaviour === "fail") nexus("step", "failed", step, "--reason", "fake failure");

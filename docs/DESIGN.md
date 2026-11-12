@@ -110,7 +110,43 @@ Nexus the **queue engine drives the steps**:
 
 This makes note delivery certain (it is part of the step's opening turn), gives natural pause points between steps,
 and works the same for both runtimes. If a turn ends without a step outcome, the engine asks the worker once for
-its status, then marks the step `waiting` and tells the orchestrator.
+its status, then marks the step `waiting` and tells the orchestrator. A turn that failed is not such a turn: see
+"Failures" below.
+
+### Failures
+
+A turn can fail without the worker deciding anything: the service is overloaded, the network drops, a limit is hit,
+the runtime's process crashes. The adapters read why from the runtime's own codes and hand the engine a failure of
+one of three kinds; the engine decides (`src/engine.ts`, `turnFailed`).
+
+| Kind | Claude Code | Codex | What the engine does |
+|---|---|---|---|
+| Passing | `overloaded`, `server_error`, `rate_limit` without a reset time, a connection error | `serverOverloaded`, `internalServerError`, `rateLimitExceeded`, `httpConnectionFailed`, `responseStreamConnectionFailed`, `responseStreamDisconnected`, `responseTooManyFailedAttempts`, `usageLimitExceeded` without a known reset | Tries the turn again (`retry_wait`) |
+| Usage, with a reset time | `rate_limit` after a `rate_limit_event` with `status: rejected` and `resetsAt` | `usageLimitExceeded` when the last rate limits show a full window and its `resetsAt` | Waits for the window (`usage_wait`, `resume_at`) |
+| Lasting | `authentication_failed`, `billing_error`, `invalid_request`, `model_not_found`, a refusal, the result subtypes `error_max_turns` and the like, anything unknown | `unauthorized`, `badRequest`, `modelNotFound`, `contextWindowExceeded`, the policy codes, `sandboxError`, `other`, anything unknown | Halts the run, naming the failure |
+
+A process that exits while its run goes on, without Nexus ending it, is a passing failure (`processExited`): the
+retry starts a new process that resumes the same session (Claude Code `--resume`, Codex `thread/resume`).
+
+- **Retries**: after 1, 2, 4, 8 and 16 minutes (`RETRY_BASE_MS` 60 000, doubled each time; `RETRY_LIMIT` 5 in a
+  row). The sixth failure in a row halts the run with the last failure as its reason. A turn that ends well clears
+  the count (`retries` in run.yaml), and so does a new step. The retry continues the step with a turn that says the
+  last one failed. A usage wait goes on `USAGE_MARGIN_MS` (60 s) after the reset and is not counted.
+- **The runtime's own retries** (Claude Code's `api_retry`, Codex's `error` with `willRetry`) are recorded in the
+  activity as `retry` and not counted: only the turn's end decides.
+- **Exits Nexus causes are never failures**: its shutdown, the hand-over of an update, an update's drain with `now`,
+  the end of a finished run. A stopped engine writes nothing into the runs, so a run held by an update stays held and
+  resumes after the restart; one whose last step was done before the stop is finished by the next server.
+- **A retry waiting at an update** is held like a running queue (`resume_after_restart`), and the next server makes
+  it when it is due. A timer that comes during the drain does nothing; a cancelled update sets it again. A pause or a
+  stop by the user cancels a pending retry.
+
+The shapes come from the runtimes' published types, not from a probe: Claude Code's from the Agent SDK's `sdk.d.ts`
+(`@anthropic-ai/claude-agent-sdk` 0.3.323, the release that matches Claude Code 2.1.323: `SDKAssistantMessageError`,
+`SDKAPIRetryMessage`, `SDKRateLimitInfo`, `SDKResultMessage` with `is_error`, `api_error_status`, `terminal_reason`),
+and Codex's from `codex app-server generate-ts` of Codex 0.167.2 (`TurnError`, `CodexErrorInfo`,
+`ErrorNotification`, `TurnStatus`). A Claude Code connection error has no code of its own; it is read from the
+`api_retry` messages before the failure, which carry no HTTP status for one. The fakes write the same shapes.
 
 ### Messages to a running step
 
