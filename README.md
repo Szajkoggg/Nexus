@@ -23,6 +23,10 @@ right, both at once, with the queue list between them: click another step and th
 **Review images** open in the app: full screen on a phone, two fingers to zoom (double-tap on a computer), swipe or
 the arrows for the step's next and previous image; "Original" opens the file in a new tab.
 
+**Withdrawing an approval.** A queue approved but not started yet shows "Withdraw approval" in its detail (with an
+optional reason): it goes back to proposed and waits for your approval again; the earlier approval stays on record.
+Once a queue has started, pause or stop it instead. Only you can do this, from the dashboard.
+
 **Drafts.** Text typed but not sent (to the orchestrator, in a conversation, to a running agent, a step's note, an
 answer, the words with an approval) stays in its box when you close the panel, open something else, switch project
 or reload, also when a phone's browser drops the tab. Each box keeps its own text; sending clears it, a failed send

@@ -102,11 +102,19 @@ approvals:
     at: 2026-11-12T09:14:00Z
     words: "Rendben, előrehozhatjuk a shadert, illetve a kettes ponttal is egyet tudok érteni."
     hash: sha256:...                   # of the revision's steps, criteria and stop conditions
+withdrawals:                           # approvals the user took back before the queue ever ran
+  - revision: 3
+    at: 2026-11-12T10:02:00Z
+    reason: "The art is not ready yet." # optional
+    approvals: 1                       # how many approval records there were then
 history:                               # previous revisions, kept for the record
   - { revision: 2, hash: sha256:..., replaced_at: 2026-11-12T09:10:00Z }
 ```
 
-A queue is runnable only when its latest approval's hash matches its current revision.
+A queue is runnable only when its latest approval's hash matches its current revision and no withdrawal came
+after that approval (a withdrawal's `approvals` is not below the number of approvals). Withdrawing sets the queue
+back to `proposed`; the approvals stay as they were, and a later approval makes it runnable again. Only a queue
+that never ran can be withdrawn (no `run.yaml`, no step started); a started one is paused or stopped instead.
 
 ## Notes: `notes/<step-id>/<note-id>.md`
 
@@ -288,6 +296,7 @@ Writes (JSON bodies only; a request with a foreign `Origin` is refused):
 | `DELETE /api/projects/:id/queues/:q/steps/:s/notes/:note` | | Withdraws a note not yet delivered |
 | `POST /api/projects/:id/sessions/:session/messages` | `text`, `queue?`, `step?` | A message to a session's inbox |
 | `POST /api/projects/:id/queues/:q/approve` | `words?` | Approves the current revision |
+| `POST /api/projects/:id/queues/:q/withdraw` | `reason?` | The user takes back the approval of a queue that never ran. Only from the dashboard's own page: the request must carry this server's `Origin` and, if it sends one, `Sec-Fetch-Site: same-origin`; anything else is refused (403). There is no CLI command and no event for it |
 | `PATCH /api/projects/:id/queues/:q` | `review_policy` (`continue`, `wait` or null) | Queue settings |
 | `POST /api/projects/:id/questions/:qid/answer` | `text`, `continue?` | The user's answer, routed to the asker |
 | `POST /api/projects/:id/queues/:q/run` | `action` (`start`, `pause`, `resume`, `stop`), `model?`, `session?` | Runs the queue through a Nexus-launched session (`session` continues an existing one) |

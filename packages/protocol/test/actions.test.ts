@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   ActionError, ProjectStore, addNote, answerAsUser, approveQueue, deleteNote, loadProjectState, newId, now,
-  routeAnswers, sendMessage, setQueueSettings, type Event, type SessionFile,
+  routeAnswers, sendMessage, setQueueSettings, withdrawApproval, type Event, type SessionFile,
 } from "../src/index.ts";
 
 function setup() {
@@ -115,4 +115,38 @@ test("project settings: set, clear with an empty value, and refuse what the sche
   updateSettings(st, { runtimes: { codex: { effort: "xhigh" } } });
   assert.throws(() => updateSettings(st, { runtimes: { claude: { permission_mode: "yolo" } } }), /permission_mode/);
   assert.equal(st.readProject().runtimes.codex.effort, "xhigh", "a refused change leaves the settings as they were");
+});
+
+test("withdrawing the approval of an unstarted queue: proposed again, recorded, and approving again works", () => {
+  const { st } = setup();
+  approveQueue(st, "Q", "go");
+  withdrawApproval(st, "Q", "  not yet: the art is missing  ");
+  let q = loadProjectState(st).queues[0]!;
+  assert.equal(q.approved, false);
+  assert.equal(q.status, "proposed");
+  assert.equal(q.approvals.length, 1, "the earlier approval stays on record");
+  assert.equal(q.approvals[0]!.words, "go");
+  assert.deepEqual(q.withdrawals.map((w) => [w.revision, w.reason, w.approvals]), [[1, "not yet: the art is missing", 1]]);
+  assert.equal(loadProjectState(st).attention[0]?.kind, "approval", "it waits for an approval again");
+  assert.throws(() => withdrawApproval(st, "Q"), (e: ActionError) => e.status === 409, "nothing left to withdraw");
+  approveQueue(st, "Q");
+  q = loadProjectState(st).queues[0]!;
+  assert.equal(q.approved, true);
+  assert.equal(q.status, "approved");
+  assert.equal(q.approvals.length, 2);
+  withdrawApproval(st, "Q");
+  assert.equal(loadProjectState(st).queues[0]!.withdrawals.at(-1)!.reason, undefined, "the reason is optional");
+});
+
+test("a queue that has started cannot be withdrawn: a step started, or a run recorded", () => {
+  const { st, session, emit } = setup();
+  approveQueue(st, "Q");
+  emit(session("worker"), { type: "step.started", queue: "Q", step: "Q1" });
+  assert.throws(() => withdrawApproval(st, "Q"), (e: ActionError) => e.status === 409 && /pause or stop/.test(e.message));
+  assert.equal(loadProjectState(st).queues[0]!.approved, true);
+
+  const b = setup();
+  approveQueue(b.st, "Q");
+  b.st.writeRun("Q", { protocol: 1, session: "s", state: "paused", started_at: now(), updated_at: now() });
+  assert.throws(() => withdrawApproval(b.st, "Q"), (e: ActionError) => e.status === 409);
 });

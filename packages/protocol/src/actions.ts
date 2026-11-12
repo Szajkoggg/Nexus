@@ -4,7 +4,7 @@ import { existsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { ProjectFile, QueueFile, USER_SESSION, type InboxEntry, type ReviewPolicy, type SessionFile } from "./schemas.ts";
 import { ProjectStore, newId, now, revisionHash } from "./store.ts";
-import { loadProjectState, type ProjectState } from "./state.ts";
+import { isApproved, loadProjectState, type ProjectState } from "./state.ts";
 
 export class ActionError extends Error {
   readonly status: number;
@@ -71,11 +71,30 @@ export function sendMessage(store: ProjectStore, session: string, text: unknown,
 export function approveQueue(store: ProjectStore, queue: string, words?: unknown): void {
   const q = queueOf(store, queue);
   const hash = revisionHash(q);
-  const latest = q.approvals.at(-1);
-  if (latest && latest.revision === q.revision && latest.hash === hash) throw new ActionError("this revision is already approved", 409);
+  if (isApproved(q)) throw new ActionError("this revision is already approved", 409);
   const status = q.status === "draft" || q.status === "proposed" ? "approved" : q.status;
   const w = typeof words === "string" && words.trim() ? words.trim() : undefined;
   store.writeQueue({ ...q, status, approvals: [...q.approvals, { revision: q.revision, at: now(), words: w, hash }], updated_at: now() });
+}
+
+/**
+ * The user takes back the approval of a queue that has never run: it is proposed again and waits for an approval.
+ * The withdrawal is recorded beside the approvals, which stay. A queue that has started is paused or stopped instead.
+ * Only the user: the dashboard calls this; there is no CLI command and no event for agents.
+ */
+export function withdrawApproval(store: ProjectStore, queue: string, reason?: unknown): void {
+  const q = queueOf(store, queue);
+  if (!isApproved(q)) throw new ActionError("the queue's current revision is not approved", 409);
+  const view = loadProjectState(store).queues.find((x) => x.id === queue);
+  const started = !!view?.run || store.readRun(queue) !== undefined
+    || (view?.steps ?? []).some((s) => s.status !== "pending" || s.segments.length > 0);
+  if (started) throw new ActionError("the queue has started; pause or stop it instead", 409);
+  const r = typeof reason === "string" && reason.trim() ? reason.trim() : undefined;
+  store.writeQueue({
+    ...q, status: "proposed",
+    withdrawals: [...q.withdrawals, { revision: q.revision, at: now(), reason: r, approvals: q.approvals.length }],
+    updated_at: now(),
+  });
 }
 
 export function setQueueSettings(store: ProjectStore, queue: string, settings: { review_policy?: unknown }): void {

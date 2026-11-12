@@ -128,6 +128,18 @@ export const Approval = z.object({
 });
 export type Approval = z.infer<typeof Approval>;
 
+/**
+ * The user took an approval back before the queue ever ran. `approvals` is how many approval records there were
+ * then: the queue is approved again only by a later one. The approvals themselves stay as they were.
+ */
+export const Withdrawal = z.object({
+  revision: z.number().int().positive(),
+  at: Time,
+  reason: z.string().optional(),
+  approvals: z.number().int().nonnegative(),
+});
+export type Withdrawal = z.infer<typeof Withdrawal>;
+
 export const QueueFile = z.object({
   protocol: z.literal(1),
   id: Id,
@@ -146,6 +158,7 @@ export const QueueFile = z.object({
   checks: z.array(z.string()).default([]),
   steps: z.array(StepDef).default([]),
   approvals: z.array(Approval).default([]),
+  withdrawals: z.array(Withdrawal).default([]),
   history: z.array(z.object({ revision: z.number().int(), hash: z.string(), replaced_at: Time })).default([]),
   source: z.object({ path: z.string(), imported_at: Time }).optional(),
   created_at: Time.optional(),

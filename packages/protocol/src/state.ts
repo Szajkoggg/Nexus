@@ -176,6 +176,14 @@ function attentionOf(queues: QueueView[], questions: QuestionView[]): AttentionI
   return out.sort((a, b) => (b.at ?? "").localeCompare(a.at ?? ""));
 }
 
+/** The latest approval pins the current revision, and no withdrawal came after it. */
+export function isApproved(q: QueueFile): boolean {
+  const latest = q.approvals.at(-1);
+  const withdrawn = q.withdrawals.at(-1);
+  return !!latest && latest.revision === q.revision && latest.hash === revisionHash(q)
+    && !(withdrawn && withdrawn.approvals >= q.approvals.length);
+}
+
 function initQueue(q: QueueFile, notes: Note[]): QueueView {
   const hash = revisionHash(q);
   const latest = q.approvals.at(-1);
@@ -183,7 +191,7 @@ function initQueue(q: QueueFile, notes: Note[]): QueueView {
     ...q,
     status: q.status,
     status_reason: q.status_note,
-    approved: !!latest && latest.revision === q.revision && latest.hash === hash,
+    approved: isApproved(q),
     revision_hash: hash,
     questions: [],
     steps: q.steps.map((s) => ({

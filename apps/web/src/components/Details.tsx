@@ -279,6 +279,31 @@ function AnswerBox({ q, project, onChanged }: { q: QuestionView; project: string
 
 // ---------------------------------------------------------------- queue
 
+/**
+ * Takes the approval back from a queue that has never run (it is proposed again). A started queue is paused or
+ * stopped instead, so this is not offered there.
+ */
+function WithdrawApproval({ project, queue, onChanged }: { project: string; queue: string; onChanged: () => void }) {
+  const [open, setOpen] = useState(false);
+  if (!open) return <div className="mt-2"><Button variant="quiet" onClick={() => setOpen(true)}>Withdraw approval</Button></div>;
+  return (
+    <div className="mt-3 rounded-lg border border-orange-500/30 bg-orange-500/5 p-3">
+      <p className="mb-2 text-sm text-zinc-300">
+        The queue has not started. Withdrawing puts it back to proposed: it waits for your approval again and cannot be started until then. The earlier approval stays on record.
+      </p>
+      <Composer
+        rows={2}
+        allowEmpty
+        draft={draftKey(project, "withdraw", queue)}
+        placeholder="Why (optional)…"
+        button="Withdraw approval"
+        extra={<Button variant="quiet" onClick={() => setOpen(false)}>Cancel</Button>}
+        onSubmit={async (reason) => { await act(project, "POST", `/queues/${enc(queue)}/withdraw`, { reason }); onChanged(); }}
+      />
+    </div>
+  );
+}
+
 export function QueueDetail({ project, queue, onChanged }: Props) {
   const id = project.project.id;
   const latest = queue.approvals.at(-1);
@@ -299,7 +324,7 @@ export function QueueDetail({ project, queue, onChanged }: Props) {
         {queue.branch && <span className="font-mono">{queue.branch}</span>}
         {queue.worktree && <span className="font-mono">{queue.worktree}</span>}
         <span className={queue.approved ? "text-emerald-400" : "text-zinc-500"}>
-          {queue.approved ? "approved" : latest ? "approval is for an older revision" : "no approval recorded in Nexus"}
+          {queue.approved ? "approved" : queue.withdrawals.length && queue.withdrawals.at(-1)!.approvals >= queue.approvals.length ? "approval withdrawn" : latest ? "approval is for an older revision" : "no approval recorded in Nexus"}
         </span>
       </div>
 
@@ -313,11 +338,18 @@ export function QueueDetail({ project, queue, onChanged }: Props) {
       {queue.questions.length > 0 && <Section title="Questions">{queue.questions.map((q) => <Question key={q.qid} q={q} project={id} onChanged={onChanged} />)}</Section>}
 
       <Section title="Approval">
-        {queue.approvals.map((a, i) => (
-          <p key={i} className="mb-1 text-sm text-zinc-300">
-            r{a.revision} · <TimeAgo at={a.at} />{a.words && <> · <q className="italic">{a.words}</q></>}
-          </p>
-        ))}
+        {[...queue.approvals.map((a) => ({ ...a, withdrawn: false as const })), ...queue.withdrawals.map((w) => ({ ...w, withdrawn: true as const }))]
+          .sort((x, y) => x.at.localeCompare(y.at))
+          .map((a, i) => (
+            <p key={i} className={`mb-1 text-sm ${a.withdrawn ? "text-orange-300/90" : "text-zinc-300"}`}>
+              r{a.revision} · {a.withdrawn ? "withdrawn " : ""}<TimeAgo at={a.at} />
+              {!a.withdrawn && a.words && <> · <q className="italic">{a.words}</q></>}
+              {a.withdrawn && a.reason && <> · <q className="italic">{a.reason}</q></>}
+            </p>
+          ))}
+        {queue.approved && !queue.run && queue.steps.every((s) => s.status === "pending" && s.segments.length === 0) && (
+          <WithdrawApproval project={id} queue={queue.id} onChanged={onChanged} />
+        )}
         {!queue.approved && (
           <div className="mt-2">
             <p className="mb-2 text-sm text-zinc-400">

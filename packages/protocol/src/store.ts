@@ -127,7 +127,7 @@ export class ProjectStore {
   queueDir(id: string): string { return join(this.dir, "queues", id); }
   queueIds(): string[] { return subdirs(join(this.dir, "queues")).filter((q) => existsSync(join(this.queueDir(q), "queue.yaml"))); }
   readQueue(id: string): QueueFile { return readYaml(join(this.queueDir(id), "queue.yaml"), QueueFile); }
-  writeQueue(q: QueueFile): void { writeYaml(join(this.queueDir(q.id), "queue.yaml"), QueueFile.parse(q)); }
+  writeQueue(q: z.input<typeof QueueFile>): void { writeYaml(join(this.queueDir(q.id), "queue.yaml"), QueueFile.parse(q)); }
 
   readNotes(queueId: string): { notes: Note[]; errors: string[] } {
     const notes: Note[] = []; const errors: string[] = [];
