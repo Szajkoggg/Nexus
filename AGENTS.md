@@ -11,7 +11,8 @@ Nexus is developed with Nexus. The agents working on this repository are run by 
 
 - Never edit, check out, build or delete anything in `C:\Code\Nexus-live`.
 - Never stop, restart or update the server on port 4317, and never run `nexus server update` or `nexus server cancel`:
-  deploying is the user's decision.
+  deploying is the user's decision. (The orchestrator may run them when the user asks for it in the chat, and only
+  then; workers and thinking partners never may, and the CLI refuses them.)
 - For anything you need to try by hand, start a development instance of your own: another port (4318 or above) and its
   own data, `NEXUS_HOME` in a temporary directory, with test projects there, never the user's registered projects.
   Stop it when you are done.
