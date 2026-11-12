@@ -3,6 +3,7 @@ import type { Event } from "@nexus/protocol";
 import { act, enc, fileUrl, type ProjectState, type QuestionView, type QueueView, type StepView } from "../api.ts";
 import { Button, Composer, Expandable, Markdown, Section, StatusBadge, StepTimes, TimeAgo } from "./ui.tsx";
 import { Activity, RetryNote, RunControls } from "./Run.tsx";
+import { StepRefusals } from "./Refusals.tsx";
 import { draftKey } from "../drafts.ts";
 import { layerValue } from "../layers.ts";
 import { nav, useNav } from "../nav.ts";
@@ -175,6 +176,8 @@ export function StepDetail({ project, queue, step, onChanged }: Props & { step: 
           </div>
         </Section>
       )}
+
+      <StepRefusals project={project} queue={queue.id} step={step.id} />
 
       {(step.session ?? (queue.run?.step === step.id ? queue.run.session : undefined)) && (
         <Activity project={id} session={(step.session ?? queue.run?.session)!} queue={queue.id} step={step.id} version={project.generated_at} />

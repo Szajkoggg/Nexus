@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { ProjectFile, QueueFile, USER_SESSION, type InboxEntry, type ReviewPolicy, type SessionFile } from "./schemas.ts";
 import { ProjectStore, newId, now, revisionHash } from "./store.ts";
 import { isApproved, loadProjectState, type ProjectState } from "./state.ts";
+import { validAllowRule } from "./refusals.ts";
 
 export class ActionError extends Error {
   readonly status: number;
@@ -229,6 +230,20 @@ export function updateSettings(store: ProjectStore, patch: unknown): void {
   const notes = r.data.conversations.notes_dir;
   if (notes !== undefined) r.data.conversations.notes_dir = notesDir(notes);
   store.writeProject(r.data);
+}
+
+/**
+ * Adds an allow rule for Claude Code workers to the project's Nexus settings (runtimes.claude.allowed_tools in
+ * .nexus/project.yaml), typically from a refusal. Only the user: the server takes it only from the dashboard's page.
+ * Nothing else is written: not the project's .claude/settings.json, not its AGENTS.md. Applies to runs started after.
+ */
+export function addAllowRule(store: ProjectStore, rule: unknown): { added: boolean; rule: string } {
+  const r = typeof rule === "string" ? rule.trim() : "";
+  if (!validAllowRule(r)) throw new ActionError("an allow rule is a tool name, optionally with a specifier in parentheses: Bash(git push:*), WebFetch(domain:example.com)");
+  const p = store.readProject();
+  if (p.runtimes.claude.allowed_tools.includes(r)) return { added: false, rule: r };
+  store.writeProject({ ...p, runtimes: { ...p.runtimes, claude: { ...p.runtimes.claude, allowed_tools: [...p.runtimes.claude.allowed_tools, r] } } });
+  return { added: true, rule: r };
 }
 
 /** The notes folder, relative to the project's root, inside it, with forward slashes and no trailing slash. */

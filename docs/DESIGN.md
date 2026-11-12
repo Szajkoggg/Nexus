@@ -170,6 +170,15 @@ The shapes come from the runtimes' published types, not from a probe: Claude Cod
 `PatchApplyStatus` with `declined`). The auto-review notification is marked unstable in that schema ("expected to
 change soon"): when Codex is updated, check it first. The fakes write the same shapes.
 
+The dashboard shows them in the step's detail, and on the project page grouped by kind (the tool, and for a command
+its first words: `Bash: git push`), with counts and the latest time (`@nexus/protocol/refusals`). From a Claude Code
+refusal the user can add an allow rule: prefilled in Claude Code's rule syntax (`Bash(git push:*)`,
+`Write(<path>)`, `WebFetch(domain:<host>)`), editable, and saved only on "Add rule", to the project's Nexus settings
+(`runtimes.claude.allowed_tools`, which runs started afterwards get as `--allowedTools`). Never to the project's own
+`.claude/settings.json` or `AGENTS.md`: those are the project's, and other tools read them. The server takes the rule
+only from the dashboard's page, so an agent cannot widen its own permissions. Codex refusals are shown only: Nexus
+does not write Codex's own configuration.
+
 The shapes come from the runtimes' published types, not from a probe: Claude Code's from the Agent SDK's `sdk.d.ts`
 (`@anthropic-ai/claude-agent-sdk` 0.3.323, the release that matches Claude Code 2.1.323: `SDKAssistantMessageError`,
 `SDKAPIRetryMessage`, `SDKRateLimitInfo`, `SDKResultMessage` with `is_error`, `api_error_status`, `terminal_reason`),

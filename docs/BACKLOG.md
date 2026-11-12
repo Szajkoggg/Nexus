@@ -50,14 +50,6 @@ Project Honeycomb's rules say a worker pushes after every step. Once this works,
 proposed in [proposals/honeycomb-push-after-acceptance.md](proposals/honeycomb-push-after-acceptance.md). The user
 approves that change; the orchestrator brings it to the user when the feature is in the live instance.
 
-## 4. Refused actions, visible
-
-In `auto` permission mode (Claude Code) and with Codex's auto review, actions an agent wanted but was not allowed are
-refused without asking. Claude Code reports them (`permission_denials` in each turn's `result`; `permission_denied`
-system messages); Codex reports declined requests. Record them per session and step, show them in the dashboard (the
-step's detail, and a per-project list grouped by kind), and offer to add an allow rule from a refusal (to the project's
-settings, never to the project's own files).
-
 ## 6. Context care between steps
 
 When a session's context is fuller than the project's threshold at a step's end, have it write its context summary,

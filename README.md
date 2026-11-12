@@ -61,6 +61,8 @@ model, effort, permission mode and extra allowed tools (the project's own `.clau
 for Codex workers the model, effort, sandbox and what happens when an agent needs to leave the sandbox; the
 orchestrator's model and effort; and the defaults. For unattended runs, Claude Code's `auto` permission mode and
 Codex's auto review are the recommended settings: routine actions run, risky ones are refused, nobody is asked.
+What was refused shows in each step's detail and, grouped by kind with counts, under "Refused actions" on the project
+page; from a Claude Code refusal, "Allow for this project…" adds a rule (prefilled, editable) to these settings.
 A run can override model and effort when it starts, and the orchestrator chooses them when it starts runs.
 
 ## Requirements

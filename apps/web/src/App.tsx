@@ -12,6 +12,7 @@ import { ProjectPicker, ProjectTabs } from "./components/Projects.tsx";
 import { isOpen, panelOrder } from "./layers.ts";
 import { nav, useNav } from "./nav.ts";
 import { SettingsButton, SettingsPanel, UpdatePill, useServer } from "./components/Settings.tsx";
+import { ProjectRefusals } from "./components/Refusals.tsx";
 
 const GROUPS: { title: string; statuses: QueueStatus[]; collapsible?: boolean }[] = [
   { title: "Finished", statuses: ["done", "cancelled"], collapsible: true },
@@ -156,6 +157,8 @@ export function App() {
             </section>
           );
         })}
+
+        {state && <ProjectRefusals project={state} />}
 
         {state && state.sessions.some((s) => s.role === "worker" || s.role === "orchestrator") && (
           <section className="mb-8">

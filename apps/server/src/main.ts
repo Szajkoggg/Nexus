@@ -11,7 +11,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 import chokidar, { type FSWatcher } from "chokidar";
 import type { Server } from "node:http";
 import {
-  ActionError, Effort, ProjectStore, addNote, updateSettings, answerAsUser, approveQueue, deleteNote, loadProjectState, nexusHome, withdrawApproval,
+  ActionError, Effort, ProjectStore, addNote, updateSettings, answerAsUser, approveQueue, deleteNote, loadProjectState, nexusHome, withdrawApproval, addAllowRule,
   readRegistry, readUsage, routeAnswers, sendMessage, setQueueSettings, type ProjectState,
 } from "@nexus/protocol";
 import { Engine } from "./engine.ts";
@@ -283,17 +283,19 @@ app.delete("/api/projects/:id/queues/:queue/steps/:step/notes/:note", act((st, _
 app.post("/api/projects/:id/sessions/:session/messages", act((st, b, p) =>
   sendMessage(st, p("session"), b.text, { queue: b.queue as string | undefined, step: b.step as string | undefined })));
 app.post("/api/projects/:id/queues/:queue/approve", act((st, b, p) => approveQueue(st, p("queue"), b.words)));
-// Only the user takes an approval back, so only from the dashboard's own page: a browser sends its Origin (and
-// Sec-Fetch-Site) with every such request; an agent's script or a curl on this machine does not. There is no CLI
-// command for it either.
-app.post("/api/projects/:id/queues/:queue/withdraw", async (c, next) => {
+// What only the user does, so only from the dashboard's own page: a browser sends its Origin (and Sec-Fetch-Site)
+// with every such request; an agent's script or a curl on this machine does not. There is no CLI command for these.
+const userOnly = (what: string) => async (c: import("hono").Context, next: () => Promise<void>) => {
   const origin = c.req.header("origin");
   const site = c.req.header("sec-fetch-site");
   if (!origin || new URL(origin).host !== c.req.header("host") || (site !== undefined && site !== "same-origin")) {
-    return c.json({ error: "only the user can withdraw an approval, from the dashboard" }, 403);
+    return c.json({ error: `only the user can ${what}, from the dashboard` }, 403);
   }
   return next();
-}, act((st, b, p) => withdrawApproval(st, p("queue"), b.reason)));
+};
+app.post("/api/projects/:id/queues/:queue/withdraw", userOnly("withdraw an approval"), act((st, b, p) => withdrawApproval(st, p("queue"), b.reason)));
+// An allow rule widens what the workers may do: an agent must not grant it to itself.
+app.post("/api/projects/:id/settings/allow-rule", userOnly("add an allow rule"), act((st, b) => addAllowRule(st, b.rule)));
 app.patch("/api/projects/:id/queues/:queue", act((st, b, p) => setQueueSettings(st, p("queue"), b)));
 app.post("/api/projects/:id/questions/:qid/answer", act((st, b, p) => answerAsUser(st, p("qid"), b.text, b.continue)));
 
@@ -319,6 +321,16 @@ app.get("/api/projects/:id/sessions/:session/activity", (c) => {
   const e = projects.get(c.req.param("id"));
   if (!e) return c.json({ error: "unknown project" }, 404);
   return c.json(e.engine.activity(c.req.param("session"), c.req.query("queue"), c.req.query("step"), Number(c.req.query("limit") ?? 300)));
+});
+
+// Refused actions of every session of the project, oldest first; with ?queue= (and &step=) only those of a step.
+app.get("/api/projects/:id/refusals", (c) => {
+  const e = projects.get(c.req.param("id"));
+  if (!e) return c.json({ error: "unknown project" }, 404);
+  const queue = c.req.query("queue"), step = c.req.query("step");
+  const all = e.store.sessionIds().flatMap((s) => e.store.readRefusals(s).entries)
+    .filter((r) => (!queue || r.queue === queue) && (!step || r.step === step));
+  return c.json(all.sort((a, b) => a.at.localeCompare(b.at)));
 });
 
 app.get("/api/usage", (c) => c.json(readUsage() ?? null));
