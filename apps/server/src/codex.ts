@@ -190,7 +190,10 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
       }
       case "item/completed": {
         const it = p.item ?? {};
-        if (it.type === "agentMessage" && it.text?.trim()) this.emit("activity", { kind: "text", text: clip(it.text, 600) });
+        if (it.type === "agentMessage" && it.text?.trim()) {
+          this.emit("activity", { kind: "text", text: clip(it.text, 600) });
+          this.emit("message", it.text);
+        }
         if (it.type === "fileChange") this.emit("activity", { kind: "tool", text: `Edit: ${(it.changes ?? []).map((c: Json) => c.path).join(", ")}` });
         if (it.type === "commandExecution" && it.status === "failed") {
           this.emit("activity", { kind: "tool_error", text: clip(`exit ${it.exitCode}: ${it.aggregatedOutput ?? ""}`, 400) });

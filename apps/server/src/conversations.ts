@@ -156,10 +156,11 @@ export class Conversations {
     const l: Live = { proc };
     this.live.set(s.id, l);
     this.runtime(s.id, { state: "idle", pid: proc.pid });
+    // The partner's last text of the turn, whole: during a hand-over, the summary.
     let reply = "";
+    proc.on("message", (text) => { reply = text; if (!l.handoff) this.store.appendChat(s.id, { at: now(), from: "partner", text }); });
     proc.on("activity", (a) => {
-      if (a.kind === "text") { reply = a.text; if (!l.handoff) this.store.appendChat(s.id, { at: now(), from: "partner", text: a.text }); }
-      else if (a.kind === "tool") this.store.appendChat(s.id, { at: now(), from: "partner", kind: "tool", text: a.text });
+      if (a.kind === "tool") this.store.appendChat(s.id, { at: now(), from: "partner", kind: "tool", text: a.text });
       else if (a.kind === "error") this.store.appendChat(s.id, { at: now(), from: "nexus", kind: "error", text: a.text });
       else if (a.kind === "turn_start") reply = "";
     });

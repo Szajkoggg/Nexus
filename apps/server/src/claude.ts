@@ -114,7 +114,10 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
         if (u) this.emit("facts", { contextTokens: (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) });
         if (m.parent_tool_use_id) return; // a subagent's message: its parent's tool call is what we show
         for (const c of m.message?.content ?? []) {
-          if (c.type === "text" && c.text?.trim()) this.emit("activity", { kind: "text", text: clip(c.text, 600) });
+          if (c.type === "text" && c.text?.trim()) {
+            this.emit("activity", { kind: "text", text: clip(c.text, 600) });
+            this.emit("message", c.text);
+          }
           if (c.type === "tool_use") this.emit("activity", { kind: "tool", text: describeTool(c.name, c.input) });
         }
         return;

@@ -162,9 +162,9 @@ Written only by the server's queue engine; agents never touch them.
 | `queues/<id>/run.yaml` | The engine's intent for a queue: `session`, `state` (`running`, `pausing`, `paused`, `halted`, `finished`, `usage_wait`), `reason`, the `step` it last opened, `nudged`, `resume_at` |
 | `sessions/<id>/runtime.json` | A launched session's live facts: process state and pid, model, context tokens and window, turns, cost |
 | `sessions/<id>/delivered.jsonl` | What the server handed to the session (notes put into a step turn, inbox entries injected or sent as a turn); counts as read |
-| `sessions/<id>/activity.jsonl` | A condensed record of the agent's stream: turns, tool calls, texts, tool errors, tagged with queue and step |
+| `sessions/<id>/activity.jsonl` | A condensed record of the agent's stream: turns, tool calls, texts (clipped to 600 characters), tool errors, tagged with queue and step |
 | `sessions/<orchestrator>/applied.jsonl` | The server's result for each orchestrator request (`queue.drafted`, `session.request`), and the notices it has sent the orchestrator; the CLI waits for the result and prints it |
-| `sessions/<orchestrator>/chat.jsonl` | The chat shown in the dashboard: the user's messages, the orchestrator's texts and tool calls, Nexus notices |
+| `sessions/<orchestrator>/chat.jsonl` | The chat shown in the dashboard: the user's messages, the orchestrator's texts (whole, however long) and tool calls, Nexus notices |
 | `<NEXUS_HOME>/usage.json` | The subscription's windows (5-hour, 7-day: utilization and reset time) from the latest `rate_limit_event` |
 
 A session launched by Nexus has `launched_by: nexus`, `runtime: claude`, `native_id` (Claude's session UUID, chosen
@@ -311,7 +311,7 @@ list as found when the server starts is the baseline.
 
 `project.yaml` holds `conversations: { notes_dir?, runtime, model?, effort? }`. A conversation is a session with
 role `conversation`: a thinking partner the user talks with about the project, one session per topic, with its chat
-in `chat.jsonl` (`from: partner` for its replies). It reads the whole project and writes only in `notes_dir`
+in `chat.jsonl` (`from: partner` for its replies, whole). It reads the whole project and writes only in `notes_dir`
 (relative to the root, checked to lie inside it): Claude Code runs it in `dontAsk` mode allowed `Read`, `Grep`,
 `Glob`, `Bash(nexus status:*)`, read-only git and `Edit(<notes_dir>/**)` only; Codex runs it with `notes_dir` as its
 working directory in a `workspace-write` sandbox (`read-only` without a notes folder), approval `never`. It starts no
@@ -320,7 +320,7 @@ work. An idle partner's process ends after 15 minutes; the next message resumes 
 API: `GET /api/projects/:id/conversations`, `POST …/conversations` (`title`, `runtime?`, `model?`, `effort?`),
 `GET …/conversations/:cid` (session, state, chat), `PATCH …/conversations/:cid` (`title`, `model`, `effort`,
 `archived`), `POST …/conversations/:cid/messages` (`text`), `POST …/conversations/:cid/handoff`: the partner writes a
-summary (decisions, open questions, proposed work), which goes into the orchestrator's chat.
+summary (decisions, open questions, proposed work), which goes whole into the orchestrator's chat.
 
 ## The orchestrator
 

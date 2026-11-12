@@ -5,7 +5,8 @@
 //   fail   report the step failed            slow    work for FAKE_SLOW_MS (default 1500), then done
 // An answer ("[Nexus] Answer …") makes it report the current step done. As an orchestrator: "FAKE-DRAFT:" followed by
 // YAML drafts that queue; "FAKE-NEXUS: [args]" runs `nexus` with those arguments; a "[Nexus] A worker asked … (qid X;"
-// notice is answered with "fake answer".
+// notice is answered with "fake answer". "FAKE-LONG" is answered with longReply("Reply"); a hand-over with
+// longReply("SUMMARY").
 import { execFileSync } from "node:child_process";
 import { appendFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -25,6 +26,21 @@ export function record(text: string, priority: string | null, busy: boolean): vo
 }
 
 export interface Fake { step?: string }
+
+/**
+ * A long Markdown reply (over 3000 characters: headings, paragraphs, a list, a code block, non-ASCII letters), the
+ * same every time, so a test can compare what reached a chat byte for byte.
+ */
+export function longReply(label: string): string {
+  const parts = [`## ${label}: what the long reply covers`];
+  for (let i = 1; i <= 8; i++) {
+    parts.push(`Paragraph ${i}. The mining loop starts slowly on purpose: a player who digs the first shaft by hand learns where ore sits, why the walls need props, and when the water comes. Árvíztűrő tükörfúrógép ${i}. Every later tool only speeds up what the hand already knows.`);
+    parts.push(`- Point ${i}.a: props cost wood, and wood is far.\n- Point ${i}.b: water rises one row per minute below the line.\n- Point ${i}.c: ore veins bend toward the old river bed.`);
+  }
+  parts.push("```ts\nconst shaft = dig({ depth: 12, props: true }); // the first shaft, by hand\n```");
+  parts.push(`End of the ${label.toLowerCase()}: nothing after this line was cut.`);
+  return parts.join("\n\n");
+}
 
 /** Records how the runtime was started or asked (FAKE_ARGS, one JSON line each), for the tests. */
 export function recordArgs(what: unknown): void {
@@ -50,7 +66,8 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
     nexus("step", "done", fake.step, "--summary", `fake finished ${fake.step} after an answer`);
     return "answered";
   }
-  if (text.includes("hands this conversation to the orchestrator")) return "SUMMARY: the user decided to try slow mining first.";
+  if (text.includes("hands this conversation to the orchestrator")) return longReply("SUMMARY");
+  if (text.includes("FAKE-LONG")) return longReply("Reply");
   const draft = /FAKE-DRAFT:\s*\n([\s\S]*)$/.exec(text);
   if (draft) return nexusOut(["queue", "draft", "-"], draft[1]);
   const run = /FAKE-NEXUS: (\[.*\])/.exec(text);

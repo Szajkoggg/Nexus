@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { ProjectStore, approveQueue, loadProjectState, routeAnswers } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
+import { longReply } from "./fake-behaviour.ts";
 
 process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
 
@@ -79,6 +80,24 @@ test("the orchestrator drafts a queue, runs it, answers the worker and hears tha
     const chat = orchestrator.view().chat;
     assert.ok(chat.some((c) => c.from === "user"));
     assert.ok(chat.some((c) => c.from === "nexus" && /A worker asked a question in queue R, step R1/.test(c.text)));
+  } finally { stop(); }
+});
+
+test("the orchestrator's long reply reaches its chat file whole", async () => {
+  const { store, orchestrator, until, stop } = setup();
+  try {
+    const reply = longReply("Reply");
+    assert.ok(reply.length >= 3000);
+    orchestrator.say("FAKE-LONG");
+    await until("the reply", () => orchestrator.view().chat.some((c) => c.from === "orchestrator" && c.kind === "message"));
+    const { readFileSync } = await import("node:fs");
+    const file = join(store.sessionDir(orchestrator.session()!.id), "chat.jsonl");
+    const texts = readFileSync(file, "utf8").split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l) as { from: string; kind: string; text: string })
+      .filter((c) => c.from === "orchestrator" && c.kind === "message").map((c) => c.text);
+    assert.deepEqual(texts, [reply], "byte for byte, no ellipsis");
+    // The activity log may keep a short form; the chat may not.
+    const activity = readFileSync(join(store.sessionDir(orchestrator.session()!.id), "activity.jsonl"), "utf8");
+    assert.ok(activity.includes("…") && !activity.includes("nothing after this line was cut"), "the activity log is clipped");
   } finally { stop(); }
 });
 

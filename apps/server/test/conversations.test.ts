@@ -9,6 +9,7 @@ import { ProjectStore, loadProjectState, updateSettings } from "@nexus/protocol"
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { Conversations } from "../src/conversations.ts";
+import { longReply } from "./fake-behaviour.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -81,6 +82,34 @@ test("handing a conversation to the orchestrator puts the partner's summary into
     await until("the confirmation", () => conversations.view(c.id).chat.some((x) => x.from === "nexus" && /went to the orchestrator/.test(x.text)));
   } finally { stop(); }
 });
+
+/** The entries of a session's chat.jsonl, read from the file itself. */
+function chatFile(store: ProjectStore, session: string): { from: string; kind?: string; text: string }[] {
+  return readFileSync(join(store.sessionDir(session), "chat.jsonl"), "utf8").split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l));
+}
+
+for (const runtime of ["claude", "codex"] as const) {
+  test(`a ${runtime} partner's long reply and hand-over summary reach the chats whole`, async () => {
+    const { store, conversations, orchestrator, until, stop } = setup("Dev/Notes");
+    try {
+      const c = conversations.create({ title: "Long", runtime });
+      const reply = longReply("Reply");
+      assert.ok(reply.length >= 3000);
+      conversations.say(c.id, "FAKE-LONG");
+      await until("the long reply", () => conversations.view(c.id).chat.some((x) => x.from === "partner" && x.kind === "message"));
+      const got = chatFile(store, c.id).filter((x) => x.from === "partner" && x.kind === "message");
+      assert.deepEqual(got.map((x) => x.text), [reply], "the partner's chat has the reply byte for byte");
+
+      const summary = longReply("SUMMARY");
+      assert.ok(summary.length > 600);
+      conversations.handoff(c.id);
+      await until("the summary in the orchestrator's chat", () => orchestrator.view().chat.some((x) => x.from === "user"));
+      const sent = chatFile(store, orchestrator.session()!.id).filter((x) => x.from === "user").map((x) => x.text);
+      assert.deepEqual(sent, [`[From the conversation "Long"]\n\n${summary}`], "the orchestrator gets the summary whole");
+      assert.ok(chatFile(store, c.id).some((x) => x.from === "partner" && x.text === summary), "the partner's chat shows it whole too");
+    } finally { stop(); }
+  });
+}
 
 test("the notes folder must lie inside the project", () => {
   const { store, stop } = setup();

@@ -23,7 +23,10 @@ export interface StreamFacts {
 export interface ActivityItem { kind: "turn_start" | "text" | "tool" | "tool_error" | "turn_end" | "error"; text: string }
 
 export interface AgentEvents {
+  /** For the activity log: short forms (a text is clipped). */
   activity: [ActivityItem];
+  /** A text the agent wrote, whole: what a chat shows. */
+  message: [string];
   facts: [StreamFacts];
   turnEnd: [{ ok: boolean; text: string }];
   exit: [number | null];

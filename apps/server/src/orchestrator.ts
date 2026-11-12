@@ -132,9 +132,10 @@ export class Orchestrator {
     });
     this.proc = proc;
     this.runtime(s.id, { state: "idle", pid: proc.pid });
+    // The chat gets the orchestrator's texts whole; the activity log keeps them clipped.
+    proc.on("message", (text) => this.store.appendChat(s.id, { at: now(), from: "orchestrator", text }));
     proc.on("activity", (a) => {
-      if (a.kind === "text") this.store.appendChat(s.id, { at: now(), from: "orchestrator", text: a.text });
-      else if (a.kind === "tool") this.store.appendChat(s.id, { at: now(), from: "orchestrator", kind: "tool", text: a.text });
+      if (a.kind === "tool") this.store.appendChat(s.id, { at: now(), from: "orchestrator", kind: "tool", text: a.text });
       else if (a.kind === "error" || (a.kind === "turn_end" && a.text.includes("error"))) this.store.appendChat(s.id, { at: now(), from: "nexus", kind: "error", text: a.text });
       this.store.appendActivity(s.id, { at: now(), ...a });
     });
