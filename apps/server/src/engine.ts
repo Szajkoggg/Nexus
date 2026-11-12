@@ -9,7 +9,7 @@ import { basename, dirname, join } from "node:path";
 import {
   ENDED_RUN_STATES,
   ActionError, ProjectStore, USER_SESSION, ensureUserSession, loadProjectState, newId, normPath, now, readUsage,
-  writeUsage, CLAUDE_EFFORTS, type Effort, type InboxView, type ProjectState, type QueueView, type RunFile, type SessionFile, type StepView,
+  writeUsage, CLAUDE_EFFORTS, RETRY_LIMIT, formatClock, type Effort, type InboxView, type ProjectState, type QueueView, type RunFile, type SessionFile, type StepView,
 } from "@nexus/protocol";
 import type { AgentProcess, StreamFacts, TurnFailure } from "./agent.ts";
 import { ClaudeSession } from "./claude.ts";
@@ -19,8 +19,8 @@ interface Live { proc: AgentProcess; session: string }
 
 export interface StartOptions { model?: string; effort?: Effort; session?: string; runtime?: "claude" | "codex" }
 
-/** A turn that failed for a passing reason is tried again this many times, after 1, 2, 4, 8 and 16 minutes. */
-export const RETRY_LIMIT = 5;
+/** A turn that failed for a passing reason is tried again RETRY_LIMIT times (5), after 1, 2, 4, 8 and 16 minutes. */
+export { RETRY_LIMIT };
 export const RETRY_BASE_MS = 60_000;
 /** A run waiting for the usage window goes on this long after the window's reset. */
 export const USAGE_MARGIN_MS = 60_000;
@@ -302,7 +302,7 @@ export class Engine {
     ].filter(Boolean);
     live.proc.send(lines.join("\n"));
     for (const n of notes) this.store.appendDelivered(run.session, { at: now(), kind: "note", id: n.id, via: "turn" });
-    this.writeRun(queueId, { ...run, step: step.id, nudged: false, ...(mode === "start" ? { retries: undefined } : {}) });
+    this.writeRun(queueId, { ...run, step: step.id, nudged: false, ...(mode === "start" ? { retries: undefined, failure: undefined } : {}) });
     this.store.appendActivity(run.session, { at: now(), kind: "turn_start", text: `Nexus opened step ${step.id}${mode === "continue" ? " (continue)" : ""}`, queue: queueId, step: step.id });
   }
 
@@ -344,17 +344,17 @@ export class Engine {
     if (run.state === "pausing" && !run.resume_after_restart) {
       return this.writeRun(queueId, { ...run, state: "paused", reason: `paused by the user; the last turn failed (${what})` });
     }
-    if (f.kind === "lasting") return this.halt(queueId, `the turn failed (${what})`);
+    if (f.kind === "lasting") { this.writeRun(queueId, { ...run, failure: f.code }); return this.halt(queueId, `the turn failed (${what})`); }
     if (f.kind === "usage" && f.resetsAt) {
       this.writeRun(queueId, { ...run, state: "usage_wait", reason: `the usage limit was reached (${what}); goes on when it resets`, resume_at: f.resetsAt, resume_after_restart: undefined });
       this.schedule(queueId, f.resetsAt, this.usageMarginMs);
       return;
     }
     const tries = (run.retries ?? 0) + 1;
-    if (tries > RETRY_LIMIT) return this.halt(queueId, `the turn failed ${tries} times in a row; the last time: ${what}`);
+    if (tries > RETRY_LIMIT) { this.writeRun(queueId, { ...run, failure: f.code }); return this.halt(queueId, `the turn failed ${tries} times in a row; the last time: ${what}`); }
     const at = new Date(Date.now() + this.retryBaseMs * 2 ** (tries - 1)).toISOString();
-    this.writeRun(queueId, { ...run, state: "retry_wait", retries: tries, reason: `the turn failed (${what}); retry ${tries} of ${RETRY_LIMIT}`, resume_at: at });
-    this.store.appendActivity(run.session, { at: now(), kind: "retry", text: `Nexus tries the turn again at ${at} (${tries} of ${RETRY_LIMIT}): ${what}`, queue: queueId, step: run.step });
+    this.writeRun(queueId, { ...run, state: "retry_wait", retries: tries, failure: f.code, reason: `the turn failed (${what}); retry ${tries} of ${RETRY_LIMIT}`, resume_at: at });
+    this.store.appendActivity(run.session, { at: now(), kind: "retry", text: `Nexus tries the turn again at ${formatClock(at, new Date())} (${tries} of ${RETRY_LIMIT}): ${what}`, queue: queueId, step: run.step });
     this.schedule(queueId, at, 0);
   }
 
@@ -430,7 +430,7 @@ export class Engine {
       this.writeRuntime(session.id, { state: "idle", turns: (this.store.readRuntime(session.id)?.turns ?? 0) + 1 });
       // A failed turn is decided at once and is not a turn without an outcome.
       if (end.failure) { for (const q of runsOf()) this.turnFailed(q, end.failure); this.changed(); return; }
-      if (end.ok) for (const q of runsOf()) { const r = this.store.readRun(q); if (r?.retries) this.writeRun(q, { ...r, retries: undefined }); }
+      if (end.ok) for (const q of runsOf()) { const r = this.store.readRun(q); if (r?.retries) this.writeRun(q, { ...r, retries: undefined, failure: undefined }); }
       // Let the CLI's last events land in the files, then decide.
       setTimeout(() => { for (const q of this.store.queueIds()) if (this.store.readRun(q)?.session === session.id) this.advance(q); this.changed(); }, 300);
     });

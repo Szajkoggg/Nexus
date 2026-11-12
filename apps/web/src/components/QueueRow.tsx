@@ -1,6 +1,7 @@
 import type { QueueView, StepView } from "../api.ts";
 import { StatusBadge, StepTimes, TimeAgo, toneOf } from "./ui.tsx";
 import { RunChip } from "./Run.tsx";
+import { retryLine } from "@nexus/protocol/times";
 
 export function QueueRow({ queue, onQueue, onStep }: {
   queue: QueueView;
@@ -34,7 +35,7 @@ export function QueueRow({ queue, onQueue, onStep }: {
         {queue.steps.map((s, i) => (
           <div key={s.id} className="flex items-center gap-2">
             {i > 0 && <div className="h-px w-3 shrink-0 bg-zinc-700" />}
-            <StepCard step={s} current={s.id === queue.current_step} onClick={() => onStep(s.id)} />
+            <StepCard step={s} current={s.id === queue.current_step} retry={queue.run?.step === s.id ? retryLine(queue.run, new Date()) : undefined} onClick={() => onStep(s.id)} />
           </div>
         ))}
         {queue.steps.length === 0 && <p className="text-sm text-zinc-500">No steps yet.</p>}
@@ -43,7 +44,7 @@ export function QueueRow({ queue, onQueue, onStep }: {
   );
 }
 
-function StepCard({ step, current, onClick }: { step: StepView; current: boolean; onClick: () => void }) {
+function StepCard({ step, current, retry, onClick }: { step: StepView; current: boolean; retry?: string; onClick: () => void }) {
   const t = toneOf(step.status);
   const unread = step.notes.filter((n) => !n.read_at).length;
   const line = step.progress?.text ?? step.summary ?? step.reason ?? step.status_note;
@@ -63,7 +64,8 @@ function StepCard({ step, current, onClick }: { step: StepView; current: boolean
       </div>
       <div className="mt-1.5 line-clamp-2 text-sm font-medium leading-snug text-zinc-100">{step.title}</div>
       <div className="mt-auto text-[11px] text-zinc-500"><StepTimes step={step} compact /></div>
-      {line && <div className="line-clamp-1 text-xs text-zinc-500">{line.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\*\*|`/g, "")}</div>}
+      {retry && <div className="line-clamp-1 text-xs text-amber-300" title={retry}>↻ {retry}</div>}
+      {line && !retry && <div className="line-clamp-1 text-xs text-zinc-500">{line.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\*\*|`/g, "")}</div>}
       {step.progress?.pct !== undefined && step.status === "running" && (
         <div className="mt-1 h-1 overflow-hidden rounded bg-zinc-800">
           <div className="h-full bg-blue-400" style={{ width: `${step.progress.pct}%` }} />

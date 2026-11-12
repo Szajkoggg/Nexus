@@ -58,12 +58,6 @@ system messages); Codex reports declined requests. Record them per session and s
 step's detail, and a per-project list grouped by kind), and offer to add an allow rule from a refusal (to the project's
 settings, never to the project's own files).
 
-## 5. Retrying what fails for a passing reason
-
-Today an API overload, a lost connection or a runtime that crashes mid-turn halts the queue, and the user finds it
-stopped hours later. Tell passing failures (the runtime's own error codes: overloaded, rate limited, network) from
-lasting ones; retry the turn with backoff a bounded number of times, then halt with the reason; show the retries.
-
 ## 6. Context care between steps
 
 When a session's context is fuller than the project's threshold at a step's end, have it write its context summary,
@@ -92,8 +86,6 @@ worker as a note for the next step or round.
 
 ## 11. Smaller
 
-- Codex workers in a queue's own worktree: the repository's `.git` lies outside the worktree, so the sandbox must
-  also be allowed to write there, or the worker cannot commit.
 - Voice input in the chats on the phone (the browser's speech recognition).
 - Notifications per kind on or off; quiet hours.
 - Search across a project's history: events, chats, reports.

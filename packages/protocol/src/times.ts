@@ -56,6 +56,27 @@ export function formatDuration(duration: number): string {
   return rh ? `${d} d ${rh} h` : `${d} d`;
 }
 
+/** A turn that failed for a passing reason is tried again at most this many times in a row (the engine's limit). */
+export const RETRY_LIMIT = 5;
+
+/** Short words for the runtimes' failure codes (Claude Code's and Codex's), as the dashboard shows them. */
+export function failureLabel(code: string | undefined): string {
+  if (!code) return "a passing failure";
+  if (/overloaded/i.test(code)) return "overloaded";
+  if (code === "processExited") return "the runtime's process exited";
+  if (/connection|disconnected|stream|failedattempts/i.test(code)) return "network";
+  if (/rate_?limit|usagelimit/i.test(code)) return "rate limited";
+  if (/server_?error|internalservererror/i.test(code)) return "server error";
+  return code;
+}
+
+/** "retry 2 of 5 at 14:05, overloaded" for a run waiting to retry a turn; undefined otherwise. */
+export function retryLine(run: { state: string; retries?: number; resume_at?: string; failure?: string }, now: Date): string | undefined {
+  if (run.state !== "retry_wait") return undefined;
+  const at = run.resume_at ? ` at ${formatClock(run.resume_at, now)}` : "";
+  return `retry ${run.retries ?? 1} of ${RETRY_LIMIT}${at}, ${failureLabel(run.failure)}`;
+}
+
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const two = (n: number) => String(n).padStart(2, "0");
 

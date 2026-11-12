@@ -5,7 +5,8 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  ProjectStore, formatClock, formatDuration, loadProjectState, newId, runTimes, stepTimes, type Event, type SessionFile,
+  ProjectStore, RETRY_LIMIT, failureLabel, formatClock, formatDuration, loadProjectState, newId, retryLine, runTimes, stepTimes, type Event,
+  type SessionFile,
 } from "../src/index.ts";
 
 const T0 = Date.parse("2026-11-12T10:00:00Z");
@@ -122,4 +123,15 @@ test("durations and clock times read as the dashboard shows them", () => {
   assert.equal(formatClock(new Date(2026, 10, 12, 9, 5).toISOString(), now), "09:05");
   assert.equal(formatClock(new Date(2026, 10, 11, 23, 59).toISOString(), now), "11 Nov 23:59");
   assert.equal(formatClock(new Date(2025, 0, 3, 7, 0).toISOString(), now), "3 Jan 2025 07:00");
+});
+
+test("a run waiting to retry reads as the retry, its time and the failure in short words", () => {
+  const now = new Date(2026, 10, 13, 13, 50);
+  const at = new Date(2026, 10, 13, 14, 5).toISOString();
+  assert.equal(retryLine({ state: "retry_wait", retries: 2, resume_at: at, failure: "overloaded" }, now), `retry 2 of ${RETRY_LIMIT} at 14:05, overloaded`);
+  assert.equal(retryLine({ state: "retry_wait", retries: 1, resume_at: at, failure: "serverOverloaded" }, now), "retry 1 of 5 at 14:05, overloaded");
+  assert.equal(retryLine({ state: "retry_wait", retries: 3, failure: "processExited" }, now), "retry 3 of 5, the runtime's process exited");
+  assert.equal(retryLine({ state: "running", retries: 2 }, now), undefined);
+  assert.deepEqual(["responseStreamDisconnected", "connection", "rate_limit", "rateLimitExceeded", "internalServerError", "weird"].map(failureLabel),
+    ["network", "network", "rate limited", "rate limited", "server error", "weird"]);
 });

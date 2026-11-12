@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { Event } from "@nexus/protocol";
 import { act, enc, fileUrl, type ProjectState, type QuestionView, type QueueView, type StepView } from "../api.ts";
 import { Button, Composer, Expandable, Markdown, Section, StatusBadge, StepTimes, TimeAgo } from "./ui.tsx";
-import { Activity, RunControls } from "./Run.tsx";
+import { Activity, RetryNote, RunControls } from "./Run.tsx";
 import { draftKey } from "../drafts.ts";
 import { layerValue } from "../layers.ts";
 import { nav, useNav } from "../nav.ts";
@@ -38,6 +38,13 @@ export function StepDetail({ project, queue, step, onChanged }: Props & { step: 
         {step.commit && <span className="font-mono">{step.commit}</span>}
         {session && <span>by {session.title ?? session.id.slice(-8)} ({session.runtime})</span>}
       </div>
+
+      {queue.run?.state === "retry_wait" && queue.run.step === step.id && (
+        <div className="mt-4 rounded-lg bg-amber-500/10 p-3 text-sm ring-1 ring-amber-500/30">
+          <RetryNote run={queue.run} className="text-sm" />
+          {queue.run.reason && <p className="mt-1 text-xs text-zinc-400">{queue.run.reason}</p>}
+        </div>
+      )}
 
       {(step.summary || step.reason || step.progress) && (
         <div className="mt-4 rounded-lg bg-zinc-800/50 p-3 text-sm">

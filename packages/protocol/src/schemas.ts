@@ -284,6 +284,8 @@ export const RunFile = z.object({
   resume_at: Time.optional(), // usage_wait: when the window resets; retry_wait: when the turn is tried again
   /** Turns that failed in a row for a passing reason; cleared by a turn that ends well and by a new step. */
   retries: z.number().int().optional(),
+  /** The runtime's code for the last failure that is being retried (or that halted the run), e.g. `overloaded`. */
+  failure: z.string().optional(),
   /** Stopped only for a Nexus update: the server resumes it by itself when it starts again. */
   resume_after_restart: z.boolean().optional(),
 });

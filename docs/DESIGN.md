@@ -140,6 +140,9 @@ retry starts a new process that resumes the same session (Claude Code `--resume`
 - **A retry waiting at an update** is held like a running queue (`resume_after_restart`), and the next server makes
   it when it is due. A timer that comes during the drain does nothing; a cancelled update sets it again. A pause or a
   stop by the user cancels a pending retry.
+- **Shown** on the step's card, at the top of the step and in the run box: "retry 2 of 5 at 14:05, overloaded" (the
+  run's `retries`, `resume_at` and `failure`, the code in short words; `retryLine` in `@nexus/protocol/times`). The
+  step's activity lists both the runtime's own retries and the engine's.
 
 The shapes come from the runtimes' published types, not from a probe: Claude Code's from the Agent SDK's `sdk.d.ts`
 (`@anthropic-ai/claude-agent-sdk` 0.3.323, the release that matches Claude Code 2.1.323: `SDKAssistantMessageError`,

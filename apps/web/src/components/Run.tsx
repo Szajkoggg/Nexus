@@ -1,5 +1,6 @@
 // Running queues through Nexus-launched sessions: controls, live activity, sessions and usage.
 import { useState } from "react";
+import { retryLine } from "@nexus/protocol/times";
 import { act, enc, useFetch, type ActivityEntry, type ProjectState, type QueueView, type SessionView, type Usage } from "../api.ts";
 import { Button, RunTimes, Section, TimeAgo } from "./ui.tsx";
 import { EffortSelect, ModelSelect } from "./Settings.tsx";
@@ -18,13 +19,20 @@ const RUN_LABEL: Record<string, string> = {
   finished: "finished", usage_wait: "waiting for the usage window", retry_wait: "waiting to retry",
 };
 
+/** A pending retry, "Retry 2 of 5 at 14:05, overloaded", in amber; nothing for a run that is not waiting to retry. */
+export function RetryNote({ run, className = "mt-1 text-xs" }: { run: NonNullable<QueueView["run"]>; className?: string }) {
+  const line = retryLine(run, new Date());
+  if (!line) return null;
+  return <p className={`${className} text-amber-300`}>↻ {line[0]!.toUpperCase() + line.slice(1)}</p>;
+}
+
 export function RunChip({ queue }: { queue: QueueView }) {
   const r = queue.run;
   if (!r || r.state === "finished") return null;
   return (
     <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs ring-1 ${RUN_TONE[r.state]}`}>
       {r.state === "running" && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-400" />}
-      Nexus: {RUN_LABEL[r.state]}{r.step && r.state === "running" ? ` · ${r.step}` : ""}
+      Nexus: {RUN_LABEL[r.state]}{r.step && (r.state === "running" || r.state === "retry_wait") ? ` · ${r.step}` : ""}
     </span>
   );
 }
@@ -66,7 +74,8 @@ export function RunControls({ project, queue, onChanged }: { project: ProjectSta
           <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-zinc-400"><RunTimes run={run} /></div>
           {run.reason && <p className="mt-1 text-zinc-300">{run.reason}</p>}
           {runSession && <p className="mt-1 text-xs text-zinc-500">Session: {runSession.title ?? runSession.id} {runSession.live?.model ? `· ${runSession.live.model}` : ""}{runSession.effort ? ` · ${runSession.effort} effort` : ""} <ContextBar s={runSession} /></p>}
-          {(run.state === "usage_wait" || run.state === "retry_wait") && run.resume_at && <p className="mt-1 text-xs text-zinc-500">Resumes by itself at {new Date(run.resume_at).toLocaleTimeString()}.</p>}
+          {run.state === "usage_wait" && run.resume_at && <p className="mt-1 text-xs text-zinc-500">Resumes by itself at {new Date(run.resume_at).toLocaleTimeString()}.</p>}
+          <RetryNote run={run} />
         </div>
       )}
       <div className="flex flex-wrap items-center gap-2">
