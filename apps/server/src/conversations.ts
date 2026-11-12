@@ -104,6 +104,9 @@ export class Conversations {
 
   shutdown(): void { for (const l of this.live.values()) { clearTimeout(l.timer); l.proc.kill(); } }
 
+  /** A partner's process is still running (after shutdown: not yet exited). */
+  alive(): boolean { return [...this.live.values()].some((l) => l.proc.state !== "exited"); }
+
   // ---------------------------------------------------------------- processes
 
   private session(id: string): SessionFile {

@@ -188,7 +188,7 @@ export function SettingsPanel({ project, onChanged, server }: { project: Project
 
 export interface ServerInfo {
   commit: string; subject: string; live: boolean; branch: string | null; root: string;
-  update: { phase: "idle" | "draining" | "updating" | "restarting" | "failed"; held: string[]; waiting: string[]; log: string[]; error?: string; now?: boolean };
+  update: { phase: "idle" | "draining" | "updating" | "restarting" | "failed" | "updated"; held: string[]; waiting: string[]; log: string[]; error?: string; now?: boolean };
 }
 
 export function useServer(version: unknown) {
@@ -198,7 +198,7 @@ export function useServer(version: unknown) {
 /** A pill in the header while Nexus updates itself. */
 export function UpdatePill({ info }: { info: ServerInfo | undefined }) {
   const u = info?.update;
-  if (!u || u.phase === "idle") return null;
+  if (!u || u.phase === "idle" || u.phase === "updated") return null;
   const text = u.phase === "draining" ? (u.waiting.length ? `updating: waiting for ${u.waiting.length} project${u.waiting.length > 1 ? "s" : ""}` : "updating")
     : u.phase === "failed" ? "update failed" : u.phase;
   return <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs ring-1 ${u.phase === "failed" ? "text-red-300 ring-red-500/40" : "animate-pulse text-sky-300 ring-sky-500/40"}`}>{text}</span>;
@@ -225,7 +225,7 @@ export function ServerSection({ info, onChanged }: { info: ServerInfo | undefine
       </p>
       {u.phase !== "idle" && (
         <div className="mt-3 rounded-lg bg-zinc-950 p-3 text-xs text-zinc-400">
-          <div className="mb-1 text-zinc-200">Update: {u.phase}{u.held.length ? `; holding ${u.held.join(", ")}` : ""}{u.waiting.length ? `; waiting for ${u.waiting.join(", ")}` : ""}</div>
+          <div className="mb-1 text-zinc-200">{u.phase === "updated" ? <>Updated: <span className="font-mono">{info.commit}</span> is up</> : <>Update: {u.phase}</>}{u.held.length ? `; holding ${u.held.join(", ")}` : ""}{u.waiting.length ? `; waiting for ${u.waiting.join(", ")}` : ""}</div>
           {u.log.map((l, i) => <div key={i} className="font-mono">{l}</div>)}
           {u.error && <div className="mt-1 whitespace-pre-wrap text-red-300">{u.error}</div>}
         </div>

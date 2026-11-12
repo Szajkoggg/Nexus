@@ -26,6 +26,8 @@ export class Engine {
   private busy = new Set<string>();
   /** Set while Nexus drains for an update: nothing new starts. */
   draining = false;
+  /** Set by shutdown: this engine writes nothing more (its successor may already own the files). */
+  private stopped = false;
 
   constructor(store: ProjectStore, changed: () => void) {
     this.store = store;
@@ -155,7 +157,15 @@ export class Engine {
   }
 
   shutdown(): void {
+    this.stopped = true;
+    for (const t of this.timers.values()) clearTimeout(t);
+    this.timers.clear();
     for (const [, l] of this.live) l.proc.kill();
+  }
+
+  /** A process of this engine's is still running (after shutdown: not yet exited). */
+  alive(): boolean {
+    return [...this.live.values()].some((l) => l.proc.state !== "exited");
   }
 
   // ---------------------------------------------------------------- driving
@@ -165,6 +175,7 @@ export class Engine {
    * the session is idle, so it is safe to call at any time and any number of times.
    */
   private advance(queueId: string, given?: ProjectState): void {
+    if (this.stopped) return;
     if (this.busy.has(queueId)) { setTimeout(() => this.advance(queueId), 50); return; }
     this.busy.add(queueId);
     try { this.advanceUnlocked(queueId, given); }
@@ -437,12 +448,13 @@ export class Engine {
       if (run?.resume_after_restart) {
         // Held for an update: resumed shortly, once this server is up.
         this.writeRun(q, { ...run, state: "paused", reason: "resuming after the Nexus update" });
-        setTimeout(() => {
+        this.timers.set(`recover:${q}`, setTimeout(() => {
+          this.timers.delete(`recover:${q}`);
           const r = this.store.readRun(q);
           if (!r?.resume_after_restart) return;
           try { this.resume(q); } catch (e) { this.halt(q, `could not resume after the update: ${(e as Error).message}`); }
           this.changed();
-        }, 1500);
+        }, 1500));
       } else if (run && ["running", "pausing"].includes(run.state)) {
         this.writeRun(q, { ...run, state: "paused", reason: "the Nexus server restarted; resume to continue" });
       }

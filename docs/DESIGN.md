@@ -229,6 +229,41 @@ the user into a Markdown queue, though a project may still copy it there.
 - Hooks are installed per project only for the observe-only path and for session-start context; the Nexus-launched
   path does not depend on them.
 
+### Updating Nexus
+
+Nexus updates itself between steps (`src/lifecycle.ts`). It holds every running queue at the end of its step
+(`resume_after_restart`), moves the live worktree, installs and builds, then hands over to its successor
+(`src/handover.ts`). The hand-over keeps two rules: exactly one server writes the projects' files at any time, and
+the old server goes only once the new one has shown it works.
+
+1. The predecessor writes `predecessor.json`, stops every agent and waits for their exits to be recorded. It stops
+   its own writing (watchers closed, timers cleared, change handling off) and frees the port. It stays alive.
+2. It starts the successor with `NEXUS_HANDOVER` naming the hand-over folder. The successor listens and runs a smoke
+   check, reading only: `GET /api/server` answers with a version, the dashboard answers if it is built, and every
+   registered project's state loads. It writes `ready.json` on success. On failure it writes `failed.json` and
+   exits.
+3. When `ready.json` appears, the predecessor writes `released.json` with its update log and exits. The successor
+   then builds its engines, which is when held runs are recovered and resumed. Its update log, shown in the
+   dashboard's server panel (`phase: updated`), begins with the predecessor's lines and ends with the version that
+   is up.
+4. Without a signal within 60 seconds (a constant), or on `failed.json` or an early exit, the predecessor logs it and
+   exits. Rolling back to the old version on failure is the next step.
+
+Until it is released, a successor builds no engine. So it does no recovery, resumes nothing, starts no agent and
+writes nothing under any `.nexus/`; it answers `/api/projects…` with 503. The predecessor's exit also counts as
+release, since a gone process writes nothing. This covers a predecessor that gave up waiting.
+
+Files carry the signals, not HTTP. The predecessor has given up its port and has nothing to serve. Files keep each
+signal's single writer obvious, and they stay behind for reading after a failed update. The order is
+release → start → wait, so the successor normally finds the port free; it still waits up to 60 s for it
+(`NEXUS_WAIT_PORT`).
+
+**Compatibility.** A start without `NEXUS_HANDOVER` behaves as before: `live.ps1`, `autostart.ps1`, a plain
+`npm start`, or a successor started by an older server, which frees the port as it exits and sends no hand-over.
+Such a server is active at once and resumes the held queues. A successor of an older version, started by a newer
+predecessor, ignores the folder and never signals. The predecessor then times out after 60 s and exits, having
+written nothing since it let go, so the successor's early start is still the only writer.
+
 ## Tech stack
 
 | Part | Choice |
@@ -307,6 +342,12 @@ The user's answers, 2026-11-12:
   which waits for the port and resumes only the queues the update held. On Windows two details mattered: the
   server writes its own log (a shell's `>>` locks the file against the successor), and the line endings are fixed
   by `.gitattributes` (npm rewrites bin scripts, which made the worktree look changed).
+- **A successor that is merely started is not up.** Until 2026-11-12 the predecessor started its successor and exited
+  300 ms later, whatever became of it: a successor that crashed on start, could not load a project or never got the
+  port left nothing running, and the successor recovered and resumed runs while the predecessor might still be
+  writing. Now the successor proves it is up (a smoke check) before the predecessor goes, and it touches nothing until
+  the predecessor has let go (see "Updating Nexus"). Checked end to end on a development instance: the predecessor
+  exited about 0.3 s after the successor's ready signal, and the successor's update log showed both servers' lines.
 
 ## Open questions
 

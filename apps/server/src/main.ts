@@ -8,7 +8,8 @@ import { Hono } from "hono";
 import { serve, type HttpBindings } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { WebSocketServer, type WebSocket } from "ws";
-import chokidar from "chokidar";
+import chokidar, { type FSWatcher } from "chokidar";
+import type { Server } from "node:http";
 import {
   ActionError, Effort, ProjectStore, addNote, updateSettings, answerAsUser, approveQueue, deleteNote, loadProjectState, nexusHome,
   readRegistry, readUsage, routeAnswers, sendMessage, setQueueSettings, type ProjectState,
@@ -17,6 +18,7 @@ import { Engine } from "./engine.ts";
 import { Orchestrator } from "./orchestrator.ts";
 import { Conversations } from "./conversations.ts";
 import { listModels } from "./models.ts";
+import { Standby, smokeCheck } from "./handover.ts";
 import { Lifecycle, version } from "./lifecycle.ts";
 import {
   AttentionWatch, allowed, auth, authCookie, isLocal, loginPage, push, pushDevices, pushKey, qrSvg, rotateToken,
@@ -40,6 +42,11 @@ if (process.env.NEXUS_LOG) {
 const PORT = Number(process.env.NEXUS_PORT ?? 4317);
 const HOST = process.env.NEXUS_HOST ?? "127.0.0.1";
 const WEB_DIST = resolve(dirname(fileURLToPath(import.meta.url)), "../../web/dist");
+// Started by an update (src/handover.ts): read-only until the predecessor hands over. A plain start, or one by an
+// older server that does not hand over, is active at once.
+const HANDOVER = process.env.NEXUS_HANDOVER;
+/** Only an active server builds engines, recovers runs, starts agents or writes under a project's .nexus/. */
+let active = !HANDOVER;
 
 // ---------------------------------------------------------------- projects
 
@@ -47,6 +54,7 @@ interface Entry { id: string; root: string; store: ProjectStore; engine: Engine;
 const projects = new Map<string, Entry>();
 
 function refreshRegistry(): void {
+  if (!active) return;
   const reg = readRegistry();
   for (const p of reg.projects) {
     if (projects.has(p.id)) continue;
@@ -72,9 +80,11 @@ const sockets = new Set<WebSocket>();
 const pending = new Map<string, NodeJS.Timeout>();
 
 function changed(id: string): void {
+  if (!active) return;
   clearTimeout(pending.get(id));
   pending.set(id, setTimeout(() => {
     pending.delete(id);
+    if (!active) return;
     const e = projects.get(id);
     if (e) {
       e.state = undefined; e.error = undefined;
@@ -97,14 +107,16 @@ function changed(id: string): void {
   }, 150));
 }
 
+const watchers: FSWatcher[] = [];
 function watchProject(id: string, dir: string): void {
-  chokidar
+  watchers.push(chokidar
     .watch(dir, { ignoreInitial: true, ignored: (p) => p.endsWith(".tmp") })
     .on("all", () => changed(id))
-    .on("error", (err) => console.error(`watch ${id}: ${(err as Error).message}`));
+    .on("error", (err) => console.error(`watch ${id}: ${(err as Error).message}`)));
 }
 
 chokidar.watch(join(nexusHome(), "projects.yaml"), { ignoreInitial: true }).on("all", () => {
+  if (!active) return;
   refreshRegistry();
   for (const s of sockets) if (s.readyState === s.OPEN) s.send(JSON.stringify({ type: "projects" }));
 });
@@ -134,7 +146,7 @@ const lifecycle = new Lifecycle(() => [...projects.values()].map((e) => ({
   drain: (now: boolean) => { e.conversations.draining = true; return e.engine.drainForUpdate(now); },
   cancel: () => { e.conversations.draining = false; e.engine.cancelDrain(); },
   shutdown: () => { e.engine.shutdown(); e.orchestrator.shutdown(); e.conversations.shutdown(); },
-})), () => { for (const s of sockets) if (s.readyState === s.OPEN) s.send(JSON.stringify({ type: "server" })); });
+})), () => { for (const s of sockets) if (s.readyState === s.OPEN) s.send(JSON.stringify({ type: "server" })); }, release);
 const watch = new AttentionWatch();
 
 // Remote devices sign in once with the access token; this machine needs nothing (src/remote.ts).
@@ -144,6 +156,11 @@ app.use("*", async (c, next) => {
   if (c.req.path.startsWith("/api/")) return c.json({ error: "sign in first" }, 401);
   return c.redirect("/login");
 });
+// A successor waiting for its predecessor serves no project yet (it has none loaded) and starts no update.
+const starting = (c: import("hono").Context) => c.json({ error: "Nexus is starting" }, 503);
+app.use("/api/projects", async (c, next) => (active ? next() : starting(c)));
+app.use("/api/projects/*", async (c, next) => (active ? next() : starting(c)));
+app.use("/api/server/*", async (c, next) => (active || c.req.method === "GET" ? next() : starting(c)));
 const secure = (c: { req: { header: (n: string) => string | undefined } }) =>
   c.req.header("x-forwarded-proto") === "https" || !!c.req.header("tailscale-user-login") || /\.ts\.net(:\d+)?$/.test(c.req.header("host") ?? "");
 app.get("/login", (c) => {
@@ -355,19 +372,66 @@ if (existsSync(WEB_DIST)) {
 
 // ---------------------------------------------------------------- start
 
-refreshRegistry();
-// The first look at each project is the baseline for push notifications: old news is not pushed after a restart.
-for (const e of projects.values()) { const s = stateOf(e); if (s) watch.check({ id: e.id, name: s.project.name }, s.attention); }
+/** Builds the engines (which recover and resume held runs) and starts watching: this server now owns the files. */
+function activate(): void {
+  active = true;
+  refreshRegistry();
+  // The first look at each project is the baseline for push notifications: old news is not pushed after a restart.
+  for (const e of projects.values()) { const s = stateOf(e); if (s) watch.check({ id: e.id, name: s.project.name }, s.attention); }
+}
+
+/** The successor's side of an update: prove it is up, say so, and take over once the predecessor has let go. */
+async function takeOver(standby: Standby): Promise<void> {
+  const host = HOST === "0.0.0.0" || HOST === "::" ? "127.0.0.1" : HOST.includes(":") ? `[${HOST}]` : HOST;
+  const problems = await smokeCheck(`http://${host}:${PORT}`, existsSync(WEB_DIST));
+  if (problems.length) {
+    console.error(`smoke check failed: ${problems.join("; ")}`);
+    standby.failed(problems.join("; "));
+    process.exit(1);
+  }
+  const v = await version();
+  standby.ready({ commit: v.commit, subject: v.subject });
+  console.log("smoke check passed; waiting for the predecessor to hand over");
+  const { released, predecessor } = await standby.released();
+  activate();
+  lifecycle.arrived(v, predecessor, released);
+  console.log(`took over from ${predecessor ? `${predecessor.commit} (pid ${predecessor.pid})` : "no recorded predecessor"}${released ? "" : ", which exited without handing over"}`);
+}
+
+/** The predecessor's side of an update: stop every agent and every write, and free the port. It stays alive. */
+async function release(): Promise<void> {
+  active = false;
+  for (const t of pending.values()) clearTimeout(t);
+  pending.clear();
+  await Promise.all(watchers.splice(0).map((w) => w.close()));
+  for (const e of projects.values()) { e.engine.shutdown(); e.orchestrator.shutdown(); e.conversations.shutdown(); }
+  // An agent's exit is written to its runtime file: wait for those last writes.
+  const alive = () => [...projects.values()].some((e) => e.engine.alive() || e.orchestrator.alive() || e.conversations.alive());
+  for (const until = Date.now() + 10_000; alive() && Date.now() < until;) await new Promise((r) => setTimeout(r, 100));
+  for (const s of sockets) s.terminate();
+  const http = server as Server;
+  await new Promise<void>((r) => { http.close(() => r()); http.closeAllConnections(); });
+}
+
+if (active) activate();
 auth(); // creates the access token on the first start
 const server = serve({ fetch: app.fetch, port: PORT, hostname: HOST }, (info) => {
-  console.log(`Nexus server on http://${HOST}:${info.port} (${projects.size} project(s); registry in ${nexusHome()})`);
+  console.log(`Nexus server on http://${HOST}:${info.port} (${projects.size} project(s); registry in ${nexusHome()})${HANDOVER ? "; taking over from an update" : ""}`);
   if (!existsSync(WEB_DIST)) console.log("No built dashboard: run the web dev server (npm run dev) or npm start.");
+  if (HANDOVER) {
+    takeOver(new Standby(HANDOVER)).catch((err: Error) => {
+      console.error(`taking over failed: ${err.message}`);
+      if (!active) { new Standby(HANDOVER).failed(err.message); process.exit(1); }
+    });
+  }
 });
-// After an update the successor starts while its predecessor still holds the port: it waits (NEXUS_WAIT_PORT seconds).
+// After an update the successor may start while its predecessor still holds the port (an older predecessor frees it
+// only as it exits): it waits (NEXUS_WAIT_PORT seconds).
 let portTries = Number(process.env.NEXUS_WAIT_PORT ?? 0) * 2;
 server.on("error", (err: NodeJS.ErrnoException) => {
   if (err.code === "EADDRINUSE" && portTries-- > 0) { setTimeout(() => server.listen(PORT, HOST), 500); return; }
   console.error(`cannot listen on ${HOST}:${PORT}: ${err.message}`);
+  if (HANDOVER && !active) new Standby(HANDOVER).failed(`cannot listen on ${HOST}:${PORT}: ${err.message}`);
   process.exit(1);
 });
 

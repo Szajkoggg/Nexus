@@ -307,6 +307,28 @@ receiving push and, to local requests only, the token, a sign-in link and its QR
 `<NEXUS_HOME>/push.json`. Whatever newly appears in a project's "waiting for you" list is pushed to every device; the
 list as found when the server starts is the baseline.
 
+**Nexus itself.** `GET /api/server` gives the version (`commit`, `subject`, `live`, `branch`, `root`) and `update`:
+`phase` (`idle`, `draining`, `updating`, `restarting`, `failed`, or `updated` on a server that took over from an
+update), `held`, `waiting`, `log`, `error?`. `POST /api/server/update` (`now?`, `ref?`) and `POST /api/server/cancel`
+start and cancel an update. A server waiting to take over answers every `/api/projects…` request, and every write
+under `/api/server/`, with 503.
+
+**The hand-over after an update.** The two servers talk through files in `<NEXUS_HOME>/handover/<id>/` (JSON, each
+written whole and renamed into place, one writer each). The predecessor removes the folders of earlier hand-overs
+when it starts one.
+
+| File | Writer | When |
+|---|---|---|
+| `predecessor.json` | predecessor | `pid`, `commit`, `subject`, `at`; before it stops its agents and starts the successor |
+| `ready.json` | successor | `pid`, `commit`, `subject`, `at`; it listens, its API (and the dashboard, if built) answers, every registered project's state loads |
+| `failed.json` | successor | `pid`, `at`, `reason`; the smoke check failed or the port never came free; it exits with code 1 |
+| `released.json` | predecessor | `at`, `log` (the update's log so far); it saw `ready.json`, writes nothing more, and exits |
+
+The predecessor starts the successor with `NEXUS_HANDOVER=<that folder>` (and `NEXUS_WAIT_PORT=60`). It waits up to
+60 seconds for `ready.json` or `failed.json`, or for the successor to exit. A successor started with `NEXUS_HANDOVER`
+stays read-only until `released.json` appears or the predecessor's process is gone. A server started without it is
+active at once, as before.
+
 ## Conversations
 
 `project.yaml` holds `conversations: { notes_dir?, runtime, model?, effort? }`. A conversation is a session with

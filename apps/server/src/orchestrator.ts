@@ -97,6 +97,9 @@ export class Orchestrator {
 
   shutdown(): void { this.proc?.kill(); }
 
+  /** Its process is still running (after shutdown: not yet exited). */
+  alive(): boolean { return !!this.proc && this.proc.state !== "exited"; }
+
   /** Not in the middle of a turn. */
   idle(): boolean { return !this.proc || this.proc.state !== "working"; }
 
