@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { attentionKey, type AttentionItem, type ProjectSummary } from "../api.ts";
+import { mergeAttention, type WaitingItem } from "@nexus/protocol/attention";
 import { TimeAgo } from "./ui.tsx";
 
 const LABEL: Record<AttentionItem["kind"], { text: string; tone: string }> = {
@@ -36,6 +37,50 @@ export function AttentionPanel({ items, onOpen }: { items: AttentionItem[]; onOp
         ))}
       </div>
     </section>
+  );
+}
+
+// ---------------------------------------------------------------- across all projects
+
+/** The header's way to everything waiting for the user, in every project: an inbox with the total count. */
+export function WaitingButton({ projects, onClick }: { projects: ProjectSummary[] | undefined; onClick: () => void }) {
+  const n = (projects ?? []).reduce((sum, p) => sum + p.attention.length, 0);
+  return (
+    <button onClick={onClick} title={`Waiting for you in all projects: ${n}`} aria-label={`Waiting for you: ${n}`}
+      className={`flex shrink-0 items-center gap-1.5 rounded-lg border px-2 py-1.5 text-sm hover:bg-zinc-900 ${n ? "border-amber-500/40 text-amber-300" : "border-zinc-700 text-zinc-400"}`}>
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2" /><path d="M5.5 5.1 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.9A2 2 0 0 0 16.7 4H7.3a2 2 0 0 0-1.8 1.1Z" /></svg>
+      {n > 0 && <span className="text-xs font-medium">{n}</span>}
+    </button>
+  );
+}
+
+/** Everything waiting for the user in every project, newest first; a tap opens the item in its project. */
+export function WaitingList({ projects, onOpen }: { projects: ProjectSummary[]; onOpen: (w: WaitingItem) => void }) {
+  const items = mergeAttention(projects);
+  return (
+    <div>
+      <h2 className="pr-8 text-xl font-semibold text-zinc-50">Waiting for you</h2>
+      <p className="mt-1 text-sm text-zinc-500">In all projects, newest first.</p>
+      {items.length === 0 && <p className="mt-6 text-sm text-zinc-400">Nothing waits for you.</p>}
+      <ul className="mt-4 space-y-2">
+        {items.map((a) => (
+          <li key={`${a.project}/${attentionKey(a)}`}>
+            <button onClick={() => onOpen(a)}
+              className="flex w-full items-start gap-3 rounded-lg border border-zinc-800 bg-zinc-900/60 p-3 text-left hover:border-zinc-600">
+              <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ring-1 ${LABEL[a.kind].tone}`}>{LABEL[a.kind].text}</span>
+              <span className="min-w-0 flex-1">
+                <span className="flex min-w-0 gap-2 text-xs">
+                  <span className="truncate font-medium text-zinc-300">{a.project_name}</span>
+                  {a.queue && <span className="shrink-0 font-mono text-zinc-500">{a.queue}{a.step ? `/${a.step}` : ""}</span>}
+                </span>
+                <span className="line-clamp-2 text-sm text-zinc-200">{plain(a.text)}</span>
+              </span>
+              {a.at && <span className="shrink-0 text-xs text-zinc-600"><TimeAgo at={a.at} /></span>}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

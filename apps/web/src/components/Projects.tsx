@@ -29,8 +29,8 @@ export function ProjectTabs({ projects, current, onPick }: { projects: ProjectSu
 
 /**
  * The narrow layout: the current project's name, with its own count and dot; a tap opens the list of all projects
- * (each with its count and dot), a second tap switches. A small amber dot on the closed picker says that another
- * project waits for you.
+ * (each with its count and dot), a second tap switches. What waits in other projects is counted by the waiting
+ * button beside it.
  */
 export function ProjectPicker({ projects, current, onPick }: { projects: ProjectSummary[]; current?: string; onPick: (id: string) => void }) {
   const [open, setOpen] = useState(() => new URLSearchParams(location.search).has("projects"));
@@ -45,8 +45,6 @@ export function ProjectPicker({ projects, current, onPick }: { projects: Project
     return () => window.removeEventListener("keydown", key);
   }, [open]);
   const here = projects.find((p) => p.id === current);
-  const others = projects.filter((p) => p.id !== current);
-  const elsewhere = others.some((p) => p.attention.length > 0);
   const single = projects.length < 2;
   return (
     <div className="flex min-w-0 flex-1 sm:hidden">
@@ -60,17 +58,16 @@ export function ProjectPicker({ projects, current, onPick }: { projects: Project
         {here && <Waiting n={here.attention.length} />}
         {here && <Running n={here.running} />}
         {!single && (
-          <span className="relative shrink-0 text-zinc-400">
+          <span className="shrink-0 text-zinc-400">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={open ? "rotate-180" : ""}><path d="m6 9 6 6 6-6" /></svg>
-            {elsewhere && !open && <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-amber-400" title="Another project waits for you" />}
           </span>
         )}
       </button>
       {open && createPortal(
         <>
-          <div className="fixed inset-x-0 bottom-0 z-40 bg-black/50" style={{ top }} onClick={() => setOpen(false)} />
+          <div className="fixed inset-x-0 bottom-0 z-40 bg-black/50 sm:hidden" style={{ top }} onClick={() => setOpen(false)} />
           <ul role="listbox" aria-label="Projects" style={{ top, maxHeight: `calc(100dvh - ${top}px - 4rem)` }}
-            className="scroll-thin fixed inset-x-0 z-50 overflow-y-auto border-b border-zinc-800 bg-zinc-900 py-1 shadow-2xl">
+            className="scroll-thin fixed inset-x-0 z-50 overflow-y-auto sm:hidden border-b border-zinc-800 bg-zinc-900 py-1 shadow-2xl">
             {projects.map((p) => (
               <li key={p.id}>
                 <button

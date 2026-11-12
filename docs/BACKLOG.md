@@ -94,7 +94,6 @@ worker as a note for the next step or round.
 
 - Codex workers in a queue's own worktree: the repository's `.git` lies outside the worktree, so the sandbox must
   also be allowed to write there, or the worker cannot commit.
-- One "waiting for you" view across all projects.
 - Voice input in the chats on the phone (the browser's speech recognition).
 - Notifications per kind on or off; quiet hours.
 - Search across a project's history: events, chats, reports.

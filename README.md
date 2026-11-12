@@ -115,7 +115,10 @@ proxy or from another address needs the access token once (it sets a cookie for 
 
 On a narrow screen the project tabs give way to a picker: the current project's name at the top left, with its
 "waiting for you" count and running dot. Tap it for the list of all projects (each with its count and dot), tap one to
-switch. A small amber dot on the closed picker means another project waits for you.
+switch. The header's tools move to a second row there.
+
+The inbox button in the header counts what waits for you in all projects (questions, approvals, steps in review,
+halted runs, failed steps). It opens one list of them, newest first, each with its project; tap an item to open it.
 
 "Replace token" in the panel signs every remote device out. To have Nexus start with Windows, without a console
 window, run from the live instance: `powershell -ExecutionPolicy Bypass -File C:\Code\Nexus-live\scripts\autostart.ps1`

@@ -4,7 +4,7 @@ import { useLive, useProjectState, useProjects, type AttentionItem, type QueueVi
 import { QueueRow } from "./components/QueueRow.tsx";
 import { QueueDetail, StepDetail } from "./components/Details.tsx";
 import { Drawer, StatusBadge, TimeAgo } from "./components/ui.tsx";
-import { AttentionPanel, NotifyToggle, useNotifications } from "./components/Attention.tsx";
+import { AttentionPanel, NotifyToggle, useNotifications, WaitingButton, WaitingList } from "./components/Attention.tsx";
 import { ContextBar, UsageMeter } from "./components/Run.tsx";
 import { ChatPanel, ConversationsButton, ConversationsPanel, OrchestratorButton, useOrchestrator } from "./components/Chat.tsx";
 import { RemoteButton, RemotePanel } from "./components/Remote.tsx";
@@ -54,6 +54,7 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(() => new URLSearchParams(location.search).has("settings"));
   const [remoteOpen, setRemoteOpen] = useState(() => new URLSearchParams(location.search).has("remote"));
   const [chatOpen, setChatOpen] = useState(() => new URLSearchParams(location.search).has("chat"));
+  const [waitingOpen, setWaitingOpen] = useState(() => new URLSearchParams(location.search).has("waiting"));
 
   const byGroup = useMemo(() => {
     const order = (q: QueueView) => q.updated ?? q.updated_at ?? "";
@@ -70,11 +71,14 @@ export function App() {
   return (
     <div className="flex min-h-full flex-col">
       <header className="sticky top-0 z-30 border-b border-zinc-800 bg-zinc-950/90 pt-[env(safe-area-inset-top)] backdrop-blur">
-        <div className="mx-auto flex max-w-7xl items-center gap-2 px-4 py-3 sm:gap-4">
+        {/* On a phone the header has two rows: the project and what waits for you, then the tools. */}
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-2 gap-y-2.5 px-4 py-3 sm:flex-nowrap sm:gap-4">
           {/* On a phone the project picker takes the wordmark's place: the current project is what matters there. */}
           <span className="hidden text-lg font-semibold tracking-tight text-zinc-50 sm:inline">Nexus</span>
           {projects && <ProjectTabs projects={projects} current={projectId} onPick={(id) => route.go(id)} />}
           {projects && <ProjectPicker projects={projects} current={projectId} onPick={(id) => route.go(id)} />}
+          <WaitingButton projects={projects} onClick={() => setWaitingOpen(true)} />
+          <div className="basis-full sm:hidden" />
           <UpdatePill info={server} />
           {projectId && <ConversationsButton onClick={() => setIdeasOpen(true)} />}
           {projectId && <OrchestratorButton view={orchestrator} onClick={() => setChatOpen(true)} />}
@@ -82,7 +86,7 @@ export function App() {
           <NotifyToggle {...notify} />
           {state && <SettingsButton onClick={() => setSettingsOpen(true)} />}
           <RemoteButton onClick={() => setRemoteOpen(true)} />
-          <span className={`flex items-center gap-1.5 text-xs ${connected ? "text-zinc-500" : "text-orange-400"}`} title={connected ? "Live updates on" : "Reconnecting"}>
+          <span className={`ml-auto flex items-center gap-1.5 text-xs sm:ml-0 ${connected ? "text-zinc-500" : "text-orange-400"}`} title={connected ? "Live updates on" : "Reconnecting"}>
             <span className={`h-2 w-2 rounded-full ${connected ? "bg-emerald-500" : "bg-orange-500"}`} />
             <span className="hidden sm:inline">{connected ? "live" : "offline"}</span>
           </span>
@@ -175,6 +179,10 @@ export function App() {
 
       <Drawer open={settingsOpen && !!state} onClose={() => setSettingsOpen(false)}>
         {state && <SettingsPanel key={state.project.id} project={state.project} onChanged={() => { reload(); setTick((t) => t + 1); }} server={server} />}
+      </Drawer>
+
+      <Drawer open={waitingOpen} onClose={() => setWaitingOpen(false)}>
+        <WaitingList projects={projects ?? []} onOpen={(w) => { setWaitingOpen(false); route.go(w.project, w.queue, w.step); }} />
       </Drawer>
 
       <Drawer open={remoteOpen} onClose={() => setRemoteOpen(false)}>
