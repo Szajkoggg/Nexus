@@ -338,11 +338,14 @@ Everything the dashboard opens over the queue list is a layer kept in the browse
 button, the back gesture, the browser's Back and Escape all close the topmost one, and Back leaves the app only when
 nothing is open. Each history entry Nexus writes carries `{hash, layers, depth}` in `history.state`: the hash is the
 route (`#/<project>[/<queue>[/<step>]]`, the queue or step drawer being the layer `item`), `layers` the open stack
-(`chat`, `ideas`, `conversation:<id>`, `settings`, `remote`, `waiting`, `projects`), `depth` how many entries Nexus
+(`chat`, `ideas`, `conversation:<id>`, `settings`, `remote`, `waiting`, `projects`, `viewer:<index>` for a review
+image), `depth` how many entries Nexus
 pushed. Opening pushes one entry; a close button goes back to it, so Back never reopens what was closed and no dead
 entries pile up; switching within a kind (another step, another conversation) replaces the entry. Switching
 projects is not a layer: it rewrites the entry in place. A page loaded with something open (a hash with a step,
-`?chat`) has no entry to go back to, so closing it rewrites the entry instead. The rules are pure
+`?chat`) has no entry to go back to, so closing it rewrites the entry instead. Review images open in an in-app
+viewer for the same reason: a new browser tab, in an installed app on a phone, had no way back; moving to the next
+image replaces the viewer's entry, so one Back always returns to the step. The rules are pure
 (`apps/web/src/layers.ts`, unit tested); `nav.ts` applies them to `window.history`.
 
 ### Drafts stay in the browser

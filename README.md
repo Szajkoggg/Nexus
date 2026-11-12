@@ -14,8 +14,11 @@ can record what you decide; "Hand to orchestrator" has it summarize the conversa
 which turns it into queues.
 
 **Back.** The back button (on a phone also the back gesture) closes what is open on top: a chat, the Ideas panel or
-a conversation in it, Settings, a queue or step. With nothing open it leaves Nexus. Escape does the same on a
+a conversation in it, Settings, a queue or step, a review image. With nothing open it leaves Nexus. Escape does the same on a
 computer.
+
+**Review images** open in the app: full screen on a phone, two fingers to zoom (double-tap on a computer), swipe or
+the arrows for the step's next and previous image; "Original" opens the file in a new tab.
 
 **Drafts.** Text typed but not sent (to the orchestrator, in a conversation, to a running agent, a step's note, an
 answer, the words with an approval) stays in its box when you close the panel, open something else, switch project

@@ -4,6 +4,9 @@ import { act, enc, fileUrl, type ProjectState, type QuestionView, type QueueView
 import { Button, Composer, Expandable, Markdown, Section, StatusBadge, StepTimes, TimeAgo } from "./ui.tsx";
 import { Activity, RunControls } from "./Run.tsx";
 import { draftKey } from "../drafts.ts";
+import { layerValue } from "../layers.ts";
+import { nav, useNav } from "../nav.ts";
+import { ImageViewer, type ViewerImage } from "./Viewer.tsx";
 
 interface Props { project: ProjectState; queue: QueueView; onChanged: () => void }
 
@@ -15,6 +18,12 @@ export function StepDetail({ project, queue, step, onChanged }: Props & { step: 
   const live = (step.status === "running" || step.status === "waiting") && step.session;
   const session = live ? project.sessions.find((s) => s.id === step.session) : undefined;
   const notesOpen = step.status === "pending" || step.status === "stopped";
+  // Review images open in the in-app viewer, a layer above the step (Back closes it); other items as links.
+  const isImage = (r: StepView["review_items"][number]) => !!r.path && /\.(png|jpe?g|gif|webp|svg)$/i.test(r.path);
+  const images: ViewerImage[] = step.review_items.filter(isImage)
+    .map((r) => ({ src: fileUrl(id, r.path!), label: r.label ?? r.path!.split("/").at(-1)!, round: r.round }));
+  const viewing = layerValue(useNav(), "viewer");
+  const shown = viewing === undefined ? undefined : Math.min(Math.max(0, Number(viewing) || 0), images.length - 1);
   return (
     <div>
       <div className="text-xs text-zinc-500">
@@ -78,17 +87,30 @@ export function StepDetail({ project, queue, step, onChanged }: Props & { step: 
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             {step.review_items.map((r, i) => {
               const href = r.path ? fileUrl(id, r.path) : r.url!;
-              const img = r.path && /\.(png|jpe?g|gif|webp|svg)$/i.test(r.path);
+              const caption = <div className="truncate px-2 py-1 text-xs text-zinc-400 group-hover:text-zinc-200">{r.label ?? r.path ?? r.url}{r.round ? ` · round ${r.round}` : ""}</div>;
+              const tile = "group overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950 text-left hover:border-zinc-600";
+              if (isImage(r)) {
+                const n = step.review_items.slice(0, i).filter(isImage).length;
+                return (
+                  <button key={i} onClick={() => nav.open(`viewer:${n}`)} className={tile}>
+                    <img src={href} alt={r.label ?? ""} className="aspect-video w-full object-cover" loading="lazy" />
+                    {caption}
+                  </button>
+                );
+              }
               return (
-                <a key={i} href={href} target="_blank" rel="noreferrer" className="group overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950 hover:border-zinc-600">
-                  {img ? <img src={href} alt={r.label ?? ""} className="aspect-video w-full object-cover" loading="lazy" />
-                    : <div className="flex aspect-video items-center justify-center text-2xl text-zinc-600">{r.url ? "↗" : "▤"}</div>}
-                  <div className="truncate px-2 py-1 text-xs text-zinc-400 group-hover:text-zinc-200">{r.label ?? r.path ?? r.url}{r.round ? ` · round ${r.round}` : ""}</div>
+                <a key={i} href={href} target="_blank" rel="noreferrer" className={tile}>
+                  <div className="flex aspect-video items-center justify-center text-2xl text-zinc-600">{r.url ? "↗" : "▤"}</div>
+                  {caption}
                 </a>
               );
             })}
           </div>
         </Section>
+      )}
+
+      {shown !== undefined && images.length > 0 && (
+        <ImageViewer images={images} index={shown} onIndex={(i) => nav.open(`viewer:${i}`)} onClose={() => nav.close("viewer")} />
       )}
 
       {step.checks.length > 0 && (
