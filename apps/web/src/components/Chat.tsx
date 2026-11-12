@@ -1,8 +1,8 @@
 // Chats: the project's orchestrator, and conversations with a thinking partner.
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import type { ChatEntry, RuntimeFile, SessionFile } from "@nexus/protocol";
 import { act, enc, useFetch } from "../api.ts";
-import { Button, Composer, Markdown, TimeAgo } from "./ui.tsx";
+import { Button, Composer, Markdown, SIDE_RIGHT, TimeAgo, useWide } from "./ui.tsx";
 import { draftKey } from "../drafts.ts";
 import { layerValue } from "../layers.ts";
 import { nav, useNav } from "../nav.ts";
@@ -27,6 +27,7 @@ function ChatColumn({ title, over, view, status, actions, empty, draft, placehol
   draft: string; placeholder: string; onSend: (text: string) => Promise<void>; onBack?: () => void;
 }) {
   const end = useRef<HTMLDivElement>(null);
+  const side = useContext(Side);
   const [showTools, setShowTools] = useState(false);
   const chat = (view?.chat ?? []).filter((c) => showTools || c.kind !== "tool");
   useEffect(() => { end.current?.scrollIntoView({ block: "end" }); }, [chat.length, view?.state]);
@@ -36,7 +37,7 @@ function ChatColumn({ title, over, view, status, actions, empty, draft, placehol
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <header className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-zinc-800 px-5 py-3">
-        {onBack && <button onClick={onBack} className="rounded-md px-1.5 text-lg text-zinc-400 hover:text-zinc-100 sm:hidden" aria-label="Back">‹</button>}
+        {onBack && <button onClick={onBack} className={`rounded-md px-1.5 text-lg text-zinc-400 hover:text-zinc-100 ${side ? "" : "sm:hidden"}`} aria-label="Back">‹</button>}
         <div className="min-w-0">
           <div className="text-xs text-zinc-500">{over}</div>
           <h2 className="truncate font-semibold text-zinc-50">{title}</h2>
@@ -90,14 +91,33 @@ function Entry({ c }: { c: ChatEntry }) {
   );
 }
 
-const Panel = ({ onClose, wide, children }: { onClose: () => void; wide?: boolean; children: ReactNode }) => (
-  <div className="fixed inset-0 z-50 flex justify-end">
-    <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-    <aside className={`relative flex h-full w-full ${wide ? "max-w-5xl" : "max-w-2xl"} border-l border-zinc-800 bg-zinc-900 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] shadow-2xl`}>
-      {children}
-    </aside>
-  </div>
-);
+/**
+ * Inside a side panel (a wide screen, beside a step's details): narrow, so the Ideas panel shows its list or one
+ * conversation at a time, as on a phone.
+ */
+const Side = createContext(false);
+
+/** A chat's panel: over the page on narrow screens; on a wide one, beside it on the right, the page still usable. */
+function Panel({ onClose, wide, children }: { onClose: () => void; wide?: boolean; children: ReactNode }) {
+  const side = useWide();
+  if (side) {
+    return (
+      <Side.Provider value={true}>
+        <aside className="fixed bottom-0 right-0 z-20 flex border-l border-zinc-800 bg-zinc-900 shadow-xl" style={{ top: "var(--header-h, 0px)", width: SIDE_RIGHT }}>
+          {children}
+        </aside>
+      </Side.Provider>
+    );
+  }
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <aside className={`relative flex h-full w-full ${wide ? "max-w-5xl" : "max-w-2xl"} border-l border-zinc-800 bg-zinc-900 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] shadow-2xl`}>
+        {children}
+      </aside>
+    </div>
+  );
+}
 
 const stateText = (v: View | undefined) =>
   v?.state === "working" ? "working…" : v?.session ? (v.state === "idle" ? "ready" : "asleep: wakes with your next message") : "starts with your first message";
@@ -167,18 +187,21 @@ export function ConversationsPanel({ project, name, version, onClose, onChanged,
   const open = creating ? undefined : layer;
   const [showArchived, setShowArchived] = useState(false);
   const view = useFetch<ConversationView>(open ? `/api/projects/${enc(project)}/conversations/${enc(open)}` : undefined, version);
+  const side = useWide();
   const current = list?.find((c) => c.id === open);
   const shown = (list ?? []).filter((c) => showArchived || !c.archived);
 
   return (
     <Panel onClose={onClose} wide>
-      <nav className={`${open || creating ? "hidden sm:flex" : "flex"} w-full shrink-0 flex-col border-r border-zinc-800 sm:w-72`}>
+      <nav className={side
+        ? `${open || creating ? "hidden" : "flex"} w-full flex-col`
+        : `${open || creating ? "hidden sm:flex" : "flex"} w-full shrink-0 flex-col border-r border-zinc-800 sm:w-72`}>
         <div className="flex items-center gap-2 border-b border-zinc-800 px-4 py-3">
           <div className="min-w-0 flex-1">
             <div className="text-xs text-zinc-500">{name}</div>
             <h2 className="font-semibold text-zinc-50">Ideas</h2>
           </div>
-          <span className="sm:hidden"><Close onClose={onClose} /></span>
+          <span className={side ? "" : "sm:hidden"}><Close onClose={onClose} /></span>
         </div>
         <div className="p-3"><Button onClick={() => nav.open("conversation:new")}>New conversation</Button></div>
         <ul className="scroll-thin flex-1 overflow-y-auto px-2 pb-3">
@@ -215,7 +238,7 @@ export function ConversationsPanel({ project, name, version, onClose, onChanged,
               }
             }}>Hand to orchestrator</Button>
             <ConversationMenu project={project} c={current} onChanged={onChanged} />
-            <span className="hidden sm:inline"><Close onClose={onClose} /></span>
+            <span className={side ? "" : "hidden sm:inline"}><Close onClose={onClose} /></span>
           </>}
           empty={<>
             <p>Think something through: gameplay, a mechanic, the look, what to build next.</p>
@@ -228,7 +251,7 @@ export function ConversationsPanel({ project, name, version, onClose, onChanged,
           onSend={async (text) => { await act(project, "POST", `/conversations/${enc(open)}/messages`, { text }); onChanged(); }}
         />
       )}
-      {!creating && !open && (
+      {!side && !creating && !open && (
         <div className="hidden flex-1 flex-col items-center justify-center p-8 text-center text-sm text-zinc-500 sm:flex">
           <div className="absolute right-3 top-3"><Close onClose={onClose} /></div>
           <p>Open a conversation, or start a new one.</p>
@@ -261,7 +284,7 @@ function NewConversation({ project, defaultRuntime, onBack, onClose, onCreated }
   return (
     <div className="flex min-w-0 flex-1 flex-col">
       <header className="flex items-center gap-2 border-b border-zinc-800 px-5 py-3">
-        <button onClick={onBack} className="rounded-md px-1.5 text-lg text-zinc-400 hover:text-zinc-100 sm:hidden" aria-label="Back">‹</button>
+        <button onClick={onBack} className={`rounded-md px-1.5 text-lg text-zinc-400 hover:text-zinc-100 ${useContext(Side) ? "" : "sm:hidden"}`} aria-label="Back">‹</button>
         <h2 className="flex-1 font-semibold text-zinc-50">New conversation</h2>
         <Close onClose={onClose} />
       </header>

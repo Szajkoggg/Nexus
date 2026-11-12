@@ -1,9 +1,9 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { QueueStatus } from "@nexus/protocol";
 import { useLive, useProjectState, useProjects, type AttentionItem, type QueueView } from "./api.ts";
 import { QueueRow } from "./components/QueueRow.tsx";
 import { QueueDetail, StepDetail } from "./components/Details.tsx";
-import { Drawer, StatusBadge, TimeAgo } from "./components/ui.tsx";
+import { Drawer, SIDE_LEFT, SIDE_RIGHT, StatusBadge, TimeAgo, useWide } from "./components/ui.tsx";
 import { AttentionPanel, NotifyToggle, useNotifications, WaitingButton, WaitingList } from "./components/Attention.tsx";
 import { ContextBar, UsageMeter } from "./components/Run.tsx";
 import { ChatPanel, ConversationsButton, ConversationsPanel, OrchestratorButton, useOrchestrator } from "./components/Chat.tsx";
@@ -66,9 +66,24 @@ export function App() {
   const step = queue?.steps.find((s) => s.id === route.step);
   const close = () => nav.close("item");
 
+  // On a wide screen a step's details sit on the left and a chat on the right, below the header, and the queue
+  // list keeps the room between them; elsewhere both are layers over the page.
+  const wide = useWide();
+  const itemShown = !!(state && queue);
+  const header = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const h = header.current;
+    if (!h) return;
+    const set = () => document.documentElement.style.setProperty("--header-h", `${h.getBoundingClientRect().height}px`);
+    set();
+    const o = new ResizeObserver(set);
+    o.observe(h);
+    return () => o.disconnect();
+  }, []);
+
   return (
     <div className="flex min-h-full flex-col">
-      <header className="sticky top-0 z-30 border-b border-zinc-800 bg-zinc-950/90 pt-[env(safe-area-inset-top)] backdrop-blur">
+      <header ref={header} className="sticky top-0 z-30 border-b border-zinc-800 bg-zinc-950/90 pt-[env(safe-area-inset-top)] backdrop-blur">
         {/* On a phone the header has two rows: the project and what waits for you, then the tools. */}
         <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-2 gap-y-2.5 px-4 py-3 sm:flex-nowrap sm:gap-4">
           {/* On a phone the project picker takes the wordmark's place: the current project is what matters there. */}
@@ -91,7 +106,8 @@ export function App() {
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6">
+      <main className="@container mx-auto w-full max-w-7xl flex-1 px-4 py-6"
+        style={wide && (itemShown || chatOpen || ideasOpen) ? { maxWidth: "none", marginLeft: itemShown ? SIDE_LEFT : 0, marginRight: chatOpen || ideasOpen ? SIDE_RIGHT : 0, width: "auto" } : undefined}>
         {projectsError && <Banner>Cannot reach the Nexus server: {projectsError}</Banner>}
         {projects?.length === 0 && (
           <Banner>No projects yet. Register one with <code>nexus project add &lt;path&gt;</code>.</Banner>
@@ -187,7 +203,7 @@ export function App() {
         <RemotePanel version={tick} />
       </Drawer>
 
-      <Drawer open={!!(state && queue)} onClose={close}>
+      <Drawer open={itemShown} onClose={close} left={wide}>
         {state && queue && (step
           ? <StepDetail project={state} queue={queue} step={step} onChanged={reload} />
           : <QueueDetail project={state} queue={queue} onChanged={reload} />)}

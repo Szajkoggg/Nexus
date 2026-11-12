@@ -9,12 +9,14 @@ let current: Nav = { hash: "", layers: [], depth: 0 };
 const listeners = new Set<() => void>();
 const emit = () => { for (const l of listeners) l(); };
 let after: ((arrived: Nav) => Step[]) | undefined;
+/** While the steps after a Back run, React hears only of where they end. */
+let quiet = false;
 
 function apply(step: Step): void {
   switch (step.op) {
     case "none": return;
     case "push": case "replace":
-      write(step.to, step.op); current = step.to; emit(); return;
+      write(step.to, step.op); current = step.to; if (!quiet) emit(); return;
     case "seq":
       for (const s of step.steps) apply(s);
       return;
@@ -31,8 +33,8 @@ function sync(): void {
   if (!(history.state as { nexus?: unknown } | null)?.nexus) write(current, "replace");
   const then = after;
   after = undefined;
+  if (then) { quiet = true; try { for (const s of then(current)) apply(s); } finally { quiet = false; } }
   emit();
-  if (then) for (const s of then(current)) apply(s);
 }
 
 let started = false;

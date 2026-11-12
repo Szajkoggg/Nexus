@@ -116,3 +116,53 @@ test("an item from the waiting list opens in its project; Back closes it and sta
   c.back();
   assert.deepEqual(c.cur(), { hash: "#/other", layers: [], depth: 0 });
 });
+
+test("wide screen: another step while the chat is open beside it switches the step and keeps the chat", () => {
+  const b = browser(home);
+  b.apply(open(b.cur(), "chat"));
+  b.apply(open(b.cur(), "item", "#/p/Q/Q1"));
+  assert.deepEqual(b.cur(), { hash: "#/p/Q/Q1", layers: ["chat", "item"], depth: 2 });
+  b.apply(open(b.cur(), "item", "#/p/Q/Q2"));
+  assert.deepEqual(b.cur(), { hash: "#/p/Q/Q2", layers: ["chat", "item"], depth: 2 }, "the step on top is switched in place");
+  // Chat opened after the step: the step is below it; switching goes back to its entry and opens both again.
+  const c = browser(home);
+  c.apply(open(c.cur(), "item", "#/p/Q/Q1"));
+  c.apply(open(c.cur(), "chat"));
+  c.apply(open(c.cur(), "item", "#/p/Q/Q2"));
+  assert.deepEqual(c.cur(), { hash: "#/p/Q/Q2", layers: ["item", "chat"], depth: 2 });
+  assert.equal(c.length, 3, "no entry piled up");
+  c.back();
+  assert.deepEqual(c.cur(), { hash: "#/p/Q/Q2", layers: ["item"], depth: 1 }, "Back closes the chat, the new step stays");
+  c.back();
+  assert.deepEqual(c.cur(), home);
+});
+
+test("wide screen: closing the step keeps the chat beside it, and closing the chat keeps the step", () => {
+  const b = browser(home);
+  b.apply(open(b.cur(), "item", "#/p/Q/Q1"));
+  b.apply(open(b.cur(), "chat"));
+  b.apply(close(b.cur(), "item"));
+  assert.deepEqual(b.cur(), { hash: "#/p", layers: ["chat"], depth: 1 });
+  b.back();
+  assert.deepEqual(b.cur(), home, "Back then closes the chat: no dead entry of the step");
+  const c = browser(home);
+  c.apply(open(c.cur(), "chat"));
+  c.apply(open(c.cur(), "item", "#/p/Q/Q1"));
+  c.apply(close(c.cur(), "chat"));
+  assert.deepEqual(c.cur(), { hash: "#/p/Q/Q1", layers: ["item"], depth: 1 });
+  c.back();
+  assert.deepEqual(c.cur(), home);
+});
+
+test("what belongs to a layer closes with it: an image with its step, a conversation with the Ideas panel", () => {
+  const b = browser(home);
+  b.apply(open(b.cur(), "item", "#/p/Q/Q1"));
+  b.apply(open(b.cur(), "viewer:0"));
+  b.apply(close(b.cur(), "item"));
+  assert.deepEqual(b.cur(), home);
+  b.apply(open(b.cur(), "ideas"));
+  b.apply(open(b.cur(), "conversation:01ABC"));
+  b.apply(open(b.cur(), "item", "#/p/Q/Q1"));
+  b.apply(close(b.cur(), "ideas"));
+  assert.deepEqual(b.cur(), { hash: "#/p/Q/Q1", layers: ["item"], depth: 1 }, "the step opened beside it stays");
+});

@@ -17,6 +17,9 @@ which turns it into queues.
 a conversation in it, Settings, a queue or step, a review image. With nothing open it leaves Nexus. Escape does the same on a
 computer.
 
+**On a wide screen** (1280 px and more) a queue or step opens on the left and the orchestrator or Ideas on the
+right, both at once, with the queue list between them: click another step and the chat stays open.
+
 **Review images** open in the app: full screen on a phone, two fingers to zoom (double-tap on a computer), swipe or
 the arrows for the step's next and previous image; "Original" opens the file in a new tab.
 

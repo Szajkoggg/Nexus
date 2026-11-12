@@ -47,6 +47,26 @@ export function Markdown({ children, className = "" }: { children: string; class
   );
 }
 
+/**
+ * A window wide enough for a step's details on the left and a chat on the right at once (1280 px: below it, two
+ * readable panels, about 510 and 430 px, would leave the queue list no room at all).
+ */
+export const WIDE = "(min-width: 1280px)";
+export function useWide(): boolean {
+  const [wide, setWide] = useState(() => typeof matchMedia !== "undefined" && matchMedia(WIDE).matches);
+  useEffect(() => {
+    const m = matchMedia(WIDE);
+    const f = () => setWide(m.matches);
+    m.addEventListener("change", f);
+    return () => m.removeEventListener("change", f);
+  }, []);
+  return wide;
+}
+
+/** Widths of the side panels on a wide screen; the queue list keeps what lies between them. */
+export const SIDE_LEFT = "min(36rem, 40vw)";
+export const SIDE_RIGHT = "min(30rem, 34vw)";
+
 export function useNow(intervalMs = 30_000): number {
   const [now, setNow] = useState(Date.now());
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), intervalMs); return () => clearInterval(t); }, [intervalMs]);
@@ -207,9 +227,23 @@ export function Button({ children, onClick, disabled, variant = "primary" }: {
 
 // ---------------------------------------------------------------- drawer
 
-/** A panel from the right. Escape and Back close it through nav.ts, which knows which layer is on top. */
-export function Drawer({ open, onClose, children }: { open: boolean; onClose: () => void; children: ReactNode }) {
+/**
+ * A panel from the right. Escape and Back close it through nav.ts, which knows which layer is on top. With `left`, a
+ * panel beside the page instead (a step's details on a wide screen): below the header, no backdrop, the page usable.
+ */
+export function Drawer({ open, onClose, left, children }: { open: boolean; onClose: () => void; left?: boolean; children: ReactNode }) {
   if (!open) return null;
+  if (left) {
+    return (
+      <aside className="scroll-thin fixed bottom-0 left-0 z-20 overflow-y-auto border-r border-zinc-800 bg-zinc-900 shadow-xl"
+        style={{ top: "var(--header-h, 0px)", width: SIDE_LEFT }}>
+        <button onClick={onClose} aria-label="Close" className="absolute right-3 top-3 rounded-md p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 6l12 12M18 6L6 18" /></svg>
+        </button>
+        <div className="p-5 pt-6">{children}</div>
+      </aside>
+    );
+  }
   return (
     <div className="fixed inset-0 z-40 flex justify-end">
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />

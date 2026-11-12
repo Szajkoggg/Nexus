@@ -348,6 +348,17 @@ viewer for the same reason: a new browser tab, in an installed app on a phone, h
 image replaces the viewer's entry, so one Back always returns to the step. The rules are pure
 (`apps/web/src/layers.ts`, unit tested); `nav.ts` applies them to `window.history`.
 
+### Details beside the chat on a wide screen
+
+From 1280 px a queue or step opens in a panel on the left and the orchestrator chat or the Ideas panel in one on the
+right, both below the header and without a backdrop, and the queue list keeps the room between them (about 370 px
+at 1440, 330 at 1280): a step can be read while talking about it. The breakpoint is where two readable panels (about
+510 and 430 px) still leave the list a column; below it, and on phones, both stay layers over the page. The two side
+panels are independent layers, so the history rules above learnt two things: switching or closing a layer that is
+not on top goes back to its entry and opens the layers above it again (applied as one change, so the panel that
+stays does not flicker), and a layer that belongs to another (a conversation to the Ideas panel, an image to its
+step) closes with it while the others stay.
+
 ### Drafts stay in the browser
 
 Unsent text in the dashboard's boxes is kept in `localStorage` (`nexus.drafts`: one map from a target key to the

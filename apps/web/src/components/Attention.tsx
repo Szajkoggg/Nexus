@@ -20,7 +20,7 @@ export function AttentionPanel({ items, onOpen }: { items: AttentionItem[]; onOp
       <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-amber-300/90">
         Waiting for you <span className="ml-1 text-xs text-zinc-500">{items.length}</span>
       </h2>
-      <div className="grid gap-2 md:grid-cols-2">
+      <div className="grid gap-2 @2xl:grid-cols-2">
         {items.map((a) => (
           <button
             key={attentionKey(a)}

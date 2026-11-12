@@ -33,25 +33,52 @@ export const isOpen = (nav: Nav, kind: string) => nav.layers.some((x) => kindOf(
 /** A hash with a queue in it has the queue or step drawer open. */
 export const hasItem = (hash: string) => hash.replace(/^#\/?/, "").split("/").filter(Boolean).length > 1;
 
-/** Opens a layer on top (at a new hash, for the drawer); the same kind on top is switched in place instead. */
+/** Layers that belong to another and close with it: a conversation in the Ideas panel, an image of a step. */
+const PARENT: Record<string, string> = { conversation: "ideas", viewer: "item" };
+const belongsTo = (layer: Layer, kind: string) => kindOf(layer) === kind || PARENT[kindOf(layer)] === kind;
+
+/** Pushes layers one by one from `at` (the drawer at `hash`, the others where they stand), as steps. */
+function reopen(at: Nav, layers: Layer[], hash: string): Step[] {
+  const steps: Step[] = [];
+  for (const l of layers) {
+    const s = open(at, l, kindOf(l) === "item" ? hash : at.hash);
+    if (s.op === "push" || s.op === "replace") { steps.push(s); at = s.to; }
+  }
+  return steps;
+}
+
+/**
+ * Opens a layer on top (at a new hash, for the drawer). The same kind already open is switched in place: on top by
+ * rewriting the entry; lower down (another step while the chat is open beside it, on a wide screen) by going back to
+ * its entry and opening it and what lay above it again, so Back keeps closing the topmost.
+ */
 export function open(cur: Nav, layer: Layer, hash = cur.hash): Step {
   const top = cur.layers.at(-1);
   if (top === layer && hash === cur.hash) return { op: "none" };
   if (top !== undefined && kindOf(top) === kindOf(layer)) return { op: "replace", to: { ...cur, hash, layers: [...cur.layers.slice(0, -1), layer] } };
+  const i = cur.layers.findIndex((x) => kindOf(x) === kindOf(layer));
+  if (i >= 0) {
+    const above = cur.layers.slice(i + 1);
+    const k = cur.layers.length - i;
+    if (cur.depth >= k) return { op: "back", steps: k, then: (arrived) => reopen(arrived, [layer, ...above], hash) };
+    return { op: "replace", to: { ...cur, hash, layers: cur.layers.map((x, j) => (j === i ? layer : x)) } };
+  }
   return { op: "push", to: { hash, layers: [...cur.layers, layer], depth: cur.depth + 1 } };
 }
 
 /**
- * Closes the layer of a kind and everything above it. When Nexus pushed their entries, that is going back; when it
- * did not (the app started with them open), the current entry is rewritten without them (at `closedHash` when the
- * drawer closes).
+ * Closes the layer of a kind and the layers that belong to it (a conversation with the Ideas panel, an image with
+ * its step). When Nexus pushed their entries, that is going back; layers above it that do not belong to it (the
+ * chat beside a step on a wide screen) are opened again after it. When Nexus did not push them (the app started
+ * with them open), the current entry is rewritten without them (at `closedHash` when the drawer closes).
  */
 export function close(cur: Nav, kind: string, closedHash = cur.hash): Step {
   const i = cur.layers.findIndex((x) => kindOf(x) === kind);
   if (i < 0) return { op: "none" };
   const k = cur.layers.length - i;
-  if (cur.depth >= k) return { op: "back", steps: k };
-  return { op: "replace", to: { hash: closedHash, layers: cur.layers.slice(0, i), depth: cur.depth } };
+  const keep = cur.layers.slice(i + 1).filter((l) => !belongsTo(l, kind));
+  if (cur.depth >= k) return keep.length ? { op: "back", steps: k, then: (arrived) => reopen(arrived, keep, cur.hash) } : { op: "back", steps: k };
+  return { op: "replace", to: { hash: closedHash, layers: [...cur.layers.slice(0, i), ...keep], depth: cur.depth } };
 }
 
 /** Closes the topmost layer (Escape). */
