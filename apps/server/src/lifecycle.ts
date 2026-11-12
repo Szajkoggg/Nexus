@@ -5,8 +5,13 @@
 // stop at their step's end, marked to be resumed. When no agent is in a turn, the live worktree moves to the new
 // commit, installs what changed, builds the dashboard, and the server hands over to its successor (src/handover.ts):
 // it stops every agent and its own writing, frees the port, starts the successor and exits once the successor has
-// passed its smoke check. The successor then resumes the marked queues. If anything fails before the restart, the
-// old version goes on and the held queues resume at once.
+// passed its smoke check. The successor then resumes the marked queues.
+//
+// When it goes wrong, the old version goes on. Before the hand-over (a failed checkout, install or build), the live
+// worktree is put back and the held queues resume at once. When the successor does not come up (it crashes, fails its
+// smoke check or sends no ready signal in time), this server stops it and whatever it started, puts the live worktree
+// back on the commit it came from (reinstalling and rebuilding), takes the port again and starts over on the files,
+// which resumes the held queues. A development checkout is never moved: its server simply goes on.
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
@@ -14,11 +19,10 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { now } from "@nexus/protocol";
-import { handOver, type PredecessorFile, type ReleasedFile } from "./handover.ts";
+import { HANDOVER_TIMEOUT_MS, handOver, isAlive, type PredecessorFile, type ReleasedFile } from "./handover.ts";
 
 const run = promisify(execFile);
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
-const MAIN = join(ROOT, "apps/server/src/main.ts");
 
 export interface Drainable { id: string; idle(): boolean; drain(now: boolean): string[]; cancel(): void; shutdown(): void }
 
@@ -36,22 +40,51 @@ export interface UpdateStatus {
   error?: string;
 }
 
-async function git(...args: string[]): Promise<string> {
-  return (await run("git", args, { cwd: ROOT, windowsHide: true })).stdout.trim();
+/** What the server gives its Lifecycle; tests replace the parts that would touch this checkout or the process. */
+export interface LifecycleOptions {
+  /** The checkout this server runs from. */
+  root?: string;
+  /** The successor's command line (default: this Node running apps/server/src/main.ts of the root). */
+  successor?: string[];
+  /** How long the successor has to signal ready. */
+  timeoutMs?: number;
+  /** Runs npm in the root. */
+  npm?: (root: string, ...args: string[]) => Promise<void>;
+  /** Stops every agent and every write of this server and frees the port (main.ts). */
+  release?: () => Promise<void>;
+  /** Takes the port again and starts over on the files, which resumes the held queues (main.ts). */
+  reacquire?: () => Promise<void>;
+  /** Tells the user's devices that the update failed (push). */
+  notify?: (text: string) => void;
+  /** Ends this process once the successor is up. */
+  exit?: () => void;
+}
+
+async function git(root: string, ...args: string[]): Promise<string> {
+  return (await run("git", args, { cwd: root, windowsHide: true })).stdout.trim();
 }
 /** npm through this Node (npm-cli.js beside it), so no shell is needed for npm.cmd on Windows. */
-async function npm(...args: string[]): Promise<void> {
+async function npmIn(root: string, ...args: string[]): Promise<void> {
   const cli = join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
-  if (existsSync(cli)) await run(process.execPath, [cli, ...args], { cwd: ROOT, windowsHide: true, maxBuffer: 32 * 1024 * 1024 });
-  else await run("npm", args, { cwd: ROOT, windowsHide: true, maxBuffer: 32 * 1024 * 1024 });
+  if (existsSync(cli)) await run(process.execPath, [cli, ...args], { cwd: root, windowsHide: true, maxBuffer: 32 * 1024 * 1024 });
+  else await run("npm", args, { cwd: root, windowsHide: true, maxBuffer: 32 * 1024 * 1024 });
 }
 const hashOf = (file: string) => (existsSync(file) ? createHash("sha256").update(readFileSync(file)).digest("hex") : "");
+const firstLine = (e: unknown) => (e as Error).message.split("\n")[0]!;
+
+/** Ends a process and everything it started (on Windows its tree; elsewhere its process group: it was detached). */
+export async function stopTree(pid: number): Promise<void> {
+  if (!isAlive(pid)) return;
+  if (process.platform === "win32") await run("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true }).catch(() => {});
+  else { try { process.kill(-pid, "SIGKILL"); } catch { try { process.kill(pid, "SIGKILL"); } catch { /* gone */ } } }
+  for (const until = Date.now() + 10_000; isAlive(pid) && Date.now() < until;) await new Promise((r) => setTimeout(r, 100));
+}
 
 /** What this server runs: its commit, and whether it is a live worktree (detached HEAD) or a development checkout. */
-export async function version(): Promise<{ commit: string; subject: string; live: boolean; branch: string | null; root: string }> {
-  const [commit, subject] = (await git("log", "-1", "--format=%h%x09%s").catch(() => "?\t")).split("\t");
-  const branch = await git("symbolic-ref", "-q", "--short", "HEAD").catch(() => "");
-  return { commit: commit ?? "?", subject: subject ?? "", live: !branch, branch: branch || null, root: ROOT };
+export async function version(root = ROOT): Promise<{ commit: string; subject: string; live: boolean; branch: string | null; root: string }> {
+  const [commit, subject] = (await git(root, "log", "-1", "--format=%h%x09%s").catch(() => "?\t")).split("\t");
+  const branch = await git(root, "symbolic-ref", "-q", "--short", "HEAD").catch(() => "");
+  return { commit: commit ?? "?", subject: subject ?? "", live: !branch, branch: branch || null, root };
 }
 
 export class Lifecycle {
@@ -59,11 +92,23 @@ export class Lifecycle {
   private timer?: NodeJS.Timeout;
   private readonly parts: () => Drainable[];
   private readonly changed: () => void;
-  /** Stops every agent and every write of this server and frees the port (main.ts). */
-  private readonly release: () => Promise<void>;
+  private readonly root: string;
+  private readonly o: Required<Omit<LifecycleOptions, "root" | "successor">> & { successor: string[] };
+  /** Where this update started: the commit to go back to, and the dependencies it had. */
+  private from?: { sha: string; short: string; live: boolean; lock: string };
 
-  constructor(parts: () => Drainable[], changed: () => void = () => {}, release: () => Promise<void> = async () => {}) {
-    this.parts = parts; this.changed = changed; this.release = release;
+  constructor(parts: () => Drainable[], changed: () => void = () => {}, options: LifecycleOptions = {}) {
+    this.parts = parts; this.changed = changed;
+    this.root = options.root ?? ROOT;
+    this.o = {
+      successor: options.successor ?? [process.execPath, join(this.root, "apps/server/src/main.ts")],
+      timeoutMs: options.timeoutMs ?? HANDOVER_TIMEOUT_MS,
+      npm: options.npm ?? npmIn,
+      release: options.release ?? (async () => {}),
+      reacquire: options.reacquire ?? (async () => {}),
+      notify: options.notify ?? (() => {}),
+      exit: options.exit ?? (() => setTimeout(() => process.exit(0), 300)),
+    };
   }
 
   get busy(): boolean { return this.status.phase === "draining" || this.status.phase === "updating" || this.status.phase === "restarting"; }
@@ -82,6 +127,7 @@ export class Lifecycle {
     const held: string[] = [];
     for (const p of this.parts()) for (const q of p.drain(!!opts.now)) held.push(`${p.id}/${q}`);
     this.status = { phase: "draining", since: now(), now: !!opts.now, ref: opts.ref || "main", held, waiting: [], log: [] };
+    this.from = undefined;
     this.note(held.length ? `holding ${held.join(", ")} at the end of their current step` : "no queue is running");
     this.timer = setInterval(() => void this.tick(), 2000);
     void this.tick();
@@ -113,8 +159,9 @@ export class Lifecycle {
     try {
       await this.update();
     } catch (err) {
-      this.status = { ...this.status, phase: "failed", error: (err as Error).message.slice(0, 2000) };
-      this.note(`failed: ${(err as Error).message.split("\n")[0]}; the current version goes on`);
+      // Nothing was handed over: this server still runs and owns the files. Only the worktree may have moved.
+      const back = await this.restoreWorktree();
+      this.fail(`${firstLine(err)}${back}`, `${(err as Error).message.slice(0, 2000)}${back}`);
       for (const p of this.parts()) p.cancel();
       return;
     }
@@ -122,45 +169,98 @@ export class Lifecycle {
   }
 
   private async update(): Promise<void> {
-    const v = await version();
-    const lock = hashOf(join(ROOT, "package-lock.json"));
+    const v = await version(this.root);
+    const sha = await git(this.root, "rev-parse", "HEAD");
+    this.from = { sha, short: v.commit, live: v.live, lock: hashOf(join(this.root, "package-lock.json")) };
     if (v.live) {
       // Content, not file stamps: npm rewrites line endings of package bins, which only looks like a change.
-      const changed = await git("diff", "--name-only", "HEAD");
-      if (changed) throw new Error(`the live worktree ${ROOT} has local changes (${changed.split("\n").join(", ")}); it should only ever be updated`);
-      const target = await git("rev-parse", "--short", `${this.status.ref}^{commit}`);
+      const changed = await git(this.root, "diff", "--name-only", "HEAD");
+      if (changed) throw new Error(`the live worktree ${this.root} has local changes (${changed.split("\n").join(", ")}); it should only ever be updated`);
+      const target = await git(this.root, "rev-parse", "--short", `${this.status.ref}^{commit}`);
       this.note(`moving the live worktree from ${v.commit} to ${target} (${this.status.ref})`);
-      await git("checkout", "--force", "--detach", this.status.ref!); // forced: only line-ending leftovers differ
+      await git(this.root, "checkout", "--force", "--detach", this.status.ref!); // forced: only line-ending leftovers differ
     } else {
       this.note(`running from a development checkout (branch ${v.branch}): rebuilding and restarting without moving it`);
     }
-    if (hashOf(join(ROOT, "package-lock.json")) !== lock) {
+    if (hashOf(join(this.root, "package-lock.json")) !== this.from.lock) {
       this.note("dependencies changed: npm install");
-      await npm("install", "--no-audit", "--no-fund");
+      await this.o.npm(this.root, "install", "--no-audit", "--no-fund");
     }
     this.note("building the dashboard");
-    await npm("run", "build", "-w", "@nexus/web");
+    await this.o.npm(this.root, "run", "build", "-w", "@nexus/web");
   }
 
-  /**
-   * Hands over to the successor and exits. Agents are all between turns by now. Without a ready signal (a failed
-   * smoke check, an early exit, the time limit) this server still exits: rolling back is not built yet.
-   */
+  /** Hands over to the successor and exits; when the successor does not come up, rolls back and goes on. */
   private async restart(): Promise<void> {
     this.status.phase = "restarting";
     this.note("restarting");
+    let result: Awaited<ReturnType<typeof handOver>>;
     try {
-      const v = await version();
-      await handOver({
-        command: [process.execPath, MAIN], cwd: ROOT,
+      const v = await version(this.root);
+      result = await handOver({
+        command: this.o.successor, cwd: this.root,
         // The successor writes its own log (NEXUS_LOG): see main.ts.
         env: { ...process.env, NEXUS_WAIT_PORT: "60", NEXUS_LOG: process.env.NEXUS_LOG ?? "1" },
         version: { commit: v.commit, subject: v.subject },
-        release: this.release, note: (t) => this.note(t), log: () => this.status.log,
+        release: this.o.release, note: (t) => this.note(t), log: () => this.status.log,
+        timeoutMs: this.o.timeoutMs,
       });
     } catch (err) {
-      this.note(`hand-over failed: ${(err as Error).message}`);
+      result = { outcome: "failed", reason: `the hand-over failed: ${firstLine(err)}`, pid: undefined };
     }
-    setTimeout(() => process.exit(0), 300);
+    if (result.outcome === "ready") { this.o.exit(); return; }
+    await this.rollBack(result.outcome === "timeout" ? `the successor sent no ready signal within ${Math.round(this.o.timeoutMs / 1000)} s` : result.reason, result.pid);
+  }
+
+  /**
+   * The successor did not come up: stop it and what it started, put the worktree back, take the port again and go
+   * on. This server's code never changed (it runs from memory); what the next start and the dashboard read from
+   * disk is what has to go back.
+   */
+  private async rollBack(reason: string, pid: number | undefined): Promise<void> {
+    this.note(`rolling back: ${reason}`);
+    if (pid !== undefined && isAlive(pid)) {
+      await stopTree(pid);
+      this.note(`stopped the successor (pid ${pid}) and what it started`);
+    }
+    const back = await this.restoreWorktree();
+    try {
+      await this.o.reacquire();
+    } catch (err) {
+      this.fail(`${reason}${back}; could not take the port again: ${firstLine(err)}`);
+      return;
+    }
+    this.fail(`${reason}${back}`);
+  }
+
+  /** Puts a live worktree back where the update found it; says what it did, for the error. */
+  private async restoreWorktree(): Promise<string> {
+    const from = this.from;
+    if (!from) return "";
+    if (!from.live) { this.note("a development checkout is not moved: this server goes on"); return "; this server goes on (a development checkout is not moved)"; }
+    try {
+      const head = await git(this.root, "rev-parse", "HEAD");
+      if (head === from.sha) return `; rolled back to ${from.short}`; // never moved
+      this.note(`moving the live worktree back to ${from.short}`);
+      // node_modules follows the lock the update installed (or half installed): compare with that one.
+      const updated = hashOf(join(this.root, "package-lock.json"));
+      await git(this.root, "checkout", "--force", "--detach", from.sha);
+      if (hashOf(join(this.root, "package-lock.json")) !== updated) {
+        this.note("dependencies changed back: npm install");
+        await this.o.npm(this.root, "install", "--no-audit", "--no-fund");
+      }
+      this.note("rebuilding the dashboard");
+      await this.o.npm(this.root, "run", "build", "-w", "@nexus/web");
+      return `; rolled back to ${from.short}`;
+    } catch (err) {
+      this.note(`rolling the worktree back failed: ${firstLine(err)}`);
+      return `; rolling the worktree back to ${from.short} failed (${firstLine(err)}): put it back by hand before the next start`;
+    }
+  }
+
+  private fail(summary: string, error = summary): void {
+    this.status = { ...this.status, phase: "failed", error };
+    this.note(`update failed: ${summary}; the held queues go on`);
+    this.o.notify(`Update failed: ${summary}.`);
   }
 }

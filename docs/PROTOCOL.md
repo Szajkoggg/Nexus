@@ -327,7 +327,11 @@ when it starts one.
 The predecessor starts the successor with `NEXUS_HANDOVER=<that folder>` (and `NEXUS_WAIT_PORT=60`). It waits up to
 60 seconds for `ready.json` or `failed.json`, or for the successor to exit. A successor started with `NEXUS_HANDOVER`
 stays read-only until `released.json` appears or the predecessor's process is gone. A server started without it is
-active at once, as before.
+active at once, as before. Without `ready.json` the predecessor rolls back: it stops the successor's process tree,
+puts a live worktree back on the commit it came from (`npm install` if the lock file differs, then a dashboard
+build), listens on the port again and resumes the held queues. The update then ends with `phase: failed` and an
+`error` of the form `<reason>; rolled back to <commit>` (a development checkout: `<reason>; this server goes on
+(a development checkout is not moved)`). A push notification titled "Nexus: update failed" goes to every device.
 
 ## Conversations
 

@@ -246,8 +246,26 @@ the old server goes only once the new one has shown it works.
    then builds its engines, which is when held runs are recovered and resumed. Its update log, shown in the
    dashboard's server panel (`phase: updated`), begins with the predecessor's lines and ends with the version that
    is up.
-4. Without a signal within 60 seconds (a constant), or on `failed.json` or an early exit, the predecessor logs it and
-   exits. Rolling back to the old version on failure is the next step.
+4. If the successor does not come up, the predecessor rolls back. That is when it gets no signal within 60 seconds
+   (a constant), finds `failed.json`, or sees the successor exit early. See "Rolling back" below.
+
+**Rolling back.** The predecessor's process still runs the old code from memory. Only what is read from disk has
+moved: the worktree, which the next start runs, and `node_modules` and the built dashboard, which this server serves.
+So rolling back means four things:
+- Stop the successor and everything it started: on Windows `taskkill /T /F` on its pid, elsewhere its process group,
+  since it was started detached. A successor never released is still in standby and has started nothing, but an
+  older one that ignores the hand-over may have.
+- Check out the commit the update came from on a live worktree. Run `npm install` if the lock file differs from the
+  one the update installed (or half installed), and rebuild the dashboard. A development checkout is never moved.
+- Take the port again, retrying for up to 20 s while the stopped successor lets go of it.
+- Build new engines on the files. Their recovery resumes the held queues (`resume_after_restart`) exactly as a
+  successor's would. The old engines were shut down for good by the release.
+
+The update then ends in phase `failed`. The error is the reason followed by "rolled back to <commit>" (in a
+development checkout: "this server goes on"). The log keeps every line, and a push notification goes to the user's
+devices. A failure before the hand-over (a checkout, install or build that fails) also puts a live worktree back.
+That server never let go, so its queues simply go on. If the worktree cannot be put back, the error says to do it by
+hand before the next start; if the port cannot be had, the error says so and the work goes on without the dashboard.
 
 Until it is released, a successor builds no engine. So it does no recovery, resumes nothing, starts no agent and
 writes nothing under any `.nexus/`; it answers `/api/projects…` with 503. The predecessor's exit also counts as
@@ -261,8 +279,10 @@ release → start → wait, so the successor normally finds the port free; it st
 **Compatibility.** A start without `NEXUS_HANDOVER` behaves as before: `live.ps1`, `autostart.ps1`, a plain
 `npm start`, or a successor started by an older server, which frees the port as it exits and sends no hand-over.
 Such a server is active at once and resumes the held queues. A successor of an older version, started by a newer
-predecessor, ignores the folder and never signals. The predecessor then times out after 60 s and exits, having
-written nothing since it let go, so the successor's early start is still the only writer.
+predecessor, ignores the folder and never signals. Updating to a version from before the hand-over is a downgrade:
+after 60 s the predecessor stops that successor, along with any agents it had resumed, and rolls back. Runs the old
+successor had resumed come back paused ("the Nexus server restarted"), as after any crash. Updating to such a
+version is not supported; do it with `live.ps1`.
 
 ## Tech stack
 
@@ -348,6 +368,14 @@ The user's answers, 2026-11-12:
   writing. Now the successor proves it is up (a smoke check) before the predecessor goes, and it touches nothing until
   the predecessor has let go (see "Updating Nexus"). Checked end to end on a development instance: the predecessor
   exited about 0.3 s after the successor's ready signal, and the successor's update log showed both servers' lines.
+- **Rolling back is fast, and the old server never has to restart.** A probe used a detached worktree of this
+  repository as a live instance on port 4319 and updated it to a branch whose server throws at start. The successor
+  crashed within a second. About 2 s later the instance answered on 4319 again, from the same process, on its
+  previous commit, and the queue the update had held ran to its end. Three details mattered:
+  - A crash is seen at once through the child's exit event, without waiting for the time limit.
+  - `node_modules` has to be compared with the lock the update installed, not the one it started from.
+  - On Windows a pid can still show as a process for a few seconds after it exits, so the probe recorded every pid
+    and checked them again after killing.
 
 ## Open questions
 

@@ -3,6 +3,7 @@
 //   ready   after FAKE_READY_MS (default 500) it writes ready.json, then waits to be released
 //   never   it sends no signal and lives on (until FAKE_LIFE_MS, default 30 s)
 //   fail    it reports a failed smoke check and exits 1
+//   crash   it exits 1 at once, saying nothing (a server that throws at start)
 // FAKE_SUCCESSOR_LOG (a file) gets one JSON line with what it saw.
 import { appendFileSync } from "node:fs";
 import { Standby, isAlive } from "../src/handover.ts";
@@ -11,7 +12,9 @@ const standby = new Standby(process.env.NEXUS_HANDOVER!);
 const log = (what: unknown) => { if (process.env.FAKE_SUCCESSOR_LOG) appendFileSync(process.env.FAKE_SUCCESSOR_LOG, JSON.stringify(what) + "\n"); };
 const behaviour = process.env.FAKE_SUCCESSOR ?? "ready";
 
-if (behaviour === "fail") {
+if (behaviour === "crash") {
+  process.exit(1);
+} else if (behaviour === "fail") {
   standby.failed("fake smoke check failure");
   process.exit(1);
 } else if (behaviour === "never") {

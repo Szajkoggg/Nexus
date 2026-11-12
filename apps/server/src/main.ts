@@ -47,6 +47,8 @@ const WEB_DIST = resolve(dirname(fileURLToPath(import.meta.url)), "../../web/dis
 const HANDOVER = process.env.NEXUS_HANDOVER;
 /** Only an active server builds engines, recovers runs, starts agents or writes under a project's .nexus/. */
 let active = !HANDOVER;
+/** Waiting to take over (NEXUS_HANDOVER): until then a failure goes to failed.json for the predecessor. */
+let standingBy = !!HANDOVER;
 
 // ---------------------------------------------------------------- projects
 
@@ -146,7 +148,10 @@ const lifecycle = new Lifecycle(() => [...projects.values()].map((e) => ({
   drain: (now: boolean) => { e.conversations.draining = true; return e.engine.drainForUpdate(now); },
   cancel: () => { e.conversations.draining = false; e.engine.cancelDrain(); },
   shutdown: () => { e.engine.shutdown(); e.orchestrator.shutdown(); e.conversations.shutdown(); },
-})), () => { for (const s of sockets) if (s.readyState === s.OPEN) s.send(JSON.stringify({ type: "server" })); }, release);
+})), () => { for (const s of sockets) if (s.readyState === s.OPEN) s.send(JSON.stringify({ type: "server" })); }, {
+  release, reacquire,
+  notify: (text) => void push({ title: "Nexus: update failed", body: text.slice(0, 180), url: "/?settings", tag: "nexus-update" }),
+});
 const watch = new AttentionWatch();
 
 // Remote devices sign in once with the access token; this machine needs nothing (src/remote.ts).
@@ -393,6 +398,7 @@ async function takeOver(standby: Standby): Promise<void> {
   standby.ready({ commit: v.commit, subject: v.subject });
   console.log("smoke check passed; waiting for the predecessor to hand over");
   const { released, predecessor } = await standby.released();
+  standingBy = false;
   activate();
   lifecycle.arrived(v, predecessor, released);
   console.log(`took over from ${predecessor ? `${predecessor.commit} (pid ${predecessor.pid})` : "no recorded predecessor"}${released ? "" : ", which exited without handing over"}`);
@@ -413,6 +419,37 @@ async function release(): Promise<void> {
   await new Promise<void>((r) => { http.close(() => r()); http.closeAllConnections(); });
 }
 
+/**
+ * After a failed hand-over: take the port again (the stopped successor may take a moment to free it) and start over
+ * on the files with new engines, whose recovery resumes the queues the update held. The work goes on even if the
+ * port cannot be had; the error says so.
+ */
+async function reacquire(): Promise<void> {
+  projects.clear(); // their engines are shut down for good
+  const http = server as Server;
+  reacquiring = true;
+  try {
+    await new Promise<void>((resolve, reject) => {
+      let tries = 40;
+      const onError = (err: NodeJS.ErrnoException) => {
+        if (err.code === "EADDRINUSE" && tries-- > 0) { setTimeout(() => http.listen(PORT, HOST), 500); return; }
+        done(); reject(err);
+      };
+      const onListening = () => { done(); resolve(); };
+      const done = () => { http.off("error", onError); http.off("listening", onListening); };
+      http.on("error", onError);
+      http.on("listening", onListening);
+      http.listen(PORT, HOST);
+    });
+    console.log(`Nexus server on http://${HOST}:${PORT} again`);
+  } finally {
+    reacquiring = false;
+    activate();
+    for (const s of sockets) if (s.readyState === s.OPEN) s.send(JSON.stringify({ type: "projects" }));
+  }
+}
+let reacquiring = false;
+
 if (active) activate();
 auth(); // creates the access token on the first start
 const server = serve({ fetch: app.fetch, port: PORT, hostname: HOST }, (info) => {
@@ -421,7 +458,7 @@ const server = serve({ fetch: app.fetch, port: PORT, hostname: HOST }, (info) =>
   if (HANDOVER) {
     takeOver(new Standby(HANDOVER)).catch((err: Error) => {
       console.error(`taking over failed: ${err.message}`);
-      if (!active) { new Standby(HANDOVER).failed(err.message); process.exit(1); }
+      if (standingBy) { new Standby(HANDOVER).failed(err.message); process.exit(1); }
     });
   }
 });
@@ -429,9 +466,10 @@ const server = serve({ fetch: app.fetch, port: PORT, hostname: HOST }, (info) =>
 // only as it exits): it waits (NEXUS_WAIT_PORT seconds).
 let portTries = Number(process.env.NEXUS_WAIT_PORT ?? 0) * 2;
 server.on("error", (err: NodeJS.ErrnoException) => {
+  if (reacquiring) return; // reacquire() handles its own
   if (err.code === "EADDRINUSE" && portTries-- > 0) { setTimeout(() => server.listen(PORT, HOST), 500); return; }
   console.error(`cannot listen on ${HOST}:${PORT}: ${err.message}`);
-  if (HANDOVER && !active) new Standby(HANDOVER).failed(`cannot listen on ${HOST}:${PORT}: ${err.message}`);
+  if (standingBy) new Standby(HANDOVER!).failed(`cannot listen on ${HOST}:${PORT}: ${err.message}`);
   process.exit(1);
 });
 

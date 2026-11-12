@@ -9,7 +9,7 @@
 // The predecessor stops every agent and its own writing and frees the port before it starts the successor, then
 // waits up to HANDOVER_TIMEOUT_MS for ready.json. The successor (NEXUS_HANDOVER names the folder) stays read-only
 // until released.json appears or the predecessor's process is gone: no recovery, no resume, no agent, no write under
-// any project's .nexus/.
+// any project's .nexus/. Without ready.json the predecessor rolls back (src/lifecycle.ts) and never releases.
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -44,10 +44,11 @@ export function isAlive(pid: number): boolean {
 
 // ---------------------------------------------------------------- the predecessor
 
+/** `pid`: the successor's process, so that a predecessor can stop it. */
 export type HandoverOutcome =
-  | { outcome: "ready"; successor: ReadyFile }
-  | { outcome: "failed"; reason: string }
-  | { outcome: "timeout" };
+  | { outcome: "ready"; successor: ReadyFile; pid: number | undefined }
+  | { outcome: "failed"; reason: string; pid: number | undefined }
+  | { outcome: "timeout"; pid: number | undefined };
 
 export interface HandoverOptions {
   /** The successor's command line: [node, script, ...]. */
@@ -66,7 +67,7 @@ export interface HandoverOptions {
 
 /**
  * Starts the successor and waits for its ready signal. On "ready" released.json is written and the caller exits;
- * on a failure or time-out the caller decides (for now: it exits as well).
+ * on a failure or time-out the caller rolls back (src/lifecycle.ts), and the successor, never released, stays idle.
  */
 export async function handOver(o: HandoverOptions): Promise<HandoverOutcome> {
   const timeoutMs = o.timeoutMs ?? HANDOVER_TIMEOUT_MS;
@@ -86,6 +87,7 @@ export async function handOver(o: HandoverOptions): Promise<HandoverOutcome> {
   child.on("error", (err) => { exited = `could not start: ${err.message}`; });
   child.on("exit", (code) => { exited = `exited (${code ?? "signal"}) before it was ready`; });
   child.unref();
+  o.note(`the successor runs as pid ${child.pid ?? "?"}`);
 
   const until = Date.now() + timeoutMs;
   while (Date.now() < until) {
@@ -93,15 +95,15 @@ export async function handOver(o: HandoverOptions): Promise<HandoverOutcome> {
     if (ready) {
       o.note(`the successor ${ready.commit} is up (pid ${ready.pid}); handing over and exiting`);
       write(dir, "released.json", { at: now(), log: o.log() } satisfies ReleasedFile);
-      return { outcome: "ready", successor: ready };
+      return { outcome: "ready", successor: ready, pid: child.pid };
     }
     const failed = read<FailedFile>(dir, "failed.json");
-    if (failed) { o.note(`the successor failed its smoke check: ${failed.reason}`); return { outcome: "failed", reason: failed.reason }; }
-    if (exited) { o.note(`the successor ${exited}`); return { outcome: "failed", reason: exited }; }
+    if (failed) { o.note(`the successor failed its smoke check: ${failed.reason}`); return { outcome: "failed", reason: `the successor failed its smoke check: ${failed.reason}`, pid: child.pid }; }
+    if (exited) { o.note(`the successor ${exited}`); return { outcome: "failed", reason: `the successor ${exited}`, pid: child.pid }; }
     await sleep(POLL_MS);
   }
   o.note(`the successor sent no ready signal within ${Math.round(timeoutMs / 1000)} s`);
-  return { outcome: "timeout" };
+  return { outcome: "timeout", pid: child.pid };
 }
 
 // ---------------------------------------------------------------- the successor

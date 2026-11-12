@@ -77,8 +77,11 @@ panel). Running steps finish first and no new step starts meanwhile; then the li
 installs what changed, builds and restarts itself, and the queues it held go on by themselves. Queues paused by you,
 stopped by a stop condition, waiting for an answer or for the usage window stay as they are. `--now` stops the
 running steps instead of waiting (they continue where they were); `nexus server cancel` gives up waiting. If the
-update fails, the old version keeps running and the held queues go on. After a restart the server writes its log
-to `%APPDATA%\Nexus\server.log`.
+update fails, the old version keeps running and the held queues go on. That includes a new version that does not
+come up (it crashes, fails its start-up check or gives no sign within 60 seconds): the old server stops it, moves
+the live worktree back, rebuilds and takes the port again. The settings panel then shows "update failed" with the
+reason and "rolled back to <commit>", and your devices get a notification. There is nothing to undo by hand: fix the
+commit and update again. After a restart the server writes its log to `%APPDATA%\Nexus\server.log`.
 
 ```sh
 npm start        # builds the dashboard, serves it and the API on http://127.0.0.1:4317

@@ -225,7 +225,7 @@ export function ServerSection({ info, onChanged }: { info: ServerInfo | undefine
       </p>
       {u.phase !== "idle" && (
         <div className="mt-3 rounded-lg bg-zinc-950 p-3 text-xs text-zinc-400">
-          <div className="mb-1 text-zinc-200">{u.phase === "updated" ? <>Updated: <span className="font-mono">{info.commit}</span> is up</> : <>Update: {u.phase}</>}{u.held.length ? `; holding ${u.held.join(", ")}` : ""}{u.waiting.length ? `; waiting for ${u.waiting.join(", ")}` : ""}</div>
+          <div className="mb-1 text-zinc-200">{u.phase === "updated" ? <>Updated: <span className="font-mono">{info.commit}</span> is up</> : <>Update: {u.phase}</>}{busy && u.held.length ? `; holding ${u.held.join(", ")}` : ""}{u.waiting.length ? `; waiting for ${u.waiting.join(", ")}` : ""}</div>
           {u.log.map((l, i) => <div key={i} className="font-mono">{l}</div>)}
           {u.error && <div className="mt-1 whitespace-pre-wrap text-red-300">{u.error}</div>}
         </div>
