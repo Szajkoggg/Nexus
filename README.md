@@ -16,7 +16,7 @@ Phase 3 (Claude Code adapter and queue engine): An approved queue can be started
 Nexus launches Claude Code (with your own subscription login), drives it step by step, puts your notes into each
 step's opening, delivers messages and answers into the running turn, holds on questions and reviews, and pauses,
 stops and resumes on request. The dashboard shows the agent's activity per step, each session's context fill and
-the subscription's usage windows. The orchestrator chat comes in phase 4.
+the subscription's usage windows.
 
 Per project, `runtimes.claude` in `.nexus/project.yaml` sets the default `model`, the `permission_mode`
 (default `acceptEdits`) and extra `allowed_tools` for launched sessions; the project's own `.claude/settings.json`
