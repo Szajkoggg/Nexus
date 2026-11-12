@@ -3,6 +3,14 @@
 Ideas for Nexus, roughly in order of how much they help unattended runs. None is approved: the orchestrator turns
 them into queues with the user. Each queue still needs the user's approval.
 
+## 0. Updates that roll back
+
+Nexus now develops itself, so a broken version must not take the live instance down. Today an update that builds but
+then fails to start leaves no server running (and remote access with it). Have the successor report that it is up
+and serving; if it does not within a minute, put the live worktree back on the previous commit and start that, and
+say so in the log and the dashboard. A smoke check (the API answers, a project loads) before the predecessor exits
+would be better still.
+
 ## 1. Refused actions, visible
 
 In `auto` permission mode (Claude Code) and with Codex's auto review, actions an agent wanted but was not allowed are
