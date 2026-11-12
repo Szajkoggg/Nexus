@@ -8,9 +8,11 @@ import {
 } from "@nexus/protocol";
 import { ClaudeSession } from "./claude.ts";
 import type { Engine } from "./engine.ts";
+import { orchestratorAgentsFile } from "./helpers.ts";
 
+// Agent (formerly Task) lets it call subagents; they run within these same read-only permissions.
 const READ_ONLY_TOOLS = [
-  "Read", "Grep", "Glob", "Bash(nexus:*)",
+  "Read", "Grep", "Glob", "Agent", "Task", "Bash(nexus:*)",
   "Bash(git log:*)", "Bash(git status:*)", "Bash(git diff:*)", "Bash(git show:*)", "Bash(git branch:*)", "Bash(git worktree list:*)",
 ];
 const NEVER = ["Edit", "Write", "NotebookEdit", "MultiEdit"];
@@ -125,6 +127,7 @@ export class Orchestrator {
       allowedTools: READ_ONLY_TOOLS,
       disallowedTools: NEVER,
       appendSystemPrompt: briefing(project.name, Math.round(project.defaults.context_reuse_threshold * 100)),
+      agentsFile: orchestratorAgentsFile(),
       env: { NEXUS_SESSION: s.id, NEXUS_DIR: this.store.dir },
     });
     this.proc = proc;
@@ -271,6 +274,12 @@ steps:
 Choosing model and effort for a run: say which and why when you start it. Hard design, debugging or open-ended work deserves a strong model at high effort; mechanical steps (renames, measurements, sheets) do well with less. Codex takes effort low to xhigh; Claude Code also max. Without --model and --effort the project's defaults apply.
 
 Choosing a session for a run: \`nexus status\` shows each session's context card (topics, files, context fill). Continue a session (--use-session) when it worked on closely related things and its context is below ${threshold} %; otherwise start a fresh one and put what it needs into the queue's description and goals. Never give one session two running queues.
+
+Helpers (subagents, through the Agent tool; they read only, like you, and keep long research out of your context):
+- queue-reviewer: before you propose a queue, have it review the draft; fix what it finds, then propose.
+- question-triage: when a worker asks, have it find whether the answer is settled (with its source) or the user's.
+- run-digest: when a run halts or finishes, have it summarize the run; tell the user from that.
+- The project's own agents (its .claude/agents) are there too. Use the ones that only read and report, such as one that finds what was decided and where; leave those that build, run checks or edit to the workers.
 
 Messages marked [Nexus] tell you that a worker asked a question, or that a run halted or finished. Act on them: answer or escalate questions; tell the user about halts and finished queues briefly, with what you propose next.
 Keep replies short and concrete. Before proposing a queue, read enough of the project to make its steps and acceptance criteria real.`;

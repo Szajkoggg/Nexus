@@ -2,7 +2,7 @@
 // question, and being told when the run finishes.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -111,4 +111,22 @@ test("a worker may not draft queues or start runs", async () => {
       (e: { stderr: Buffer }) => /only an orchestrator/.test(e.stderr.toString()),
     );
   } finally { stop(); }
+});
+
+test("the orchestrator gets Nexus's helper agents, which only read", async () => {
+  const { orchestrator, until, stop } = setup();
+  const args = join(process.env.NEXUS_HOME!, "..", "args.log");
+  process.env.FAKE_ARGS = args;
+  try {
+    orchestrator.say("Hello");
+    await until("the process to start", () => existsSync(args));
+    const { readFileSync } = await import("node:fs");
+    const argv = (JSON.parse(readFileSync(args, "utf8").trim().split("\n")[0]!) as { argv: string[] }).argv;
+    assert.ok(argv.slice(argv.indexOf("--allowedTools") + 1).includes("Agent"), "it may call subagents");
+    const agents = JSON.parse(readFileSync(argv[argv.indexOf("--agents") + 1]!, "utf8")) as Record<string, { tools: string[] }>;
+    assert.deepEqual(Object.keys(agents).sort(), ["question-triage", "queue-reviewer", "run-digest"]);
+    for (const [name, a] of Object.entries(agents)) {
+      assert.ok(a.tools.every((t) => ["Read", "Grep", "Glob"].includes(t)), `${name} only reads (no Bash, so no nexus commands)`);
+    }
+  } finally { stop(); delete process.env.FAKE_ARGS; }
 });
