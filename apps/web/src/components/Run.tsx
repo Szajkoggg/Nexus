@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { act, enc, useFetch, type ActivityEntry, type ProjectState, type QueueView, type SessionView, type Usage } from "../api.ts";
 import { Button, Section, TimeAgo } from "./ui.tsx";
-import { CLAUDE_EFFORTS, CODEX_EFFORTS } from "./Settings.tsx";
+import { EffortSelect, ModelSelect } from "./Settings.tsx";
 
 const RUN_TONE: Record<string, string> = {
   running: "text-blue-300 bg-blue-500/10 ring-blue-500/40",
@@ -28,7 +28,6 @@ export function RunChip({ queue }: { queue: QueueView }) {
   );
 }
 
-const CLAUDE_MODELS = ["opus", "sonnet", "haiku"];
 
 /** Start, pause, stop and resume a queue's run. */
 export function RunControls({ project, queue, onChanged }: { project: ProjectState; queue: QueueView; onChanged: () => void }) {
@@ -36,11 +35,8 @@ export function RunControls({ project, queue, onChanged }: { project: ProjectSta
   const [model, setModel] = useState("");
   const [effort, setEffort] = useState("");
   const [runtime, setRuntime] = useState<"claude" | "codex">(project.project.runtimes.default);
-  const codexModels = useFetch<string[]>(runtime === "codex" ? "/api/codex/models" : undefined, runtime);
-  const suggestions = runtime === "codex" ? codexModels ?? [] : CLAUDE_MODELS;
   const defaultModel = project.project.runtimes[runtime].model;
   const defaultEffort = project.project.runtimes[runtime].effort;
-  const efforts: readonly string[] = runtime === "codex" ? CODEX_EFFORTS : CLAUDE_EFFORTS;
   const [session, setSession] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
@@ -98,19 +94,13 @@ export function RunControls({ project, queue, onChanged }: { project: ProjectSta
           </label>
           <label className="text-xs text-zinc-400">
             <span className="mb-1 block">Model</span>
-            <input
-              list={`models-${queue.id}`} value={model} onChange={(e) => setModel(e.target.value)} disabled={!!session}
-              placeholder={defaultModel ? `default: ${defaultModel}` : "runtime default"}
-              className="w-44 rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm text-zinc-200 placeholder:text-zinc-600 disabled:opacity-50"
-            />
-            <datalist id={`models-${queue.id}`}>{suggestions.map((m) => <option key={m} value={m} />)}</datalist>
+            <ModelSelect runtime={runtime} value={model} onChange={setModel} disabled={!!session}
+              defaultLabel={session ? "as before" : defaultModel ? `default: ${defaultModel}` : "runtime default"} />
           </label>
           <label className="text-xs text-zinc-400">
             <span className="mb-1 block">Effort</span>
-            <select value={effort} onChange={(e) => setEffort(e.target.value)} className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm text-zinc-200">
-              <option value="">{session ? "as before" : defaultEffort ? `default: ${defaultEffort}` : "default"}</option>
-              {efforts.map((x) => <option key={x} value={x}>{x}</option>)}
-            </select>
+            <EffortSelect runtime={runtime} model={model || (project.project.runtimes[runtime].model ?? "")} value={effort} onChange={setEffort}
+              defaultLabel={session ? "as before" : defaultEffort ? `default: ${defaultEffort}` : "default"} />
           </label>
           <Button disabled={busy} onClick={() => call({ action: "start", model: model || undefined, effort: effort || undefined, session: session || undefined, runtime: session ? undefined : runtime })}>
             {run ? "Start a new run" : "Start"}

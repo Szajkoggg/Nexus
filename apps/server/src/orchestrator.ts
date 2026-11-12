@@ -4,7 +4,7 @@
 // permission mode dontAsk with a read-only allow list.
 import { randomUUID } from "node:crypto";
 import {
-  ActionError, Effort, ProjectStore, applyDraft, loadProjectState, newId, now, type ChatEntry, type Event, type ProjectState, type SessionFile,
+  ActionError, ClaudeEffort, ProjectStore, applyDraft, loadProjectState, newId, now, type ChatEntry, type Event, type ProjectState, type SessionFile,
 } from "@nexus/protocol";
 import { ClaudeSession } from "./claude.ts";
 import type { Engine } from "./engine.ts";
@@ -64,8 +64,8 @@ export class Orchestrator {
    */
   settings(model: unknown, effort: unknown): void {
     const m = typeof model === "string" && model.trim() ? model.trim() : undefined;
-    const e = effort === undefined || effort === null || effort === "" ? undefined : Effort.safeParse(effort);
-    if (e && !e.success) throw new ActionError(`effort is one of ${Effort.options.join(", ")}`);
+    const e = effort === undefined || effort === null || effort === "" ? undefined : ClaudeEffort.safeParse(effort);
+    if (e && !e.success) throw new ActionError(`effort is one of ${ClaudeEffort.options.join(", ")}`);
     const p = this.store.readProject();
     this.store.writeProject({ ...p, orchestrator: { runtime: "claude", notify: true, session: null, ...p.orchestrator, model: m, effort: e?.data } });
     const s = this.session();

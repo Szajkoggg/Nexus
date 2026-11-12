@@ -16,7 +16,7 @@ import {
 import { Engine } from "./engine.ts";
 import { Orchestrator } from "./orchestrator.ts";
 import { Conversations } from "./conversations.ts";
-import { listCodexModels } from "./codex.ts";
+import { listModels } from "./models.ts";
 import { Lifecycle, version } from "./lifecycle.ts";
 import {
   AttentionWatch, allowed, auth, authCookie, isLocal, loginPage, push, pushDevices, pushKey, qrSvg, rotateToken,
@@ -317,7 +317,10 @@ app.post("/api/push/test", async (c) => {
   const only = typeof b.endpoint === "string" ? b.endpoint : undefined;
   return c.json({ sent: await push({ title: "Nexus", body: "Notifications reach this device.", url: "/", tag: "test" }, only) });
 });
-app.get("/api/codex/models", async (c) => c.json(await listCodexModels()));
+app.get("/api/models/:runtime", async (c) => {
+  const r = c.req.param("runtime");
+  return r === "claude" || r === "codex" ? c.json(await listModels(r)) : c.json({ error: "runtime is claude or codex" }, 404);
+});
 
 // The orchestrator chat.
 const orchestratorOf = (st: ProjectStore) => [...projects.values()].find((e) => e.store === st)!.orchestrator;

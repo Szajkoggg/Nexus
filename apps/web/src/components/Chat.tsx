@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { ChatEntry, RuntimeFile, SessionFile } from "@nexus/protocol";
 import { act, enc, useFetch } from "../api.ts";
 import { Button, Composer, Markdown, TimeAgo } from "./ui.tsx";
-import { CLAUDE_EFFORTS, CODEX_EFFORTS } from "./Settings.tsx";
+import { EffortSelect, ModelSelect, useEfforts } from "./Settings.tsx";
 
 interface View { session: SessionFile | null; state: "working" | "idle" | "exited"; runtime: RuntimeFile | null; chat: ChatEntry[]; model: string | null; effort: string | null }
 
@@ -273,18 +273,15 @@ function NewConversation({ project, defaultRuntime, onBack, onClose, onCreated }
         </label>
         <div className="flex flex-wrap gap-3">
           <label className="text-sm text-zinc-300">Runtime
-            <select value={runtime} onChange={(e) => { setRuntime(e.target.value as "claude" | "codex"); setEffort(""); }} className={`mt-1 ${field}`}>
+            <select value={runtime} onChange={(e) => { setRuntime(e.target.value as "claude" | "codex"); setModel(""); setEffort(""); }} className={`mt-1 ${field}`}>
               <option value="claude">Claude Code</option><option value="codex">Codex</option>
             </select>
           </label>
           <label className="text-sm text-zinc-300">Model
-            <input value={model} onChange={(e) => setModel(e.target.value)} placeholder="default" list="claude-models" className={`mt-1 ${field} w-40`} />
+            <span className="mt-1 block"><ModelSelect runtime={runtime} value={model} onChange={setModel} className="py-1.5" /></span>
           </label>
           <label className="text-sm text-zinc-300">Effort
-            <select value={effort} onChange={(e) => setEffort(e.target.value)} className={`mt-1 ${field}`}>
-              <option value="">default</option>
-              {(runtime === "codex" ? CODEX_EFFORTS : CLAUDE_EFFORTS).map((x) => <option key={x} value={x}>{x}</option>)}
-            </select>
+            <span className="mt-1 block"><EffortSelect runtime={runtime} model={model} value={effort} onChange={setEffort} className="py-1.5" /></span>
           </label>
         </div>
         <Button onClick={() => void create()}>Start</Button>
@@ -295,6 +292,7 @@ function NewConversation({ project, defaultRuntime, onBack, onClose, onCreated }
 }
 
 function ConversationMenu({ project, c, onChanged }: { project: string; c: ConversationItem; onChanged: () => void }) {
+  const efforts = useEfforts(c.runtime === "codex" ? "codex" : "claude", c.model ?? "");
   const patch = (body: unknown) => act(project, "PATCH", `/conversations/${enc(c.id)}`, body).then(onChanged, (e: Error) => alert(e.message));
   return (
     <select value="" onChange={(e) => {
@@ -308,7 +306,7 @@ function ConversationMenu({ project, c, onChanged }: { project: string; c: Conve
       <option value="archive">{c.archived ? "Unarchive" : "Archive"}</option>
       <optgroup label="Effort (from the next message)">
         <option value="effort:">default</option>
-        {(c.runtime === "codex" ? CODEX_EFFORTS : CLAUDE_EFFORTS).map((x) => <option key={x} value={`effort:${x}`}>{x}{c.effort === x ? " ✓" : ""}</option>)}
+        {efforts.map((x) => <option key={x} value={`effort:${x}`}>{x}{c.effort === x ? " ✓" : ""}</option>)}
       </optgroup>
     </select>
   );

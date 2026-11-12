@@ -8,7 +8,7 @@ import { existsSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import {
   ActionError, ProjectStore, USER_SESSION, ensureUserSession, loadProjectState, newId, normPath, now, readUsage,
-  writeUsage, CODEX_EFFORTS, type Effort, type InboxView, type ProjectState, type QueueView, type RunFile, type SessionFile, type StepView,
+  writeUsage, CLAUDE_EFFORTS, type Effort, type InboxView, type ProjectState, type QueueView, type RunFile, type SessionFile, type StepView,
 } from "@nexus/protocol";
 import type { AgentProcess, StreamFacts } from "./agent.ts";
 import { ClaudeSession } from "./claude.ts";
@@ -285,7 +285,7 @@ export class Engine {
   // ---------------------------------------------------------------- sessions and processes
 
   private newSession(state: ProjectState, q: QueueView, runtime: "claude" | "codex", model?: string, effort?: Effort): SessionFile {
-    if (runtime === "codex" && effort && !CODEX_EFFORTS.includes(effort)) throw new ActionError(`Codex takes effort ${CODEX_EFFORTS.join(", ")}`);
+    if (runtime === "claude" && effort && !CLAUDE_EFFORTS.includes(effort)) throw new ActionError(`Claude Code takes effort ${CLAUDE_EFFORTS.join(", ")}`);
     const cwd = this.worktreeFor(state, q);
     const s: SessionFile = {
       protocol: 1, id: newId(), project: state.project.id, role: "worker", runtime,
@@ -304,7 +304,7 @@ export class Engine {
     if (s.runtime === "external" || s.launched_by !== "nexus" || !s.native_id) throw new ActionError("only a session Nexus launched (and started at least once) can be continued", 409);
     const busy = state.queues.find((q) => q.id !== queueId && q.run?.session === id && ["running", "pausing", "usage_wait"].includes(q.run.state));
     if (busy) throw new ActionError(`that session is running queue ${busy.id}`, 409);
-    if (s.runtime === "codex" && effort && !CODEX_EFFORTS.includes(effort)) throw new ActionError(`Codex takes effort ${CODEX_EFFORTS.join(", ")}`);
+    if (s.runtime === "claude" && effort && !CLAUDE_EFFORTS.includes(effort)) throw new ActionError(`Claude Code takes effort ${CLAUDE_EFFORTS.join(", ")}`);
     const updated: SessionFile = { ...s, queue: queueId, model: model ?? s.model, effort: effort ?? s.effort };
     this.store.writeSession(updated);
     return updated;

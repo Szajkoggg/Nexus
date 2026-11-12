@@ -30,10 +30,14 @@ export type Role = z.infer<typeof Role>;
 
 export const Runtime = z.enum(["claude", "codex", "external"]);
 
-/** How hard the model thinks. Claude Code takes all five (--effort); Codex takes low to xhigh (a turn's effort). */
-export const Effort = z.enum(["low", "medium", "high", "xhigh", "max"]);
+/**
+ * How hard the model thinks. Claude Code takes low to max (--effort); Codex takes what each model lists (low to
+ * ultra for most; a turn's effort), so the dashboard offers each model's own levels.
+ */
+export const Effort = z.enum(["low", "medium", "high", "xhigh", "max", "ultra"]);
 export type Effort = z.infer<typeof Effort>;
-export const CODEX_EFFORTS: readonly Effort[] = ["low", "medium", "high", "xhigh"];
+export const CLAUDE_EFFORTS: readonly Effort[] = ["low", "medium", "high", "xhigh", "max"];
+export const ClaudeEffort = Effort.exclude(["ultra"]);
 export type Runtime = z.infer<typeof Runtime>;
 
 // ---------------------------------------------------------------- registry (Nexus-level, not per project)
@@ -63,14 +67,14 @@ export const ProjectFile = z.object({
     default: z.enum(["claude", "codex"]).default("claude"),
     claude: z.object({
       model: z.string().optional(),
-      effort: Effort.optional(),
+      effort: ClaudeEffort.optional(),
       permission_mode: z.enum(["acceptEdits", "auto", "bypassPermissions", "dontAsk", "manual", "plan"]).default("acceptEdits"),
       /** Added to every Nexus-launched session; `Bash(nexus:*)` is always allowed. */
       allowed_tools: z.array(z.string()).default([]),
     }).prefault({}),
     codex: z.object({
       model: z.string().optional(),
-      effort: Effort.exclude(["max"]).optional(),
+      effort: Effort.optional(),
       sandbox: z.enum(["read-only", "workspace-write", "danger-full-access"]).default("workspace-write"),
       /** `never`: anything outside the sandbox is refused. `on-request` with an `auto_review` reviewer: Codex's own
        *  reviewer decides each request by its risk, like Claude Code's auto mode. */
@@ -90,7 +94,7 @@ export const ProjectFile = z.object({
     runtime: Runtime.default("claude"),
     session: Id.nullable().default(null),
     model: z.string().optional(),
-    effort: Effort.optional(),
+    effort: ClaudeEffort.optional(),
     /** Tell the orchestrator when a worker asks, or a run halts or finishes (it starts if needed). */
     notify: z.boolean().default(true),
   }).optional(),

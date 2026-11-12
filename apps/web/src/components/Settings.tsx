@@ -4,8 +4,7 @@ import type { ProjectFile } from "@nexus/protocol";
 import { act, useFetch } from "../api.ts";
 import { Button, Section } from "./ui.tsx";
 
-export const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
-export const CODEX_EFFORTS = ["low", "medium", "high", "xhigh"] as const;
+const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 
 const field = "w-full rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm text-zinc-200 placeholder:text-zinc-600";
 
@@ -113,11 +112,10 @@ export function SettingsPanel({ project, onChanged, server }: { project: Project
       </Section>
 
       <Section title="Claude Code workers">
-        <Row label="Model" hint="An alias (opus, sonnet, haiku) or a full model name; empty: Claude Code's default.">
-          <input value={f.claudeModel} onChange={(e) => set("claudeModel", e.target.value)} placeholder="default" list="claude-models" className={field} />
-          <datalist id="claude-models"><option value="opus" /><option value="sonnet" /><option value="haiku" /></datalist>
+        <Row label="Model">
+          <ModelSelect runtime="claude" value={f.claudeModel} onChange={(v) => set("claudeModel", v)} defaultLabel="Claude Code's default" className="w-full" />
         </Row>
-        <Row label="Effort"><Select value={f.claudeEffort} onChange={(v) => set("claudeEffort", v)} options={CLAUDE_EFFORTS} empty="default" /></Row>
+        <Row label="Effort"><EffortSelect runtime="claude" model={f.claudeModel} value={f.claudeEffort} onChange={(v) => set("claudeEffort", v)} className="w-full" /></Row>
         <Row label="Permissions" hint={claudeAuto ? "Auto: routine actions run, risky ones are refused by Claude Code's classifier. Nobody is asked: a refusal is reported to the agent." : "Nobody can answer a prompt while Nexus runs: what is not allowed is refused."}>
           <Select value={f.claudePermission} onChange={(v) => set("claudePermission", v as typeof f.claudePermission)} options={[
             ["auto", "auto (recommended for unattended runs)"], ["acceptEdits", "acceptEdits: file edits, plus the allow list"],
@@ -130,10 +128,10 @@ export function SettingsPanel({ project, onChanged, server }: { project: Project
       </Section>
 
       <Section title="Codex workers">
-        <Row label="Model" hint="Empty: Codex's default (from its own config).">
-          <input value={f.codexModel} onChange={(e) => set("codexModel", e.target.value)} placeholder="default" className={field} />
+        <Row label="Model">
+          <ModelSelect runtime="codex" value={f.codexModel} onChange={(v) => set("codexModel", v)} defaultLabel="Codex's default" className="w-full" />
         </Row>
-        <Row label="Effort"><Select value={f.codexEffort} onChange={(v) => set("codexEffort", v)} options={CODEX_EFFORTS} empty="default" /></Row>
+        <Row label="Effort"><EffortSelect runtime="codex" model={f.codexModel} value={f.codexEffort} onChange={(v) => set("codexEffort", v)} className="w-full" /></Row>
         <Row label="Sandbox"><Select value={f.codexSandbox} onChange={(v) => set("codexSandbox", v as typeof f.codexSandbox)} options={[["workspace-write", "workspace-write (recommended)"], ["read-only", "read-only"], ["danger-full-access", "danger-full-access (risky)"]]} /></Row>
         <Row label="Leaving the sandbox" hint={codexAuto ? "Auto review: Codex's reviewer approves or refuses each request by its risk, like Claude Code's auto mode." : f.codexApproval === "never" ? "Never: anything outside the sandbox (network, files elsewhere) is refused." : "Requests go to the reviewer chosen here; one Nexus cannot answer is refused."}>
           <Select value={f.codexApproval === "on-request" && f.codexReviewer === "auto_review" ? "auto" : f.codexApproval} onChange={(v) => {
@@ -145,9 +143,9 @@ export function SettingsPanel({ project, onChanged, server }: { project: Project
 
       <Section title="Orchestrator">
         <Row label="Model" hint="Applies from its next message; the conversation goes on.">
-          <input value={orchModel} onChange={(e) => set("orchModel", e.target.value)} placeholder="default" list="claude-models" className={field} />
+          <ModelSelect runtime="claude" value={orchModel} onChange={(v) => set("orchModel", v)} defaultLabel="Claude Code's default" className="w-full" />
         </Row>
-        <Row label="Effort"><Select value={orchEffort} onChange={(v) => set("orchEffort", v)} options={CLAUDE_EFFORTS} empty="default" /></Row>
+        <Row label="Effort"><EffortSelect runtime="claude" model={orchModel} value={orchEffort} onChange={(v) => set("orchEffort", v)} className="w-full" /></Row>
         <Row label="Tell it about"><span className="flex items-center gap-2 pt-1 text-sm text-zinc-300">
           <input type="checkbox" checked={f.notify} onChange={(e) => set("notify", e.target.checked)} className="accent-sky-500" />
           workers' questions, and runs that halt or finish
@@ -158,9 +156,9 @@ export function SettingsPanel({ project, onChanged, server }: { project: Project
         <Row label="Notes folder" hint="The one folder a thinking partner may write in, relative to the project (e.g. Dev/Concepts/Gameplay). Empty: they only read.">
           <input value={f.notesDir} onChange={(e) => set("notesDir", e.target.value)} placeholder="read only" className={`${field} font-mono text-xs`} />
         </Row>
-        <Row label="Runtime"><Select value={f.ideasRuntime} onChange={(v) => set("ideasRuntime", v as "claude" | "codex")} options={[["claude", "Claude Code"], ["codex", "Codex"]]} /></Row>
-        <Row label="Model"><input value={f.ideasModel} onChange={(e) => set("ideasModel", e.target.value)} placeholder="default" list="claude-models" className={field} /></Row>
-        <Row label="Effort"><Select value={f.ideasEffort} onChange={(v) => set("ideasEffort", v)} options={f.ideasRuntime === "codex" ? CODEX_EFFORTS : CLAUDE_EFFORTS} empty="default" /></Row>
+        <Row label="Runtime"><Select value={f.ideasRuntime} onChange={(v) => { set("ideasRuntime", v as "claude" | "codex"); set("ideasModel", ""); set("ideasEffort", ""); }} options={[["claude", "Claude Code"], ["codex", "Codex"]]} /></Row>
+        <Row label="Model"><ModelSelect runtime={f.ideasRuntime} value={f.ideasModel} onChange={(v) => set("ideasModel", v)} defaultLabel="the runtime's default" className="w-full" /></Row>
+        <Row label="Effort"><EffortSelect runtime={f.ideasRuntime} model={f.ideasModel} value={f.ideasEffort} onChange={(v) => set("ideasEffort", v)} className="w-full" /></Row>
       </Section>
 
       <Section title="Defaults">
@@ -243,5 +241,70 @@ export function ServerSection({ info, onChanged }: { info: ServerInfo | undefine
       </p>
       {msg && <p className="mt-2 text-xs text-red-300">{msg}</p>}
     </Section>
+  );
+}
+
+// ---------------------------------------------------------------- choosing a model
+
+
+interface ModelInfo { value: string; label: string; description?: string; efforts?: string[] }
+
+/**
+ * A model, chosen from the list the runtime itself gives (Claude Code's and Codex's own model lists). "Other…" takes
+ * a full model name for the rare case; a saved name not in the list is shown as it is.
+ */
+export function ModelSelect({ runtime, value, onChange, defaultLabel = "default", className = "", disabled }: {
+  runtime: "claude" | "codex"; value: string; onChange: (v: string) => void; defaultLabel?: string; className?: string; disabled?: boolean;
+}) {
+  const models = useFetch<ModelInfo[]>(`/api/models/${runtime}`, runtime);
+  const [typing, setTyping] = useState(false);
+  const options: [string, string, string?][] = (models ?? []).map((m) => [m.value, m.label, m.description]);
+  if (value && !options.some(([v]) => v === value)) options.push([value, value]);
+  const style = `rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm text-zinc-200 disabled:opacity-50 ${className}`;
+  if (typing) {
+    return (
+      <span className="flex items-center gap-1">
+        <input autoFocus value={value} onChange={(e) => onChange(e.target.value.trim())} placeholder="full model name" className={style} />
+        <button type="button" onClick={() => setTyping(false)} className="px-1 text-xs text-zinc-400 hover:text-zinc-200" title="Back to the list">list</button>
+      </span>
+    );
+  }
+  return (
+    <select value={value} disabled={disabled} className={style}
+      onChange={(e) => { if (e.target.value === "\u0000other") { setTyping(true); onChange(""); } else onChange(e.target.value); }}>
+      <option value="">{defaultLabel}</option>
+      {options.map(([v, l, d]) => <option key={v} value={v} title={d}>{l}{d ? ` · ${d}` : ""}</option>)}
+      {!models && <option disabled value={"\u0000loading"}>loading the models…</option>}
+      <option value={"\u0000other"}>Other…</option>
+    </select>
+  );
+}
+
+/**
+ * The effort levels a model takes, from the runtime's own model list: the chosen model's, or, for the runtime's
+ * default model, every level some model takes.
+ */
+export function useEfforts(runtime: "claude" | "codex", model: string): string[] {
+  const models = useFetch<ModelInfo[]>(`/api/models/${runtime}`, runtime);
+  const fallback = runtime === "claude" ? [...CLAUDE_EFFORTS] : ["low", "medium", "high", "xhigh"];
+  if (!models?.length) return fallback;
+  const chosen = models.find((m) => m.value === model)?.efforts;
+  if (chosen?.length) return chosen;
+  const all = new Set(models.flatMap((m) => m.efforts ?? []));
+  const order = ["low", "medium", "high", "xhigh", "max", "ultra"];
+  return all.size ? order.filter((e) => all.has(e)) : fallback;
+}
+
+export function EffortSelect({ runtime, model, value, onChange, defaultLabel = "default", className = "", disabled }: {
+  runtime: "claude" | "codex"; model: string; value: string; onChange: (v: string) => void; defaultLabel?: string; className?: string; disabled?: boolean;
+}) {
+  const efforts = useEfforts(runtime, model);
+  const options = value && !efforts.includes(value) ? [...efforts, value] : efforts;
+  return (
+    <select value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)}
+      className={`rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm text-zinc-200 disabled:opacity-50 ${className}`}>
+      <option value="">{defaultLabel}</option>
+      {options.map((x) => <option key={x} value={x}>{x}{efforts.includes(x) ? "" : " (not offered by this model)"}</option>)}
+    </select>
   );
 }

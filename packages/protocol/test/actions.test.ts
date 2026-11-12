@@ -109,7 +109,10 @@ test("project settings: set, clear with an empty value, and refuse what the sche
   updateSettings(st, { runtimes: { claude: { model: "", effort: null } } });
   p = st.readProject();
   assert.deepEqual([p.runtimes.claude.model, p.runtimes.claude.effort, p.runtimes.claude.permission_mode], [undefined, undefined, "auto"]);
-  assert.throws(() => updateSettings(st, { runtimes: { codex: { effort: "max" } } }), /effort/);
+  assert.throws(() => updateSettings(st, { runtimes: { claude: { effort: "ultra" } } }), /effort/);
+  updateSettings(st, { runtimes: { codex: { effort: "max" } } });
+  assert.equal(st.readProject().runtimes.codex.effort, "max", "Codex models take max (and ultra)");
+  updateSettings(st, { runtimes: { codex: { effort: "xhigh" } } });
   assert.throws(() => updateSettings(st, { runtimes: { claude: { permission_mode: "yolo" } } }), /permission_mode/);
   assert.equal(st.readProject().runtimes.codex.effort, "xhigh", "a refused change leaves the settings as they were");
 });

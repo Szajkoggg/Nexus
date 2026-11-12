@@ -9,7 +9,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import {
-  ActionError, CODEX_EFFORTS, Effort, ProjectStore, newId, normPath, now, type ProjectFile, type SessionFile,
+  ActionError, CLAUDE_EFFORTS, Effort, ProjectStore, newId, normPath, now, type ProjectFile, type SessionFile,
 } from "@nexus/protocol";
 import type { AgentProcess } from "./agent.ts";
 import { ClaudeSession } from "./claude.ts";
@@ -56,7 +56,7 @@ export class Conversations {
     const c = p.conversations;
     const runtime = body.runtime === "codex" || body.runtime === "claude" ? body.runtime : c.runtime;
     const effort = parseEffort(body.effort) ?? c.effort;
-    if (runtime === "codex" && effort && !CODEX_EFFORTS.includes(effort)) throw new ActionError(`Codex takes effort ${CODEX_EFFORTS.join(", ")}`);
+    if (runtime === "claude" && effort && !CLAUDE_EFFORTS.includes(effort)) throw new ActionError(`Claude Code takes effort ${CLAUDE_EFFORTS.join(", ")}`);
     const title = typeof body.title === "string" && body.title.trim() ? body.title.trim().slice(0, 120) : "New conversation";
     const s: SessionFile = {
       protocol: 1, id: newId(), project: p.id, role: "conversation", runtime, title,
@@ -75,7 +75,7 @@ export class Conversations {
     if (body.model !== undefined) next.model = typeof body.model === "string" && body.model.trim() ? body.model.trim() : undefined;
     if (body.effort !== undefined) next.effort = parseEffort(body.effort);
     if (typeof body.archived === "boolean") next.archived = body.archived;
-    if (next.runtime === "codex" && next.effort && !CODEX_EFFORTS.includes(next.effort)) throw new ActionError(`Codex takes effort ${CODEX_EFFORTS.join(", ")}`);
+    if (next.runtime === "claude" && next.effort && !CLAUDE_EFFORTS.includes(next.effort)) throw new ActionError(`Claude Code takes effort ${CLAUDE_EFFORTS.join(", ")}`);
     this.store.writeSession(next);
     // A new model or effort applies from the next message: the process restarts (the conversation goes on).
     if (next.model !== s.model || next.effort !== s.effort) this.retire(id);

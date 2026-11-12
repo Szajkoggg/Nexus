@@ -227,40 +227,6 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
   }
 }
 
-/** The models this Codex offers (`model/list`), asked once and kept for an hour. */
-let modelCache: { at: number; models: string[] } | undefined;
-export async function listCodexModels(): Promise<string[]> {
-  if (modelCache && Date.now() - modelCache.at < 3_600_000) return modelCache.models;
-  const bin = process.env.NEXUS_CODEX ?? "codex";
-  const script = /\.(m?[jt]s)$/.test(bin);
-  const proc = spawn(script ? process.execPath : bin, script ? [bin, "app-server"] : ["app-server"], { stdio: ["pipe", "pipe", "ignore"], windowsHide: true });
-  const models = await new Promise<string[]>((resolve) => {
-    let buffer = "";
-    const timer = setTimeout(() => resolve([]), 15_000);
-    proc.on("error", () => resolve([]));
-    proc.stdout.setEncoding("utf8");
-    proc.stdout.on("data", (d: string) => {
-      buffer += d;
-      for (const line of buffer.split("\n").slice(0, -1)) {
-        try {
-          const m = JSON.parse(line) as Json;
-          if (m.id === 1) proc.stdin.write(JSON.stringify({ method: "initialized", params: {} }) + "\n" + JSON.stringify({ id: 2, method: "model/list", params: {} }) + "\n");
-          if (m.id === 2) {
-            clearTimeout(timer);
-            const list = (m.result?.data ?? m.result?.models ?? []) as Json[];
-            resolve(list.map((x) => x.id ?? x.model ?? x.slug).filter((x): x is string => typeof x === "string"));
-          }
-        } catch { /* not a message */ }
-      }
-      buffer = buffer.slice(buffer.lastIndexOf("\n") + 1);
-    });
-    proc.stdin.write(JSON.stringify({ id: 1, method: "initialize", params: { clientInfo: { name: "nexus", title: "Nexus", version: "0.1.0" }, capabilities: { experimentalApi: true, requestAttestation: false } } }) + "\n");
-  });
-  proc.kill();
-  if (models.length) modelCache = { at: Date.now(), models };
-  return models;
-}
-
 const input = (text: string) => [{ type: "text", text, text_elements: [] }];
 const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
 const duration = (mins?: number | null) => (!mins ? "window" : mins % 1440 === 0 ? `${mins / 1440}d` : mins % 60 === 0 ? `${mins / 60}h` : `${mins}m`);

@@ -145,13 +145,13 @@ test("model and effort reach Claude Code as flags, and are kept on the session",
   } finally { engine.shutdown(); delete process.env.FAKE_ARGS; }
 });
 
-test("Codex gets the effort on every turn and the project's reviewer when the thread starts; max is refused", async () => {
+test("Codex gets the effort on every turn and the project's reviewer when the thread starts; Claude Code refuses ultra", async () => {
   const { store, engine, queue, until } = setup(["done", "done"]);
   process.env.FAKE_ARGS = join(dirname(process.env.FAKE_LOG!), "args.log");
   const p = store.readProject();
   store.writeProject({ ...p, runtimes: { ...p.runtimes, codex: { ...p.runtimes.codex, effort: "medium", approval_policy: "on-request", approvals_reviewer: "auto_review" } } });
   try {
-    assert.throws(() => engine.start("Q", { runtime: "codex", effort: "max" }), /Codex takes effort/);
+    assert.throws(() => engine.start("Q", { runtime: "claude", effort: "ultra" }), /Claude Code takes effort/);
     engine.start("Q", { runtime: "codex" });
     await until("the run to finish", () => queue().run?.state === "finished");
     const calls = readFileSync(process.env.FAKE_ARGS, "utf8").trim().split("\n").map((l) => JSON.parse(l) as Record<string, unknown>);

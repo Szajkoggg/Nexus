@@ -291,7 +291,9 @@ Writes (JSON bodies only; a request with a foreign `Origin` is refused):
 | `PATCH /api/projects/:id/settings` | `name`, `runtimes`, `defaults`, `orchestrator.notify` (an empty value clears a field) | Project settings, checked against the schema |
 
 Also `GET /api/projects/:id/sessions/:session/activity?queue=&step=&limit=`, `GET /api/projects/:id/orchestrator`
-(its session, state and chat), `GET /api/usage` and `GET /api/codex/models`.
+(its session, state and chat), `GET /api/usage` and `GET /api/models/:runtime`: the models a runtime offers, asked from the runtime itself
+(Claude Code: an `initialize` control request on its stream-json input; Codex: `model/list`), with each model's
+name, description and effort levels; the dashboard offers only these.
 
 **Remote access.** A request is local when it comes from a loopback address without proxy headers
 (`X-Forwarded-For`, `Forwarded`, `X-Forwarded-Host`, `Tailscale-User-Login`). Anything else, pages, API and the
