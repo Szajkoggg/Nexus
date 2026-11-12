@@ -184,7 +184,8 @@ One long-lived session per project, shown as the project's chat. It may:
 - answer or escalate worker questions, add notes to steps.
 
 It may not edit project files, approve queues, or answer a question that is the user's. This is enforced by the
-runtime's permissions (for Claude: read-only tools plus `Bash(nexus *)`), not only by instruction.
+runtime's permissions (for Claude: read-only tools plus `Bash(nexus *)`, and writes only under `.nexus/drafts/`, where
+it keeps its queue drafts), not only by instruction.
 
 ### Context management
 
@@ -458,6 +459,16 @@ the text across. Drafts untouched for 14 days are pruned when the page loads.
   - `node_modules` has to be compared with the lock the update installed, not the one it started from.
   - On Windows a pid can still show as a process for a few seconds after it exits, so the probe recorded every pid
     and checked them again after killing.
+
+- **Queue drafts go through files, not heredocs.** On 2026-11-12 an orchestrator could not upload a long queue
+  revision: `cd … && nexus queue draft - <<'EOF'` was refused in `dontAsk` mode (a chained command does not match
+  `Bash(nexus:*)`), and the heredoc alone (about 8.5 KB; about 7 KB worked) broke in Claude Code's Bash wrapper on
+  Windows, with YAML lines reaching the shell as commands. The orchestrator now writes `.nexus/drafts/<queue>.yaml`
+  and runs `nexus queue draft` on that file, and the heredoc form left its briefing. A probe (Claude Code, `haiku`,
+  `dontAsk`, the orchestrator's exact lists, about $0.02 for three runs) showed that `Edit(<path>/**)` alone also
+  permits `Write` there, creating missing directories, while `Write(<path>/**)` alone permits nothing; Nexus keeps
+  both rules so the allow list says what is meant. `Write` and `Edit` must not be disallowed, since a disallow rule
+  beats an allow rule.
 
 ## Open questions
 

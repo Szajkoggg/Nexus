@@ -367,9 +367,17 @@ summary (decisions, open questions, proposed work), which goes whole into the or
 ## The orchestrator
 
 `project.yaml` holds `orchestrator: { runtime, session, model?, notify }`. The orchestrator is a Claude Code session
-launched in the project's checkout with `--permission-mode dontAsk`, allowed only `Read`, `Grep`, `Glob`,
-`Bash(nexus:*)` and read-only git commands, and with `Edit`, `Write` and `NotebookEdit` disallowed: anything else is
-refused without a prompt. Its briefing (appended system prompt) explains its role, the commands and the queue YAML.
+launched in the project's checkout with `--permission-mode dontAsk`, allowed only `Read`, `Grep`, `Glob`, `Agent`,
+`Bash(nexus:*)`, read-only git commands, and `Write(.nexus/drafts/**)` and `Edit(.nexus/drafts/**)`, and with
+`NotebookEdit` and `MultiEdit` disallowed: anything else, writes outside `.nexus/drafts/` included, is refused without
+a prompt. (`Write` and `Edit` are not disallowed: a disallow rule would beat the drafts rules.) Its briefing
+(appended system prompt) explains its role, the commands and the queue YAML.
+
+- `.nexus/drafts/<queue>.yaml` holds the orchestrator's queue drafts; the orchestrator is its only writer. It writes a
+  draft there, uploads it with `nexus queue draft .nexus/drafts/<queue>.yaml` (relative to the project's root, its
+  working directory), and keeps the file to edit for later revisions. The server reads only the path it is given.
+  The briefing tells it to run `nexus` commands on their own: a chained command (`cd …`, `&&`, a pipe) does not match
+  `Bash(nexus:*)` and is refused.
 
 - `nexus queue draft <file|->` sends a queue definition (YAML) as `queue.drafted`. The server writes it: a new queue
   becomes `proposed` (or `draft`); a change to an existing queue's steps, checks or stop conditions makes a new

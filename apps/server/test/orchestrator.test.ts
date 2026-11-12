@@ -150,6 +150,47 @@ test("the orchestrator gets Nexus's helper agents, which only read", async () =>
   } finally { stop(); delete process.env.FAKE_ARGS; }
 });
 
+test("the orchestrator may write only queue drafts, and its briefing uploads them from files", async () => {
+  const { orchestrator, until, stop } = setup();
+  const args = join(process.env.NEXUS_HOME!, "..", "args.log");
+  process.env.FAKE_ARGS = args;
+  try {
+    orchestrator.say("Hello");
+    await until("the process to start", () => existsSync(args));
+    const { readFileSync } = await import("node:fs");
+    const argv = (JSON.parse(readFileSync(args, "utf8").trim().split("\n")[0]!) as { argv: string[] }).argv;
+    assert.equal(argv[argv.indexOf("--permission-mode") + 1], "dontAsk");
+    const allowed = argv.slice(argv.indexOf("--allowedTools") + 1);
+    assert.ok(allowed.includes("Write(.nexus/drafts/**)") && allowed.includes("Edit(.nexus/drafts/**)"), "drafts are writable");
+    const writes = allowed.filter((t) => /^(Write|Edit|MultiEdit|NotebookEdit)\b/.test(t));
+    assert.deepEqual(writes.sort(), ["Edit(.nexus/drafts/**)", "Write(.nexus/drafts/**)"], "nothing else is writable");
+    const disallowed = argv[argv.indexOf("--disallowedTools") + 1]!.split(",");
+    assert.deepEqual(disallowed.sort(), ["MultiEdit", "NotebookEdit"], "a Write or Edit rule here would beat the drafts rules");
+    const brief = argv[argv.indexOf("--append-system-prompt") + 1]!;
+    assert.match(brief, /nexus queue draft \.nexus\/drafts\//);
+    assert.doesNotMatch(brief, /<<|heredoc/i);
+    assert.match(brief, /no cd, no &&, no pipes/);
+    assert.doesNotMatch(brief, /may not edit files|read only, like you/);
+  } finally { stop(); delete process.env.FAKE_ARGS; }
+});
+
+test("the orchestrator drafts and then revises a queue from one file under .nexus/drafts/", async () => {
+  const { store, orchestrator, state, until, stop } = setup();
+  try {
+    const { mkdirSync, writeFileSync } = await import("node:fs");
+    const drafts = join(store.dir, "drafts");
+    mkdirSync(drafts, { recursive: true });
+    writeFileSync(join(drafts, "R.yaml"), QUEUE);
+    // A relative path: the orchestrator runs in the project's root.
+    orchestrator.say(`FAKE-NEXUS: ["queue","draft",".nexus/drafts/R.yaml"]`);
+    await until("the drafted queue", () => orchestrator.view().chat.some((c) => /queue R created as proposed \(revision 1\)/.test(c.text)));
+    writeFileSync(join(drafts, "R.yaml"), QUEUE.replace("acceptance: [Done]", "acceptance: [Done, Twice]"));
+    orchestrator.say(`FAKE-NEXUS: ["queue","draft",".nexus/drafts/R.yaml"]`);
+    await until("the revision", () => orchestrator.view().chat.some((c) => /queue R updated to revision 2/.test(c.text)));
+    assert.deepEqual(state().queues.find((q) => q.id === "R")!.steps[1]!.acceptance, ["Done", "Twice"]);
+  } finally { stop(); }
+});
+
 test("only the user or an orchestrator may update or stop updating the Nexus server", async () => {
   const { store, stop } = setup();
   try {

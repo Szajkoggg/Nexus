@@ -1,7 +1,7 @@
 // The project's orchestrator: one long-lived Claude Code session the user talks with in the dashboard. It plans
 // queues and launches runs through `nexus` (queue.drafted, session.request), answers or escalates workers'
-// questions, and is told when a worker asks or a run halts or finishes. It may read everything and edit nothing:
-// permission mode dontAsk with a read-only allow list.
+// questions, and is told when a worker asks or a run halts or finishes. It may read everything and write only queue
+// drafts under .nexus/drafts/: permission mode dontAsk with a read-only allow list plus the drafts rules.
 import { randomUUID } from "node:crypto";
 import {
   ActionError, ClaudeEffort, ProjectStore, applyDraft, loadProjectState, newId, now, type ChatEntry, type Event, type ProjectState, type SessionFile,
@@ -15,7 +15,12 @@ const READ_ONLY_TOOLS = [
   "Read", "Grep", "Glob", "Agent", "Task", "Bash(nexus:*)",
   "Bash(git log:*)", "Bash(git status:*)", "Bash(git diff:*)", "Bash(git show:*)", "Bash(git branch:*)", "Bash(git worktree list:*)",
 ];
-const NEVER = ["Edit", "Write", "NotebookEdit", "MultiEdit"];
+// Queue drafts are files it writes and then hands to `nexus queue draft`: a long heredoc breaks in Claude Code's
+// shell wrapper on Windows. Edit and Write stay out of NEVER because a disallow rule beats these path rules;
+// dontAsk refuses writes anywhere else.
+const DRAFTS = ".nexus/drafts";
+const DRAFT_TOOLS = [`Write(${DRAFTS}/**)`, `Edit(${DRAFTS}/**)`];
+const NEVER = ["NotebookEdit", "MultiEdit"];
 
 export class Orchestrator {
   private proc?: ClaudeSession;
@@ -127,7 +132,7 @@ export class Orchestrator {
     const proc = new ClaudeSession({
       cwd: s.cwd, uuid: s.native_id!, resume, model: s.model, effort: s.effort,
       permissionMode: "dontAsk",
-      allowedTools: READ_ONLY_TOOLS,
+      allowedTools: [...READ_ONLY_TOOLS, ...DRAFT_TOOLS],
       disallowedTools: NEVER,
       appendSystemPrompt: briefing(project.name, Math.round(project.defaults.context_reuse_threshold * 100)),
       agentsFile: orchestratorAgentsFile(),
@@ -242,15 +247,17 @@ function briefing(project: string, threshold: number): string {
 
 Your job: plan the work with the user as queues of steps, keep the queues and their runs moving, and keep the user informed. You plan and launch; you never do the project's work yourself.
 - You may read the project (its files, documentation, git history) and everything under .nexus/.
-- You may not edit files, approve queues (only the user approves, in the dashboard), or answer a question that is the user's to decide by the project's rules (for example the look, gameplay, final numbers). Escalate those, with your framing and a recommendation.
+- You write only queue drafts, in .nexus/drafts/. You may not edit any other file, approve queues (only the user approves, in the dashboard), or answer a question that is the user's to decide by the project's rules (for example the look, gameplay, final numbers). Escalate those, with your framing and a recommendation.
 
 Commands (\`nexus\` is on PATH; your session is set in the environment):
 - nexus status                                   every queue, step, run, open question and session, with context cards
-- nexus queue draft - <<'EOF' ... EOF            create or change a queue from YAML (format below); a new or changed queue waits for the user's approval
+- nexus queue draft .nexus/drafts/ID.yaml        create or change a queue from YAML (format below): write the YAML to .nexus/drafts/ID.yaml, then run nexus queue draft .nexus/drafts/ID.yaml; keep the file and edit it for later revisions. A new or changed queue waits for the user's approval
 - nexus run <queue> start --reason "..." [--use-session <id>] [--runtime claude|codex] [--model <model>] [--effort low|medium|high|xhigh|max]   start an approved queue (--use-session continues an existing session; runtime, model and effort default to the project's)
 - nexus run <queue> pause|resume|stop --reason "..."
 - nexus answer <qid> "<answer>" [--continue|--wait]            answer a worker's question whose answer is already settled
 - nexus answer <qid> "<framing, options, recommendation>" --escalate   pass it to the user
+
+Run nexus commands on their own (no cd, no &&, no pipes), since chained commands are refused.
 
 Queue YAML (all text in English):
 id: W                          # short, unique in the project
@@ -279,7 +286,7 @@ Choosing model and effort for a run: say which and why when you start it. Hard d
 
 Choosing a session for a run: \`nexus status\` shows each session's context card (topics, files, context fill). Continue a session (--use-session) when it worked on closely related things and its context is below ${threshold} %; otherwise start a fresh one and put what it needs into the queue's description and goals. Never give one session two running queues.
 
-Helpers (subagents, through the Agent tool; they read only, like you, and keep long research out of your context):
+Helpers (subagents, through the Agent tool; they read only (you also write queue drafts), and keep long research out of your context):
 - queue-reviewer: before you propose a queue, have it review the draft; fix what it finds, then propose.
 - question-triage: when a worker asks, have it find whether the answer is settled (with its source) or the user's.
 - run-digest: when a run halts or finishes, have it summarize the run; tell the user from that.
