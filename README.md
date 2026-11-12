@@ -113,6 +113,10 @@ proxy or from another address needs the access token once (it sets a cookie for 
 5. On the phone, add Nexus to the home screen (iPhone: Share, Add to Home Screen), open it from there and turn on
    the bell: notifications arrive even with Nexus closed. "Send a test notification" in the panel checks it.
 
+On a narrow screen the project tabs give way to a picker: the current project's name at the top left, with its
+"waiting for you" count and running dot. Tap it for the list of all projects (each with its count and dot), tap one to
+switch. A small amber dot on the closed picker means another project waits for you.
+
 "Replace token" in the panel signs every remote device out. To have Nexus start with Windows, without a console
 window, run from the live instance: `powershell -ExecutionPolicy Bypass -File C:\Code\Nexus-live\scripts\autostart.ps1`
 (`-Remove` undoes it; the log goes to `%APPDATA%\Nexus\server.log`). To start it once without a window:

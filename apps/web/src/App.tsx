@@ -8,6 +8,7 @@ import { AttentionPanel, NotifyToggle, useNotifications } from "./components/Att
 import { ContextBar, UsageMeter } from "./components/Run.tsx";
 import { ChatPanel, ConversationsButton, ConversationsPanel, OrchestratorButton, useOrchestrator } from "./components/Chat.tsx";
 import { RemoteButton, RemotePanel } from "./components/Remote.tsx";
+import { ProjectPicker, ProjectTabs } from "./components/Projects.tsx";
 import { SettingsButton, SettingsPanel, UpdatePill, useServer } from "./components/Settings.tsx";
 
 const GROUPS: { title: string; statuses: QueueStatus[]; collapsible?: boolean }[] = [
@@ -70,20 +71,10 @@ export function App() {
     <div className="flex min-h-full flex-col">
       <header className="sticky top-0 z-30 border-b border-zinc-800 bg-zinc-950/90 pt-[env(safe-area-inset-top)] backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center gap-2 px-4 py-3 sm:gap-4">
-          <span className="text-lg font-semibold tracking-tight text-zinc-50">Nexus</span>
-          <nav className="scroll-thin flex flex-1 gap-1 overflow-x-auto">
-            {projects?.map((p) => (
-              <button
-                key={p.id}
-                onClick={() => route.go(p.id)}
-                className={`flex shrink-0 items-center gap-2 rounded-lg px-3 py-1.5 text-sm ${p.id === projectId ? "bg-zinc-800 text-zinc-50" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"}`}
-              >
-                {p.name}
-                {p.attention.length > 0 && <span className="rounded-full bg-amber-500/20 px-1.5 text-xs text-amber-300" title="Waiting for you">{p.attention.length}</span>}
-                {p.running > 0 && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-400" title={`${p.running} running`} />}
-              </button>
-            ))}
-          </nav>
+          {/* On a phone the project picker takes the wordmark's place: the current project is what matters there. */}
+          <span className="hidden text-lg font-semibold tracking-tight text-zinc-50 sm:inline">Nexus</span>
+          {projects && <ProjectTabs projects={projects} current={projectId} onPick={(id) => route.go(id)} />}
+          {projects && <ProjectPicker projects={projects} current={projectId} onPick={(id) => route.go(id)} />}
           <UpdatePill info={server} />
           {projectId && <ConversationsButton onClick={() => setIdeasOpen(true)} />}
           {projectId && <OrchestratorButton view={orchestrator} onClick={() => setChatOpen(true)} />}
