@@ -30,12 +30,26 @@ export interface ActivityItem { kind: "turn_start" | "text" | "tool" | "tool_err
  */
 export interface TurnFailure { kind: "passing" | "lasting" | "usage"; code: string; text: string; resetsAt?: string }
 
+/** An action the agent wanted but was refused, as the runtime reported it (see Refusal in the protocol). */
+export interface RefusalItem { by: "permissions" | "nexus" | "auto_review"; tool: string; input: string; reason?: string; ref?: string }
+
+/** A tool's input in short: its command, path or query, else its JSON, clipped. */
+export function shortInput(input: unknown, max = 300): string {
+  const o = (input ?? {}) as Record<string, unknown>;
+  const key = ["command", "file_path", "path", "pattern", "url", "query", "description", "prompt"].find((k) => typeof o[k] === "string");
+  const s = key ? String(o[key]) : typeof input === "string" ? input : JSON.stringify(input ?? "");
+  const one = s.replace(/\s+/g, " ").trim();
+  return one.length > max ? one.slice(0, max - 1) + "…" : one;
+}
+
 export interface AgentEvents {
   /** For the activity log: short forms (a text is clipped). */
   activity: [ActivityItem];
   /** A text the agent wrote, whole: what a chat shows. */
   message: [string];
   facts: [StreamFacts];
+  /** An action the runtime (or Nexus for it) refused. */
+  refusal: [RefusalItem];
   /** `ok` false with no failure: the turn was interrupted (Nexus asked for it). */
   turnEnd: [{ ok: boolean; text: string; failure?: TurnFailure }];
   exit: [number | null];

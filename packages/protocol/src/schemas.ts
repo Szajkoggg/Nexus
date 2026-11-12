@@ -307,6 +307,28 @@ export const Activity = z.object({
 });
 export type Activity = z.infer<typeof Activity>;
 
+/**
+ * sessions/<id>/refusals.jsonl: one line per action the agent wanted but was refused, from the runtime's stream.
+ * Written only by the server. `by`: `permissions` (Claude Code's permission mode or rules), `nexus` (Nexus declined a
+ * Codex approval request: it runs unattended), `auto_review` (Codex's auto reviewer denied it).
+ */
+export const Refusal = z.object({
+  at: Time,
+  session: Id,
+  runtime: z.enum(["claude", "codex"]),
+  by: z.enum(["permissions", "nexus", "auto_review"]),
+  /** Claude Code: the tool's name (Bash, Write, mcp__server__tool). Codex: command, file_change, network, mcp, permissions, … */
+  tool: z.string(),
+  /** The input in short: the command, the path, the host (at most 300 characters). */
+  input: z.string(),
+  reason: z.string().optional(),
+  /** The runtime's id for the call (tool_use_id, item id, review id): one record per refusal. */
+  ref: z.string().optional(),
+  queue: Id.optional(),
+  step: Id.optional(),
+});
+export type Refusal = z.infer<typeof Refusal>;
+
 /** sessions/<id>/runtime.json: live facts about a Nexus-launched session. Written only by the server. */
 export const RuntimeFile = z.object({
   state: z.enum(["starting", "working", "idle", "exited"]),

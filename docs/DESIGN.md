@@ -144,6 +144,32 @@ retry starts a new process that resumes the same session (Claude Code `--resume`
   run's `retries`, `resume_at` and `failure`, the code in short words; `retryLine` in `@nexus/protocol/times`). The
   step's activity lists both the runtime's own retries and the engine's.
 
+### Refused actions
+
+Unattended means unasked, so an action the permissions do not allow is refused, not asked about. Each refusal is a
+record in the session's `refusals.jsonl`, written by the engine from the adapters' `refusal` events, tagged with the
+queue and step of the run that drives the session now (also when the session was continued from an earlier queue).
+One record per refusal: the adapters report a call once, and the engine skips a `ref` the file already has (a
+resumed runtime may repeat its list).
+
+- **Claude Code** reports a denial twice: a `permission_denied` system message as it happens (tool name and call id,
+  the reason, but not the input, which Nexus takes from the call's `tool_use` earlier in the turn), and the result's
+  `permission_denials` (name, id and input), which is the authoritative list: it also holds denials the messages
+  leave out, such as a hook's or a path rule's.
+- **Codex** refuses in two ways. With approvals routed to the user, Codex sends an approval request, which Nexus
+  declines because it runs unattended (`item/commandExecution/requestApproval`, `item/fileChange/requestApproval`,
+  `item/permissions/requestApproval`, and the older `execCommandApproval` and `applyPatchApproval`). With
+  `auto_review`, the reviewer decides and Nexus only hears the verdict, `item/autoApprovalReview/completed` with
+  `review.status` `denied` (or `timedOut`), naming the action. Either way the item then completes with status
+  `declined`; an item declined with no request or review heard of is recorded from the item itself.
+
+The shapes come from the runtimes' published types, not from a probe: Claude Code's from the Agent SDK's `sdk.d.ts`
+(`@anthropic-ai/claude-agent-sdk` 0.3.323: `SDKPermissionDeniedMessage`, `SDKPermissionDenial`), Codex's from
+`codex app-server generate-ts` of Codex 0.167.2 (`ServerRequest`, `CommandExecutionRequestApprovalParams`,
+`ItemGuardianApprovalReviewCompletedNotification`, `GuardianApprovalReviewAction`, `CommandExecutionStatus` and
+`PatchApplyStatus` with `declined`). The auto-review notification is marked unstable in that schema ("expected to
+change soon"): when Codex is updated, check it first. The fakes write the same shapes.
+
 The shapes come from the runtimes' published types, not from a probe: Claude Code's from the Agent SDK's `sdk.d.ts`
 (`@anthropic-ai/claude-agent-sdk` 0.3.323, the release that matches Claude Code 2.1.323: `SDKAssistantMessageError`,
 `SDKAPIRetryMessage`, `SDKRateLimitInfo`, `SDKResultMessage` with `is_error`, `api_error_status`, `terminal_reason`),

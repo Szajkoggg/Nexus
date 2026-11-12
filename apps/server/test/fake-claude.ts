@@ -11,11 +11,25 @@ const queue: string[] = [];
 
 async function turn(text: string): Promise<void> {
   out({ type: "system", subtype: "init", model: "fake-model", session_id: "fake" });
+  const denials: unknown[] = [];
   const reply = await respond(fake, text, (command) =>
-    out({ type: "assistant", message: { content: [{ type: "tool_use", name: "Bash", input: { command } }] }, parent_tool_use_id: null }));
+    out({ type: "assistant", message: { content: [{ type: "tool_use", name: "Bash", input: { command } }] }, parent_tool_use_id: null }), () => refused(denials));
   if (typeof reply !== "string") return "exit" in reply ? exitOnSignal() : fail(reply.fail);
   out({ type: "assistant", message: { content: [{ type: "text", text: reply }], usage: { input_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: 90 } }, parent_tool_use_id: null });
-  out({ type: "result", subtype: "success", is_error: false, result: reply, num_turns: 1, total_cost_usd: 0, modelUsage: { fake: { contextWindow: 1000 } } });
+  out({ type: "result", subtype: "success", is_error: false, result: reply, num_turns: 1, total_cost_usd: 0, modelUsage: { fake: { contextWindow: 1000 } }, permission_denials: denials });
+}
+
+/**
+ * Refused tool calls as Claude Code writes them (Agent SDK sdk.d.ts: SDKPermissionDeniedMessage, and
+ * SDKPermissionDenial in the result's permission_denials, the authoritative list): a Bash call denied with a message,
+ * and a Write denied only in the result's list (as a path rule's denial is).
+ */
+function refused(denials: unknown[]): void {
+  const bash = { command: "git push origin main" }, write = { file_path: "C:/Users/x/.ssh/config", content: "Host *" };
+  out({ type: "assistant", message: { content: [{ type: "tool_use", id: "toolu_bash", name: "Bash", input: bash }] }, parent_tool_use_id: null });
+  out({ type: "system", subtype: "permission_denied", tool_name: "Bash", tool_use_id: "toolu_bash", decision_reason_type: "mode", decision_reason: "Bash(git push:*) is not allowed in this mode", message: "Permission to use Bash has been denied.", uuid: "u", session_id: "fake" });
+  out({ type: "assistant", message: { content: [{ type: "tool_use", id: "toolu_write", name: "Write", input: write }] }, parent_tool_use_id: null });
+  denials.push({ tool_name: "Bash", tool_use_id: "toolu_bash", tool_input: bash }, { tool_name: "Write", tool_use_id: "toolu_write", tool_input: write });
 }
 
 /**

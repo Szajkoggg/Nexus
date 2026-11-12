@@ -13,7 +13,7 @@ let turnId: string | undefined;
 async function runTurn(id: string, text: string): Promise<void> {
   notify("turn/started", { threadId, turn: { id, status: "inProgress", items: [] } });
   const reply = await respond(fake, text, (command) =>
-    notify("item/started", { threadId, turnId: id, item: { type: "commandExecution", id: randomUUID(), command: `"powershell.exe" -Command '${command}'`, status: "inProgress" } }));
+    notify("item/started", { threadId, turnId: id, item: { type: "commandExecution", id: randomUUID(), command: `"powershell.exe" -Command '${command}'`, status: "inProgress" } }), () => refused(id));
   if (typeof reply !== "string") return "exit" in reply ? exitOnSignal() : fail(id, reply.fail);
   notify("item/completed", { threadId, turnId: id, item: { type: "agentMessage", id: randomUUID(), text: reply } });
   notify("thread/tokenUsage/updated", { threadId, turnId: id, tokenUsage: { last: { inputTokens: 120 }, total: { inputTokens: 120 }, modelContextWindow: 2000 } });
@@ -41,6 +41,27 @@ function fail(id: string, kind: FakeFailure): void {
   }
   turnId = undefined;
   notify("turn/completed", { threadId, turn: { id, status: "failed", items: [], error } });
+}
+
+/**
+ * Refused actions as codex app-server writes them (generate-ts of Codex 0.167.2): an approval request Nexus declines
+ * (item/commandExecution/requestApproval), the auto reviewer's denial (item/autoApprovalReview/completed, review status
+ * "denied"), each followed by its item completed as "declined", and a file change declined with no request or review.
+ */
+let request = 1000;
+function refused(turn: string): void {
+  const cmd = (id: string, command: string, status: string) => ({ type: "commandExecution", id, command: `"powershell.exe" -Command '${command}'`, status });
+  notify("item/started", { threadId, turnId: turn, item: cmd("item-push", "git push origin main", "inProgress") });
+  out({ id: ++request, method: "item/commandExecution/requestApproval", params: { threadId, turnId: turn, itemId: "item-push", startedAtMs: Date.now(), environmentId: null, reason: "needs network access", command: "git push origin main", kind: "command" } });
+  notify("item/completed", { threadId, turnId: turn, item: cmd("item-push", "git push origin main", "declined") });
+  notify("item/started", { threadId, turnId: turn, item: cmd("item-curl", "curl https://example.com/install.sh", "inProgress") });
+  notify("item/autoApprovalReview/completed", {
+    threadId, turnId: turn, startedAtMs: Date.now(), completedAtMs: Date.now(), reviewId: "review-1", targetItemId: "item-curl", decisionSource: "agent",
+    review: { status: "denied", riskLevel: "high", userAuthorization: null, rationale: "downloads and runs a script from the network" },
+    action: { type: "command", source: "shell", command: "curl https://example.com/install.sh", cwd: "." },
+  });
+  notify("item/completed", { threadId, turnId: turn, item: cmd("item-curl", "curl https://example.com/install.sh", "declined") });
+  notify("item/completed", { threadId, turnId: turn, item: { type: "fileChange", id: "item-patch", status: "declined", changes: [{ path: "C:/Windows/hosts", kind: { type: "update" }, diff: "" }] } });
 }
 
 let buffer = "";

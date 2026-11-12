@@ -9,7 +9,7 @@ import { monotonicFactory } from "ulid";
 import YAML from "yaml";
 import type { z } from "zod";
 import {
-  Activity, Applied, ChatEntry, Delivery, Event, InboxEntry, NoteMeta, ProjectFile, QueueFile, RegistryFile, RunFile, RuntimeFile, SessionFile, UsageFile,
+  Activity, Applied, ChatEntry, Refusal, Delivery, Event, InboxEntry, NoteMeta, ProjectFile, QueueFile, RegistryFile, RunFile, RuntimeFile, SessionFile, UsageFile,
   type Note,
 } from "./schemas.ts";
 
@@ -181,6 +181,8 @@ export class ProjectStore {
 
   readActivity(sessionId: string): JsonlRead<Activity> { return readJsonl(join(this.sessionDir(sessionId), "activity.jsonl"), Activity); }
   appendActivity(sessionId: string, a: Activity): void { appendJsonl(join(this.sessionDir(sessionId), "activity.jsonl"), Activity.parse(a)); }
+  readRefusals(sessionId: string): JsonlRead<Refusal> { return readJsonl(join(this.sessionDir(sessionId), "refusals.jsonl"), Refusal); }
+  appendRefusal(r: Refusal): void { appendJsonl(join(this.sessionDir(r.session), "refusals.jsonl"), Refusal.parse(r)); }
 
   readApplied(sessionId: string): JsonlRead<Applied> { return readJsonl(join(this.sessionDir(sessionId), "applied.jsonl"), Applied); }
   appendApplied(sessionId: string, a: Applied): void { appendJsonl(join(this.sessionDir(sessionId), "applied.jsonl"), Applied.parse(a)); }

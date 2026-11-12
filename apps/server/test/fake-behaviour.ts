@@ -8,6 +8,7 @@
 // FAKE_LOG, so a new process goes on counting), "<kind>" every turn. Kinds: overloaded, network (passing), auth
 // (lasting), limit (a usage limit resetting FAKE_RESET_MS, default 1500, later), crash (the process exits mid-turn).
 // Each fake writes the failure the way its runtime does (fake-claude.ts, fake-codex.ts).
+// "refused": the agent tries actions that are refused (each fake writes them as its runtime does), then done.
 // An answer ("[Nexus] Answer …") makes it report the current step done. As an orchestrator: "FAKE-DRAFT:" followed by
 // YAML drafts that queue; "FAKE-NEXUS: [args]" runs `nexus` with those arguments; a "[Nexus] A worker asked … (qid X;"
 // notice is answered with "fake answer". "FAKE-LONG" is answered with longReply("Reply"); a hand-over with
@@ -73,7 +74,7 @@ export function recordArgs(what: Record<string, unknown>): void {
  * Does what the message asks and returns the agent's reply, or the failure the runtime should show for this turn.
  * `tool` reports a shell command it ran.
  */
-export async function respond(fake: Fake, text: string, tool: (command: string) => void): Promise<string | { fail: FakeFailure } | { exit: true }> {
+export async function respond(fake: Fake, text: string, tool: (command: string) => void, refused?: () => void): Promise<string | { fail: FakeFailure } | { exit: true }> {
   const m = /step (\S+) \(\d+ of \d+\)/.exec(text);
   if (text.startsWith("[Nexus] Queue") && m) {
     const step = (fake.step = m[1]!);
@@ -84,6 +85,7 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
     if (fail) return { fail };
     if (/^(overloaded|network|auth|limit|crash)/.test(behaviour)) nexus("step", "done", step, "--summary", `fake finished ${step} after failures`);
     if (behaviour === "slow") await new Promise((r) => setTimeout(r, Number(process.env.FAKE_SLOW_MS ?? 1500)));
+    if (behaviour === "refused") { refused?.(); nexus("step", "done", step, "--summary", `fake finished ${step} without what was refused`); }
     if (behaviour === "done" || behaviour === "slow") nexus("step", "done", step, "--summary", `fake finished ${step}`);
     if (behaviour === "fail") nexus("step", "failed", step, "--reason", "fake failure");
     if (behaviour === "doneexit") { nexus("step", "done", step, "--summary", `fake finished ${step}, then exits`); return { exit: true }; }

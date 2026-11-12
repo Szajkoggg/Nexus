@@ -209,6 +209,49 @@ test("Codex in the project's own checkout gets no git roots: its .git lies insid
   } finally { engine.shutdown(); delete process.env.FAKE_ARGS; }
 });
 
+// ---------------------------------------------------------------- refused actions
+
+const REFUSED = {
+  claude: [
+    { by: "permissions", tool: "Bash", input: "git push origin main", reason: "Bash(git push:*) is not allowed in this mode", ref: "toolu_bash" },
+    { by: "permissions", tool: "Write", input: "C:/Users/x/.ssh/config", reason: undefined, ref: "toolu_write" },
+  ],
+  codex: [
+    { by: "nexus", tool: "command", input: "git push origin main", reason: "needs network access", ref: "item-push" },
+    { by: "auto_review", tool: "command", input: "curl https://example.com/install.sh", reason: "downloads and runs a script from the network", ref: "item-curl" },
+    { by: "auto_review", tool: "file_change", input: "C:/Windows/hosts", reason: undefined, ref: "item-patch" },
+  ],
+};
+
+for (const runtime of ["claude", "codex"] as const) {
+  test(`${runtime}: every refused action becomes one record with its session, queue and step`, async () => {
+    const { store, engine, queue, until } = setup(["done", "refused"]);
+    try {
+      engine.start("Q", { runtime });
+      await until("the run to finish", () => queue().run?.state === "finished");
+      const session = queue().run!.session;
+      const records = store.readRefusals(session).entries;
+      assert.deepEqual(records.map(({ by, tool, input, reason, ref }) => ({ by, tool, input, reason, ref })), REFUSED[runtime],
+        "each once: a message and the result's list (Claude), a request or review and its declined item (Codex)");
+      for (const r of records) assert.deepEqual([r.session, r.runtime, r.queue, r.step], [session, runtime, "Q", "Q2"]);
+    } finally { engine.shutdown(); }
+  });
+}
+
+test("a session continued in a second queue tags its refusals with the queue it runs now", async () => {
+  const { store, engine, queue, until } = setup(["done"]);
+  try {
+    engine.start("Q");
+    await until("the first run to finish", () => queue().run?.state === "finished");
+    const session = queue().run!.session;
+    store.writeQueue({ protocol: 1, id: "R", title: "Second", revision: 1, status: "proposed", stop_conditions: [], checks: [], steps: [{ id: "R1", title: "x", goal: "FAKE: refused", acceptance: [] }], approvals: [], history: [] });
+    approveQueue(store, "R");
+    engine.start("R", { session });
+    await until("the second run to finish", () => store.readRun("R")?.state === "finished");
+    assert.ok(store.readRefusals(session).entries.every((r) => r.queue === "R" && r.step === "R1"));
+  } finally { engine.shutdown(); }
+});
+
 // ---------------------------------------------------------------- failures of a turn
 
 /** The next server on the same files, as after a restart. */

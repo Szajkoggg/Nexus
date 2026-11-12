@@ -434,11 +434,19 @@ export class Engine {
     this.writeRuntime(session.id, { state: "idle", pid: proc.pid });
 
     const tag = () => {
-      const run = this.store.queueIds().map((q) => [q, this.store.readRun(q)] as const).find(([, r]) => r?.session === session.id);
+      // The run that drives the session now; a session continued from an earlier queue still has that one's run too.
+      const runs = this.store.queueIds().map((q) => [q, this.store.readRun(q)] as const).filter(([, r]) => r?.session === session.id);
+      const run = runs.find(([, r]) => GOING.includes(r!.state)) ?? runs.sort(([, a], [, b]) => b!.updated_at.localeCompare(a!.updated_at))[0];
       return run ? { queue: run[0], step: run[1]?.step } : {};
     };
     proc.on("activity", (a) => this.store.appendActivity(session.id, { at: now(), ...a, ...tag() }));
     proc.on("facts", (f) => this.facts(session.id, f));
+    proc.on("refusal", (r) => {
+      // One record per refusal, also across processes of the session (a resumed runtime may repeat its list).
+      if (r.ref && this.store.readRefusals(session.id).entries.some((x) => x.ref === r.ref)) return;
+      this.store.appendRefusal({ at: now(), session: session.id, runtime: session.runtime === "codex" ? "codex" : "claude", ...r, ...tag() });
+      this.changed();
+    });
     const runsOf = () => this.store.queueIds().filter((q) => this.store.readRun(q)?.session === session.id);
     proc.on("turnEnd", (end) => {
       this.writeRuntime(session.id, { state: "idle", turns: (this.store.readRuntime(session.id)?.turns ?? 0) + 1 });

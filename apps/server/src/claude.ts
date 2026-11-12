@@ -2,7 +2,7 @@
 // alive across turns. Signed in with the user's own subscription (no API key, no Agent SDK).
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { agentEnv, type ActivityItem, type AgentEvents, type AgentProcess, type Priority, type StreamFacts, type TurnFailure } from "./agent.ts";
+import { agentEnv, shortInput, type ActivityItem, type AgentEvents, type AgentProcess, type Priority, type StreamFacts, type TurnFailure } from "./agent.ts";
 
 export type { ActivityItem, Priority, StreamFacts };
 
@@ -74,6 +74,10 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
   readonly pid?: number;
   private lastStderr = "";
   private signs: ClaudeTurnSigns = {};
+  /** Tool calls of the running turn, by tool_use_id: a permission_denied message names the call, not its input. */
+  private calls = new Map<string, { name: string; input: unknown }>();
+  /** Refusals already reported, by tool_use_id: the result's permission_denials repeat the messages. */
+  private refused = new Set<string>();
 
   constructor(options: ClaudeOptions) {
     super();
@@ -130,6 +134,12 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
 
   kill(): void { if (this.state !== "exited") this.proc.kill(); }
 
+  /** Reports a refused tool call once (the message and the result's list both name it). */
+  private refuse(id: string | undefined, tool: string, input: unknown, reason?: string): void {
+    if (id) { if (this.refused.has(id)) return; this.refused.add(id); }
+    this.emit("refusal", { by: "permissions", tool, input: input === undefined ? "" : shortInput(input), reason: reason ? clip(String(reason), 300) : undefined, ref: id });
+  }
+
   private read(chunk: string): void {
     this.buffer += chunk;
     let i: number;
@@ -152,6 +162,10 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
           this.emit("activity", { kind: "retry", text: `Claude Code retries a request (${m.attempt} of ${m.max_retries}, in ${Math.round((m.retry_delay_ms ?? 0) / 1000)} s): ${m.error ?? "error"}${m.error_status ? ` (${m.error_status})` : ""}` });
         }
         if (m.subtype === "model_refusal_no_fallback") this.signs.refusal = true;
+        if (m.subtype === "permission_denied") {
+          const call = this.calls.get(m.tool_use_id);
+          this.refuse(m.tool_use_id, m.tool_name ?? call?.name ?? "tool", call?.input, m.decision_reason || m.message || m.decision_reason_type);
+        }
         if (m.subtype === "init") {
           this.signs = {};
           this.state = "working";
@@ -161,6 +175,7 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
         return;
       case "assistant": {
         if (m.error && !m.parent_tool_use_id) this.signs.apiError = String(m.error);
+        for (const c of m.message?.content ?? []) if (c.type === "tool_use" && c.id) this.calls.set(c.id, { name: c.name, input: c.input });
         const u = m.message?.usage;
         if (u) this.emit("facts", { contextTokens: (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) });
         if (m.parent_tool_use_id) return; // a subagent's message: its parent's tool call is what we show
@@ -202,6 +217,9 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
         this.state = "idle";
         const models = Object.values((m.modelUsage ?? {}) as Record<string, { contextWindow?: number }>);
         this.emit("facts", { contextWindow: models.find((x) => x.contextWindow)?.contextWindow, costUsd: m.total_cost_usd });
+        // The authoritative list: anything the messages did not report (a hook's or a path rule's denial, for one).
+        for (const d of (m.permission_denials ?? []) as { tool_name: string; tool_use_id: string; tool_input: unknown }[]) this.refuse(d.tool_use_id, d.tool_name, d.tool_input);
+        this.calls.clear();
         const failure = classifyClaudeResult(m, this.signs);
         this.signs = {};
         const ok = !failure && !m.is_error && m.subtype === "success";

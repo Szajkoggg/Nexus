@@ -6,7 +6,7 @@ import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from "node:c
 import { EventEmitter } from "node:events";
 import { existsSync } from "node:fs";
 import { join, relative, resolve, isAbsolute } from "node:path";
-import { agentEnv, type AgentEvents, type AgentOptions, type AgentProcess, type Priority, type TurnFailure } from "./agent.ts";
+import { agentEnv, shortInput, type AgentEvents, type RefusalItem, type AgentOptions, type AgentProcess, type Priority, type TurnFailure } from "./agent.ts";
 
 export interface CodexOptions extends AgentOptions {
   /** The thread to resume; a new thread is started without one. */
@@ -77,6 +77,10 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
   /** Messages waiting for the running turn to end (or for the thread to be ready). */
   private readonly queue: string[] = [];
   private lastStderr = "";
+  /** What started items were about (their command or files), by item id: a declined item's request does not say. */
+  private items = new Map<string, { tool: string; input: string }>();
+  /** Refusals already reported, by item (or review) id: a declined request ends as a declined item too. */
+  private refused = new Set<string>();
   /** The last rate-limit windows: when a full one resets. */
   private limits: { usedPercent: number; resetsAt?: string }[] = [];
 
@@ -205,9 +209,11 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
     }
   }
 
-  /** With approval policy `never` none should come; anything that does is declined and recorded. */
+  /** With approval policy `never` none should come; anything that does is declined and recorded as a refusal. */
   private serverRequest(m: Json): void {
     this.emit("activity", { kind: "tool_error", text: `Codex asked for ${m.method}; declined (Nexus runs unattended)` });
+    const r = requestedAction(m.method, m.params ?? {}, this.items);
+    this.refuse({ by: "nexus", ...r });
     const decision = /requestApproval$/.test(m.method) ? { result: { decision: "decline" } } : { error: { code: -32601, message: "not supported by Nexus" } };
     this.proc.stdin.write(JSON.stringify({ id: m.id, ...decision }) + "\n");
   }
@@ -234,6 +240,8 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
       }
       case "item/started": {
         const it = p.item ?? {};
+        const what = itemAction(it);
+        if (what && it.id) this.items.set(it.id, what);
         if (it.type === "commandExecution") this.emit("activity", { kind: "tool", text: `Shell: ${clip(unwrap(it.command), 300)}` });
         if (it.type === "mcpToolCall") this.emit("activity", { kind: "tool", text: `MCP ${it.server}.${it.tool}` });
         if (it.type === "webSearch") this.emit("activity", { kind: "tool", text: `Web search: ${it.query ?? ""}` });
@@ -241,6 +249,9 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
       }
       case "item/completed": {
         const it = p.item ?? {};
+        // Declined without a request Nexus saw or a review it heard of (a refusal by Codex itself).
+        if (it.status === "declined") this.refuse({ by: "auto_review", ...(itemAction(it) ?? { tool: it.type ?? "item", input: "" }), ref: it.id });
+        if (it.id) this.items.delete(it.id);
         if (it.type === "agentMessage" && it.text?.trim()) {
           this.emit("activity", { kind: "text", text: clip(it.text, 600) });
           this.emit("message", it.text);
@@ -254,6 +265,14 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
       case "thread/tokenUsage/updated": {
         const u = p.tokenUsage;
         if (u) this.emit("facts", { contextTokens: u.last?.inputTokens, contextWindow: u.modelContextWindow ?? undefined });
+        return;
+      }
+      case "item/autoApprovalReview/completed": {
+        // [UNSTABLE in the schema] The auto reviewer's verdict on a request; denied or timed out is a refusal.
+        const status = p.review?.status;
+        if (status === "denied" || status === "timedOut") {
+          this.refuse({ by: "auto_review", ...reviewedAction(p.action ?? {}), reason: clip(p.review?.rationale ?? (status === "timedOut" ? "the review timed out" : "denied"), 300), ref: p.targetItemId ?? p.reviewId });
+        }
         return;
       }
       case "account/rateLimits/updated":
@@ -284,9 +303,56 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
     if (Object.keys(usage).length) this.emit("facts", { usage });
   }
 
+  /** Reports a refusal once per item: a request or a review first, the declined item after it. */
+  private refuse(r: RefusalItem): void {
+    if (r.ref) { if (this.refused.has(r.ref)) return; this.refused.add(r.ref); }
+    this.emit("refusal", r);
+  }
+
   /** When the latest full window (100 % used) resets, if the rate limits said so. */
   private fullWindowResets(): string | undefined {
     return this.limits.filter((w) => w.usedPercent >= 100 && w.resetsAt).map((w) => w.resetsAt!).sort().at(-1);
+  }
+}
+
+/** What an item does, in short: a command or the files of a change. */
+function itemAction(it: Json): { tool: string; input: string } | undefined {
+  if (it.type === "commandExecution") return { tool: "command", input: clip(unwrap(it.command), 300) };
+  if (it.type === "fileChange") return { tool: "file_change", input: clip((it.changes ?? []).map((c: Json) => c.path).join(", "), 300) };
+  if (it.type === "mcpToolCall") return { tool: "mcp", input: `${it.server}.${it.tool}` };
+  return undefined;
+}
+
+/**
+ * What an approval request asked for (ServerRequest of generate-ts, Codex 0.167.2): the v2 requests
+ * item/commandExecution|fileChange|permissions/requestApproval and the older execCommandApproval and
+ * applyPatchApproval. Anything else Codex asks (user input, an MCP elicitation) is named by its method.
+ */
+function requestedAction(method: string, p: Json, items: Map<string, { tool: string; input: string }>): Omit<RefusalItem, "by"> {
+  const known = p.itemId ? items.get(p.itemId) : undefined;
+  const reason = p.reason ? clip(String(p.reason), 300) : undefined;
+  const ref = p.itemId ?? p.callId ?? p.approvalId ?? undefined;
+  switch (method) {
+    case "item/commandExecution/requestApproval": return { tool: "command", input: p.command ? clip(unwrap(p.command), 300) : known?.input ?? "", reason, ref };
+    case "item/fileChange/requestApproval": return { tool: "file_change", input: known?.input ?? p.grantRoot ?? "", reason, ref };
+    case "item/permissions/requestApproval": return { tool: "permissions", input: shortInput(p.permissions), reason, ref };
+    case "execCommandApproval": return { tool: "command", input: clip(unwrap(p.command), 300), reason, ref };
+    case "applyPatchApproval": return { tool: "file_change", input: clip(Object.keys(p.fileChanges ?? {}).join(", "), 300), reason, ref };
+    default: return { tool: method, input: shortInput(p.message ?? p.questions ?? ""), ref };
+  }
+}
+
+/** What the auto reviewer judged (GuardianApprovalReviewAction). */
+function reviewedAction(a: Json): { tool: string; input: string } {
+  switch (a.type) {
+    case "command": return { tool: "command", input: clip(unwrap(a.command), 300) };
+    case "execve": return { tool: "command", input: clip([a.program, ...(a.argv ?? []).slice(1)].join(" "), 300) };
+    case "applyPatch": return { tool: "file_change", input: clip((a.files ?? []).join(", "), 300) };
+    case "networkAccess": return { tool: "network", input: `${a.host}${a.port ? `:${a.port}` : ""}` };
+    case "mcpToolCall": return { tool: "mcp", input: `${a.server}.${a.toolName}` };
+    case "requestPermissions": return { tool: "permissions", input: shortInput(a.permissions) };
+    case "writeStdin": return { tool: "stdin", input: clip(String(a.stdin ?? ""), 300) };
+    default: return { tool: String(a.type ?? "action"), input: shortInput(a) };
   }
 }
 
