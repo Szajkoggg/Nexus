@@ -6,7 +6,7 @@ import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ProjectStore, approveQueue, loadProjectState, routeAnswers } from "@nexus/protocol";
+import { ProjectStore, applyDraft, approveQueue, loadProjectState, routeAnswers, withdrawApproval } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { longReply } from "./fake-behaviour.ts";
@@ -28,11 +28,12 @@ steps:
     acceptance: [Done]
 `;
 
-function setup() {
-  const root = mkdtempSync(join(tmpdir(), "nexus-orch-"));
+/** `again`: the root of an earlier setup, as after a server restart (same files, a new engine and orchestrator). */
+function setup(again?: string) {
+  const root = again ?? mkdtempSync(join(tmpdir(), "nexus-orch-"));
   process.env.NEXUS_HOME = join(root, "home");
-  delete process.env.FAKE_LOG;
-  const store = ProjectStore.init(root, { id: "p", name: "P", root });
+  if (!again) delete process.env.FAKE_LOG;
+  const store = again ? ProjectStore.forRoot(root) : ProjectStore.init(root, { id: "p", name: "P", root });
   let orchestrator: Orchestrator;
   const engine: Engine = new Engine(store, () => tick());
   orchestrator = new Orchestrator(store, engine, () => tick());
@@ -48,7 +49,7 @@ function setup() {
     }
   };
   const stop = () => { clearInterval(timer); engine.shutdown(); orchestrator.shutdown(); };
-  return { store, engine, orchestrator, state, until, stop };
+  return { root, store, engine, orchestrator, state, until, stop };
 }
 
 test("the orchestrator drafts a queue, runs it, answers the worker and hears that it finished", async () => {
@@ -207,4 +208,127 @@ test("only the user or an orchestrator may update or stop updating the Nexus ser
       }
     }
   } finally { stop(); }
+});
+
+// ---------------------------------------------------------------- approvals, withdrawals and reached pauses
+
+type Setup = ReturnType<typeof setup>;
+const queueDef = (id: string, goals: string[]) =>
+  ({ id, title: "Told", steps: goals.map((g, i) => ({ id: `${id}${i + 1}`, title: `Step ${i + 1}`, goal: `FAKE: ${g}`, acceptance: ["Done"] })) });
+const facts = (o: Orchestrator) => o.view().chat.filter((c) => c.from === "nexus").map((c) => c.text);
+const runOf = (x: Setup, id: string) => x.state().queues.find((q) => q.id === id)?.run;
+/** Several ticks: anything told twice would show by now. */
+const settle = () => new Promise((r) => setTimeout(r, 700));
+/** What reached the fake orchestrator (FAKE_LOG). */
+async function delivered(): Promise<string[]> {
+  const { readFileSync } = await import("node:fs");
+  const file = process.env.FAKE_LOG!;
+  return existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(Boolean).map((l) => (JSON.parse(l) as { text: string }).text) : [];
+}
+
+test("approvals and withdrawals are told once each, by their position, the chat showing only the fact", async () => {
+  const { root, store, orchestrator, until, stop } = setup();
+  process.env.FAKE_LOG = join(root, "fake.log");
+  try {
+    orchestrator.say("Hello");
+    await until("the session", () => !!orchestrator.session());
+    applyDraft(store, queueDef("A", ["done"]));
+    approveQueue(store, "A");
+    await until("the approval", () => facts(orchestrator).includes("Queue A revision 1 approved."));
+    withdrawApproval(store, "A", "not yet");
+    await until("the withdrawal", () => facts(orchestrator).some((t) => t.includes("withdrew")));
+    approveQueue(store, "A");
+    await until("the second approval", () => facts(orchestrator).filter((t) => t === "Queue A revision 1 approved.").length === 2);
+    applyDraft(store, queueDef("A", ["done", "done"]));
+    approveQueue(store, "A");
+    await until("revision 2", () => facts(orchestrator).includes("Queue A revision 2 approved."));
+    await settle();
+    assert.deepEqual(facts(orchestrator), [
+      "Queue A revision 1 approved.",
+      "The user withdrew the approval of queue A revision 1: not yet",
+      "Queue A revision 1 approved.",
+      "Queue A revision 2 approved.",
+    ]);
+    await until("the deliveries", () => true);
+    const sent = (await delivered()).filter((t) => t.startsWith("[Nexus] Queue A revision"));
+    assert.equal(sent.length, 3);
+    assert.ok(sent.every((t) => /If the plan puts it next, start it now; otherwise tell the user why not/.test(t)), "no run yet: start it");
+  } finally { stop(); }
+});
+
+test("approving a halted queue's new revision says resume", async () => {
+  const x = setup();
+  process.env.FAKE_LOG = join(x.root, "fake.log");
+  try {
+    x.orchestrator.say("Hello");
+    await x.until("the session", () => !!x.orchestrator.session());
+    applyDraft(x.store, queueDef("H", ["stop", "done"]));
+    approveQueue(x.store, "H");
+    x.engine.start("H");
+    await x.until("the halt", () => runOf(x, "H")?.state === "halted");
+    applyDraft(x.store, { ...queueDef("H", ["stop", "done"]), stop_conditions: ["Changed."] });
+    approveQueue(x.store, "H");
+    await x.until("the approval", () => facts(x.orchestrator).includes("Queue H revision 2 approved."));
+    await settle();
+    const sent = (await delivered()).find((t) => t.startsWith("[Nexus] Queue H revision 2 approved."));
+    assert.match(sent ?? "", /Its run is halted at step H1\. If the plan puts it next, resume it now/);
+  } finally { x.stop(); }
+});
+
+test("a requested pause reached is told once with its step; a stop, a restart's and an update's pauses are not", async () => {
+  process.env.FAKE_SLOW_MS = "800";
+  const first = setup();
+  let second: Setup | undefined;
+  let third: Setup | undefined;
+  const working = (x: Setup) => runOf(x, "P")?.state === "running" && !x.engine.idle();
+  try {
+    const { store, engine, orchestrator, until } = first;
+    orchestrator.say("Hello");
+    await until("the session", () => !!orchestrator.session());
+    applyDraft(store, queueDef("P", ["slow", "slow", "slow", "slow", "slow"]));
+    approveQueue(store, "P");
+    engine.start("P");
+    await until("step 1 working", () => working(first));
+    engine.pause("P");
+    await until("the pause", () => facts(orchestrator).includes("Run of P paused after step P1."));
+
+    // A stop: nothing.
+    engine.resume("P");
+    await until("step 2 working", () => working(first));
+    engine.stopNow("P");
+    await until("stopped", () => runOf(first, "P")?.state === "paused" && engine.idle());
+    await settle();
+    assert.deepEqual(facts(orchestrator).filter((t) => t.startsWith("Run of")), ["Run of P paused after step P1."]);
+
+    // A server restart while it runs: paused by the restart, nothing told; the same session repeats nothing.
+    engine.resume("P");
+    await until("working again", () => working(first));
+    const before = facts(orchestrator);
+    first.stop();
+    second = setup(first.root);
+    const s2 = second;
+    await until("the restart's pause", () => /restarted/.test(runOf(s2, "P")?.reason ?? ""));
+    await settle();
+    assert.equal(s2.orchestrator.session()!.id, orchestrator.session()!.id, "the same orchestrator session");
+    assert.deepEqual(facts(s2.orchestrator), before, "nothing new, nothing repeated");
+
+    // An update: the hold before it is not told; an approval during the drain is told once, after the restart.
+    s2.engine.resume("P");
+    await s2.until("working for the update", () => working(s2));
+    s2.engine.drainForUpdate(false);
+    applyDraft(s2.store, queueDef("D", ["done"]));
+    approveQueue(s2.store, "D");
+    await s2.until("the hold", () => runOf(s2, "P")?.state === "paused" && s2.engine.idle());
+    await settle();
+    assert.ok(!facts(s2.orchestrator).includes("Queue D revision 1 approved."), "not during the drain");
+    s2.stop();
+    third = setup(first.root);
+    const s3 = third;
+    await s3.until("the approval after the restart", () => facts(s3.orchestrator).includes("Queue D revision 1 approved."));
+    await s3.until("the resumed run", () => ["running", "finished"].includes(runOf(s3, "P")?.state ?? ""));
+    await settle();
+    const all = facts(s3.orchestrator);
+    assert.equal(all.filter((t) => t === "Queue D revision 1 approved.").length, 1);
+    assert.deepEqual(all.filter((t) => t.startsWith("Run of")), ["Run of P paused after step P1."], "no pause but the requested one");
+  } finally { first.stop(); second?.stop(); third?.stop(); delete process.env.FAKE_SLOW_MS; }
 });

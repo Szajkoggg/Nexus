@@ -210,24 +210,53 @@ export class Orchestrator {
   private notify(state: ProjectState, s: SessionFile): void {
     const told = new Set(this.store.readApplied(s.id).entries.map((a) => a.event));
     const since = s.created_at;
-    const items: { key: string; text: string }[] = [];
+    // fact: what happened, shown in the chat too; todo: the instruction, for the orchestrator only.
+    const items: { key: string; fact: string; todo: string }[] = [];
     for (const x of state.questions) {
       const asker = state.sessions.find((y) => y.id === x.session);
       if (x.state !== "open" || asker?.role !== "worker" || x.asked_at < since) continue;
       items.push({
         key: `notify:question:${x.qid}`,
-        text: `[Nexus] A worker asked a question${x.queue ? ` in queue ${x.queue}${x.step ? `, step ${x.step}` : ""}` : ""} (qid ${x.qid}; ${x.can_continue ? "it goes on meanwhile" : "it waits for the answer"}):\n${x.text}${x.options?.length ? `\nOptions: ${x.options.join(" / ")}` : ""}\nAnswer it if the answer is settled, otherwise escalate it to the user.`,
+        fact: `A worker asked a question${x.queue ? ` in queue ${x.queue}${x.step ? `, step ${x.step}` : ""}` : ""} (qid ${x.qid}; ${x.can_continue ? "it goes on meanwhile" : "it waits for the answer"}):
+${x.text}${x.options?.length ? `
+Options: ${x.options.join(" / ")}` : ""}`,
+        todo: "Answer it if the answer is settled, otherwise escalate it to the user.",
       });
     }
     for (const q of state.queues) {
       const r = q.run;
-      if (!r || (r.state !== "halted" && r.state !== "finished") || r.updated_at < since) continue;
-      items.push({
-        key: `notify:run:${q.id}:${r.state}:${r.updated_at}`,
-        text: r.state === "halted"
-          ? `[Nexus] The run of queue ${q.id} halted at step ${r.step ?? "?"}: ${r.reason ?? "no reason given"}. Tell the user briefly, with what you propose.`
-          : `[Nexus] Queue ${q.id} finished.${q.report ? ` Report: ${q.report.summary}` : ""} Tell the user briefly, with what you propose next.`,
+      // Approvals and withdrawals by their position, so withdrawing and approving the same revision again is told again.
+      q.approvals.forEach((a, i) => {
+        if (a.at < since) return;
+        const todo = !r
+          ? "If the plan puts it next, start it now; otherwise tell the user why not."
+          : r.state === "paused" || r.state === "halted"
+            ? `Its run is ${r.state}${r.step ? ` at step ${r.step}` : ""}. If the plan puts it next, resume it now; otherwise tell the user why not.`
+            : `Its run is ${r.state}; tell the user if anything follows from the approval.`;
+        items.push({ key: `notify:approval:${q.id}:${i}`, fact: `Queue ${q.id} revision ${a.revision} approved.`, todo });
       });
+      q.withdrawals.forEach((w, i) => {
+        if (w.at < since) return;
+        items.push({
+          key: `notify:withdrawal:${q.id}:${i}`,
+          fact: `The user withdrew the approval of queue ${q.id} revision ${w.revision}${w.reason ? `: ${w.reason}` : "."}`,
+          todo: "Do not start it. Tell the user briefly what this changes in the plan.",
+        });
+      });
+      if (!r) continue;
+      // A pause someone asked for (the user, or you with nexus run pause), reached at a step's end. Not a stop, and
+      // not the pauses of a server restart or an update, whose reasons differ.
+      if (r.state === "paused" && r.reason?.startsWith("paused by the user") && r.ended_at && r.ended_at >= since) {
+        items.push({
+          key: `notify:paused:${q.id}:${r.ended_at}`,
+          fact: `Run of ${q.id} paused after step ${r.step ?? "?"}.`,
+          todo: "If you paused it to free the checkout for another queue, start that one now; otherwise tell the user.",
+        });
+      }
+      if ((r.state !== "halted" && r.state !== "finished") || r.updated_at < since) continue;
+      items.push(r.state === "halted"
+        ? { key: `notify:run:${q.id}:${r.state}:${r.updated_at}`, fact: `The run of queue ${q.id} halted at step ${r.step ?? "?"}: ${r.reason ?? "no reason given"}.`, todo: "Tell the user briefly, with what you propose." }
+        : { key: `notify:run:${q.id}:${r.state}:${r.updated_at}`, fact: `Queue ${q.id} finished.${q.report ? ` Report: ${q.report.summary}` : ""}`, todo: "Tell the user briefly, with what you propose next." });
     }
     const fresh = items.filter((i) => !told.has(i.key));
     if (!fresh.length) return;
@@ -235,9 +264,8 @@ export class Orchestrator {
     for (const i of fresh) {
       this.store.appendApplied(s.id, { at: now(), event: i.key, ok: true, message: "told" });
       // The user sees the fact; the instruction after it is for the orchestrator only.
-      const shown = i.text.replace(/^\[Nexus\] /, "").replace(/\s*(Answer it if|Tell the user)[\s\S]*$/, "");
-      this.store.appendChat(s.id, { at: now(), from: "nexus", text: shown });
-      this.deliver(i.text);
+      this.store.appendChat(s.id, { at: now(), from: "nexus", text: i.fact });
+      this.deliver(`[Nexus] ${i.fact} ${i.todo}`);
     }
   }
 }
@@ -292,7 +320,8 @@ Helpers (subagents, through the Agent tool; they read only (you also write queue
 - run-digest: when a run halts or finishes, have it summarize the run; tell the user from that.
 - The project's own agents (its .claude/agents) are there too. Use the ones that only read and report, such as one that finds what was decided and where; leave those that build, run checks or edit to the workers.
 
-Messages marked [Nexus] tell you that a worker asked a question, or that a run halted or finished. Act on them: answer or escalate questions; tell the user about halts and finished queues briefly, with what you propose next.
+Messages marked [Nexus] tell you that a worker asked a question, that the user approved a queue or withdrew an approval, that a run reached a requested pause, or that a run halted or finished. Act on them: answer or escalate questions; an approval or a reached pause is your cue to start (or resume) what the plan put next, and say in the chat what you started; tell the user about withdrawals, halts and finished queues briefly, with what you propose next.
+Never have two runs going in one checkout at once: queues without their own worktree share the main checkout, so pause one at a step's end before starting another there.
 Keep replies short and concrete. Before proposing a queue, read enough of the project to make its steps and acceptance criteria real.`;
 }
 

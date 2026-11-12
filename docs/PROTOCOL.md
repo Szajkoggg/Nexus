@@ -384,8 +384,15 @@ a prompt. (`Write` and `Edit` are not disallowed: a disallow rule would beat the
   revision, which needs the user's approval again.
 - `nexus run <queue> start|pause|resume|stop --reason … [--use-session <id>] [--model <m>]` sends `session.request`.
   Starting an unapproved revision is refused.
-- With `notify` on, the server tells the orchestrator (starting it if needed) when a worker asks a question and when a
-  run halts or finishes; the chat shows these notices.
+- With `notify` on, the server tells the orchestrator (starting it if needed) when a worker asks a question, when the
+  user approves a revision of a queue ("Queue X revision N approved.", with the instruction to start it, or to resume
+  its paused or halted run, if the plan puts it next), when the user withdraws an approval, when a run reaches a
+  requested pause ("Run of X paused after step S.": a pause asked for by the user or the orchestrator, not a stop now,
+  nor the pause of a server restart or of an update), and when a run halts or finishes. The chat shows only the fact;
+  the instruction goes to the orchestrator alone. Each notice is told once, recorded in `applied.jsonl` (`notify:…`
+  keys; approvals and withdrawals by their position in the queue's `approvals` and `withdrawals`, so approving a
+  withdrawn revision again is told again). Nothing older than the orchestrator session is told; what happens during
+  an update's drain is told once after the restart.
 
 ## The `nexus` command inside agents
 
