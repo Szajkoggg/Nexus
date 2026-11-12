@@ -7,10 +7,15 @@ user, a per-project orchestrator agent and the working agents.
 - [docs/DESIGN.md](docs/DESIGN.md): concepts, architecture, decisions, phases
 - [docs/PROTOCOL.md](docs/PROTOCOL.md): the `.nexus/` files, events and the `nexus` CLI
 
-**Status: phase 2** (notes, approvals, questions). Agents started by hand report through `nexus`; the dashboard
-shows every registered project's queues live, gathers what waits for the user (questions, stops, approvals,
-reviews) with optional browser notifications, and lets the user leave notes on steps, message a running agent,
-answer questions and approve queues. Launching agents and the orchestrator chat come in the next phases.
+**Status: phase 3** (Claude Code adapter and queue engine). An approved queue can be started from the dashboard:
+Nexus launches Claude Code (with your own subscription login), drives it step by step, puts your notes into each
+step's opening, delivers messages and answers into the running turn, holds on questions and reviews, and pauses,
+stops and resumes on request. The dashboard shows the agent's activity per step, each session's context fill and
+the subscription's usage windows. The orchestrator chat comes in phase 4.
+
+Per project, `runtimes.claude` in `.nexus/project.yaml` sets the default `model`, the `permission_mode`
+(default `acceptEdits`) and extra `allowed_tools` for launched sessions; the project's own `.claude/settings.json`
+applies as well.
 
 ## Requirements
 

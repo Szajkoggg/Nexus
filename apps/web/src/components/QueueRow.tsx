@@ -1,5 +1,6 @@
 import type { QueueView, StepView } from "../api.ts";
 import { StatusBadge, TimeAgo, toneOf } from "./ui.tsx";
+import { RunChip } from "./Run.tsx";
 
 export function QueueRow({ queue, onQueue, onStep }: {
   queue: QueueView;
@@ -14,6 +15,7 @@ export function QueueRow({ queue, onQueue, onStep }: {
         <span className="font-mono text-sm text-zinc-500">{queue.id}</span>
         <span className="font-medium text-zinc-100">{queue.title}</span>
         <StatusBadge status={queue.status} />
+        <RunChip queue={queue} />
         {openQuestions > 0 && (
           <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-xs text-amber-300">
             {openQuestions} question{openQuestions > 1 ? "s" : ""}

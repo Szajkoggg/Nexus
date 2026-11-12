@@ -152,6 +152,25 @@ Every line:
 
 The server validates every event against the writer's role and ignores (and reports) what that role may not do.
 
+## Server-owned runtime files
+
+Written only by the server's queue engine; agents never touch them.
+
+| File | What |
+|---|---|
+| `queues/<id>/run.yaml` | The engine's intent for a queue: `session`, `state` (`running`, `pausing`, `paused`, `halted`, `finished`, `usage_wait`), `reason`, the `step` it last opened, `nudged`, `resume_at` |
+| `sessions/<id>/runtime.json` | A launched session's live facts: process state and pid, model, context tokens and window, turns, cost |
+| `sessions/<id>/delivered.jsonl` | What the server handed to the session (notes put into a step turn, inbox entries injected or sent as a turn); counts as read |
+| `sessions/<id>/activity.jsonl` | A condensed record of the agent's stream: turns, tool calls, texts, tool errors, tagged with queue and step |
+| `<NEXUS_HOME>/usage.json` | The subscription's windows (5-hour, 7-day: utilization and reset time) from the latest `rate_limit_event` |
+
+A session launched by Nexus has `launched_by: nexus`, `runtime: claude`, `native_id` (Claude's session UUID, chosen
+by Nexus) and the `model` it was started with. A queue may also say `worktree: auto`: Nexus then creates the worktree
+and branch when it starts the queue and writes their paths back into `queue.yaml`.
+
+The event `review.accepted` (`queue`, `step`, `text?`), written by the user or an orchestrator, accepts a step held in
+`review`.
+
 ## The user's session
 
 The server keeps one session with id `user` and role `user` for what the user does in the dashboard. Its event log
@@ -261,3 +280,23 @@ Writes (JSON bodies only; a request with a foreign `Origin` is refused):
 | `POST /api/projects/:id/queues/:q/approve` | `words?` | Approves the current revision |
 | `PATCH /api/projects/:id/queues/:q` | `review_policy` (`continue`, `wait` or null) | Queue settings |
 | `POST /api/projects/:id/questions/:qid/answer` | `text`, `continue?` | The user's answer, routed to the asker |
+| `POST /api/projects/:id/queues/:q/run` | `action` (`start`, `pause`, `resume`, `stop`), `model?`, `session?` | Runs the queue through a Nexus-launched session (`session` continues an existing one) |
+| `POST /api/projects/:id/queues/:q/steps/:s/accept` | `text?` | Accepts a step waiting in review |
+
+Also `GET /api/projects/:id/sessions/:session/activity?queue=&step=&limit=` and `GET /api/usage`.
+
+## How the engine runs a Claude Code session
+
+`claude -p --input-format stream-json --output-format stream-json --verbose --session-id <uuid>` (or `--resume
+<uuid>` for a session that ran before), with the project's permission mode, `--allowedTools Bash(nexus:*)` plus the
+project's list, the model, and a worker briefing as `--append-system-prompt`. Environment: `NEXUS_SESSION`,
+`NEXUS_DIR`. The process stays alive across turns; stdin carries user messages:
+
+- a step turn: `{"type":"user","message":{"role":"user","content":"…"},"parent_tool_use_id":null}`
+- a message while the agent works: the same with `"priority":"next"` (read after its current tool calls, no interrupt)
+- stop now: `"priority":"now"` (interrupts the turn)
+
+From stdout it reads `system/init` (a turn starts), `assistant` (tool calls, text, context usage),
+`user` tool results (errors), `rate_limit_event` (usage windows) and `result` (the turn ended; the context window
+from `modelUsage`). After a turn ends it decides the next move from the step's state: next step, wait (question,
+review), nudge once if the step has no outcome, or halt.

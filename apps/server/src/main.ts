@@ -11,8 +11,9 @@ import { WebSocketServer, type WebSocket } from "ws";
 import chokidar from "chokidar";
 import {
   ActionError, ProjectStore, addNote, answerAsUser, approveQueue, deleteNote, loadProjectState, nexusHome,
-  readRegistry, routeAnswers, sendMessage, setQueueSettings, type ProjectState,
+  readRegistry, readUsage, routeAnswers, sendMessage, setQueueSettings, type ProjectState,
 } from "@nexus/protocol";
+import { Engine } from "./engine.ts";
 
 const PORT = Number(process.env.NEXUS_PORT ?? 4317);
 const HOST = process.env.NEXUS_HOST ?? "127.0.0.1";
@@ -20,7 +21,7 @@ const WEB_DIST = resolve(dirname(fileURLToPath(import.meta.url)), "../../web/dis
 
 // ---------------------------------------------------------------- projects
 
-interface Entry { id: string; root: string; store: ProjectStore; state?: ProjectState; error?: string }
+interface Entry { id: string; root: string; store: ProjectStore; engine: Engine; state?: ProjectState; error?: string }
 const projects = new Map<string, Entry>();
 
 function refreshRegistry(): void {
@@ -28,7 +29,7 @@ function refreshRegistry(): void {
   for (const p of reg.projects) {
     if (projects.has(p.id)) continue;
     const store = ProjectStore.forRoot(p.root);
-    projects.set(p.id, { id: p.id, root: p.root, store });
+    projects.set(p.id, { id: p.id, root: p.root, store, engine: new Engine(store, () => changed(p.id)) });
     watchProject(p.id, store.dir);
   }
   for (const id of projects.keys()) if (!reg.projects.some((p) => p.id === id)) projects.delete(id);
@@ -58,6 +59,9 @@ function changed(id: string): void {
       if (s) {
         try { if (routeAnswers(e.store, s) > 0) e.state = undefined; }
         catch (err) { console.error(`routing answers in ${id}: ${(err as Error).message}`); }
+        try { const fresh = stateOf(e); if (fresh) e.engine.onChange(fresh); }
+        catch (err) { console.error(`engine in ${id}: ${(err as Error).message}`); }
+        e.state = undefined;
       }
     }
     const msg = JSON.stringify({ type: "changed", project: id });
@@ -176,6 +180,28 @@ app.post("/api/projects/:id/queues/:queue/approve", act((st, b, p) => approveQue
 app.patch("/api/projects/:id/queues/:queue", act((st, b, p) => setQueueSettings(st, p("queue"), b)));
 app.post("/api/projects/:id/questions/:qid/answer", act((st, b, p) => answerAsUser(st, p("qid"), b.text, b.continue)));
 
+// The engine: running queues through Nexus-launched sessions.
+const engineOf = (st: ProjectStore) => [...projects.values()].find((e) => e.store === st)!.engine;
+app.post("/api/projects/:id/queues/:queue/run", act((st, b, p) => {
+  const engine = engineOf(st); const q = p("queue");
+  switch (b.action) {
+    case "start": return engine.start(q, { model: (b.model as string) || undefined, session: (b.session as string) || undefined });
+    case "pause": return engine.pause(q);
+    case "resume": return engine.resume(q);
+    case "stop": return engine.stopNow(q, b.text as string | undefined);
+    default: throw new ActionError("action is start, pause, resume or stop");
+  }
+}));
+app.post("/api/projects/:id/queues/:queue/steps/:step/accept", act((st, b, p) => engineOf(st).acceptReview(p("queue"), p("step"), b.text as string | undefined)));
+
+app.get("/api/projects/:id/sessions/:session/activity", (c) => {
+  const e = projects.get(c.req.param("id"));
+  if (!e) return c.json({ error: "unknown project" }, 404);
+  return c.json(e.engine.activity(c.req.param("session"), c.req.query("queue"), c.req.query("step"), Number(c.req.query("limit") ?? 300)));
+});
+
+app.get("/api/usage", (c) => c.json(readUsage() ?? null));
+
 if (existsSync(WEB_DIST)) {
   app.use("/*", serveStatic({ root: WEB_DIST.replaceAll("\\", "/") }));
   app.get("*", serveStatic({ path: join(WEB_DIST, "index.html").replaceAll("\\", "/") }));
@@ -188,6 +214,10 @@ const server = serve({ fetch: app.fetch, port: PORT, hostname: HOST }, (info) =>
   console.log(`Nexus server on http://${HOST}:${info.port} (${projects.size} project(s); registry in ${nexusHome()})`);
   if (!existsSync(WEB_DIST)) console.log("No built dashboard: run the web dev server (npm run dev) or npm start.");
 });
+
+const shutdown = () => { for (const e of projects.values()) e.engine.shutdown(); process.exit(0); };
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
 
 const wss = new WebSocketServer({ noServer: true });
 server.on("upgrade", (req, socket, head) => {

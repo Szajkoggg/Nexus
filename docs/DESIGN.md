@@ -277,8 +277,21 @@ The user's answers, 2026-11-12:
 | Watch the usage limits? | Yes; pause before the limit, resume when it resets |
 | Where does `.nexus/` live? | In the project's main checkout, git-ignored |
 
+## Findings from building phase 3
+
+- **Context fill and usage limits are in the stream.** Every `assistant` message carries its usage (input, cache
+  creation and cache read tokens: the context in use); the `result` gives the model's `contextWindow`; a
+  `rate_limit_event` gives the 5-hour and 7-day windows' utilization and reset times.
+- **A message with `priority: "next"` reaches a running turn** after its current tool calls, without interrupting it;
+  a plain message sent during a turn becomes the next turn.
+- **The CLI starts turns by itself** when a background task it started finishes. The engine therefore opens a step
+  only when the session is idle, and re-decides after every turn.
+- **Claude Code blocks long foreground `sleep`** and the agent moves such waits to the background. Nothing for Nexus
+  to do, but it explains extra turns in the activity.
+- **A killed server takes its `claude` children with it** (their stdin closes). On restart, any session process still
+  alive is ended before a resume, and running queues come back paused.
+
 ## Open questions
 
-1. **Measuring Claude's context fill and usage limits in print mode.** Token usage per assistant message in the
-   stream should give the fill; where the 5-hour and 7-day figures appear is unknown. To be confirmed when the
-   adapter is built.
+1. **Codex parity.** The app-server offers the same moves (turns, `turn/steer`, `turn/interrupt`, token usage); to be
+   confirmed in phase 5.

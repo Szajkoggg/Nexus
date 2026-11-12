@@ -10,7 +10,7 @@ import {
 
 function setup() {
   const root = mkdtempSync(join(tmpdir(), "nexus-actions-"));
-  const st = ProjectStore.init(root, { id: "p", name: "P", root, defaults: {} as never, runtimes: {} });
+  const st = ProjectStore.init(root, { id: "p", name: "P", root, });
   st.writeQueue({
     protocol: 1, id: "Q", title: "Queue", revision: 1, status: "proposed", stop_conditions: [], checks: [],
     steps: [{ id: "Q1", title: "One", goal: "", acceptance: [] }, { id: "Q2", title: "Two", goal: "", acceptance: [] }],

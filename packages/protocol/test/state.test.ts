@@ -7,7 +7,7 @@ import { ProjectStore, loadProjectState, newId, now, revisionHash, type Event, t
 
 function setup() {
   const root = mkdtempSync(join(tmpdir(), "nexus-test-"));
-  const st = ProjectStore.init(root, { id: "p", name: "P", root, defaults: {} as never, runtimes: {} });
+  const st = ProjectStore.init(root, { id: "p", name: "P", root, });
   const q: QueueFile = {
     protocol: 1, id: "Q", title: "Queue", revision: 1, status: "approved", stop_conditions: [], checks: [],
     steps: [

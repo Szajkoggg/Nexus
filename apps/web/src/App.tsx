@@ -5,6 +5,7 @@ import { QueueRow } from "./components/QueueRow.tsx";
 import { QueueDetail, StepDetail } from "./components/Details.tsx";
 import { Drawer, StatusBadge, TimeAgo } from "./components/ui.tsx";
 import { AttentionPanel, NotifyToggle, useNotifications } from "./components/Attention.tsx";
+import { ContextBar, UsageMeter } from "./components/Run.tsx";
 
 const GROUPS: { title: string; statuses: QueueStatus[]; collapsible?: boolean }[] = [
   { title: "Finished", statuses: ["done", "cancelled"], collapsible: true },
@@ -34,7 +35,9 @@ export function App() {
   const { state, error, reload } = useProjectState(projectId);
   const [showFinished, setShowFinished] = useState(false);
 
+  const [tick, setTick] = useState(0);
   const connected = useLive((m) => {
+    setTick((t) => t + 1);
     if (m.type === "projects" || m.type === "reconnected") reloadProjects();
     if ((m.type === "changed" && m.project === projectId) || m.type === "reconnected") reload();
     if (m.type === "changed") reloadProjects();
@@ -72,6 +75,7 @@ export function App() {
               </button>
             ))}
           </nav>
+          <UsageMeter version={tick} />
           <NotifyToggle {...notify} />
           <span className={`flex items-center gap-1.5 text-xs ${connected ? "text-zinc-500" : "text-orange-400"}`} title={connected ? "Live updates on" : "Reconnecting"}>
             <span className={`h-2 w-2 rounded-full ${connected ? "bg-emerald-500" : "bg-orange-500"}`} />
@@ -135,7 +139,7 @@ export function App() {
             <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-400">Sessions</h2>
             <div className="overflow-x-auto rounded-xl border border-zinc-800">
               <table className="w-full text-left text-sm">
-                <thead className="text-xs text-zinc-500"><tr>{["Session", "Role", "Runtime", "Queue", "Branch", "Last event"].map((h) => <th key={h} className="px-3 py-2 font-medium">{h}</th>)}</tr></thead>
+                <thead className="text-xs text-zinc-500"><tr>{["Session", "Role", "Runtime", "Queue", "State", "Context", "Last event"].map((h) => <th key={h} className="px-3 py-2 font-medium">{h}</th>)}</tr></thead>
                 <tbody>
                   {state.sessions.filter((s) => s.role !== "user").map((s) => (
                     <tr key={s.id} className="border-t border-zinc-800/80">
@@ -143,7 +147,8 @@ export function App() {
                       <td className="px-3 py-2 text-zinc-400">{s.role}</td>
                       <td className="px-3 py-2 text-zinc-400">{s.runtime}{s.launched_by === "external" ? " (external)" : ""}</td>
                       <td className="px-3 py-2 font-mono text-zinc-400">{s.queue ?? "-"}</td>
-                      <td className="px-3 py-2 font-mono text-zinc-500">{s.branch ?? "-"}</td>
+                      <td className="px-3 py-2 text-zinc-400">{s.live ? `${s.live.state}${s.live.model ? ` · ${s.live.model.replace(/^claude-/, "")}` : ""}` : "-"}</td>
+                      <td className="px-3 py-2"><ContextBar s={s} /></td>
                       <td className="px-3 py-2 text-zinc-500">{s.last_event ? <>{s.last_event} · <TimeAgo at={s.last_event_at} /></> : "-"}</td>
                     </tr>
                   ))}

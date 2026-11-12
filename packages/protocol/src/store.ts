@@ -1,6 +1,6 @@
 // Reading and writing a project's .nexus/ directory and the Nexus registry.
 // Rules (docs/PROTOCOL.md): one writer per file, JSONL is append-only, YAML is replaced atomically.
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -9,7 +9,7 @@ import { monotonicFactory } from "ulid";
 import YAML from "yaml";
 import type { z } from "zod";
 import {
-  Event, InboxEntry, NoteMeta, ProjectFile, QueueFile, RegistryFile, SessionFile,
+  Activity, Delivery, Event, InboxEntry, NoteMeta, ProjectFile, QueueFile, RegistryFile, RunFile, RuntimeFile, SessionFile, UsageFile,
   type Note,
 } from "./schemas.ts";
 
@@ -110,7 +110,7 @@ export class ProjectStore {
   static forRoot(root: string): ProjectStore { return new ProjectStore(join(root, NEXUS_DIRNAME)); }
 
   /** Creates .nexus/ with a .gitignore that ignores the directory itself, so the project's own .gitignore is untouched. */
-  static init(root: string, project: Omit<ProjectFile, "protocol">): ProjectStore {
+  static init(root: string, project: Omit<z.input<typeof ProjectFile>, "protocol">): ProjectStore {
     const store = ProjectStore.forRoot(root);
     mkdirSync(join(store.dir, "queues"), { recursive: true });
     mkdirSync(join(store.dir, "sessions"), { recursive: true });
@@ -164,6 +164,47 @@ export class ProjectStore {
   appendInbox(sessionId: string, entry: InboxEntry): void {
     appendJsonl(join(this.sessionDir(sessionId), "inbox.jsonl"), InboxEntry.parse(entry));
   }
+
+  // server-owned runtime files
+  readRun(queueId: string): RunFile | undefined {
+    const f = join(this.queueDir(queueId), "run.yaml");
+    return existsSync(f) ? readYaml(f, RunFile) : undefined;
+  }
+  writeRun(queueId: string, run: RunFile): void { writeYaml(join(this.queueDir(queueId), "run.yaml"), RunFile.parse(run)); }
+  clearRun(queueId: string): void {
+    const f = join(this.queueDir(queueId), "run.yaml");
+    if (existsSync(f)) unlinkSync(f);
+  }
+
+  readDelivered(sessionId: string): JsonlRead<Delivery> { return readJsonl(join(this.sessionDir(sessionId), "delivered.jsonl"), Delivery); }
+  appendDelivered(sessionId: string, d: Delivery): void { appendJsonl(join(this.sessionDir(sessionId), "delivered.jsonl"), Delivery.parse(d)); }
+
+  readActivity(sessionId: string): JsonlRead<Activity> { return readJsonl(join(this.sessionDir(sessionId), "activity.jsonl"), Activity); }
+  appendActivity(sessionId: string, a: Activity): void { appendJsonl(join(this.sessionDir(sessionId), "activity.jsonl"), Activity.parse(a)); }
+
+  readRuntime(sessionId: string): RuntimeFile | undefined {
+    const f = join(this.sessionDir(sessionId), "runtime.json");
+    try { return existsSync(f) ? RuntimeFile.parse(JSON.parse(readFileSync(f, "utf8"))) : undefined; } catch { return undefined; }
+  }
+  writeRuntime(sessionId: string, r: RuntimeFile): void {
+    const f = join(this.sessionDir(sessionId), "runtime.json");
+    const tmp = `${f}.${process.pid}.tmp`;
+    writeFileSync(tmp, JSON.stringify(RuntimeFile.parse(r)), "utf8");
+    renameSync(tmp, f);
+  }
+}
+
+// ---------------------------------------------------------------- account-wide usage
+
+const usageFile = () => join(nexusHome(), "usage.json");
+export function readUsage(): UsageFile | undefined {
+  try { return existsSync(usageFile()) ? UsageFile.parse(JSON.parse(readFileSync(usageFile(), "utf8"))) : undefined; } catch { return undefined; }
+}
+export function writeUsage(u: UsageFile): void {
+  mkdirSync(nexusHome(), { recursive: true });
+  const tmp = `${usageFile()}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(UsageFile.parse(u)), "utf8");
+  renameSync(tmp, usageFile());
 }
 
 function subdirs(dir: string): string[] {

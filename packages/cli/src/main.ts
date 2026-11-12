@@ -258,7 +258,7 @@ const commands: Record<string, () => void> = {
     const root = normPath(need(args[2], "<path>"));
     if (!existsSync(root)) throw new UsageError(`no such directory: ${root}`);
     const id = o.id ?? basename(root).toLowerCase().replace(/[^a-z0-9-]+/g, "-");
-    const st = ProjectStore.init(root, { id, name: o.name ?? basename(root), root, defaults: {} as never, runtimes: {} });
+    const st = ProjectStore.init(root, { id, name: o.name ?? basename(root), root });
     const reg = readRegistry();
     if (!reg.projects.some((p) => p.id === id)) { reg.projects.push({ id, root }); writeRegistry(reg); }
     console.log(`ok: project ${id} at ${root}\n    ${st.dir}`);

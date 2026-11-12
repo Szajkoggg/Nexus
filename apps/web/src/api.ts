@@ -19,6 +19,21 @@ export async function act(project: string, method: "POST" | "PATCH" | "DELETE", 
 }
 
 export const enc = encodeURIComponent;
+
+export interface Usage { updated_at: string; windows: Record<string, { utilization: number; resets_at?: string; status?: string }> }
+export interface ActivityEntry { at: string; kind: string; text: string; queue?: string; step?: string }
+
+/** Re-fetches whenever `version` changes (the page bumps it on every live change of the project). */
+export function useFetch<T>(url: string | undefined, version: unknown): T | undefined {
+  const [data, setData] = useState<T>();
+  useEffect(() => {
+    if (!url) { setData(undefined); return; }
+    let alive = true;
+    fetch(url).then((r) => (r.ok ? r.json() : undefined)).then((d) => { if (alive) setData(d as T); }, () => {});
+    return () => { alive = false; };
+  }, [url, version]);
+  return data;
+}
 export const attentionKey = (a: AttentionItem) => [a.kind, a.queue, a.step, a.qid].join("/");
 
 export const fileUrl = (project: string, path: string) =>

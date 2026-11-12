@@ -49,7 +49,15 @@ export const ProjectFile = z.object({
     usage_pause_threshold: z.number().min(0).max(1).default(0.9),
     worktree_dir: z.string().optional(),
   }).prefault({}),
-  runtimes: z.record(z.string(), z.record(z.string(), z.unknown())).default({}),
+  runtimes: z.object({
+    claude: z.object({
+      model: z.string().optional(),
+      permission_mode: z.enum(["acceptEdits", "auto", "bypassPermissions", "dontAsk", "manual", "plan"]).default("acceptEdits"),
+      /** Added to every Nexus-launched session; `Bash(nexus:*)` is always allowed. */
+      allowed_tools: z.array(z.string()).default([]),
+    }).prefault({}),
+    codex: z.record(z.string(), z.unknown()).default({}),
+  }).prefault({}),
   orchestrator: z.object({ runtime: Runtime, session: Id.nullable() }).optional(),
 });
 export type ProjectFile = z.infer<typeof ProjectFile>;
@@ -133,6 +141,8 @@ export const SessionFile = z.object({
   launched_by: z.enum(["nexus", "external"]),
   created_at: Time,
   forked_from: Id.nullable().optional(),
+  /** The model asked for when Nexus launched it (an alias or a full name); kept for resuming. */
+  model: z.string().optional(),
 });
 export type SessionFile = z.infer<typeof SessionFile>;
 
@@ -181,6 +191,8 @@ export const Event = z.discriminatedUnion("type", [
     queue: Id.optional(), reason: z.string(),
   }),
   z.object({ ...base, type: z.literal("log"), level: z.enum(["info", "warn", "error"]), text: z.string() }),
+  /** The user (or orchestrator) accepts a step waiting in review. */
+  z.object({ ...base, type: z.literal("review.accepted"), ...qs, text: z.string().optional() }),
 ]);
 export type Event = z.infer<typeof Event>;
 export type EventType = Event["type"];
@@ -188,8 +200,65 @@ export type EventOf<T extends EventType> = Extract<Event, { type: T }>;
 
 /** Event types a worker session may not write (orchestrators and the user may). */
 export const ORCHESTRATOR_ONLY: ReadonlySet<EventType> = new Set([
-  "answer.given", "queue.drafted", "session.request",
+  "answer.given", "queue.drafted", "session.request", "review.accepted",
 ]);
+
+// ---------------------------------------------------------------- server-owned runtime files
+
+/** queues/<id>/run.yaml: the engine's intent for a queue. Written only by the server. */
+export const RunFile = z.object({
+  protocol: z.literal(1),
+  session: Id,
+  /**
+   * running: the engine drives the steps. pausing: stop after the current step. paused: user paused or the server
+   * restarted. halted: a stop, failure or stall; needs the user. finished: the last step is done.
+   * usage_wait: waiting for the subscription window to reset.
+   */
+  state: z.enum(["running", "pausing", "paused", "halted", "finished", "usage_wait"]),
+  reason: z.string().optional(),
+  step: Id.optional(),        // the step the engine last opened
+  nudged: z.boolean().optional(),
+  started_at: Time,
+  updated_at: Time,
+  resume_at: Time.optional(), // usage_wait: when the window resets
+});
+export type RunFile = z.infer<typeof RunFile>;
+
+/** sessions/<id>/delivered.jsonl: what the server handed to a live session (notes in a step turn, inbox entries). */
+export const Delivery = z.object({
+  at: Time, kind: z.enum(["note", "inbox"]), id: Id, via: z.enum(["turn", "inject", "status"]),
+});
+export type Delivery = z.infer<typeof Delivery>;
+
+/** sessions/<id>/activity.jsonl: a condensed record of what the agent did, from the runtime's stream. */
+export const Activity = z.object({
+  at: Time,
+  kind: z.enum(["turn_start", "text", "tool", "tool_error", "turn_end", "error", "exit"]),
+  text: z.string(),
+  queue: Id.optional(),
+  step: Id.optional(),
+});
+export type Activity = z.infer<typeof Activity>;
+
+/** sessions/<id>/runtime.json: live facts about a Nexus-launched session. Written only by the server. */
+export const RuntimeFile = z.object({
+  state: z.enum(["starting", "working", "idle", "exited"]),
+  pid: z.number().int().optional(),
+  model: z.string().optional(),
+  context_tokens: z.number().optional(),
+  context_window: z.number().optional(),
+  turns: z.number().int().default(0),
+  cost_usd: z.number().optional(),
+  updated_at: Time,
+});
+export type RuntimeFile = z.infer<typeof RuntimeFile>;
+
+/** <NEXUS_HOME>/usage.json: the subscription's windows, from the last report of any session. */
+export const UsageFile = z.object({
+  updated_at: Time,
+  windows: z.record(z.string(), z.object({ utilization: z.number(), resets_at: Time.optional(), status: z.string().optional() })),
+});
+export type UsageFile = z.infer<typeof UsageFile>;
 
 // ---------------------------------------------------------------- inbox (sessions/<id>/inbox.jsonl)
 

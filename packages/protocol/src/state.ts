@@ -1,6 +1,6 @@
 // Derives the dashboard's view of a project from its files. Pure apart from reading through the store;
 // nothing here is ever written back (state.json, if kept, is only a cache of this).
-import { ORCHESTRATOR_ONLY, type Event, type InboxEntry, type Note, type ProjectFile, type QueueFile, type QueueStatus, type ReviewItem, type SessionFile, type StepDef, type StepStatus } from "./schemas.ts";
+import { ORCHESTRATOR_ONLY, type Event, type InboxEntry, type Note, type ProjectFile, type QueueFile, type QueueStatus, type ReviewItem, type RunFile, type RuntimeFile, type SessionFile, type StepDef, type StepStatus } from "./schemas.ts";
 import { ProjectStore, revisionHash } from "./store.ts";
 
 export interface CheckView { name: string; ok: boolean; summary?: string; at: string }
@@ -39,6 +39,8 @@ export interface QueueView extends Omit<QueueFile, "steps"> {
   steps: StepView[];
   report?: { path: string; summary: string; at: string };
   questions: QuestionView[];
+  /** The engine's run of this queue, when Nexus drives it. */
+  run?: RunFile;
   updated?: string;    // time of the latest event about this queue
 }
 export interface SessionView extends SessionFile {
@@ -47,6 +49,7 @@ export interface SessionView extends SessionFile {
   context?: { text: string; topics: string[]; files: string[]; at: string };
   event_count: number;
   inbox: InboxView[];
+  live?: RuntimeFile;
 }
 export interface ProjectState {
   project: ProjectFile;
@@ -72,11 +75,14 @@ export function loadProjectState(store: ProjectStore): ProjectState {
       const q = store.readQueue(id);
       const { notes, errors } = store.readNotes(id);
       warnings.push(...errors);
-      queues.set(id, initQueue(q, notes));
+      const view = initQueue(q, notes);
+      try { view.run = store.readRun(id); } catch (e) { warnings.push(`queue ${id} run: ${(e as Error).message}`); }
+      queues.set(id, view);
     } catch (e) { warnings.push(`queue ${id}: ${(e as Error).message}`); }
   }
 
   const sessions = new Map<string, SessionView>();
+  const noteDeliveries = new Map<string, string>();
   const events: Event[] = [];
   for (const id of store.sessionIds()) {
     try {
@@ -84,8 +90,15 @@ export function loadProjectState(store: ProjectStore): ProjectState {
       const r = store.readEvents(id);
       warnings.push(...r.errors);
       const inbox = store.readInbox(id);
-      warnings.push(...inbox.errors);
-      sessions.set(id, { ...s, event_count: r.entries.length, inbox: inbox.entries });
+      const delivered = store.readDelivered(id);
+      warnings.push(...inbox.errors, ...delivered.errors);
+      // What the server handed over counts as read; so do notes it put into a step turn.
+      const handed = new Map(delivered.entries.filter((d) => d.kind === "inbox").map((d) => [d.id, d.at]));
+      for (const d of delivered.entries) if (d.kind === "note") noteDeliveries.set(d.id, d.at);
+      sessions.set(id, {
+        ...s, event_count: r.entries.length, live: store.readRuntime(id),
+        inbox: inbox.entries.map((m) => (handed.has(m.id) ? { ...m, read_at: handed.get(m.id) } : m)),
+      });
       for (const e of r.entries) {
         if (e.session !== id) { warnings.push(`session ${id}: event ${e.id} claims session ${e.session}; ignored`); continue; }
         if (ORCHESTRATOR_ONLY.has(e.type) && s.role === "worker") {
@@ -96,6 +109,11 @@ export function loadProjectState(store: ProjectStore): ProjectState {
     } catch (e) { warnings.push(`session ${id}: ${(e as Error).message}`); }
   }
   events.sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id));
+
+  for (const q of queues.values()) for (const st of q.steps) for (const n of st.notes) {
+    const at = noteDeliveries.get(n.id);
+    if (at) n.read_at = at;
+  }
 
   const questions = new Map<string, QuestionView>();
   for (const e of events) apply(e, queues, sessions, questions, warnings);
@@ -132,6 +150,7 @@ function attentionOf(queues: QueueView[], questions: QuestionView[]): AttentionI
     out.push({ kind: "question", queue: x.queue, step: x.step, qid: x.qid, text: x.text, at: by?.at ?? x.asked_at });
   }
   for (const q of queues) {
+    if (q.run?.state === "halted" && q.status !== "stopped") out.push({ kind: "stopped", queue: q.id, step: q.run.step, text: q.run.reason ?? "The run halted", at: q.run.updated_at });
     if (q.status === "stopped") out.push({ kind: "stopped", queue: q.id, step: q.current_step, text: q.status_reason ?? "Stopped", at: q.updated ?? q.updated_at });
     if (q.status === "proposed") out.push({ kind: "approval", queue: q.id, text: q.title, at: q.updated_at });
     if (q.status === "cancelled" || q.status === "done") continue;
@@ -259,6 +278,14 @@ function apply(
       });
       x.state = e.escalate ? "escalated" : "answered";
       if (!e.escalate) resume(x, queues, e);
+      return;
+    }
+    case "review.accepted": {
+      const q = queueOf(e.queue); const st = stepOf(q, e.step);
+      if (!q || !st || st.status !== "review") return;
+      st.status = "done";
+      if (q.steps.every((x) => FINISHED_STEP.has(x.status))) q.status = "done";
+      else if (q.status === "waiting" && !q.steps.some((x) => x.status === "waiting" || x.status === "review")) q.status = "running";
       return;
     }
     case "message.read": {

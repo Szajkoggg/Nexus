@@ -1,7 +1,8 @@
 import { useState } from "react";
 import type { Event } from "@nexus/protocol";
 import { act, enc, fileUrl, type ProjectState, type QuestionView, type QueueView, type StepView } from "../api.ts";
-import { Composer, Expandable, Markdown, Section, StatusBadge, TimeAgo } from "./ui.tsx";
+import { Button, Composer, Expandable, Markdown, Section, StatusBadge, TimeAgo } from "./ui.tsx";
+import { Activity, RunControls } from "./Run.tsx";
 
 interface Props { project: ProjectState; queue: QueueView; onChanged: () => void }
 
@@ -38,6 +39,8 @@ export function StepDetail({ project, queue, step, onChanged }: Props & { step: 
           )}
         </div>
       )}
+
+      {step.status === "review" && <AcceptReview project={id} queue={queue.id} step={step.id} onChanged={onChanged} />}
 
       {live && session && (
         <Section title="Message the running agent" aside={<span className="text-xs text-zinc-600">read at its next check-in</span>}>
@@ -142,6 +145,10 @@ export function StepDetail({ project, queue, step, onChanged }: Props & { step: 
         </Section>
       )}
 
+      {(step.session ?? (queue.run?.step === step.id ? queue.run.session : undefined)) && (
+        <Activity project={id} session={(step.session ?? queue.run?.session)!} queue={queue.id} step={step.id} version={project.generated_at} />
+      )}
+
       {step.timeline.length > 0 && (
         <Section title="Timeline">
           <ol className="relative space-y-2 border-l border-zinc-800 pl-4">
@@ -157,6 +164,17 @@ export function StepDetail({ project, queue, step, onChanged }: Props & { step: 
         </Section>
       )}
     </div>
+  );
+}
+
+function AcceptReview({ project, queue, step, onChanged }: { project: string; queue: string; step: string; onChanged: () => void }) {
+  const [error, setError] = useState<string>();
+  return (
+    <Section title="Waiting for your review">
+      <p className="mb-2 text-sm text-zinc-400">The queue holds here until you accept this step.</p>
+      <Button onClick={() => act(project, "POST", `/queues/${enc(queue)}/steps/${enc(step)}/accept`).then(onChanged, (e: Error) => setError(e.message))}>Accept and go on</Button>
+      {error && <span className="ml-3 text-xs text-red-400">{error}</span>}
+    </Section>
   );
 }
 
@@ -290,6 +308,8 @@ export function QueueDetail({ project, queue, onChanged }: Props) {
           </div>
         )}
       </Section>
+
+      <RunControls project={project} queue={queue} onChanged={onChanged} />
 
       <Section title="Settings">
         <label className="flex flex-wrap items-center gap-2 text-sm text-zinc-300">
