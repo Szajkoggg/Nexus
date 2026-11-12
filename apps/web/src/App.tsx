@@ -6,7 +6,7 @@ import { QueueDetail, StepDetail } from "./components/Details.tsx";
 import { Drawer, StatusBadge, TimeAgo } from "./components/ui.tsx";
 import { AttentionPanel, NotifyToggle, useNotifications } from "./components/Attention.tsx";
 import { ContextBar, UsageMeter } from "./components/Run.tsx";
-import { ChatPanel, OrchestratorButton, useOrchestrator } from "./components/Chat.tsx";
+import { ChatPanel, ConversationsButton, ConversationsPanel, OrchestratorButton, useOrchestrator } from "./components/Chat.tsx";
 import { RemoteButton, RemotePanel } from "./components/Remote.tsx";
 import { SettingsButton, SettingsPanel, UpdatePill, useServer } from "./components/Settings.tsx";
 
@@ -49,6 +49,7 @@ export function App() {
   const notify = useNotifications(projects);
   const orchestrator = useOrchestrator(projectId, tick);
   const server = useServer(tick);
+  const [ideasOpen, setIdeasOpen] = useState(() => new URLSearchParams(location.search).has("ideas"));
   const [settingsOpen, setSettingsOpen] = useState(() => new URLSearchParams(location.search).has("settings"));
   const [remoteOpen, setRemoteOpen] = useState(() => new URLSearchParams(location.search).has("remote"));
   const [chatOpen, setChatOpen] = useState(() => new URLSearchParams(location.search).has("chat"));
@@ -84,6 +85,7 @@ export function App() {
             ))}
           </nav>
           <UpdatePill info={server} />
+          {projectId && <ConversationsButton onClick={() => setIdeasOpen(true)} />}
           {projectId && <OrchestratorButton view={orchestrator} onClick={() => setChatOpen(true)} />}
           <UsageMeter version={tick} />
           <NotifyToggle {...notify} />
@@ -146,14 +148,14 @@ export function App() {
           );
         })}
 
-        {state && state.sessions.some((s) => s.role !== "user") && (
+        {state && state.sessions.some((s) => s.role === "worker" || s.role === "orchestrator") && (
           <section className="mb-8">
             <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-400">Sessions</h2>
             <div className="overflow-x-auto rounded-xl border border-zinc-800">
               <table className="w-full text-left text-sm">
                 <thead className="text-xs text-zinc-500"><tr>{["Session", "Role", "Runtime", "Queue", "State", "Context", "Last event"].map((h) => <th key={h} className="px-3 py-2 font-medium">{h}</th>)}</tr></thead>
                 <tbody>
-                  {state.sessions.filter((s) => s.role !== "user").map((s) => (
+                  {state.sessions.filter((s) => s.role === "worker" || s.role === "orchestrator").map((s) => (
                     <tr key={s.id} className="border-t border-zinc-800/80">
                       <td className="px-3 py-2"><span className="text-zinc-200">{s.title ?? s.id.slice(-8)}</span></td>
                       <td className="px-3 py-2 text-zinc-400">{s.role}</td>
@@ -170,6 +172,11 @@ export function App() {
           </section>
         )}
       </main>
+
+      {ideasOpen && projectId && state && (
+        <ConversationsPanel project={projectId} name={state.project.name} version={tick} defaultRuntime={state.project.conversations.runtime}
+          onClose={() => setIdeasOpen(false)} onChanged={() => setTick((t) => t + 1)} />
+      )}
 
       {chatOpen && projectId && (
         <ChatPanel project={projectId} name={state?.project.name ?? projectId} view={orchestrator} onClose={() => setChatOpen(false)} onChanged={() => setTick((t) => t + 1)} />

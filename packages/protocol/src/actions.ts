@@ -200,11 +200,23 @@ export function updateSettings(store: ProjectStore, patch: unknown): void {
       claude: merged(p.runtimes.claude, b.runtimes?.claude),
       codex: merged(p.runtimes.codex, b.runtimes?.codex),
     },
+    conversations: merged(p.conversations, b.conversations),
     orchestrator: b.orchestrator?.notify === undefined
       ? p.orchestrator
       : { runtime: "claude" as const, session: null, ...p.orchestrator, notify: !!b.orchestrator.notify },
   };
   const r = ProjectFile.safeParse(next);
   if (!r.success) throw new ActionError(r.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "));
+  const notes = r.data.conversations.notes_dir;
+  if (notes !== undefined) r.data.conversations.notes_dir = notesDir(notes);
   store.writeProject(r.data);
+}
+
+/** The notes folder, relative to the project's root, inside it, with forward slashes and no trailing slash. */
+export function notesDir(dir: string): string {
+  const d = dir.trim().replaceAll("\\", "/").replace(/^\.\//, "").replace(/\/+$/, "");
+  if (!d || d.startsWith("/") || /^[A-Za-z]:/.test(d) || d.split("/").includes("..")) {
+    throw new ActionError("the notes folder is a path inside the project, relative to its root (for example Dev/Concepts/Gameplay)");
+  }
+  return d;
 }

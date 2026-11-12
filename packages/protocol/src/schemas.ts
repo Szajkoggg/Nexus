@@ -19,8 +19,12 @@ export const StepStatus = z.enum([
 ]);
 export type StepStatus = z.infer<typeof StepStatus>;
 
-/** `user` is the one session the server keeps for what the user does in the dashboard (answers, for now). */
-export const Role = z.enum(["worker", "orchestrator", "user"]);
+/**
+ * `user` is the one session the server keeps for what the user does in the dashboard (answers, for now).
+ * `conversation` is a thinking partner the user talks with about the project (design, ideas): it reads the project
+ * and writes only in the project's notes folder; it starts no work.
+ */
+export const Role = z.enum(["worker", "orchestrator", "user", "conversation"]);
 export const USER_SESSION = "user";
 export type Role = z.infer<typeof Role>;
 
@@ -73,6 +77,14 @@ export const ProjectFile = z.object({
       approval_policy: z.enum(["never", "on-request", "untrusted"]).default("never"),
       approvals_reviewer: z.enum(["user", "auto_review", "guardian_subagent"]).optional(),
     }).prefault({}),
+  }).prefault({}),
+  /** Conversations: thinking partners for the project. */
+  conversations: z.object({
+    /** The one folder they may write in (their notes), relative to the project's root. */
+    notes_dir: z.string().optional(),
+    runtime: z.enum(["claude", "codex"]).default("claude"),
+    model: z.string().optional(),
+    effort: Effort.optional(),
   }).prefault({}),
   orchestrator: z.object({
     runtime: Runtime.default("claude"),
@@ -168,6 +180,8 @@ export const SessionFile = z.object({
   model: z.string().optional(),
   /** The effort asked for when Nexus launched it; kept for resuming. */
   effort: Effort.optional(),
+  /** A conversation the user put away: kept, not listed first. */
+  archived: z.boolean().optional(),
 });
 export type SessionFile = z.infer<typeof SessionFile>;
 
@@ -289,7 +303,7 @@ export type Applied = z.infer<typeof Applied>;
 /** sessions/<orchestrator>/chat.jsonl: the conversation shown in the dashboard. */
 export const ChatEntry = z.object({
   at: Time,
-  from: z.enum(["user", "orchestrator", "nexus"]),
+  from: z.enum(["user", "orchestrator", "partner", "nexus"]),
   kind: z.enum(["message", "tool", "error"]).default("message"),
   text: z.string(),
 });

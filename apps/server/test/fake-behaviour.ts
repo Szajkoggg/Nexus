@@ -50,6 +50,7 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
     nexus("step", "done", fake.step, "--summary", `fake finished ${fake.step} after an answer`);
     return "answered";
   }
+  if (text.includes("hands this conversation to the orchestrator")) return "SUMMARY: the user decided to try slow mining first.";
   const draft = /FAKE-DRAFT:\s*\n([\s\S]*)$/.exec(text);
   if (draft) return nexusOut(["queue", "draft", "-"], draft[1]);
   const run = /FAKE-NEXUS: (\[.*\])/.exec(text);

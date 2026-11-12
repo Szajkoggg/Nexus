@@ -101,7 +101,7 @@ export function loadProjectState(store: ProjectStore): ProjectState {
       });
       for (const e of r.entries) {
         if (e.session !== id) { warnings.push(`session ${id}: event ${e.id} claims session ${e.session}; ignored`); continue; }
-        if (ORCHESTRATOR_ONLY.has(e.type) && s.role === "worker") {
+        if (ORCHESTRATOR_ONLY.has(e.type) && s.role !== "orchestrator" && s.role !== "user") {
           warnings.push(`session ${id}: ${e.type} is for orchestrators; ignored`); continue;
         }
         events.push(e);

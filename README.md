@@ -7,6 +7,12 @@ user, a per-project orchestrator agent and the working agents.
 - [docs/DESIGN.md](docs/DESIGN.md): concepts, architecture, decisions, phases
 - [docs/PROTOCOL.md](docs/PROTOCOL.md): the `.nexus/` files, events and the `nexus` CLI
 
+**Ideas.** Beside the orchestrator, each project has conversations with a thinking partner (the bulb icon): one
+session per topic, for thinking something through (gameplay design, the look, what to build next) without starting
+any work. A partner reads the whole project and writes only in the project's notes folder (settings: "Ideas"), so it
+can record what you decide; "Hand to orchestrator" has it summarize the conversation into the orchestrator's chat,
+which turns it into queues.
+
 **Status: phase 6** (remote access). Nexus can be used from a phone while the PC is on: through Tailscale (your own
 devices only, no open ports), signing in once with an access token (a QR code on the PC does it), installable as an
 app, with push notifications when something waits for you. See "Remote access" below.

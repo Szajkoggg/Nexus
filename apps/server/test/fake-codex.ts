@@ -35,7 +35,7 @@ process.stdin.on("data", (d: string) => {
     const text = () => (m.params?.input ?? []).map((x: { text?: string }) => x.text ?? "").join("\n");
     switch (m.method) {
       case "initialize": reply({ userAgent: "fake-codex" }); break;
-      case "thread/start": recordArgs({ method: m.method, model: m.params.model, approvalsReviewer: m.params.approvalsReviewer ?? null, approvalPolicy: m.params.approvalPolicy }); threadId = randomUUID(); reply({ thread: { id: threadId }, model: "fake-codex-model" }); break;
+      case "thread/start": recordArgs({ method: m.method, model: m.params.model, approvalsReviewer: m.params.approvalsReviewer ?? null, approvalPolicy: m.params.approvalPolicy, sandbox: m.params.sandbox, cwd: m.params.cwd }); threadId = randomUUID(); reply({ thread: { id: threadId }, model: "fake-codex-model" }); break;
       case "thread/resume": threadId = m.params.threadId; reply({ thread: { id: threadId }, model: "fake-codex-model" }); break;
       case "account/rateLimits/read":
         reply({ rateLimits: { primary: { usedPercent: 5, windowDurationMins: 10080, resetsAt: Math.floor(Date.now() / 1000) + 86400 }, secondary: null } });

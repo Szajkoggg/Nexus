@@ -305,6 +305,21 @@ receiving push and, to local requests only, the token, a sign-in link and its QR
 `<NEXUS_HOME>/push.json`. Whatever newly appears in a project's "waiting for you" list is pushed to every device; the
 list as found when the server starts is the baseline.
 
+## Conversations
+
+`project.yaml` holds `conversations: { notes_dir?, runtime, model?, effort? }`. A conversation is a session with
+role `conversation`: a thinking partner the user talks with about the project, one session per topic, with its chat
+in `chat.jsonl` (`from: partner` for its replies). It reads the whole project and writes only in `notes_dir`
+(relative to the root, checked to lie inside it): Claude Code runs it in `dontAsk` mode allowed `Read`, `Grep`,
+`Glob`, `Bash(nexus status:*)`, read-only git and `Edit(<notes_dir>/**)` only; Codex runs it with `notes_dir` as its
+working directory in a `workspace-write` sandbox (`read-only` without a notes folder), approval `never`. It starts no
+work. An idle partner's process ends after 15 minutes; the next message resumes the conversation.
+
+API: `GET /api/projects/:id/conversations`, `POST …/conversations` (`title`, `runtime?`, `model?`, `effort?`),
+`GET …/conversations/:cid` (session, state, chat), `PATCH …/conversations/:cid` (`title`, `model`, `effort`,
+`archived`), `POST …/conversations/:cid/messages` (`text`), `POST …/conversations/:cid/handoff`: the partner writes a
+summary (decisions, open questions, proposed work), which goes into the orchestrator's chat.
+
 ## The orchestrator
 
 `project.yaml` holds `orchestrator: { runtime, session, model?, notify }`. The orchestrator is a Claude Code session

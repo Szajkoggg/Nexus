@@ -57,6 +57,10 @@ export function SettingsPanel({ project, onChanged, server }: { project: Project
     codexSandbox: project.runtimes.codex.sandbox,
     codexApproval: project.runtimes.codex.approval_policy,
     codexReviewer: project.runtimes.codex.approvals_reviewer ?? "",
+    notesDir: project.conversations.notes_dir ?? "",
+    ideasRuntime: project.conversations.runtime,
+    ideasModel: project.conversations.model ?? "",
+    ideasEffort: project.conversations.effort ?? "",
     orchModel: undefined as string | undefined,
     orchEffort: undefined as string | undefined,
     notify: project.orchestrator?.notify ?? true,
@@ -82,6 +86,7 @@ export function SettingsPanel({ project, onChanged, server }: { project: Project
           codex: { model: f.codexModel || null, effort: f.codexEffort || null, sandbox: f.codexSandbox, approval_policy: f.codexApproval, approvals_reviewer: f.codexReviewer || null },
         },
         orchestrator: { notify: f.notify },
+        conversations: { notes_dir: f.notesDir || null, runtime: f.ideasRuntime, model: f.ideasModel || null, effort: f.ideasEffort || null },
         defaults: { review_policy: f.review, usage_pause_threshold: f.usage / 100, context_reuse_threshold: f.reuse / 100, worktree_dir: f.worktrees || null },
       });
       if (f.orchModel !== undefined || f.orchEffort !== undefined) {
@@ -147,6 +152,15 @@ export function SettingsPanel({ project, onChanged, server }: { project: Project
           <input type="checkbox" checked={f.notify} onChange={(e) => set("notify", e.target.checked)} className="accent-sky-500" />
           workers' questions, and runs that halt or finish
         </span></Row>
+      </Section>
+
+      <Section title="Ideas (conversations)">
+        <Row label="Notes folder" hint="The one folder a thinking partner may write in, relative to the project (e.g. Dev/Concepts/Gameplay). Empty: they only read.">
+          <input value={f.notesDir} onChange={(e) => set("notesDir", e.target.value)} placeholder="read only" className={`${field} font-mono text-xs`} />
+        </Row>
+        <Row label="Runtime"><Select value={f.ideasRuntime} onChange={(v) => set("ideasRuntime", v as "claude" | "codex")} options={[["claude", "Claude Code"], ["codex", "Codex"]]} /></Row>
+        <Row label="Model"><input value={f.ideasModel} onChange={(e) => set("ideasModel", e.target.value)} placeholder="default" list="claude-models" className={field} /></Row>
+        <Row label="Effort"><Select value={f.ideasEffort} onChange={(v) => set("ideasEffort", v)} options={f.ideasRuntime === "codex" ? CODEX_EFFORTS : CLAUDE_EFFORTS} empty="default" /></Row>
       </Section>
 
       <Section title="Defaults">

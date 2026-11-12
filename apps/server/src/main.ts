@@ -15,6 +15,7 @@ import {
 } from "@nexus/protocol";
 import { Engine } from "./engine.ts";
 import { Orchestrator } from "./orchestrator.ts";
+import { Conversations } from "./conversations.ts";
 import { listCodexModels } from "./codex.ts";
 import { Lifecycle, version } from "./lifecycle.ts";
 import {
@@ -42,7 +43,7 @@ const WEB_DIST = resolve(dirname(fileURLToPath(import.meta.url)), "../../web/dis
 
 // ---------------------------------------------------------------- projects
 
-interface Entry { id: string; root: string; store: ProjectStore; engine: Engine; orchestrator: Orchestrator; state?: ProjectState; error?: string }
+interface Entry { id: string; root: string; store: ProjectStore; engine: Engine; orchestrator: Orchestrator; conversations: Conversations; state?: ProjectState; error?: string }
 const projects = new Map<string, Entry>();
 
 function refreshRegistry(): void {
@@ -51,7 +52,8 @@ function refreshRegistry(): void {
     if (projects.has(p.id)) continue;
     const store = ProjectStore.forRoot(p.root);
     const engine = new Engine(store, () => changed(p.id));
-    projects.set(p.id, { id: p.id, root: p.root, store, engine, orchestrator: new Orchestrator(store, engine, () => changed(p.id)) });
+    const orchestrator = new Orchestrator(store, engine, () => changed(p.id));
+    projects.set(p.id, { id: p.id, root: p.root, store, engine, orchestrator, conversations: new Conversations(store, orchestrator, () => changed(p.id)) });
     watchProject(p.id, store.dir);
   }
   for (const id of projects.keys()) if (!reg.projects.some((p) => p.id === id)) projects.delete(id);
@@ -128,10 +130,10 @@ const MIME: Record<string, string> = {
 const app = new Hono<{ Bindings: HttpBindings }>();
 const lifecycle = new Lifecycle(() => [...projects.values()].map((e) => ({
   id: e.id,
-  idle: () => e.engine.idle() && e.orchestrator.idle(),
-  drain: (now: boolean) => e.engine.drainForUpdate(now),
-  cancel: () => e.engine.cancelDrain(),
-  shutdown: () => { e.engine.shutdown(); e.orchestrator.shutdown(); },
+  idle: () => e.engine.idle() && e.orchestrator.idle() && e.conversations.idle(),
+  drain: (now: boolean) => { e.conversations.draining = true; return e.engine.drainForUpdate(now); },
+  cancel: () => { e.conversations.draining = false; e.engine.cancelDrain(); },
+  shutdown: () => { e.engine.shutdown(); e.orchestrator.shutdown(); e.conversations.shutdown(); },
 })), () => { for (const s of sockets) if (s.readyState === s.OPEN) s.send(JSON.stringify({ type: "server" })); });
 const watch = new AttentionWatch();
 
@@ -325,6 +327,21 @@ app.get("/api/projects/:id/orchestrator", (c) => {
 });
 app.post("/api/projects/:id/orchestrator/messages", act((st, b) => orchestratorOf(st).say(b.text)));
 app.post("/api/projects/:id/orchestrator/reset", act((st) => orchestratorOf(st).reset()));
+// Conversations: thinking partners for the project.
+const conversationsOf = (st: ProjectStore) => [...projects.values()].find((e) => e.store === st)!.conversations;
+app.get("/api/projects/:id/conversations", (c) => {
+  const e = projects.get(c.req.param("id"));
+  return e ? c.json(e.conversations.list()) : c.json({ error: "unknown project" }, 404);
+});
+app.get("/api/projects/:id/conversations/:cid", (c) => {
+  const e = projects.get(c.req.param("id"));
+  if (!e) return c.json({ error: "unknown project" }, 404);
+  try { return c.json(e.conversations.view(c.req.param("cid"))); } catch (err) { return c.json({ error: (err as Error).message }, 404); }
+});
+app.post("/api/projects/:id/conversations", act((st, b) => conversationsOf(st).create(b)));
+app.patch("/api/projects/:id/conversations/:cid", act((st, b, p) => conversationsOf(st).update(p("cid"), b)));
+app.post("/api/projects/:id/conversations/:cid/messages", act((st, b, p) => conversationsOf(st).say(p("cid"), b.text)));
+app.post("/api/projects/:id/conversations/:cid/handoff", act((st, _b, p) => conversationsOf(st).handoff(p("cid"))));
 app.post("/api/projects/:id/orchestrator/settings", act((st, b) => orchestratorOf(st).settings(b.model, b.effort)));
 app.patch("/api/projects/:id/settings", act((st, b) => updateSettings(st, b)));
 
@@ -351,7 +368,7 @@ server.on("error", (err: NodeJS.ErrnoException) => {
   process.exit(1);
 });
 
-const shutdown = () => { for (const e of projects.values()) { e.engine.shutdown(); e.orchestrator.shutdown(); } process.exit(0); };
+const shutdown = () => { for (const e of projects.values()) { e.engine.shutdown(); e.orchestrator.shutdown(); e.conversations.shutdown(); } process.exit(0); };
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
 

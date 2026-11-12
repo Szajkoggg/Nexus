@@ -218,7 +218,7 @@ const commands: Record<string, () => void | Promise<void>> = {
     const sid = o.session ?? process.env.NEXUS_SESSION;
     const s = sid ? state.sessions.find((x) => x.id === sid) : undefined;
     console.log(`project ${state.project.name} (${state.project.id})`);
-    if (s?.role === "orchestrator") return overview(state);
+    if (s?.role === "orchestrator" || s?.role === "conversation") return overview(state);
     if (s) console.log(`session ${s.id}: ${s.role}, ${s.runtime}, queue ${s.queue ?? "-"}`);
     const queues = s?.queue ? state.queues.filter((q) => q.id === s.queue) : state.queues.filter((q) => ["running", "waiting", "stopped"].includes(q.status));
     for (const q of queues) {
