@@ -53,3 +53,11 @@ test("a push subscription needs an endpoint and keys", () => {
   remote.unsubscribe("https://push.example/x");
   assert.equal(remote.pushDevices().length, 0);
 });
+
+test("the sign-in cookie survives opening the app from the home screen (SameSite=Lax) and lasts a year", () => {
+  const c = remote.authCookie(true);
+  assert.match(c, /SameSite=Lax/);
+  assert.match(c, /Max-Age=31536000/);
+  assert.match(c, /HttpOnly/);
+  assert.match(c, /Secure/);
+});

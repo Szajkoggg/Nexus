@@ -63,8 +63,13 @@ export function allowed(req: IncomingMessage): boolean {
   return isLocal(req) || tokenMatches(cookieOf(req));
 }
 
+/**
+ * Lax, not Strict: an installed app opened from the home screen, or a link opened from another app, is a navigation
+ * from outside, and a Strict cookie would not be sent with it (the user would have to sign in at every launch).
+ * Writes stay protected: the API takes JSON only and refuses a foreign Origin.
+ */
 export function authCookie(secure: boolean): string {
-  return `${COOKIE}=${encodeURIComponent(auth().token)}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Strict${secure ? "; Secure" : ""}`;
+  return `${COOKIE}=${encodeURIComponent(auth().token)}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Lax${secure ? "; Secure" : ""}`;
 }
 
 export function loginPage(error?: string): string {
@@ -151,14 +156,15 @@ export function unsubscribe(endpoint: unknown): void {
   savePush(p);
 }
 
-/** Sends to every subscribed device; drops subscriptions the push service says are gone. */
-export async function push(payload: { title: string; body: string; url: string; tag?: string }): Promise<number> {
+/** Sends to every subscribed device (or only to `endpoint`); drops subscriptions the push service says are gone. */
+export async function push(payload: { title: string; body: string; url: string; tag?: string }, endpoint?: string): Promise<number> {
   const p = pushStore();
-  if (!p.subscriptions.length) return 0;
+  const targets = endpoint ? p.subscriptions.filter((s) => s.endpoint === endpoint) : p.subscriptions;
+  if (!targets.length) return 0;
   webpush.setVapidDetails(process.env.NEXUS_VAPID_SUBJECT ?? "mailto:nexus@example.com", p.vapid.publicKey, p.vapid.privateKey);
   const gone: string[] = [];
   let sent = 0;
-  await Promise.all(p.subscriptions.map(async (s) => {
+  await Promise.all(targets.map(async (s) => {
     try { await webpush.sendNotification(s, JSON.stringify(payload), { TTL: 3600, urgency: "high" }); sent++; }
     catch (err) {
       const code = (err as { statusCode?: number }).statusCode;

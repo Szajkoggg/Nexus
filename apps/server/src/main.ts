@@ -120,7 +120,8 @@ app.use("*", async (c, next) => {
   if (c.req.path.startsWith("/api/")) return c.json({ error: "sign in first" }, 401);
   return c.redirect("/login");
 });
-const secure = (c: { req: { header: (n: string) => string | undefined } }) => c.req.header("x-forwarded-proto") === "https" || !!c.req.header("tailscale-user-login");
+const secure = (c: { req: { header: (n: string) => string | undefined } }) =>
+  c.req.header("x-forwarded-proto") === "https" || !!c.req.header("tailscale-user-login") || /\.ts\.net(:\d+)?$/.test(c.req.header("host") ?? "");
 app.get("/login", (c) => {
   const t = c.req.query("token");
   if (t && tokenMatches(t)) { c.header("set-cookie", authCookie(secure(c))); return c.redirect("/"); }
@@ -263,7 +264,11 @@ app.post("/api/push/unsubscribe", async (c) => {
   unsubscribe(b.endpoint);
   return c.json({ ok: true });
 });
-app.post("/api/push/test", async (c) => c.json({ sent: await push({ title: "Nexus", body: "Notifications reach this device.", url: "/", tag: "test" }) }));
+app.post("/api/push/test", async (c) => {
+  const b = (await c.req.json().catch(() => ({}))) as { endpoint?: unknown };
+  const only = typeof b.endpoint === "string" ? b.endpoint : undefined;
+  return c.json({ sent: await push({ title: "Nexus", body: "Notifications reach this device.", url: "/", tag: "test" }, only) });
+});
 app.get("/api/codex/models", async (c) => c.json(await listCodexModels()));
 
 // The orchestrator chat.

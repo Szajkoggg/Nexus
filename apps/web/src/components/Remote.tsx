@@ -1,5 +1,5 @@
 // Remote access: how a phone reaches this dashboard, signs in, and gets notifications.
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useFetch } from "../api.ts";
 import { Button, Section } from "./ui.tsx";
 
@@ -11,6 +11,42 @@ interface Remote {
   login_url?: string;
   qr?: string;
   devices: { endpoint: string; label?: string; added_at: string }[];
+}
+
+/** What this browser can do for notifications, step by step, so a refusal is not silent. */
+function DeviceCheck() {
+  const [rows, setRows] = useState<[string, boolean | undefined, string][]>();
+  useEffect(() => {
+    void (async () => {
+      const secure = window.isSecureContext;
+      const sw = "serviceWorker" in navigator && "PushManager" in window;
+      const perm = typeof Notification !== "undefined" ? Notification.permission : "unsupported";
+      let reg: ServiceWorkerRegistration | undefined; let sub: PushSubscription | null = null;
+      if (sw) { try { reg = await navigator.serviceWorker.getRegistration(); sub = reg ? await reg.pushManager.getSubscription() : null; } catch { /* reported below */ } }
+      setRows([
+        ["Opened over https", secure, secure ? location.host : `${location.protocol}//${location.host}: open the https://…ts.net address`],
+        ["Browser supports push", sw, sw ? "" : "on an iPhone, open Nexus from the home screen"],
+        ["Notifications allowed", perm === "granted" ? true : perm === "denied" ? false : undefined, perm === "denied" ? "blocked: allow them in the site or app settings" : perm === "default" ? "not asked yet: the bell asks" : perm],
+        ["Service worker running", reg?.active ? true : sw && secure ? false : undefined, reg?.active ? "" : "the bell starts it"],
+        ["This device subscribed", sub ? true : false, sub ? new URL(sub.endpoint).host : "turn on the bell"],
+      ]);
+    })();
+  }, []);
+  if (!rows) return null;
+  return (
+    <div className="mt-3 rounded-lg bg-zinc-950 p-3">
+      <div className="mb-1 text-xs font-semibold text-zinc-400">This device</div>
+      <ul className="space-y-1 text-xs">
+        {rows.map(([label, ok, detail]) => (
+          <li key={label} className="flex gap-2">
+            <span className={ok === true ? "text-emerald-400" : ok === false ? "text-red-400" : "text-zinc-500"}>{ok === true ? "✓" : ok === false ? "✗" : "·"}</span>
+            <span className="text-zinc-300">{label}</span>
+            {detail && <span className="min-w-0 break-words text-zinc-500">{detail}</span>}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 }
 
 export function RemoteButton({ onClick }: { onClick: () => void }) {
@@ -90,6 +126,7 @@ export function RemotePanel({ version }: { version: unknown }) {
 
       <Section title="3. Notifications">
         <p className="text-sm text-zinc-400">On each device, turn on the bell in the header. Nexus then sends a notification when something waits for you: a question, a stop, a queue to approve, a review.</p>
+        <DeviceCheck />
         {r.devices.length > 0 ? (
           <ul className="mt-2 space-y-1 text-sm text-zinc-300">
             {r.devices.map((d) => <li key={d.endpoint}>{d.label ?? "Device"} <span className="text-xs text-zinc-500">since {new Date(d.added_at).toLocaleDateString()}</span></li>)}
