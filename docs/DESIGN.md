@@ -233,7 +233,7 @@ the user into a Markdown queue, though a project may still copy it there.
 
 | Part | Choice |
 |---|---|
-| Language | TypeScript throughout, Node.js 22 LTS or later, pnpm workspaces |
+| Language | TypeScript throughout, run natively by Node.js 24+ (type stripping: no build step for CLI and server), npm workspaces |
 | `packages/protocol` | Schemas (zod) for every file and event; shared by server, CLI and web |
 | `packages/cli` | The `nexus` command agents run; validates and appends |
 | `apps/server` | Hono (HTTP), ws (WebSocket), chokidar (file watching), the runtime adapters |

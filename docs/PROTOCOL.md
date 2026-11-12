@@ -205,7 +205,16 @@ nexus queue draft --file queue.yaml
 nexus answer <qid> "..." [--escalate] [--continue|--wait]
 nexus session start|resume|fork|pause|stop ...
 nexus attach                                   # register a hand-started session as external
+# setup (the user)
+nexus project add <path> [--id] [--name]       # creates .nexus/ (self-ignoring) and registers the project
+nexus import <file.md> [--prefix X]            # one-time import of queues written as Markdown tables
+nexus note <queue> <step> <text>               # until the dashboard can add notes
 ```
+
+`nexus status`, run by a session with a queue, prints that queue's undelivered notes and records them as read
+(`note.read`): being shown to the agent is the delivery.
+
+Step states also include `stopped` (the step a `queue.stop` named, when it was not finished).
 
 Output is short plain text so it reads well inside an agent's transcript. Exit code 0 on success, 2 on a protocol
 violation (with the reason on stderr).

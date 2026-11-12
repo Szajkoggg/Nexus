@@ -1,0 +1,22 @@
+{
+  "name": "nexus",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "node scripts/dev.ts",
+    "start": "npm run build -w @nexus/web && node apps/server/src/main.ts",
+    "typecheck": "tsc -p packages/protocol && tsc -p packages/cli && tsc -p apps/server && tsc -p apps/web",
+    "test": "node --test packages/*/test/*.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

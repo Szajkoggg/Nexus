@@ -1,0 +1,23 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", Consolas, monospace;
+}
+
+html, body, #root { height: 100%; }
+
+@layer base {
+  .md :where(p, ul, ol, pre, blockquote) { margin: 0.5rem 0; }
+  .md :where(ul) { list-style: disc; padding-left: 1.25rem; }
+  .md :where(ol) { list-style: decimal; padding-left: 1.25rem; }
+  .md :where(code) { font-family: var(--font-mono); font-size: 0.85em; background: rgb(255 255 255 / 0.06); padding: 0.05rem 0.3rem; border-radius: 0.25rem; }
+  .md :where(pre) { background: rgb(255 255 255 / 0.04); padding: 0.75rem; border-radius: 0.5rem; overflow-x: auto; }
+  .md :where(pre code) { background: none; padding: 0; }
+  .md :where(a) { color: var(--color-sky-400); text-decoration: underline; text-underline-offset: 2px; }
+  .md :where(strong) { color: var(--color-zinc-100); font-weight: 600; }
+  .md :where(table) { border-collapse: collapse; font-size: 0.85em; display: block; overflow-x: auto; }
+  .md :where(th, td) { border: 1px solid var(--color-zinc-800); padding: 0.25rem 0.5rem; vertical-align: top; }
+}
+
+.scroll-thin { scrollbar-width: thin; scrollbar-color: var(--color-zinc-700) transparent; }
