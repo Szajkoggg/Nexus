@@ -57,7 +57,10 @@ export class ClaudeSession extends EventEmitter<Events> {
     if (options.model) args.push("--model", options.model);
     if (options.appendSystemPrompt) args.push("--append-system-prompt", options.appendSystemPrompt);
     if (options.allowedTools.length) args.push("--allowedTools", ...options.allowedTools); // variadic: keep last
-    this.proc = spawn(process.env.NEXUS_CLAUDE ?? "claude", args, {
+    // NEXUS_CLAUDE replaces the binary (tests use a fake written in TypeScript or JavaScript, run by this Node).
+    const bin = process.env.NEXUS_CLAUDE ?? "claude";
+    const script = /\.(m?[jt]s)$/.test(bin);
+    this.proc = spawn(script ? process.execPath : bin, script ? [bin, ...args] : args, {
       cwd: options.cwd,
       env: { ...process.env, ...options.env },
       stdio: ["pipe", "pipe", "pipe"],
