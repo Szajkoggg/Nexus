@@ -302,6 +302,12 @@ The user's answers, 2026-11-12:
   not. Push works through the browsers' own push services (Web Push with VAPID), so a phone gets notifications with
   Nexus closed once it is installed to the home screen.
 
+- **Nexus updates itself between steps.** The live instance runs from its own worktree on a detached commit; an
+  update holds every running queue at the end of its step, moves the worktree, builds and starts its successor,
+  which waits for the port and resumes only the queues the update held. On Windows two details mattered: the
+  server writes its own log (a shell's `>>` locks the file against the successor), and the line endings are fixed
+  by `.gitattributes` (npm rewrites bin scripts, which made the worktree look changed).
+
 ## Open questions
 
 1. **The orchestrator on Codex.** The orchestrator runs on Claude Code only: its read-only guarantee rests on Claude
