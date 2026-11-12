@@ -15,6 +15,7 @@ import {
 } from "@nexus/protocol";
 import { Engine } from "./engine.ts";
 import { Orchestrator } from "./orchestrator.ts";
+import { listCodexModels } from "./codex.ts";
 
 const PORT = Number(process.env.NEXUS_PORT ?? 4317);
 const HOST = process.env.NEXUS_HOST ?? "127.0.0.1";
@@ -190,7 +191,10 @@ const engineOf = (st: ProjectStore) => [...projects.values()].find((e) => e.stor
 app.post("/api/projects/:id/queues/:queue/run", act((st, b, p) => {
   const engine = engineOf(st); const q = p("queue");
   switch (b.action) {
-    case "start": return engine.start(q, { model: (b.model as string) || undefined, session: (b.session as string) || undefined });
+    case "start": return engine.start(q, {
+      model: (b.model as string) || undefined, session: (b.session as string) || undefined,
+      runtime: b.runtime === "codex" || b.runtime === "claude" ? b.runtime : undefined,
+    });
     case "pause": return engine.pause(q);
     case "resume": return engine.resume(q);
     case "stop": return engine.stopNow(q, b.text as string | undefined);
@@ -206,6 +210,7 @@ app.get("/api/projects/:id/sessions/:session/activity", (c) => {
 });
 
 app.get("/api/usage", (c) => c.json(readUsage() ?? null));
+app.get("/api/codex/models", async (c) => c.json(await listCodexModels()));
 
 // The orchestrator chat.
 const orchestratorOf = (st: ProjectStore) => [...projects.values()].find((e) => e.store === st)!.orchestrator;

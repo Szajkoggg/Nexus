@@ -291,7 +291,13 @@ The user's answers, 2026-11-12:
 - **A killed server takes its `claude` children with it** (their stdin closes). On restart, any session process still
   alive is ended before a resume, and running queues come back paused.
 
+- **Codex has the same moves.** `turn/steer` reaches a running turn (checked live), `thread/resume` continues a
+  thread with its context (checked: the agent recalled the previous queue), token usage and the context window
+  arrive per request, and the rate limits arrive as a weekly window.
+- **Codex runs commands in PowerShell**, where npm's `nexus.ps1` is blocked by the execution policy: Nexus therefore
+  puts its own `nexus.cmd` first on the agents' PATH. The sandboxed shell can run it and write to `.nexus/`.
+
 ## Open questions
 
-1. **Codex parity.** The app-server offers the same moves (turns, `turn/steer`, `turn/interrupt`, token usage); to be
-   confirmed in phase 5.
+1. **The orchestrator on Codex.** The orchestrator runs on Claude Code only: its read-only guarantee rests on Claude
+   Code's `dontAsk` mode. Codex's `read-only` sandbox could give the same, with `.nexus/` writable; not built yet.

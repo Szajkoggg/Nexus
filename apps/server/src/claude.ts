@@ -2,6 +2,9 @@
 // alive across turns. Signed in with the user's own subscription (no API key, no Agent SDK).
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
+import { agentEnv, type ActivityItem, type AgentEvents, type AgentProcess, type Priority, type StreamFacts } from "./agent.ts";
+
+export type { ActivityItem, Priority, StreamFacts };
 
 export interface ClaudeOptions {
   cwd: string;
@@ -16,28 +19,7 @@ export interface ClaudeOptions {
   env: Record<string, string>;
 }
 
-export type Priority = "now" | "next" | "later";
-
-/** Facts read from the stream, for the session's runtime record. */
-export interface StreamFacts {
-  model?: string;
-  contextTokens?: number;
-  contextWindow?: number;
-  costUsd?: number;
-  usage?: Record<string, { utilization: number; resets_at?: string; status?: string }>;
-}
-
-/** What the agent did, condensed for the dashboard. */
-export interface ActivityItem { kind: "turn_start" | "text" | "tool" | "tool_error" | "turn_end" | "error"; text: string }
-
-interface Events {
-  activity: [ActivityItem];
-  facts: [StreamFacts];
-  turnEnd: [{ ok: boolean; text: string }];
-  exit: [number | null];
-}
-
-export class ClaudeSession extends EventEmitter<Events> {
+export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentProcess {
   readonly options: ClaudeOptions;
   private proc: ChildProcessWithoutNullStreams;
   private buffer = "";
@@ -64,7 +46,7 @@ export class ClaudeSession extends EventEmitter<Events> {
     const script = /\.(m?[jt]s)$/.test(bin);
     this.proc = spawn(script ? process.execPath : bin, script ? [bin, ...args] : args, {
       cwd: options.cwd,
-      env: { ...process.env, ...options.env },
+      env: agentEnv(options.env),
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
     });

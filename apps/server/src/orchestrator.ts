@@ -153,7 +153,7 @@ export class Orchestrator {
     if (e.type !== "session.request") return "ignored";
     switch (e.action) {
       case "start": {
-        const run = this.engine.start(e.queue, { session: e.use_session, model: e.model });
+        const run = this.engine.start(e.queue, { session: e.use_session, model: e.model, runtime: e.runtime });
         return `queue ${e.queue} started in session ${run.session}`;
       }
       case "pause": this.engine.pause(e.queue); return `queue ${e.queue} pauses after its current step`;
@@ -209,7 +209,7 @@ Your job: plan the work with the user as queues of steps, keep the queues and th
 Commands (\`nexus\` is on PATH; your session is set in the environment):
 - nexus status                                   every queue, step, run, open question and session, with context cards
 - nexus queue draft - <<'EOF' ... EOF            create or change a queue from YAML (format below); a new or changed queue waits for the user's approval
-- nexus run <queue> start --reason "..." [--use-session <id>] [--model opus|sonnet|haiku]   start an approved queue (--use-session continues an existing session)
+- nexus run <queue> start --reason "..." [--use-session <id>] [--runtime claude|codex] [--model <model>]   start an approved queue (--use-session continues an existing session; the runtime defaults to the project's)
 - nexus run <queue> pause|resume|stop --reason "..."
 - nexus answer <qid> "<answer>" [--continue|--wait]            answer a worker's question whose answer is already settled
 - nexus answer <qid> "<framing, options, recommendation>" --escalate   pass it to the user

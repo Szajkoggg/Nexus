@@ -29,7 +29,7 @@ Agent commands (session from NEXUS_SESSION or --session):
   nexus log <text> [--level info|warn|error]
   nexus answer <qid> <text> [--escalate] [--continue|--wait]     (orchestrator only)
   nexus queue draft <file.yaml|->                                 (orchestrator only) create or change a queue
-  nexus run <queue> start|pause|resume|stop --reason <text> [--use-session <id>] [--model <m>]   (orchestrator only)
+  nexus run <queue> start|pause|resume|stop --reason <text> [--use-session <id>] [--runtime claude|codex] [--model <m>]   (orchestrator only)
   (--queue <id> picks the queue when the session has none or the step id is ambiguous)
 
 Setup:
@@ -316,7 +316,7 @@ const commands: Record<string, () => void> = {
     const queue = need(args[1], "<queue>");
     const action = need(args[2], "start|pause|resume|stop");
     if (!["start", "pause", "resume", "stop"].includes(action)) throw new UsageError("the action is start, pause, resume or stop");
-    const e = emit(st, s, { type: "session.request", action, queue, use_session: o["use-session"], model: o.model, reason: need(o.reason, "--reason") });
+    const e = emit(st, s, { type: "session.request", action, queue, use_session: o["use-session"], model: o.model, runtime: o.runtime, reason: need(o.reason, "--reason") });
     report(waitApplied(st, s.id, e.id));
   },
 

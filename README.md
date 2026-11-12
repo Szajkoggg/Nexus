@@ -7,7 +7,12 @@ user, a per-project orchestrator agent and the working agents.
 - [docs/DESIGN.md](docs/DESIGN.md): concepts, architecture, decisions, phases
 - [docs/PROTOCOL.md](docs/PROTOCOL.md): the `.nexus/` files, events and the `nexus` CLI
 
-**Status: phase 4** (orchestrator chat). Each project has an orchestrator in the dashboard's chat: it reads the
+**Status: phase 5** (Codex adapter). Runs can use Codex as well as Claude Code: the runtime is chosen per run (or
+by the project's default), and everything works the same way: step turns, notes, messages into the running turn
+(`turn/steer`), questions, stop and resume, continuing a session's thread, context fill and the Codex usage window.
+Needs the Codex CLI (`npm i -g @openai/codex`), signed in with `codex login`.
+
+Phase 4 (orchestrator chat): Each project has an orchestrator in the dashboard's chat: it reads the
 project, drafts queues for your approval, starts and steers runs (choosing to continue a session that has the
 right context, or a fresh one), answers workers' questions whose answer is settled and passes the rest to you, and
 tells you when a run halts or finishes. It can read everything and edit nothing.
@@ -18,9 +23,10 @@ step's opening, delivers messages and answers into the running turn, holds on qu
 stops and resumes on request. The dashboard shows the agent's activity per step, each session's context fill and
 the subscription's usage windows.
 
-Per project, `runtimes.claude` in `.nexus/project.yaml` sets the default `model`, the `permission_mode`
-(default `acceptEdits`) and extra `allowed_tools` for launched sessions; the project's own `.claude/settings.json`
-applies as well.
+Per project, `.nexus/project.yaml` sets `runtimes.default` (`claude` or `codex`); `runtimes.claude` the default
+`model`, the `permission_mode` (default `acceptEdits`) and extra `allowed_tools` (the project's own
+`.claude/settings.json` applies as well); `runtimes.codex` the `model`, the `sandbox` (default `workspace-write`) and
+the `approval_policy` (default `never`).
 
 ## Requirements
 

@@ -57,8 +57,9 @@ defaults:
   usage_pause_threshold: 0.9           # share of the 5-hour window at which no new step turn starts
   worktree_dir: C:/Code/GameDev/ProjectHoneycomb.worktrees
 runtimes:
-  claude: { permission_mode: acceptEdits }
-  codex:  { sandbox: workspace-write }
+  default: claude                      # the runtime a run uses when its start names none
+  claude: { model: opus, permission_mode: acceptEdits, allowed_tools: [] }
+  codex:  { model: gpt-6-astra, sandbox: workspace-write, approval_policy: never }
 orchestrator:
   runtime: claude
   session: 01JD...                     # its current session id
@@ -304,6 +305,30 @@ refused without a prompt. Its briefing (appended system prompt) explains its rol
   Starting an unapproved revision is refused.
 - With `notify` on, the server tells the orchestrator (starting it if needed) when a worker asks a question and when a
   run halts or finishes; the chat shows these notices.
+
+## The `nexus` command inside agents
+
+The server writes `<NEXUS_HOME>/bin/nexus.cmd` (for cmd and PowerShell, where npm's `.ps1` shim is blocked when
+scripts are disabled, as in Codex's shell) and `<NEXUS_HOME>/bin/nexus` (for Git Bash), both running this checkout's
+CLI with the server's Node, and puts that directory first on every launched agent's `PATH`.
+
+## How the engine runs a Codex session
+
+`codex app-server` over stdio: JSON-RPC requests and notifications, one JSON object per line, no `jsonrpc` field.
+After `initialize` (with `experimentalApi`) and `initialized`, `thread/start` (or `thread/resume` with the stored
+thread id) with the working directory, model, sandbox mode, approval policy (`never`: Nexus runs unattended; any
+approval request that still comes is declined) and the worker briefing as `developerInstructions`. The thread id
+becomes the session's `native_id`.
+
+- a step turn: `turn/start` with `input: [{type: "text", text, text_elements: []}]` and, in `workspace-write`, a
+  `sandboxPolicy` whose writable roots include the project's `.nexus/` when the worktree is elsewhere
+- a message while the agent works: `turn/steer` with the running turn's id
+- stop now: `turn/interrupt`, then the message as the next turn
+
+It reads `turn/started` and `turn/completed` (the turn's status), `item/started` and `item/completed`
+(`commandExecution`, `fileChange`, `agentMessage`, `mcpToolCall`, `webSearch`), `thread/tokenUsage/updated` (the last
+request's input tokens are the context in use; `modelContextWindow`) and `account/rateLimits/updated` (stored as
+`codex_<window>` in `usage.json`, e.g. `codex_7d`). Checked against Codex CLI 0.167.2.
 
 ## How the engine runs a Claude Code session
 

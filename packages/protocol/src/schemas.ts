@@ -50,13 +50,19 @@ export const ProjectFile = z.object({
     worktree_dir: z.string().optional(),
   }).prefault({}),
   runtimes: z.object({
+    /** The runtime a run uses when its start does not name one. */
+    default: z.enum(["claude", "codex"]).default("claude"),
     claude: z.object({
       model: z.string().optional(),
       permission_mode: z.enum(["acceptEdits", "auto", "bypassPermissions", "dontAsk", "manual", "plan"]).default("acceptEdits"),
       /** Added to every Nexus-launched session; `Bash(nexus:*)` is always allowed. */
       allowed_tools: z.array(z.string()).default([]),
     }).prefault({}),
-    codex: z.record(z.string(), z.unknown()).default({}),
+    codex: z.object({
+      model: z.string().optional(),
+      sandbox: z.enum(["read-only", "workspace-write", "danger-full-access"]).default("workspace-write"),
+      approval_policy: z.enum(["never", "on-request", "untrusted"]).default("never"),
+    }).prefault({}),
   }).prefault({}),
   orchestrator: z.object({
     runtime: Runtime.default("claude"),
@@ -195,7 +201,7 @@ export const Event = z.discriminatedUnion("type", [
   z.object({
     ...base, type: z.literal("session.request"),
     action: z.enum(["start", "resume", "pause", "stop"]), queue: Id,
-    use_session: Id.optional(), model: z.string().optional(), reason: z.string(),
+    use_session: Id.optional(), model: z.string().optional(), runtime: z.enum(["claude", "codex"]).optional(), reason: z.string(),
   }),
   z.object({ ...base, type: z.literal("log"), level: z.enum(["info", "warn", "error"]), text: z.string() }),
   /** The user (or orchestrator) accepts a step waiting in review. */

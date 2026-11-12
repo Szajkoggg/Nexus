@@ -10,11 +10,13 @@ import {
   ActionError, ProjectStore, USER_SESSION, ensureUserSession, loadProjectState, newId, normPath, now, readUsage,
   writeUsage, type InboxView, type ProjectState, type QueueView, type RunFile, type SessionFile, type StepView,
 } from "@nexus/protocol";
-import { ClaudeSession, type StreamFacts } from "./claude.ts";
+import type { AgentProcess, StreamFacts } from "./agent.ts";
+import { ClaudeSession } from "./claude.ts";
+import { CodexSession } from "./codex.ts";
 
-interface Live { proc: ClaudeSession; session: string }
+interface Live { proc: AgentProcess; session: string }
 
-export interface StartOptions { model?: string; session?: string }
+export interface StartOptions { model?: string; session?: string; runtime?: "claude" | "codex" }
 
 export class Engine {
   private readonly live = new Map<string, Live>();   // by Nexus session id
@@ -39,7 +41,9 @@ export class Engine {
     if (q.status === "done" || q.status === "cancelled") throw new ActionError(`the queue is ${q.status}`, 409);
     if (!q.steps.some((s) => s.status !== "done" && s.status !== "skipped")) throw new ActionError("no step left to run", 409);
 
-    const session = opts.session ? this.reuseSession(state, opts.session, queueId, opts.model) : this.newSession(state, q, opts.model);
+    const session = opts.session
+      ? this.reuseSession(state, opts.session, queueId, opts.model)
+      : this.newSession(state, q, opts.runtime ?? state.project.runtimes.default, opts.model);
     const run: RunFile = { protocol: 1, session: session.id, state: "running", started_at: now(), updated_at: now() };
     this.store.writeRun(queueId, run);
     this.ensureProcess(session);
@@ -172,7 +176,7 @@ export class Engine {
       live.proc.close();
       return;
     }
-    const wait = this.usageWait(state);
+    const wait = this.usageWait(state, this.sessionFile(state, run.session).runtime);
     if (wait) {
       this.writeRun(queueId, { ...run, state: "usage_wait", reason: wait.reason, resume_at: wait.until });
       this.scheduleResume(queueId, wait.until);
@@ -236,12 +240,14 @@ export class Engine {
 
   // ---------------------------------------------------------------- sessions and processes
 
-  private newSession(state: ProjectState, q: QueueView, model?: string): SessionFile {
+  private newSession(state: ProjectState, q: QueueView, runtime: "claude" | "codex", model?: string): SessionFile {
     const cwd = this.worktreeFor(state, q);
     const s: SessionFile = {
-      protocol: 1, id: newId(), project: state.project.id, role: "worker", runtime: "claude", native_id: randomUUID(),
+      protocol: 1, id: newId(), project: state.project.id, role: "worker", runtime,
+      // Claude takes the id Nexus chooses; Codex assigns its thread id when the thread starts.
+      native_id: runtime === "claude" ? randomUUID() : null,
       title: `${q.id} worker`, cwd, branch: gitBranch(cwd), queue: q.id, launched_by: "nexus", created_at: now(),
-      model: model ?? state.project.runtimes.claude.model,
+      model: model ?? state.project.runtimes[runtime].model,
     };
     this.store.writeSession(s);
     return s;
@@ -249,7 +255,7 @@ export class Engine {
 
   private reuseSession(state: ProjectState, id: string, queueId: string, model?: string): SessionFile {
     const s = this.sessionFile(state, id);
-    if (s.runtime !== "claude" || s.launched_by !== "nexus" || !s.native_id) throw new ActionError("only a Claude session launched by Nexus can be continued", 409);
+    if (s.runtime === "external" || s.launched_by !== "nexus" || !s.native_id) throw new ActionError("only a session Nexus launched (and started at least once) can be continued", 409);
     const busy = state.queues.find((q) => q.id !== queueId && q.run?.session === id && ["running", "pausing", "usage_wait"].includes(q.run.state));
     if (busy) throw new ActionError(`that session is running queue ${busy.id}`, 409);
     const updated: SessionFile = { ...s, queue: queueId, model: model ?? s.model };
@@ -261,18 +267,30 @@ export class Engine {
     const existing = this.live.get(session.id);
     if (existing && existing.proc.state !== "exited") return existing;
     const project = this.store.readProject();
-    const claude = project.runtimes.claude;
-    const transcriptExists = this.store.readRuntime(session.id) !== undefined; // started before: resume it
-    const proc = new ClaudeSession({
-      cwd: session.cwd,
-      uuid: session.native_id!,
-      resume: transcriptExists,
-      model: session.model ?? claude.model,
-      permissionMode: claude.permission_mode,
-      allowedTools: ["Bash(nexus:*)", ...claude.allowed_tools],
-      appendSystemPrompt: WORKER_BRIEFING,
-      env: { NEXUS_SESSION: session.id, NEXUS_DIR: this.store.dir },
-    });
+    const env = { NEXUS_SESSION: session.id, NEXUS_DIR: this.store.dir };
+    let proc: AgentProcess;
+    if (session.runtime === "codex") {
+      const codex = project.runtimes.codex;
+      const inside = normPath(this.store.dir).toLowerCase().startsWith(normPath(session.cwd).toLowerCase() + "/");
+      proc = new CodexSession({
+        cwd: session.cwd, model: session.model ?? codex.model, instructions: WORKER_BRIEFING, env,
+        threadId: session.native_id, sandbox: codex.sandbox, approvalPolicy: codex.approval_policy,
+        writableRoots: inside ? [] : [this.store.dir],
+      });
+    } else {
+      const claude = project.runtimes.claude;
+      const transcriptExists = this.store.readRuntime(session.id) !== undefined; // started before: resume it
+      proc = new ClaudeSession({
+        cwd: session.cwd,
+        uuid: session.native_id!,
+        resume: transcriptExists,
+        model: session.model ?? claude.model,
+        permissionMode: claude.permission_mode,
+        allowedTools: ["Bash(nexus:*)", ...claude.allowed_tools],
+        appendSystemPrompt: WORKER_BRIEFING,
+        env,
+      });
+    }
     const l: Live = { proc, session: session.id };
     this.live.set(session.id, l);
     this.writeRuntime(session.id, { state: "idle", pid: proc.pid });
@@ -309,7 +327,11 @@ export class Engine {
     if (f.costUsd !== undefined) patch.cost_usd = f.costUsd;
     if (f.contextTokens !== undefined || f.model) patch.state = "working";
     if (Object.keys(patch).length) this.writeRuntime(session, patch);
-    if (f.usage) writeUsage({ updated_at: now(), windows: f.usage });
+    if (f.usage) writeUsage({ updated_at: now(), windows: { ...readUsage()?.windows, ...f.usage } });
+    if (f.nativeId) {
+      const s = this.store.readSession(session);
+      if (s.native_id !== f.nativeId) this.store.writeSession({ ...s, native_id: f.nativeId });
+    }
   }
 
   private writeRuntime(session: string, patch: Record<string, unknown>): void {
@@ -337,13 +359,17 @@ export class Engine {
 
   // ---------------------------------------------------------------- usage limits
 
-  private usageWait(state: ProjectState): { reason: string; until: string } | undefined {
-    const u = readUsage();
-    const w = u?.windows.five_hour;
-    if (!w || !w.resets_at || Date.parse(w.resets_at) < Date.now()) return undefined;
+  /** Claude's 5-hour window, or any of Codex's windows, above the project's threshold. */
+  private usageWait(state: ProjectState, runtime: string): { reason: string; until: string } | undefined {
+    const windows = readUsage()?.windows ?? {};
+    const names = runtime === "codex" ? Object.keys(windows).filter((k) => k.startsWith("codex_")) : ["five_hour"];
     const limit = state.project.defaults.usage_pause_threshold;
-    if (w.utilization < limit) return undefined;
-    return { reason: `the 5-hour window is at ${Math.round(w.utilization * 100)} % (limit ${Math.round(limit * 100)} %)`, until: w.resets_at };
+    for (const name of names) {
+      const w = windows[name];
+      if (!w || !w.resets_at || Date.parse(w.resets_at) < Date.now() || w.utilization < limit) continue;
+      return { reason: `the ${name.replace("codex_", "Codex ").replace("five_hour", "5-hour")} window is at ${Math.round(w.utilization * 100)} % (limit ${Math.round(limit * 100)} %)`, until: w.resets_at };
+    }
+    return undefined;
   }
 
   private scheduleResume(queueId: string, until: string): void {

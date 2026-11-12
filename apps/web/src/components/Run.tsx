@@ -27,17 +27,16 @@ export function RunChip({ queue }: { queue: QueueView }) {
   );
 }
 
-const MODELS = [
-  { value: "", label: "project default" },
-  { value: "opus", label: "Opus" },
-  { value: "sonnet", label: "Sonnet" },
-  { value: "haiku", label: "Haiku" },
-];
+const CLAUDE_MODELS = ["opus", "sonnet", "haiku"];
 
 /** Start, pause, stop and resume a queue's run. */
 export function RunControls({ project, queue, onChanged }: { project: ProjectState; queue: QueueView; onChanged: () => void }) {
   const id = project.project.id;
   const [model, setModel] = useState("");
+  const [runtime, setRuntime] = useState<"claude" | "codex">(project.project.runtimes.default);
+  const codexModels = useFetch<string[]>(runtime === "codex" ? "/api/codex/models" : undefined, runtime);
+  const suggestions = runtime === "codex" ? codexModels ?? [] : CLAUDE_MODELS;
+  const defaultModel = project.project.runtimes[runtime].model;
   const [session, setSession] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
@@ -49,7 +48,7 @@ export function RunControls({ project, queue, onChanged }: { project: ProjectSta
     catch (e) { setError((e as Error).message); }
     finally { setBusy(false); }
   };
-  const reusable = project.sessions.filter((s) => s.runtime === "claude" && s.launched_by === "nexus" && s.native_id
+  const reusable = project.sessions.filter((s) => s.role === "worker" && s.runtime !== "external" && s.launched_by === "nexus" && s.native_id
     && !project.queues.some((q) => q.id !== queue.id && q.run?.session === s.id && ["running", "pausing", "usage_wait"].includes(q.run.state)));
   const runSession = run ? project.sessions.find((s) => s.id === run.session) : undefined;
   const canStart = queue.approved && !active && queue.status !== "done" && queue.status !== "cancelled";
@@ -81,18 +80,28 @@ export function RunControls({ project, queue, onChanged }: { project: ProjectSta
               <option value="">New session</option>
               {reusable.map((s) => (
                 <option key={s.id} value={s.id}>
-                  Continue: {s.title ?? s.id.slice(-8)}{s.context ? ` (${s.context.topics.slice(0, 3).join(", ") || "has context"})` : ""}{s.live?.context_tokens && s.live.context_window ? ` · ${Math.round((100 * s.live.context_tokens) / s.live.context_window)}%` : ""}
+                  Continue: {s.title ?? s.id.slice(-8)} ({s.runtime}){s.context ? ` (${s.context.topics.slice(0, 3).join(", ") || "has context"})` : ""}{s.live?.context_tokens && s.live.context_window ? ` · ${Math.round((100 * s.live.context_tokens) / s.live.context_window)}%` : ""}
                 </option>
               ))}
             </select>
           </label>
           <label className="text-xs text-zinc-400">
-            <span className="mb-1 block">Model</span>
-            <select value={model} onChange={(e) => setModel(e.target.value)} disabled={!!session} className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm text-zinc-200 disabled:opacity-50">
-              {MODELS.map((m) => <option key={m.value} value={m.value}>{m.label}{m.value === "" && project.project.runtimes.claude.model ? ` (${project.project.runtimes.claude.model})` : ""}</option>)}
+            <span className="mb-1 block">Runtime</span>
+            <select value={runtime} onChange={(e) => { setRuntime(e.target.value as "claude" | "codex"); setModel(""); }} disabled={!!session} className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm text-zinc-200 disabled:opacity-50">
+              <option value="claude">Claude Code</option>
+              <option value="codex">Codex</option>
             </select>
           </label>
-          <Button disabled={busy} onClick={() => call({ action: "start", model: model || undefined, session: session || undefined })}>
+          <label className="text-xs text-zinc-400">
+            <span className="mb-1 block">Model</span>
+            <input
+              list={`models-${queue.id}`} value={model} onChange={(e) => setModel(e.target.value)} disabled={!!session}
+              placeholder={defaultModel ? `default: ${defaultModel}` : "runtime default"}
+              className="w-44 rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm text-zinc-200 placeholder:text-zinc-600 disabled:opacity-50"
+            />
+            <datalist id={`models-${queue.id}`}>{suggestions.map((m) => <option key={m} value={m} />)}</datalist>
+          </label>
+          <Button disabled={busy} onClick={() => call({ action: "start", model: model || undefined, session: session || undefined, runtime: session ? undefined : runtime })}>
             {run ? "Start a new run" : "Start"}
           </Button>
         </div>
@@ -100,7 +109,9 @@ export function RunControls({ project, queue, onChanged }: { project: ProjectSta
       {!queue.approved && !active && <p className="text-sm text-zinc-500">Approve the queue's current revision to run it.</p>}
       {error && <p className="mt-2 text-xs text-red-400">{error}</p>}
       <p className="mt-2 text-xs text-zinc-600">
-        Claude Code runs in {queue.worktree && queue.worktree !== "auto" ? <span className="font-mono">{queue.worktree}</span> : queue.worktree === "auto" ? "a new worktree" : <span className="font-mono">{project.project.root}</span>} with permission mode {project.project.runtimes.claude.permission_mode}.
+        {runtime === "codex" ? "Codex" : "Claude Code"} runs in {queue.worktree && queue.worktree !== "auto" ? <span className="font-mono">{queue.worktree}</span> : queue.worktree === "auto" ? "a new worktree" : <span className="font-mono">{project.project.root}</span>}{runtime === "codex"
+          ? ` with sandbox ${project.project.runtimes.codex.sandbox}, approvals ${project.project.runtimes.codex.approval_policy}.`
+          : ` with permission mode ${project.project.runtimes.claude.permission_mode}.`}
       </p>
     </Section>
   );
@@ -153,7 +164,7 @@ export function UsageMeter({ version }: { version: unknown }) {
   if (!u) return null;
   const windows = Object.entries(u.windows).filter(([, w]) => !w.resets_at || Date.parse(w.resets_at) > Date.now());
   if (!windows.length) return null;
-  const name = (k: string) => (k === "five_hour" ? "5h" : k === "seven_day" ? "7d" : k.replace(/_/g, " "));
+  const name = (k: string) => (k === "five_hour" ? "Claude 5h" : k === "seven_day" ? "Claude 7d" : k.startsWith("codex_") ? `Codex ${k.slice(6)}` : k.replace(/_/g, " "));
   return (
     <span className="hidden items-center gap-3 text-xs text-zinc-500 sm:flex" title={`Reported ${new Date(u.updated_at).toLocaleString()}`}>
       {windows.map(([k, w]) => {
