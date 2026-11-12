@@ -1,0 +1,5 @@
+# One line ending everywhere, so tools (npm rewriting bin scripts, editors) never leave a checkout looking changed.
+* text=auto eol=lf
+*.png binary
+*.ps1 text eol=crlf
+*.vbs text eol=crlf

@@ -105,10 +105,12 @@ export class Lifecycle {
     const v = await version();
     const lock = hashOf(join(ROOT, "package-lock.json"));
     if (v.live) {
-      if (await git("status", "--porcelain", "--untracked-files=no")) throw new Error(`the live worktree ${ROOT} has local changes; it should only ever be updated`);
+      // Content, not file stamps: npm rewrites line endings of package bins, which only looks like a change.
+      const changed = await git("diff", "--name-only", "HEAD");
+      if (changed) throw new Error(`the live worktree ${ROOT} has local changes (${changed.split("\n").join(", ")}); it should only ever be updated`);
       const target = await git("rev-parse", "--short", `${this.status.ref}^{commit}`);
       this.note(`moving the live worktree from ${v.commit} to ${target} (${this.status.ref})`);
-      await git("checkout", "--detach", this.status.ref!);
+      await git("checkout", "--force", "--detach", this.status.ref!); // forced: only line-ending leftovers differ
     } else {
       this.note(`running from a development checkout (branch ${v.branch}): rebuilding and restarting without moving it`);
     }
