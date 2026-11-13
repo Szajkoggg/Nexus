@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ProjectStore, loadProjectState, newId, now, revisionHash, type Event, type QueueFile, type SessionFile } from "../src/index.ts";
+import { ProjectStore, loadProjectState, newId, stepClosed, now, revisionHash, type Event, type QueueFile, type SessionFile } from "../src/index.ts";
 
 function setup() {
   const root = mkdtempSync(join(tmpdir(), "nexus-test-"));
@@ -235,4 +235,38 @@ test("only the user rejects a step waiting for their review; the rejection holds
   assert.equal(s.queues[0]!.rejection, undefined);
   assert.equal(s.queues[0]!.steps[1]!.status, "rejected", "the step stays rejected");
   assert.notEqual(s.queues[0]!.status, "paused");
+});
+
+test("a rejected step counts as closed once a newer revision is approved: the queue whose other steps are finished is done", () => {
+  const { st, session, emit } = setup();
+  const w = session("worker"); const u = session("user");
+  emit(w, { type: "step.started", queue: "Q", step: "Q1" });
+  emit(w, { type: "step.done", queue: "Q", step: "Q1", summary: "ok" });
+  emit(w, { type: "step.started", queue: "Q", step: "Q2" });
+  emit(w, { type: "step.done", queue: "Q", step: "Q2", summary: "ok" });
+  emit(u, { type: "review.rejected", queue: "Q", step: "Q2", text: "Not this." });
+  const view = () => loadProjectState(st).queues[0]!;
+  assert.equal(view().status, "paused", "before the approval the rejection holds: not done");
+  assert.ok(!stepClosed(view(), view().steps[1]!));
+
+  // Revision 2 keeps the steps (the rejected one is not run again); its approval lets the queue end.
+  const cur = st.readQueue("Q");
+  st.writeQueue({ ...cur, revision: 2, history: [{ revision: 1, hash: "y", replaced_at: "2026-11-12T10:30:00.000Z" }], approvals: [...cur.approvals, { revision: 2, at: "2026-11-12T11:00:00.000Z", hash: "x" }] });
+  let q = view();
+  assert.equal(q.rejection, undefined);
+  assert.equal(q.status, "done");
+  assert.equal(q.status_reason, undefined);
+  assert.deepEqual([q.steps[1]!.status, q.steps[1]!.reason], ["rejected", "Not this."], "it keeps its mark and reason");
+  assert.ok(stepClosed(q, q.steps[1]!));
+
+  // With a new step after it, the queue is done once that step is.
+  const two = st.readQueue("Q");
+  st.writeQueue({ ...two, steps: [...two.steps, { id: "Q3", title: "Redo", goal: "", acceptance: [] }] });
+  q = view();
+  assert.notEqual(q.status, "done", "Q3 is still pending");
+  emit(w, { type: "step.started", queue: "Q", step: "Q3" });
+  emit(w, { type: "step.done", queue: "Q", step: "Q3", summary: "redone" });
+  q = view();
+  assert.equal(q.status, "done");
+  assert.equal(q.steps[1]!.status, "rejected");
 });

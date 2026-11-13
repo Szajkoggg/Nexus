@@ -10,7 +10,7 @@ import { existsSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import {
   ENDED_RUN_STATES,
-  ActionError, ProjectStore, USER_SESSION, ensureUserSession, liftByContinue, loadProjectState, stopPlace, newId, normPath, now, readUsage,
+  ActionError, ProjectStore, USER_SESSION, ensureUserSession, liftByContinue, loadProjectState, stepClosed, stopPlace, newId, normPath, now, readUsage,
   writeUsage, CLAUDE_EFFORTS, RETRY_LIMIT, effortIssue, formatClock, type Effort, type ProjectFile, type StepDef, type InboxView, type ProjectState, type QueueView, type RunFile, type SessionFile,
   type SessionView, type StepView,
   addNote,
@@ -157,7 +157,7 @@ export class Engine {
     if (q.run && GOING.includes(q.run.state)) throw new ActionError("the queue is already running", 409);
     if (q.status === "stopped") throw new ActionError(stoppedMessage(q), 409);
     if (q.status === "done" || q.status === "cancelled") throw new ActionError(`the queue is ${q.status}`, 409);
-    if (!q.steps.some((s) => s.status !== "done" && s.status !== "skipped")) throw new ActionError("no step left to run", 409);
+    if (q.steps.every((s) => stepClosed(q, s))) throw new ActionError("no step left to run", 409);
 
     // The run's own values: what was asked, else the continued session's, else the project's defaults.
     const reused = opts.session ? this.sessionFile(state, opts.session) : undefined;
@@ -171,7 +171,7 @@ export class Engine {
     const own = effortIssue(runtime, values.effort);
     if (own) throw new ActionError(own);
     // Every step still to run is checked now, so a bad combination refuses the start rather than halting the run later.
-    for (const st of q.steps.filter((x) => x.status !== "done" && x.status !== "skipped")) {
+    for (const st of q.steps.filter((x) => !stepClosed(q, x))) {
       const w = stepValues(values, st, state.project);
       const issue = effortIssue(w.runtime, w.effort);
       if (issue) throw new ActionError(`step ${st.id} would run on ${RUNTIME_NAME[w.runtime]} at effort ${w.effort}: ${issue}`, 409);
@@ -760,10 +760,10 @@ export class Engine {
     this.writeRun(queueId, { ...run, state: "halted", reason, resume_after_restart: undefined, resume_at: undefined });
   }
 
-  /** The queue has no step left: every step is done or skipped. */
+  /** The queue has no step left: every step is done or skipped, or rejected by the user and released (stepClosed). */
   private nothingLeft(queueId: string): boolean {
     const q = loadProjectState(this.store).queues.find((x) => x.id === queueId);
-    return !!q && q.steps.length > 0 && q.steps.every((s) => s.status === "done" || s.status === "skipped");
+    return !!q && q.steps.length > 0 && q.steps.every((s) => stepClosed(q, s));
   }
 
   /** Ends a going run as finished (its last step is done). */
@@ -1024,7 +1024,8 @@ export class Engine {
     const state = loadProjectState(this.store);
     for (const q of this.store.queueIds()) {
       const run = this.store.readRun(q);
-      const left = state.queues.find((x) => x.id === q)?.steps.some((s) => s.status !== "done" && s.status !== "skipped");
+      const view = state.queues.find((x) => x.id === q);
+      const left = view?.steps.some((s) => !stepClosed(view, s));
       if (run && (["running", "pausing"].includes(run.state) || run.resume_after_restart) && left === false) {
         // Its last step was done before the server stopped: the run is over, whatever stopped the process.
         this.writeRun(q, { ...run, state: "finished", reason: undefined, resume_after_restart: undefined, retries: undefined });

@@ -117,6 +117,14 @@ export interface ProjectState {
 const FINISHED_STEP: ReadonlySet<StepStatus> = new Set(["done", "skipped", "failed"]);
 const TERMINAL_QUEUE: ReadonlySet<QueueStatus> = new Set(["done", "cancelled"]);
 
+/**
+ * A step that needs no more work: done or skipped, or rejected once the rejection no longer holds (a newer revision
+ * was approved after it). A rejected step is never run again; it keeps its status and reason.
+ */
+export function stepClosed(q: Pick<QueueView, "rejection">, st: { id: string; status: StepStatus }): boolean {
+  return st.status === "done" || st.status === "skipped" || (st.status === "rejected" && q.rejection?.step !== st.id);
+}
+
 export function loadProjectState(store: ProjectStore): ProjectState {
   const warnings: string[] = [];
   const project = store.readProject();
@@ -199,6 +207,11 @@ export function loadProjectState(store: ProjectStore): ProjectState {
     } else if (!TERMINAL_QUEUE.has(q.status)) {
       q.status = "paused"; q.status_reason = `step ${r.step} was rejected${r.text ? `: ${r.text}` : ""}; it goes on once you approve a revision that deals with it`;
     }
+  }
+  // Once its rejection no longer holds, a rejected step counts as closed: a queue whose other steps are finished is done.
+  for (const q of queues.values()) {
+    if (TERMINAL_QUEUE.has(q.status) || q.rejection || !q.steps.some((s) => s.status === "rejected")) continue;
+    if (q.steps.every((s) => stepClosed(q, s) || FINISHED_STEP.has(s.status))) { q.status = "done"; q.status_reason = undefined; }
   }
 
   // An approval after a proposal to lift answers it (approving a stopped queue lifts the stop anyway).

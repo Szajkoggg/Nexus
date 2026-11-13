@@ -296,6 +296,9 @@ the reason, `rejected: <step>`). Nothing is reverted.
 - The step's status is `rejected` (its `reason` is the text). It is never run again.
 - The derived queue has `rejection` (`step`, `at`, `text?`, `revision`: the revision current when it came) and is
   `paused`, with the reason, until the user approves a newer revision. Then the rejection lifts.
+- Once the rejection lifts, the rejected step counts as closed, like a skipped one (`stepClosed`): it keeps its
+  status `rejected` and its reason, start and resume run what is pending, and the queue is `done` when every other step
+  is finished (the run ends `finished`).
 - The orchestrator is told once per project, like a note on an acceptance: whatever `notify` says, starting it if it
   has no session (key `notify:reject:<event id>`). It proposes what follows as queue revisions for the user's
   approval: a revert as a step, changes to the remaining steps, or a new queue (then the user can stop this one).

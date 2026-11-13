@@ -353,3 +353,34 @@ test("a rejection pauses the run and tells the orchestrator once; the run goes o
     assert.equal(x.step("J", "J1").status, "rejected");
   } finally { x.stop(); }
 });
+
+test("after a rejection and a newer approved revision, start runs what is pending and the queue ends done, its run finished", async () => {
+  const x = setup();
+  try {
+    updateSettings(x.store, { orchestrator: { notify: false } });
+    const def = (k2: string) => ({
+      id: "K", title: "Rejected then revised", review_policy: "continue" as const, checks: [],
+      steps: [
+        { id: "K1", title: "Step 1", goal: "FAKE: done", acceptance: [], review: { policy: "wait" as const } },
+        { id: "K2", title: k2, goal: "FAKE: done", acceptance: [] },
+      ],
+    });
+    applyDraft(x.store, def("Step 2"));
+    approveQueue(x.store, "K");
+    x.engine.start("K");
+    await x.until("K1 waits for the user", () => x.step("K", "K1").review_with === "user");
+    x.engine.rejectStep("K", "K1", "Not this way.");
+    const q = () => x.state().queues.find((y) => y.id === "K")!;
+    assert.equal(q().status, "paused");
+
+    applyDraft(x.store, def("Step 2, done the other way"));
+    approveQueue(x.store, "K");
+    x.engine.start("K");
+    await x.until("the run to finish", () => q().run?.state === "finished");
+    assert.equal(q().status, "done");
+    assert.deepEqual(q().steps.map((s) => s.status), ["rejected", "done"]);
+    assert.equal(x.step("K", "K1").reason, "Not this way.");
+    assert.equal(x.delivered().filter((t) => t.includes("step K1 (1 of 2)")).length, 1, "the rejected step is not run again");
+    assert.ok(!x.state().attention.some((a) => a.queue === "K"), "nothing of K waits for the user");
+  } finally { x.stop(); }
+});
