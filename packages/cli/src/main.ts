@@ -1,8 +1,8 @@
 // The `nexus` command. Agents report through it; the user (or Nexus itself) also uses it for setup.
 // Every agent-side command validates its input and appends one event to the session's own log.
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, writeFileSync } from "node:fs";
 import YAML from "yaml";
-import { basename, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { execFileSync } from "node:child_process";
 import {
@@ -422,8 +422,15 @@ const commands: Record<string, () => void | Promise<void>> = {
     const queue = need(args[1], "<queue>");
     const file = normPath(need(o.file, "--file"));
     if (!existsSync(file)) throw new UsageError(`no such file: ${file}`);
-    emit(st, s, { type: "queue.report", queue, path: file, summary: need(o.summary, "--summary") });
-    console.log(`ok: report for queue ${queue}`);
+    const summary = need(o.summary, "--summary");
+    try { st.readQueue(queue); } catch { throw new UsageError(`unknown queue ${queue}`); }
+    // The report lives in the queue's folder, where the dashboard and the run digest read it. Workers may not write
+    // under .nexus with their file tools, so they write it anywhere and this command (its only writer) copies it in.
+    const target = normPath(join(st.queueDir(queue), "report.md"));
+    const same = process.platform === "win32" ? target.toLowerCase() === file.toLowerCase() : target === file;
+    if (!same) writeFileSync(target, readFileSync(file));
+    emit(st, s, { type: "queue.report", queue, path: target, summary });
+    console.log(`ok: report for queue ${queue} in ${target}${same ? "" : ` (copied from ${file})`}`);
   },
 
   log() {

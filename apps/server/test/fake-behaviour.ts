@@ -20,8 +20,8 @@
 // notice is answered with "fake answer". "FAKE-LONG" is answered with longReply("Reply"); a hand-over with
 // longReply("SUMMARY").
 import { execFileSync } from "node:child_process";
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const CLI = join(dirname(fileURLToPath(import.meta.url)), "../../../packages/cli/bin/nexus.js");
@@ -82,6 +82,15 @@ export function recordArgs(what: Record<string, unknown>): void {
   if (process.env.FAKE_ARGS) appendFileSync(process.env.FAKE_ARGS, JSON.stringify({ ...what, handover: process.env.NEXUS_HANDOVER ?? null }) + "\n");
 }
 
+/** A Write the runtime's --disallowedTools rules refuse (Claude's form for an absolute path: Write(//C:/x/**)). */
+function writeDenied(path: string): boolean {
+  const p = path.replaceAll("\\", "/").toLowerCase();
+  return process.argv.flatMap((a) => a.split(",")).some((a) => {
+    const m = /^Write\(\/\/(.+)\/\*\*\)$/.exec(a);
+    return !!m && p.startsWith(m[1]!.toLowerCase() + "/");
+  });
+}
+
 /**
  * Does what the message asks and returns the agent's reply, or the failure the runtime should show for this turn.
  * `tool` reports a shell command it ran.
@@ -111,6 +120,17 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
       else { writeFileSync(file, "1"); nexus("stop", step, "--condition", "fake condition", "--reason", "fake stop"); }
     }
     if (behaviour === "ask") nexus("ask", "Which way?", "--step", step);
+    // The queue's last step done: the report, written where the prompt says (refused under a denied folder, as
+    // Claude Code refuses a Write its --disallowedTools rule covers), then registered with nexus report.
+    const report = /`nexus report (\S+) --file (\S+) --summary/.exec(text);
+    if (report && behaviour === "done") {
+      const path = resolve(report[2]!);
+      if (!writeDenied(path)) {
+        mkdirSync(dirname(path), { recursive: true });
+        writeFileSync(path, `# Queue ${report[1]} report\n\nfake report of the whole queue\n`);
+        nexus("report", report[1]!, "--file", path, "--summary", `fake report of ${report[1]}`);
+      }
+    }
     return `step ${step}: ${behaviour}`;
   }
   if (text.startsWith("[Nexus] Answer") && fake.step) {

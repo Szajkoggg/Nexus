@@ -726,7 +726,7 @@ export class Engine {
       notes.length ? `\nNotes from the user for this step:\n${notes.map((n) => `- ${n.body}`).join("\n")}` : "",
       answers.length ? `\nAnswers to your questions about this step:\n${answers.map((x) => `- "${x.text}": ${x.answers.at(-1)?.text}`).join("\n")}` : "",
       `\nBegin with \`nexus step start ${step.id}\`${mode === "continue" ? " (again is fine)" : ""}. End with \`nexus step done ${step.id} --summary "…"\`, \`nexus step failed\` or \`nexus stop\`, then write \`nexus context\` and end your turn. Do not start another step.`,
-      last ? `\nThis is the queue's last step. After it is done, write a short report of the whole queue (what each step achieved against its acceptance, checks, review material, open questions, a proposed next step) to ${join(this.store.queueDir(q.id), "report.md").replaceAll("\\", "/")} and register it with \`nexus report ${q.id} --file <that path> --summary "…"\`.` : "",
+      last ? `\nThis is the queue's last step. After it is done, write a short report of the whole queue (what each step achieved against its acceptance, checks, review material, open questions, a proposed next step) to tmp/reports/${q.id}.md in your working directory (or any path outside .nexus) and register it with \`nexus report ${q.id} --file tmp/reports/${q.id}.md --summary "…"\`, which copies it into the queue's folder.` : "",
     ].filter(Boolean);
     live.proc.send([around.before, lines.join("\n"), around.after].filter(Boolean).join("\n\n"));
     for (const n of notes) this.store.appendDelivered(run.session, { at: now(), kind: "note", id: n.id, via: "turn" });

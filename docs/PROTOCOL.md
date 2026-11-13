@@ -28,6 +28,7 @@ a shell command can take part.
     <queue-id>/
       queue.yaml                        server: definition, revisions, approvals
       notes/<step-id>/<note-id>.md      server: notes for a step (front matter + body)
+      report.md                         `nexus report`: the queue's report, copied from where the worker wrote it
   sessions/
     <session-id>/
       session.yaml                      server: runtime, native id, role, cwd
@@ -234,7 +235,7 @@ Every line:
 | `note.read` | `note` | A note was received |
 | `message.read` | `message` | An inbox message was received |
 | `context.summary` | `text`, `topics: []`, `files: []` | What a successor or continuation needs to know; written at the end of each step |
-| `queue.report` | `queue`, `path`, `summary` | The worker's report of the whole queue, written when it ends (done or stopped) |
+| `queue.report` | `queue`, `path`, `summary` | The worker's report of the whole queue, written when it ends (done or stopped). `path` is the copy in the queue's folder (`.nexus/queues/<queue>/report.md`), which `nexus report` writes |
 | `change.proposed` | `queue`, `patch`, `reason` | A proposed change to a queue definition (needs a new approval) |
 | `queue.drafted` | `queue`, `definition` | Orchestrator only: a new or changed draft queue |
 | `session.request` | `action` (start, resume, pause, stop, cancel_start), `queue`, `use_session?`, `runtime?`, `model?`, `effort?`, `after?`, `start_at?`, `reason` | Orchestrator only: asks the engine to act on a queue's run (`use_session` continues an existing session). `start` with `after`: start when that queue is done (a chain, see "Chains"); with `start_at` (ISO 8601, or `usage-reset`): start at that time (a schedule, see "Schedules"); `cancel_start`: cancel the queue's planned start |
@@ -427,7 +428,7 @@ nexus step failed W3 --reason "..."
 nexus stop W3 --condition "user decision" --reason "..."
 nexus ask "Canyon joints: vertical only, or also inclined?" [--option ...] [--can-continue]
 nexus context --topics rock,support --files Runtime/Core/Rock/* <<< "summary text"
-nexus report W --file docs/reports/W.md --summary "..."
+nexus report W --file tmp/reports/W.md --summary "..."   # copies the file to .nexus/queues/W/report.md
 nexus propose-change W --file patch.yaml --reason "..."
 # orchestrator only
 nexus queue draft --file queue.yaml
@@ -445,6 +446,12 @@ nexus note <queue> <step> <text>               # until the dashboard can add not
 Without a session (or with one that has no queue) it lists the queues at work (running, waiting, stopped), then the
 approved ones not running, each with its steps and, when it is not running, the run left behind (`run: halted at W3
 (...)`). An orchestrator or a thinking partner gets the overview of every queue instead.
+
+`nexus report <queue> --file <path> --summary <text>` copies the file into `.nexus/queues/<queue>/report.md` (the one
+writer of that file; a path that is already that file is left as it is) and records `queue.report` naming the copy, so
+the dashboard and the run digest read it there. Workers may not write under `.nexus` with their file tools
+(`protect_nexus`), so the last step's prompt asks for the report at `tmp/reports/<queue>.md` in the working directory
+(or any path outside `.nexus`).
 
 Step states also include `stopped` (the step a `queue.stop` named, when it was not finished).
 
