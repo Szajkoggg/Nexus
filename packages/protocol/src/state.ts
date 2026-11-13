@@ -2,7 +2,7 @@
 // nothing here is ever written back (state.json, if kept, is only a cache of this).
 import { ORCHESTRATOR_ONLY, USER_ONLY, type StatusChange, type Event, type InboxEntry, type Note, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type ReviewItem, type ReviewPolicy, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type StepDef, type StepStatus } from "./schemas.ts";
 import { ProjectStore, revisionHash } from "./store.ts";
-import { ENDED_RUN_STATES, type Segment } from "./times.ts";
+import { ENDED_RUN_STATES, formatClock, type Segment } from "./times.ts";
 import { stopPlace } from "./attention.ts";
 
 export interface CheckView { name: string; ok: boolean; summary?: string; at: string }
@@ -229,7 +229,7 @@ export function loadProjectState(store: ProjectStore): ProjectState {
   // Planned starts: shown on both queues, with why each waits.
   for (const q of queues.values()) {
     if (!q.start) continue;
-    const a = queues.get(q.start.after);
+    const a = q.start.after ? queues.get(q.start.after) : undefined;
     if (a) (a.starts_next ??= []).push(q.id);
     Object.assign(q.start, startWait(q.start, a, [...queues.values()]));
   }
@@ -258,6 +258,7 @@ const BUSY_RUN = new Set(["running", "pausing", "usage_wait", "retry_wait"]);
 
 /** Why a planned start has not come yet. */
 function startWait(plan: StartFile, a: QueueView | undefined, queues: QueueView[]): { waiting: string; blocked: boolean } {
+  if (plan.at) return { waiting: plan.usage ? `the ${plan.usage === "codex" ? "Codex" : "Claude Code"} usage window resets` : "its time", blocked: false };
   if (!a) return { waiting: `queue ${plan.after} does not exist`, blocked: true };
   if (a.status === "done") {
     const busy = plan.session ? queues.find((x) => x.id !== plan.after && !!x.run && x.run.session === plan.session && BUSY_RUN.has(x.run.state)) : undefined;
@@ -293,7 +294,10 @@ function attentionOf(queues: QueueView[], questions: QuestionView[]): AttentionI
       });
     }
     if (q.status === "proposed") out.push({ kind: "approval", queue: q.id, text: q.title, at: q.updated_at });
-    if (q.start?.failed) out.push({ kind: "start", queue: q.id, text: `Did not start after ${q.start.after}: ${q.start.failed.reason}`, at: q.start.failed.at });
+    if (q.start?.failed) {
+      const when = q.start.after ? `after ${q.start.after}` : `at ${formatClock(q.start.at!, new Date())}`;
+      out.push({ kind: "start", queue: q.id, text: `Did not start ${when}: ${q.start.failed.reason}`, at: q.start.failed.at });
+    }
     if (q.status === "cancelled" || q.status === "done") continue;
     for (const s of q.steps) {
       // A review the orchestrator does is not the user's (the queue still shows it waiting).

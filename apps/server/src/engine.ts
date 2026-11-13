@@ -43,6 +43,41 @@ export interface EngineOptions {
   /** How the push of accepted steps runs git, and its time limit (tests). */
   git?: GitRunner;
   pushTimeoutMs?: number;
+  /** The clock of the long timers (schedules, usage waits, retries); tests control it. */
+  clock?: Clock;
+}
+
+/** What the engine's long timers run on: the real clock, or one a test moves. */
+export interface Clock {
+  now(): number;
+  setTimeout(fn: () => void, ms: number): unknown;
+  clearTimeout(handle: unknown): void;
+}
+export const REAL_CLOCK: Clock = {
+  now: () => Date.now(),
+  setTimeout: (fn, ms) => setTimeout(fn, ms),
+  clearTimeout: (h) => clearTimeout(h as NodeJS.Timeout),
+};
+
+/** A long timer is armed in pieces of at most this (Node's setTimeout fires at once beyond 2^31-1 ms, about 24.8 days). */
+export const MAX_TIMER_MS = 24 * 60 * 60_000;
+/** A schedule this late (the server was not running at its time) does not start: it is missed. */
+export const MISSED_MS = 15 * 60_000;
+
+/** A schedule: at a time (ISO 8601), or "usage-reset". */
+export interface ScheduleOptions extends Omit<StartOptions, "after"> { at: string; by: "user" | "orchestrator"; reason?: string }
+
+/**
+ * When the usage window of a runtime resets, from the latest usage data: Claude Code's 5-hour window; for Codex, of
+ * its windows not yet reset, the last to reset among those at or above the pause threshold (the run waits for all of
+ * them), else the first to reset. Undefined while nothing is known.
+ */
+export function usageReset(runtime: "claude" | "codex", threshold: number, nowMs: number): number | undefined {
+  const windows = Object.entries(readUsage()?.windows ?? {})
+    .filter(([k, w]) => (runtime === "codex" ? k.startsWith("codex_") : k === "five_hour") && w.resets_at && Date.parse(w.resets_at) > nowMs);
+  if (!windows.length) return undefined;
+  const full = windows.filter(([, w]) => w.utilization >= threshold).map(([, w]) => Date.parse(w.resets_at!));
+  return full.length ? Math.max(...full) : Math.min(...windows.map(([, w]) => Date.parse(w.resets_at!)));
 }
 
 /** A process asked to end for a restart (another model or effort) is killed if it has not exited by then. */
@@ -72,6 +107,9 @@ export class Engine {
   private readonly store: ProjectStore;
   private readonly changed: () => void;
   private timers = new Map<string, NodeJS.Timeout>();
+  /** The long timers (by queue for a retry or usage wait, `start:<queue>` for a schedule), on `clock`. */
+  private readonly clockTimers = new Map<string, unknown>();
+  private readonly clock: Clock;
   private busy = new Set<string>();
   /** Set while Nexus drains for an update: nothing new starts. */
   draining = false;
@@ -91,8 +129,14 @@ export class Engine {
     this.changed = changed;
     this.retryBaseMs = options.retryBaseMs ?? RETRY_BASE_MS;
     this.usageMarginMs = options.usageMarginMs ?? USAGE_MARGIN_MS;
+    this.clock = options.clock ?? REAL_CLOCK;
     this.pusher = new AcceptedPusher(store, changed, { run: options.git, timeout: options.pushTimeoutMs });
     this.recoverAfterRestart();
+    // Schedules are armed again; what came due while no server ran is looked at once this one is up.
+    for (const id of this.store.queueIds()) {
+      const plan = this.store.readStart(id);
+      if (plan?.at && !plan.failed) this.armStart(id, Date.parse(plan.at));
+    }
     this.timers.set("starts", setTimeout(() => { this.timers.delete("starts"); this.checkStarts(); }, 1500));
   }
 
@@ -146,6 +190,7 @@ export class Engine {
     };
     this.store.writeRun(queueId, run);
     this.store.clearStart(queueId); // a planned start is used up by any start
+    this.clearClockTimer(`start:${queueId}`);
     this.ensureProcess(session);
     this.advance(queueId);
     return run;
@@ -329,7 +374,7 @@ export class Engine {
     this.checkStarts();
   }
 
-  // ---------------------------------------------------------------- chains
+  // ---------------------------------------------------------------- planned starts: chains and schedules
 
   /**
    * Plans to start `queueId` when queue `o.after` is done. When it already is, the queue starts now (or, while an
@@ -341,26 +386,18 @@ export class Engine {
     const a = state.queues.find((x) => x.id === o.after);
     if (!a) throw new ActionError(`unknown queue ${o.after}`, 404);
     if (a.id === q.id) throw new ActionError("a queue cannot start after itself");
-    if (q.status === "done" || q.status === "cancelled") throw new ActionError(`queue ${q.id} is ${q.status}`, 409);
-    if (q.run && GOING.includes(q.run.state)) throw new ActionError(`queue ${q.id} is already running`, 409);
+    const options = this.planOptions(state, q, o);
     if (a.status === "cancelled") throw new ActionError(`queue ${a.id} is cancelled: it will never be done`, 409);
     // No loop: following the plans from A must not come back to this queue.
     for (let at: string | undefined = a.id, seen = new Set<string>(); at && !seen.has(at); seen.add(at), at = this.store.readStart(at)?.after) {
       if (at === q.id) throw new ActionError(`queue ${a.id} already waits for ${q.id} (through its planned starts): that would be a loop`, 409);
     }
-    const runtime = o.session ? undefined : o.runtime ?? state.project.runtimes.default;
-    const issue = runtime ? effortIssue(runtime, o.effort) : undefined;
-    if (issue) throw new ActionError(issue);
-    if (o.session) {
-      const s = state.sessions.find((x) => x.id === o.session);
-      if (!s || s.role !== "worker" || s.launched_by !== "nexus" || s.runtime === "external") throw new ActionError(`session ${o.session} is not a worker session Nexus launched`, 409);
-    }
-    const options = { runtime: o.session ? undefined : o.runtime, model: o.model, effort: o.effort, session: o.session };
     const busy = o.session ? state.queues.find((x) => x.id !== q.id && !!x.run && x.run.session === o.session && GOING.includes(x.run.state)) : undefined;
     if (a.status === "done" && !this.draining && !busy) {
       const run = this.start(q.id, { ...options, after: a.id });
       return `queue ${a.id} is already done: queue ${q.id} started now in session ${run.session}`;
     }
+    this.clearClockTimer(`start:${q.id}`);
     this.store.writeStart(q.id, {
       protocol: 1, after: a.id, ...options, by: o.by, reason: o.reason, revision: q.revision, created_at: now(),
     });
@@ -370,38 +407,98 @@ export class Engine {
       : `queue ${q.id} starts after the Nexus update (queue ${a.id} is done)`;
   }
 
+  /**
+   * Plans to start `queueId` at a time (`o.at`, ISO 8601, in the future), or when the usage window of the runtime it
+   * would run on resets (`o.at` = "usage-reset"; refused while no usage data of that runtime is known). Replaces an
+   * earlier plan of the queue. Returns what happened, in a sentence.
+   */
+  scheduleStart(queueId: string, o: ScheduleOptions): string {
+    const state = loadProjectState(this.store);
+    const q = this.queue(state, queueId);
+    const options = this.planOptions(state, q, o);
+    let at: number;
+    let usage: "claude" | "codex" | undefined;
+    if (o.at === "usage-reset") {
+      const s = o.session ? state.sessions.find((x) => x.id === o.session) : undefined;
+      usage = s ? (s.runtime === "codex" ? "codex" : "claude") : o.runtime ?? state.project.runtimes.default;
+      const reset = usageReset(usage, state.project.defaults.usage_pause_threshold, this.clock.now());
+      if (!reset) throw new ActionError(`no usage window of ${RUNTIME_NAME[usage]} is known yet (Nexus learns them from a run): give a time instead`, 409);
+      at = reset + this.usageMarginMs;
+    } else {
+      at = Date.parse(o.at);
+      if (Number.isNaN(at)) throw new ActionError(`not a time: ${o.at}`);
+      if (at < this.clock.now() - 60_000) throw new ActionError(`${o.at} is in the past`);
+    }
+    const iso = new Date(at).toISOString();
+    this.store.writeStart(q.id, {
+      protocol: 1, at: iso, usage, ...options, by: o.by, reason: o.reason, revision: q.revision, created_at: now(),
+    });
+    this.armStart(q.id, at);
+    this.changed();
+    return `queue ${q.id} starts at ${formatClock(iso, new Date(this.clock.now()))}${usage ? ` (when the ${RUNTIME_NAME[usage]} usage window resets)` : ""}`;
+  }
+
   /** Cancels the planned start of a queue. */
   cancelStart(queueId: string): string {
     const plan = this.store.readStart(queueId);
     if (!plan) throw new ActionError(`queue ${queueId} has no planned start`, 409);
     this.store.clearStart(queueId);
+    this.clearClockTimer(`start:${queueId}`);
     this.changed();
-    return `the planned start of queue ${queueId} (after ${plan.after}) is cancelled`;
+    return `the planned start of queue ${queueId} (${plan.after ? `after ${plan.after}` : `at ${formatClock(plan.at!, new Date(this.clock.now()))}`}) is cancelled`;
+  }
+
+  /** What every planned start checks: the queue can be planned, and the start's options make sense. */
+  private planOptions(state: ProjectState, q: QueueView, o: Omit<StartOptions, "after">): Pick<StartOptions, "runtime" | "model" | "effort" | "session"> {
+    if (q.status === "done" || q.status === "cancelled") throw new ActionError(`queue ${q.id} is ${q.status}`, 409);
+    if (q.run && GOING.includes(q.run.state)) throw new ActionError(`queue ${q.id} is already running`, 409);
+    const runtime = o.session ? undefined : o.runtime ?? state.project.runtimes.default;
+    const issue = runtime ? effortIssue(runtime, o.effort) : undefined;
+    if (issue) throw new ActionError(issue);
+    if (o.session) {
+      const s = state.sessions.find((x) => x.id === o.session);
+      if (!s || s.role !== "worker" || s.launched_by !== "nexus" || s.runtime === "external") throw new ActionError(`session ${o.session} is not a worker session Nexus launched`, 409);
+    }
+    return { runtime: o.session ? undefined : o.runtime, model: o.model, effort: o.effort, session: o.session };
+  }
+
+  /** Arms the timer of a scheduled start (in pieces of at most a day); when it comes, the plans are looked at. */
+  private armStart(queueId: string, at: number): void {
+    this.wakeAt(`start:${queueId}`, at, () => { this.checkStarts(); this.changed(); });
   }
 
   /**
-   * Starts each queue whose planned start is due: the queue it waits for is done. Not while an update drains (the
-   * plans stay, and the next server or cancelDrain looks again). A plan whose session to continue is busy waits for
-   * it to free (one session never runs two queues). A start that fails (the queue not approved, stopped, …) is
-   * recorded on the plan as `failed`, an item waiting for the user; it is not tried again by itself.
+   * Starts each queue whose planned start is due: a chain's queue is done, or a schedule's time has come. Not while an
+   * update drains (the plans stay, and the next server or cancelDrain looks again). A chain whose session to continue
+   * is busy waits for it to free (one session never runs two queues); a schedule does not wait: its session busy, it
+   * fails. A schedule more than MISSED_MS late (the server was not running) does not start: it is `missed`. A start
+   * that fails (the queue not approved, stopped, …) is recorded on the plan as `failed`, an item waiting for the user
+   * (a missed one is told to the orchestrator too); it is not tried again by itself.
    */
   private checkStarts(): void {
     if (this.stopped || this.draining || this.checkingStarts) return;
     this.checkingStarts = true;
     try {
       const state = loadProjectState(this.store);
+      const t = this.clock.now();
       for (const q of state.queues) {
         const plan = q.start;
         if (!plan || plan.failed) continue;
-        if (state.queues.find((x) => x.id === plan.after)?.status !== "done") continue;
-        if (plan.session && state.queues.some((x) => x.id !== q.id && !!x.run && x.run.session === plan.session && GOING.includes(x.run.state))) continue;
+        const { waiting: _w, blocked: _b, ...file } = plan;
+        const fail = (reason: string, missed?: boolean) => this.store.writeStart(q.id, { ...file, failed: { at: now(), reason, missed } });
+        const busy = plan.session ? state.queues.find((x) => x.id !== q.id && !!x.run && x.run.session === plan.session && GOING.includes(x.run.state)) : undefined;
+        if (plan.after) {
+          if (state.queues.find((x) => x.id === plan.after)?.status !== "done" || busy) continue;
+        } else {
+          const at = Date.parse(plan.at!);
+          if (t < at) continue;
+          if (t - at > MISSED_MS) { fail(`missed: Nexus was not running at ${formatClock(plan.at!, new Date(t))}`, true); continue; }
+          if (busy) { fail(`session ${plan.session} was running queue ${busy.id}`); continue; }
+        }
         try {
           const run = this.start(q.id, { runtime: plan.runtime, model: plan.model, effort: plan.effort, session: plan.session, after: plan.after });
-          this.store.appendActivity(run.session, { at: now(), kind: "turn_start", text: `Nexus started queue ${q.id}: queue ${plan.after} is done`, queue: q.id });
-        } catch (e) {
-          const { waiting: _w, blocked: _b, ...file } = plan;
-          this.store.writeStart(q.id, { ...file, failed: { at: now(), reason: (e as Error).message } });
-        }
+          this.store.appendActivity(run.session, { at: now(), kind: "turn_start", text: `Nexus started queue ${q.id}: ${plan.after ? `queue ${plan.after} is done` : "its scheduled time came"}`, queue: q.id });
+        } catch (e) { fail((e as Error).message); }
       }
     } finally { this.checkingStarts = false; }
   }
@@ -416,6 +513,8 @@ export class Engine {
     this.stopped = true;
     for (const t of this.timers.values()) clearTimeout(t);
     this.timers.clear();
+    for (const t of this.clockTimers.values()) this.clock.clearTimeout(t);
+    this.clockTimers.clear();
     for (const [, l] of this.live) l.proc.kill();
   }
 
@@ -696,7 +795,7 @@ export class Engine {
     }
     const tries = (run.retries ?? 0) + 1;
     if (tries > RETRY_LIMIT) { this.writeRun(queueId, { ...run, failure: f.code }); return this.halt(queueId, `the turn failed ${tries} times in a row; the last time: ${what}`); }
-    const at = new Date(Date.now() + this.retryBaseMs * 2 ** (tries - 1)).toISOString();
+    const at = new Date(this.clock.now() + this.retryBaseMs * 2 ** (tries - 1)).toISOString();
     this.writeRun(queueId, { ...run, state: "retry_wait", retries: tries, failure: f.code, reason: `the turn failed (${what}); retry ${tries} of ${RETRY_LIMIT}`, resume_at: at });
     this.store.appendActivity(run.session, { at: now(), kind: "retry", text: `Nexus tries the turn again at ${formatClock(at, new Date())} (${tries} of ${RETRY_LIMIT}): ${what}`, queue: queueId, step: run.step });
     this.schedule(queueId, at, 0);
@@ -875,7 +974,7 @@ export class Engine {
     const limit = state.project.defaults.usage_pause_threshold;
     for (const name of names) {
       const w = windows[name];
-      if (!w || !w.resets_at || Date.parse(w.resets_at) < Date.now() || w.utilization < limit) continue;
+      if (!w || !w.resets_at || Date.parse(w.resets_at) < this.clock.now() || w.utilization < limit) continue;
       return { reason: `the ${name.replace("codex_", "Codex ").replace("five_hour", "5-hour")} window is at ${Math.round(w.utilization * 100)} % (limit ${Math.round(limit * 100)} %)`, until: w.resets_at };
     }
     return undefined;
@@ -886,22 +985,38 @@ export class Engine {
    * step left open is continued. Not while draining for an update: the next server (or cancelDrain) sets it again.
    */
   private schedule(queueId: string, at: string, margin: number): void {
-    this.clearTimer(queueId);
-    const ms = Math.max(margin ? 1000 : 0, Date.parse(at) - Date.now() + margin);
-    this.timers.set(queueId, setTimeout(() => {
-      this.timers.delete(queueId);
+    const due = Math.max(this.clock.now() + (margin ? 1000 : 0), Date.parse(at) + margin);
+    this.wakeAt(queueId, due, () => {
       const run = this.store.readRun(queueId);
       if (this.stopped || this.draining || (run?.state !== "usage_wait" && run?.state !== "retry_wait")) return;
       const why = run.state === "retry_wait" ? `the last turn failed: ${run.reason ?? "a passing failure"}; this is the retry` : undefined;
       try { this.resume(queueId, why); } catch (e) { this.halt(queueId, `could not go on: ${(e as Error).message}`); }
       this.changed();
-    }, ms));
+    });
   }
 
-  private clearTimer(queueId: string): void {
-    clearTimeout(this.timers.get(queueId));
-    this.timers.delete(queueId);
+  /**
+   * Calls `fire` at `at` (ms since the epoch, on the engine's clock), under `key` (replacing what was armed there). The
+   * timer is armed in pieces of at most MAX_TIMER_MS, each re-checking the clock, so a time weeks ahead neither fires
+   * at once (as setTimeout does beyond 2^31-1 ms) nor early.
+   */
+  private wakeAt(key: string, at: number, fire: () => void): void {
+    this.clearClockTimer(key);
+    const piece = Math.max(0, Math.min(at - this.clock.now(), MAX_TIMER_MS));
+    this.clockTimers.set(key, this.clock.setTimeout(() => {
+      this.clockTimers.delete(key);
+      if (this.stopped) return;
+      if (this.clock.now() >= at) fire(); else this.wakeAt(key, at, fire);
+    }, piece));
   }
+
+  private clearClockTimer(key: string): void {
+    if (this.clockTimers.has(key)) this.clock.clearTimeout(this.clockTimers.get(key));
+    this.clockTimers.delete(key);
+  }
+
+  /** A queue's retry or usage-wait timer. */
+  private clearTimer(queueId: string): void { this.clearClockTimer(queueId); }
 
   // ---------------------------------------------------------------- helpers
 

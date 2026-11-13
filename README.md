@@ -91,8 +91,9 @@ A run can override model and effort when it starts, and the orchestrator chooses
 With context care on (the default, under Defaults), a run whose session is fuller than "Reuse a session up to" at
 the end of a step goes on in a fresh session of the same runtime, model and effort, given the previous session's
 context summary; the run's panel lists each such switch.
-A queue can be started when another one is done: "When" in the start form (or the orchestrator's
-`nexus run B start --after A`). The plan shows on both queues and can be cancelled; if A halts it waits and says why,
+A queue can be started when another one is done, at a time, or when the usage window resets: "When" in the start
+form (or the orchestrator's `nexus run B start --after A`, `--at "2026-11-14 22:00"`, `--at usage-reset`). A schedule
+missed while Nexus was not running does not start late; it appears under "Waiting for you". The plan shows on both queues and can be cancelled; if A halts it waits and says why,
 and if B is not approved when A is done, B does not start and the item appears under "Waiting for you".
 A step in a queue may name its own runtime, model and effort (`runtime`, `model`, `effort` in the queue YAML, shown
 on the step); a step without them runs on the run's. Another runtime runs the step in a fresh session given the

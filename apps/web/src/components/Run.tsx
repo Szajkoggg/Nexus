@@ -1,5 +1,5 @@
 // Running queues through Nexus-launched sessions: controls, live activity, sessions and usage.
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { formatClock, retryLine } from "@nexus/protocol/times";
 import { act, enc, useFetch, type ActivityEntry, type ProjectState, type QueueView, type SessionView, type Usage } from "../api.ts";
 import { Button, RunTimes, Section, TimeAgo } from "./ui.tsx";
@@ -56,6 +56,17 @@ function SessionSwitches({ run, sessions }: { run: NonNullable<QueueView["run"]>
   );
 }
 
+const AT = "@time", USAGE = "@usage-reset";
+
+/** How long until a time, in words ("3 h 20 min", "12 days"), updated each minute. */
+function Until({ at }: { at: string }) {
+  const [, tick] = useState(0);
+  useEffect(() => { const t = setInterval(() => tick((x) => x + 1), 60_000); return () => clearInterval(t); }, []);
+  const min = Math.max(0, Math.round((Date.parse(at) - Date.now()) / 60_000));
+  const text = min < 60 ? `${min} min` : min < 48 * 60 ? `${Math.floor(min / 60)} h${min % 60 ? ` ${min % 60} min` : ""}` : `${Math.round(min / 1440)} days`;
+  return <>{text}</>;
+}
+
 /**
  * A planned start of the queue: the queue it waits for and why it has not come yet, or why it could not start; with
  * Cancel. Amber while it waits on something only the user or the orchestrator can change.
@@ -69,11 +80,16 @@ function PlannedStart({ queue, busy, onCancel }: { queue: QueueView; busy: boole
     <div className={`mb-3 rounded-lg p-3 text-sm ring-1 ${tone}`}>
       <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
         <p className="min-w-0 flex-1">
-          {p.failed
-            ? <span className="text-orange-200">It was to start when <span className="font-mono">{p.after}</span> was done, but could not: {p.failed.reason}</span>
-            : <span className="text-zinc-100">Starts when <span className="font-mono">{p.after}</span> is done.</span>}
+          {p.after
+            ? (p.failed
+              ? <span className="text-orange-200">It was to start when <span className="font-mono">{p.after}</span> was done, but could not: {p.failed.reason}</span>
+              : <span className="text-zinc-100">Starts when <span className="font-mono">{p.after}</span> is done.</span>)
+            : (p.failed
+              ? <span className="text-orange-200">It was to start at {formatClock(p.at!, new Date())}, but did not: {p.failed.reason}</span>
+              : <span className="text-zinc-100">Starts at <span className="font-medium">{formatClock(p.at!, new Date())}</span>{p.usage ? `, when the ${p.usage === "codex" ? "Codex" : "Claude Code"} usage window resets` : ""}.</span>)}
           <span className="mt-1 block text-xs text-zinc-400">
-            {p.failed ? <>Start it yourself, or dismiss the plan. · <TimeAgo at={p.failed.at} /></> : <>Now: {p.waiting}.</>}
+            {p.failed ? <>Start it yourself, or dismiss the plan. · <TimeAgo at={p.failed.at} /></>
+              : p.after ? <>Now: {p.waiting}.</> : <>In <Until at={p.at!} />. It must be approved then, and its session free.</>}
           </span>
           <span className="mt-1 block text-xs text-zinc-500">
             Planned by {p.by === "user" ? "you" : "the orchestrator"} · <TimeAgo at={p.created_at} />{options.length ? ` · ${options.join(" · ")}` : ""}{p.reason ? ` · ${p.reason}` : ""}
@@ -93,7 +109,8 @@ export function RunChip({ queue }: { queue: QueueView }) {
   const going = r && ["running", "pausing", "usage_wait", "retry_wait"].includes(r.state);
   if (queue.start && !going) {
     const tone = queue.start.failed || queue.start.blocked ? "text-orange-300 bg-orange-500/10 ring-orange-500/40" : "text-sky-300 bg-sky-500/10 ring-sky-500/40";
-    return <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs ring-1 ${tone}`}>{queue.start.failed ? "did not start" : "starts"} after {queue.start.after}</span>;
+    const when = queue.start.after ? `after ${queue.start.after}` : `at ${formatClock(queue.start.at!, new Date())}`;
+    return <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs ring-1 ${tone}`}>{queue.start.failed ? "did not start" : "starts"} {when}</span>;
   }
   if (!r || r.state === "finished" || endedHalt(queue)) return null;
   return (
@@ -114,7 +131,9 @@ export function RunControls({ project, queue, onChanged }: { project: ProjectSta
   const defaultModel = project.project.runtimes[runtime].model;
   const defaultEffort = project.project.runtimes[runtime].effort;
   const [session, setSession] = useState("");
+  // "When": "" now, AT a time, USAGE the usage window's reset, else a queue to start after.
   const [after, setAfter] = useState("");
+  const [time, setTime] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const run = queue.run;
@@ -202,11 +221,22 @@ export function RunControls({ project, queue, onChanged }: { project: ProjectSta
             <span className="mb-1 block">When</span>
             <select value={after} onChange={(e) => setAfter(e.target.value)} className="max-w-60 rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm text-zinc-200">
               <option value="">Now</option>
+              <option value={AT}>At a time…</option>
+              <option value={USAGE}>When the usage window resets</option>
               {chainable.map((x) => <option key={x.id} value={x.id}>When {x.id} is done{x.status === "done" ? " (it is: now)" : ""}</option>)}
             </select>
           </label>
-          <Button disabled={busy} onClick={() => call({ action: "start", model: model || undefined, effort: effort || undefined, session: session || undefined, runtime: session ? undefined : runtime, after: after || undefined })}>
-            {after ? `Start after ${after}` : run ? "Start a new run" : "Start"}
+          {after === AT && (
+            <label className="text-xs text-zinc-400">
+              <span className="mb-1 block">Time</span>
+              <input type="datetime-local" value={time} onChange={(e) => setTime(e.target.value)} className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm text-zinc-200 [color-scheme:dark]" />
+            </label>
+          )}
+          <Button disabled={busy || (after === AT && !time)} onClick={() => call({
+            action: "start", model: model || undefined, effort: effort || undefined, session: session || undefined, runtime: session ? undefined : runtime,
+            ...(after === AT ? { at: new Date(time).toISOString() } : after === USAGE ? { at: "usage-reset" } : after ? { after } : {}),
+          })}>
+            {after === AT || after === USAGE ? "Schedule" : after ? `Start after ${after}` : run ? "Start a new run" : "Start"}
           </Button>
         </div>
       )}

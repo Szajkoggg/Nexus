@@ -320,8 +320,10 @@ app.post("/api/projects/:id/queues/:queue/run", act((st, b, p) => {
         effort: Effort.safeParse(b.effort).success ? (b.effort as Effort) : undefined,
         runtime: b.runtime === "codex" || b.runtime === "claude" ? b.runtime as "claude" | "codex" : undefined,
       };
-      // With `after`: a chain, the queue starts when that one is done.
+      // With `after`: a chain, the queue starts when that one is done. With `at` (ISO 8601, or usage-reset): a schedule.
+      if (typeof b.after === "string" && b.after && typeof b.at === "string" && b.at) throw new ActionError("give after or at, not both");
       if (typeof b.after === "string" && b.after) return { message: engine.chain(q, { ...options, after: b.after, by: "user" }) };
+      if (typeof b.at === "string" && b.at) return { message: engine.scheduleStart(q, { ...options, at: b.at, by: "user" }) };
       return engine.start(q, options);
     }
     case "pause": return engine.pause(q);

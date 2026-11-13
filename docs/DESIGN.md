@@ -320,6 +320,18 @@ nothing fires while an update drains. Decisions:
 - A plan to continue a session waits while that session runs another queue, rather than failing: one session never
   runs two queues, and chaining a queue into the session of the queue before it is the common case.
 
+A schedule ("at 22:00", "when the usage window resets") is the same kind of plan with a time instead of a queue.
+Decisions:
+
+- A schedule does not wait: at its time the queue starts, or the plan fails and the user is told. A schedule says
+  when, and starting hours later than asked (after a busy session freed) would be a different plan than the one made.
+- A schedule more than 15 minutes late, because the server was not running, does not start. Work set for the night
+  must not begin by surprise in the morning; the user and the orchestrator are told, and decide.
+- The usage reset is fixed when the plan is made, from the usage data then known, and shown as a time. A plan that
+  moved with later data would be harder to read and to trust; making it again takes the new reset.
+- Long timers are armed in pieces of at most a day: Node fires a timer longer than 2^31-1 ms (about 24.8 days) at once,
+  which a weekly usage window can exceed. Tests drive these timers with a clock of their own.
+
 ### Review material
 
 A step's review spec says what to prepare (e.g. "before/after shots of fixtures X, Y; one phone-width sheet").

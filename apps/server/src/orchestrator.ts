@@ -270,6 +270,8 @@ export class Orchestrator {
     if (e.type !== "session.request") return "ignored";
     switch (e.action) {
       case "start": {
+        if (e.after && e.start_at) throw new ActionError("give --after or --at, not both");
+        if (e.start_at) return this.engine.scheduleStart(e.queue, { at: e.start_at, session: e.use_session, model: e.model, effort: e.effort, runtime: e.runtime, by: "orchestrator", reason: e.reason });
         if (e.after) return this.engine.chain(e.queue, { after: e.after, session: e.use_session, model: e.model, effort: e.effort, runtime: e.runtime, by: "orchestrator", reason: e.reason });
         const run = this.engine.start(e.queue, { session: e.use_session, model: e.model, effort: e.effort, runtime: e.runtime });
         return `queue ${e.queue} started in session ${run.session}`;
@@ -349,6 +351,15 @@ Options: ${x.options.join(" / ")}` : ""}`,
         if (st.status !== "review" || st.review_with !== "orchestrator") continue;
         items.push({ key: `notify:review:${q.id}:${st.id}:${st.finished_at}`, fact: `Step ${st.id} of queue ${q.id} is done and waits for your review: ${st.summary ?? st.title}`, todo: reviewBrief(q, st) });
       }
+      // A scheduled start missed because the server was not running at its time: the user has it in their list.
+      const missed = q.start?.failed?.missed ? q.start : undefined;
+      if (missed && missed.failed!.at >= since) {
+        items.push({
+          key: `notify:missed:${q.id}:${missed.at}`,
+          fact: `The scheduled start of queue ${q.id} at ${missed.at} was missed: Nexus was not running then. It did not start.`,
+          todo: "Tell the user briefly; propose starting it now or a new time (nexus run <queue> start --at …).",
+        });
+      }
       if (!r) continue;
       // A pause someone asked for (the user, or you with nexus run pause), reached at a step's end. Not a stop, and
       // not the pauses of a server restart or an update, whose reasons differ.
@@ -411,7 +422,8 @@ Commands (\`nexus\` is on PATH; your session is set in the environment):
 - nexus queue draft .nexus/drafts/ID.yaml        create or change a queue from YAML (format below): write the YAML to .nexus/drafts/ID.yaml, then run nexus queue draft .nexus/drafts/ID.yaml; keep the file and edit it for later revisions. A new or changed queue waits for the user's approval
 - nexus run <queue> start --reason "..." [--use-session <id>] [--runtime claude|codex] [--model <model>] [--effort low|medium|high|xhigh|max]   start an approved queue (--use-session continues an existing session; runtime, model and effort default to the project's)
 - nexus run <queue> start --after <other> --reason "..." [same options]   start it when queue <other> is done (a chain; at once if it already is). It must be approved when it comes due, or it does not start and the user is told. A chain with --use-session waits while that session runs another queue; --use-session of <other>'s session continues its context
-- nexus run <queue> cancel-start --reason "..."   cancel the queue's planned start
+- nexus run <queue> start --at "YYYY-MM-DD HH:MM" --reason "..." [same options]   start it at that local time; --at usage-reset: when the usage window of its runtime resets (refused while Nexus knows no usage data of that runtime). At the time it must be approved and its session free, or it does not start and the user is told; if Nexus was down then (more than 15 minutes late) it does not start, and you are told
+- nexus run <queue> cancel-start --reason "..."   cancel the queue's planned start (a chain or a schedule)
 - nexus run <queue> pause|resume|stop --reason "..."
 - nexus answer <qid> "<answer>" [--continue|--wait]            answer a worker's question whose answer is already settled
 - nexus answer <qid> "<framing, options, recommendation>" --escalate   pass it to the user

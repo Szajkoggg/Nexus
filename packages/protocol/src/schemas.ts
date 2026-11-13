@@ -325,6 +325,8 @@ export const Event = z.discriminatedUnion("type", [
     runtime: z.enum(["claude", "codex"]).optional(), reason: z.string(),
     /** With `start`: start when this queue is done instead of now (a chain, queues/<queue>/start.yaml). */
     after: Id.optional(),
+    /** With `start`: start at this time (ISO 8601) or `usage-reset` (when the runtime's usage window resets): a schedule. */
+    start_at: z.string().optional(),
   }),
   z.object({ ...base, type: z.literal("log"), level: z.enum(["info", "warn", "error"]), text: z.string() }),
   /**
@@ -374,14 +376,18 @@ export const PushFile = z.object({
 export type PushFile = z.infer<typeof PushFile>;
 
 /**
- * queues/<id>/start.yaml: a planned start of the queue. Written only by the server. `after`: it starts when that
- * queue is done (a chain). `runtime`, `model`, `effort`, `session` are the start's options, as a start takes them.
- * `failed`: it came due but the queue could not start (not approved, …); it stays, as an item waiting for the user,
- * until the queue is started or the plan cancelled or replaced. Starting the queue or cancelling removes the file.
+ * queues/<id>/start.yaml: a planned start of the queue. Written only by the server. Either `after`: it starts when that
+ * queue is done (a chain); or `at`: it starts at that time (a schedule; `usage` when the time is the reset of that
+ * runtime's usage window, plus a margin). `runtime`, `model`, `effort`, `session` are the start's options, as a start
+ * takes them. `failed`: it came due but the queue could not start (not approved, its session busy, or `missed`: the
+ * server was not running then); it stays, as an item waiting for the user, until the queue is started or the plan
+ * cancelled or replaced. Starting the queue or cancelling removes the file.
  */
 export const StartFile = z.object({
   protocol: z.literal(1),
-  after: Id,
+  after: Id.optional(),
+  at: Time.optional(),
+  usage: z.enum(["claude", "codex"]).optional(),
   runtime: z.enum(["claude", "codex"]).optional(),
   model: z.string().optional(),
   effort: Effort.optional(),
@@ -391,8 +397,8 @@ export const StartFile = z.object({
   /** The queue's revision when the plan was made (shown; the start needs the then current revision approved). */
   revision: z.number().int().positive(),
   created_at: Time,
-  failed: z.object({ at: Time, reason: z.string() }).optional(),
-});
+  failed: z.object({ at: Time, reason: z.string(), missed: z.boolean().optional() }).optional(),
+}).refine((s) => !!s.after !== !!s.at, { message: "a planned start has either after or at" });
 export type StartFile = z.infer<typeof StartFile>;
 
 /** queues/<id>/run.yaml: the engine's intent for a queue. Written only by the server. */

@@ -16,11 +16,6 @@ would be better still.
 
 Pending with the user: docs/proposals/honeycomb-push-after-acceptance.md, to bring up after deploy.
 
-## 7. Chains and schedules
-
-"When queue A is done, start B" (both approved); "start when the usage window resets"; "start at night". Shown on
-the queues, cancellable.
-
 ## 9. Git on the dashboard
 
 Per step, the commits it made and a summary of their diff; the branch's state; for a finished queue with its own
