@@ -1,6 +1,7 @@
 // Review images in the app: full screen, fitted, two-finger zoom, swipe or buttons to the next and previous image.
 // A picture with a "before" (src/review.ts pairPictures) is shown beside it (stacked when the screen is upright) or
-// overlaid with a slider; the step's view puts the picture's mark and comments below (`footer`).
+// overlaid with a slider; the step's view puts its action bar below (`footer`: the picture's mark, comments, and
+// the original file under ⋯).
 // The viewer is a layer in the history (nav.ts: "viewer:<index>"), so Back and Escape close it; moving to another
 // image replaces its entry, so one Back always returns to the step.
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -21,7 +22,7 @@ export function swipeOf(dx: number, dy: number, width: number): -1 | 0 | 1 {
 
 export function ImageViewer({ images, index, onIndex, onClose, footer }: {
   images: ViewerImage[]; index: number; onIndex: (i: number) => void; onClose: () => void;
-  /** Below the picture: what the user can do with it (its mark, comments). */
+  /** Below the picture: an ActionBar with what the user can do with it (its mark, comments, the original). */
   footer?: (index: number) => ReactNode;
 }) {
   const img = images[index]!;
@@ -45,7 +46,7 @@ export function ImageViewer({ images, index, onIndex, onClose, footer }: {
           <div className="truncate font-medium text-fg">{img.label}</div>
           <div className="text-xs text-fg-2">{images.length > 1 ? `${index + 1} of ${images.length}` : "1 image"}{img.round ? ` · round ${img.round}` : ""}</div>
         </div>
-        <a href={img.src} target="_blank" rel="noreferrer" className="shrink-0 rounded-md px-2 py-1.5 text-xs text-accent hover:bg-surface-3" title="Open the original file in a new tab">Original ↗</a>
+        {!footer && <a href={img.src} target="_blank" rel="noreferrer" className="shrink-0 rounded-md px-2 py-1.5 text-xs text-accent hover:bg-surface-3" title="Open the original file in a new tab">Original ↗</a>}
         <button onClick={onClose} aria-label="Close" className="shrink-0 rounded-md p-1.5 text-fg-2 hover:bg-surface-3 hover:text-fg">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 6l12 12M18 6L6 18" /></svg>
         </button>
@@ -66,7 +67,7 @@ export function ImageViewer({ images, index, onIndex, onClose, footer }: {
         {prev && <button onClick={prev} aria-label="Previous image" className={`${arrow} left-2`}><Chevron dir="left" /></button>}
         {next && <button onClick={next} aria-label="Next image" className={`${arrow} right-2`}><Chevron dir="right" /></button>}
       </div>
-      {footer && <div className="scroll-thin max-h-[40%] shrink-0 overflow-y-auto border-t border-line-strong bg-canvas px-3 py-2">{footer(index)}</div>}
+      {footer?.(index)}
     </div>,
     document.body,
   );

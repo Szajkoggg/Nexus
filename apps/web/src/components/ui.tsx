@@ -168,10 +168,39 @@ export function Expandable({ text, lines = 3 }: { text: string; lines?: number }
 // ---------------------------------------------------------------- writing
 
 /**
- * A text box with a submit button. Ctrl+Enter submits. What is typed is kept as a draft under `draft` (see drafts.ts)
- * until it is sent: it survives closing the panel, a reload, and is never shown for another target. A failed submit
- * keeps it.
+ * The text of a box that submits: kept as a draft under `draft` (see drafts.ts) until it is sent, so it survives
+ * closing the panel and a reload and is never shown for another target. A failed submit keeps it, and so does
+ * whatever was typed while it was sending. Ctrl+Enter in the box submits (`onKeyDown`). Shared by Composer and the
+ * action bars, whose box and button are apart. The caller keys its component by the draft.
  */
+export function useDraftText({ draft, onSubmit, allowEmpty = false, verbatim = false }: {
+  draft: string; onSubmit: (text: string) => Promise<void>; allowEmpty?: boolean; verbatim?: boolean;
+}) {
+  const [text, setText] = useState(() => readDraft(draft));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+  const current = useRef(text);
+  const change = (value: string) => { current.current = value; setText(value); writeDraft(draft, value); };
+  const ready = !busy && (allowEmpty || !!text.trim());
+  const submit = async () => {
+    if (!ready) return;
+    const sent = text;
+    setBusy(true); setError(undefined);
+    try {
+      await onSubmit(verbatim ? sent : sent.trim());
+      // Whatever was typed while it was sending stays.
+      if (current.current === sent) change("");
+    }
+    catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+  const onKeyDown = (e: React.KeyboardEvent) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); void submit(); } };
+  return { text, change, submit, ready, busy, error, setError, onKeyDown };
+}
+
+export const TEXTAREA = "w-full resize-y rounded-lg border border-line-strong bg-canvas px-3 py-2 text-sm text-fg placeholder:text-fg-3 focus:border-accent focus:outline-none";
+
+/** A text box with a submit button below it; see useDraftText. */
 export function Composer(props: ComposerProps) {
   // Keyed by the draft so that moving to another step or conversation starts from that target's own text.
   return <ComposerBox key={props.draft} {...props} />;
@@ -185,54 +214,131 @@ interface ComposerProps {
 }
 
 function ComposerBox({ draft, placeholder, button, onSubmit, allowEmpty = false, rows = 3, extra, verbatim = false }: ComposerProps) {
-  const [text, setText] = useState(() => readDraft(draft));
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string>();
-  const current = useRef(text);
-  const change = (value: string) => { current.current = value; setText(value); writeDraft(draft, value); };
-  const submit = async () => {
-    if (busy || (!allowEmpty && !text.trim())) return;
-    const sent = text;
-    setBusy(true); setError(undefined);
-    try {
-      await onSubmit(verbatim ? sent : sent.trim());
-      // Whatever was typed while it was sending stays.
-      if (current.current === sent) change("");
-    }
-    catch (e) { setError((e as Error).message); }
-    finally { setBusy(false); }
-  };
+  const t = useDraftText({ draft, onSubmit, allowEmpty, verbatim });
   return (
     <div>
-      <textarea
-        value={text} rows={rows} placeholder={placeholder}
-        onChange={(e) => change(e.target.value)}
-        onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); void submit(); } }}
-        className="w-full resize-y rounded-lg border border-line-strong bg-canvas px-3 py-2 text-sm text-fg placeholder:text-fg-3 focus:border-accent focus:outline-none"
-      />
+      <textarea value={t.text} rows={rows} placeholder={placeholder} onChange={(e) => t.change(e.target.value)} onKeyDown={t.onKeyDown} className={TEXTAREA} />
       <div className="mt-2 flex flex-wrap items-center gap-3">
-        <Button onClick={submit} disabled={busy || (!allowEmpty && !text.trim())}>{busy ? "Sending…" : button}</Button>
+        <Button onClick={t.submit} disabled={!t.ready}>{t.busy ? "Sending…" : button}</Button>
         {extra}
         <span className="text-xs text-fg-3">Ctrl+Enter</span>
-        {error && <span className="text-xs text-danger">{error}</span>}
+        {t.error && <span className="text-xs text-danger">{t.error}</span>}
       </div>
     </div>
   );
 }
 
-export function Button({ children, onClick, disabled, variant = "primary" }: {
+export function Button({ children, onClick, disabled, variant = "primary", pressed }: {
   children: ReactNode; onClick: () => void; disabled?: boolean; variant?: "primary" | "quiet" | "danger";
+  /** A toggle (the bar's "Fix it…" while its form is open). */
+  pressed?: boolean;
 }) {
   const style = {
     primary: "bg-accent-strong text-on-accent hover:bg-accent",
-    quiet: "bg-surface-3 text-fg hover:bg-surface-4",
+    quiet: `${pressed ? "bg-surface-4" : "bg-surface-3"} text-fg hover:bg-surface-4`,
     danger: "text-danger hover:bg-danger/10",
   }[variant];
   return (
-    <button onClick={onClick} disabled={disabled} className={`rounded-md px-3 py-1.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-40 ${style}`}>
+    <button onClick={onClick} disabled={disabled} aria-pressed={pressed} className={`rounded-md px-3 py-1.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-40 ${style}`}>
       {children}
     </button>
   );
+}
+
+// ---------------------------------------------------------------- the action bar
+
+/** One entry of a ⋯ menu: an action, or a heading over the entries after it. */
+export type MenuEntry =
+  | { label: ReactNode; onSelect: () => void; danger?: boolean; checked?: boolean }
+  | { heading: string };
+
+/**
+ * ⋯: what a panel can do besides its main actions (Reject, Withdraw, settings…). Opens upward from an action bar,
+ * downward from a header. Escape or a click outside closes only the menu.
+ */
+export function Menu({ items, down = false, label = "More actions" }: { items: MenuEntry[]; down?: boolean; label?: string }) {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    // In the capture phase, marked handled and stopped, so nav.ts's Escape does not also close the panel.
+    const key = (e: KeyboardEvent) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setOpen(false); } };
+    window.addEventListener("keydown", key, true);
+    return () => window.removeEventListener("keydown", key, true);
+  }, [open]);
+  if (!items.length) return null;
+  return (
+    <div className="relative">
+      <button onClick={() => setOpen(!open)} aria-label={label} title={label} aria-haspopup="menu" aria-expanded={open}
+        className="grid h-8 w-8 place-items-center rounded-md border border-line-strong bg-surface-2 text-fg-2 hover:bg-surface-3 hover:text-fg">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" /></svg>
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-[70]" onClick={() => setOpen(false)} />
+          <div role="menu" className={`scroll-thin absolute right-0 z-[71] max-h-[60vh] w-max min-w-52 max-w-[min(20rem,85vw)] overflow-y-auto rounded-lg border border-line-strong bg-surface-2 py-1 shadow-xl ${down ? "top-full mt-1.5" : "bottom-full mb-1.5"}`}>
+            {items.map((m, i) => "heading" in m
+              ? <div key={i} className="px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wider text-fg-3">{m.heading}</div>
+              : (
+                <button key={i} role={m.checked === undefined ? "menuitem" : "menuitemcheckbox"} aria-checked={m.checked}
+                  onClick={() => { setOpen(false); m.onSelect(); }}
+                  className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-surface-3 ${m.danger ? "text-danger" : "text-fg"}`}>
+                  {m.checked !== undefined && <span className={`w-3 shrink-0 ${m.checked ? "text-accent" : "invisible"}`}>✓</span>}
+                  <span className="min-w-0">{m.label}</span>
+                </button>
+              ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The one action bar at the bottom of a panel, always in sight: the main action on the right, the second left of it,
+ * everything else under ⋯, a short hint on the left. `children` is the open form of an action (a note, Fix it, a
+ * reason), shown above the buttons it belongs to.
+ */
+export function ActionBar({ hint, menu, secondary, primary, children }: {
+  hint?: ReactNode; menu?: MenuEntry[]; secondary?: ReactNode; primary?: ReactNode; children?: ReactNode;
+}) {
+  return (
+    <div className="shrink-0 border-t border-line bg-surface pb-[env(safe-area-inset-bottom)]">
+      {children && <div className="scroll-thin max-h-[45vh] overflow-y-auto border-b border-line px-4 py-3 sm:px-5">{children}</div>}
+      <div className="flex flex-wrap items-center justify-end gap-2 px-4 py-3 sm:px-5">
+        {hint ? <span className="min-w-[8rem] flex-1 text-xs text-fg-3">{hint}</span> : <span className="mr-auto" />}
+        {menu && <Menu items={menu} />}
+        {secondary}
+        {primary}
+      </div>
+    </div>
+  );
+}
+
+export function CloseButton({ onClose, className = "" }: { onClose: () => void; className?: string }) {
+  return (
+    <button onClick={onClose} aria-label="Close" className={`shrink-0 rounded-md p-1.5 text-fg-2 hover:bg-surface-3 hover:text-fg ${className}`}>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 6l12 12M18 6L6 18" /></svg>
+    </button>
+  );
+}
+
+/** A panel's header: where it is, what it is, its status, and ✕ always at the top right. */
+export function PanelHeader({ where, title, status, onClose }: { where: ReactNode; title: ReactNode; status?: ReactNode; onClose: () => void }) {
+  return (
+    <header className="shrink-0 border-b border-line px-5 pb-3 pt-3 sm:px-6">
+      <div className="flex items-start gap-2">
+        <div className="min-w-0 flex-1 pt-1.5 text-xs text-fg-3">{where}</div>
+        <CloseButton onClose={onClose} className="-mr-2" />
+      </div>
+      <h2 className="mt-0.5 text-xl font-semibold text-fg">{title}</h2>
+      {status && <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-fg-3">{status}</div>}
+    </header>
+  );
+}
+
+/** What a panel shows between its header and its action bar; it scrolls, they stay. */
+export function PanelBody({ children }: { children: ReactNode }) {
+  return <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-5 pb-6 pt-4 sm:px-6">{children}</div>;
 }
 
 // ---------------------------------------------------------------- drawer
@@ -240,28 +346,25 @@ export function Button({ children, onClick, disabled, variant = "primary" }: {
 /**
  * A panel from the right. Escape and Back close it through nav.ts, which knows which layer is on top. With `left`, a
  * panel beside the page instead (a step's details on a wide screen): below the header, no backdrop, the page usable.
+ * With `panel`, the content brings its own PanelHeader (with ✕), PanelBody and ActionBar; else the drawer scrolls
+ * and has ✕ itself.
  */
-export function Drawer({ open, onClose, left, children }: { open: boolean; onClose: () => void; left?: boolean; children: ReactNode }) {
+export function Drawer({ open, onClose, left, panel, children }: { open: boolean; onClose: () => void; left?: boolean; panel?: boolean; children: ReactNode }) {
   if (!open) return null;
+  const content = panel ? children : <><CloseButton onClose={onClose} className="absolute right-3 top-3" /><div className="p-5 pt-6 sm:p-6">{children}</div></>;
   if (left) {
     return (
-      <aside className="scroll-thin fixed bottom-0 left-0 z-20 overflow-y-auto border-r border-line bg-surface shadow-xl"
+      <aside className={`fixed bottom-0 left-0 z-20 border-r border-line bg-surface shadow-xl ${panel ? "flex flex-col" : "scroll-thin overflow-y-auto"}`}
         style={{ top: "var(--header-h, 0px)", width: SIDE_LEFT }}>
-        <button onClick={onClose} aria-label="Close" className="absolute right-3 top-3 rounded-md p-1.5 text-fg-2 hover:bg-surface-3 hover:text-fg">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 6l12 12M18 6L6 18" /></svg>
-        </button>
-        <div className="p-5 pt-6">{children}</div>
+        {content}
       </aside>
     );
   }
   return (
     <div className="fixed inset-0 z-40 flex justify-end">
       <div className="absolute inset-0 bg-scrim/50" onClick={onClose} />
-      <aside className="scroll-thin relative h-full w-full max-w-2xl overflow-y-auto border-l border-line bg-surface pt-[env(safe-area-inset-top)] shadow-2xl">
-        <button onClick={onClose} aria-label="Close" className="absolute right-3 top-3 rounded-md p-1.5 text-fg-2 hover:bg-surface-3 hover:text-fg">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 6l12 12M18 6L6 18" /></svg>
-        </button>
-        <div className="p-5 pt-6 sm:p-6">{children}</div>
+      <aside className={`relative h-full w-full max-w-2xl border-l border-line bg-surface pt-[env(safe-area-inset-top)] shadow-2xl ${panel ? "flex flex-col" : "scroll-thin overflow-y-auto"}`}>
+        {content}
       </aside>
     </div>
   );

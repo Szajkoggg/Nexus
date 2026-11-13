@@ -611,6 +611,20 @@ Rules the components keep:
   pending delivery, a planned start) uses `info`.
 - Opacity modifiers derive tints from tokens (`bg-warn/15`), so a theme defines each colour once.
 
+### One action bar
+
+Every panel that asks something of the user is built the same way (UX proposals, item 13): `PanelHeader` (where it
+is, what it is, its status, ✕ at the top right), `PanelBody` (scrolls), `ActionBar` (stays). The bar holds the main
+action on the right, the second left of it, the rest under ⋯ (`Menu`), a short hint on the left; what an action
+needs (a text, a reason, a confirmation) opens in the bar, above its buttons, so the button and its form are never
+apart. A drawer with `panel` leaves all three to its content. One bar per panel: a step's bar is its review when it
+waits for the user, else the answer to its first open question (a second open question keeps its box in its card); a
+queue's bar is Continue on a stopped queue whose revision is approved, else Approve on one that is not. A form opens
+by itself when its draft has text, so nothing typed earlier is hidden. `useDraftText` holds a box's draft, sending
+and Ctrl+Enter for both `Composer` and the bars. The chats keep the rule in their top row (the switch left, ⋯ and ✕
+right) and the viewer ends with the same bar. The menu closes on Escape without closing the panel: its handler runs
+in the capture phase and stops the event before nav.ts sees it.
+
 The theme is chosen per browser, not per project (settings, "This browser"): `localStorage` `nexus.theme`, one of
 `graphite`, `paper`, `honey` or `system` (Paper when the system is light, Graphite when dark, following it while the
 page is open); nothing stored, or anything else, is Graphite. Like drafts, it is the device's own matter, so it stays

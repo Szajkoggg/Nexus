@@ -197,10 +197,10 @@ export function App() {
         <RemotePanel version={tick} />
       </Drawer>
 
-      <Drawer open={itemShown} onClose={close} left={wide}>
+      <Drawer open={itemShown} onClose={close} left={wide} panel>
         {state && queue && (step
-          ? <StepDetail project={state} queue={queue} step={step} onChanged={reload} />
-          : <QueueDetail project={state} queue={queue} onChanged={reload} />)}
+          ? <StepDetail project={state} queue={queue} step={step} onChanged={reload} onClose={close} />
+          : <QueueDetail project={state} queue={queue} onChanged={reload} onClose={close} />)}
       </Drawer>
     </div>
   );

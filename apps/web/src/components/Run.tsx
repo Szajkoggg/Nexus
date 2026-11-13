@@ -251,7 +251,7 @@ export function RunControls({ project, queue, onChanged }: { project: ProjectSta
       )}
       {!queue.approved && !active && <p className="text-sm text-fg-3">Approve the queue's current revision to run it.</p>}
       {error && <p className="mt-2 text-xs text-danger">{error}</p>}
-      <p className="mt-2 text-xs text-fg-3">
+      <p className="mt-2 text-xs text-fg-3 wrap-anywhere">
         {runtime === "codex" ? "Codex" : "Claude Code"} runs in {queue.worktree && queue.worktree !== "auto" ? <span className="font-mono">{queue.worktree}</span> : queue.worktree === "auto" ? "a new worktree" : <span className="font-mono">{project.project.root}</span>}{runtime === "codex"
           ? ` with sandbox ${project.project.runtimes.codex.sandbox}, approvals ${project.project.runtimes.codex.approval_policy}.`
           : ` with permission mode ${project.project.runtimes.claude.permission_mode}.`}

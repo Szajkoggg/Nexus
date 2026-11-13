@@ -10,8 +10,8 @@ user, a per-project orchestrator agent and the working agents.
 **Ideas.** Beside the orchestrator, each project has conversations with a thinking partner (the bulb icon): one
 session per topic, for thinking something through (gameplay design, the look, what to build next) without starting
 any work. A partner reads the whole project and writes only in the project's notes folder (settings: "Ideas"), so it
-can record what you decide; "Hand to orchestrator" has it summarize the conversation into the orchestrator's chat,
-which turns it into queues.
+can record what you decide; "Hand to orchestrator" (under ⋯ in the conversation) has it summarize the conversation
+into the orchestrator's chat, which turns it into queues.
 
 **Chat about a step.** Every step, in every state, has "Chat about this": it opens the step's latest conversation (an
 archived one does not count) or starts one, and "New conversation" beside it starts another. The partner gets the
@@ -27,12 +27,20 @@ computer.
 **On a wide screen** (1280 px and more) a queue or step opens on the left and the orchestrator or Ideas on the
 right, both at once, with the queue list between them: click another step and the chat stays open.
 
+**One action bar.** Every queue and step panel ends with the same bar, always in sight however long the panel is:
+the main action on the right (Accept and go on, Approve revision N, Continue, Answer), the second left of it (Fix
+it…), and everything else under ⋯ (Reject, a note with the acceptance, your words with an approval, Withdraw
+approval, the queue's "After each step"). What an action needs (Fix it's text, a reason) opens just above the bar.
+The header says where you are, what it is and its status, with ✕ at the top right. The chats follow the same rule:
+Orchestrator | Ideas on the left, ⋯ and ✕ on the right; "New conversation" (which makes the orchestrator start over)
+and showing the tool calls are under ⋯.
+
 **Review images** open in the app: full screen on a phone, two fingers to zoom (double-tap on a computer), swipe or
-the arrows for the step's next and previous image; "Original" opens the file in a new tab. A picture with a "before"
-(the same label in an earlier round, or one the worker named with `--before`) can be seen beside it or overlaid with
-a slider. Below each picture: **Mark accepted** (a mark for that picture only; it does not accept the step) and a
-comment, which goes back to the worker as a Fix it while the step waits for your review, and otherwise becomes a note
-on the next pending step.
+the arrows for the step's next and previous image; "Open the original" under ⋯ opens the file in a new tab. A picture
+with a "before" (the same label in an earlier round, or one the worker named with `--before`) can be seen beside it
+or overlaid with a slider. The viewer's bar: **Mark accepted** (a mark for that picture only; it does not accept the
+step) and **Comment…**, which goes back to the worker as a Fix it while the step waits for your review, and otherwise
+becomes a note on the next pending step.
 
 **Finished queues** (done or cancelled) are no longer cards in the list: they fold into one line at the bottom of
 the project page, "Finished (N)", closed until you open it (the browser remembers that, per project). Open, it lists
@@ -40,8 +48,8 @@ one compact line per queue, the most recently finished on top, with when it fini
 for its details. A finished queue that still waits for you (a step in review, an open question) stays in the list
 above until nothing waits.
 
-**Withdrawing an approval.** A queue approved but not started yet shows "Withdraw approval" in its detail (with an
-optional reason): it goes back to proposed and waits for your approval again; the earlier approval stays on record.
+**Withdrawing an approval.** A queue approved but not started yet has "Withdraw approval…" under ⋯ in its bar (with
+an optional reason): it goes back to proposed and waits for your approval again; the earlier approval stays on record.
 Once a queue has started, pause or stop it instead. Only you can do this, from the dashboard.
 
 **Drafts.** Text typed but not sent (to the orchestrator, in a conversation, to a running agent, a step's note, an
@@ -206,21 +214,21 @@ switch. The header's tools move to a second row there.
 The inbox button in the header counts what waits for you in all projects (questions, approvals, steps in review,
 halted runs, failed steps). It opens one list of them, newest first, each with its project; tap an item to open it.
 
-"After each step" (in Settings for the project, on a queue for that queue) can also be "wait for the orchestrator's
+"After each step" (in Settings for the project, under ⋯ in a queue's bar for that queue) can also be "wait for the orchestrator's
 review": the orchestrator then checks each step and accepts it, sends it back, or hands it to you with why. A step
 says whom it waits for ("review: orchestrator" or "review: you"); only those for you are in the inbox. Without an
 orchestrator, or with its notices off, such steps wait for you.
 
-A step waiting for you can be accepted, with a note if you like ("+ Add a note"): the note goes to the next step of
+A step waiting for you can be accepted, with a note if you like (⋯, "Add a note to the acceptance"): the note goes to the next step of
 the queue, which gets it when it starts, or to the orchestrator, for the plan, later queues or the project's rules
 (on the queue's last step, always to the orchestrator; it reaches the orchestrator even with its notifications off).
-Or it can be sent back with **Fix it**: write what you want instead, and the step goes
+Or it can be sent back with **Fix it…**: write what you want instead, and the step goes
 back to its worker in the same session as its next round. Your words win over the step's acceptance criteria where
 they conflict; when the step has criteria, Nexus lists them and asks before sending. The round after a Fix it comes
 back to you. The orchestrator may send a step back twice (`review_send_back_limit` in the project's defaults); its
 third send-back hands the step to you instead.
 
-**Reject** ("I want something else", "I don't want this") is the third action on a step waiting for you, with an
+**Reject** ("I want something else", "I don't want this", under ⋯) is the third action on a step waiting for you, with an
 optional reason. The run pauses and nothing is reverted; the orchestrator is told (even with its notifications off)
 and proposes what follows, a revert as a step, changed steps or a new queue, as revisions for you to approve. The
 queue goes on only once you approve a new revision, at its first pending step; the rejected step is not run again,

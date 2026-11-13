@@ -4,20 +4,20 @@ import { stopPlace } from "@nexus/protocol/attention";
 import { stepValuesText } from "@nexus/protocol/steps";
 import { act, actResult, enc, fileUrl, useFetch, type ProjectState, type QuestionView, type QueueView, type StepView } from "../api.ts";
 import { noteTargets, pairPictures, showsReviewActions } from "../review.ts";
-import { Button, Composer, Expandable, Markdown, Section, StatusBadge, StepTimes, TimeAgo, reviewLabel } from "./ui.tsx";
+import { ActionBar, Button, Composer, Expandable, Markdown, PanelBody, PanelHeader, Section, StatusBadge, StepTimes, TEXTAREA, TimeAgo, reviewLabel, useDraftText, type MenuEntry } from "./ui.tsx";
 import { Activity, RetryNote, RunControls } from "./Run.tsx";
 import { StepRefusals } from "./Refusals.tsx";
-import { draftKey } from "../drafts.ts";
+import { draftKey, readDraft } from "../drafts.ts";
 import { layerValue } from "../layers.ts";
 import { nav, useNav } from "../nav.ts";
 import { ImageViewer, type ViewerImage } from "./Viewer.tsx";
 import { StepChat } from "./Chat.tsx";
 
-interface Props { project: ProjectState; queue: QueueView; onChanged: () => void }
+interface Props { project: ProjectState; queue: QueueView; onChanged: () => void; onClose: () => void }
 
 // ---------------------------------------------------------------- step
 
-export function StepDetail({ project, queue, step, onChanged }: Props & { step: StepView }) {
+export function StepDetail({ project, queue, step, onChanged, onClose }: Props & { step: StepView }) {
   const id = project.project.id;
   const questions = queue.questions.filter((q) => q.step === step.id);
   const live = (step.status === "running" || step.status === "waiting") && step.session;
@@ -36,25 +36,29 @@ export function StepDetail({ project, queue, step, onChanged }: Props & { step: 
   }));
   const viewing = layerValue(useNav(), "viewer");
   const shown = viewing === undefined ? undefined : Math.min(Math.max(0, Number(viewing) || 0), images.length - 1);
+  // The action bar: the user's review when the step waits for it; else the answer to the step's open question (the
+  // first, if there are several; the others keep their answer box in their card).
+  const reviewing = showsReviewActions(step);
+  const asking = reviewing ? undefined : questions.find((q) => q.state === "open" || q.state === "escalated");
   return (
-    <div>
-      <div className="text-xs text-fg-3">
-        <span className="font-mono">{queue.id}</span> · {queue.title}
-      </div>
-      <h2 className="mt-1 flex flex-wrap items-center gap-3 pr-8 text-xl font-semibold text-fg">
-        <span className="font-mono text-fg-3">{step.id}</span> {step.title}
-      </h2>
-      <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-fg-3">
-        <StatusBadge status={step.status} label={reviewLabel(step)} />
-        <StepTimes step={step} />
-        {step.commit && <span className="font-mono">{step.commit}</span>}
-        {session && <span>by {session.title ?? session.id.slice(-8)} ({session.runtime})</span>}
-        {stepValuesText(step) && (
-          <span className="rounded bg-surface-3 px-1.5 py-0.5 text-fg" title="This step's own runtime, model and effort; what it leaves out is the run's">
-            runs on {stepValuesText(step)}
-          </span>
-        )}
-      </div>
+    <>
+      <PanelHeader
+        where={<><span className="font-mono">{queue.id}</span> · {queue.title}</>}
+        title={<><span className="mr-2 font-mono text-fg-3">{step.id}</span>{step.title}</>}
+        status={<>
+          <StatusBadge status={step.status} label={reviewLabel(step)} />
+          <StepTimes step={step} />
+          {step.commit && <span className="font-mono">{step.commit}</span>}
+          {session && <span>by {session.title ?? session.id.slice(-8)} ({session.runtime})</span>}
+          {stepValuesText(step) && (
+            <span className="rounded bg-surface-3 px-1.5 py-0.5 text-fg" title="This step's own runtime, model and effort; what it leaves out is the run's">
+              runs on {stepValuesText(step)}
+            </span>
+          )}
+        </>}
+        onClose={onClose}
+      />
+      <PanelBody>
       <StepChat project={id} queue={queue.id} step={step.id} version={project.generated_at} />
 
       {queue.run?.state === "retry_wait" && queue.run.step === step.id && (
@@ -79,7 +83,12 @@ export function StepDetail({ project, queue, step, onChanged }: Props & { step: 
           <p className="text-sm text-fg-2">The queue holds here until the orchestrator accepts this step, sends it back, or hands it to you.</p>
         </Section>
       )}
-      {showsReviewActions(step) && <AcceptReview project={id} queue={queue.id} step={step.id} next={noteTargets(queue.steps, step.id).next} asked={step.asked_user?.text} criteria={step.acceptance} onChanged={onChanged} />}
+      {reviewing && (
+        <Section title="Waiting for your review">
+          {step.asked_user?.text && <p className="mb-2 text-sm text-fg"><span className="text-fg-3">The orchestrator asks you: </span>{step.asked_user.text}</p>}
+          <p className="text-sm text-fg-2">The queue holds here until you accept this step or send it back.</p>
+        </Section>
+      )}
 
       <PushLine project={id} queue={queue} step={step.id} onChanged={onChanged} />
 
@@ -111,7 +120,7 @@ export function StepDetail({ project, queue, step, onChanged }: Props & { step: 
         </Section>
       )}
 
-      {questions.length > 0 && <Section title="Questions">{questions.map((q) => <Question key={q.qid} q={q} project={id} onChanged={onChanged} />)}</Section>}
+      {questions.length > 0 && <Section title="Questions">{questions.map((q) => <Question key={q.qid} q={q} project={id} onChanged={onChanged} inBar={q.qid === asking?.qid} />)}</Section>}
 
       {step.status_note && (
         <Section title="Recorded state">
@@ -161,7 +170,7 @@ export function StepDetail({ project, queue, step, onChanged }: Props & { step: 
 
       {shown !== undefined && images.length > 0 && (
         <ImageViewer images={images} index={shown} onIndex={(i) => nav.open(`viewer:${i}`)} onClose={() => nav.close("viewer")}
-          footer={(i) => <PictureActions key={pictures[i]!.item.path} project={id} queue={queue} step={step} path={pictures[i]!.item.path!} onChanged={onChanged} />} />
+          footer={(i) => <PictureActions key={pictures[i]!.item.path} project={id} queue={queue} step={step} path={pictures[i]!.item.path!} src={images[i]!.src} onChanged={onChanged} />} />
       )}
 
       {step.checks.length > 0 && (
@@ -244,25 +253,27 @@ export function StepDetail({ project, queue, step, onChanged }: Props & { step: 
           </ol>
         </Section>
       )}
-    </div>
+      </PanelBody>
+      {reviewing
+        ? <ReviewBar key={step.id} project={id} queue={queue.id} step={step.id} next={noteTargets(queue.steps, step.id).next} criteria={step.acceptance} onChanged={onChanged} />
+        : asking && <AnswerBar key={asking.qid} q={asking} project={id} onChanged={onChanged} />}
+    </>
   );
 }
 
 /** Reject: the step is marked rejected, the run pauses, nothing is reverted; the orchestrator proposes what follows. */
-function RejectStep({ project, queue, step, onChanged }: { project: string; queue: string; step: string; onChanged: () => void }) {
-  const [open, setOpen] = useState(false);
+function RejectStep({ project, queue, step, onChanged, onCancel }: { project: string; queue: string; step: string; onChanged: () => void; onCancel: () => void }) {
   const [why, setWhy] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
-  if (!open) return <div className="mt-3"><Button variant="danger" onClick={() => setOpen(true)}>Reject…</Button></div>;
   const reject = () => {
     setBusy(true); setError(undefined);
     act(project, "POST", `/queues/${enc(queue)}/steps/${enc(step)}/reject`, why.trim() ? { text: why } : {})
-      .then(() => { setOpen(false); setWhy(""); onChanged(); }, (e: Error) => setError(e.message))
+      .then(() => { onCancel(); setWhy(""); onChanged(); }, (e: Error) => setError(e.message))
       .finally(() => setBusy(false));
   };
   return (
-    <div className="mt-3 rounded-lg border border-danger/30 bg-danger/10 p-3">
+    <div className="rounded-lg border border-danger/30 bg-danger/10 p-3">
       <p className="text-sm text-danger">Reject this step</p>
       <p className="mt-1 text-xs text-fg-2">The run pauses and nothing is reverted. The orchestrator is told and proposes what follows (a revert as a step, changed steps, or a new queue) for your approval; the run goes on only once you approve a new revision, and this step is not run again.</p>
       <textarea
@@ -271,7 +282,7 @@ function RejectStep({ project, queue, step, onChanged }: { project: string; queu
       />
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <button disabled={busy} onClick={reject} className="rounded-md border border-danger/50 bg-danger/15 px-3 py-1.5 text-sm font-medium text-danger hover:bg-danger/25 disabled:opacity-40">{busy ? "Rejecting…" : "Reject the step"}</button>
-        <Button variant="quiet" onClick={() => setOpen(false)}>Cancel</Button>
+        <Button variant="quiet" onClick={onCancel}>Cancel</Button>
         {error && <span className="text-xs text-danger">{error}</span>}
       </div>
     </div>
@@ -311,29 +322,33 @@ function PictureBadges({ marks, paired }: { marks?: StepView["pictures"][string]
 }
 
 /**
- * Below a picture in the viewer: mark it accepted (a mark only; the step is not accepted) and comment on it. A comment
- * goes back to the worker as a Fix it while the step waits for the user's review; otherwise it is a note on the next
- * pending step.
+ * The viewer's action bar: mark the picture accepted (a mark only; the step is not accepted), comment on it, and the
+ * original file under ⋯. A comment goes back to the worker as a Fix it while the step waits for the user's review;
+ * otherwise it is a note on the next pending step. The comment box opens by itself when there are comments or a draft.
  */
-function PictureActions({ project, queue, step, path, onChanged }: { project: string; queue: QueueView; step: StepView; path: string; onChanged: () => void }) {
+function PictureActions({ project, queue, step, path, src, onChanged }: { project: string; queue: QueueView; step: StepView; path: string; src: string; onChanged: () => void }) {
   const marks = step.pictures[path];
   const [error, setError] = useState<string>();
+  const [commentOpen, setCommentOpen] = useState(() => !!marks?.comments.length || !!readDraft(draftKey(project, "picture", queue.id, step.id, path)));
   const next = noteTargets(queue.steps, step.id).next;
   const where = showsReviewActions(step) ? "goes back to the worker with the step (a Fix it: your words win over its criteria)"
     : step.status === "review" && step.review_with === "orchestrator" ? "goes to the orchestrator, which weighs it in its review of the step and sends the step back if you ask for a fix"
     : next ? `becomes a note on step ${next}, delivered when it starts` : undefined;
   const base = `/queues/${enc(queue.id)}/steps/${enc(step.id)}/pictures`;
   return (
-    <div className="space-y-2 text-sm">
-      <div className="flex flex-wrap items-center gap-2">
+    <ActionBar
+      hint={error ? <span className="text-danger">{error}</span> : "A mark for this picture; the step is not accepted by it."}
+      menu={[{ label: "Open the original ↗", onSelect: () => window.open(src, "_blank", "noreferrer") }]}
+      secondary={where ? <Button variant="quiet" pressed={commentOpen} onClick={() => setCommentOpen(!commentOpen)}>Comment…</Button> : undefined}
+      primary={
         <button
           onClick={() => act(project, "POST", `${base}/mark`, { path, accepted: !marks?.accepted }).then(onChanged, (e: Error) => setError(e.message))}
           aria-pressed={!!marks?.accepted}
-          className={`rounded-md px-3 py-1.5 text-sm font-medium ring-1 ${marks?.accepted ? "bg-ok/20 text-ok ring-ok/50" : "text-fg ring-line-strong hover:bg-surface-3"}`}
+          className={`rounded-md px-3 py-1.5 text-sm font-medium ${marks?.accepted ? "bg-ok/20 text-ok ring-1 ring-ok/50" : "bg-accent-strong text-on-accent hover:bg-accent"}`}
         >{marks?.accepted ? "✓ Accepted" : "Mark accepted"}</button>
-        <span className="text-xs text-fg-3">a mark for this picture; the step is not accepted by it</span>
-        {error && <span className="text-xs text-danger">{error}</span>}
-      </div>
+      }
+    >
+      {(commentOpen || !where) && <div className="space-y-2 text-sm">
       {marks?.comments.map((c, i) => (
         <div key={i} className="rounded-md bg-surface-3 px-2 py-1.5">
           <p className="whitespace-pre-wrap text-fg">{c.text}</p>
@@ -352,7 +367,8 @@ function PictureActions({ project, queue, step, path, onChanged }: { project: st
           <p className="mt-1 text-[11px] text-fg-3">The comment {where}.</p>
         </div>
       ) : <p className="text-xs text-fg-3">No step to take a comment: this step is not waiting for your review and nothing after it is pending.</p>}
-    </div>
+      </div>}
+    </ActionBar>
   );
 }
 
@@ -500,9 +516,13 @@ function PushLine({ project, queue, step, onChanged }: { project: string; queue:
 
 const POLICY_LABEL: Record<string, string> = { continue: "go on", wait: "wait for my review", orchestrator: "the orchestrator reviews" };
 
-function AcceptReview({ project, queue, step, next, asked, criteria, onChanged }: { project: string; queue: string; step: string; next?: string; asked?: string; criteria: string[]; onChanged: () => void }) {
+/**
+ * The bar of a step in the user's review: Accept and go on, Fix it… beside it, Reject and a note with the acceptance
+ * under ⋯. Fix it opens with the text kept from before, if there is one.
+ */
+function ReviewBar({ project, queue, step, next, criteria, onChanged }: { project: string; queue: string; step: string; next?: string; criteria: string[]; onChanged: () => void }) {
   const [error, setError] = useState<string>();
-  // Accept's note: collapsed by default; empty means a plain accept. It goes to the next step, or to the orchestrator
+  // Accept's note: closed by default; empty means a plain accept. It goes to the next step, or to the orchestrator
   // (always on the queue's last step).
   const [noteOpen, setNoteOpen] = useState(false);
   const [note, setNote] = useState("");
@@ -510,18 +530,30 @@ function AcceptReview({ project, queue, step, next, asked, criteria, onChanged }
   const to = next ? noteTo : "orchestrator";
   const accept = () => act(project, "POST", `/queues/${enc(queue)}/steps/${enc(step)}/accept`, note.trim() ? { text: note, note_to: to } : {})
     .then(() => { setNote(""); setNoteOpen(false); onChanged(); }, (e: Error) => setError(e.message));
+  const [fixOpen, setFixOpen] = useState(() => !!readDraft(draftKey(project, "fix", queue, step)));
+  const [rejectOpen, setRejectOpen] = useState(false);
   // Fix it with criteria: the text waits here until the user confirms that it overrides them.
   const [confirm, setConfirm] = useState<{ resolve: () => void; reject: (e: Error) => void; send: () => Promise<void> }>();
   const send = (text: string) => act(project, "POST", `/queues/${enc(queue)}/steps/${enc(step)}/send-back`, { text }).then(onChanged);
+  const menu: MenuEntry[] = [
+    ...(noteOpen ? [] : [{ label: "Add a note to the acceptance…", onSelect: () => setNoteOpen(true) }]),
+    ...(rejectOpen ? [] : [{ label: "Reject…", danger: true, onSelect: () => setRejectOpen(true) }]),
+  ];
+  const opened = noteOpen || fixOpen || rejectOpen;
   return (
-    <Section title="Waiting for your review">
-      {asked && <p className="mb-2 text-sm text-fg"><span className="text-fg-3">The orchestrator asks you: </span>{asked}</p>}
-      <p className="mb-2 text-sm text-fg-2">The queue holds here until you accept this step or send it back.</p>
+    <ActionBar
+      hint={error ? <span className="text-danger">{error}</span> : undefined}
+      menu={menu}
+      secondary={<Button variant="quiet" pressed={fixOpen} onClick={() => setFixOpen(!fixOpen)}>Fix it…</Button>}
+      primary={<Button onClick={() => void accept()}>{note.trim() ? "Accept with the note" : "Accept and go on"}</Button>}
+    >
+      {opened && <div className="space-y-4">
+      {rejectOpen && <RejectStep project={project} queue={queue} step={step} onChanged={onChanged} onCancel={() => setRejectOpen(false)} />}
       {noteOpen && (
-        <div className="mb-3">
+        <div>
           <textarea
-            value={note} rows={3} placeholder="A note with your acceptance (optional)…" onChange={(e) => setNote(e.target.value)}
-            className="w-full resize-y rounded-lg border border-line-strong bg-canvas px-3 py-2 text-sm text-fg placeholder:text-fg-3 focus:border-accent focus:outline-none"
+            value={note} rows={2} placeholder="A note with your acceptance (optional)…" onChange={(e) => setNote(e.target.value)}
+            className={TEXTAREA}
           />
           {next ? (
             <label className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-fg-2">
@@ -536,13 +568,7 @@ function AcceptReview({ project, queue, step, next, asked, criteria, onChanged }
           )}
         </div>
       )}
-      <div className="flex flex-wrap items-center gap-3">
-        <Button onClick={() => void accept()}>{note.trim() ? "Accept with the note" : "Accept and go on"}</Button>
-        {!noteOpen && <button onClick={() => setNoteOpen(true)} className="text-sm text-fg-2 hover:text-fg">+ Add a note</button>}
-        {error && <span className="text-xs text-danger">{error}</span>}
-      </div>
-      <RejectStep project={project} queue={queue} step={step} onChanged={onChanged} />
-      <div className="mt-4">
+      {fixOpen && <div>
         <p className="mb-1.5 text-sm text-fg">Fix it</p>
         <p className="mb-2 text-xs text-fg-3">Sends the step back to its worker with your words. Where they conflict with the step's acceptance criteria, your words win.</p>
         <Composer
@@ -566,8 +592,30 @@ function AcceptReview({ project, queue, step, next, asked, criteria, onChanged }
             </div>
           </div>
         )}
-      </div>
-    </Section>
+      </div>}
+      </div>}
+    </ActionBar>
+  );
+}
+
+/** The bar of a step with an open question: the answer box, whether the worker may go on, and Answer. */
+function AnswerBar({ q, project, onChanged }: { q: QuestionView; project: string; onChanged: () => void }) {
+  const [goOn, setGoOn] = useState(true);
+  const t = useDraftText({
+    draft: draftKey(project, "answer", q.qid),
+    onSubmit: async (text) => { await act(project, "POST", `/questions/${enc(q.qid)}/answer`, { text, continue: goOn }); onChanged(); },
+  });
+  return (
+    <ActionBar
+      hint={t.error ? <span className="text-danger">{t.error}</span> : "Ctrl+Enter answers"}
+      primary={<Button onClick={t.submit} disabled={!t.ready}>{t.busy ? "Sending…" : "Answer"}</Button>}
+    >
+      <textarea value={t.text} rows={2} placeholder="Your answer…" onChange={(e) => t.change(e.target.value)} onKeyDown={t.onKeyDown} className={TEXTAREA} />
+      <label className="mt-1.5 flex items-center gap-1.5 text-xs text-fg-2">
+        <input type="checkbox" checked={goOn} onChange={(e) => setGoOn(e.target.checked)} className="accent-accent" />
+        the worker may go on
+      </label>
+    </ActionBar>
   );
 }
 
@@ -603,7 +651,8 @@ function describe(e: Event): string {
   }
 }
 
-export function Question({ q, project, onChanged }: { q: QuestionView; project: string; onChanged: () => void }) {
+/** A question and its answers; open, with its answer box, unless the panel's action bar answers it (`inBar`). */
+export function Question({ q, project, onChanged, inBar }: { q: QuestionView; project: string; onChanged: () => void; inBar?: boolean }) {
   const open = q.state === "open" || q.state === "escalated";
   const tone = q.state === "escalated" ? "border-review/40 bg-review/5" : open ? "border-warn/30 bg-warn/5" : "border-line";
   return (
@@ -622,7 +671,7 @@ export function Question({ q, project, onChanged }: { q: QuestionView; project: 
           <Markdown className="inline [&_p]:inline [&_p]:m-0">{a.text}</Markdown>
         </div>
       ))}
-      {open && (
+      {open && !inBar && (
         <div className="mt-3">
           <AnswerBox q={q} project={project} onChanged={onChanged} />
         </div>
@@ -719,23 +768,10 @@ function StoppedWork({ left, work, setWork, needsChoice, pushAccepted, branch }:
   );
 }
 
-function StopBox({ project, queue, onChanged, left, work, setWork, needsChoice, pushAccepted, note, setNote }: {
-  project: string; queue: QueueView; onChanged: () => void;
-  left?: LeftView; work?: "keep" | "discard"; setWork: (w: "keep" | "discard") => void; needsChoice: boolean; pushAccepted: boolean;
-  note?: string; setNote: (n: string | undefined) => void;
+/** A stopped queue's stop: why and where, the orchestrator's proposal, what the step left; Continue is in the bar. */
+function StopBox({ queue, left, work, setWork, needsChoice, pushAccepted }: {
+  queue: QueueView; left?: LeftView; work?: "keep" | "discard"; setWork: (w: "keep" | "discard") => void; needsChoice: boolean; pushAccepted: boolean;
 }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string>();
-  const go = async () => {
-    setBusy(true); setError(undefined); setNote(undefined);
-    try {
-      const r = await actResult<{ message?: string } | string>(project, "POST", `/queues/${enc(queue.id)}/continue`, needsChoice ? { work } : {});
-      if (r && typeof r === "object" && r.message) setNote(r.message);
-      onChanged();
-    }
-    catch (e) { setError((e as Error).message); }
-    finally { setBusy(false); }
-  };
   const p = queue.lift_proposal;
   return (
     <div className="mt-4 rounded-lg border border-stop/30 bg-stop/10 p-3 text-sm">
@@ -748,18 +784,9 @@ function StopBox({ project, queue, onChanged, left, work, setWork, needsChoice, 
         </div>
       )}
       {left && <StoppedWork left={left} work={work} setWork={setWork} needsChoice={needsChoice} pushAccepted={pushAccepted} branch={queue.branch} />}
-      {queue.approved ? (
-        <div className="mt-3 flex flex-wrap items-center gap-3">
-          <Button disabled={busy || (needsChoice && !work)} onClick={() => void go()}>{needsChoice && work === "discard" ? "Discard and ask for a revert" : "Continue"}</Button>
-          <span className="text-xs text-fg-2">
-            {needsChoice && !work ? "Choose Keep or Discard first." : needsChoice && work === "discard" ? "The stop stays until you approve the orchestrator's revert." : "Lifts the stop; the stopped step runs again in its session, unless it was skipped."}
-          </span>
-        </div>
-      ) : (
+      {!queue.approved && (
         <p className="mt-3 text-xs text-fg-2">Revision {queue.revision} is not approved yet: approving it lifts the stop{needsChoice ? " (with your choice above)" : ""}.</p>
       )}
-      {note && <p className="mt-2 text-xs text-info">{note}</p>}
-      {error && <p className="mt-2 text-xs text-danger">{error}</p>}
     </div>
   );
 }
@@ -798,11 +825,9 @@ function Changes({ entries, queue }: { entries: StatusChange[]; queue: QueueView
   );
 }
 
-function WithdrawApproval({ project, queue, onChanged }: { project: string; queue: string; onChanged: () => void }) {
-  const [open, setOpen] = useState(false);
-  if (!open) return <div className="mt-2"><Button variant="quiet" onClick={() => setOpen(true)}>Withdraw approval</Button></div>;
+function WithdrawApproval({ project, queue, onChanged, onCancel }: { project: string; queue: string; onChanged: () => void; onCancel: () => void }) {
   return (
-    <div className="mt-3 rounded-lg border border-stop/30 bg-stop/5 p-3">
+    <div className="rounded-lg border border-stop/30 bg-stop/5 p-3">
       <p className="mb-2 text-sm text-fg">
         The queue has not started. Withdrawing puts it back to proposed: it waits for your approval again and cannot be started until then. The earlier approval stays on record.
       </p>
@@ -812,7 +837,7 @@ function WithdrawApproval({ project, queue, onChanged }: { project: string; queu
         draft={draftKey(project, "withdraw", queue)}
         placeholder="Why (optional)…"
         button="Withdraw approval"
-        extra={<Button variant="quiet" onClick={() => setOpen(false)}>Cancel</Button>}
+        extra={<Button variant="quiet" onClick={onCancel}>Cancel</Button>}
         onSubmit={async (reason) => { await act(project, "POST", `/queues/${enc(queue)}/withdraw`, { reason }); onChanged(); }}
       />
     </div>
@@ -842,41 +867,37 @@ function OwnValues({ queue }: { queue: QueueView }) {
   );
 }
 
-export function QueueDetail({ project, queue, onChanged }: Props) {
+export function QueueDetail({ project, queue, onChanged, onClose }: Props) {
   const id = project.project.id;
   const latest = queue.approvals.at(-1);
   const inherited = project.project.defaults.stop_conditions;
-  const [error, setError] = useState<string>();
-  const setPolicy = (review_policy: string | null) =>
-    act(id, "PATCH", `/queues/${enc(queue.id)}`, { review_policy }).then(onChanged, (e: Error) => setError(e.message));
   // A stopped queue: what its stopped step left, and the user's Keep or Discard, shared by Continue and the approval.
   const left = useFetch<LeftView | null>(queue.status === "stopped" ? `/api/projects/${enc(id)}/queues/${enc(queue.id)}/left` : undefined, project.generated_at);
   const [work, setWork] = useState<"keep" | "discard">();
-  const [workNote, setWorkNote] = useState<string>();
   const needsChoice = !!left && left.commits.length > 0 && !left.discarded;
 
   return (
-    <div>
-      <div className="text-xs text-fg-3">{project.project.name}</div>
-      <h2 className="mt-1 pr-8 text-xl font-semibold text-fg">
-        <span className="font-mono text-fg-3">{queue.id}</span> {queue.title}
-      </h2>
-      <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-fg-3">
-        <StatusBadge status={queue.status} />
-        <span>revision {queue.revision}</span>
-        {queue.branch && <span className="font-mono">{queue.branch}</span>}
-        {queue.worktree && <span className="font-mono">{queue.worktree}</span>}
-        <span className={queue.approved ? "text-ok" : "text-fg-3"}>
-          {queue.approved ? "approved" : queue.withdrawals.length && queue.withdrawals.at(-1)!.approvals >= queue.approvals.length ? "approval withdrawn" : latest ? "approval is for an older revision" : "no approval recorded in Nexus"}
-        </span>
-      </div>
-
+    <>
+      <PanelHeader
+        where={<>{project.project.name} · queue</>}
+        title={<><span className="mr-2 font-mono text-fg-3">{queue.id}</span>{queue.title}</>}
+        status={<>
+          <StatusBadge status={queue.status} />
+          <span>revision {queue.revision}</span>
+          {queue.branch && <span className="font-mono">{queue.branch}</span>}
+          {queue.worktree && <span className="font-mono">{queue.worktree}</span>}
+          <span className={queue.approved ? "text-ok" : "text-fg-3"}>
+            {queue.approved ? "approved" : queue.withdrawals.length && queue.withdrawals.at(-1)!.approvals >= queue.approvals.length ? "approval withdrawn" : latest ? "approval is for an older revision" : "no approval recorded in Nexus"}
+          </span>
+        </>}
+        onClose={onClose}
+      />
+      <PanelBody>
       <BranchLine project={id} queue={queue.id} version={project.generated_at} />
       <WorktreeActions project={id} root={project.project.root} queue={queue} onChanged={onChanged} />
 
       {queue.status === "stopped"
-        ? <StopBox project={id} queue={queue} onChanged={onChanged} left={left ?? undefined} work={work} setWork={setWork} needsChoice={needsChoice}
-            pushAccepted={project.project.defaults.push_accepted} note={workNote} setNote={setWorkNote} />
+        ? <StopBox queue={queue} left={left ?? undefined} work={work} setWork={setWork} needsChoice={needsChoice} pushAccepted={project.project.defaults.push_accepted} />
         : queue.status_reason && <Section title="State"><Expandable text={queue.status_reason} /></Section>}
       {queue.report && (
         <Section title="Queue report">
@@ -898,9 +919,6 @@ export function QueueDetail({ project, queue, onChanged }: Props) {
               {a.withdrawn && a.reason && <> · <q className="italic">{a.reason}</q></>}
             </p>
           ))}
-        {queue.approved && !queue.run && queue.steps.every((s) => s.status === "pending" && s.segments.length === 0) && (
-          <WithdrawApproval project={id} queue={queue.id} onChanged={onChanged} />
-        )}
         {!queue.approved && (
           <div className="mt-2">
             <p className="mb-2 text-sm text-fg-2">
@@ -915,19 +933,6 @@ export function QueueDetail({ project, queue, onChanged }: Props) {
             {queue.status === "stopped" && left?.discarded && (
               <p className="mb-2 text-sm text-fg">You chose to discard step {left.step}'s work: approving this revision lifts the stop.</p>
             )}
-            <Composer
-              rows={2}
-              allowEmpty
-              draft={draftKey(id, "approval", queue.id)}
-              placeholder="Your words with the approval (optional)…"
-              button={queue.status === "stopped" && needsChoice && work === "discard" ? "Discard the step's work" : `Approve revision ${queue.revision}`}
-              onSubmit={async (words) => {
-                if (queue.status === "stopped" && needsChoice && !work) throw new Error("choose Keep or Discard first, in the stop box above");
-                const r = await actResult<{ message?: string }>(id, "POST", `/queues/${enc(queue.id)}/approve`, { words, work: needsChoice ? work : undefined });
-                if (r?.message) setWorkNote(r.message);
-                onChanged();
-              }}
-            />
           </div>
         )}
       </Section>
@@ -935,23 +940,6 @@ export function QueueDetail({ project, queue, onChanged }: Props) {
       <RunControls project={project} queue={queue} onChanged={onChanged} />
 
       <Changes entries={queue.changes} queue={queue} />
-
-      <Section title="Settings">
-        <label className="flex flex-wrap items-center gap-2 text-sm text-fg">
-          After each step
-          <select
-            value={queue.review_policy ?? ""}
-            onChange={(e) => void setPolicy(e.target.value || null)}
-            className="rounded-md border border-line-strong bg-canvas px-2 py-1 text-sm"
-          >
-            <option value="">project default ({POLICY_LABEL[project.project.defaults.review_policy]})</option>
-            <option value="continue">go on to the next step</option>
-            <option value="wait">wait for my review</option>
-            <option value="orchestrator">wait for the orchestrator's review</option>
-          </select>
-        </label>
-        {error && <p className="mt-1 text-xs text-danger">{error}</p>}
-      </Section>
 
       {queue.description && <Section title="Description"><Expandable text={queue.description} lines={6} /></Section>}
 
@@ -970,6 +958,99 @@ export function QueueDetail({ project, queue, onChanged }: Props) {
       {queue.source && (
         <p className="mt-6 text-xs text-fg-3">Imported from <span className="font-mono">{queue.source.path}</span> <TimeAgo at={queue.source.imported_at} /></p>
       )}
-    </div>
+      </PanelBody>
+      <QueueBar key={queue.id} project={project} queue={queue} onChanged={onChanged} left={left ?? undefined} work={work} needsChoice={needsChoice} />
+    </>
+  );
+}
+
+/**
+ * The bar of a queue: Continue on a stopped queue whose revision is approved; Approve revision N (words with it under
+ * ⋯) on one that is not; Withdraw approval (a queue approved but never started) and the review policy under ⋯.
+ */
+function QueueBar({ project, queue, onChanged, left, work, needsChoice }: {
+  project: ProjectState; queue: QueueView; onChanged: () => void; left?: LeftView; work?: "keep" | "discard"; needsChoice: boolean;
+}) {
+  const id = project.project.id;
+  const stopped = queue.status === "stopped";
+  // What the server said back after Continue or an approval with Keep or Discard (the orchestrator drafts a revert…).
+  const [note, setNote] = useState<string>();
+  const [error, setError] = useState<string>();
+  const [busy, setBusy] = useState(false);
+  const go = async () => {
+    setBusy(true); setError(undefined); setNote(undefined);
+    try {
+      const r = await actResult<{ message?: string } | string>(id, "POST", `/queues/${enc(queue.id)}/continue`, needsChoice ? { work } : {});
+      if (r && typeof r === "object" && r.message) setNote(r.message);
+      onChanged();
+    }
+    catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+  const wordsKey = draftKey(id, "approval", queue.id);
+  const [wordsOpen, setWordsOpen] = useState(() => !!readDraft(wordsKey));
+  const words = useDraftText({
+    draft: wordsKey, allowEmpty: true,
+    onSubmit: async (text) => {
+      if (stopped && needsChoice && !work) throw new Error("choose Keep or Discard first, in the stop box above");
+      const r = await actResult<{ message?: string }>(id, "POST", `/queues/${enc(queue.id)}/approve`, { words: text, work: needsChoice ? work : undefined });
+      if (r?.message) setNote(r.message);
+      onChanged();
+    },
+  });
+  const canWithdraw = queue.approved && !queue.run && queue.steps.every((s) => s.status === "pending" && s.segments.length === 0);
+  const [withdrawOpen, setWithdrawOpen] = useState(false);
+  const [policyOpen, setPolicyOpen] = useState(false);
+  const setPolicy = (review_policy: string | null) =>
+    act(id, "PATCH", `/queues/${enc(queue.id)}`, { review_policy }).then(onChanged, (e: Error) => setError(e.message));
+  const policy = queue.review_policy ? POLICY_LABEL[queue.review_policy] : `project default (${POLICY_LABEL[project.project.defaults.review_policy]})`;
+
+  const menu: MenuEntry[] = [
+    ...(!queue.approved && !wordsOpen ? [{ label: "Your words with the approval…", onSelect: () => setWordsOpen(true) }] : []),
+    ...(canWithdraw && !withdrawOpen ? [{ label: "Withdraw approval…", danger: true, onSelect: () => setWithdrawOpen(true) }] : []),
+    ...(!policyOpen ? [{ label: `After each step: ${policy}…`, onSelect: () => setPolicyOpen(true) }] : []),
+  ];
+  const fail = error ?? words.error;
+  const hint = fail ? <span className="text-danger">{fail}</span>
+    : note ? <span className="text-info">{note}</span>
+    : stopped && queue.approved
+      ? (needsChoice && !work ? "Choose Keep or Discard first." : needsChoice && work === "discard" ? "The stop stays until you approve the orchestrator's revert." : "Lifts the stop; the stopped step runs again in its session, unless it was skipped.")
+      : undefined;
+  const primary = stopped && queue.approved
+    ? <Button disabled={busy || (needsChoice && !work)} onClick={() => void go()}>{needsChoice && work === "discard" ? "Discard and ask for a revert" : "Continue"}</Button>
+    : !queue.approved
+      ? <Button disabled={!words.ready} onClick={words.submit}>{words.busy ? "Sending…" : stopped && needsChoice && work === "discard" ? "Discard the step's work" : `Approve revision ${queue.revision}`}</Button>
+      : undefined;
+  const opened = (!queue.approved && wordsOpen) || (canWithdraw && withdrawOpen) || policyOpen;
+  return (
+    <ActionBar hint={hint} menu={menu} primary={primary}>
+      {opened && (
+        <div className="space-y-4">
+          {!queue.approved && wordsOpen && (
+            <textarea value={words.text} rows={2} placeholder="Your words with the approval (optional)…"
+              onChange={(e) => words.change(e.target.value)} onKeyDown={words.onKeyDown} className={TEXTAREA} />
+          )}
+          {canWithdraw && withdrawOpen && <WithdrawApproval project={id} queue={queue.id} onChanged={onChanged} onCancel={() => setWithdrawOpen(false)} />}
+          {policyOpen && (
+            <div className="flex flex-wrap items-center gap-2 text-sm text-fg">
+              <label className="flex flex-wrap items-center gap-2">
+                After each step
+                <select
+                  value={queue.review_policy ?? ""}
+                  onChange={(e) => void setPolicy(e.target.value || null)}
+                  className="rounded-md border border-line-strong bg-canvas px-2 py-1 text-sm"
+                >
+                  <option value="">project default ({POLICY_LABEL[project.project.defaults.review_policy]})</option>
+                  <option value="continue">go on to the next step</option>
+                  <option value="wait">wait for my review</option>
+                  <option value="orchestrator">wait for the orchestrator's review</option>
+                </select>
+              </label>
+              <Button variant="quiet" onClick={() => setPolicyOpen(false)}>Done</Button>
+            </div>
+          )}
+        </div>
+      )}
+    </ActionBar>
   );
 }

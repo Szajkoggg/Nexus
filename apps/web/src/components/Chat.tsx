@@ -2,7 +2,7 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import type { ChatEntry, RuntimeFile, SessionFile } from "@nexus/protocol";
 import { act, enc, useFetch } from "../api.ts";
-import { Button, Composer, Markdown, SIDE_RIGHT, TimeAgo, useWide } from "./ui.tsx";
+import { Button, CloseButton, Composer, Markdown, Menu, SIDE_RIGHT, TimeAgo, useWide, type MenuEntry } from "./ui.tsx";
 import { draftKey } from "../drafts.ts";
 import { layerValue, type SidePanel } from "../layers.ts";
 import { nav, useNav } from "../nav.ts";
@@ -14,21 +14,13 @@ export function useOrchestrator(project: string | undefined, version: unknown) {
   return useFetch<View>(project ? `/api/projects/${enc(project)}/orchestrator` : undefined, version);
 }
 
-const Close = ({ onClose }: { onClose: () => void }) => (
-  <button onClick={onClose} aria-label="Close" className="rounded-md p-1.5 text-fg-2 hover:bg-surface-3 hover:text-fg">
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 6l12 12M18 6L6 18" /></svg>
-  </button>
-);
-
-
-/** A chat: its header, the messages, and the composer. */
-function ChatColumn({ title, over, about, view, status, actions, empty, draft, placeholder, onSend, onBack }: {
-  title: string; over: string; about?: ReactNode; view: View | undefined; status: string; actions?: ReactNode; empty: ReactNode;
+/** A chat: what it is (under the panel's switch and ⋯), the messages, and the composer. */
+function ChatColumn({ title, over, about, view, status, showTools, empty, draft, placeholder, onSend, onBack }: {
+  title: string; over: string; about?: ReactNode; view: View | undefined; status: string; showTools: boolean; empty: ReactNode;
   draft: string; placeholder: string; onSend: (text: string) => Promise<void>; onBack?: () => void;
 }) {
   const end = useRef<HTMLDivElement>(null);
   const side = useContext(Side);
-  const [showTools, setShowTools] = useState(false);
   const chat = (view?.chat ?? []).filter((c) => showTools || c.kind !== "tool");
   useEffect(() => { end.current?.scrollIntoView({ block: "end" }); }, [chat.length, view?.state]);
   const rt = view?.runtime;
@@ -45,12 +37,6 @@ function ChatColumn({ title, over, about, view, status, actions, empty, draft, p
         </div>
         <span className="text-xs text-fg-3">
           {status}{model ? ` · ${model}` : ""}{view?.effort ? ` · ${view.effort} effort` : ""}{pct !== undefined ? ` · ${pct}% context` : ""}
-        </span>
-        <span className="ml-auto flex flex-wrap items-center gap-2">
-          <label className="flex items-center gap-1.5 text-xs text-fg-2">
-            <input type="checkbox" checked={showTools} onChange={(e) => setShowTools(e.target.checked)} className="accent-accent" /> tool calls
-          </label>
-          {actions}
         </span>
       </header>
       <div className="scroll-thin flex-1 space-y-3 overflow-y-auto px-5 py-4">
@@ -102,22 +88,25 @@ const Side = createContext(false);
  * At the top of each chat panel: Orchestrator | Ideas. The other one comes to the top in one click on every screen
  * size (opened when it is closed); Back then shows this one again.
  */
-function PanelSwitch({ which }: { which: SidePanel }) {
+function PanelSwitch({ which, menu, onClose }: { which: SidePanel; menu?: MenuEntry[]; onClose: () => void }) {
   const item = (p: SidePanel, label: string) => (
     <button key={p} onClick={() => { if (p !== which) nav.raise(p); }} aria-pressed={p === which}
       className={`rounded-md px-3 py-1 text-xs font-medium ${p === which ? "bg-surface-4 text-fg" : "text-fg-2 hover:bg-surface-3 hover:text-fg"}`}>{label}</button>
   );
   return (
-    <div className="flex shrink-0 items-center gap-1 border-b border-line px-3 py-1.5" role="group" aria-label="Chats">
-      {item("chat", "Orchestrator")}{item("ideas", "Ideas")}
+    <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-1.5">
+      <div className="flex items-center gap-1" role="group" aria-label="Chats">{item("chat", "Orchestrator")}{item("ideas", "Ideas")}</div>
+      <span className="ml-auto" />
+      {menu && <Menu items={menu} down label="Chat actions" />}
+      <CloseButton onClose={onClose} />
     </div>
   );
 }
 
 /** A chat's panel: over the page on narrow screens; on a wide one, beside it on the right, the page still usable. */
-function Panel({ onClose, wide, which, children }: { onClose: () => void; wide?: boolean; which: SidePanel; children: ReactNode }) {
+function Panel({ onClose, wide, which, menu, children }: { onClose: () => void; wide?: boolean; which: SidePanel; menu?: MenuEntry[]; children: ReactNode }) {
   const side = useWide();
-  const body = <><PanelSwitch which={which} /><div className="flex min-h-0 flex-1">{children}</div></>;
+  const body = <><PanelSwitch which={which} menu={menu} onClose={onClose} /><div className="flex min-h-0 flex-1">{children}</div></>;
   if (side) {
     return (
       <Side.Provider value={true}>
@@ -155,20 +144,21 @@ export function OrchestratorButton({ view, onClick }: { view: View | undefined; 
 export function ChatPanel({ project, name, view, onClose, onChanged }: {
   project: string; name: string; view: View | undefined; onClose: () => void; onChanged: () => void;
 }) {
+  const [showTools, setShowTools] = useState(false);
+  const menu: MenuEntry[] = [
+    { label: "Show tool calls", checked: showTools, onSelect: () => setShowTools(!showTools) },
+    ...(view?.session ? [{
+      label: "New conversation…", onSelect: () => {
+        if (confirm("Start a new conversation? The orchestrator forgets this one (its transcript stays on disk).")) {
+          void act(project, "POST", "/orchestrator/reset").then(onChanged);
+        }
+      },
+    }] : []),
+  ];
   return (
-    <Panel onClose={onClose} which="chat">
+    <Panel onClose={onClose} which="chat" menu={menu}>
       <ChatColumn
-        over={name} title="Orchestrator" view={view} status={stateText(view)}
-        actions={<>
-          {view?.session && (
-            <Button variant="quiet" onClick={() => {
-              if (confirm("Start a new conversation? The orchestrator forgets this one (its transcript stays on disk).")) {
-                void act(project, "POST", "/orchestrator/reset").then(onChanged);
-              }
-            }}>New conversation</Button>
-          )}
-          <Close onClose={onClose} />
-        </>}
+        over={name} title="Orchestrator" view={view} status={stateText(view)} showTools={showTools}
         empty={<>
           <p>Plan queues with the orchestrator, ask where things stand, or have it start a run.</p>
           <p className="mt-1 text-fg-3">It reads the project and works through <code>nexus</code>; it never edits files or approves queues.</p>
@@ -225,7 +215,7 @@ export function StepChat({ project, queue, step, version }: { project: string; q
     } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   };
   return (
-    <div className="mt-4">
+    <div>
       <div className="flex flex-wrap items-center gap-2">
         <button onClick={() => void go(false)} disabled={busy} title="Talk this step through with a thinking partner; nothing changes in the run"
           className="flex items-center gap-1.5 rounded-md border border-line-strong px-2.5 py-1 text-sm text-fg hover:border-fg-3/60 hover:bg-surface-3 disabled:opacity-40">
@@ -277,9 +267,28 @@ export function ConversationsPanel({ project, name, version, onClose, onChanged,
   const side = useWide();
   const current = list?.find((c) => c.id === open);
   const shown = (list ?? []).filter((c) => showArchived || !c.archived);
+  const [showTools, setShowTools] = useState(false);
+  const efforts = useEfforts(current?.runtime === "codex" ? "codex" : "claude", current?.model ?? "");
+  const patch = (body: unknown) => act(project, "PATCH", `/conversations/${enc(open!)}`, body).then(onChanged, (e: Error) => alert(e.message));
+  // The menu of an open conversation: what its header had (Hand to orchestrator, More…) and the tool calls.
+  const menu: MenuEntry[] | undefined = !creating && open && current ? [
+    { label: "Show tool calls", checked: showTools, onSelect: () => setShowTools(!showTools) },
+    {
+      label: "Hand to orchestrator…", onSelect: () => {
+        if (confirm("Hand this conversation to the orchestrator? The partner writes a summary (decisions, open questions, proposed work), which goes into the orchestrator's chat.")) {
+          void act(project, "POST", `/conversations/${enc(open)}/handoff`).then(onChanged);
+        }
+      },
+    },
+    { label: "Rename…", onSelect: () => { const t = prompt("Topic", current.title); if (t) void patch({ title: t }); } },
+    { label: current.archived ? "Unarchive" : "Archive", onSelect: () => void patch({ archived: !current.archived }) },
+    { heading: "Effort (from the next message)" },
+    { label: "default", checked: !current.effort, onSelect: () => void patch({ effort: null }) },
+    ...efforts.map((x) => ({ label: x, checked: current.effort === x, onSelect: () => void patch({ effort: x }) })),
+  ] : undefined;
 
   return (
-    <Panel onClose={onClose} wide which="ideas">
+    <Panel onClose={onClose} wide which="ideas" menu={menu}>
       <nav className={side
         ? `${open || creating ? "hidden" : "flex"} w-full flex-col`
         : `${open || creating ? "hidden sm:flex" : "flex"} w-full shrink-0 flex-col border-r border-line sm:w-72`}>
@@ -288,7 +297,6 @@ export function ConversationsPanel({ project, name, version, onClose, onChanged,
             <div className="text-xs text-fg-3">{name}</div>
             <h2 className="font-semibold text-fg">Ideas</h2>
           </div>
-          <span className={side ? "" : "sm:hidden"}><Close onClose={onClose} /></span>
         </div>
         <div className="p-3"><Button onClick={() => nav.open("conversation:new")}>New conversation</Button></div>
         <ul className="scroll-thin flex-1 overflow-y-auto px-2 pb-3">
@@ -313,20 +321,12 @@ export function ConversationsPanel({ project, name, version, onClose, onChanged,
         )}
       </nav>
 
-      {creating && <NewConversation project={project} defaultRuntime={defaultRuntime} onBack={() => nav.close("conversation")} onClose={onClose}
+      {creating && <NewConversation project={project} defaultRuntime={defaultRuntime} onBack={() => nav.close("conversation")}
         onCreated={(id) => { nav.open(`conversation:${id}`); onChanged(); }} />}
       {!creating && open && current && (
         <ChatColumn
           over={`${name} · ideas`} title={current.title ?? "Conversation"} about={<AboutStep project={project} c={current} className="mt-1" />} view={view} status={stateText(view)} onBack={() => nav.close("conversation")}
-          actions={<>
-            <Button variant="quiet" onClick={() => {
-              if (confirm("Hand this conversation to the orchestrator? The partner writes a summary (decisions, open questions, proposed work), which goes into the orchestrator's chat.")) {
-                void act(project, "POST", `/conversations/${enc(open)}/handoff`).then(onChanged);
-              }
-            }}>Hand to orchestrator</Button>
-            <ConversationMenu project={project} c={current} onChanged={onChanged} />
-            <span className={side ? "" : "hidden sm:inline"}><Close onClose={onClose} /></span>
-          </>}
+          showTools={showTools}
           empty={<>
             <p>Think something through: gameplay, a mechanic, the look, what to build next.</p>
             <p className="mt-1 text-fg-3">
@@ -340,7 +340,6 @@ export function ConversationsPanel({ project, name, version, onClose, onChanged,
       )}
       {!side && !creating && !open && (
         <div className="hidden flex-1 flex-col items-center justify-center p-8 text-center text-sm text-fg-3 sm:flex">
-          <div className="absolute right-3 top-3"><Close onClose={onClose} /></div>
           <p>Open a conversation, or start a new one.</p>
           <p className="mt-1 text-fg-3">Each conversation is its own session: topics do not mix, and each can be picked up later.</p>
         </div>
@@ -349,8 +348,8 @@ export function ConversationsPanel({ project, name, version, onClose, onChanged,
   );
 }
 
-function NewConversation({ project, defaultRuntime, onBack, onClose, onCreated }: {
-  project: string; defaultRuntime: "claude" | "codex"; onBack: () => void; onClose: () => void; onCreated: (id: string) => void;
+function NewConversation({ project, defaultRuntime, onBack, onCreated }: {
+  project: string; defaultRuntime: "claude" | "codex"; onBack: () => void; onCreated: (id: string) => void;
 }) {
   const [title, setTitle] = useState("");
   const [runtime, setRuntime] = useState(defaultRuntime);
@@ -373,7 +372,6 @@ function NewConversation({ project, defaultRuntime, onBack, onClose, onCreated }
       <header className="flex items-center gap-2 border-b border-line px-5 py-3">
         <button onClick={onBack} className={`rounded-md px-1.5 text-lg text-fg-2 hover:text-fg ${useContext(Side) ? "" : "sm:hidden"}`} aria-label="Back">‹</button>
         <h2 className="flex-1 font-semibold text-fg">New conversation</h2>
-        <Close onClose={onClose} />
       </header>
       <div className="max-w-lg space-y-3 p-5">
         <label className="block text-sm text-fg">Topic
@@ -396,26 +394,5 @@ function NewConversation({ project, defaultRuntime, onBack, onClose, onCreated }
         {error && <p className="text-sm text-danger">{error}</p>}
       </div>
     </div>
-  );
-}
-
-function ConversationMenu({ project, c, onChanged }: { project: string; c: ConversationItem; onChanged: () => void }) {
-  const efforts = useEfforts(c.runtime === "codex" ? "codex" : "claude", c.model ?? "");
-  const patch = (body: unknown) => act(project, "PATCH", `/conversations/${enc(c.id)}`, body).then(onChanged, (e: Error) => alert(e.message));
-  return (
-    <select value="" onChange={(e) => {
-      const v = e.target.value;
-      if (v === "rename") { const t = prompt("Topic", c.title); if (t) void patch({ title: t }); }
-      if (v === "archive") void patch({ archived: !c.archived });
-      if (v.startsWith("effort:")) void patch({ effort: v.slice(7) || null });
-    }} className="rounded-md border border-line-strong bg-canvas px-2 py-1 text-xs text-fg" title="More">
-      <option value="">More…</option>
-      <option value="rename">Rename</option>
-      <option value="archive">{c.archived ? "Unarchive" : "Archive"}</option>
-      <optgroup label="Effort (from the next message)">
-        <option value="effort:">default</option>
-        {efforts.map((x) => <option key={x} value={`effort:${x}`}>{x}{c.effort === x ? " ✓" : ""}</option>)}
-      </optgroup>
-    </select>
   );
 }
