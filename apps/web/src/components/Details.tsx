@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { Event, StatusChange } from "@nexus/protocol";
+import { stopPlace } from "@nexus/protocol/attention";
 import { act, enc, fileUrl, type ProjectState, type QuestionView, type QueueView, type StepView } from "../api.ts";
 import { Button, Composer, Expandable, Markdown, Section, StatusBadge, StepTimes, TimeAgo, reviewLabel } from "./ui.tsx";
 import { Activity, RetryNote, RunControls } from "./Run.tsx";
@@ -398,7 +399,7 @@ function StopBox({ project, queue, onChanged }: { project: string; queue: QueueV
   const p = queue.lift_proposal;
   return (
     <div className="mt-4 rounded-lg bg-orange-500/10 p-3 text-sm ring-1 ring-orange-500/30">
-      <p className="font-medium text-orange-300">Stopped{queue.current_step ? ` at ${queue.current_step}` : ""}</p>
+      <p className="font-medium text-orange-300">Stopped{stopPlace(queue)}</p>
       {queue.status_reason && <div className="mt-1 text-zinc-300"><Expandable text={queue.status_reason} /></div>}
       {p && (
         <div className="mt-3 rounded-md bg-zinc-900/70 p-2.5">

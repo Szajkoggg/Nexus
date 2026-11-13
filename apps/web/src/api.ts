@@ -34,7 +34,8 @@ export function useFetch<T>(url: string | undefined, version: unknown): T | unde
   }, [url, version]);
   return data;
 }
-export const attentionKey = (a: AttentionItem) => [a.kind, a.queue, a.step, a.qid].join("/");
+/** A stopped queue is one item whatever happens to its step (as the server's push notifications key it). */
+export const attentionKey = (a: AttentionItem) => [a.kind, a.queue, a.lift ? undefined : a.step, a.qid].join("/");
 
 export const fileUrl = (project: string, path: string) =>
   `/api/projects/${encodeURIComponent(project)}/file?path=${encodeURIComponent(path)}`;

@@ -4,7 +4,7 @@ import { useLive, useProjectState, useProjects, type AttentionItem, type QueueVi
 import { QueueRow } from "./components/QueueRow.tsx";
 import { QueueDetail, StepDetail } from "./components/Details.tsx";
 import { Drawer, SIDE_LEFT, SIDE_RIGHT, StatusBadge, TimeAgo, useWide } from "./components/ui.tsx";
-import { AttentionPanel, NotifyToggle, useNotifications, WaitingButton, WaitingList } from "./components/Attention.tsx";
+import { AttentionPanel, attentionTarget, NotifyToggle, useNotifications, WaitingButton, WaitingList } from "./components/Attention.tsx";
 import { ContextBar, UsageMeter } from "./components/Run.tsx";
 import { ChatPanel, ConversationsButton, ConversationsPanel, OrchestratorButton, useOrchestrator } from "./components/Chat.tsx";
 import { RemoteButton, RemotePanel } from "./components/Remote.tsx";
@@ -128,7 +128,7 @@ export function App() {
         )}
 
         {state && state.attention.length > 0 && (
-          <AttentionPanel items={state.attention} onOpen={(a: AttentionItem) => { if (projectId && a.queue) nav.item(projectId, a.queue, a.step); }} />
+          <AttentionPanel items={state.attention} onOpen={(a: AttentionItem) => { if (projectId && a.queue) nav.item(projectId, a.queue, attentionTarget(a)); }} />
         )}
 
         {state && byGroup.map((g) => (
@@ -190,7 +190,7 @@ export function App() {
       </Drawer>
 
       <Drawer open={waitingOpen} onClose={() => nav.close("waiting")}>
-        <WaitingList projects={projects ?? []} onOpen={(w) => nav.closeThenItem("waiting", w.project, w.queue, w.step)} />
+        <WaitingList projects={projects ?? []} onOpen={(w) => nav.closeThenItem("waiting", w.project, w.queue, attentionTarget(w))} />
       </Drawer>
 
       <Drawer open={remoteOpen} onClose={() => nav.close("remote")}>

@@ -17,3 +17,14 @@ export function mergeAttention(projects: readonly ProjectAttention[]): WaitingIt
     return Date.parse(b.at) - Date.parse(a.at);
   });
 }
+
+/**
+ * Where a stopped queue's stop is, as a phrase to follow "stopped": " at step W4b" while that step holds it; once the
+ * step is finished (the orchestrator skipped it), the stop is the queue's: " (the stop came from W4b, now skipped)".
+ * Empty when the stop names no step.
+ */
+export function stopPlace(q: { stop_step?: string; steps: readonly { id: string; status: string }[] }): string {
+  const st = q.stop_step ? q.steps.find((s) => s.id === q.stop_step) : undefined;
+  if (!st) return "";
+  return st.status === "skipped" || st.status === "done" ? ` (the stop came from ${st.id}, now ${st.status})` : ` at step ${st.id}`;
+}

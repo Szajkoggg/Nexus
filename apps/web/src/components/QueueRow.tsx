@@ -2,6 +2,8 @@ import type { QueueView, StepView } from "../api.ts";
 import { StatusBadge, StepTimes, TimeAgo, reviewLabel, toneOf } from "./ui.tsx";
 import { RunChip } from "./Run.tsx";
 import { retryLine } from "@nexus/protocol/times";
+import { stopPlace } from "@nexus/protocol/attention";
+import { StopWays } from "./Attention.tsx";
 
 export function QueueRow({ queue, onQueue, onStep }: {
   queue: QueueView;
@@ -28,7 +30,15 @@ export function QueueRow({ queue, onQueue, onStep }: {
           {queue.updated && <TimeAgo at={queue.updated} />}
         </span>
       </button>
-      {queue.status_reason && (queue.status === "stopped" || queue.status === "waiting" || queue.status === "paused") && (
+      {queue.status === "stopped" ? (
+        // The way out of the stop; a tap opens the queue, whose stop box has Continue.
+        <button onClick={onQueue} className="block w-full px-4 pt-1 text-left">
+          <span className="line-clamp-1 text-xs text-zinc-500">
+            Stopped{stopPlace(queue)}{queue.status_reason ? `: ${queue.status_reason.replace(/\*\*|`/g, "")}` : ""}
+          </span>
+          <StopWays lift={{ place: stopPlace(queue), continue: queue.approved, revision: queue.revision, proposal: queue.lift_proposal }} className="mt-1" />
+        </button>
+      ) : queue.status_reason && (queue.status === "waiting" || queue.status === "paused") && (
         <p className="line-clamp-1 px-4 pt-1 text-xs text-zinc-500">{queue.status_reason.replace(/\*\*|`/g, "")}</p>
       )}
       <div className="scroll-thin flex gap-2 overflow-x-auto px-4 pb-4 pt-3">

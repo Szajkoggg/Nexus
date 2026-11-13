@@ -195,3 +195,36 @@ test("Continue after the orchestrator skipped the stopped step opens the next pe
     assert.deepEqual(queue().steps.map((s) => s.status), ["skipped", "done"]);
   } finally { engine.shutdown(); }
 });
+
+// The W case of Project Honeycomb: a step stops through a stop condition; the orchestrator skips it (a revision
+// replaced it) and proposes lifting the stop; resume is refused, naming Continue; Continue opens the next pending step.
+for (const runtime of ["claude", "codex"] as const) {
+  test(`${runtime}: the W case: stop, skip the stopped step, propose-lift, resume refused, Continue opens the next pending step`, async () => {
+    const { store, engine, state, queue, opened, until } = setup([step("W1", "done"), step("W4b", "stop"), step("W4c", "done"), step("W5", "done")]);
+    try {
+      engine.start("Q", { runtime });
+      await until("the stop", () => queue().run?.state === "halted");
+      assert.match(queue().run!.reason!, /queue Q is stopped at step W4b: fake condition: fake stop\. Only the user lifts a stop: with Continue in the dashboard, or by approving a new revision/);
+
+      orchestratorStatusChange(store, { queue: "Q", step: "W4b", to: "skipped", reason: "replaced by W4c" });
+      orchestratorStatusChange(store, { queue: "Q", to: "propose-lift", reason: "W4b was replaced; W4c can run" });
+      const s = state();
+      const q = s.queues.find((x) => x.id === "Q")!;
+      assert.equal(q.status, "stopped", "skipping and proposing lift nothing");
+      assert.equal(q.current_step, undefined);
+      const item = s.attention.find((a) => a.queue === "Q" && a.kind === "stopped")!;
+      assert.equal(item.lift?.place, " (the stop came from W4b, now skipped)");
+      assert.equal(item.lift?.continue, true);
+      assert.equal(item.lift?.proposal?.reason, "W4b was replaced; W4c can run");
+
+      assert.throws(() => engine.resume("Q"), /queue Q is stopped \(the stop came from W4b, now skipped\): fake condition: fake stop\. Only the user lifts a stop: with Continue in the dashboard/);
+      assert.throws(() => engine.start("Q", { runtime }), /with Continue in the dashboard/);
+
+      assert.match(engine.continueQueue("Q"), /goes on in session/);
+      await until("the run to finish", () => queue().run?.state === "finished");
+      assert.deepEqual(opened(), ["W1", "W4b", "W4c", "W5"], "Continue opens W4c; nothing reopens W4b");
+      assert.deepEqual(queue().steps.map((x) => x.status), ["done", "skipped", "done", "done"]);
+      assert.ok(!state().attention.some((a) => a.queue === "Q"));
+    } finally { engine.shutdown(); }
+  });
+}

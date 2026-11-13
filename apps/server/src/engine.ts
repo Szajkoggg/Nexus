@@ -10,7 +10,7 @@ import { existsSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import {
   ENDED_RUN_STATES,
-  ActionError, ProjectStore, USER_SESSION, ensureUserSession, liftByContinue, loadProjectState, newId, normPath, now, readUsage,
+  ActionError, ProjectStore, USER_SESSION, ensureUserSession, liftByContinue, loadProjectState, stopPlace, newId, normPath, now, readUsage,
   writeUsage, CLAUDE_EFFORTS, RETRY_LIMIT, effortIssue, formatClock, type Effort, type ProjectFile, type StepDef, type InboxView, type ProjectState, type QueueView, type RunFile, type SessionFile,
   type SessionView, type StepView,
 } from "@nexus/protocol";
@@ -319,7 +319,7 @@ export class Engine {
     if (!q.approved) return this.halt(queueId, "the queue's revision changed and is not approved");
 
     const current = run.step ? q.steps.find((s) => s.id === run.step) : undefined;
-    if (q.status === "stopped") return this.halt(queueId, stoppedMessage(q, run.step));
+    if (q.status === "stopped") return this.halt(queueId, stoppedMessage(q));
     if (current) {
       switch (current.status) {
         case "running":
@@ -838,10 +838,9 @@ export class Engine {
   }
 }
 
-/** Why a stopped queue does not go on: the step it stopped at and the stop's own reason, and who lifts it. */
-function stoppedMessage(q: QueueView, step?: string): string {
-  const at = q.current_step ?? step;
-  return `queue ${q.id} is stopped${at ? ` at step ${at}` : ""}: ${q.status_reason ?? "a stop condition was met"}. Only the user lifts a stop, by approving a new revision of the queue`;
+/** Why a stopped queue does not go on: where the stop is and its own reason, and the user's two ways out. */
+function stoppedMessage(q: QueueView): string {
+  return `queue ${q.id} is stopped${stopPlace(q)}: ${q.status_reason ?? "a stop condition was met"}. Only the user lifts a stop: with Continue in the dashboard, or by approving a new revision of the queue`;
 }
 
 function formatInbox(m: InboxView, state: ProjectState): string {

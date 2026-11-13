@@ -162,6 +162,19 @@ finished run or one of an older revision, the queue starts afresh at its first p
 told once. The dashboard shows the stop with the orchestrator's proposal (`lift_proposal`) beside Continue, and the
 queue's and each step's `changes`: who, when, what and why.
 
+**Where a stop is, and the ways out shown.** The queue's view keeps `stop_step`, the step the latest `queue.stop` named
+(or, for a queue imported as stopped, its last stopped step), until a lift. While that step is not finished the stop is
+"at step W4b"; once the orchestrator skips it, the stop is the queue's: "stopped (the stop came from W4b, now
+skipped)" (`stopPlace`). The engine's refusal of start and resume and its halt on a stopped queue name the place and
+both ways out: Continue in the dashboard, or approving a new revision. The attention item of a stopped queue (kind
+`stopped`, a queue whose status is `stopped`, not a halted run) carries `lift`: `place`, `continue` (the current
+revision is approved, so Continue lifts the stop; else approving revision `revision` does) and the orchestrator's
+`proposal` (`at`, `reason`) when there is one; its `step` is the stop's step only while that step holds it, and its
+time is the later of the queue's last change and the proposal. Such an item is keyed by its queue alone (a skip is no
+new notification), and opens the queue, whose stop box has Continue. `nexus status` prints, under a stopped queue,
+`stopped<place>; the user lifts it with …` and `proposal to lift (orchestrator, <time>): <reason>`; the
+orchestrator's "Waiting for the user" shows the same under the item.
+
 **Housekeeping by the orchestrator** (`nexus queue set`, event `status.set`). The server checks each request against
 the derived state and records it as an entry `by: orchestrator` with the request's `reason` and the queue's
 `revision`:

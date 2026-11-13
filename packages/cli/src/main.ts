@@ -6,7 +6,7 @@ import { basename, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { execFileSync } from "node:child_process";
 import {
-  Event, ProjectStore, findNexusDir, loadProjectState, newId, normPath, now, readRegistry, writeRegistry,
+  Event, ProjectStore, findNexusDir, loadProjectState, stopPlace, newId, normPath, now, readRegistry, writeRegistry,
   type ReviewItem, type Role, type Runtime, type SessionFile,
 } from "@nexus/protocol";
 import { importMarkdownQueues } from "./import-md.ts";
@@ -124,6 +124,16 @@ function stepEvent(type: string, step: string | undefined, extra: () => Record<s
   console.log(`ok: ${type} ${queue}/${step}`);
 }
 
+type QueueOf = ReturnType<typeof loadProjectState>["queues"][number];
+
+/** A stopped queue's ways out: where the stop is, how the user lifts it, and the orchestrator's proposal to lift it. */
+function stopLines(q: QueueOf): string[] {
+  if (q.status !== "stopped") return [];
+  const how = q.approved ? "the user lifts it with Continue, or by approving a new revision" : `the user lifts it by approving revision ${q.revision}`;
+  const p = q.lift_proposal;
+  return [`  stopped${stopPlace(q)}; ${how}`, ...(p ? [`  proposal to lift (orchestrator, ${p.at}): ${p.reason.replace(/\s+/g, " ").slice(0, 300)}`] : [])];
+}
+
 /** What an orchestrator needs to see: every queue, run, open question and worker session with its context card. */
 function overview(state: ReturnType<typeof loadProjectState>): void {
   const pct = (t?: number, w?: number) => (t && w ? `${Math.round((100 * t) / w)} % context` : "context unknown");
@@ -135,6 +145,7 @@ Queues (${state.queues.length - done.length} open; finished: ${done.map((q) => q
     console.log(`- ${q.id} [${q.status}] ${q.title}: revision ${q.revision}, ${q.approved ? "approved" : "not approved"}${run}`);
     console.log(`  steps: ${q.steps.map((x) => `${x.id} ${x.status}${x.review_with ? ` (for ${x.review_with === "user" ? "the user" : "you"})` : ""}`).join(", ")}`);
     if (q.status_reason && q.status !== "running") console.log(`  why: ${q.status_reason.replace(/\s+/g, " ").slice(0, 300)}`);
+    for (const line of stopLines(q)) console.log(line);
   }
   const open = state.questions.filter((x) => x.state === "open" || x.state === "escalated");
   console.log(`
@@ -152,7 +163,14 @@ Worker sessions (${workers.length})`);
   if (attention.length) {
     console.log(`
 Waiting for the user`);
-    for (const a of attention) console.log(`- ${a.kind} ${a.queue ?? ""}${a.step ? `/${a.step}` : ""}: ${a.text.replace(/\s+/g, " ").slice(0, 160)}`);
+    for (const a of attention) {
+      const where = a.lift ? `${a.queue}${a.lift.place}` : `${a.queue ?? ""}${a.step ? `/${a.step}` : ""}`;
+      console.log(`- ${a.kind} ${where}: ${a.text.replace(/\s+/g, " ").slice(0, 160)}`);
+      if (!a.lift) continue;
+      console.log(`  ${a.lift.continue ? "Continue lifts it" : `approving revision ${a.lift.revision} lifts it`}`);
+      const p = a.lift.proposal;
+      if (p) console.log(`  proposal to lift (orchestrator, ${p.at}): ${p.reason.replace(/\s+/g, " ").slice(0, 300)}`);
+    }
   }
 }
 
@@ -278,6 +296,7 @@ const commands: Record<string, () => void | Promise<void>> = {
     for (const q of queues) {
       console.log(`\nqueue ${q.id} [${q.status}] ${q.title}${q.approved ? "" : " (no approval recorded for this revision)"}`);
       if (q.status_reason) console.log(`  why: ${q.status_reason.slice(0, 300)}`);
+      for (const line of stopLines(q)) console.log(line);
       if (q.run && q.status !== "running") {
         const why = q.run.reason ? ` (${q.run.reason.replace(/\s+/g, " ").slice(0, 200)})` : "";
         console.log(`  run: ${q.run.state}${q.run.step ? ` at ${q.run.step}` : ""}${why}`);

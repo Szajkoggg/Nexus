@@ -179,7 +179,8 @@ export async function push(payload: { title: string; body: string; url: string; 
 const LABEL: Record<AttentionItem["kind"], string> = {
   question: "Question", stopped: "Stopped", approval: "Needs approval", review: "Review", failed: "Failed",
 };
-const key = (a: AttentionItem) => [a.kind, a.queue, a.step, a.qid].join("/");
+// A stopped queue is one item whatever happens to its step (a skip by the orchestrator is no news for the user).
+const key = (a: AttentionItem) => [a.kind, a.queue, a.lift ? undefined : a.step, a.qid].join("/");
 
 /**
  * Pushes what newly appears in a project's "waiting for you" list. The first look at a project is the baseline,
@@ -200,7 +201,8 @@ export class AttentionWatch {
       void this.send({
         title: `${project.name}: ${LABEL[a.kind]}`,
         body: `${where ? where + " " : ""}${a.text.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\*\*|`/g, "")}`.slice(0, 180),
-        url: `/#/${[project.id, a.queue, a.step].filter(Boolean).map((x) => encodeURIComponent(x!)).join("/")}`,
+        // A stopped queue's notification opens the queue, whose stop box has Continue.
+        url: `/#/${[project.id, a.queue, a.lift ? undefined : a.step].filter(Boolean).map((x) => encodeURIComponent(x!)).join("/")}`,
         tag: `${project.id}:${key(a)}`,
       });
     }

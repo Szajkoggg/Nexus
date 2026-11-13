@@ -14,6 +14,30 @@ const LABEL: Record<AttentionItem["kind"], { text: string; tone: string }> = {
 
 const plain = (s: string) => s.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\*\*|`/g, "");
 
+/** Where an item leads: a stopped queue's item opens the queue, whose stop box has Continue; others their step. */
+export const attentionTarget = (a: AttentionItem): string | undefined => (a.lift ? undefined : a.step);
+
+/** The queue and step an item is about; for a stopped queue, where its stop is ("W at step W4b", "W (the stop came …)"). */
+const whereOf = (a: AttentionItem) => (a.lift ? `${a.queue}${a.lift.place}` : `${a.queue ?? ""}${a.step ? `/${a.step}` : ""}`);
+
+/**
+ * A stopped queue's way out, as the waiting list and the queue card show it: Continue when the current revision is
+ * approved (else approving it lifts the stop), and the orchestrator's proposal to lift it, with its reason and time.
+ */
+export function StopWays({ lift, className = "" }: { lift: NonNullable<AttentionItem["lift"]>; className?: string }) {
+  return (
+    <span className={`block text-xs ${className}`}>
+      <span className="block text-orange-300">{lift.continue ? "Continue possible: open the queue to lift the stop" : `Approving revision ${lift.revision} lifts the stop`}</span>
+      {lift.proposal && (
+        <span className="mt-1 block rounded-md bg-zinc-950/60 px-2 py-1 text-zinc-300">
+          <span className="text-zinc-500">The orchestrator proposes to continue · <TimeAgo at={lift.proposal.at} /></span>
+          <span className="line-clamp-2 block">{plain(lift.proposal.reason)}</span>
+        </span>
+      )}
+    </span>
+  );
+}
+
 export function AttentionPanel({ items, onOpen }: { items: AttentionItem[]; onOpen: (a: AttentionItem) => void }) {
   return (
     <section className="mb-8">
@@ -29,8 +53,9 @@ export function AttentionPanel({ items, onOpen }: { items: AttentionItem[]; onOp
           >
             <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ring-1 ${LABEL[a.kind].tone}`}>{LABEL[a.kind].text}</span>
             <span className="min-w-0 flex-1">
-              <span className="block font-mono text-xs text-zinc-500">{a.queue}{a.step ? `/${a.step}` : ""}</span>
+              <span className="block font-mono text-xs text-zinc-500">{whereOf(a)}</span>
               <span className="line-clamp-2 text-sm text-zinc-200">{plain(a.text)}</span>
+              {a.lift && <StopWays lift={a.lift} className="mt-1.5" />}
             </span>
             {a.at && <span className="shrink-0 text-xs text-zinc-600"><TimeAgo at={a.at} /></span>}
           </button>
@@ -69,11 +94,12 @@ export function WaitingList({ projects, onOpen }: { projects: ProjectSummary[]; 
               className="flex w-full items-start gap-3 rounded-lg border border-zinc-800 bg-zinc-900/60 p-3 text-left hover:border-zinc-600">
               <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ring-1 ${LABEL[a.kind].tone}`}>{LABEL[a.kind].text}</span>
               <span className="min-w-0 flex-1">
-                <span className="flex min-w-0 gap-2 text-xs">
-                  <span className="truncate font-medium text-zinc-300">{a.project_name}</span>
-                  {a.queue && <span className="shrink-0 font-mono text-zinc-500">{a.queue}{a.step ? `/${a.step}` : ""}</span>}
+                <span className="flex min-w-0 flex-wrap gap-x-2 text-xs">
+                  <span className="max-w-full truncate font-medium text-zinc-300">{a.project_name}</span>
+                  {a.queue && <span className="min-w-0 break-words font-mono text-zinc-500">{whereOf(a)}</span>}
                 </span>
                 <span className="line-clamp-2 text-sm text-zinc-200">{plain(a.text)}</span>
+                {a.lift && <StopWays lift={a.lift} className="mt-1.5" />}
               </span>
               {a.at && <span className="shrink-0 text-xs text-zinc-600"><TimeAgo at={a.at} /></span>}
             </button>
@@ -165,7 +191,7 @@ export function useNotifications(projects: ProjectSummary[] | undefined) {
             body: `${a.queue ?? ""}${a.step ? `/${a.step}` : ""} ${plain(a.text)}`.trim().slice(0, 200),
             tag: key,
           });
-          n.onclick = () => { window.focus(); location.hash = `/${[p.id, a.queue, a.step].filter(Boolean).map((x) => encodeURIComponent(x!)).join("/")}`; };
+          n.onclick = () => { window.focus(); location.hash = `/${[p.id, a.queue, attentionTarget(a)].filter(Boolean).map((x) => encodeURIComponent(x!)).join("/")}`; };
         } catch { /* a browser that shows notifications only through a service worker */ }
       }
     }

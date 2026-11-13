@@ -74,3 +74,22 @@ test("a session with a queue sees only its own", () => {
   assert.match(out, /^session w: worker, claude, queue A$/m);
   assert.deepEqual(listed(out), ["A approved"]);
 });
+
+test("a stopped queue's proposal to lift: under the queue, and in the orchestrator's Waiting for the user", () => {
+  const store = setup();
+  store.writeSession({ protocol: 1, id: "o", project: "p", role: "orchestrator", runtime: "claude", cwd: store.dir, launched_by: "nexus", created_at: at(0) });
+  orchestratorStatusChange(store, { queue: "S", step: "S1", to: "skipped", reason: "replaced by S2" });
+  orchestratorStatusChange(store, { queue: "S", to: "propose-lift", reason: "S2 can run now" });
+  const proposal = /^ {2}proposal to lift \(orchestrator, [\d-]+T[\d:.]+Z\): S2 can run now$/m;
+
+  const plain = status(store);
+  assert.match(plain, /^ {2}stopped \(the stop came from S1, now skipped\); the user lifts it with Continue, or by approving a new revision$/m);
+  assert.match(plain, proposal);
+
+  const overview = status(store, "o");
+  const [queues, waiting] = overview.split("\nWaiting for the user\n");
+  assert.ok(waiting, overview);
+  assert.match(queues!, /^- S \[stopped\][^\n]*\n {2}steps: [^\n]*\n {2}why: art: missing\n {2}stopped \(the stop came from S1, now skipped\); the user lifts it with Continue/m);
+  assert.match(queues!, proposal);
+  assert.match(waiting, /^- stopped S \(the stop came from S1, now skipped\): art: missing\n {2}Continue lifts it\n {2}proposal to lift \(orchestrator, [^)]+\): S2 can run now$/m);
+});

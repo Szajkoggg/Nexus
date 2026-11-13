@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  ActionError, ProjectStore, applyDraft, approveQueue, loadProjectState, newId, orchestratorStatusChange, type Event, type StepDef,
+  ActionError, ProjectStore, applyDraft, approveQueue, loadProjectState, newId, orchestratorStatusChange, stopPlace, type Event, type StepDef,
 } from "../src/index.ts";
 
 const CLI = join(dirname(fileURLToPath(import.meta.url)), "../../cli/bin/nexus.js");
@@ -159,4 +159,41 @@ test("a worker can use neither the command nor the event", () => {
   assert.ok(s.warnings.some((w) => /status.set is for orchestrators; ignored/.test(w)));
   assert.equal(queue().steps[2]!.status, "pending");
   assert.equal(queue().changes.length, 0);
+});
+
+test("a stopped queue's attention item carries its ways out; once its step is skipped the stop reads as the queue's", () => {
+  const { store, emit, queue, set } = setup();
+  emit(1, { type: "step.started", queue: "Q", step: "Q1" });
+  emit(2, { type: "queue.stop", queue: "Q", step: "Q1", condition: "art", reason: "missing" });
+  const item = () => loadProjectState(store).attention.find((a) => a.kind === "stopped" && a.queue === "Q")!;
+  assert.equal(stopPlace(queue()), " at step Q1");
+  assert.deepEqual(item().lift, { place: " at step Q1", continue: true, revision: 1 });
+  assert.equal(item().step, "Q1");
+
+  set("skipped", "Q1", "replaced by Q2");
+  set("propose-lift", undefined, "Q2 can run");
+  const q = queue();
+  assert.equal(q.status, "stopped");
+  assert.equal(q.stop_step, "Q1");
+  assert.equal(stopPlace(q), " (the stop came from Q1, now skipped)");
+  const a = item();
+  assert.equal(a.step, undefined, "the item is the queue's, not the skipped step's");
+  assert.equal(a.lift?.place, " (the stop came from Q1, now skipped)");
+  assert.equal(a.lift?.proposal?.reason, "Q2 can run");
+  assert.equal(a.lift?.proposal?.at, q.lift_proposal?.at);
+  assert.equal(a.at, q.lift_proposal?.at, "the proposal makes the item new");
+
+  // A queue whose current revision is not approved: approving lifts it, not Continue.
+  applyDraft(store, { id: "Q", title: "Queue", stop_conditions: [], checks: [], steps: [...store.readQueue("Q").steps.map(({ id, title, goal, acceptance }) => ({ id, title, goal, acceptance })), step("Q4")] });
+  assert.deepEqual([item().lift?.continue, item().lift?.revision], [false, 2]);
+  approveQueue(store, "Q");
+  assert.equal(queue().stop_step, undefined, "a lift clears it");
+  assert.ok(!loadProjectState(store).attention.some((x) => x.kind === "stopped"));
+});
+
+test("a queue imported as stopped takes its stop place from its stopped step", () => {
+  const { store, queue } = setup();
+  const f = store.readQueue("Q");
+  store.writeQueue({ ...f, status: "stopped", status_note: "waiting for the art", steps: f.steps.map((s) => (s.id === "Q2" ? { ...s, status: "stopped" as const } : s)) });
+  assert.equal(stopPlace(queue()), " at step Q2");
 });
