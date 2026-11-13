@@ -35,8 +35,14 @@ export interface StepView extends StepDef {
   review_with?: "orchestrator" | "user";
   /** The orchestrator's reason for handing the step's review to the user, in the current round. */
   asked_user?: { text: string; at: string };
-  /** Send-backs of this step, oldest first (by the orchestrator or the user). */
-  sent_back: { text: string; at: string; by: "orchestrator" | "user" }[];
+  /**
+   * Send-backs of this step, oldest first: `id` is the review.sent_back event's; `round` the round it opened once the
+   * server delivered it to the worker (`delivered`); `to_user`: the orchestrator's beyond the limit, which handed the
+   * step to the user instead.
+   */
+  sent_back: { id: string; text: string; at: string; by: "orchestrator" | "user"; round: number; delivered: boolean; to_user?: boolean }[];
+  /** The round at work answers the user's Fix it: its review is the user's, whatever the policy. */
+  user_fix?: boolean;
   review_items: (ReviewItem & { at: string; round?: number })[];
   checks: CheckView[];
   notes: (Note & { read_at?: string })[];
@@ -126,6 +132,10 @@ export function loadProjectState(store: ProjectStore): ProjectState {
   }
   events.sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id));
 
+  // Send-backs the server delivered to a worker, by the review.sent_back event they carry out.
+  const delivered = new Set<string>();
+  for (const s of sessions.values()) for (const m of s.inbox) if (m.type === "send_back") delivered.add(m.ref);
+
   for (const q of queues.values()) for (const st of q.steps) for (const n of st.notes) {
     const at = noteDeliveries.get(n.id);
     if (at) n.read_at = at;
@@ -138,7 +148,7 @@ export function loadProjectState(store: ProjectStore): ProjectState {
   let next = 0;
   for (const e of events) {
     while (next < changes.length && changes[next]!.c.at < e.at) { applyChange(changes[next]!.q, changes[next]!.c); next++; }
-    apply(e, queues, sessions, questions, warnings, project);
+    apply(e, queues, sessions, questions, warnings, project, delivered);
   }
   for (; next < changes.length; next++) applyChange(changes[next]!.q, changes[next]!.c);
   // An approval after a proposal to lift answers it (approving a stopped queue lifts the stop anyway).
@@ -242,7 +252,7 @@ export function reviewPolicyOf(st: Pick<StepDef, "review">, q: Pick<QueueFile, "
 
 function apply(
   e: Event, queues: Map<string, QueueView>, sessions: Map<string, SessionView>,
-  questions: Map<string, QuestionView>, warnings: string[], project: ProjectFile,
+  questions: Map<string, QuestionView>, warnings: string[], project: ProjectFile, delivered: ReadonlySet<string>,
 ): void {
   const s = sessions.get(e.session);
   if (s) {
@@ -298,10 +308,11 @@ function apply(
     case "step.done": {
       const q = queueOf(e.queue); const st = stepOf(q, e.step);
       if (!q || !st) return;
-      const policy = reviewPolicyOf(st, q, project);
+      // After the user's Fix it, the round's review is the user's.
+      const policy = st.user_fix ? "wait" : reviewPolicyOf(st, q, project);
       st.status = policy === "continue" ? "done" : "review";
       st.review_with = policy === "orchestrator" ? "orchestrator" : policy === "wait" ? "user" : undefined;
-      st.asked_user = undefined;
+      st.asked_user = undefined; st.user_fix = undefined;
       st.finished_at = e.at; st.summary = e.summary; st.commit = e.commit;
       endSegment(st, e.at);
       if (q.steps.every((x) => FINISHED_STEP.has(x.status))) q.status = "done";
@@ -358,10 +369,28 @@ function apply(
       return;
     }
     case "review.sent_back": {
-      // Recorded here; sending the step back to its worker is the server's (src/engine.ts).
-      const st = stepOf(queueOf(e.queue), e.step);
-      if (!st || st.status !== "review") return;
-      st.sent_back.push({ text: e.text, at: e.at, by: s?.role === "user" ? "user" : "orchestrator" });
+      // The request is recorded here; the server carries it out by writing the worker's inbox (routeSendBacks), and
+      // that entry reopens the step as the next round. The orchestrator sends back only what waits for it, the
+      // user (Fix it) only what waits for the user.
+      const q = queueOf(e.queue); const st = stepOf(q, e.step);
+      if (!q || !st) return;
+      const by = s?.role === "user" ? "user" : "orchestrator";
+      if (st.status !== "review" || st.review_with !== by) { warnings.push(`event ${e.id}: step ${e.queue}/${e.step} is not waiting for the ${by}'s review; the send-back is ignored`); return; }
+      const round = st.timeline.filter((x) => x.type === "step.done").length + 1;
+      const limit = project.defaults.review_send_back_limit;
+      if (by === "orchestrator" && st.sent_back.filter((x) => x.by === "orchestrator" && !x.to_user).length >= limit) {
+        st.sent_back.push({ id: e.id, text: e.text, at: e.at, by, round, delivered: false, to_user: true });
+        st.review_with = "user";
+        st.asked_user = { text: `The orchestrator sent this step back ${limit} time${limit === 1 ? "" : "s"} already and would again: ${e.text}`, at: e.at };
+        return;
+      }
+      const sent = delivered.has(e.id);
+      st.sent_back.push({ id: e.id, text: e.text, at: e.at, by, round, delivered: sent });
+      if (!sent) return; // waits for the server to deliver it
+      st.status = "running"; st.review_with = undefined; st.asked_user = undefined;
+      st.user_fix = by === "user" ? true : undefined;
+      st.finished_at = undefined;
+      if (q.status === "waiting" && !q.steps.some((x) => x.status === "waiting" || x.status === "review")) q.status = "running";
       return;
     }
     case "review.accepted": {

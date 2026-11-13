@@ -4,7 +4,7 @@
 // drafts under .nexus/drafts/: permission mode dontAsk with a read-only allow list plus the drafts rules.
 import { randomUUID } from "node:crypto";
 import {
-  ActionError, ClaudeEffort, ProjectStore, applyDraft, loadProjectState, orchestratorStatusChange, newId, now, type ChatEntry, type Event, type ProjectState, type QueueView, type SessionFile, type StepView,
+  ActionError, ClaudeEffort, ProjectStore, applyDraft, loadProjectState, orchestratorStatusChange, newId, now, sendBack, type ChatEntry, type Event, type ProjectState, type QueueView, type SessionFile, type StepView,
 } from "@nexus/protocol";
 import { ClaudeSession } from "./claude.ts";
 import type { Engine } from "./engine.ts";
@@ -213,7 +213,7 @@ export class Orchestrator {
     this.applying = true;
     try {
       const done = new Set(this.store.readApplied(s.id).entries.map((a) => a.event));
-      const pending = this.store.readEvents(s.id).entries.filter((e) => (e.type === "queue.drafted" || e.type === "session.request" || e.type === "status.set") && !done.has(e.id));
+      const pending = this.store.readEvents(s.id).entries.filter((e) => (e.type === "queue.drafted" || e.type === "session.request" || e.type === "status.set" || e.type === "review.sent_back") && !done.has(e.id));
       for (const e of pending) {
         let ok = true; let message: string;
         try { message = this.apply(e); }
@@ -225,6 +225,7 @@ export class Orchestrator {
 
   private apply(e: Event): string {
     if (e.type === "queue.drafted") return applyDraft(this.store, e.definition);
+    if (e.type === "review.sent_back") return sendBack(this.store, { queue: e.queue, step: e.step, from: "orchestrator", text: e.text, event: e.id });
     if (e.type === "status.set") {
       const message = orchestratorStatusChange(this.store, { queue: e.queue, step: e.step, to: e.to, reason: e.reason });
       // A cancel reaches the user as a push notification, like other notifications; nothing waits in their list.
@@ -357,6 +358,7 @@ function reviewBrief(q: QueueView, st: StepView): string {
     ...(missing.length ? [`Checks of the queue not reported this round: ${missing.join("; ")}`] : []),
     `Review material:\n${list(items.map((i) => `${i.label ?? i.kind ?? "item"}: ${i.path ?? i.url ?? ""}`))}`,
     `Commits: ${commits.join(", ") || "none reported"}`,
+    ...(st.sent_back.length ? [`Sent back before:\n${list(st.sent_back.map((b) => `round ${b.round}, by the ${b.by}: ${b.text}`))}`] : []),
     `Decide with one of: nexus review accept ${q.id} ${st.id} [--note "..."] (the run goes on); nexus review send-back ${q.id} ${st.id} "what to fix"; nexus review ask-user ${q.id} ${st.id} "why" (the user decides). Tell the user briefly what you decided.`,
   ].join("\n\n");
 }
@@ -376,7 +378,7 @@ Commands (\`nexus\` is on PATH; your session is set in the environment):
 - nexus answer <qid> "<answer>" [--continue|--wait]            answer a worker's question whose answer is already settled
 - nexus answer <qid> "<framing, options, recommendation>" --escalate   pass it to the user
 - nexus review accept <queue> <step> [--note "..."]   accept a step waiting for your review; the run goes on
-- nexus review send-back <queue> <step> "what to fix"   send it back to its worker
+- nexus review send-back <queue> <step> "what to fix"   send it back to its worker, as the step's next round in the same session (beyond the project's limit of send-backs per step, 2 by default, the step goes to the user instead)
 - nexus review ask-user <queue> <step> "why"      hand its review to the user
 - nexus server status                            the running Nexus version, the steps running in every project, and an update in progress
 - nexus server update [--now]                    deploy: update Nexus itself and restart it (only when the user asks; see below)

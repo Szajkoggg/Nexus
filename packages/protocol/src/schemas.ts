@@ -63,6 +63,11 @@ export const ProjectFile = z.object({
   defaults: z.object({
     stop_conditions: z.array(z.string()).default([]),
     review_policy: ReviewPolicy.default("continue"),
+    /**
+     * How many times the orchestrator may send a step back; its next send-back hands the step to the user instead.
+     * The user's Fix it does not count.
+     */
+    review_send_back_limit: z.number().int().min(0).default(2),
     context_reuse_threshold: z.number().min(0).max(1).default(0.6),
     /**
      * Context care: when a worker's context is fuller than context_reuse_threshold at the end of a step, the next step
@@ -454,6 +459,11 @@ export const InboxEntry = z.discriminatedUnion("type", [
   /** `id` is "answer-" + the answer.given event's id, so routing the same answer twice is detectable. */
   z.object({ ...ibase, type: z.literal("answer"), qid: Id, text: z.string(), continue: z.boolean().optional() }),
   z.object({ ...ibase, type: z.literal("stop"), text: z.string().optional() }),
+  /**
+   * A step sent back to its worker (by the orchestrator or the user's Fix it): `id` is "send-back-" + the
+   * review.sent_back event's id (`ref`); `round` is the round it opens. Its being in the inbox reopens the step.
+   */
+  z.object({ ...ibase, type: z.literal("send_back"), ref: Id, queue: Id, step: Id, text: z.string(), round: z.number().int().positive() }),
 ]);
 export type InboxEntry = z.infer<typeof InboxEntry>;
 

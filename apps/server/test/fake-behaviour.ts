@@ -117,6 +117,13 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
     nexus("step", "done", fake.step, "--summary", `fake finished ${fake.step} after an answer`);
     return "answered";
   }
+  // A step sent back (by the orchestrator or the user's Fix it): work on it again and report it done.
+  const back = /^\[Nexus\] The (?:orchestrator reviewed|user sent) step (\S+) of queue \S+ .*\(round (\d+)\)/.exec(text);
+  if (back) {
+    nexus("step", "start", back[1]!);
+    nexus("step", "done", back[1]!, "--summary", `fake finished ${back[1]} round ${back[2]}`);
+    return `round ${back[2]}`;
+  }
   if (text.includes("write your context summary")) {
     if (!process.env.FAKE_NO_SUMMARY && fake.step) nexus("context", `fake summary of ${fake.step}, on request`, "--topics", "fake");
     return "summary";

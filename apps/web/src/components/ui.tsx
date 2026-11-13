@@ -178,9 +178,11 @@ export function Composer(props: ComposerProps) {
 interface ComposerProps {
   draft: string; placeholder: string; button: string; onSubmit: (text: string) => Promise<void>;
   allowEmpty?: boolean; rows?: number; extra?: ReactNode;
+  /** Hands the text over as typed (not trimmed): words recorded verbatim. */
+  verbatim?: boolean;
 }
 
-function ComposerBox({ draft, placeholder, button, onSubmit, allowEmpty = false, rows = 3, extra }: ComposerProps) {
+function ComposerBox({ draft, placeholder, button, onSubmit, allowEmpty = false, rows = 3, extra, verbatim = false }: ComposerProps) {
   const [text, setText] = useState(() => readDraft(draft));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
@@ -191,7 +193,7 @@ function ComposerBox({ draft, placeholder, button, onSubmit, allowEmpty = false,
     const sent = text;
     setBusy(true); setError(undefined);
     try {
-      await onSubmit(sent.trim());
+      await onSubmit(verbatim ? sent : sent.trim());
       // Whatever was typed while it was sending stays.
       if (current.current === sent) change("");
     }

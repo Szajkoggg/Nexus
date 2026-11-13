@@ -184,6 +184,12 @@ review": the orchestrator then checks each step and accepts it, sends it back, o
 says whom it waits for ("review: orchestrator" or "review: you"); only those for you are in the inbox. Without an
 orchestrator, or with its notices off, such steps wait for you.
 
+A step waiting for you can be accepted, or sent back with **Fix it**: write what you want instead, and the step goes
+back to its worker in the same session as its next round. Your words win over the step's acceptance criteria where
+they conflict; when the step has criteria, Nexus lists them and asks before sending. The round after a Fix it comes
+back to you. The orchestrator may send a step back twice (`review_send_back_limit` in the project's defaults); its
+third send-back hands the step to you instead.
+
 "Replace token" in the panel signs every remote device out. To have Nexus start with Windows, without a console
 window, run from the live instance: `powershell -ExecutionPolicy Bypass -File C:\Code\Nexus-live\scripts\autostart.ps1`
 (`-Remove` undoes it; the log goes to `%APPDATA%\Nexus\server.log`). To start it once without a window:

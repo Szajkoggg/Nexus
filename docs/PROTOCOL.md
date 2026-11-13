@@ -53,6 +53,7 @@ defaults:
     - A step would grow beyond what is written in it.
     - A check that passed before the queue fails and is not fixed within the step.
   review_policy: continue              # continue | wait | orchestrator (see "Review" below)
+  review_send_back_limit: 2            # the orchestrator's send-backs of a step before the next goes to the user
   context_reuse_threshold: 0.6         # max context fill to continue a session
   context_care: true                   # above that fill at a step's end, the next step runs in a fresh session
   protect_nexus: true                  # Claude Code workers' file tools may not write under the project's .nexus
@@ -223,7 +224,7 @@ Every line:
 | `change.proposed` | `queue`, `patch`, `reason` | A proposed change to a queue definition (needs a new approval) |
 | `queue.drafted` | `queue`, `definition` | Orchestrator only: a new or changed draft queue |
 | `session.request` | `action` (start, resume, pause, stop), `queue`, `use_session?`, `model?`, `reason` | Orchestrator only: asks the engine to act on a queue's run (`use_session` continues an existing session) |
-| `review.sent_back` | `queue`, `step`, `text` | Orchestrator or user only: a step in review goes back to its worker with what to fix (recorded on the step as `sent_back`; reopening the step for its worker is not built yet: it stays in review) |
+| `review.sent_back` | `queue`, `step`, `text` | Orchestrator or user only: a step in review goes back to its worker with what to fix (see "Sending a step back") |
 | `review.asked_user` | `queue`, `step`, `text` | Orchestrator only in practice (the loader takes it from an orchestrator or the user): a step waiting for the orchestrator's review goes to the user, with why |
 | `status.set` | `queue`, `step?`, `to` (`skipped`, `finished`, `cancelled`, `propose-lift`), `reason` | Orchestrator only: housekeeping; the server checks it and records an entry in the queue's `changes` (see `queue.yaml`). A worker's is ignored by derivation, and the server applies only the orchestrator's own requests |
 | `log` | `level`, `text` | Anything else worth keeping |
@@ -275,10 +276,30 @@ The review policy says what happens when a step is done. It is the step's own (`
   waiting for the orchestrator to the user.
 
 The derived step has `review_with` (`orchestrator` or `user`) while in `review`, `asked_user` (`text`, `at`) after a
-hand-over in the current round, and `sent_back` (each `text`, `at`, `by`). Only a step waiting for the user is in the
+hand-over in the current round, and `sent_back` (each `id`, `text`, `at`, `by`, `round`, `delivered`, `to_user?`). Only a step waiting for the user is in the
 user's attention list (kind `review`, with the orchestrator's reason as its text when it handed it over); the queue
 shows `waiting` in both cases. An orchestrator's `review.accepted` or `review.asked_user` on a step that waits for the
 user is ignored (with a warning); the user may accept either. Workers may write none of the three events.
+
+### Sending a step back
+
+One server action (`sendBack` in `packages/protocol/src/actions.ts`) sends a step in review back to its worker, with
+who sends it (`orchestrator` or `user`) and the text. The orchestrator's comes from `nexus review send-back` (its
+`review.sent_back` event, which the server carries out and answers in `applied.jsonl`); the user's is **Fix it** in
+the dashboard (`POST …/steps/:s/send-back`), for which the server writes `review.sent_back` as the user's session, the
+text verbatim (it must not be empty). Picture comments (N8.3) are a user's Fix it.
+
+- The orchestrator sends back only a step waiting for its review; Fix it is only for a step waiting for the user.
+- The server **routes send-backs** like answers: each accepted one goes once into the inbox of the session that worked
+  on the step, as `send_back` (`id` `send-back-<event id>`, `ref`, `queue`, `step`, `text`, `round`, `from`). That
+  entry reopens the step: derivation sets it `running` again as round `round` (its `step.done`s so far plus one). The
+  engine hands the entry to the same session as the next turn; on a paused or halted run it waits, and the resume
+  opens the turn with it. The worker's prompt names the round, the text, the step's criteria, and, for a Fix it,
+  that the user's words win over the acceptance criteria where they conflict. No new queue revision is made.
+- The orchestrator's send-backs of a step beyond `defaults.review_send_back_limit` (default 2) are not delivered: the
+  step goes to the user (`review_with: user`, `asked_user` saying so with the text), and the entry is `to_user`. The
+  user's Fix it does not count toward the limit.
+- After a Fix it the step's next round waits for the user, whatever the policy (`user_fix` on the derived step).
 
 ## The user's session
 
@@ -290,13 +311,14 @@ holds the user's answers (`answer.given`). Like an orchestrator, it may write th
 Written by the server, read by the session's adapter or hook. A `message` may name the `queue` and `step` it is
 about, so the dashboard shows it on that step. The server **routes answers**: every final `answer.given` (not an
 escalation), from the orchestrator or the user, is appended to the asking session's inbox once, with the id
-`answer-<event id>`. The session records each entry it has seen with `message.read`; `nexus status` shows the unread
-ones and records them.
+`answer-<event id>`. It routes send-backs the same way (`send_back`, see "Sending a step back"). The session records
+each entry it has seen with `message.read`; `nexus status` shows the unread ones and records them.
 
 ```json
 {"v":1,"id":"01JD...","at":"...","type":"message","from":"user","text":"Use the grassland settings for the bench too."}
 {"v":1,"id":"01JD...","at":"...","type":"answer","qid":"01JD...","from":"orchestrator","text":"...","continue":true}
 {"v":1,"id":"01JD...","at":"...","type":"stop","from":"user","text":"Stop after this check."}
+{"v":1,"id":"send-back-01JD...","at":"...","type":"send_back","from":"user","ref":"01JD...","queue":"W","step":"W2","text":"Blue, not red.","round":2}
 ```
 
 `delivered_at` is recorded by the server in `state.json` once the runtime has accepted the message (stdin write,
@@ -401,6 +423,7 @@ sends (see the CLI).
 | `POST /api/projects/:id/questions/:qid/answer` | `text`, `continue?` | The user's answer, routed to the asker |
 | `POST /api/projects/:id/queues/:q/run` | `action` (`start`, `pause`, `resume`, `stop`), `model?`, `session?` | Runs the queue through a Nexus-launched session (`session` continues an existing one) |
 | `POST /api/projects/:id/queues/:q/steps/:s/accept` | `text?` | Accepts a step waiting in review |
+| `POST /api/projects/:id/queues/:q/steps/:s/send-back` | `text` (required, kept verbatim) | Fix it: sends a step waiting for the user's review back to its worker; answers `{ message }` |
 | `POST /api/projects/:id/queues/:q/continue` | | Continue: lifts the stop of a stopped queue whose current revision is approved and goes on (see "Continue" under `queue.yaml`); refused (409) otherwise |
 | `POST /api/projects/:id/orchestrator/messages` | `text` | A chat message to the orchestrator (starts or wakes it) |
 | `POST /api/projects/:id/orchestrator/reset` | | The next message starts a new orchestrator session |
@@ -508,7 +531,8 @@ a prompt. (`Write` and `Edit` are not disallowed: a disallow rule would beat the
 - `nexus review accept <queue> <step> [--note <text>]`, `nexus review send-back <queue> <step> <what to fix>` and
   `nexus review ask-user <queue> <step> <why>` write `review.accepted` (the note as its `text`), `review.sent_back`
   and `review.asked_user`. The CLI refuses them from any session but an orchestrator, and for a step that is not
-  waiting for the orchestrator's review.
+  waiting for the orchestrator's review. `send-back` waits for the server's result and prints it ("sent back to its
+  worker as round N", or that the step goes to the user beyond the limit).
 - `nexus queue set <queue> [--step <step>] skipped|finished|cancelled|propose-lift --reason …` sends `status.set`
   and prints the server's result: housekeeping (see "Housekeeping by the orchestrator" under `queue.yaml`). A worker
   session is refused by the CLI.

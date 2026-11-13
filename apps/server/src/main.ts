@@ -12,7 +12,7 @@ import chokidar, { type FSWatcher } from "chokidar";
 import type { Server } from "node:http";
 import {
   ActionError, Effort, ProjectStore, addNote, updateSettings, answerAsUser, approveQueue, deleteNote, loadProjectState, nexusHome, withdrawApproval, addAllowRule,
-  readRegistry, readUsage, routeAnswers, sendMessage, setQueueSettings, type ProjectState,
+  readRegistry, readUsage, routeAnswers, routeSendBacks, sendBack, sendMessage, setQueueSettings, type ProjectState,
 } from "@nexus/protocol";
 import { Engine } from "./engine.ts";
 import { Orchestrator } from "./orchestrator.ts";
@@ -113,6 +113,9 @@ function changed(id: string): void {
       if (s) {
         try { if (routeAnswers(e.store, s) > 0) e.state = undefined; }
         catch (err) { console.error(`routing answers in ${id}: ${(err as Error).message}`); }
+        // Send-backs not delivered yet (the action delivers its own at once; this is the backstop).
+        try { const fresh = stateOf(e); if (fresh && routeSendBacks(e.store, fresh) > 0) e.state = undefined; }
+        catch (err) { console.error(`routing send-backs in ${id}: ${(err as Error).message}`); }
         try { const fresh = stateOf(e); if (fresh) e.orchestrator.onChange(fresh); }
         catch (err) { console.error(`orchestrator in ${id}: ${(err as Error).message}`); }
         e.state = undefined;
@@ -324,6 +327,8 @@ app.post("/api/projects/:id/queues/:queue/run", act((st, b, p) => {
 }));
 // Continue on a stopped queue: the user's lift of the stop, then the run goes on (only from the dashboard, as every write).
 app.post("/api/projects/:id/queues/:queue/continue", act((st, _b, p) => engineOf(st).continueQueue(p("queue"))));
+// Fix it: the user sends a step waiting for their review back to its worker, with what they want (required).
+app.post("/api/projects/:id/queues/:queue/steps/:step/send-back", act((st, b, p) => ({ message: sendBack(st, { queue: p("queue"), step: p("step"), from: "user", text: b.text }) })));
 app.post("/api/projects/:id/queues/:queue/steps/:step/accept", act((st, b, p) => engineOf(st).acceptReview(p("queue"), p("step"), b.text as string | undefined)));
 
 app.get("/api/projects/:id/sessions/:session/activity", (c) => {

@@ -178,7 +178,9 @@ export class Engine {
     // A step left unfinished (stopped, failed, interrupted) is continued rather than skipped; one waiting for an
     // answer just waits on (the answer arrives through the inbox).
     const open = q.steps.find((s) => s.id === run.step && !["done", "skipped", "review"].includes(s.status));
-    if (open?.status === "waiting") this.changed();
+    // A step sent back while the run was paused or halted: the send-back, still in the inbox, opens its next turn.
+    const sentBack = open && state.sessions.find((x) => x.id === run.session)?.inbox.some((m) => m.type === "send_back" && m.step === open.id && !m.read_at);
+    if (open?.status === "waiting" || sentBack) this.changed();
     else if (open) this.openStep(queueId, open, q, "continue", why);
     else this.advance(queueId);
   }
@@ -836,6 +838,21 @@ function formatInbox(m: InboxView, state: ProjectState): string {
     return `[Nexus] Answer from the ${m.from} to your question${q ? ` "${q.text}"` : ""}:\n${m.text}${how}`;
   }
   if (m.type === "message") return `[Nexus] Message from the ${m.from}${m.step ? ` about step ${m.step}` : ""}:\n${m.text}`;
+  if (m.type === "send_back") {
+    const step = state.queues.find((q) => q.id === m.queue)?.steps.find((s) => s.id === m.step);
+    const lines = m.from === "user"
+      ? [
+        `[Nexus] The user sent step ${m.step} of queue ${m.queue} back to you (round ${m.round}). What the user wants:`,
+        m.text,
+        `The user's words win over the step's acceptance criteria where they conflict; the rest of the criteria still hold.`,
+      ]
+      : [`[Nexus] The orchestrator reviewed step ${m.step} of queue ${m.queue} and sent it back to you (round ${m.round}). What to fix:`, m.text];
+    return [
+      ...lines,
+      step?.acceptance.length ? `\nAcceptance criteria of the step:\n${step.acceptance.map((a) => `- ${a}`).join("\n")}` : "",
+      `\nWork on it in this step: \`nexus step start ${m.step}\`, then the checks, review material for this round (\`nexus review add ${m.step} … --round ${m.round}\`), and \`nexus step done ${m.step} --summary "…"\` (or \`nexus step failed\` / \`nexus stop\`), then \`nexus context\`, and end your turn.`,
+    ].filter(Boolean).join("\n");
+  }
   return `[Nexus] The ${m.from} asks you to stop now${m.text ? `: ${m.text}` : "."} Leave the work consistent and end your turn.`;
 }
 

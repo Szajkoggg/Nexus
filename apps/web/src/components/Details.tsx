@@ -67,7 +67,22 @@ export function StepDetail({ project, queue, step, onChanged }: Props & { step: 
           <p className="text-sm text-zinc-400">The queue holds here until the orchestrator accepts this step, sends it back, or hands it to you.</p>
         </Section>
       )}
-      {step.status === "review" && step.review_with !== "orchestrator" && <AcceptReview project={id} queue={queue.id} step={step.id} asked={step.asked_user?.text} onChanged={onChanged} />}
+      {step.status === "review" && step.review_with !== "orchestrator" && <AcceptReview project={id} queue={queue.id} step={step.id} asked={step.asked_user?.text} criteria={step.acceptance} onChanged={onChanged} />}
+
+      {step.sent_back.length > 0 && (
+        <Section title="Sent back">
+          <ul className="space-y-2">
+            {step.sent_back.map((b) => (
+              <li key={b.id} className="text-sm">
+                <div className="text-xs text-zinc-500">
+                  {b.by === "user" ? "You (Fix it)" : "Orchestrator"} · <TimeAgo at={b.at} /> · {b.to_user ? "beyond the limit: handed to you instead" : b.delivered ? `round ${b.round}` : "on its way to the worker"}
+                </div>
+                <p className="whitespace-pre-wrap text-zinc-300">{b.text}</p>
+              </li>
+            ))}
+          </ul>
+        </Section>
+      )}
 
       {live && session && (
         <Section title="Message the running agent" aside={<span className="text-xs text-zinc-600">read at its next check-in</span>}>
@@ -215,14 +230,42 @@ export function StepDetail({ project, queue, step, onChanged }: Props & { step: 
 
 const POLICY_LABEL: Record<string, string> = { continue: "go on", wait: "wait for my review", orchestrator: "the orchestrator reviews" };
 
-function AcceptReview({ project, queue, step, asked, onChanged }: { project: string; queue: string; step: string; asked?: string; onChanged: () => void }) {
+function AcceptReview({ project, queue, step, asked, criteria, onChanged }: { project: string; queue: string; step: string; asked?: string; criteria: string[]; onChanged: () => void }) {
   const [error, setError] = useState<string>();
+  // Fix it with criteria: the text waits here until the user confirms that it overrides them.
+  const [confirm, setConfirm] = useState<{ resolve: () => void; reject: (e: Error) => void; send: () => Promise<void> }>();
+  const send = (text: string) => act(project, "POST", `/queues/${enc(queue)}/steps/${enc(step)}/send-back`, { text }).then(onChanged);
   return (
     <Section title="Waiting for your review">
       {asked && <p className="mb-2 text-sm text-zinc-300"><span className="text-zinc-500">The orchestrator asks you: </span>{asked}</p>}
-      <p className="mb-2 text-sm text-zinc-400">The queue holds here until you accept this step.</p>
+      <p className="mb-2 text-sm text-zinc-400">The queue holds here until you accept this step or send it back.</p>
       <Button onClick={() => act(project, "POST", `/queues/${enc(queue)}/steps/${enc(step)}/accept`).then(onChanged, (e: Error) => setError(e.message))}>Accept and go on</Button>
       {error && <span className="ml-3 text-xs text-red-400">{error}</span>}
+      <div className="mt-4">
+        <p className="mb-1.5 text-sm text-zinc-300">Fix it</p>
+        <p className="mb-2 text-xs text-zinc-500">Sends the step back to its worker with your words. Where they conflict with the step's acceptance criteria, your words win.</p>
+        <Composer
+          draft={draftKey(project, "fix", queue, step)}
+          placeholder="What you want instead…"
+          button="Fix it"
+          verbatim
+          onSubmit={(text) => criteria.length
+            ? new Promise<void>((resolve, reject) => setConfirm({ resolve, reject, send: () => send(text) }))
+            : send(text)}
+        />
+        {confirm && (
+          <div className="mt-3 rounded-lg bg-amber-500/10 p-3 ring-1 ring-amber-500/30">
+            <p className="text-sm text-amber-200">Your words override these acceptance criteria where they conflict:</p>
+            <ul className="mt-1.5 space-y-1">
+              {criteria.map((c, i) => <li key={i} className="flex gap-2 text-sm text-zinc-300"><span className="text-zinc-600">◇</span><Markdown className="[&_p]:m-0">{c}</Markdown></li>)}
+            </ul>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button onClick={() => { const c = confirm; setConfirm(undefined); c.send().then(c.resolve, c.reject); }}>Send it back</Button>
+              <Button variant="quiet" onClick={() => { const c = confirm; setConfirm(undefined); c.reject(new Error("Not sent; your text is kept.")); }}>Cancel</Button>
+            </div>
+          </div>
+        )}
+      </div>
     </Section>
   );
 }

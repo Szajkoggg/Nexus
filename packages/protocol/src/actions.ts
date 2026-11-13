@@ -157,6 +157,59 @@ export function routeAnswers(store: ProjectStore, state: ProjectState = loadProj
   return routed;
 }
 
+// ---------------------------------------------------------------- sending a step back
+
+/**
+ * Delivers every send-back the derivation accepted (not one beyond the orchestrator's limit) to the inbox of the
+ * session that worked on the step, once; that entry reopens the step as its next round. Safe to run on every change.
+ */
+export function routeSendBacks(store: ProjectStore, state: ProjectState = loadProjectState(store)): number {
+  let routed = 0;
+  for (const q of state.queues) for (const st of q.steps) for (const b of st.sent_back) {
+    if (b.delivered || b.to_user || !st.session) continue;
+    const worker = state.sessions.find((s) => s.id === st.session);
+    if (!worker || worker.role !== "worker") continue;
+    const id = `send-back-${b.id}`;
+    if (worker.inbox.some((m) => m.id === id)) continue;
+    store.appendInbox(worker.id, { v: 1, id, at: now(), from: b.by, type: "send_back", ref: b.id, queue: q.id, step: st.id, text: b.text, round: b.round });
+    routed++;
+  }
+  return routed;
+}
+
+/**
+ * Sends a step in review back to its worker with what to fix: the orchestrator's send-back (its review.sent_back
+ * event, `event`, written by `nexus review send-back`), or the user's Fix it (written here, as the user's session; also
+ * what picture comments become). The step reopens in the same session as the next round; on a paused or halted run
+ * the message waits for the resume. Beyond `defaults.review_send_back_limit` the orchestrator's send-back hands the
+ * step to the user instead. Returns what became of it.
+ */
+export function sendBack(store: ProjectStore, req: { queue: string; step: string; from: "orchestrator" | "user"; text: unknown; event?: string }): string {
+  nonEmpty(req.text, req.from === "user" ? "what to fix" : "the send-back");
+  const text = req.text as string; // recorded verbatim
+  stepOf(store, req.queue, req.step);
+  let id = req.event;
+  if (req.from === "user") {
+    const st = loadProjectState(store).queues.find((q) => q.id === req.queue)!.steps.find((s) => s.id === req.step)!;
+    if (st.status !== "review" || st.review_with !== "user") throw new ActionError(`step ${req.queue}/${req.step} is not waiting for your review`, 409);
+    const user = ensureUserSession(store);
+    id = newId();
+    store.appendEvent({ v: 1, id, at: now(), session: user.id, type: "review.sent_back", queue: req.queue, step: req.step, text });
+  }
+  if (!id) throw new ActionError("an orchestrator's send-back is its review.sent_back event");
+  routeSendBacks(store);
+  const state = loadProjectState(store);
+  const st = state.queues.find((q) => q.id === req.queue)!.steps.find((s) => s.id === req.step)!;
+  const b = st.sent_back.find((x) => x.id === id);
+  if (!b) {
+    const why = state.warnings.find((w) => w.startsWith(`event ${id}:`));
+    throw new ActionError(why ? why.replace(/^event \S+: /, "") : `step ${req.queue}/${req.step} could not be sent back`, 409);
+  }
+  if (b.to_user) return `step ${req.queue}/${req.step} goes to the user: it was sent back ${state.project.defaults.review_send_back_limit} times already`;
+  if (!b.delivered) throw new ActionError(`step ${req.queue}/${req.step} has no worker session to send it back to`, 409);
+  return `step ${req.queue}/${req.step} sent back to its worker as round ${b.round}`;
+}
+
 // ---------------------------------------------------------------- queue drafts (from an orchestrator)
 
 /**

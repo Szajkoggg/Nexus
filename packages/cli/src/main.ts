@@ -188,8 +188,10 @@ function reviewDecision(action: "accept" | "send-back" | "ask-user"): void {
     return;
   }
   const text = need(args.slice(4).join(" ").trim(), action === "send-back" ? "<what to fix>" : "<why>");
-  emit(st, s, { type: action === "send-back" ? "review.sent_back" : "review.asked_user", queue, step, text });
-  console.log(action === "send-back" ? `ok: ${queue}/${step} sent back` : `ok: ${queue}/${step} waits for the user's review`);
+  const e = emit(st, s, { type: action === "send-back" ? "review.sent_back" : "review.asked_user", queue, step, text });
+  // The server carries out a send-back (the worker's inbox, or the user beyond the limit); this waits for its result.
+  if (action === "send-back") report(waitApplied(st, s.id, e.id));
+  else console.log(`ok: ${queue}/${step} waits for the user's review`);
 }
 
 function report(r: { ok: boolean; message: string } | undefined): void {
@@ -295,6 +297,8 @@ const commands: Record<string, () => void | Promise<void>> = {
         console.log(`\nanswer from the ${m.from} to ${m.qid}${q ? ` ("${q.text}")` : ""}${how}:\n${m.text}`);
       } else if (m.type === "message") {
         console.log(`\nmessage from the ${m.from}${m.step ? ` about ${m.queue}/${m.step}` : ""} (${m.at}):\n${m.text}`);
+      } else if (m.type === "send_back") {
+        console.log(`\n${m.queue}/${m.step} sent back by the ${m.from} (round ${m.round}):\n${m.text}${m.from === "user" ? "\n(The user's words win over the step's acceptance criteria where they conflict.)" : ""}`);
       } else {
         console.log(`\nSTOP requested by the ${m.from}${m.text ? `: ${m.text}` : ""}. Finish the current action, then stop and report.`);
       }
