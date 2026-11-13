@@ -9,6 +9,11 @@
 // (lasting), limit (a usage limit resetting FAKE_RESET_MS, default 1500, later), crash (the process exits mid-turn).
 // Each fake writes the failure the way its runtime does (fake-claude.ts, fake-codex.ts).
 // "refused": the agent tries actions that are refused (each fake writes them as its runtime does), then done.
+// "summary": done, then the step's context summary (`nexus context`); "summaryslow": the same, then FAKE_SLOW_MS before
+// the turn ends. Nexus asking for the summary ("[Nexus] … write your context summary") gets one, unless
+// FAKE_NO_SUMMARY is set. FAKE_CONTEXT_FILL (0 to 1) is the context fill each turn reports (default: claude 10 %,
+// codex 6 %). A step turn may come after a seed (context care's first prompt of a fresh session): it is found at the
+// start of any line.
 // An answer ("[Nexus] Answer …") makes it report the current step done. As an orchestrator: "FAKE-DRAFT:" followed by
 // YAML drafts that queue; "FAKE-NEXUS: [args]" runs `nexus` with those arguments; a "[Nexus] A worker asked … (qid X;"
 // notice is answered with "fake answer". "FAKE-LONG" is answered with longReply("Reply"); a hand-over with
@@ -28,7 +33,13 @@ const nexusOut = (args: string[], input?: string): string => {
 
 /** Records what reached the agent and how, for the tests (FAKE_LOG, one JSON line each). */
 export function record(text: string, priority: string | null, busy: boolean): void {
-  if (process.env.FAKE_LOG) appendFileSync(process.env.FAKE_LOG, JSON.stringify({ text, priority, busy }) + "\n");
+  if (process.env.FAKE_LOG) appendFileSync(process.env.FAKE_LOG, JSON.stringify({ text, priority, busy, session: process.env.NEXUS_SESSION ?? null }) + "\n");
+}
+
+/** The context tokens a turn reports for a window of `window` tokens: FAKE_CONTEXT_FILL of it, else `fallback`. */
+export function contextTokens(window: number, fallback: number): number {
+  const fill = process.env.FAKE_CONTEXT_FILL;
+  return fill ? Math.round(Number(fill) * window) : fallback;
 }
 
 export interface Fake { step?: string }
@@ -76,7 +87,7 @@ export function recordArgs(what: Record<string, unknown>): void {
  */
 export async function respond(fake: Fake, text: string, tool: (command: string) => void, refused?: () => void): Promise<string | { fail: FakeFailure } | { exit: true }> {
   const m = /step (\S+) \(\d+ of \d+\)/.exec(text);
-  if (text.startsWith("[Nexus] Queue") && m) {
+  if (/(^|\n)\[Nexus\] Queue/.test(text) && m) {
     const step = (fake.step = m[1]!);
     const behaviour = /FAKE: (\w+)/.exec(text)?.[1] ?? "done";
     nexus("step", "start", step);
@@ -86,7 +97,9 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
     if (/^(overloaded|network|auth|limit|crash)/.test(behaviour)) nexus("step", "done", step, "--summary", `fake finished ${step} after failures`);
     if (behaviour === "slow") await new Promise((r) => setTimeout(r, Number(process.env.FAKE_SLOW_MS ?? 1500)));
     if (behaviour === "refused") { refused?.(); nexus("step", "done", step, "--summary", `fake finished ${step} without what was refused`); }
-    if (behaviour === "done" || behaviour === "slow") nexus("step", "done", step, "--summary", `fake finished ${step}`);
+    if (["done", "slow", "summary", "summaryslow"].includes(behaviour)) nexus("step", "done", step, "--summary", `fake finished ${step}`);
+    if (behaviour.startsWith("summary")) nexus("context", `fake summary of ${step}`, "--topics", "fake,context");
+    if (behaviour === "summaryslow") await new Promise((r) => setTimeout(r, Number(process.env.FAKE_SLOW_MS ?? 1500)));
     if (behaviour === "fail") nexus("step", "failed", step, "--reason", "fake failure");
     if (behaviour === "doneexit") { nexus("step", "done", step, "--summary", `fake finished ${step}, then exits`); return { exit: true }; }
     if (behaviour === "stop") nexus("stop", step, "--condition", "fake condition", "--reason", "fake stop");
@@ -96,6 +109,10 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
   if (text.startsWith("[Nexus] Answer") && fake.step) {
     nexus("step", "done", fake.step, "--summary", `fake finished ${fake.step} after an answer`);
     return "answered";
+  }
+  if (text.includes("write your context summary")) {
+    if (!process.env.FAKE_NO_SUMMARY && fake.step) nexus("context", `fake summary of ${fake.step}, on request`, "--topics", "fake");
+    return "summary";
   }
   if (text.includes("hands this conversation to the orchestrator")) return longReply("SUMMARY");
   if (text.includes("FAKE-LONG")) return longReply("Reply");

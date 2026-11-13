@@ -1,6 +1,6 @@
 // A stand-in for `claude -p --input-format stream-json --output-format stream-json`, for testing without a model.
 // What it does is in fake-behaviour.ts.
-import { record, recordArgs, respond, type Fake, type FakeFailure } from "./fake-behaviour.ts";
+import { contextTokens, record, recordArgs, respond, type Fake, type FakeFailure } from "./fake-behaviour.ts";
 
 recordArgs({ argv: process.argv.slice(2) });
 
@@ -15,7 +15,7 @@ async function turn(text: string): Promise<void> {
   const reply = await respond(fake, text, (command) =>
     out({ type: "assistant", message: { content: [{ type: "tool_use", name: "Bash", input: { command } }] }, parent_tool_use_id: null }), () => refused(denials));
   if (typeof reply !== "string") return "exit" in reply ? exitOnSignal() : fail(reply.fail);
-  out({ type: "assistant", message: { content: [{ type: "text", text: reply }], usage: { input_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: 90 } }, parent_tool_use_id: null });
+  out({ type: "assistant", message: { content: [{ type: "text", text: reply }], usage: { input_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: contextTokens(1000, 100) - 10 } }, parent_tool_use_id: null });
   out({ type: "result", subtype: "success", is_error: false, result: reply, num_turns: 1, total_cost_usd: 0, modelUsage: { fake: { contextWindow: 1000 } }, permission_denials: denials });
 }
 

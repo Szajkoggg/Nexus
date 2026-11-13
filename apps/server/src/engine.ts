@@ -9,7 +9,8 @@ import { basename, dirname, join } from "node:path";
 import {
   ENDED_RUN_STATES,
   ActionError, ProjectStore, USER_SESSION, ensureUserSession, loadProjectState, newId, normPath, now, readUsage,
-  writeUsage, CLAUDE_EFFORTS, RETRY_LIMIT, formatClock, type Effort, type InboxView, type ProjectState, type QueueView, type RunFile, type SessionFile, type StepView,
+  writeUsage, CLAUDE_EFFORTS, RETRY_LIMIT, formatClock, type Effort, type InboxView, type ProjectState, type QueueView, type RunFile, type SessionFile,
+  type SessionView, type StepView,
 } from "@nexus/protocol";
 import type { AgentProcess, StreamFacts, TurnFailure } from "./agent.ts";
 import { ClaudeSession } from "./claude.ts";
@@ -274,10 +275,80 @@ export class Engine {
       this.schedule(queueId, wait.until, this.usageMarginMs);
       return;
     }
+    if (current && this.careForContext(queueId, run, state, q, current, next, live)) return;
     this.openStep(queueId, next, q, "start");
   }
 
-  private openStep(queueId: string, step: StepView, q: QueueView, mode: "start" | "continue", why?: string): void {
+  /**
+   * Context care (DESIGN.md, "Context care between steps"): at the end of a step whose session's context is fuller than
+   * the project's threshold, the next step runs in a fresh session of the same runtime, model and effort, seeded with
+   * the step's context summary and the queue's text. A missing summary is asked for once; if it is still missing, the
+   * seed is the queue's description and its finished steps' summaries. Without a known context window nothing changes.
+   * Returns whether it took the next move (asked for the summary, or switched and opened the step).
+   */
+  private careForContext(queueId: string, run: RunFile, state: ProjectState, q: QueueView, done: StepView, next: StepView, live: Live): boolean {
+    const defaults = state.project.defaults;
+    if (!defaults.context_care) return false;
+    const old = state.sessions.find((x) => x.id === run.session);
+    const tokens = old?.live?.context_tokens, window = old?.live?.context_window;
+    if (!old || !tokens || !window || old.runtime === "external") return false;
+    const fill = tokens / window;
+    if (fill <= defaults.context_reuse_threshold) return false;
+    // Fresh: written by this session at or after its latest start of the step that just ended.
+    const since = done.timeline.filter((e) => e.type === "step.started" && e.session === old.id).at(-1)?.at ?? run.started_at;
+    const fresh = !!old.context && old.context.at >= since;
+    const asked = run.summary_asked === done.id;
+    if (!fresh && !asked) {
+      this.writeRun(queueId, { ...run, summary_asked: done.id });
+      live.proc.send(`[Nexus] Step ${done.id} is over, and this session's context is ${Math.round(fill * 100)}% full: the next step runs in a fresh session. Before that, write your context summary with \`nexus context "<what a successor needs to know>" --topics a,b --files x,y\` (what was decided and why, where things are, what is still open), then end your turn. Do not start anything else.`);
+      this.store.appendActivity(old.id, { at: now(), kind: "turn_start", text: `Nexus asked for the context summary of step ${done.id} (context ${Math.round(fill * 100)}% full)`, queue: queueId, step: done.id });
+      return true;
+    }
+    this.switchSession(queueId, run, q, old, live, done, next, fill, fresh ? (asked ? "asked" : "written") : "fallback");
+    return true;
+  }
+
+  /** Goes on with `next` in a fresh session that continues `old` (see careForContext). */
+  private switchSession(queueId: string, run: RunFile, q: QueueView, old: SessionView, live: Live, done: StepView, next: StepView, fill: number, source: "written" | "asked" | "fallback"): void {
+    const oldFile = this.store.readSession(old.id);
+    const part = (run.switches?.length ?? 0) + 2;
+    const fresh: SessionFile = {
+      protocol: 1, id: newId(), project: oldFile.project, role: "worker", runtime: oldFile.runtime,
+      native_id: oldFile.runtime === "claude" ? randomUUID() : null,
+      title: `${q.id} worker (${part})`, cwd: oldFile.cwd, branch: gitBranch(oldFile.cwd) ?? oldFile.branch, queue: q.id,
+      launched_by: "nexus", created_at: now(), model: oldFile.model, effort: oldFile.effort, continues: old.id,
+    };
+    this.store.writeSession(fresh);
+    this.store.writeSession({ ...oldFile, continued_by: fresh.id });
+    // What the old session has not read yet goes into the new one's first turn; the old process ends.
+    const unread = (loadProjectState(this.store).sessions.find((x) => x.id === old.id)?.inbox ?? []).filter((m) => !m.read_at);
+    this.ending.add(old.id);
+    live.proc.close();
+    const pct = Math.round(fill * 100);
+    this.writeRun(queueId, {
+      ...run, session: fresh.id, summary_asked: undefined,
+      switches: [...(run.switches ?? []), { at: now(), from: old.id, to: fresh.id, step: next.id, fill, summary: source }],
+    });
+    this.store.appendActivity(old.id, { at: now(), kind: "turn_end", text: `Nexus goes on in a fresh session (${fresh.id}): this one's context is ${pct}% full`, queue: queueId, step: done.id });
+    for (const m of unread) this.store.appendDelivered(old.id, { at: now(), kind: "inbox", id: m.id, via: "carried", to: fresh.id });
+    const state = loadProjectState(this.store);
+    this.ensureProcess(fresh);
+    const summary = source === "fallback" ? undefined : old.context;
+    const seed = [
+      `[Nexus] You take over queue ${q.id} "${q.title}" in a fresh session. The session that ran it so far had its context ${pct}% full, so Nexus goes on here; you have not seen its work, only what follows.`,
+      summary
+        ? `\nIts context summary at the end of ${done.id}:\n${summary.text}${summary.topics.length ? `\nTopics: ${summary.topics.join(", ")}` : ""}${summary.files.length ? `\nFiles: ${summary.files.join(", ")}` : ""}`
+        : `\nIt left no context summary of ${done.id}; the queue's description and its finished steps' summaries below are what there is.`,
+      `\nThe queue${q.description ? `:\n${q.description.trim()}` : ` has no description.`}`,
+      `\nIts steps:\n${q.steps.map((s) => `- ${s.id} ${s.title}: ${s.id === next.id ? "yours now" : s.status}${s.summary ? `. ${s.summary}` : ""}`).join("\n")}`,
+    ].join("\n");
+    const carried = unread.length
+      ? `Messages that came for the previous session and were not read yet:\n\n${unread.map((m) => formatInbox(m, state)).join("\n\n")}`
+      : undefined;
+    this.openStep(queueId, next, this.queue(state, queueId), "start", undefined, { before: seed, after: carried });
+  }
+
+  private openStep(queueId: string, step: StepView, q: QueueView, mode: "start" | "continue", why?: string, around: { before?: string; after?: string } = {}): void {
     const run = this.run(queueId);
     const live = this.live.get(run.session);
     if (!live) return this.halt(queueId, "the session's process is not running");
@@ -300,15 +371,16 @@ export class Engine {
       `\nBegin with \`nexus step start ${step.id}\`${mode === "continue" ? " (again is fine)" : ""}. End with \`nexus step done ${step.id} --summary "…"\`, \`nexus step failed\` or \`nexus stop\`, then write \`nexus context\` and end your turn. Do not start another step.`,
       last ? `\nThis is the queue's last step. After it is done, write a short report of the whole queue (what each step achieved against its acceptance, checks, review material, open questions, a proposed next step) to ${join(this.store.queueDir(q.id), "report.md").replaceAll("\\", "/")} and register it with \`nexus report ${q.id} --file <that path> --summary "…"\`.` : "",
     ].filter(Boolean);
-    live.proc.send(lines.join("\n"));
+    live.proc.send([around.before, lines.join("\n"), around.after].filter(Boolean).join("\n\n"));
     for (const n of notes) this.store.appendDelivered(run.session, { at: now(), kind: "note", id: n.id, via: "turn" });
-    this.writeRun(queueId, { ...run, step: step.id, nudged: false, ...(mode === "start" ? { retries: undefined, failure: undefined } : {}) });
-    this.store.appendActivity(run.session, { at: now(), kind: "turn_start", text: `Nexus opened step ${step.id}${mode === "continue" ? " (continue)" : ""}`, queue: queueId, step: step.id });
+    this.writeRun(queueId, { ...run, step: step.id, nudged: false, ...(mode === "start" ? { retries: undefined, failure: undefined, summary_asked: undefined } : {}) });
+    this.store.appendActivity(run.session, { at: now(), kind: "turn_start", text: `Nexus opened step ${step.id}${mode === "continue" ? " (continue)" : ""}${around.before ? " in a fresh session, with what the previous one handed over" : ""}`, queue: queueId, step: step.id });
   }
 
   /** Hands unread inbox entries to a live session: inside a running turn, or as a new turn when it is idle. */
   private deliverInbox(state: ProjectState, l: Live): void {
-    if (l.proc.state === "exited") return;
+    // A process Nexus is ending gets nothing more (a session taken over had its unread entries carried across).
+    if (l.proc.state === "exited" || this.ending.has(l.session)) return;
     const s = state.sessions.find((x) => x.id === l.session);
     const unread = (s?.inbox ?? []).filter((m) => !m.read_at);
     if (!unread.length) return;

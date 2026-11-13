@@ -2,7 +2,7 @@
 // uses and sends the notifications Nexus reads. What it does with a message is in fake-behaviour.ts; a turn/steer
 // is recorded with priority "next", like Claude's mid-turn messages.
 import { randomUUID } from "node:crypto";
-import { record, recordArgs, respond, type Fake, type FakeFailure } from "./fake-behaviour.ts";
+import { contextTokens, record, recordArgs, respond, type Fake, type FakeFailure } from "./fake-behaviour.ts";
 
 const out = (m: unknown) => process.stdout.write(JSON.stringify(m) + "\n");
 const notify = (method: string, params: unknown) => out({ method, params });
@@ -16,7 +16,7 @@ async function runTurn(id: string, text: string): Promise<void> {
     notify("item/started", { threadId, turnId: id, item: { type: "commandExecution", id: randomUUID(), command: `"powershell.exe" -Command '${command}'`, status: "inProgress" } }), () => refused(id));
   if (typeof reply !== "string") return "exit" in reply ? exitOnSignal() : fail(id, reply.fail);
   notify("item/completed", { threadId, turnId: id, item: { type: "agentMessage", id: randomUUID(), text: reply } });
-  notify("thread/tokenUsage/updated", { threadId, turnId: id, tokenUsage: { last: { inputTokens: 120 }, total: { inputTokens: 120 }, modelContextWindow: 2000 } });
+  notify("thread/tokenUsage/updated", { threadId, turnId: id, tokenUsage: { last: { inputTokens: contextTokens(2000, 120) }, total: { inputTokens: contextTokens(2000, 120) }, modelContextWindow: 2000 } });
   turnId = undefined;
   notify("turn/completed", { threadId, turn: { id, status: "completed", items: [] } });
 }

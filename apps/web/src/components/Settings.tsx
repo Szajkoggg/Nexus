@@ -66,6 +66,7 @@ export function SettingsPanel({ project, onChanged, server }: { project: Project
     review: project.defaults.review_policy,
     usage: Math.round(project.defaults.usage_pause_threshold * 100),
     reuse: Math.round(project.defaults.context_reuse_threshold * 100),
+    care: project.defaults.context_care,
     worktrees: project.defaults.worktree_dir ?? "",
   }));
   const [busy, setBusy] = useState(false);
@@ -86,7 +87,7 @@ export function SettingsPanel({ project, onChanged, server }: { project: Project
         },
         orchestrator: { notify: f.notify },
         conversations: { notes_dir: f.notesDir || null, runtime: f.ideasRuntime, model: f.ideasModel || null, effort: f.ideasEffort || null },
-        defaults: { review_policy: f.review, usage_pause_threshold: f.usage / 100, context_reuse_threshold: f.reuse / 100, worktree_dir: f.worktrees || null },
+        defaults: { review_policy: f.review, usage_pause_threshold: f.usage / 100, context_reuse_threshold: f.reuse / 100, context_care: f.care, worktree_dir: f.worktrees || null },
       });
       if (f.orchModel !== undefined || f.orchEffort !== undefined) {
         await act(project.id, "POST", "/orchestrator/settings", { model: orchModel || null, effort: orchEffort || null });
@@ -166,8 +167,14 @@ export function SettingsPanel({ project, onChanged, server }: { project: Project
         <Row label="Pause new steps at" hint="Share of a usage window (Claude's 5 hours, Codex's windows) above which no new step starts.">
           <span className="flex items-center gap-2"><input type="number" min={10} max={100} value={f.usage} onChange={(e) => set("usage", Number(e.target.value))} className={`${field} w-24`} /> %</span>
         </Row>
-        <Row label="Reuse a session up to" hint="The orchestrator continues a session only below this context fill.">
+        <Row label="Reuse a session up to" hint="The orchestrator continues a session only below this context fill; with context care on, so does a run from one step to the next.">
           <span className="flex items-center gap-2"><input type="number" min={10} max={100} value={f.reuse} onChange={(e) => set("reuse", Number(e.target.value))} className={`${field} w-24`} /> %</span>
+        </Row>
+        <Row label="Context care" hint="Above that fill at the end of a step, the next step runs in a fresh session, given the previous one's context summary, instead of the runtime compacting in the middle of a step.">
+          <span className="flex items-center gap-2 pt-1 text-sm text-zinc-300">
+            <input type="checkbox" checked={f.care} onChange={(e) => set("care", e.target.checked)} className="accent-sky-500" />
+            a fresh session when the context is full
+          </span>
         </Row>
         <Row label="Worktrees in" hint="Where Nexus creates worktrees for queues that ask for one; empty: next to the project.">
           <input value={f.worktrees} onChange={(e) => set("worktrees", e.target.value)} placeholder={`${project.root}/../…worktrees`} className={`${field} font-mono text-xs`} />

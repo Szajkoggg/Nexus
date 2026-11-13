@@ -64,6 +64,9 @@ Codex's auto review are the recommended settings: routine actions run, risky one
 What was refused shows in each step's detail and, grouped by kind with counts, under "Refused actions" on the project
 page; from a Claude Code refusal, "Allow for this project…" adds a rule (prefilled, editable) to these settings.
 A run can override model and effort when it starts, and the orchestrator chooses them when it starts runs.
+With context care on (the default, under Defaults), a run whose session is fuller than "Reuse a session up to" at
+the end of a step goes on in a fresh session of the same runtime, model and effort, given the previous session's
+context summary; the run's panel lists each such switch.
 
 ## Requirements
 

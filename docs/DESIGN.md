@@ -248,6 +248,22 @@ When the orchestrator assigns a queue it picks one of:
 Its choice and the reason are shown on the queue. The user can override it. A session is used by one process at a
 time: Nexus never runs two processes on one session.
 
+**Context care between steps.** Within a run the engine keeps the same threshold. When a step ends with its session's
+context above it, the next step runs in a fresh session of the same runtime, model and effort, seeded with the
+step's context summary and the queue's own text (protocol: "Context care"). A runtime left to itself compacts when
+the window is full, which can happen in the middle of a step and loses detail nobody chose to lose; a step's end is
+the natural cut, and the worker's own summary is a better hand-over than an automatic compaction. Decisions:
+
+- On by default (`defaults.context_care`), also for existing projects; the user turns it off in the settings.
+- The summary must be fresh: written by that session at or after its latest start of the step that just ended. An
+  older one would miss the step's own work. A missing summary is asked for once; if the worker still writes none,
+  the seed is the queue's description and the finished steps' summaries, which every worker writes anyway.
+- No known context window (a runtime that has not reported one yet) means no switch: Nexus does not guess.
+- What the old session had not read yet (a message that came between its last turn and the switch) goes into the new
+  session's first turn, after the step, and counts as delivered in the old session's `delivered.jsonl`.
+- The switch is recorded in `run.yaml` (`switches`) and on both `session.yaml` files (`continues`, `continued_by`),
+  and the run's panel lists it: from which step, how full the old context was, and where the seed came from.
+
 ### Autonomy and insight
 
 Queues run autonomously: they do not stop at each step for the user. The user checks queues as a whole, and looks

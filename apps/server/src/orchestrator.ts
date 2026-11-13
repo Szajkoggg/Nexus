@@ -312,7 +312,7 @@ steps:
 
 Choosing model and effort for a run: say which and why when you start it. Hard design, debugging or open-ended work deserves a strong model at high effort; mechanical steps (renames, measurements, sheets) do well with less. Codex takes effort low to xhigh; Claude Code also max. Without --model and --effort the project's defaults apply.
 
-Choosing a session for a run: \`nexus status\` shows each session's context card (topics, files, context fill). Continue a session (--use-session) when it worked on closely related things and its context is below ${threshold} %; otherwise start a fresh one and put what it needs into the queue's description and goals. Never give one session two running queues.
+Choosing a session for a run: \`nexus status\` shows each session's context card (topics, files, context fill). Continue a session (--use-session) when it worked on closely related things and its context is below ${threshold} %; otherwise start a fresh one and put what it needs into the queue's description and goals. Never give one session two running queues. With context care on (the project's default), a run whose session gets fuller than that at the end of a step goes on in a fresh session by itself, seeded with the step's context summary; \`nexus status\` shows the run's current session.
 
 Helpers (subagents, through the Agent tool; they read only (you also write queue drafts), and keep long research out of your context):
 - queue-reviewer: before you propose a queue, have it review the draft; fix what it finds, then propose.

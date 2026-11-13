@@ -54,6 +54,7 @@ defaults:
     - A check that passed before the queue fails and is not fixed within the step.
   review_policy: continue              # continue | wait
   context_reuse_threshold: 0.6         # max context fill to continue a session
+  context_care: true                   # above that fill at a step's end, the next step runs in a fresh session
   usage_pause_threshold: 0.9           # share of the 5-hour window at which no new step turn starts
   worktree_dir: C:/Code/GameDev/ProjectHoneycomb.worktrees
 runtimes:
@@ -174,9 +175,9 @@ Written only by the server's queue engine; agents never touch them.
 
 | File | What |
 |---|---|
-| `queues/<id>/run.yaml` | The engine's intent for a queue: `session`, `state` (`running`, `pausing`, `paused`, `halted`, `finished`, `usage_wait`, `retry_wait`: a turn failed for a passing reason and is tried again at `resume_at`), `reason`, the `step` it last opened, `nudged`, `resume_at` (when a usage wait or a retry goes on), `retries` (turns failed in a row for a passing reason; cleared by a turn that ends well or a new step), `failure` (the runtime's code for the failure being retried or that halted the run, e.g. `overloaded`), `resume_after_restart`, `started_at`, `ended_at` (when it last stopped going: set when it becomes `finished`, `halted` or `paused`, kept while it stays so, removed when it goes on; older files without it fall back to `updated_at`) |
+| `queues/<id>/run.yaml` | The engine's intent for a queue: `session`, `state` (`running`, `pausing`, `paused`, `halted`, `finished`, `usage_wait`, `retry_wait`: a turn failed for a passing reason and is tried again at `resume_at`), `reason`, the `step` it last opened, `nudged`, `resume_at` (when a usage wait or a retry goes on), `retries` (turns failed in a row for a passing reason; cleared by a turn that ends well or a new step), `failure` (the runtime's code for the failure being retried or that halted the run, e.g. `overloaded`), `resume_after_restart`, `started_at`, `ended_at` (when it last stopped going: set when it becomes `finished`, `halted` or `paused`, kept while it stays so, removed when it goes on; older files without it fall back to `updated_at`), `summary_asked` (context care: the step whose context summary Nexus asked for; asked once), `switches` (context care, oldest first: `at`, `from` and `to` session, `step` the new session began with, `fill` of the old one from 0 to 1, `summary`: `written` by the worker, `asked` and then written, or `fallback`) |
 | `sessions/<id>/runtime.json` | A launched session's live facts: process state and pid, model, context tokens and window, turns, cost |
-| `sessions/<id>/delivered.jsonl` | What the server handed to the session (notes put into a step turn, inbox entries injected or sent as a turn); counts as read |
+| `sessions/<id>/delivered.jsonl` | What the server handed to the session (notes put into a step turn, inbox entries injected or sent as a turn, or `carried` into the first turn of the session `to` that took over); counts as read |
 | `sessions/<id>/refusals.jsonl` | One line per action the agent wanted but was refused: `at`, `session`, `runtime`, `by` (`permissions`: Claude Code's permission mode or rules; `nexus`: Nexus declined a Codex approval request; `auto_review`: Codex's auto reviewer), `tool` (Claude Code's tool name; for Codex `command`, `file_change`, `network`, `mcp`, `permissions`, …), `input` in short (the command, path or host, at most 300 characters), `reason` when the runtime gave one, `ref` (the runtime's id for the call: one record per refusal), `queue`, `step` |
 | `sessions/<id>/activity.jsonl` | A condensed record of the agent's stream: turns, tool calls, texts (clipped to 600 characters), tool errors, exits, and retries (`retry`: the runtime's own and the engine's), tagged with queue and step |
 | `sessions/<orchestrator>/applied.jsonl` | The server's result for each orchestrator request (`queue.drafted`, `session.request`), and the notices it has sent the orchestrator; the CLI waits for the result and prints it |
@@ -226,6 +227,8 @@ branch: v2/cliffs
 launched_by: nexus                     # nexus | external
 created_at: ...
 forked_from: null
+continues: 01JD...                     # context care: the session this one took over from
+continued_by: 01JD...                  # context care: the session that took over from this one
 ```
 
 ## The `nexus` CLI
@@ -406,6 +409,43 @@ a prompt. (`Write` and `Edit` are not disallowed: a disallow rule would beat the
 The server writes `<NEXUS_HOME>/bin/nexus.cmd` (for cmd and PowerShell, where npm's `.ps1` shim is blocked when
 scripts are disabled, as in Codex's shell) and `<NEXUS_HOME>/bin/nexus` (for Git Bash), both running this checkout's
 CLI with the server's Node, and puts that directory first on every launched agent's `PATH`.
+
+## Context care
+
+With `defaults.context_care` on (the default), at the end of a step whose session's context fill (`context_tokens`
+/ `context_window` in `runtime.json`) is above `context_reuse_threshold`, and when a next step remains, the engine
+goes on in a fresh session. Without a known context window it goes on in the same session.
+
+1. It looks for a fresh summary: a `context.summary` from that session at or after its latest `step.started` of the
+   step that ended. If there is none, it asks once with a turn ("… write your context summary with `nexus context`
+   …, then end your turn") and records `summary_asked` in `run.yaml`; after that turn it goes on with or without one.
+2. It writes the new `session.yaml` (same runtime, model, effort and working directory; `continues`) and sets
+   `continued_by` on the old one, closes the old process, points `run.yaml` at the new session and appends to
+   `switches`.
+3. The new session's first turn is a seed, then the step turn, then the old session's unread inbox entries (recorded
+   in the old session's `delivered.jsonl` as `carried`). The seed names the queue and the old session's fill, gives
+   the summary (text, topics, files) or says there was none, and lists the queue's description and its steps with
+   their states and the finished steps' summaries.
+
+```
+[Nexus] You take over queue W "Variant B made a system" in a fresh session. The session that ran it so far had its
+context 82% full, so Nexus goes on here; you have not seen its work, only what follows.
+
+Its context summary at the end of W2:
+...
+Topics: rock, support
+
+The queue:
+...
+
+Its steps:
+- W1 Voronoi fracture: done. <its summary>
+- W2 Bodies shaped: done. <its summary>
+- W3 Support: yours now
+
+[Nexus] Queue W "Variant B made a system" (revision 3, approved), step W3 (3 of 7): Support.
+...
+```
 
 ## How the engine runs a Codex session
 

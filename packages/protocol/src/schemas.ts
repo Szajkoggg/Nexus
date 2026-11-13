@@ -59,6 +59,11 @@ export const ProjectFile = z.object({
     stop_conditions: z.array(z.string()).default([]),
     review_policy: ReviewPolicy.default("continue"),
     context_reuse_threshold: z.number().min(0).max(1).default(0.6),
+    /**
+     * Context care: when a worker's context is fuller than context_reuse_threshold at the end of a step, the next step
+     * runs in a fresh session seeded with the context summary, instead of the runtime compacting mid-step.
+     */
+    context_care: z.boolean().default(true),
     usage_pause_threshold: z.number().min(0).max(1).default(0.9),
     worktree_dir: z.string().optional(),
   }).prefault({}),
@@ -199,6 +204,10 @@ export const SessionFile = z.object({
   effort: Effort.optional(),
   /** A conversation the user put away: kept, not listed first. */
   archived: z.boolean().optional(),
+  /** The session this one took over from (context care: the earlier one's context was full). */
+  continues: Id.optional(),
+  /** The session that took over from this one. */
+  continued_by: Id.optional(),
 });
 export type SessionFile = z.infer<typeof SessionFile>;
 
@@ -288,12 +297,26 @@ export const RunFile = z.object({
   failure: z.string().optional(),
   /** Stopped only for a Nexus update: the server resumes it by itself when it starts again. */
   resume_after_restart: z.boolean().optional(),
+  /** Context care: the step whose end Nexus asked the session to write its context summary for (asked once). */
+  summary_asked: Id.optional(),
+  /**
+   * Context care: each time the run went on in a fresh session, oldest first. `step` is the first step of the new
+   * session, `fill` the old session's context fill (0 to 1), `summary` where the seed came from: `written` (the
+   * worker's own summary of the step), `asked` (written when Nexus asked for it), `fallback` (none: the queue's
+   * description and the finished steps' summaries).
+   */
+  switches: z.array(z.object({
+    at: Time, from: Id, to: Id, step: Id, fill: z.number(), summary: z.enum(["written", "asked", "fallback"]),
+  })).optional(),
 });
 export type RunFile = z.infer<typeof RunFile>;
 
 /** sessions/<id>/delivered.jsonl: what the server handed to a live session (notes in a step turn, inbox entries). */
 export const Delivery = z.object({
-  at: Time, kind: z.enum(["note", "inbox"]), id: Id, via: z.enum(["turn", "inject", "status"]),
+  at: Time, kind: z.enum(["note", "inbox"]), id: Id,
+  /** `carried`: put into the first turn of the session that took over (`to`). */
+  via: z.enum(["turn", "inject", "status", "carried"]),
+  to: Id.optional(),
 });
 export type Delivery = z.infer<typeof Delivery>;
 
