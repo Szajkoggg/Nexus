@@ -13,7 +13,7 @@ import {
   type SessionView, type StepView,
 } from "@nexus/protocol";
 import type { AgentProcess, StreamFacts, TurnFailure } from "./agent.ts";
-import { ClaudeSession } from "./claude.ts";
+import { ClaudeSession, nexusDenyRules } from "./claude.ts";
 import { CodexSession, gitWritableRoots } from "./codex.ts";
 
 interface Live { proc: AgentProcess; session: string }
@@ -618,6 +618,9 @@ export class Engine {
         effort: session.effort ?? claude.effort,
         permissionMode: claude.permission_mode,
         allowedTools: ["Bash(nexus:*)", ...claude.allowed_tools],
+        // The project's .nexus is the server's (and the CLI's) to write, not the worker's file tools'. Its absolute
+        // path: the worker's cwd may be a worktree whose own .nexus does not exist.
+        disallowedTools: project.defaults.protect_nexus ? nexusDenyRules(this.store.dir) : undefined,
         appendSystemPrompt: WORKER_BRIEFING,
         env,
       });

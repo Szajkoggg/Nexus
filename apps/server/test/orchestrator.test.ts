@@ -166,7 +166,7 @@ test("the orchestrator may write only queue drafts, and its briefing uploads the
     const writes = allowed.filter((t) => /^(Write|Edit|MultiEdit|NotebookEdit)\b/.test(t));
     assert.deepEqual(writes.sort(), ["Edit(.nexus/drafts/**)", "Write(.nexus/drafts/**)"], "nothing else is writable");
     const disallowed = argv[argv.indexOf("--disallowedTools") + 1]!.split(",");
-    assert.deepEqual(disallowed.sort(), ["MultiEdit", "NotebookEdit"], "a Write or Edit rule here would beat the drafts rules");
+    assert.deepEqual(disallowed.sort(), ["MultiEdit", "NotebookEdit"], "a Write or Edit rule here would beat the drafts rules (so no .nexus deny rules either: those are the workers')");
     const brief = argv[argv.indexOf("--append-system-prompt") + 1]!;
     assert.match(brief, /nexus queue draft \.nexus\/drafts\//);
     assert.doesNotMatch(brief, /<<|heredoc/i);

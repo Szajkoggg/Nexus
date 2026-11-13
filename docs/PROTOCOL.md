@@ -55,6 +55,7 @@ defaults:
   review_policy: continue              # continue | wait
   context_reuse_threshold: 0.6         # max context fill to continue a session
   context_care: true                   # above that fill at a step's end, the next step runs in a fresh session
+  protect_nexus: true                  # Claude Code workers' file tools may not write under the project's .nexus
   usage_pause_threshold: 0.9           # share of the 5-hour window at which no new step turn starts
   worktree_dir: C:/Code/GameDev/ProjectHoneycomb.worktrees
 runtimes:
@@ -602,7 +603,12 @@ request's input tokens are the context in use; `modelContextWindow`) and `accoun
 
 `claude -p --input-format stream-json --output-format stream-json --verbose --session-id <uuid>` (or `--resume
 <uuid>` for a session that ran before), with the project's permission mode, `--allowedTools Bash(nexus:*)` plus the
-project's list, the model, and a worker briefing as `--append-system-prompt`. Environment: `NEXUS_SESSION`,
+project's list, the model, and a worker briefing as `--append-system-prompt`. With `defaults.protect_nexus` on (the
+default), `--disallowedTools Edit(//<.nexus>/**),Write(//<.nexus>/**)` names the project's `.nexus` by its absolute
+path in Claude Code's rule form (`//` and forward slashes, the Windows drive letter as the first segment:
+`C:\Code\P\.nexus` is `//c/Code/P/.nexus`), so it holds from a worktree too; deny rules win over the allow list. The
+nexus CLI, which writes the worker's events there, is a process, not a file tool, and keeps working. Orchestrators
+and thinking partners keep their own rules. Codex workers are not restricted (see DESIGN.md). Environment: `NEXUS_SESSION`,
 `NEXUS_DIR`. The process stays alive across turns; stdin carries user messages:
 
 - a step turn: `{"type":"user","message":{"role":"user","content":"…"},"parent_tool_use_id":null}`

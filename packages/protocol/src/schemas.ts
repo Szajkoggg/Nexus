@@ -64,6 +64,11 @@ export const ProjectFile = z.object({
      * runs in a fresh session seeded with the context summary, instead of the runtime compacting mid-step.
      */
     context_care: z.boolean().default(true),
+    /**
+     * Workers may not write under the project's .nexus folder with their file tools (Claude Code: deny rules for Edit
+     * and Write on its absolute path). The nexus CLI, which writes their events, is a process and keeps working.
+     */
+    protect_nexus: z.boolean().default(true),
     usage_pause_threshold: z.number().min(0).max(1).default(0.9),
     worktree_dir: z.string().optional(),
   }).prefault({}),

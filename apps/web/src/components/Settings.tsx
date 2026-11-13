@@ -67,6 +67,7 @@ export function SettingsPanel({ project, onChanged, server }: { project: Project
     usage: Math.round(project.defaults.usage_pause_threshold * 100),
     reuse: Math.round(project.defaults.context_reuse_threshold * 100),
     care: project.defaults.context_care,
+    protectNexus: project.defaults.protect_nexus,
     worktrees: project.defaults.worktree_dir ?? "",
   }));
   const [busy, setBusy] = useState(false);
@@ -87,7 +88,7 @@ export function SettingsPanel({ project, onChanged, server }: { project: Project
         },
         orchestrator: { notify: f.notify },
         conversations: { notes_dir: f.notesDir || null, runtime: f.ideasRuntime, model: f.ideasModel || null, effort: f.ideasEffort || null },
-        defaults: { review_policy: f.review, usage_pause_threshold: f.usage / 100, context_reuse_threshold: f.reuse / 100, context_care: f.care, worktree_dir: f.worktrees || null },
+        defaults: { review_policy: f.review, usage_pause_threshold: f.usage / 100, context_reuse_threshold: f.reuse / 100, context_care: f.care, protect_nexus: f.protectNexus, worktree_dir: f.worktrees || null },
       });
       if (f.orchModel !== undefined || f.orchEffort !== undefined) {
         await act(project.id, "POST", "/orchestrator/settings", { model: orchModel || null, effort: orchEffort || null });
@@ -125,6 +126,12 @@ export function SettingsPanel({ project, onChanged, server }: { project: Project
         </Row>
         <Row label="Also allowed" hint="One rule per line, as in Claude Code's settings (Bash(git commit:*), WebFetch…). The project's own .claude/settings.json applies too.">
           <textarea value={f.claudeTools} onChange={(e) => set("claudeTools", e.target.value)} rows={3} className={`${field} font-mono text-xs`} />
+        </Row>
+        <Row label="Keep out of .nexus" hint="Workers' file tools (Write, Edit) may not write under the project's .nexus folder, where Nexus keeps its records; the nexus command still records their reports. Shell commands are not covered. Codex workers cannot be kept out: its Windows sandbox refuses a read-only folder the nexus command must still write in.">
+          <span className="flex items-center gap-2 pt-1 text-sm text-zinc-300">
+            <input type="checkbox" checked={f.protectNexus} onChange={(e) => set("protectNexus", e.target.checked)} className="accent-sky-500" />
+            workers may not write under .nexus
+          </span>
         </Row>
       </Section>
 

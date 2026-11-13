@@ -160,6 +160,53 @@ test("model and effort reach Claude Code as flags, and are kept on the session",
   } finally { engine.shutdown(); delete process.env.FAKE_ARGS; }
 });
 
+test("a Claude worker's file tools may not write under the project's .nexus: deny rules on its absolute path, also from a worktree; none when the setting is off", async () => {
+  const argvOf = (store: ProjectStore) => {
+    const lines = readFileSync(process.env.FAKE_ARGS!, "utf8").trim().split("\n").map((l) => JSON.parse(l) as { argv?: string[] });
+    return lines.filter((l) => l.argv).at(-1)!.argv!;
+  };
+  const denied = (argv: string[]) => (argv.includes("--disallowedTools") ? argv[argv.indexOf("--disallowedTools") + 1]!.split(",") : []);
+  const posix = (dir: string) => `//${dir.replaceAll("\\", "/").replace(/^([A-Za-z]):/, (_m, d: string) => d.toLowerCase())}`.replace(/^\/\/\//, "//");
+
+  // In the project's own checkout.
+  let x = setup(["done"]);
+  process.env.FAKE_ARGS = join(dirname(process.env.FAKE_LOG!), "args.log");
+  try {
+    x.engine.start("Q", { runtime: "claude" });
+    await x.until("the run to finish", () => x.queue().run?.state === "finished");
+    const p = posix(x.store.dir);
+    assert.ok(/^\/\/[a-z]\/|^\/\//.test(p));
+    assert.deepEqual(denied(argvOf(x.store)), [`Edit(${p}/**)`, `Write(${p}/**)`]);
+    assert.ok(argvOf(x.store).slice(argvOf(x.store).indexOf("--allowedTools") + 1).includes("Bash(nexus:*)"), "the nexus CLI stays allowed");
+  } finally { x.engine.shutdown(); }
+
+  // In a queue's own worktree, whose .nexus is the main checkout's: the rules name that one.
+  x = setup(["done"]);
+  process.env.FAKE_ARGS = join(dirname(process.env.FAKE_LOG!), "args.log");
+  const root = x.store.readProject().root;
+  const git = (...a: string[]) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.invalid", ...a], { cwd: root, stdio: "ignore" });
+  git("init", "-q", "-b", "main"); writeFileSync(join(root, "a.txt"), "a\n"); git("add", "a.txt"); git("commit", "-qm", "init");
+  x.store.writeQueue({ ...x.store.readQueue("Q"), worktree: "auto" });
+  try {
+    x.engine.start("Q", { runtime: "claude" });
+    await x.until("the run to finish", () => x.queue().run?.state === "finished");
+    const wt = x.store.readQueue("Q").worktree!;
+    assert.ok(!normalize(wt).toLowerCase().startsWith(normalize(root).toLowerCase() + "\\.nexus"));
+    assert.deepEqual(denied(argvOf(x.store)), [`Edit(${posix(x.store.dir)}/**)`, `Write(${posix(x.store.dir)}/**)`]);
+  } finally { x.engine.shutdown(); }
+
+  // The setting off.
+  x = setup(["done"]);
+  process.env.FAKE_ARGS = join(dirname(process.env.FAKE_LOG!), "args.log");
+  const pf = x.store.readProject();
+  x.store.writeProject({ ...pf, defaults: { ...pf.defaults, protect_nexus: false } });
+  try {
+    x.engine.start("Q", { runtime: "claude" });
+    await x.until("the run to finish", () => x.queue().run?.state === "finished");
+    assert.deepEqual(denied(argvOf(x.store)), []);
+  } finally { x.engine.shutdown(); delete process.env.FAKE_ARGS; }
+});
+
 test("Codex gets the effort on every turn and the project's reviewer when the thread starts; Claude Code refuses ultra", async () => {
   const { store, engine, queue, until } = setup(["done", "done"]);
   process.env.FAKE_ARGS = join(dirname(process.env.FAKE_LOG!), "args.log");

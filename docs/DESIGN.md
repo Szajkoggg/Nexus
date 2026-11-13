@@ -555,6 +555,22 @@ the text across. Drafts untouched for 14 days are pruned when the page loads.
   only when the git directory lies outside the working directory; the roots work both in the thread's config
   (`sandbox_workspace_write.writable_roots`) and in a turn's sandbox policy, and Nexus sends both.
 
+- **Workers cannot write under `.nexus` with their file tools, and only Claude Code workers** (decided 2026-11-13; a
+  Honeycomb worker had edited a queue file by hand). Claude Code workers get deny rules for Edit and Write on the
+  project's `.nexus` by its absolute path (`Edit(//c/…/.nexus/**)`, `Write(//c/…/.nexus/**)`). A probe (haiku,
+  dontAsk, a temporary project, the rules from the code; $0.007) showed Write and Edit refused there ("File is in a
+  directory that is denied by your permission settings."), both working elsewhere in the project, Read still allowed,
+  and `nexus log` recording its event. File-tool rules do not cover the shell: a Bash redirection or a script can
+  still write there. The project setting `defaults.protect_nexus` turns the rules off.
+  Codex cannot be kept out, on this machine (probe with Codex 0.167.2 on Windows, `gpt-6-luna`, about 136k tokens,
+  mostly cached): `workspace-write`, the sandbox mode Nexus uses, has no read-only subpath of its own (only `.git`,
+  `.codex` and `.agents` are kept read-only), and a permission profile sent with it is ignored (the older sandbox
+  settings win, as Codex's documentation says). A permission profile alone (Beta; `extends = ":workspace"`, `.nexus`
+  read, the session's own folder write, because Codex sandboxes every process it starts, the nexus CLI included)
+  made the Windows sandbox refuse every command: "windows elevated sandbox cannot reopen writable descendants under
+  read-only carveouts directly; refusing to run unsandboxed". Without that carve-out the CLI could not record events.
+  So Codex workers are unchanged.
+
 - **Remote access needs no open port.** The server keeps listening on 127.0.0.1; Tailscale Serve relays the tailnet's
   https requests to it. Requests relayed by a proxy count as remote and need the access token; this machine does
   not. Push works through the browsers' own push services (Web Push with VAPID), so a phone gets notifications with

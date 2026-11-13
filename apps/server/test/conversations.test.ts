@@ -46,6 +46,7 @@ test("a Claude partner asks nothing and may write only in the notes folder", asy
     const allowed = argv.slice(argv.indexOf("--allowedTools") + 1);
     assert.ok(allowed.includes("Edit(Dev/Concepts/Gameplay/**)"), "writes go to the notes folder");
     assert.ok(!allowed.some((t) => t === "Edit" || t === "Write" || t.startsWith("Bash(nexus run") || t === "Bash(nexus:*)"), "nothing else is writable, no run can start");
+    assert.equal(argv[argv.indexOf("--disallowedTools") + 1], "NotebookEdit", "unchanged: no .nexus deny rules for a partner (those are the workers')");
     assert.equal(loadProjectState(conversations["store"]).sessions.find((s) => s.id === c.id)?.role, "conversation");
   } finally { stop(); }
 });

@@ -236,6 +236,23 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
   }
 }
 
+/**
+ * A path in Claude Code's permission rule form for an absolute path: `//` and the path with forward slashes; on
+ * Windows the drive letter as the first segment (`C:\\x\\y` is `//c/x/y`), as Claude Code normalizes Windows paths
+ * to that form before matching.
+ */
+export function claudeAbsolutePath(path: string): string {
+  const p = path.replaceAll("\\", "/").replace(/\/+$/, "");
+  const drive = /^([A-Za-z]):(\/.*)?$/.exec(p);
+  return drive ? `//${drive[1]!.toLowerCase()}${drive[2] ?? ""}` : `/${p.startsWith("/") ? p : `/${p}`}`;
+}
+
+/** The deny rules that keep a worker's file tools out of the project's .nexus folder (its absolute path). */
+export function nexusDenyRules(nexusDir: string): string[] {
+  const p = claudeAbsolutePath(nexusDir);
+  return [`Edit(${p}/**)`, `Write(${p}/**)`];
+}
+
 const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
 
 function describeTool(name: string, input: Record<string, any> = {}): string {
