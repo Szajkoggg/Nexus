@@ -60,8 +60,10 @@ export function recordStepEnd(store: ProjectStore, queue: string, step: string):
 export function recordBase(store: ProjectStore, q: Pick<QueueView, "id" | "base">, root: string): void {
   const ref = q.base ?? git(root, ["rev-parse", "--abbrev-ref", "HEAD"]);
   const sha = ref ? git(root, ["rev-parse", `${ref}^{commit}`]) : undefined;
-  if (!ref || !sha) return;
-  store.writeGit(q.id, { ...(store.readGit(q.id) ?? empty()), base: { ref, sha, at: now() } });
+  if (!ref || ref === "HEAD" || !sha) return;
+  // Whether it names a branch: only a branch can be merged back into.
+  const branch = git(root, ["rev-parse", "--verify", "--quiet", `refs/heads/${ref}`]) !== undefined;
+  store.writeGit(q.id, { ...(store.readGit(q.id) ?? empty()), base: { ref, sha, at: now(), branch } });
 }
 
 // ---------------------------------------------------------------- a step's commits

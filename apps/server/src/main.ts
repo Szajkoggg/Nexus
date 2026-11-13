@@ -16,6 +16,7 @@ import {
 } from "@nexus/protocol";
 import { Engine } from "./engine.ts";
 import { branchState, stepCommits } from "./gitinfo.ts";
+import { cleanUp, mergeBack } from "./mergeback.ts";
 import { Orchestrator } from "./orchestrator.ts";
 import { Conversations } from "./conversations.ts";
 import { listModels } from "./models.ts";
@@ -338,6 +339,9 @@ app.post("/api/projects/:id/queues/:queue/run", act((st, b, p) => {
 app.post("/api/projects/:id/queues/:queue/continue", act((st, _b, p) => engineOf(st).continueQueue(p("queue"))));
 // Fix it: the user sends a step waiting for their review back to its worker, with what they want (required).
 app.post("/api/projects/:id/queues/:queue/steps/:step/send-back", act((st, b, p) => ({ message: sendBack(st, { queue: p("queue"), step: p("step"), from: "user", text: b.text }) })));
+// Merge back and clean up a finished worktree queue: the user's only (no CLI command or event leads here).
+app.post("/api/projects/:id/queues/:queue/merge", act((st, _b, p) => ({ message: mergeBack(st, p("queue")) })));
+app.post("/api/projects/:id/queues/:queue/cleanup", act((st, _b, p) => ({ message: cleanUp(st, p("queue")) })));
 // Push again: the last failed push of an accepted step of this queue, tried again.
 app.post("/api/projects/:id/queues/:queue/push", act((st, _b, p) => ({ message: engineOf(st).pushAgain(p("queue")) })));
 // Reject: the user's, on a step waiting for their review; the run pauses until a new revision is approved.

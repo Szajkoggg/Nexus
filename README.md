@@ -214,6 +214,12 @@ and nothing of the queue is pushed in between.
 per round; in the project's own checkout, a commit not made during its worker's turns is marked ◆. A queue shows its
 branch: how far ahead and behind of its base and of its remote-tracking branch, as last fetched (Nexus never fetches).
 
+**Merge back and clean up.** A finished queue that ran in a worktree of its own offers "Merge into <base>…" and
+"Clean up…". Each asks first. Merge runs where the base branch is checked out (a fast-forward when possible, else a
+merge commit) and refuses if that checkout has uncommitted changes or a run going; a conflict is aborted, leaving
+everything as it was. Clean up removes the worktree and deletes the branch, only if nothing is uncommitted and the
+branch is merged. Only you can do either, from the dashboard; nothing is pushed.
+
 **Push accepted steps** (Settings, off by default): when a step is accepted, by you or the orchestrator, Nexus pushes
 the commit the step was reviewed at (not later work) to the branch the queue runs on, at its upstream remote or
 origin. Never forced, never with a prompt. The step shows "Pushed: …" or "Push failed: …"; a failed push leaves the

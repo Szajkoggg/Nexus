@@ -326,6 +326,63 @@ function StepCommits({ project, queue, step, version }: { project: string; queue
   );
 }
 
+/**
+ * A finished queue with a worktree of its own: merge its branch back into its base, and clean up (the worktree removed,
+ * the branch deleted with -d). The user's only; each asks first and tells what it will do.
+ */
+function WorktreeActions({ project, root, queue, onChanged }: { project: string; root: string; queue: QueueView; onChanged: () => void }) {
+  const [ask, setAsk] = useState<"merge" | "cleanup">();
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; text: string }>();
+  const g = queue.git;
+  const norm = (p: string) => p.replaceAll("\\", "/").toLowerCase();
+  if (!queue.worktree || queue.worktree === "auto" || norm(queue.worktree) === norm(root)) return null;
+  if (queue.status !== "done" && !g?.merged && !g?.cleaned) return null;
+  const branch = queue.branch ?? "its branch";
+  const base = g?.base?.branch !== false ? g?.base?.ref : undefined;
+  const go = (what: "merge" | "cleanup") => {
+    setBusy(true); setResult(undefined);
+    fetch(`/api/projects/${enc(project)}/queues/${enc(queue.id)}/${what}`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })
+      .then(async (r) => { const b = await r.json().catch(() => ({})) as { result?: { message?: string }; error?: string }; setResult(r.ok ? { ok: true, text: b.result?.message ?? "done" } : { ok: false, text: b.error ?? r.statusText }); if (r.ok) setAsk(undefined); onChanged(); })
+      .catch((e: Error) => setResult({ ok: false, text: e.message }))
+      .finally(() => setBusy(false));
+  };
+  return (
+    <Section title="Worktree">
+      <p className="break-all text-xs text-zinc-500"><span className="font-mono">{queue.worktree}</span> on <span className="font-mono">{branch}</span>{g?.base ? <> from <span className="font-mono">{g.base.ref}</span></> : null}</p>
+      {g?.merged && <p className="mt-1.5 text-sm text-emerald-300">Merged into <span className="font-mono">{g.merged.into}</span> ({g.merged.fast_forward ? "fast-forward" : `merge commit ${g.merged.sha.slice(0, 7)}`}) <span className="text-xs text-zinc-500">· <TimeAgo at={g.merged.at} /></span></p>}
+      {g?.cleaned
+        ? <p className="mt-1.5 text-sm text-zinc-300">Cleaned up: the worktree removed, branch <span className="font-mono">{g.cleaned.branch}</span> deleted <span className="text-xs text-zinc-500">· <TimeAgo at={g.cleaned.at} /></span></p>
+        : (
+          <div className="mt-2 flex flex-wrap gap-2">
+            {base && !g?.merged && <Button variant="quiet" onClick={() => { setAsk("merge"); setResult(undefined); }}>Merge into {base}…</Button>}
+            <Button variant="quiet" onClick={() => { setAsk("cleanup"); setResult(undefined); }}>Clean up…</Button>
+          </div>
+        )}
+      {ask && !g?.cleaned && (
+        <div className="mt-3 rounded-lg bg-amber-500/10 p-3 ring-1 ring-amber-500/30">
+          {ask === "merge" ? (
+            <>
+              <p className="text-sm text-amber-200">Merge <span className="font-mono">{branch}</span> into <span className="font-mono">{base}</span>?</p>
+              <p className="mt-1 text-xs text-zinc-400">In the worktree where {base} is checked out: a fast-forward when possible, else a merge commit. Refused if that worktree has uncommitted changes or a run is going there; on a conflict the merge is aborted and nothing changes. Nothing is pushed.</p>
+            </>
+          ) : (
+            <>
+              <p className="text-sm text-amber-200">Clean up this queue's worktree?</p>
+              <p className="mt-1 text-xs text-zinc-400">Removes the worktree (git worktree remove) and deletes branch <span className="font-mono">{branch}</span> (git branch -d). Refused, with nothing removed, if the worktree has uncommitted changes or the branch is not merged.</p>
+            </>
+          )}
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Button disabled={busy} onClick={() => go(ask)}>{busy ? "Working…" : ask === "merge" ? "Merge" : "Clean up"}</Button>
+            <Button variant="quiet" onClick={() => setAsk(undefined)}>Cancel</Button>
+          </div>
+        </div>
+      )}
+      {result && <p className={`mt-2 break-all text-xs ${result.ok ? "text-emerald-300" : "text-red-300"}`}>{result.text}</p>}
+    </Section>
+  );
+}
+
 interface BranchView { branch: string; base?: { ref: string; ahead: number; behind: number }; upstream?: { ref: string; ahead: number; behind: number; at?: string } }
 
 /** The queue's branch: ahead and behind of its base and of its remote-tracking ref (as last fetched: never fetched here). */
@@ -644,6 +701,7 @@ export function QueueDetail({ project, queue, onChanged }: Props) {
       </div>
 
       <BranchLine project={id} queue={queue.id} version={project.generated_at} />
+      <WorktreeActions project={id} root={project.project.root} queue={queue} onChanged={onChanged} />
 
       {queue.status === "stopped"
         ? <StopBox project={id} queue={queue} onChanged={onChanged} />

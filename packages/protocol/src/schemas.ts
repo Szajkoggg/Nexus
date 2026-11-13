@@ -372,7 +372,11 @@ export const USER_ONLY: ReadonlySet<EventType> = new Set(["review.rejected"]);
  */
 export const GitFile = z.object({
   protocol: z.literal(1),
-  base: z.object({ ref: z.string(), sha: z.string(), at: Time }).optional(),
+  base: z.object({ ref: z.string(), sha: z.string(), at: Time, branch: z.boolean().optional() }).optional(),
+  /** The user merged the queue's branch back into its base (in the worktree where the base is checked out). */
+  merged: z.object({ at: Time, into: z.string(), path: z.string(), sha: z.string(), fast_forward: z.boolean() }).optional(),
+  /** The user cleaned up: the worktree removed and its branch deleted (git branch -d). */
+  cleaned: z.object({ at: Time, path: z.string(), branch: z.string() }).optional(),
   steps: z.record(z.string(), z.array(z.object({
     session: Id,
     start: z.string().nullable(), started_at: Time,

@@ -1,6 +1,6 @@
 // Derives the dashboard's view of a project from its files. Pure apart from reading through the store;
 // nothing here is ever written back (state.json, if kept, is only a cache of this).
-import { ORCHESTRATOR_ONLY, USER_ONLY, type StatusChange, type Event, type InboxEntry, type Note, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type ReviewItem, type ReviewPolicy, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type StepDef, type StepStatus } from "./schemas.ts";
+import { ORCHESTRATOR_ONLY, USER_ONLY, type StatusChange, type Event, type InboxEntry, type Note, type GitFile, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type ReviewItem, type ReviewPolicy, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type StepDef, type StepStatus } from "./schemas.ts";
 import { ProjectStore, revisionHash } from "./store.ts";
 import { ENDED_RUN_STATES, formatClock, type Segment } from "./times.ts";
 import { stopPlace } from "./attention.ts";
@@ -83,6 +83,8 @@ export interface QueueView extends Omit<QueueFile, "steps"> {
   run?: RunFile;
   /** Pushing what was accepted (queues/<id>/push.yaml). */
   push?: PushFile;
+  /** Git records of the queue (queues/<id>/git.yaml): its base, and a merge back and cleanup by the user. */
+  git?: GitFile;
   /** A planned start of this queue (queues/<id>/start.yaml), with why it has not come yet. */
   start?: StartView;
   /** Queues planned to start when this one is done. */
@@ -138,6 +140,7 @@ export function loadProjectState(store: ProjectStore): ProjectState {
       const view = initQueue(q, notes);
       try { view.run = store.readRun(id); } catch (e) { warnings.push(`queue ${id} run: ${(e as Error).message}`); }
       try { view.push = store.readPush(id); } catch (e) { warnings.push(`queue ${id} push: ${(e as Error).message}`); }
+      try { view.git = store.readGit(id); } catch (e) { warnings.push(`queue ${id} git: ${(e as Error).message}`); }
       try {
         const plan = store.readStart(id);
         if (plan) view.start = { ...plan, waiting: "", blocked: false };
