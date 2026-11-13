@@ -195,8 +195,17 @@ export function SettingsPanel({ project, onChanged, server }: { project: Project
 
 export interface ServerInfo {
   commit: string; subject: string; live: boolean; branch: string | null; root: string;
-  update: { phase: "idle" | "draining" | "updating" | "restarting" | "failed" | "updated"; held: string[]; waiting: string[]; log: string[]; error?: string; now?: boolean };
+  update: {
+    phase: "idle" | "draining" | "updating" | "restarting" | "failed" | "updated"; held: string[]; waiting: string[]; log: string[]; error?: string; now?: boolean;
+    /** After a deploy: whether the deployed main was pushed. */
+    push?: { result: "pushed" | "failed" | "skipped"; text: string; at: string };
+  };
+  /** Whether a deploy pushes the deployed main to its upstream. */
+  push_on_deploy: boolean;
 }
+
+const PUSH_TONE = { pushed: "text-emerald-300", failed: "text-red-300", skipped: "text-zinc-400" } as const;
+const PUSH_LABEL = { pushed: "Pushed", failed: "Push failed", skipped: "Not pushed" } as const;
 
 export function useServer(version: unknown) {
   return useFetch<ServerInfo>("/api/server", version);
@@ -233,6 +242,7 @@ export function ServerSection({ info, onChanged }: { info: ServerInfo | undefine
       {u.phase !== "idle" && (
         <div className="mt-3 rounded-lg bg-zinc-950 p-3 text-xs text-zinc-400">
           <div className="mb-1 text-zinc-200">{u.phase === "updated" ? <>Updated: <span className="font-mono">{info.commit}</span> is up</> : <>Update: {u.phase}</>}{busy && u.held.length ? `; holding ${u.held.join(", ")}` : ""}{u.waiting.length ? `; waiting for ${u.waiting.join(", ")}` : ""}</div>
+          {u.push && <div className={`mb-1 ${PUSH_TONE[u.push.result]}`}><span className="font-semibold">{PUSH_LABEL[u.push.result]}:</span> {u.push.text}</div>}
           {u.log.map((l, i) => <div key={i} className="font-mono">{l}</div>)}
           {u.error && <div className="mt-1 whitespace-pre-wrap text-red-300">{u.error}</div>}
         </div>
@@ -242,9 +252,16 @@ export function ServerSection({ info, onChanged }: { info: ServerInfo | undefine
         {!busy && <Button variant="quiet" onClick={() => { if (confirm("Stop the running steps now? They continue from where they were after the restart.")) void call("/api/server/update", { now: true }); }}>Update now</Button>}
         {u.phase === "draining" && <Button variant="quiet" onClick={() => void call("/api/server/cancel")}>Cancel</Button>}
       </div>
+      <label className="mt-3 flex items-start gap-2 text-sm text-zinc-300">
+        <input type="checkbox" className="mt-0.5 accent-sky-500" checked={info.push_on_deploy}
+          onChange={(e) => void call("/api/server/settings", { push_on_deploy: e.target.checked })} />
+        <span>Push the deployed main to GitHub after an update{info.live ? "" : " (only a live instance pushes)"}</span>
+      </label>
       <p className="mt-2 text-xs text-zinc-500">
         Update Nexus lets every running step finish (new steps wait), moves this instance to the newest commit on main,
-        builds it and restarts. The queues it held go on by themselves; paused or stopped ones stay as they are.
+        builds it and restarts. The queues it held go on by themselves; paused or stopped ones stay as they are. Once the
+        new version is up, it pushes that commit of main to its upstream, fast-forward only; a failed push leaves the
+        update in place and says why here.
       </p>
       {msg && <p className="mt-2 text-xs text-red-300">{msg}</p>}
     </Section>

@@ -121,6 +121,14 @@ the live worktree back, rebuilds and takes the port again. The settings panel th
 reason and "rolled back to <commit>", and your devices get a notification. There is nothing to undo by hand: fix the
 commit and update again. After a restart the server writes its log to `%APPDATA%\Nexus\server.log`.
 
+Once an update of `main` is up, Nexus pushes the deployed commit to GitHub, to the upstream of `main`. It never
+forces: if GitHub's `main` has commits the deployed one lacks, the push is refused. It never asks for credentials:
+git must already be able to push without a prompt, or the push counts as failed after at most 60 seconds. The settings
+panel shows the result above the update log: "Pushed: <commit> is now origin/main", "Push failed: <reason>", or "Not
+pushed: <why>". A failed push leaves the update in place; fix the cause and push or update again. To stop pushing,
+untick "Push the deployed main to GitHub after an update" in the settings panel. Only you can change it, from the
+dashboard. An update to anything other than `main` is never pushed, and agents never push.
+
 ```sh
 npm start        # builds the dashboard, serves it and the API on http://127.0.0.1:4317
 npm run dev      # development, apart from the live instance: API on :4318 with data in %APPDATA%\Nexus-dev,

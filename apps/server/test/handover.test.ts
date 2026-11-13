@@ -99,7 +99,7 @@ test("the predecessor frees the port first, and goes only after its successor si
     env: { ...process.env, FAKE_SUCCESSOR: "ready", FAKE_READY_MS: "800", FAKE_SUCCESSOR_LOG: succLog },
     version: { commit: "old1234", subject: "the old version" },
     release: async () => { order.push("released"); },
-    note: (t) => notes.push(t), log: () => ["10:00:00 an earlier line of the update", ...notes],
+    note: (t) => notes.push(t), log: () => ["10:00:00 an earlier line of the update", ...notes], ref: "main",
     timeoutMs: 15_000,
   });
   order.push("exits"); // what Lifecycle.restart does next
@@ -107,10 +107,11 @@ test("the predecessor frees the port first, and goes only after its successor si
   assert.equal(result.outcome, "ready");
   assert.deepEqual(order, ["released", "exits"]);
   await until("the successor to be released", () => existsSync(succLog));
-  const seen = JSON.parse(readFileSync(succLog, "utf8").trim()) as { readyAt: number; released: { log: string[] } | null; predecessorAliveAtReady: boolean };
+  const seen = JSON.parse(readFileSync(succLog, "utf8").trim()) as { readyAt: number; released: { log: string[]; ref?: string } | null; predecessorAliveAtReady: boolean };
   assert.ok(exitAt >= seen.readyAt, "the predecessor exits only after the ready signal");
   assert.equal(seen.predecessorAliveAtReady, true, "it was still alive when the successor became ready");
   assert.ok(seen.released?.log.includes("10:00:00 an earlier line of the update"), "the update's log goes to the successor");
+  assert.equal(seen.released?.ref, "main", "and what it deployed, for the push on deploy");
   assert.ok(notes.some((n) => /successor fake-new is up/.test(n)));
 });
 
@@ -180,7 +181,13 @@ test("a successor waits, read-only, until the predecessor hands over; then it re
     const info = await (await fetch(`http://127.0.0.1:${port}/api/server`)).json() as { commit: string; update: { phase: string; log: string[] } };
     assert.equal(info.update.phase, "updated");
     assert.equal(info.update.log[0], "10:00:00 moving the live worktree", "the predecessor's lines come first");
-    assert.match(info.update.log.at(-1)!, new RegExp(`up: ${info.commit} .*\\(was old1234\\); the predecessor handed over`));
+    assert.ok(info.update.log.some((l) => new RegExp(`up: ${info.commit} .*\\(was old1234\\); the predecessor handed over`).test(l)), info.update.log.join("\n"));
+    // Then the push on deploy: never from a development checkout (this test runs from one), and here no ref was given.
+    let push: { result: string; text: string } | undefined;
+    for (const t = Date.now(); !push && Date.now() - t < 10_000; await sleep(200)) {
+      push = ((await (await fetch(`http://127.0.0.1:${port}/api/server`)).json()) as { update: { push?: { result: string; text: string } } }).update.push;
+    }
+    assert.equal(push?.result, "skipped", JSON.stringify(push));
   } finally { s.stop(); }
 });
 

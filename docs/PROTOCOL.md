@@ -193,6 +193,7 @@ Written only by the server's queue engine; agents never touch them.
 | `sessions/<orchestrator>/applied.jsonl` | The server's result for each orchestrator request (`queue.drafted`, `session.request`), and the notices it has sent the orchestrator; the CLI waits for the result and prints it |
 | `sessions/<orchestrator>/chat.jsonl` | The chat shown in the dashboard: the user's messages, the orchestrator's texts (whole, however long) and tool calls, Nexus notices |
 | `<NEXUS_HOME>/usage.json` | The subscription's windows (5-hour, 7-day: utilization and reset time) from the latest `rate_limit_event` |
+| `<NEXUS_HOME>/deploy.json` | `{ push_on_deploy: boolean }` (default `true` when the file is missing). One writer: the server, on `POST /api/server/settings` from the dashboard |
 
 A session launched by Nexus has `launched_by: nexus`, `runtime: claude`, `native_id` (Claude's session UUID, chosen
 by Nexus) and the `model` it was started with. A queue may also say `worktree: auto`: Nexus then creates the worktree
@@ -341,9 +342,19 @@ list as found when the server starts is the baseline.
 
 **Nexus itself.** `GET /api/server` gives the version (`commit`, `subject`, `live`, `branch`, `root`) and `update`:
 `phase` (`idle`, `draining`, `updating`, `restarting`, `failed`, or `updated` on a server that took over from an
-update), `held`, `waiting`, `log`, `error?`. `POST /api/server/update` (`now?`, `ref?`) and `POST /api/server/cancel`
-start and cancel an update. A server waiting to take over answers every `/api/projects…` request, and every write
-under `/api/server/`, with 503.
+update), `held`, `waiting`, `log`, `error?`, and after a deploy `push?` (`result`: `pushed`, `failed` or `skipped`,
+`text`, `at`). It also gives `push_on_deploy`. `POST /api/server/update` (`now?`, `ref?`) and
+`POST /api/server/cancel` start and cancel an update. `POST /api/server/settings` (`push_on_deploy`: boolean) is the
+user's only: like withdrawing an approval, it is refused without the dashboard page's own `Origin`. A server waiting
+to take over answers every `/api/projects…` request, and every write under `/api/server/`, with 503.
+
+**Push on deploy.** A successor that took over a live instance (`live: true`) pushes what it runs once it is up, if
+`push_on_deploy` is on and the update's ref was `main`. It runs
+`git push <main's upstream remote> <deployed sha>:refs/heads/main`, a plain push and so fast-forward only, never forced,
+with `GIT_TERMINAL_PROMPT=0` and `GCM_INTERACTIVE=never` and a 60-second limit. A prompt or a hang counts as a failed
+push. The result goes into `update.push` and the update log. A failed push (no upstream, rejected, network,
+credentials, time-out) leaves the deploy as it is. A deployed ref other than `main`, an unknown ref (a predecessor from
+before this), a development checkout, or the setting off: no push, and the log says why.
 
 **The hand-over after an update.** The two servers talk through files in `<NEXUS_HOME>/handover/<id>/` (JSON, each
 written whole and renamed into place, one writer each). The predecessor removes the folders of earlier hand-overs
@@ -354,7 +365,7 @@ when it starts one.
 | `predecessor.json` | predecessor | `pid`, `commit`, `subject`, `at`; before it stops its agents and starts the successor |
 | `ready.json` | successor | `pid`, `commit`, `subject`, `at`; it listens, its API (and the dashboard, if built) answers, every registered project's state loads |
 | `failed.json` | successor | `pid`, `at`, `reason`; the smoke check failed or the port never came free; it exits with code 1 |
-| `released.json` | predecessor | `at`, `log` (the update's log so far); it saw `ready.json`, writes nothing more, and exits |
+| `released.json` | predecessor | `at`, `log` (the update's log so far), `ref` (what the update deployed); it saw `ready.json`, writes nothing more, and exits |
 
 The predecessor starts the successor with `NEXUS_HANDOVER=<that folder>` (and `NEXUS_WAIT_PORT=60`). It waits up to
 60 seconds for `ready.json` or `failed.json`, or for the successor to exit. A successor started with `NEXUS_HANDOVER`

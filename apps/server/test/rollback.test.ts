@@ -5,7 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -94,6 +94,9 @@ test("a successor that crashes at start: the live worktree goes back, is reinsta
     const s = t.lifecycle.status;
     assert.match(s.error!, new RegExp(`the successor exited \\(1\\) before it was ready; rolled back to ${t.r.short}$`));
     assert.equal(t.r.git("rev-parse", "HEAD"), t.r.a, "the worktree is back on the commit it came from");
+    const handover = join(process.env.NEXUS_HOME!, "handover");
+    const pred = JSON.parse(readFileSync(join(handover, readdirSync(handover)[0]!, "predecessor.json"), "utf8")) as { commit: string; subject: string };
+    assert.deepEqual([pred.commit, pred.subject], [t.r.short, "A: where it runs"], "the predecessor names the commit it ran, not the one it moved to");
     assert.equal(t.r.git("rev-parse", "--abbrev-ref", "HEAD"), "HEAD", "still detached");
     assert.deepEqual(t.npm.map((a) => a[0]), ["install", "run", "install", "run"], "installed and built for the update, then again for the rollback");
     assert.ok(s.log.some((l) => /moving the live worktree back to/.test(l)));

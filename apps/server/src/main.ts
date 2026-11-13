@@ -18,6 +18,7 @@ import { Engine } from "./engine.ts";
 import { Orchestrator } from "./orchestrator.ts";
 import { Conversations } from "./conversations.ts";
 import { listModels } from "./models.ts";
+import { readDeploySettings, writeDeploySettings } from "./deploy.ts";
 import { Standby, refuseHandoverDir, smokeCheck, takeHandoverEnv } from "./handover.ts";
 import { Lifecycle, version } from "./lifecycle.ts";
 import {
@@ -336,7 +337,15 @@ app.get("/api/projects/:id/refusals", (c) => {
 app.get("/api/usage", (c) => c.json(readUsage() ?? null));
 
 // Nexus itself: its version, and updating it without cutting off running work (src/lifecycle.ts).
-app.get("/api/server", async (c) => c.json({ ...(await version()), update: lifecycle.status }));
+app.get("/api/server", async (c) => c.json({ ...(await version()), update: lifecycle.status, push_on_deploy: readDeploySettings().push_on_deploy }));
+// Whether a deploy pushes the deployed main (src/deploy.ts): the user's to switch, from the dashboard only.
+app.post("/api/server/settings", userOnly("change pushing on deploy"), async (c) => {
+  const b = (await c.req.json().catch(() => ({}))) as { push_on_deploy?: unknown };
+  if (typeof b.push_on_deploy !== "boolean") return c.json({ error: "push_on_deploy is true or false" }, 400);
+  writeDeploySettings({ ...readDeploySettings(), push_on_deploy: b.push_on_deploy });
+  for (const s of sockets) if (s.readyState === s.OPEN) s.send(JSON.stringify({ type: "server" }));
+  return c.json({ ok: true, push_on_deploy: b.push_on_deploy });
+});
 app.post("/api/server/update", async (c) => {
   const b = (await c.req.json().catch(() => ({}))) as { now?: unknown; ref?: unknown };
   try { return c.json(lifecycle.start({ now: b.now === true, ref: typeof b.ref === "string" ? b.ref : undefined })); }

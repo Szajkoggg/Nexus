@@ -398,6 +398,20 @@ successor logs why and exits non-zero before writing or starting anything, so a 
 rolls back. The backstop cannot catch a stray server that runs without `NEXUS_HOME`, since that server's home is the
 real one.
 
+**Push on deploy** (`src/deploy.ts`). The successor pushes, once it has taken over, and the predecessor does not.
+Three reasons:
+- A push may take up to its 60-second limit, and the predecessor pushing would keep the successor in standby, with
+  the held queues waiting, for that long.
+- A push is only right once the new version is known to be up, and the successor is where that is known.
+- The result belongs in the update log the server panel shows, and that is the successor's.
+
+The predecessor passes the deployed ref in `released.json`, and only `main` is pushed: the exact commit the live
+worktree runs, `<sha>:refs/heads/main` to the upstream remote of `main`. It is a plain push, so git itself refuses
+anything but a fast-forward. Prompts are off, and a hang ends at 60 s, so an unattended push can fail but never wait.
+A failed push changes nothing about the deploy. The setting lives in `<NEXUS_HOME>/deploy.json`, written only by the
+server. It can only be changed from the dashboard (the same Origin rule as withdrawing an approval), so an agent can
+neither push nor turn pushing on.
+
 ## Tech stack
 
 | Part | Choice |
@@ -544,6 +558,15 @@ the text across. Drafts untouched for 14 days are pruned when the page loads.
   over as if it were the live successor. During a real update it could have answered for the real successor. The
   same test on the old code, with `NEXUS_HANDOVER` pointing at a decoy folder, wrote `ready.json` into the decoy. The
   whole suite on the new code, inheriting the same decoy, wrote nothing there (see "The variable is consumed once").
+- **The predecessor named the wrong commit.** `predecessor.json` took its version after the worktree had moved, so
+  the successor's log said "(was <the new commit>)". It now names the commit the update started from. The push probe
+  showed it. That probe was a clone of this repository, not a worktree, because a worktree shares the real `origin`.
+  The clone's `origin` was a temporary bare repository. The probe deployed to it, was rejected by it once someone else
+  had pushed, and had the setting off.
+- **Screenshots at phone width need an http parent page.** In a 390 px iframe inside a `file://` page, the settings
+  panel rendered without its Nexus section: `/api/server` did not reach the dashboard there, while the project API
+  did. The same iframe inside a page served over http from 127.0.0.1 shows it, so phone-width screenshots use an http
+  parent.
 
 - **Queue drafts go through files, not heredocs.** On 2026-11-12 an orchestrator could not upload a long queue
   revision: `cd … && nexus queue draft - <<'EOF'` was refused in `dontAsk` mode (a chained command does not match

@@ -23,7 +23,8 @@ export interface Version { commit: string; subject: string }
 export interface PredecessorFile extends Version { pid: number; at: string }
 export interface ReadyFile extends Version { pid: number; at: string }
 export interface FailedFile { pid: number; at: string; reason: string }
-export interface ReleasedFile { at: string; log: string[] }
+/** `ref`: what the update deployed (absent from older predecessors). */
+export interface ReleasedFile { at: string; log: string[]; ref?: string }
 
 const read = <T>(dir: string, name: string): T | undefined => {
   const f = join(dir, name);
@@ -99,6 +100,8 @@ export interface HandoverOptions {
   note: (text: string) => void;
   /** This update's log so far; it goes to the successor with released.json. */
   log: () => string[];
+  /** What the update deployed; it goes to the successor with released.json (push on deploy only pushes main). */
+  ref?: string;
   timeoutMs?: number;
 }
 
@@ -131,7 +134,7 @@ export async function handOver(o: HandoverOptions): Promise<HandoverOutcome> {
     const ready = read<ReadyFile>(dir, "ready.json");
     if (ready) {
       o.note(`the successor ${ready.commit} is up (pid ${ready.pid}); handing over and exiting`);
-      write(dir, "released.json", { at: now(), log: o.log() } satisfies ReleasedFile);
+      write(dir, "released.json", { at: now(), log: o.log(), ref: o.ref } satisfies ReleasedFile);
       return { outcome: "ready", successor: ready, pid: child.pid };
     }
     const failed = read<FailedFile>(dir, "failed.json");

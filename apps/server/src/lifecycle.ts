@@ -20,6 +20,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { now } from "@nexus/protocol";
 import { HANDOVER_TIMEOUT_MS, handOver, isAlive, type PredecessorFile, type ReleasedFile } from "./handover.ts";
+import { pushDeployed, type GitRunner, type PushResult } from "./deploy.ts";
 
 const run = promisify(execFile);
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -38,6 +39,8 @@ export interface UpdateStatus {
   waiting: string[];
   log: string[];
   error?: string;
+  /** After a deploy: whether the deployed main was pushed to its upstream (src/deploy.ts). */
+  push?: PushResult;
 }
 
 /** What the server gives its Lifecycle; tests replace the parts that would touch this checkout or the process. */
@@ -58,6 +61,8 @@ export interface LifecycleOptions {
   notify?: (text: string) => void;
   /** Ends this process once the successor is up. */
   exit?: () => void;
+  /** Runs git for the push on deploy (src/deploy.ts). */
+  git?: GitRunner;
 }
 
 async function git(root: string, ...args: string[]): Promise<string> {
@@ -93,9 +98,11 @@ export class Lifecycle {
   private readonly parts: () => Drainable[];
   private readonly changed: () => void;
   private readonly root: string;
-  private readonly o: Required<Omit<LifecycleOptions, "root" | "successor">> & { successor: string[] };
+  private readonly o: Required<Omit<LifecycleOptions, "root" | "successor" | "git">> & { successor: string[]; git?: GitRunner };
+  /** The push after a deploy, while it runs (tests wait for it). */
+  pushing?: Promise<void>;
   /** Where this update started: the commit to go back to, and the dependencies it had. */
-  private from?: { sha: string; short: string; live: boolean; lock: string };
+  private from?: { sha: string; short: string; subject: string; live: boolean; lock: string };
 
   constructor(parts: () => Drainable[], changed: () => void = () => {}, options: LifecycleOptions = {}) {
     this.parts = parts; this.changed = changed;
@@ -108,6 +115,7 @@ export class Lifecycle {
       reacquire: options.reacquire ?? (async () => {}),
       notify: options.notify ?? (() => {}),
       exit: options.exit ?? (() => setTimeout(() => process.exit(0), 300)),
+      git: options.git,
     };
   }
 
@@ -120,6 +128,17 @@ export class Lifecycle {
     this.note(released
       ? `up: ${v.commit} ${v.subject}${from}; the predecessor handed over`
       : `up: ${v.commit} ${v.subject}${from}; the predecessor exited without handing over`);
+    this.pushing = this.pushAfterDeploy(released?.ref);
+  }
+
+  /** The deploy is up: push it (a live instance's main only). Whatever happens, the deploy stands. */
+  private async pushAfterDeploy(ref: string | undefined): Promise<void> {
+    const v = await version(this.root);
+    const push = await pushDeployed({ root: this.root, ref, live: v.live, run: this.o.git });
+    this.status = { ...this.status, push };
+    this.note(push.result === "pushed" ? `pushed: ${push.text}`
+      : push.result === "failed" ? `push failed: ${push.text}; the deploy stands`
+      : `not pushed: ${push.text}`);
   }
 
   start(opts: { now?: boolean; ref?: string }): UpdateStatus {
@@ -171,7 +190,7 @@ export class Lifecycle {
   private async update(): Promise<void> {
     const v = await version(this.root);
     const sha = await git(this.root, "rev-parse", "HEAD");
-    this.from = { sha, short: v.commit, live: v.live, lock: hashOf(join(this.root, "package-lock.json")) };
+    this.from = { sha, short: v.commit, subject: v.subject, live: v.live, lock: hashOf(join(this.root, "package-lock.json")) };
     if (v.live) {
       // Content, not file stamps: npm rewrites line endings of package bins, which only looks like a change.
       const changed = await git(this.root, "diff", "--name-only", "HEAD");
@@ -201,9 +220,10 @@ export class Lifecycle {
         command: this.o.successor, cwd: this.root,
         // The successor writes its own log (NEXUS_LOG): see main.ts.
         env: { ...process.env, NEXUS_WAIT_PORT: "60", NEXUS_LOG: process.env.NEXUS_LOG ?? "1" },
-        version: { commit: v.commit, subject: v.subject },
+        // What this server runs: the commit the update started from (the worktree has moved on by now).
+        version: this.from ? { commit: this.from.short, subject: this.from.subject } : { commit: v.commit, subject: v.subject },
         release: this.o.release, note: (t) => this.note(t), log: () => this.status.log,
-        timeoutMs: this.o.timeoutMs,
+        ref: this.status.ref, timeoutMs: this.o.timeoutMs,
       });
     } catch (err) {
       result = { outcome: "failed", reason: `the hand-over failed: ${firstLine(err)}`, pid: undefined };

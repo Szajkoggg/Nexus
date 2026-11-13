@@ -24,7 +24,7 @@ Nexus is developed with Nexus. The agents working on this repository are run by 
 | What Nexus should do, its look and behaviour as the user sees it | The user |
 | What to do next | The user approves queues |
 | Code structure, naming, tests, refactors | Whoever does the work, said in the report |
-| Deploying to the live instance, pushing to GitHub | The user |
+| Deploying to the live instance, pushing to GitHub | The user (a deploy pushes the deployed main; agents never push) |
 
 ## How work is done
 
