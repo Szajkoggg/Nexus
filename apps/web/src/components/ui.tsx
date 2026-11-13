@@ -6,23 +6,24 @@ import type { QueueView, StepView } from "../api.ts";
 
 // ---------------------------------------------------------------- status colours
 
-type Tone = { dot: string; text: string; ring: string; bg: string };
+type Tone = { dot: string; text: string };
+// A status is a dot and a word in the status's colour, never a ring or a filled pill (docs/DESIGN.md, theme tokens).
 // Written out in full so Tailwind sees every class.
 const TONES: Record<string, Tone> = {
-  pending: { dot: "bg-zinc-500", text: "text-zinc-400", ring: "ring-zinc-700", bg: "bg-zinc-800/40" },
-  draft: { dot: "bg-zinc-500", text: "text-zinc-400", ring: "ring-zinc-700", bg: "bg-zinc-800/40" },
-  proposed: { dot: "bg-slate-300", text: "text-slate-300", ring: "ring-slate-500/40", bg: "bg-slate-500/10" },
-  approved: { dot: "bg-sky-400", text: "text-sky-300", ring: "ring-sky-500/40", bg: "bg-sky-500/10" },
-  running: { dot: "bg-blue-400 animate-pulse", text: "text-blue-300", ring: "ring-blue-500/50", bg: "bg-blue-500/10" },
-  waiting: { dot: "bg-amber-400", text: "text-amber-300", ring: "ring-amber-500/50", bg: "bg-amber-500/10" },
-  review: { dot: "bg-violet-400", text: "text-violet-300", ring: "ring-violet-500/50", bg: "bg-violet-500/10" },
-  paused: { dot: "bg-zinc-400", text: "text-zinc-300", ring: "ring-zinc-500/40", bg: "bg-zinc-500/10" },
-  stopped: { dot: "bg-orange-400", text: "text-orange-300", ring: "ring-orange-500/50", bg: "bg-orange-500/10" },
-  failed: { dot: "bg-red-400", text: "text-red-300", ring: "ring-red-500/50", bg: "bg-red-500/10" },
-  rejected: { dot: "bg-rose-400", text: "text-rose-300", ring: "ring-rose-500/50", bg: "bg-rose-500/10" },
-  done: { dot: "bg-emerald-400", text: "text-emerald-300", ring: "ring-emerald-500/30", bg: "bg-emerald-500/5" },
-  skipped: { dot: "bg-zinc-600", text: "text-zinc-500", ring: "ring-zinc-800", bg: "bg-zinc-900" },
-  cancelled: { dot: "bg-zinc-600", text: "text-zinc-500", ring: "ring-zinc-800", bg: "bg-zinc-900" },
+  pending: { dot: "bg-fg-3", text: "text-fg-3" },
+  draft: { dot: "bg-fg-3", text: "text-fg-3" },
+  proposed: { dot: "bg-fg-2", text: "text-fg-2" },
+  approved: { dot: "bg-info", text: "text-info" },
+  running: { dot: "bg-accent animate-pulse", text: "text-accent" },
+  waiting: { dot: "bg-warn", text: "text-warn" },
+  review: { dot: "bg-review", text: "text-review" },
+  paused: { dot: "bg-fg-2", text: "text-fg-2" },
+  stopped: { dot: "bg-stop", text: "text-stop" },
+  failed: { dot: "bg-danger", text: "text-danger" },
+  rejected: { dot: "bg-danger", text: "text-danger" },
+  done: { dot: "bg-ok", text: "text-ok" },
+  skipped: { dot: "bg-fg-3", text: "text-fg-3" },
+  cancelled: { dot: "bg-fg-3", text: "text-fg-3" },
 };
 export const toneOf = (status: string): Tone => TONES[status] ?? TONES.pending!;
 
@@ -35,8 +36,8 @@ export function reviewLabel(step: { status: string; review_with?: "orchestrator"
 export function StatusBadge({ status, label, className = "" }: { status: string; label?: string; className?: string }) {
   const t = toneOf(status);
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ring-1 ${t.ring} ${t.bg} ${t.text} ${className}`}>
-      <span className={`h-1.5 w-1.5 rounded-full ${t.dot}`} />
+    <span className={`inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-medium ${t.text} ${className}`}>
+      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${t.dot}`} />
       {label ?? status}
     </span>
   );
@@ -46,7 +47,7 @@ export function StatusBadge({ status, label, className = "" }: { status: string;
 
 export function Markdown({ children, className = "" }: { children: string; className?: string }) {
   return (
-    <div className={`md text-sm leading-relaxed text-zinc-300 ${className}`}>
+    <div className={`md text-sm leading-relaxed text-fg ${className}`}>
       <ReactMarkdown components={{ a: ({ node: _n, ...p }) => <a {...p} target="_blank" rel="noreferrer" /> }}>
         {children}
       </ReactMarkdown>
@@ -141,7 +142,7 @@ export function Section({ title, children, aside }: { title: string; children: R
   return (
     <section className="mt-6 first:mt-0">
       <div className="mb-2 flex items-baseline justify-between gap-2">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">{title}</h3>
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-3">{title}</h3>
         {aside}
       </div>
       {children}
@@ -156,7 +157,7 @@ export function Expandable({ text, lines = 3 }: { text: string; lines?: number }
     <div>
       <div className={!open && long ? "line-clamp-3" : ""}><Markdown>{text}</Markdown></div>
       {long && (
-        <button onClick={() => setOpen(!open)} className="mt-1 text-xs text-sky-400 hover:text-sky-300">
+        <button onClick={() => setOpen(!open)} className="mt-1 text-xs text-accent hover:underline">
           {open ? "Show less" : "Show more"}
         </button>
       )}
@@ -207,13 +208,13 @@ function ComposerBox({ draft, placeholder, button, onSubmit, allowEmpty = false,
         value={text} rows={rows} placeholder={placeholder}
         onChange={(e) => change(e.target.value)}
         onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); void submit(); } }}
-        className="w-full resize-y rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-sky-500 focus:outline-none"
+        className="w-full resize-y rounded-lg border border-line-strong bg-canvas px-3 py-2 text-sm text-fg placeholder:text-fg-3 focus:border-accent focus:outline-none"
       />
       <div className="mt-2 flex flex-wrap items-center gap-3">
         <Button onClick={submit} disabled={busy || (!allowEmpty && !text.trim())}>{busy ? "Sending…" : button}</Button>
         {extra}
-        <span className="text-xs text-zinc-600">Ctrl+Enter</span>
-        {error && <span className="text-xs text-red-400">{error}</span>}
+        <span className="text-xs text-fg-3">Ctrl+Enter</span>
+        {error && <span className="text-xs text-danger">{error}</span>}
       </div>
     </div>
   );
@@ -223,9 +224,9 @@ export function Button({ children, onClick, disabled, variant = "primary" }: {
   children: ReactNode; onClick: () => void; disabled?: boolean; variant?: "primary" | "quiet" | "danger";
 }) {
   const style = {
-    primary: "bg-sky-600 text-white hover:bg-sky-500",
-    quiet: "bg-zinc-800 text-zinc-200 hover:bg-zinc-700",
-    danger: "text-red-300 hover:bg-red-500/10",
+    primary: "bg-accent-strong text-on-accent hover:bg-accent",
+    quiet: "bg-surface-3 text-fg hover:bg-surface-4",
+    danger: "text-danger hover:bg-danger/10",
   }[variant];
   return (
     <button onClick={onClick} disabled={disabled} className={`rounded-md px-3 py-1.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-40 ${style}`}>
@@ -244,9 +245,9 @@ export function Drawer({ open, onClose, left, children }: { open: boolean; onClo
   if (!open) return null;
   if (left) {
     return (
-      <aside className="scroll-thin fixed bottom-0 left-0 z-20 overflow-y-auto border-r border-zinc-800 bg-zinc-900 shadow-xl"
+      <aside className="scroll-thin fixed bottom-0 left-0 z-20 overflow-y-auto border-r border-line bg-surface shadow-xl"
         style={{ top: "var(--header-h, 0px)", width: SIDE_LEFT }}>
-        <button onClick={onClose} aria-label="Close" className="absolute right-3 top-3 rounded-md p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100">
+        <button onClick={onClose} aria-label="Close" className="absolute right-3 top-3 rounded-md p-1.5 text-fg-2 hover:bg-surface-3 hover:text-fg">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 6l12 12M18 6L6 18" /></svg>
         </button>
         <div className="p-5 pt-6">{children}</div>
@@ -255,9 +256,9 @@ export function Drawer({ open, onClose, left, children }: { open: boolean; onClo
   }
   return (
     <div className="fixed inset-0 z-40 flex justify-end">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <aside className="scroll-thin relative h-full w-full max-w-2xl overflow-y-auto border-l border-zinc-800 bg-zinc-900 pt-[env(safe-area-inset-top)] shadow-2xl">
-        <button onClick={onClose} aria-label="Close" className="absolute right-3 top-3 rounded-md p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100">
+      <div className="absolute inset-0 bg-scrim/50" onClick={onClose} />
+      <aside className="scroll-thin relative h-full w-full max-w-2xl overflow-y-auto border-l border-line bg-surface pt-[env(safe-area-inset-top)] shadow-2xl">
+        <button onClick={onClose} aria-label="Close" className="absolute right-3 top-3 rounded-md p-1.5 text-fg-2 hover:bg-surface-3 hover:text-fg">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 6l12 12M18 6L6 18" /></svg>
         </button>
         <div className="p-5 pt-6 sm:p-6">{children}</div>

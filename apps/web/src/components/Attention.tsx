@@ -5,12 +5,12 @@ import { mergeAttention, type WaitingItem } from "@nexus/protocol/attention";
 import { TimeAgo } from "./ui.tsx";
 
 const LABEL: Record<AttentionItem["kind"], { text: string; tone: string }> = {
-  question: { text: "Question", tone: "text-amber-300 bg-amber-500/10 ring-amber-500/40" },
-  stopped: { text: "Stopped", tone: "text-orange-300 bg-orange-500/10 ring-orange-500/40" },
-  approval: { text: "Needs approval", tone: "text-sky-300 bg-sky-500/10 ring-sky-500/40" },
-  review: { text: "Review", tone: "text-violet-300 bg-violet-500/10 ring-violet-500/40" },
-  failed: { text: "Failed", tone: "text-red-300 bg-red-500/10 ring-red-500/40" },
-  start: { text: "Did not start", tone: "text-orange-300 bg-orange-500/10 ring-orange-500/40" },
+  question: { text: "Question", tone: "text-warn bg-warn/15" },
+  stopped: { text: "Stopped", tone: "text-stop bg-stop/15" },
+  approval: { text: "Needs approval", tone: "text-info bg-info/15" },
+  review: { text: "Review", tone: "text-review bg-review/15" },
+  failed: { text: "Failed", tone: "text-danger bg-danger/15" },
+  start: { text: "Did not start", tone: "text-stop bg-stop/15" },
 };
 
 const plain = (s: string) => s.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\*\*|`/g, "");
@@ -28,10 +28,10 @@ const whereOf = (a: AttentionItem) => (a.lift ? `${a.queue}${a.lift.place}` : `$
 export function StopWays({ lift, className = "" }: { lift: NonNullable<AttentionItem["lift"]>; className?: string }) {
   return (
     <span className={`block text-xs ${className}`}>
-      <span className="block text-orange-300">{lift.continue ? "Continue possible: open the queue to lift the stop" : `Approving revision ${lift.revision} lifts the stop`}</span>
+      <span className="block text-stop">{lift.continue ? "Continue possible: open the queue to lift the stop" : `Approving revision ${lift.revision} lifts the stop`}</span>
       {lift.proposal && (
-        <span className="mt-1 block rounded-md bg-zinc-950/60 px-2 py-1 text-zinc-300">
-          <span className="text-zinc-500">The orchestrator proposes to continue · <TimeAgo at={lift.proposal.at} /></span>
+        <span className="mt-1 block rounded-md bg-canvas/60 px-2 py-1 text-fg">
+          <span className="text-fg-3">The orchestrator proposes to continue · <TimeAgo at={lift.proposal.at} /></span>
           <span className="line-clamp-2 block">{plain(lift.proposal.reason)}</span>
         </span>
       )}
@@ -42,23 +42,23 @@ export function StopWays({ lift, className = "" }: { lift: NonNullable<Attention
 export function AttentionPanel({ items, onOpen }: { items: AttentionItem[]; onOpen: (a: AttentionItem) => void }) {
   return (
     <section className="mb-8">
-      <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-amber-300/90">
-        Waiting for you <span className="ml-1 text-xs text-zinc-500">{items.length}</span>
+      <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-warn/90">
+        Waiting for you <span className="ml-1 text-xs text-fg-3">{items.length}</span>
       </h2>
       <div className="grid gap-2 @2xl:grid-cols-2">
         {items.map((a) => (
           <button
             key={attentionKey(a)}
             onClick={() => onOpen(a)}
-            className="flex items-start gap-3 rounded-lg border border-zinc-800 bg-zinc-900/60 p-3 text-left hover:border-zinc-600"
+            className="flex items-start gap-3 rounded-lg border border-line bg-surface p-3 text-left hover:border-fg-3/60"
           >
-            <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ring-1 ${LABEL[a.kind].tone}`}>{LABEL[a.kind].text}</span>
+            <span className={`shrink-0 rounded-md px-2 py-0.5 text-xs font-semibold ${LABEL[a.kind].tone}`}>{LABEL[a.kind].text}</span>
             <span className="min-w-0 flex-1">
-              <span className="block font-mono text-xs text-zinc-500">{whereOf(a)}</span>
-              <span className="line-clamp-2 text-sm text-zinc-200">{plain(a.text)}</span>
+              <span className="block font-mono text-xs text-fg-3">{whereOf(a)}</span>
+              <span className="line-clamp-2 text-sm text-fg">{plain(a.text)}</span>
               {a.lift && <StopWays lift={a.lift} className="mt-1.5" />}
             </span>
-            {a.at && <span className="shrink-0 text-xs text-zinc-600"><TimeAgo at={a.at} /></span>}
+            {a.at && <span className="shrink-0 text-xs text-fg-3"><TimeAgo at={a.at} /></span>}
           </button>
         ))}
       </div>
@@ -73,7 +73,7 @@ export function WaitingButton({ projects, onClick }: { projects: ProjectSummary[
   const n = (projects ?? []).reduce((sum, p) => sum + p.attention.length, 0);
   return (
     <button onClick={onClick} title={`Waiting for you in all projects: ${n}`} aria-label={`Waiting for you: ${n}`}
-      className={`flex shrink-0 items-center gap-1.5 rounded-lg border px-2 py-1.5 text-sm hover:bg-zinc-900 ${n ? "border-amber-500/40 text-amber-300" : "border-zinc-700 text-zinc-400"}`}>
+      className={`flex shrink-0 items-center gap-1.5 rounded-lg border px-2 py-1.5 text-sm hover:bg-surface ${n ? "border-warn/40 text-warn" : "border-line-strong text-fg-2"}`}>
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2" /><path d="M5.5 5.1 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.9A2 2 0 0 0 16.7 4H7.3a2 2 0 0 0-1.8 1.1Z" /></svg>
       {n > 0 && <span className="text-xs font-medium">{n}</span>}
     </button>
@@ -85,24 +85,24 @@ export function WaitingList({ projects, onOpen }: { projects: ProjectSummary[]; 
   const items = mergeAttention(projects);
   return (
     <div>
-      <h2 className="pr-8 text-xl font-semibold text-zinc-50">Waiting for you</h2>
-      <p className="mt-1 text-sm text-zinc-500">In all projects, newest first.</p>
-      {items.length === 0 && <p className="mt-6 text-sm text-zinc-400">Nothing waits for you.</p>}
+      <h2 className="pr-8 text-xl font-semibold text-fg">Waiting for you</h2>
+      <p className="mt-1 text-sm text-fg-3">In all projects, newest first.</p>
+      {items.length === 0 && <p className="mt-6 text-sm text-fg-2">Nothing waits for you.</p>}
       <ul className="mt-4 space-y-2">
         {items.map((a) => (
           <li key={`${a.project}/${attentionKey(a)}`}>
             <button onClick={() => onOpen(a)}
-              className="flex w-full items-start gap-3 rounded-lg border border-zinc-800 bg-zinc-900/60 p-3 text-left hover:border-zinc-600">
-              <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ring-1 ${LABEL[a.kind].tone}`}>{LABEL[a.kind].text}</span>
+              className="flex w-full items-start gap-3 rounded-lg border border-line bg-surface p-3 text-left hover:border-fg-3/60">
+              <span className={`shrink-0 rounded-md px-2 py-0.5 text-xs font-semibold ${LABEL[a.kind].tone}`}>{LABEL[a.kind].text}</span>
               <span className="min-w-0 flex-1">
                 <span className="flex min-w-0 flex-wrap gap-x-2 text-xs">
-                  <span className="max-w-full truncate font-medium text-zinc-300">{a.project_name}</span>
-                  {a.queue && <span className="min-w-0 break-words font-mono text-zinc-500">{whereOf(a)}</span>}
+                  <span className="max-w-full truncate font-medium text-fg">{a.project_name}</span>
+                  {a.queue && <span className="min-w-0 break-words font-mono text-fg-3">{whereOf(a)}</span>}
                 </span>
-                <span className="line-clamp-2 text-sm text-zinc-200">{plain(a.text)}</span>
+                <span className="line-clamp-2 text-sm text-fg">{plain(a.text)}</span>
                 {a.lift && <StopWays lift={a.lift} className="mt-1.5" />}
               </span>
-              {a.at && <span className="shrink-0 text-xs text-zinc-600"><TimeAgo at={a.at} /></span>}
+              {a.at && <span className="shrink-0 text-xs text-fg-3"><TimeAgo at={a.at} /></span>}
             </button>
           </li>
         ))}
@@ -260,7 +260,7 @@ export function NotifyToggle({ supported, on, toggle, push, toast, busy, dismiss
       <button
         onClick={toggle}
         title={on ? `${push ? "Push" : "Tab"} notifications on: click to turn off` : push ? "Send notifications to this device, even with Nexus closed" : "Notify me in this tab when something waits for me"}
-        className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs ${on ? "text-sky-300" : "text-zinc-500 hover:text-zinc-300"} ${busy ? "animate-pulse" : ""}`}
+        className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs ${on ? "text-accent" : "text-fg-3 hover:text-fg"} ${busy ? "animate-pulse" : ""}`}
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
@@ -272,7 +272,7 @@ export function NotifyToggle({ supported, on, toggle, push, toast, busy, dismiss
       {toast && createPortal(
         <div
           role="status" onClick={dismiss}
-          className={`fixed inset-x-4 bottom-[calc(1rem+env(safe-area-inset-bottom))] z-[60] mx-auto max-w-md rounded-lg border bg-zinc-900 px-4 py-3 text-sm shadow-2xl sm:inset-x-auto sm:right-6 ${toast.kind === "error" ? "border-red-500/40 text-red-200" : "border-emerald-500/40 text-emerald-200"}`}
+          className={`fixed inset-x-4 bottom-[calc(1rem+env(safe-area-inset-bottom))] z-[60] mx-auto max-w-md rounded-lg border bg-surface px-4 py-3 text-sm shadow-2xl sm:inset-x-auto sm:right-6 ${toast.kind === "error" ? "border-danger/40 text-danger" : "border-ok/40 text-ok"}`}
         >
           {toast.text}
         </div>,

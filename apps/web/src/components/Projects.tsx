@@ -5,9 +5,9 @@ import { nav } from "../nav.ts";
 import type { ProjectSummary } from "../api.ts";
 
 const Waiting = ({ n }: { n: number }) =>
-  n > 0 ? <span className="shrink-0 rounded-full bg-amber-500/20 px-1.5 text-xs text-amber-300" title="Waiting for you">{n}</span> : null;
+  n > 0 ? <span className="shrink-0 rounded-full bg-warn/20 px-1.5 text-xs text-warn" title="Waiting for you">{n}</span> : null;
 const Running = ({ n }: { n: number }) =>
-  n > 0 ? <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-blue-400" title={`${n} running`} /> : null;
+  n > 0 ? <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-accent" title={`${n} running`} /> : null;
 
 /** The wide layout: one tab per project. */
 export function ProjectTabs({ projects, current, onPick }: { projects: ProjectSummary[]; current?: string; onPick: (id: string) => void }) {
@@ -17,7 +17,7 @@ export function ProjectTabs({ projects, current, onPick }: { projects: ProjectSu
         <button
           key={p.id}
           onClick={() => onPick(p.id)}
-          className={`flex shrink-0 items-center gap-2 rounded-lg px-3 py-1.5 text-sm ${p.id === current ? "bg-zinc-800 text-zinc-50" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"}`}
+          className={`flex shrink-0 items-center gap-2 rounded-lg px-3 py-1.5 text-sm ${p.id === current ? "bg-surface-3 text-fg" : "text-fg-2 hover:bg-surface hover:text-fg"}`}
         >
           {p.name}
           <Waiting n={p.attention.length} />
@@ -48,30 +48,30 @@ export function ProjectPicker({ projects, current, open, onPick }: { projects: P
         ref={button}
         onClick={() => !single && setOpen(!open)}
         aria-haspopup="listbox" aria-expanded={open} disabled={single}
-        className="flex min-w-0 items-center gap-2 rounded-lg bg-zinc-800 px-3 py-1.5 text-sm text-zinc-50 disabled:cursor-default"
+        className="flex min-w-0 items-center gap-2 rounded-lg bg-surface-3 px-3 py-1.5 text-sm text-fg disabled:cursor-default"
       >
         <span className="truncate">{here?.name ?? "Projects"}</span>
         {here && <Waiting n={here.attention.length} />}
         {here && <Running n={here.running} />}
         {!single && (
-          <span className="shrink-0 text-zinc-400">
+          <span className="shrink-0 text-fg-2">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={open ? "rotate-180" : ""}><path d="m6 9 6 6 6-6" /></svg>
           </span>
         )}
       </button>
       {open && createPortal(
         <>
-          <div className="fixed inset-x-0 bottom-0 z-40 bg-black/50 sm:hidden" style={{ top }} onClick={() => setOpen(false)} />
+          <div className="fixed inset-x-0 bottom-0 z-40 bg-scrim/50 sm:hidden" style={{ top }} onClick={() => setOpen(false)} />
           <ul role="listbox" aria-label="Projects" style={{ top, maxHeight: `calc(100dvh - ${top}px - 4rem)` }}
-            className="scroll-thin fixed inset-x-0 z-50 overflow-y-auto sm:hidden border-b border-zinc-800 bg-zinc-900 py-1 shadow-2xl">
+            className="scroll-thin fixed inset-x-0 z-50 overflow-y-auto sm:hidden border-b border-line bg-surface py-1 shadow-2xl">
             {projects.map((p) => (
               <li key={p.id}>
                 <button
                   role="option" aria-selected={p.id === current}
                   onClick={() => (p.id === current ? setOpen(false) : onPick(p.id))}
-                  className={`flex min-h-12 w-full items-center gap-3 px-4 text-left text-sm ${p.id === current ? "bg-zinc-800/80 text-zinc-50" : "text-zinc-300 active:bg-zinc-800"}`}
+                  className={`flex min-h-12 w-full items-center gap-3 px-4 text-left text-sm ${p.id === current ? "bg-surface-3/80 text-fg" : "text-fg active:bg-surface-3"}`}
                 >
-                  <span className={`w-4 shrink-0 text-sky-400 ${p.id === current ? "" : "invisible"}`}>✓</span>
+                  <span className={`w-4 shrink-0 text-accent ${p.id === current ? "" : "invisible"}`}>✓</span>
                   <span className="min-w-0 flex-1 truncate">{p.name}</span>
                   <Running n={p.running} />
                   <Waiting n={p.attention.length} />

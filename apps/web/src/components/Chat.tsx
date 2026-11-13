@@ -15,7 +15,7 @@ export function useOrchestrator(project: string | undefined, version: unknown) {
 }
 
 const Close = ({ onClose }: { onClose: () => void }) => (
-  <button onClick={onClose} aria-label="Close" className="rounded-md p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100">
+  <button onClick={onClose} aria-label="Close" className="rounded-md p-1.5 text-fg-2 hover:bg-surface-3 hover:text-fg">
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 6l12 12M18 6L6 18" /></svg>
   </button>
 );
@@ -36,30 +36,30 @@ function ChatColumn({ title, over, about, view, status, actions, empty, draft, p
   const model = rt?.model ? rt.model.replace(/^claude-/, "") : view?.model;
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <header className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-zinc-800 px-5 py-3">
-        {onBack && <button onClick={onBack} className={`rounded-md px-1.5 text-lg text-zinc-400 hover:text-zinc-100 ${side ? "" : "sm:hidden"}`} aria-label="Back">‹</button>}
+      <header className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-line px-5 py-3">
+        {onBack && <button onClick={onBack} className={`rounded-md px-1.5 text-lg text-fg-2 hover:text-fg ${side ? "" : "sm:hidden"}`} aria-label="Back">‹</button>}
         <div className="min-w-0">
-          <div className="text-xs text-zinc-500">{over}</div>
-          <h2 className="truncate font-semibold text-zinc-50">{title}</h2>
+          <div className="text-xs text-fg-3">{over}</div>
+          <h2 className="truncate font-semibold text-fg">{title}</h2>
           {about}
         </div>
-        <span className="text-xs text-zinc-500">
+        <span className="text-xs text-fg-3">
           {status}{model ? ` · ${model}` : ""}{view?.effort ? ` · ${view.effort} effort` : ""}{pct !== undefined ? ` · ${pct}% context` : ""}
         </span>
         <span className="ml-auto flex flex-wrap items-center gap-2">
-          <label className="flex items-center gap-1.5 text-xs text-zinc-400">
-            <input type="checkbox" checked={showTools} onChange={(e) => setShowTools(e.target.checked)} className="accent-sky-500" /> tool calls
+          <label className="flex items-center gap-1.5 text-xs text-fg-2">
+            <input type="checkbox" checked={showTools} onChange={(e) => setShowTools(e.target.checked)} className="accent-accent" /> tool calls
           </label>
           {actions}
         </span>
       </header>
       <div className="scroll-thin flex-1 space-y-3 overflow-y-auto px-5 py-4">
-        {chat.length === 0 && <div className="mt-10 text-center text-sm text-zinc-500">{empty}</div>}
+        {chat.length === 0 && <div className="mt-10 text-center text-sm text-fg-3">{empty}</div>}
         {chat.map((c, i) => <Entry key={i} c={c} />)}
-        {view?.state === "working" && <div className="text-xs text-zinc-500"><span className="animate-pulse">●</span> working…</div>}
+        {view?.state === "working" && <div className="text-xs text-fg-3"><span className="animate-pulse">●</span> working…</div>}
         <div ref={end} />
       </div>
-      <footer className="border-t border-zinc-800 p-4">
+      <footer className="border-t border-line p-4">
         <Composer rows={3} draft={draft} placeholder={placeholder} button="Send" onSubmit={onSend} />
       </footer>
     </div>
@@ -68,25 +68,25 @@ function ChatColumn({ title, over, about, view, status, actions, empty, draft, p
 
 function Entry({ c }: { c: ChatEntry }) {
   if (c.kind === "tool") {
-    return <div className="truncate pl-1 font-mono text-[11px] text-zinc-600" title={c.text}>› {c.text}</div>;
+    return <div className="truncate pl-1 font-mono text-[11px] text-fg-3" title={c.text}>› {c.text}</div>;
   }
   if (c.from === "user") {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-sm bg-sky-600/90 px-4 py-2 text-sm text-white">{c.text}</div>
+        <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-sm bg-user-bubble px-4 py-2 text-sm text-fg">{c.text}</div>
       </div>
     );
   }
   if (c.from === "nexus") {
     return (
-      <div className={`rounded-lg border px-3 py-2 text-xs ${c.kind === "error" ? "border-red-500/30 bg-red-500/5 text-red-300" : "border-amber-500/30 bg-amber-500/5 text-amber-200/90"}`}>
+      <div className={`rounded-lg border px-3 py-2 text-xs ${c.kind === "error" ? "border-danger/30 bg-danger/5 text-danger" : "border-warn/30 bg-warn/5 text-warn/90"}`}>
         <span className="mr-2 font-semibold">Nexus</span><span className="whitespace-pre-wrap">{c.text}</span>
-        <span className="ml-2 text-zinc-500"><TimeAgo at={c.at} /></span>
+        <span className="ml-2 text-fg-3"><TimeAgo at={c.at} /></span>
       </div>
     );
   }
   return (
-    <div className="max-w-[92%] rounded-2xl rounded-bl-sm bg-zinc-800/70 px-4 py-2">
+    <div className="max-w-[92%] rounded-2xl rounded-bl-sm bg-surface-3 px-4 py-2">
       <Markdown>{c.text}</Markdown>
     </div>
   );
@@ -105,10 +105,10 @@ const Side = createContext(false);
 function PanelSwitch({ which }: { which: SidePanel }) {
   const item = (p: SidePanel, label: string) => (
     <button key={p} onClick={() => { if (p !== which) nav.raise(p); }} aria-pressed={p === which}
-      className={`rounded-md px-3 py-1 text-xs font-medium ${p === which ? "bg-zinc-700 text-zinc-50" : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"}`}>{label}</button>
+      className={`rounded-md px-3 py-1 text-xs font-medium ${p === which ? "bg-surface-4 text-fg" : "text-fg-2 hover:bg-surface-3 hover:text-fg"}`}>{label}</button>
   );
   return (
-    <div className="flex shrink-0 items-center gap-1 border-b border-zinc-800 px-3 py-1.5" role="group" aria-label="Chats">
+    <div className="flex shrink-0 items-center gap-1 border-b border-line px-3 py-1.5" role="group" aria-label="Chats">
       {item("chat", "Orchestrator")}{item("ideas", "Ideas")}
     </div>
   );
@@ -121,7 +121,7 @@ function Panel({ onClose, wide, which, children }: { onClose: () => void; wide?:
   if (side) {
     return (
       <Side.Provider value={true}>
-        <aside className="fixed bottom-0 right-0 z-20 flex flex-col border-l border-zinc-800 bg-zinc-900 shadow-xl" style={{ top: "var(--header-h, 0px)", width: SIDE_RIGHT }}>
+        <aside className="fixed bottom-0 right-0 z-20 flex flex-col border-l border-line bg-surface shadow-xl" style={{ top: "var(--header-h, 0px)", width: SIDE_RIGHT }}>
           {body}
         </aside>
       </Side.Provider>
@@ -129,8 +129,8 @@ function Panel({ onClose, wide, which, children }: { onClose: () => void; wide?:
   }
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <aside className={`relative flex h-full w-full flex-col ${wide ? "max-w-5xl" : "max-w-2xl"} border-l border-zinc-800 bg-zinc-900 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] shadow-2xl`}>
+      <div className="absolute inset-0 bg-scrim/40" onClick={onClose} />
+      <aside className={`relative flex h-full w-full flex-col ${wide ? "max-w-5xl" : "max-w-2xl"} border-l border-line bg-surface pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] shadow-2xl`}>
         {body}
       </aside>
     </div>
@@ -144,8 +144,8 @@ const stateText = (v: View | undefined) =>
 
 export function OrchestratorButton({ view, onClick }: { view: View | undefined; onClick: () => void }) {
   return (
-    <button onClick={onClick} title="Orchestrator" className="flex shrink-0 items-center gap-2 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-sm text-zinc-200 hover:border-zinc-500 hover:bg-zinc-900 sm:px-3">
-      <span className={`h-2 w-2 rounded-full ${view?.state === "working" ? "animate-pulse bg-blue-400" : view?.session ? "bg-emerald-500" : "bg-zinc-600"}`} />
+    <button onClick={onClick} title="Orchestrator" className="flex shrink-0 items-center gap-2 rounded-lg border border-line-strong px-2.5 py-1.5 text-sm text-fg hover:border-fg-3/60 hover:bg-surface sm:px-3">
+      <span className={`h-2 w-2 rounded-full ${view?.state === "working" ? "animate-pulse bg-accent" : view?.session ? "bg-ok" : "bg-fg-3"}`} />
       <span className="hidden sm:inline">Orchestrator</span>
       <svg className="sm:hidden" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1.1-4.6A8 8 0 1 1 21 12Z" /></svg>
     </button>
@@ -171,7 +171,7 @@ export function ChatPanel({ project, name, view, onClose, onChanged }: {
         </>}
         empty={<>
           <p>Plan queues with the orchestrator, ask where things stand, or have it start a run.</p>
-          <p className="mt-1 text-zinc-600">It reads the project and works through <code>nexus</code>; it never edits files or approves queues.</p>
+          <p className="mt-1 text-fg-3">It reads the project and works through <code>nexus</code>; it never edits files or approves queues.</p>
         </>}
         draft={draftKey(project, "orchestrator")}
         placeholder="Message the orchestrator…"
@@ -192,8 +192,8 @@ function AboutStep({ project, c, className = "" }: { project: string; c: Session
   const { queue, step } = c.about;
   return (
     <button onClick={(e) => { e.stopPropagation(); nav.closeThenItem("ideas", project, queue, step); }} title="Open the step"
-      className={`inline-flex max-w-full items-center gap-1 truncate rounded bg-zinc-800 px-1.5 py-0.5 text-xs text-sky-300 hover:bg-zinc-700 ${className}`}>
-      <span className="text-zinc-500">about step</span> <span className="font-mono">{queue}/{step}</span>
+      className={`inline-flex max-w-full items-center gap-1 truncate rounded bg-surface-3 px-1.5 py-0.5 text-xs text-accent hover:bg-surface-4 ${className}`}>
+      <span className="text-fg-3">about step</span> <span className="font-mono">{queue}/{step}</span>
     </button>
   );
 }
@@ -228,12 +228,12 @@ export function StepChat({ project, queue, step, version }: { project: string; q
     <div className="mt-4">
       <div className="flex flex-wrap items-center gap-2">
         <button onClick={() => void go(false)} disabled={busy} title="Talk this step through with a thinking partner; nothing changes in the run"
-          className="flex items-center gap-1.5 rounded-md border border-zinc-700 px-2.5 py-1 text-sm text-zinc-200 hover:border-zinc-500 hover:bg-zinc-800 disabled:opacity-40">
+          className="flex items-center gap-1.5 rounded-md border border-line-strong px-2.5 py-1 text-sm text-fg hover:border-fg-3/60 hover:bg-surface-3 disabled:opacity-40">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
           Chat about this
         </button>
         {mine.length > 0 && (
-          <button onClick={() => void go(true)} disabled={busy} className="rounded-md px-2 py-1 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-40">
+          <button onClick={() => void go(true)} disabled={busy} className="rounded-md px-2 py-1 text-xs text-fg-2 hover:bg-surface-3 hover:text-fg disabled:opacity-40">
             New conversation
           </button>
         )}
@@ -242,22 +242,22 @@ export function StepChat({ project, queue, step, version }: { project: string; q
         <ul className="mt-1.5 space-y-0.5">
           {mine.map((c) => (
             <li key={c.id}>
-              <button onClick={() => nav.conversation(c.id)} className="flex max-w-full items-baseline gap-2 text-left text-xs text-zinc-400 hover:text-zinc-200">
-                <span className="truncate text-sky-300">{c.title}</span>
-                <span className="shrink-0 text-zinc-600">{c.messages} message{c.messages === 1 ? "" : "s"} · <TimeAgo at={c.last_at} /></span>
+              <button onClick={() => nav.conversation(c.id)} className="flex max-w-full items-baseline gap-2 text-left text-xs text-fg-2 hover:text-fg">
+                <span className="truncate text-accent">{c.title}</span>
+                <span className="shrink-0 text-fg-3">{c.messages} message{c.messages === 1 ? "" : "s"} · <TimeAgo at={c.last_at} /></span>
               </button>
             </li>
           ))}
         </ul>
       )}
-      {error && <p className="mt-1 text-xs text-red-300">{error}</p>}
+      {error && <p className="mt-1 text-xs text-danger">{error}</p>}
     </div>
   );
 }
 
 export function ConversationsButton({ onClick }: { onClick: () => void }) {
   return (
-    <button onClick={onClick} title="Conversations: think a topic through with a partner" className="flex shrink-0 items-center gap-2 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-sm text-zinc-200 hover:border-zinc-500 hover:bg-zinc-900 sm:px-3">
+    <button onClick={onClick} title="Conversations: think a topic through with a partner" className="flex shrink-0 items-center gap-2 rounded-lg border border-line-strong px-2.5 py-1.5 text-sm text-fg hover:border-fg-3/60 hover:bg-surface sm:px-3">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.2 1 2V17h6v-.3c0-.8.4-1.5 1-2A7 7 0 0 0 12 2Z" /></svg>
       <span className="hidden sm:inline">Ideas</span>
     </button>
@@ -282,11 +282,11 @@ export function ConversationsPanel({ project, name, version, onClose, onChanged,
     <Panel onClose={onClose} wide which="ideas">
       <nav className={side
         ? `${open || creating ? "hidden" : "flex"} w-full flex-col`
-        : `${open || creating ? "hidden sm:flex" : "flex"} w-full shrink-0 flex-col border-r border-zinc-800 sm:w-72`}>
-        <div className="flex items-center gap-2 border-b border-zinc-800 px-4 py-3">
+        : `${open || creating ? "hidden sm:flex" : "flex"} w-full shrink-0 flex-col border-r border-line sm:w-72`}>
+        <div className="flex items-center gap-2 border-b border-line px-4 py-3">
           <div className="min-w-0 flex-1">
-            <div className="text-xs text-zinc-500">{name}</div>
-            <h2 className="font-semibold text-zinc-50">Ideas</h2>
+            <div className="text-xs text-fg-3">{name}</div>
+            <h2 className="font-semibold text-fg">Ideas</h2>
           </div>
           <span className={side ? "" : "sm:hidden"}><Close onClose={onClose} /></span>
         </div>
@@ -295,20 +295,20 @@ export function ConversationsPanel({ project, name, version, onClose, onChanged,
           {shown.map((c) => (
             <li key={c.id}>
               <button onClick={() => nav.open(`conversation:${c.id}`)}
-                className={`w-full rounded-lg px-3 py-2 text-left text-sm ${c.id === open ? "bg-zinc-800 text-zinc-50" : "text-zinc-300 hover:bg-zinc-800/60"} ${c.archived ? "opacity-50" : ""}`}>
+                className={`w-full rounded-lg px-3 py-2 text-left text-sm ${c.id === open ? "bg-surface-3 text-fg" : "text-fg hover:bg-surface-3/60"} ${c.archived ? "opacity-50" : ""}`}>
                 <span className="flex items-center gap-2">
-                  {c.state === "working" && <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-blue-400" />}
+                  {c.state === "working" && <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-accent" />}
                   <span className="truncate">{c.title}</span>
                 </span>
-                <span className="block text-xs text-zinc-500">{c.about && <span className="font-mono text-sky-300/80">{c.about.queue}/{c.about.step} · </span>}{c.runtime} · {c.messages} messages · <TimeAgo at={c.last_at} /></span>
+                <span className="block text-xs text-fg-3">{c.about && <span className="font-mono text-accent/80">{c.about.queue}/{c.about.step} · </span>}{c.runtime} · {c.messages} messages · <TimeAgo at={c.last_at} /></span>
               </button>
             </li>
           ))}
-          {list && shown.length === 0 && <li className="px-3 py-2 text-sm text-zinc-500">No conversation yet.</li>}
+          {list && shown.length === 0 && <li className="px-3 py-2 text-sm text-fg-3">No conversation yet.</li>}
         </ul>
         {(list ?? []).some((c) => c.archived) && (
-          <label className="flex items-center gap-2 border-t border-zinc-800 px-4 py-2 text-xs text-zinc-500">
-            <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} className="accent-sky-500" /> show archived
+          <label className="flex items-center gap-2 border-t border-line px-4 py-2 text-xs text-fg-3">
+            <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} className="accent-accent" /> show archived
           </label>
         )}
       </nav>
@@ -329,7 +329,7 @@ export function ConversationsPanel({ project, name, version, onClose, onChanged,
           </>}
           empty={<>
             <p>Think something through: gameplay, a mechanic, the look, what to build next.</p>
-            <p className="mt-1 text-zinc-600">
+            <p className="mt-1 text-fg-3">
               The partner reads the project{view?.notes_dir ? <> and writes notes only in <code>{view.notes_dir}</code></> : <>; it writes nothing until a notes folder is set in the project's settings</>}. It starts no work: hand the conversation to the orchestrator for that.
             </p>
           </>}
@@ -339,10 +339,10 @@ export function ConversationsPanel({ project, name, version, onClose, onChanged,
         />
       )}
       {!side && !creating && !open && (
-        <div className="hidden flex-1 flex-col items-center justify-center p-8 text-center text-sm text-zinc-500 sm:flex">
+        <div className="hidden flex-1 flex-col items-center justify-center p-8 text-center text-sm text-fg-3 sm:flex">
           <div className="absolute right-3 top-3"><Close onClose={onClose} /></div>
           <p>Open a conversation, or start a new one.</p>
-          <p className="mt-1 text-zinc-600">Each conversation is its own session: topics do not mix, and each can be picked up later.</p>
+          <p className="mt-1 text-fg-3">Each conversation is its own session: topics do not mix, and each can be picked up later.</p>
         </div>
       )}
     </Panel>
@@ -357,7 +357,7 @@ function NewConversation({ project, defaultRuntime, onBack, onClose, onCreated }
   const [model, setModel] = useState("");
   const [effort, setEffort] = useState("");
   const [error, setError] = useState<string>();
-  const field = "w-full rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-200 placeholder:text-zinc-600";
+  const field = "w-full rounded-md border border-line-strong bg-canvas px-2 py-1.5 text-sm text-fg placeholder:text-fg-3";
   const create = async () => {
     setError(undefined);
     const r = await fetch(`/api/projects/${enc(project)}/conversations`, {
@@ -370,30 +370,30 @@ function NewConversation({ project, defaultRuntime, onBack, onClose, onCreated }
   };
   return (
     <div className="flex min-w-0 flex-1 flex-col">
-      <header className="flex items-center gap-2 border-b border-zinc-800 px-5 py-3">
-        <button onClick={onBack} className={`rounded-md px-1.5 text-lg text-zinc-400 hover:text-zinc-100 ${useContext(Side) ? "" : "sm:hidden"}`} aria-label="Back">‹</button>
-        <h2 className="flex-1 font-semibold text-zinc-50">New conversation</h2>
+      <header className="flex items-center gap-2 border-b border-line px-5 py-3">
+        <button onClick={onBack} className={`rounded-md px-1.5 text-lg text-fg-2 hover:text-fg ${useContext(Side) ? "" : "sm:hidden"}`} aria-label="Back">‹</button>
+        <h2 className="flex-1 font-semibold text-fg">New conversation</h2>
         <Close onClose={onClose} />
       </header>
       <div className="max-w-lg space-y-3 p-5">
-        <label className="block text-sm text-zinc-300">Topic
+        <label className="block text-sm text-fg">Topic
           <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Gameplay: mining and defense" autoFocus className={`mt-1 ${field}`} />
         </label>
         <div className="flex flex-wrap gap-3">
-          <label className="text-sm text-zinc-300">Runtime
+          <label className="text-sm text-fg">Runtime
             <select value={runtime} onChange={(e) => { setRuntime(e.target.value as "claude" | "codex"); setModel(""); setEffort(""); }} className={`mt-1 ${field}`}>
               <option value="claude">Claude Code</option><option value="codex">Codex</option>
             </select>
           </label>
-          <label className="text-sm text-zinc-300">Model
+          <label className="text-sm text-fg">Model
             <span className="mt-1 block"><ModelSelect runtime={runtime} value={model} onChange={setModel} className="py-1.5" /></span>
           </label>
-          <label className="text-sm text-zinc-300">Effort
+          <label className="text-sm text-fg">Effort
             <span className="mt-1 block"><EffortSelect runtime={runtime} model={model} value={effort} onChange={setEffort} className="py-1.5" /></span>
           </label>
         </div>
         <Button onClick={() => void create()}>Start</Button>
-        {error && <p className="text-sm text-red-300">{error}</p>}
+        {error && <p className="text-sm text-danger">{error}</p>}
       </div>
     </div>
   );
@@ -408,7 +408,7 @@ function ConversationMenu({ project, c, onChanged }: { project: string; c: Conve
       if (v === "rename") { const t = prompt("Topic", c.title); if (t) void patch({ title: t }); }
       if (v === "archive") void patch({ archived: !c.archived });
       if (v.startsWith("effort:")) void patch({ effort: v.slice(7) || null });
-    }} className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-zinc-300" title="More">
+    }} className="rounded-md border border-line-strong bg-canvas px-2 py-1 text-xs text-fg" title="More">
       <option value="">More…</option>
       <option value="rename">Rename</option>
       <option value="archive">{c.archived ? "Unarchive" : "Archive"}</option>

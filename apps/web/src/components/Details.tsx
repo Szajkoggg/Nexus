@@ -38,19 +38,19 @@ export function StepDetail({ project, queue, step, onChanged }: Props & { step: 
   const shown = viewing === undefined ? undefined : Math.min(Math.max(0, Number(viewing) || 0), images.length - 1);
   return (
     <div>
-      <div className="text-xs text-zinc-500">
+      <div className="text-xs text-fg-3">
         <span className="font-mono">{queue.id}</span> · {queue.title}
       </div>
-      <h2 className="mt-1 flex flex-wrap items-center gap-3 pr-8 text-xl font-semibold text-zinc-50">
-        <span className="font-mono text-zinc-500">{step.id}</span> {step.title}
+      <h2 className="mt-1 flex flex-wrap items-center gap-3 pr-8 text-xl font-semibold text-fg">
+        <span className="font-mono text-fg-3">{step.id}</span> {step.title}
       </h2>
-      <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-zinc-500">
+      <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-fg-3">
         <StatusBadge status={step.status} label={reviewLabel(step)} />
         <StepTimes step={step} />
         {step.commit && <span className="font-mono">{step.commit}</span>}
         {session && <span>by {session.title ?? session.id.slice(-8)} ({session.runtime})</span>}
         {stepValuesText(step) && (
-          <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-zinc-300" title="This step's own runtime, model and effort; what it leaves out is the run's">
+          <span className="rounded bg-surface-3 px-1.5 py-0.5 text-fg" title="This step's own runtime, model and effort; what it leaves out is the run's">
             runs on {stepValuesText(step)}
           </span>
         )}
@@ -58,25 +58,25 @@ export function StepDetail({ project, queue, step, onChanged }: Props & { step: 
       <StepChat project={id} queue={queue.id} step={step.id} version={project.generated_at} />
 
       {queue.run?.state === "retry_wait" && queue.run.step === step.id && (
-        <div className="mt-4 rounded-lg bg-amber-500/10 p-3 text-sm ring-1 ring-amber-500/30">
+        <div className="mt-4 rounded-lg border border-warn/30 bg-warn/10 p-3 text-sm">
           <RetryNote run={queue.run} className="text-sm" />
-          {queue.run.reason && <p className="mt-1 text-xs text-zinc-400">{queue.run.reason}</p>}
+          {queue.run.reason && <p className="mt-1 text-xs text-fg-2">{queue.run.reason}</p>}
         </div>
       )}
 
       {(step.summary || step.reason || step.progress) && (
-        <div className="mt-4 rounded-lg bg-zinc-800/50 p-3 text-sm">
-          {step.summary && <p><span className="text-zinc-500">Summary: </span>{step.summary}</p>}
-          {step.reason && step.status !== "rejected" && <p className="text-orange-300"><span className="text-zinc-500">Reason: </span>{step.reason}</p>}
+        <div className="mt-4 rounded-lg bg-surface-2 p-3 text-sm">
+          {step.summary && <p><span className="text-fg-3">Summary: </span>{step.summary}</p>}
+          {step.reason && step.status !== "rejected" && <p className="text-stop"><span className="text-fg-3">Reason: </span>{step.reason}</p>}
           {step.progress && step.status === "running" && (
-            <p><span className="text-zinc-500">Now: </span>{step.progress.text} <span className="text-xs text-zinc-500">(<TimeAgo at={step.progress.at} />)</span></p>
+            <p><span className="text-fg-3">Now: </span>{step.progress.text} <span className="text-xs text-fg-3">(<TimeAgo at={step.progress.at} />)</span></p>
           )}
         </div>
       )}
 
       {step.status === "review" && step.review_with === "orchestrator" && (
         <Section title="Waiting for the orchestrator's review">
-          <p className="text-sm text-zinc-400">The queue holds here until the orchestrator accepts this step, sends it back, or hands it to you.</p>
+          <p className="text-sm text-fg-2">The queue holds here until the orchestrator accepts this step, sends it back, or hands it to you.</p>
         </Section>
       )}
       {showsReviewActions(step) && <AcceptReview project={id} queue={queue.id} step={step.id} next={noteTargets(queue.steps, step.id).next} asked={step.asked_user?.text} criteria={step.acceptance} onChanged={onChanged} />}
@@ -90,10 +90,10 @@ export function StepDetail({ project, queue, step, onChanged }: Props & { step: 
           <ul className="space-y-2">
             {step.sent_back.map((b) => (
               <li key={b.id} className="text-sm">
-                <div className="text-xs text-zinc-500">
+                <div className="text-xs text-fg-3">
                   {b.by === "user" ? "You (Fix it)" : "Orchestrator"} · <TimeAgo at={b.at} /> · {b.to_user ? "beyond the limit: handed to you instead" : b.delivered ? `round ${b.round}` : "on its way to the worker"}
                 </div>
-                <p className="whitespace-pre-wrap text-zinc-300">{b.text}</p>
+                <p className="whitespace-pre-wrap text-fg">{b.text}</p>
               </li>
             ))}
           </ul>
@@ -101,7 +101,7 @@ export function StepDetail({ project, queue, step, onChanged }: Props & { step: 
       )}
 
       {live && session && (
-        <Section title="Message the running agent" aside={<span className="text-xs text-zinc-600">read at its next check-in</span>}>
+        <Section title="Message the running agent" aside={<span className="text-xs text-fg-3">read at its next check-in</span>}>
           <Composer
             draft={draftKey(id, "message", queue.id, step.id)}
             placeholder="Delivered to the agent without stopping it…"
@@ -124,7 +124,7 @@ export function StepDetail({ project, queue, step, onChanged }: Props & { step: 
         <Section title="Acceptance">
           <ul className="space-y-1.5">
             {step.acceptance.map((a, i) => (
-              <li key={i} className="flex gap-2 text-sm text-zinc-300"><span className="text-zinc-600">◇</span><Markdown className="[&_p]:m-0">{a}</Markdown></li>
+              <li key={i} className="flex gap-2 text-sm text-fg"><span className="text-fg-3">◇</span><Markdown className="[&_p]:m-0">{a}</Markdown></li>
             ))}
           </ul>
         </Section>
@@ -136,8 +136,8 @@ export function StepDetail({ project, queue, step, onChanged }: Props & { step: 
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             {step.review_items.map((r, i) => {
               const href = r.path ? fileUrl(id, r.path) : r.url!;
-              const caption = <div className="truncate px-2 py-1 text-xs text-zinc-400 group-hover:text-zinc-200">{r.label ?? r.path ?? r.url}{r.round ? ` · round ${r.round}` : ""}</div>;
-              const tile = "group overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950 text-left hover:border-zinc-600";
+              const caption = <div className="truncate px-2 py-1 text-xs text-fg-2 group-hover:text-fg">{r.label ?? r.path ?? r.url}{r.round ? ` · round ${r.round}` : ""}</div>;
+              const tile = "group overflow-hidden rounded-lg border border-line bg-canvas text-left hover:border-fg-3/60";
               if (isImage(r)) {
                 const n = step.review_items.slice(0, i).filter(isImage).length;
                 return (
@@ -150,7 +150,7 @@ export function StepDetail({ project, queue, step, onChanged }: Props & { step: 
               }
               return (
                 <a key={i} href={href} target="_blank" rel="noreferrer" className={tile}>
-                  <div className="flex aspect-video items-center justify-center text-2xl text-zinc-600">{r.url ? "↗" : "▤"}</div>
+                  <div className="flex aspect-video items-center justify-center text-2xl text-fg-3">{r.url ? "↗" : "▤"}</div>
                   {caption}
                 </a>
               );
@@ -169,28 +169,28 @@ export function StepDetail({ project, queue, step, onChanged }: Props & { step: 
           <ul className="space-y-1 text-sm">
             {step.checks.map((c, i) => (
               <li key={i} className="flex gap-2">
-                <span className={c.ok ? "text-emerald-400" : "text-red-400"}>{c.ok ? "✓" : "✗"}</span>
-                <span className="text-zinc-200">{c.name}</span>
-                {c.summary && <span className="text-zinc-500">{c.summary}</span>}
+                <span className={c.ok ? "text-ok" : "text-danger"}>{c.ok ? "✓" : "✗"}</span>
+                <span className="text-fg">{c.name}</span>
+                {c.summary && <span className="text-fg-3">{c.summary}</span>}
               </li>
             ))}
           </ul>
         </Section>
       )}
 
-      <Section title="Notes" aside={<span className="text-xs text-zinc-600">{forOrchestrator ? "go to the orchestrator, which weighs them in its review" : "delivered when the step starts"}</span>}>
+      <Section title="Notes" aside={<span className="text-xs text-fg-3">{forOrchestrator ? "go to the orchestrator, which weighs them in its review" : "delivered when the step starts"}</span>}>
         <div className="space-y-2">
           {step.notes.map((n) => (
-            <div key={n.id} className="rounded-lg border border-zinc-800 p-3">
-              <div className="mb-1 flex items-center gap-2 text-xs text-zinc-500">
+            <div key={n.id} className="rounded-lg border border-line p-3">
+              <div className="mb-1 flex items-center gap-2 text-xs text-fg-3">
                 <span>from {n.from}{n.to === "orchestrator" ? ", to the orchestrator" : ""}</span><TimeAgo at={n.at} />
-                <span className={`ml-auto ${n.read_at ? "text-emerald-400" : "text-sky-400"}`}>{n.read_at ? (n.to === "orchestrator" ? "told the orchestrator" : "delivered") : n.to === "orchestrator" ? "on its way to the orchestrator" : "waiting for the step"}</span>
+                <span className={`ml-auto ${n.read_at ? "text-ok" : "text-info"}`}>{n.read_at ? (n.to === "orchestrator" ? "told the orchestrator" : "delivered") : n.to === "orchestrator" ? "on its way to the orchestrator" : "waiting for the step"}</span>
                 {!n.read_at && <WithdrawNote project={id} queue={queue.id} step={step.id} note={n.id} onChanged={onChanged} />}
               </div>
               <Markdown>{n.body}</Markdown>
             </div>
           ))}
-          {step.notes.length === 0 && !notesOpen && <p className="text-sm text-zinc-600">None.</p>}
+          {step.notes.length === 0 && !notesOpen && <p className="text-sm text-fg-3">None.</p>}
         </div>
         {notesOpen && (
           <div className="mt-3">
@@ -208,10 +208,10 @@ export function StepDetail({ project, queue, step, onChanged }: Props & { step: 
         <Section title="Messages sent while it ran">
           <div className="space-y-2">
             {step.messages.map((m) => (
-              <div key={m.id} className="rounded-lg border border-zinc-800 p-3 text-sm">
-                <div className="mb-1 flex gap-2 text-xs text-zinc-500">
+              <div key={m.id} className="rounded-lg border border-line p-3 text-sm">
+                <div className="mb-1 flex gap-2 text-xs text-fg-3">
                   <span>from {m.from}</span><TimeAgo at={m.at} />
-                  <span className={`ml-auto ${m.read_at ? "text-emerald-400" : "text-sky-400"}`}>{m.read_at ? "read" : "not read yet"}</span>
+                  <span className={`ml-auto ${m.read_at ? "text-ok" : "text-info"}`}>{m.read_at ? "read" : "not read yet"}</span>
                 </div>
                 {m.type === "message" && <Markdown>{m.text}</Markdown>}
               </div>
@@ -232,13 +232,13 @@ export function StepDetail({ project, queue, step, onChanged }: Props & { step: 
 
       {step.timeline.length > 0 && (
         <Section title="Timeline">
-          <ol className="relative space-y-2 border-l border-zinc-800 pl-4">
+          <ol className="relative space-y-2 border-l border-line pl-4">
             {step.timeline.map((e) => (
               <li key={e.id} className="text-sm">
-                <span className="absolute -left-[3px] mt-1.5 h-1.5 w-1.5 rounded-full bg-zinc-600" />
-                <span className="font-mono text-xs text-zinc-500">{e.type}</span>{" "}
-                <span className="text-zinc-300">{describe(e)}</span>{" "}
-                <span className="text-xs text-zinc-600"><TimeAgo at={e.at} /></span>
+                <span className="absolute -left-[3px] mt-1.5 h-1.5 w-1.5 rounded-full bg-fg-3" />
+                <span className="font-mono text-xs text-fg-3">{e.type}</span>{" "}
+                <span className="text-fg">{describe(e)}</span>{" "}
+                <span className="text-xs text-fg-3"><TimeAgo at={e.at} /></span>
               </li>
             ))}
           </ol>
@@ -262,17 +262,17 @@ function RejectStep({ project, queue, step, onChanged }: { project: string; queu
       .finally(() => setBusy(false));
   };
   return (
-    <div className="mt-3 rounded-lg bg-rose-500/10 p-3 ring-1 ring-rose-500/30">
-      <p className="text-sm text-rose-200">Reject this step</p>
-      <p className="mt-1 text-xs text-zinc-400">The run pauses and nothing is reverted. The orchestrator is told and proposes what follows (a revert as a step, changed steps, or a new queue) for your approval; the run goes on only once you approve a new revision, and this step is not run again.</p>
+    <div className="mt-3 rounded-lg border border-danger/30 bg-danger/10 p-3">
+      <p className="text-sm text-danger">Reject this step</p>
+      <p className="mt-1 text-xs text-fg-2">The run pauses and nothing is reverted. The orchestrator is told and proposes what follows (a revert as a step, changed steps, or a new queue) for your approval; the run goes on only once you approve a new revision, and this step is not run again.</p>
       <textarea
         value={why} rows={2} placeholder="Why (optional)…" onChange={(e) => setWhy(e.target.value)}
-        className="mt-2 w-full resize-y rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-rose-500 focus:outline-none"
+        className="mt-2 w-full resize-y rounded-lg border border-line-strong bg-canvas px-3 py-2 text-sm text-fg placeholder:text-fg-3 focus:border-danger focus:outline-none"
       />
       <div className="mt-2 flex flex-wrap items-center gap-2">
-        <button disabled={busy} onClick={reject} className="rounded-md bg-rose-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-rose-500 disabled:opacity-40">{busy ? "Rejecting…" : "Reject the step"}</button>
+        <button disabled={busy} onClick={reject} className="rounded-md border border-danger/50 bg-danger/15 px-3 py-1.5 text-sm font-medium text-danger hover:bg-danger/25 disabled:opacity-40">{busy ? "Rejecting…" : "Reject the step"}</button>
         <Button variant="quiet" onClick={() => setOpen(false)}>Cancel</Button>
-        {error && <span className="text-xs text-red-400">{error}</span>}
+        {error && <span className="text-xs text-danger">{error}</span>}
       </div>
     </div>
   );
@@ -282,13 +282,13 @@ function RejectStep({ project, queue, step, onChanged }: { project: string; queu
 function Rejected({ step, holding }: { step: StepView; holding: boolean }) {
   const at = step.timeline.findLast((e) => e.type === "review.rejected")?.at;
   return (
-    <div className="mt-4 rounded-lg bg-rose-500/10 p-3 text-sm ring-1 ring-rose-500/30">
+    <div className="mt-4 rounded-lg border border-danger/30 bg-danger/10 p-3 text-sm">
       <p>
-        <span className="text-zinc-500">Rejected by you{step.reason ? ": " : ""}</span>
-        {step.reason && <span className="text-rose-200">{step.reason}</span>}
-        {at && <span className="text-xs text-zinc-500"> · <TimeAgo at={at} /></span>}
+        <span className="text-fg-3">Rejected by you{step.reason ? ": " : ""}</span>
+        {step.reason && <span className="text-danger">{step.reason}</span>}
+        {at && <span className="text-xs text-fg-3"> · <TimeAgo at={at} /></span>}
       </p>
-      <p className="mt-1 text-xs text-zinc-400">
+      <p className="mt-1 text-xs text-fg-2">
         {holding
           ? "Nothing was reverted. The run waits until you approve a new revision of the queue (the orchestrator proposes one); nothing of the queue is pushed until then."
           : "A newer revision was approved since; this step is not run again."}
@@ -300,12 +300,12 @@ function Rejected({ step, holding }: { step: StepView; holding: boolean }) {
 /** On a picture's tile: accepted, its comments, whether it has a before to compare with. */
 function PictureBadges({ marks, paired }: { marks?: StepView["pictures"][string]; paired: boolean }) {
   if (!marks?.accepted && !marks?.comments.length && !paired) return null;
-  const chip = "rounded bg-black/70 px-1.5 py-0.5 text-[11px]";
+  const chip = "rounded bg-canvas/70 px-1.5 py-0.5 text-[11px]";
   return (
     <span className="absolute right-1.5 top-1.5 flex gap-1">
-      {paired && <span className={`${chip} text-zinc-200`} title="Has a before to compare with">⇄</span>}
-      {marks?.accepted && <span className={`${chip} text-emerald-300`} title="You marked it accepted">✓</span>}
-      {!!marks?.comments.length && <span className={`${chip} text-sky-300`} title="Your comments">💬 {marks.comments.length}</span>}
+      {paired && <span className={`${chip} text-fg`} title="Has a before to compare with">⇄</span>}
+      {marks?.accepted && <span className={`${chip} text-ok`} title="You marked it accepted">✓</span>}
+      {!!marks?.comments.length && <span className={`${chip} text-info`} title="Your comments">💬 {marks.comments.length}</span>}
     </span>
   );
 }
@@ -329,15 +329,15 @@ function PictureActions({ project, queue, step, path, onChanged }: { project: st
         <button
           onClick={() => act(project, "POST", `${base}/mark`, { path, accepted: !marks?.accepted }).then(onChanged, (e: Error) => setError(e.message))}
           aria-pressed={!!marks?.accepted}
-          className={`rounded-md px-3 py-1.5 text-sm font-medium ring-1 ${marks?.accepted ? "bg-emerald-600/20 text-emerald-300 ring-emerald-500/50" : "text-zinc-200 ring-white/15 hover:bg-white/10"}`}
+          className={`rounded-md px-3 py-1.5 text-sm font-medium ring-1 ${marks?.accepted ? "bg-ok/20 text-ok ring-ok/50" : "text-fg ring-line-strong hover:bg-surface-3"}`}
         >{marks?.accepted ? "✓ Accepted" : "Mark accepted"}</button>
-        <span className="text-xs text-zinc-500">a mark for this picture; the step is not accepted by it</span>
-        {error && <span className="text-xs text-red-400">{error}</span>}
+        <span className="text-xs text-fg-3">a mark for this picture; the step is not accepted by it</span>
+        {error && <span className="text-xs text-danger">{error}</span>}
       </div>
       {marks?.comments.map((c, i) => (
-        <div key={i} className="rounded-md bg-white/5 px-2 py-1.5">
-          <p className="whitespace-pre-wrap text-zinc-200">{c.text}</p>
-          <p className="text-[11px] text-zinc-500">{c.to === "send_back" ? "sent back to the worker" : c.to === "orchestrator" ? "to the orchestrator's review" : `a note on step ${c.note_step}`} · <TimeAgo at={c.at} /></p>
+        <div key={i} className="rounded-md bg-surface-3 px-2 py-1.5">
+          <p className="whitespace-pre-wrap text-fg">{c.text}</p>
+          <p className="text-[11px] text-fg-3">{c.to === "send_back" ? "sent back to the worker" : c.to === "orchestrator" ? "to the orchestrator's review" : `a note on step ${c.note_step}`} · <TimeAgo at={c.at} /></p>
         </div>
       ))}
       {where ? (
@@ -349,9 +349,9 @@ function PictureActions({ project, queue, step, path, onChanged }: { project: st
             rows={2}
             onSubmit={async (text) => { await act(project, "POST", `${base}/comment`, { path, text }); onChanged(); }}
           />
-          <p className="mt-1 text-[11px] text-zinc-500">The comment {where}.</p>
+          <p className="mt-1 text-[11px] text-fg-3">The comment {where}.</p>
         </div>
-      ) : <p className="text-xs text-zinc-500">No step to take a comment: this step is not waiting for your review and nothing after it is pending.</p>}
+      ) : <p className="text-xs text-fg-3">No step to take a comment: this step is not waiting for your review and nothing after it is pending.</p>}
     </div>
   );
 }
@@ -366,23 +366,23 @@ function StepCommits({ project, queue, step, version }: { project: string; queue
   const several = data.rounds.length > 1;
   const foreign = data.rounds.some((r) => r.commits.some((c) => c.foreign));
   return (
-    <Section title="Commits" aside={foreign ? <span className="text-xs text-amber-400/80">◆ not by this step's worker</span> : undefined}>
+    <Section title="Commits" aside={foreign ? <span className="text-xs text-warn/80">◆ not by this step's worker</span> : undefined}>
       <div className="space-y-3">
         {data.rounds.map((r, i) => (
           <div key={i}>
-            {several && <div className="mb-1 text-xs text-zinc-500">Round {i + 1}{r.open ? " (at work)" : ""}</div>}
+            {several && <div className="mb-1 text-xs text-fg-3">Round {i + 1}{r.open ? " (at work)" : ""}</div>}
             {r.commits.length === 0
-              ? <p className="text-sm text-zinc-500">{r.open ? "No commit yet." : "No commit."}</p>
+              ? <p className="text-sm text-fg-3">{r.open ? "No commit yet." : "No commit."}</p>
               : (
                 <ul className="space-y-1.5">
                   {r.commits.map((c) => (
                     <li key={c.sha} className="text-sm">
                       <div className="flex gap-2">
-                        <span className="shrink-0 font-mono text-xs leading-5 text-zinc-500">{c.sha.slice(0, 7)}</span>
-                        <span className={`min-w-0 ${c.foreign ? "text-amber-200" : "text-zinc-200"}`}>{c.foreign && <span className="text-amber-400" title="Not made in a turn of this step's worker">◆ </span>}{c.subject}</span>
+                        <span className="shrink-0 font-mono text-xs leading-5 text-fg-3">{c.sha.slice(0, 7)}</span>
+                        <span className={`min-w-0 ${c.foreign ? "text-warn" : "text-fg"}`}>{c.foreign && <span className="text-warn" title="Not made in a turn of this step's worker">◆ </span>}{c.subject}</span>
                       </div>
-                      <div className="pl-[3.75rem] text-xs text-zinc-500">
-                        {c.files} file{c.files === 1 ? "" : "s"} · <span className="text-emerald-400/80">+{c.insertions}</span> <span className="text-red-400/80">−{c.deletions}</span> · {c.author} · <TimeAgo at={c.at} />
+                      <div className="pl-[3.75rem] text-xs text-fg-3">
+                        {c.files} file{c.files === 1 ? "" : "s"} · <span className="text-ok/80">+{c.insertions}</span> <span className="text-danger/80">−{c.deletions}</span> · {c.author} · <TimeAgo at={c.at} />
                       </div>
                     </li>
                   ))}
@@ -418,10 +418,10 @@ function WorktreeActions({ project, root, queue, onChanged }: { project: string;
   };
   return (
     <Section title="Worktree">
-      <p className="break-all text-xs text-zinc-500"><span className="font-mono">{queue.worktree}</span> on <span className="font-mono">{branch}</span>{g?.base ? <> from <span className="font-mono">{g.base.ref}</span></> : null}</p>
-      {g?.merged && <p className="mt-1.5 text-sm text-emerald-300">Merged into <span className="font-mono">{g.merged.into}</span> ({g.merged.fast_forward ? "fast-forward" : `merge commit ${g.merged.sha.slice(0, 7)}`}) <span className="text-xs text-zinc-500">· <TimeAgo at={g.merged.at} /></span></p>}
+      <p className="break-all text-xs text-fg-3"><span className="font-mono">{queue.worktree}</span> on <span className="font-mono">{branch}</span>{g?.base ? <> from <span className="font-mono">{g.base.ref}</span></> : null}</p>
+      {g?.merged && <p className="mt-1.5 text-sm text-ok">Merged into <span className="font-mono">{g.merged.into}</span> ({g.merged.fast_forward ? "fast-forward" : `merge commit ${g.merged.sha.slice(0, 7)}`}) <span className="text-xs text-fg-3">· <TimeAgo at={g.merged.at} /></span></p>}
       {g?.cleaned
-        ? <p className="mt-1.5 text-sm text-zinc-300">Cleaned up: the worktree removed, branch <span className="font-mono">{g.cleaned.branch}</span> deleted <span className="text-xs text-zinc-500">· <TimeAgo at={g.cleaned.at} /></span></p>
+        ? <p className="mt-1.5 text-sm text-fg">Cleaned up: the worktree removed, branch <span className="font-mono">{g.cleaned.branch}</span> deleted <span className="text-xs text-fg-3">· <TimeAgo at={g.cleaned.at} /></span></p>
         : (
           <div className="mt-2 flex flex-wrap gap-2">
             {base && !g?.merged && <Button variant="quiet" onClick={() => { setAsk("merge"); setResult(undefined); }}>Merge into {base}…</Button>}
@@ -429,16 +429,16 @@ function WorktreeActions({ project, root, queue, onChanged }: { project: string;
           </div>
         )}
       {ask && !g?.cleaned && (
-        <div className="mt-3 rounded-lg bg-amber-500/10 p-3 ring-1 ring-amber-500/30">
+        <div className="mt-3 rounded-lg border border-warn/30 bg-warn/10 p-3">
           {ask === "merge" ? (
             <>
-              <p className="text-sm text-amber-200">Merge <span className="font-mono">{branch}</span> into <span className="font-mono">{base}</span>?</p>
-              <p className="mt-1 text-xs text-zinc-400">In the worktree where {base} is checked out: a fast-forward when possible, else a merge commit. Refused if that worktree has uncommitted changes or a run is going there; on a conflict the merge is aborted and nothing changes. Nothing is pushed.</p>
+              <p className="text-sm text-warn">Merge <span className="font-mono">{branch}</span> into <span className="font-mono">{base}</span>?</p>
+              <p className="mt-1 text-xs text-fg-2">In the worktree where {base} is checked out: a fast-forward when possible, else a merge commit. Refused if that worktree has uncommitted changes or a run is going there; on a conflict the merge is aborted and nothing changes. Nothing is pushed.</p>
             </>
           ) : (
             <>
-              <p className="text-sm text-amber-200">Clean up this queue's worktree?</p>
-              <p className="mt-1 text-xs text-zinc-400">Removes the worktree (git worktree remove) and deletes branch <span className="font-mono">{branch}</span> (git branch -d). Refused, with nothing removed, if the worktree has uncommitted changes or the branch is not merged.</p>
+              <p className="text-sm text-warn">Clean up this queue's worktree?</p>
+              <p className="mt-1 text-xs text-fg-2">Removes the worktree (git worktree remove) and deletes branch <span className="font-mono">{branch}</span> (git branch -d). Refused, with nothing removed, if the worktree has uncommitted changes or the branch is not merged.</p>
             </>
           )}
           <div className="mt-2 flex flex-wrap gap-2">
@@ -447,7 +447,7 @@ function WorktreeActions({ project, root, queue, onChanged }: { project: string;
           </div>
         </div>
       )}
-      {result && <p className={`mt-2 break-all text-xs ${result.ok ? "text-emerald-300" : "text-red-300"}`}>{result.text}</p>}
+      {result && <p className={`mt-2 break-all text-xs ${result.ok ? "text-ok" : "text-danger"}`}>{result.text}</p>}
     </Section>
   );
 }
@@ -459,15 +459,15 @@ function BranchLine({ project, queue, version }: { project: string; queue: strin
   const b = useFetch<BranchView | null>(`/api/projects/${enc(project)}/queues/${enc(queue)}/git`, version);
   if (!b) return null;
   const counts = (x: { ahead: number; behind: number }) => (
-    <span><span className="text-emerald-300">{x.ahead} ahead</span>, <span className={x.behind ? "text-amber-300" : "text-zinc-400"}>{x.behind} behind</span></span>
+    <span><span className="text-ok">{x.ahead} ahead</span>, <span className={x.behind ? "text-warn" : "text-fg-2"}>{x.behind} behind</span></span>
   );
   return (
-    <div className="mt-3 space-y-0.5 rounded-lg bg-zinc-800/50 p-3 text-sm text-zinc-300">
-      <p><span className="text-zinc-500">Branch </span><span className="font-mono">{b.branch}</span></p>
-      {b.base && <p className="text-xs">{counts(b.base)} <span className="text-zinc-500">of its base</span> <span className="font-mono">{b.base.ref}</span></p>}
+    <div className="mt-3 space-y-0.5 rounded-lg bg-surface-2 p-3 text-sm text-fg">
+      <p><span className="text-fg-3">Branch </span><span className="font-mono">{b.branch}</span></p>
+      {b.base && <p className="text-xs">{counts(b.base)} <span className="text-fg-3">of its base</span> <span className="font-mono">{b.base.ref}</span></p>}
       {b.upstream
-        ? <p className="text-xs">{counts(b.upstream)} <span className="text-zinc-500">of</span> <span className="font-mono">{b.upstream.ref}</span> <span className="text-zinc-500">as fetched {b.upstream.at ? <TimeAgo at={b.upstream.at} /> : "at an unknown time"}</span></p>
-        : <p className="text-xs text-zinc-500">No remote-tracking branch.</p>}
+        ? <p className="text-xs">{counts(b.upstream)} <span className="text-fg-3">of</span> <span className="font-mono">{b.upstream.ref}</span> <span className="text-fg-3">as fetched {b.upstream.at ? <TimeAgo at={b.upstream.at} /> : "at an unknown time"}</span></p>
+        : <p className="text-xs text-fg-3">No remote-tracking branch.</p>}
     </div>
   );
 }
@@ -481,17 +481,17 @@ function PushLine({ project, queue, step, onChanged }: { project: string; queue:
   const failed = p.result === "failed";
   const latest = failed && queue.push?.error?.step === step;
   return (
-    <div className={`mt-4 rounded-lg p-3 text-sm ring-1 ${failed ? "bg-red-500/10 ring-red-500/30" : p.result === "pushed" ? "bg-emerald-500/10 ring-emerald-500/30" : "bg-zinc-800/50 ring-zinc-700"}`}>
+    <div className={`mt-4 rounded-lg border p-3 text-sm ${failed ? "border-danger/30 bg-danger/10" : p.result === "pushed" ? "border-ok/30 bg-ok/10" : "border-line-strong bg-surface-2"}`}>
       <p>
-        <span className="text-zinc-500">{failed ? "Push failed: " : p.result === "pushed" ? "Pushed: " : "Push: "}</span>
-        <span className={failed ? "text-red-300" : "text-zinc-200"}>{p.text}</span>
-        <span className="text-xs text-zinc-500"> · <TimeAgo at={p.at} /></span>
+        <span className="text-fg-3">{failed ? "Push failed: " : p.result === "pushed" ? "Pushed: " : "Push: "}</span>
+        <span className={failed ? "text-danger" : "text-fg"}>{p.text}</span>
+        <span className="text-xs text-fg-3"> · <TimeAgo at={p.at} /></span>
       </p>
-      {failed && <p className="mt-1 text-xs text-zinc-400">The step stays accepted. The next accepted step pushes again, or push again now.</p>}
+      {failed && <p className="mt-1 text-xs text-fg-2">The step stays accepted. The next accepted step pushes again, or push again now.</p>}
       {latest && (
         <div className="mt-2 flex items-center gap-3">
           <Button variant="quiet" disabled={busy} onClick={() => { setBusy(true); setError(undefined); act(project, "POST", `/queues/${enc(queue.id)}/push`).then(onChanged, (e: Error) => setError(e.message)).finally(() => setBusy(false)); }}>{busy ? "Pushing…" : "Push again"}</Button>
-          {error && <span className="text-xs text-red-400">{error}</span>}
+          {error && <span className="text-xs text-danger">{error}</span>}
         </div>
       )}
     </div>
@@ -515,36 +515,36 @@ function AcceptReview({ project, queue, step, next, asked, criteria, onChanged }
   const send = (text: string) => act(project, "POST", `/queues/${enc(queue)}/steps/${enc(step)}/send-back`, { text }).then(onChanged);
   return (
     <Section title="Waiting for your review">
-      {asked && <p className="mb-2 text-sm text-zinc-300"><span className="text-zinc-500">The orchestrator asks you: </span>{asked}</p>}
-      <p className="mb-2 text-sm text-zinc-400">The queue holds here until you accept this step or send it back.</p>
+      {asked && <p className="mb-2 text-sm text-fg"><span className="text-fg-3">The orchestrator asks you: </span>{asked}</p>}
+      <p className="mb-2 text-sm text-fg-2">The queue holds here until you accept this step or send it back.</p>
       {noteOpen && (
         <div className="mb-3">
           <textarea
             value={note} rows={3} placeholder="A note with your acceptance (optional)…" onChange={(e) => setNote(e.target.value)}
-            className="w-full resize-y rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-sky-500 focus:outline-none"
+            className="w-full resize-y rounded-lg border border-line-strong bg-canvas px-3 py-2 text-sm text-fg placeholder:text-fg-3 focus:border-accent focus:outline-none"
           />
           {next ? (
-            <label className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-zinc-400">
+            <label className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-fg-2">
               The note goes to
-              <select value={noteTo} onChange={(e) => setNoteTo(e.target.value as "next" | "orchestrator")} className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-zinc-200">
+              <select value={noteTo} onChange={(e) => setNoteTo(e.target.value as "next" | "orchestrator")} className="rounded-md border border-line-strong bg-canvas px-2 py-1 text-xs text-fg">
                 <option value="next">the next step ({next}), when it starts</option>
                 <option value="orchestrator">the orchestrator (the plan, later queues, the rules)</option>
               </select>
             </label>
           ) : (
-            <p className="mt-1.5 text-xs text-zinc-400">The note goes to the orchestrator: this is the queue's last step.</p>
+            <p className="mt-1.5 text-xs text-fg-2">The note goes to the orchestrator: this is the queue's last step.</p>
           )}
         </div>
       )}
       <div className="flex flex-wrap items-center gap-3">
         <Button onClick={() => void accept()}>{note.trim() ? "Accept with the note" : "Accept and go on"}</Button>
-        {!noteOpen && <button onClick={() => setNoteOpen(true)} className="text-sm text-zinc-400 hover:text-zinc-200">+ Add a note</button>}
-        {error && <span className="text-xs text-red-400">{error}</span>}
+        {!noteOpen && <button onClick={() => setNoteOpen(true)} className="text-sm text-fg-2 hover:text-fg">+ Add a note</button>}
+        {error && <span className="text-xs text-danger">{error}</span>}
       </div>
       <RejectStep project={project} queue={queue} step={step} onChanged={onChanged} />
       <div className="mt-4">
-        <p className="mb-1.5 text-sm text-zinc-300">Fix it</p>
-        <p className="mb-2 text-xs text-zinc-500">Sends the step back to its worker with your words. Where they conflict with the step's acceptance criteria, your words win.</p>
+        <p className="mb-1.5 text-sm text-fg">Fix it</p>
+        <p className="mb-2 text-xs text-fg-3">Sends the step back to its worker with your words. Where they conflict with the step's acceptance criteria, your words win.</p>
         <Composer
           draft={draftKey(project, "fix", queue, step)}
           placeholder="What you want instead…"
@@ -555,10 +555,10 @@ function AcceptReview({ project, queue, step, next, asked, criteria, onChanged }
             : send(text)}
         />
         {confirm && (
-          <div className="mt-3 rounded-lg bg-amber-500/10 p-3 ring-1 ring-amber-500/30">
-            <p className="text-sm text-amber-200">Your words override these acceptance criteria where they conflict:</p>
+          <div className="mt-3 rounded-lg border border-warn/30 bg-warn/10 p-3">
+            <p className="text-sm text-warn">Your words override these acceptance criteria where they conflict:</p>
             <ul className="mt-1.5 space-y-1">
-              {criteria.map((c, i) => <li key={i} className="flex gap-2 text-sm text-zinc-300"><span className="text-zinc-600">◇</span><Markdown className="[&_p]:m-0">{c}</Markdown></li>)}
+              {criteria.map((c, i) => <li key={i} className="flex gap-2 text-sm text-fg"><span className="text-fg-3">◇</span><Markdown className="[&_p]:m-0">{c}</Markdown></li>)}
             </ul>
             <div className="mt-3 flex flex-wrap gap-2">
               <Button onClick={() => { const c = confirm; setConfirm(undefined); c.send().then(c.resolve, c.reject); }}>Send it back</Button>
@@ -575,9 +575,9 @@ function WithdrawNote({ project, queue, step, note, onChanged }: { project: stri
   const [error, setError] = useState<string>();
   return (
     <>
-      {error && <span className="text-red-400">{error}</span>}
+      {error && <span className="text-danger">{error}</span>}
       <button
-        className="text-zinc-500 hover:text-red-300"
+        className="text-fg-3 hover:text-danger"
         onClick={() => act(project, "DELETE", `/queues/${enc(queue)}/steps/${enc(step)}/notes/${enc(note)}`).then(onChanged, (e: Error) => setError(e.message))}
       >withdraw</button>
     </>
@@ -605,20 +605,20 @@ function describe(e: Event): string {
 
 export function Question({ q, project, onChanged }: { q: QuestionView; project: string; onChanged: () => void }) {
   const open = q.state === "open" || q.state === "escalated";
-  const tone = q.state === "escalated" ? "border-violet-500/40 bg-violet-500/5" : open ? "border-amber-500/30 bg-amber-500/5" : "border-zinc-800";
+  const tone = q.state === "escalated" ? "border-review/40 bg-review/5" : open ? "border-warn/30 bg-warn/5" : "border-line";
   return (
     <div className={`mb-2 rounded-lg border p-3 text-sm ${tone}`}>
-      <div className="mb-1 flex flex-wrap gap-2 text-xs text-zinc-500">
+      <div className="mb-1 flex flex-wrap gap-2 text-xs text-fg-3">
         <StatusBadge status={q.state === "open" ? "waiting" : q.state === "escalated" ? "review" : "done"} label={q.state === "escalated" ? "for you" : q.state} />
         {q.queue && <span className="font-mono">{q.queue}{q.step ? `/${q.step}` : ""}</span>}
         <span>{q.can_continue ? "the worker goes on meanwhile" : "the worker waits"}</span>
         <span className="ml-auto"><TimeAgo at={q.asked_at} /></span>
       </div>
-      <p className="text-zinc-100">{q.text}</p>
-      {q.options && <ul className="mt-1 list-disc pl-5 text-zinc-400">{q.options.map((o) => <li key={o}>{o}</li>)}</ul>}
+      <p className="text-fg">{q.text}</p>
+      {q.options && <ul className="mt-1 list-disc pl-5 text-fg-2">{q.options.map((o) => <li key={o}>{o}</li>)}</ul>}
       {q.answers.map((a) => (
-        <div key={a.id} className="mt-2 border-t border-zinc-800 pt-2 text-zinc-300">
-          <span className="text-zinc-500">{a.escalate ? "Passed to you by the orchestrator: " : `Answer (${a.by}): `}</span>
+        <div key={a.id} className="mt-2 border-t border-line pt-2 text-fg">
+          <span className="text-fg-3">{a.escalate ? "Passed to you by the orchestrator: " : `Answer (${a.by}): `}</span>
           <Markdown className="inline [&_p]:inline [&_p]:m-0">{a.text}</Markdown>
         </div>
       ))}
@@ -640,8 +640,8 @@ function AnswerBox({ q, project, onChanged }: { q: QuestionView; project: string
       placeholder="Your answer…"
       button="Answer"
       extra={
-        <label className="flex items-center gap-1.5 text-xs text-zinc-400">
-          <input type="checkbox" checked={goOn} onChange={(e) => setGoOn(e.target.checked)} className="accent-sky-500" />
+        <label className="flex items-center gap-1.5 text-xs text-fg-2">
+          <input type="checkbox" checked={goOn} onChange={(e) => setGoOn(e.target.checked)} className="accent-accent" />
           the worker may go on
         </label>
       }
@@ -675,24 +675,24 @@ interface LeftView {
 function StoppedWork({ left, work, setWork, needsChoice, pushAccepted, branch }: {
   left: LeftView; work?: "keep" | "discard"; setWork: (w: "keep" | "discard") => void; needsChoice: boolean; pushAccepted: boolean; branch?: string;
 }) {
-  if (!left.commits.length && !left.uncommitted.length) return <p className="mt-3 text-xs text-zinc-400">Step {left.step} left no commits and no uncommitted changes.</p>;
+  if (!left.commits.length && !left.uncommitted.length) return <p className="mt-3 text-xs text-fg-2">Step {left.step} left no commits and no uncommitted changes.</p>;
   const n = left.commits.length;
   const option = (value: "keep" | "discard", title: string, text: string) => (
-    <label className={`flex cursor-pointer gap-2 rounded-md p-2 ring-1 ${work === value ? "bg-zinc-900 ring-sky-500/60" : "ring-zinc-700/60 hover:bg-zinc-900/60"}`}>
-      <input type="radio" name="stopped-work" checked={work === value} onChange={() => setWork(value)} className="mt-1 accent-sky-500" />
-      <span><span className="font-medium text-zinc-100">{title}</span><span className="block text-xs text-zinc-400">{text}</span></span>
+    <label className={`flex cursor-pointer gap-2 rounded-md p-2 ring-1 ${work === value ? "bg-surface ring-accent/60" : "ring-line-strong hover:bg-surface/60"}`}>
+      <input type="radio" name="stopped-work" checked={work === value} onChange={() => setWork(value)} className="mt-1 accent-accent" />
+      <span><span className="font-medium text-fg">{title}</span><span className="block text-xs text-fg-2">{text}</span></span>
     </label>
   );
   return (
-    <div className="mt-3 space-y-3 rounded-md bg-zinc-900/70 p-2.5">
+    <div className="mt-3 space-y-3 rounded-md bg-surface/70 p-2.5">
       {n > 0 && (
         <div>
-          <p className="text-xs text-zinc-400">Step {left.step} left {n} commit{n === 1 ? "" : "s"} of its own:</p>
+          <p className="text-xs text-fg-2">Step {left.step} left {n} commit{n === 1 ? "" : "s"} of its own:</p>
           <ul className="mt-1 space-y-1">
             {left.commits.map((c) => (
               <li key={c.sha} className="text-sm">
-                <span className="font-mono text-xs text-zinc-500">{c.sha.slice(0, 7)}</span> <span className="text-zinc-200">{c.subject}</span>
-                <span className="block pl-[3.6rem] text-[11px] text-zinc-500">{c.files} file{c.files === 1 ? "" : "s"} · <span className="text-emerald-400/80">+{c.insertions}</span> <span className="text-red-400/80">−{c.deletions}</span> · <TimeAgo at={c.at} /></span>
+                <span className="font-mono text-xs text-fg-3">{c.sha.slice(0, 7)}</span> <span className="text-fg">{c.subject}</span>
+                <span className="block pl-[3.6rem] text-[11px] text-fg-3">{c.files} file{c.files === 1 ? "" : "s"} · <span className="text-ok/80">+{c.insertions}</span> <span className="text-danger/80">−{c.deletions}</span> · <TimeAgo at={c.at} /></span>
               </li>
             ))}
           </ul>
@@ -700,13 +700,13 @@ function StoppedWork({ left, work, setWork, needsChoice, pushAccepted, branch }:
       )}
       {left.uncommitted.length > 0 && (
         <div>
-          <p className="text-xs text-zinc-400">Uncommitted changes {left.uncommitted_note}; Nexus never cleans them:</p>
-          <ul className="mt-1 space-y-0.5 font-mono text-xs text-zinc-300">
-            {left.uncommitted.map((u) => <li key={u.path} className="break-all"><span className="inline-block w-6 text-amber-300/90">{u.status}</span>{u.path}</li>)}
+          <p className="text-xs text-fg-2">Uncommitted changes {left.uncommitted_note}; Nexus never cleans them:</p>
+          <ul className="mt-1 space-y-0.5 font-mono text-xs text-fg">
+            {left.uncommitted.map((u) => <li key={u.path} className="break-all"><span className="inline-block w-6 text-warn/90">{u.status}</span>{u.path}</li>)}
           </ul>
         </div>
       )}
-      {left.discarded && <p className="text-sm text-zinc-300">You chose to discard these commits <TimeAgo at={left.discarded.at} />: the orchestrator proposes a revision that reverts them, and approving it lifts the stop.</p>}
+      {left.discarded && <p className="text-sm text-fg">You chose to discard these commits <TimeAgo at={left.discarded.at} />: the orchestrator proposes a revision that reverts them, and approving it lifts the stop.</p>}
       {needsChoice && (
         <div className="space-y-1.5" role="radiogroup" aria-label="The stopped step's commits">
           {option("keep", "Keep", pushAccepted
@@ -738,28 +738,28 @@ function StopBox({ project, queue, onChanged, left, work, setWork, needsChoice, 
   };
   const p = queue.lift_proposal;
   return (
-    <div className="mt-4 rounded-lg bg-orange-500/10 p-3 text-sm ring-1 ring-orange-500/30">
-      <p className="font-medium text-orange-300">Stopped{stopPlace(queue)}</p>
-      {queue.status_reason && <div className="mt-1 text-zinc-300"><Expandable text={queue.status_reason} /></div>}
+    <div className="mt-4 rounded-lg border border-stop/30 bg-stop/10 p-3 text-sm">
+      <p className="font-medium text-stop">Stopped{stopPlace(queue)}</p>
+      {queue.status_reason && <div className="mt-1 text-fg"><Expandable text={queue.status_reason} /></div>}
       {p && (
-        <div className="mt-3 rounded-md bg-zinc-900/70 p-2.5">
-          <p className="text-xs text-zinc-500">The orchestrator proposes to continue · <TimeAgo at={p.at} /></p>
-          <p className="mt-0.5 text-zinc-200">{p.reason}</p>
+        <div className="mt-3 rounded-md bg-surface/70 p-2.5">
+          <p className="text-xs text-fg-3">The orchestrator proposes to continue · <TimeAgo at={p.at} /></p>
+          <p className="mt-0.5 text-fg">{p.reason}</p>
         </div>
       )}
       {left && <StoppedWork left={left} work={work} setWork={setWork} needsChoice={needsChoice} pushAccepted={pushAccepted} branch={queue.branch} />}
       {queue.approved ? (
         <div className="mt-3 flex flex-wrap items-center gap-3">
           <Button disabled={busy || (needsChoice && !work)} onClick={() => void go()}>{needsChoice && work === "discard" ? "Discard and ask for a revert" : "Continue"}</Button>
-          <span className="text-xs text-zinc-400">
+          <span className="text-xs text-fg-2">
             {needsChoice && !work ? "Choose Keep or Discard first." : needsChoice && work === "discard" ? "The stop stays until you approve the orchestrator's revert." : "Lifts the stop; the stopped step runs again in its session, unless it was skipped."}
           </span>
         </div>
       ) : (
-        <p className="mt-3 text-xs text-zinc-400">Revision {queue.revision} is not approved yet: approving it lifts the stop{needsChoice ? " (with your choice above)" : ""}.</p>
+        <p className="mt-3 text-xs text-fg-2">Revision {queue.revision} is not approved yet: approving it lifts the stop{needsChoice ? " (with your choice above)" : ""}.</p>
       )}
-      {note && <p className="mt-2 text-xs text-sky-300">{note}</p>}
-      {error && <p className="mt-2 text-xs text-red-300">{error}</p>}
+      {note && <p className="mt-2 text-xs text-info">{note}</p>}
+      {error && <p className="mt-2 text-xs text-danger">{error}</p>}
     </div>
   );
 }
@@ -785,12 +785,12 @@ function Changes({ entries, queue }: { entries: StatusChange[]; queue: QueueView
       <ul className="space-y-2">
         {[...entries].reverse().map((c, i) => (
           <li key={i} className="text-sm">
-            <div className="flex flex-wrap items-baseline gap-x-2 text-xs text-zinc-500">
-              <span className={c.by === "orchestrator" ? "text-violet-300" : "text-sky-300"}>{WHO[c.by]}</span>
+            <div className="flex flex-wrap items-baseline gap-x-2 text-xs text-fg-3">
+              <span className={c.by === "orchestrator" ? "text-review" : "text-info"}>{WHO[c.by]}</span>
               <TimeAgo at={c.at} />
             </div>
-            <div className="text-zinc-200">{what(c)}</div>
-            {c.reason && <div className="text-xs text-zinc-400">{c.kind === "lift" ? "The stop was: " : "Why: "}{c.reason}</div>}
+            <div className="text-fg">{what(c)}</div>
+            {c.reason && <div className="text-xs text-fg-2">{c.kind === "lift" ? "The stop was: " : "Why: "}{c.reason}</div>}
           </li>
         ))}
       </ul>
@@ -802,8 +802,8 @@ function WithdrawApproval({ project, queue, onChanged }: { project: string; queu
   const [open, setOpen] = useState(false);
   if (!open) return <div className="mt-2"><Button variant="quiet" onClick={() => setOpen(true)}>Withdraw approval</Button></div>;
   return (
-    <div className="mt-3 rounded-lg border border-orange-500/30 bg-orange-500/5 p-3">
-      <p className="mb-2 text-sm text-zinc-300">
+    <div className="mt-3 rounded-lg border border-stop/30 bg-stop/5 p-3">
+      <p className="mb-2 text-sm text-fg">
         The queue has not started. Withdrawing puts it back to proposed: it waits for your approval again and cannot be started until then. The earlier approval stays on record.
       </p>
       <Composer
@@ -831,13 +831,13 @@ function OwnValues({ queue }: { queue: QueueView }) {
       <ul className="space-y-1 text-sm">
         {own.map((s) => (
           <li key={s.id} className="flex flex-wrap gap-x-2">
-            <span className="font-mono text-zinc-500">{s.id}</span>
-            <span className="text-zinc-300">{s.title}</span>
-            <span className="text-violet-300">⚙ {stepValuesText(s)}</span>
+            <span className="font-mono text-fg-3">{s.id}</span>
+            <span className="text-fg">{s.title}</span>
+            <span className="text-review">⚙ {stepValuesText(s)}</span>
           </li>
         ))}
       </ul>
-      <p className="mt-1.5 text-xs text-zinc-500">The other steps, and what a step leaves out, run on the run's runtime, model and effort.</p>
+      <p className="mt-1.5 text-xs text-fg-3">The other steps, and what a step leaves out, run on the run's runtime, model and effort.</p>
     </Section>
   );
 }
@@ -857,16 +857,16 @@ export function QueueDetail({ project, queue, onChanged }: Props) {
 
   return (
     <div>
-      <div className="text-xs text-zinc-500">{project.project.name}</div>
-      <h2 className="mt-1 pr-8 text-xl font-semibold text-zinc-50">
-        <span className="font-mono text-zinc-500">{queue.id}</span> {queue.title}
+      <div className="text-xs text-fg-3">{project.project.name}</div>
+      <h2 className="mt-1 pr-8 text-xl font-semibold text-fg">
+        <span className="font-mono text-fg-3">{queue.id}</span> {queue.title}
       </h2>
-      <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-zinc-500">
+      <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-fg-3">
         <StatusBadge status={queue.status} />
         <span>revision {queue.revision}</span>
         {queue.branch && <span className="font-mono">{queue.branch}</span>}
         {queue.worktree && <span className="font-mono">{queue.worktree}</span>}
-        <span className={queue.approved ? "text-emerald-400" : "text-zinc-500"}>
+        <span className={queue.approved ? "text-ok" : "text-fg-3"}>
           {queue.approved ? "approved" : queue.withdrawals.length && queue.withdrawals.at(-1)!.approvals >= queue.approvals.length ? "approval withdrawn" : latest ? "approval is for an older revision" : "no approval recorded in Nexus"}
         </span>
       </div>
@@ -880,8 +880,8 @@ export function QueueDetail({ project, queue, onChanged }: Props) {
         : queue.status_reason && <Section title="State"><Expandable text={queue.status_reason} /></Section>}
       {queue.report && (
         <Section title="Queue report">
-          <p className="text-sm text-zinc-300">{queue.report.summary}</p>
-          <a className="text-sm text-sky-400 underline" href={fileUrl(id, queue.report.path)} target="_blank" rel="noreferrer">Open the report</a>
+          <p className="text-sm text-fg">{queue.report.summary}</p>
+          <a className="text-sm text-accent underline" href={fileUrl(id, queue.report.path)} target="_blank" rel="noreferrer">Open the report</a>
         </Section>
       )}
       {queue.questions.length > 0 && <Section title="Questions">{queue.questions.map((q) => <Question key={q.qid} q={q} project={id} onChanged={onChanged} />)}</Section>}
@@ -892,7 +892,7 @@ export function QueueDetail({ project, queue, onChanged }: Props) {
         {[...queue.approvals.map((a) => ({ ...a, withdrawn: false as const })), ...queue.withdrawals.map((w) => ({ ...w, withdrawn: true as const }))]
           .sort((x, y) => x.at.localeCompare(y.at))
           .map((a, i) => (
-            <p key={i} className={`mb-1 text-sm ${a.withdrawn ? "text-orange-300/90" : "text-zinc-300"}`}>
+            <p key={i} className={`mb-1 text-sm ${a.withdrawn ? "text-stop/90" : "text-fg"}`}>
               r{a.revision} · {a.withdrawn ? "withdrawn " : ""}<TimeAgo at={a.at} />
               {!a.withdrawn && a.words && <> · <q className="italic">{a.words}</q></>}
               {a.withdrawn && a.reason && <> · <q className="italic">{a.reason}</q></>}
@@ -903,17 +903,17 @@ export function QueueDetail({ project, queue, onChanged }: Props) {
         )}
         {!queue.approved && (
           <div className="mt-2">
-            <p className="mb-2 text-sm text-zinc-400">
+            <p className="mb-2 text-sm text-fg-2">
               Approving pins revision {queue.revision}: its steps, acceptance criteria, checks and stop conditions. A later change needs a new approval.
               {queue.status === "stopped" && " It also lifts the stop."}
             </p>
             {queue.status === "stopped" && needsChoice && (
-              <p className={`mb-2 text-sm ${work ? "text-zinc-300" : "text-amber-300"}`}>
+              <p className={`mb-2 text-sm ${work ? "text-fg" : "text-warn"}`}>
                 {work === "keep" ? `With Keep: step ${left!.step}'s commits stay.` : work === "discard" ? `With Discard nothing is approved now: the orchestrator proposes a revision that reverts step ${left!.step}'s commits.` : `First choose Keep or Discard for step ${left!.step}'s commits, in the stop box above.`}
               </p>
             )}
             {queue.status === "stopped" && left?.discarded && (
-              <p className="mb-2 text-sm text-zinc-300">You chose to discard step {left.step}'s work: approving this revision lifts the stop.</p>
+              <p className="mb-2 text-sm text-fg">You chose to discard step {left.step}'s work: approving this revision lifts the stop.</p>
             )}
             <Composer
               rows={2}
@@ -937,12 +937,12 @@ export function QueueDetail({ project, queue, onChanged }: Props) {
       <Changes entries={queue.changes} queue={queue} />
 
       <Section title="Settings">
-        <label className="flex flex-wrap items-center gap-2 text-sm text-zinc-300">
+        <label className="flex flex-wrap items-center gap-2 text-sm text-fg">
           After each step
           <select
             value={queue.review_policy ?? ""}
             onChange={(e) => void setPolicy(e.target.value || null)}
-            className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm"
+            className="rounded-md border border-line-strong bg-canvas px-2 py-1 text-sm"
           >
             <option value="">project default ({POLICY_LABEL[project.project.defaults.review_policy]})</option>
             <option value="continue">go on to the next step</option>
@@ -950,16 +950,16 @@ export function QueueDetail({ project, queue, onChanged }: Props) {
             <option value="orchestrator">wait for the orchestrator's review</option>
           </select>
         </label>
-        {error && <p className="mt-1 text-xs text-red-400">{error}</p>}
+        {error && <p className="mt-1 text-xs text-danger">{error}</p>}
       </Section>
 
       {queue.description && <Section title="Description"><Expandable text={queue.description} lines={6} /></Section>}
 
       <Section title="Stop conditions">
-        <ul className="space-y-1.5 text-sm text-zinc-300">
-          {queue.stop_conditions.map((c, i) => <li key={i} className="flex gap-2"><span className="text-orange-400/70">■</span><Markdown className="[&_p]:m-0">{c}</Markdown></li>)}
-          {inherited.map((c, i) => <li key={`p${i}`} className="flex gap-2 text-zinc-500"><span>□</span><span>{c} <span className="text-xs">(project)</span></span></li>)}
-          {queue.stop_conditions.length + inherited.length === 0 && <li className="text-zinc-600">None.</li>}
+        <ul className="space-y-1.5 text-sm text-fg">
+          {queue.stop_conditions.map((c, i) => <li key={i} className="flex gap-2"><span className="text-stop/70">■</span><Markdown className="[&_p]:m-0">{c}</Markdown></li>)}
+          {inherited.map((c, i) => <li key={`p${i}`} className="flex gap-2 text-fg-3"><span>□</span><span>{c} <span className="text-xs">(project)</span></span></li>)}
+          {queue.stop_conditions.length + inherited.length === 0 && <li className="text-fg-3">None.</li>}
         </ul>
       </Section>
       {queue.checks.length > 0 && (
@@ -968,7 +968,7 @@ export function QueueDetail({ project, queue, onChanged }: Props) {
         </Section>
       )}
       {queue.source && (
-        <p className="mt-6 text-xs text-zinc-600">Imported from <span className="font-mono">{queue.source.path}</span> <TimeAgo at={queue.source.imported_at} /></p>
+        <p className="mt-6 text-xs text-fg-3">Imported from <span className="font-mono">{queue.source.path}</span> <TimeAgo at={queue.source.imported_at} /></p>
       )}
     </div>
   );

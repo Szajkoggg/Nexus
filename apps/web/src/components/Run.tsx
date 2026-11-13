@@ -1,19 +1,25 @@
 // Running queues through Nexus-launched sessions: controls, live activity, sessions and usage.
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { formatClock, retryLine } from "@nexus/protocol/times";
 import { act, enc, useFetch, type ActivityEntry, type ProjectState, type QueueView, type SessionView, type Usage } from "../api.ts";
 import { Button, RunTimes, Section, TimeAgo } from "./ui.tsx";
 import { EffortSelect, ModelSelect } from "./Settings.tsx";
 
-const RUN_TONE: Record<string, string> = {
-  running: "text-blue-300 bg-blue-500/10 ring-blue-500/40",
-  pausing: "text-amber-300 bg-amber-500/10 ring-amber-500/40",
-  paused: "text-zinc-300 bg-zinc-500/10 ring-zinc-500/40",
-  halted: "text-orange-300 bg-orange-500/10 ring-orange-500/40",
-  finished: "text-emerald-300 bg-emerald-500/10 ring-emerald-500/30",
-  usage_wait: "text-amber-300 bg-amber-500/10 ring-amber-500/40",
-  retry_wait: "text-amber-300 bg-amber-500/10 ring-amber-500/40",
+// The run's state as a dot and a word: [dot, text].
+const RUN_TONE: Record<string, [string, string]> = {
+  running: ["bg-accent animate-pulse", "text-accent"],
+  pausing: ["bg-warn", "text-warn"],
+  paused: ["bg-fg-2", "text-fg-2"],
+  halted: ["bg-stop", "text-stop"],
+  finished: ["bg-ok", "text-ok"],
+  usage_wait: ["bg-warn", "text-warn"],
+  retry_wait: ["bg-warn", "text-warn"],
 };
+const RunState = ({ state, children }: { state: string; children: ReactNode }) => (
+  <span className={`inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-medium ${RUN_TONE[state]?.[1] ?? "text-fg-2"}`}>
+    <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${RUN_TONE[state]?.[0] ?? "bg-fg-3"}`} />{children}
+  </span>
+);
 const RUN_LABEL: Record<string, string> = {
   running: "running", pausing: "pausing after this step", paused: "paused", halted: "halted",
   finished: "finished", usage_wait: "waiting for the usage window", retry_wait: "waiting to retry",
@@ -23,7 +29,7 @@ const RUN_LABEL: Record<string, string> = {
 export function RetryNote({ run, className = "mt-1 text-xs" }: { run: NonNullable<QueueView["run"]>; className?: string }) {
   const line = retryLine(run, new Date());
   if (!line) return null;
-  return <p className={`${className} text-amber-300`}>↻ {line[0]!.toUpperCase() + line.slice(1)}</p>;
+  return <p className={`${className} text-warn`}>↻ {line[0]!.toUpperCase() + line.slice(1)}</p>;
 }
 
 const RUNTIME_NAME: Record<string, string> = { claude: "Claude Code", codex: "Codex" };
@@ -41,10 +47,10 @@ const SEEDED: Record<string, string> = {
 function SessionSwitches({ run, sessions }: { run: NonNullable<QueueView["run"]>; sessions: SessionView[] }) {
   if (!run.switches?.length) return null;
   return (
-    <ul className="mt-1 space-y-0.5 text-xs text-zinc-400">
+    <ul className="mt-1 space-y-0.5 text-xs text-fg-2">
       {run.switches.map((s) => (
         <li key={s.to} className="flex gap-1.5">
-          <span className="text-sky-400">↪</span>
+          <span className="text-info">↪</span>
           <span className="min-w-0">
             Fresh session from <span className="font-mono">{s.step}</span> at {formatClock(s.at, new Date())}: {s.why === "runtime"
               ? `the step runs on ${RUNTIME_NAME[sessions.find((x) => x.id === s.to)?.runtime ?? ""] ?? "another runtime"}`
@@ -75,23 +81,23 @@ function PlannedStart({ queue, busy, onCancel }: { queue: QueueView; busy: boole
   const p = queue.start;
   if (!p) return null;
   const options = [p.session ? `continues session ${p.session.slice(-8)}` : p.runtime === "codex" ? "Codex" : p.runtime === "claude" ? "Claude Code" : undefined, p.model, p.effort && `${p.effort} effort`].filter(Boolean);
-  const tone = p.failed ? "bg-orange-500/10 ring-orange-500/30" : p.blocked ? "bg-amber-500/10 ring-amber-500/30" : "bg-sky-500/10 ring-sky-500/30";
+  const tone = p.failed ? "border-stop/30 bg-stop/10" : p.blocked ? "border-warn/30 bg-warn/10" : "border-info/30 bg-info/10";
   return (
-    <div className={`mb-3 rounded-lg p-3 text-sm ring-1 ${tone}`}>
+    <div className={`mb-3 rounded-lg border p-3 text-sm ${tone}`}>
       <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
         <p className="min-w-0 flex-1">
           {p.after
             ? (p.failed
-              ? <span className="text-orange-200">It was to start when <span className="font-mono">{p.after}</span> was done, but could not: {p.failed.reason}</span>
-              : <span className="text-zinc-100">Starts when <span className="font-mono">{p.after}</span> is done.</span>)
+              ? <span className="text-stop">It was to start when <span className="font-mono">{p.after}</span> was done, but could not: {p.failed.reason}</span>
+              : <span className="text-fg">Starts when <span className="font-mono">{p.after}</span> is done.</span>)
             : (p.failed
-              ? <span className="text-orange-200">It was to start at {formatClock(p.at!, new Date())}, but did not: {p.failed.reason}</span>
-              : <span className="text-zinc-100">Starts at <span className="font-medium">{formatClock(p.at!, new Date())}</span>{p.usage ? `, when the ${p.usage === "codex" ? "Codex" : "Claude Code"} usage window resets` : ""}.</span>)}
-          <span className="mt-1 block text-xs text-zinc-400">
+              ? <span className="text-stop">It was to start at {formatClock(p.at!, new Date())}, but did not: {p.failed.reason}</span>
+              : <span className="text-fg">Starts at <span className="font-medium">{formatClock(p.at!, new Date())}</span>{p.usage ? `, when the ${p.usage === "codex" ? "Codex" : "Claude Code"} usage window resets` : ""}.</span>)}
+          <span className="mt-1 block text-xs text-fg-2">
             {p.failed ? <>Start it yourself, or dismiss the plan. · <TimeAgo at={p.failed.at} /></>
               : p.after ? <>Now: {p.waiting}.</> : <>In <Until at={p.at!} />. It must be approved then, and its session free.</>}
           </span>
-          <span className="mt-1 block text-xs text-zinc-500">
+          <span className="mt-1 block text-xs text-fg-3">
             Planned by {p.by === "user" ? "you" : "the orchestrator"} · <TimeAgo at={p.created_at} />{options.length ? ` · ${options.join(" · ")}` : ""}{p.reason ? ` · ${p.reason}` : ""}
           </span>
         </p>
@@ -108,16 +114,19 @@ export function RunChip({ queue }: { queue: QueueView }) {
   const r = queue.run;
   const going = r && ["running", "pausing", "usage_wait", "retry_wait"].includes(r.state);
   if (queue.start && !going) {
-    const tone = queue.start.failed || queue.start.blocked ? "text-orange-300 bg-orange-500/10 ring-orange-500/40" : "text-sky-300 bg-sky-500/10 ring-sky-500/40";
+    const tone = queue.start.failed || queue.start.blocked ? ["bg-stop", "text-stop"] : ["bg-info", "text-info"];
     const when = queue.start.after ? `after ${queue.start.after}` : `at ${formatClock(queue.start.at!, new Date())}`;
-    return <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs ring-1 ${tone}`}>{queue.start.failed ? "did not start" : "starts"} {when}</span>;
+    return (
+      <span className={`inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-medium ${tone[1]}`}>
+        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tone[0]}`} />{queue.start.failed ? "did not start" : "starts"} {when}
+      </span>
+    );
   }
   if (!r || r.state === "finished" || endedHalt(queue)) return null;
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs ring-1 ${RUN_TONE[r.state]}`}>
-      {r.state === "running" && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-400" />}
+    <RunState state={r.state}>
       Nexus: {RUN_LABEL[r.state]}{r.step && (r.state === "running" || r.state === "retry_wait") ? ` · ${r.step}` : ""}
-    </span>
+    </RunState>
   );
 }
 
@@ -159,26 +168,26 @@ export function RunControls({ project, queue, onChanged }: { project: ProjectSta
     <Section title="Run with Nexus">
       <PlannedStart queue={queue} busy={busy} onCancel={() => call({ action: "cancel_start" })} />
       {!!queue.starts_next?.length && (
-        <p className="mb-3 text-xs text-zinc-400">
-          <span className="text-sky-400">→</span> When this queue is done, {queue.starts_next.map((x, i) => <span key={x}>{i ? ", " : ""}<span className="font-mono text-zinc-200">{x}</span></span>)} start{queue.starts_next.length === 1 ? "s" : ""}.
+        <p className="mb-3 text-xs text-fg-2">
+          <span className="text-info">→</span> When this queue is done, {queue.starts_next.map((x, i) => <span key={x}>{i ? ", " : ""}<span className="font-mono text-fg">{x}</span></span>)} start{queue.starts_next.length === 1 ? "s" : ""}.
         </p>
       )}
       {run && (
-        <div className="mb-3 rounded-lg bg-zinc-800/50 p-3 text-sm">
+        <div className="mb-3 rounded-lg bg-surface-2 p-3 text-sm">
           <div className="flex flex-wrap items-center gap-2">
-            <span className={`rounded-full px-2 py-0.5 text-xs ring-1 ${RUN_TONE[shown!.state]}`}>{ended ? "ended" : RUN_LABEL[run.state]}</span>
-            {run.step && <span className="font-mono text-xs text-zinc-400">at {run.step}</span>}
-            <span className="text-xs text-zinc-500">since <TimeAgo at={run.updated_at} /></span>
+            <RunState state={shown!.state}>{ended ? "ended" : RUN_LABEL[run.state]}</RunState>
+            {run.step && <span className="font-mono text-xs text-fg-2">at {run.step}</span>}
+            <span className="text-xs text-fg-3">since <TimeAgo at={run.updated_at} /></span>
           </div>
-          <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-zinc-400"><RunTimes run={shown!} /></div>
+          <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-fg-2"><RunTimes run={shown!} /></div>
           {run.reason && (ended
-            ? <p className="mt-1 text-xs text-zinc-500">The queue is done. The run's last note: {run.reason}</p>
-            : <p className="mt-1 text-zinc-300">{run.reason}</p>)}
-          {runSession && <p className="mt-1 text-xs text-zinc-500">Session: {runSession.title ?? runSession.id} {runSession.live?.model ? `· ${runSession.live.model}` : ""}{runSession.effort ? ` · ${runSession.effort} effort` : ""} <ContextBar s={runSession} /></p>}
-          {run.after && <p className="mt-1 text-xs text-zinc-500">Started by its plan when <span className="font-mono">{run.after}</span> was done.</p>}
+            ? <p className="mt-1 text-xs text-fg-3">The queue is done. The run's last note: {run.reason}</p>
+            : <p className="mt-1 text-fg">{run.reason}</p>)}
+          {runSession && <p className="mt-1 text-xs text-fg-3">Session: {runSession.title ?? runSession.id} {runSession.live?.model ? `· ${runSession.live.model}` : ""}{runSession.effort ? ` · ${runSession.effort} effort` : ""} <ContextBar s={runSession} /></p>}
+          {run.after && <p className="mt-1 text-xs text-fg-3">Started by its plan when <span className="font-mono">{run.after}</span> was done.</p>}
           <SessionSwitches run={run} sessions={project.sessions} />
-          {run.summary_asked && run.state === "running" && <p className="mt-1 text-xs text-sky-300">↪ The context is full: the session writes its summary of {run.summary_asked}; the next step runs in a fresh session.</p>}
-          {run.state === "usage_wait" && run.resume_at && <p className="mt-1 text-xs text-zinc-500">Resumes by itself at {new Date(run.resume_at).toLocaleTimeString()}.</p>}
+          {run.summary_asked && run.state === "running" && <p className="mt-1 text-xs text-info">↪ The context is full: the session writes its summary of {run.summary_asked}; the next step runs in a fresh session.</p>}
+          {run.state === "usage_wait" && run.resume_at && <p className="mt-1 text-xs text-fg-3">Resumes by itself at {new Date(run.resume_at).toLocaleTimeString()}.</p>}
           <RetryNote run={run} />
         </div>
       )}
@@ -188,10 +197,10 @@ export function RunControls({ project, queue, onChanged }: { project: ProjectSta
         {run && !ended && queue.status !== "stopped" && (run.state === "paused" || run.state === "halted") && <Button disabled={busy || !queue.approved} onClick={() => call({ action: "resume" })}>Resume</Button>}
       </div>
       {canStart && (!run || run.state === "finished" || run.state === "halted" || run.state === "paused") && (
-        <div className={`${run ? "mt-4 border-t border-zinc-800 pt-3" : ""} flex flex-wrap items-end gap-3`}>
-          <label className="text-xs text-zinc-400">
+        <div className={`${run ? "mt-4 border-t border-line pt-3" : ""} flex flex-wrap items-end gap-3`}>
+          <label className="text-xs text-fg-2">
             <span className="mb-1 block">Session</span>
-            <select value={session} onChange={(e) => setSession(e.target.value)} className="max-w-72 rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm text-zinc-200">
+            <select value={session} onChange={(e) => setSession(e.target.value)} className="max-w-72 rounded-md border border-line-strong bg-canvas px-2 py-1 text-sm text-fg">
               <option value="">New session</option>
               {reusable.map((s) => (
                 <option key={s.id} value={s.id}>
@@ -200,26 +209,26 @@ export function RunControls({ project, queue, onChanged }: { project: ProjectSta
               ))}
             </select>
           </label>
-          <label className="text-xs text-zinc-400">
+          <label className="text-xs text-fg-2">
             <span className="mb-1 block">Runtime</span>
-            <select value={runtime} onChange={(e) => { setRuntime(e.target.value as "claude" | "codex"); setModel(""); setEffort(""); }} disabled={!!session} className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm text-zinc-200 disabled:opacity-50">
+            <select value={runtime} onChange={(e) => { setRuntime(e.target.value as "claude" | "codex"); setModel(""); setEffort(""); }} disabled={!!session} className="rounded-md border border-line-strong bg-canvas px-2 py-1 text-sm text-fg disabled:opacity-50">
               <option value="claude">Claude Code</option>
               <option value="codex">Codex</option>
             </select>
           </label>
-          <label className="max-w-full text-xs text-zinc-400">
+          <label className="max-w-full text-xs text-fg-2">
             <span className="mb-1 block">Model</span>
             <ModelSelect runtime={runtime} value={model} onChange={setModel} disabled={!!session} className="max-w-full"
               defaultLabel={session ? "as before" : defaultModel ? `default: ${defaultModel}` : "runtime default"} />
           </label>
-          <label className="text-xs text-zinc-400">
+          <label className="text-xs text-fg-2">
             <span className="mb-1 block">Effort</span>
             <EffortSelect runtime={runtime} model={model || (project.project.runtimes[runtime].model ?? "")} value={effort} onChange={setEffort}
               defaultLabel={session ? "as before" : defaultEffort ? `default: ${defaultEffort}` : "default"} />
           </label>
-          <label className="text-xs text-zinc-400">
+          <label className="text-xs text-fg-2">
             <span className="mb-1 block">When</span>
-            <select value={after} onChange={(e) => setAfter(e.target.value)} className="max-w-60 rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm text-zinc-200">
+            <select value={after} onChange={(e) => setAfter(e.target.value)} className="max-w-60 rounded-md border border-line-strong bg-canvas px-2 py-1 text-sm text-fg">
               <option value="">Now</option>
               <option value={AT}>At a time…</option>
               <option value={USAGE}>When the usage window resets</option>
@@ -227,9 +236,9 @@ export function RunControls({ project, queue, onChanged }: { project: ProjectSta
             </select>
           </label>
           {after === AT && (
-            <label className="text-xs text-zinc-400">
+            <label className="text-xs text-fg-2">
               <span className="mb-1 block">Time</span>
-              <input type="datetime-local" value={time} onChange={(e) => setTime(e.target.value)} className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm text-zinc-200 [color-scheme:dark]" />
+              <input type="datetime-local" value={time} onChange={(e) => setTime(e.target.value)} className="rounded-md border border-line-strong bg-canvas px-2 py-1 text-sm text-fg" />
             </label>
           )}
           <Button disabled={busy || (after === AT && !time)} onClick={() => call({
@@ -240,9 +249,9 @@ export function RunControls({ project, queue, onChanged }: { project: ProjectSta
           </Button>
         </div>
       )}
-      {!queue.approved && !active && <p className="text-sm text-zinc-500">Approve the queue's current revision to run it.</p>}
-      {error && <p className="mt-2 text-xs text-red-400">{error}</p>}
-      <p className="mt-2 text-xs text-zinc-600">
+      {!queue.approved && !active && <p className="text-sm text-fg-3">Approve the queue's current revision to run it.</p>}
+      {error && <p className="mt-2 text-xs text-danger">{error}</p>}
+      <p className="mt-2 text-xs text-fg-3">
         {runtime === "codex" ? "Codex" : "Claude Code"} runs in {queue.worktree && queue.worktree !== "auto" ? <span className="font-mono">{queue.worktree}</span> : queue.worktree === "auto" ? "a new worktree" : <span className="font-mono">{project.project.root}</span>}{runtime === "codex"
           ? ` with sandbox ${project.project.runtimes.codex.sandbox}, approvals ${project.project.runtimes.codex.approval_policy}.`
           : ` with permission mode ${project.project.runtimes.claude.permission_mode}.`}
@@ -252,8 +261,8 @@ export function RunControls({ project, queue, onChanged }: { project: ProjectSta
 }
 
 const KIND_STYLE: Record<string, string> = {
-  tool: "text-zinc-300", text: "text-zinc-100", tool_error: "text-red-300", error: "text-red-300",
-  turn_start: "text-zinc-500", turn_end: "text-zinc-500", exit: "text-zinc-500", retry: "text-amber-300",
+  tool: "text-fg", text: "text-fg", tool_error: "text-danger", error: "text-danger",
+  turn_start: "text-fg-3", turn_end: "text-fg-3", exit: "text-fg-3", retry: "text-warn",
 };
 const KIND_ICON: Record<string, string> = { tool: "›", text: "¶", tool_error: "✗", error: "!", turn_start: "▸", turn_end: "■", exit: "■", retry: "↻" };
 
@@ -264,12 +273,12 @@ export function Activity({ project, session, queue, step, version }: { project: 
   if (!items?.length) return null;
   const shown = all ? items : items.slice(-40);
   return (
-    <Section title="Agent activity" aside={items.length > 40 && <button className="text-xs text-sky-400" onClick={() => setAll(!all)}>{all ? "Latest only" : `All ${items.length}`}</button>}>
-      <ol className="scroll-thin max-h-96 space-y-1 overflow-y-auto rounded-lg bg-zinc-950 p-3 font-mono text-xs">
+    <Section title="Agent activity" aside={items.length > 40 && <button className="text-xs text-accent" onClick={() => setAll(!all)}>{all ? "Latest only" : `All ${items.length}`}</button>}>
+      <ol className="scroll-thin max-h-96 space-y-1 overflow-y-auto rounded-lg bg-canvas p-3 font-mono text-xs">
         {shown.map((a, i) => (
-          <li key={i} className={`flex gap-2 ${KIND_STYLE[a.kind] ?? "text-zinc-400"}`}>
-            <span className="w-14 shrink-0 text-zinc-600">{new Date(a.at).toLocaleTimeString("en-GB")}</span>
-            <span className="w-3 shrink-0 text-zinc-600">{KIND_ICON[a.kind] ?? "·"}</span>
+          <li key={i} className={`flex gap-2 ${KIND_STYLE[a.kind] ?? "text-fg-2"}`}>
+            <span className="w-14 shrink-0 text-fg-3">{new Date(a.at).toLocaleTimeString("en-GB")}</span>
+            <span className="w-3 shrink-0 text-fg-3">{KIND_ICON[a.kind] ?? "·"}</span>
             <span className={`min-w-0 break-words ${a.kind === "text" ? "whitespace-pre-wrap font-sans" : ""}`}>{a.text}</span>
           </li>
         ))}
@@ -284,10 +293,10 @@ export function ContextBar({ s }: { s: SessionView }) {
   const pct = Math.round((100 * t) / w);
   return (
     <span className="inline-flex items-center gap-1.5 align-middle" title={`${t.toLocaleString()} of ${w.toLocaleString()} tokens`}>
-      <span className="inline-block h-1.5 w-16 overflow-hidden rounded bg-zinc-800">
-        <span className={`block h-full ${pct > 60 ? "bg-amber-400" : "bg-sky-400"}`} style={{ width: `${Math.max(2, pct)}%` }} />
+      <span className="inline-block h-1.5 w-16 overflow-hidden rounded bg-surface-3">
+        <span className={`block h-full ${pct > 60 ? "bg-warn" : "bg-info"}`} style={{ width: `${Math.max(2, pct)}%` }} />
       </span>
-      <span className="text-zinc-500">{pct}%</span>
+      <span className="text-fg-3">{pct}%</span>
     </span>
   );
 }
@@ -300,14 +309,14 @@ export function UsageMeter({ version }: { version: unknown }) {
   if (!windows.length) return null;
   const name = (k: string) => (k === "five_hour" ? "Claude 5h" : k === "seven_day" ? "Claude 7d" : k.startsWith("codex_") ? `Codex ${k.slice(6)}` : k.replace(/_/g, " "));
   return (
-    <span className="hidden items-center gap-3 text-xs text-zinc-500 sm:flex" title={`Reported ${new Date(u.updated_at).toLocaleString()}`}>
+    <span className="hidden items-center gap-3 text-xs text-fg-3 sm:flex" title={`Reported ${new Date(u.updated_at).toLocaleString()}`}>
       {windows.map(([k, w]) => {
         const pct = Math.round(w.utilization * 100);
         return (
           <span key={k} className="flex items-center gap-1.5" title={w.resets_at ? `resets ${new Date(w.resets_at).toLocaleString()}` : undefined}>
             {name(k)}
-            <span className="inline-block h-1.5 w-12 overflow-hidden rounded bg-zinc-800">
-              <span className={`block h-full ${pct >= 90 ? "bg-red-400" : pct >= 70 ? "bg-amber-400" : "bg-emerald-400"}`} style={{ width: `${Math.max(2, pct)}%` }} />
+            <span className="inline-block h-1.5 w-12 overflow-hidden rounded bg-surface-3">
+              <span className={`block h-full ${pct >= 90 ? "bg-danger" : pct >= 70 ? "bg-warn" : "bg-ok"}`} style={{ width: `${Math.max(2, pct)}%` }} />
             </span>
             {pct}%
           </span>

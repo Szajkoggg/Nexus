@@ -37,16 +37,16 @@ export function ImageViewer({ images, index, onIndex, onClose, footer }: {
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
   });
-  const arrow = "absolute top-1/2 z-10 -translate-y-1/2 rounded-full bg-black/50 p-2.5 text-zinc-100 ring-1 ring-white/15 hover:bg-black/70";
+  const arrow = "absolute top-1/2 z-10 -translate-y-1/2 rounded-full bg-canvas/60 p-2.5 text-fg ring-1 ring-line-strong hover:bg-canvas/85";
   return createPortal(
-    <div role="dialog" aria-label="Review image" className="fixed inset-0 z-[60] flex flex-col bg-black pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+    <div role="dialog" aria-label="Review image" className="fixed inset-0 z-[60] flex flex-col bg-canvas pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
       <header className="flex items-center gap-3 px-3 py-2 text-sm">
         <div className="min-w-0 flex-1">
-          <div className="truncate font-medium text-zinc-100">{img.label}</div>
-          <div className="text-xs text-zinc-400">{images.length > 1 ? `${index + 1} of ${images.length}` : "1 image"}{img.round ? ` · round ${img.round}` : ""}</div>
+          <div className="truncate font-medium text-fg">{img.label}</div>
+          <div className="text-xs text-fg-2">{images.length > 1 ? `${index + 1} of ${images.length}` : "1 image"}{img.round ? ` · round ${img.round}` : ""}</div>
         </div>
-        <a href={img.src} target="_blank" rel="noreferrer" className="shrink-0 rounded-md px-2 py-1.5 text-xs text-sky-300 hover:bg-white/10" title="Open the original file in a new tab">Original ↗</a>
-        <button onClick={onClose} aria-label="Close" className="shrink-0 rounded-md p-1.5 text-zinc-300 hover:bg-white/10 hover:text-white">
+        <a href={img.src} target="_blank" rel="noreferrer" className="shrink-0 rounded-md px-2 py-1.5 text-xs text-accent hover:bg-surface-3" title="Open the original file in a new tab">Original ↗</a>
+        <button onClick={onClose} aria-label="Close" className="shrink-0 rounded-md p-1.5 text-fg-2 hover:bg-surface-3 hover:text-fg">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 6l12 12M18 6L6 18" /></svg>
         </button>
       </header>
@@ -54,7 +54,7 @@ export function ImageViewer({ images, index, onIndex, onClose, footer }: {
         <div className="flex justify-center gap-1 px-3 pb-2" role="group" aria-label="Compare with the before">
           {([["after", "After"], ["both", "Before and after"], ["overlay", "Overlay"]] as const).map(([m, label]) => (
             <button key={m} onClick={() => setMode(m)} aria-pressed={shown === m}
-              className={`rounded-full px-3 py-1 text-xs ring-1 ${shown === m ? "bg-sky-600 text-white ring-sky-500" : "text-zinc-300 ring-white/15 hover:bg-white/10"}`}>{label}</button>
+              className={`rounded-full px-3 py-1 text-xs ring-1 ${shown === m ? "bg-accent-strong text-on-accent ring-accent" : "text-fg ring-line-strong hover:bg-surface-3"}`}>{label}</button>
           ))}
         </div>
       )}
@@ -66,7 +66,7 @@ export function ImageViewer({ images, index, onIndex, onClose, footer }: {
         {prev && <button onClick={prev} aria-label="Previous image" className={`${arrow} left-2`}><Chevron dir="left" /></button>}
         {next && <button onClick={next} aria-label="Next image" className={`${arrow} right-2`}><Chevron dir="right" /></button>}
       </div>
-      {footer && <div className="scroll-thin max-h-[40%] shrink-0 overflow-y-auto border-t border-white/10 bg-zinc-950 px-3 py-2">{footer(index)}</div>}
+      {footer && <div className="scroll-thin max-h-[40%] shrink-0 overflow-y-auto border-t border-line-strong bg-canvas px-3 py-2">{footer(index)}</div>}
     </div>,
     document.body,
   );
@@ -143,14 +143,14 @@ function Stage({ src, alt, onSwipe }: { src: string; alt: string; onSwipe: (dir:
 /** A picture and its before: both (beside each other, stacked when upright) or overlaid with a slider to wipe between. */
 function Compare({ before, after, mode }: { before: { src: string; label: string }; after: { src: string; label: string }; mode: "both" | "overlay" }) {
   const [split, setSplit] = useState(50);
-  const tag = "absolute left-2 top-2 rounded bg-black/70 px-1.5 py-0.5 text-[11px] text-zinc-200";
+  const tag = "absolute left-2 top-2 rounded bg-canvas/70 px-1.5 py-0.5 text-[11px] text-fg";
   if (mode === "both") {
     return (
       <div className="absolute inset-0 flex flex-col gap-1 p-1 landscape:flex-row">
         {[["Before", before], ["After", after]].map(([what, x]) => {
           const p = x as { src: string; label: string };
           return (
-            <figure key={what as string} className="relative flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-hidden rounded bg-zinc-950">
+            <figure key={what as string} className="relative flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-hidden rounded bg-canvas">
               <img src={p.src} alt={`${what as string}: ${p.label}`} draggable={false} className="max-h-full max-w-full object-contain" />
               <figcaption className={tag}>{what as string} · {p.label}</figcaption>
             </figure>
@@ -164,11 +164,11 @@ function Compare({ before, after, mode }: { before: { src: string; label: string
       <div className="relative min-h-0 flex-1 select-none overflow-hidden">
         <img src={before.src} alt={`Before: ${before.label}`} draggable={false} className="absolute inset-0 m-auto max-h-full max-w-full object-contain" />
         <img src={after.src} alt={`After: ${after.label}`} draggable={false} className="absolute inset-0 m-auto max-h-full max-w-full object-contain" style={{ clipPath: `inset(0 0 0 ${split}%)` }} />
-        <div className="pointer-events-none absolute inset-y-0 w-px bg-sky-400/80" style={{ left: `${split}%` }} />
+        <div className="pointer-events-none absolute inset-y-0 w-px bg-accent/80" style={{ left: `${split}%` }} />
         <span className={tag}>Before · {before.label}</span>
-        <span className="absolute right-2 top-2 rounded bg-black/70 px-1.5 py-0.5 text-[11px] text-zinc-200">After</span>
+        <span className="absolute right-2 top-2 rounded bg-canvas/70 px-1.5 py-0.5 text-[11px] text-fg">After</span>
       </div>
-      <input type="range" min={0} max={100} value={split} onChange={(e) => setSplit(Number(e.target.value))} aria-label="Before and after split" className="mx-4 my-2 accent-sky-500" />
+      <input type="range" min={0} max={100} value={split} onChange={(e) => setSplit(Number(e.target.value))} aria-label="Before and after split" className="mx-4 my-2 accent-accent" />
     </div>
   );
 }

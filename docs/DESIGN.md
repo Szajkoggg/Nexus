@@ -580,6 +580,36 @@ The key names the project and the target (`<project>/orchestrator`, `/conversati
 moving from one step or conversation to another remounts the box with that target's own text instead of carrying
 the text across. Drafts untouched for 14 days are pruned when the page loads.
 
+### Colours are theme tokens
+
+Every colour in the dashboard is a theme token: a CSS variable in `apps/web/src/index.css` (Tailwind's `@theme`),
+used through Tailwind's utilities (`bg-surface`, `text-fg-2`, `border-line`, `text-warn`, `bg-review/15`). Tailwind's
+own palette is switched off (`--color-*: initial`), so a palette class such as `text-zinc-400` produces no CSS: a
+colour can only come from the scheme. The values are the **Graphite** theme of the UX proposals
+(`docs/ux/mockups/mock.css`, item 19), the only theme for now; another theme sets the same variables under its own
+selector, and every component follows without a change.
+
+| Token | Use |
+|---|---|
+| `canvas` | The page; text boxes and inputs; dark chips over pictures |
+| `surface`, `surface-2`, `surface-3`, `surface-4` | Panels and cards; raised fills (info boxes, step cards); chips, quiet buttons, the current step; hover over those |
+| `line`, `line-strong` | Dividers and card edges; inputs, buttons, a hovered edge (`fg-3/60`) |
+| `fg`, `fg-2`, `fg-3` | Main text; secondary text (labels, descriptions); meta (ids, times, hints), still at about 4.5:1 on a surface |
+| `accent`, `accent-strong`, `on-accent` | The one accent: actions, links, focus, selection, what is running; a primary button's fill and its text |
+| `ok`, `warn`, `stop`, `review`, `info`, `danger` | Status colours: done; waiting and questions; stopped; in review (and the orchestrator's doings); approval and pending deliveries; failed, rejected and errors |
+| `user-bubble`, `scrim` | The user's own chat messages; the dimming behind a drawer or menu |
+
+Rules the components keep:
+
+- **A status is a dot and a word** in its colour (`StatusBadge`, the run's state, the update pill), never a ring or a
+  filled pill. Step cards are neutral (`surface-2`, the current one `surface-3`); the dot and word carry the status.
+- **A kind is a tag**: what waits for the user (Question, Review, Needs approval, Stopped) is the kind's colour on a
+  15 % fill of it, without a ring.
+- **A callout** (a stop, a merge to confirm, a rejection) is a faint fill of its colour with a 30 % border of it.
+- **One accent** for actions: primary buttons, links, focus, checkboxes. Information that is not an action (a
+  pending delivery, a planned start) uses `info`.
+- Opacity modifiers derive tints from tokens (`bg-warn/15`), so a theme defines each colour once.
+
 ## Findings from building phase 3
 
 - **Context fill and usage limits are in the stream.** Every `assistant` message carries its usage (input, cache

@@ -20,19 +20,19 @@ export function StepRefusals({ project, queue, step }: { project: ProjectState; 
   const [open, setOpen] = useState<string>();
   if (!list?.length) return null;
   return (
-    <Section title="Refused actions" aside={<span className="text-xs text-zinc-600">{list.length}</span>}>
+    <Section title="Refused actions" aside={<span className="text-xs text-fg-3">{list.length}</span>}>
       <ul className="space-y-2">
         {[...list].reverse().map((r, i) => {
           const key = r.ref ?? `${r.at}/${i}`;
           return (
-            <li key={key} className="rounded-lg border border-zinc-800 p-3 text-sm">
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-zinc-500">
-                <span className="font-medium text-orange-300">{refusalKind(r).label}</span>
+            <li key={key} className="rounded-lg border border-line p-3 text-sm">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-fg-3">
+                <span className="font-medium text-stop">{refusalKind(r).label}</span>
                 <span>· {BY[r.by]}</span>
                 <span className="ml-auto"><TimeAgo at={r.at} /></span>
               </div>
-              {r.input && <div className="mt-1 break-all font-mono text-xs text-zinc-200">{r.input}</div>}
-              {r.reason && <div className="mt-1 text-xs text-zinc-400">{r.reason}</div>}
+              {r.input && <div className="mt-1 break-all font-mono text-xs text-fg">{r.input}</div>}
+              {r.reason && <div className="mt-1 text-xs text-fg-2">{r.reason}</div>}
               <AllowRule project={project} refusal={r} open={open === key} onOpen={(o) => setOpen(o ? key : undefined)} />
             </li>
           );
@@ -52,20 +52,20 @@ export function ProjectRefusals({ project }: { project: ProjectState }) {
   return (
     <section className="mb-8">
       <div className="mb-3 flex items-baseline gap-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-400">Refused actions</h2>
-        <span className="text-xs text-zinc-600">{list.length}</span>
+        <h2 className="text-sm font-semibold uppercase tracking-wider text-fg-2">Refused actions</h2>
+        <span className="text-xs text-fg-3">{list.length}</span>
       </div>
-      <ul className="divide-y divide-zinc-800/80 rounded-xl border border-zinc-800">
+      <ul className="divide-y divide-line rounded-xl border border-line">
         {groups.map((g) => (
           <li key={g.key} className="px-3 py-2.5 text-sm">
             <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-              <span className="font-medium text-zinc-100">{g.label}</span>
-              <span className="rounded-full bg-zinc-800 px-1.5 text-xs text-zinc-300" title="How many times">{g.count}×</span>
-              <span className="text-xs text-zinc-500">{g.runtime === "claude" ? "Claude Code" : "Codex"}</span>
-              <span className="ml-auto text-xs text-zinc-500">latest <TimeAgo at={g.latest.at} /></span>
+              <span className="font-medium text-fg">{g.label}</span>
+              <span className="rounded-full bg-surface-3 px-1.5 text-xs text-fg" title="How many times">{g.count}×</span>
+              <span className="text-xs text-fg-3">{g.runtime === "claude" ? "Claude Code" : "Codex"}</span>
+              <span className="ml-auto text-xs text-fg-3">latest <TimeAgo at={g.latest.at} /></span>
             </div>
-            <div className="mt-0.5 flex flex-wrap gap-x-2 text-xs text-zinc-500">
-              {g.latest.input && <span className="min-w-0 break-all font-mono text-zinc-400">{g.latest.input}</span>}
+            <div className="mt-0.5 flex flex-wrap gap-x-2 text-xs text-fg-3">
+              {g.latest.input && <span className="min-w-0 break-all font-mono text-fg-2">{g.latest.input}</span>}
               {g.latest.queue && <span className="font-mono">{g.latest.queue}{g.latest.step ? `/${g.latest.step}` : ""}</span>}
             </div>
             <AllowRule project={project} refusal={g.latest} open={open === g.key} onOpen={(o) => setOpen(o ? g.key : undefined)} />
@@ -91,9 +91,9 @@ function AllowRule({ project, refusal, open, onOpen }: { project: ProjectState; 
     return (
       <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
         {allowed.includes(suggested)
-          ? <span className="text-emerald-400">Allowed now: <span className="font-mono">{suggested}</span> (for runs started since)</span>
-          : <button className="text-sky-400 hover:text-sky-300" onClick={() => { setRule(suggested); setMsg(undefined); onOpen(true); }}>Allow for this project…</button>}
-        {msg && <span className={msg.ok ? "text-emerald-400" : "text-red-300"}>{msg.text}</span>}
+          ? <span className="text-ok">Allowed now: <span className="font-mono">{suggested}</span> (for runs started since)</span>
+          : <button className="text-accent hover:underline" onClick={() => { setRule(suggested); setMsg(undefined); onOpen(true); }}>Allow for this project…</button>}
+        {msg && <span className={msg.ok ? "text-ok" : "text-danger"}>{msg.text}</span>}
       </div>
     );
   }
@@ -107,17 +107,17 @@ function AllowRule({ project, refusal, open, onOpen }: { project: ProjectState; 
     finally { setBusy(false); }
   };
   return (
-    <div className="mt-2 rounded-lg bg-zinc-800/50 p-3">
-      <label className="text-xs text-zinc-400">
+    <div className="mt-2 rounded-lg bg-surface-2 p-3">
+      <label className="text-xs text-fg-2">
         <span className="mb-1 block">Allow rule for Claude Code workers</span>
         <input value={rule} onChange={(e) => setRule(e.target.value)} spellCheck={false}
-          className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 font-mono text-sm text-zinc-200" />
+          className="w-full rounded-md border border-line-strong bg-canvas px-2 py-1 font-mono text-sm text-fg" />
       </label>
-      <p className="mt-1.5 text-xs text-zinc-500">
+      <p className="mt-1.5 text-xs text-fg-3">
         Goes to this project's Nexus settings ("Also allowed"), for runs started from now on. The project's own files
         (.claude/settings.json, AGENTS.md) are not changed.
       </p>
-      {msg && !msg.ok && <p className="mt-1.5 text-xs text-red-300">{msg.text}</p>}
+      {msg && !msg.ok && <p className="mt-1.5 text-xs text-danger">{msg.text}</p>}
       <div className="mt-2 flex gap-2">
         <Button disabled={busy || !rule.trim()} onClick={() => void save()}>Add rule</Button>
         <Button variant="quiet" disabled={busy} onClick={() => onOpen(false)}>Cancel</Button>

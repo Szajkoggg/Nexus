@@ -34,14 +34,14 @@ function DeviceCheck() {
   }, []);
   if (!rows) return null;
   return (
-    <div className="mt-3 rounded-lg bg-zinc-950 p-3">
-      <div className="mb-1 text-xs font-semibold text-zinc-400">This device</div>
+    <div className="mt-3 rounded-lg bg-canvas p-3">
+      <div className="mb-1 text-xs font-semibold text-fg-2">This device</div>
       <ul className="space-y-1 text-xs">
         {rows.map(([label, ok, detail]) => (
           <li key={label} className="flex gap-2">
-            <span className={ok === true ? "text-emerald-400" : ok === false ? "text-red-400" : "text-zinc-500"}>{ok === true ? "✓" : ok === false ? "✗" : "·"}</span>
-            <span className="text-zinc-300">{label}</span>
-            {detail && <span className="min-w-0 break-words text-zinc-500">{detail}</span>}
+            <span className={ok === true ? "text-ok" : ok === false ? "text-danger" : "text-fg-3"}>{ok === true ? "✓" : ok === false ? "✗" : "·"}</span>
+            <span className="text-fg">{label}</span>
+            {detail && <span className="min-w-0 break-words text-fg-3">{detail}</span>}
           </li>
         ))}
       </ul>
@@ -51,7 +51,7 @@ function DeviceCheck() {
 
 export function RemoteButton({ onClick }: { onClick: () => void }) {
   return (
-    <button onClick={onClick} title="Remote access" className="rounded-md p-1.5 text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200">
+    <button onClick={onClick} title="Remote access" className="rounded-md p-1.5 text-fg-3 hover:bg-surface hover:text-fg">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="7" y="2" width="10" height="20" rx="2" /><path d="M11 18h2" /></svg>
     </button>
   );
@@ -63,7 +63,7 @@ export function RemotePanel({ version }: { version: unknown }) {
   const r = useFetch<Remote>(`/api/remote${base ? `?base=${encodeURIComponent(base)}` : ""}`, `${String(version)}-${bump}`);
   const [reveal, setReveal] = useState(false);
   const [note, setNote] = useState<string>();
-  if (!r) return <p className="text-sm text-zinc-500">Loading…</p>;
+  if (!r) return <p className="text-sm text-fg-3">Loading…</p>;
 
   const post = async (url: string) => {
     const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
@@ -72,47 +72,47 @@ export function RemotePanel({ version }: { version: unknown }) {
 
   return (
     <div>
-      <h2 className="pr-8 text-xl font-semibold text-zinc-50">Remote access</h2>
-      <p className="mt-1 text-sm text-zinc-400">Use Nexus from your phone while this PC is on. It stays private: only your own devices on your Tailscale network can reach it, and each signs in once with the access token.</p>
+      <h2 className="pr-8 text-xl font-semibold text-fg">Remote access</h2>
+      <p className="mt-1 text-sm text-fg-2">Use Nexus from your phone while this PC is on. It stays private: only your own devices on your Tailscale network can reach it, and each signs in once with the access token.</p>
 
-      {!r.local && <Section title="This device"><p className="text-sm text-zinc-300">You are signed in remotely. The token and the QR code are shown only on the PC.</p></Section>}
+      {!r.local && <Section title="This device"><p className="text-sm text-fg">You are signed in remotely. The token and the QR code are shown only on the PC.</p></Section>}
 
       {r.local && (
         <>
           <Section title="1. Tailscale">
             {r.tailscale.url ? (
-              <p className="text-sm text-emerald-300">Tailscale is running. This PC is <span className="font-mono">{r.tailscale.url}</span></p>
+              <p className="text-sm text-ok">Tailscale is running. This PC is <span className="font-mono">{r.tailscale.url}</span></p>
             ) : (
-              <p className="text-sm text-amber-300">{r.tailscale.detail ?? "Tailscale is not available."}</p>
+              <p className="text-sm text-warn">{r.tailscale.detail ?? "Tailscale is not available."}</p>
             )}
-            <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-zinc-400">
-              <li>Install Tailscale on this PC and sign in: <code className="text-zinc-300">winget install tailscale.tailscale</code></li>
+            <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-fg-2">
+              <li>Install Tailscale on this PC and sign in: <code className="text-fg">winget install tailscale.tailscale</code></li>
               <li>Install the Tailscale app on your phone and sign in with the same account.</li>
               <li>In the Tailscale admin console, under DNS, turn on MagicDNS and HTTPS certificates.</li>
-              <li>Publish Nexus to your tailnet (not the internet): <code className="text-zinc-300">tailscale serve --bg 4317</code></li>
+              <li>Publish Nexus to your tailnet (not the internet): <code className="text-fg">tailscale serve --bg 4317</code></li>
             </ol>
           </Section>
 
           <Section title="2. Sign the phone in">
             {!r.tailscale.url && (
-              <label className="mb-3 block text-xs text-zinc-400">
+              <label className="mb-3 block text-xs text-fg-2">
                 Address the phone uses (if not Tailscale's)
                 <input value={base} onChange={(e) => setBase(e.target.value.trim())} placeholder="https://my-pc.tailnet.ts.net"
-                  className="mt-1 block w-full rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm text-zinc-200 placeholder:text-zinc-600" />
+                  className="mt-1 block w-full rounded-md border border-line-strong bg-canvas px-2 py-1 text-sm text-fg placeholder:text-fg-3" />
               </label>
             )}
             {r.qr && r.login_url ? (
               <div className="flex flex-wrap items-start gap-4">
-                <div className="w-44 shrink-0 rounded-lg bg-zinc-950 p-2" dangerouslySetInnerHTML={{ __html: r.qr }} />
-                <div className="min-w-0 text-sm text-zinc-400">
+                <div className="w-44 shrink-0 rounded-lg bg-canvas p-2" dangerouslySetInnerHTML={{ __html: r.qr }} />
+                <div className="min-w-0 text-sm text-fg-2">
                   <p>Scan with the phone's camera: it opens Nexus and signs in. Then add it to the home screen (Share → Add to Home Screen on iPhone) to get notifications.</p>
-                  <p className="mt-2 break-all font-mono text-xs text-zinc-500">{r.base}/login</p>
+                  <p className="mt-2 break-all font-mono text-xs text-fg-3">{r.base}/login</p>
                 </div>
               </div>
-            ) : <p className="text-sm text-zinc-500">The QR code appears once the address is known.</p>}
+            ) : <p className="text-sm text-fg-3">The QR code appears once the address is known.</p>}
             <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
-              <span className="text-zinc-400">Access token:</span>
-              <code className="rounded bg-zinc-950 px-2 py-0.5 text-zinc-200">{reveal ? r.token : "••••••••••••"}</code>
+              <span className="text-fg-2">Access token:</span>
+              <code className="rounded bg-canvas px-2 py-0.5 text-fg">{reveal ? r.token : "••••••••••••"}</code>
               <Button variant="quiet" onClick={() => setReveal(!reveal)}>{reveal ? "Hide" : "Show"}</Button>
               <Button variant="danger" onClick={() => {
                 if (confirm("Replace the access token? Every remote device is signed out and must sign in again.")) {
@@ -125,18 +125,18 @@ export function RemotePanel({ version }: { version: unknown }) {
       )}
 
       <Section title="3. Notifications">
-        <p className="text-sm text-zinc-400">On each device, turn on the bell in the header. Nexus then sends a notification when something waits for you: a question, a stop, a queue to approve, a review.</p>
+        <p className="text-sm text-fg-2">On each device, turn on the bell in the header. Nexus then sends a notification when something waits for you: a question, a stop, a queue to approve, a review.</p>
         <DeviceCheck />
         {r.devices.length > 0 ? (
-          <ul className="mt-2 space-y-1 text-sm text-zinc-300">
-            {r.devices.map((d) => <li key={d.endpoint}>{d.label ?? "Device"} <span className="text-xs text-zinc-500">since {new Date(d.added_at).toLocaleDateString()}</span></li>)}
+          <ul className="mt-2 space-y-1 text-sm text-fg">
+            {r.devices.map((d) => <li key={d.endpoint}>{d.label ?? "Device"} <span className="text-xs text-fg-3">since {new Date(d.added_at).toLocaleDateString()}</span></li>)}
           </ul>
-        ) : <p className="mt-2 text-sm text-zinc-500">No device receives notifications yet.</p>}
+        ) : <p className="mt-2 text-sm text-fg-3">No device receives notifications yet.</p>}
         {r.devices.length > 0 && (
           <div className="mt-2"><Button variant="quiet" onClick={() => void post("/api/push/test").then((x) => setNote(`Test sent to ${String(x.sent)} device(s).`))}>Send a test notification</Button></div>
         )}
       </Section>
-      {note && <p className="mt-4 text-sm text-sky-300">{note}</p>}
+      {note && <p className="mt-4 text-sm text-info">{note}</p>}
     </div>
   );
 }

@@ -90,11 +90,11 @@ export function App() {
 
   return (
     <div className="flex min-h-full flex-col">
-      <header ref={header} className="sticky top-0 z-30 border-b border-zinc-800 bg-zinc-950/90 pt-[env(safe-area-inset-top)] backdrop-blur">
+      <header ref={header} className="sticky top-0 z-30 border-b border-line bg-canvas/90 pt-[env(safe-area-inset-top)] backdrop-blur">
         {/* On a phone the header has two rows: the project and what waits for you, then the tools. */}
         <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-2 gap-y-2.5 px-4 py-3 sm:flex-nowrap sm:gap-4">
           {/* On a phone the project picker takes the wordmark's place: the current project is what matters there. */}
-          <span className="hidden text-lg font-semibold tracking-tight text-zinc-50 sm:inline">Nexus</span>
+          <span className="hidden text-lg font-semibold tracking-tight text-fg sm:inline">Nexus</span>
           {projects && <ProjectTabs projects={projects} current={projectId} onPick={(id) => nav.project(id)} />}
           {projects && <ProjectPicker projects={projects} current={projectId} open={isOpen(route.nav, "projects")} onPick={(id) => nav.project(id)} />}
           <WaitingButton projects={projects} onClick={() => nav.open("waiting")} />
@@ -106,8 +106,8 @@ export function App() {
           <NotifyToggle {...notify} />
           {state && <SettingsButton onClick={() => nav.open("settings")} />}
           <RemoteButton onClick={() => nav.open("remote")} />
-          <span className={`ml-auto flex items-center gap-1.5 text-xs sm:ml-0 ${connected ? "text-zinc-500" : "text-orange-400"}`} title={connected ? "Live updates on" : "Reconnecting"}>
-            <span className={`h-2 w-2 rounded-full ${connected ? "bg-emerald-500" : "bg-orange-500"}`} />
+          <span className={`ml-auto flex items-center gap-1.5 text-xs sm:ml-0 ${connected ? "text-fg-3" : "text-stop"}`} title={connected ? "Live updates on" : "Reconnecting"}>
+            <span className={`h-2 w-2 rounded-full ${connected ? "bg-ok" : "bg-stop"}`} />
             <span className="hidden sm:inline">{connected ? "live" : "offline"}</span>
           </span>
         </div>
@@ -121,9 +121,9 @@ export function App() {
         )}
         {error && <Banner>{error}</Banner>}
         {state && state.warnings.length > 0 && (
-          <details className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm text-amber-200">
+          <details className="mb-4 rounded-lg border border-warn/30 bg-warn/5 px-3 py-2 text-sm text-warn">
             <summary className="cursor-pointer">{state.warnings.length} warning(s) reading the project files</summary>
-            <ul className="mt-2 list-disc pl-5 text-xs text-amber-200/80">{state.warnings.map((w, i) => <li key={i}>{w}</li>)}</ul>
+            <ul className="mt-2 list-disc pl-5 text-xs text-warn/80">{state.warnings.map((w, i) => <li key={i}>{w}</li>)}</ul>
           </details>
         )}
 
@@ -134,15 +134,15 @@ export function App() {
         {state && byGroup.map((g) => (
           <section key={g.title} className="mb-8">
             <div className="mb-3 flex items-baseline gap-3">
-              <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-400">{g.title}</h2>
-              <span className="text-xs text-zinc-600">{g.queues.length}</span>
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-fg-2">{g.title}</h2>
+              <span className="text-xs text-fg-3">{g.queues.length}</span>
             </div>
             <div className="space-y-3">
               {g.queues.map((q) => (
                 <QueueRow key={q.id} queue={q} onQueue={() => projectId && nav.item(projectId, q.id)} onStep={(s) => projectId && nav.item(projectId, q.id, s)} />
               ))}
             </div>
-            {g.queues.length === 0 && <p className="text-sm text-zinc-600">Nothing here.</p>}
+            {g.queues.length === 0 && <p className="text-sm text-fg-3">Nothing here.</p>}
           </section>
         ))}
 
@@ -152,20 +152,20 @@ export function App() {
 
         {state && state.sessions.some((s) => s.role === "worker" || s.role === "orchestrator") && (
           <section className="mb-8">
-            <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-400">Sessions</h2>
-            <div className="overflow-x-auto rounded-xl border border-zinc-800">
+            <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-fg-2">Sessions</h2>
+            <div className="overflow-x-auto rounded-xl border border-line">
               <table className="w-full text-left text-sm">
-                <thead className="text-xs text-zinc-500"><tr>{["Session", "Role", "Runtime", "Queue", "State", "Context", "Last event"].map((h) => <th key={h} className="px-3 py-2 font-medium">{h}</th>)}</tr></thead>
+                <thead className="text-xs text-fg-3"><tr>{["Session", "Role", "Runtime", "Queue", "State", "Context", "Last event"].map((h) => <th key={h} className="px-3 py-2 font-medium">{h}</th>)}</tr></thead>
                 <tbody>
                   {state.sessions.filter((s) => s.role === "worker" || s.role === "orchestrator").map((s) => (
-                    <tr key={s.id} className="border-t border-zinc-800/80">
-                      <td className="px-3 py-2"><span className="text-zinc-200">{s.title ?? s.id.slice(-8)}</span></td>
-                      <td className="px-3 py-2 text-zinc-400">{s.role}</td>
-                      <td className="px-3 py-2 text-zinc-400">{s.runtime}{s.launched_by === "external" ? " (external)" : ""}</td>
-                      <td className="px-3 py-2 font-mono text-zinc-400">{s.queue ?? "-"}</td>
-                      <td className="px-3 py-2 text-zinc-400">{s.live ? `${s.live.state}${s.live.model ? ` · ${s.live.model.replace(/^claude-/, "")}` : ""}${s.effort ? ` · ${s.effort}` : ""}` : "-"}</td>
+                    <tr key={s.id} className="border-t border-line">
+                      <td className="px-3 py-2"><span className="text-fg">{s.title ?? s.id.slice(-8)}</span></td>
+                      <td className="px-3 py-2 text-fg-2">{s.role}</td>
+                      <td className="px-3 py-2 text-fg-2">{s.runtime}{s.launched_by === "external" ? " (external)" : ""}</td>
+                      <td className="px-3 py-2 font-mono text-fg-2">{s.queue ?? "-"}</td>
+                      <td className="px-3 py-2 text-fg-2">{s.live ? `${s.live.state}${s.live.model ? ` · ${s.live.model.replace(/^claude-/, "")}` : ""}${s.effort ? ` · ${s.effort}` : ""}` : "-"}</td>
                       <td className="px-3 py-2"><ContextBar s={s} /></td>
-                      <td className="px-3 py-2 text-zinc-500">{s.last_event ? <>{s.last_event} · <TimeAgo at={s.last_event_at} /></> : "-"}</td>
+                      <td className="px-3 py-2 text-fg-3">{s.last_event ? <>{s.last_event} · <TimeAgo at={s.last_event_at} /></> : "-"}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -207,5 +207,5 @@ export function App() {
 }
 
 function Banner({ children }: { children: React.ReactNode }) {
-  return <div className="mb-4 rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm text-zinc-300">{children}</div>;
+  return <div className="mb-4 rounded-lg border border-line bg-surface px-4 py-3 text-sm text-fg">{children}</div>;
 }

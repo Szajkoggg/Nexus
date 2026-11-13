@@ -6,13 +6,13 @@ import { Button, Section } from "./ui.tsx";
 
 const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 
-const field = "w-full rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm text-zinc-200 placeholder:text-zinc-600";
+const field = "w-full rounded-md border border-line-strong bg-canvas px-2 py-1 text-sm text-fg placeholder:text-fg-3";
 
 function Row({ label, hint, children }: { label: string; hint?: ReactNode; children: ReactNode }) {
   return (
     <label className="grid gap-1 py-1.5 sm:grid-cols-[11rem_1fr] sm:items-start sm:gap-3">
-      <span className="pt-1 text-sm text-zinc-300">{label}</span>
-      <span className="min-w-0">{children}{hint && <span className="mt-1 block text-xs text-zinc-500">{hint}</span>}</span>
+      <span className="pt-1 text-sm text-fg">{label}</span>
+      <span className="min-w-0">{children}{hint && <span className="mt-1 block text-xs text-fg-3">{hint}</span>}</span>
     </label>
   );
 }
@@ -31,7 +31,7 @@ function Select({ value, onChange, options, empty }: { value: string; onChange: 
 
 export function SettingsButton({ onClick }: { onClick: () => void }) {
   return (
-    <button onClick={onClick} title="Project settings" className="rounded-md p-1.5 text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200">
+    <button onClick={onClick} title="Project settings" className="rounded-md p-1.5 text-fg-3 hover:bg-surface hover:text-fg">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <circle cx="12" cy="12" r="3" />
         <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" />
@@ -104,8 +104,8 @@ export function SettingsPanel({ project, onChanged, server }: { project: Project
   const codexAuto = f.codexApproval === "on-request" && f.codexReviewer === "auto_review";
   return (
     <div>
-      <div className="text-xs text-zinc-500">{project.root}</div>
-      <h2 className="mt-1 pr-8 text-xl font-semibold text-zinc-50">Project settings</h2>
+      <div className="text-xs text-fg-3">{project.root}</div>
+      <h2 className="mt-1 pr-8 text-xl font-semibold text-fg">Project settings</h2>
 
       <Section title="General">
         <Row label="Name"><input value={f.name} onChange={(e) => set("name", e.target.value)} className={field} /></Row>
@@ -129,8 +129,8 @@ export function SettingsPanel({ project, onChanged, server }: { project: Project
           <textarea value={f.claudeTools} onChange={(e) => set("claudeTools", e.target.value)} rows={3} className={`${field} font-mono text-xs`} />
         </Row>
         <Row label="Keep out of .nexus" hint="Workers' file tools (Write, Edit) may not write under the project's .nexus folder, where Nexus keeps its records; the nexus command still records their reports. Shell commands are not covered. Codex workers cannot be kept out: its Windows sandbox refuses a read-only folder the nexus command must still write in.">
-          <span className="flex items-center gap-2 pt-1 text-sm text-zinc-300">
-            <input type="checkbox" checked={f.protectNexus} onChange={(e) => set("protectNexus", e.target.checked)} className="accent-sky-500" />
+          <span className="flex items-center gap-2 pt-1 text-sm text-fg">
+            <input type="checkbox" checked={f.protectNexus} onChange={(e) => set("protectNexus", e.target.checked)} className="accent-accent" />
             workers may not write under .nexus
           </span>
         </Row>
@@ -155,8 +155,8 @@ export function SettingsPanel({ project, onChanged, server }: { project: Project
           <ModelSelect runtime="claude" value={orchModel} onChange={(v) => set("orchModel", v)} defaultLabel="Claude Code's default" className="w-full" />
         </Row>
         <Row label="Effort"><EffortSelect runtime="claude" model={orchModel} value={orchEffort} onChange={(v) => set("orchEffort", v)} className="w-full" /></Row>
-        <Row label="Tell it about"><span className="flex items-center gap-2 pt-1 text-sm text-zinc-300">
-          <input type="checkbox" checked={f.notify} onChange={(e) => set("notify", e.target.checked)} className="accent-sky-500" />
+        <Row label="Tell it about"><span className="flex items-center gap-2 pt-1 text-sm text-fg">
+          <input type="checkbox" checked={f.notify} onChange={(e) => set("notify", e.target.checked)} className="accent-accent" />
           workers' questions, and runs that halt or finish
         </span></Row>
       </Section>
@@ -173,8 +173,8 @@ export function SettingsPanel({ project, onChanged, server }: { project: Project
       <Section title="Defaults">
         <Row label="After each step" hint={f.review === "orchestrator" ? "The orchestrator accepts each step, sends it back, or hands it to you; without an orchestrator, or with its notices off, the step waits for you." : undefined}><Select value={f.review} onChange={(v) => set("review", v as "continue" | "wait" | "orchestrator")} options={[["continue", "go on to the next step"], ["wait", "wait for my review"], ["orchestrator", "wait for the orchestrator's review"]]} /></Row>
         <Row label="Push what was accepted" hint="When a step is accepted (by you or the orchestrator), Nexus pushes the commit the step was reviewed at to the branch the queue runs on (its upstream remote, else origin). Never forced; a failed push shows on the step.">
-          <span className="flex items-center gap-2 pt-1 text-sm text-zinc-300">
-            <input type="checkbox" checked={f.pushAccepted} onChange={(e) => set("pushAccepted", e.target.checked)} className="accent-sky-500" />
+          <span className="flex items-center gap-2 pt-1 text-sm text-fg">
+            <input type="checkbox" checked={f.pushAccepted} onChange={(e) => set("pushAccepted", e.target.checked)} className="accent-accent" />
             push accepted steps
           </span>
         </Row>
@@ -185,8 +185,8 @@ export function SettingsPanel({ project, onChanged, server }: { project: Project
           <span className="flex items-center gap-2"><input type="number" min={10} max={100} value={f.reuse} onChange={(e) => set("reuse", Number(e.target.value))} className={`${field} w-24`} /> %</span>
         </Row>
         <Row label="Context care" hint="Above that fill at the end of a step, the next step runs in a fresh session, given the previous one's context summary, instead of the runtime compacting in the middle of a step.">
-          <span className="flex items-center gap-2 pt-1 text-sm text-zinc-300">
-            <input type="checkbox" checked={f.care} onChange={(e) => set("care", e.target.checked)} className="accent-sky-500" />
+          <span className="flex items-center gap-2 pt-1 text-sm text-fg">
+            <input type="checkbox" checked={f.care} onChange={(e) => set("care", e.target.checked)} className="accent-accent" />
             a fresh session when the context is full
           </span>
         </Row>
@@ -197,7 +197,7 @@ export function SettingsPanel({ project, onChanged, server }: { project: Project
 
       <div className="mt-6 flex flex-wrap items-center gap-3">
         <Button onClick={save} disabled={busy}>{busy ? "Saving…" : "Save"}</Button>
-        {msg && <span className={`text-sm ${msg.ok ? "text-emerald-300" : "text-red-300"}`}>{msg.text}</span>}
+        {msg && <span className={`text-sm ${msg.ok ? "text-ok" : "text-danger"}`}>{msg.text}</span>}
       </div>
 
       <ServerSection info={server} onChanged={onChanged} />
@@ -218,7 +218,7 @@ export interface ServerInfo {
   push_on_deploy: boolean;
 }
 
-const PUSH_TONE = { pushed: "text-emerald-300", failed: "text-red-300", skipped: "text-zinc-400" } as const;
+const PUSH_TONE = { pushed: "text-ok", failed: "text-danger", skipped: "text-fg-2" } as const;
 const PUSH_LABEL = { pushed: "Pushed", failed: "Push failed", skipped: "Not pushed" } as const;
 
 export function useServer(version: unknown) {
@@ -231,7 +231,11 @@ export function UpdatePill({ info }: { info: ServerInfo | undefined }) {
   if (!u || u.phase === "idle" || u.phase === "updated") return null;
   const text = u.phase === "draining" ? (u.waiting.length ? `updating: waiting for ${u.waiting.length} project${u.waiting.length > 1 ? "s" : ""}` : "updating")
     : u.phase === "failed" ? "update failed" : u.phase;
-  return <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs ring-1 ${u.phase === "failed" ? "text-red-300 ring-red-500/40" : "animate-pulse text-sky-300 ring-sky-500/40"}`}>{text}</span>;
+  return (
+    <span className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap text-xs font-medium ${u.phase === "failed" ? "text-danger" : "text-accent"}`}>
+      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${u.phase === "failed" ? "bg-danger" : "animate-pulse bg-accent"}`} />{text}
+    </span>
+  );
 }
 
 export function ServerSection({ info, onChanged }: { info: ServerInfo | undefined; onChanged: () => void }) {
@@ -247,18 +251,18 @@ export function ServerSection({ info, onChanged }: { info: ServerInfo | undefine
   const busy = u.phase === "draining" || u.phase === "updating" || u.phase === "restarting";
   return (
     <Section title="Nexus">
-      <p className="text-sm text-zinc-300">
+      <p className="text-sm text-fg">
         <span className="font-mono">{info.commit}</span> {info.subject}
       </p>
-      <p className="mt-1 text-xs text-zinc-500">
+      <p className="mt-1 text-xs text-fg-3">
         {info.live ? "Live instance" : `Development checkout (branch ${info.branch}): an update rebuilds and restarts it without moving it`} · <span className="font-mono">{info.root}</span>
       </p>
       {u.phase !== "idle" && (
-        <div className="mt-3 rounded-lg bg-zinc-950 p-3 text-xs text-zinc-400">
-          <div className="mb-1 text-zinc-200">{u.phase === "updated" ? <>Updated: <span className="font-mono">{info.commit}</span> is up</> : <>Update: {u.phase}</>}{busy && u.held.length ? `; holding ${u.held.join(", ")}` : ""}{u.waiting.length ? `; waiting for ${u.waiting.join(", ")}` : ""}</div>
+        <div className="mt-3 rounded-lg bg-canvas p-3 text-xs text-fg-2">
+          <div className="mb-1 text-fg">{u.phase === "updated" ? <>Updated: <span className="font-mono">{info.commit}</span> is up</> : <>Update: {u.phase}</>}{busy && u.held.length ? `; holding ${u.held.join(", ")}` : ""}{u.waiting.length ? `; waiting for ${u.waiting.join(", ")}` : ""}</div>
           {u.push && <div className={`mb-1 ${PUSH_TONE[u.push.result]}`}><span className="font-semibold">{PUSH_LABEL[u.push.result]}:</span> {u.push.text}</div>}
           {u.log.map((l, i) => <div key={i} className="font-mono">{l}</div>)}
-          {u.error && <div className="mt-1 whitespace-pre-wrap text-red-300">{u.error}</div>}
+          {u.error && <div className="mt-1 whitespace-pre-wrap text-danger">{u.error}</div>}
         </div>
       )}
       <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -266,18 +270,18 @@ export function ServerSection({ info, onChanged }: { info: ServerInfo | undefine
         {!busy && <Button variant="quiet" onClick={() => { if (confirm("Stop the running steps now? They continue from where they were after the restart.")) void call("/api/server/update", { now: true }); }}>Update now</Button>}
         {u.phase === "draining" && <Button variant="quiet" onClick={() => void call("/api/server/cancel")}>Cancel</Button>}
       </div>
-      <label className="mt-3 flex items-start gap-2 text-sm text-zinc-300">
-        <input type="checkbox" className="mt-0.5 accent-sky-500" checked={info.push_on_deploy}
+      <label className="mt-3 flex items-start gap-2 text-sm text-fg">
+        <input type="checkbox" className="mt-0.5 accent-accent" checked={info.push_on_deploy}
           onChange={(e) => void call("/api/server/settings", { push_on_deploy: e.target.checked })} />
         <span>Push the deployed main to GitHub after an update{info.live ? "" : " (only a live instance pushes)"}</span>
       </label>
-      <p className="mt-2 text-xs text-zinc-500">
+      <p className="mt-2 text-xs text-fg-3">
         Update Nexus lets every running step finish (new steps wait), moves this instance to the newest commit on main,
         builds it and restarts. The queues it held go on by themselves; paused or stopped ones stay as they are. Once the
         new version is up, it pushes that commit of main to its upstream, fast-forward only; a failed push leaves the
         update in place and says why here.
       </p>
-      {msg && <p className="mt-2 text-xs text-red-300">{msg}</p>}
+      {msg && <p className="mt-2 text-xs text-danger">{msg}</p>}
     </Section>
   );
 }
@@ -298,12 +302,12 @@ export function ModelSelect({ runtime, value, onChange, defaultLabel = "default"
   const [typing, setTyping] = useState(false);
   const options: [string, string, string?][] = (models ?? []).map((m) => [m.value, m.label, m.description]);
   if (value && !options.some(([v]) => v === value)) options.push([value, value]);
-  const style = `rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm text-zinc-200 disabled:opacity-50 ${className}`;
+  const style = `rounded-md border border-line-strong bg-canvas px-2 py-1 text-sm text-fg disabled:opacity-50 ${className}`;
   if (typing) {
     return (
       <span className="flex items-center gap-1">
         <input autoFocus value={value} onChange={(e) => onChange(e.target.value.trim())} placeholder="full model name" className={style} />
-        <button type="button" onClick={() => setTyping(false)} className="px-1 text-xs text-zinc-400 hover:text-zinc-200" title="Back to the list">list</button>
+        <button type="button" onClick={() => setTyping(false)} className="px-1 text-xs text-fg-2 hover:text-fg" title="Back to the list">list</button>
       </span>
     );
   }
@@ -340,7 +344,7 @@ export function EffortSelect({ runtime, model, value, onChange, defaultLabel = "
   const options = value && !efforts.includes(value) ? [...efforts, value] : efforts;
   return (
     <select value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)}
-      className={`rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm text-zinc-200 disabled:opacity-50 ${className}`}>
+      className={`rounded-md border border-line-strong bg-canvas px-2 py-1 text-sm text-fg disabled:opacity-50 ${className}`}>
       <option value="">{defaultLabel}</option>
       {options.map((x) => <option key={x} value={x}>{x}{efforts.includes(x) ? "" : " (not offered by this model)"}</option>)}
     </select>
