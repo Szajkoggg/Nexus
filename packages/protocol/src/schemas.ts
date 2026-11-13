@@ -283,6 +283,8 @@ export const ReviewItem = z.object({
   url: z.string().optional(),
   label: z.string().optional(),
   kind: z.enum(["image", "sheet", "doc", "data", "link"]).optional(),
+  /** The picture this one is the "after" of (`nexus review add … --before PATH`); else it pairs by label across rounds. */
+  before: z.string().optional(),
 }).refine((i) => i.path || i.url, { message: "a review item needs a path or a url" });
 export type ReviewItem = z.infer<typeof ReviewItem>;
 
@@ -341,6 +343,13 @@ export const Event = z.discriminatedUnion("type", [
    * pauses, nothing is reverted; the orchestrator proposes what follows. User only.
    */
   z.object({ ...base, type: z.literal("review.rejected"), ...qs, text: z.string().optional() }),
+  /** The user marks one review picture (by its path) accepted, or takes the mark back. A mark only: the step is not accepted. */
+  z.object({ ...base, type: z.literal("review.marked"), ...qs, path: z.string().min(1), accepted: z.boolean() }),
+  /**
+   * The user's comment on one review picture, and where it went: `send_back` (the step waited for the user's review: a
+   * Fix it) or `note` (on `note_step`, the next pending step).
+   */
+  z.object({ ...base, type: z.literal("review.commented"), ...qs, path: z.string().min(1), text: z.string().min(1), to: z.enum(["send_back", "note"]), note_step: Id.optional() }),
   /** The orchestrator hands a step waiting for its review to the user, saying why. */
   z.object({ ...base, type: z.literal("review.asked_user"), ...qs, text: z.string().min(1) }),
 ]);
@@ -354,7 +363,7 @@ export const ORCHESTRATOR_ONLY: ReadonlySet<EventType> = new Set([
 ]);
 
 /** Event types only the user's session may write (the server writes them for the dashboard). */
-export const USER_ONLY: ReadonlySet<EventType> = new Set(["review.rejected"]);
+export const USER_ONLY: ReadonlySet<EventType> = new Set(["review.rejected", "review.marked", "review.commented"]);
 
 // ---------------------------------------------------------------- server-owned runtime files
 

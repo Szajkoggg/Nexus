@@ -4,7 +4,7 @@ import { existsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { ProjectFile, QueueFile, USER_SESSION, effortIssue, type StatusChange, type InboxEntry, ReviewPolicy, type SessionFile } from "./schemas.ts";
 import { ProjectStore, newId, now, revisionHash } from "./store.ts";
-import { isApproved, loadProjectState, type ProjectState } from "./state.ts";
+import { commentTarget, isApproved, loadProjectState, type ProjectState } from "./state.ts";
 import { validAllowRule } from "./refusals.ts";
 
 export class ActionError extends Error {
@@ -155,6 +155,43 @@ export function routeAnswers(store: ProjectStore, state: ProjectState = loadProj
     }
   }
   return routed;
+}
+
+// ---------------------------------------------------------------- review pictures: marks and comments
+
+/** The user's review picture of a step, by its path; refused when the step has no such picture. */
+function pictureOf(store: ProjectStore, queue: string, step: string, path: unknown) {
+  stepOf(store, queue, step);
+  const q = loadProjectState(store).queues.find((x) => x.id === queue)!;
+  const st = q.steps.find((s) => s.id === step)!;
+  const item = typeof path === "string" ? st.review_items.find((r) => r.path === path) : undefined;
+  if (!item) throw new ActionError(`step ${queue}/${step} has no review picture ${String(path)}`, 404);
+  return { q, st, item, path: path as string };
+}
+
+/** The user marks a review picture accepted (or takes the mark back). A mark only: the step is not accepted. */
+export function markPicture(store: ProjectStore, req: { queue: string; step: string; path: unknown; accepted: unknown }): void {
+  const { path } = pictureOf(store, req.queue, req.step, req.path);
+  const user = ensureUserSession(store);
+  store.appendEvent({ v: 1, id: newId(), at: now(), session: user.id, type: "review.marked", queue: req.queue, step: req.step, path, accepted: req.accepted !== false });
+}
+
+/**
+ * The user's comment on a review picture: while the step waits for the user's review it goes back to the worker
+ * with a send-back (a Fix it, see sendBack); otherwise it becomes a note on the next pending step (commentTarget).
+ * Recorded as review.commented. Returns where it went.
+ */
+export function commentOnPicture(store: ProjectStore, req: { queue: string; step: string; path: unknown; text: unknown }): string {
+  const text = nonEmpty(req.text, "the comment");
+  const { q, item, path } = pictureOf(store, req.queue, req.step, req.path);
+  const target = commentTarget(q, req.step);
+  if (target.to === "none") throw new ActionError(`step ${req.queue}/${req.step} is not waiting for your review and no step after it is pending: the comment has nowhere to go`, 409);
+  const about = `About the picture "${item.label ?? path.split(/[\\/]/).at(-1)}" (${path}):\n${text}`;
+  const user = ensureUserSession(store);
+  store.appendEvent({ v: 1, id: newId(), at: now(), session: user.id, type: "review.commented", queue: req.queue, step: req.step, path, text, to: target.to, note_step: target.to === "note" ? target.step : undefined });
+  if (target.to === "send_back") return sendBack(store, { queue: req.queue, step: req.step, from: "user", text: about });
+  addNote(store, req.queue, target.step, about);
+  return `the comment is a note on step ${target.step}, delivered when it starts`;
 }
 
 // ---------------------------------------------------------------- sending a step back

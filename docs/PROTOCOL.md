@@ -224,7 +224,9 @@ Every line:
 |---|---|---|
 | `step.started` | `queue`, `step` | The worker begins the step |
 | `step.progress` | `queue`, `step`, `text`, `pct?` | A short status line for the dashboard |
-| `review.added` | `queue`, `step`, `items: [{path or url, label, kind?}]`, `round?` | Review material, `kind` = image, sheet, doc, data, link |
+| `review.added` | `queue`, `step`, `items: [{path or url, label, kind?, before?}]`, `round?` | Review material, `kind` = image, sheet, doc, data, link; `before`: the path of the picture this one is compared with (see "Review pictures") |
+| `review.marked` | `queue`, `step`, `path`, `accepted` | User only: a review picture marked accepted (or the mark taken back). A mark only: it does not accept the step |
+| `review.commented` | `queue`, `step`, `path`, `text`, `to` (`send_back`, `note`), `note_step?` | User only: a comment on a review picture, and where it went (see "Review pictures") |
 | `check.result` | `queue`, `step`, `name`, `ok`, `summary` | One check's outcome |
 | `step.done` | `queue`, `step`, `summary`, `commit?` | Acceptance met; the step's work is finished |
 | `step.failed` | `queue`, `step`, `reason` | The step cannot be finished as written |
@@ -363,6 +365,20 @@ The server reads git for the dashboard (`apps/server/src/gitinfo.ts`), only loca
   `origin/<branch>`), with `at`, when that ref last changed (its newest reflog entry).
 - A project that is not a git repository shows none of it.
 
+### Review pictures
+
+- **Pairs.** A review picture is compared with its "before": the one its item names (`before`, from
+  `nexus review add <step> <picture> --before <path>`, one picture at a time), else the latest earlier picture with
+  the same label from an earlier round (without round numbers: the latest earlier one with that label). The viewer
+  shows the two beside each other (stacked when the screen is upright) or overlaid with a slider.
+- **Marks.** The user may mark a picture accepted (`review.marked`, by its path), and take the mark back. It is a
+  mark only: the step is not accepted by it. The derived step has `pictures.<path>` (`accepted`: when, while marked;
+  `comments`).
+- **Comments.** A comment on a picture goes, while the step waits for the user's review, back to the worker with a
+  send-back (a user's Fix it, see "Sending a step back"); otherwise it becomes a note from the user on the next pending
+  step after it, delivered when that step starts. With neither it is refused. The text sent says which picture
+  (`About the picture "<label>" (<path>): …`); `review.commented` records the user's own words and where they went.
+
 ### Merge back and clean up
 
 For a finished queue (`done`) with a worktree of its own, the user, and only the user, can merge its branch back and
@@ -461,6 +477,7 @@ nexus status                                   # the current queue, step, notes 
 nexus step start W3
 nexus step progress W3 "Support graph built; probing fixtures"
 nexus review add W3 tmp/review/w3/sheet.png --label "Sheet, round 1"
+nexus review add W3 tmp/review/w3/lit.png --before tmp/review/w3/unlit.png --label "Lighting"   # one picture and its before
 nexus check W3 core-tests --ok --summary "548 passed"
 nexus step done W3 --summary "No floating body on any fixture" [--commit 1a2b3c]
 nexus step failed W3 --reason "..."
@@ -536,6 +553,8 @@ sends (see the CLI).
 | `PATCH /api/projects/:id/queues/:q` | `review_policy` (`continue`, `wait`, `orchestrator` or null) | Queue settings |
 | `POST /api/projects/:id/questions/:qid/answer` | `text`, `continue?` | The user's answer, routed to the asker |
 | `POST /api/projects/:id/queues/:q/run` | `action` (`start`, `pause`, `resume`, `stop`, `cancel_start`), `runtime?`, `model?`, `effort?`, `session?`, `after?`, `at?` | Runs the queue through a Nexus-launched session (`session` continues an existing one). `start` with `after`: a chain, the queue starts when that one is done (`{message}`); with `at` (ISO 8601, or `usage-reset`): a schedule (`{message}`); `cancel_start` cancels the planned start (`{message}`) |
+| `POST /api/projects/:id/queues/:q/steps/:s/pictures/mark` | `path`, `accepted` | The user's mark on a review picture (`review.marked`) |
+| `POST /api/projects/:id/queues/:q/steps/:s/pictures/comment` | `path`, `text` | The user's comment on a review picture: a send-back or a note (see "Review pictures"); answers `{ ok, result: { message } }` |
 | `POST /api/projects/:id/queues/:q/steps/:s/reject` | `text?` | Reject (the user's): the step is rejected, the run pauses until a newer revision is approved; answers `{ ok, result: { message } }` |
 | `POST /api/projects/:id/queues/:q/steps/:s/accept` | `text?` (the note), `note_to?` (`next` or `orchestrator`) | Accepts a step waiting in review (and, with `push_accepted`, pushes it); answers where the note went (`to`, `step`) |
 | `GET /api/projects/:id/queues/:q/steps/:s/commits` | | A step's commits per round: `{ rounds: [{ session, start, end, open, commits: [{ sha, subject, author, at, files, insertions, deletions, foreign }] }] }`, newest first; an open round runs to HEAD; null outside a git repository or with nothing recorded |

@@ -28,7 +28,11 @@ computer.
 right, both at once, with the queue list between them: click another step and the chat stays open.
 
 **Review images** open in the app: full screen on a phone, two fingers to zoom (double-tap on a computer), swipe or
-the arrows for the step's next and previous image; "Original" opens the file in a new tab.
+the arrows for the step's next and previous image; "Original" opens the file in a new tab. A picture with a "before"
+(the same label in an earlier round, or one the worker named with `--before`) can be seen beside it or overlaid with
+a slider. Below each picture: **Mark accepted** (a mark for that picture only; it does not accept the step) and a
+comment, which goes back to the worker as a Fix it while the step waits for your review, and otherwise becomes a note
+on the next pending step.
 
 **Finished queues** (done or cancelled) are no longer cards in the list: they fold into one line at the bottom of
 the project page, "Finished (N)", closed until you open it (the browser remembers that, per project). Open, it lists
@@ -240,6 +244,7 @@ nexus status
 nexus step start W3
 nexus step progress W3 "Support graph built" --pct 40
 nexus review add W3 tmp/review/w3/sheet.png --label "Sheet, round 1"
+nexus review add W3 tmp/review/w3/lit.png --before tmp/review/w3/unlit.png --label "Lighting"
 nexus step done W3 --summary "No floating body on any fixture"
 ```
 

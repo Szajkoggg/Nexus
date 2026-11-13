@@ -20,3 +20,25 @@ export function noteTargets(steps: StepLike[], step: string): { next?: string; o
   const next = i < 0 ? undefined : steps.slice(i + 1).find((s) => s.status === "pending");
   return { next: next?.id, orchestrator: true };
 }
+
+/** What the pairing reads of a review item. */
+export interface PictureLike { path?: string; label?: string; round?: number; before?: string; at?: string }
+
+/** A review picture and the one it is compared with, if any (`before` is a path). */
+export interface Pair<T extends PictureLike> { item: T; before?: string; beforeLabel?: string }
+
+/**
+ * Pairs each picture with its "before": the one named with `nexus review add --before`, else the latest earlier
+ * picture with the same label from an earlier round (without round numbers: the latest earlier one with that label,
+ * the items being in the order they were added). Pictures without either stand alone.
+ */
+export function pairPictures<T extends PictureLike>(items: T[]): Pair<T>[] {
+  return items.map((item, i) => {
+    if (item.before) return { item, before: item.before, beforeLabel: "before" };
+    if (item.label === undefined) return { item };
+    const earlier = items.slice(0, i).filter((x) => x.path && x.label === item.label
+      && (item.round === undefined || x.round === undefined ? item.round === undefined && x.round === undefined : x.round < item.round));
+    const best = earlier.sort((a, b) => (a.round ?? 0) - (b.round ?? 0)).at(-1);
+    return best ? { item, before: best.path, beforeLabel: best.round !== undefined ? `round ${best.round}` : "earlier" } : { item };
+  });
+}

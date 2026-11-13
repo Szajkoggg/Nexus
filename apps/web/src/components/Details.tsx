@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { Event, StatusChange } from "@nexus/protocol";
 import { stopPlace } from "@nexus/protocol/attention";
 import { act, enc, fileUrl, useFetch, type ProjectState, type QuestionView, type QueueView, type StepView } from "../api.ts";
-import { noteTargets, showsReviewActions } from "../review.ts";
+import { noteTargets, pairPictures, showsReviewActions } from "../review.ts";
 import { Button, Composer, Expandable, Markdown, Section, StatusBadge, StepTimes, TimeAgo, reviewLabel } from "./ui.tsx";
 import { Activity, RetryNote, RunControls } from "./Run.tsx";
 import { StepRefusals } from "./Refusals.tsx";
@@ -24,8 +24,13 @@ export function StepDetail({ project, queue, step, onChanged }: Props & { step: 
   const notesOpen = step.status === "pending" || step.status === "stopped";
   // Review images open in the in-app viewer, a layer above the step (Back closes it); other items as links.
   const isImage = (r: StepView["review_items"][number]) => !!r.path && /\.(png|jpe?g|gif|webp|svg)$/i.test(r.path);
-  const images: ViewerImage[] = step.review_items.filter(isImage)
-    .map((r) => ({ src: fileUrl(id, r.path!), label: r.label ?? r.path!.split("/").at(-1)!, round: r.round }));
+  // Each picture with its before, if it has one (an explicit --before, else the same label in an earlier round).
+  const pictures = pairPictures(step.review_items.filter(isImage));
+  const images: ViewerImage[] = pictures.map(({ item: r, before, beforeLabel }) => ({
+    src: fileUrl(id, r.path!), label: r.label ?? r.path!.split("/").at(-1)!, round: r.round,
+    // An explicit before by its file name; one paired by label by its round.
+    before: before ? { src: fileUrl(id, before), label: beforeLabel === "before" ? before.split(/[\\/]/).at(-1)! : beforeLabel ?? "before" } : undefined,
+  }));
   const viewing = layerValue(useNav(), "viewer");
   const shown = viewing === undefined ? undefined : Math.min(Math.max(0, Number(viewing) || 0), images.length - 1);
   return (
@@ -133,8 +138,9 @@ export function StepDetail({ project, queue, step, onChanged }: Props & { step: 
               if (isImage(r)) {
                 const n = step.review_items.slice(0, i).filter(isImage).length;
                 return (
-                  <button key={i} onClick={() => nav.open(`viewer:${n}`)} className={tile}>
+                  <button key={i} onClick={() => nav.open(`viewer:${n}`)} className={`${tile} relative`}>
                     <img src={href} alt={r.label ?? ""} className="aspect-video w-full object-cover" loading="lazy" />
+                    <PictureBadges marks={step.pictures[r.path!]} paired={!!pictures[n]?.before} />
                     {caption}
                   </button>
                 );
@@ -151,7 +157,8 @@ export function StepDetail({ project, queue, step, onChanged }: Props & { step: 
       )}
 
       {shown !== undefined && images.length > 0 && (
-        <ImageViewer images={images} index={shown} onIndex={(i) => nav.open(`viewer:${i}`)} onClose={() => nav.close("viewer")} />
+        <ImageViewer images={images} index={shown} onIndex={(i) => nav.open(`viewer:${i}`)} onClose={() => nav.close("viewer")}
+          footer={(i) => <PictureActions key={pictures[i]!.item.path} project={id} queue={queue} step={step} path={pictures[i]!.item.path!} onChanged={onChanged} />} />
       )}
 
       {step.checks.length > 0 && (
@@ -283,6 +290,64 @@ function Rejected({ step, holding }: { step: StepView; holding: boolean }) {
           ? "Nothing was reverted. The run waits until you approve a new revision of the queue (the orchestrator proposes one); nothing of the queue is pushed until then."
           : "A newer revision was approved since; this step is not run again."}
       </p>
+    </div>
+  );
+}
+
+/** On a picture's tile: accepted, its comments, whether it has a before to compare with. */
+function PictureBadges({ marks, paired }: { marks?: StepView["pictures"][string]; paired: boolean }) {
+  if (!marks?.accepted && !marks?.comments.length && !paired) return null;
+  const chip = "rounded bg-black/70 px-1.5 py-0.5 text-[11px]";
+  return (
+    <span className="absolute right-1.5 top-1.5 flex gap-1">
+      {paired && <span className={`${chip} text-zinc-200`} title="Has a before to compare with">⇄</span>}
+      {marks?.accepted && <span className={`${chip} text-emerald-300`} title="You marked it accepted">✓</span>}
+      {!!marks?.comments.length && <span className={`${chip} text-sky-300`} title="Your comments">💬 {marks.comments.length}</span>}
+    </span>
+  );
+}
+
+/**
+ * Below a picture in the viewer: mark it accepted (a mark only; the step is not accepted) and comment on it. A comment
+ * goes back to the worker as a Fix it while the step waits for the user's review; otherwise it is a note on the next
+ * pending step.
+ */
+function PictureActions({ project, queue, step, path, onChanged }: { project: string; queue: QueueView; step: StepView; path: string; onChanged: () => void }) {
+  const marks = step.pictures[path];
+  const [error, setError] = useState<string>();
+  const next = noteTargets(queue.steps, step.id).next;
+  const where = showsReviewActions(step) ? "goes back to the worker with the step (a Fix it: your words win over its criteria)"
+    : next ? `becomes a note on step ${next}, delivered when it starts` : undefined;
+  const base = `/queues/${enc(queue.id)}/steps/${enc(step.id)}/pictures`;
+  return (
+    <div className="space-y-2 text-sm">
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          onClick={() => act(project, "POST", `${base}/mark`, { path, accepted: !marks?.accepted }).then(onChanged, (e: Error) => setError(e.message))}
+          aria-pressed={!!marks?.accepted}
+          className={`rounded-md px-3 py-1.5 text-sm font-medium ring-1 ${marks?.accepted ? "bg-emerald-600/20 text-emerald-300 ring-emerald-500/50" : "text-zinc-200 ring-white/15 hover:bg-white/10"}`}
+        >{marks?.accepted ? "✓ Accepted" : "Mark accepted"}</button>
+        <span className="text-xs text-zinc-500">a mark for this picture; the step is not accepted by it</span>
+        {error && <span className="text-xs text-red-400">{error}</span>}
+      </div>
+      {marks?.comments.map((c, i) => (
+        <div key={i} className="rounded-md bg-white/5 px-2 py-1.5">
+          <p className="whitespace-pre-wrap text-zinc-200">{c.text}</p>
+          <p className="text-[11px] text-zinc-500">{c.to === "send_back" ? "sent back to the worker" : `a note on step ${c.note_step}`} · <TimeAgo at={c.at} /></p>
+        </div>
+      ))}
+      {where ? (
+        <div>
+          <Composer
+            draft={draftKey(project, "picture", queue.id, step.id, path)}
+            placeholder="A comment on this picture…"
+            button="Comment"
+            rows={2}
+            onSubmit={async (text) => { await act(project, "POST", `${base}/comment`, { path, text }); onChanged(); }}
+          />
+          <p className="mt-1 text-[11px] text-zinc-500">The comment {where}.</p>
+        </div>
+      ) : <p className="text-xs text-zinc-500">No step to take a comment: this step is not waiting for your review and nothing after it is pending.</p>}
     </div>
   );
 }

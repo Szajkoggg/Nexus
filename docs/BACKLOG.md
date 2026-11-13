@@ -16,16 +16,6 @@ would be better still.
 
 Pending with the user: docs/proposals/honeycomb-push-after-acceptance.md, to bring up after deploy.
 
-## 9. Git on the dashboard
-
-Per step, the commits it made and a summary of their diff; the branch's state; for a finished queue with its own
-worktree, merging back and cleaning up as explicit, user-approved actions.
-
-## 10. Reviewing
-
-A before/after comparison viewer for review images; per picture "accept" or a comment, which goes back to the
-worker as a note for the next step or round.
-
 ## 11. Smaller
 
 - Voice input in the chats on the phone (the browser's speech recognition).

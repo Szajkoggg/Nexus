@@ -52,6 +52,11 @@ export interface StepView extends StepDef {
   /** The round at work answers the user's Fix it: its review is the user's, whatever the policy. */
   user_fix?: boolean;
   review_items: (ReviewItem & { at: string; round?: number })[];
+  /**
+   * The user's marks and comments on review pictures, by the picture's path: `accepted` with its time while marked;
+   * comments oldest first, with where each went.
+   */
+  pictures: Record<string, { accepted?: string; comments: { text: string; at: string; to: "send_back" | "note"; note_step?: string }[] }>;
   checks: CheckView[];
   notes: (Note & { read_at?: string })[];
   /** Messages sent to a session about this step while it ran. */
@@ -346,7 +351,7 @@ function initQueue(q: QueueFile, notes: Note[]): QueueView {
     steps: q.steps.map((s) => ({
       ...s,
       status: s.status ?? "pending",
-      review_items: [], checks: [], timeline: [], messages: [], segments: [], sent_back: [],
+      review_items: [], checks: [], timeline: [], messages: [], segments: [], sent_back: [], pictures: {},
       notes: notes.filter((n) => n.step === s.id),
     })),
   };
@@ -400,6 +405,15 @@ function apply(
     case "step.progress": {
       const st = stepOf(queueOf(e.queue), e.step);
       if (st) st.progress = { text: e.text, pct: e.pct, at: e.at };
+      return;
+    }
+    case "review.marked":
+    case "review.commented": {
+      const st = stepOf(queueOf(e.queue), e.step);
+      if (!st) return;
+      const p = (st.pictures[e.path] ??= { comments: [] });
+      if (e.type === "review.marked") p.accepted = e.accepted ? e.at : undefined;
+      else p.comments.push({ text: e.text, at: e.at, to: e.to, note_step: e.note_step });
       return;
     }
     case "review.added": {
@@ -592,3 +606,16 @@ function resume(x: QuestionView, queues: Map<string, QueueView>, e: Event): void
   if (q?.status === "waiting" && !q.steps.some((s) => s.status === "waiting" || s.status === "review")) q.status = "running";
 }
 
+
+/**
+ * Where the user's comment on a review picture of a step goes: back to the worker with a send-back (a Fix it) while
+ * the step waits for the user's review; otherwise a note on the next pending step after it; else nowhere.
+ */
+export function commentTarget(q: Pick<QueueView, "steps">, step: string): { to: "send_back" } | { to: "note"; step: string } | { to: "none" } {
+  const i = q.steps.findIndex((s) => s.id === step);
+  const st = q.steps[i];
+  if (!st) return { to: "none" };
+  if (st.status === "review" && st.review_with !== "orchestrator") return { to: "send_back" };
+  const next = q.steps.slice(i + 1).find((s) => s.status === "pending");
+  return next ? { to: "note", step: next.id } : { to: "none" };
+}

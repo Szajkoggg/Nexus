@@ -12,7 +12,7 @@ import chokidar, { type FSWatcher } from "chokidar";
 import type { Server } from "node:http";
 import {
   ActionError, Effort, ProjectStore, addNote, updateSettings, answerAsUser, approveQueue, deleteNote, loadProjectState, nexusHome, withdrawApproval, addAllowRule,
-  readRegistry, readUsage, routeAnswers, routeSendBacks, sendBack, sendMessage, setQueueSettings, type ProjectState,
+  readRegistry, readUsage, commentOnPicture, markPicture, routeAnswers, routeSendBacks, sendBack, sendMessage, setQueueSettings, type ProjectState,
 } from "@nexus/protocol";
 import { Engine } from "./engine.ts";
 import { branchState, stepCommits } from "./gitinfo.ts";
@@ -344,6 +344,10 @@ app.post("/api/projects/:id/queues/:queue/merge", act((st, _b, p) => ({ message:
 app.post("/api/projects/:id/queues/:queue/cleanup", act((st, _b, p) => ({ message: cleanUp(st, p("queue")) })));
 // Push again: the last failed push of an accepted step of this queue, tried again.
 app.post("/api/projects/:id/queues/:queue/push", act((st, _b, p) => ({ message: engineOf(st).pushAgain(p("queue")) })));
+// Review pictures: the user's mark (a mark only) and comment (a Fix it while the step waits for the user, else a note
+// on the next pending step).
+app.post("/api/projects/:id/queues/:queue/steps/:step/pictures/mark", act((st, b, p) => markPicture(st, { queue: p("queue"), step: p("step"), path: b.path, accepted: b.accepted })));
+app.post("/api/projects/:id/queues/:queue/steps/:step/pictures/comment", act((st, b, p) => ({ message: commentOnPicture(st, { queue: p("queue"), step: p("step"), path: b.path, text: b.text }) })));
 // Reject: the user's, on a step waiting for their review; the run pauses until a new revision is approved.
 app.post("/api/projects/:id/queues/:queue/steps/:step/reject", act((st, b, p) => ({ message: engineOf(st).rejectStep(p("queue"), p("step"), b.text) })));
 app.post("/api/projects/:id/queues/:queue/steps/:step/accept", act((st, b, p) => engineOf(st).acceptReview(p("queue"), p("step"), b.text, b.note_to)));

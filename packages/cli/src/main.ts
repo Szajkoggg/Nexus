@@ -21,6 +21,7 @@ Agent commands (session from NEXUS_SESSION or --session):
   nexus step done <step> --summary <text> [--commit <sha>]
   nexus step failed <step> --reason <text>
   nexus review add <step> <path|url>... [--label <text>] [--kind image|sheet|doc|data|link] [--round N]
+                    [--before <path>]   (one picture: the "before" it is compared with; else pictures pair by label across rounds)
   nexus check <step> <name> --ok|--fail [--summary <text>]
   nexus stop <step> --condition <text> --reason <text>
   nexus ask <text> [--step <step>] [--option <text>]... [--can-continue]
@@ -70,7 +71,7 @@ const { values: o, positionals: args } = parseArgs({
     id: { type: "string" }, name: { type: "string" }, prefix: { type: "string" },
     "dry-run": { type: "boolean" }, replace: { type: "boolean" },
     role: { type: "string" }, runtime: { type: "string" }, title: { type: "string" }, from: { type: "string" },
-    help: { type: "boolean", short: "h" }, note: { type: "string" }, now: { type: "boolean" }, ref: { type: "string" },
+    help: { type: "boolean", short: "h" }, note: { type: "string" }, before: { type: "string" }, now: { type: "boolean" }, ref: { type: "string" },
   },
 });
 
@@ -370,11 +371,17 @@ const commands: Record<string, () => void | Promise<void>> = {
     checkStep(st, queue, step);
     const targets = args.slice(3);
     if (!targets.length) throw new UsageError("missing <path|url>");
+    let before: string | undefined;
+    if (o.before !== undefined) {
+      if (targets.length !== 1 || /^https?:\/\//.test(targets[0]!)) throw new UsageError("--before goes with exactly one picture (a file)");
+      before = normPath(o.before);
+      if (!existsSync(before)) throw new UsageError(`no such file: ${before}`);
+    }
     const items: ReviewItem[] = targets.map((t) => {
       if (/^https?:\/\//.test(t)) return { url: t, label: o.label, kind: (o.kind as ReviewItem["kind"]) ?? "link" };
       const p = normPath(t);
       if (!existsSync(p)) throw new UsageError(`no such file: ${p}`);
-      return { path: p, label: o.label ?? basename(p), kind: (o.kind as ReviewItem["kind"]) ?? guessKind(p) };
+      return { path: p, label: o.label ?? basename(p), kind: (o.kind as ReviewItem["kind"]) ?? guessKind(p), before };
     });
     emit(st, s, { type: "review.added", queue, step, items, round: o.round ? Number(o.round) : undefined });
     console.log(`ok: ${items.length} review item(s) for ${queue}/${step}`);

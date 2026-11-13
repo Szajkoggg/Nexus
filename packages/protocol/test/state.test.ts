@@ -270,3 +270,42 @@ test("a rejected step counts as closed once a newer revision is approved: the qu
   assert.equal(q.status, "done");
   assert.equal(q.steps[1]!.status, "rejected");
 });
+
+test("a comment on a review picture goes back with a send-back while the step waits for the user, else to the next pending step", async () => {
+  const { commentTarget, commentOnPicture, markPicture } = await import("../src/index.ts");
+  const { writeFileSync: wf } = await import("node:fs");
+  const { st, q, session, emit, root } = setup();
+  st.writeQueue({ ...q, steps: [...q.steps, { id: "Q3", title: "Three", goal: "", acceptance: [] }] });
+  const w = session("worker");
+  const pic = join(root, "cliff.png"); wf(pic, "png");
+  emit(w, { type: "step.started", queue: "Q", step: "Q1" });
+  emit(w, { type: "review.added", queue: "Q", step: "Q1", items: [{ path: pic, label: "Cliff" }] });
+  emit(w, { type: "step.done", queue: "Q", step: "Q1", summary: "ok" }); // Q1: continue, done
+  emit(w, { type: "step.started", queue: "Q", step: "Q2" });
+  emit(w, { type: "review.added", queue: "Q", step: "Q2", items: [{ path: pic, label: "Cliff" }] });
+  emit(w, { type: "step.done", queue: "Q", step: "Q2", summary: "ok" }); // Q2: wait, in review for the user
+  let s = loadProjectState(st);
+  assert.deepEqual(commentTarget(s.queues[0]!, "Q2"), { to: "send_back" });
+  assert.deepEqual(commentTarget(s.queues[0]!, "Q1"), { to: "note", step: "Q3" }, "done: the next pending step");
+  assert.deepEqual(commentTarget({ steps: [{ ...s.queues[0]!.steps[1]!, review_with: "orchestrator" as const }, s.queues[0]!.steps[2]!] }, "Q2"), { to: "note", step: "Q3" }, "held by the orchestrator: not a Fix it");
+  assert.deepEqual(commentTarget({ steps: s.queues[0]!.steps.slice(0, 1) }, "Q1"), { to: "none" });
+
+  assert.match(commentOnPicture(st, { queue: "Q", step: "Q1", path: pic, text: "Warmer light." }), /a note on step Q3/);
+  assert.match(commentOnPicture(st, { queue: "Q", step: "Q2", path: pic, text: "Less moss." }), /sent back to its worker as round 2/);
+  assert.throws(() => commentOnPicture(st, { queue: "Q", step: "Q2", path: join(root, "other.png"), text: "x" }), /no review picture/);
+  assert.throws(() => commentOnPicture(st, { queue: "Q", step: "Q1", path: pic, text: "  " }), /the comment is empty/);
+  markPicture(st, { queue: "Q", step: "Q1", path: pic, accepted: true });
+  s = loadProjectState(st);
+  const [s1, s2, s3] = s.queues[0]!.steps;
+  assert.ok(s1!.pictures[pic]!.accepted, "marked");
+  assert.equal(s1!.status, "done");
+  assert.deepEqual(s1!.pictures[pic]!.comments.map((c) => [c.text, c.to, c.note_step]), [["Warmer light.", "note", "Q3"]]);
+  assert.match(s3!.notes[0]!.body, /About the picture "Cliff" .*\nWarmer light\./);
+  assert.equal(s2!.sent_back[0]!.by, "user");
+  assert.match(s2!.sent_back[0]!.text, /About the picture "Cliff"/);
+  markPicture(st, { queue: "Q", step: "Q1", path: pic, accepted: false });
+  assert.equal(loadProjectState(st).queues[0]!.steps[0]!.pictures[pic]!.accepted, undefined, "the mark taken back");
+  // A worker cannot write either.
+  emit(w, { type: "review.marked", queue: "Q", step: "Q2", path: pic, accepted: true });
+  assert.equal(loadProjectState(st).queues[0]!.steps[1]!.pictures[pic]?.accepted, undefined);
+});
