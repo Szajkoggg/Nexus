@@ -6,7 +6,9 @@
 import { useEffect, useId, useState, type ReactNode } from "react";
 import { actResult, enc } from "../api.ts";
 import { stopDecision, type LeftState, type LeftView, type WorkChoice } from "../stopDecision.ts";
-import { TimeAgo } from "./ui.tsx";
+import { stopPlace } from "@nexus/protocol/attention";
+import type { QueueView } from "../api.ts";
+import { Expandable, TimeAgo } from "./ui.tsx";
 
 /**
  * What the stopped step left: its own commits, with Keep or Discard when there are any, and the checkout's uncommitted
@@ -58,6 +60,32 @@ export function StoppedWork({ left, work, setWork, needsChoice, pushAccepted, br
               : `The commits stay, local in the branch${branch ? ` ${branch}` : ""}; nothing is pushed.`)}
           {option("discard", "Discard", "The stop stays. The orchestrator proposes a revision whose first step reverts these commits (and only these); approving it lifts the stop.")}
         </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * A stopped queue's stop: why and where, the orchestrator's proposal, what the step left; Continue is in the
+ * bar. Continue (the user's lift) only when the current revision is approved; otherwise approving it lifts the stop.
+ */
+export function StopBox({ queue, left, work, setWork, needsChoice, pushAccepted }: {
+  queue: QueueView; left?: LeftView; work?: WorkChoice; setWork: (w: WorkChoice) => void; needsChoice: boolean; pushAccepted: boolean;
+}) {
+  const p = queue.lift_proposal;
+  return (
+    <div className="mt-4 rounded-lg border border-stop/30 bg-stop/10 p-3 text-sm">
+      <p className="font-medium text-stop">Stopped{stopPlace(queue)}</p>
+      {queue.status_reason && <div className="mt-1 text-fg"><Expandable text={queue.status_reason} /></div>}
+      {p && (
+        <div className="mt-3 rounded-md bg-surface/70 p-2.5">
+          <p className="text-xs text-fg-3">The orchestrator proposes to continue · <TimeAgo at={p.at} /></p>
+          <p className="mt-0.5 text-fg">{p.reason}</p>
+        </div>
+      )}
+      {left && <StoppedWork left={left} work={work} setWork={setWork} needsChoice={needsChoice} pushAccepted={pushAccepted} branch={queue.branch} />}
+      {!queue.approved && (
+        <p className="mt-3 text-xs text-fg-2">Revision {queue.revision} is not approved yet: approving it lifts the stop{needsChoice ? " (with your choice above)" : ""}.</p>
       )}
     </div>
   );

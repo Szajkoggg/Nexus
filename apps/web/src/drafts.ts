@@ -61,6 +61,13 @@ function save(drafts: Drafts): void {
 export const readDraft = (key: string): string => load()[key]?.text ?? "";
 export const writeDraft = (key: string, text: string): void => save(withDraft(load(), key, text, Date.now()));
 export const clearDraft = (key: string): void => writeDraft(key, "");
+/** Told when a draft is put from elsewhere (putDraft), so that an open box with that draft shows it. */
+export const DRAFT_EVENT = "nexus:draft";
+/** Writes a draft from outside its box ("Ask the orchestrator…" puts a reference in the composer); an open box follows. */
+export const putDraft = (key: string, text: string): void => {
+  writeDraft(key, text);
+  try { window.dispatchEvent(new CustomEvent(DRAFT_EVENT, { detail: key })); } catch { /* no window */ }
+};
 export const pruneStoredDrafts = (): void => {
   const all = load();
   const kept = pruneDrafts(all, Date.now());

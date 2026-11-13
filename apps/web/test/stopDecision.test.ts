@@ -68,11 +68,16 @@ test("a revision not approved: Approve revision N… opens the queue; the approv
   const d = stopDecision({ approved: false, revision: 2, left: left(2) });
   assert.deepEqual(d.opener && [d.opener.action, d.opener.label], ["open", "Approve revision 2…"]);
   assert.equal(d.confirm, undefined, "Continue is not offered: approving lifts the stop");
-  assert.deepEqual(d.approve, { label: "Approve revision 2" });
-  assert.deepEqual(stopDecision({ approved: false, revision: 2, left: left(2), work: "keep" }).approve, { label: "Approve revision 2" });
-  assert.deepEqual(stopDecision({ approved: false, revision: 2, left: left(2), work: "discard" }).approve, { label: "Discard the step's work" });
-  // Without commits of its own Discard means nothing: the plain approval.
-  assert.deepEqual(stopDecision({ approved: false, revision: 2, left: left(0), work: "discard" }).approve, { label: "Approve revision 2" });
+  assert.deepEqual(d.approve, { label: "Approve revision 2", disabled: true, hint: "First choose Keep or Discard for step W4c's commits, in the stop box." });
+  assert.deepEqual(stopDecision({ approved: false, revision: 2, left: left(2), work: "keep" }).approve,
+    { label: "Approve revision 2", disabled: false, hint: "With Keep: step W4c's commits stay, and approving revision 2 lifts the stop." });
+  assert.deepEqual(stopDecision({ approved: false, revision: 2, left: left(2), work: "discard" }).approve,
+    { label: "Discard the step's work", disabled: false, hint: "With Discard nothing is approved now: the orchestrator proposes a revision that reverts step W4c's commits." });
+  // Without commits of its own Discard means nothing: the plain approval, with nothing to add to what it pins.
+  assert.deepEqual(stopDecision({ approved: false, revision: 2, left: left(0), work: "discard" }).approve, { label: "Approve revision 2", disabled: false, hint: undefined });
+  // Discard recorded: approving the revert lifts the stop without asking again.
+  assert.deepEqual(stopDecision({ approved: false, revision: 3, left: left(2, { discarded: { at: "2026-11-13T11:00:00Z" } }) }).approve,
+    { label: "Approve revision 3", disabled: false, hint: "You chose to discard step W4c's work: approving revision 3 lifts the stop." });
   // Not yet read: the queue opens all the same.
   assert.equal(stopDecision({ approved: false, revision: 2, left: undefined }).opener?.disabled, false);
 });

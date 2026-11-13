@@ -19,6 +19,8 @@ import { SettingsButton, SettingsPanel, UpdatePill, useServer } from "./componen
 import { ProjectRefusals } from "./components/Refusals.tsx";
 import { FinishedGroup } from "./components/Finished.tsx";
 import { splitFinished } from "./finished.ts";
+import { ApprovalView, useApprovalForm } from "./components/Approval.tsx";
+import { needsApproval } from "./approval.ts";
 
 // Finished queues (done, cancelled) fold into one group at the bottom (FinishedGroup); one that still waits for the
 // user stays in progress until nothing waits.
@@ -89,6 +91,10 @@ export function App() {
   // list keeps the room between them; elsewhere both are layers over the page.
   const wide = useWide();
   const itemShown = !!(state && queue);
+  // A queue waiting for approval opens in the full view on a desktop, the compact list on the phone (UX proposals,
+  // 15), unless the user picked the other form for it.
+  const [form, setForm] = useApprovalForm(projectId, queue?.id, queue?.revision);
+  const fullApproval = !!(queue && !step && needsApproval(queue) && (form ?? (phone ? "panel" : "full")) === "full");
   const header = useRef<HTMLElement>(null);
   useEffect(() => {
     const h = header.current;
@@ -172,11 +178,16 @@ export function App() {
       <RemotePanel version={tick} />
     </Drawer>
 
-    <Drawer open={itemShown} onClose={close} left={wide} panel>
+    <Drawer open={itemShown && !fullApproval} onClose={close} left={wide} panel>
       {state && queue && (step
         ? <StepDetail project={state} queue={queue} step={step} onChanged={reload} onClose={close} of={of} />
-        : <QueueDetail project={state} queue={queue} onChanged={reload} onClose={close} of={of} />)}
+        : <QueueDetail project={state} queue={queue} onChanged={reload} onClose={close} of={of}
+            chat={orchestrator?.chat} onFull={() => setForm("full")} />)}
     </Drawer>
+    {fullApproval && state && queue && (
+      <ApprovalView key={`${queue.id}/${queue.revision}`} project={state} queue={queue} chat={orchestrator?.chat ?? []} onChanged={reload} onClose={close}
+        onPanel={() => setForm("panel")} right={wide && (chatOpen || ideasOpen) ? SIDE_RIGHT : undefined} />
+    )}
   </>;
 
   if (phone) {

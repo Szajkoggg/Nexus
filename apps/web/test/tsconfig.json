@@ -1,4 +1,4 @@
 {
   "extends": "../../../tsconfig.base.json",
-  "include": [".", "../src/drafts.ts", "../src/layers.ts", "../src/finished.ts", "../src/theme.ts", "../src/waiting.ts", "../src/steplist.ts", "../src/queueStatus.ts", "../src/stopDecision.ts"]
+  "include": [".", "../src/drafts.ts", "../src/layers.ts", "../src/finished.ts", "../src/theme.ts", "../src/waiting.ts", "../src/steplist.ts", "../src/queueStatus.ts", "../src/stopDecision.ts", "../src/approval.ts"]
 }

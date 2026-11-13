@@ -708,6 +708,27 @@ Proposed reads "needs your approval". Open questions and the steps in review are
 review"). The step lines follow the same rule: a step whose events say it runs while its run does not reads paused,
 without a progress bar. The page's groups are unchanged here; the desktop layouts of the next queue use the same helper.
 
+### Approving: the whole queue in one scroll
+
+The approval (UX proposals, 15, and 13 left) has two forms of the same thing, both in `apps/web/src/components/
+Approval.tsx`. The **full view**, a layer over the whole window, is what a desktop opens for a queue whose revision
+waits for approval (`needsApproval`: not approved, neither done nor cancelled), from its waiting item and from the
+queue, so reading and approving a 4-step queue takes 2 clicks (it took 7): the title with its status, run settings
+(`runSettings`: the run's values, else its planned start's, else the project's) and who proposed it on one line; an
+outline on the left (description, each step, stop conditions, checks) that follows the scroll, and keeps a part picked
+in it marked while that part shows; every step's goal and acceptance in the page. The **compact list** is the queue's
+drawer on a desktop and its sheet on the phone: one row per step, "N criteria ▾" opens the goal and acceptance in
+place, the rest as folds. The phone opens the compact list; "Full view ⤢" and "Show as a panel" switch, remembered per
+revision while the page lives (a choice, not history: Back closes the queue whichever form shows). Beside a chat open
+on a wide screen the full view leaves the chat its room.
+
+Both forms share the approval (`useApprove`: the words under ⋯, the button, what it pins; Keep or Discard of a stopped
+queue's revision through `stopDecision`, so Approve waits for the choice), Ctrl+Enter outside a text box, and "Ask the
+orchestrator…", which puts "About queue X (revision N): " at the start of the orchestrator's composer (`putDraft`
+tells an open composer) and raises its chat. The orchestrator's message is found in its chat (`draftOf`): the first
+message after its last `nexus queue draft` of the queue's file; a draft from stdin or a queue imported by hand has
+none, and the line says "imported from" or "proposed" instead. No server change.
+
 ### Continue at the stop
 
 A stopped queue goes on from where its stop shows (UX proposals, quick fix 4): the stopped step's line in the queue's

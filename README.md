@@ -66,6 +66,18 @@ one compact line per queue, the most recently finished on top, with when it fini
 for its details. A finished queue that still waits for you (a step in review, an open question) stays in the list
 above until nothing waits.
 
+**Approving a queue.** On a desktop a queue that waits for your approval opens in a full view, from its waiting
+item and from the queue: every step's goal and acceptance in one scroll, an outline on the left that follows it and
+jumps on a click, the run settings on one line under the title (steps, branch, what it starts after, runtime, model
+and effort, what happens after each step, the steps on their own runtime or model), and who proposed it, with the
+orchestrator's message one click away ("▸ its message"). **Approve revision N** is in the action bar, beside what it
+pins; Ctrl+Enter approves too. **Ask the orchestrator…** opens its chat with "About queue X (revision N): " at the
+start of the composer, the full view still beside it. On the phone, and in the queue's panel, the same approval is a
+compact list: one row per step with its goal's first lines and "N criteria ▾" to open the whole goal and its
+acceptance in place, and the description, stop conditions, checks and the orchestrator's message as folds. "Full
+view ⤢" and "Show as a panel" (under ⋯) switch between the two. A stopped queue's new revision shows its stop box with
+Keep or Discard first: Approve waits for the choice.
+
 **Withdrawing an approval.** A queue approved but not started yet has "Withdraw approval…" under ⋯ in its bar (with
 an optional reason): it goes back to proposed and waits for your approval again; the earlier approval stays on record.
 Once a queue has started, pause or stop it instead. Only you can do this, from the dashboard.

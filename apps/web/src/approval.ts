@@ -1,0 +1,76 @@
+// Approving a queue (UX proposals, 15): what the approval view says besides the steps themselves. Whether a queue waits
+// for the user's approval, its run settings on one line, the orchestrator's message that came with its draft, and the
+// reference that "Ask the orchestrator…" puts in the composer. Pure and unit tested (test/approval.test.ts).
+import type { ChatEntry, ProjectFile, QueueView } from "@nexus/protocol";
+import { stepValuesText } from "@nexus/protocol/steps";
+import { formatClock } from "@nexus/protocol/times";
+
+/** A queue whose current revision waits for the user's approval: not approved, and neither finished nor cancelled. */
+export const needsApproval = (q: Pick<QueueView, "approved" | "status">): boolean =>
+  !q.approved && q.status !== "done" && q.status !== "cancelled";
+
+const RUNTIME = { claude: "Claude", codex: "Codex" } as const;
+export const POLICY_WORDS: Record<string, string> = { continue: "go on", wait: "wait for my review", orchestrator: "the orchestrator reviews" };
+
+export interface RunSettings {
+  /** "4 steps · on main, after SF · Claude, high · after each step: go on", in parts. */
+  parts: string[];
+  /** The steps that run on their own runtime, model or effort (SF2): "SC3 on Codex · gpt-6-luna". */
+  own: string[];
+}
+
+/**
+ * A queue's run settings as they will apply: where it runs, when it starts (after another queue, at a time), the
+ * runtime, model and effort (the run's, else its planned start's, else the project's defaults), what happens after
+ * each step, and the steps with values of their own.
+ */
+export function runSettings(q: Pick<QueueView, "steps" | "branch" | "worktree" | "start" | "run" | "review_policy">, project: Pick<ProjectFile, "defaults" | "runtimes">, now = new Date()): RunSettings {
+  const n = q.steps.length;
+  const where = q.worktree ? `in its own worktree${q.branch ? ` on ${q.branch}` : ""}` : q.branch ? `on ${q.branch}` : undefined;
+  const when = q.start?.after ? `after ${q.start.after}` : q.start?.at ? `at ${formatClock(q.start.at, now)}` : undefined;
+  const rt = q.run?.runtime ?? q.start?.runtime ?? project.runtimes.default;
+  const model = q.run?.model ?? q.start?.model ?? project.runtimes[rt].model;
+  const effort = q.run?.effort ?? q.start?.effort ?? project.runtimes[rt].effort;
+  const policy = q.review_policy ?? project.defaults.review_policy;
+  return {
+    parts: [
+      `${n} step${n === 1 ? "" : "s"}`,
+      [where, when].filter(Boolean).join(", ") || undefined,
+      [RUNTIME[rt], model, effort].filter(Boolean).join(", "),
+      `after each step: ${POLICY_WORDS[policy] ?? policy}`,
+    ].filter((x): x is string => !!x),
+    own: q.steps.flatMap((s) => { const t = stepValuesText(s); return t ? [`${s.id} on ${t}`] : []; }),
+  };
+}
+
+/** A `nexus queue draft` of this queue in a tool call's line ("Bash: nexus queue draft .nexus/drafts/SC.yaml"). */
+const draftsQueue = (text: string, queue: string) => {
+  if (!/\bnexus(\.cmd)? queue draft\b/.test(text)) return false;
+  const esc = queue.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|[\\s/\\\\"'])${esc}\\.ya?ml\\b`).test(text);
+};
+
+/**
+ * The orchestrator's draft of a queue, as its chat shows it: when it last ran `nexus queue draft` with that queue's
+ * file, and the first message it wrote after that (the message that came with the draft; none yet while it works).
+ * None when the chat shows no such draft (a queue imported by hand, a draft sent from stdin).
+ */
+export function draftOf(chat: readonly ChatEntry[], queue: string): { at: string; message?: ChatEntry } | undefined {
+  let i = -1;
+  chat.forEach((c, k) => { if (c.from === "orchestrator" && c.kind === "tool" && draftsQueue(c.text, queue)) i = k; });
+  if (i < 0) return undefined;
+  return { at: chat[i]!.at, message: chat.slice(i + 1).find((c) => c.from === "orchestrator" && c.kind === "message") };
+}
+
+/** What approving pins, said beside the button. */
+export const pinsText = (revision: number, stopped: boolean) =>
+  `Approving pins revision ${revision}: these steps, their acceptance, the checks and stop conditions${stopped ? "; it also lifts the stop" : ""}`;
+
+/** The reference "Ask the orchestrator…" puts at the start of the composer. */
+export const queueReference = (queue: string, revision: number) => `About queue ${queue} (revision ${revision}): `;
+
+/** The composer's text with the reference at its start: once, before what was already typed. */
+export function withReference(text: string, reference: string): string {
+  if (text.startsWith(reference)) return text;
+  return text.trim() ? `${reference}${text}` : reference;
+}

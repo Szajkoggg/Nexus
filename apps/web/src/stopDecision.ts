@@ -33,8 +33,11 @@ export interface StopDecision {
   opener?: { action: "continue" | "choose" | "open"; label: string; title: string; disabled: boolean };
   /** The button that lifts the stop once the choice is made (the queue's bar, the open choice); when approved. */
   confirm?: { label: string; disabled: boolean };
-  /** The approval's button on a revision not yet approved (approving lifts the stop). */
-  approve?: { label: string };
+  /**
+   * The approval of a revision not yet approved (approving lifts the stop): its button, waiting for Keep or Discard
+   * when the step left commits, and what the choice means (else nothing: the approval's own hint says what it pins).
+   */
+  approve?: { label: string; disabled: boolean; hint?: string };
   /** Beside the buttons: what pressing does, or what is still missing. */
   hint?: string;
 }
@@ -52,7 +55,16 @@ export function stopDecision({ approved, revision, left, work }: {
     return {
       needsChoice, discarded,
       opener: { action: "open", label: `Approve revision ${revision}…`, title: `Revision ${revision} is not approved yet: approving it lifts the stop`, disabled: false },
-      approve: { label: needsChoice && work === "discard" ? "Discard the step's work" : `Approve revision ${revision}` },
+      approve: {
+        label: needsChoice && work === "discard" ? "Discard the step's work" : `Approve revision ${revision}`,
+        disabled: needsChoice && !work,
+        hint: needsChoice
+          ? !work ? `First choose Keep or Discard for step ${known!.step}'s commits, in the stop box.`
+            : work === "discard" ? `With Discard nothing is approved now: the orchestrator proposes a revision that reverts step ${known!.step}'s commits.`
+            : `With Keep: step ${known!.step}'s commits stay, and approving revision ${revision} lifts the stop.`
+          : discarded ? `You chose to discard step ${known!.step}'s work: approving revision ${revision} lifts the stop.`
+          : undefined,
+      },
     };
   }
   if (discarded) {

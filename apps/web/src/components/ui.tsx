@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { readDraft, writeDraft } from "../drafts.ts";
+import { DRAFT_EVENT, readDraft, writeDraft } from "../drafts.ts";
 import { usePhone } from "../phone.ts";
 import ReactMarkdown from "react-markdown";
 import { formatClock, formatDuration, runTimes, stepTimes } from "@nexus/protocol/times";
@@ -182,6 +182,12 @@ export function useDraftText({ draft, onSubmit, allowEmpty = false, verbatim = f
   const [error, setError] = useState<string>();
   const current = useRef(text);
   const change = (value: string) => { current.current = value; setText(value); writeDraft(draft, value); };
+  // A draft put from elsewhere while this box is open (putDraft: a reference from "Ask the orchestrator…").
+  useEffect(() => {
+    const on = (e: Event) => { if ((e as CustomEvent<string>).detail === draft) { const t = readDraft(draft); current.current = t; setText(t); } };
+    window.addEventListener(DRAFT_EVENT, on);
+    return () => window.removeEventListener(DRAFT_EVENT, on);
+  }, [draft]);
   const ready = !busy && (allowEmpty || !!text.trim());
   const submit = async () => {
     if (!ready) return;

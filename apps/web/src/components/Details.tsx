@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import type { Event, StatusChange } from "@nexus/protocol";
+import type { ChatEntry, Event, StatusChange } from "@nexus/protocol";
 import { stopPlace } from "@nexus/protocol/attention";
 import { stepValuesText } from "@nexus/protocol/steps";
 import { act, actResult, enc, fileUrl, useFetch, type ProjectState, type QuestionView, type QueueView, type StepView } from "../api.ts";
@@ -13,11 +13,17 @@ import { nav, useNav } from "../nav.ts";
 import { usePhone } from "../phone.ts";
 import { ImageViewer, type ViewerImage } from "./Viewer.tsx";
 import { StepChat } from "./Chat.tsx";
-import { StoppedWork, stopVersion, useContinue, useLeft } from "./Stop.tsx";
+import { StopBox, stopVersion, useContinue, useLeft } from "./Stop.tsx";
+import { AskButton, CompactSteps, SettingsLine, useApprove, useCtrlEnter } from "./Approval.tsx";
+import { needsApproval } from "../approval.ts";
 import { needsWorkChoice, stopDecision, type LeftState, type LeftView, type WorkChoice } from "../stopDecision.ts";
 
 interface Props {
   project: ProjectState; queue: QueueView; onChanged: () => void; onClose: () => void;
+  /** The orchestrator's chat: where its message with a queue's draft is found (the approval's compact list). */
+  chat?: readonly ChatEntry[];
+  /** Switches a queue waiting for approval to the full view (Approval.tsx). */
+  onFull?: () => void;
   /** Where it stands in the waiting list ("2 of 6 waiting"), when it waits for the user (on the phone). */
   of?: string;
 }
@@ -961,32 +967,6 @@ function AnswerBox({ q, project, onChanged }: { q: QuestionView; project: string
 
 // ---------------------------------------------------------------- queue
 
-/**
- * A stopped queue's stop: why and where, the orchestrator's proposal, what the step left (Stop.tsx); Continue is in the
- * bar. Continue (the user's lift) only when the current revision is approved; otherwise approving it lifts the stop.
- */
-function StopBox({ queue, left, work, setWork, needsChoice, pushAccepted }: {
-  queue: QueueView; left?: LeftView; work?: "keep" | "discard"; setWork: (w: "keep" | "discard") => void; needsChoice: boolean; pushAccepted: boolean;
-}) {
-  const p = queue.lift_proposal;
-  return (
-    <div className="mt-4 rounded-lg border border-stop/30 bg-stop/10 p-3 text-sm">
-      <p className="font-medium text-stop">Stopped{stopPlace(queue)}</p>
-      {queue.status_reason && <div className="mt-1 text-fg"><Expandable text={queue.status_reason} /></div>}
-      {p && (
-        <div className="mt-3 rounded-md bg-surface/70 p-2.5">
-          <p className="text-xs text-fg-3">The orchestrator proposes to continue · <TimeAgo at={p.at} /></p>
-          <p className="mt-0.5 text-fg">{p.reason}</p>
-        </div>
-      )}
-      {left && <StoppedWork left={left} work={work} setWork={setWork} needsChoice={needsChoice} pushAccepted={pushAccepted} branch={queue.branch} />}
-      {!queue.approved && (
-        <p className="mt-3 text-xs text-fg-2">Revision {queue.revision} is not approved yet: approving it lifts the stop{needsChoice ? " (with your choice above)" : ""}.</p>
-      )}
-    </div>
-  );
-}
-
 const WHO: Record<StatusChange["by"], string> = { user_approval: "You, approving", user_continue: "You, with Continue", orchestrator: "Orchestrator" };
 
 /** Status changes made through Nexus (queue.yaml's changes): who, when, what and why; newest first. */
@@ -1067,7 +1047,7 @@ function OwnValues({ queue }: { queue: QueueView }) {
   );
 }
 
-export function QueueDetail({ project, queue, onChanged, onClose, of }: Props) {
+export function QueueDetail({ project, queue, onChanged, onClose, of, chat = [], onFull }: Props) {
   const id = project.project.id;
   const latest = queue.approvals.at(-1);
   const inherited = project.project.defaults.stop_conditions;
@@ -1077,6 +1057,11 @@ export function QueueDetail({ project, queue, onChanged, onClose, of }: Props) {
   const left = leftState === "error" ? undefined : leftState;
   const [work, setWork] = useState<WorkChoice>();
   const needsChoice = needsWorkChoice(left);
+  // A queue waiting for approval: its steps as the compact list (UX proposals, 13 left), the description, stop
+  // conditions and checks folded in it, its run settings in the header.
+  const approving = needsApproval(queue);
+  const history = [...queue.approvals.map((a) => ({ ...a, withdrawn: false as const })), ...queue.withdrawals.map((w) => ({ ...w, withdrawn: true as const }))]
+    .sort((x, y) => x.at.localeCompare(y.at));
 
   return (
     <>
@@ -1086,8 +1071,9 @@ export function QueueDetail({ project, queue, onChanged, onClose, of }: Props) {
         status={<>
           <StatusBadge status={queue.status} />
           <span>revision {queue.revision}</span>
-          {queue.branch && <span className="font-mono">{queue.branch}</span>}
-          {queue.worktree && <span className="font-mono">{queue.worktree}</span>}
+          {approving && <SettingsLine project={project} queue={queue} />}
+          {queue.branch && !approving && <span className="font-mono">{queue.branch}</span>}
+          {queue.worktree && !approving && <span className="font-mono">{queue.worktree}</span>}
           <span className={queue.approved ? "text-ok" : "text-fg-3"}>
             {queue.approved ? "approved" : queue.withdrawals.length && queue.withdrawals.at(-1)!.approvals >= queue.approvals.length ? "approval withdrawn" : latest ? "approval is for an older revision" : "no approval recorded in Nexus"}
           </span>
@@ -1101,6 +1087,7 @@ export function QueueDetail({ project, queue, onChanged, onClose, of }: Props) {
       {queue.status === "stopped"
         ? <StopBox queue={queue} left={left ?? undefined} work={work} setWork={setWork} needsChoice={needsChoice} pushAccepted={project.project.defaults.push_accepted} />
         : queue.status_reason && <Section title="State"><Expandable text={queue.status_reason} /></Section>}
+      {approving && <CompactSteps project={project} queue={queue} chat={chat} onFull={onFull} />}
       {queue.report && (
         <Section title="Queue report">
           <p className="text-sm text-fg">{queue.report.summary}</p>
@@ -1109,50 +1096,32 @@ export function QueueDetail({ project, queue, onChanged, onClose, of }: Props) {
       )}
       {queue.questions.length > 0 && <Section title="Questions">{queue.questions.map((q) => <Question key={q.qid} q={q} project={id} onChanged={onChanged} />)}</Section>}
 
-      <OwnValues queue={queue} />
+      {!approving && <OwnValues queue={queue} />}
 
-      <Section title="Approval">
-        {[...queue.approvals.map((a) => ({ ...a, withdrawn: false as const })), ...queue.withdrawals.map((w) => ({ ...w, withdrawn: true as const }))]
-          .sort((x, y) => x.at.localeCompare(y.at))
-          .map((a, i) => (
+      {history.length > 0 && <Section title="Approval">
+        {history.map((a, i) => (
             <p key={i} className={`mb-1 text-sm ${a.withdrawn ? "text-stop/90" : "text-fg"}`}>
               r{a.revision} · {a.withdrawn ? "withdrawn " : ""}<TimeAgo at={a.at} />
               {!a.withdrawn && a.words && <> · <q className="italic">{a.words}</q></>}
               {a.withdrawn && a.reason && <> · <q className="italic">{a.reason}</q></>}
             </p>
           ))}
-        {!queue.approved && (
-          <div className="mt-2">
-            <p className="mb-2 text-sm text-fg-2">
-              Approving pins revision {queue.revision}: its steps, acceptance criteria, checks and stop conditions. A later change needs a new approval.
-              {queue.status === "stopped" && " It also lifts the stop."}
-            </p>
-            {queue.status === "stopped" && needsChoice && (
-              <p className={`mb-2 text-sm ${work ? "text-fg" : "text-warn"}`}>
-                {work === "keep" ? `With Keep: step ${left!.step}'s commits stay.` : work === "discard" ? `With Discard nothing is approved now: the orchestrator proposes a revision that reverts step ${left!.step}'s commits.` : `First choose Keep or Discard for step ${left!.step}'s commits, in the stop box above.`}
-              </p>
-            )}
-            {queue.status === "stopped" && left?.discarded && (
-              <p className="mb-2 text-sm text-fg">You chose to discard step {left.step}'s work: approving this revision lifts the stop.</p>
-            )}
-          </div>
-        )}
-      </Section>
+      </Section>}
 
       <RunControls project={project} queue={queue} onChanged={onChanged} />
 
       <Changes entries={queue.changes} queue={queue} />
 
-      {queue.description && <Section title="Description"><Expandable text={queue.description} lines={6} /></Section>}
+      {!approving && queue.description && <Section title="Description"><Expandable text={queue.description} lines={6} /></Section>}
 
-      <Section title="Stop conditions">
+      {!approving && <Section title="Stop conditions">
         <ul className="space-y-1.5 text-sm text-fg">
           {queue.stop_conditions.map((c, i) => <li key={i} className="flex gap-2"><span className="text-stop/70">■</span><Markdown className="[&_p]:m-0">{c}</Markdown></li>)}
           {inherited.map((c, i) => <li key={`p${i}`} className="flex gap-2 text-fg-3"><span>□</span><span>{c} <span className="text-xs">(project)</span></span></li>)}
           {queue.stop_conditions.length + inherited.length === 0 && <li className="text-fg-3">None.</li>}
         </ul>
-      </Section>
-      {queue.checks.length > 0 && (
+      </Section>}
+      {!approving && queue.checks.length > 0 && (
         <Section title="Checks for every step">
           {queue.checks.map((c, i) => <Markdown key={i}>{c}</Markdown>)}
         </Section>
@@ -1178,20 +1147,10 @@ function QueueBar({ project, queue, onChanged, left, work, needsChoice }: {
   // A stop's buttons and hint, as everywhere the stop is shown; Continue itself is the one in Stop.tsx.
   const d = stopped ? stopDecision({ approved: queue.approved, revision: queue.revision, left, work }) : undefined;
   const cont = useContinue({ project: id, queue: queue.id, onChanged });
-  // What the server said back after an approval with Keep or Discard (the orchestrator drafts a revert…).
-  const [note, setNote] = useState<string>();
+  // The approval (Approval.tsx, the same in the full view): its words, Keep or Discard, what it pins; Ctrl+Enter.
+  const a = useApprove({ project: id, queue, left, work, onChanged });
+  useCtrlEnter(!queue.approved, a.submit);
   const [error, setError] = useState<string>();
-  const wordsKey = draftKey(id, "approval", queue.id);
-  const [wordsOpen, setWordsOpen] = useState(() => !!readDraft(wordsKey));
-  const words = useDraftText({
-    draft: wordsKey, allowEmpty: true,
-    onSubmit: async (text) => {
-      if (stopped && needsChoice && !work) throw new Error("choose Keep or Discard first, in the stop box above");
-      const r = await actResult<{ message?: string }>(id, "POST", `/queues/${enc(queue.id)}/approve`, { words: text, work: needsChoice ? work : undefined });
-      if (r?.message) setNote(r.message);
-      onChanged();
-    },
-  });
   const canWithdraw = queue.approved && !queue.run && queue.steps.every((s) => s.status === "pending" && s.segments.length === 0);
   const [withdrawOpen, setWithdrawOpen] = useState(false);
   const [policyOpen, setPolicyOpen] = useState(false);
@@ -1200,30 +1159,28 @@ function QueueBar({ project, queue, onChanged, left, work, needsChoice }: {
   const policy = queue.review_policy ? POLICY_LABEL[queue.review_policy] : `project default (${POLICY_LABEL[project.project.defaults.review_policy]})`;
 
   const menu: MenuEntry[] = [
-    ...(!queue.approved && !wordsOpen ? [{ label: "Your words with the approval…", onSelect: () => setWordsOpen(true) }] : []),
+    ...(!queue.approved ? a.menu : []),
     ...(canWithdraw && !withdrawOpen ? [{ label: "Withdraw approval…", danger: true, onSelect: () => setWithdrawOpen(true) }] : []),
     ...(!policyOpen ? [{ label: `After each step: ${policy}…`, onSelect: () => setPolicyOpen(true) }] : []),
   ];
-  const fail = cont.error ?? error ?? words.error;
-  const said = cont.note ?? note;
+  const fail = cont.error ?? error ?? a.words.error;
+  const said = cont.note ?? a.note;
   const hint = fail ? <span className="text-danger">{fail}</span>
     : said ? <span className="text-info">{said}</span>
     : stopped && queue.approved ? d!.hint
+    : !queue.approved ? a.hint
     : undefined;
   const primary = stopped && queue.approved
     ? d!.confirm && <Button disabled={cont.busy || d!.confirm.disabled} onClick={() => void cont.go(d!.needsChoice, work)}>{d!.confirm.label}</Button>
     : !queue.approved
-      ? <Button disabled={!words.ready} onClick={words.submit}>{words.busy ? "Sending…" : d?.approve?.label ?? `Approve revision ${queue.revision}`}</Button>
+      ? <Button disabled={a.disabled} onClick={a.submit}>{a.label}</Button>
       : undefined;
-  const opened = (!queue.approved && wordsOpen) || (canWithdraw && withdrawOpen) || policyOpen;
+  const opened = (!queue.approved && a.wordsOpen) || (canWithdraw && withdrawOpen) || policyOpen;
   return (
-    <ActionBar hint={hint} menu={menu} primary={primary}>
+    <ActionBar hint={hint} menu={menu} secondary={!queue.approved && <AskButton project={id} queue={queue} />} primary={primary}>
       {opened && (
         <div className="space-y-4">
-          {!queue.approved && wordsOpen && (
-            <textarea value={words.text} rows={2} placeholder="Your words with the approval (optional)…"
-              onChange={(e) => words.change(e.target.value)} onKeyDown={words.onKeyDown} className={TEXTAREA} />
-          )}
+          {!queue.approved && a.wordsBox}
           {canWithdraw && withdrawOpen && <WithdrawApproval project={id} queue={queue.id} onChanged={onChanged} onCancel={() => setWithdrawOpen(false)} />}
           {policyOpen && (
             <div className="flex flex-wrap items-center gap-2 text-sm text-fg">
