@@ -7,6 +7,7 @@
 // defaults.push_accepted. Everything goes in queues/<id>/push.yaml (one writer: the server).
 import { execFileSync } from "node:child_process";
 import { ActionError, loadProjectState, normPath, now, type ProjectState, type ProjectStore, type PushFile, type QueueView } from "@nexus/protocol";
+import { checkoutOf } from "./gitinfo.ts";
 import { PUSH_ENV, PUSH_TIMEOUT_MS, pushFailure, runGit, type GitRunner } from "./deploy.ts";
 
 const MOVED = "the remote branch has commits the accepted one does not; bring them into the branch, then push again";
@@ -129,8 +130,3 @@ function newestAcceptance(q: QueueView): { step: string; event: string; at: stri
   return best;
 }
 
-/** Where the queue's work is: its worktree once created, else the project's checkout; undefined for one not made yet. */
-function checkoutOf(store: ProjectStore, q: QueueView): string | undefined {
-  if (q.worktree === "auto") return undefined;
-  return normPath(q.worktree ?? store.readProject().root);
-}

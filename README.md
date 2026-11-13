@@ -210,6 +210,10 @@ and proposes what follows, a revert as a step, changed steps or a new queue, as 
 queue goes on only once you approve a new revision, at its first pending step; the rejected step is not run again,
 and nothing of the queue is pushed in between.
 
+**Commits and the branch.** A step lists the commits made while it was at work (subject, files and lines changed),
+per round; in the project's own checkout, a commit not made during its worker's turns is marked ◆. A queue shows its
+branch: how far ahead and behind of its base and of its remote-tracking branch, as last fetched (Nexus never fetches).
+
 **Push accepted steps** (Settings, off by default): when a step is accepted, by you or the orchestrator, Nexus pushes
 the commit the step was reviewed at (not later work) to the branch the queue runs on, at its upstream remote or
 origin. Never forced, never with a prompt. The step shows "Pushed: …" or "Push failed: …"; a failed push leaves the

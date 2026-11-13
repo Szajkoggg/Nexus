@@ -15,6 +15,7 @@ import {
   readRegistry, readUsage, routeAnswers, routeSendBacks, sendBack, sendMessage, setQueueSettings, type ProjectState,
 } from "@nexus/protocol";
 import { Engine } from "./engine.ts";
+import { branchState, stepCommits } from "./gitinfo.ts";
 import { Orchestrator } from "./orchestrator.ts";
 import { Conversations } from "./conversations.ts";
 import { listModels } from "./models.ts";
@@ -347,6 +348,21 @@ app.get("/api/projects/:id/sessions/:session/activity", (c) => {
   const e = projects.get(c.req.param("id"));
   if (!e) return c.json({ error: "unknown project" }, 404);
   return c.json(e.engine.activity(c.req.param("session"), c.req.query("queue"), c.req.query("step"), Number(c.req.query("limit") ?? 300)));
+});
+
+// Git on the dashboard (src/gitinfo.ts; local git only, never a fetch): a step's commits per round, a queue's branch.
+// null when the project is not a git repository (or nothing was recorded).
+app.get("/api/projects/:id/queues/:queue/steps/:step/commits", (c) => {
+  const e = projects.get(c.req.param("id"));
+  const q = e ? stateOf(e)?.queues.find((x) => x.id === c.req.param("queue")) : undefined;
+  if (!e || !q) return c.json({ error: "unknown project or queue" }, 404);
+  return c.json(stepCommits(e.store, q, c.req.param("step")) ?? null);
+});
+app.get("/api/projects/:id/queues/:queue/git", (c) => {
+  const e = projects.get(c.req.param("id"));
+  const q = e ? stateOf(e)?.queues.find((x) => x.id === c.req.param("queue")) : undefined;
+  if (!e || !q) return c.json({ error: "unknown project or queue" }, 404);
+  return c.json(branchState(e.store, q) ?? null);
 });
 
 // Refused actions of every session of the project, oldest first; with ?queue= (and &step=) only those of a step.

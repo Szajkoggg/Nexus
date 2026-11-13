@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { Event, StatusChange } from "@nexus/protocol";
 import { stopPlace } from "@nexus/protocol/attention";
-import { act, enc, fileUrl, type ProjectState, type QuestionView, type QueueView, type StepView } from "../api.ts";
+import { act, enc, fileUrl, useFetch, type ProjectState, type QuestionView, type QueueView, type StepView } from "../api.ts";
 import { noteTargets, showsReviewActions } from "../review.ts";
 import { Button, Composer, Expandable, Markdown, Section, StatusBadge, StepTimes, TimeAgo, reviewLabel } from "./ui.tsx";
 import { Activity, RetryNote, RunControls } from "./Run.tsx";
@@ -218,6 +218,8 @@ export function StepDetail({ project, queue, step, onChanged }: Props & { step: 
         <Activity project={id} session={(step.session ?? queue.run?.session)!} queue={queue.id} step={step.id} version={project.generated_at} />
       )}
 
+      <StepCommits project={id} queue={queue.id} step={step.id} version={project.generated_at} />
+
       {step.timeline.length > 0 && (
         <Section title="Timeline">
           <ol className="relative space-y-2 border-l border-zinc-800 pl-4">
@@ -281,6 +283,65 @@ function Rejected({ step, holding }: { step: StepView; holding: boolean }) {
           ? "Nothing was reverted. The run waits until you approve a new revision of the queue (the orchestrator proposes one); nothing of the queue is pushed until then."
           : "A newer revision was approved since; this step is not run again."}
       </p>
+    </div>
+  );
+}
+
+interface CommitView { sha: string; subject: string; author: string; at: string; files: number; insertions: number; deletions: number; foreign: boolean }
+interface RoundView { session: string; start: string | null; end: string | null; open: boolean; commits: CommitView[] }
+
+/** The commits of each round of the step (server: src/gitinfo.ts); nothing outside a git repository. */
+function StepCommits({ project, queue, step, version }: { project: string; queue: string; step: string; version: unknown }) {
+  const data = useFetch<{ rounds: RoundView[] } | null>(`/api/projects/${enc(project)}/queues/${enc(queue)}/steps/${enc(step)}/commits`, version);
+  if (!data) return null;
+  const several = data.rounds.length > 1;
+  const foreign = data.rounds.some((r) => r.commits.some((c) => c.foreign));
+  return (
+    <Section title="Commits" aside={foreign ? <span className="text-xs text-amber-400/80">◆ not by this step's worker</span> : undefined}>
+      <div className="space-y-3">
+        {data.rounds.map((r, i) => (
+          <div key={i}>
+            {several && <div className="mb-1 text-xs text-zinc-500">Round {i + 1}{r.open ? " (at work)" : ""}</div>}
+            {r.commits.length === 0
+              ? <p className="text-sm text-zinc-500">{r.open ? "No commit yet." : "No commit."}</p>
+              : (
+                <ul className="space-y-1.5">
+                  {r.commits.map((c) => (
+                    <li key={c.sha} className="text-sm">
+                      <div className="flex gap-2">
+                        <span className="shrink-0 font-mono text-xs leading-5 text-zinc-500">{c.sha.slice(0, 7)}</span>
+                        <span className={`min-w-0 ${c.foreign ? "text-amber-200" : "text-zinc-200"}`}>{c.foreign && <span className="text-amber-400" title="Not made in a turn of this step's worker">◆ </span>}{c.subject}</span>
+                      </div>
+                      <div className="pl-[3.75rem] text-xs text-zinc-500">
+                        {c.files} file{c.files === 1 ? "" : "s"} · <span className="text-emerald-400/80">+{c.insertions}</span> <span className="text-red-400/80">−{c.deletions}</span> · {c.author} · <TimeAgo at={c.at} />
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+          </div>
+        ))}
+      </div>
+    </Section>
+  );
+}
+
+interface BranchView { branch: string; base?: { ref: string; ahead: number; behind: number }; upstream?: { ref: string; ahead: number; behind: number; at?: string } }
+
+/** The queue's branch: ahead and behind of its base and of its remote-tracking ref (as last fetched: never fetched here). */
+function BranchLine({ project, queue, version }: { project: string; queue: string; version: unknown }) {
+  const b = useFetch<BranchView | null>(`/api/projects/${enc(project)}/queues/${enc(queue)}/git`, version);
+  if (!b) return null;
+  const counts = (x: { ahead: number; behind: number }) => (
+    <span><span className="text-emerald-300">{x.ahead} ahead</span>, <span className={x.behind ? "text-amber-300" : "text-zinc-400"}>{x.behind} behind</span></span>
+  );
+  return (
+    <div className="mt-3 space-y-0.5 rounded-lg bg-zinc-800/50 p-3 text-sm text-zinc-300">
+      <p><span className="text-zinc-500">Branch </span><span className="font-mono">{b.branch}</span></p>
+      {b.base && <p className="text-xs">{counts(b.base)} <span className="text-zinc-500">of its base</span> <span className="font-mono">{b.base.ref}</span></p>}
+      {b.upstream
+        ? <p className="text-xs">{counts(b.upstream)} <span className="text-zinc-500">of</span> <span className="font-mono">{b.upstream.ref}</span> <span className="text-zinc-500">as fetched {b.upstream.at ? <TimeAgo at={b.upstream.at} /> : "at an unknown time"}</span></p>
+        : <p className="text-xs text-zinc-500">No remote-tracking branch.</p>}
     </div>
   );
 }
@@ -581,6 +642,8 @@ export function QueueDetail({ project, queue, onChanged }: Props) {
           {queue.approved ? "approved" : queue.withdrawals.length && queue.withdrawals.at(-1)!.approvals >= queue.approvals.length ? "approval withdrawn" : latest ? "approval is for an older revision" : "no approval recorded in Nexus"}
         </span>
       </div>
+
+      <BranchLine project={id} queue={queue.id} version={project.generated_at} />
 
       {queue.status === "stopped"
         ? <StopBox project={id} queue={queue} onChanged={onChanged} />

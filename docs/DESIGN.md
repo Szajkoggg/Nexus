@@ -458,6 +458,14 @@ A failed push changes nothing about the deploy. The setting lives in `<NEXUS_HOM
 server. It can only be changed from the dashboard (the same Origin rule as withdrawing an approval), so an agent can
 neither push nor turn pushing on.
 
+**Commits per step, and foreign ones** (`src/gitinfo.ts`, queue N8). A commit carries nothing that says which agent
+made it: workers commit with the user's own identity. In a worktree of the queue's own only its worker commits, but in
+the main checkout the user and other queues commit too. Nexus already knows when the worker was at work on the step
+(the runtime's turns in `activity.jsonl`), so a commit made outside those turns is marked as not the worker's. A commit
+of the user's made during a turn is not caught; changing the commits (an author, a trailer) would catch it, but
+Nexus does not touch what agents commit. The branch's state uses the local remote-tracking refs and says how old they
+are: fetching is a network action, which the server does not take for the dashboard.
+
 **Pushing what was accepted** (`src/accepted.ts`, queue N5). The server pushes an accepted step's work, not the
 worker: a worker pushing depends on its permissions and sandbox, and could push work nobody accepted. What is pushed
 is the commit that was HEAD when the step entered review, recorded then, never the branch tip at the time of the

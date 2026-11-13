@@ -364,6 +364,23 @@ export const USER_ONLY: ReadonlySet<EventType> = new Set(["review.rejected"]);
  * not be read). `steps`: what became of each accepted step's push (`acceptance`: the review.accepted event's id).
  * `pushed`: the last successful push; `error`: the last failure, until a push succeeds.
  */
+/**
+ * queues/<id>/git.yaml: the HEAD of the queue's checkout around each step's work. Written only by the server.
+ * `base`: what an auto worktree was made from (`ref` the branch or commit named, `sha` what it was then).
+ * `steps.<step>`: rounds of work, oldest first: `start` when the step opened (or a send-back reopened it), `end` at
+ * the end of the turn in which it got its outcome; `sha` null when the checkout is not a git repository.
+ */
+export const GitFile = z.object({
+  protocol: z.literal(1),
+  base: z.object({ ref: z.string(), sha: z.string(), at: Time }).optional(),
+  steps: z.record(z.string(), z.array(z.object({
+    session: Id,
+    start: z.string().nullable(), started_at: Time,
+    end: z.string().nullable().optional(), ended_at: Time.optional(),
+  }))).default({}),
+});
+export type GitFile = z.infer<typeof GitFile>;
+
 export const PushFile = z.object({
   protocol: z.literal(1),
   review: z.record(z.string(), z.object({ sha: z.string().nullable(), finished_at: Time, at: Time })).default({}),

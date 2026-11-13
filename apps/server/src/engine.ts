@@ -2,6 +2,7 @@
 // messages and answers to live sessions, and records what the agent does. See docs/DESIGN.md, "Nexus drives the
 // queue, step by step". All of its state is in files (run.yaml, runtime.json, delivered.jsonl, activity.jsonl);
 // the processes are the only thing a restart loses, and a restart pauses the runs that had one.
+import { recordBase, recordStepEnd, recordStepStart } from "./gitinfo.ts";
 import { AcceptedPusher } from "./accepted.ts";
 import type { GitRunner } from "./deploy.ts";
 import { execFileSync } from "node:child_process";
@@ -35,6 +36,9 @@ export { RETRY_LIMIT };
 export const RETRY_BASE_MS = 60_000;
 /** A run waiting for the usage window goes on this long after the window's reset. */
 export const USAGE_MARGIN_MS = 60_000;
+
+/** A step with one of these has its outcome: its round of commits ends with the turn that gave it. */
+const OUTCOME: ReadonlySet<string> = new Set(["done", "review", "failed", "stopped"]);
 
 export interface EngineOptions {
   /** The first retry's delay; each further one doubles it. Tests make it short. */
@@ -730,6 +734,7 @@ export class Engine {
     ].filter(Boolean);
     live.proc.send([around.before, lines.join("\n"), around.after].filter(Boolean).join("\n\n"));
     for (const n of notes) this.store.appendDelivered(run.session, { at: now(), kind: "note", id: n.id, via: "turn" });
+    recordStepStart(this.store, queueId, step.id, run.session);
     this.writeRun(queueId, { ...run, step: step.id, nudged: false, ...(mode === "start" ? { retries: undefined, failure: undefined, summary_asked: undefined } : {}) });
     this.store.appendActivity(run.session, { at: now(), kind: "turn_start", text: `Nexus opened step ${step.id}${mode === "continue" ? " (continue)" : ""}${around.before ? " in a fresh session, with what the previous one handed over" : ""}`, queue: queueId, step: step.id });
   }
@@ -749,6 +754,7 @@ export class Engine {
       else if (l.proc.state === "working") l.proc.send(text, "next");
       else if (idleAllowed) l.proc.send(text);
       else continue; // a paused run: keep it for later
+      if (m.type === "send_back") recordStepStart(this.store, m.queue, m.step, l.session); // the next round
       this.store.appendDelivered(l.session, { at: now(), kind: "inbox", id: m.id, via: l.proc.state === "working" ? "inject" : "turn" });
     }
   }
@@ -895,8 +901,18 @@ export class Engine {
       // A failed turn is decided at once and is not a turn without an outcome.
       if (end.failure) { for (const q of runsOf()) this.turnFailed(q, end.failure); this.changed(); return; }
       if (end.ok) for (const q of runsOf()) { const r = this.store.readRun(q); if (r?.retries) this.writeRun(q, { ...r, retries: undefined, failure: undefined }); }
-      // Let the CLI's last events land in the files, then decide.
-      setTimeout(() => { for (const q of this.store.queueIds()) if (this.store.readRun(q)?.session === session.id) this.advance(q); this.changed(); }, 300);
+      // Let the CLI's last events land in the files, then decide. A step that got its outcome in this turn ends its
+      // round of commits here.
+      setTimeout(() => {
+        const state = loadProjectState(this.store);
+        for (const q of state.queues) {
+          if (q.run?.session !== session.id) continue;
+          const st = q.steps.find((s) => s.id === q.run!.step);
+          if (st && OUTCOME.has(st.status)) recordStepEnd(this.store, q.id, st.id);
+          this.advance(q.id);
+        }
+        this.changed();
+      }, 300);
     });
     proc.on("exit", (code) => {
       // Ended by Nexus (shutdown, the hand-over of an update, an update's drain with `now`, a finished run): no
@@ -958,6 +974,8 @@ export class Engine {
     if (!existsSync(path)) {
       const exists = (() => { try { execFileSync("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], { cwd: root, stdio: "ignore" }); return true; } catch { return false; } })();
       const args = exists ? ["worktree", "add", path, branch] : ["worktree", "add", "-b", branch, path, q.base ?? "HEAD"];
+      // What a new branch is made from, for its ahead/behind on the dashboard (before the worktree moves anything).
+      if (!exists) recordBase(this.store, q, root);
       try { execFileSync("git", args, { cwd: root, stdio: ["ignore", "pipe", "pipe"] }); }
       catch (e) { throw new ActionError(`could not create the worktree: ${(e as { stderr?: Buffer }).stderr?.toString().trim() || (e as Error).message}`, 500); }
     }
