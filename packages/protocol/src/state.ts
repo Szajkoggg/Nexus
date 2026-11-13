@@ -1,6 +1,6 @@
 // Derives the dashboard's view of a project from its files. Pure apart from reading through the store;
 // nothing here is ever written back (state.json, if kept, is only a cache of this).
-import { ORCHESTRATOR_ONLY, type Event, type InboxEntry, type Note, type ProjectFile, type QueueFile, type QueueStatus, type ReviewItem, type RunFile, type RuntimeFile, type SessionFile, type StepDef, type StepStatus } from "./schemas.ts";
+import { ORCHESTRATOR_ONLY, type StatusChange, type Event, type InboxEntry, type Note, type ProjectFile, type QueueFile, type QueueStatus, type ReviewItem, type RunFile, type RuntimeFile, type SessionFile, type StepDef, type StepStatus } from "./schemas.ts";
 import { ProjectStore, revisionHash } from "./store.ts";
 import { ENDED_RUN_STATES, type Segment } from "./times.ts";
 
@@ -119,8 +119,16 @@ export function loadProjectState(store: ProjectStore): ProjectState {
     if (at) n.read_at = at;
   }
 
+  // Status changes made through Nexus come in among the events, by time; at the same time the event goes first.
+  const changes = [...queues.values()].flatMap((q) => q.changes.map((c) => ({ q, c })))
+    .sort((a, b) => a.c.at.localeCompare(b.c.at));
   const questions = new Map<string, QuestionView>();
-  for (const e of events) apply(e, queues, sessions, questions, warnings);
+  let next = 0;
+  for (const e of events) {
+    while (next < changes.length && changes[next]!.c.at < e.at) { applyChange(changes[next]!.q, changes[next]!.c); next++; }
+    apply(e, queues, sessions, questions, warnings);
+  }
+  for (; next < changes.length; next++) applyChange(changes[next]!.q, changes[next]!.c);
 
   for (const q of queues.values()) {
     q.questions = [...questions.values()].filter((x) => x.queue === q.id);
@@ -344,6 +352,16 @@ function apply(
     default:
       return;
   }
+}
+
+/**
+ * A lift of a stop: the queue is approved again and its stopped steps are pending again, so a start runs them; the
+ * stops before it no longer count (their record stays in the steps' timelines and in the entry's reason).
+ */
+function applyChange(q: QueueView, c: StatusChange): void {
+  if (c.kind !== "lift") return;
+  if (q.status === "stopped") { q.status = "approved"; q.status_reason = undefined; }
+  for (const st of q.steps) if (st.status === "stopped") { st.status = "pending"; st.reason = undefined; }
 }
 
 function endSegment(st: StepView, at: string): void {

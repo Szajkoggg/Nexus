@@ -244,12 +244,23 @@ app.get("/api/projects/:id/file", (c) => {
 /**
  * Writes accept JSON only and only from this server's own pages: a cross-site form cannot send JSON without a
  * preflight this server never grants, and a stray Origin is refused outright.
+ *
+ * Every write is a user action, so it must come from the dashboard's own page: a browser sends its Origin (and
+ * Sec-Fetch-Site) with every such request; an agent's script or a curl on this machine does not. Agents change
+ * things through the nexus CLI, which writes files. The only exceptions are what `nexus server` itself sends
+ * (`update` and `cancel`, which the CLI keeps to the user and to an orchestrator the user asked).
  */
+const CLI_WRITES = new Set(["/api/server/update", "/api/server/cancel"]);
 app.use("/api/*", async (c, next) => {
   if (c.req.method === "GET" || c.req.method === "HEAD") return next();
   const origin = c.req.header("origin");
   if (origin && new URL(origin).host !== c.req.header("host")) return c.json({ error: "cross-origin write refused" }, 403);
   if (!c.req.header("content-type")?.startsWith("application/json")) return c.json({ error: "JSON only" }, 415);
+  if (CLI_WRITES.has(c.req.path)) return next();
+  const site = c.req.header("sec-fetch-site");
+  if (!origin || (site !== undefined && site !== "same-origin")) {
+    return c.json({ error: "only the user does this, from the dashboard (agents use the nexus CLI)" }, 403);
+  }
   return next();
 });
 
@@ -288,19 +299,10 @@ app.delete("/api/projects/:id/queues/:queue/steps/:step/notes/:note", act((st, _
 app.post("/api/projects/:id/sessions/:session/messages", act((st, b, p) =>
   sendMessage(st, p("session"), b.text, { queue: b.queue as string | undefined, step: b.step as string | undefined })));
 app.post("/api/projects/:id/queues/:queue/approve", act((st, b, p) => approveQueue(st, p("queue"), b.words)));
-// What only the user does, so only from the dashboard's own page: a browser sends its Origin (and Sec-Fetch-Site)
-// with every such request; an agent's script or a curl on this machine does not. There is no CLI command for these.
-const userOnly = (what: string) => async (c: import("hono").Context, next: () => Promise<void>) => {
-  const origin = c.req.header("origin");
-  const site = c.req.header("sec-fetch-site");
-  if (!origin || new URL(origin).host !== c.req.header("host") || (site !== undefined && site !== "same-origin")) {
-    return c.json({ error: `only the user can ${what}, from the dashboard` }, 403);
-  }
-  return next();
-};
-app.post("/api/projects/:id/queues/:queue/withdraw", userOnly("withdraw an approval"), act((st, b, p) => withdrawApproval(st, p("queue"), b.reason)));
-// An allow rule widens what the workers may do: an agent must not grant it to itself.
-app.post("/api/projects/:id/settings/allow-rule", userOnly("add an allow rule"), act((st, b) => addAllowRule(st, b.rule)));
+// Withdrawing an approval and adding an allow rule are the user's too, like every write (see the guard above): an agent
+// must not take an approval back or widen its own permissions.
+app.post("/api/projects/:id/queues/:queue/withdraw", act((st, b, p) => withdrawApproval(st, p("queue"), b.reason)));
+app.post("/api/projects/:id/settings/allow-rule", act((st, b) => addAllowRule(st, b.rule)));
 app.patch("/api/projects/:id/queues/:queue", act((st, b, p) => setQueueSettings(st, p("queue"), b)));
 app.post("/api/projects/:id/questions/:qid/answer", act((st, b, p) => answerAsUser(st, p("qid"), b.text, b.continue)));
 
@@ -353,7 +355,7 @@ function runningSteps() {
   });
 }
 // Whether a deploy pushes the deployed main (src/deploy.ts): the user's to switch, from the dashboard only.
-app.post("/api/server/settings", userOnly("change pushing on deploy"), async (c) => {
+app.post("/api/server/settings", async (c) => {
   const b = (await c.req.json().catch(() => ({}))) as { push_on_deploy?: unknown };
   if (typeof b.push_on_deploy !== "boolean") return c.json({ error: "push_on_deploy is true or false" }, 400);
   writeDeploySettings({ ...readDeploySettings(), push_on_deploy: b.push_on_deploy });

@@ -116,6 +116,14 @@ withdrawals:                           # approvals the user took back before the
     approvals: 1                       # how many approval records there were then
 history:                               # previous revisions, kept for the record
   - { revision: 2, hash: sha256:..., replaced_at: 2026-11-12T09:10:00Z }
+changes:                               # status changes made through Nexus; written only by the server
+  - at: 2026-11-13T09:40:00Z
+    kind: lift                         # the user lifted the queue's stop
+    by: user_approval                  # user_approval (approving a new revision) | user_continue
+    from: stopped
+    to: approved
+    reason: "the art is missing: W4 needs the cliff textures"   # the stop's own reason, as it was derived
+    revision: 3                        # the revision the change was made on
 ```
 
 A step's `runtime`, `model` and `effort` are part of what is approved. Each one a step leaves out is the run's
@@ -126,6 +134,20 @@ A queue is runnable only when its latest approval's hash matches its current rev
 after that approval (a withdrawal's `approvals` is not below the number of approvals). Withdrawing sets the queue
 back to `proposed`; the approvals stay as they were, and a later approval makes it runnable again. Only a queue
 that never ran can be withdrawn (no `run.yaml`, no step started); a started one is paused or stopped instead.
+
+**Changes and lifting a stop.** `changes` records the status changes made through Nexus, oldest first, written only
+by the server; nobody edits statuses in the file. Derivation applies each entry in time order among the events (an
+event at the same time goes first), so a later event can still change the status again. A `lift` makes a `stopped`
+queue `approved` and its `stopped` steps `pending` again (their reason cleared); a stop before the lift, whether a
+`queue.stop` event or a `stopped` status an import wrote into the file, no longer counts. A stop after it does.
+
+Approving a revision of a stopped queue lifts the stop: the server appends the approval and a `lift` by
+`user_approval` with the stop's derived reason (`condition: reason` for an event stop, the file's `status_note` for
+an imported one), writes the queue `approved`, and archives the queue's `run.yaml` as `run.<time>.yaml` beside it
+(the time of archiving in ISO 8601 with `-` for `:` and `.`, e.g. `run.2026-11-13T09-40-00-123Z.yaml`), so a start
+begins at the first pending step, which is the stopped step itself unless the new revision says otherwise. An
+archived run record is read by nothing; it is kept for the record. Approving a stopped queue whose run is still
+going is refused.
 
 ## Notes: `notes/<step-id>/<note-id>.md`
 
@@ -185,7 +207,7 @@ Written only by the server's queue engine; agents never touch them.
 
 | File | What |
 |---|---|
-| `queues/<id>/run.yaml` | The engine's intent for a queue: `session`, `state` (`running`, `pausing`, `paused`, `halted`, `finished`, `usage_wait`, `retry_wait`: a turn failed for a passing reason and is tried again at `resume_at`), `reason`, the `step` it last opened, `nudged`, `resume_at` (when a usage wait or a retry goes on), `retries` (turns failed in a row for a passing reason; cleared by a turn that ends well or a new step), `failure` (the runtime's code for the failure being retried or that halted the run, e.g. `overloaded`), `resume_after_restart`, `runtime`, `model` and `effort` (the run's own, fixed at its start: the start's choice, else the continued session's, else the project's defaults; a missing model or effort is the runtime's default), `started_at`, `ended_at` (when it last stopped going: set when it becomes `finished`, `halted` or `paused`, kept while it stays so, removed when it goes on; older files without it fall back to `updated_at`), `summary_asked` (context care: the step whose context summary Nexus asked for; asked once), `switches` (each fresh session, oldest first: `at`, `from` and `to` session, `step` the new session began with, `why`: `context` (context care; a record without `why` is this) or `runtime` (the step runs on another runtime), `fill` of the old one from 0 to 1 when known, `summary`: `written` by the worker, `asked` and then written, or `fallback`) |
+| `queues/<id>/run.yaml` | The engine's intent for a queue: `session`, `state` (`running`, `pausing`, `paused`, `halted`, `finished`, `usage_wait`, `retry_wait`: a turn failed for a passing reason and is tried again at `resume_at`), `reason`, the `step` it last opened, `nudged`, `resume_at` (when a usage wait or a retry goes on), `retries` (turns failed in a row for a passing reason; cleared by a turn that ends well or a new step), `failure` (the runtime's code for the failure being retried or that halted the run, e.g. `overloaded`), `resume_after_restart`, `runtime`, `model` and `effort` (the run's own, fixed at its start: the start's choice, else the continued session's, else the project's defaults; a missing model or effort is the runtime's default), `started_at`, `ended_at` (when it last stopped going: set when it becomes `finished`, `halted` or `paused`, kept while it stays so, removed when it goes on; older files without it fall back to `updated_at`), `summary_asked` (context care: the step whose context summary Nexus asked for; asked once), `switches` (each fresh session, oldest first: `at`, `from` and `to` session, `step` the new session began with, `why`: `context` (context care; a record without `why` is this) or `runtime` (the step runs on another runtime), `fill` of the old one from 0 to 1 when known, `summary`: `written` by the worker, `asked` and then written, or `fallback`), `revision` (the queue's revision the run was started on). Start refuses a `stopped` queue, naming the step and the stop's reason, and writes `revision`. Resume refuses a stopped queue too, and a run of an older revision (`revision` below the queue's; a run record without `revision` is older when a revision was replaced, in `history`, after its `started_at`): start the queue instead. Archived records are `run.<time>.yaml` (see "Changes and lifting a stop") |
 | `sessions/<id>/runtime.json` | A launched session's live facts: process state and pid, model, context tokens and window, turns, cost |
 | `sessions/<id>/delivered.jsonl` | What the server handed to the session (notes put into a step turn, inbox entries injected or sent as a turn, or `carried` into the first turn of the session `to` that took over); counts as read |
 | `sessions/<id>/refusals.jsonl` | One line per action the agent wanted but was refused: `at`, `session`, `runtime`, `by` (`permissions`: Claude Code's permission mode or rules; `nexus`: Nexus declined a Codex approval request; `auto_review`: Codex's auto reviewer), `tool` (Claude Code's tool name; for Codex `command`, `file_change`, `network`, `mcp`, `permissions`, …), `input` in short (the command, path or host, at most 300 characters), `reason` when the runtime gave one, `ref` (the runtime's id for the call: one record per refusal), `queue`, `step` |
@@ -304,15 +326,19 @@ Reads: `GET /api/projects` (with each project's "waiting for you" list), `GET /a
 `GET /api/projects/:id/file?path=` (files under the project, its worktree directory or a session's directory only).
 Live: a WebSocket at `/ws` sends `{"type":"changed","project":id}` and `{"type":"projects"}`.
 
-Writes (JSON bodies only; a request with a foreign `Origin` is refused):
+Writes (JSON bodies only; a request with a foreign `Origin` is refused). Every write is a user action and is taken
+only from the dashboard's own page: the request must carry this server's `Origin` and, if it sends one,
+`Sec-Fetch-Site: same-origin`; anything else is refused (403). Agents change things through the `nexus` CLI, which
+writes files. The only exceptions are `POST /api/server/update` and `POST /api/server/cancel`, which `nexus server`
+sends (see the CLI).
 
 | Request | Body | Effect |
 |---|---|---|
 | `POST /api/projects/:id/queues/:q/steps/:s/notes` | `text` | A note from the user for the step |
 | `DELETE /api/projects/:id/queues/:q/steps/:s/notes/:note` | | Withdraws a note not yet delivered |
 | `POST /api/projects/:id/sessions/:session/messages` | `text`, `queue?`, `step?` | A message to a session's inbox |
-| `POST /api/projects/:id/queues/:q/approve` | `words?` | Approves the current revision |
-| `POST /api/projects/:id/queues/:q/withdraw` | `reason?` | The user takes back the approval of a queue that never ran. Only from the dashboard's own page: the request must carry this server's `Origin` and, if it sends one, `Sec-Fetch-Site: same-origin`; anything else is refused (403). There is no CLI command and no event for it |
+| `POST /api/projects/:id/queues/:q/approve` | `words?` | Approves the current revision; for a stopped queue it also lifts the stop (see `queue.yaml`) |
+| `POST /api/projects/:id/queues/:q/withdraw` | `reason?` | The user takes back the approval of a queue that never ran. There is no CLI command and no event for it |
 | `PATCH /api/projects/:id/queues/:q` | `review_policy` (`continue`, `wait` or null) | Queue settings |
 | `POST /api/projects/:id/questions/:qid/answer` | `text`, `continue?` | The user's answer, routed to the asker |
 | `POST /api/projects/:id/queues/:q/run` | `action` (`start`, `pause`, `resume`, `stop`), `model?`, `session?` | Runs the queue through a Nexus-launched session (`session` continues an existing one) |
@@ -321,7 +347,7 @@ Writes (JSON bodies only; a request with a foreign `Origin` is refused):
 | `POST /api/projects/:id/orchestrator/reset` | | The next message starts a new orchestrator session |
 | `POST /api/projects/:id/orchestrator/settings` | `model`, `effort` (empty: the default) | The orchestrator's model and effort, from its next message on |
 | `PATCH /api/projects/:id/settings` | `name`, `runtimes`, `defaults`, `orchestrator.notify` (an empty value clears a field) | Project settings, checked against the schema |
-| `POST /api/projects/:id/settings/allow-rule` | `rule` | Adds an allow rule for Claude Code workers to `runtimes.claude.allowed_tools` in `.nexus/project.yaml` (once; a rule already there is left as it is), typically from a refusal. A tool name, optionally with a specifier in parentheses, on one line. Only from the dashboard's own page, like a withdrawal (403 otherwise): an agent must not widen its own permissions. Nothing else is written, not the project's `.claude/settings.json` or `AGENTS.md` |
+| `POST /api/projects/:id/settings/allow-rule` | `rule` | Adds an allow rule for Claude Code workers to `runtimes.claude.allowed_tools` in `.nexus/project.yaml` (once; a rule already there is left as it is), typically from a refusal. A tool name, optionally with a specifier in parentheses, on one line. Like every write, only from the dashboard's own page: an agent must not widen its own permissions. Nothing else is written, not the project's `.claude/settings.json` or `AGENTS.md` |
 
 Also `GET /api/projects/:id/sessions/:session/activity?queue=&step=&limit=`, `GET /api/projects/:id/refusals?queue=&step=`
 (the refused actions of every session of the project, oldest first; optionally only a queue's or a step's), `GET /api/projects/:id/orchestrator`

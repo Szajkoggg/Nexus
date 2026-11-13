@@ -69,13 +69,30 @@ export function sendMessage(store: ProjectStore, session: string, text: unknown,
 
 // ---------------------------------------------------------------- queues
 
+/**
+ * The user approves the queue's current revision. Approving a stopped queue (a new revision drafted after the stop)
+ * lifts the stop: a `lift` entry in its changes with the stop's reason, the queue approved, and the old run record
+ * archived (run.<time>.yaml), so a start begins at the first pending step. Only the user: the server takes it only
+ * from the dashboard's page.
+ */
 export function approveQueue(store: ProjectStore, queue: string, words?: unknown): void {
   const q = queueOf(store, queue);
   const hash = revisionHash(q);
   if (isApproved(q)) throw new ActionError("this revision is already approved", 409);
-  const status = q.status === "draft" || q.status === "proposed" ? "approved" : q.status;
+  const view = loadProjectState(store).queues.find((x) => x.id === queue);
+  const at = now();
   const w = typeof words === "string" && words.trim() ? words.trim() : undefined;
-  store.writeQueue({ ...q, status, approvals: [...q.approvals, { revision: q.revision, at: now(), words: w, hash }], updated_at: now() });
+  const approvals = [...q.approvals, { revision: q.revision, at, words: w, hash }];
+  if (view?.status === "stopped") {
+    const run = store.readRun(queue);
+    if (run && ["running", "pausing"].includes(run.state)) throw new ActionError("the queue's run is still going; stop it first", 409);
+    const lift = { at, kind: "lift" as const, by: "user_approval" as const, from: "stopped", to: "approved", reason: view.status_reason, revision: q.revision };
+    store.writeQueue({ ...q, status: "approved", status_note: undefined, approvals, changes: [...q.changes, lift], updated_at: at });
+    store.archiveRun(queue);
+    return;
+  }
+  const status = q.status === "draft" || q.status === "proposed" ? "approved" : q.status;
+  store.writeQueue({ ...q, status, approvals, updated_at: at });
 }
 
 /**

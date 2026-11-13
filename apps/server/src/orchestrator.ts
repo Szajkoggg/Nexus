@@ -259,8 +259,12 @@ Options: ${x.options.join(" / ")}` : ""}`,
       // Approvals and withdrawals by their position, so withdrawing and approving the same revision again is told again.
       q.approvals.forEach((a, i) => {
         if (a.at < since) return;
+        // A run of an older revision is not resumed (the engine refuses it): the new revision starts afresh.
+        const older = r && (r.revision !== undefined ? r.revision < a.revision : q.history.some((h) => h.replaced_at > r.started_at));
         const todo = !r
           ? "If the plan puts it next, start it now; otherwise tell the user why not."
+          : older && (r.state === "paused" || r.state === "halted" || r.state === "finished")
+            ? `Its earlier run (${r.state}${r.step ? ` at step ${r.step}` : ""}) was of an older revision and cannot be resumed. If the plan puts it next, start it now (it begins at the first pending step); otherwise tell the user why not.`
           : r.state === "paused" || r.state === "halted"
             ? `Its run is ${r.state}${r.step ? ` at step ${r.step}` : ""}. If the plan puts it next, resume it now; otherwise tell the user why not.`
             : `Its run is ${r.state}; tell the user if anything follows from the approval.`;
@@ -286,7 +290,7 @@ Options: ${x.options.join(" / ")}` : ""}`,
       }
       if ((r.state !== "halted" && r.state !== "finished") || r.updated_at < since) continue;
       items.push(r.state === "halted"
-        ? { key: `notify:run:${q.id}:${r.state}:${r.updated_at}`, fact: `The run of queue ${q.id} halted at step ${r.step ?? "?"}: ${r.reason ?? "no reason given"}.`, todo: "Tell the user briefly, with what you propose." }
+        ? { key: `notify:run:${q.id}:${r.state}:${r.updated_at}`, fact: `The run of queue ${q.id} halted ${r.step ? `at step ${r.step}` : "before it opened a step"}: ${r.reason ?? "no reason given"}.`, todo: "Tell the user briefly, with what you propose." }
         : { key: `notify:run:${q.id}:${r.state}:${r.updated_at}`, fact: `Queue ${q.id} finished.${q.report ? ` Report: ${q.report.summary}` : ""}`, todo: "Tell the user briefly, with what you propose next." });
     }
     const fresh = items.filter((i) => !told.has(i.key));

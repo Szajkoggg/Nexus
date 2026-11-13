@@ -318,6 +318,17 @@ Approving is a dashboard action: the user picks a queue revision, writes their w
 Nexus records `{revision hash, time, words}`. The worker sees the approval in its step turns. This replaces quoting
 the user into a Markdown queue, though a project may still copy it there.
 
+**Statuses change through Nexus, never by editing files** (decided 2026-11-13, after Project Honeycomb's queue W: a
+stopped queue's new revision was approved, `start` said ok and halted with the old stop note, and a worker then edited
+the queue file by hand). Every change is an entry in the queue's `changes`, written by the server, with who, when
+and why; derivation applies the entries in time order among the events, so neither a later rebuild nor an older event
+undoes them. Only the user lifts a stop: stop conditions are the user's guard rails. Approving a new revision of a
+stopped queue lifts it (the old stop's reason goes into the entry, the old run record is archived, a start begins at
+the first pending step); `start` and `resume` refuse a stopped queue with the step and the reason, and `resume`
+refuses a run of an older revision, which would reopen a step the new revision may have replaced. Every write to the
+API is the user's and is taken only from the dashboard's page (the Origin rule), approving among them; agents act
+through the CLI and its events.
+
 ### Runtimes and authentication
 
 - **Claude Code**: Nexus spawns the unmodified `claude` binary in print mode with stream-json input and output and

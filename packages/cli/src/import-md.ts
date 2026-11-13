@@ -169,6 +169,7 @@ function buildQueue(s: Section, table: Table, opts: { source: string; prefix?: s
     approvals: [],
     withdrawals: [],
     history: [],
+    changes: [],
     source: { path: opts.source, imported_at: opts.now },
     created_at: opts.now,
     updated_at: opts.now,

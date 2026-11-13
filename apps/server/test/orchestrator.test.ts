@@ -256,23 +256,29 @@ test("approvals and withdrawals are told once each, by their position, the chat 
   } finally { stop(); }
 });
 
-test("approving a halted queue's new revision says resume", async () => {
-  const x = setup();
-  process.env.FAKE_LOG = join(x.root, "fake.log");
-  try {
-    x.orchestrator.say("Hello");
-    await x.until("the session", () => !!x.orchestrator.session());
-    applyDraft(x.store, queueDef("H", ["stop", "done"]));
-    approveQueue(x.store, "H");
-    x.engine.start("H");
-    await x.until("the halt", () => runOf(x, "H")?.state === "halted");
-    applyDraft(x.store, { ...queueDef("H", ["stop", "done"]), stop_conditions: ["Changed."] });
-    approveQueue(x.store, "H");
-    await x.until("the approval", () => facts(x.orchestrator).includes("Queue H revision 2 approved."));
-    await settle();
-    const sent = (await delivered()).find((t) => t.startsWith("[Nexus] Queue H revision 2 approved."));
-    assert.match(sent ?? "", /Its run is halted at step H1\. If the plan puts it next, resume it now/);
-  } finally { x.stop(); }
+test("approving a halted queue's new revision says start: the old run is of the older revision; a stopped one's is archived", async () => {
+  for (const [first, told] of [
+    ["fail", /Its earlier run \(halted at step H1\) was of an older revision and cannot be resumed\. If the plan puts it next, start it now/],
+    ["stop", /Queue H revision 2 approved\. If the plan puts it next, start it now/],
+  ] as const) {
+    const x = setup();
+    process.env.FAKE_LOG = join(x.root, "fake.log");
+    try {
+      x.orchestrator.say("Hello");
+      await x.until("the session", () => !!x.orchestrator.session());
+      applyDraft(x.store, queueDef("H", [first, "done"]));
+      approveQueue(x.store, "H");
+      x.engine.start("H");
+      await x.until("the halt", () => runOf(x, "H")?.state === "halted");
+      applyDraft(x.store, { ...queueDef("H", [first, "done"]), stop_conditions: ["Changed."] });
+      approveQueue(x.store, "H");
+      await x.until("the approval", () => facts(x.orchestrator).includes("Queue H revision 2 approved."));
+      await settle();
+      const sent = (await delivered()).find((t) => t.startsWith("[Nexus] Queue H revision 2 approved."));
+      assert.match(sent ?? "", told, first);
+      assert.throws(() => x.engine.resume("H"), first === "fail" ? /older|revision/ : /no run/);
+    } finally { x.stop(); }
+  }
 });
 
 test("a requested pause reached is told once with its step; a stop, a restart's and an update's pauses are not", async () => {

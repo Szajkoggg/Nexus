@@ -87,6 +87,7 @@ export class Engine {
     const q = this.queue(state, queueId);
     if (!q.approved) throw new ActionError("approve the queue's current revision first", 409);
     if (q.run && GOING.includes(q.run.state)) throw new ActionError("the queue is already running", 409);
+    if (q.status === "stopped") throw new ActionError(stoppedMessage(q), 409);
     if (q.status === "done" || q.status === "cancelled") throw new ActionError(`the queue is ${q.status}`, 409);
     if (!q.steps.some((s) => s.status !== "done" && s.status !== "skipped")) throw new ActionError("no step left to run", 409);
 
@@ -116,7 +117,7 @@ export class Engine {
       ? this.reuseSession(state, reused.id, queueId, want.model, want.effort)
       : this.newSession(state, q, want.runtime, want.model, want.effort);
     const run: RunFile = {
-      protocol: 1, session: session.id, state: "running", started_at: now(), updated_at: now(),
+      protocol: 1, session: session.id, state: "running", started_at: now(), updated_at: now(), revision: q.revision,
       runtime: values.runtime, model: values.model, effort: values.effort,
     };
     this.store.writeRun(queueId, run);
@@ -144,6 +145,11 @@ export class Engine {
     const state = loadProjectState(this.store);
     const q = this.queue(state, queueId);
     if (!q.approved) throw new ActionError("approve the queue's current revision first", 409);
+    if (q.status === "stopped") throw new ActionError(stoppedMessage(q), 409);
+    // A run of an older revision would reopen a step the new revision may have replaced, in the old session. A run
+    // without the field is older when a revision was replaced after it started.
+    const older = run.revision !== undefined ? run.revision < q.revision : q.history.some((h) => h.replaced_at > run.started_at);
+    if (older) throw new ActionError(`the run belongs to revision ${run.revision ?? "an earlier one"} and the queue is at revision ${q.revision}: start the queue instead of resuming`, 409);
     const session = this.sessionFile(state, run.session);
     this.ensureProcess(session);
     this.clearTimer(queueId);
@@ -277,7 +283,7 @@ export class Engine {
     if (!q.approved) return this.halt(queueId, "the queue's revision changed and is not approved");
 
     const current = run.step ? q.steps.find((s) => s.id === run.step) : undefined;
-    if (q.status === "stopped") return this.halt(queueId, q.status_reason ?? "a stop condition was met");
+    if (q.status === "stopped") return this.halt(queueId, stoppedMessage(q, run.step));
     if (current) {
       switch (current.status) {
         case "running":
@@ -791,6 +797,12 @@ export class Engine {
     if (!s || s.id === USER_SESSION) throw new ActionError(`unknown session ${id}`, 404);
     return s;
   }
+}
+
+/** Why a stopped queue does not go on: the step it stopped at and the stop's own reason, and who lifts it. */
+function stoppedMessage(q: QueueView, step?: string): string {
+  const at = q.current_step ?? step;
+  return `queue ${q.id} is stopped${at ? ` at step ${at}` : ""}: ${q.status_reason ?? "a stop condition was met"}. Only the user lifts a stop, by approving a new revision of the queue`;
 }
 
 function formatInbox(m: InboxView, state: ProjectState): string {

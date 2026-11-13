@@ -152,6 +152,26 @@ export const Withdrawal = z.object({
 });
 export type Withdrawal = z.infer<typeof Withdrawal>;
 
+/**
+ * One change of a status made through Nexus, in queue.yaml's `changes` (written only by the server). Derivation applies
+ * the entries in time order among the events. `lift`: the user lifted the queue's stop (`by`: approving a new revision,
+ * or Continue); the queue becomes approved and its stopped steps pending again; stops before it no longer count.
+ */
+export const StatusChange = z.object({
+  at: Time,
+  kind: z.enum(["lift"]),
+  by: z.enum(["user_approval", "user_continue"]),
+  /** The step it changed; absent: the queue. */
+  step: Id.optional(),
+  from: z.string(),
+  to: z.string(),
+  /** Why, in words: for a lift, the stop's own reason as it was derived ("condition: reason"). */
+  reason: z.string().optional(),
+  /** The revision the change was made on. */
+  revision: z.number().int().positive().optional(),
+});
+export type StatusChange = z.infer<typeof StatusChange>;
+
 export const QueueFile = z.object({
   protocol: z.literal(1),
   id: Id,
@@ -172,6 +192,8 @@ export const QueueFile = z.object({
   approvals: z.array(Approval).default([]),
   withdrawals: z.array(Withdrawal).default([]),
   history: z.array(z.object({ revision: z.number().int(), hash: z.string(), replaced_at: Time })).default([]),
+  /** Status changes made through Nexus (lifts of a stop, for now), oldest first. Written only by the server. */
+  changes: z.array(StatusChange).default([]),
   source: z.object({ path: z.string(), imported_at: Time }).optional(),
   created_at: Time.optional(),
   updated_at: Time.optional(),
@@ -304,6 +326,8 @@ export const RunFile = z.object({
   failure: z.string().optional(),
   /** Stopped only for a Nexus update: the server resumes it by itself when it starts again. */
   resume_after_restart: z.boolean().optional(),
+  /** The queue's revision the run was started on: a run of an older revision is not resumed. */
+  revision: z.number().int().positive().optional(),
   /** The run's own runtime, model and effort, fixed at its start: what a step without its own values runs on. */
   runtime: z.enum(["claude", "codex"]).optional(),
   model: z.string().optional(),

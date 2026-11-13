@@ -171,6 +171,17 @@ export class ProjectStore {
     return existsSync(f) ? readYaml(f, RunFile) : undefined;
   }
   writeRun(queueId: string, run: RunFile): void { writeYaml(join(this.queueDir(queueId), "run.yaml"), RunFile.parse(run)); }
+  /**
+   * Keeps a run record that is over beside the queue as run.<time>.yaml (the time of archiving, with `-` for `:` and
+   * `.`), so the next start begins afresh. Returns the archive's file name, or undefined when there was no run.
+   */
+  archiveRun(queueId: string): string | undefined {
+    const f = join(this.queueDir(queueId), "run.yaml");
+    if (!existsSync(f)) return undefined;
+    const name = `run.${new Date().toISOString().replace(/[:.]/g, "-")}.yaml`;
+    renameSync(f, join(this.queueDir(queueId), name));
+    return name;
+  }
   clearRun(queueId: string): void {
     const f = join(this.queueDir(queueId), "run.yaml");
     if (existsSync(f)) unlinkSync(f);
