@@ -122,12 +122,20 @@ history:                               # previous revisions, kept for the record
   - { revision: 2, hash: sha256:..., replaced_at: 2026-11-12T09:10:00Z }
 changes:                               # status changes made through Nexus; written only by the server
   - at: 2026-11-13T09:40:00Z
-    kind: lift                         # lift | status | run | proposal (see below)
+    kind: lift                         # lift | status | run | proposal | work (see below)
     by: user_approval                  # user_approval (approving a new revision) | user_continue | orchestrator
     from: stopped
     to: approved
     reason: "the art is missing: W4 needs the cliff textures"   # the stop's own reason, as it was derived
     revision: 3                        # the revision the change was made on
+  - at: 2026-11-13T09:40:00Z
+    kind: work                         # the user's choice about a stopped step's work (see "The work a stopped step left")
+    by: user_continue
+    step: W4
+    from: stopped
+    to: kept                           # kept | discarded
+    commits: [4e1a2c9..., 9b07d31...]  # the step's own commits the choice was about
+    revision: 3
 ```
 
 A step's `runtime`, `model` and `effort` are part of what is approved. Each one a step leaves out is the run's
@@ -162,6 +170,29 @@ stop (when the orchestrator skipped that step, the next pending one opens); with
 finished run or one of an older revision, the queue starts afresh at its first pending step. The orchestrator is
 told once. The dashboard shows the stop with the orchestrator's proposal (`lift_proposal`) beside Continue, and the
 queue's and each step's `changes`: who, when, what and why.
+
+**The work a stopped step left.** Where a stop is lifted (Continue, or approving a new revision of a stopped queue),
+the user decides about what the stopped step (`stop_step`) left (`apps/server/src/stopwork.ts`):
+- The server works it out, reading git only (no network, `status` without optional locks): the step's own commits from
+  `git.yaml` (every round), leaving out those marked foreign; and the uncommitted changes of the queue's checkout
+  (`git status`), labelled "in the checkout, not necessarily this step's". `GET /api/projects/:id/queues/:q/left`
+  answers `{ step, commits, uncommitted: [{ status, path }], uncommitted_note, discarded }` (`discarded`: the Discard
+  recorded for this stop, or null), or null when the queue is not stopped at a step.
+- When the step left commits of its own, the lift takes a choice, `work: keep | discard` in the body of `continue` and
+  `approve`; without it they are refused (409, naming the step and the number of commits). With none nothing is asked.
+  What the lift itself would refuse (a run still going; Continue on an unapproved revision; approving an approved
+  one) is refused first, so no choice is recorded for a lift that does not happen.
+- **Keep** appends a `work` change (`to: kept`, `commits`, `by`) and lifts as before. The commits stay, and go out
+  with the next accepted commit when the project pushes what was accepted.
+- **Discard** appends a `work` change (`to: discarded`, `commits`) and does not lift: Continue does not go on, and the
+  approval is not recorded. The orchestrator is told once per project (key `notify:discard:<queue>:<index of the
+  change>` in any orchestrator session's `applied.jsonl`), like a chat message of the user: whatever `notify` says,
+  starting it if it has no session, with the commits; it drafts a revision whose first pending step reverts exactly
+  them. Once a Discard is recorded for the present stop (after its `queue.stop`), approving a revision lifts the
+  stop without asking again.
+- Uncommitted changes are shown, never cleaned: neither Nexus nor a revert step removes files it cannot attribute to
+  the step; the orchestrator asks the user about them. The worker's briefing asks a worker that stops to commit what
+  is consistent and leave the working tree clean.
 
 **Where a stop is, and the ways out shown.** The queue's view keeps `stop_step`, the step the latest `queue.stop` named
 (or, for a queue imported as stopped, its last stopped step), until a lift. While that step is not finished the stop is
@@ -552,7 +583,7 @@ sends (see the CLI).
 | `POST /api/projects/:id/queues/:q/steps/:s/notes` | `text` | A note from the user for the step |
 | `DELETE /api/projects/:id/queues/:q/steps/:s/notes/:note` | | Withdraws a note not yet delivered |
 | `POST /api/projects/:id/sessions/:session/messages` | `text`, `queue?`, `step?` | A message to a session's inbox |
-| `POST /api/projects/:id/queues/:q/approve` | `words?` | Approves the current revision; for a stopped queue it also lifts the stop (see `queue.yaml`) |
+| `POST /api/projects/:id/queues/:q/approve` | `words?`, `work?` (`keep` or `discard`) | Approves the current revision; for a stopped queue it also lifts the stop (see `queue.yaml`). `work` is required when the stopped step left commits of its own and no Discard is recorded; with `discard` nothing is approved (see "The work a stopped step left") |
 | `POST /api/projects/:id/queues/:q/withdraw` | `reason?` | The user takes back the approval of a queue that never ran. There is no CLI command and no event for it |
 | `PATCH /api/projects/:id/queues/:q` | `review_policy` (`continue`, `wait`, `orchestrator` or null) | Queue settings |
 | `POST /api/projects/:id/questions/:qid/answer` | `text`, `continue?` | The user's answer, routed to the asker |
@@ -567,7 +598,8 @@ sends (see the CLI).
 | `POST /api/projects/:id/queues/:q/cleanup` | | Clean up a finished worktree queue: the worktree removed, its branch deleted with `-d`; answers `{ ok, result: { message } }` |
 | `POST /api/projects/:id/queues/:q/push` | | Push again: the step of the queue's last failed push; answers `{ ok, result: { message } }` at once, the push runs in the background |
 | `POST /api/projects/:id/queues/:q/steps/:s/send-back` | `text` (required, kept verbatim) | Fix it: sends a step waiting for the user's review back to its worker; answers `{ ok, result: { message } }` |
-| `POST /api/projects/:id/queues/:q/continue` | | Continue: lifts the stop of a stopped queue whose current revision is approved and goes on (see "Continue" under `queue.yaml`); refused (409) otherwise |
+| `POST /api/projects/:id/queues/:q/continue` | `work?` (`keep` or `discard`) | Continue: lifts the stop of a stopped queue whose current revision is approved and goes on (see "Continue" under `queue.yaml`); refused (409) otherwise. `work` is required when the stopped step left commits of its own; `discard` records it and does not go on |
+| `GET /api/projects/:id/queues/:q/left` | | What a stopped queue's stopped step left (see "The work a stopped step left"); null when not stopped at a step |
 | `POST /api/projects/:id/orchestrator/messages` | `text` | A chat message to the orchestrator (starts or wakes it) |
 | `POST /api/projects/:id/orchestrator/reset` | | The next message starts a new orchestrator session |
 | `POST /api/projects/:id/orchestrator/settings` | `model`, `effort` (empty: the default) | The orchestrator's model and effort, from its next message on |

@@ -1157,8 +1157,9 @@ Report through the \`nexus\` command (on PATH; your session is set in the enviro
 - nexus check <step> <name> --ok|--fail --summary "..."      results of the step's checks
 - nexus step done <step> --summary "..." [--commit <sha>]   when the acceptance criteria are met
 - nexus step failed <step> --reason "..."                   when the step cannot be done as written
-- nexus stop <step> --condition "..." --reason "..."        when a stop condition is met
+- nexus stop <step> --condition "..." --reason "..."        when a stop condition is met (first commit what is consistent, see below)
 - nexus ask "<question>" --step <step> [--can-continue]     a question for the orchestrator or the user; without --can-continue, end your turn after asking: the answer arrives as a message
 - nexus context "<what a successor needs to know>" --topics a,b --files x,y   at the end of each step
-Messages from the user may arrive while you work, marked [Nexus]; follow them.`;
+Messages from the user may arrive while you work, marked [Nexus]; follow them.
+Before you stop (nexus stop, or a stop condition you meet): commit what is in a consistent state, with a message that says so, and leave the working tree clean (no uncommitted changes); what is not consistent, set aside or undo, and say in the reason what you left out. The user then decides whether the stopped step's commits are kept or reverted; changes nobody committed cannot be attributed to the step.`;
 

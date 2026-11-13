@@ -15,8 +15,9 @@ import {
   readRegistry, readUsage, commentOnPicture, markPicture, routeAnswers, routeSendBacks, sendBack, sendMessage, setQueueSettings, type ProjectState,
 } from "@nexus/protocol";
 import { Engine } from "./engine.ts";
-import { branchState, stepCommits } from "./gitinfo.ts";
+import { branchState, leftBehind, stepCommits } from "./gitinfo.ts";
 import { cleanUp, mergeBack } from "./mergeback.ts";
+import { decideStoppedWork, discardRecorded } from "./stopwork.ts";
 import { Orchestrator } from "./orchestrator.ts";
 import { Conversations } from "./conversations.ts";
 import { listModels } from "./models.ts";
@@ -303,7 +304,12 @@ app.post("/api/projects/:id/queues/:queue/steps/:step/notes", act((st, b, p) => 
 app.delete("/api/projects/:id/queues/:queue/steps/:step/notes/:note", act((st, _b, p) => deleteNote(st, p("queue"), p("step"), p("note"))));
 app.post("/api/projects/:id/sessions/:session/messages", act((st, b, p) =>
   sendMessage(st, p("session"), b.text, { queue: b.queue as string | undefined, step: b.step as string | undefined })));
-app.post("/api/projects/:id/queues/:queue/approve", act((st, b, p) => approveQueue(st, p("queue"), b.words)));
+// Approving a stopped queue lifts its stop: first the user's choice about the stopped step's work (src/stopwork.ts).
+app.post("/api/projects/:id/queues/:queue/approve", act((st, b, p) => {
+  const d = decideStoppedWork(st, p("queue"), b.work, "user_approval");
+  if (!d.proceed) return { message: d.message };
+  return approveQueue(st, p("queue"), b.words);
+}));
 // Withdrawing an approval and adding an allow rule are the user's too, like every write (see the guard above): an agent
 // must not take an approval back or widen its own permissions.
 app.post("/api/projects/:id/queues/:queue/withdraw", act((st, b, p) => withdrawApproval(st, p("queue"), b.reason)));
@@ -336,7 +342,11 @@ app.post("/api/projects/:id/queues/:queue/run", act((st, b, p) => {
   }
 }));
 // Continue on a stopped queue: the user's lift of the stop, then the run goes on (only from the dashboard, as every write).
-app.post("/api/projects/:id/queues/:queue/continue", act((st, _b, p) => engineOf(st).continueQueue(p("queue"))));
+app.post("/api/projects/:id/queues/:queue/continue", act((st, b, p) => {
+  const d = decideStoppedWork(st, p("queue"), b.work, "user_continue");
+  if (!d.proceed) return { message: d.message };
+  return engineOf(st).continueQueue(p("queue"));
+}));
 // Fix it: the user sends a step waiting for their review back to its worker, with what they want (required).
 app.post("/api/projects/:id/queues/:queue/steps/:step/send-back", act((st, b, p) => ({ message: sendBack(st, { queue: p("queue"), step: p("step"), from: "user", text: b.text }) })));
 // Merge back and clean up a finished worktree queue: the user's only (no CLI command or event leads here).
@@ -365,6 +375,15 @@ app.get("/api/projects/:id/queues/:queue/steps/:step/commits", (c) => {
   const q = e ? stateOf(e)?.queues.find((x) => x.id === c.req.param("queue")) : undefined;
   if (!e || !q) return c.json({ error: "unknown project or queue" }, 404);
   return c.json(stepCommits(e.store, q, c.req.param("step")) ?? null);
+});
+// What a stopped queue's stopped step left (its own commits, the checkout's uncommitted changes) and whether a Discard
+// is recorded for this stop; null when the queue is not stopped at a step.
+app.get("/api/projects/:id/queues/:queue/left", (c) => {
+  const e = projects.get(c.req.param("id"));
+  const q = e ? stateOf(e)?.queues.find((x) => x.id === c.req.param("queue")) : undefined;
+  if (!e || !q) return c.json({ error: "unknown project or queue" }, 404);
+  const left = leftBehind(e.store, q);
+  return c.json(left ? { ...left, discarded: discardRecorded(q) ?? null } : null);
 });
 app.get("/api/projects/:id/queues/:queue/git", (c) => {
   const e = projects.get(c.req.param("id"));

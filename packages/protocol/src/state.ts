@@ -591,6 +591,8 @@ function applyChange(q: QueueView, c: StatusChange): void {
     }
     case "run":
       return; // the run record itself says finished; the queue's steps are all done or skipped already
+    case "work":
+      return; // the user's choice about a stopped step's work: a record; a Keep's lift is its own entry
   }
 }
 

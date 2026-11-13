@@ -132,6 +132,12 @@ export class Orchestrator {
     for (const n of notes) {
       this.ensure();
       this.markTold(s, [n.key]);
+      if (n.discard) {
+        const list = n.discard.map((sha) => `- ${sha}`).join("\n");
+        this.store.appendChat(s.id, { at: now(), from: "nexus", text: `You chose to discard the work of stopped step ${n.step} of queue ${n.queue} (${n.discard.length} commit${n.discard.length === 1 ? "" : "s"}). The stop stays until you approve a revision that reverts it.` });
+        this.deliver(`[Nexus] The user chose to discard the work of stopped step ${n.step} of queue ${n.queue}. The stop stays. Draft a new revision of queue ${n.queue} whose first pending step reverts exactly the step's own commits, newest first:\n${list}\nThe revert step: git revert of these commits only (git show each first; resolve a conflict within the step or stop and ask), nothing else; it never cleans, resets or deletes files it cannot attribute to these commits: uncommitted changes in the checkout are not necessarily the step's, so ask the user about them instead. Keep the stopped step in the draft and skip it with nexus queue set once the user has approved. Approving the revision lifts the stop without asking again. Tell the user briefly what you drafted.`);
+        continue;
+      }
       if (n.rejected) {
         this.store.appendChat(s.id, { at: now(), from: "nexus", text: `You rejected step ${n.step} of queue ${n.queue}${n.text ? `:\n${n.text}` : "."}` });
         this.deliver(`[Nexus] The user rejected step ${n.step} of queue ${n.queue}${n.text ? `. Their reason:\n${n.text}\n` : " (no reason given). "}The run is paused and nothing was reverted. Propose what follows as queue revisions for the user's approval: a revert as a step, changes to the remaining steps, or a new queue (then the user can stop this one). The rejected step is never run again; the run goes on only after the user approves a new revision, at its first pending step, and nothing of the queue is pushed until then. Tell the user briefly what you propose.`);
@@ -148,8 +154,13 @@ export class Orchestrator {
    * Notes of the user's on an acceptance, for the orchestrator, that no orchestrator session has been told yet (each
    * is told once per project: a reset does not repeat it, and one made with no session starts one).
    */
-  private pendingNotes(state: ProjectState): { key: string; queue: string; step: string; text: string; last: boolean; rejected?: boolean }[] {
-    const out: { key: string; queue: string; step: string; text: string; last: boolean; rejected?: boolean }[] = [];
+  private pendingNotes(state: ProjectState): { key: string; queue: string; step: string; text: string; last: boolean; rejected?: boolean; discard?: string[] }[] {
+    const out: { key: string; queue: string; step: string; text: string; last: boolean; rejected?: boolean; discard?: string[] }[] = [];
+    // The user's Discard of a stopped step's work (src/stopwork.ts): told like the user's chat message.
+    for (const q of state.queues) q.changes.forEach((c, i) => {
+      if (c.kind !== "work" || c.to !== "discarded" || !c.step) return;
+      out.push({ key: `notify:discard:${q.id}:${i}`, queue: q.id, step: c.step, text: "", last: false, discard: c.commits ?? [] });
+    });
     for (const q of state.queues) for (const st of q.steps) for (const e of st.timeline) {
       if (e.type === "review.rejected") {
         out.push({ key: `notify:reject:${e.id}`, queue: q.id, step: st.id, text: e.text ?? "", last: q.steps.at(-1)?.id === st.id, rejected: true });
@@ -470,6 +481,8 @@ Helpers (subagents, through the Agent tool; they read only (you also write queue
 - question-triage: when a worker asks, have it find whether the answer is settled (with its source) or the user's.
 - run-digest: when a run halts or finishes, have it summarize the run; tell the user from that.
 - The project's own agents (its .claude/agents) are there too. Use the ones that only read and report, such as one that finds what was decided and where; leave those that build, run checks or edit to the workers.
+
+The work a stopped step left: when the user lifts a stop (Continue, or approving a new revision) and the stopped step left commits of its own, they choose Keep (the commits stay and go out with the next accepted commit) or Discard. On Discard you are told the commits: draft a revision whose first pending step reverts exactly those commits with git revert, nothing else. A revert step never cleans, resets or deletes files it cannot attribute to those commits; uncommitted changes in the checkout are not necessarily the step's, so ask the user about them instead of drafting their removal. Approving that revision lifts the stop.
 
 Statuses change through Nexus, never by editing files. Housekeeping is yours, with nexus queue set (the reason is required and recorded with your name and the time; nexus status shows it):
 - nexus queue set <queue> --step <step> skipped --reason "..."   a pending, stopped or failed step is not to be run (replaced by a new revision's steps, done elsewhere: say where, or no longer needed). Skipping a pending step of a running queue works: the engine never opens it.

@@ -6,6 +6,7 @@
 //   stop1  report a stop condition the first time, done once the stop is lifted
 //   doneexit  report the step done, then the process exits on a signal before its turn ends
 //   commit    commit a file named after the step in its working directory, then done
+//   commitstop  the same commit, then a stop condition
 // A failure of the runtime, then done: "<kind><n>" fails the step's first n turns (counted in a file beside
 // FAKE_LOG, so a new process goes on counting), "<kind>" every turn. Kinds: overloaded, network (passing), auth
 // (lasting), limit (a usage limit resetting FAKE_RESET_MS, default 1500, later), crash (the process exits mid-turn),
@@ -109,12 +110,14 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
     if (/^(overloaded|network|auth|limit|crash|cloudflare)/.test(behaviour)) nexus("step", "done", step, "--summary", `fake finished ${step} after failures`);
     if (behaviour === "slow") await new Promise((r) => setTimeout(r, Number(process.env.FAKE_SLOW_MS ?? 1500)));
     // "commit": a commit in the working directory (a file named after the step), then done.
-    if (behaviour === "commit") {
+    // "commitstop": the same commit, then a stop condition (as the worker briefing asks: commit, then stop).
+    if (behaviour === "commit" || behaviour === "commitstop") {
       writeFileSync(join(process.cwd(), `${step}.txt`), `${step}\n`);
       const g = ["-c", "user.name=worker", "-c", "user.email=worker@example.invalid", "-c", "commit.gpgsign=false"];
       execFileSync("git", [...g, "add", `${step}.txt`], { stdio: "ignore" });
       execFileSync("git", [...g, "commit", "-q", "-m", `${step} work`], { stdio: "ignore" });
-      nexus("step", "done", step, "--summary", `fake committed ${step}`);
+      if (behaviour === "commit") nexus("step", "done", step, "--summary", `fake committed ${step}`);
+      else nexus("stop", step, "--condition", "fake condition", "--reason", "fake stop after a commit");
     }
     if (behaviour === "refused") { refused?.(); nexus("step", "done", step, "--summary", `fake finished ${step} without what was refused`); }
     if (["done", "slow", "summary", "summaryslow"].includes(behaviour)) nexus("step", "done", step, "--summary", `fake finished ${step}`);

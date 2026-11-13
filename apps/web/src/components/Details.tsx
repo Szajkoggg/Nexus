@@ -700,6 +700,9 @@ function Changes({ entries, queue }: { entries: StatusChange[]; queue: QueueView
       case "lift": return `lifted the stop${c.revision ? ` (revision ${c.revision})` : ""}`;
       case "proposal": return "proposed to lift the stop";
       case "run": return "closed the halted run as finished";
+      case "work": return c.to === "kept"
+        ? `kept the work of stopped step ${c.step} (${c.commits?.length ?? 0} commit${c.commits?.length === 1 ? "" : "s"})`
+        : `chose to discard the work of stopped step ${c.step} (${c.commits?.length ?? 0} commit${c.commits?.length === 1 ? "" : "s"}): the orchestrator drafts a revision that reverts it`;
       default: return c.step ? `${c.step}: ${c.from} → ${c.to}` : `queue ${queue.id}: ${c.from} → ${c.to}`;
     }
   };

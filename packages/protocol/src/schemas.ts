@@ -183,7 +183,7 @@ export type Withdrawal = z.infer<typeof Withdrawal>;
  */
 export const StatusChange = z.object({
   at: Time,
-  kind: z.enum(["lift", "status", "run", "proposal"]),
+  kind: z.enum(["lift", "status", "run", "proposal", "work"]),
   by: z.enum(["user_approval", "user_continue", "orchestrator"]),
   /** The step it changed; absent: the queue. */
   step: Id.optional(),
@@ -193,6 +193,8 @@ export const StatusChange = z.object({
   reason: z.string().optional(),
   /** The revision the change was made on. */
   revision: z.number().int().positive().optional(),
+  /** `work`: the commits of the stopped step the user's choice (`to`: kept or discarded) was about. */
+  commits: z.array(z.string()).optional(),
 });
 export type StatusChange = z.infer<typeof StatusChange>;
 

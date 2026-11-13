@@ -167,3 +167,33 @@ export function branchState(store: ProjectStore, q: QueueView): BranchView | und
   }
   return view;
 }
+
+// ---------------------------------------------------------------- what a stopped step left
+
+/** Uncommitted changes in a checkout are not necessarily the stopped step's: said wherever they are shown. */
+export const UNCOMMITTED_NOTE = "in the checkout, not necessarily this step's";
+
+export interface LeftBehind {
+  step: string;
+  /** The step's own commits, every round, newest first; those marked foreign are left out. */
+  commits: CommitView[];
+  /** `git status` of the queue's checkout (read only): `status` is its two-letter code, `path` the file. */
+  uncommitted: { status: string; path: string }[];
+  uncommitted_note: string;
+}
+
+/** What a stopped queue's stopped step left behind; undefined when the queue is not stopped at a step. */
+export function leftBehind(store: ProjectStore, q: QueueView): LeftBehind | undefined {
+  if (q.status !== "stopped" || !q.stop_step) return undefined;
+  const commits = (stepCommits(store, q, q.stop_step)?.rounds ?? []).flatMap((r) => r.commits).filter((c) => !c.foreign);
+  const dir = checkoutOf(store, q);
+  // --no-optional-locks: status does not refresh the index, so it writes nothing.
+  // Not git(): its trim would eat the leading space of the first line's status code.
+  let status: string | undefined;
+  if (dir) {
+    try { status = execFileSync("git", ["--no-optional-locks", "status", "--porcelain=v1", "--untracked-files=all"], { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true, timeout: TIMEOUT }); }
+    catch { status = undefined; }
+  }
+  const uncommitted = (status ?? "").split(/\r?\n/).filter(Boolean).map((l) => ({ status: l.slice(0, 2).trim(), path: l.slice(3) }));
+  return { step: q.stop_step, commits, uncommitted, uncommitted_note: UNCOMMITTED_NOTE };
+}
