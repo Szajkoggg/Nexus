@@ -98,6 +98,12 @@ steps:
     goal: ...
     acceptance: [...]
     review: { prepare: ..., rounds: 3 }
+  - id: W3
+    title: Fixture sheet
+    goal: ...
+    runtime: codex                     # optional: claude | codex; this step only
+    model: gpt-6-luna                  # optional
+    effort: low                        # optional: low, medium, high, xhigh, max (Claude Code); Codex: the model's levels
 approvals:
   - revision: 3
     at: 2026-11-12T09:14:00Z
@@ -111,6 +117,10 @@ withdrawals:                           # approvals the user took back before the
 history:                               # previous revisions, kept for the record
   - { revision: 2, hash: sha256:..., replaced_at: 2026-11-12T09:10:00Z }
 ```
+
+A step's `runtime`, `model` and `effort` are part of what is approved. Each one a step leaves out is the run's
+(see "Runtime, model and effort per step"). A draft is refused when a step names Claude Code with an effort it does
+not take (`ultra`); an effort without a runtime is checked when a run starts.
 
 A queue is runnable only when its latest approval's hash matches its current revision and no withdrawal came
 after that approval (a withdrawal's `approvals` is not below the number of approvals). Withdrawing sets the queue
@@ -175,7 +185,7 @@ Written only by the server's queue engine; agents never touch them.
 
 | File | What |
 |---|---|
-| `queues/<id>/run.yaml` | The engine's intent for a queue: `session`, `state` (`running`, `pausing`, `paused`, `halted`, `finished`, `usage_wait`, `retry_wait`: a turn failed for a passing reason and is tried again at `resume_at`), `reason`, the `step` it last opened, `nudged`, `resume_at` (when a usage wait or a retry goes on), `retries` (turns failed in a row for a passing reason; cleared by a turn that ends well or a new step), `failure` (the runtime's code for the failure being retried or that halted the run, e.g. `overloaded`), `resume_after_restart`, `started_at`, `ended_at` (when it last stopped going: set when it becomes `finished`, `halted` or `paused`, kept while it stays so, removed when it goes on; older files without it fall back to `updated_at`), `summary_asked` (context care: the step whose context summary Nexus asked for; asked once), `switches` (context care, oldest first: `at`, `from` and `to` session, `step` the new session began with, `fill` of the old one from 0 to 1, `summary`: `written` by the worker, `asked` and then written, or `fallback`) |
+| `queues/<id>/run.yaml` | The engine's intent for a queue: `session`, `state` (`running`, `pausing`, `paused`, `halted`, `finished`, `usage_wait`, `retry_wait`: a turn failed for a passing reason and is tried again at `resume_at`), `reason`, the `step` it last opened, `nudged`, `resume_at` (when a usage wait or a retry goes on), `retries` (turns failed in a row for a passing reason; cleared by a turn that ends well or a new step), `failure` (the runtime's code for the failure being retried or that halted the run, e.g. `overloaded`), `resume_after_restart`, `runtime`, `model` and `effort` (the run's own, fixed at its start: the start's choice, else the continued session's, else the project's defaults; a missing model or effort is the runtime's default), `started_at`, `ended_at` (when it last stopped going: set when it becomes `finished`, `halted` or `paused`, kept while it stays so, removed when it goes on; older files without it fall back to `updated_at`), `summary_asked` (context care: the step whose context summary Nexus asked for; asked once), `switches` (each fresh session, oldest first: `at`, `from` and `to` session, `step` the new session began with, `why`: `context` (context care; a record without `why` is this) or `runtime` (the step runs on another runtime), `fill` of the old one from 0 to 1 when known, `summary`: `written` by the worker, `asked` and then written, or `fallback`) |
 | `sessions/<id>/runtime.json` | A launched session's live facts: process state and pid, model, context tokens and window, turns, cost |
 | `sessions/<id>/delivered.jsonl` | What the server handed to the session (notes put into a step turn, inbox entries injected or sent as a turn, or `carried` into the first turn of the session `to` that took over); counts as read |
 | `sessions/<id>/refusals.jsonl` | One line per action the agent wanted but was refused: `at`, `session`, `runtime`, `by` (`permissions`: Claude Code's permission mode or rules; `nexus`: Nexus declined a Codex approval request; `auto_review`: Codex's auto reviewer), `tool` (Claude Code's tool name; for Codex `command`, `file_change`, `network`, `mcp`, `permissions`, …), `input` in short (the command, path or host, at most 300 characters), `reason` when the runtime gave one, `ref` (the runtime's id for the call: one record per refusal), `queue`, `step` |
@@ -410,16 +420,38 @@ The server writes `<NEXUS_HOME>/bin/nexus.cmd` (for cmd and PowerShell, where np
 scripts are disabled, as in Codex's shell) and `<NEXUS_HOME>/bin/nexus` (for Git Bash), both running this checkout's
 CLI with the server's Node, and puts that directory first on every launched agent's `PATH`.
 
+## Runtime, model and effort per step
+
+A run fixes its own runtime, model and effort when it starts (`run.yaml`). A step runs on its own values where it
+names them and on the run's where it does not, never on the previous step's. A step on another runtime than the run's
+takes a model or effort it does not name from the project's defaults for that runtime (`runtimes.<runtime>`): the
+run's model belongs to the run's runtime.
+
+Starting a run checks every step still to run: one that would run on Claude Code at an effort Claude Code does not take
+refuses the start, naming the step and the reason; nothing is written. A run that continues a session (`session`,
+`use_session`) must begin with a step on that session's runtime. Before opening each step the engine makes the session
+fit it:
+
+- **Another runtime** than the session's (also back to one used before): a fresh session, seeded as below
+  (`switches[].why: runtime`).
+- **The same runtime, another model or effort**: the same session. Claude Code takes them only at start, so the engine
+  ends the idle process and starts it again with `--resume`, the new `--model` and `--effort`, then opens the step
+  (a process that has not exited after 10 seconds is killed). Codex takes them per turn: `turn/start` carries `model`
+  and `effort` ("for this turn and subsequent turns"); going back to a value the step left out names what the thread
+  started with (`model` and `reasoningEffort` of the `thread/start` or `thread/resume` result). `session.yaml` holds
+  the values in use.
+
 ## Context care
 
 With `defaults.context_care` on (the default), at the end of a step whose session's context fill (`context_tokens`
 / `context_window` in `runtime.json`) is above `context_reuse_threshold`, and when a next step remains, the engine
-goes on in a fresh session. Without a known context window it goes on in the same session.
+goes on in a fresh session. Without a known context window it goes on in the same session. A fresh session for another
+runtime is made the same way.
 
 1. It looks for a fresh summary: a `context.summary` from that session at or after its latest `step.started` of the
    step that ended. If there is none, it asks once with a turn ("… write your context summary with `nexus context`
    …, then end your turn") and records `summary_asked` in `run.yaml`; after that turn it goes on with or without one.
-2. It writes the new `session.yaml` (same runtime, model, effort and working directory; `continues`) and sets
+2. It writes the new `session.yaml` (the next step's runtime, model and effort, the same working directory; `continues`) and sets
    `continued_by` on the old one, closes the old process, points `run.yaml` at the new session and appends to
    `switches`.
 3. The new session's first turn is a seed, then the step turn, then the old session's unread inbox entries (recorded
@@ -428,8 +460,8 @@ goes on in a fresh session. Without a known context window it goes on in the sam
    their states and the finished steps' summaries.
 
 ```
-[Nexus] You take over queue W "Variant B made a system" in a fresh session. The session that ran it so far had its
-context 82% full, so Nexus goes on here; you have not seen its work, only what follows.
+[Nexus] You take over queue W "Variant B made a system" in a fresh session: the session that ran the queue so far
+had its context 82% full. You have not seen its work, only what follows.
 
 Its context summary at the end of W2:
 ...
@@ -455,8 +487,8 @@ thread id) with the working directory, model, sandbox mode, approval policy (`ne
 approval request that still comes is declined) and the worker briefing as `developerInstructions`. The thread id
 becomes the session's `native_id`.
 
-- a step turn: `turn/start` with `input: [{type: "text", text, text_elements: []}]` and, in `workspace-write`, a
-  `sandboxPolicy` whose writable roots include the project's `.nexus/` when the worktree is elsewhere
+- a step turn: `turn/start` with `input: [{type: "text", text, text_elements: []}]`, the session's `effort` (and,
+  once a step changed them, `model` and `effort`) and, in `workspace-write`, a `sandboxPolicy` whose writable roots include the project's `.nexus/` when the worktree is elsewhere
 - a message while the agent works: `turn/steer` with the running turn's id
 - stop now: `turn/interrupt`, then the message as the next turn
 

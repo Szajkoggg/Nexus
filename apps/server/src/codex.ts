@@ -81,6 +81,10 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
   private items = new Map<string, { tool: string; input: string }>();
   /** Refusals already reported, by item (or review) id: a declined request ends as a declined item too. */
   private refused = new Set<string>();
+  /** What the thread started with (its model and effort): what a retune back to "the default" names. */
+  private base: { model?: string; effort?: string } = {};
+  /** Set by retune: every turn names its model and effort (Codex keeps a turn's override for later turns). */
+  private turnValues?: { model?: string; effort?: string };
   /** The last rate-limit windows: when a full one resets. */
   private limits: { usedPercent: number; resetsAt?: string }[] = [];
 
@@ -125,6 +129,14 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
     this.queue.push(text);
   }
 
+  /**
+   * Another model or effort from the next turn on: Codex takes both per turn (turn/start, "for this turn and
+   * subsequent turns"). One left out goes back to what the thread started with.
+   */
+  retune(model?: string, effort?: string): void {
+    this.turnValues = { model: model ?? this.base.model, effort: effort ?? this.base.effort };
+  }
+
   close(): void {
     const end = () => { if (this.state !== "exited") this.proc.stdin.end(); };
     if (this.state === "working") this.once("turnEnd", end); else end();
@@ -150,6 +162,7 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
         ? await this.request("thread/resume", { threadId: o.threadId, ...common, excludeTurns: true })
         : await this.request("thread/start", common);
       this.threadId = r.thread.id as string;
+      this.base = { model: (r.model as string | undefined) ?? o.model, effort: (r.reasoningEffort as string | null | undefined) ?? o.effort };
       this.emit("facts", { nativeId: this.threadId, model: r.model });
       void this.request("account/rateLimits/read", {}).then((x) => this.rateLimits(x.rateLimits), () => {});
       const first = this.queue.shift();
@@ -166,8 +179,10 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
     const sandboxPolicy = o.sandbox === "workspace-write"
       ? { type: "workspaceWrite", writableRoots: o.writableRoots, networkAccess: false, excludeTmpdirEnvVar: false, excludeSlashTmp: false }
       : undefined;
+    const effort = this.turnValues ? this.turnValues.effort : o.effort;
+    const model = this.turnValues?.model;
     void this.request("turn/start", {
-      threadId: this.threadId, input: input(text), ...(sandboxPolicy ? { sandboxPolicy } : {}), ...(o.effort ? { effort: o.effort } : {}),
+      threadId: this.threadId, input: input(text), ...(sandboxPolicy ? { sandboxPolicy } : {}), ...(effort ? { effort } : {}), ...(model ? { model } : {}),
     })
       .then((r) => { this.turnId = r.turn?.id ?? this.turnId; })
       .catch((err) => {

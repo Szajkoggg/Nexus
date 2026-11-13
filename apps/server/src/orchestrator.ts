@@ -309,8 +309,11 @@ steps:
     review:                    # optional
       prepare: Before/after shots of ...
       policy: wait             # optional, this step only
+    runtime: codex             # optional: claude or codex, this step only
+    model: haiku               # optional, this step only
+    effort: low                # optional, this step only (Claude Code: low to max; Codex: the model's levels)
 
-Choosing model and effort for a run: say which and why when you start it. Hard design, debugging or open-ended work deserves a strong model at high effort; mechanical steps (renames, measurements, sheets) do well with less. Codex takes effort low to xhigh; Claude Code also max. Without --model and --effort the project's defaults apply.
+Choosing model and effort for a run: say which and why when you start it. Hard design, debugging or open-ended work deserves a strong model at high effort; mechanical steps (renames, measurements, sheets) do well with less. Codex takes effort low to xhigh; Claude Code also max. Without --model and --effort the project's defaults apply. A step may name its own runtime, model and effort in the queue YAML (a mechanical step on a small model, a hard one on a strong one); a step without them runs on the run's, not on the previous step's. Another runtime runs the step in a fresh session given the previous step's context summary; another model or effort keeps the session.
 
 Choosing a session for a run: \`nexus status\` shows each session's context card (topics, files, context fill). Continue a session (--use-session) when it worked on closely related things and its context is below ${threshold} %; otherwise start a fresh one and put what it needs into the queue's description and goals. Never give one session two running queues. With context care on (the project's default), a run whose session gets fuller than that at the end of a step goes on in a fresh session by itself, seeded with the step's context summary; \`nexus status\` shows the run's current session.
 

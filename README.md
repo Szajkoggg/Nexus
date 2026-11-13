@@ -67,6 +67,9 @@ A run can override model and effort when it starts, and the orchestrator chooses
 With context care on (the default, under Defaults), a run whose session is fuller than "Reuse a session up to" at
 the end of a step goes on in a fresh session of the same runtime, model and effort, given the previous session's
 context summary; the run's panel lists each such switch.
+A step in a queue may name its own runtime, model and effort (`runtime`, `model`, `effort` in the queue YAML, shown
+on the step); a step without them runs on the run's. Another runtime runs the step in a fresh session given the
+previous step's summary; another model or effort keeps the session.
 
 ## Requirements
 

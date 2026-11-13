@@ -26,14 +26,19 @@ export function RetryNote({ run, className = "mt-1 text-xs" }: { run: NonNullabl
   return <p className={`${className} text-amber-300`}>↻ {line[0]!.toUpperCase() + line.slice(1)}</p>;
 }
 
+const RUNTIME_NAME: Record<string, string> = { claude: "Claude Code", codex: "Codex" };
+
 const SEEDED: Record<string, string> = {
   written: "seeded with its context summary",
   asked: "seeded with the context summary it wrote when asked",
   fallback: "no summary came: seeded with the queue's description and its finished steps' summaries",
 };
 
-/** Context care: each time the run went on in a fresh session because the previous one's context was full. */
-function SessionSwitches({ run }: { run: NonNullable<QueueView["run"]> }) {
+/**
+ * Each time the run went on in a fresh session: the previous one's context was full (context care), or the step runs
+ * on another runtime.
+ */
+function SessionSwitches({ run, sessions }: { run: NonNullable<QueueView["run"]>; sessions: SessionView[] }) {
   if (!run.switches?.length) return null;
   return (
     <ul className="mt-1 space-y-0.5 text-xs text-zinc-400">
@@ -41,7 +46,9 @@ function SessionSwitches({ run }: { run: NonNullable<QueueView["run"]> }) {
         <li key={s.to} className="flex gap-1.5">
           <span className="text-sky-400">↪</span>
           <span className="min-w-0">
-            Fresh session from <span className="font-mono">{s.step}</span> at {formatClock(s.at, new Date())}: the previous one's context was {Math.round(s.fill * 100)}% full; {SEEDED[s.summary]}.
+            Fresh session from <span className="font-mono">{s.step}</span> at {formatClock(s.at, new Date())}: {s.why === "runtime"
+              ? `the step runs on ${RUNTIME_NAME[sessions.find((x) => x.id === s.to)?.runtime ?? ""] ?? "another runtime"}`
+              : `the previous one's context was ${s.fill === undefined ? "full" : `${Math.round(s.fill * 100)}% full`}`}; {SEEDED[s.summary]}.
           </span>
         </li>
       ))}
@@ -105,7 +112,7 @@ export function RunControls({ project, queue, onChanged }: { project: ProjectSta
             ? <p className="mt-1 text-xs text-zinc-500">The queue is done. The run's last note: {run.reason}</p>
             : <p className="mt-1 text-zinc-300">{run.reason}</p>)}
           {runSession && <p className="mt-1 text-xs text-zinc-500">Session: {runSession.title ?? runSession.id} {runSession.live?.model ? `· ${runSession.live.model}` : ""}{runSession.effort ? ` · ${runSession.effort} effort` : ""} <ContextBar s={runSession} /></p>}
-          <SessionSwitches run={run} />
+          <SessionSwitches run={run} sessions={project.sessions} />
           {run.summary_asked && run.state === "running" && <p className="mt-1 text-xs text-sky-300">↪ The context is full: the session writes its summary of {run.summary_asked}; the next step runs in a fresh session.</p>}
           {run.state === "usage_wait" && run.resume_at && <p className="mt-1 text-xs text-zinc-500">Resumes by itself at {new Date(run.resume_at).toLocaleTimeString()}.</p>}
           <RetryNote run={run} />

@@ -2,7 +2,7 @@
 // writer of queue definitions, notes and inboxes (docs/PROTOCOL.md, "Rules").
 import { existsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import { ProjectFile, QueueFile, USER_SESSION, type InboxEntry, type ReviewPolicy, type SessionFile } from "./schemas.ts";
+import { ProjectFile, QueueFile, USER_SESSION, effortIssue, type InboxEntry, type ReviewPolicy, type SessionFile } from "./schemas.ts";
 import { ProjectStore, newId, now, revisionHash } from "./store.ts";
 import { isApproved, loadProjectState, type ProjectState } from "./state.ts";
 import { validAllowRule } from "./refusals.ts";
@@ -157,6 +157,10 @@ export function applyDraft(store: ProjectStore, definition: unknown): string {
   const ids = draft.steps.map((s) => s.id);
   if (new Set(ids).size !== ids.length) throw new ActionError("step ids must be unique");
   if (!draft.steps.length) throw new ActionError("a queue needs at least one step");
+  for (const st of draft.steps) {
+    const issue = st.runtime ? effortIssue(st.runtime, st.effort) : undefined;
+    if (issue) throw new ActionError(`step ${st.id}: ${issue}`);
+  }
 
   let old: QueueFile | undefined;
   try { old = store.readQueue(draft.id); } catch { old = undefined; }

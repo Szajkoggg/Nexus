@@ -264,6 +264,19 @@ the natural cut, and the worker's own summary is a better hand-over than an auto
 - The switch is recorded in `run.yaml` (`switches`) and on both `session.yaml` files (`continues`, `continued_by`),
   and the run's panel lists it: from which step, how full the old context was, and where the seed came from.
 
+**Runtime, model and effort per step.** A step may name its runtime, model and effort (a mechanical step on a small
+model, a design step on a strong one). Decisions:
+
+- A step without them runs on the run's values, fixed at the run's start, not on the previous step's: a step on
+  `haiku` is an exception for that step only, so the queue reads the same whatever order its steps run in.
+- Another runtime always means a fresh session seeded like context care's, also when going back to a runtime used
+  earlier in the run: that earlier session missed the steps in between, and the summary chain carries them.
+- Another model or effort keeps the session, so its context is kept: Claude Code is restarted between steps with
+  `--resume` (it takes both only at start), Codex takes them per turn. The values on another runtime come from the
+  project's defaults for that runtime, since the run's model names a model of its own runtime.
+- Bad combinations are found as early as they can be: at draft when the step names both runtime and effort, otherwise
+  at the run's start for every step still to run; never halfway through a run.
+
 ### Autonomy and insight
 
 Queues run autonomously: they do not stop at each step for the user. The user checks queues as a whole, and looks

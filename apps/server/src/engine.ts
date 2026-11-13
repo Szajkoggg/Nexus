@@ -9,7 +9,7 @@ import { basename, dirname, join } from "node:path";
 import {
   ENDED_RUN_STATES,
   ActionError, ProjectStore, USER_SESSION, ensureUserSession, loadProjectState, newId, normPath, now, readUsage,
-  writeUsage, CLAUDE_EFFORTS, RETRY_LIMIT, formatClock, type Effort, type InboxView, type ProjectState, type QueueView, type RunFile, type SessionFile,
+  writeUsage, CLAUDE_EFFORTS, RETRY_LIMIT, effortIssue, formatClock, type Effort, type ProjectFile, type StepDef, type InboxView, type ProjectState, type QueueView, type RunFile, type SessionFile,
   type SessionView, type StepView,
 } from "@nexus/protocol";
 import type { AgentProcess, StreamFacts, TurnFailure } from "./agent.ts";
@@ -32,6 +32,25 @@ export interface EngineOptions {
   usageMarginMs?: number;
 }
 
+/** A process asked to end for a restart (another model or effort) is killed if it has not exited by then. */
+export const RESTART_KILL_MS = 10_000;
+
+const RUNTIME_NAME = { claude: "Claude Code", codex: "Codex" } as const;
+
+/** The runtime, model and effort a step runs on. */
+export interface StepValues { runtime: "claude" | "codex"; model?: string; effort?: Effort }
+
+/**
+ * What a step runs on: its own values, else the run's. A step on another runtime than the run's takes a value it does
+ * not name from the project's defaults for that runtime (the run's model and effort belong to the run's runtime).
+ */
+export function stepValues(run: StepValues, step: Pick<StepDef, "runtime" | "model" | "effort">, project: ProjectFile): StepValues {
+  const runtime = step.runtime ?? run.runtime;
+  const same = runtime === run.runtime;
+  const d = project.runtimes[runtime];
+  return { runtime, model: step.model ?? (same ? run.model : d.model), effort: step.effort ?? (same ? run.effort : d.effort) };
+}
+
 /** States in which a run still goes on by itself. */
 const GOING = ["running", "pausing", "usage_wait", "retry_wait"];
 
@@ -47,6 +66,8 @@ export class Engine {
   private stopped = false;
   /** Sessions whose process Nexus itself is ending: their exit is no failure. */
   private readonly ending = new Set<string>();
+  /** Sessions whose process Nexus ends to start it again with another model or effort (Claude Code). */
+  private readonly restarting = new Set<string>();
   private readonly retryBaseMs: number;
   private readonly usageMarginMs: number;
 
@@ -69,10 +90,35 @@ export class Engine {
     if (q.status === "done" || q.status === "cancelled") throw new ActionError(`the queue is ${q.status}`, 409);
     if (!q.steps.some((s) => s.status !== "done" && s.status !== "skipped")) throw new ActionError("no step left to run", 409);
 
-    const session = opts.session
-      ? this.reuseSession(state, opts.session, queueId, opts.model, opts.effort)
-      : this.newSession(state, q, opts.runtime ?? state.project.runtimes.default, opts.model, opts.effort);
-    const run: RunFile = { protocol: 1, session: session.id, state: "running", started_at: now(), updated_at: now() };
+    // The run's own values: what was asked, else the continued session's, else the project's defaults.
+    const reused = opts.session ? this.sessionFile(state, opts.session) : undefined;
+    if (reused && reused.runtime === "external") throw new ActionError("only a session Nexus launched (and started at least once) can be continued", 409);
+    const runtime = reused ? reused.runtime as "claude" | "codex" : opts.runtime ?? state.project.runtimes.default;
+    const values: StepValues = {
+      runtime,
+      model: opts.model ?? (reused ? reused.model : state.project.runtimes[runtime].model),
+      effort: opts.effort ?? (reused ? reused.effort : state.project.runtimes[runtime].effort),
+    };
+    const own = effortIssue(runtime, values.effort);
+    if (own) throw new ActionError(own);
+    // Every step still to run is checked now, so a bad combination refuses the start rather than halting the run later.
+    for (const st of q.steps.filter((x) => x.status !== "done" && x.status !== "skipped")) {
+      const w = stepValues(values, st, state.project);
+      const issue = effortIssue(w.runtime, w.effort);
+      if (issue) throw new ActionError(`step ${st.id} would run on ${RUNTIME_NAME[w.runtime]} at effort ${w.effort}: ${issue}`, 409);
+    }
+    const first = q.steps.find((x) => x.status === "pending");
+    const want = first ? stepValues(values, first, state.project) : values;
+    if (reused && want.runtime !== reused.runtime) {
+      throw new ActionError(`step ${first!.id} runs on ${RUNTIME_NAME[want.runtime]}; the session to continue is a ${RUNTIME_NAME[reused.runtime as "claude" | "codex"]} session`, 409);
+    }
+    const session = reused
+      ? this.reuseSession(state, reused.id, queueId, want.model, want.effort)
+      : this.newSession(state, q, want.runtime, want.model, want.effort);
+    const run: RunFile = {
+      protocol: 1, session: session.id, state: "running", started_at: now(), updated_at: now(),
+      runtime: values.runtime, model: values.model, effort: values.effort,
+    };
     this.store.writeRun(queueId, run);
     this.ensureProcess(session);
     this.advance(queueId);
@@ -224,6 +270,7 @@ export class Engine {
     if (!run || (run.state !== "running" && run.state !== "pausing")) return;
     const state = given ?? loadProjectState(this.store);
     const q = this.queue(state, queueId);
+    if (this.restarting.has(run.session)) return; // the process restarts with another model or effort
     const live = this.live.get(run.session);
     if (!live || live.proc.state === "exited") return this.halt(queueId, "the session's process is not running");
     if (live.proc.state === "working") return;
@@ -269,54 +316,82 @@ export class Engine {
       return;
     }
     if (run.state === "pausing") return this.writeRun(queueId, { ...run, state: "paused" });
-    const wait = this.usageWait(state, this.sessionFile(state, run.session).runtime);
+    const want = stepValues(this.runValues(state, run), next, state.project);
+    const issue = effortIssue(want.runtime, want.effort);
+    if (issue) return this.halt(queueId, `step ${next.id}: ${issue}`);
+    const wait = this.usageWait(state, want.runtime);
     if (wait) {
       this.writeRun(queueId, { ...run, state: "usage_wait", reason: wait.reason, resume_at: wait.until });
       this.schedule(queueId, wait.until, this.usageMarginMs);
       return;
     }
-    if (current && this.careForContext(queueId, run, state, q, current, next, live)) return;
+    if (this.prepareStep(queueId, run, state, q, current, next, want, live)) return;
     this.openStep(queueId, next, q, "start");
   }
 
   /**
-   * Context care (DESIGN.md, "Context care between steps"): at the end of a step whose session's context is fuller than
-   * the project's threshold, the next step runs in a fresh session of the same runtime, model and effort, seeded with
-   * the step's context summary and the queue's text. A missing summary is asked for once; if it is still missing, the
-   * seed is the queue's description and its finished steps' summaries. Without a known context window nothing changes.
-   * Returns whether it took the next move (asked for the summary, or switched and opened the step).
+   * Makes the session fit the next step before it opens; returns whether it took the next move instead.
+   *
+   * - Another runtime than the session's, or (context care, DESIGN.md "Context care between steps") a context fuller
+   *   than the project's threshold: the step runs in a fresh session with the step's runtime, model and effort,
+   *   seeded with the ended step's context summary and the queue's text. A missing summary is asked for once; if it is
+   *   still missing, the seed is the queue's description and its finished steps' summaries. Without a known context
+   *   window the fill does not count.
+   * - The same runtime with another model or effort: Claude Code's process is restarted with `--resume` and the new
+   *   values (the step opens when the new process is up); Codex takes them with the next turn.
    */
-  private careForContext(queueId: string, run: RunFile, state: ProjectState, q: QueueView, done: StepView, next: StepView, live: Live): boolean {
+  private prepareStep(queueId: string, run: RunFile, state: ProjectState, q: QueueView, done: StepView | undefined, next: StepView, want: StepValues, live: Live): boolean {
     const defaults = state.project.defaults;
-    if (!defaults.context_care) return false;
     const old = state.sessions.find((x) => x.id === run.session);
-    const tokens = old?.live?.context_tokens, window = old?.live?.context_window;
-    if (!old || !tokens || !window || old.runtime === "external") return false;
-    const fill = tokens / window;
-    if (fill <= defaults.context_reuse_threshold) return false;
-    // Fresh: written by this session at or after its latest start of the step that just ended.
-    const since = done.timeline.filter((e) => e.type === "step.started" && e.session === old.id).at(-1)?.at ?? run.started_at;
-    const fresh = !!old.context && old.context.at >= since;
-    const asked = run.summary_asked === done.id;
-    if (!fresh && !asked) {
-      this.writeRun(queueId, { ...run, summary_asked: done.id });
-      live.proc.send(`[Nexus] Step ${done.id} is over, and this session's context is ${Math.round(fill * 100)}% full: the next step runs in a fresh session. Before that, write your context summary with \`nexus context "<what a successor needs to know>" --topics a,b --files x,y\` (what was decided and why, where things are, what is still open), then end your turn. Do not start anything else.`);
-      this.store.appendActivity(old.id, { at: now(), kind: "turn_start", text: `Nexus asked for the context summary of step ${done.id} (context ${Math.round(fill * 100)}% full)`, queue: queueId, step: done.id });
+    if (!old || old.runtime === "external") return false;
+    const tokens = old.live?.context_tokens, window = old.live?.context_window;
+    const fill = tokens && window ? tokens / window : undefined;
+    const why = old.runtime !== want.runtime ? "runtime"
+      : defaults.context_care && fill !== undefined && fill > defaults.context_reuse_threshold ? "context" : undefined;
+    if (why) {
+      // Fresh: written by this session at or after its latest start of the step that just ended.
+      const since = done?.timeline.filter((e) => e.type === "step.started" && e.session === old.id).at(-1)?.at ?? run.started_at;
+      const fresh = !!done && !!old.context && old.context.at >= since;
+      const asked = !!done && run.summary_asked === done.id;
+      if (done && !fresh && !asked) {
+        const because = why === "runtime" ? `step ${next.id} runs on ${RUNTIME_NAME[want.runtime]}` : `this session's context is ${Math.round(fill! * 100)}% full`;
+        this.writeRun(queueId, { ...run, summary_asked: done.id });
+        live.proc.send(`[Nexus] Step ${done.id} is over, and ${because}: the next step runs in a fresh session. Before that, write your context summary with \`nexus context "<what a successor needs to know>" --topics a,b --files x,y\` (what was decided and why, where things are, what is still open), then end your turn. Do not start anything else.`);
+        this.store.appendActivity(old.id, { at: now(), kind: "turn_start", text: `Nexus asked for the context summary of step ${done.id} (${because})`, queue: queueId, step: done.id });
+        return true;
+      }
+      this.switchSession(queueId, run, q, old, live, done, next, want, why, fill, fresh ? (asked ? "asked" : "written") : "fallback");
       return true;
     }
-    this.switchSession(queueId, run, q, old, live, done, next, fill, fresh ? (asked ? "asked" : "written") : "fallback");
+    if (old.model === want.model && old.effort === want.effort) return false;
+    const file = this.store.readSession(old.id);
+    this.store.writeSession({ ...file, model: want.model, effort: want.effort });
+    const what = `${want.model ?? "the runtime's default model"}, ${want.effort ? `${want.effort} effort` : "the default effort"}`;
+    if (live.proc.retune) {
+      live.proc.retune(want.model, want.effort);
+      this.store.appendActivity(old.id, { at: now(), kind: "turn_start", text: `Nexus switches the session to ${what} for step ${next.id}`, queue: queueId, step: next.id });
+      return false;
+    }
+    // Claude Code takes model and effort at start: end the idle process, and resume the session with the new values
+    // once it has exited (never two processes on one session); the exit handler then decides again.
+    this.restarting.add(old.id);
+    this.ending.add(old.id);
+    live.proc.close();
+    const proc = live.proc;
+    this.timers.set(`restart:${old.id}`, setTimeout(() => { this.timers.delete(`restart:${old.id}`); if (proc.state !== "exited") proc.kill(); }, RESTART_KILL_MS));
+    this.store.appendActivity(old.id, { at: now(), kind: "turn_end", text: `Nexus restarts the session's process on ${what} for step ${next.id}`, queue: queueId, step: next.id });
     return true;
   }
 
-  /** Goes on with `next` in a fresh session that continues `old` (see careForContext). */
-  private switchSession(queueId: string, run: RunFile, q: QueueView, old: SessionView, live: Live, done: StepView, next: StepView, fill: number, source: "written" | "asked" | "fallback"): void {
+  /** Goes on with `next` in a fresh session (with `want`'s runtime, model and effort) that continues `old`. */
+  private switchSession(queueId: string, run: RunFile, q: QueueView, old: SessionView, live: Live, done: StepView | undefined, next: StepView, want: StepValues, why: "context" | "runtime", fill: number | undefined, source: "written" | "asked" | "fallback"): void {
     const oldFile = this.store.readSession(old.id);
     const part = (run.switches?.length ?? 0) + 2;
     const fresh: SessionFile = {
-      protocol: 1, id: newId(), project: oldFile.project, role: "worker", runtime: oldFile.runtime,
-      native_id: oldFile.runtime === "claude" ? randomUUID() : null,
+      protocol: 1, id: newId(), project: oldFile.project, role: "worker", runtime: want.runtime,
+      native_id: want.runtime === "claude" ? randomUUID() : null,
       title: `${q.id} worker (${part})`, cwd: oldFile.cwd, branch: gitBranch(oldFile.cwd) ?? oldFile.branch, queue: q.id,
-      launched_by: "nexus", created_at: now(), model: oldFile.model, effort: oldFile.effort, continues: old.id,
+      launched_by: "nexus", created_at: now(), model: want.model, effort: want.effort, continues: old.id,
     };
     this.store.writeSession(fresh);
     this.store.writeSession({ ...oldFile, continued_by: fresh.id });
@@ -324,21 +399,23 @@ export class Engine {
     const unread = (loadProjectState(this.store).sessions.find((x) => x.id === old.id)?.inbox ?? []).filter((m) => !m.read_at);
     this.ending.add(old.id);
     live.proc.close();
-    const pct = Math.round(fill * 100);
+    const because = why === "runtime"
+      ? `step ${next.id} runs on ${RUNTIME_NAME[want.runtime]}, and the session that ran the queue so far is a ${RUNTIME_NAME[old.runtime as "claude" | "codex"]} session`
+      : `the session that ran the queue so far had its context ${Math.round(fill! * 100)}% full`;
     this.writeRun(queueId, {
       ...run, session: fresh.id, summary_asked: undefined,
-      switches: [...(run.switches ?? []), { at: now(), from: old.id, to: fresh.id, step: next.id, fill, summary: source }],
+      switches: [...(run.switches ?? []), { at: now(), from: old.id, to: fresh.id, step: next.id, why, fill, summary: source }],
     });
-    this.store.appendActivity(old.id, { at: now(), kind: "turn_end", text: `Nexus goes on in a fresh session (${fresh.id}): this one's context is ${pct}% full`, queue: queueId, step: done.id });
+    this.store.appendActivity(old.id, { at: now(), kind: "turn_end", text: `Nexus goes on in a fresh session (${fresh.id}): ${because}`, queue: queueId, step: done?.id ?? next.id });
     for (const m of unread) this.store.appendDelivered(old.id, { at: now(), kind: "inbox", id: m.id, via: "carried", to: fresh.id });
     const state = loadProjectState(this.store);
     this.ensureProcess(fresh);
     const summary = source === "fallback" ? undefined : old.context;
     const seed = [
-      `[Nexus] You take over queue ${q.id} "${q.title}" in a fresh session. The session that ran it so far had its context ${pct}% full, so Nexus goes on here; you have not seen its work, only what follows.`,
-      summary
+      `[Nexus] You take over queue ${q.id} "${q.title}" in a fresh session: ${because}. You have not seen its work, only what follows.`,
+      summary && done
         ? `\nIts context summary at the end of ${done.id}:\n${summary.text}${summary.topics.length ? `\nTopics: ${summary.topics.join(", ")}` : ""}${summary.files.length ? `\nFiles: ${summary.files.join(", ")}` : ""}`
-        : `\nIt left no context summary of ${done.id}; the queue's description and its finished steps' summaries below are what there is.`,
+        : `\nIt left no context summary${done ? ` of ${done.id}` : ""}; the queue's description and its finished steps' summaries below are what there is.`,
       `\nThe queue${q.description ? `:\n${q.description.trim()}` : ` has no description.`}`,
       `\nIts steps:\n${q.steps.map((s) => `- ${s.id} ${s.title}: ${s.id === next.id ? "yours now" : s.status}${s.summary ? `. ${s.summary}` : ""}`).join("\n")}`,
     ].join("\n");
@@ -346,6 +423,13 @@ export class Engine {
       ? `Messages that came for the previous session and were not read yet:\n\n${unread.map((m) => formatInbox(m, state)).join("\n\n")}`
       : undefined;
     this.openStep(queueId, next, this.queue(state, queueId), "start", undefined, { before: seed, after: carried });
+  }
+
+  /** The run's own runtime, model and effort; an older run file without them: its session's. */
+  private runValues(state: ProjectState, run: RunFile): StepValues {
+    if (run.runtime) return { runtime: run.runtime, model: run.model, effort: run.effort };
+    const s = this.sessionFile(state, run.session);
+    return { runtime: s.runtime === "codex" ? "codex" : "claude", model: s.model, effort: s.effort };
   }
 
   private openStep(queueId: string, step: StepView, q: QueueView, mode: "start" | "continue", why?: string, around: { before?: string; after?: string } = {}): void {
@@ -467,7 +551,7 @@ export class Engine {
     const busy = state.queues.find((q) => q.id !== queueId && q.run?.session === id && GOING.includes(q.run.state));
     if (busy) throw new ActionError(`that session is running queue ${busy.id}`, 409);
     if (s.runtime === "claude" && effort && !CLAUDE_EFFORTS.includes(effort)) throw new ActionError(`Claude Code takes effort ${CLAUDE_EFFORTS.join(", ")}`);
-    const updated: SessionFile = { ...s, queue: queueId, model: model ?? s.model, effort: effort ?? s.effort };
+    const updated: SessionFile = { ...s, queue: queueId, model, effort };
     this.store.writeSession(updated);
     return updated;
   }
@@ -535,6 +619,17 @@ export class Engine {
       this.writeRuntime(session.id, { state: "exited" });
       this.store.appendActivity(session.id, { at: now(), kind: code === 0 || byNexus ? "exit" : "error", text: `process exited (${code ?? "signal"})${byNexus ? ", ended by Nexus" : ""}`, ...tag() });
       if (this.live.get(session.id) === l) this.live.delete(session.id);
+      if (this.restarting.delete(session.id)) {
+        clearTimeout(this.timers.get(`restart:${session.id}`));
+        this.timers.delete(`restart:${session.id}`);
+        if (!this.stopped) {
+          try { this.ensureProcess(this.store.readSession(session.id)); }
+          catch (e) { for (const q of runsOf()) this.halt(q, `could not restart the session: ${(e as Error).message}`); }
+          for (const q of runsOf()) this.advance(q);
+        }
+        this.changed();
+        return;
+      }
       if (!byNexus) for (const q of runsOf()) {
         // The agent finished the queue's last step and its process then ended (the CLI closing, killed, or crashing
         // after the report): nothing is left to run, so the run is finished, not a failure to retry.

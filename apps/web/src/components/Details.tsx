@@ -38,6 +38,11 @@ export function StepDetail({ project, queue, step, onChanged }: Props & { step: 
         <StepTimes step={step} />
         {step.commit && <span className="font-mono">{step.commit}</span>}
         {session && <span>by {session.title ?? session.id.slice(-8)} ({session.runtime})</span>}
+        {(step.runtime || step.model || step.effort) && (
+          <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-zinc-300" title="This step's own runtime, model and effort; what it leaves out is the run's">
+            runs on {[step.runtime === "codex" ? "Codex" : step.runtime === "claude" ? "Claude Code" : undefined, step.model, step.effort && `${step.effort} effort`].filter(Boolean).join(" · ")}
+          </span>
+        )}
       </div>
 
       {queue.run?.state === "retry_wait" && queue.run.step === step.id && (

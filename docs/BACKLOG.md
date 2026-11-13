@@ -50,21 +50,10 @@ Project Honeycomb's rules say a worker pushes after every step. Once this works,
 proposed in [proposals/honeycomb-push-after-acceptance.md](proposals/honeycomb-push-after-acceptance.md). The user
 approves that change; the orchestrator brings it to the user when the feature is in the live instance.
 
-## 6. Context care between steps
-
-When a session's context is fuller than the project's threshold at a step's end, have it write its context summary,
-then go on in a fresh session seeded with that summary (and the queue's own text), instead of letting the runtime
-compact on its own in the middle of a step.
-
 ## 7. Chains and schedules
 
 "When queue A is done, start B" (both approved); "start when the usage window resets"; "start at night". Shown on
 the queues, cancellable.
-
-## 8. Runtime, model and effort per step
-
-A step in the queue YAML may name its runtime, model and effort (a mechanical step on a small model, a design step on
-a strong one). The engine switches sessions where a step needs another runtime, carrying the context summary across.
 
 ## 9. Git on the dashboard
 

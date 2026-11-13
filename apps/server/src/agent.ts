@@ -63,6 +63,8 @@ export interface AgentProcess extends EventEmitter<AgentEvents> {
   send(text: string, priority?: Priority): void;
   /** End the session after the running turn. */
   close(): void;
+  /** Another model or effort from the next turn on, where the runtime takes them per turn (Codex). */
+  retune?(model?: string, effort?: string): void;
   kill(): void;
 }
 

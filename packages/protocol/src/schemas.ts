@@ -118,6 +118,13 @@ export const StepDef = z.object({
     rounds: z.number().int().positive().optional(),
     policy: ReviewPolicy.optional(),
   }).optional(),
+  /**
+   * The runtime, model and effort this step runs on. Each one left out is the run's; with another runtime than the
+   * run's, a model or effort left out is the project's default for that runtime.
+   */
+  runtime: z.enum(["claude", "codex"]).optional(),
+  model: z.string().min(1).optional(),
+  effort: Effort.optional(),
   /** Baseline state before any event: set by imports and manual corrections. Events take precedence. */
   status: StepStatus.optional(),
   /** Free text recorded with the baseline, e.g. what an import found next to the step. */
@@ -297,16 +304,22 @@ export const RunFile = z.object({
   failure: z.string().optional(),
   /** Stopped only for a Nexus update: the server resumes it by itself when it starts again. */
   resume_after_restart: z.boolean().optional(),
-  /** Context care: the step whose end Nexus asked the session to write its context summary for (asked once). */
+  /** The run's own runtime, model and effort, fixed at its start: what a step without its own values runs on. */
+  runtime: z.enum(["claude", "codex"]).optional(),
+  model: z.string().optional(),
+  effort: Effort.optional(),
+  /** The step whose end Nexus asked the session to write its context summary for, before a fresh session (asked once). */
   summary_asked: Id.optional(),
   /**
-   * Context care: each time the run went on in a fresh session, oldest first. `step` is the first step of the new
-   * session, `fill` the old session's context fill (0 to 1), `summary` where the seed came from: `written` (the
-   * worker's own summary of the step), `asked` (written when Nexus asked for it), `fallback` (none: the queue's
-   * description and the finished steps' summaries).
+   * Each time the run went on in a fresh session, oldest first. `why`: `context` (context care: the old session's
+   * context was full; older records without `why` are this) or `runtime` (the step runs on another runtime). `step` is
+   * the first step of the new session, `fill` the old session's context fill (0 to 1) when known, `summary` where the
+   * seed came from: `written` (the worker's own summary of the step), `asked` (written when Nexus asked for it),
+   * `fallback` (none: the queue's description and the finished steps' summaries).
    */
   switches: z.array(z.object({
-    at: Time, from: Id, to: Id, step: Id, fill: z.number(), summary: z.enum(["written", "asked", "fallback"]),
+    at: Time, from: Id, to: Id, step: Id, why: z.enum(["context", "runtime"]).optional(), fill: z.number().optional(),
+    summary: z.enum(["written", "asked", "fallback"]),
   })).optional(),
 });
 export type RunFile = z.infer<typeof RunFile>;
@@ -396,3 +409,8 @@ export const InboxEntry = z.discriminatedUnion("type", [
   z.object({ ...ibase, type: z.literal("stop"), text: z.string().optional() }),
 ]);
 export type InboxEntry = z.infer<typeof InboxEntry>;
+
+/** Why a runtime cannot run at this effort, or undefined. Codex checks a model's own levels itself. */
+export function effortIssue(runtime: "claude" | "codex", effort: Effort | undefined): string | undefined {
+  return runtime === "claude" && effort && !CLAUDE_EFFORTS.includes(effort) ? `Claude Code takes effort ${CLAUDE_EFFORTS.join(", ")}` : undefined;
+}
