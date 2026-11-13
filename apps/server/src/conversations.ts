@@ -12,7 +12,7 @@ import {
   ActionError, Effort, ProjectStore, effortIssue, loadProjectState, newId, normPath, now, type ProjectFile, type SessionFile,
 } from "@nexus/protocol";
 import { findStep, sinceThen, stepSeed } from "./step-seed.ts";
-import { AgentHost, ROLE_RECORDS, type Hosted } from "./agent-host.ts";
+import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Hosted } from "./agent-host.ts";
 import type { Orchestrator } from "./orchestrator.ts";
 
 const READ = ["Read", "Grep", "Glob", "Bash(nexus status:*)", "Bash(git log:*)", "Bash(git status:*)", "Bash(git diff:*)", "Bash(git show:*)"];
@@ -31,11 +31,12 @@ export class Conversations {
   /** Set while Nexus drains for an update: no new turn starts. */
   draining = false;
 
-  constructor(store: ProjectStore, orchestrator: Orchestrator, changed: () => void) {
+  /** `host`: how the partners' processes are made (tests give a stand-in). */
+  constructor(store: ProjectStore, orchestrator: Orchestrator, changed: () => void, host: AgentHostOptions = {}) {
     this.store = store;
     this.orchestrator = orchestrator;
     this.changed = changed;
-    this.host = new AgentHost(store, ROLE_RECORDS.conversation);
+    this.host = new AgentHost(store, ROLE_RECORDS.conversation, host);
   }
 
   list() {

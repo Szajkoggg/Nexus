@@ -7,7 +7,7 @@ import {
   ActionError, ClaudeEffort, ProjectStore, applyDraft, loadProjectState, orchestratorStatusChange, newId, runIsOlder, now, sendBack, type ChatEntry, type Event, type ProjectState, type QueueView, type SessionFile, type StepView,
 } from "@nexus/protocol";
 import type { AgentProcess } from "./agent.ts";
-import { AgentHost, ROLE_RECORDS } from "./agent-host.ts";
+import { AgentHost, ROLE_RECORDS, type AgentHostOptions } from "./agent-host.ts";
 import type { Engine } from "./engine.ts";
 import { orchestratorAgentsFile } from "./helpers.ts";
 import type { UpdateNotice } from "./lifecycle.ts";
@@ -41,12 +41,13 @@ export class Orchestrator {
   private stopped = false;
   private readonly news: { update: () => UpdateNotice | undefined; changes: () => DeployChanges[]; push?: (n: UserNotice) => void };
 
-  constructor(store: ProjectStore, engine: Engine, changed: () => void, news: { update?: () => UpdateNotice | undefined; changes?: () => DeployChanges[]; push?: (n: UserNotice) => void } = {}) {
+  /** `host`: how its process is made (tests give a stand-in). */
+  constructor(store: ProjectStore, engine: Engine, changed: () => void, news: { update?: () => UpdateNotice | undefined; changes?: () => DeployChanges[]; push?: (n: UserNotice) => void } = {}, host: AgentHostOptions = {}) {
     this.store = store;
     this.engine = engine;
     this.changed = changed;
     this.news = { update: news.update ?? (() => undefined), changes: news.changes ?? (() => []), push: news.push };
-    this.host = new AgentHost(store, ROLE_RECORDS.orchestrator);
+    this.host = new AgentHost(store, ROLE_RECORDS.orchestrator, host);
   }
 
   /** The orchestrator's process (one at a time): the latest one started, until it exits or Nexus ends it. */

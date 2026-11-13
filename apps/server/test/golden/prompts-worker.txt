@@ -1,0 +1,227 @@
+== start: the first step opens
+-- to worker 1
+[Nexus] Queue Q "Prompts under test" (revision 1, approved), step A1 (1 of 4): First step.
+
+Goal:
+Do the first thing.
+Precisely.
+
+Acceptance:
+- It is done
+- It is tested
+
+Checks for every step:
+- npm run typecheck
+- npm test
+
+Review to prepare: Before/after shots of the page
+
+Stop conditions (meeting one ends the queue: report it with `nexus stop`):
+- A file outside the repository would change.
+- The project's own stop condition.
+
+Notes from the user for this step:
+- Mind the second page.
+
+Begin with `nexus step start A1`. End with `nexus step done A1 --summary "…"`, `nexus step failed` or `nexus stop`, then write `nexus context` and end your turn. Do not start another step.
+== the turn ends without an outcome: the nudge
+-- to worker 1
+[Nexus] Your turn ended, but step A1 has no outcome yet. Continue the step if work remains; otherwise report it with `nexus step done A1 --summary "…"`, `nexus step failed`, `nexus stop`, or ask with `nexus ask` and end your turn.
+== a blocking question answered by the user, to wait for further word
+-- to worker 1
+[Nexus] Answer from the user to your question "Which page first?":
+The second one. Wait for further word before going on.
+== messages from the user: about the step, and not
+-- to worker 1
+[Nexus] Message from the user about step A1:
+Use the new colours.
+-- to worker 1
+[Nexus] Message from the user:
+A general remark.
+== stops through the inbox: with a text from the user, without one from the orchestrator
+-- to worker 1 (now)
+[Nexus] The user asks you to stop now: The plan changed Leave the work consistent and end your turn.
+-- to worker 1 (now)
+[Nexus] The orchestrator asks you to stop now. Leave the work consistent and end your turn.
+== the user stops the running turn: with a text, then without one
+-- to worker 1 (now)
+[Nexus] The user asks you to stop now: Wrong branch Leave the work in a consistent state, record where you are with `nexus step progress`, and end your turn. Do not start anything new.
+-- to worker 1 (now)
+[Nexus] The user asks you to stop now. Leave the work in a consistent state, record where you are with `nexus step progress`, and end your turn. Do not start anything new.
+== resumed with a reason: the step continues
+-- to worker 1
+[Nexus] Queue Q "Prompts under test" (revision 1, approved), step A1 (1 of 4): First step.
+Continue this step where it was left (the user resumed it).
+
+Goal:
+Do the first thing.
+Precisely.
+
+Acceptance:
+- It is done
+- It is tested
+
+Checks for every step:
+- npm run typecheck
+- npm test
+
+Review to prepare: Before/after shots of the page
+
+Stop conditions (meeting one ends the queue: report it with `nexus stop`):
+- A file outside the repository would change.
+- The project's own stop condition.
+
+Answers to your questions about this step:
+- "Which page first?": The second one.
+
+Begin with `nexus step start A1` (again is fine). End with `nexus step done A1 --summary "…"`, `nexus step failed` or `nexus stop`, then write `nexus context` and end your turn. Do not start another step.
+== the first step done: the second opens
+-- to worker 1
+[Nexus] Queue Q "Prompts under test" (revision 1, approved), step A2 (2 of 4): Second step.
+
+Goal:
+Do the second thing.
+
+Checks for every step:
+- npm run typecheck
+- npm test
+
+Stop conditions (meeting one ends the queue: report it with `nexus stop`):
+- A file outside the repository would change.
+- The project's own stop condition.
+
+Begin with `nexus step start A2`. End with `nexus step done A2 --summary "…"`, `nexus step failed` or `nexus stop`, then write `nexus context` and end your turn. Do not start another step.
+== the second step done with the context 90 % full: the summary is asked for
+-- to worker 1
+[Nexus] Step A2 is over, and this session's context is 90% full: the next step runs in a fresh session. Before that, write your context summary with `nexus context "<what a successor needs to know>" --topics a,b --files x,y` (what was decided and why, where things are, what is still open), then end your turn. Do not start anything else.
+== the summary written, a message not yet read: a fresh session is seeded with both
+-- to worker 2
+[Nexus] You take over queue Q "Prompts under test" in a fresh session: the session that ran the queue so far had its context 90% full. You have not seen its work, only what follows.
+
+Its context summary at the end of A2:
+Decided: the second page first.
+Topics: pages, colours
+Files: src/page.ts
+
+The queue:
+Context the worker needs.
+On two lines.
+
+Its steps:
+- A1 First step: done. The first thing is done.
+- A2 Second step: done. The second thing is done.
+- A3 Third step: yours now
+- A4 Last step on Codex: pending
+
+[Nexus] Queue Q "Prompts under test" (revision 1, approved), step A3 (3 of 4): Third step.
+
+Acceptance:
+- Third acceptance
+
+Checks for every step:
+- npm run typecheck
+- npm test
+
+Stop conditions (meeting one ends the queue: report it with `nexus stop`):
+- A file outside the repository would change.
+- The project's own stop condition.
+
+Begin with `nexus step start A3`. End with `nexus step done A3 --summary "…"`, `nexus step failed` or `nexus stop`, then write `nexus context` and end your turn. Do not start another step.
+
+Messages that came for the previous session and were not read yet:
+
+[Nexus] Message from the user:
+This came while the step ended.
+== the third step done, the last runs on Codex: the summary is asked for
+-- to worker 2
+[Nexus] Step A3 is over, and step A4 runs on Codex: the next step runs in a fresh session. Before that, write your context summary with `nexus context "<what a successor needs to know>" --topics a,b --files x,y` (what was decided and why, where things are, what is still open), then end your turn. Do not start anything else.
+== no summary written: a fresh Codex session is seeded from the queue
+-- to worker 3
+[Nexus] You take over queue Q "Prompts under test" in a fresh session: step A4 runs on Codex, and the session that ran the queue so far is a Claude Code session. You have not seen its work, only what follows.
+
+It left no context summary of A3; the queue's description and its finished steps' summaries below are what there is.
+
+The queue:
+Context the worker needs.
+On two lines.
+
+Its steps:
+- A1 First step: done. The first thing is done.
+- A2 Second step: done. The second thing is done.
+- A3 Third step: done. The third thing is done.
+- A4 Last step on Codex: yours now
+
+[Nexus] Queue Q "Prompts under test" (revision 1, approved), step A4 (4 of 4): Last step on Codex.
+
+Goal:
+Do the last thing.
+
+Acceptance:
+- Last acceptance
+
+Checks for every step:
+- npm run typecheck
+- npm test
+
+Stop conditions (meeting one ends the queue: report it with `nexus stop`):
+- A file outside the repository would change.
+- The project's own stop condition.
+
+Begin with `nexus step start A4`. End with `nexus step done A4 --summary "…"`, `nexus step failed` or `nexus stop`, then write `nexus context` and end your turn. Do not start another step.
+
+This is the queue's last step. After it is done, write a short report of the whole queue (what each step achieved against its acceptance, checks, review material, open questions, a proposed next step) to <report file> (a folder for reports outside the working tree and any repository: never write it into the working tree, it would block the cleanup of a worktree) and register it with `nexus report Q --file <report file> --summary "…"`, which copies it into the queue's folder and removes it from there.
+== sent back: by the user (a step with acceptance), by the orchestrator (one without)
+-- to worker 3
+[Nexus] The user sent step A1 of queue Q back to you (round 2). What the user wants:
+The second page is still wrong.
+The user's words win over the step's acceptance criteria where they conflict; the rest of the criteria still hold.
+
+Acceptance criteria of the step:
+- It is done
+- It is tested
+
+Work on it in this step: `nexus step start A1`, then the checks, review material for this round (`nexus review add A1 … --round 2`), and `nexus step done A1 --summary "…"` (or `nexus step failed` / `nexus stop`), then `nexus context`, and end your turn.
+-- to worker 3
+[Nexus] The orchestrator reviewed step A2 of queue Q and sent it back to you (round 3). What to fix:
+The test is missing.
+
+Work on it in this step: `nexus step start A2`, then the checks, review material for this round (`nexus review add A2 … --round 3`), and `nexus step done A2 --summary "…"` (or `nexus step failed` / `nexus stop`), then `nexus context`, and end your turn.
+== the last step failed and is resumed: it continues with what it was left at
+-- to worker 3
+[Nexus] Queue Q "Prompts under test" (revision 1, approved), step A4 (4 of 4): Last step on Codex.
+Continue this step where it was left (it was left: The build tool is missing.).
+
+Goal:
+Do the last thing.
+
+Acceptance:
+- Last acceptance
+
+Checks for every step:
+- npm run typecheck
+- npm test
+
+Stop conditions (meeting one ends the queue: report it with `nexus stop`):
+- A file outside the repository would change.
+- The project's own stop condition.
+
+Begin with `nexus step start A4` (again is fine). End with `nexus step done A4 --summary "…"`, `nexus step failed` or `nexus stop`, then write `nexus context` and end your turn. Do not start another step.
+
+This is the queue's last step. After it is done, write a short report of the whole queue (what each step achieved against its acceptance, checks, review material, open questions, a proposed next step) to <report file> (a folder for reports outside the working tree and any repository: never write it into the working tree, it would block the cleanup of a worktree) and register it with `nexus report Q --file <report file> --summary "…"`, which copies it into the queue's folder and removes it from there.
+== the worker's briefing (Claude Code: appended to the system prompt)
+You are a worker session run by Nexus, the dashboard through which the user follows and steers your work.
+Nexus sends you one step of an approved queue at a time. Work on that step only; when its outcome is reported, end your turn: Nexus opens the next step.
+Report through the `nexus` command (on PATH; your session is set in the environment as NEXUS_SESSION):
+- nexus step start <step>                                   when you begin a step
+- nexus step progress <step> "<short status>" [--pct N]     at milestones, so the user sees where you are
+- nexus review add <step> <file|url>... --label "..."       review material (pictures, sheets, reports)
+- nexus check <step> <name> --ok|--fail --summary "..."      results of the step's checks
+- nexus step done <step> --summary "..." [--commit <sha>]   when the acceptance criteria are met
+- nexus step failed <step> --reason "..."                   when the step cannot be done as written
+- nexus stop <step> --condition "..." --reason "..."        when a stop condition is met (first commit what is consistent, see below)
+- nexus ask "<question>" --step <step> [--can-continue]     a question for the orchestrator or the user; without --can-continue, end your turn after asking: the answer arrives as a message
+- nexus context "<what a successor needs to know>" --topics a,b --files x,y   at the end of each step
+Messages from the user may arrive while you work, marked [Nexus]; follow them.
+Before you stop (nexus stop, or a stop condition you meet): commit what is in a consistent state, with a message that says so, and leave the working tree clean (no uncommitted changes); what is not consistent, set aside or undo, and say in the reason what you left out. The user then decides whether the stopped step's commits are kept or reverted; changes nobody committed cannot be attributed to the step.
+== the worker's briefing for Codex (its instructions)
+(the same text)

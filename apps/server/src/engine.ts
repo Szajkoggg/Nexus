@@ -17,7 +17,7 @@ import {
   addNote, runIsOlder,
 } from "@nexus/protocol";
 import type { TurnFailure } from "./agent.ts";
-import { AgentHost, ROLE_RECORDS, type Hosted, type Launch } from "./agent-host.ts";
+import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Hosted, type Launch } from "./agent-host.ts";
 import { nexusDenyRules } from "./claude.ts";
 import { gitWritableRoots } from "./codex.ts";
 import {
@@ -54,6 +54,8 @@ export interface EngineOptions {
   pushTimeoutMs?: number;
   /** The clock of the long timers (schedules, usage waits, retries); tests control it. */
   clock?: Clock;
+  /** Makes the workers' processes; tests give a stand-in (AgentHostOptions.spawn). */
+  spawn?: AgentHostOptions["spawn"];
 }
 
 /** What the engine's long timers run on: the real clock, or one a test moves. */
@@ -134,7 +136,7 @@ export class Engine {
   constructor(store: ProjectStore, changed: () => void, options: EngineOptions = {}) {
     this.store = store;
     this.changed = changed;
-    this.host = new AgentHost(store, ROLE_RECORDS.worker);
+    this.host = new AgentHost(store, ROLE_RECORDS.worker, { spawn: options.spawn });
     this.retryBaseMs = options.retryBaseMs ?? RETRY_BASE_MS;
     this.usageMarginMs = options.usageMarginMs ?? USAGE_MARGIN_MS;
     this.clock = options.clock ?? REAL_CLOCK;
