@@ -551,7 +551,7 @@ nothing is open. Each history entry Nexus writes carries `{hash, layers, depth}`
 route (`#/<project>[/<queue>[/<step>]]`, the queue or step drawer being the layer `item`), `layers` the open stack
 (`chat`, `ideas`, `conversation:<id>`, `settings`, `remote`, `waiting`, `projects`, `viewer:<index>` for a review
 image), `depth` how many entries Nexus
-pushed. Opening pushes one entry; a close button goes back to it, so Back never reopens what was closed and no dead
+pushed, and the view (`tab`: the phone's tab, a desktop's middle column; see below). Opening pushes one entry; a close button goes back to it, so Back never reopens what was closed and no dead
 entries pile up; switching within a kind (another step, another conversation) replaces the entry. Switching
 projects is not a layer: it rewrites the entry in place. A page loaded with something open (a hash with a step,
 `?chat`) has no entry to go back to, so closing it rewrites the entry instead. Review images open in an in-app
@@ -559,16 +559,53 @@ viewer for the same reason: a new browser tab, in an installed app on a phone, h
 image replaces the viewer's entry, so one Back always returns to the step. The rules are pure
 (`apps/web/src/layers.ts`, unit tested); `nav.ts` applies them to `window.history`.
 
-### Details beside the chat on a wide screen
+### Details beside the chat on a wide screen (replaced)
 
-From 1280 px a queue or step opens in a panel on the left and the orchestrator chat or the Ideas panel in one on the
-right, both below the header and without a backdrop, and the queue list keeps the room between them (about 370 px
-at 1440, 330 at 1280): a step can be read while talking about it. The breakpoint is where two readable panels (about
-510 and 430 px) still leave the list a column; below it, and on phones, both stay layers over the page. The two side
-panels are independent layers, so the history rules above learnt two things: switching or closing a layer that is
-not on top goes back to its entry and opens the layers above it again (applied as one change, so the panel that
-stays does not flicker), and a layer that belongs to another (a conversation to the Ideas panel, an image to its
-step) closes with it while the others stay.
+N2B.3 opened a queue or step in a panel on the left and the chat or Ideas in one on the right from 1280 px, the queue
+list between them. **Chat-first (below) replaces it**: from 1024 px the chat is the middle column, not a panel. What
+N2B.3 taught the history rules stays: switching or closing a layer that is not on top goes back to its entry and
+opens the layers above it again (applied as one change, so what stays does not flicker), and a layer that belongs to
+another (a conversation to Ideas, an image to its step) closes with it while the others stay. Its 1280 px breakpoint
+(`WIDE`, `useWide`) is where the right rail of chat-first begins.
+
+### Chat-first on a desktop
+
+From 1024 px (UX proposals 11A and 12A, the user's choice after queue UX) the dashboard is a chat app with a
+project sidebar. The **sidebar** (`ProjectSidebar` in Projects.tsx) lists every project with its waiting count and a
+dot while something runs (from the projects API; the list scrolls, so any number fit), and holds the global status at
+its foot: an update going on, the usage windows one per row, notifications, the project's settings, remote access;
+"live" or "offline" sits at its top. The **middle column** shows one of three views: the project's **orchestrator
+chat** (the view a project opens on), **Ideas** (the conversations, the list beside the open one), or the project's
+**queues** ("All queues": what waits in it, its queues, the finished ones, refused actions, sessions). Its header
+(`DeskHead` in Chat.tsx) is the Orchestrator / Ideas switch, what the view says about itself (the chat's state,
+model and context, "Tool calls", ⋯ with "New conversation"), and the column's buttons: what waits in all projects
+(a drawer) and All queues. The chat's text keeps a chat app's measure, at most 780 px wide in the middle; the
+orchestrator's and the partner's messages are text under a line saying who and when, Nexus's notices a line with a
+rule at the left, the composer a card with Send at its right. The phone keeps its bubbles.
+
+**The view is not a layer.** It is the history entry's `tab`, as on the phone, read through `viewOf(nav, "desk")`
+(chat first) and switched by `switchTab(…, "desk")`; `nav.ts` picks the layout by the `PHONE` query and turns opening
+the chat or Ideas into a view switch on both layouts. So:
+
+- **Switching the view adds no history entry**, and neither does switching projects. Back closes what is open (a
+  conversation, a queue or step, an image, Settings, the waiting list) and then leaves the app.
+- **A project switch shows its orchestrator chat** (`switchProject` with the desk layout) and closes what was open.
+- **What lies beside the column stays when the view switches.** A queue or step opens on the right (`Drawer beside`,
+  no backdrop, `SIDE` wide) and the column makes room for it; switching to Ideas or the queues keeps it open: Nexus
+  goes back to the entry below it, rewrites that with the new view and opens it again, so Back still closes it and
+  the view stays. A conversation belongs to the Ideas view and closes when another view shows; the Ideas switch with
+  a conversation open shows the list again.
+- **"Chat about this"** on a step shows Ideas and opens the conversation over it with the step still beside it
+  (`openConversation`); Back closes the conversation, then the step.
+- A `?chat` or `?ideas` link, or a phone's entry in a window made wide, is read as its view (a phone's Waiting tab
+  shows the chat).
+
+The approval's **full view** covers the window right of the sidebar. "Ask the orchestrator…" there turns it into the
+compact list on the right (the form remembered for that revision, as "Show as a panel" does) and shows the chat
+with the reference in its composer, so the queue and the chat are both in view: the full view used to leave a chat
+open beside it its room, which no longer exists as a panel. Between 1024 and 1280 px the same layout holds; the right
+rail of 11A (what waits, what runs, what finished today; from 1280 px, a "Waiting N" drawer below) and items opening
+over it follow in UI4.2. Until then the column's header carries the inbox button and All queues.
 
 ### Drafts stay in the browser
 
@@ -641,7 +678,7 @@ picker, what runs in the project ("SF running"), and settings (with "offline" wh
 bottom bar has four tabs at the thumb: **Orchestrator** (the chat), **Waiting** (everything that waits in all
 projects, with its count), **Queues** (the project's queues; what waits has its own tab) and **Ideas** (the
 conversations). The header's tools (the update, the usage, notifications, remote access) are in Settings there, at
-the top, under "Nexus on this device". From 1024 px the desktop header is unchanged.
+the top, under "Nexus on this device". From 1024 px the desktop layout takes over ("Chat-first on a desktop").
 
 The tab is not a layer. It is a field of the history entry (`Nav.tab`), and switching rewrites the entry it is on
 (`switchTab` in `layers.ts`), so:
@@ -652,12 +689,13 @@ The tab is not a layer. It is a field of the history entry (`Nav.tab`), and swit
   is left behind. Tapping the tab already shown closes what is over it (a conversation goes back to the list).
 - **A sheet keeps the tab under it.** A queue or step, Settings, remote access, an image push entries as on the
   desktop; their entries carry the tab, so Back from a step opened on Queues shows Queues again.
-- **A project switch shows the Waiting tab** (`switchProject`); the chat does not open by itself.
+- **A project switch shows the Waiting tab** (`switchProject`); the chat does not open by itself (on a desktop it
+  does: see "Chat-first on a desktop").
 - **The chat, Ideas and the waiting list are tabs, not layers, on the phone.** Code that opens them as layers (a link
   with `?chat`, a window made narrow, "Chat about this" on a step) is shown through `phoneView`: such a layer stands
   for its tab, the topmost winning; a conversation stays a layer over the Ideas tab. `nav.ts` turns opening or raising
   them into a tab switch on the phone, and a conversation from a step's sheet closes the sheet, shows Ideas and opens
-  the conversation over it (`phoneConversation`), so Back returns to the list.
+  the conversation over it (`openConversation`), so Back returns to the list.
 
 On a tab, the chats are inline (`inline` in Chat.tsx): no panel row, since the bottom bar switches and nothing closes
 a tab; the chat's ⋯ moves into its own header, and the Ideas tab shows the list or one conversation at a time.
@@ -719,8 +757,9 @@ outline on the left (description, each step, stop conditions, checks) that follo
 in it marked while that part shows; every step's goal and acceptance in the page. The **compact list** is the queue's
 drawer on a desktop and its sheet on the phone: one row per step, "N criteria ▾" opens the goal and acceptance in
 place, the rest as folds. The phone opens the compact list; "Full view ⤢" and "Show as a panel" switch, remembered per
-revision while the page lives (a choice, not history: Back closes the queue whichever form shows). Beside a chat open
-on a wide screen the full view leaves the chat its room.
+revision while the page lives (a choice, not history: Back closes the queue whichever form shows). On a desktop the
+full view leaves the project sidebar in sight, and "Ask the orchestrator…" turns it into the panel beside the chat
+("Chat-first on a desktop").
 
 Both forms share the approval (`useApprove`: the words under ⋯, the button, what it pins; Keep or Discard of a stopped
 queue's revision through `stopDecision`, so Approve waits for the choice), Ctrl+Enter outside a text box, and "Ask the

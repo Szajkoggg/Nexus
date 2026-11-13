@@ -2,9 +2,9 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import type { ChatEntry, RuntimeFile, SessionFile } from "@nexus/protocol";
 import { act, enc, useFetch } from "../api.ts";
-import { Button, CloseButton, Composer, Markdown, Menu, SIDE_RIGHT, TimeAgo, useWide, type MenuEntry } from "./ui.tsx";
+import { Button, Composer, Markdown, Menu, TimeAgo, type MenuEntry } from "./ui.tsx";
 import { draftKey } from "../drafts.ts";
-import { layerValue, type SidePanel } from "../layers.ts";
+import { layerValue } from "../layers.ts";
 import { nav, useNav } from "../nav.ts";
 import { usePhone } from "../phone.ts";
 import { EffortSelect, ModelSelect, useEfforts } from "./Settings.tsx";
@@ -15,64 +15,98 @@ export function useOrchestrator(project: string | undefined, version: unknown) {
   return useFetch<View>(project ? `/api/projects/${enc(project)}/orchestrator` : undefined, version);
 }
 
-/** A chat: what it is (under the panel's switch and ⋯), the messages, and the composer. */
-function ChatColumn({ title, over, about, view, status, showTools, menu, empty, draft, placeholder, onSend, onBack }: {
-  title: string; over: string; about?: ReactNode; view: View | undefined; status: string; showTools: boolean; empty: ReactNode;
+/** A chat: what it is (its header; on a desktop's orchestrator chat, in the middle column's header), the messages, and the composer. */
+function ChatColumn({ title, over, who, about, view, status, showTools, menu, empty, draft, placeholder, onSend, onBack, bare }: {
+  title: string; over: string;
+  /** Who answers, over each of its messages on a desktop: "Orchestrator", "Partner". */
+  who: string; about?: ReactNode; view: View | undefined; status: string; showTools: boolean; empty: ReactNode;
   draft: string; placeholder: string; onSend: (text: string) => Promise<void>; onBack?: () => void;
-  /** On the phone's tab, where there is no panel row: the chat's menu, at the right of its header. */
+  /** The chat's menu, at the right of its header. */
   menu?: MenuEntry[];
+  /** No header of its own: the desktop's orchestrator chat, whose state is in the middle column's header. */
+  bare?: boolean;
 }) {
   const end = useRef<HTMLDivElement>(null);
   const side = useContext(Side);
   const phone = usePhone();
   const chat = (view?.chat ?? []).filter((c) => showTools || c.kind !== "tool");
   useEffect(() => { end.current?.scrollIntoView({ block: "end" }); }, [chat.length, view?.state]);
-  const rt = view?.runtime;
-  const pct = rt?.context_tokens && rt.context_window ? Math.round((100 * rt.context_tokens) / rt.context_window) : undefined;
-  const model = rt?.model ? rt.model.replace(/^claude-/, "") : view?.model;
+  // On a desktop the text keeps a chat app's measure: a column of about 780 px in the middle.
+  const measure = phone ? "" : "mx-auto w-full max-w-[48.75rem]";
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <header className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-line px-5 py-3">
-        {onBack && <button onClick={onBack} className={`rounded-md px-1.5 text-lg text-fg-2 hover:text-fg ${side ? "" : "sm:hidden"}`} aria-label="Back">‹</button>}
-        <div className="min-w-0">
-          <div className="text-xs text-fg-3">{over}</div>
-          <h2 className="truncate font-semibold text-fg">{title}</h2>
-          {about}
+      {!bare && (
+        <header className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-line px-5 py-3">
+          {onBack && <button onClick={onBack} className={`rounded-md px-1.5 text-lg text-fg-2 hover:text-fg ${side ? "" : "sm:hidden"}`} aria-label="Back">‹</button>}
+          <div className="min-w-0">
+            <div className="text-xs text-fg-3">{over}</div>
+            <h2 className="truncate font-semibold text-fg">{title}</h2>
+            {about}
+          </div>
+          <span className="text-xs text-fg-3">{statusLine(view, status)}</span>
+          {menu && <span className="ml-auto"><Menu items={menu} down label="Chat actions" /></span>}
+        </header>
+      )}
+      <div className={`scroll-thin flex-1 overflow-y-auto ${phone ? "px-5 py-4" : "px-6 py-6"}`}>
+        <div className={`${measure} ${phone ? "space-y-3" : "space-y-4"}`}>
+          {chat.length === 0 && <div className="mt-10 text-center text-sm text-fg-3">{empty}</div>}
+          {chat.map((c, i) => <Entry key={i} c={c} flat={!phone} who={who} />)}
+          {view?.state === "working" && <div className="text-xs text-fg-3"><span className="animate-pulse">●</span> working…</div>}
+          <div ref={end} />
         </div>
-        <span className="text-xs text-fg-3">
-          {status}{model ? ` · ${model}` : ""}{view?.effort ? ` · ${view.effort} effort` : ""}{pct !== undefined ? ` · ${pct}% context` : ""}
-        </span>
-        {menu && <span className="ml-auto"><Menu items={menu} down label="Chat actions" /></span>}
-      </header>
-      <div className="scroll-thin flex-1 space-y-3 overflow-y-auto px-5 py-4">
-        {chat.length === 0 && <div className="mt-10 text-center text-sm text-fg-3">{empty}</div>}
-        {chat.map((c, i) => <Entry key={i} c={c} />)}
-        {view?.state === "working" && <div className="text-xs text-fg-3"><span className="animate-pulse">●</span> working…</div>}
-        <div ref={end} />
       </div>
-      <footer className="border-t border-line p-4 max-lg:p-3">
-        <Composer rows={3} draft={draft} placeholder={placeholder} button="Send" onSubmit={onSend} oneLine={phone} />
+      <footer className={phone ? "border-t border-line p-3" : "px-6 pb-5 pt-3"}>
+        <div className={measure}>
+          <Composer rows={3} draft={draft} placeholder={placeholder} button="Send" onSubmit={onSend} oneLine={phone} card={!phone} />
+        </div>
       </footer>
     </div>
   );
 }
 
-function Entry({ c }: { c: ChatEntry }) {
+/** What a chat's session is doing, its model, effort and how full its context is: "ready · opus-5-5 · 38% context". */
+function statusLine(view: View | undefined, status: string): string {
+  const rt = view?.runtime;
+  const pct = rt?.context_tokens && rt.context_window ? Math.round((100 * rt.context_tokens) / rt.context_window) : undefined;
+  const model = rt?.model ? rt.model.replace(/^claude-/, "") : view?.model;
+  return `${status}${model ? ` · ${model}` : ""}${view?.effort ? ` · ${view.effort} effort` : ""}${pct !== undefined ? ` · ${pct}% context` : ""}`;
+}
+
+/**
+ * One entry of a chat. On the phone the other side's messages are bubbles; on a desktop (`flat`, mockup 11A) they are
+ * text in the column under a line saying who and when, Nexus's notices a line with a rule at the left.
+ */
+function Entry({ c, flat, who }: { c: ChatEntry; flat?: boolean; who: string }) {
   if (c.kind === "tool") {
-    return <div className="truncate pl-1 font-mono text-[11px] text-fg-3" title={c.text}>› {c.text}</div>;
+    return <div className="truncate pl-1 font-mono text-[11px] text-fg-3" title={c.text}>{flat ? "$" : "›"} {c.text}</div>;
   }
   if (c.from === "user") {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-sm bg-user-bubble px-4 py-2 text-sm text-fg">{c.text}</div>
+        <div className={`whitespace-pre-wrap rounded-2xl rounded-br-sm bg-user-bubble px-4 py-2 text-sm text-fg ${flat ? "max-w-[min(85%,37.5rem)]" : "max-w-[85%]"}`}>{c.text}</div>
       </div>
     );
   }
   if (c.from === "nexus") {
+    if (flat) {
+      return (
+        <div className={`border-l-2 px-2.5 py-0.5 text-xs ${c.kind === "error" ? "border-danger/60 text-danger" : "border-line-strong text-fg-2"}`}>
+          <span className="whitespace-pre-wrap">Nexus · {c.text}</span><span className="text-fg-3"> · <TimeAgo at={c.at} /></span>
+        </div>
+      );
+    }
     return (
       <div className={`rounded-lg border px-3 py-2 text-xs ${c.kind === "error" ? "border-danger/30 bg-danger/5 text-danger" : "border-warn/30 bg-warn/5 text-warn/90"}`}>
         <span className="mr-2 font-semibold">Nexus</span><span className="whitespace-pre-wrap">{c.text}</span>
         <span className="ml-2 text-fg-3"><TimeAgo at={c.at} /></span>
+      </div>
+    );
+  }
+  if (flat) {
+    return (
+      <div>
+        <div className="mb-1 text-xs text-fg-3">{who} · <TimeAgo at={c.at} /></div>
+        <Markdown className="leading-relaxed">{c.text}</Markdown>
       </div>
     );
   }
@@ -84,54 +118,59 @@ function Entry({ c }: { c: ChatEntry }) {
 }
 
 /**
- * Inside a side panel (a wide screen, beside a step's details): narrow, so the Ideas panel shows its list or one
- * conversation at a time, as on a phone.
+ * Narrow: on the phone's tab the Ideas panel shows its list or one conversation at a time. On a desktop's middle
+ * column the list and the open conversation sit side by side.
  */
 const Side = createContext(false);
 
+/** What a desktop's middle column header needs from App: the orchestrator's state, the number of ideas, its own buttons. */
+export interface Desk {
+  orchestrator: View | undefined;
+  /** Conversations that are not archived, for "Ideas · N". */
+  ideas: number | undefined;
+  /** The column's buttons at the right: what waits, All queues. */
+  tools: ReactNode;
+}
+
 /**
- * At the top of each chat panel: Orchestrator | Ideas. The other one comes to the top in one click on every screen
- * size (opened when it is closed); Back then shows this one again.
+ * The header of a desktop's middle column (mockup 11A): the Orchestrator / Ideas switch, what the view says about
+ * itself (the chat's state, its tool calls and ⋯), and the column's own buttons. The project's queues show it too,
+ * with neither side of the switch on. A switch adds no history entry (layers.ts, switchTab).
  */
-function PanelSwitch({ which, menu, onClose }: { which: SidePanel; menu?: MenuEntry[]; onClose: () => void }) {
-  const item = (p: SidePanel, label: string) => (
-    <button key={p} onClick={() => { if (p !== which) nav.raise(p); }} aria-pressed={p === which}
-      className={`rounded-md px-3 py-1 text-xs font-medium ${p === which ? "bg-surface-4 text-fg" : "text-fg-2 hover:bg-surface-3 hover:text-fg"}`}>{label}</button>
+export function DeskHead({ which, desk, children }: { which?: "chat" | "ideas"; desk: Desk; children?: ReactNode }) {
+  const o = desk.orchestrator;
+  const item = (p: "chat" | "ideas", label: ReactNode) => (
+    <button key={p} onClick={() => nav.tab(p)} aria-pressed={p === which}
+      className={`flex items-center gap-1.5 rounded-md px-3 py-1 text-[13px] ${p === which ? "bg-surface-3 font-semibold text-fg" : "text-fg-2 hover:text-fg"}`}>{label}</button>
   );
   return (
-    <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-1.5">
-      <div className="flex items-center gap-1" role="group" aria-label="Chats">{item("chat", "Orchestrator")}{item("ideas", "Ideas")}</div>
-      <span className="ml-auto" />
-      {menu && <Menu items={menu} down label="Chat actions" />}
-      <CloseButton onClose={onClose} />
-    </div>
+    <header className="flex min-h-15 shrink-0 items-center gap-3 border-b border-line px-6 py-2.5">
+      <div className="flex shrink-0 items-center gap-0.5 rounded-lg border border-line bg-surface-2 p-0.5" role="group" aria-label="Chats">
+        {item("chat", <><span className={`h-2 w-2 rounded-full ${o?.state === "working" ? "animate-pulse bg-accent" : o?.session ? "bg-ok" : "bg-fg-3"}`} />Orchestrator</>)}
+        {item("ideas", <>Ideas{desk.ideas ? <span className="text-fg-3">· {desk.ideas}</span> : null}</>)}
+      </div>
+      {children}
+      <span className="flex-1" />
+      {desk.tools}
+    </header>
   );
 }
 
 /**
- * A chat's panel: over the page on narrow screens; on a wide one, beside it on the right, the page still usable. On
- * the phone (`inline`) it is the content of its tab: no panel row, since the bottom bar switches and nothing closes it.
+ * A chat's frame. On the phone (`inline`) it is the content of its tab: no panel row, since the bottom bar switches and
+ * nothing closes it. On a desktop (`desk`) it is the middle column, under its header.
  */
-function Panel({ onClose, wide, which, menu, inline, children }: { onClose: () => void; wide?: boolean; which: SidePanel; menu?: MenuEntry[]; inline?: boolean; children: ReactNode }) {
-  const side = useWide();
-  if (inline) return <Side.Provider value={true}><div className="flex min-h-0 min-w-0 flex-1">{children}</div></Side.Provider>;
-  const body = <><PanelSwitch which={which} menu={menu} onClose={onClose} /><div className="flex min-h-0 flex-1">{children}</div></>;
-  if (side) {
-    return (
-      <Side.Provider value={true}>
-        <aside className="fixed bottom-0 right-0 z-20 flex flex-col border-l border-line bg-surface shadow-xl" style={{ top: "var(--header-h, 0px)", width: SIDE_RIGHT }}>
-          {body}
-        </aside>
-      </Side.Provider>
-    );
-  }
+function Panel({ inline, desk, which, head, children }: {
+  inline?: boolean; desk?: Desk; which: "chat" | "ideas"; head?: ReactNode; children: ReactNode;
+}) {
+  if (inline || !desk) return <Side.Provider value={true}><div className="flex min-h-0 min-w-0 flex-1">{children}</div></Side.Provider>;
   return (
-    <div className="fixed inset-0 z-50 flex justify-end">
-      <div className="absolute inset-0 bg-scrim/40" onClick={onClose} />
-      <aside className={`relative flex h-full w-full flex-col ${wide ? "max-w-5xl" : "max-w-2xl"} border-l border-line bg-surface pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] shadow-2xl`}>
-        {body}
-      </aside>
-    </div>
+    <Side.Provider value={false}>
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <DeskHead which={which} desk={desk}>{head}</DeskHead>
+        <div className="flex min-h-0 flex-1">{children}</div>
+      </div>
+    </Side.Provider>
   );
 }
 
@@ -140,34 +179,30 @@ const stateText = (v: View | undefined) =>
 
 // ---------------------------------------------------------------- the orchestrator
 
-export function OrchestratorButton({ view, onClick }: { view: View | undefined; onClick: () => void }) {
-  return (
-    <button onClick={onClick} title="Orchestrator" className="flex shrink-0 items-center gap-2 rounded-lg border border-line-strong px-2.5 py-1.5 text-sm text-fg hover:border-fg-3/60 hover:bg-surface sm:px-3">
-      <span className={`h-2 w-2 rounded-full ${view?.state === "working" ? "animate-pulse bg-accent" : view?.session ? "bg-ok" : "bg-fg-3"}`} />
-      <span className="hidden sm:inline">Orchestrator</span>
-      <svg className="sm:hidden" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1.1-4.6A8 8 0 1 1 21 12Z" /></svg>
-    </button>
-  );
-}
-
-export function ChatPanel({ project, name, view, onClose, onChanged, inline }: {
-  project: string; name: string; view: View | undefined; onClose: () => void; onChanged: () => void; inline?: boolean;
+/** The orchestrator's chat: the phone's Orchestrator tab (`inline`), a desktop's middle column (`desk`). */
+export function ChatPanel({ project, name, view, onChanged, inline, desk }: {
+  project: string; name: string; view: View | undefined; onChanged: () => void; inline?: boolean; desk?: Desk;
 }) {
   const [showTools, setShowTools] = useState(false);
-  const menu: MenuEntry[] = [
-    { label: "Show tool calls", checked: showTools, onSelect: () => setShowTools(!showTools) },
-    ...(view?.session ? [{
-      label: "New conversation…", onSelect: () => {
-        if (confirm("Start a new conversation? The orchestrator forgets this one (its transcript stays on disk).")) {
-          void act(project, "POST", "/orchestrator/reset").then(onChanged);
-        }
-      },
-    }] : []),
-  ];
+  const fresh: MenuEntry[] = view?.session ? [{
+    label: "New conversation…", onSelect: () => {
+      if (confirm("Start a new conversation? The orchestrator forgets this one (its transcript stays on disk).")) {
+        void act(project, "POST", "/orchestrator/reset").then(onChanged);
+      }
+    },
+  }] : [];
+  const menu: MenuEntry[] = [{ label: "Show tool calls", checked: showTools, onSelect: () => setShowTools(!showTools) }, ...fresh];
+  // On a desktop the chat's state, "Tool calls" and ⋯ (New conversation) are in the column's header.
+  const head = desk && <>
+    <span className="min-w-0 truncate text-xs text-fg-3">{statusLine(view, stateText(view))}</span>
+    <button onClick={() => setShowTools(!showTools)} aria-pressed={showTools}
+      className={`shrink-0 rounded-md px-2.5 py-1 text-xs ${showTools ? "bg-surface-3 text-fg" : "text-fg-2 hover:bg-surface-3 hover:text-fg"}`}>Tool calls</button>
+    {fresh.length > 0 && <Menu items={fresh} down label="Chat actions" />}
+  </>;
   return (
-    <Panel onClose={onClose} which="chat" menu={menu} inline={inline}>
+    <Panel inline={inline} desk={desk} which="chat" head={head}>
       <ChatColumn
-        over={name} title="Orchestrator" view={view} status={stateText(view)} showTools={showTools} menu={inline ? menu : undefined}
+        over={name} title="Orchestrator" who="Orchestrator" view={view} status={stateText(view)} showTools={showTools} menu={inline ? menu : undefined} bare={!!desk}
         empty={<>
           <p>Plan queues with the orchestrator, ask where things stand, or have it start a run.</p>
           <p className="mt-1 text-fg-3">It reads the project and works through <code>nexus</code>; it never edits files or approves queues.</p>
@@ -254,17 +289,9 @@ export function StepChat({ project, queue, step, version }: { project: string; q
   );
 }
 
-export function ConversationsButton({ onClick }: { onClick: () => void }) {
-  return (
-    <button onClick={onClick} title="Conversations: think a topic through with a partner" className="flex shrink-0 items-center gap-2 rounded-lg border border-line-strong px-2.5 py-1.5 text-sm text-fg hover:border-fg-3/60 hover:bg-surface sm:px-3">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.2 1 2V17h6v-.3c0-.8.4-1.5 1-2A7 7 0 0 0 12 2Z" /></svg>
-      <span className="hidden sm:inline">Ideas</span>
-    </button>
-  );
-}
-
-export function ConversationsPanel({ project, name, version, onClose, onChanged, defaultRuntime, inline }: {
-  project: string; name: string; version: unknown; onClose: () => void; onChanged: () => void; defaultRuntime: "claude" | "codex"; inline?: boolean;
+/** The conversations with a thinking partner: the phone's Ideas tab (`inline`), a desktop's middle column (`desk`). */
+export function ConversationsPanel({ project, name, version, onChanged, defaultRuntime, inline, desk }: {
+  project: string; name: string; version: unknown; onChanged: () => void; defaultRuntime: "claude" | "codex"; inline?: boolean; desk?: Desk;
 }) {
   const list = useFetch<ConversationItem[]>(`/api/projects/${enc(project)}/conversations`, version);
   // The open conversation (or the new-conversation form) is a layer above the panel: Back returns to the list.
@@ -273,8 +300,8 @@ export function ConversationsPanel({ project, name, version, onClose, onChanged,
   const open = creating ? undefined : layer;
   const [showArchived, setShowArchived] = useState(false);
   const view = useFetch<ConversationView>(open ? `/api/projects/${enc(project)}/conversations/${enc(open)}` : undefined, version);
-  // Narrow like a side panel (the list or one conversation at a time) on a wide screen and on the phone's tab.
-  const side = useWide() || !!inline;
+  // On the phone's tab the list or one conversation at a time; on a desktop both, side by side.
+  const side = !desk;
   const current = list?.find((c) => c.id === open);
   const shown = (list ?? []).filter((c) => showArchived || !c.archived);
   const [showTools, setShowTools] = useState(false);
@@ -298,16 +325,18 @@ export function ConversationsPanel({ project, name, version, onClose, onChanged,
   ] : undefined;
 
   return (
-    <Panel onClose={onClose} wide which="ideas" menu={menu} inline={inline}>
+    <Panel inline={inline} desk={desk} which="ideas">
       <nav className={side
         ? `${open || creating ? "hidden" : "flex"} w-full flex-col`
         : `${open || creating ? "hidden sm:flex" : "flex"} w-full shrink-0 flex-col border-r border-line sm:w-72`}>
-        <div className="flex items-center gap-2 border-b border-line px-4 py-3">
-          <div className="min-w-0 flex-1">
-            <div className="text-xs text-fg-3">{name}</div>
-            <h2 className="font-semibold text-fg">Ideas</h2>
+        {side && (
+          <div className="flex items-center gap-2 border-b border-line px-4 py-3">
+            <div className="min-w-0 flex-1">
+              <div className="text-xs text-fg-3">{name}</div>
+              <h2 className="font-semibold text-fg">Ideas</h2>
+            </div>
           </div>
-        </div>
+        )}
         <div className="p-3"><Button onClick={() => nav.open("conversation:new")}>New conversation</Button></div>
         <ul className="scroll-thin flex-1 overflow-y-auto px-2 pb-3">
           {shown.map((c) => (
@@ -335,8 +364,8 @@ export function ConversationsPanel({ project, name, version, onClose, onChanged,
         onCreated={(id) => { nav.open(`conversation:${id}`); onChanged(); }} />}
       {!creating && open && current && (
         <ChatColumn
-          over={`${name} · ideas`} title={current.title ?? "Conversation"} about={<AboutStep project={project} c={current} className="mt-1" />} view={view} status={stateText(view)} onBack={() => nav.close("conversation")}
-          showTools={showTools} menu={inline ? menu : undefined}
+          over={`${name} · ideas`} title={current.title ?? "Conversation"} who="Partner" about={<AboutStep project={project} c={current} className="mt-1" />} view={view} status={stateText(view)} onBack={() => nav.close("conversation")}
+          showTools={showTools} menu={menu}
           empty={<>
             <p>Think something through: gameplay, a mechanic, the look, what to build next.</p>
             <p className="mt-1 text-fg-3">

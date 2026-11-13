@@ -281,13 +281,34 @@ export function ContextBar({ s }: { s: SessionView }) {
 }
 
 /** The subscription's windows, from the latest report of any session. */
-export function UsageMeter({ version, always }: { version: unknown; always?: boolean }) {
+export function UsageMeter({ version, always, stacked }: {
+  version: unknown; always?: boolean;
+  /** At a desktop sidebar's foot: one row per window, its name, a bar and the percentage. */
+  stacked?: boolean;
+}) {
   const u = useFetch<Usage | null>("/api/usage", version);
   const none = always ? <span className="text-xs text-fg-3">No session has reported it yet.</span> : null;
   if (!u) return none;
   const windows = Object.entries(u.windows).filter(([, w]) => !w.resets_at || Date.parse(w.resets_at) > Date.now());
   if (!windows.length) return none;
   const name = (k: string) => (k === "five_hour" ? "Claude 5h" : k === "seven_day" ? "Claude 7d" : k.startsWith("codex_") ? `Codex ${k.slice(6)}` : k.replace(/_/g, " "));
+  const fill = (pct: number) => (pct >= 90 ? "bg-danger" : pct >= 70 ? "bg-warn" : "bg-ok");
+  if (stacked) {
+    return (
+      <div className="space-y-1.5" title={`Reported ${new Date(u.updated_at).toLocaleString()}`}>
+        {windows.map(([k, w]) => {
+          const pct = Math.round(w.utilization * 100);
+          return (
+            <div key={k} className="grid grid-cols-[4.5rem_1fr_2.25rem] items-center gap-2 text-xs text-fg-3" title={w.resets_at ? `resets ${new Date(w.resets_at).toLocaleString()}` : undefined}>
+              <span className="truncate">{name(k)}</span>
+              <span className="h-1 overflow-hidden rounded-sm bg-surface-3"><span className={`block h-full ${fill(pct)}`} style={{ width: `${Math.max(2, pct)}%` }} /></span>
+              <span className="text-right">{pct}%</span>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
   return (
     <span className={`${always ? "flex flex-wrap" : "hidden sm:flex"} items-center gap-3 text-xs text-fg-3`} title={`Reported ${new Date(u.updated_at).toLocaleString()}`}>
       {windows.map(([k, w]) => {
@@ -296,7 +317,7 @@ export function UsageMeter({ version, always }: { version: unknown; always?: boo
           <span key={k} className="flex items-center gap-1.5" title={w.resets_at ? `resets ${new Date(w.resets_at).toLocaleString()}` : undefined}>
             {name(k)}
             <span className="inline-block h-1.5 w-12 overflow-hidden rounded bg-surface-3">
-              <span className={`block h-full ${pct >= 90 ? "bg-danger" : pct >= 70 ? "bg-warn" : "bg-ok"}`} style={{ width: `${Math.max(2, pct)}%` }} />
+              <span className={`block h-full ${fill(pct)}`} style={{ width: `${Math.max(2, pct)}%` }} />
             </span>
             {pct}%
           </span>

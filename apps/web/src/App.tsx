@@ -1,15 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import type { QueueStatus } from "@nexus/protocol";
-import { useLive, useProjectState, useProjects, type AttentionItem, type QueueView } from "./api.ts";
+import { enc, useFetch, useLive, useProjectState, useProjects, type AttentionItem, type QueueView } from "./api.ts";
 import { QueueRow } from "./components/QueueRow.tsx";
 import { chooseOption, QueueDetail, StepDetail } from "./components/Details.tsx";
-import { Button, Drawer, Section, SIDE_LEFT, SIDE_RIGHT, TimeAgo, useWide } from "./components/ui.tsx";
+import { Button, Drawer, Section, SIDE, TimeAgo } from "./components/ui.tsx";
 import { AttentionPanel, attentionTarget, NotifyToggle, useNotifications, WaitingButton, WaitingList } from "./components/Attention.tsx";
 import { ContextBar, UsageMeter } from "./components/Run.tsx";
-import { ChatPanel, ConversationsButton, ConversationsPanel, OrchestratorButton, useOrchestrator } from "./components/Chat.tsx";
+import { ChatPanel, ConversationsPanel, DeskHead, useOrchestrator, type Desk } from "./components/Chat.tsx";
 import { RemoteButton, RemotePanel } from "./components/Remote.tsx";
-import { ProjectPicker, ProjectTabs } from "./components/Projects.tsx";
-import { isOpen, panelOrder, phoneView } from "./layers.ts";
+import { ProjectPicker, ProjectSidebar } from "./components/Projects.tsx";
+import { isOpen, phoneView, viewOf } from "./layers.ts";
 import { usePhone } from "./phone.ts";
 import { BottomBar, RunningNow } from "./components/Phone.tsx";
 import { waitingPosition } from "./waiting.ts";
@@ -30,8 +30,8 @@ const GROUPS: { title: string; statuses: QueueStatus[] }[] = [
 ];
 
 /**
- * The selection lives in the URL hash: #/<project>[/<queue>[/<step>]]; what is open over it, in the history entry
- * (nav.ts), so that Back closes the topmost layer.
+ * The selection lives in the URL hash: #/<project>[/<queue>[/<step>]]; what is open over it, and the view (the phone's
+ * tab, a desktop's middle column), in the history entry (nav.ts), so that Back closes the topmost layer.
  */
 function useRoute() {
   const n = useNav();
@@ -57,10 +57,8 @@ export function App() {
   const orchestrator = useOrchestrator(projectId, tick);
   const server = useServer(tick);
   // Each panel is a layer in the browser history: opening pushes an entry, closing (or Back) pops it.
-  const ideasOpen = isOpen(route.nav, "ideas");
   const settingsOpen = isOpen(route.nav, "settings");
   const remoteOpen = isOpen(route.nav, "remote");
-  const chatOpen = isOpen(route.nav, "chat");
   const waitingOpen = isOpen(route.nav, "waiting");
 
   const { byGroup, finished } = useMemo(() => {
@@ -80,31 +78,22 @@ export function App() {
   const close = () => nav.close("item");
   const openWaiting = (w: WaitingItem) => nav.closeThenItem("waiting", w.project, w.queue, attentionTarget(w));
   // Below 1024 px: the phone layout, with a tab instead of the chat, Ideas and waiting layers (layers.ts phoneView).
+  // From 1024 px: chat-first (UX proposals, 11A), the middle column showing the chat, Ideas or the project's queues.
   const phone = usePhone();
   const tab = phone ? phoneView(route.nav).tab : undefined;
+  const view = phone ? undefined : viewOf(route.nav, "desk").tab;
   const waiting = useMemo(() => mergeAttention(projects ?? []), [projects]);
   // On the phone an item that waits for the user says where it stands in the waiting list: "2 of 6".
   const place = phone && projectId && route.queue ? waitingPosition(waiting, { project: projectId, queue: route.queue, step: route.step }) : undefined;
   const of = place?.at ? `${place.at} of ${place.total} waiting` : undefined;
 
-  // On a wide screen a step's details sit on the left and a chat on the right, below the header, and the queue
-  // list keeps the room between them; elsewhere both are layers over the page.
-  const wide = useWide();
   const itemShown = !!(state && queue);
   // A queue waiting for approval opens in the full view on a desktop, the compact list on the phone (UX proposals,
   // 15), unless the user picked the other form for it.
   const [form, setForm] = useApprovalForm(projectId, queue?.id, queue?.revision);
   const fullApproval = !!(queue && !step && needsApproval(queue) && (form ?? (phone ? "panel" : "full")) === "full");
-  const header = useRef<HTMLElement>(null);
-  useEffect(() => {
-    const h = header.current;
-    if (!h) return;
-    const set = () => document.documentElement.style.setProperty("--header-h", `${h.getBoundingClientRect().height}px`);
-    set();
-    const o = new ResizeObserver(set);
-    o.observe(h);
-    return () => o.disconnect();
-  }, [phone]);
+  // "Ideas · N" in a desktop's switch: the conversations that are not archived.
+  const ideas = useFetch<{ archived?: boolean }[]>(!phone && projectId ? `/api/projects/${enc(projectId)}/conversations` : undefined, tick);
 
   const banners = <>
     {projectsError && <Banner>Cannot reach the Nexus server: {projectsError}</Banner>}
@@ -178,7 +167,7 @@ export function App() {
       <RemotePanel version={tick} />
     </Drawer>
 
-    <Drawer open={itemShown && !fullApproval} onClose={close} left={wide} panel>
+    <Drawer open={itemShown && !fullApproval} onClose={close} beside={!phone} panel>
       {state && queue && (step
         ? <StepDetail project={state} queue={queue} step={step} onChanged={reload} onClose={close} of={of} />
         : <QueueDetail project={state} queue={queue} onChanged={reload} onClose={close} of={of}
@@ -186,7 +175,7 @@ export function App() {
     </Drawer>
     {fullApproval && state && queue && (
       <ApprovalView key={`${queue.id}/${queue.revision}`} project={state} queue={queue} chat={orchestrator?.chat ?? []} onChanged={reload} onClose={close}
-        onPanel={() => setForm("panel")} right={wide && (chatOpen || ideasOpen) ? SIDE_RIGHT : undefined} />
+        onPanel={() => setForm("panel")} sidebar={phone ? undefined : SIDEBAR} />
     )}
   </>;
 
@@ -195,7 +184,7 @@ export function App() {
     return (
       <div className="flex h-dvh flex-col">
         {/* The top line: the project picker, what runs, settings. The header's other tools are in Settings here. */}
-        <header ref={header} className="z-30 shrink-0 border-b border-line bg-surface pt-[env(safe-area-inset-top)]">
+        <header className="z-30 shrink-0 border-b border-line bg-surface pt-[env(safe-area-inset-top)]">
           <div className="flex min-h-13 items-center gap-3 px-3 py-2">
             {projects && <ProjectPicker projects={projects} current={projectId} open={isOpen(route.nav, "projects")} onPick={(id) => nav.project(id)} />}
             {state && <RunningNow queues={state.queues} />}
@@ -210,11 +199,11 @@ export function App() {
           {tab === "waiting" && <WaitingList projects={projects ?? []} onOpen={openWaiting} onChoose={(w, o) => { if (w.qid) chooseOption(w.qid, o); openWaiting(w); }} />}
           {tab === "queues" && queuesPage}
           {tab === "chat" && projectId && (
-            <ChatPanel key={`chat-${projectId}`} inline project={projectId} name={state?.project.name ?? projectId} view={orchestrator} onClose={() => nav.tab("waiting")} onChanged={() => setTick((t) => t + 1)} />
+            <ChatPanel key={`chat-${projectId}`} inline project={projectId} name={state?.project.name ?? projectId} view={orchestrator} onChanged={() => setTick((t) => t + 1)} />
           )}
           {tab === "ideas" && projectId && state && (
             <ConversationsPanel key={`ideas-${projectId}`} inline project={projectId} name={state.project.name} version={tick} defaultRuntime={state.project.conversations.runtime}
-              onClose={() => nav.tab("waiting")} onChanged={() => setTick((t) => t + 1)} />
+              onChanged={() => setTick((t) => t + 1)} />
           )}
         </main>
 
@@ -224,50 +213,61 @@ export function App() {
     );
   }
 
+  // A desktop (from 1024 px; UX proposals, 11A and 12A): the projects in a sidebar with the global status at its foot,
+  // and the middle column: the orchestrator chat (what a project opens on), Ideas, or the project's queues from "All
+  // queues". A queue or step opens beside it, on the right, and the column makes room for it.
+  const desk: Desk = {
+    orchestrator,
+    ideas: ideas?.filter((c) => !c.archived).length,
+    tools: <>
+      <WaitingButton projects={projects} onClick={() => nav.open("waiting")} />
+      <button onClick={() => nav.tab("queues")} aria-pressed={view === "queues"}
+        className={`shrink-0 rounded-lg border px-3 py-1.5 text-sm ${view === "queues" ? "border-line-strong bg-surface-3 text-fg" : "border-line-strong text-fg-2 hover:bg-surface hover:text-fg"}`}>All queues</button>
+    </>,
+  };
+  const alerts = (projectsError || projects?.length === 0 || error) && <div className="px-6 pt-4">{banners}</div>;
   return (
-    <div className="flex min-h-full flex-col">
-      <header ref={header} className="sticky top-0 z-30 border-b border-line bg-canvas/90 pt-[env(safe-area-inset-top)] backdrop-blur">
-        {/* From 1024 px; below it the phone's top line and bottom bar take its place. */}
-        <div className="mx-auto flex max-w-7xl items-center gap-4 px-4 py-3">
-          <span className="text-lg font-semibold tracking-tight text-fg">Nexus</span>
-          {projects && <ProjectTabs projects={projects} current={projectId} onPick={(id) => nav.project(id)} />}
-          <WaitingButton projects={projects} onClick={() => nav.open("waiting")} />
-          <UpdatePill info={server} />
-          {projectId && <ConversationsButton onClick={() => nav.raise("ideas")} />}
-          {projectId && <OrchestratorButton view={orchestrator} onClick={() => nav.raise("chat")} />}
-          <UsageMeter version={tick} />
+    <div className="flex h-dvh">
+      <ProjectSidebar projects={projects ?? []} current={projectId} connected={connected} onPick={(id) => nav.project(id)} foot={<>
+        <UpdatePill info={server} />
+        <UsageMeter version={tick} stacked />
+        <div className="-mx-1.5 flex items-center gap-0.5">
           <NotifyToggle {...notify} />
+          <span className="flex-1" />
           {state && <SettingsButton onClick={() => nav.open("settings")} />}
           <RemoteButton onClick={() => nav.open("remote")} />
-          <span className={`flex items-center gap-1.5 text-xs ${connected ? "text-fg-3" : "text-stop"}`} title={connected ? "Live updates on" : "Reconnecting"}>
-            <span className={`h-2 w-2 rounded-full ${connected ? "bg-ok" : "bg-stop"}`} />
-            <span>{connected ? "live" : "offline"}</span>
-          </span>
         </div>
-      </header>
+      </>} />
 
-      <main className="@container mx-auto w-full max-w-7xl flex-1 px-4 py-6"
-        style={wide && (itemShown || chatOpen || ideasOpen) ? { maxWidth: "none", marginLeft: itemShown ? SIDE_LEFT : 0, marginRight: chatOpen || ideasOpen ? SIDE_RIGHT : 0, width: "auto" } : undefined}>
-        {banners}
-
-        {state && state.attention.length > 0 && (
-          <AttentionPanel project={state.project.id} items={state.attention} queues={state.queues} pushAccepted={state.project.defaults.push_accepted}
-            onChanged={reload}
-            onOpen={(a: AttentionItem) => { if (projectId && a.queue) nav.item(projectId, a.queue, attentionTarget(a)); }} />
-        )}
-
-        {queuesPage}
+      <main className="flex min-w-0 flex-1 flex-col" style={itemShown && !fullApproval ? { marginRight: SIDE } : undefined}>
+        {view === "chat" && <>
+          {alerts}
+          {projectId && <ChatPanel key={`chat-${projectId}`} desk={desk} project={projectId} name={state?.project.name ?? projectId} view={orchestrator} onChanged={() => setTick((t) => t + 1)} />}
+        </>}
+        {view === "ideas" && <>
+          {alerts}
+          {projectId && state && (
+            <ConversationsPanel key={`ideas-${projectId}`} desk={desk} project={projectId} name={state.project.name} version={tick} defaultRuntime={state.project.conversations.runtime}
+              onChanged={() => setTick((t) => t + 1)} />
+          )}
+        </>}
+        {view === "queues" && <>
+          <DeskHead desk={desk}>
+            <h1 className="min-w-0 truncate text-sm font-semibold text-fg">{state?.project.name ?? projectId}<span className="font-normal text-fg-3"> · queues</span></h1>
+          </DeskHead>
+          <div className="@container scroll-thin min-h-0 flex-1 overflow-y-auto px-6 py-6">
+            <div className="mx-auto max-w-6xl">
+              {banners}
+              {state && state.attention.length > 0 && (
+                <AttentionPanel project={state.project.id} items={state.attention} queues={state.queues} pushAccepted={state.project.defaults.push_accepted}
+                  onChanged={reload}
+                  onOpen={(a: AttentionItem) => { if (projectId && a.queue) nav.item(projectId, a.queue, attentionTarget(a)); }} />
+              )}
+              {queuesPage}
+            </div>
+          </div>
+        </>}
       </main>
-
-      {/* The chat and the Ideas panel stack in the order they were opened: the later one lies on top. */}
-      {panelOrder(route.nav).map((p) => p === "ideas"
-        ? ideasOpen && projectId && state && (
-          <ConversationsPanel key="ideas" project={projectId} name={state.project.name} version={tick} defaultRuntime={state.project.conversations.runtime}
-            onClose={() => nav.close("ideas")} onChanged={() => setTick((t) => t + 1)} />
-        )
-        : chatOpen && projectId && (
-          <ChatPanel key="chat" project={projectId} name={state?.project.name ?? projectId} view={orchestrator} onClose={() => nav.close("chat")} onChanged={() => setTick((t) => t + 1)} />
-        ))}
 
       <Drawer open={waitingOpen} onClose={() => nav.close("waiting")}>
         <WaitingList projects={projects ?? []} onOpen={openWaiting} />
@@ -277,6 +277,9 @@ export function App() {
     </div>
   );
 }
+
+/** The width of a desktop's project sidebar (Tailwind's w-58), which the approval's full view leaves in sight. */
+const SIDEBAR = "14.5rem";
 
 function Banner({ children }: { children: React.ReactNode }) {
   return <div className="mb-4 rounded-lg border border-line bg-surface px-4 py-3 text-sm text-fg">{children}</div>;

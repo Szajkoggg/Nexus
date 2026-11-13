@@ -1,6 +1,6 @@
-// Switching projects: tabs on a desktop; on the phone (below 1024 px, App decides), a picker that opens from the
+// Switching projects: a sidebar on a desktop; on the phone (below 1024 px, App decides), a picker that opens from the
 // current project's name.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { nav } from "../nav.ts";
 import type { ProjectSummary } from "../api.ts";
@@ -10,24 +10,49 @@ const Waiting = ({ n }: { n: number }) =>
 const Running = ({ n }: { n: number }) =>
   n > 0 ? <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-accent" title={`${n} running`} /> : null;
 
-/** The wide layout: one tab per project. */
-export function ProjectTabs({ projects, current, onPick }: { projects: ProjectSummary[]; current?: string; onPick: (id: string) => void }) {
+/** A project's mark in the sidebar: the first letters of its first two words ("Project Honeycomb" → PH). */
+export const initials = (name: string) =>
+  name.split(/[\s_-]+/).filter(Boolean).slice(0, 2).map((w) => [...w][0]!.toUpperCase()).join("") || "?";
+
+/**
+ * A desktop's sidebar (from 1024 px; UX proposals, 12A): Nexus and whether live updates arrive, every project with its
+ * waiting count and a dot when something runs (the list scrolls when there are many), and at its foot the global
+ * status (`foot`: the update, the usage, notifications, settings, remote access).
+ */
+export function ProjectSidebar({ projects, current, connected, onPick, foot }: {
+  projects: ProjectSummary[]; current?: string; connected: boolean; onPick: (id: string) => void; foot: ReactNode;
+}) {
   return (
-    <nav className="scroll-thin flex flex-1 gap-1 overflow-x-auto">
-      {projects.map((p) => (
-        <button
-          key={p.id}
-          onClick={() => onPick(p.id)}
-          className={`flex shrink-0 items-center gap-2 rounded-lg px-3 py-1.5 text-sm ${p.id === current ? "bg-surface-3 text-fg" : "text-fg-2 hover:bg-surface hover:text-fg"}`}
-        >
-          {p.name}
-          <Waiting n={p.attention.length} />
-          <Running n={p.running} />
-        </button>
-      ))}
-    </nav>
+    <aside className="flex h-full w-58 shrink-0 flex-col border-r border-line bg-surface" aria-label="Projects">
+      <div className="flex items-center gap-2 px-4.5 pb-3 pt-4">
+        <span className="text-base font-semibold tracking-tight text-fg">Nexus</span>
+        <span className="flex-1" />
+        <span className={`flex items-center gap-1.5 text-xs ${connected ? "text-fg-3" : "text-stop"}`} title={connected ? "Live updates on" : "Reconnecting"}>
+          {connected ? "live" : "offline"}<span className={`h-1.5 w-1.5 rounded-full ${connected ? "bg-ok" : "bg-stop"}`} />
+        </span>
+      </div>
+      <div className="px-5 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-fg-3">Projects</div>
+      <nav className="scroll-thin min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2.5 pb-3">
+        {projects.map((p) => {
+          const on = p.id === current;
+          return (
+            <button key={p.id} onClick={() => onPick(p.id)} aria-current={on ? "page" : undefined} title={p.name}
+              className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm ${on ? "bg-surface-3 font-semibold text-fg" : "text-fg-2 hover:bg-surface-2 hover:text-fg"}`}>
+              <span className={`grid h-6.5 w-6.5 shrink-0 place-items-center rounded-md text-xs font-bold ${on ? "bg-accent-strong text-on-accent" : "bg-surface-3 text-fg-2"}`}>{initials(p.name)}</span>
+              <span className="min-w-0 flex-1 truncate">{p.name}</span>
+              <Running n={p.running} />
+              <Count n={p.attention.length} />
+            </button>
+          );
+        })}
+      </nav>
+      <div className="flex shrink-0 flex-col gap-2 border-t border-line px-4 py-3">{foot}</div>
+    </aside>
   );
 }
+
+const Count = ({ n }: { n: number }) =>
+  n > 0 ? <span className="grid h-4.5 min-w-4.5 shrink-0 place-items-center rounded-full bg-warn px-1.5 text-[11px] font-semibold text-canvas" title="Waiting for you">{n}</span> : null;
 
 /**
  * The narrow layout: the current project's name, with its own count and dot; a tap opens the list of all projects

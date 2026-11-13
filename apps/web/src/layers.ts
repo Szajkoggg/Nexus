@@ -8,11 +8,12 @@
 //
 // This part is pure (no window, no history) and unit tested; nav.ts applies its steps to the browser.
 
-/** A layer is a kind, optionally with a value: "chat", "settings", "item" (the queue or step drawer), "conversation:<id>". */
+/** A layer is a kind, optionally with a value: "settings", "item" (the queue or step drawer), "conversation:<id>". */
 export type Layer = string;
 /**
- * The phone's tab (below 1024 px; see "The phone" in DESIGN.md). It is not a layer: switching tabs rewrites the entry
- * it is on and adds none, so Back closes sheets and layers, then leaves. Absent until a tab is picked (the Waiting tab).
+ * The view: the phone's tab (below 1024 px; "The phone" in DESIGN.md), or what a desktop's middle column shows (the
+ * chat, Ideas or the project's queues; "Chat-first on a desktop"). It is not a layer: switching rewrites the entry it
+ * is on and adds none, so Back closes sheets and layers, then leaves. Absent until one is picked (the layout's first).
  */
 export type Tab = "chat" | "waiting" | "queues" | "ideas";
 export interface Nav { hash: string; layers: Layer[]; depth: number; tab?: Tab }
@@ -54,7 +55,7 @@ function reopen(at: Nav, layers: Layer[], hash: string): Step[] {
 
 /**
  * Opens a layer on top (at a new hash, for the drawer). The same kind already open is switched in place: on top by
- * rewriting the entry; lower down (another step while the chat is open beside it, on a wide screen) by going back to
+ * rewriting the entry; lower down (another step while a conversation is open over it, on a desktop) by going back to
  * its entry and opening it and what lay above it again, so Back keeps closing the topmost.
  */
 export function open(cur: Nav, layer: Layer, hash = cur.hash): Step {
@@ -72,27 +73,9 @@ export function open(cur: Nav, layer: Layer, hash = cur.hash): Step {
 }
 
 /**
- * Brings a layer that is open lower down (the chat under the Ideas panel, or the other way round) to the top, with the
- * layers that belong to it (a conversation with its Ideas panel); the layers that lay above it stay open, now below
- * it. Back afterwards closes it and shows the one beneath. One that is closed is opened; one on top stays as it is.
- * When Nexus pushed the entries, that is going back to before it and opening the others and then it again; when it
- * did not (the app started with them open), the entry is rewritten in the new order.
- */
-export function raise(cur: Nav, kind: string): Step {
-  const i = cur.layers.findIndex((x) => kindOf(x) === kind);
-  if (i < 0) return open(cur, kind);
-  const mine = cur.layers.slice(i).filter((l) => belongsTo(l, kind));
-  const others = cur.layers.slice(i + 1).filter((l) => !belongsTo(l, kind));
-  if (!others.length) return { op: "none" };
-  const k = cur.layers.length - i;
-  if (cur.depth >= k) return { op: "back", steps: k, then: (arrived) => reopen(arrived, [...others, ...mine], cur.hash) };
-  return { op: "replace", to: { ...cur, layers: [...cur.layers.slice(0, i), ...others, ...mine] } };
-}
-
-/**
  * Closes the layer of a kind and the layers that belong to it (a conversation with the Ideas panel, an image with
- * its step). When Nexus pushed their entries, that is going back; layers above it that do not belong to it (the
- * chat beside a step on a wide screen) are opened again after it. When Nexus did not push them (the app started
+ * its step). When Nexus pushed their entries, that is going back; layers above it that do not belong to it (a
+ * conversation opened beside the step on a desktop) are opened again after it. When Nexus did not push them (the app started
  * with them open), the current entry is rewritten without them (at `closedHash` when the drawer closes).
  */
 export function close(cur: Nav, kind: string, closedHash = cur.hash): Step {
@@ -149,55 +132,76 @@ export function navOf(state: unknown, hash: string, query: string): Nav {
   return { hash, layers, depth: 0 };
 }
 
-export type SidePanel = "chat" | "ideas";
+// ---------------------------------------------------------------- the views: the phone's tabs, a desktop's middle
 
-/**
- * The chat and the Ideas panel that are open, bottom first: the one opened last lies on top, on a phone (both over
- * the page) and on a wide screen (both on the right). A conversation counts as the Ideas panel it belongs to.
- */
-export function panelOrder(nav: Nav): SidePanel[] {
-  const at = (p: SidePanel) => nav.layers.findIndex((l) => (p === "ideas" ? kindOf(l) === "ideas" || kindOf(l) === "conversation" : kindOf(l) === p));
-  return (["chat", "ideas"] as const).filter((p) => at(p) >= 0).sort((a, b) => at(a) - at(b));
-}
-
-// ---------------------------------------------------------------- the phone
+/** Which layout reads an entry: the phone (below 1024 px) or a desktop (from 1024 px). */
+export type Layout = "phone" | "desk";
 
 export const TABS: readonly Tab[] = ["chat", "waiting", "queues", "ideas"];
 
-/** The layers the phone shows as tabs instead: the chat, the Ideas panel and the waiting list. */
-const TABBED: Record<string, Tab> = { chat: "chat", ideas: "ideas", waiting: "waiting" };
+/**
+ * The layers a layout shows as a view instead: on the phone the chat, the Ideas panel and the waiting list are tabs;
+ * on a desktop the chat and Ideas are the middle column (the waiting list stays a drawer there).
+ */
+const TABBED: Record<Layout, Record<string, Tab>> = {
+  phone: { chat: "chat", ideas: "ideas", waiting: "waiting" },
+  desk: { chat: "chat", ideas: "ideas" },
+};
+/** The views a layout has, the first shown when none is picked (or the picked one is not the layout's). */
+const VIEWS: Record<Layout, readonly Tab[]> = { phone: ["waiting", "chat", "queues", "ideas"], desk: ["chat", "ideas", "queues"] };
+
+/** The view a layer stands for in a layout ("chat" → the chat), or undefined when it stays a layer. */
+export const viewFor = (layout: Layout, layer: Layer): Tab | undefined => TABBED[layout][layer];
 
 /**
- * What the phone shows for an entry: its tab, and the layers over it. A chat, Ideas or waiting layer (from a link with
- * ?chat, a wide window made narrow, or "Chat about this" on a step) is shown as its tab, the topmost of them winning;
- * a conversation stays a layer, over the Ideas tab. Without either, the Waiting tab.
+ * What a layout shows for an entry: its view (the phone's tab, a desktop's middle column), and the layers over it. A
+ * chat, Ideas or (on the phone) waiting layer, from a link with ?chat, a window resized across 1024 px or older code,
+ * is shown as its view, the topmost of them winning; a conversation stays a layer, over the Ideas view. Without
+ * either, the entry's tab, or the layout's first view: Waiting on the phone, the chat on a desktop.
  */
-export function phoneView(nav: Nav): { tab: Tab; layers: Layer[] } {
-  const tabbed = nav.layers.filter((l) => kindOf(l) in TABBED || kindOf(l) === "conversation");
-  const top = tabbed.at(-1);
-  const tab = top === undefined ? nav.tab ?? "waiting" : kindOf(top) === "conversation" ? "ideas" : TABBED[kindOf(top)]!;
-  return { tab, layers: nav.layers.filter((l) => !(kindOf(l) in TABBED)) };
+export function viewOf(nav: Nav, layout: Layout): { tab: Tab; layers: Layer[] } {
+  const tabbed = TABBED[layout];
+  const top = nav.layers.filter((l) => kindOf(l) in tabbed || kindOf(l) === "conversation").at(-1);
+  const own = nav.tab !== undefined && VIEWS[layout].includes(nav.tab) ? nav.tab : VIEWS[layout][0]!;
+  const tab = top === undefined ? own : kindOf(top) === "conversation" ? "ideas" : tabbed[kindOf(top)]!;
+  return { tab, layers: nav.layers.filter((l) => !(kindOf(l) in tabbed)) };
 }
+export const phoneView = (nav: Nav) => viewOf(nav, "phone");
 
 /**
- * Switches the phone's tab. It adds no entry: what is open over the current tab (a conversation, a sheet) closes
- * first, going back over the entries Nexus pushed for it, and the entry arrived at is rewritten with the new tab.
- * Tapping the tab already shown closes what is open over it (a conversation back to the list).
+ * Switches the view. It adds no entry: on the phone what is open over the current tab (a conversation, a sheet)
+ * closes first, going back over the entries Nexus pushed for it, and the entry arrived at is rewritten with the new
+ * tab; tapping the tab already shown closes what is open over it (a conversation back to the list). On a desktop what
+ * lies beside the middle column (a queue or step, its image) stays open: Nexus goes back to the entry below it,
+ * rewrites that with the new view and opens it again, so Back afterwards still closes it and keeps the view; only a
+ * conversation, which belongs to the Ideas view, closes.
  */
-export function switchTab(cur: Nav, tab: Tab): Step {
+export function switchTab(cur: Nav, tab: Tab, layout: Layout = "phone"): Step {
   const n = cur.layers.length;
-  const rewrite = (at: Nav): Step => ({ op: "replace", to: { ...at, tab, layers: [] } });
-  if (n && cur.depth >= n) return { op: "back", steps: n, then: (arrived) => [rewrite(arrived)] };
-  if (!n && phoneView(cur).tab === tab) return { op: "none" };
-  return rewrite(cur);
+  if (layout === "phone") {
+    const rewrite = (at: Nav): Step => ({ op: "replace", to: { ...at, tab, layers: [] } });
+    if (n && cur.depth >= n) return { op: "back", steps: n, then: (arrived) => [rewrite(arrived)] };
+    if (!n && phoneView(cur).tab === tab) return { op: "none" };
+    return rewrite(cur);
+  }
+  const keep = cur.layers.filter((l) => !(kindOf(l) in TABBED.desk) && kindOf(l) !== "conversation");
+  if (keep.length === n && viewOf(cur, "desk").tab === tab) return { op: "none" };
+  if (n && cur.depth >= n) {
+    return {
+      op: "back", steps: n,
+      then: (arrived) => { const at: Nav = { ...arrived, tab, layers: [] }; return [{ op: "replace", to: at }, ...reopen(at, keep, cur.hash)]; },
+    };
+  }
+  return { op: "replace", to: { ...cur, tab, layers: keep } };
 }
 
 /**
- * Shows a project's page, in place (switching projects is not a layer, so Back does not walk through them). What is
- * open closes first. On the phone the Waiting tab shows afterwards: the chat does not open by itself.
+ * Shows a project, in place (switching projects is not a layer, so Back does not walk through them). What is open
+ * closes first. Then the phone shows its Waiting tab (the chat does not open by itself there), a desktop the
+ * project's orchestrator chat.
  */
-export function switchProject(cur: Nav, hash: string, phone: boolean): Step {
-  const patch: Partial<Nav> = phone ? { tab: "waiting" } : {};
+export function switchProject(cur: Nav, hash: string, layout: Layout): Step {
+  const patch: Partial<Nav> = { tab: layout === "phone" ? "waiting" : "chat" };
   return cur.layers.length
     ? closeThen(cur, kindOf(cur.layers[0]!), hash, undefined, patch)
     : { op: "replace", to: { ...cur, ...patch, hash } };
@@ -221,11 +225,12 @@ export function andThen(cur: Nav, first: Step, next: (at: Nav) => Step): Step {
 }
 
 /**
- * Opens a conversation on the phone: over the Ideas tab. From elsewhere (a step's sheet, another tab) what is open
- * closes first and the Ideas tab shows; from another conversation, it is switched in place.
+ * Opens a conversation over the Ideas view. From another view the view switches first: on the phone what is open
+ * (a step's sheet, from "Chat about this") closes; on a desktop a step stays open beside it. From another
+ * conversation, it is switched in place. Back returns to the list.
  */
-export function phoneConversation(cur: Nav, id: string): Step {
-  const onIdeas = phoneView(cur).tab === "ideas" && cur.layers.every((l) => kindOf(l) === "conversation");
+export function openConversation(cur: Nav, id: string, layout: Layout = "phone"): Step {
   const layer = `conversation:${id}`;
-  return onIdeas ? open(cur, layer) : andThen(cur, switchTab(cur, "ideas"), (at) => open(at, layer));
+  const onIdeas = viewOf(cur, layout).tab === "ideas" && (layout === "desk" || cur.layers.every((l) => kindOf(l) === "conversation"));
+  return onIdeas ? open(cur, layer) : andThen(cur, switchTab(cur, "ideas", layout), (at) => open(at, layer));
 }

@@ -20,9 +20,21 @@ summary, checks, review material, commits and reason once it has an outcome. Whe
 next message tells the partner what changed. Talking changes nothing in the run: a step in review keeps waiting for
 you. The step lists its conversations, and a conversation shows its step ("about step W/W3"), a link back to it.
 
-**Back.** The back button (on a phone also the back gesture) closes what is open on top: a chat, the Ideas panel or
-a conversation in it, Settings, a queue or step, a review image. With nothing open it leaves Nexus. Escape does the same on a
-computer.
+**Back.** The back button (on a phone also the back gesture) closes what is open on top: a conversation, Settings, a
+queue or step, a review image, the waiting list. Switching between the orchestrator chat, Ideas and the queues, and
+switching projects, are not steps for Back. With nothing open it leaves Nexus. Escape does the same on a computer.
+
+**On a computer** (a window of 1024 px and more) the projects are in a sidebar on the left, each with what waits for
+you in it and a dot while something runs; any number fit, the list scrolls. At its foot: an update going on, the
+usage, notifications, the project's settings and remote access; "live" at its top says whether updates arrive. The
+middle is the conversation: clicking a project opens its orchestrator chat. The chat's header switches between
+**Orchestrator** and **Ideas** (with how many conversations there are); "Tool calls" shows the tool lines, ⋯ has "New
+conversation". **All queues** at the right of the header shows the project's queues, what waits in it and its
+finished queues; the inbox button beside it lists what waits in all projects. A queue or step opens on the right, beside
+the chat, which stays usable: switching to Ideas or the queues keeps it open, and "Chat about this" opens the
+conversation in the middle with the step still beside it. A queue waiting for approval opens in full beside the
+sidebar; "Ask the orchestrator…" there turns it into the panel on the right and puts the queue's reference in the
+chat's box.
 
 **On a phone** (and in any window narrower than 1024 px) a bar at the bottom has four tabs: **Orchestrator** (the
 chat), **Waiting** (what waits for you in all projects, with the count), **Queues** and **Ideas**. One tap switches.
@@ -39,16 +51,12 @@ computer. "Running" means a run is really at work; a queue whose run is paused s
 highlighted with why and its action (**Continue…**, **Review…**, its questions). On a phone the list is one column, the
 finished steps before it and the steps after the next three are folded into one line each; a tap unfolds them.
 
-**On a wide screen** (1280 px and more) a queue or step opens on the left and the orchestrator or Ideas on the
-right, both at once, with the queue list between them: click another step and the chat stays open.
-
 **One action bar.** Every queue and step panel ends with the same bar, always in sight however long the panel is:
 the main action on the right (Accept and go on, Approve revision N, Continue, Answer), the second left of it (Fix
 it…), and everything else under ⋯ (Reject, a note with the acceptance, your words with an approval, Withdraw
 approval, the queue's "After each step"). What an action needs (Fix it's text, a reason) opens just above the bar.
-The header says where you are, what it is and its status, with ✕ at the top right. The chats follow the same rule:
-Orchestrator | Ideas on the left, ⋯ and ✕ on the right; "New conversation" (which makes the orchestrator start over)
-and showing the tool calls are under ⋯.
+The header says where you are, what it is and its status, with ✕ at the top right. A conversation in Ideas has its
+actions under ⋯; the orchestrator's "New conversation" (which makes it start over) is under the chat's ⋯.
 
 **Reviewing a step** opens on its summary and its pictures, large, two per row, with your marks; the checks, the
 goal and acceptance, the commits and the timeline are one line below, folded. A picture opens in the viewer: full
@@ -236,16 +244,16 @@ proxy or from another address needs the access token once (it sets a cookie for 
    phone and sign in with the same account.
 2. In the Tailscale admin console, under DNS, turn on MagicDNS and HTTPS certificates.
 3. Publish Nexus to your tailnet only: `tailscale serve --bg 4317` (not `funnel`, which would make it public).
-4. On the PC, open the dashboard's Remote access panel (the phone icon in the header): it shows the address, the
+4. On the PC, open the dashboard's Remote access panel (the phone icon at the foot of the project sidebar): it shows the address, the
    token and a QR code. Scan it with the phone: it opens Nexus and signs in.
 5. On the phone, add Nexus to the home screen (iPhone: Share, Add to Home Screen), open it from there and turn on
    the bell: notifications arrive even with Nexus closed. "Send a test notification" in the panel checks it.
 
-On a narrow screen the project tabs give way to a picker: the current project's name at the top left, with its
+On a narrow screen the project sidebar gives way to a picker: the current project's name at the top left, with its
 "waiting for you" count and running dot. Tap it for the list of all projects (each with its count and dot), tap one to
-switch. The header's tools move to a second row there.
+switch.
 
-The inbox button in the header counts what waits for you in all projects (questions, approvals, steps in review,
+The inbox button (in the chat's header on a computer, the Waiting tab on a phone) counts what waits for you in all projects (questions, approvals, steps in review,
 halted runs, failed steps). It opens one list of them, newest first, each with its project; tap an item to open it.
 
 "After each step" (in Settings for the project, under ⋯ in a queue's bar for that queue) can also be "wait for the orchestrator's

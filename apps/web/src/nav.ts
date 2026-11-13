@@ -1,6 +1,6 @@
 // Applies layers.ts to the browser: history entries, Back, Escape, and a React hook to read what is open.
 import { useSyncExternalStore } from "react";
-import { close, closeThen, closeTop, isOpen, navOf, open, phoneConversation, raise, switchProject, switchTab, type Layer, type Nav, type Step, type Tab } from "./layers.ts";
+import { close, closeThen, closeTop, navOf, open, openConversation, switchProject, switchTab, viewFor, type Layer, type Layout, type Nav, type Step, type Tab } from "./layers.ts";
 import { PHONE } from "./phone.ts";
 
 const write = (n: Nav, how: "push" | "replace") =>
@@ -54,9 +54,11 @@ function start(): void {
 /** The hash of the current project's page, without a queue or step. */
 const projectHash = () => current.hash.replace(/^(#\/[^/]+).*$/, "$1");
 const hashOf = (...parts: (string | undefined)[]) => "#/" + parts.filter((x): x is string => !!x).map(encodeURIComponent).join("/");
-/** The phone layout (below 1024 px): the chat, Ideas and the waiting list are tabs there, not layers. */
-const phone = () => typeof matchMedia !== "undefined" && matchMedia(PHONE).matches;
-const TAB_OF: Record<string, Tab> = { chat: "chat", ideas: "ideas", waiting: "waiting" };
+/**
+ * The layout: the phone below 1024 px (the chat, Ideas and the waiting list are tabs there), a desktop from 1024 px
+ * (the chat and Ideas are its middle column). Either way they are views, not layers.
+ */
+const layout = (): Layout => typeof matchMedia !== "undefined" && matchMedia(PHONE).matches ? "phone" : "desk";
 
 /** What is open now; re-renders when it changes. */
 export function useNav(): Nav {
@@ -65,27 +67,25 @@ export function useNav(): Nav {
 }
 
 export const nav = {
-  /** Opens a panel or a nested layer ("chat", "conversation:<id>"…) on top. */
-  open: (layer: Layer) => apply(phone() && layer in TAB_OF ? switchTab(current, TAB_OF[layer]!) : open(current, layer)),
   /**
-   * Brings a panel to the top: up from beneath another, or opened when it is closed (the chat switch, header buttons).
-   * On the phone the chat and Ideas are tabs: their tab shows.
+   * Opens a layer ("settings", "conversation:<id>"…) on top. The chat and Ideas (on the phone also the waiting list)
+   * are views: opening one shows it (`switchTab`).
    */
-  raise: (kind: string) => apply(phone() && kind in TAB_OF ? switchTab(current, TAB_OF[kind]!) : raise(current, kind)),
-  /** Opens a conversation in the Ideas panel, opening the panel first when it is closed (on the phone, the Ideas tab). */
-  conversation: (id: string) => {
-    if (phone()) { apply(phoneConversation(current, id)); return; }
-    if (!isOpen(current, "ideas")) apply(open(current, "ideas"));
-    apply(open(current, `conversation:${id}`));
+  open: (layer: Layer) => {
+    const l = layout();
+    const view = viewFor(l, layer);
+    apply(view ? switchTab(current, view, l) : open(current, layer));
   },
-  /** The phone's tabs: Orchestrator, Waiting, Queues, Ideas. A switch adds no history entry. */
-  tab: (tab: Tab) => apply(switchTab(current, tab)),
+  /** Opens a conversation over the Ideas view, showing that view first. */
+  conversation: (id: string) => apply(openConversation(current, id, layout())),
+  /** Shows a view: the phone's tabs (Orchestrator, Waiting, Queues, Ideas), a desktop's middle column. No history entry. */
+  tab: (tab: Tab) => apply(switchTab(current, tab, layout())),
   /** Closes the layer of this kind and what lies above it. */
   close: (kind: string) => apply(close(current, kind, kind === "item" ? projectHash() : current.hash)),
   /** Opens a queue or step in its drawer; from one already open, it switches in place. */
   item: (project: string, queue: string, step?: string) => apply(open(current, "item", hashOf(project, queue, step))),
-  /** Shows a project's page, in place: switching projects is not a layer, so Back does not walk through them. */
-  project: (project: string) => apply(switchProject(current, hashOf(project), phone())),
+  /** Shows a project, in place: switching projects is not a layer, so Back does not walk through them. */
+  project: (project: string) => apply(switchProject(current, hashOf(project), layout())),
   /** Closes a layer, then opens a queue or step in another project (the waiting list). */
   closeThenItem: (kind: string, project: string, queue?: string, step?: string) =>
     apply(queue ? closeThen(current, kind, hashOf(project, queue, step), "item") : closeThen(current, kind, hashOf(project))),

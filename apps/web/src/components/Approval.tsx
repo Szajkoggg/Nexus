@@ -93,12 +93,12 @@ export function useCtrlEnter(enabled: boolean, go: () => void) {
 export function askOrchestrator(project: string, queue: QueueView) {
   const key = draftKey(project, "orchestrator");
   putDraft(key, withReference(readDraft(key), queueReference(queue.id, queue.revision)));
-  nav.raise("chat");
+  nav.open("chat");
 }
 
-/** "Ask the orchestrator…" as a button of an action bar. */
-export const AskButton = ({ project, queue }: { project: string; queue: QueueView }) => (
-  <Button variant="quiet" onClick={() => askOrchestrator(project, queue)}>Ask the orchestrator…</Button>
+/** "Ask the orchestrator…" as a button of an action bar; `first` runs before it (the full view becomes its panel). */
+export const AskButton = ({ project, queue, first }: { project: string; queue: QueueView; first?: () => void }) => (
+  <Button variant="quiet" onClick={() => { first?.(); askOrchestrator(project, queue); }}>Ask the orchestrator…</Button>
 );
 
 // ---------------------------------------------------------------- shared parts
@@ -249,11 +249,12 @@ export function CompactSteps({ project, queue, chat, onFull }: { project: Projec
 /**
  * The whole queue in one scroll (mockup 15): where it is and its title, its status, run settings and who proposed it
  * on one line; an outline on the left (description, each step, stop conditions, checks) that follows the scroll and
- * jumps on a click; every step's goal and acceptance in the page; the action bar with what approving pins. Beside a
- * chat open on a wide screen it leaves the chat its room (`right`).
+ * jumps on a click; every step's goal and acceptance in the page; the action bar with what approving pins. On a
+ * desktop it leaves the project sidebar in sight (`sidebar`, its width); "Ask the orchestrator…" shows the queue as a
+ * panel beside the chat, so the chat and the queue are both in view.
  */
-export function ApprovalView({ project, queue, chat, right, onClose, onPanel, onChanged }: {
-  project: ProjectState; queue: QueueView; chat: readonly ChatEntry[]; right?: string;
+export function ApprovalView({ project, queue, chat, sidebar, onClose, onPanel, onChanged }: {
+  project: ProjectState; queue: QueueView; chat: readonly ChatEntry[]; sidebar?: string;
   onClose: () => void; onPanel: () => void; onChanged: () => void;
 }) {
   const id = project.project.id;
@@ -317,7 +318,7 @@ export function ApprovalView({ project, queue, chat, right, onClose, onPanel, on
     : a.note ? <span className="text-info">{a.note}</span>
     : <>{a.hint} · Ctrl+Enter</>;
   return (
-    <div role="dialog" aria-label={`Approve queue ${queue.id}`} className="fixed inset-y-0 left-0 z-40 flex flex-col bg-canvas pt-[env(safe-area-inset-top)]" style={{ right: right ?? 0 }}>
+    <div role="dialog" aria-label={`Approve queue ${queue.id}`} className="fixed inset-y-0 right-0 z-40 flex flex-col bg-canvas pt-[env(safe-area-inset-top)]" style={{ left: sidebar ?? 0 }}>
       <header className="shrink-0 border-b border-line bg-surface px-5 pb-3.5 pt-3 sm:px-7 sm:pt-4">
         <div className="flex items-center gap-2 text-xs text-fg-3">
           <span className="min-w-0 truncate">{project.project.name} · queue · revision {queue.revision}</span>
@@ -375,7 +376,7 @@ export function ApprovalView({ project, queue, chat, right, onClose, onPanel, on
           </div>
         </div>
       </div>
-      <ActionBar hint={hint} menu={menu} secondary={<AskButton project={id} queue={queue} />}
+      <ActionBar hint={hint} menu={menu} secondary={<AskButton project={id} queue={queue} first={onPanel} />}
         primary={<Button disabled={a.disabled} onClick={a.submit}>{a.label}</Button>}>
         {a.wordsBox}
       </ActionBar>

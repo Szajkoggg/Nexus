@@ -57,8 +57,8 @@ export function Markdown({ children, className = "" }: { children: string; class
 }
 
 /**
- * A window wide enough for a step's details on the left and a chat on the right at once (1280 px: below it, two
- * readable panels, about 510 and 430 px, would leave the queue list no room at all).
+ * A window wide enough for the right rail beside a desktop's chat (UX proposals, 11A: from 1280 px; between 1024 and
+ * 1280 px the rail folds into a button). The breakpoint is N2B.3's, where two readable panels still fit beside a column.
  */
 export const WIDE = "(min-width: 1280px)";
 export function useWide(): boolean {
@@ -72,9 +72,8 @@ export function useWide(): boolean {
   return wide;
 }
 
-/** Widths of the side panels on a wide screen; the queue list keeps what lies between them. */
-export const SIDE_LEFT = "min(36rem, 40vw)";
-export const SIDE_RIGHT = "min(30rem, 34vw)";
+/** The width of a queue or step open beside a desktop's middle column, which keeps what is left of the window. */
+export const SIDE = "min(36rem, 40vw)";
 
 export function useNow(intervalMs = 30_000): number {
   const [now, setNow] = useState(Date.now());
@@ -220,18 +219,34 @@ interface ComposerProps {
   verbatim?: boolean;
   /** One line that grows with the text (up to six), and a round Send beside it: the phone's chat. */
   oneLine?: boolean;
+  /** A card holding a box that grows with the text (up to ten lines), Ctrl+Enter and Send at its right: a desktop's chat. */
+  card?: boolean;
 }
 
-function ComposerBox({ draft, placeholder, button, onSubmit, allowEmpty = false, rows = 3, extra, verbatim = false, oneLine = false }: ComposerProps) {
+function ComposerBox({ draft, placeholder, button, onSubmit, allowEmpty = false, rows = 3, extra, verbatim = false, oneLine = false, card = false }: ComposerProps) {
   const t = useDraftText({ draft, onSubmit, allowEmpty, verbatim });
   const box = useRef<HTMLTextAreaElement>(null);
-  // The one-line box grows with what is typed, up to six lines, then scrolls.
+  // The one-line box grows with what is typed, up to six lines (the card's up to ten), then scrolls.
   useEffect(() => {
     const b = box.current;
-    if (!oneLine || !b) return;
+    if (!(oneLine || card) || !b) return;
     b.style.height = "auto";
-    b.style.height = `${Math.min(b.scrollHeight, 6 * 22 + 22)}px`;
-  }, [oneLine, t.text]);
+    b.style.height = `${Math.min(b.scrollHeight, (card ? 10 : 6) * 22 + (card ? 12 : 22))}px`;
+  }, [oneLine, card, t.text]);
+  if (card) {
+    return (
+      <div>
+        <div className="flex items-end gap-2.5 rounded-2xl border border-line-strong bg-surface py-2 pl-4 pr-2 focus-within:border-accent">
+          <textarea ref={box} value={t.text} rows={2} placeholder={placeholder} aria-label={placeholder}
+            onChange={(e) => t.change(e.target.value)} onKeyDown={t.onKeyDown}
+            className="min-h-14 flex-1 resize-none bg-transparent py-1.5 text-sm leading-[22px] text-fg placeholder:text-fg-3 focus:outline-none" />
+          <span className="mb-2 shrink-0 rounded border border-line-strong px-1.5 text-[11px] text-fg-3">Ctrl+Enter</span>
+          <Button onClick={t.submit} disabled={!t.ready}>{t.busy ? "Sending…" : button}</Button>
+        </div>
+        {t.error && <p className="mt-1 text-xs text-danger">{t.error}</p>}
+      </div>
+    );
+  }
   if (oneLine) {
     return (
       <div>
@@ -410,18 +425,18 @@ export function PanelBody({ children }: { children: ReactNode }) {
 // ---------------------------------------------------------------- drawer
 
 /**
- * A panel from the right. Escape and Back close it through nav.ts, which knows which layer is on top. With `left`, a
- * panel beside the page instead (a step's details on a wide screen): below the header, no backdrop, the page usable.
+ * A panel from the right. Escape and Back close it through nav.ts, which knows which layer is on top. With `beside`, a
+ * panel beside the middle column instead (a queue or step on a desktop): no backdrop, the chat usable beside it.
  * With `panel`, the content brings its own PanelHeader (with ✕), PanelBody and ActionBar; else the drawer scrolls
  * and has ✕ itself.
  */
-export function Drawer({ open, onClose, left, panel, children }: { open: boolean; onClose: () => void; left?: boolean; panel?: boolean; children: ReactNode }) {
+export function Drawer({ open, onClose, beside, panel, children }: { open: boolean; onClose: () => void; beside?: boolean; panel?: boolean; children: ReactNode }) {
   if (!open) return null;
   const content = panel ? children : <><CloseButton onClose={onClose} className="absolute right-3 top-3" /><div className="p-5 pt-6 sm:p-6 max-lg:px-4 max-lg:pt-14">{children}</div></>;
-  if (left) {
+  if (beside) {
     return (
-      <aside className={`fixed bottom-0 left-0 z-20 border-r border-line bg-surface shadow-xl ${panel ? "flex flex-col" : "scroll-thin overflow-y-auto"}`}
-        style={{ top: "var(--header-h, 0px)", width: SIDE_LEFT }}>
+      <aside className={`fixed inset-y-0 right-0 z-20 border-l border-line bg-surface shadow-xl ${panel ? "flex flex-col" : "scroll-thin overflow-y-auto"}`}
+        style={{ width: SIDE }}>
         {content}
       </aside>
     );
