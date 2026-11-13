@@ -20,6 +20,16 @@ export async function act(project: string, method: "POST" | "PATCH" | "DELETE", 
 
 export const enc = encodeURIComponent;
 
+/** A write whose answer matters: resolves with the server's `result` (e.g. `{ message }`); rejects with its reason. */
+export async function actResult<T>(project: string, method: "POST" | "PATCH" | "DELETE", path: string, body: unknown = {}): Promise<T | null> {
+  const r = await fetch(`/api/projects/${encodeURIComponent(project)}${path}`, {
+    method, headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+  });
+  const b = await r.json().catch(() => ({})) as { result?: T; error?: string };
+  if (!r.ok) throw new Error(b.error ?? r.statusText);
+  return b.result ?? null;
+}
+
 export interface Usage { updated_at: string; windows: Record<string, { utilization: number; resets_at?: string; status?: string }> }
 export interface ActivityEntry { at: string; kind: string; text: string; queue?: string; step?: string }
 

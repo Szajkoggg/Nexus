@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { Event, StatusChange } from "@nexus/protocol";
 import { stopPlace } from "@nexus/protocol/attention";
 import { stepValuesText } from "@nexus/protocol/steps";
-import { act, enc, fileUrl, useFetch, type ProjectState, type QuestionView, type QueueView, type StepView } from "../api.ts";
+import { act, actResult, enc, fileUrl, useFetch, type ProjectState, type QuestionView, type QueueView, type StepView } from "../api.ts";
 import { noteTargets, pairPictures, showsReviewActions } from "../review.ts";
 import { Button, Composer, Expandable, Markdown, Section, StatusBadge, StepTimes, TimeAgo, reviewLabel } from "./ui.tsx";
 import { Activity, RetryNote, RunControls } from "./Run.tsx";
@@ -657,12 +657,79 @@ function AnswerBox({ q, project, onChanged }: { q: QuestionView; project: string
  * A stopped queue: why, where, and the way on. Continue (the user's lift) only when the current revision is approved;
  * otherwise approving the revision lifts the stop. The orchestrator's proposal, when there is one, is shown with it.
  */
-function StopBox({ project, queue, onChanged }: { project: string; queue: QueueView; onChanged: () => void }) {
+interface LeftView {
+  step: string;
+  commits: { sha: string; subject: string; author: string; at: string; files: number; insertions: number; deletions: number }[];
+  uncommitted: { status: string; path: string }[];
+  uncommitted_note: string;
+  discarded: { at: string } | null;
+}
+
+/**
+ * What the stopped step left: its own commits, with Keep or Discard when there are any, and the checkout's uncommitted
+ * changes, which are not necessarily the step's and are never cleaned.
+ */
+function StoppedWork({ left, work, setWork, needsChoice, pushAccepted, branch }: {
+  left: LeftView; work?: "keep" | "discard"; setWork: (w: "keep" | "discard") => void; needsChoice: boolean; pushAccepted: boolean; branch?: string;
+}) {
+  if (!left.commits.length && !left.uncommitted.length) return <p className="mt-3 text-xs text-zinc-400">Step {left.step} left no commits and no uncommitted changes.</p>;
+  const n = left.commits.length;
+  const option = (value: "keep" | "discard", title: string, text: string) => (
+    <label className={`flex cursor-pointer gap-2 rounded-md p-2 ring-1 ${work === value ? "bg-zinc-900 ring-sky-500/60" : "ring-zinc-700/60 hover:bg-zinc-900/60"}`}>
+      <input type="radio" name="stopped-work" checked={work === value} onChange={() => setWork(value)} className="mt-1 accent-sky-500" />
+      <span><span className="font-medium text-zinc-100">{title}</span><span className="block text-xs text-zinc-400">{text}</span></span>
+    </label>
+  );
+  return (
+    <div className="mt-3 space-y-3 rounded-md bg-zinc-900/70 p-2.5">
+      {n > 0 && (
+        <div>
+          <p className="text-xs text-zinc-400">Step {left.step} left {n} commit{n === 1 ? "" : "s"} of its own:</p>
+          <ul className="mt-1 space-y-1">
+            {left.commits.map((c) => (
+              <li key={c.sha} className="text-sm">
+                <span className="font-mono text-xs text-zinc-500">{c.sha.slice(0, 7)}</span> <span className="text-zinc-200">{c.subject}</span>
+                <span className="block pl-[3.6rem] text-[11px] text-zinc-500">{c.files} file{c.files === 1 ? "" : "s"} · <span className="text-emerald-400/80">+{c.insertions}</span> <span className="text-red-400/80">−{c.deletions}</span> · <TimeAgo at={c.at} /></span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {left.uncommitted.length > 0 && (
+        <div>
+          <p className="text-xs text-zinc-400">Uncommitted changes {left.uncommitted_note}; Nexus never cleans them:</p>
+          <ul className="mt-1 space-y-0.5 font-mono text-xs text-zinc-300">
+            {left.uncommitted.map((u) => <li key={u.path} className="break-all"><span className="inline-block w-6 text-amber-300/90">{u.status}</span>{u.path}</li>)}
+          </ul>
+        </div>
+      )}
+      {left.discarded && <p className="text-sm text-zinc-300">You chose to discard these commits <TimeAgo at={left.discarded.at} />: the orchestrator proposes a revision that reverts them, and approving it lifts the stop.</p>}
+      {needsChoice && (
+        <div className="space-y-1.5" role="radiogroup" aria-label="The stopped step's commits">
+          {option("keep", "Keep", pushAccepted
+            ? `The commits stay, and go out with the next accepted step's push${branch ? ` to ${branch}` : ""}.`
+            : `The commits stay, local in the branch${branch ? ` ${branch}` : ""}; nothing is pushed.`)}
+          {option("discard", "Discard", "The stop stays. The orchestrator proposes a revision whose first step reverts these commits (and only these); approving it lifts the stop.")}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StopBox({ project, queue, onChanged, left, work, setWork, needsChoice, pushAccepted, note, setNote }: {
+  project: string; queue: QueueView; onChanged: () => void;
+  left?: LeftView; work?: "keep" | "discard"; setWork: (w: "keep" | "discard") => void; needsChoice: boolean; pushAccepted: boolean;
+  note?: string; setNote: (n: string | undefined) => void;
+}) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const go = async () => {
-    setBusy(true); setError(undefined);
-    try { await act(project, "POST", `/queues/${enc(queue.id)}/continue`); onChanged(); }
+    setBusy(true); setError(undefined); setNote(undefined);
+    try {
+      const r = await actResult<{ message?: string } | string>(project, "POST", `/queues/${enc(queue.id)}/continue`, needsChoice ? { work } : {});
+      if (r && typeof r === "object" && r.message) setNote(r.message);
+      onChanged();
+    }
     catch (e) { setError((e as Error).message); }
     finally { setBusy(false); }
   };
@@ -677,14 +744,18 @@ function StopBox({ project, queue, onChanged }: { project: string; queue: QueueV
           <p className="mt-0.5 text-zinc-200">{p.reason}</p>
         </div>
       )}
+      {left && <StoppedWork left={left} work={work} setWork={setWork} needsChoice={needsChoice} pushAccepted={pushAccepted} branch={queue.branch} />}
       {queue.approved ? (
         <div className="mt-3 flex flex-wrap items-center gap-3">
-          <Button disabled={busy} onClick={() => void go()}>Continue</Button>
-          <span className="text-xs text-zinc-400">Lifts the stop; the stopped step runs again in its session, unless it was skipped.</span>
+          <Button disabled={busy || (needsChoice && !work)} onClick={() => void go()}>{needsChoice && work === "discard" ? "Discard and ask for a revert" : "Continue"}</Button>
+          <span className="text-xs text-zinc-400">
+            {needsChoice && !work ? "Choose Keep or Discard first." : needsChoice && work === "discard" ? "The stop stays until you approve the orchestrator's revert." : "Lifts the stop; the stopped step runs again in its session, unless it was skipped."}
+          </span>
         </div>
       ) : (
-        <p className="mt-3 text-xs text-zinc-400">Revision {queue.revision} is not approved yet: approving it lifts the stop.</p>
+        <p className="mt-3 text-xs text-zinc-400">Revision {queue.revision} is not approved yet: approving it lifts the stop{needsChoice ? " (with your choice above)" : ""}.</p>
       )}
+      {note && <p className="mt-2 text-xs text-sky-300">{note}</p>}
       {error && <p className="mt-2 text-xs text-red-300">{error}</p>}
     </div>
   );
@@ -775,6 +846,11 @@ export function QueueDetail({ project, queue, onChanged }: Props) {
   const [error, setError] = useState<string>();
   const setPolicy = (review_policy: string | null) =>
     act(id, "PATCH", `/queues/${enc(queue.id)}`, { review_policy }).then(onChanged, (e: Error) => setError(e.message));
+  // A stopped queue: what its stopped step left, and the user's Keep or Discard, shared by Continue and the approval.
+  const left = useFetch<LeftView | null>(queue.status === "stopped" ? `/api/projects/${enc(id)}/queues/${enc(queue.id)}/left` : undefined, project.generated_at);
+  const [work, setWork] = useState<"keep" | "discard">();
+  const [workNote, setWorkNote] = useState<string>();
+  const needsChoice = !!left && left.commits.length > 0 && !left.discarded;
 
   return (
     <div>
@@ -796,7 +872,8 @@ export function QueueDetail({ project, queue, onChanged }: Props) {
       <WorktreeActions project={id} root={project.project.root} queue={queue} onChanged={onChanged} />
 
       {queue.status === "stopped"
-        ? <StopBox project={id} queue={queue} onChanged={onChanged} />
+        ? <StopBox project={id} queue={queue} onChanged={onChanged} left={left ?? undefined} work={work} setWork={setWork} needsChoice={needsChoice}
+            pushAccepted={project.project.defaults.push_accepted} note={workNote} setNote={setWorkNote} />
         : queue.status_reason && <Section title="State"><Expandable text={queue.status_reason} /></Section>}
       {queue.report && (
         <Section title="Queue report">
@@ -825,14 +902,28 @@ export function QueueDetail({ project, queue, onChanged }: Props) {
           <div className="mt-2">
             <p className="mb-2 text-sm text-zinc-400">
               Approving pins revision {queue.revision}: its steps, acceptance criteria, checks and stop conditions. A later change needs a new approval.
+              {queue.status === "stopped" && " It also lifts the stop."}
             </p>
+            {queue.status === "stopped" && needsChoice && (
+              <p className={`mb-2 text-sm ${work ? "text-zinc-300" : "text-amber-300"}`}>
+                {work === "keep" ? `With Keep: step ${left!.step}'s commits stay.` : work === "discard" ? `With Discard nothing is approved now: the orchestrator proposes a revision that reverts step ${left!.step}'s commits.` : `First choose Keep or Discard for step ${left!.step}'s commits, in the stop box above.`}
+              </p>
+            )}
+            {queue.status === "stopped" && left?.discarded && (
+              <p className="mb-2 text-sm text-zinc-300">You chose to discard step {left.step}'s work: approving this revision lifts the stop.</p>
+            )}
             <Composer
               rows={2}
               allowEmpty
               draft={draftKey(id, "approval", queue.id)}
               placeholder="Your words with the approval (optional)…"
-              button={`Approve revision ${queue.revision}`}
-              onSubmit={async (words) => { await act(id, "POST", `/queues/${enc(queue.id)}/approve`, { words }); onChanged(); }}
+              button={queue.status === "stopped" && needsChoice && work === "discard" ? "Discard the step's work" : `Approve revision ${queue.revision}`}
+              onSubmit={async (words) => {
+                if (queue.status === "stopped" && needsChoice && !work) throw new Error("choose Keep or Discard first, in the stop box above");
+                const r = await actResult<{ message?: string }>(id, "POST", `/queues/${enc(queue.id)}/approve`, { words, work: needsChoice ? work : undefined });
+                if (r?.message) setWorkNote(r.message);
+                onChanged();
+              }}
             />
           </div>
         )}

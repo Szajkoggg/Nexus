@@ -81,6 +81,13 @@ done elsewhere, closes a halted run whose steps are all done, and cancels a queu
 notification). Each queue and step lists these changes: who, when and why. Approving, lifting a stop, marking work
 done and reopening a finished step stay yours.
 
+The stop box shows what the stopped step left: its own commits, and the uncommitted changes in the checkout (which
+are not necessarily that step's, and which Nexus never cleans). When the step committed, Continue and the approval
+of a new revision ask you first: **Keep** (the commits stay; with "push accepted steps" on they go out with the next
+accepted step's push, otherwise they stay local in the branch) or **Discard** (the stop stays, and the orchestrator
+proposes a revision whose first step reverts those commits; approving it lifts the stop). A worker that stops
+commits what is consistent and leaves no uncommitted changes behind.
+
 Per project, the dashboard's settings panel (the gear icon) sets the default runtime; for Claude Code workers the
 model, effort, permission mode and extra allowed tools (the project's own `.claude/settings.json` applies as well);
 for Codex workers the model, effort, sandbox and what happens when an agent needs to leave the sandbox; the
