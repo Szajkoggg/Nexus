@@ -1,9 +1,8 @@
 # Dashboard proposals with mockups
 
 Queue UX, step UX2 (2026-11-13). Proposals for the items of the pick list in [survey.md](survey.md). UX1 was
-accepted without a pick, so the worker asked (escalated to the user by the orchestrator); meanwhile it mocked up its
-recommendation, which the orchestrator also recommended: **11, 12, 13, 14, 15, 16, 18, 19, with the quick fixes 1–4
-folded in**. The remaining items (5–10, 17) are shown inside these mockups too; see the table at the end.
+accepted without a pick, so the worker asked; the user picked **all the larger changes, 11–19, with the quick fixes
+1–4 folded in**. The other quick fixes (5–10) are shown inside these mockups too; see the table at the end.
 
 The mockups are standalone HTML pages in [mockups/](mockups/) (open them in a browser; `mock.css` holds the three
 themes, `phone.js` the phone's top line and bottom bar). The data is real: the queues, steps, questions and chat
@@ -100,6 +99,27 @@ With 11A it is the right rail's top on the first visit of the day; with 11B, the
 waiting item" helper shared with the drawers. Server: none (a small API for events across projects would make it
 cheaper).
 
+## 17. Long queues: the step that matters in view
+
+[17-long-queues.html](mockups/17-long-queues.html), [picture](mockups/shots/17-long-queues-1440.png), and the phone
+form [17-long-queues-phone.html](mockups/17-long-queues-phone.html),
+[picture](mockups/shots/17-long-queues-390.png). Honeycomb's W has 11 steps; today the stopped W4c is cut off at the
+right edge on a desktop and 1½ cards show on a phone.
+
+- **A · Folded rail**: the done and skipped steps before the current one fold into one chip ("3 done · 2 skipped,
+  W1–W4b ▸"); the rail starts at the step that matters, which gets a wider card with its reason, Continue and its
+  questions; later steps stay small, the rest as "+ W5 · W6 · W7".
+- **B · Step list**: one line per step in two columns under a progress line (a segment per step, coloured by status);
+  the current step highlighted with its action. On the phone the same list in one column, the finished run folded,
+  later steps after the third folded.
+
+**Recommendation: B.** It shows the whole queue at once without sideways scrolling, reads the same on a desktop and a
+phone, and is shorter than today's card row for queues up to about 12 steps. A keeps today's cards if the user likes
+them, at the cost of a second form for the phone.
+
+*Touches:* `QueueRow.tsx` (the step row becomes a list; folding of closed steps), `Run.tsx` (the progress line). The
+step order and statuses are already in the state.
+
 ## 18. The phone: a bottom bar
 
 [18a-phone-waiting.html](mockups/18a-phone-waiting.html), [18b-phone-chat.html](mockups/18b-phone-chat.html),
@@ -143,11 +163,10 @@ once the colours in the components go through variables.
 | 8 The dead Orchestrator click | 11A/11B switch, 18 bottom bar (SC4 builds the switch) |
 | 9 Next waiting item | 13 (question), 16, 18C |
 | 10 Panels from consistent sides | 11A: drawers open over the right rail only |
-| 17 Long queues: a vertical step list, the current step in view | 19 (step list), 11B (step line) |
 
 ## Suggested order for an implementation queue
 
 1. Themes as variables and the action bar (19, 13): everything later builds on them, and they change no behaviour.
-2. The phone layout with the bottom bar and the waiting cards (18, quick fixes 1, 2, 7).
+2. The phone layout with the bottom bar, the waiting cards and the step list (18, 17, quick fixes 1, 2, 7).
 3. Review and approval views (14, 15, quick fixes 4, 9).
 4. The desktop layout: chat-first with the project sidebar (11A, 12A) and the digest in its rail (16).

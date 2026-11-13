@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>17 Long queues: the step that matters in view (desktop)</title>
+<link rel="stylesheet" href="mock.css">
+<style>
+  body { padding: 16px 22px; height: 100vh; display: flex; flex-direction: column; gap: 14px; }
+  .band { display: grid; grid-template-columns: 170px 1fr; gap: 16px; }
+  .qh { display: flex; align-items: center; gap: 10px; }
+  /* A: a compact rail; the finished run of steps folds into one chip, the rail opens on the step that matters */
+  .rail { display: flex; gap: 8px; align-items: stretch; margin-top: 12px; }
+  .fold { display: flex; flex-direction: column; justify-content: center; gap: 4px; padding: 8px 12px; border: 1px dashed var(--border-strong); border-radius: 8px; color: var(--text-2); font-size: 12.5px; white-space: nowrap; }
+  .sc { width: 196px; flex: none; padding: 9px 11px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); display: flex; flex-direction: column; gap: 3px; }
+  .sc.cur { border-color: color-mix(in srgb, var(--stop) 60%, var(--border)); background: color-mix(in srgb, var(--stop) 7%, var(--surface-2)); width: 300px; }
+  .sc .t { font-weight: 600; font-size: 13px; }
+  .more { display: grid; place-items: center; padding: 0 10px; color: var(--text-3); font-size: 12px; white-space: nowrap; }
+  /* B: a vertical list with a progress line */
+  .vl { display: grid; grid-template-columns: 1fr 1fr; gap: 0 28px; margin-top: 10px; }
+  .vs { display: grid; grid-template-columns: 14px 44px 1fr auto; gap: 10px; align-items: baseline; padding: 5px 8px; border-radius: 6px; font-size: 13.5px; }
+  .vs.cur { background: color-mix(in srgb, var(--stop) 9%, transparent); }
+  .vs .d { width: 8px; height: 8px; border-radius: 50%; align-self: center; }
+  .prog { display: flex; gap: 3px; margin-top: 10px; } .prog i { flex: 1; height: 5px; border-radius: 3px; background: var(--surface-3); }
+</style></head>
+<body class="theme-graphite">
+<div class="row"><h2>A queue with 11 steps: W of Project Honeycomb</h2><span class="grow"></span><span class="faint small">Today the stopped step W4c is cut off at the right edge (survey a2)</span></div>
+
+<div class="band">
+  <div class="col gap-4"><strong>A · Folded rail</strong><span class="small muted">Done and skipped steps before the current one fold into one chip; the rail starts at the step that matters, which gets a wider card with its reason and action. Pending steps after it stay small.</span></div>
+  <div class="card pad-l">
+    <div class="qh"><span class="mono faint">W</span><h2>Variant B made a system</h2><span class="st stopped">stopped at W4c</span><span class="faint small">· 2 questions</span><span class="grow"></span><span class="mono faint small">v2/cliffs</span><span class="faint small">5 of 11 closed</span></div>
+    <div class="rail">
+      <div class="fold"><span><span class="st done">3 done</span> · 2 skipped</span><span class="faint">W1 – W4b ▸</span></div>
+      <div class="sc cur"><span class="row small"><span class="mono faint">W4c</span><span class="st stopped">stopped 10:43</span></span><span class="t">A clean soil edge (W4 finished, part 2)</span><span class="small muted clamp2">Look faults of its own remain after three look rounds: a stair along straight2, a fin on corner2.</span><span class="row" style="margin-top:4px"><span class="btn sm">Continue…</span><span class="btn sm ghost">2 questions</span></span></div>
+      <div class="sc"><span class="row small"><span class="mono faint">W4d</span><span class="st">pending</span></span><span class="t clamp2">What W4b left, part 1 - the last holes</span></div>
+      <div class="sc"><span class="row small"><span class="mono faint">W4e</span><span class="st">pending</span></span><span class="t clamp2">What W4b left, part 2 - cuts that follow the rock</span></div>
+      <div class="more">+ W5 · W6 · W7 ▸</div>
+    </div>
+  </div>
+</div>
+
+<div class="band">
+  <div class="col gap-4"><strong>B · Step list</strong><span class="small muted">One line per step in two columns, a progress line over them; the current step highlighted with its action. The same list is the phone's form (picture 17, phone).</span><span class="small" style="color: var(--ok)">Recommended</span></div>
+  <div class="card pad-l">
+    <div class="qh"><span class="mono faint">W</span><h2>Variant B made a system</h2><span class="st stopped">stopped at W4c</span><span class="faint small">· 2 questions</span><span class="grow"></span><span class="mono faint small">v2/cliffs</span><span class="faint small">5 of 11 closed</span></div>
+    <div class="prog"><i style="background:var(--ok)"></i><i style="background:var(--text-3)"></i><i style="background:var(--ok)"></i><i style="background:var(--text-3)"></i><i style="background:var(--ok)"></i><i style="background:var(--stop)"></i><i></i><i></i><i></i><i></i><i></i></div>
+    <div class="vl">
+      <div>
+        <div class="vs"><span class="d" style="background:var(--ok)"></span><span class="mono faint">W1</span><span>Voronoi fracture</span><span class="faint small">done</span></div>
+        <div class="vs"><span class="d" style="background:var(--text-3)"></span><span class="mono faint">W2</span><span class="muted">Bodies shaped</span><span class="faint small">skipped</span></div>
+        <div class="vs"><span class="d" style="background:var(--ok)"></span><span class="mono faint">W3</span><span>Support</span><span class="faint small">done</span></div>
+        <div class="vs"><span class="d" style="background:var(--text-3)"></span><span class="mono faint">W4</span><span class="muted">The soil follows the rock</span><span class="faint small">skipped</span></div>
+        <div class="vs"><span class="d" style="background:var(--ok)"></span><span class="mono faint">W4b</span><span class="ellipsis">The corner of three heights</span><span class="faint small">1 h 34 min</span></div>
+        <div class="vs cur"><span class="d" style="background:var(--stop)"></span><span class="mono faint">W4c</span><span><strong>A clean soil edge</strong> <span class="st stopped">stopped</span></span><span class="btn sm">Continue…</span></div>
+      </div>
+      <div>
+        <div class="vs"><span class="d" style="background:var(--surface-3)"></span><span class="mono faint">W4d</span><span class="ellipsis">What W4b left, part 1 - the last holes</span><span class="faint small">pending</span></div>
+        <div class="vs"><span class="d" style="background:var(--surface-3)"></span><span class="mono faint">W4e</span><span class="ellipsis">What W4b left, part 2 - cuts that follow the rock</span><span class="faint small">pending</span></div>
+        <div class="vs"><span class="d" style="background:var(--surface-3)"></span><span class="mono faint">W5</span><span>Triangle budget</span><span class="faint small">pending</span></div>
+        <div class="vs"><span class="d" style="background:var(--surface-3)"></span><span class="mono faint">W6</span><span>Sheet</span><span class="faint small">pending</span></div>
+        <div class="vs"><span class="d" style="background:var(--surface-3)"></span><span class="mono faint">W7</span><span>A rock shader, switchable</span><span class="faint small">pending</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+</body></html>
