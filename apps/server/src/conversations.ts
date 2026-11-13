@@ -9,12 +9,10 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import {
-  ActionError, CLAUDE_EFFORTS, Effort, ProjectStore, loadProjectState, newId, normPath, now, type ProjectFile, type SessionFile,
+  ActionError, Effort, ProjectStore, effortIssue, loadProjectState, newId, normPath, now, type ProjectFile, type SessionFile,
 } from "@nexus/protocol";
 import { findStep, sinceThen, stepSeed } from "./step-seed.ts";
-import type { AgentProcess } from "./agent.ts";
-import { ClaudeSession } from "./claude.ts";
-import { CodexSession } from "./codex.ts";
+import { AgentHost, ROLE_RECORDS, type Hosted } from "./agent-host.ts";
 import type { Orchestrator } from "./orchestrator.ts";
 
 const READ = ["Read", "Grep", "Glob", "Bash(nexus status:*)", "Bash(git log:*)", "Bash(git status:*)", "Bash(git diff:*)", "Bash(git show:*)"];
@@ -22,13 +20,14 @@ const READ = ["Read", "Grep", "Glob", "Bash(nexus status:*)", "Bash(git log:*)",
 export const HANDOFF_SCOPE = "Summarize only the topics discussed in this conversation, unless the user asked you to include others. From a notes file, pass on what this conversation decided or recorded; another topic in the notes folder, even a related one, is not part of this hand-over: name its file at most, as 'see also', without its content. In every notes file only the Decided section holds decisions. Name the dates of the Decided entries you cover.";
 const IDLE_MS = 15 * 60_000; // an idle partner's process ends; the next message resumes the conversation
 
-interface Live { proc: AgentProcess; timer?: NodeJS.Timeout; handoff?: boolean }
+/** What a partner's process keeps beside it: its idle timer, and whether its running turn writes a hand-over. */
+type Live = Hosted<{ timer?: NodeJS.Timeout; handoff?: boolean }>;
 
 export class Conversations {
   private readonly store: ProjectStore;
   private readonly orchestrator: Orchestrator;
   private readonly changed: () => void;
-  private readonly live = new Map<string, Live>();
+  private readonly host: AgentHost<{ timer?: NodeJS.Timeout; handoff?: boolean }>;
   /** Set while Nexus drains for an update: no new turn starts. */
   draining = false;
 
@@ -36,6 +35,7 @@ export class Conversations {
     this.store = store;
     this.orchestrator = orchestrator;
     this.changed = changed;
+    this.host = new AgentHost(store, ROLE_RECORDS.conversation);
   }
 
   list() {
@@ -44,14 +44,14 @@ export class Conversations {
       .filter((s): s is SessionFile => s?.role === "conversation")
       .map((s) => {
         const chat = this.store.readChat(s.id).entries;
-        return { ...s, state: this.live.get(s.id)?.proc.state ?? "exited", last_at: chat.at(-1)?.at ?? s.created_at, messages: chat.filter((c) => c.kind === "message").length };
+        return { ...s, state: this.host.get(s.id)?.proc.state ?? "exited", last_at: chat.at(-1)?.at ?? s.created_at, messages: chat.filter((c) => c.kind === "message").length };
       })
       .sort((a, b) => Number(!!a.archived) - Number(!!b.archived) || b.last_at.localeCompare(a.last_at));
   }
 
   view(id: string) {
     const s = this.session(id);
-    return { session: s, state: this.live.get(id)?.proc.state ?? "exited", runtime: this.store.readRuntime(id) ?? null, chat: this.store.readChat(id).entries.slice(-400), model: s.model ?? null, effort: s.effort ?? null, notes_dir: this.store.readProject().conversations.notes_dir ?? null };
+    return { session: s, state: this.host.get(id)?.proc.state ?? "exited", runtime: this.store.readRuntime(id) ?? null, chat: this.store.readChat(id).entries.slice(-400), model: s.model ?? null, effort: s.effort ?? null, notes_dir: this.store.readProject().conversations.notes_dir ?? null };
   }
 
   /**
@@ -64,7 +64,8 @@ export class Conversations {
     const about = this.stepLink(body.queue, body.step);
     const runtime = body.runtime === "codex" || body.runtime === "claude" ? body.runtime : c.runtime;
     const effort = parseEffort(body.effort) ?? c.effort;
-    if (runtime === "claude" && effort && !CLAUDE_EFFORTS.includes(effort)) throw new ActionError(`Claude Code takes effort ${CLAUDE_EFFORTS.join(", ")}`);
+    const issue = effortIssue(runtime, effort);
+    if (issue) throw new ActionError(issue);
     const title = typeof body.title === "string" && body.title.trim() ? body.title.trim().slice(0, 120)
       : about ? `${about.step}: ${about.title}`.slice(0, 120) : "New conversation";
     const s: SessionFile = {
@@ -99,7 +100,8 @@ export class Conversations {
     if (body.model !== undefined) next.model = typeof body.model === "string" && body.model.trim() ? body.model.trim() : undefined;
     if (body.effort !== undefined) next.effort = parseEffort(body.effort);
     if (typeof body.archived === "boolean") next.archived = body.archived;
-    if (next.runtime === "claude" && next.effort && !CLAUDE_EFFORTS.includes(next.effort)) throw new ActionError(`Claude Code takes effort ${CLAUDE_EFFORTS.join(", ")}`);
+    const issue = next.runtime === "external" ? undefined : effortIssue(next.runtime, next.effort);
+    if (issue) throw new ActionError(issue);
     this.store.writeSession(next);
     // A new model or effort applies from the next message: the process restarts (the conversation goes on).
     if (next.model !== s.model || next.effort !== s.effort) this.retire(id);
@@ -141,12 +143,12 @@ ${text}`;
     this.deliver(s, `[Nexus] The user hands this conversation to the orchestrator, who plans and runs work in queues. Write a summary for it, in English: what was decided (only what the user decided), the open questions, the work you propose (as steps with what each should achieve), and the files where the notes are. ${HANDOFF_SCOPE} Reply with the summary only.`);
   }
 
-  idle(): boolean { return ![...this.live.values()].some((l) => l.proc.state === "working"); }
+  idle(): boolean { return this.host.idle(); }
 
-  shutdown(): void { for (const l of this.live.values()) { clearTimeout(l.timer); l.proc.kill(); } }
+  shutdown(): void { for (const l of this.host.all()) clearTimeout(l.timer); this.host.shutdown(); }
 
   /** A partner's process is still running (after shutdown: not yet exited). */
-  alive(): boolean { return [...this.live.values()].some((l) => l.proc.state !== "exited"); }
+  alive(): boolean { return this.host.alive(); }
 
   // ---------------------------------------------------------------- processes
 
@@ -165,81 +167,63 @@ ${text}`;
   }
 
   private retire(id: string): void {
-    const l = this.live.get(id);
-    if (!l) return;
-    clearTimeout(l.timer);
-    if (l.proc.state === "working") { l.proc.close(); } else { l.proc.kill(); }
-    this.live.delete(id);
+    clearTimeout(this.host.get(id)?.timer);
+    this.host.retire(id);
   }
 
   private ensure(s: SessionFile): Live {
-    const existing = this.live.get(s.id);
-    if (existing && existing.proc.state !== "exited") return existing;
+    const existing = this.host.running(s.id);
+    if (existing) return existing;
     const p = this.store.readProject();
     const notes = p.conversations.notes_dir;
-    const env = { NEXUS_SESSION: s.id, NEXUS_DIR: this.store.dir };
+    const env = this.host.env(s.id);
     const instructions = briefing(p, notes);
-    let proc: AgentProcess;
-    if (s.runtime === "codex") {
-      // Its working directory is the notes folder: the sandbox writes only there. Without one it is read-only.
-      const cwd = notes ? join(p.root, notes) : p.root;
-      if (notes) mkdirSync(cwd, { recursive: true });
-      proc = new CodexSession({
-        cwd, model: s.model, effort: s.effort, instructions, env, threadId: s.native_id,
-        sandbox: notes ? "workspace-write" : "read-only", approvalPolicy: "never", writableRoots: [],
-      });
-    } else {
-      proc = new ClaudeSession({
-        cwd: p.root, uuid: s.native_id!, resume: this.store.readRuntime(s.id) !== undefined,
+    return this.host.start(s, (resume) => {
+      if (s.runtime === "codex") {
+        // Its working directory is the notes folder: the sandbox writes only there. Without one it is read-only.
+        const cwd = notes ? join(p.root, notes) : p.root;
+        if (notes) mkdirSync(cwd, { recursive: true });
+        return { runtime: "codex", options: {
+          cwd, model: s.model, effort: s.effort, instructions, env, threadId: s.native_id,
+          sandbox: notes ? "workspace-write" : "read-only", approvalPolicy: "never", writableRoots: [],
+        } };
+      }
+      return { runtime: "claude", options: {
+        cwd: p.root, uuid: s.native_id!, resume,
         model: s.model, effort: s.effort, permissionMode: "dontAsk",
         allowedTools: notes ? [...READ, `Edit(${notes}/**)`] : READ,
         disallowedTools: ["NotebookEdit"],
         appendSystemPrompt: instructions, env,
-      });
-    }
-    const l: Live = { proc };
-    this.live.set(s.id, l);
-    this.runtime(s.id, { state: "idle", pid: proc.pid });
-    // The partner's last text of the turn, whole: during a hand-over, the summary.
-    let reply = "";
-    proc.on("message", (text) => { reply = text; if (!l.handoff) this.store.appendChat(s.id, { at: now(), from: "partner", text }); });
-    proc.on("activity", (a) => {
-      if (a.kind === "tool") this.store.appendChat(s.id, { at: now(), from: "partner", kind: "tool", text: a.text });
-      else if (a.kind === "error") this.store.appendChat(s.id, { at: now(), from: "nexus", kind: "error", text: a.text });
-      else if (a.kind === "turn_start") reply = "";
+      } };
+    }, {}, (l) => {
+      // The partner's last text of the turn, whole: during a hand-over, the summary.
+      let reply = "";
+      return {
+        message: (text) => { reply = text; if (!l.handoff) this.store.appendChat(s.id, { at: now(), from: "partner", text }); },
+        activity: (a) => {
+          if (a.kind === "tool") this.store.appendChat(s.id, { at: now(), from: "partner", kind: "tool", text: a.text });
+          else if (a.kind === "error") this.store.appendChat(s.id, { at: now(), from: "nexus", kind: "error", text: a.text });
+          else if (a.kind === "turn_start") reply = "";
+        },
+        turnEnd: () => {
+          if (l.handoff) {
+            l.handoff = false;
+            const summary = reply.trim();
+            if (summary) {
+              this.store.appendChat(s.id, { at: now(), from: "partner", text: summary });
+              try {
+                this.orchestrator.say(`[From the conversation "${this.session(s.id).title}"]\n\n${summary}`);
+                this.store.appendChat(s.id, { at: now(), from: "nexus", text: "The summary went to the orchestrator's chat." });
+              } catch (e) { this.store.appendChat(s.id, { at: now(), from: "nexus", kind: "error", text: `Could not hand it over: ${(e as Error).message}` }); }
+            }
+          }
+          clearTimeout(l.timer);
+          l.timer = setTimeout(() => { if (l.proc.state !== "working" && this.host.get(s.id) === l) { this.host.retire(s.id); this.changed(); } }, IDLE_MS);
+          this.changed();
+        },
+        exit: () => this.changed(),
+      };
     });
-    proc.on("facts", (f) => {
-      const patch: Record<string, unknown> = {};
-      if (f.model) patch.model = f.model;
-      if (f.contextTokens !== undefined) { patch.context_tokens = f.contextTokens; patch.state = "working"; }
-      if (f.contextWindow) patch.context_window = f.contextWindow;
-      if (f.nativeId && f.nativeId !== s.native_id) this.store.writeSession({ ...this.store.readSession(s.id), native_id: f.nativeId });
-      if (Object.keys(patch).length) this.runtime(s.id, patch);
-    });
-    proc.on("turnEnd", () => {
-      this.runtime(s.id, { state: "idle" });
-      if (l.handoff) {
-        l.handoff = false;
-        const summary = reply.trim();
-        if (summary) {
-          this.store.appendChat(s.id, { at: now(), from: "partner", text: summary });
-          try {
-            this.orchestrator.say(`[From the conversation "${this.session(s.id).title}"]\n\n${summary}`);
-            this.store.appendChat(s.id, { at: now(), from: "nexus", text: "The summary went to the orchestrator's chat." });
-          } catch (e) { this.store.appendChat(s.id, { at: now(), from: "nexus", kind: "error", text: `Could not hand it over: ${(e as Error).message}` }); }
-        }
-      }
-      clearTimeout(l.timer);
-      l.timer = setTimeout(() => { if (l.proc.state !== "working") { l.proc.kill(); this.live.delete(s.id); this.changed(); } }, IDLE_MS);
-      this.changed();
-    });
-    proc.on("exit", () => { this.runtime(s.id, { state: "exited" }); if (this.live.get(s.id) === l) this.live.delete(s.id); this.changed(); });
-    return l;
-  }
-
-  private runtime(id: string, patch: Record<string, unknown>): void {
-    const old = this.store.readRuntime(id);
-    this.store.writeRuntime(id, { turns: 0, state: "idle", ...old, ...patch, updated_at: now() } as never);
   }
 }
 
