@@ -52,7 +52,7 @@ defaults:
     - A required asset is missing.
     - A step would grow beyond what is written in it.
     - A check that passed before the queue fails and is not fixed within the step.
-  review_policy: continue              # continue | wait
+  review_policy: continue              # continue | wait | orchestrator (see "Review" below)
   context_reuse_threshold: 0.6         # max context fill to continue a session
   context_care: true                   # above that fill at a step's end, the next step runs in a fresh session
   protect_nexus: true                  # Claude Code workers' file tools may not write under the project's .nexus
@@ -223,6 +223,8 @@ Every line:
 | `change.proposed` | `queue`, `patch`, `reason` | A proposed change to a queue definition (needs a new approval) |
 | `queue.drafted` | `queue`, `definition` | Orchestrator only: a new or changed draft queue |
 | `session.request` | `action` (start, resume, pause, stop), `queue`, `use_session?`, `model?`, `reason` | Orchestrator only: asks the engine to act on a queue's run (`use_session` continues an existing session) |
+| `review.sent_back` | `queue`, `step`, `text` | Orchestrator or user only: a step in review goes back to its worker with what to fix (recorded on the step as `sent_back`; reopening the step for its worker is not built yet: it stays in review) |
+| `review.asked_user` | `queue`, `step`, `text` | Orchestrator only in practice (the loader takes it from an orchestrator or the user): a step waiting for the orchestrator's review goes to the user, with why |
 | `status.set` | `queue`, `step?`, `to` (`skipped`, `finished`, `cancelled`, `propose-lift`), `reason` | Orchestrator only: housekeeping; the server checks it and records an entry in the queue's `changes` (see `queue.yaml`). A worker's is ignored by derivation, and the server applies only the orchestrator's own requests |
 | `log` | `level`, `text` | Anything else worth keeping |
 
@@ -258,6 +260,25 @@ and branch when it starts the queue and writes their paths back into `queue.yaml
 
 The event `review.accepted` (`queue`, `step`, `text?`), written by the user or an orchestrator, accepts a step held in
 `review`.
+
+### Review
+
+The review policy says what happens when a step is done. It is the step's own (`review.policy`), else its queue's
+(`review_policy`), else the project's default (`defaults.review_policy`):
+
+- `continue`: the step is done and the run goes on.
+- `wait`: the step is held in `review` for the user; the queue is `waiting`.
+- `orchestrator`: the step is held in `review` for the project's orchestrator; the queue is `waiting`. The orchestrator
+  accepts it (`review.accepted`), sends it back (`review.sent_back`) or hands it to the user (`review.asked_user`,
+  with why). It goes to the user instead when the project has no orchestrator (`project.yaml` has no `orchestrator`)
+  or its notices are off (`orchestrator.notify: false`); this is derived, so turning notices off hands every step
+  waiting for the orchestrator to the user.
+
+The derived step has `review_with` (`orchestrator` or `user`) while in `review`, `asked_user` (`text`, `at`) after a
+hand-over in the current round, and `sent_back` (each `text`, `at`, `by`). Only a step waiting for the user is in the
+user's attention list (kind `review`, with the orchestrator's reason as its text when it handed it over); the queue
+shows `waiting` in both cases. An orchestrator's `review.accepted` or `review.asked_user` on a step that waits for the
+user is ignored (with a warning); the user may accept either. Workers may write none of the three events.
 
 ## The user's session
 
@@ -376,7 +397,7 @@ sends (see the CLI).
 | `POST /api/projects/:id/sessions/:session/messages` | `text`, `queue?`, `step?` | A message to a session's inbox |
 | `POST /api/projects/:id/queues/:q/approve` | `words?` | Approves the current revision; for a stopped queue it also lifts the stop (see `queue.yaml`) |
 | `POST /api/projects/:id/queues/:q/withdraw` | `reason?` | The user takes back the approval of a queue that never ran. There is no CLI command and no event for it |
-| `PATCH /api/projects/:id/queues/:q` | `review_policy` (`continue`, `wait` or null) | Queue settings |
+| `PATCH /api/projects/:id/queues/:q` | `review_policy` (`continue`, `wait`, `orchestrator` or null) | Queue settings |
 | `POST /api/projects/:id/questions/:qid/answer` | `text`, `continue?` | The user's answer, routed to the asker |
 | `POST /api/projects/:id/queues/:q/run` | `action` (`start`, `pause`, `resume`, `stop`), `model?`, `session?` | Runs the queue through a Nexus-launched session (`session` continues an existing one) |
 | `POST /api/projects/:id/queues/:q/steps/:s/accept` | `text?` | Accepts a step waiting in review |
@@ -484,6 +505,10 @@ a prompt. (`Write` and `Edit` are not disallowed: a disallow rule would beat the
   revision, which needs the user's approval again.
 - `nexus run <queue> start|pause|resume|stop --reason … [--use-session <id>] [--model <m>]` sends `session.request`.
   Starting an unapproved revision is refused.
+- `nexus review accept <queue> <step> [--note <text>]`, `nexus review send-back <queue> <step> <what to fix>` and
+  `nexus review ask-user <queue> <step> <why>` write `review.accepted` (the note as its `text`), `review.sent_back`
+  and `review.asked_user`. The CLI refuses them from any session but an orchestrator, and for a step that is not
+  waiting for the orchestrator's review.
 - `nexus queue set <queue> [--step <step>] skipped|finished|cancelled|propose-lift --reason …` sends `status.set`
   and prints the server's result: housekeeping (see "Housekeeping by the orchestrator" under `queue.yaml`). A worker
   session is refused by the CLI.
@@ -491,10 +516,16 @@ a prompt. (`Write` and `Edit` are not disallowed: a disallow rule would beat the
   user approves a revision of a queue ("Queue X revision N approved.", with the instruction to start it, or to resume
   its paused or halted run, if the plan puts it next; a run of an older revision cannot be resumed, so then: start it), when the user withdraws an approval, when the user lifts a stop with Continue ("The user lifted the stop of queue X with Continue (the stop was: …); its run goes on.", told once), when a run reaches a
   requested pause ("Run of X paused after step S.": a pause asked for by the user or the orchestrator, not a stop now,
-  nor the pause of a server restart or of an update), and when a run halts or finishes. The chat shows only the fact;
+  nor the pause of a server restart or of an update), when a step waits for its review ("Step S of queue X is done and
+  waits for your review: <summary>", with the step's goal, acceptance, the checks reported this round and those of the
+  queue not reported, the review material of the round, the commits, and the three commands; key
+  `notify:review:<queue>:<step>:<finished_at>`, once per round and session, also for a step that entered review before
+  the session started, so a reset orchestrator is told; a step waiting for it starts an orchestrator that has no
+  session), and when a run halts or finishes. The chat shows only the fact;
   the instruction goes to the orchestrator alone. Each notice is told once, recorded in `applied.jsonl` (`notify:…`
   keys; approvals and withdrawals by their position in the queue's `approvals` and `withdrawals`, so approving a
-  withdrawn revision again is told again). Nothing older than the orchestrator session is told.
+  withdrawn revision again is told again). Nothing older than the orchestrator session is told, except a step waiting
+  for its review.
 - Nothing is held back across a restart. While an update drains, notices wait. Every server, once active, runs one
   pass over every project, as after a change: plain starts, successors after their hand-over, and a predecessor that
   took the port back after a rollback. The same pass runs whenever an update settles: it is up and its push done, it

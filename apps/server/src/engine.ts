@@ -325,7 +325,7 @@ export class Engine {
         case "waiting":
           return; // a blocking question: its answer arrives through the inbox and starts the next turn
         case "review":
-          return; // waits for the user's acceptance (review policy "wait")
+          return; // waits for its review: the user's (policy wait) or the orchestrator's (policy orchestrator)
         case "failed":
         case "stopped":
           return this.halt(queueId, `step ${current.id} ${current.status}${current.reason ? `: ${current.reason}` : ""}`);

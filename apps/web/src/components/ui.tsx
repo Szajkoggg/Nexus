@@ -25,6 +25,12 @@ const TONES: Record<string, Tone> = {
 };
 export const toneOf = (status: string): Tone => TONES[status] ?? TONES.pending!;
 
+/** A step in review says whom it waits for. */
+export function reviewLabel(step: { status: string; review_with?: "orchestrator" | "user" }): string | undefined {
+  if (step.status !== "review") return undefined;
+  return step.review_with === "orchestrator" ? "review: orchestrator" : "review: you";
+}
+
 export function StatusBadge({ status, label, className = "" }: { status: string; label?: string; className?: string }) {
   const t = toneOf(status);
   return (

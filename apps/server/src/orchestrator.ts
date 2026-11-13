@@ -4,7 +4,7 @@
 // drafts under .nexus/drafts/: permission mode dontAsk with a read-only allow list plus the drafts rules.
 import { randomUUID } from "node:crypto";
 import {
-  ActionError, ClaudeEffort, ProjectStore, applyDraft, loadProjectState, orchestratorStatusChange, newId, now, type ChatEntry, type Event, type ProjectState, type SessionFile,
+  ActionError, ClaudeEffort, ProjectStore, applyDraft, loadProjectState, orchestratorStatusChange, newId, now, type ChatEntry, type Event, type ProjectState, type QueueView, type SessionFile, type StepView,
 } from "@nexus/protocol";
 import { ClaudeSession } from "./claude.ts";
 import type { Engine } from "./engine.ts";
@@ -119,8 +119,12 @@ export class Orchestrator {
   /** After every change: carry out the orchestrator's requests and tell it what it should know. */
   onChange(state: ProjectState): void {
     if (this.stopped) return;
-    const s = this.session();
-    if (!s) return;
+    let s = this.session();
+    if (!s) {
+      // A step waiting for its review starts it (after a reset, or before it ever ran with notices on).
+      if (this.engine.draining || !state.queues.some((q) => q.steps.some((x) => x.review_with === "orchestrator"))) return;
+      s = this.ensure();
+    }
     this.applyRequests(s);
     if (this.engine.draining) return; // held until the update settles: told after its restart, or once it fails
     // With notices off it is still told the outcome of an update it ran itself: that answers its own command.
@@ -302,6 +306,12 @@ Options: ${x.options.join(" / ")}` : ""}`,
           todo: "Do not start it. Tell the user briefly what this changes in the plan.",
         });
       });
+      // A step waiting for its review: told whenever it entered review (also to a session started after that), once
+      // per round.
+      for (const st of q.steps) {
+        if (st.status !== "review" || st.review_with !== "orchestrator") continue;
+        items.push({ key: `notify:review:${q.id}:${st.id}:${st.finished_at}`, fact: `Step ${st.id} of queue ${q.id} is done and waits for your review: ${st.summary ?? st.title}`, todo: reviewBrief(q, st) });
+      }
       if (!r) continue;
       // A pause someone asked for (the user, or you with nexus run pause), reached at a step's end. Not a stop, and
       // not the pauses of a server restart or an update, whose reasons differ.
@@ -330,6 +340,27 @@ Options: ${x.options.join(" / ")}` : ""}`,
   }
 }
 
+/** What the orchestrator needs to review a step: its acceptance, the checks and material of this round, its commits. */
+function reviewBrief(q: QueueView, st: StepView): string {
+  const since = st.segments.at(-1)?.start ?? "";
+  const round = st.timeline.filter((e) => e.type === "step.done").length;
+  const checks = st.checks.filter((c) => c.at >= since);
+  const missing = q.checks.filter((name) => !checks.some((c) => c.name === name));
+  const items = st.review_items.filter((i) => i.at >= since);
+  const commits = [...new Set(st.timeline.flatMap((e) => (e.type === "step.done" && e.commit ? [e.commit] : [])))];
+  const list = (xs: string[]) => (xs.length ? xs.map((x) => `- ${x}`).join("\n") : "- none");
+  return [
+    "",
+    `Round ${round}. Goal:\n${st.goal.trim() || "(none)"}`,
+    `Acceptance:\n${list(st.acceptance)}`,
+    `Checks reported this round:\n${list(checks.map((c) => `${c.name}: ${c.ok ? "ok" : "FAILED"}${c.summary ? ` (${c.summary})` : ""}`))}`,
+    ...(missing.length ? [`Checks of the queue not reported this round: ${missing.join("; ")}`] : []),
+    `Review material:\n${list(items.map((i) => `${i.label ?? i.kind ?? "item"}: ${i.path ?? i.url ?? ""}`))}`,
+    `Commits: ${commits.join(", ") || "none reported"}`,
+    `Decide with one of: nexus review accept ${q.id} ${st.id} [--note "..."] (the run goes on); nexus review send-back ${q.id} ${st.id} "what to fix"; nexus review ask-user ${q.id} ${st.id} "why" (the user decides). Tell the user briefly what you decided.`,
+  ].join("\n\n");
+}
+
 function briefing(project: string, threshold: number): string {
   return `You are the orchestrator of the project "${project}" in Nexus, the user's dashboard for AI-driven work. The user talks with you in the dashboard's chat; reply in the language they write in. Everything you write into files or queues is in English.
 
@@ -344,6 +375,9 @@ Commands (\`nexus\` is on PATH; your session is set in the environment):
 - nexus run <queue> pause|resume|stop --reason "..."
 - nexus answer <qid> "<answer>" [--continue|--wait]            answer a worker's question whose answer is already settled
 - nexus answer <qid> "<framing, options, recommendation>" --escalate   pass it to the user
+- nexus review accept <queue> <step> [--note "..."]   accept a step waiting for your review; the run goes on
+- nexus review send-back <queue> <step> "what to fix"   send it back to its worker
+- nexus review ask-user <queue> <step> "why"      hand its review to the user
 - nexus server status                            the running Nexus version, the steps running in every project, and an update in progress
 - nexus server update [--now]                    deploy: update Nexus itself and restart it (only when the user asks; see below)
 
@@ -356,7 +390,7 @@ description: |                 # optional: context the worker needs
   ...
 worktree: auto                 # optional: auto = Nexus creates a worktree and branch; or a path; omitted = the main checkout
 branch: v2/cliffs              # optional
-review_policy: continue        # optional: continue (default) or wait (hold after each step for the user)
+review_policy: continue        # optional: continue (go on), wait (hold each step for the user) or orchestrator (hold each step for your review); default: the project's
 stop_conditions:
   - ...
 checks:
@@ -370,7 +404,7 @@ steps:
       - ...
     review:                    # optional
       prepare: Before/after shots of ...
-      policy: wait             # optional, this step only
+      policy: wait             # optional, this step only: continue, wait or orchestrator
     runtime: codex             # optional: claude or codex, this step only
     model: haiku               # optional, this step only
     effort: low                # optional, this step only (Claude Code: low to max; Codex: the model's levels)
@@ -392,7 +426,9 @@ Statuses change through Nexus, never by editing files. Housekeeping is yours, wi
 - nexus queue set <queue> propose-lift --reason "..."         propose that the user lift the stop of a stopped queue; they decide in the dashboard
 Consent is the user's, and refused to you: marking a step done (work done elsewhere is skipped, with the reason saying where), approving, lifting a stop, reopening a finished step. A stopped queue goes on only when the user lifts the stop: by approving a new revision (then a start begins at the first pending step) or with Continue. When you draft a new revision of a stopped queue to replace the stopped step, keep that step in the draft (a draft may not drop a step that has started or stopped, nor change a step's status) and skip it with nexus queue set once the user has approved, so the record shows what became of it.
 
-Messages marked [Nexus] tell you that a worker asked a question, that the user approved a queue or withdrew an approval, that a run reached a requested pause, that a run halted or finished, or how a Nexus update you ran ended. What came up while Nexus updated reaches you right after its restart. After a deploy you may also be told what changed for agents (the commits' Agents: lines): your briefing may still describe the older way, so follow those where they differ. They are for you, not the user. Act on them: answer or escalate questions; an approval or a reached pause is your cue to start (or resume) what the plan put next, and say in the chat what you started; tell the user about withdrawals, halts and finished queues briefly, with what you propose next.
+Reviewing steps: a step whose review policy is orchestrator waits for you when it is done, and you get a [Nexus] message with its goal, acceptance, the checks and review material of the round, and its commits. Check the work against its acceptance: read the commits (git show, git diff), the review material and the summary; for more than a glance, have run-digest summarize the run or use the project's own read-only reviewers (agents that read and report). You run no checks yourself: a check of the queue that is missing or failed is a send-back. Then accept it, send it back with what to fix, or ask the user. Matters the project's rules give the user (for example the look, gameplay, final numbers) go to the user with ask-user, with your framing and recommendation; so does anything you cannot judge from what you can read.
+
+Messages marked [Nexus] tell you that a worker asked a question, that a step waits for your review, that the user approved a queue or withdrew an approval, that a run reached a requested pause, that a run halted or finished, or how a Nexus update you ran ended. What came up while Nexus updated reaches you right after its restart. After a deploy you may also be told what changed for agents (the commits' Agents: lines): your briefing may still describe the older way, so follow those where they differ. They are for you, not the user. Act on them: answer or escalate questions; an approval or a reached pause is your cue to start (or resume) what the plan put next, and say in the chat what you started; tell the user about withdrawals, halts and finished queues briefly, with what you propose next.
 Deploying Nexus itself: run nexus server update only when the user asks for it in the chat, never on your own, not even when a queue that changes Nexus has finished. Before you run it, tell the user (from nexus server status) whether a step is running in any project: the update waits for those steps to finish (no new step starts meanwhile), and with --now it interrupts them instead (they continue afterwards). Also tell them that you restart with Nexus: your process ends, and this conversation goes on after the restart. You then get a [Nexus] message with the outcome (the new version, or why it failed and what still runs); pass it on to the user.
 
 Never have two runs going in one checkout at once: queues without their own worktree share the main checkout, so pause one at a step's end before starting another there.

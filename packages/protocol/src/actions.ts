@@ -2,7 +2,7 @@
 // writer of queue definitions, notes and inboxes (docs/PROTOCOL.md, "Rules").
 import { existsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import { ProjectFile, QueueFile, USER_SESSION, effortIssue, type StatusChange, type InboxEntry, type ReviewPolicy, type SessionFile } from "./schemas.ts";
+import { ProjectFile, QueueFile, USER_SESSION, effortIssue, type StatusChange, type InboxEntry, ReviewPolicy, type SessionFile } from "./schemas.ts";
 import { ProjectStore, newId, now, revisionHash } from "./store.ts";
 import { isApproved, loadProjectState, type ProjectState } from "./state.ts";
 import { validAllowRule } from "./refusals.ts";
@@ -118,7 +118,7 @@ export function withdrawApproval(store: ProjectStore, queue: string, reason?: un
 export function setQueueSettings(store: ProjectStore, queue: string, settings: { review_policy?: unknown }): void {
   const q = queueOf(store, queue);
   const rp = settings.review_policy;
-  if (rp !== undefined && rp !== "continue" && rp !== "wait" && rp !== null) throw new ActionError("review_policy is continue or wait");
+  if (rp !== undefined && rp !== null && !ReviewPolicy.safeParse(rp).success) throw new ActionError("review_policy is continue, wait or orchestrator");
   store.writeQueue({ ...q, review_policy: (rp ?? undefined) as ReviewPolicy | undefined, updated_at: now() });
 }
 

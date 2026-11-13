@@ -6,7 +6,12 @@ export const PROTOCOL_VERSION = 1;
 const Id = z.string().min(1);
 const Time = z.string().min(1); // ISO 8601 UTC
 
-export const ReviewPolicy = z.enum(["continue", "wait"]);
+/**
+ * What happens when a step is done: `continue` goes on, `wait` holds it for the user, `orchestrator` holds it for the
+ * project's orchestrator, who accepts it, sends it back or asks the user (and the user, without one or with its
+ * notices off).
+ */
+export const ReviewPolicy = z.enum(["continue", "wait", "orchestrator"]);
 export type ReviewPolicy = z.infer<typeof ReviewPolicy>;
 
 export const QueueStatus = z.enum([
@@ -303,6 +308,10 @@ export const Event = z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("log"), level: z.enum(["info", "warn", "error"]), text: z.string() }),
   /** The user (or orchestrator) accepts a step waiting in review. */
   z.object({ ...base, type: z.literal("review.accepted"), ...qs, text: z.string().optional() }),
+  /** The orchestrator (or the user) sends a step in review back to its worker with what to fix. */
+  z.object({ ...base, type: z.literal("review.sent_back"), ...qs, text: z.string().min(1) }),
+  /** The orchestrator hands a step waiting for its review to the user, saying why. */
+  z.object({ ...base, type: z.literal("review.asked_user"), ...qs, text: z.string().min(1) }),
 ]);
 export type Event = z.infer<typeof Event>;
 export type EventType = Event["type"];
@@ -310,7 +319,7 @@ export type EventOf<T extends EventType> = Extract<Event, { type: T }>;
 
 /** Event types a worker session may not write (orchestrators and the user may). */
 export const ORCHESTRATOR_ONLY: ReadonlySet<EventType> = new Set([
-  "answer.given", "queue.drafted", "session.request", "review.accepted", "status.set",
+  "answer.given", "queue.drafted", "session.request", "review.accepted", "review.sent_back", "review.asked_user", "status.set",
 ]);
 
 // ---------------------------------------------------------------- server-owned runtime files

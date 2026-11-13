@@ -92,6 +92,8 @@ test("review policy can be set and cleared", () => {
   const { st } = setup();
   setQueueSettings(st, "Q", { review_policy: "wait" });
   assert.equal(st.readQueue("Q").review_policy, "wait");
+  setQueueSettings(st, "Q", { review_policy: "orchestrator" });
+  assert.equal(st.readQueue("Q").review_policy, "orchestrator");
   setQueueSettings(st, "Q", { review_policy: null });
   assert.equal(st.readQueue("Q").review_policy, undefined);
   assert.throws(() => setQueueSettings(st, "Q", { review_policy: "sometimes" }));

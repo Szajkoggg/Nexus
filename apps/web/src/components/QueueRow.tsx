@@ -1,5 +1,5 @@
 import type { QueueView, StepView } from "../api.ts";
-import { StatusBadge, StepTimes, TimeAgo, toneOf } from "./ui.tsx";
+import { StatusBadge, StepTimes, TimeAgo, reviewLabel, toneOf } from "./ui.tsx";
 import { RunChip } from "./Run.tsx";
 import { retryLine } from "@nexus/protocol/times";
 
@@ -56,7 +56,7 @@ function StepCard({ step, current, retry, onClick }: { step: StepView; current: 
       <div className="flex items-center gap-2 text-xs">
         <span className={`h-2 w-2 shrink-0 rounded-full ${t.dot}`} />
         <span className="font-mono text-zinc-400">{step.id}</span>
-        <span className={`${t.text}`}>{step.status}</span>
+        <span className={`${t.text}`}>{reviewLabel(step) ?? step.status}</span>
         <span className="ml-auto flex gap-1.5 text-zinc-500">
           {step.review_items.length > 0 && <span title="Review material">▣ {step.review_items.length}</span>}
           {step.notes.length > 0 && <span title={`${step.notes.length} note(s), ${unread} unread`} className={unread ? "text-sky-400" : ""}>✎ {step.notes.length}</span>}

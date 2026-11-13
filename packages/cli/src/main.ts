@@ -30,6 +30,9 @@ Agent commands (session from NEXUS_SESSION or --session):
   nexus log <text> [--level info|warn|error]
   nexus answer <qid> <text> [--escalate] [--continue|--wait]     (orchestrator only)
   nexus queue draft <file.yaml|->                                 (orchestrator only) create or change a queue
+  nexus review accept <queue> <step> [--note <text>]             (orchestrator only) a step waiting for your review
+  nexus review send-back <queue> <step> <what to fix>             (orchestrator only) back to its worker
+  nexus review ask-user <queue> <step> <why>                      (orchestrator only) hand the review to the user
   nexus queue set <queue> [--step <step>] skipped|finished|cancelled|propose-lift --reason <text>   (orchestrator only)
                                       housekeeping: skip a pending, stopped or failed step; close a halted run of a
                                       queue whose steps are all done or skipped; cancel a queue that is not running;
@@ -66,7 +69,7 @@ const { values: o, positionals: args } = parseArgs({
     id: { type: "string" }, name: { type: "string" }, prefix: { type: "string" },
     "dry-run": { type: "boolean" }, replace: { type: "boolean" },
     role: { type: "string" }, runtime: { type: "string" }, title: { type: "string" }, from: { type: "string" },
-    help: { type: "boolean", short: "h" }, now: { type: "boolean" }, ref: { type: "string" },
+    help: { type: "boolean", short: "h" }, note: { type: "string" }, now: { type: "boolean" }, ref: { type: "string" },
   },
 });
 
@@ -130,7 +133,7 @@ Queues (${state.queues.length - done.length} open; finished: ${done.map((q) => q
   for (const q of state.queues.filter((x) => !done.includes(x))) {
     const run = q.run ? `; run ${q.run.state}${q.run.step ? ` at ${q.run.step}` : ""} in session ${q.run.session}${q.run.reason ? ` (${q.run.reason})` : ""}` : "";
     console.log(`- ${q.id} [${q.status}] ${q.title}: revision ${q.revision}, ${q.approved ? "approved" : "not approved"}${run}`);
-    console.log(`  steps: ${q.steps.map((x) => `${x.id} ${x.status}`).join(", ")}`);
+    console.log(`  steps: ${q.steps.map((x) => `${x.id} ${x.status}${x.review_with ? ` (for ${x.review_with === "user" ? "the user" : "you"})` : ""}`).join(", ")}`);
     if (q.status_reason && q.status !== "running") console.log(`  why: ${q.status_reason.replace(/\s+/g, " ").slice(0, 300)}`);
   }
   const open = state.questions.filter((x) => x.state === "open" || x.state === "escalated");
@@ -169,6 +172,24 @@ function waitApplied(st: ProjectStore, session: string, event: string, ms = 15_0
     Atomics.wait(pause, 0, 0, 150);
   }
   return undefined;
+}
+
+/** The orchestrator's decision on a step waiting for its review: accept, send back, or hand it to the user. */
+function reviewDecision(action: "accept" | "send-back" | "ask-user"): void {
+  const st = store(); const s = orchestrator(st);
+  const queue = need(args[2], "<queue>"); const step = need(args[3], "<step>");
+  checkStep(st, queue, step);
+  const view = loadProjectState(st).queues.find((q) => q.id === queue)!.steps.find((x) => x.id === step)!;
+  if (view.status !== "review") throw new UsageError(`step ${queue}/${step} is not waiting for review (it is ${view.status})`);
+  if (view.review_with !== "orchestrator") throw new UsageError(`step ${queue}/${step} waits for the user's review, not yours`);
+  if (action === "accept") {
+    emit(st, s, { type: "review.accepted", queue, step, text: o.note?.trim() || undefined });
+    console.log(`ok: ${queue}/${step} accepted; the run goes on`);
+    return;
+  }
+  const text = need(args.slice(4).join(" ").trim(), action === "send-back" ? "<what to fix>" : "<why>");
+  emit(st, s, { type: action === "send-back" ? "review.sent_back" : "review.asked_user", queue, step, text });
+  console.log(action === "send-back" ? `ok: ${queue}/${step} sent back` : `ok: ${queue}/${step} waits for the user's review`);
 }
 
 function report(r: { ok: boolean; message: string } | undefined): void {
@@ -300,7 +321,8 @@ const commands: Record<string, () => void | Promise<void>> = {
   },
 
   review() {
-    if (args[1] !== "add") throw new UsageError("nexus review add <step> <path|url>...");
+    if (args[1] === "accept" || args[1] === "send-back" || args[1] === "ask-user") return reviewDecision(args[1]);
+    if (args[1] !== "add") throw new UsageError("nexus review add <step> <path|url>... (orchestrators: nexus review accept|send-back|ask-user <queue> <step>)");
     const st = store(); const s = session(st);
     const step = need(args[2], "<step>");
     const queue = queueFor(st, s, step);

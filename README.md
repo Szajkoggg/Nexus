@@ -179,6 +179,11 @@ switch. The header's tools move to a second row there.
 The inbox button in the header counts what waits for you in all projects (questions, approvals, steps in review,
 halted runs, failed steps). It opens one list of them, newest first, each with its project; tap an item to open it.
 
+"After each step" (in Settings for the project, on a queue for that queue) can also be "wait for the orchestrator's
+review": the orchestrator then checks each step and accepts it, sends it back, or hands it to you with why. A step
+says whom it waits for ("review: orchestrator" or "review: you"); only those for you are in the inbox. Without an
+orchestrator, or with its notices off, such steps wait for you.
+
 "Replace token" in the panel signs every remote device out. To have Nexus start with Windows, without a console
 window, run from the live instance: `powershell -ExecutionPolicy Bypass -File C:\Code\Nexus-live\scripts\autostart.ps1`
 (`-Remove` undoes it; the log goes to `%APPDATA%\Nexus\server.log`). To start it once without a window:

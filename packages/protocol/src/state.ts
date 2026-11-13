@@ -1,6 +1,6 @@
 // Derives the dashboard's view of a project from its files. Pure apart from reading through the store;
 // nothing here is ever written back (state.json, if kept, is only a cache of this).
-import { ORCHESTRATOR_ONLY, type StatusChange, type Event, type InboxEntry, type Note, type ProjectFile, type QueueFile, type QueueStatus, type ReviewItem, type RunFile, type RuntimeFile, type SessionFile, type StepDef, type StepStatus } from "./schemas.ts";
+import { ORCHESTRATOR_ONLY, type StatusChange, type Event, type InboxEntry, type Note, type ProjectFile, type QueueFile, type QueueStatus, type ReviewItem, type ReviewPolicy, type RunFile, type RuntimeFile, type SessionFile, type StepDef, type StepStatus } from "./schemas.ts";
 import { ProjectStore, revisionHash } from "./store.ts";
 import { ENDED_RUN_STATES, type Segment } from "./times.ts";
 
@@ -27,6 +27,16 @@ export interface StepView extends StepDef {
   progress?: { text: string; pct?: number; at: string };
   session?: string;
   summary?: string; reason?: string; commit?: string;
+  /**
+   * In review: whom the step waits for. The orchestrator with review policy `orchestrator`, until it asks the user
+   * (`asked_user`); the user with `wait`, and also with `orchestrator` when the project has no orchestrator or its
+   * notices are off.
+   */
+  review_with?: "orchestrator" | "user";
+  /** The orchestrator's reason for handing the step's review to the user, in the current round. */
+  asked_user?: { text: string; at: string };
+  /** Send-backs of this step, oldest first (by the orchestrator or the user). */
+  sent_back: { text: string; at: string; by: "orchestrator" | "user" }[];
   review_items: (ReviewItem & { at: string; round?: number })[];
   checks: CheckView[];
   notes: (Note & { read_at?: string })[];
@@ -128,11 +138,18 @@ export function loadProjectState(store: ProjectStore): ProjectState {
   let next = 0;
   for (const e of events) {
     while (next < changes.length && changes[next]!.c.at < e.at) { applyChange(changes[next]!.q, changes[next]!.c); next++; }
-    apply(e, queues, sessions, questions, warnings);
+    apply(e, queues, sessions, questions, warnings, project);
   }
   for (; next < changes.length; next++) applyChange(changes[next]!.q, changes[next]!.c);
   // An approval after a proposal to lift answers it (approving a stopped queue lifts the stop anyway).
   for (const q of queues.values()) if (q.lift_proposal && q.approvals.some((a) => a.at > q.lift_proposal!.at)) q.lift_proposal = undefined;
+
+  // A review for the orchestrator goes to the user when there is none to do it, or its notices are off.
+  const orchestrating = !!project.orchestrator && project.orchestrator.notify !== false;
+  for (const q of queues.values()) for (const st of q.steps) {
+    if (st.status !== "review") st.review_with = undefined;
+    else if (st.review_with === "orchestrator" && !orchestrating) st.review_with = "user";
+  }
 
   for (const q of queues.values()) {
     q.questions = [...questions.values()].filter((x) => x.queue === q.id);
@@ -183,7 +200,8 @@ function attentionOf(queues: QueueView[], questions: QuestionView[]): AttentionI
     if (q.status === "proposed") out.push({ kind: "approval", queue: q.id, text: q.title, at: q.updated_at });
     if (q.status === "cancelled" || q.status === "done") continue;
     for (const s of q.steps) {
-      if (s.status === "review") out.push({ kind: "review", queue: q.id, step: s.id, text: s.summary ?? s.title, at: s.finished_at });
+      // A review the orchestrator does is not the user's (the queue still shows it waiting).
+      if (s.status === "review" && s.review_with !== "orchestrator") out.push({ kind: "review", queue: q.id, step: s.id, text: s.asked_user?.text ?? s.summary ?? s.title, at: s.asked_user?.at ?? s.finished_at });
       if (s.status === "failed") out.push({ kind: "failed", queue: q.id, step: s.id, text: s.reason ?? s.title, at: s.finished_at });
     }
   }
@@ -211,15 +229,20 @@ function initQueue(q: QueueFile, notes: Note[]): QueueView {
     steps: q.steps.map((s) => ({
       ...s,
       status: s.status ?? "pending",
-      review_items: [], checks: [], timeline: [], messages: [], segments: [],
+      review_items: [], checks: [], timeline: [], messages: [], segments: [], sent_back: [],
       notes: notes.filter((n) => n.step === s.id),
     })),
   };
 }
 
+/** The review policy that applies to a step: its own, else its queue's, else the project's default. */
+export function reviewPolicyOf(st: Pick<StepDef, "review">, q: Pick<QueueFile, "review_policy">, project: Pick<ProjectFile, "defaults">): ReviewPolicy {
+  return st.review?.policy ?? q.review_policy ?? project.defaults.review_policy;
+}
+
 function apply(
   e: Event, queues: Map<string, QueueView>, sessions: Map<string, SessionView>,
-  questions: Map<string, QuestionView>, warnings: string[],
+  questions: Map<string, QuestionView>, warnings: string[], project: ProjectFile,
 ): void {
   const s = sessions.get(e.session);
   if (s) {
@@ -275,12 +298,14 @@ function apply(
     case "step.done": {
       const q = queueOf(e.queue); const st = stepOf(q, e.step);
       if (!q || !st) return;
-      const policy = st.review?.policy ?? q.review_policy ?? "continue";
-      st.status = policy === "wait" ? "review" : "done";
+      const policy = reviewPolicyOf(st, q, project);
+      st.status = policy === "continue" ? "done" : "review";
+      st.review_with = policy === "orchestrator" ? "orchestrator" : policy === "wait" ? "user" : undefined;
+      st.asked_user = undefined;
       st.finished_at = e.at; st.summary = e.summary; st.commit = e.commit;
       endSegment(st, e.at);
       if (q.steps.every((x) => FINISHED_STEP.has(x.status))) q.status = "done";
-      else if (policy === "wait") q.status = "waiting";
+      else if (policy !== "continue") q.status = "waiting";
       return;
     }
     case "step.failed": {
@@ -326,9 +351,25 @@ function apply(
       if (!e.escalate) resume(x, queues, e);
       return;
     }
+    case "review.asked_user": {
+      const st = stepOf(queueOf(e.queue), e.step);
+      if (!st || st.status !== "review" || st.review_with !== "orchestrator") { warnings.push(`event ${e.id}: step ${e.queue}/${e.step} is not waiting for the orchestrator's review; ignored`); return; }
+      st.review_with = "user"; st.asked_user = { text: e.text, at: e.at };
+      return;
+    }
+    case "review.sent_back": {
+      // Recorded here; sending the step back to its worker is the server's (src/engine.ts).
+      const st = stepOf(queueOf(e.queue), e.step);
+      if (!st || st.status !== "review") return;
+      st.sent_back.push({ text: e.text, at: e.at, by: s?.role === "user" ? "user" : "orchestrator" });
+      return;
+    }
     case "review.accepted": {
       const q = queueOf(e.queue); const st = stepOf(q, e.step);
       if (!q || !st || st.status !== "review") return;
+      // The orchestrator accepts only what waits for it; what went to the user is the user's.
+      if (s?.role === "orchestrator" && st.review_with !== "orchestrator") { warnings.push(`event ${e.id}: step ${e.queue}/${e.step} waits for the user's review; the orchestrator's acceptance is ignored`); return; }
+      st.review_with = undefined;
       st.status = "done";
       if (q.steps.every((x) => FINISHED_STEP.has(x.status))) q.status = "done";
       else if (q.status === "waiting" && !q.steps.some((x) => x.status === "waiting" || x.status === "review")) q.status = "running";

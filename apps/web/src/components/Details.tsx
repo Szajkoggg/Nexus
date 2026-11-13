@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { Event, StatusChange } from "@nexus/protocol";
 import { act, enc, fileUrl, type ProjectState, type QuestionView, type QueueView, type StepView } from "../api.ts";
-import { Button, Composer, Expandable, Markdown, Section, StatusBadge, StepTimes, TimeAgo } from "./ui.tsx";
+import { Button, Composer, Expandable, Markdown, Section, StatusBadge, StepTimes, TimeAgo, reviewLabel } from "./ui.tsx";
 import { Activity, RetryNote, RunControls } from "./Run.tsx";
 import { StepRefusals } from "./Refusals.tsx";
 import { draftKey } from "../drafts.ts";
@@ -34,7 +34,7 @@ export function StepDetail({ project, queue, step, onChanged }: Props & { step: 
         <span className="font-mono text-zinc-500">{step.id}</span> {step.title}
       </h2>
       <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-zinc-500">
-        <StatusBadge status={step.status} />
+        <StatusBadge status={step.status} label={reviewLabel(step)} />
         <StepTimes step={step} />
         {step.commit && <span className="font-mono">{step.commit}</span>}
         {session && <span>by {session.title ?? session.id.slice(-8)} ({session.runtime})</span>}
@@ -62,7 +62,12 @@ export function StepDetail({ project, queue, step, onChanged }: Props & { step: 
         </div>
       )}
 
-      {step.status === "review" && <AcceptReview project={id} queue={queue.id} step={step.id} onChanged={onChanged} />}
+      {step.status === "review" && step.review_with === "orchestrator" && (
+        <Section title="Waiting for the orchestrator's review">
+          <p className="text-sm text-zinc-400">The queue holds here until the orchestrator accepts this step, sends it back, or hands it to you.</p>
+        </Section>
+      )}
+      {step.status === "review" && step.review_with !== "orchestrator" && <AcceptReview project={id} queue={queue.id} step={step.id} asked={step.asked_user?.text} onChanged={onChanged} />}
 
       {live && session && (
         <Section title="Message the running agent" aside={<span className="text-xs text-zinc-600">read at its next check-in</span>}>
@@ -208,10 +213,13 @@ export function StepDetail({ project, queue, step, onChanged }: Props & { step: 
   );
 }
 
-function AcceptReview({ project, queue, step, onChanged }: { project: string; queue: string; step: string; onChanged: () => void }) {
+const POLICY_LABEL: Record<string, string> = { continue: "go on", wait: "wait for my review", orchestrator: "the orchestrator reviews" };
+
+function AcceptReview({ project, queue, step, asked, onChanged }: { project: string; queue: string; step: string; asked?: string; onChanged: () => void }) {
   const [error, setError] = useState<string>();
   return (
     <Section title="Waiting for your review">
+      {asked && <p className="mb-2 text-sm text-zinc-300"><span className="text-zinc-500">The orchestrator asks you: </span>{asked}</p>}
       <p className="mb-2 text-sm text-zinc-400">The queue holds here until you accept this step.</p>
       <Button onClick={() => act(project, "POST", `/queues/${enc(queue)}/steps/${enc(step)}/accept`).then(onChanged, (e: Error) => setError(e.message))}>Accept and go on</Button>
       {error && <span className="ml-3 text-xs text-red-400">{error}</span>}
@@ -243,6 +251,9 @@ function describe(e: Event): string {
     case "question.asked": return e.text;
     case "answer.given": return e.text;
     case "context.summary": return e.text.slice(0, 200);
+    case "review.accepted": return e.text ?? "";
+    case "review.sent_back": return e.text;
+    case "review.asked_user": return e.text;
     default: return "";
   }
 }
@@ -466,9 +477,10 @@ export function QueueDetail({ project, queue, onChanged }: Props) {
             onChange={(e) => void setPolicy(e.target.value || null)}
             className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm"
           >
-            <option value="">project default ({project.project.defaults.review_policy === "wait" ? "wait for review" : "go on"})</option>
+            <option value="">project default ({POLICY_LABEL[project.project.defaults.review_policy]})</option>
             <option value="continue">go on to the next step</option>
             <option value="wait">wait for my review</option>
+            <option value="orchestrator">wait for the orchestrator's review</option>
           </select>
         </label>
         {error && <p className="mt-1 text-xs text-red-400">{error}</p>}

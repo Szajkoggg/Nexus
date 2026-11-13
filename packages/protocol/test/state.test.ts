@@ -125,3 +125,82 @@ test("a done queue waits for nothing: no item for a halted run, nor for a failed
   assert.equal(s.queues[0]!.status, "done");
   assert.deepEqual(s.attention, []);
 });
+
+// ---------------------------------------------------------------- review by the orchestrator
+
+test("the review policy falls back from step to queue to the project's default", () => {
+  const { st, q, session, emit } = setup();
+  const three = [
+    { id: "Q1", title: "One", goal: "", acceptance: [] },
+    { id: "Q2", title: "Two", goal: "", acceptance: [], review: { policy: "orchestrator" as const } },
+    { id: "Q3", title: "Three", goal: "", acceptance: [] },
+  ];
+  const w = session("worker");
+  const statuses = () => loadProjectState(st).queues[0]!.steps.map((x) => `${x.status}${x.review_with ? `:${x.review_with}` : ""}`);
+  for (const s of ["Q1", "Q2", "Q3"]) { emit(w, { type: "step.started", queue: "Q", step: s }); emit(w, { type: "step.done", queue: "Q", step: s, summary: "ok" }); }
+  st.writeProject({ ...st.readProject(), orchestrator: { runtime: "claude", notify: true, session: null } });
+
+  st.writeQueue({ ...q, steps: three }); // nothing on the queue, the project's default: continue
+  assert.deepEqual(statuses(), ["done", "review:orchestrator", "done"]);
+  st.writeQueue({ ...q, steps: three, review_policy: "wait" }); // the queue's
+  assert.deepEqual(statuses(), ["review:user", "review:orchestrator", "review:user"]);
+  st.writeQueue({ ...q, steps: three }); // the project's default
+  st.writeProject({ ...st.readProject(), defaults: { ...st.readProject().defaults, review_policy: "orchestrator" } });
+  assert.deepEqual(statuses(), ["review:orchestrator", "review:orchestrator", "review:orchestrator"]);
+});
+
+test("an orchestrator review is not the user's item until it asks the user; the queue waits in both", () => {
+  const { st, q, session, emit } = setup();
+  st.writeQueue({ ...q, review_policy: "orchestrator" });
+  st.writeProject({ ...st.readProject(), orchestrator: { runtime: "claude", notify: true, session: null } });
+  const w = session("worker"); const o = session("orchestrator");
+  emit(w, { type: "step.started", queue: "Q", step: "Q1" });
+  emit(w, { type: "step.done", queue: "Q", step: "Q1", summary: "ok" });
+  let s = loadProjectState(st);
+  assert.equal(s.queues[0]!.status, "waiting");
+  assert.equal(s.queues[0]!.steps[0]!.review_with, "orchestrator");
+  assert.deepEqual(s.attention, []);
+
+  // A worker can neither hand it on nor accept it.
+  emit(w, { type: "review.asked_user", queue: "Q", step: "Q1", text: "self" });
+  emit(w, { type: "review.accepted", queue: "Q", step: "Q1" });
+  emit(w, { type: "review.sent_back", queue: "Q", step: "Q1", text: "self" });
+  s = loadProjectState(st);
+  assert.equal(s.queues[0]!.steps[0]!.review_with, "orchestrator");
+  assert.deepEqual(s.queues[0]!.steps[0]!.sent_back, []);
+  assert.equal(s.warnings.filter((x) => /is for orchestrators/.test(x)).length, 3);
+
+  emit(o, { type: "review.asked_user", queue: "Q", step: "Q1", text: "The look is the user's." });
+  s = loadProjectState(st);
+  assert.equal(s.queues[0]!.status, "waiting");
+  assert.equal(s.queues[0]!.steps[0]!.review_with, "user");
+  assert.deepEqual(s.attention.map((a) => [a.kind, a.step, a.text]), [["review", "Q1", "The look is the user's."]]);
+  // Now it is the user's: the orchestrator's acceptance does not count.
+  emit(o, { type: "review.accepted", queue: "Q", step: "Q1" });
+  assert.equal(loadProjectState(st).queues[0]!.steps[0]!.status, "review");
+  emit(session("user"), { type: "review.accepted", queue: "Q", step: "Q1" });
+  s = loadProjectState(st);
+  assert.equal(s.queues[0]!.steps[0]!.status, "done");
+  assert.equal(s.queues[0]!.status, "running");
+});
+
+test("the orchestrator accepts a step waiting for it; without an orchestrator or with notices off it is the user's", () => {
+  const { st, q, session, emit } = setup();
+  st.writeQueue({ ...q, review_policy: "orchestrator" });
+  const w = session("worker"); const o = session("orchestrator");
+  emit(w, { type: "step.started", queue: "Q", step: "Q1" });
+  emit(w, { type: "step.done", queue: "Q", step: "Q1", summary: "ok" });
+  let s = loadProjectState(st);
+  assert.equal(s.queues[0]!.steps[0]!.review_with, "user", "the project has no orchestrator");
+  assert.equal(s.attention.length, 1);
+  st.writeProject({ ...st.readProject(), orchestrator: { runtime: "claude", notify: false, session: null } });
+  assert.equal(loadProjectState(st).queues[0]!.steps[0]!.review_with, "user", "notices off");
+  st.writeProject({ ...st.readProject(), orchestrator: { runtime: "claude", notify: true, session: null } });
+  s = loadProjectState(st);
+  assert.equal(s.queues[0]!.steps[0]!.review_with, "orchestrator");
+  assert.deepEqual(s.attention, []);
+  emit(o, { type: "review.accepted", queue: "Q", step: "Q1", text: "fine" });
+  s = loadProjectState(st);
+  assert.equal(s.queues[0]!.steps[0]!.status, "done");
+  assert.equal(s.queues[0]!.steps[0]!.review_with, undefined);
+});

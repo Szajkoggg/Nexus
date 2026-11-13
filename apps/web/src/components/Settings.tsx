@@ -170,7 +170,7 @@ export function SettingsPanel({ project, onChanged, server }: { project: Project
       </Section>
 
       <Section title="Defaults">
-        <Row label="After each step"><Select value={f.review} onChange={(v) => set("review", v as "continue" | "wait")} options={[["continue", "go on to the next step"], ["wait", "wait for my review"]]} /></Row>
+        <Row label="After each step" hint={f.review === "orchestrator" ? "The orchestrator accepts each step, sends it back, or hands it to you; without an orchestrator, or with its notices off, the step waits for you." : undefined}><Select value={f.review} onChange={(v) => set("review", v as "continue" | "wait" | "orchestrator")} options={[["continue", "go on to the next step"], ["wait", "wait for my review"], ["orchestrator", "wait for the orchestrator's review"]]} /></Row>
         <Row label="Pause new steps at" hint="Share of a usage window (Claude's 5 hours, Codex's windows) above which no new step starts.">
           <span className="flex items-center gap-2"><input type="number" min={10} max={100} value={f.usage} onChange={(e) => set("usage", Number(e.target.value))} className={`${field} w-24`} /> %</span>
         </Row>
