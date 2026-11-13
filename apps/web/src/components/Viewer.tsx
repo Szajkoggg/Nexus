@@ -7,7 +7,11 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
-export interface ViewerImage { src: string; label: string; round?: number; before?: { src: string; label: string } }
+export interface ViewerImage {
+  src: string; label: string; round?: number; before?: { src: string; label: string };
+  /** The user's mark and comments on it, shown on its thumbnail in the filmstrip. */
+  accepted?: boolean; comments?: number;
+}
 type Mode = "after" | "both" | "overlay";
 
 const MAX_ZOOM = 6;
@@ -20,8 +24,10 @@ export function swipeOf(dx: number, dy: number, width: number): -1 | 0 | 1 {
   return dx < 0 ? 1 : -1;
 }
 
-export function ImageViewer({ images, index, onIndex, onClose, footer }: {
+export function ImageViewer({ images, index, onIndex, onClose, footer, back, context }: {
   images: ViewerImage[]; index: number; onIndex: (i: number) => void; onClose: () => void;
+  /** What ‹ goes back to (the step's id), and where the pictures are ("Nexus · UX · UX2 Proposals…"). */
+  back?: string; context?: string;
   /** Below the picture: an ActionBar with what the user can do with it (its mark, comments, the original). */
   footer?: (index: number) => ReactNode;
 }) {
@@ -32,6 +38,8 @@ export function ImageViewer({ images, index, onIndex, onClose, footer }: {
   const next = index < images.length - 1 ? () => onIndex(index + 1) : undefined;
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
       if (e.key === "ArrowLeft") prev?.();
       if (e.key === "ArrowRight") next?.();
     };
@@ -39,34 +47,60 @@ export function ImageViewer({ images, index, onIndex, onClose, footer }: {
     return () => window.removeEventListener("keydown", key);
   });
   const arrow = "absolute top-1/2 z-10 -translate-y-1/2 rounded-full bg-canvas/60 p-2.5 text-fg ring-1 ring-line-strong hover:bg-canvas/85";
+  // The filmstrip keeps the picture shown in sight.
+  const strip = useRef<HTMLDivElement>(null);
+  useEffect(() => { strip.current?.querySelector("[aria-current=true]")?.scrollIntoView({ block: "nearest", inline: "nearest" }); }, [index]);
+  const marked = images.filter((x) => x.accepted).length;
   return createPortal(
     <div role="dialog" aria-label="Review image" className="fixed inset-0 z-[60] flex flex-col bg-canvas pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
-      <header className="flex items-center gap-3 px-3 py-2 text-sm">
+      <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-line bg-surface px-3 py-2 text-sm">
+        {back && (
+          <button onClick={onClose} aria-label={`Back to ${back}`} className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1.5 text-fg-2 hover:bg-surface-3 hover:text-fg max-lg:min-h-11">
+            <Chevron dir="left" /><span className="font-mono text-xs">{back}</span>
+          </button>
+        )}
         <div className="min-w-0 flex-1">
-          <div className="truncate font-medium text-fg">{img.label}</div>
-          <div className="text-xs text-fg-2">{images.length > 1 ? `${index + 1} of ${images.length}` : "1 image"}{img.round ? ` · round ${img.round}` : ""}</div>
+          <div className="truncate font-semibold text-fg">{img.label}</div>
+          <div className="truncate text-xs text-fg-3">
+            {images.length > 1 ? `picture ${index + 1} of ${images.length}` : "1 picture"}{img.round ? ` · round ${img.round}` : ""}{context ? ` · ${context}` : ""}
+          </div>
         </div>
+        {img.before && (
+          <div className="flex shrink-0 gap-0.5 rounded-lg border border-line bg-surface-2 p-0.5 max-lg:order-last max-lg:basis-full max-lg:justify-center" role="group" aria-label="Compare with the before">
+            {([["after", "After"], ["both", "Before | After"], ["overlay", "Overlay"]] as const).map(([m, label]) => (
+              <button key={m} onClick={() => setMode(m)} aria-pressed={shown === m}
+                className={`rounded-md px-3 py-1 text-xs max-lg:min-h-9 ${shown === m ? "bg-surface-4 font-semibold text-fg" : "text-fg-2 hover:text-fg"}`}>{label}</button>
+            ))}
+          </div>
+        )}
         {!footer && <a href={img.src} target="_blank" rel="noreferrer" className="shrink-0 rounded-md px-2 py-1.5 text-xs text-accent hover:bg-surface-3" title="Open the original file in a new tab">Original ↗</a>}
-        <button onClick={onClose} aria-label="Close" className="shrink-0 rounded-md p-1.5 text-fg-2 hover:bg-surface-3 hover:text-fg">
+        <button onClick={onClose} aria-label="Close" className="grid shrink-0 place-items-center rounded-md p-1.5 text-fg-2 hover:bg-surface-3 hover:text-fg max-lg:h-11 max-lg:w-11">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 6l12 12M18 6L6 18" /></svg>
         </button>
       </header>
-      {img.before && (
-        <div className="flex justify-center gap-1 px-3 pb-2" role="group" aria-label="Compare with the before">
-          {([["after", "After"], ["both", "Before and after"], ["overlay", "Overlay"]] as const).map(([m, label]) => (
-            <button key={m} onClick={() => setMode(m)} aria-pressed={shown === m}
-              className={`rounded-full px-3 py-1 text-xs ring-1 ${shown === m ? "bg-accent-strong text-on-accent ring-accent" : "text-fg ring-line-strong hover:bg-surface-3"}`}>{label}</button>
-          ))}
-        </div>
-      )}
       <div className="relative min-h-0 flex-1">
         {/* Keyed by the image: zoom and pan start fresh on each. */}
         {shown === "after" || !img.before
           ? <Stage key={index} src={img.src} alt={img.label} onSwipe={(d) => (d > 0 ? next : prev)?.()} />
-          : <Compare key={`${index}-${shown}`} before={img.before} after={{ src: img.src, label: img.label }} mode={shown} />}
+          : <Compare key={`${index}-${shown}`} before={img.before} after={{ src: img.src, label: img.label }} mode={shown} onSwipe={(d) => (d > 0 ? next : prev)?.()} />}
         {prev && <button onClick={prev} aria-label="Previous image" className={`${arrow} left-2`}><Chevron dir="left" /></button>}
         {next && <button onClick={next} aria-label="Next image" className={`${arrow} right-2`}><Chevron dir="right" /></button>}
       </div>
+      {images.length > 1 && (
+        <div className="flex items-center gap-3 border-t border-line bg-surface px-3 py-2">
+          <div ref={strip} className="scroll-thin flex min-w-0 gap-2 overflow-x-auto" role="list" aria-label="The step's pictures">
+            {images.map((x, i) => (
+              <button key={i} role="listitem" onClick={() => onIndex(i)} aria-current={i === index} title={x.label}
+                className={`relative h-12 w-20 shrink-0 overflow-hidden rounded-md border-2 bg-canvas lg:h-16 lg:w-28 ${i === index ? "border-accent" : "border-transparent opacity-80 hover:opacity-100"}`}>
+                <img src={x.src} alt={x.label} draggable={false} className="h-full w-full object-cover object-left-top" loading="lazy" />
+                {x.accepted && <span className="absolute right-1 top-1 rounded bg-ok px-1 text-[11px] font-bold leading-4 text-canvas" title="Marked">✓</span>}
+                {!!x.comments && <span className="absolute bottom-1 right-1 rounded bg-canvas/80 px-1 text-[10px] leading-4 text-info" title="Your comments">💬 {x.comments}</span>}
+              </button>
+            ))}
+          </div>
+          <span className="ml-auto shrink-0 whitespace-nowrap text-xs text-fg-3">{marked} of {images.length} marked<span className="max-lg:hidden"> · ← → to move</span></span>
+        </div>
+      )}
       {footer?.(index)}
     </div>,
     document.body,
@@ -142,12 +176,23 @@ function Stage({ src, alt, onSwipe }: { src: string; alt: string; onSwipe: (dir:
 }
 
 /** A picture and its before: both (beside each other, stacked when upright) or overlaid with a slider to wipe between. */
-function Compare({ before, after, mode }: { before: { src: string; label: string }; after: { src: string; label: string }; mode: "both" | "overlay" }) {
+function Compare({ before, after, mode, onSwipe }: { before: { src: string; label: string }; after: { src: string; label: string }; mode: "both" | "overlay"; onSwipe: (dir: -1 | 1) => void }) {
   const [split, setSplit] = useState(50);
+  const start = useRef<{ x: number; y: number } | undefined>(undefined);
+  const swipe = {
+    onPointerDown: (e: React.PointerEvent) => { if ((e.target as HTMLElement).tagName !== "INPUT") start.current = { x: e.clientX, y: e.clientY }; },
+    onPointerUp: (e: React.PointerEvent) => {
+      const s = start.current; start.current = undefined;
+      if (!s) return;
+      const d = swipeOf(e.clientX - s.x, e.clientY - s.y, (e.currentTarget as HTMLElement).clientWidth);
+      if (d) onSwipe(d);
+    },
+    onPointerCancel: () => { start.current = undefined; },
+  };
   const tag = "absolute left-2 top-2 rounded bg-canvas/70 px-1.5 py-0.5 text-[11px] text-fg";
   if (mode === "both") {
     return (
-      <div className="absolute inset-0 flex flex-col gap-1 p-1 landscape:flex-row">
+      <div {...swipe} className="absolute inset-0 flex touch-pan-y flex-col gap-1 p-1 landscape:flex-row">
         {[["Before", before], ["After", after]].map(([what, x]) => {
           const p = x as { src: string; label: string };
           return (
@@ -162,7 +207,7 @@ function Compare({ before, after, mode }: { before: { src: string; label: string
   }
   return (
     <div className="absolute inset-0 flex flex-col">
-      <div className="relative min-h-0 flex-1 select-none overflow-hidden">
+      <div {...swipe} className="relative min-h-0 flex-1 touch-pan-y select-none overflow-hidden">
         <img src={before.src} alt={`Before: ${before.label}`} draggable={false} className="absolute inset-0 m-auto max-h-full max-w-full object-contain" />
         <img src={after.src} alt={`After: ${after.label}`} draggable={false} className="absolute inset-0 m-auto max-h-full max-w-full object-contain" style={{ clipPath: `inset(0 0 0 ${split}%)` }} />
         <div className="pointer-events-none absolute inset-y-0 w-px bg-accent/80" style={{ left: `${split}%` }} />

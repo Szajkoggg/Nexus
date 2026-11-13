@@ -50,12 +50,15 @@ The header says where you are, what it is and its status, with ✕ at the top ri
 Orchestrator | Ideas on the left, ⋯ and ✕ on the right; "New conversation" (which makes the orchestrator start over)
 and showing the tool calls are under ⋯.
 
-**Review images** open in the app: full screen on a phone, two fingers to zoom (double-tap on a computer), swipe or
-the arrows for the step's next and previous image; "Open the original" under ⋯ opens the file in a new tab. A picture
-with a "before" (the same label in an earlier round, or one the worker named with `--before`) can be seen beside it
-or overlaid with a slider. The viewer's bar: **Mark accepted** (a mark for that picture only; it does not accept the
-step) and **Comment…**, which goes back to the worker as a Fix it while the step waits for your review, and otherwise
-becomes a note on the next pending step.
+**Reviewing a step** opens on its summary and its pictures, large, two per row, with your marks; the checks, the
+goal and acceptance, the commits and the timeline are one line below, folded. A picture opens in the viewer: full
+screen, two fingers to zoom (double-tap on a computer), swipe, the arrow keys or the filmstrip at the bottom to move
+between the step's pictures; "Open the original" under ⋯ opens the file in a new tab. A picture with a "before" (the
+same label in an earlier round, or one the worker named with `--before`) can be seen beside it or overlaid with a
+slider. The viewer's bar: **✓ Mark this picture** (a mark for that picture only; it does not accept the step) and a
+comment (Enter sends it), which goes back to the worker as a Fix it while the step waits for your review, and
+otherwise becomes a note on the next pending step; on the right the step's own **Fix it…** and **Accept the step**, so
+you can decide after the last picture without leaving the viewer.
 
 **Finished queues** (done or cancelled) are no longer cards in the list: they fold into one line at the bottom of
 the project page, "Finished (N)", closed until you open it (the browser remembers that, per project). Open, it lists

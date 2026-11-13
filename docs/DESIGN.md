@@ -708,6 +708,23 @@ Proposed reads "needs your approval". Open questions and the steps in review are
 review"). The step lines follow the same rule: a step whose events say it runs while its run does not reads paused,
 without a progress bar. The page's groups are unchanged here; the desktop layouts of the next queue use the same helper.
 
+### Reviewing: the pictures first, the decision in the viewer
+
+A step that waits for the user's review opens on what to judge (UX proposals, 13 and 14): its summary, what the
+orchestrator asks, then its pictures, large, two per row, each with its mark (✓ marked, ⇄ has a before, 💬 comments)
+and "k marked"; links and sheets follow as one line of links. The checks are one line of ✓ and ✗ beside three folds,
+Goal and acceptance (with what to prepare), Commits · N and Timeline, which open in place. Accept is in the action
+bar, under the evidence. The step's other parts (its chat, notes, messages, activity) follow below. Steps that do not
+wait for the user keep the usual order.
+
+The viewer has a top bar (‹ back to the step, the picture, "picture 3 of 7" and where, After | Before | After |
+Overlay, ✕), a filmstrip of all the step's pictures with their marks and the one shown framed, and the same action bar
+as every panel: for the picture on the left its mark and a one-line comment (Enter sends), for the step on the right,
+while it waits for the user, the drawer's decision (⋯ with Reject and a note, Fix it…, Accept the step), so the user
+decides after the last picture without leaving the viewer. Both bars share one hook (`useReviewDecision`); each keeps
+its own open forms, and Fix it's text is the same draft in both. The arrow keys move (not while typing in a box), and
+a swipe moves in every view: the picture alone, before and after, and the overlay outside its slider.
+
 ## Findings from building phase 3
 
 - **Context fill and usage limits are in the stream.** Every `assistant` message carries its usage (input, cache

@@ -38,6 +38,7 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
     src: fileUrl(id, r.path!), label: r.label ?? r.path!.split("/").at(-1)!, round: r.round,
     // An explicit before by its file name; one paired by label by its round.
     before: before ? { src: fileUrl(id, before), label: beforeLabel === "before" ? before.split(/[\\/]/).at(-1)! : beforeLabel ?? "before" } : undefined,
+    accepted: !!step.pictures[r.path!]?.accepted, comments: step.pictures[r.path!]?.comments.length ?? 0,
   }));
   const viewing = layerValue(useNav(), "viewer");
   const shown = viewing === undefined ? undefined : Math.min(Math.max(0, Number(viewing) || 0), images.length - 1);
@@ -49,17 +50,27 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
   // the answer in the body and Answer in the bar; the step's details follow below it.
   const phone = usePhone();
   const questionFirst = phone && !!asking;
-  const body = (
+  const [fold, setFold] = useState<{ goal?: boolean; commits?: boolean; timeline?: boolean }>({});
+  // The step's parts. While it waits for the user's review the summary and the pictures come first (UX proposals,
+  // 13 and 14): the pictures large, two per row, with their marks; the checks, the goal, the commits and the timeline
+  // on one line, folded; Accept in the action bar. Otherwise the usual order.
+  const chat = (
     <>
       <StepChat project={id} queue={queue.id} step={step.id} version={project.generated_at} />
-
+    </>
+  );
+  const retry = (
+    <>
       {queue.run?.state === "retry_wait" && queue.run.step === step.id && (
         <div className="mt-4 rounded-lg border border-warn/30 bg-warn/10 p-3 text-sm">
           <RetryNote run={queue.run} className="text-sm" />
           {queue.run.reason && <p className="mt-1 text-xs text-fg-2">{queue.run.reason}</p>}
         </div>
       )}
-
+    </>
+  );
+  const summary = (
+    <>
       {(step.summary || step.reason || step.progress) && (
         <div className="mt-4 rounded-lg bg-surface-2 p-3 text-sm">
           {step.summary && <p><span className="text-fg-3">Summary: </span>{step.summary}</p>}
@@ -69,7 +80,10 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
           )}
         </div>
       )}
-
+    </>
+  );
+  const reviewNotes = (
+    <>
       {step.status === "review" && step.review_with === "orchestrator" && (
         <Section title="Waiting for the orchestrator's review">
           <p className="text-sm text-fg-2">The queue holds here until the orchestrator accepts this step, sends it back, or hands it to you.</p>
@@ -81,11 +95,20 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
           <p className="text-sm text-fg-2">The queue holds here until you accept this step or send it back.</p>
         </Section>
       )}
-
+    </>
+  );
+  const push = (
+    <>
       <PushLine project={id} queue={queue} step={step.id} onChanged={onChanged} />
-
+    </>
+  );
+  const rejected = (
+    <>
       {step.status === "rejected" && <Rejected step={step} holding={queue.rejection?.step === step.id} />}
-
+    </>
+  );
+  const sentBack = (
+    <>
       {step.sent_back.length > 0 && (
         <Section title="Sent back">
           <ul className="space-y-2">
@@ -100,7 +123,10 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
           </ul>
         </Section>
       )}
-
+    </>
+  );
+  const message = (
+    <>
       {live && session && (
         <Section title="Message the running agent" aside={<span className="text-xs text-fg-3">read at its next check-in</span>}>
           <Composer
@@ -111,19 +137,28 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
           />
         </Section>
       )}
-
+    </>
+  );
+  const questionsPart = (
+    <>
       {questions.some((q) => !(questionFirst && q.qid === asking?.qid)) && (
         <Section title={questionFirst ? "Other questions" : "Questions"}>
           {questions.filter((q) => !(questionFirst && q.qid === asking?.qid)).map((q) => <Question key={q.qid} q={q} project={id} onChanged={onChanged} inBar={q.qid === asking?.qid} />)}
         </Section>
       )}
-
+    </>
+  );
+  const statusNote = (
+    <>
       {step.status_note && (
         <Section title="Recorded state">
           <Expandable text={step.status_note} />
         </Section>
       )}
-
+    </>
+  );
+  const goalAcceptance = (
+    <>
       {step.goal && <Section title="Goal"><Markdown>{step.goal}</Markdown></Section>}
       {step.acceptance.length > 0 && (
         <Section title="Acceptance">
@@ -135,7 +170,10 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
         </Section>
       )}
       {step.review?.prepare && <Section title="Review to prepare"><Markdown>{step.review.prepare}</Markdown></Section>}
-
+    </>
+  );
+  const material = (
+    <>
       {step.review_items.length > 0 && (
         <Section title="Review material">
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
@@ -163,12 +201,19 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
           </div>
         </Section>
       )}
-
+    </>
+  );
+  const viewer = (
+    <>
       {shown !== undefined && images.length > 0 && (
         <ImageViewer images={images} index={shown} onIndex={(i) => nav.open(`viewer:${i}`)} onClose={() => nav.close("viewer")}
+          back={step.id} context={`${project.project.name} · ${queue.id} · ${step.id} ${step.title}`}
           footer={(i) => <PictureActions key={pictures[i]!.item.path} project={id} queue={queue} step={step} path={pictures[i]!.item.path!} src={images[i]!.src} onChanged={onChanged} />} />
       )}
-
+    </>
+  );
+  const checks = (
+    <>
       {step.checks.length > 0 && (
         <Section title="Checks">
           <ul className="space-y-1 text-sm">
@@ -182,7 +227,10 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
           </ul>
         </Section>
       )}
-
+    </>
+  );
+  const notes = (
+    <>
       <Section title="Notes" aside={<span className="text-xs text-fg-3">{forOrchestrator ? "go to the orchestrator, which weighs them in its review" : "delivered when the step starts"}</span>}>
         <div className="space-y-2">
           {step.notes.map((n) => (
@@ -208,7 +256,10 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
           </div>
         )}
       </Section>
-
+    </>
+  );
+  const messages = (
+    <>
       {step.messages.length > 0 && (
         <Section title="Messages sent while it ran">
           <div className="space-y-2">
@@ -224,17 +275,32 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
           </div>
         </Section>
       )}
-
+    </>
+  );
+  const refusals = (
+    <>
       <StepRefusals project={project} queue={queue.id} step={step.id} />
-
+    </>
+  );
+  const changes = (
+    <>
       <Changes entries={queue.changes.filter((c) => c.step === step.id)} queue={queue} />
-
+    </>
+  );
+  const activity = (
+    <>
       {(step.session ?? (queue.run?.step === step.id ? queue.run.session : undefined)) && (
         <Activity project={id} session={(step.session ?? queue.run?.session)!} queue={queue.id} step={step.id} version={project.generated_at} />
       )}
-
+    </>
+  );
+  const commits = (
+    <>
       <StepCommits project={id} queue={queue.id} step={step.id} version={project.generated_at} />
-
+    </>
+  );
+  const timeline = (
+    <>
       {step.timeline.length > 0 && (
         <Section title="Timeline">
           <ol className="relative space-y-2 border-l border-line pl-4">
@@ -249,6 +315,64 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
           </ol>
         </Section>
       )}
+    </>
+  );
+  const marked = pictures.filter((p) => step.pictures[p.item.path!]?.accepted).length;
+  const others = step.review_items.filter((r) => !isImage(r));
+  const reviewPictures = (
+    <>
+      {step.asked_user?.text && <p className="mt-4 text-sm text-fg"><span className="text-fg-3">The orchestrator asks you: </span>{step.asked_user.text}</p>}
+      {pictures.length > 0 && (
+        <section className="mt-5">
+          <div className="mb-2 flex items-baseline gap-3">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-3">Pictures · {pictures.length}</h3>
+            <span className="ml-auto text-xs text-fg-3">{marked ? <>{marked} marked <span className="text-ok">✓</span></> : "none marked yet"}</span>
+          </div>
+          <div className="grid grid-cols-2 gap-2.5">
+            {pictures.map(({ item: r, before }, n) => (
+              <button key={r.path} onClick={() => nav.open(`viewer:${n}`)} className="group relative overflow-hidden rounded-lg border border-line bg-surface-2 text-left hover:border-fg-3/60">
+                <img src={fileUrl(id, r.path!)} alt={r.label ?? ""} className="aspect-[16/10] w-full bg-canvas object-cover object-top" loading="lazy" />
+                <span className="flex items-center gap-1.5 px-2 py-1.5 text-xs text-fg">
+                  {step.pictures[r.path!]?.accepted ? <span className="text-ok" title="You marked it">✓</span> : before ? <span className="text-fg-3" title="Has a before to compare with">⇄</span> : null}
+                  <span className="truncate">{r.label ?? r.path!.split("/").at(-1)}{r.round ? ` · round ${r.round}` : ""}</span>
+                  {!!step.pictures[r.path!]?.comments.length && <span className="ml-auto shrink-0 text-info" title="Your comments">💬 {step.pictures[r.path!]!.comments.length}</span>}
+                </span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+      {others.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm">
+          {others.map((r, i) => (
+            <a key={i} href={r.path ? fileUrl(id, r.path) : r.url!} target="_blank" rel="noreferrer" className="text-accent hover:underline">
+              {r.url ? "↗" : "▤"} {r.label ?? r.path ?? r.url}
+            </a>
+          ))}
+        </div>
+      )}
+      <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+        {step.checks.map((c, i) => <span key={i} title={c.summary} className={c.ok ? "text-ok" : "text-danger"}>{c.ok ? "✓" : "✗"} {c.name}</span>)}
+        {(step.goal || step.acceptance.length > 0 || step.review?.prepare) && <Fold label="Goal and acceptance" open={!!fold.goal} onToggle={() => setFold((f) => ({ ...f, goal: !f.goal }))} />}
+        <StepCommits project={id} queue={queue.id} step={step.id} version={project.generated_at} toggle={{ open: !!fold.commits, onToggle: () => setFold((f) => ({ ...f, commits: !f.commits })) }} />
+        {step.timeline.length > 0 && <Fold label="Timeline" open={!!fold.timeline} onToggle={() => setFold((f) => ({ ...f, timeline: !f.timeline }))} />}
+      </div>
+      {fold.goal && goalAcceptance}
+      {fold.commits && commits}
+      {fold.timeline && timeline}
+    </>
+  );
+  const body = reviewing ? (
+    <>
+      {summary}
+      {reviewPictures}
+      <div className="mt-6">{chat}</div>
+      {retry}{push}{rejected}{sentBack}{message}{questionsPart}{statusNote}{notes}{messages}{refusals}{changes}{activity}{viewer}
+    </>
+  ) : (
+    <>
+      {chat}{retry}{summary}{reviewNotes}{push}{rejected}{sentBack}{message}{questionsPart}{statusNote}{goalAcceptance}{material}{viewer}
+      {checks}{notes}{messages}{refusals}{changes}{activity}{commits}{timeline}
     </>
   );
   return (
@@ -401,6 +525,15 @@ function Rejected({ step, holding }: { step: StepView; holding: boolean }) {
   );
 }
 
+/** A folded part of the review's one line: "▸ Goal and acceptance". */
+function Fold({ label, open, onToggle }: { label: string; open: boolean; onToggle: () => void }) {
+  return (
+    <button onClick={onToggle} aria-expanded={open} className="whitespace-nowrap text-fg-2 hover:text-fg max-lg:min-h-11">
+      <span className={`mr-1 inline-block text-xs text-fg-3 transition-transform ${open ? "rotate-90" : ""}`}>▸</span>{label}
+    </button>
+  );
+}
+
 /** On a picture's tile: accepted, its comments, whether it has a before to compare with. */
 function PictureBadges({ marks, paired }: { marks?: StepView["pictures"][string]; paired: boolean }) {
   if (!marks?.accepted && !marks?.comments.length && !paired) return null;
@@ -415,52 +548,66 @@ function PictureBadges({ marks, paired }: { marks?: StepView["pictures"][string]
 }
 
 /**
- * The viewer's action bar: mark the picture accepted (a mark only; the step is not accepted), comment on it, and the
- * original file under ⋯. A comment goes back to the worker as a Fix it while the step waits for the user's review;
- * otherwise it is a note on the next pending step. The comment box opens by itself when there are comments or a draft.
+ * The viewer's action bar (UX proposals, 14): for the picture on the left, its mark (a mark only; the step is not
+ * accepted by it) and a one-line comment; for the step on the right, while it waits for the user's review, the same
+ * decision as the drawer's bar (Accept, Fix it…, Reject and a note under ⋯), so the user decides after the last
+ * picture without leaving the viewer. A comment goes back to the worker as a Fix it while the step waits for the user's
+ * review; otherwise it is a note on the next pending step. The original file is under ⋯.
  */
 function PictureActions({ project, queue, step, path, src, onChanged }: { project: string; queue: QueueView; step: StepView; path: string; src: string; onChanged: () => void }) {
   const marks = step.pictures[path];
   const [error, setError] = useState<string>();
-  const [commentOpen, setCommentOpen] = useState(() => !!marks?.comments.length || !!readDraft(draftKey(project, "picture", queue.id, step.id, path)));
   const next = noteTargets(queue.steps, step.id).next;
-  const where = showsReviewActions(step) ? "goes back to the worker with the step (a Fix it: your words win over its criteria)"
+  const reviewing = showsReviewActions(step);
+  const where = reviewing ? "goes back to the worker with the step (a Fix it: your words win over its criteria)"
     : step.status === "review" && step.review_with === "orchestrator" ? "goes to the orchestrator, which weighs it in its review of the step and sends the step back if you ask for a fix"
     : next ? `becomes a note on step ${next}, delivered when it starts` : undefined;
   const base = `/queues/${enc(queue.id)}/steps/${enc(step.id)}/pictures`;
+  const comment = useDraftText({
+    draft: draftKey(project, "picture", queue.id, step.id, path),
+    onSubmit: async (text) => { await act(project, "POST", `${base}/comment`, { path, text }); onChanged(); },
+  });
+  const decision = useReviewDecision({ project, queue: queue.id, step: step.id, next, criteria: step.acceptance, onChanged }, "Accept the step");
+  const original = { label: "Open the original ↗", onSelect: () => window.open(src, "_blank", "noreferrer") };
+  const phone = usePhone();
+  const fail = error ?? comment.error ?? (reviewing ? decision.error : undefined);
   return (
     <ActionBar
-      hint={error ? <span className="text-danger">{error}</span> : "A mark for this picture; the step is not accepted by it."}
-      menu={[{ label: "Open the original ↗", onSelect: () => window.open(src, "_blank", "noreferrer") }]}
-      secondary={where ? <Button variant="quiet" pressed={commentOpen} onClick={() => setCommentOpen(!commentOpen)}>Comment…</Button> : undefined}
-      primary={
-        <button
-          onClick={() => act(project, "POST", `${base}/mark`, { path, accepted: !marks?.accepted }).then(onChanged, (e: Error) => setError(e.message))}
-          aria-pressed={!!marks?.accepted}
-          className={`rounded-md px-3 py-1.5 text-sm font-medium ${marks?.accepted ? "bg-ok/20 text-ok ring-1 ring-ok/50" : "bg-accent-strong text-on-accent hover:bg-accent"}`}
-        >{marks?.accepted ? "✓ Accepted" : "Mark accepted"}</button>
+      left={
+        <div className="flex min-w-0 flex-1 basis-80 items-center gap-2">
+          <button
+            onClick={() => act(project, "POST", `${base}/mark`, { path, accepted: !marks?.accepted }).then(onChanged, (e: Error) => setError(e.message))}
+            aria-pressed={!!marks?.accepted} title="A mark for this picture; the step is not accepted by it"
+            className={`shrink-0 whitespace-nowrap rounded-md border px-3 py-1.5 text-sm font-medium max-lg:min-h-11 ${marks?.accepted ? "border-ok/50 bg-ok/20 text-ok" : "border-line-strong bg-surface-2 text-fg hover:bg-surface-3"}`}
+          >{marks?.accepted ? "✓ Marked" : "✓ Mark this picture"}</button>
+          {where && (
+            <input value={comment.text} onChange={(e) => comment.change(e.target.value)} aria-label="A comment on this picture"
+              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void comment.submit(); } }}
+              placeholder="A comment on this picture…" title={`Enter sends it. The comment ${where}.`}
+              className="min-w-0 flex-1 rounded-md border border-line-strong bg-canvas px-3 py-1.5 text-sm text-fg placeholder:text-fg-3 focus:border-accent focus:outline-none max-lg:min-h-11 lg:max-w-md" />
+          )}
+        </div>
       }
+      hint={fail ? <span className="text-danger">{fail}</span> : reviewing && !phone ? <span className="block text-right">The step:</span> : undefined}
+      menu={reviewing ? [...decision.menu, original] : [original]}
+      secondary={reviewing ? decision.secondary : undefined}
+      primary={reviewing ? decision.primary : undefined}
     >
-      {(commentOpen || !where) && <div className="space-y-2 text-sm">
-      {marks?.comments.map((c, i) => (
-        <div key={i} className="rounded-md bg-surface-3 px-2 py-1.5">
-          <p className="whitespace-pre-wrap text-fg">{c.text}</p>
-          <p className="text-[11px] text-fg-3">{c.to === "send_back" ? "sent back to the worker" : c.to === "orchestrator" ? "to the orchestrator's review" : `a note on step ${c.note_step}`} · <TimeAgo at={c.at} /></p>
+      {(reviewing && decision.forms) || marks?.comments.length ? (
+        <div className="space-y-3 text-sm">
+          {reviewing && decision.forms}
+          {!!marks?.comments.length && (
+            <div className="space-y-1.5">
+              {marks.comments.map((c, i) => (
+                <div key={i} className="rounded-md bg-surface-3 px-2 py-1.5">
+                  <p className="whitespace-pre-wrap text-fg">{c.text}</p>
+                  <p className="text-[11px] text-fg-3">{c.to === "send_back" ? "sent back to the worker" : c.to === "orchestrator" ? "to the orchestrator's review" : `a note on step ${c.note_step}`} · <TimeAgo at={c.at} /></p>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
-      ))}
-      {where ? (
-        <div>
-          <Composer
-            draft={draftKey(project, "picture", queue.id, step.id, path)}
-            placeholder="A comment on this picture…"
-            button="Comment"
-            rows={2}
-            onSubmit={async (text) => { await act(project, "POST", `${base}/comment`, { path, text }); onChanged(); }}
-          />
-          <p className="mt-1 text-[11px] text-fg-3">The comment {where}.</p>
-        </div>
-      ) : <p className="text-xs text-fg-3">No step to take a comment: this step is not waiting for your review and nothing after it is pending.</p>}
-      </div>}
+      ) : undefined}
     </ActionBar>
   );
 }
@@ -469,9 +616,17 @@ interface CommitView { sha: string; subject: string; author: string; at: string;
 interface RoundView { session: string; start: string | null; end: string | null; open: boolean; commits: CommitView[] }
 
 /** The commits of each round of the step (server: src/gitinfo.ts); nothing outside a git repository. */
-function StepCommits({ project, queue, step, version }: { project: string; queue: string; step: string; version: unknown }) {
+function StepCommits({ project, queue, step, version, toggle }: {
+  project: string; queue: string; step: string; version: unknown;
+  /** The review's one line: "Commits · 3", which opens and closes the list. */
+  toggle?: { open: boolean; onToggle: () => void };
+}) {
   const data = useFetch<{ rounds: RoundView[] } | null>(`/api/projects/${enc(project)}/queues/${enc(queue)}/steps/${enc(step)}/commits`, version);
   if (!data) return null;
+  if (toggle) {
+    const n = data.rounds.reduce((k, r) => k + r.commits.length, 0);
+    return <Fold label={`Commits · ${n}`} open={toggle.open} onToggle={toggle.onToggle} />;
+  }
   const several = data.rounds.length > 1;
   const foreign = data.rounds.some((r) => r.commits.some((c) => c.foreign));
   return (
@@ -609,11 +764,14 @@ function PushLine({ project, queue, step, onChanged }: { project: string; queue:
 
 const POLICY_LABEL: Record<string, string> = { continue: "go on", wait: "wait for my review", orchestrator: "the orchestrator reviews" };
 
+interface ReviewArgs { project: string; queue: string; step: string; next?: string; criteria: string[]; onChanged: () => void }
+
 /**
- * The bar of a step in the user's review: Accept and go on, Fix it… beside it, Reject and a note with the acceptance
- * under ⋯. Fix it opens with the text kept from before, if there is one.
+ * The user's decision on a step in their review, for an action bar: Accept (with a note, under ⋯), Fix it… beside it,
+ * Reject under ⋯, and the forms they open. Fix it opens with the text kept from before, if there is one. The step's
+ * drawer and the picture viewer each show it (`accept` names the button).
  */
-function ReviewBar({ project, queue, step, next, criteria, onChanged }: { project: string; queue: string; step: string; next?: string; criteria: string[]; onChanged: () => void }) {
+function useReviewDecision({ project, queue, step, next, criteria, onChanged }: ReviewArgs, accept_label: string) {
   const [error, setError] = useState<string>();
   // Accept's note: closed by default; empty means a plain accept. It goes to the next step, or to the orchestrator
   // (always on the queue's last step).
@@ -633,14 +791,12 @@ function ReviewBar({ project, queue, step, next, criteria, onChanged }: { projec
     ...(rejectOpen ? [] : [{ label: "Reject…", danger: true, onSelect: () => setRejectOpen(true) }]),
   ];
   const opened = noteOpen || fixOpen || rejectOpen;
-  return (
-    <ActionBar
-      hint={error ? <span className="text-danger">{error}</span> : undefined}
-      menu={menu}
-      secondary={<Button variant="quiet" pressed={fixOpen} onClick={() => setFixOpen(!fixOpen)}>Fix it…</Button>}
-      primary={<Button onClick={() => void accept()}>{note.trim() ? "Accept with the note" : "Accept and go on"}</Button>}
-    >
-      {opened && <div className="space-y-4">
+  return {
+    error,
+    menu,
+    secondary: <Button variant="quiet" pressed={fixOpen} onClick={() => setFixOpen(!fixOpen)}>Fix it…</Button>,
+    primary: <Button onClick={() => void accept()}>{note.trim() ? "Accept with the note" : accept_label}</Button>,
+    forms: opened && <div className="space-y-4">
       {rejectOpen && <RejectStep project={project} queue={queue} step={step} onChanged={onChanged} onCancel={() => setRejectOpen(false)} />}
       {noteOpen && (
         <div>
@@ -686,7 +842,16 @@ function ReviewBar({ project, queue, step, next, criteria, onChanged }: { projec
           </div>
         )}
       </div>}
-      </div>}
+      </div>,
+  };
+}
+
+/** The bar of a step in the user's review: Accept and go on, Fix it… beside it, Reject and a note under ⋯. */
+function ReviewBar(props: ReviewArgs) {
+  const d = useReviewDecision(props, "Accept and go on");
+  return (
+    <ActionBar hint={d.error ? <span className="text-danger">{d.error}</span> : undefined} menu={d.menu} secondary={d.secondary} primary={d.primary}>
+      {d.forms}
     </ActionBar>
   );
 }

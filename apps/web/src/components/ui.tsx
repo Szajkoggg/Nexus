@@ -325,13 +325,16 @@ export function Menu({ items, down = false, label = "More actions" }: { items: M
  * everything else under ⋯, a short hint on the left. `children` is the open form of an action (a note, Fix it, a
  * reason), shown above the buttons it belongs to.
  */
-export function ActionBar({ hint, menu, secondary, primary, children }: {
+export function ActionBar({ left, hint, menu, secondary, primary, children }: {
+  /** Controls at the bar's start (the viewer's: the picture's mark and comment), before the hint. */
+  left?: ReactNode;
   hint?: ReactNode; menu?: MenuEntry[]; secondary?: ReactNode; primary?: ReactNode; children?: ReactNode;
 }) {
   return (
     <div className="shrink-0 border-t border-line bg-surface pb-[env(safe-area-inset-bottom)]">
       {children && <div className="scroll-thin max-h-[45vh] overflow-y-auto border-b border-line px-4 py-3 sm:px-5">{children}</div>}
       <div className="flex flex-wrap items-center justify-end gap-2 px-4 py-3 sm:px-5">
+        {left}
         {hint ? <span className="min-w-[8rem] flex-1 text-xs text-fg-3">{hint}</span> : <span className="mr-auto" />}
         {menu && <Menu items={menu} />}
         {secondary}
