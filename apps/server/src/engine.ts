@@ -8,7 +8,7 @@ import { existsSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import {
   ENDED_RUN_STATES,
-  ActionError, ProjectStore, USER_SESSION, ensureUserSession, loadProjectState, newId, normPath, now, readUsage,
+  ActionError, ProjectStore, USER_SESSION, ensureUserSession, liftByContinue, loadProjectState, newId, normPath, now, readUsage,
   writeUsage, CLAUDE_EFFORTS, RETRY_LIMIT, effortIssue, formatClock, type Effort, type ProjectFile, type StepDef, type InboxView, type ProjectState, type QueueView, type RunFile, type SessionFile,
   type SessionView, type StepView,
 } from "@nexus/protocol";
@@ -137,7 +137,27 @@ export class Engine {
     }
   }
 
-  /** `why`: said to the agent when the step is continued (a retry after a failed turn). */
+  /**
+   * The user's Continue on a stopped queue: lifts the stop (a `lift` by Continue) and goes on. A run of this revision
+   * resumes, reopening the stopped step in its session (unless the orchestrator skipped it: then the next pending
+   * one opens). Without a run (an imported stop), or with a finished one or one of an older revision, the queue
+   * starts afresh at its first pending step.
+   */
+  continueQueue(queueId: string): string {
+    if (this.draining) throw new ActionError("Nexus is updating; continue the queue after the restart", 409);
+    const lift = liftByContinue(this.store, queueId);
+    const run = this.store.readRun(queueId);
+    const q = this.queue(loadProjectState(this.store), queueId);
+    const older = run && (run.revision !== undefined ? run.revision < q.revision : q.history.some((h) => h.replaced_at > run.started_at));
+    if (!run || run.state === "finished" || older) {
+      const started = this.start(queueId);
+      return `the stop is lifted; queue ${queueId} starts at its first pending step in session ${started.session}`;
+    }
+    this.resume(queueId, `the user lifted the stop with Continue${lift.reason ? `; the stop was: ${lift.reason}` : ""}`);
+    return `the stop is lifted; queue ${queueId} goes on in session ${run.session}`;
+  }
+
+  /** `why`: said to the agent when the step is continued (a retry after a failed turn, a lifted stop). */
   resume(queueId: string, why?: string): void {
     const run = this.run(queueId);
     if (run.state === "running") return;

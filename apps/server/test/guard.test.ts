@@ -43,7 +43,8 @@ test("every write without the dashboard's origin is refused; approve and setting
     for (let i = 0; i < 100; i++) { try { if ((await fetch(url + "/api/projects")).ok) break; } catch { /* not up yet */ } await sleep(100); }
 
     const routes = writeRoutes();
-    assert.ok(routes.some((r) => r.path === "/api/projects/p/queues/x/approve") && routes.some((r) => r.method === "PATCH" && r.path === "/api/projects/p/settings"), "the list holds approve and settings");
+    assert.ok(routes.some((r) => r.path === "/api/projects/p/queues/x/approve") && routes.some((r) => r.method === "PATCH" && r.path === "/api/projects/p/settings")
+      && routes.some((r) => r.path === "/api/projects/p/queues/x/continue"), "the list holds approve, settings and Continue");
     const open = new Set(["/api/server/update", "/api/server/cancel"]); // the CLI's own: not sent here, they would act
     for (const r of routes.filter((x) => !open.has(x.path))) {
       const res = await send(r.method, r.path, {});

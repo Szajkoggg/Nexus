@@ -269,7 +269,7 @@ app.use("/api/projects/:id/*", async (c, next) => {
   if (c.req.method === "POST" && lifecycle.busy) {
     const orchestrator = c.req.path.endsWith("/orchestrator/messages");
     const action = c.req.path.endsWith("/run") ? ((await c.req.json().catch(() => ({}))) as { action?: string }).action : undefined;
-    if (orchestrator || action === "start" || action === "resume") {
+    if (orchestrator || action === "start" || action === "resume" || c.req.path.endsWith("/continue")) {
       return c.json({ error: "Nexus is updating; try again in a moment" }, 409);
     }
   }
@@ -322,6 +322,8 @@ app.post("/api/projects/:id/queues/:queue/run", act((st, b, p) => {
     default: throw new ActionError("action is start, pause, resume or stop");
   }
 }));
+// Continue on a stopped queue: the user's lift of the stop, then the run goes on (only from the dashboard, as every write).
+app.post("/api/projects/:id/queues/:queue/continue", act((st, _b, p) => engineOf(st).continueQueue(p("queue"))));
 app.post("/api/projects/:id/queues/:queue/steps/:step/accept", act((st, b, p) => engineOf(st).acceptReview(p("queue"), p("step"), b.text as string | undefined)));
 
 app.get("/api/projects/:id/sessions/:session/activity", (c) => {

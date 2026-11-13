@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Event } from "@nexus/protocol";
+import type { Event, StatusChange } from "@nexus/protocol";
 import { act, enc, fileUrl, type ProjectState, type QuestionView, type QueueView, type StepView } from "../api.ts";
 import { Button, Composer, Expandable, Markdown, Section, StatusBadge, StepTimes, TimeAgo } from "./ui.tsx";
 import { Activity, RetryNote, RunControls } from "./Run.tsx";
@@ -184,6 +184,8 @@ export function StepDetail({ project, queue, step, onChanged }: Props & { step: 
 
       <StepRefusals project={project} queue={queue.id} step={step.id} />
 
+      <Changes entries={queue.changes.filter((c) => c.step === step.id)} queue={queue} />
+
       {(step.session ?? (queue.run?.step === step.id ? queue.run.session : undefined)) && (
         <Activity project={id} session={(step.session ?? queue.run?.session)!} queue={queue.id} step={step.id} version={project.generated_at} />
       )}
@@ -298,6 +300,74 @@ function AnswerBox({ q, project, onChanged }: { q: QuestionView; project: string
  * Takes the approval back from a queue that has never run (it is proposed again). A started queue is paused or
  * stopped instead, so this is not offered there.
  */
+/**
+ * A stopped queue: why, where, and the way on. Continue (the user's lift) only when the current revision is approved;
+ * otherwise approving the revision lifts the stop. The orchestrator's proposal, when there is one, is shown with it.
+ */
+function StopBox({ project, queue, onChanged }: { project: string; queue: QueueView; onChanged: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+  const go = async () => {
+    setBusy(true); setError(undefined);
+    try { await act(project, "POST", `/queues/${enc(queue.id)}/continue`); onChanged(); }
+    catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+  const p = queue.lift_proposal;
+  return (
+    <div className="mt-4 rounded-lg bg-orange-500/10 p-3 text-sm ring-1 ring-orange-500/30">
+      <p className="font-medium text-orange-300">Stopped{queue.current_step ? ` at ${queue.current_step}` : ""}</p>
+      {queue.status_reason && <div className="mt-1 text-zinc-300"><Expandable text={queue.status_reason} /></div>}
+      {p && (
+        <div className="mt-3 rounded-md bg-zinc-900/70 p-2.5">
+          <p className="text-xs text-zinc-500">The orchestrator proposes to continue · <TimeAgo at={p.at} /></p>
+          <p className="mt-0.5 text-zinc-200">{p.reason}</p>
+        </div>
+      )}
+      {queue.approved ? (
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <Button disabled={busy} onClick={() => void go()}>Continue</Button>
+          <span className="text-xs text-zinc-400">Lifts the stop; the stopped step runs again in its session, unless it was skipped.</span>
+        </div>
+      ) : (
+        <p className="mt-3 text-xs text-zinc-400">Revision {queue.revision} is not approved yet: approving it lifts the stop.</p>
+      )}
+      {error && <p className="mt-2 text-xs text-red-300">{error}</p>}
+    </div>
+  );
+}
+
+const WHO: Record<StatusChange["by"], string> = { user_approval: "You, approving", user_continue: "You, with Continue", orchestrator: "Orchestrator" };
+
+/** Status changes made through Nexus (queue.yaml's changes): who, when, what and why; newest first. */
+function Changes({ entries, queue }: { entries: StatusChange[]; queue: QueueView }) {
+  if (!entries.length) return null;
+  const what = (c: StatusChange) => {
+    switch (c.kind) {
+      case "lift": return `lifted the stop${c.revision ? ` (revision ${c.revision})` : ""}`;
+      case "proposal": return "proposed to lift the stop";
+      case "run": return "closed the halted run as finished";
+      default: return c.step ? `${c.step}: ${c.from} → ${c.to}` : `queue ${queue.id}: ${c.from} → ${c.to}`;
+    }
+  };
+  return (
+    <Section title="Changes">
+      <ul className="space-y-2">
+        {[...entries].reverse().map((c, i) => (
+          <li key={i} className="text-sm">
+            <div className="flex flex-wrap items-baseline gap-x-2 text-xs text-zinc-500">
+              <span className={c.by === "orchestrator" ? "text-violet-300" : "text-sky-300"}>{WHO[c.by]}</span>
+              <TimeAgo at={c.at} />
+            </div>
+            <div className="text-zinc-200">{what(c)}</div>
+            {c.reason && <div className="text-xs text-zinc-400">{c.kind === "lift" ? "The stop was: " : "Why: "}{c.reason}</div>}
+          </li>
+        ))}
+      </ul>
+    </Section>
+  );
+}
+
 function WithdrawApproval({ project, queue, onChanged }: { project: string; queue: string; onChanged: () => void }) {
   const [open, setOpen] = useState(false);
   if (!open) return <div className="mt-2"><Button variant="quiet" onClick={() => setOpen(true)}>Withdraw approval</Button></div>;
@@ -343,7 +413,9 @@ export function QueueDetail({ project, queue, onChanged }: Props) {
         </span>
       </div>
 
-      {queue.status_reason && <Section title="State"><Expandable text={queue.status_reason} /></Section>}
+      {queue.status === "stopped"
+        ? <StopBox project={id} queue={queue} onChanged={onChanged} />
+        : queue.status_reason && <Section title="State"><Expandable text={queue.status_reason} /></Section>}
       {queue.report && (
         <Section title="Queue report">
           <p className="text-sm text-zinc-300">{queue.report.summary}</p>
@@ -383,6 +455,8 @@ export function QueueDetail({ project, queue, onChanged }: Props) {
       </Section>
 
       <RunControls project={project} queue={queue} onChanged={onChanged} />
+
+      <Changes entries={queue.changes} queue={queue} />
 
       <Section title="Settings">
         <label className="flex flex-wrap items-center gap-2 text-sm text-zinc-300">

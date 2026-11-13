@@ -285,6 +285,15 @@ Options: ${x.options.join(" / ")}` : ""}`,
             : `Its run is ${r.state}; tell the user if anything follows from the approval.`;
         items.push({ key: `notify:approval:${q.id}:${i}`, fact: `Queue ${q.id} revision ${a.revision} approved.`, todo });
       });
+      // A lift by the user's Continue: told once, by its position in the queue's changes.
+      q.changes.forEach((c, i) => {
+        if (c.kind !== "lift" || c.by !== "user_continue" || c.at < since) return;
+        items.push({
+          key: `notify:lift:${q.id}:${i}`,
+          fact: `The user lifted the stop of queue ${q.id} with Continue${c.reason ? ` (the stop was: ${c.reason})` : ""}; its run goes on.`,
+          todo: "Nothing to start: the run goes on by itself. Tell the user briefly if anything follows from it for the plan.",
+        });
+      });
       q.withdrawals.forEach((w, i) => {
         if (w.at < since) return;
         items.push({

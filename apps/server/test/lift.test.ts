@@ -6,7 +6,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ProjectStore, applyDraft, approveQueue, loadProjectState, routeAnswers, type StepDef } from "@nexus/protocol";
+import { ProjectStore, applyDraft, approveQueue, loadProjectState, orchestratorStatusChange, routeAnswers, type StepDef } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -130,4 +130,68 @@ test("resume refuses a run of an older revision, also a run record without its r
     await until("the run to finish", () => queue().run?.state === "finished");
     assert.deepEqual(opened(), ["Q1", "Q2", "Q2b", "Q3"]);
   } finally { engine.shutdown(); delete process.env.FAKE_SLOW_MS; }
+});
+
+// ---------------------------------------------------------------- Continue (the user's lift without a new revision)
+
+for (const runtime of ["claude", "codex"] as const) {
+  test(`${runtime}: Continue lifts the stop and the stopped step runs again in its session`, async () => {
+    const { store, engine, queue, opened, until } = setup([step("Q1", "done"), step("Q2", "stop1"), step("Q3", "done")]);
+    try {
+      engine.start("Q", { runtime });
+      await until("the stop", () => queue().run?.state === "halted");
+      const session = queue().run!.session;
+      assert.match(engine.continueQueue("Q"), /the stop is lifted; queue Q goes on/);
+      const lift = queue().changes.at(-1)!;
+      assert.deepEqual([lift.kind, lift.by, lift.from, lift.to, lift.reason], ["lift", "user_continue", "stopped", "approved", "fake condition: fake stop"]);
+      await until("the run to finish", () => queue().run?.state === "finished");
+      assert.deepEqual(opened(), ["Q1", "Q2", "Q2", "Q3"]);
+      assert.equal(queue().run!.session, session, "the same session goes on");
+      assert.deepEqual(queue().steps.map((s) => s.status), ["done", "done", "done"]);
+      const received = readFileSync(process.env.FAKE_LOG!, "utf8");
+      assert.match(received, /Continue this step where it was left \(the user lifted the stop with Continue; the stop was: fake condition: fake stop\)/);
+    } finally { engine.shutdown(); }
+  });
+}
+
+test("Continue with no run record (an imported stop) starts at the first pending step", async () => {
+  const { store, engine, queue, opened, until } = setup([step("Q1", "done"), step("Q2", "done"), step("Q3", "done")]);
+  const q = store.readQueue("Q");
+  store.writeQueue({
+    ...q, status: "stopped", status_note: "Stopped at Q2: waiting for the art",
+    steps: q.steps.map((s) => (s.id === "Q1" ? { ...s, status: "done" as const } : s.id === "Q2" ? { ...s, status: "stopped" as const } : s)),
+  });
+  try {
+    assert.equal(store.readRun("Q"), undefined);
+    assert.match(engine.continueQueue("Q"), /starts at its first pending step/);
+    await until("the run to finish", () => queue().run?.state === "finished");
+    assert.deepEqual(opened(), ["Q2", "Q3"]);
+    assert.equal(queue().changes.at(-1)!.reason, "Stopped at Q2: waiting for the art");
+  } finally { engine.shutdown(); }
+});
+
+test("Continue is refused unless the queue is stopped and its current revision approved (approving lifts it then)", async () => {
+  const { engine, queue, until, revise } = setup([step("Q1", "stop"), step("Q2", "done"), step("Q3", "done")]);
+  try {
+    assert.throws(() => engine.continueQueue("Q"), /queue Q is not stopped \(it is approved\)/);
+    engine.start("Q");
+    await until("the stop", () => queue().run?.state === "halted");
+    revise();
+    assert.throws(() => engine.continueQueue("Q"), /revision 2 of queue Q is not approved: approve it instead/);
+    assert.equal(queue().status, "stopped", "nothing was lifted");
+    assert.equal(queue().changes.length, 0);
+  } finally { engine.shutdown(); }
+});
+
+test("Continue after the orchestrator skipped the stopped step opens the next pending one", async () => {
+  const { store, engine, queue, opened, until } = setup([step("Q1", "stop"), step("Q2", "done")]);
+  try {
+    engine.start("Q");
+    await until("the stop", () => queue().run?.state === "halted");
+    orchestratorStatusChange(store, { queue: "Q", step: "Q1", to: "skipped", reason: "done by hand" });
+    engine.continueQueue("Q");
+    await until("the run to finish", () => queue().run?.state === "finished");
+    assert.deepEqual(opened(), ["Q1", "Q2"]);
+    assert.deepEqual(queue().steps.map((s) => s.status), ["skipped", "done"]);
+  } finally { engine.shutdown(); }
 });

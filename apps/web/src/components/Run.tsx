@@ -93,7 +93,8 @@ export function RunControls({ project, queue, onChanged }: { project: ProjectSta
   const reusable = project.sessions.filter((s) => s.role === "worker" && s.runtime !== "external" && s.launched_by === "nexus" && s.native_id
     && !project.queues.some((q) => q.id !== queue.id && q.run?.session === s.id && ["running", "pausing", "usage_wait", "retry_wait"].includes(q.run.state)));
   const runSession = run ? project.sessions.find((s) => s.id === run.session) : undefined;
-  const canStart = queue.approved && !active && queue.status !== "done" && queue.status !== "cancelled";
+  // A stopped queue goes on only through Continue or a newly approved revision (the stop box above).
+  const canStart = queue.approved && !active && queue.status !== "done" && queue.status !== "cancelled" && queue.status !== "stopped";
   const ended = endedHalt(queue);
   // Shown as finished: the label, its colour and the times say "ended", and there is nothing to resume.
   const shown = run && ended ? { ...run, state: "finished" as const } : run;
@@ -121,7 +122,7 @@ export function RunControls({ project, queue, onChanged }: { project: ProjectSta
       <div className="flex flex-wrap items-center gap-2">
         {active && run?.state !== "pausing" && <Button variant="quiet" disabled={busy} onClick={() => call({ action: "pause" })}>Pause after this step</Button>}
         {active && <Button variant="danger" disabled={busy} onClick={() => call({ action: "stop" })}>Stop now</Button>}
-        {run && !ended && (run.state === "paused" || run.state === "halted") && <Button disabled={busy || !queue.approved} onClick={() => call({ action: "resume" })}>Resume</Button>}
+        {run && !ended && queue.status !== "stopped" && (run.state === "paused" || run.state === "halted") && <Button disabled={busy || !queue.approved} onClick={() => call({ action: "resume" })}>Resume</Button>}
       </div>
       {canStart && (!run || run.state === "finished" || run.state === "halted" || run.state === "paused") && (
         <div className={`${run ? "mt-4 border-t border-zinc-800 pt-3" : ""} flex flex-wrap items-end gap-3`}>

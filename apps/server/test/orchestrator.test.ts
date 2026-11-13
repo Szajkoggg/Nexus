@@ -453,3 +453,23 @@ test("a proposal to lift a stop is recorded for the user, and a lift clears it",
     assert.equal(q.status, "approved");
   } finally { x.stop(); }
 });
+
+test("the orchestrator is told once that the user lifted a stop with Continue", async () => {
+  const x = setup();
+  process.env.FAKE_LOG = join(x.root, "fake.log");
+  try {
+    x.orchestrator.say("Hello");
+    await x.until("the session", () => !!x.orchestrator.session());
+    applyDraft(x.store, queueDef("K", ["stop1", "done"]));
+    approveQueue(x.store, "K");
+    x.engine.start("K");
+    await x.until("the stop", () => runOf(x, "K")?.state === "halted");
+    x.engine.continueQueue("K");
+    await x.until("the run to finish", () => runOf(x, "K")?.state === "finished");
+    await x.until("the notice", () => facts(x.orchestrator).some((t) => /lifted the stop of queue K with Continue/.test(t)));
+    await settle();
+    assert.equal(facts(x.orchestrator).filter((t) => /lifted the stop of queue K with Continue/.test(t)).length, 1, "in the chat once");
+    const sent = (await delivered()).filter((t) => t.startsWith("[Nexus] The user lifted the stop of queue K with Continue (the stop was: fake condition: fake stop); its run goes on. Nothing to start"));
+    assert.equal(sent.length, 1, "to the orchestrator once");
+  } finally { x.stop(); }
+});

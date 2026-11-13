@@ -149,6 +149,16 @@ begins at the first pending step, which is the stopped step itself unless the ne
 archived run record is read by nothing; it is kept for the record. Approving a stopped queue whose run is still
 going is refused.
 
+**Continue** is the user's other way to lift a stop, for when the cause was outside the queue and no new revision is
+needed: only a stopped queue whose current revision is approved (otherwise approving that revision lifts the stop),
+and only from the dashboard (`POST /api/projects/:id/queues/:q/continue`; no CLI command, no event). The server
+appends a `lift` by `user_continue` with the stop's derived reason, writes the queue `approved`, and goes on: a run
+of this revision resumes, reopening the step it last opened in its session with a turn that says the user lifted the
+stop (when the orchestrator skipped that step, the next pending one opens); with no `run.yaml` (an imported stop), a
+finished run or one of an older revision, the queue starts afresh at its first pending step. The orchestrator is
+told once. The dashboard shows the stop with the orchestrator's proposal (`lift_proposal`) beside Continue, and the
+queue's and each step's `changes`: who, when, what and why.
+
 **Housekeeping by the orchestrator** (`nexus queue set`, event `status.set`). The server checks each request against
 the derived state and records it as an entry `by: orchestrator` with the request's `reason` and the queue's
 `revision`:
@@ -366,6 +376,7 @@ sends (see the CLI).
 | `POST /api/projects/:id/questions/:qid/answer` | `text`, `continue?` | The user's answer, routed to the asker |
 | `POST /api/projects/:id/queues/:q/run` | `action` (`start`, `pause`, `resume`, `stop`), `model?`, `session?` | Runs the queue through a Nexus-launched session (`session` continues an existing one) |
 | `POST /api/projects/:id/queues/:q/steps/:s/accept` | `text?` | Accepts a step waiting in review |
+| `POST /api/projects/:id/queues/:q/continue` | | Continue: lifts the stop of a stopped queue whose current revision is approved and goes on (see "Continue" under `queue.yaml`); refused (409) otherwise |
 | `POST /api/projects/:id/orchestrator/messages` | `text` | A chat message to the orchestrator (starts or wakes it) |
 | `POST /api/projects/:id/orchestrator/reset` | | The next message starts a new orchestrator session |
 | `POST /api/projects/:id/orchestrator/settings` | `model`, `effort` (empty: the default) | The orchestrator's model and effort, from its next message on |
@@ -474,7 +485,7 @@ a prompt. (`Write` and `Edit` are not disallowed: a disallow rule would beat the
   session is refused by the CLI.
 - With `notify` on, the server tells the orchestrator (starting it if needed) when a worker asks a question, when the
   user approves a revision of a queue ("Queue X revision N approved.", with the instruction to start it, or to resume
-  its paused or halted run, if the plan puts it next; a run of an older revision cannot be resumed, so then: start it), when the user withdraws an approval, when a run reaches a
+  its paused or halted run, if the plan puts it next; a run of an older revision cannot be resumed, so then: start it), when the user withdraws an approval, when the user lifts a stop with Continue ("The user lifted the stop of queue X with Continue (the stop was: …); its run goes on.", told once), when a run reaches a
   requested pause ("Run of X paused after step S.": a pause asked for by the user or the orchestrator, not a stop now,
   nor the pause of a server restart or of an update), and when a run halts or finishes. The chat shows only the fact;
   the instruction goes to the orchestrator alone. Each notice is told once, recorded in `applied.jsonl` (`notify:…`

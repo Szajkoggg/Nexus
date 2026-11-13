@@ -62,6 +62,14 @@ crashed runtime) is tried again by itself after 1, 2, 4, 8 and 16 minutes ("wait
 for its window; anything else, or a sixth failure in a row, halts the run with the reason. Pausing or stopping
 cancels a pending retry.
 
+A queue stopped by a stop condition goes on only when you lift the stop. Either approve a new revision the
+orchestrator drafted (a start then begins at the first pending step), or, when the cause was outside the queue,
+press Continue on the queue: the stopped step runs again in its session. The orchestrator may propose continuing;
+its proposal shows beside Continue. It does housekeeping itself: it skips a step a new revision replaced or that was
+done elsewhere, closes a halted run whose steps are all done, and cancels a queue that is no longer needed (you get a
+notification). Each queue and step lists these changes: who, when and why. Approving, lifting a stop, marking work
+done and reopening a finished step stay yours.
+
 Per project, the dashboard's settings panel (the gear icon) sets the default runtime; for Claude Code workers the
 model, effort, permission mode and extra allowed tools (the project's own `.claude/settings.json` applies as well);
 for Codex workers the model, effort, sandbox and what happens when an agent needs to leave the sandbox; the

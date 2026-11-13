@@ -3,6 +3,7 @@
 //   done   report the step done              ask     ask a blocking question, then end the turn
 //   noop   end the turn without an outcome   stop    report a stop condition
 //   fail   report the step failed            slow    work for FAKE_SLOW_MS (default 1500), then done
+//   stop1  report a stop condition the first time, done once the stop is lifted
 //   doneexit  report the step done, then the process exits on a signal before its turn ends
 // A failure of the runtime, then done: "<kind><n>" fails the step's first n turns (counted in a file beside
 // FAKE_LOG, so a new process goes on counting), "<kind>" every turn. Kinds: overloaded, network (passing), auth
@@ -103,6 +104,12 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
     if (behaviour === "fail") nexus("step", "failed", step, "--reason", "fake failure");
     if (behaviour === "doneexit") { nexus("step", "done", step, "--summary", `fake finished ${step}, then exits`); return { exit: true }; }
     if (behaviour === "stop") nexus("stop", step, "--condition", "fake condition", "--reason", "fake stop");
+    // stop1: a stop condition on the step's first turn; once the stop is lifted, the step is done.
+    if (behaviour === "stop1") {
+      const file = join(dirname(process.env.FAKE_LOG ?? "."), `fake-stops-${step}`);
+      if (existsSync(file)) nexus("step", "done", step, "--summary", `fake finished ${step} after the stop was lifted`);
+      else { writeFileSync(file, "1"); nexus("stop", step, "--condition", "fake condition", "--reason", "fake stop"); }
+    }
     if (behaviour === "ask") nexus("ask", "Which way?", "--step", step);
     return `step ${step}: ${behaviour}`;
   }

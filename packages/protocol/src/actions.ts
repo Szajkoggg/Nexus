@@ -225,6 +225,24 @@ export function applyDraft(store: ProjectStore, definition: unknown): string {
     : `queue ${draft.id} updated (no change to steps, checks or stop conditions: the approval stands)`;
 }
 
+/**
+ * The user's Continue on a stopped queue whose current revision is approved: a `lift` by `user_continue` with the
+ * stop's reason, and the queue approved. The run goes on afterwards (the engine's continueQueue). With the revision
+ * not approved the user approves it instead, which lifts the stop too. Only the user: the dashboard calls this.
+ */
+export function liftByContinue(store: ProjectStore, queue: string): StatusChange {
+  const q = queueOf(store, queue);
+  const view = loadProjectState(store).queues.find((x) => x.id === q.id)!;
+  if (view.status !== "stopped") throw new ActionError(`queue ${q.id} is not stopped (it is ${view.status})`, 409);
+  if (!isApproved(q)) throw new ActionError(`revision ${q.revision} of queue ${q.id} is not approved: approve it instead, which lifts the stop`, 409);
+  const run = store.readRun(q.id);
+  if (run && GOING_RUN.includes(run.state)) throw new ActionError(`queue ${q.id}'s run is still going (${run.state})`, 409);
+  const at = now();
+  const lift: StatusChange = { at, kind: "lift", by: "user_continue", from: "stopped", to: "approved", reason: view.status_reason, revision: q.revision };
+  store.writeQueue({ ...q, status: "approved", status_note: undefined, changes: [...q.changes, lift], updated_at: at });
+  return lift;
+}
+
 // ---------------------------------------------------------------- housekeeping by the orchestrator
 
 const GOING_RUN = ["running", "pausing", "usage_wait", "retry_wait"];
