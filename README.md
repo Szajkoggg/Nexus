@@ -13,6 +13,13 @@ any work. A partner reads the whole project and writes only in the project's not
 can record what you decide; "Hand to orchestrator" has it summarize the conversation into the orchestrator's chat,
 which turns it into queues.
 
+**Chat about a step.** Every step, in every state, has "Chat about this": it opens the step's latest conversation (an
+archived one does not count) or starts one, and "New conversation" beside it starts another. The partner gets the
+step's context with your first message: its goal, acceptance criteria and notes, its progress while it runs, and its
+summary, checks, review material, commits and reason once it has an outcome. When the step's state changes later, the
+next message tells the partner what changed. Talking changes nothing in the run: a step in review keeps waiting for
+you. The step lists its conversations, and a conversation shows its step ("about step W/W3"), a link back to it.
+
 **Back.** The back button (on a phone also the back gesture) closes what is open on top: a chat, the Ideas panel or
 a conversation in it, Settings, a queue or step, a review image. With nothing open it leaves Nexus. Escape does the same on a
 computer.

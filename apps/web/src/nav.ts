@@ -1,6 +1,6 @@
 // Applies layers.ts to the browser: history entries, Back, Escape, and a React hook to read what is open.
 import { useSyncExternalStore } from "react";
-import { close, closeThen, closeTop, navOf, open, type Layer, type Nav, type Step } from "./layers.ts";
+import { close, closeThen, closeTop, isOpen, navOf, open, type Layer, type Nav, type Step } from "./layers.ts";
 
 const write = (n: Nav, how: "push" | "replace") =>
   history[how === "push" ? "pushState" : "replaceState"]({ ...(history.state ?? {}), nexus: n }, "", n.hash || location.pathname + location.search);
@@ -63,6 +63,11 @@ export function useNav(): Nav {
 export const nav = {
   /** Opens a panel or a nested layer ("chat", "conversation:<id>"…) on top. */
   open: (layer: Layer) => apply(open(current, layer)),
+  /** Opens a conversation in the Ideas panel, opening the panel first when it is closed. */
+  conversation: (id: string) => {
+    if (!isOpen(current, "ideas")) apply(open(current, "ideas"));
+    apply(open(current, `conversation:${id}`));
+  },
   /** Closes the layer of this kind and what lies above it. */
   close: (kind: string) => apply(close(current, kind, kind === "item" ? projectHash() : current.hash)),
   /** Opens a queue or step in its drawer; from one already open, it switches in place. */

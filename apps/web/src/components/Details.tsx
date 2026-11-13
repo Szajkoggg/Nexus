@@ -10,6 +10,7 @@ import { draftKey } from "../drafts.ts";
 import { layerValue } from "../layers.ts";
 import { nav, useNav } from "../nav.ts";
 import { ImageViewer, type ViewerImage } from "./Viewer.tsx";
+import { StepChat } from "./Chat.tsx";
 
 interface Props { project: ProjectState; queue: QueueView; onChanged: () => void }
 
@@ -46,6 +47,7 @@ export function StepDetail({ project, queue, step, onChanged }: Props & { step: 
           </span>
         )}
       </div>
+      <StepChat project={id} queue={queue.id} step={step.id} version={project.generated_at} />
 
       {queue.run?.state === "retry_wait" && queue.run.step === step.id && (
         <div className="mt-4 rounded-lg bg-amber-500/10 p-3 text-sm ring-1 ring-amber-500/30">

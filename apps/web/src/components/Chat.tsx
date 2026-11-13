@@ -22,8 +22,8 @@ const Close = ({ onClose }: { onClose: () => void }) => (
 
 
 /** A chat: its header, the messages, and the composer. */
-function ChatColumn({ title, over, view, status, actions, empty, draft, placeholder, onSend, onBack }: {
-  title: string; over: string; view: View | undefined; status: string; actions?: ReactNode; empty: ReactNode;
+function ChatColumn({ title, over, about, view, status, actions, empty, draft, placeholder, onSend, onBack }: {
+  title: string; over: string; about?: ReactNode; view: View | undefined; status: string; actions?: ReactNode; empty: ReactNode;
   draft: string; placeholder: string; onSend: (text: string) => Promise<void>; onBack?: () => void;
 }) {
   const end = useRef<HTMLDivElement>(null);
@@ -41,6 +41,7 @@ function ChatColumn({ title, over, view, status, actions, empty, draft, placehol
         <div className="min-w-0">
           <div className="text-xs text-zinc-500">{over}</div>
           <h2 className="truncate font-semibold text-zinc-50">{title}</h2>
+          {about}
         </div>
         <span className="text-xs text-zinc-500">
           {status}{model ? ` · ${model}` : ""}{view?.effort ? ` · ${view.effort} effort` : ""}{pct !== undefined ? ` · ${pct}% context` : ""}
@@ -168,6 +169,75 @@ export function ChatPanel({ project, name, view, onClose, onChanged }: {
 interface ConversationItem extends SessionFile { state: string; last_at: string; messages: number }
 interface ConversationView extends View { notes_dir: string | null }
 
+/** The step a conversation is about, as a link back to it (it closes the Ideas panel and opens the step). */
+function AboutStep({ project, c, className = "" }: { project: string; c: SessionFile; className?: string }) {
+  if (!c.about) return null;
+  const { queue, step } = c.about;
+  return (
+    <button onClick={(e) => { e.stopPropagation(); nav.closeThenItem("ideas", project, queue, step); }} title="Open the step"
+      className={`inline-flex max-w-full items-center gap-1 truncate rounded bg-zinc-800 px-1.5 py-0.5 text-xs text-sky-300 hover:bg-zinc-700 ${className}`}>
+      <span className="text-zinc-500">about step</span> <span className="font-mono">{queue}/{step}</span>
+    </button>
+  );
+}
+
+/**
+ * "Chat about this" on a step: opens the step's latest conversation that is not archived, or starts one (the server
+ * seeds it with the step's context at the first message); "New conversation" starts another. Below, the step's
+ * conversations, each a link into it.
+ */
+export function StepChat({ project, queue, step, version }: { project: string; queue: string; step: string; version: unknown }) {
+  const list = useFetch<ConversationItem[]>(`/api/projects/${enc(project)}/conversations`, version);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+  const mine = (list ?? []).filter((c) => !c.archived && c.about?.queue === queue && c.about.step === step);
+  const go = async (fresh: boolean) => {
+    setBusy(true); setError(undefined);
+    try {
+      if (!fresh) {
+        const r = await fetch(`/api/projects/${enc(project)}/queues/${enc(queue)}/steps/${enc(step)}/conversation`);
+        const j = await r.json() as { conversation: { id: string } | null };
+        if (j.conversation) { nav.conversation(j.conversation.id); return; }
+      }
+      const r = await fetch(`/api/projects/${enc(project)}/conversations`, {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ queue, step }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error ?? r.statusText);
+      nav.conversation(j.result.id as string);
+    } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+  };
+  return (
+    <div className="mt-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <button onClick={() => void go(false)} disabled={busy} title="Talk this step through with a thinking partner; nothing changes in the run"
+          className="flex items-center gap-1.5 rounded-md border border-zinc-700 px-2.5 py-1 text-sm text-zinc-200 hover:border-zinc-500 hover:bg-zinc-800 disabled:opacity-40">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
+          Chat about this
+        </button>
+        {mine.length > 0 && (
+          <button onClick={() => void go(true)} disabled={busy} className="rounded-md px-2 py-1 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-40">
+            New conversation
+          </button>
+        )}
+      </div>
+      {mine.length > 0 && (
+        <ul className="mt-1.5 space-y-0.5">
+          {mine.map((c) => (
+            <li key={c.id}>
+              <button onClick={() => nav.conversation(c.id)} className="flex max-w-full items-baseline gap-2 text-left text-xs text-zinc-400 hover:text-zinc-200">
+                <span className="truncate text-sky-300">{c.title}</span>
+                <span className="shrink-0 text-zinc-600">{c.messages} message{c.messages === 1 ? "" : "s"} · <TimeAgo at={c.last_at} /></span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {error && <p className="mt-1 text-xs text-red-300">{error}</p>}
+    </div>
+  );
+}
+
 export function ConversationsButton({ onClick }: { onClick: () => void }) {
   return (
     <button onClick={onClick} title="Conversations: think a topic through with a partner" className="flex shrink-0 items-center gap-2 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-sm text-zinc-200 hover:border-zinc-500 hover:bg-zinc-900 sm:px-3">
@@ -213,7 +283,7 @@ export function ConversationsPanel({ project, name, version, onClose, onChanged,
                   {c.state === "working" && <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-blue-400" />}
                   <span className="truncate">{c.title}</span>
                 </span>
-                <span className="block text-xs text-zinc-500">{c.runtime} · {c.messages} messages · <TimeAgo at={c.last_at} /></span>
+                <span className="block text-xs text-zinc-500">{c.about && <span className="font-mono text-sky-300/80">{c.about.queue}/{c.about.step} · </span>}{c.runtime} · {c.messages} messages · <TimeAgo at={c.last_at} /></span>
               </button>
             </li>
           ))}
@@ -230,7 +300,7 @@ export function ConversationsPanel({ project, name, version, onClose, onChanged,
         onCreated={(id) => { nav.open(`conversation:${id}`); onChanged(); }} />}
       {!creating && open && current && (
         <ChatColumn
-          over={`${name} · ideas`} title={current.title ?? "Conversation"} view={view} status={stateText(view)} onBack={() => nav.close("conversation")}
+          over={`${name} · ideas`} title={current.title ?? "Conversation"} about={<AboutStep project={project} c={current} className="mt-1" />} view={view} status={stateText(view)} onBack={() => nav.close("conversation")}
           actions={<>
             <Button variant="quiet" onClick={() => {
               if (confirm("Hand this conversation to the orchestrator? The partner writes a summary (decisions, open questions, proposed work), which goes into the orchestrator's chat.")) {
