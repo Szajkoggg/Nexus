@@ -13,10 +13,13 @@ import { isOpen, panelOrder } from "./layers.ts";
 import { nav, useNav } from "./nav.ts";
 import { SettingsButton, SettingsPanel, UpdatePill, useServer } from "./components/Settings.tsx";
 import { ProjectRefusals } from "./components/Refusals.tsx";
+import { FinishedGroup } from "./components/Finished.tsx";
+import { splitFinished } from "./finished.ts";
 
-const GROUPS: { title: string; statuses: QueueStatus[]; collapsible?: boolean }[] = [
-  { title: "Finished", statuses: ["done", "cancelled"], collapsible: true },
-  { title: "In progress", statuses: ["running", "waiting", "stopped", "paused"] },
+// Finished queues (done, cancelled) fold into one group at the bottom (FinishedGroup); one that still waits for the
+// user stays in progress until nothing waits.
+const GROUPS: { title: string; statuses: QueueStatus[] }[] = [
+  { title: "In progress", statuses: ["running", "waiting", "stopped", "paused", "done", "cancelled"] },
   { title: "Planned", statuses: ["approved", "proposed", "draft"] },
 ];
 
@@ -35,7 +38,6 @@ export function App() {
   const { projects, error: projectsError, reload: reloadProjects } = useProjects();
   const projectId = route.project ?? projects?.[0]?.id;
   const { state, error, reload } = useProjectState(projectId);
-  const [showFinished, setShowFinished] = useState(false);
 
   const [tick, setTick] = useState(0);
   const connected = useLive((m) => {
@@ -55,12 +57,16 @@ export function App() {
   const chatOpen = isOpen(route.nav, "chat");
   const waitingOpen = isOpen(route.nav, "waiting");
 
-  const byGroup = useMemo(() => {
+  const { byGroup, finished } = useMemo(() => {
     const order = (q: QueueView) => q.updated ?? q.updated_at ?? "";
-    return GROUPS.map((g) => ({
-      ...g,
-      queues: (state?.queues ?? []).filter((q) => g.statuses.includes(q.status)).sort((a, b) => order(b).localeCompare(order(a))),
-    }));
+    const split = splitFinished(state?.queues ?? [], new Set((state?.attention ?? []).map((a) => a.queue).filter((x): x is string => !!x)));
+    return {
+      finished: split.finished,
+      byGroup: GROUPS.map((g) => ({
+        ...g,
+        queues: split.active.filter((q) => g.statuses.includes(q.status)).sort((a, b) => order(b).localeCompare(order(a))),
+      })),
+    };
   }, [state]);
 
   const queue = state?.queues.find((q) => q.id === route.queue);
@@ -125,38 +131,22 @@ export function App() {
           <AttentionPanel items={state.attention} onOpen={(a: AttentionItem) => { if (projectId && a.queue) nav.item(projectId, a.queue, a.step); }} />
         )}
 
-        {state && byGroup.map((g) => {
-          const hidden = g.collapsible && !showFinished;
-          const shown = hidden ? [] : g.queues;
-          return (
-            <section key={g.title} className="mb-8">
-              <div className="mb-3 flex items-baseline gap-3">
-                <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-400">{g.title}</h2>
-                <span className="text-xs text-zinc-600">{g.queues.length}</span>
-                {g.collapsible && g.queues.length > 0 && (
-                  <button onClick={() => setShowFinished(!showFinished)} className="text-xs text-sky-400 hover:text-sky-300">
-                    {showFinished ? "Hide" : "Show"}
-                  </button>
-                )}
-              </div>
-              {hidden && g.queues.length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                  {g.queues.map((q) => (
-                    <button key={q.id} onClick={() => projectId && nav.item(projectId, q.id)} className="flex items-center gap-2 rounded-lg border border-zinc-800 px-3 py-1.5 text-sm text-zinc-400 hover:border-zinc-700 hover:text-zinc-200">
-                      <span className="font-mono text-zinc-500">{q.id}</span>{q.title}<StatusBadge status={q.status} />
-                    </button>
-                  ))}
-                </div>
-              )}
-              <div className="space-y-3">
-                {shown.map((q) => (
-                  <QueueRow key={q.id} queue={q} onQueue={() => projectId && nav.item(projectId, q.id)} onStep={(s) => projectId && nav.item(projectId, q.id, s)} />
-                ))}
-              </div>
-              {g.queues.length === 0 && <p className="text-sm text-zinc-600">Nothing here.</p>}
-            </section>
-          );
-        })}
+        {state && byGroup.map((g) => (
+          <section key={g.title} className="mb-8">
+            <div className="mb-3 flex items-baseline gap-3">
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-400">{g.title}</h2>
+              <span className="text-xs text-zinc-600">{g.queues.length}</span>
+            </div>
+            <div className="space-y-3">
+              {g.queues.map((q) => (
+                <QueueRow key={q.id} queue={q} onQueue={() => projectId && nav.item(projectId, q.id)} onStep={(s) => projectId && nav.item(projectId, q.id, s)} />
+              ))}
+            </div>
+            {g.queues.length === 0 && <p className="text-sm text-zinc-600">Nothing here.</p>}
+          </section>
+        ))}
+
+        {state && projectId && <FinishedGroup project={projectId} rows={finished} onOpen={(id) => nav.item(projectId, id)} />}
 
         {state && <ProjectRefusals project={state} />}
 

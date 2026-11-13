@@ -23,6 +23,12 @@ right, both at once, with the queue list between them: click another step and th
 **Review images** open in the app: full screen on a phone, two fingers to zoom (double-tap on a computer), swipe or
 the arrows for the step's next and previous image; "Original" opens the file in a new tab.
 
+**Finished queues** (done or cancelled) are no longer cards in the list: they fold into one line at the bottom of
+the project page, "Finished (N)", closed until you open it (the browser remembers that, per project). Open, it lists
+one compact line per queue, the most recently finished on top, with when it finished and how long it ran; tap one
+for its details. A finished queue that still waits for you (a step in review, an open question) stays in the list
+above until nothing waits.
+
 **Withdrawing an approval.** A queue approved but not started yet shows "Withdraw approval" in its detail (with an
 optional reason): it goes back to proposed and waits for your approval again; the earlier approval stays on record.
 Once a queue has started, pause or stop it instead. Only you can do this, from the dashboard.
