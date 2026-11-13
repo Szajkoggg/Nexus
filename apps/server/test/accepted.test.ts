@@ -67,7 +67,7 @@ test("an accepted step pushes the commit it was reviewed at, not a later one of 
     await x.inReview("Q1");
     assert.equal(x.store.readPush("Q")!.review.Q1!.sha, b, "HEAD when the step entered review");
     const c = x.commit("C"); // the next step's work, before the push
-    x.engine.acceptReview("Q", "Q1");
+    x.engine.acceptReview("Q", "Q1", "Fine; keep the old names in Q2.", "next"); // a note does not change what is pushed
     await x.until("the push", () => x.store.readPush("Q")?.steps.Q1?.result === "pushed");
     assert.equal(x.remoteBranch(), b, "the reviewed commit, created on the remote");
     assert.notEqual(x.remoteBranch(), c);

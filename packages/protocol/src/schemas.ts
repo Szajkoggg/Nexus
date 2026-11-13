@@ -316,8 +316,11 @@ export const Event = z.discriminatedUnion("type", [
     runtime: z.enum(["claude", "codex"]).optional(), reason: z.string(),
   }),
   z.object({ ...base, type: z.literal("log"), level: z.enum(["info", "warn", "error"]), text: z.string() }),
-  /** The user (or orchestrator) accepts a step waiting in review. */
-  z.object({ ...base, type: z.literal("review.accepted"), ...qs, text: z.string().optional() }),
+  /**
+   * The user (or orchestrator) accepts a step waiting in review. The user's note (`text`) goes `to` the next step (as
+   * a note on it) or the orchestrator (told once, like a chat message of the user).
+   */
+  z.object({ ...base, type: z.literal("review.accepted"), ...qs, text: z.string().optional(), to: z.enum(["next", "orchestrator"]).optional() }),
   /** The orchestrator (or the user) sends a step in review back to its worker with what to fix. */
   z.object({ ...base, type: z.literal("review.sent_back"), ...qs, text: z.string().min(1) }),
   /** The orchestrator hands a step waiting for its review to the user, saying why. */

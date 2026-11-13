@@ -274,8 +274,18 @@ A session launched by Nexus has `launched_by: nexus`, `runtime: claude`, `native
 by Nexus) and the `model` it was started with. A queue may also say `worktree: auto`: Nexus then creates the worktree
 and branch when it starts the queue and writes their paths back into `queue.yaml`.
 
-The event `review.accepted` (`queue`, `step`, `text?`), written by the user or an orchestrator, accepts a step held in
-`review`.
+The event `review.accepted` (`queue`, `step`, `text?`, `to?`), written by the user or an orchestrator, accepts a step
+held in `review`.
+
+**Accept with a note** (the user's). The note is optional; empty means a plain accept. `to` says where it went:
+- `next` (the default): the next pending step of the queue gets it as a note from the user (`notes/`), delivered when
+  that step starts, like any note on a pending step.
+- `orchestrator`: the note stays on the event, and the orchestrator is told it once per project, like a chat message
+  of the user: it starts an orchestrator that has no session and is told whatever `notify` says (but not while an
+  update drains; then after the restart). The key `notify:note:<event id>` in any orchestrator session's
+  `applied.jsonl` marks it told, so a reset orchestrator is not told again. The chat shows the note.
+- On the queue's last step (no pending step after it) the note always goes to the orchestrator.
+An acceptance with a note pushes like any other (see "Pushing what was accepted").
 
 ### Review
 
@@ -460,7 +470,7 @@ sends (see the CLI).
 | `PATCH /api/projects/:id/queues/:q` | `review_policy` (`continue`, `wait`, `orchestrator` or null) | Queue settings |
 | `POST /api/projects/:id/questions/:qid/answer` | `text`, `continue?` | The user's answer, routed to the asker |
 | `POST /api/projects/:id/queues/:q/run` | `action` (`start`, `pause`, `resume`, `stop`), `model?`, `session?` | Runs the queue through a Nexus-launched session (`session` continues an existing one) |
-| `POST /api/projects/:id/queues/:q/steps/:s/accept` | `text?` | Accepts a step waiting in review (and, with `push_accepted`, pushes it) |
+| `POST /api/projects/:id/queues/:q/steps/:s/accept` | `text?` (the note), `note_to?` (`next` or `orchestrator`) | Accepts a step waiting in review (and, with `push_accepted`, pushes it); answers where the note went (`to`, `step`) |
 | `POST /api/projects/:id/queues/:q/push` | | Push again: the step of the queue's last failed push; answers `{ message }` at once, the push runs in the background |
 | `POST /api/projects/:id/queues/:q/steps/:s/send-back` | `text` (required, kept verbatim) | Fix it: sends a step waiting for the user's review back to its worker; answers `{ message }` |
 | `POST /api/projects/:id/queues/:q/continue` | | Continue: lifts the stop of a stopped queue whose current revision is approved and goes on (see "Continue" under `queue.yaml`); refused (409) otherwise |

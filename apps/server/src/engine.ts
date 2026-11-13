@@ -13,6 +13,7 @@ import {
   ActionError, ProjectStore, USER_SESSION, ensureUserSession, liftByContinue, loadProjectState, stopPlace, newId, normPath, now, readUsage,
   writeUsage, CLAUDE_EFFORTS, RETRY_LIMIT, effortIssue, formatClock, type Effort, type ProjectFile, type StepDef, type InboxView, type ProjectState, type QueueView, type RunFile, type SessionFile,
   type SessionView, type StepView,
+  addNote,
 } from "@nexus/protocol";
 import type { AgentProcess, StreamFacts, TurnFailure } from "./agent.ts";
 import { ClaudeSession, nexusDenyRules } from "./claude.ts";
@@ -257,14 +258,28 @@ export class Engine {
     }
   }
 
-  acceptReview(queueId: string, step: string, text?: string): void {
+  /**
+   * The user accepts a step in review, optionally with a note: to the next step of the queue (by default; a note from
+   * the user on the next pending step, delivered when it starts) or to the orchestrator (recorded on the event and
+   * told by the orchestrator, src/orchestrator.ts). Without a next step the note goes to the orchestrator. Returns
+   * where it went.
+   */
+  acceptReview(queueId: string, step: string, text?: unknown, to?: unknown): { to?: "next" | "orchestrator"; step?: string } {
+    if (to !== undefined && to !== null && to !== "next" && to !== "orchestrator") throw new ActionError("a note goes to next or orchestrator");
     const state = loadProjectState(this.store);
-    const st = this.queue(state, queueId).steps.find((s) => s.id === step);
+    const q = this.queue(state, queueId);
+    const index = q.steps.findIndex((s) => s.id === step);
+    const st = q.steps[index];
     if (!st) throw new ActionError(`no step ${step}`, 404);
     if (st.status !== "review") throw new ActionError("the step is not waiting for review", 409);
+    const note = typeof text === "string" && text.trim() ? text.trim() : undefined;
+    const next = q.steps.slice(index + 1).find((s) => s.status === "pending");
+    const dest = !note ? undefined : to === "orchestrator" || !next ? "orchestrator" as const : "next" as const;
+    if (dest === "next") addNote(this.store, queueId, next!.id, note);
     const user = ensureUserSession(this.store);
-    this.store.appendEvent({ v: 1, id: newId(), at: now(), session: user.id, type: "review.accepted", queue: queueId, step, text });
+    this.store.appendEvent({ v: 1, id: newId(), at: now(), session: user.id, type: "review.accepted", queue: queueId, step, text: note, to: dest });
     this.advance(queueId);
+    return { to: dest, step: dest === "next" ? next!.id : undefined };
   }
 
   /** Called after every change to the project's files (debounced by the server). */

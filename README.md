@@ -184,7 +184,10 @@ review": the orchestrator then checks each step and accepts it, sends it back, o
 says whom it waits for ("review: orchestrator" or "review: you"); only those for you are in the inbox. Without an
 orchestrator, or with its notices off, such steps wait for you.
 
-A step waiting for you can be accepted, or sent back with **Fix it**: write what you want instead, and the step goes
+A step waiting for you can be accepted, with a note if you like ("+ Add a note"): the note goes to the next step of
+the queue, which gets it when it starts, or to the orchestrator, for the plan, later queues or the project's rules
+(on the queue's last step, always to the orchestrator; it reaches the orchestrator even with its notifications off).
+Or it can be sent back with **Fix it**: write what you want instead, and the step goes
 back to its worker in the same session as its next round. Your words win over the step's acceptance criteria where
 they conflict; when the step has criteria, Nexus lists them and asks before sending. The round after a Fix it comes
 back to you. The orchestrator may send a step back twice (`review_send_back_limit` in the project's defaults); its

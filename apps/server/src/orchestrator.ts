@@ -120,15 +120,38 @@ export class Orchestrator {
   onChange(state: ProjectState): void {
     if (this.stopped) return;
     let s = this.session();
+    const notes = this.pendingNotes(state);
     if (!s) {
-      // A step waiting for its review starts it (after a reset, or before it ever ran with notices on).
-      if (this.engine.draining || !state.queues.some((q) => q.steps.some((x) => x.review_with === "orchestrator"))) return;
+      // A step waiting for its review, or a note of the user's, starts it (after a reset, or before it ever ran).
+      if (this.engine.draining || (!notes.length && !state.queues.some((q) => q.steps.some((x) => x.review_with === "orchestrator")))) return;
       s = this.ensure();
     }
     this.applyRequests(s);
     if (this.engine.draining) return; // held until the update settles: told after its restart, or once it fails
+    // The user's notes on an acceptance are like chat messages of the user: told whatever notify says.
+    for (const n of notes) {
+      this.ensure();
+      this.markTold(s, [n.key]);
+      this.store.appendChat(s.id, { at: now(), from: "nexus", text: `You accepted step ${n.step} of queue ${n.queue}${n.last ? " (its last step)" : ""} with a note for the orchestrator:\n${n.text}` });
+      this.deliver(`[Nexus] The user accepted step ${n.step} of queue ${n.queue}${n.last ? " (its last step)" : ""} with this note for you:\n${n.text}\nTake it into account in the plan, and tell the user briefly what you will do with it.`);
+    }
     // With notices off it is still told the outcome of an update it ran itself: that answers its own command.
     this.notify(state, s, state.project.orchestrator?.notify === false);
+  }
+
+  /**
+   * Notes of the user's on an acceptance, for the orchestrator, that no orchestrator session has been told yet (each
+   * is told once per project: a reset does not repeat it, and one made with no session starts one).
+   */
+  private pendingNotes(state: ProjectState): { key: string; queue: string; step: string; text: string; last: boolean }[] {
+    const out: { key: string; queue: string; step: string; text: string; last: boolean }[] = [];
+    for (const q of state.queues) for (const st of q.steps) for (const e of st.timeline) {
+      if (e.type !== "review.accepted" || e.to !== "orchestrator" || !e.text) continue;
+      out.push({ key: `notify:note:${e.id}`, queue: q.id, step: st.id, text: e.text, last: q.steps.at(-1)?.id === st.id });
+    }
+    if (!out.length) return out;
+    const told = new Set(state.sessions.filter((x) => x.role === "orchestrator").flatMap((x) => this.store.readApplied(x.id).entries.map((a) => a.event)));
+    return out.filter((n) => !told.has(n.key));
   }
 
   /** For good: an orchestrator shut down starts no process again (a late change, an agent's exit, may still come in). */
@@ -430,7 +453,7 @@ Consent is the user's, and refused to you: marking a step done (work done elsewh
 
 Reviewing steps: a step whose review policy is orchestrator waits for you when it is done, and you get a [Nexus] message with its goal, acceptance, the checks and review material of the round, and its commits. Check the work against its acceptance: read the commits (git show, git diff), the review material and the summary; for more than a glance, have run-digest summarize the run or use the project's own read-only reviewers (agents that read and report). You run no checks yourself: a check of the queue that is missing or failed is a send-back. Then accept it, send it back with what to fix, or ask the user. Matters the project's rules give the user (for example the look, gameplay, final numbers) go to the user with ask-user, with your framing and recommendation; so does anything you cannot judge from what you can read.
 
-Messages marked [Nexus] tell you that a worker asked a question, that a step waits for your review, that the user approved a queue or withdrew an approval, that a run reached a requested pause, that a run halted or finished, or how a Nexus update you ran ended. What came up while Nexus updated reaches you right after its restart. After a deploy you may also be told what changed for agents (the commits' Agents: lines): your briefing may still describe the older way, so follow those where they differ. They are for you, not the user. Act on them: answer or escalate questions; an approval or a reached pause is your cue to start (or resume) what the plan put next, and say in the chat what you started; tell the user about withdrawals, halts and finished queues briefly, with what you propose next.
+Messages marked [Nexus] tell you that a worker asked a question, that a step waits for your review, that the user accepted a step with a note for you (their words, as in the chat: take them into the plan), that the user approved a queue or withdrew an approval, that a run reached a requested pause, that a run halted or finished, or how a Nexus update you ran ended. What came up while Nexus updated reaches you right after its restart. After a deploy you may also be told what changed for agents (the commits' Agents: lines): your briefing may still describe the older way, so follow those where they differ. They are for you, not the user. Act on them: answer or escalate questions; an approval or a reached pause is your cue to start (or resume) what the plan put next, and say in the chat what you started; tell the user about withdrawals, halts and finished queues briefly, with what you propose next.
 Deploying Nexus itself: run nexus server update only when the user asks for it in the chat, never on your own, not even when a queue that changes Nexus has finished. Before you run it, tell the user (from nexus server status) whether a step is running in any project: the update waits for those steps to finish (no new step starts meanwhile), and with --now it interrupts them instead (they continue afterwards). Also tell them that you restart with Nexus: your process ends, and this conversation goes on after the restart. You then get a [Nexus] message with the outcome (the new version, or why it failed and what still runs); pass it on to the user.
 
 Never have two runs going in one checkout at once: queues without their own worktree share the main checkout, so pause one at a step's end before starting another there.

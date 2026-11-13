@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { Event, StatusChange } from "@nexus/protocol";
 import { stopPlace } from "@nexus/protocol/attention";
 import { act, enc, fileUrl, type ProjectState, type QuestionView, type QueueView, type StepView } from "../api.ts";
+import { noteTargets, showsReviewActions } from "../review.ts";
 import { Button, Composer, Expandable, Markdown, Section, StatusBadge, StepTimes, TimeAgo, reviewLabel } from "./ui.tsx";
 import { Activity, RetryNote, RunControls } from "./Run.tsx";
 import { StepRefusals } from "./Refusals.tsx";
@@ -68,7 +69,7 @@ export function StepDetail({ project, queue, step, onChanged }: Props & { step: 
           <p className="text-sm text-zinc-400">The queue holds here until the orchestrator accepts this step, sends it back, or hands it to you.</p>
         </Section>
       )}
-      {step.status === "review" && step.review_with !== "orchestrator" && <AcceptReview project={id} queue={queue.id} step={step.id} asked={step.asked_user?.text} criteria={step.acceptance} onChanged={onChanged} />}
+      {showsReviewActions(step) && <AcceptReview project={id} queue={queue.id} step={step.id} next={noteTargets(queue.steps, step.id).next} asked={step.asked_user?.text} criteria={step.acceptance} onChanged={onChanged} />}
 
       <PushLine project={id} queue={queue} step={step.id} onChanged={onChanged} />
 
@@ -259,8 +260,16 @@ function PushLine({ project, queue, step, onChanged }: { project: string; queue:
 
 const POLICY_LABEL: Record<string, string> = { continue: "go on", wait: "wait for my review", orchestrator: "the orchestrator reviews" };
 
-function AcceptReview({ project, queue, step, asked, criteria, onChanged }: { project: string; queue: string; step: string; asked?: string; criteria: string[]; onChanged: () => void }) {
+function AcceptReview({ project, queue, step, next, asked, criteria, onChanged }: { project: string; queue: string; step: string; next?: string; asked?: string; criteria: string[]; onChanged: () => void }) {
   const [error, setError] = useState<string>();
+  // Accept's note: collapsed by default; empty means a plain accept. It goes to the next step, or to the orchestrator
+  // (always on the queue's last step).
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [note, setNote] = useState("");
+  const [noteTo, setNoteTo] = useState<"next" | "orchestrator">("next");
+  const to = next ? noteTo : "orchestrator";
+  const accept = () => act(project, "POST", `/queues/${enc(queue)}/steps/${enc(step)}/accept`, note.trim() ? { text: note, note_to: to } : {})
+    .then(() => { setNote(""); setNoteOpen(false); onChanged(); }, (e: Error) => setError(e.message));
   // Fix it with criteria: the text waits here until the user confirms that it overrides them.
   const [confirm, setConfirm] = useState<{ resolve: () => void; reject: (e: Error) => void; send: () => Promise<void> }>();
   const send = (text: string) => act(project, "POST", `/queues/${enc(queue)}/steps/${enc(step)}/send-back`, { text }).then(onChanged);
@@ -268,8 +277,30 @@ function AcceptReview({ project, queue, step, asked, criteria, onChanged }: { pr
     <Section title="Waiting for your review">
       {asked && <p className="mb-2 text-sm text-zinc-300"><span className="text-zinc-500">The orchestrator asks you: </span>{asked}</p>}
       <p className="mb-2 text-sm text-zinc-400">The queue holds here until you accept this step or send it back.</p>
-      <Button onClick={() => act(project, "POST", `/queues/${enc(queue)}/steps/${enc(step)}/accept`).then(onChanged, (e: Error) => setError(e.message))}>Accept and go on</Button>
-      {error && <span className="ml-3 text-xs text-red-400">{error}</span>}
+      {noteOpen && (
+        <div className="mb-3">
+          <textarea
+            value={note} rows={3} placeholder="A note with your acceptance (optional)…" onChange={(e) => setNote(e.target.value)}
+            className="w-full resize-y rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-sky-500 focus:outline-none"
+          />
+          {next ? (
+            <label className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-zinc-400">
+              The note goes to
+              <select value={noteTo} onChange={(e) => setNoteTo(e.target.value as "next" | "orchestrator")} className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-zinc-200">
+                <option value="next">the next step ({next}), when it starts</option>
+                <option value="orchestrator">the orchestrator (the plan, later queues, the rules)</option>
+              </select>
+            </label>
+          ) : (
+            <p className="mt-1.5 text-xs text-zinc-400">The note goes to the orchestrator: this is the queue's last step.</p>
+          )}
+        </div>
+      )}
+      <div className="flex flex-wrap items-center gap-3">
+        <Button onClick={() => void accept()}>{note.trim() ? "Accept with the note" : "Accept and go on"}</Button>
+        {!noteOpen && <button onClick={() => setNoteOpen(true)} className="text-sm text-zinc-400 hover:text-zinc-200">+ Add a note</button>}
+        {error && <span className="text-xs text-red-400">{error}</span>}
+      </div>
       <div className="mt-4">
         <p className="mb-1.5 text-sm text-zinc-300">Fix it</p>
         <p className="mb-2 text-xs text-zinc-500">Sends the step back to its worker with your words. Where they conflict with the step's acceptance criteria, your words win.</p>

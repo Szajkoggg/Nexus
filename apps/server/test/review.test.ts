@@ -38,11 +38,13 @@ function setup() {
   const delivered = () => existsSync(process.env.FAKE_LOG!)
     ? readFileSync(process.env.FAKE_LOG!, "utf8").split("\n").filter(Boolean).map((l) => (JSON.parse(l) as { text: string }).text) : [];
   /** A queue whose steps the orchestrator reviews, approved and started. */
-  const run = async (id: string, steps = 2) => {
-    orchestrator.say("Hello");
-    await until("the session", () => !!orchestrator.session());
+  const run = async (id: string, steps = 2, o: { policy?: "orchestrator" | "wait"; hello?: boolean } = {}) => {
+    if (o.hello !== false) {
+      orchestrator.say("Hello");
+      await until("the session", () => !!orchestrator.session());
+    }
     applyDraft(store, {
-      id, title: "Reviewed", review_policy: "orchestrator", checks: ["npm test"],
+      id, title: "Reviewed", review_policy: o.policy ?? "orchestrator", checks: ["npm test"],
       steps: Array.from({ length: steps }, (_, i) => ({ id: `${id}${i + 1}`, title: `Step ${i + 1}`, goal: "FAKE: done", acceptance: [`Criterion ${i + 1}`] })),
     });
     approveQueue(store, id);
@@ -253,5 +255,54 @@ test("a send-back on a halted run waits for the resume", async () => {
     x.engine.resume("H");
     await x.until("round 2 at the worker", () => x.delivered().some(roundTurn("H1", 2)));
     await x.until("round 2 in review", () => x.step("H", "H1").summary === "fake finished H1 round 2" && x.step("H", "H1").status === "review");
+  } finally { x.stop(); }
+});
+
+// ---------------------------------------------------------------- the user's Accept with a note
+
+test("a note on Accept for the next step reaches the worker when that step starts", async () => {
+  const x = setup();
+  try {
+    await x.run("A", 2, { policy: "wait" });
+    await x.until("the user's review", () => x.step("A", "A1").review_with === "user");
+    assert.deepEqual(x.engine.acceptReview("A", "A1", "Keep the old shader names in A2.", "next"), { to: "next", step: "A2" });
+    await x.until("A2 opened", () => x.delivered().some((t) => t.includes("step A2 (2 of 2)")));
+    const turn = x.delivered().find((t) => t.includes("step A2 (2 of 2)"))!;
+    assert.match(turn, /Notes from the user for this step:\n- Keep the old shader names in A2\./);
+    const ev = x.step("A", "A1").timeline.find((e) => e.type === "review.accepted") as { text?: string; to?: string };
+    assert.deepEqual([ev.text, ev.to], ["Keep the old shader names in A2.", "next"]);
+    await new Promise((r) => setTimeout(r, 400));
+    assert.ok(!x.delivered().some((t) => t.includes("with this note for you")), "nothing for the orchestrator");
+  } finally { x.stop(); }
+});
+
+test("a note for the orchestrator starts and tells it, with notices off and no session; once per project", async () => {
+  const x = setup();
+  try {
+    updateSettings(x.store, { orchestrator: { notify: false } });
+    await x.run("O", 2, { policy: "wait", hello: false });
+    await x.until("the user's review", () => x.step("O", "O1").review_with === "user");
+    assert.equal(x.orchestrator.session(), undefined, "no orchestrator session yet");
+    assert.deepEqual(x.engine.acceptReview("O", "O1", "Caves before cliffs from now on.", "orchestrator"), { to: "orchestrator", step: undefined });
+    await x.until("the note told", () => x.delivered().some((t) => t.startsWith("[Nexus] The user accepted step O1 of queue O with this note for you:\nCaves before cliffs from now on.")));
+    assert.ok(x.facts().some((t) => t === "You accepted step O1 of queue O with a note for the orchestrator:\nCaves before cliffs from now on."), "the chat shows it");
+    assert.equal(x.step("O", "O2").notes.length, 0, "not a note on the next step");
+    const first = x.orchestrator.session()!.id;
+    x.orchestrator.reset();
+    x.orchestrator.say("Hello again");
+    await x.until("a new session", () => x.orchestrator.session()?.id !== first && !!x.orchestrator.session());
+    await new Promise((r) => setTimeout(r, 600));
+    assert.equal(x.delivered().filter((t) => t.includes("with this note for you")).length, 1, "a reset does not repeat it");
+  } finally { x.stop(); }
+});
+
+test("on the queue's last step the note goes to the orchestrator", async () => {
+  const x = setup();
+  try {
+    await x.run("L", 1, { policy: "wait" });
+    await x.until("the user's review", () => x.step("L", "L1").review_with === "user");
+    assert.deepEqual(x.engine.acceptReview("L", "L1", "Good; next, the sound pass.", "next"), { to: "orchestrator", step: undefined });
+    await x.until("the note told", () => x.delivered().some((t) => t.startsWith("[Nexus] The user accepted step L1 of queue L (its last step) with this note for you:\nGood; next, the sound pass.")));
+    await x.until("the run to finish", () => x.state().queues[0]!.run?.state === "finished");
   } finally { x.stop(); }
 });
