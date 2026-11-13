@@ -134,8 +134,10 @@ function MessageBox({ queue, chat }: { queue: QueueView; chat: readonly ChatEntr
 
 const STATUS_TONE: Record<string, string> = { approval: "text-info bg-info", stopped: "text-stop bg-stop", failed: "text-danger bg-danger" };
 function StatusWord({ queue }: { queue: QueueView }) {
-  // What the view is for: the approval; a stopped queue says where it stopped (its new revision lifts the stop).
-  const s = queue.status === "stopped" ? queueStatus(queue) : { tone: "approval", label: "needs your approval" };
+  // What the view is for: the approval ("needs approval (revision 3) · then starts after HS" for a revised one); a
+  // stopped queue whose revision is approved says where it stopped.
+  const honest = queueStatus(queue);
+  const s = honest.tone === "approval" || queue.status === "stopped" ? honest : { tone: "approval", label: "needs your approval" };
   const [text, dot] = (STATUS_TONE[s.tone] ?? "text-fg-2 bg-fg-2").split(" ");
   return <span className={`inline-flex items-center gap-1.5 font-medium ${text}`}><span className={`h-1.5 w-1.5 rounded-full ${dot}`} />{s.label}</span>;
 }

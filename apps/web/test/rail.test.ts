@@ -51,3 +51,15 @@ test("finished today: done or cancelled today, most recent first; yesterday's an
   ];
   assert.deepEqual(finishedToday(queues, new Set(["F"]), now).map((r) => r.queue.id), ["B", "D", "A"]);
 });
+
+test("a planned queue whose new revision waits for approval stays in the rail and says so first", () => {
+  const queues = [
+    q("HS", "running", { steps: st("HS1:running"), run: { state: "running", step: "HS1" } }),
+    q("ST", "proposed", { approved: false, revision: 2, start: { after: "HS" } }),
+    q("RV", "approved", { approved: true, revision: 1, start: { after: "HS" } }),
+    q("NW", "proposed", { approved: false, revision: 2 }), // no plan: it waits for the user, not here
+  ];
+  const work = atWork(queues);
+  assert.deepEqual(work.map((w) => [w.queue.id, shortStatus(w.status)]), [["HS", "0/1"], ["ST", "needs approval · then after HS"], ["RV", "after HS"]]);
+  assert.equal(work[1]!.status.tone, "approval");
+});

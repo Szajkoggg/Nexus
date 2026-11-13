@@ -7,7 +7,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ProjectStore, approveQueue, loadProjectState, newId, orchestratorStatusChange, type Event } from "@nexus/protocol";
+import { ProjectStore, applyDraft, approveQueue, loadProjectState, newId, orchestratorStatusChange, type Event } from "@nexus/protocol";
 
 const CLI = join(dirname(fileURLToPath(import.meta.url)), "../bin/nexus.js");
 const T0 = Date.now() - 86_400_000;
@@ -104,4 +104,22 @@ test("a step's own runtime, model and effort: on its line, and in the orchestrat
   assert.match(plain, /^ {2}P1 {4}pending {2}Step P1$/m, "a step without its own values: nothing");
   store.writeSession({ protocol: 1, id: "o", project: "p", role: "orchestrator", runtime: "claude", cwd: store.dir, launched_by: "nexus", created_at: at(0) });
   assert.match(status(store, "o"), /^ {2}steps: P1 pending, P2 pending \[on Codex · gpt-6-luna · low effort\]$/m);
+});
+
+test("a planned queue whose new revision waits for approval says so first, the planned start after it", () => {
+  const store = setup();
+  store.writeSession({ protocol: 1, id: "o", project: "p", role: "orchestrator", runtime: "claude", cwd: store.dir, launched_by: "nexus", created_at: at(0) });
+  store.writeQueue({ protocol: 1, id: "ST", title: "Queue ST", revision: 1, status: "proposed", stop_conditions: [], checks: [], steps: [{ id: "ST1", title: "Step", goal: "", acceptance: [] }] });
+  approveQueue(store, "ST");
+  store.writeStart("ST", { protocol: 1, after: "A", by: "orchestrator", revision: 1, created_at: at(1) });
+  let out = status(store, "o");
+  assert.match(out, /^- ST \[approved\] Queue ST: revision 1, approved\n {2}steps: [^\n]*\n {2}starts when A is done/m, "approved: the plan alone");
+  assert.doesNotMatch(out.split("\n- ST")[1]!.split("\n- ")[0]!, /needs approval/);
+
+  // The orchestrator changes it: revision 2, not approved yet.
+  applyDraft(store, { id: "ST", title: "Queue ST", stop_conditions: [], checks: [], steps: [{ id: "ST1", title: "Step, revised", goal: "", acceptance: [] }] });
+  out = status(store, "o");
+  assert.match(out, /^- ST \[\w+\] Queue ST: revision 2, not approved\n {2}needs approval \(revision 2\): the planned start below waits for it\n {2}steps: [^\n]*\n {2}then starts when A is done/m);
+  // Without a session: listed with its approval, when its status puts it in the list.
+  if (loadProjectState(store).queues.find((q) => q.id === "ST")!.status !== "proposed") assert.match(status(store), /^queue ST \[\w+\] Queue ST \(needs approval: revision 2\)$/m);
 });

@@ -7,17 +7,18 @@ import { splitFinished, type FinishedRow, type QueueLike as FinishLike } from ".
 type Q = StatusLike & FinishLike & { id: string };
 
 /** The order of the queues at work: what runs first, then what waits on someone, what is paused, what is planned. */
-const ORDER: Partial<Record<Tone, number>> = { running: 0, waiting: 1, review: 2, paused: 3, planned: 4 };
+const ORDER: Partial<Record<Tone, number>> = { running: 0, waiting: 1, review: 2, paused: 3, planned: 4, approval: 4 };
 
 /**
  * The queues at work in a project: running, waiting (for an answer, a retry, the usage window), in review, paused,
- * or with a planned start (a chain or a schedule). A stopped or failed queue and one that needs approval are not
- * here: they wait for the user, in the rail's first section. Approved queues without a start are not at work yet.
+ * or with a planned start (a chain or a schedule), also one whose new revision waits for approval first (it says so).
+ * A stopped or failed queue and one that needs approval with no plan are not here: they wait for the user, in the
+ * rail's first section. Approved queues without a start are not at work yet.
  */
 export function atWork<T extends Q>(queues: readonly T[], now = new Date()): { queue: T; status: HonestStatus }[] {
   return queues
     .map((queue) => ({ queue, status: queueStatus(queue, now) }))
-    .filter(({ queue, status }) => status.tone === "planned" ? !!queue.start && !queue.start.failed : ORDER[status.tone] !== undefined)
+    .filter(({ queue, status }) => status.tone === "planned" || status.tone === "approval" ? !!queue.start && !queue.start.failed : ORDER[status.tone] !== undefined)
     .sort((a, b) => ORDER[a.status.tone]! - ORDER[b.status.tone]!);
 }
 
@@ -27,6 +28,7 @@ export function shortStatus(s: HonestStatus): string {
     case "running": return s.label.startsWith("pausing") ? "pausing" : `${s.closed}/${s.total}`;
     case "review": return s.label.startsWith("the orchestrator reviews") ? "orchestrator reviews" : "review";
     case "planned": return s.label.replace(/^starts /, "");
+    case "approval": return s.label.replace(/ \(revision \d+\)/, "").replace(" · then starts ", " · then ");
     case "waiting": return s.label.startsWith("waiting for an answer") ? "question" : s.label.includes("usage") ? "usage window" : "retry";
     default: return s.label;
   }

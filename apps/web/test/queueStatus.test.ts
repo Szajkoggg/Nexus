@@ -54,3 +54,21 @@ test("before it runs: approval, approved, a planned start; after: done, cancelle
   assert.deepEqual(pick(queueStatus(q({ status: "done", steps: st("D1:done D2:skipped") }))), ["done", "done"]);
   assert.deepEqual(pick(queueStatus(q({ status: "cancelled" }))), ["cancelled", "cancelled"]);
 });
+
+test("a revision waiting for approval comes first, in the approval tone, with the planned start after it", () => {
+  const planned = { status: "proposed", revision: 3, steps: st("S1:pending S2:pending"), start: { after: "HS" } };
+  assert.deepEqual(pick(queueStatus(q({ ...planned, approved: false }))), ["approval", "needs approval (revision 3) · then starts after HS"]);
+  // Approved: the planned start alone, as before.
+  assert.deepEqual(pick(queueStatus(q({ ...planned, status: "approved", approved: true }))), ["planned", "starts after HS"]);
+  // A time, and no plan at all.
+  const at = new Date(2026, 10, 14, 14, 0).toISOString();
+  assert.match(queueStatus(q({ ...planned, start: { at }, approved: false }), new Date(2026, 10, 14, 9, 0)).label, /^needs approval \(revision 3\) · then starts at 14:00$/);
+  assert.deepEqual(pick(queueStatus(q({ status: "proposed", revision: 2, steps: st("S1:pending"), approved: false }))), ["approval", "needs approval (revision 2)"]);
+  // Before a step runs, after some did (a revised queue that ran), and a stopped one: approval first all the same.
+  assert.deepEqual(pick(queueStatus(q({ status: "paused", revision: 2, steps: st("S1:done S2:pending"), approved: false, start: { after: "HS" } }))), ["approval", "needs approval (revision 2) · then starts after HS"]);
+  // A first revision with no plan keeps its plain words; a failed plan is not promised.
+  assert.deepEqual(pick(queueStatus(q({ status: "proposed", revision: 1, approved: false }))), ["approval", "needs your approval"]);
+  assert.deepEqual(pick(queueStatus(q({ status: "proposed", revision: 2, approved: false, start: { after: "HS", failed: { reason: "x" } } }))), ["approval", "needs approval (revision 2)"]);
+  // Done and cancelled stay so.
+  assert.deepEqual(pick(queueStatus(q({ status: "done", revision: 2, approved: false }))), ["done", "done"]);
+});

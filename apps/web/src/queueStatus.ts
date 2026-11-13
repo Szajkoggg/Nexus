@@ -26,7 +26,14 @@ export interface QueueLike {
   stop_step?: string;
   current_step?: string;
   start?: { at?: string; after?: string; failed?: unknown };
+  /** The latest approval pins the current revision; absent: taken as approved (older callers). */
+  approved?: boolean;
+  revision?: number;
 }
+
+/** A planned start in words: "starts after HS", "starts at 14:00". */
+const startText = (start: NonNullable<QueueLike["start"]>, now: Date) =>
+  start.after ? `starts after ${start.after}` : start.at ? `starts at ${formatClock(start.at, now)}` : "planned";
 
 const GOING = new Set(["running", "pausing", "usage_wait", "retry_wait"]);
 
@@ -42,6 +49,12 @@ export function queueStatus(q: QueueLike, now = new Date()): HonestStatus {
   const run = q.run && GOING.has(q.run.state) ? q.run : undefined;
 
   if (q.status === "cancelled") return at("cancelled", "cancelled");
+  // A revision waiting for approval comes first: nothing of the queue runs, and no planned start fires, until it is
+  // approved ("needs approval (revision 3) · then starts after HS"). A first revision with no plan keeps the plain words.
+  if (q.approved === false && q.status !== "done" && q.status !== "draft" && ((q.revision ?? 1) > 1 || q.start || q.status !== "proposed")) {
+    const then = q.start && !q.start.failed ? ` · then ${startText(q.start, now)}` : "";
+    return { tone: "approval", label: `needs approval (revision ${q.revision ?? 1})${then}`, ...base };
+  }
   if (q.status === "stopped") {
     // Where the stop is, while that step holds it; a stop whose step was skipped since is the queue's.
     const s = q.stop_step ? q.steps.find((x) => x.id === q.stop_step) : undefined;
@@ -69,7 +82,7 @@ export function queueStatus(q: QueueLike, now = new Date()): HonestStatus {
   // A planned start that has not come, or could not start.
   if (q.start) {
     if (q.start.failed) return at("failed", "did not start");
-    return at("planned", q.start.after ? `starts after ${q.start.after}` : q.start.at ? `starts at ${formatClock(q.start.at, now)}` : "planned");
+    return at("planned", startText(q.start, now));
   }
   // The steps say a run is at work, but none runs: honest about it.
   if (q.status === "running" || q.status === "waiting" || q.status === "paused") return at("paused", "paused", q.current_step ?? q.run?.step);

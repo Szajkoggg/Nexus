@@ -16,6 +16,7 @@ import { StepChat } from "./Chat.tsx";
 import { StopBox, stopVersion, useContinue, useLeft } from "./Stop.tsx";
 import { AskButton, CompactSteps, SettingsLine, useApprove, useCtrlEnter } from "./Approval.tsx";
 import { needsApproval } from "../approval.ts";
+import { queueStatus } from "../queueStatus.ts";
 import { needsWorkChoice, stopDecision, type LeftState, type LeftView, type WorkChoice } from "../stopDecision.ts";
 
 interface Props {
@@ -1060,6 +1061,8 @@ export function QueueDetail({ project, queue, onChanged, onClose, of, chat = [],
   // A queue waiting for approval: its steps as the compact list (UX proposals, 13 left), the description, stop
   // conditions and checks folded in it, its run settings in the header.
   const approving = needsApproval(queue);
+  const honest = queueStatus(queue);
+  const waitsApproval = honest.tone === "approval";
   const history = [...queue.approvals.map((a) => ({ ...a, withdrawn: false as const })), ...queue.withdrawals.map((w) => ({ ...w, withdrawn: true as const }))]
     .sort((x, y) => x.at.localeCompare(y.at));
 
@@ -1069,6 +1072,8 @@ export function QueueDetail({ project, queue, onChanged, onClose, of, chat = [],
         where={<>{project.project.name} · queue</>} of={of}
         title={<><span className="mr-2 font-mono text-fg-3">{queue.id}</span>{queue.title}</>}
         status={<>
+          {/* A revision waiting for approval says so first, in the approval colour, with the planned start after it. */}
+          {waitsApproval && <span className="font-medium text-info">{honest.label}</span>}
           <StatusBadge status={queue.status} />
           <span>revision {queue.revision}</span>
           {approving && <SettingsLine project={project} queue={queue} />}

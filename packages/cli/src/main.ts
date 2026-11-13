@@ -154,6 +154,8 @@ Queues (${state.queues.length - done.length} open; finished: ${done.map((q) => q
   for (const q of state.queues.filter((x) => !done.includes(x))) {
     const run = q.run ? `; run ${q.run.state}${q.run.step ? ` at ${q.run.step}` : ""} in session ${q.run.session}${q.run.reason ? ` (${q.run.reason})` : ""}` : "";
     console.log(`- ${q.id} [${q.status}] ${q.title}: revision ${q.revision}, ${q.approved ? "approved" : "not approved"}${run}`);
+    // A revision waiting for approval comes first: nothing runs and no planned start fires until the user approves it.
+    if (!q.approved) console.log(`  needs approval (revision ${q.revision})${q.start && !q.start.failed ? ": the planned start below waits for it" : ""}`);
     console.log(`  steps: ${q.steps.map((x) => `${x.id} ${x.status}${x.review_with ? ` (for ${x.review_with === "user" ? "the user" : "you"})` : ""}${stepValuesText(x) ? ` [on ${stepValuesText(x)}]` : ""}`).join(", ")}`);
     if (q.status_reason && q.status !== "running") console.log(`  why: ${q.status_reason.replace(/\s+/g, " ").slice(0, 300)}`);
     for (const line of stopLines(q)) console.log(line);
@@ -162,8 +164,8 @@ Queues (${state.queues.length - done.length} open; finished: ${done.map((q) => q
       const when = p.after ? `after ${p.after}` : `at ${new Date(p.at!).toLocaleString("sv-SE").slice(0, 16)}${p.usage ? " (usage reset)" : ""}`;
       console.log(p.failed
         ? `  planned start ${when} did not happen: ${p.failed.reason} (the user sees it; start the queue or cancel the plan with nexus run ${q.id} cancel-start)`
-        : p.after ? `  starts when ${p.after} is done${p.session ? `, in session ${p.session}` : ""}; now: ${p.waiting}`
-          : `  starts ${when}${p.session ? `, in session ${p.session}` : ""}`);
+        : p.after ? `  ${q.approved ? "" : "then "}starts when ${p.after} is done${p.session ? `, in session ${p.session}` : ""}; now: ${p.waiting}`
+          : `  ${q.approved ? "" : "then "}starts ${when}${p.session ? `, in session ${p.session}` : ""}`);
     }
   }
   const open = state.questions.filter((x) => x.state === "open" || x.state === "escalated");
@@ -313,7 +315,7 @@ const commands: Record<string, () => void | Promise<void>> = {
       ...state.queues.filter((q) => ["approved", "paused"].includes(q.status)),
     ];
     for (const q of queues) {
-      console.log(`\nqueue ${q.id} [${q.status}] ${q.title}${q.approved ? "" : " (no approval recorded for this revision)"}`);
+      console.log(`\nqueue ${q.id} [${q.status}] ${q.title}${q.approved ? "" : ` (needs approval: revision ${q.revision})`}`);
       if (q.status_reason) console.log(`  why: ${q.status_reason.slice(0, 300)}`);
       for (const line of stopLines(q)) console.log(line);
       if (q.run && q.status !== "running") {
