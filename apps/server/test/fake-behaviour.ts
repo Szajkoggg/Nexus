@@ -8,7 +8,8 @@
 //   commit    commit a file named after the step in its working directory, then done
 // A failure of the runtime, then done: "<kind><n>" fails the step's first n turns (counted in a file beside
 // FAKE_LOG, so a new process goes on counting), "<kind>" every turn. Kinds: overloaded, network (passing), auth
-// (lasting), limit (a usage limit resetting FAKE_RESET_MS, default 1500, later), crash (the process exits mid-turn).
+// (lasting), limit (a usage limit resetting FAKE_RESET_MS, default 1500, later), crash (the process exits mid-turn),
+// cloudflare (an HTTP 403 page from Cloudflare, which the runtimes report as an authentication failure: passing).
 // Each fake writes the failure the way its runtime does (fake-claude.ts, fake-codex.ts).
 // "refused": the agent tries actions that are refused (each fake writes them as its runtime does), then done.
 // "summary": done, then the step's context summary (`nexus context`); "summaryslow": the same, then FAKE_SLOW_MS before
@@ -46,11 +47,11 @@ export function contextTokens(window: number, fallback: number): number {
 
 export interface Fake { step?: string }
 
-export type FakeFailure = "overloaded" | "network" | "auth" | "limit" | "crash";
+export type FakeFailure = "overloaded" | "network" | "auth" | "limit" | "crash" | "cloudflare";
 
 /** Whether this turn of the step fails, and how (see the header). */
 function failure(step: string, behaviour: string): FakeFailure | undefined {
-  const m = /^(overloaded|network|auth|limit|crash)(\d*)$/.exec(behaviour);
+  const m = /^(overloaded|network|auth|limit|crash|cloudflare)(\d*)$/.exec(behaviour);
   if (!m) return undefined;
   if (!m[2]) return m[1] as FakeFailure;
   const file = join(dirname(process.env.FAKE_LOG ?? "."), `fake-fails-${step}`);
@@ -105,7 +106,7 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
     tool(`nexus step start ${step}`);
     const fail = failure(step, behaviour);
     if (fail) return { fail };
-    if (/^(overloaded|network|auth|limit|crash)/.test(behaviour)) nexus("step", "done", step, "--summary", `fake finished ${step} after failures`);
+    if (/^(overloaded|network|auth|limit|crash|cloudflare)/.test(behaviour)) nexus("step", "done", step, "--summary", `fake finished ${step} after failures`);
     if (behaviour === "slow") await new Promise((r) => setTimeout(r, Number(process.env.FAKE_SLOW_MS ?? 1500)));
     // "commit": a commit in the working directory (a file named after the step), then done.
     if (behaviour === "commit") {

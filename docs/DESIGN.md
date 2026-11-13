@@ -123,7 +123,14 @@ one of three kinds; the engine decides (`src/engine.ts`, `turnFailed`).
 |---|---|---|---|
 | Passing | `overloaded`, `server_error`, `rate_limit` without a reset time, a connection error | `serverOverloaded`, `internalServerError`, `rateLimitExceeded`, `httpConnectionFailed`, `responseStreamConnectionFailed`, `responseStreamDisconnected`, `responseTooManyFailedAttempts`, `usageLimitExceeded` without a known reset | Tries the turn again (`retry_wait`) |
 | Usage, with a reset time | `rate_limit` after a `rate_limit_event` with `status: rejected` and `resetsAt` | `usageLimitExceeded` when the last rate limits show a full window and its `resetsAt` | Waits for the window (`usage_wait`, `resume_at`) |
+| Passing, an edge's 403 | `authentication_failed` (or another lasting code) whose text has a 403 and the mark of Cloudflare or a like edge ("Attention Required!", "cf-ray", "Just a moment...", Akamai): code `edge_block_403` | The same, by its message, whatever the code (no sample yet; assumed `unauthorized` with "unexpected status 403 Forbidden: Attention Required! \| Cloudflare"); as a connection failure with `httpStatusCode` 403 it is passing by its code | Tries the turn again, like any passing failure; the sixth in a row halts naming it |
 | Lasting | `authentication_failed`, `billing_error`, `invalid_request`, `model_not_found`, a refusal, the result subtypes `error_max_turns` and the like, anything unknown | `unauthorized`, `badRequest`, `modelNotFound`, `contextWindowExceeded`, the policy codes, `sandboxError`, `other`, anything unknown | Halts the run, naming the failure |
+
+**An edge's 403 is not a credential error.** On 2026-11-13 queue N7 halted with `authentication_failed`: "Failed to
+authenticate. API Error: 403 Attention Required! | Cloudflare". That is Cloudflare's block page in front of the API,
+not a wrong credential, and a resume went on fine. Such a failure is passing (`edgeBlock` in `src/agent.ts`): both the
+403 and an edge's mark must be in the text (the whole of it, not only the 300 characters kept), so a 401, "Invalid API
+key", an expired token or a plain 403 about permissions stays lasting.
 
 A process that exits while its run goes on, without Nexus ending it, is a passing failure (`processExited`): the
 retry starts a new process that resumes the same session (Claude Code `--resume`, Codex `thread/resume`).

@@ -31,8 +31,9 @@ function exitOnSignal(): void { process.kill(process.pid, "SIGTERM"); }
 
 function fail(id: string, kind: FakeFailure): void {
   if (kind === "crash") process.exit(3);
-  const info = { overloaded: "serverOverloaded", network: { responseStreamDisconnected: { httpStatusCode: null } }, auth: "unauthorized", limit: "usageLimitExceeded" }[kind];
-  const message = { overloaded: "The server is overloaded", network: "stream disconnected before completion", auth: "401 Unauthorized", limit: "You have hit your usage limit." }[kind];
+  // cloudflare: no sample from Codex exists; assumed to come as "unauthorized" with the status line and the page's title.
+  const info = { overloaded: "serverOverloaded", network: { responseStreamDisconnected: { httpStatusCode: null } }, auth: "unauthorized", limit: "usageLimitExceeded", cloudflare: "unauthorized" }[kind];
+  const message = { overloaded: "The server is overloaded", network: "stream disconnected before completion", auth: "401 Unauthorized", limit: "You have hit your usage limit.", cloudflare: "unexpected status 403 Forbidden: Attention Required! | Cloudflare" }[kind];
   const error = { message, codexErrorInfo: info, additionalDetails: null, misalignment: null };
   if (kind === "overloaded" || kind === "network") notify("error", { error, willRetry: true, threadId, turnId: id });
   if (kind === "limit") {

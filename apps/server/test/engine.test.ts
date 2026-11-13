@@ -342,6 +342,25 @@ for (const runtime of ["claude", "codex"] as const) {
     } finally { engine.shutdown(); }
   });
 
+  test(`${runtime}: a Cloudflare 403 is retried like a passing failure: two then success goes on, six halt naming it`, async () => {
+    const { engine, queue, received, until } = setup(["cloudflare2", "done"]);
+    try {
+      engine.start("Q", { runtime });
+      await until("the run to finish", () => queue().run?.state === "finished");
+      assert.deepEqual(queue().steps.map((s) => s.status), ["done", "done"]);
+      assert.equal(received().filter((m) => m.text.includes("step Q1 (1 of 2)")).length, 3, "the first turn and two retries");
+    } finally { engine.shutdown(); }
+    const six = setup(["cloudflare6", "done"]);
+    try {
+      six.engine.start("Q", { runtime });
+      await six.until("the halt", () => six.queue().run?.state === "halted");
+      const reason = six.queue().run!.reason!;
+      assert.match(reason, new RegExp(`failed ${RETRY_LIMIT + 1} times in a row; the last time: edge_block_403: .*403.*Cloudflare`));
+      assert.equal(six.queue().run!.failure, "edge_block_403");
+      assert.equal(six.received().filter((m) => m.text.includes("step Q1 (1 of 2)")).length, RETRY_LIMIT + 1);
+    } finally { six.engine.shutdown(); }
+  });
+
   test(`${runtime}: an authentication failure halts the run at once`, async () => {
     const { store, engine, queue, received, until } = setup(["auth", "done"]);
     try {

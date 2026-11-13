@@ -30,6 +30,20 @@ export interface ActivityItem { kind: "turn_start" | "text" | "tool" | "tool_err
  */
 export interface TurnFailure { kind: "passing" | "lasting" | "usage"; code: string; text: string; resetsAt?: string }
 
+/**
+ * An HTTP 403 page from Cloudflare (or a like edge in front of the API: a block or challenge of this request), which
+ * the runtimes report as an authentication failure though no credential is wrong. It passes: the same request goes
+ * through later. Seen on 2026-11-13 (queue N7, Claude Code): `authentication_failed`, "Failed to authenticate. API
+ * Error: 403 Attention Required! | Cloudflare"; a resume went on fine. Both a 403 and the edge's mark must be there, so
+ * a real credential failure (401, "Invalid API key", an expired token) stays lasting.
+ */
+export function edgeBlock(text: string): boolean {
+  return /\b403\b/.test(text) && /cloudflare|attention required|cf-ray|just a moment\.\.\.|akamai/i.test(text);
+}
+
+/** The code of a failure that is an edge's 403 (see edgeBlock). */
+export const EDGE_BLOCK = "edge_block_403";
+
 /** An action the agent wanted but was refused, as the runtime reported it (see Refusal in the protocol). */
 export interface RefusalItem { by: "permissions" | "nexus" | "auto_review"; tool: string; input: string; reason?: string; ref?: string }
 

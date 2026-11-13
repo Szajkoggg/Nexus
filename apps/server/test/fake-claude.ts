@@ -42,9 +42,10 @@ function exitOnSignal(): void { process.kill(process.pid, "SIGTERM"); }
 
 function fail(kind: FakeFailure): void {
   if (kind === "crash") process.exit(3);
-  const error = { overloaded: "overloaded", network: "unknown", auth: "authentication_failed", limit: "rate_limit" }[kind];
-  const status = { overloaded: 529, network: null, auth: 401, limit: 429 }[kind];
-  const text = { overloaded: "API Error: Repeated 529 Overloaded errors", network: "API Error: Connection error.", auth: "Invalid API key - Please run /login", limit: "Claude AI usage limit reached" }[kind];
+  // cloudflare: the shape queue N7 met on 2026-11-13 (the assistant's error and the result's text as Claude Code wrote them).
+  const error = { overloaded: "overloaded", network: "unknown", auth: "authentication_failed", limit: "rate_limit", cloudflare: "authentication_failed" }[kind];
+  const status = { overloaded: 529, network: null, auth: 401, limit: 429, cloudflare: 403 }[kind];
+  const text = { overloaded: "API Error: Repeated 529 Overloaded errors", network: "API Error: Connection error.", auth: "Invalid API key - Please run /login", limit: "Claude AI usage limit reached", cloudflare: "Failed to authenticate. API Error: 403 Attention Required! | Cloudflare" }[kind];
   if (kind === "overloaded" || kind === "network") out({ type: "system", subtype: "api_retry", attempt: 1, max_retries: 10, retry_delay_ms: 500, error_status: status, error, uuid: "u", session_id: "fake" });
   if (kind === "limit") out({ type: "rate_limit_event", rate_limit_info: { status: "rejected", rateLimitType: "five_hour", resetsAt: Math.ceil((Date.now() + Number(process.env.FAKE_RESET_MS ?? 1500)) / 1000) }, uuid: "u", session_id: "fake" });
   out({ type: "assistant", message: { content: [{ type: "text", text }] }, error, parent_tool_use_id: null });

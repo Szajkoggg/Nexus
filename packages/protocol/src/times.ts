@@ -64,6 +64,7 @@ export function failureLabel(code: string | undefined): string {
   if (!code) return "a passing failure";
   if (/overloaded/i.test(code)) return "overloaded";
   if (code === "processExited") return "the runtime's process exited";
+  if (code === "edge_block_403") return "blocked by Cloudflare (403)";
   if (/connection|disconnected|stream|failedattempts/i.test(code)) return "network";
   if (/rate_?limit|usagelimit/i.test(code)) return "rate limited";
   if (/server_?error|internalservererror/i.test(code)) return "server error";

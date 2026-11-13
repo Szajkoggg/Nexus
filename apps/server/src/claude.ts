@@ -2,7 +2,7 @@
 // alive across turns. Signed in with the user's own subscription (no API key, no Agent SDK).
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { agentEnv, shortInput, type ActivityItem, type AgentEvents, type AgentProcess, type Priority, type StreamFacts, type TurnFailure } from "./agent.ts";
+import { EDGE_BLOCK, agentEnv, edgeBlock, shortInput, type ActivityItem, type AgentEvents, type AgentProcess, type Priority, type StreamFacts, type TurnFailure } from "./agent.ts";
 
 export type { ActivityItem, Priority, StreamFacts };
 
@@ -27,14 +27,18 @@ const CLAUDE_PASSING = new Set(["overloaded", "server_error", "rate_limit", "con
  * `rate_limit_event` system messages. Undefined for a success, and for a turn Nexus interrupted.
  */
 export function classifyClaudeResult(m: Record<string, any>, signs: ClaudeTurnSigns): TurnFailure | undefined {
-  const text = clip(String(typeof m.result === "string" && m.result ? m.result : (m.errors ?? []).join("; ") || m.subtype || "error"), 300);
+  const full = String(typeof m.result === "string" && m.result ? m.result : (m.errors ?? []).join("; ") || m.subtype || "error");
+  const text = clip(full, 300);
   if (signs.refusal || m.stop_reason === "refusal") return { kind: "lasting", code: "refusal", text };
   if (!m.is_error && m.subtype === "success") return undefined;
   if (m.terminal_reason === "aborted_streaming" || m.terminal_reason === "aborted_tools") return undefined; // interrupted
   let code = signs.apiError ?? httpCode(m.api_error_status) ?? (m.subtype && m.subtype !== "success" ? String(m.subtype) : "unknown");
   if ((code === "unknown" || code === "server_error") && signs.connectionRetry) code = "connection";
   if (code === "rate_limit" && signs.resetsAt && Date.parse(signs.resetsAt) > Date.now()) return { kind: "usage", code, text, resetsAt: signs.resetsAt };
-  return { kind: CLAUDE_PASSING.has(code) ? "passing" : "lasting", code, text };
+  if (CLAUDE_PASSING.has(code)) return { kind: "passing", code, text };
+  // An edge's 403 page reported as an authentication failure (or another lasting code): no credential is wrong.
+  if (edgeBlock(full)) return { kind: "passing", code: EDGE_BLOCK, text };
+  return { kind: "lasting", code, text };
 }
 
 function httpCode(status: unknown): string | undefined {

@@ -31,6 +31,30 @@ test("Claude Code: the assistant's error, else the HTTP status, else the subtype
   assert.equal(kind({}), "lasting unknown");
 });
 
+test("Claude Code: a Cloudflare 403 page is passing; a credential failure stays lasting", () => {
+  // The shape queue N7 met on 2026-11-13: the assistant's error, the result's status and text.
+  const n7 = classifyClaudeResult(result({ api_error_status: 403, result: "Failed to authenticate. API Error: 403 Attention Required! | Cloudflare" }), { apiError: "authentication_failed" })!;
+  assert.deepEqual([n7.kind, n7.code, n7.text], ["passing", "edge_block_403", "Failed to authenticate. API Error: 403 Attention Required! | Cloudflare"]);
+  // A long page: the mark is found beyond the 300 characters the text keeps.
+  const page = classifyClaudeResult(result({ api_error_status: 403, result: `API Error: 403 <html>${"x".repeat(400)}<title>Just a moment...</title> cf-ray: 8a1b</html>` }), { apiError: "authentication_failed" })!;
+  assert.equal(`${page.kind} ${page.code}`, "passing edge_block_403");
+  const lasting = (text: string, status?: number) => { const f = classifyClaudeResult(result({ api_error_status: status, result: text }), { apiError: "authentication_failed" })!; return `${f.kind} ${f.code}`; };
+  assert.equal(lasting("Invalid API key - Please run /login", 401), "lasting authentication_failed");
+  assert.equal(lasting("Failed to authenticate. API Error: 401 OAuth token has expired"), "lasting authentication_failed");
+  assert.equal(lasting("API Error: 403 Forbidden: your organization has disabled this model", 403), "lasting authentication_failed", "a 403 without an edge's mark");
+  assert.equal(lasting("Failed to authenticate: see the Cloudflare status page", 401), "lasting authentication_failed", "an edge's name without a 403");
+});
+
+test("Codex: a Cloudflare 403 page is passing whatever its code; unauthorized stays lasting", () => {
+  // No sample from Codex: assumed to come as "unauthorized" (or "other") with the status line and the page's title.
+  const f = (info: unknown, message: string) => { const x = classifyCodexError({ message, codexErrorInfo: info, additionalDetails: null }); return `${x.kind} ${x.code}`; };
+  assert.equal(f("unauthorized", "unexpected status 403 Forbidden: Attention Required! | Cloudflare"), "passing edge_block_403");
+  assert.equal(f("other", "unexpected status 403 Forbidden: <title>Just a moment...</title>"), "passing edge_block_403");
+  assert.equal(f({ responseStreamConnectionFailed: { httpStatusCode: 403 } }, "403 Attention Required! | Cloudflare"), "passing responseStreamConnectionFailed", "as a connection failure it is passing by its code");
+  assert.equal(f("unauthorized", "401 Unauthorized"), "lasting unauthorized");
+  assert.equal(f("unauthorized", "unexpected status 403 Forbidden: missing scope api.responses.write"), "lasting unauthorized");
+});
+
 test("Codex: the TurnError's codexErrorInfo, a string or a one-key object", () => {
   const kind = (info: unknown, resetsAt?: string) => { const f = classifyCodexError({ message: "m", codexErrorInfo: info, additionalDetails: null }, resetsAt); return `${f.kind} ${f.code}`; };
   assert.equal(kind("serverOverloaded"), "passing serverOverloaded");

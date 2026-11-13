@@ -6,7 +6,7 @@ import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from "node:c
 import { EventEmitter } from "node:events";
 import { existsSync } from "node:fs";
 import { join, relative, resolve, isAbsolute } from "node:path";
-import { agentEnv, shortInput, type AgentEvents, type RefusalItem, type AgentOptions, type AgentProcess, type Priority, type TurnFailure } from "./agent.ts";
+import { EDGE_BLOCK, agentEnv, edgeBlock, shortInput, type AgentEvents, type RefusalItem, type AgentOptions, type AgentProcess, type Priority, type TurnFailure } from "./agent.ts";
 
 export interface CodexOptions extends AgentOptions {
   /** The thread to resume; a new thread is started without one. */
@@ -40,9 +40,14 @@ const CODEX_PASSING = new Set([
 export function classifyCodexError(error: Json | null | undefined, resetsAt?: string): TurnFailure {
   const info = error?.codexErrorInfo;
   const code = typeof info === "string" ? info : info && typeof info === "object" ? Object.keys(info)[0] ?? "unknown" : "unknown";
-  const text = clip(String(error?.message ?? "the turn failed") + (error?.additionalDetails ? ` (${error.additionalDetails})` : ""), 300);
+  const full = String(error?.message ?? "the turn failed") + (error?.additionalDetails ? ` (${error.additionalDetails})` : "");
+  const text = clip(full, 300);
   if (code === "usageLimitExceeded") return resetsAt && Date.parse(resetsAt) > Date.now() ? { kind: "usage", code, text, resetsAt } : { kind: "passing", code, text };
-  return { kind: CODEX_PASSING.has(code) ? "passing" : "lasting", code, text };
+  if (CODEX_PASSING.has(code)) return { kind: "passing", code, text };
+  // An edge's 403 page, however Codex codes it (no sample yet; "unauthorized" or "other" are the likely codes): it
+  // passes. As a connection failure with httpStatusCode 403 it is passing already, by its code.
+  if (edgeBlock(full)) return { kind: "passing", code: EDGE_BLOCK, text };
+  return { kind: "lasting", code, text };
 }
 
 /**

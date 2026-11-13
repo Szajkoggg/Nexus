@@ -131,6 +131,7 @@ test("a run waiting to retry reads as the retry, its time and the failure in sho
   assert.equal(retryLine({ state: "retry_wait", retries: 2, resume_at: at, failure: "overloaded" }, now), `retry 2 of ${RETRY_LIMIT} at 14:05, overloaded`);
   assert.equal(retryLine({ state: "retry_wait", retries: 1, resume_at: at, failure: "serverOverloaded" }, now), "retry 1 of 5 at 14:05, overloaded");
   assert.equal(retryLine({ state: "retry_wait", retries: 3, failure: "processExited" }, now), "retry 3 of 5, the runtime's process exited");
+  assert.equal(retryLine({ state: "retry_wait", retries: 2, failure: "edge_block_403" }, now), "retry 2 of 5, blocked by Cloudflare (403)");
   assert.equal(retryLine({ state: "running", retries: 2 }, now), undefined);
   assert.deepEqual(["responseStreamDisconnected", "connection", "rate_limit", "rateLimitExceeded", "internalServerError", "weird"].map(failureLabel),
     ["network", "network", "rate limited", "rate limited", "server error", "weird"]);
