@@ -5,6 +5,7 @@ import { QueueRow } from "./components/QueueRow.tsx";
 import { chooseOption, QueueDetail, StepDetail } from "./components/Details.tsx";
 import { Button, Drawer, Section, TimeAgo, useWide } from "./components/ui.tsx";
 import { Rail, RAIL } from "./components/Rail.tsx";
+import { RefsProvider } from "./components/Refs.tsx";
 import { AttentionPanel, attentionTarget, NotifyToggle, useNotifications, WaitingList } from "./components/Attention.tsx";
 import { ContextBar, UsageMeter } from "./components/Run.tsx";
 import { ChatPanel, ConversationsPanel, DeskHead, useOrchestrator, type Desk } from "./components/Chat.tsx";
@@ -185,6 +186,7 @@ export function App() {
   if (phone) {
     const scrolls = tab === "waiting" || tab === "queues";
     return (
+      <RefsProvider project={projectId} queues={state?.queues}>
       <div className="flex h-dvh flex-col">
         {/* The top line: the project picker, what runs, settings. The header's other tools are in Settings here. */}
         <header className="z-30 shrink-0 border-b border-line bg-surface pt-[env(safe-area-inset-top)]">
@@ -213,6 +215,7 @@ export function App() {
         <BottomBar tab={tab!} waiting={waiting.length} working={orchestrator?.state === "working"} onTab={(t) => nav.tab(t)} />
         {drawers}
       </div>
+      </RefsProvider>
     );
   }
 
@@ -236,6 +239,7 @@ export function App() {
   const besideShown = !wide && ((itemShown && !fullApproval) || waitingOpen);
   const alerts = (projectsError || projects?.length === 0 || error) && <div className="px-6 pt-4">{banners}</div>;
   return (
+    <RefsProvider project={projectId} queues={state?.queues}>
     <div className="flex h-dvh">
       <ProjectSidebar projects={projects ?? []} current={projectId} connected={connected} onPick={(id) => nav.project(id)} foot={<>
         <UpdatePill info={server} />
@@ -289,6 +293,7 @@ export function App() {
 
       {drawers}
     </div>
+    </RefsProvider>
   );
 }
 

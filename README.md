@@ -32,7 +32,8 @@ middle is the conversation: clicking a project opens its orchestrator chat. The 
 conversation". On the right, from 1280 px, a rail lists what waits for you in all projects (a stopped queue with
 Continue right there), what runs in the project with one honest status each ("1/3", "review", "after SF"), and what
 finished today; **All queues of <project>** at its foot shows the project's queues in the middle. In a narrower window
-the rail is folded into **Waiting N** at the right of the chat's header. A queue or step opens on the right, over the
+the rail is folded into **Waiting N** at the right of the chat's header. In the chat, the project's queue and step
+ids ("SF", "UX2", "W / W4c") are links with the item's status dot: a click opens the queue or step (on a phone too). A queue or step opens on the right, over the
 rail, and the chat stays where it is and usable: switching to Ideas or the queues keeps it open, and "Chat about this" opens the
 conversation in the middle with the step still beside it. A queue waiting for approval opens in full beside the
 sidebar; "Ask the orchestrator…" there turns it into the panel on the right and puts the queue's reference in the

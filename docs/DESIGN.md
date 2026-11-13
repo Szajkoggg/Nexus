@@ -629,6 +629,28 @@ into "Waiting N" in the chat's header (N: what waits in all projects): it opens 
 rail's place (the `waiting` layer, so Back closes it), and the column makes room for it, as it does for a queue or
 step there, which opens over the drawer. Below 1024 px the phone has its Waiting tab instead.
 
+### Refs in the chat
+
+The ids of the project's queues and steps in a chat message ("SF", "UX2", "W4c", "W / W4c") are links that open
+the item, on every screen size: over the rail on a desktop, as a sheet on the phone (`nav.item`, so Back closes it and
+the chat is there again). They are drawn as a chip with the item's status dot (a queue's honest status, a step's
+own: running, waiting, review, stopped, failed), as in the mockups, in the orchestrator's and the partner's messages
+(their Markdown, through a rehype step), the user's messages and Nexus's notices; not in tool lines.
+
+Which words are refs is `splitRefs` (`apps/web/src/refs.ts`, pure, unit tested), against an index of the project's
+queues and steps (`refIndex`); nothing else counts, so a word that looks like an id is text unless the project has it:
+
+- An id stands alone: no letter (accented ones too), digit or underscore around it; a hyphenated suffix ("SF-et",
+  "W4c-nél") is fine. After `/`, `\`, `.` or `-`, or before a file extension or a path's next part, it is a path or a
+  file name ("drafts/SC.yaml") and stays text. Code spans, code blocks and links keep their text.
+- "Q/S" or "Q / S" is a ref to the step when S is Q's step; otherwise Q alone is.
+- A bare step id is a ref when one queue has that step; when several have it, only "Q/S" links it.
+- One-letter ids that are also words at a sentence's start (A, I, O) are refs only as "Q/S": a queue called A would
+  otherwise turn every "A" into a link.
+- Case matters: "ux2" is not "UX2".
+
+Refs link only within the project whose chat it is; another project's ids ("Honeycomb · W/W4c") stay text.
+
 ### Drafts stay in the browser
 
 Unsent text in the dashboard's boxes is kept in `localStorage` (`nexus.drafts`: one map from a target key to the

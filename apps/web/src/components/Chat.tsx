@@ -2,7 +2,8 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import type { ChatEntry, RuntimeFile, SessionFile } from "@nexus/protocol";
 import { act, enc, useFetch } from "../api.ts";
-import { Button, Composer, Markdown, Menu, TimeAgo, type MenuEntry } from "./ui.tsx";
+import { Button, Composer, Menu, TimeAgo, type MenuEntry } from "./ui.tsx";
+import { ChatMarkdown, RefText } from "./Refs.tsx";
 import { draftKey } from "../drafts.ts";
 import { layerValue } from "../layers.ts";
 import { nav, useNav } from "../nav.ts";
@@ -83,7 +84,7 @@ function Entry({ c, flat, who }: { c: ChatEntry; flat?: boolean; who: string }) 
   if (c.from === "user") {
     return (
       <div className="flex justify-end">
-        <div className={`whitespace-pre-wrap rounded-2xl rounded-br-sm bg-user-bubble px-4 py-2 text-sm text-fg ${flat ? "max-w-[min(85%,37.5rem)]" : "max-w-[85%]"}`}>{c.text}</div>
+        <div className={`whitespace-pre-wrap rounded-2xl rounded-br-sm bg-user-bubble px-4 py-2 text-sm text-fg ${flat ? "max-w-[min(85%,37.5rem)]" : "max-w-[85%]"}`}><RefText text={c.text} /></div>
       </div>
     );
   }
@@ -91,13 +92,13 @@ function Entry({ c, flat, who }: { c: ChatEntry; flat?: boolean; who: string }) 
     if (flat) {
       return (
         <div className={`border-l-2 px-2.5 py-0.5 text-xs ${c.kind === "error" ? "border-danger/60 text-danger" : "border-line-strong text-fg-2"}`}>
-          <span className="whitespace-pre-wrap">Nexus · {c.text}</span><span className="text-fg-3"> · <TimeAgo at={c.at} /></span>
+          <span className="whitespace-pre-wrap">Nexus · <RefText text={c.text} /></span><span className="text-fg-3"> · <TimeAgo at={c.at} /></span>
         </div>
       );
     }
     return (
       <div className={`rounded-lg border px-3 py-2 text-xs ${c.kind === "error" ? "border-danger/30 bg-danger/5 text-danger" : "border-warn/30 bg-warn/5 text-warn/90"}`}>
-        <span className="mr-2 font-semibold">Nexus</span><span className="whitespace-pre-wrap">{c.text}</span>
+        <span className="mr-2 font-semibold">Nexus</span><span className="whitespace-pre-wrap"><RefText text={c.text} /></span>
         <span className="ml-2 text-fg-3"><TimeAgo at={c.at} /></span>
       </div>
     );
@@ -106,13 +107,13 @@ function Entry({ c, flat, who }: { c: ChatEntry; flat?: boolean; who: string }) 
     return (
       <div>
         <div className="mb-1 text-xs text-fg-3">{who} · <TimeAgo at={c.at} /></div>
-        <Markdown className="leading-relaxed">{c.text}</Markdown>
+        <ChatMarkdown className="leading-relaxed">{c.text}</ChatMarkdown>
       </div>
     );
   }
   return (
     <div className="max-w-[92%] rounded-2xl rounded-bl-sm bg-surface-3 px-4 py-2">
-      <Markdown>{c.text}</Markdown>
+      <ChatMarkdown>{c.text}</ChatMarkdown>
     </div>
   );
 }
