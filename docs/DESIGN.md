@@ -685,6 +685,29 @@ place count as one; next skips them and wraps round to the first; a place no lon
 position and its next is the first that waits. The phone's sheets show the place ("2 of 6 waiting") now; the next
 item's button and the desktop's waiting rail build on it.
 
+### A queue's steps as a list, with one honest status
+
+A queue on the project page (UX proposals, 17B) is its header, a progress line with a segment per step coloured by its
+status, and its steps one line each: a dot, the id, the title and the status. The step that matters (the one at work,
+the stop, else the first not finished, once the queue has started) is tinted by its status and gets two lines more:
+why it is where it is (the stop's reason, the question, its summary, its progress, why its run is paused) and its
+action, which opens where the action is: **Continue…** (or **Approve revision N…**) opens the queue, whose stop box has
+it; **Review…** and the questions open the step. On the desktop the steps fill two columns, the left first, all of
+them. On the phone (`foldSteps` in `apps/web/src/steplist.ts`, pure, unit tested) one column folds what does not
+matter now: the leading run of done and skipped steps becomes one line ("W1 – W4b · 3 done, 2 skipped ▸"), and so do
+the steps after the third that follow the step that matters ("+ W6, W7 ▸"); a fold of a single step is shown instead,
+and a tap unfolds. The finished queues keep their own folded group at the bottom of the page (FQ).
+
+One status per queue (`queueStatus` in `apps/web/src/queueStatus.ts`, pure, unit tested; survey Q3) replaces the
+status, run and question chips that contradicted each other. It reads, first match wins: cancelled; stopped (at the
+step that holds the stop); failed at a step (unless a run took it up again); waiting for the user's review (one step,
+or how many); waiting for an answer (a question the worker waits on); the orchestrator reviews; then the run as it
+really is: running, pausing after a step, waiting to retry, waiting for the usage window; done; a planned start (or
+that it did not start); and a queue whose steps say they run while no run goes reads **paused**, with its run's reason.
+Proposed reads "needs your approval". Open questions and the steps in review are counted beside it ("5 of 11 · 2 in
+review"). The step lines follow the same rule: a step whose events say it runs while its run does not reads paused,
+without a progress bar. The page's groups are unchanged here; the desktop layouts of the next queue use the same helper.
+
 ## Findings from building phase 3
 
 - **Context fill and usage limits are in the stream.** Every `assistant` message carries its usage (input, cache

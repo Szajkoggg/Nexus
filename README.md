@@ -33,6 +33,12 @@ queue opens as a full-screen sheet with ‹ and ✕ at the top and says where it
 options are buttons right in its waiting card: a tap opens the question with that option chosen, and **Answer**
 confirms it (words of your own can go with it). The chat's box is one line with a round Send.
 
+**A queue** on the project page shows one status ("running · SF3", "paused · B2", "stopped at W4c", "waiting for
+your review · UX2"…), a progress line with a segment per step, and its steps one line each, in two columns on a
+computer. "Running" means a run is really at work; a queue whose run is paused says so. The step that matters is
+highlighted with why and its action (**Continue…**, **Review…**, its questions). On a phone the list is one column, the
+finished steps before it and the steps after the next three are folded into one line each; a tap unfolds them.
+
 **On a wide screen** (1280 px and more) a queue or step opens on the left and the orchestrator or Ideas on the
 right, both at once, with the queue list between them: click another step and the chat stays open.
 

@@ -110,27 +110,6 @@ function PlannedStart({ queue, busy, onCancel }: { queue: QueueView; busy: boole
 /** A run that halted although its queue is done (or cancelled): it has ended; nothing waits on it. */
 const endedHalt = (queue: QueueView) => queue.run?.state === "halted" && (queue.status === "done" || queue.status === "cancelled");
 
-export function RunChip({ queue }: { queue: QueueView }) {
-  const r = queue.run;
-  const going = r && ["running", "pausing", "usage_wait", "retry_wait"].includes(r.state);
-  if (queue.start && !going) {
-    const tone = queue.start.failed || queue.start.blocked ? ["bg-stop", "text-stop"] : ["bg-info", "text-info"];
-    const when = queue.start.after ? `after ${queue.start.after}` : `at ${formatClock(queue.start.at!, new Date())}`;
-    return (
-      <span className={`inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-medium ${tone[1]}`}>
-        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tone[0]}`} />{queue.start.failed ? "did not start" : "starts"} {when}
-      </span>
-    );
-  }
-  if (!r || r.state === "finished" || endedHalt(queue)) return null;
-  return (
-    <RunState state={r.state}>
-      Nexus: {RUN_LABEL[r.state]}{r.step && (r.state === "running" || r.state === "retry_wait") ? ` · ${r.step}` : ""}
-    </RunState>
-  );
-}
-
-
 /** Start, pause, stop and resume a queue's run. */
 export function RunControls({ project, queue, onChanged }: { project: ProjectState; queue: QueueView; onChanged: () => void }) {
   const id = project.project.id;
