@@ -146,6 +146,7 @@ export class Engine {
     const q = this.queue(state, queueId);
     if (!q.approved) throw new ActionError("approve the queue's current revision first", 409);
     if (q.status === "stopped") throw new ActionError(stoppedMessage(q), 409);
+    if (q.status === "cancelled") throw new ActionError(`queue ${q.id} is cancelled`, 409);
     // A run of an older revision would reopen a step the new revision may have replaced, in the old session. A run
     // without the field is older when a revision was replaced after it started.
     const older = run.revision !== undefined ? run.revision < q.revision : q.history.some((h) => h.replaced_at > run.started_at);

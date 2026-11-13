@@ -42,6 +42,8 @@ export interface QueueView extends Omit<QueueFile, "steps"> {
   revision_hash: string;
   steps: StepView[];
   report?: { path: string; summary: string; at: string };
+  /** The orchestrator's proposal to lift the queue's stop, until a lift, a later stop or an approval. */
+  lift_proposal?: { at: string; reason: string };
   questions: QuestionView[];
   /** The engine's run of this queue, when Nexus drives it. */
   run?: RunFile;
@@ -129,6 +131,8 @@ export function loadProjectState(store: ProjectStore): ProjectState {
     apply(e, queues, sessions, questions, warnings);
   }
   for (; next < changes.length; next++) applyChange(changes[next]!.q, changes[next]!.c);
+  // An approval after a proposal to lift answers it (approving a stopped queue lifts the stop anyway).
+  for (const q of queues.values()) if (q.lift_proposal && q.approvals.some((a) => a.at > q.lift_proposal!.at)) q.lift_proposal = undefined;
 
   for (const q of queues.values()) {
     q.questions = [...questions.values()].filter((x) => x.queue === q.id);
@@ -289,7 +293,9 @@ function apply(
     case "queue.stop": {
       const q = queueOf(e.queue); const st = stepOf(q, e.step);
       if (!q) return;
-      q.status = "stopped"; q.status_reason = `${e.condition}: ${e.reason}`;
+      q.lift_proposal = undefined;
+      // A done or cancelled queue stays so (a cancel by the orchestrator, for one, is not undone by a late stop).
+      if (!TERMINAL_QUEUE.has(q.status)) { q.status = "stopped"; q.status_reason = `${e.condition}: ${e.reason}`; }
       for (const x of q.steps) endSegment(x, e.at);
       if (st && !FINISHED_STEP.has(st.status)) { st.status = "stopped"; st.reason = e.reason; }
       return;
@@ -359,9 +365,32 @@ function apply(
  * stops before it no longer count (their record stays in the steps' timelines and in the entry's reason).
  */
 function applyChange(q: QueueView, c: StatusChange): void {
-  if (c.kind !== "lift") return;
-  if (q.status === "stopped") { q.status = "approved"; q.status_reason = undefined; }
-  for (const st of q.steps) if (st.status === "stopped") { st.status = "pending"; st.reason = undefined; }
+  switch (c.kind) {
+    case "lift":
+      q.lift_proposal = undefined;
+      if (q.status === "stopped") { q.status = "approved"; q.status_reason = undefined; }
+      for (const st of q.steps) if (st.status === "stopped") { st.status = "pending"; st.reason = undefined; }
+      return;
+    case "proposal":
+      q.lift_proposal = { at: c.at, reason: c.reason ?? "" };
+      return;
+    case "status": {
+      if (c.step) {
+        const st = q.steps.find((x) => x.id === c.step);
+        if (!st) return;
+        st.status = c.to as StepStatus; st.reason = c.reason;
+        endSegment(st, c.at);
+      } else if (c.to === "cancelled") {
+        q.status = "cancelled"; q.status_reason = c.reason;
+        return;
+      }
+      // Skipping the last open step makes the queue done.
+      if (!TERMINAL_QUEUE.has(q.status) && q.steps.every((x) => FINISHED_STEP.has(x.status))) { q.status = "done"; q.status_reason = undefined; }
+      return;
+    }
+    case "run":
+      return; // the run record itself says finished; the queue's steps are all done or skipped already
+  }
 }
 
 function endSegment(st: StepView, at: string): void {

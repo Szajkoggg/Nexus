@@ -118,8 +118,8 @@ history:                               # previous revisions, kept for the record
   - { revision: 2, hash: sha256:..., replaced_at: 2026-11-12T09:10:00Z }
 changes:                               # status changes made through Nexus; written only by the server
   - at: 2026-11-13T09:40:00Z
-    kind: lift                         # the user lifted the queue's stop
-    by: user_approval                  # user_approval (approving a new revision) | user_continue
+    kind: lift                         # lift | status | run | proposal (see below)
+    by: user_approval                  # user_approval (approving a new revision) | user_continue | orchestrator
     from: stopped
     to: approved
     reason: "the art is missing: W4 needs the cliff textures"   # the stop's own reason, as it was derived
@@ -148,6 +148,28 @@ an imported one), writes the queue `approved`, and archives the queue's `run.yam
 begins at the first pending step, which is the stopped step itself unless the new revision says otherwise. An
 archived run record is read by nothing; it is kept for the record. Approving a stopped queue whose run is still
 going is refused.
+
+**Housekeeping by the orchestrator** (`nexus queue set`, event `status.set`). The server checks each request against
+the derived state and records it as an entry `by: orchestrator` with the request's `reason` and the queue's
+`revision`:
+
+| Request | Allowed when | Entry, and what derivation does |
+|---|---|---|
+| `--step S skipped` | S is `pending`, `stopped` or `failed`, and the queue is not done or cancelled | `kind: status`, `step`, `from` (S's status), `to: skipped`: S becomes `skipped` with the reason; when every step is then done, skipped or failed the queue is `done`. A stop is not lifted by it |
+| `finished` | the queue's run is `halted` and every step is done or skipped | `kind: run`, `from: halted`, `to: finished`; the server also writes `run.yaml` `finished` |
+| `cancelled` | the queue is not done or cancelled and its run is not `running`, `pausing`, `usage_wait` or `retry_wait` | `kind: status`, `from` (the queue's status), `to: cancelled`: the queue is `cancelled` with the reason; a later stop leaves it so. The user gets a push notification; nothing goes into the waiting list |
+| `propose-lift` | the queue is `stopped` | `kind: proposal`, `from: stopped`, `to: lift proposed`: the queue's view carries `lift_proposal` (`at`, `reason`) until a lift, a later `queue.stop` or a later approval |
+
+Refused, with the reason: `done` (work done elsewhere is skipped, with the reason saying where), approving, lifting
+a stop (`lift`, `approved`, `running` or `pending` for a queue), reopening a finished step (`pending`, `running`),
+skipping a step at work, and any other status. The engine reads a step's status again before it opens a step, so
+skipping a pending step of a running queue takes effect: the step is never opened. A cancelled queue is neither
+started nor resumed.
+
+**Drafts do not change statuses.** In a draft of an existing queue a step's `status` may be left out or be the one in
+the file; any other value refuses the whole draft, listing the steps. A new step has no status or `skipped`. A draft
+that leaves out a step that has started or stopped (one with a stretch at work, or a status other than `pending` or
+`skipped`) is refused: keep the step and skip it with `nexus queue set`.
 
 ## Notes: `notes/<step-id>/<note-id>.md`
 
@@ -190,6 +212,7 @@ Every line:
 | `change.proposed` | `queue`, `patch`, `reason` | A proposed change to a queue definition (needs a new approval) |
 | `queue.drafted` | `queue`, `definition` | Orchestrator only: a new or changed draft queue |
 | `session.request` | `action` (start, resume, pause, stop), `queue`, `use_session?`, `model?`, `reason` | Orchestrator only: asks the engine to act on a queue's run (`use_session` continues an existing session) |
+| `status.set` | `queue`, `step?`, `to` (`skipped`, `finished`, `cancelled`, `propose-lift`), `reason` | Orchestrator only: housekeeping; the server checks it and records an entry in the queue's `changes` (see `queue.yaml`). A worker's is ignored by derivation, and the server applies only the orchestrator's own requests |
 | `log` | `level`, `text` | Anything else worth keeping |
 
 The server validates every event against the writer's role and ignores (and reports) what that role may not do.
@@ -212,7 +235,7 @@ Written only by the server's queue engine; agents never touch them.
 | `sessions/<id>/delivered.jsonl` | What the server handed to the session (notes put into a step turn, inbox entries injected or sent as a turn, or `carried` into the first turn of the session `to` that took over); counts as read |
 | `sessions/<id>/refusals.jsonl` | One line per action the agent wanted but was refused: `at`, `session`, `runtime`, `by` (`permissions`: Claude Code's permission mode or rules; `nexus`: Nexus declined a Codex approval request; `auto_review`: Codex's auto reviewer), `tool` (Claude Code's tool name; for Codex `command`, `file_change`, `network`, `mcp`, `permissions`, …), `input` in short (the command, path or host, at most 300 characters), `reason` when the runtime gave one, `ref` (the runtime's id for the call: one record per refusal), `queue`, `step` |
 | `sessions/<id>/activity.jsonl` | A condensed record of the agent's stream: turns, tool calls, texts (clipped to 600 characters), tool errors, exits, and retries (`retry`: the runtime's own and the engine's), tagged with queue and step |
-| `sessions/<orchestrator>/applied.jsonl` | The server's result for each orchestrator request (`queue.drafted`, `session.request`), and the notices it has sent the orchestrator; the CLI waits for the result and prints it |
+| `sessions/<orchestrator>/applied.jsonl` | The server's result for each orchestrator request (`queue.drafted`, `session.request`, `status.set`), and the notices it has sent the orchestrator; the CLI waits for the result and prints it |
 | `sessions/<orchestrator>/chat.jsonl` | The chat shown in the dashboard: the user's messages, the orchestrator's texts (whole, however long) and tool calls, Nexus notices |
 | `<NEXUS_HOME>/usage.json` | The subscription's windows (5-hour, 7-day: utilization and reset time) from the latest `rate_limit_event` |
 | `<NEXUS_HOME>/deploy.json` | `{ push_on_deploy: boolean }` (default `true` when the file is missing). One writer: the server, on `POST /api/server/settings` from the dashboard |
@@ -446,9 +469,12 @@ a prompt. (`Write` and `Edit` are not disallowed: a disallow rule would beat the
   revision, which needs the user's approval again.
 - `nexus run <queue> start|pause|resume|stop --reason … [--use-session <id>] [--model <m>]` sends `session.request`.
   Starting an unapproved revision is refused.
+- `nexus queue set <queue> [--step <step>] skipped|finished|cancelled|propose-lift --reason …` sends `status.set`
+  and prints the server's result: housekeeping (see "Housekeeping by the orchestrator" under `queue.yaml`). A worker
+  session is refused by the CLI.
 - With `notify` on, the server tells the orchestrator (starting it if needed) when a worker asks a question, when the
   user approves a revision of a queue ("Queue X revision N approved.", with the instruction to start it, or to resume
-  its paused or halted run, if the plan puts it next), when the user withdraws an approval, when a run reaches a
+  its paused or halted run, if the plan puts it next; a run of an older revision cannot be resumed, so then: start it), when the user withdraws an approval, when a run reaches a
   requested pause ("Run of X paused after step S.": a pause asked for by the user or the orchestrator, not a stop now,
   nor the pause of a server restart or of an update), and when a run halts or finishes. The chat shows only the fact;
   the instruction goes to the orchestrator alone. Each notice is told once, recorded in `applied.jsonl` (`notify:…`

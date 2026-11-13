@@ -4,7 +4,7 @@
 // drafts under .nexus/drafts/: permission mode dontAsk with a read-only allow list plus the drafts rules.
 import { randomUUID } from "node:crypto";
 import {
-  ActionError, ClaudeEffort, ProjectStore, applyDraft, loadProjectState, newId, now, type ChatEntry, type Event, type ProjectState, type SessionFile,
+  ActionError, ClaudeEffort, ProjectStore, applyDraft, loadProjectState, orchestratorStatusChange, newId, now, type ChatEntry, type Event, type ProjectState, type SessionFile,
 } from "@nexus/protocol";
 import { ClaudeSession } from "./claude.ts";
 import type { Engine } from "./engine.ts";
@@ -24,6 +24,9 @@ const DRAFTS = ".nexus/drafts";
 const DRAFT_TOOLS = [`Write(${DRAFTS}/**)`, `Edit(${DRAFTS}/**)`];
 const NEVER = ["NotebookEdit", "MultiEdit"];
 
+/** A push notification for the user's devices (src/remote.ts `push`). */
+export interface UserNotice { title: string; body: string; url: string; tag: string }
+
 export class Orchestrator {
   private proc?: ClaudeSession;
   private readonly store: ProjectStore;
@@ -36,13 +39,14 @@ export class Orchestrator {
    * News about Nexus itself: the outcome of an update, for the session that asked for it (src/lifecycle.ts), and the
    * changes for agents of each deploy, for every session older than it (src/deploy.ts).
    */
-  private readonly news: { update: () => UpdateNotice | undefined; changes: () => DeployChanges[] };
+  private stopped = false;
+  private readonly news: { update: () => UpdateNotice | undefined; changes: () => DeployChanges[]; push?: (n: UserNotice) => void };
 
-  constructor(store: ProjectStore, engine: Engine, changed: () => void, news: { update?: () => UpdateNotice | undefined; changes?: () => DeployChanges[] } = {}) {
+  constructor(store: ProjectStore, engine: Engine, changed: () => void, news: { update?: () => UpdateNotice | undefined; changes?: () => DeployChanges[]; push?: (n: UserNotice) => void } = {}) {
     this.store = store;
     this.engine = engine;
     this.changed = changed;
-    this.news = { update: news.update ?? (() => undefined), changes: news.changes ?? (() => []) };
+    this.news = { update: news.update ?? (() => undefined), changes: news.changes ?? (() => []), push: news.push };
   }
 
   /** The current orchestrator session, if one was ever started. */
@@ -114,6 +118,7 @@ export class Orchestrator {
 
   /** After every change: carry out the orchestrator's requests and tell it what it should know. */
   onChange(state: ProjectState): void {
+    if (this.stopped) return;
     const s = this.session();
     if (!s) return;
     this.applyRequests(s);
@@ -122,7 +127,8 @@ export class Orchestrator {
     this.notify(state, s, state.project.orchestrator?.notify === false);
   }
 
-  shutdown(): void { this.proc?.kill(); }
+  /** For good: an orchestrator shut down starts no process again (a late change, an agent's exit, may still come in). */
+  shutdown(): void { this.stopped = true; this.proc?.kill(); }
 
   /** Its process is still running (after shutdown: not yet exited). */
   alive(): boolean { return !!this.proc && this.proc.state !== "exited"; }
@@ -203,7 +209,7 @@ export class Orchestrator {
     this.applying = true;
     try {
       const done = new Set(this.store.readApplied(s.id).entries.map((a) => a.event));
-      const pending = this.store.readEvents(s.id).entries.filter((e) => (e.type === "queue.drafted" || e.type === "session.request") && !done.has(e.id));
+      const pending = this.store.readEvents(s.id).entries.filter((e) => (e.type === "queue.drafted" || e.type === "session.request" || e.type === "status.set") && !done.has(e.id));
       for (const e of pending) {
         let ok = true; let message: string;
         try { message = this.apply(e); }
@@ -215,6 +221,15 @@ export class Orchestrator {
 
   private apply(e: Event): string {
     if (e.type === "queue.drafted") return applyDraft(this.store, e.definition);
+    if (e.type === "status.set") {
+      const message = orchestratorStatusChange(this.store, { queue: e.queue, step: e.step, to: e.to, reason: e.reason });
+      // A cancel reaches the user as a push notification, like other notifications; nothing waits in their list.
+      if (e.to.trim().toLowerCase() === "cancelled") {
+        const p = this.store.readProject();
+        this.news.push?.({ title: `${p.name}: queue cancelled`, body: `${e.queue} cancelled by the orchestrator: ${e.reason}`.slice(0, 180), url: `/#/${encodeURIComponent(p.id)}/${encodeURIComponent(e.queue)}`, tag: `${p.id}:cancelled:${e.queue}` });
+      }
+      return message;
+    }
     if (e.type !== "session.request") return "ignored";
     switch (e.action) {
       case "start": {
@@ -360,6 +375,13 @@ Helpers (subagents, through the Agent tool; they read only (you also write queue
 - question-triage: when a worker asks, have it find whether the answer is settled (with its source) or the user's.
 - run-digest: when a run halts or finishes, have it summarize the run; tell the user from that.
 - The project's own agents (its .claude/agents) are there too. Use the ones that only read and report, such as one that finds what was decided and where; leave those that build, run checks or edit to the workers.
+
+Statuses change through Nexus, never by editing files. Housekeeping is yours, with nexus queue set (the reason is required and recorded with your name and the time; nexus status shows it):
+- nexus queue set <queue> --step <step> skipped --reason "..."   a pending, stopped or failed step is not to be run (replaced by a new revision's steps, done elsewhere: say where, or no longer needed). Skipping a pending step of a running queue works: the engine never opens it.
+- nexus queue set <queue> finished --reason "..."             close a halted run of a queue whose steps are all done or skipped
+- nexus queue set <queue> cancelled --reason "..."            a queue that is not running and is no longer needed; the user gets a notification
+- nexus queue set <queue> propose-lift --reason "..."         propose that the user lift the stop of a stopped queue; they decide in the dashboard
+Consent is the user's, and refused to you: marking a step done (work done elsewhere is skipped, with the reason saying where), approving, lifting a stop, reopening a finished step. A stopped queue goes on only when the user lifts the stop: by approving a new revision (then a start begins at the first pending step) or with Continue. When you draft a new revision of a stopped queue to replace the stopped step, keep that step in the draft (a draft may not drop a step that has started or stopped, nor change a step's status) and skip it with nexus queue set once the user has approved, so the record shows what became of it.
 
 Messages marked [Nexus] tell you that a worker asked a question, that the user approved a queue or withdrew an approval, that a run reached a requested pause, that a run halted or finished, or how a Nexus update you ran ended. What came up while Nexus updated reaches you right after its restart. After a deploy you may also be told what changed for agents (the commits' Agents: lines): your briefing may still describe the older way, so follow those where they differ. They are for you, not the user. Act on them: answer or escalate questions; an approval or a reached pause is your cue to start (or resume) what the plan put next, and say in the chat what you started; tell the user about withdrawals, halts and finished queues briefly, with what you propose next.
 Deploying Nexus itself: run nexus server update only when the user asks for it in the chat, never on your own, not even when a queue that changes Nexus has finished. Before you run it, tell the user (from nexus server status) whether a step is running in any project: the update waits for those steps to finish (no new step starts meanwhile), and with --now it interrupts them instead (they continue afterwards). Also tell them that you restart with Nexus: your process ends, and this conversation goes on after the restart. You then get a [Nexus] message with the outcome (the new version, or why it failed and what still runs); pass it on to the user.

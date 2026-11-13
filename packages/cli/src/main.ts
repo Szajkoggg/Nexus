@@ -29,6 +29,10 @@ Agent commands (session from NEXUS_SESSION or --session):
   nexus log <text> [--level info|warn|error]
   nexus answer <qid> <text> [--escalate] [--continue|--wait]     (orchestrator only)
   nexus queue draft <file.yaml|->                                 (orchestrator only) create or change a queue
+  nexus queue set <queue> [--step <step>] skipped|finished|cancelled|propose-lift --reason <text>   (orchestrator only)
+                                      housekeeping: skip a pending, stopped or failed step; close a halted run of a
+                                      queue whose steps are all done or skipped; cancel a queue that is not running;
+                                      propose that the user lift a stop. Done, approving and lifting are the user's
   nexus run <queue> start|pause|resume|stop --reason <text> [--use-session <id>] [--runtime claude|codex] [--model <m>] [--effort <e>]   (orchestrator only)
   (--queue <id> picks the queue when the session has none or the step id is ambiguous)
 
@@ -357,7 +361,16 @@ const commands: Record<string, () => void | Promise<void>> = {
   },
 
   queue() {
-    if (args[1] !== "draft") throw new UsageError("nexus queue draft <file.yaml|->");
+    if (args[1] === "set") {
+      const st = store(); const s = orchestrator(st);
+      const queue = need(args[2], "<queue>");
+      const to = need(args[3], "skipped|finished|cancelled|propose-lift");
+      // The server checks it against the queue's state and gives the reason when it refuses.
+      const e = emit(st, s, { type: "status.set", queue, step: o.step, to, reason: need(o.reason, "--reason") });
+      report(waitApplied(st, s.id, e.id));
+      return;
+    }
+    if (args[1] !== "draft") throw new UsageError("nexus queue draft <file.yaml|-> | nexus queue set <queue> [--step <step>] <status> --reason <text>");
     const st = store(); const s = orchestrator(st);
     const src = need(args[2], "<file.yaml|->");
     const text = src === "-" ? readFileSync(0, "utf8") : readFileSync(normPath(src), "utf8");

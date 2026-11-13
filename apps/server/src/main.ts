@@ -80,7 +80,7 @@ function refreshRegistry(): void {
     const engine = new Engine(store, () => changed(p.id));
     // Through its usual notices it is told the outcome of an update it asked for (lifecycle.notice), and what changed
     // for agents in each deploy since its session began (deploy-changes.jsonl).
-    const orchestrator = new Orchestrator(store, engine, () => changed(p.id), { update: () => lifecycle.notice(), changes: readDeployChanges });
+    const orchestrator = new Orchestrator(store, engine, () => changed(p.id), { update: () => lifecycle.notice(), changes: readDeployChanges, push: (n) => void push(n) });
     projects.set(p.id, { id: p.id, root: p.root, store, engine, orchestrator, conversations: new Conversations(store, orchestrator, () => changed(p.id)) });
     watchProject(p.id, store.dir);
   }

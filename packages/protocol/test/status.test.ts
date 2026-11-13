@@ -1,0 +1,162 @@
+// The orchestrator's housekeeping (orchestratorStatusChange, `nexus queue set`): what it may change and what stays the
+// user's, how the changes survive a rebuild, the draft rules, and that a worker can use neither the command nor the
+// event.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  ActionError, ProjectStore, applyDraft, approveQueue, loadProjectState, newId, orchestratorStatusChange, type Event, type StepDef,
+} from "../src/index.ts";
+
+const CLI = join(dirname(fileURLToPath(import.meta.url)), "../../cli/bin/nexus.js");
+/** A day ago: the events come before the changes, which are stamped with the time they are made. */
+const T0 = Date.now() - 86_400_000;
+const at = (min: number) => new Date(T0 + min * 60_000).toISOString();
+const step = (id: string): StepDef => ({ id, title: `Step ${id}`, goal: "", acceptance: [] });
+
+function setup(ids = ["Q1", "Q2", "Q3"]) {
+  const root = mkdtempSync(join(tmpdir(), "nexus-status-"));
+  const store = ProjectStore.init(root, { id: "p", name: "P", root });
+  for (const [id, role] of [["w", "worker"], ["o", "orchestrator"]] as const) {
+    store.writeSession({ protocol: 1, id, project: "p", role, runtime: "claude", cwd: root, launched_by: "nexus", created_at: at(0) });
+  }
+  store.writeQueue({ protocol: 1, id: "Q", title: "Queue", revision: 1, status: "proposed", stop_conditions: [], checks: [], steps: ids.map(step) });
+  approveQueue(store, "Q");
+  const emit = (min: number, body: Record<string, unknown>, session = "w") =>
+    store.appendEvent({ v: 1, id: newId(), at: at(min), session, ...body } as Event);
+  const queue = () => loadProjectState(store).queues.find((q) => q.id === "Q")!;
+  const set = (to: string, stepId?: string, reason = "housekeeping") => orchestratorStatusChange(store, { queue: "Q", step: stepId, to, reason });
+  return { root, store, emit, queue, set };
+}
+
+test("allowed: skip a pending, stopped or failed step; each is an entry with who, when, from, to and why", () => {
+  const { emit, queue, set } = setup(["Q1", "Q2", "Q3", "Q4"]);
+  emit(1, { type: "step.started", queue: "Q", step: "Q1" });
+  emit(2, { type: "step.failed", queue: "Q", step: "Q1", reason: "the table does not exist" });
+  emit(3, { type: "step.started", queue: "Q", step: "Q2" });
+  emit(4, { type: "queue.stop", queue: "Q", step: "Q2", condition: "art", reason: "missing" });
+  assert.match(set("skipped", "Q1", "done elsewhere: in queue M, step M3"), /Q\/Q1 skipped \(was failed\)/);
+  assert.match(set("skipped", "Q2", "replaced by Q2b"), /was stopped/);
+  assert.match(set("skipped", "Q3", "no longer needed"), /was pending/);
+  const q = queue();
+  assert.deepEqual(q.steps.map((s) => s.status), ["skipped", "skipped", "skipped", "pending"]);
+  assert.equal(q.steps[1]!.reason, "replaced by Q2b");
+  assert.deepEqual(q.changes.map((c) => [c.kind, c.by, c.step, c.from, c.to]), [
+    ["status", "orchestrator", "Q1", "failed", "skipped"], ["status", "orchestrator", "Q2", "stopped", "skipped"], ["status", "orchestrator", "Q3", "pending", "skipped"],
+  ]);
+  assert.equal(q.status, "stopped", "skipping the stopped step does not lift the stop: that is the user's");
+});
+
+test("refused, with the reason: done, approving, lifting, reopening, a step at work, and anything not listed", () => {
+  const { emit, set } = setup();
+  emit(1, { type: "step.started", queue: "Q", step: "Q1" });
+  emit(2, { type: "step.done", queue: "Q", step: "Q1", summary: "ok" });
+  emit(3, { type: "step.started", queue: "Q", step: "Q2" });
+  const refused = (to: string, s: string | undefined, why: RegExp) => assert.throws(() => set(to, s), (e: ActionError) => why.test(e.message), `${to} ${s ?? ""}`);
+  refused("done", "Q3", /never marks a step done: work done elsewhere is skipped/);
+  refused("approved", undefined, /approving is the user's/);
+  refused("lift", undefined, /only the user lifts a stop/);
+  refused("pending", "Q1", /reopening step Q\/Q1 \(done\) is the user's: a send-back/);
+  refused("skipped", "Q1", /is done already/);
+  refused("skipped", "Q2", /is running: a step at work is not skipped/);
+  refused("skipped", undefined, /skipping is for a step/);
+  refused("finished", undefined, /no halted run/);
+  refused("propose-lift", undefined, /is not stopped/);
+  refused("paused", "Q3", /not a status the orchestrator sets/);
+  assert.throws(() => set("skipped", "Q9"), /has no step Q9 \(has Q1, Q2, Q3\)/);
+  assert.throws(() => orchestratorStatusChange(new ProjectStore(setup().store.dir), { queue: "Q", step: "Q3", to: "skipped", reason: " " }), /reason/);
+});
+
+test("skipping the last open step makes the queue done, and a halted run on it can be closed as finished", () => {
+  const { store, emit, queue, set } = setup(["Q1", "Q2"]);
+  emit(1, { type: "step.started", queue: "Q", step: "Q1" });
+  emit(2, { type: "step.done", queue: "Q", step: "Q1", summary: "ok" });
+  emit(3, { type: "step.started", queue: "Q", step: "Q2" });
+  emit(4, { type: "step.failed", queue: "Q", step: "Q2", reason: "broken" });
+  store.writeRun("Q", { protocol: 1, session: "w", state: "halted", reason: "step Q2 failed: broken", step: "Q2", started_at: at(1), updated_at: at(4), ended_at: at(4) });
+  assert.throws(() => set("finished"), /not done or skipped: Q2 \(failed\)/);
+  set("skipped", "Q2", "done by hand in the editor");
+  assert.equal(queue().status, "done");
+  assert.match(set("finished", undefined, "the queue is done"), /closed as finished/);
+  assert.equal(store.readRun("Q")!.state, "finished");
+  assert.deepEqual(queue().changes.at(-1)!.kind, "run");
+  assert.ok(!loadProjectState(store).attention.some((a) => a.queue === "Q"), "nothing waits for the user");
+});
+
+test("a skipped failed step stays skipped after a later rebuild; a cancelled stopped queue stays cancelled", () => {
+  const { store, emit, queue, set } = setup();
+  emit(1, { type: "step.started", queue: "Q", step: "Q1" });
+  emit(2, { type: "step.failed", queue: "Q", step: "Q1", reason: "x" });
+  set("skipped", "Q1", "not needed");
+  emit(30, { type: "step.progress", queue: "Q", step: "Q2", text: "unrelated, later" });
+  assert.equal(queue().steps[0]!.status, "skipped", "derived again from the files, with a later event among them");
+
+  const b = setup();
+  b.emit(1, { type: "step.started", queue: "Q", step: "Q1" });
+  b.emit(2, { type: "queue.stop", queue: "Q", step: "Q1", condition: "c", reason: "r" });
+  b.store.writeRun("Q", { protocol: 1, session: "w", state: "running", step: "Q1", started_at: at(1), updated_at: at(2) });
+  assert.throws(() => b.set("cancelled"), /stop its run first/);
+  b.store.writeRun("Q", { protocol: 1, session: "w", state: "halted", step: "Q1", started_at: at(1), updated_at: at(2) });
+  b.set("cancelled", undefined, "superseded by queue R");
+  b.emit(40, { type: "queue.stop", queue: "Q", step: "Q1", condition: "c", reason: "a late stop" });
+  const q = b.queue();
+  assert.equal(q.status, "cancelled");
+  assert.equal(q.status_reason, "superseded by queue R");
+  assert.ok(!loadProjectState(b.store).attention.some((a) => a.queue === "Q"), "a cancelled queue does not wait for the user");
+  assert.throws(() => b.set("cancelled"), /cancelled already/);
+});
+
+test("a proposal to lift is recorded on a stopped queue, and cleared by a lift, a later stop or an approval", async () => {
+  const tick = () => new Promise((r) => setTimeout(r, 5));
+  const { store, emit, queue, set } = setup();
+  emit(1, { type: "step.started", queue: "Q", step: "Q2" });
+  emit(2, { type: "queue.stop", queue: "Q", step: "Q2", condition: "art", reason: "missing" });
+  set("propose-lift", undefined, "the art arrived in the shared folder");
+  assert.deepEqual(queue().lift_proposal?.reason, "the art arrived in the shared folder");
+  await tick();
+  store.appendEvent({ v: 1, id: newId(), at: new Date().toISOString(), session: "w", type: "queue.stop", queue: "Q", step: "Q2", condition: "art", reason: "missing again" });
+  await tick();
+  assert.equal(queue().lift_proposal, undefined, "a later stop clears it");
+
+  set("propose-lift", undefined, "now it is there");
+  assert.ok(queue().lift_proposal);
+  applyDraft(store, { id: "Q", title: "Queue", steps: [step("Q1"), step("Q2"), step("Q2b"), step("Q3")] });
+  approveQueue(store, "Q"); // lifts the stop
+  assert.equal(queue().lift_proposal, undefined, "a lift clears it");
+  assert.equal(queue().status, "approved");
+});
+
+test("drafts: an existing step's status only as in the file; a new step without status or skipped; no dropping a started or stopped step", () => {
+  const { store, emit } = setup();
+  emit(1, { type: "step.started", queue: "Q", step: "Q2" });
+  emit(2, { type: "queue.stop", queue: "Q", step: "Q2", condition: "c", reason: "r" });
+  const draft = (steps: StepDef[]) => applyDraft(store, { id: "Q", title: "Queue", steps });
+  assert.throws(() => draft([step("Q1"), { ...step("Q2"), status: "skipped" }, { ...step("Q3"), status: "done" }]),
+    /does not change the status of an existing step: Q2 \(pending in the file, skipped in the draft\), Q3 \(pending in the file, done in the draft\)/);
+  assert.throws(() => draft([step("Q1"), step("Q2"), step("Q3"), { ...step("Q4"), status: "done" }]), /new step has no status or skipped: Q4 \(done\)/);
+  assert.throws(() => draft([step("Q1"), step("Q3")]), /does not drop a step that has started or stopped: Q2 \(stopped\)/);
+  assert.match(draft([step("Q1"), { ...step("Q2"), status: undefined }, step("Q3"), { ...step("Q2b"), status: "skipped" }]), /revision 2/);
+  assert.match(draft([step("Q2"), step("Q3"), { ...step("Q2b"), status: "skipped" }]), /revision 3/, "a pending step that never started may go");
+  assert.equal(store.readQueue("Q").steps.length, 3);
+});
+
+test("a worker can use neither the command nor the event", () => {
+  const { store, root, emit, queue } = setup();
+  // The CLI refuses a worker.
+  const run = (session: string) => {
+    try { execFileSync(process.execPath, [CLI, "queue", "set", "Q", "--step", "Q3", "skipped", "--reason", "x"], { env: { ...process.env, NEXUS_SESSION: session, NEXUS_DIR: store.dir }, cwd: root, encoding: "utf8", stdio: "pipe" }); return ""; }
+    catch (e) { return String((e as { stderr?: string }).stderr); }
+  };
+  assert.match(run("w"), /only an orchestrator session may do this/);
+  // An event written into a worker's own log by hand is ignored when the state is derived (and the server applies
+  // only the orchestrator's own requests).
+  emit(5, { type: "status.set", queue: "Q", step: "Q3", to: "skipped", reason: "by hand" }, "w");
+  const s = loadProjectState(store);
+  assert.ok(s.warnings.some((w) => /status.set is for orchestrators; ignored/.test(w)));
+  assert.equal(queue().steps[2]!.status, "pending");
+  assert.equal(queue().changes.length, 0);
+});

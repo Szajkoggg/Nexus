@@ -103,6 +103,8 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
       windowsHide: true,
     });
     this.pid = this.proc.pid;
+    // A write to a process that is exiting (killed, crashed) fails with EPIPE: its exit is handled, the write is moot.
+    this.proc.stdin.on("error", () => {});
     this.proc.stdout.setEncoding("utf8");
     this.proc.stdout.on("data", (d: string) => this.read(d));
     this.proc.stderr.setEncoding("utf8");

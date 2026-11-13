@@ -329,6 +329,14 @@ refuses a run of an older revision, which would reopen a step the new revision m
 API is the user's and is taken only from the dashboard's page (the Origin rule), approving among them; agents act
 through the CLI and its events.
 
+Housekeeping is the orchestrator's, with `nexus queue set` (event `status.set`, applied by the server as an entry
+`by: orchestrator`): skip a step a revision replaced or that was done elsewhere (a stopped or failed one too), close
+a halted run of a queue whose steps are all done or skipped, cancel a queue that is not running (the user gets a
+push notification, nothing waits in their list), and propose that the user lift a stop. Consent stays the user's:
+marking work done (the orchestrator skips with the reason saying where), approving, lifting a stop, reopening a
+finished step. A draft cannot change a step's status or drop a step that has started or stopped, so a new revision
+of a stopped queue keeps the replaced step and the orchestrator skips it: the record shows what became of it.
+
 ### Runtimes and authentication
 
 - **Claude Code**: Nexus spawns the unmodified `claude` binary in print mode with stream-json input and output and

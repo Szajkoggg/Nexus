@@ -98,6 +98,8 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
       cwd: options.cwd, env: agentEnv(options.env), stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
     });
     this.pid = this.proc.pid;
+    // A write to a process that is exiting (killed, crashed) fails with EPIPE: its exit is handled, the write is moot.
+    this.proc.stdin.on("error", () => {});
     this.proc.stdout.setEncoding("utf8");
     this.proc.stdout.on("data", (d: string) => this.read(d));
     this.proc.stderr.setEncoding("utf8");

@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ProjectStore, applyDraft, approveQueue, loadProjectState, routeAnswers, withdrawApproval } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
-import { Orchestrator } from "../src/orchestrator.ts";
+import { Orchestrator, type UserNotice } from "../src/orchestrator.ts";
 import { longReply } from "./fake-behaviour.ts";
 
 process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
@@ -29,14 +29,14 @@ steps:
 `;
 
 /** `again`: the root of an earlier setup, as after a server restart (same files, a new engine and orchestrator). */
-function setup(again?: string) {
+function setup(again?: string, push?: (n: UserNotice) => void) {
   const root = again ?? mkdtempSync(join(tmpdir(), "nexus-orch-"));
   process.env.NEXUS_HOME = join(root, "home");
   if (!again) delete process.env.FAKE_LOG;
   const store = again ? ProjectStore.forRoot(root) : ProjectStore.init(root, { id: "p", name: "P", root });
   let orchestrator: Orchestrator;
   const engine: Engine = new Engine(store, () => tick());
-  orchestrator = new Orchestrator(store, engine, () => tick());
+  orchestrator = new Orchestrator(store, engine, () => tick(), { push });
   // Stands in for the server's file watcher.
   function tick() { routeAnswers(store); orchestrator.onChange(loadProjectState(store)); engine.onChange(loadProjectState(store)); }
   const timer = setInterval(tick, 150);
@@ -171,6 +171,10 @@ test("the orchestrator may write only queue drafts, and its briefing uploads the
     assert.match(brief, /nexus queue draft \.nexus\/drafts\//);
     assert.doesNotMatch(brief, /<<|heredoc/i);
     assert.match(brief, /no cd, no &&, no pipes/);
+    // Housekeeping is its own; consent is the user's; a replaced stopped step is kept and skipped.
+    assert.match(brief, /nexus queue set <queue> --step <step> skipped --reason/);
+    assert.match(brief, /Consent is the user's, and refused to you: marking a step done[^.]*, approving, lifting a stop, reopening a finished step/);
+    assert.match(brief, /keep that step in the draft[\s\S]*skip it with nexus queue set/);
     assert.doesNotMatch(brief, /may not edit files|read only, like you/);
   } finally { stop(); delete process.env.FAKE_ARGS; }
 });
@@ -337,4 +341,115 @@ test("a requested pause reached is told once with its step; a stop, a restart's 
     assert.equal(all.filter((t) => t === "Queue D revision 1 approved.").length, 1);
     assert.deepEqual(all.filter((t) => t.startsWith("Run of")), ["Run of P paused after step P1."], "no pause but the requested one");
   } finally { first.stop(); second?.stop(); third?.stop(); delete process.env.FAKE_SLOW_MS; }
+});
+
+// ---------------------------------------------------------------- housekeeping: nexus queue set
+
+/** The steps the engine opened for a queue, in order (from what reached the fake runtimes). */
+async function opened(queue: string): Promise<string[]> {
+  // A step turn reads "[Nexus] Queue P "title" (revision 1, approved), step P1 (1 of 3): ..."; notices to the orchestrator differ.
+  return (await delivered()).flatMap((t) => {
+    const m = t.startsWith(`[Nexus] Queue ${queue} "`) ? /\), step (\S+) \(\d+ of \d+\)/.exec(t) : null;
+    return m ? [m[1]!] : [];
+  });
+}
+const said = (o: Orchestrator, re: RegExp) => o.view().chat.some((c) => re.test(c.text));
+
+test("the orchestrator skips the stopped step a new revision replaced; then a start runs the new steps", async () => {
+  const x = setup();
+  process.env.FAKE_LOG = join(x.root, "fake.log");
+  try {
+    applyDraft(x.store, queueDef("S", ["done", "stop", "done"]));
+    approveQueue(x.store, "S");
+    x.engine.start("S");
+    await x.until("the stop", () => runOf(x, "S")?.state === "halted");
+    // Revision 2 keeps the stopped step and adds its replacement; the user approves it (which lifts the stop).
+    const def = queueDef("S", ["done", "stop", "done"]);
+    applyDraft(x.store, { ...def, steps: [def.steps[0], def.steps[1], { id: "S2b", title: "Instead", goal: "FAKE: done", acceptance: ["Done"] }, def.steps[2]] });
+    approveQueue(x.store, "S");
+    x.orchestrator.say(`FAKE-NEXUS: ["queue","set","S","--step","S2","skipped","--reason","replaced by S2b"]`);
+    await x.until("the skip", () => said(x.orchestrator, /step S\/S2 skipped \(was pending\)/));
+    x.engine.start("S");
+    await x.until("the run to finish", () => runOf(x, "S")?.state === "finished");
+    assert.deepEqual(await opened("S"), ["S1", "S2", "S2b", "S3"], "S2 ran once, before the stop; after the skip only the new steps");
+    const q = x.state().queues.find((y) => y.id === "S")!;
+    assert.deepEqual(q.steps.map((st) => st.status), ["done", "skipped", "done", "done"]);
+    assert.deepEqual(q.changes.map((c) => [c.kind, c.by, c.step ?? null]), [["lift", "user_approval", null], ["status", "orchestrator", "S2"]]);
+  } finally { x.stop(); }
+});
+
+test("the orchestrator skips a pending step of a running queue; the engine never opens it", async () => {
+  process.env.FAKE_SLOW_MS = "2500";
+  const x = setup();
+  process.env.FAKE_LOG = join(x.root, "fake.log");
+  try {
+    applyDraft(x.store, queueDef("P", ["slow", "done", "done"]));
+    approveQueue(x.store, "P");
+    x.engine.start("P");
+    await x.until("the first step to run", () => x.state().queues.find((q) => q.id === "P")!.steps[0]!.status === "running");
+    x.orchestrator.say(`FAKE-NEXUS: ["queue","set","P","--step","P2","skipped","--reason","done elsewhere: queue M, step M3"]`);
+    await x.until("the skip", () => said(x.orchestrator, /step P\/P2 skipped/));
+    await x.until("the run to finish", () => runOf(x, "P")?.state === "finished");
+    assert.deepEqual(await opened("P"), ["P1", "P3"]);
+  } finally { x.stop(); delete process.env.FAKE_SLOW_MS; }
+});
+
+test("the orchestrator closes a halted run of a queue whose steps are all done or skipped: run.yaml finished, and an entry", async () => {
+  const x = setup();
+  process.env.FAKE_LOG = join(x.root, "fake.log");
+  try {
+    applyDraft(x.store, queueDef("H", ["done", "fail"]));
+    approveQueue(x.store, "H");
+    x.engine.start("H");
+    await x.until("the halt", () => runOf(x, "H")?.state === "halted");
+    x.orchestrator.say(`FAKE-NEXUS: ["queue","set","H","finished","--reason","the queue is done"]`);
+    await x.until("the refusal", () => said(x.orchestrator, /not done or skipped: H2 \(failed\)/));
+    x.orchestrator.say(`FAKE-NEXUS: ["queue","set","H","--step","H2","skipped","--reason","fixed by hand in the editor"]`);
+    await x.until("the skip", () => x.state().queues.find((q) => q.id === "H")!.status === "done");
+    x.orchestrator.say(`FAKE-NEXUS: ["queue","set","H","finished","--reason","the queue is done"]`);
+    await x.until("the run closed", () => runOf(x, "H")?.state === "finished");
+    const q = x.state().queues.find((y) => y.id === "H")!;
+    assert.deepEqual(q.changes.at(-1)!.kind, "run");
+    assert.deepEqual([q.changes.at(-1)!.from, q.changes.at(-1)!.to], ["halted", "finished"]);
+    assert.ok(!x.state().attention.some((a) => a.queue === "H"), "nothing waits for the user");
+  } finally { x.stop(); }
+});
+
+test("a cancel by the orchestrator reaches the user as a push notification, with no waiting-list item", async () => {
+  const sent: UserNotice[] = [];
+  const x = setup(undefined, (n) => sent.push(n));
+  try {
+    applyDraft(x.store, queueDef("C", ["done"]));
+    approveQueue(x.store, "C");
+    x.orchestrator.say(`FAKE-NEXUS: ["queue","set","C","cancelled","--reason","superseded by queue D"]`);
+    await x.until("the cancel", () => x.state().queues.find((q) => q.id === "C")!.status === "cancelled");
+    await x.until("the notification", () => sent.length > 0);
+    assert.equal(sent.length, 1);
+    assert.match(sent[0]!.title, /P: queue cancelled/);
+    assert.match(sent[0]!.body, /C cancelled by the orchestrator: superseded by queue D/);
+    assert.ok(!x.state().attention.some((a) => a.queue === "C"));
+    assert.throws(() => x.engine.start("C"), /cancelled/);
+  } finally { x.stop(); }
+});
+
+test("a proposal to lift a stop is recorded for the user, and a lift clears it", async () => {
+  const x = setup();
+  process.env.FAKE_LOG = join(x.root, "fake.log");
+  try {
+    applyDraft(x.store, queueDef("L", ["stop", "done"]));
+    approveQueue(x.store, "L");
+    x.orchestrator.say(`FAKE-NEXUS: ["queue","set","L","propose-lift","--reason","early"]`);
+    await x.until("the refusal", () => said(x.orchestrator, /queue L is not stopped/));
+    x.engine.start("L");
+    await x.until("the stop", () => runOf(x, "L")?.state === "halted");
+    x.orchestrator.say(`FAKE-NEXUS: ["queue","set","L","propose-lift","--reason","the art is in the shared folder now"]`);
+    await x.until("the proposal", () => !!x.state().queues.find((q) => q.id === "L")!.lift_proposal);
+    assert.equal(x.state().queues.find((q) => q.id === "L")!.lift_proposal!.reason, "the art is in the shared folder now");
+    const def = queueDef("L", ["stop", "done"]);
+    applyDraft(x.store, { ...def, steps: [{ ...def.steps[0]!, goal: "FAKE: done" }, def.steps[1]] });
+    approveQueue(x.store, "L");
+    const q = x.state().queues.find((y) => y.id === "L")!;
+    assert.equal(q.lift_proposal, undefined);
+    assert.equal(q.status, "approved");
+  } finally { x.stop(); }
 });

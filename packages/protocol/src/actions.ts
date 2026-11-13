@@ -2,7 +2,7 @@
 // writer of queue definitions, notes and inboxes (docs/PROTOCOL.md, "Rules").
 import { existsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import { ProjectFile, QueueFile, USER_SESSION, effortIssue, type InboxEntry, type ReviewPolicy, type SessionFile } from "./schemas.ts";
+import { ProjectFile, QueueFile, USER_SESSION, effortIssue, type StatusChange, type InboxEntry, type ReviewPolicy, type SessionFile } from "./schemas.ts";
 import { ProjectStore, newId, now, revisionHash } from "./store.ts";
 import { isApproved, loadProjectState, type ProjectState } from "./state.ts";
 import { validAllowRule } from "./refusals.ts";
@@ -182,10 +182,26 @@ export function applyDraft(store: ProjectStore, definition: unknown): string {
   let old: QueueFile | undefined;
   try { old = store.readQueue(draft.id); } catch { old = undefined; }
   const at = now();
+  // A new step starts pending, or skipped (kept for the record); statuses change through nexus queue set only.
+  const fresh = draft.steps.filter((s) => !old?.steps.some((o) => o.id === s.id) && s.status && s.status !== "skipped");
+  if (fresh.length) throw new ActionError(`a new step has no status or skipped: ${fresh.map((s) => `${s.id} (${s.status})`).join(", ")}`);
   if (!old) {
     store.writeQueue({ ...draft, revision: 1, approvals: [], history: [], created_at: at, updated_at: at });
     return `queue ${draft.id} created as ${draft.status} (revision 1); the user approves it in the dashboard`;
   }
+  // A draft may not change the status of an existing step (that is nexus queue set's, recorded), nor drop a step
+  // that has started or stopped (keep it and skip it, so the record shows what became of it).
+  const statusChanged = draft.steps.flatMap((s) => {
+    const before = old!.steps.find((o) => o.id === s.id);
+    return before && s.status !== undefined && s.status !== before.status ? [`${s.id} (${before.status ?? "pending"} in the file, ${s.status} in the draft)`] : [];
+  });
+  if (statusChanged.length) throw new ActionError(`a draft does not change the status of an existing step: ${statusChanged.join(", ")}. Leave the status out, or as it is; housekeeping is nexus queue set QUEUE --step STEP skipped --reason "..."`);
+  const view = loadProjectState(store).queues.find((x) => x.id === old!.id);
+  const dropped = old.steps.filter((o) => !draft.steps.some((s) => s.id === o.id)).flatMap((o) => {
+    const v = view?.steps.find((x) => x.id === o.id);
+    return v && (v.segments.length > 0 || !["pending", "skipped"].includes(v.status)) ? [`${o.id} (${v.status})`] : [];
+  });
+  if (dropped.length) throw new ActionError(`a draft does not drop a step that has started or stopped: ${dropped.join(", ")}. Keep it in the draft and skip it with nexus queue set QUEUE --step STEP skipped --reason "replaced by ..."`);
   const steps = draft.steps.map((s) => {
     const before = old!.steps.find((o) => o.id === s.id);
     return { ...s, status: s.status ?? before?.status, status_note: s.status_note ?? before?.status_note };
@@ -207,6 +223,79 @@ export function applyDraft(store: ProjectStore, definition: unknown): string {
   return changed
     ? `queue ${draft.id} updated to revision ${next.revision}; it needs the user's approval again`
     : `queue ${draft.id} updated (no change to steps, checks or stop conditions: the approval stands)`;
+}
+
+// ---------------------------------------------------------------- housekeeping by the orchestrator
+
+const GOING_RUN = ["running", "pausing", "usage_wait", "retry_wait"];
+
+/**
+ * The orchestrator's housekeeping (`nexus queue set`, event `status.set`), recorded as an entry in the queue's
+ * `changes`. Allowed: a pending, stopped or failed step to `skipped`; a halted run of a queue whose steps are all done
+ * or skipped to `finished`; a queue whose run is not going to `cancelled`; and `propose-lift` on a stopped queue.
+ * Consent stays the user's: marking work done, approving, lifting a stop, reopening a finished step.
+ */
+export function orchestratorStatusChange(store: ProjectStore, input: { queue: string; step?: string; to: string; reason: string }): string {
+  const to = input.to.trim().toLowerCase();
+  const reason = nonEmpty(input.reason, "the reason");
+  const q = queueOf(store, input.queue);
+  const view = loadProjectState(store).queues.find((x) => x.id === q.id)!;
+  const step = input.step ? view.steps.find((s) => s.id === input.step) : undefined;
+  if (input.step && !step) throw new ActionError(`queue ${q.id} has no step ${input.step} (has ${view.steps.map((s) => s.id).join(", ")})`, 404);
+  const where = step ? `step ${q.id}/${step.id}` : `queue ${q.id}`;
+
+  if (to === "done") throw new ActionError("the orchestrator never marks a step done: work done elsewhere is skipped, with the reason saying where it was done");
+  if (to === "approved" || to === "approve") throw new ActionError("approving is the user's, in the dashboard");
+  if (["lift", "lifted", "resume", "continue"].includes(to) || (!step && ["approved", "running", "pending"].includes(to))) {
+    throw new ActionError("only the user lifts a stop (by approving a new revision, or with Continue); propose it with: nexus queue set QUEUE propose-lift --reason \"...\"");
+  }
+  if (step && ["pending", "running", "reopened", "reopen"].includes(to)) {
+    throw new ActionError(step.status === "pending" ? `${where} is pending already` : `reopening ${where} (${step.status}) is the user's: a send-back`);
+  }
+
+  const at = now();
+  const record = (entry: Omit<StatusChange, "at" | "by" | "revision">): void => {
+    store.writeQueue({ ...q, changes: [...q.changes, { at, by: "orchestrator", revision: q.revision, ...entry }], updated_at: at });
+  };
+  switch (to) {
+    case "skipped": {
+      if (!step) throw new ActionError("skipping is for a step: nexus queue set QUEUE --step STEP skipped --reason \"...\"");
+      if (view.status === "done" || view.status === "cancelled") throw new ActionError(`queue ${q.id} is ${view.status}`, 409);
+      if (!["pending", "stopped", "failed"].includes(step.status)) {
+        throw new ActionError(step.status === "done" || step.status === "skipped"
+          ? `${where} is ${step.status} already`
+          : `${where} is ${step.status}: a step at work is not skipped (pause or stop the run first)`, 409);
+      }
+      record({ kind: "status", step: step.id, from: step.status, to: "skipped", reason });
+      return `${where} skipped (was ${step.status})`;
+    }
+    case "finished": {
+      if (step) throw new ActionError("finished is for a queue's halted run, not for a step");
+      const run = store.readRun(q.id);
+      if (run?.state !== "halted") throw new ActionError(`queue ${q.id} has no halted run${run ? ` (its run is ${run.state})` : ""}`, 409);
+      const open = view.steps.filter((s) => s.status !== "done" && s.status !== "skipped");
+      if (open.length) throw new ActionError(`queue ${q.id} still has steps that are not done or skipped: ${open.map((s) => `${s.id} (${s.status})`).join(", ")}`, 409);
+      store.writeRun(q.id, { ...run, state: "finished", reason: undefined, resume_after_restart: undefined, resume_at: undefined, updated_at: at });
+      record({ kind: "run", from: "halted", to: "finished", reason });
+      return `the halted run of queue ${q.id} is closed as finished`;
+    }
+    case "cancelled": {
+      if (step) throw new ActionError("cancelling is for a queue; a step is skipped");
+      if (view.status === "done" || view.status === "cancelled") throw new ActionError(`queue ${q.id} is ${view.status} already`, 409);
+      const run = store.readRun(q.id);
+      if (run && GOING_RUN.includes(run.state)) throw new ActionError(`queue ${q.id} is ${run.state === "running" ? "running" : `running (${run.state})`}: stop its run first`, 409);
+      record({ kind: "status", from: view.status, to: "cancelled", reason });
+      return `queue ${q.id} cancelled (was ${view.status}); the user is notified`;
+    }
+    case "propose-lift": {
+      if (step) throw new ActionError("a proposal to lift is for a queue");
+      if (view.status !== "stopped") throw new ActionError(`queue ${q.id} is not stopped (it is ${view.status})`, 409);
+      record({ kind: "proposal", from: "stopped", to: "lift proposed", reason });
+      return `your proposal to lift the stop of queue ${q.id} is recorded; the user decides (Continue, or approving a new revision)`;
+    }
+    default:
+      throw new ActionError(`${to} is not a status the orchestrator sets: a step can be skipped; a queue cancelled, its halted run finished, or a lift proposed (propose-lift)`);
+  }
 }
 
 // ---------------------------------------------------------------- project settings

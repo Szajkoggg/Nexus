@@ -154,13 +154,17 @@ export type Withdrawal = z.infer<typeof Withdrawal>;
 
 /**
  * One change of a status made through Nexus, in queue.yaml's `changes` (written only by the server). Derivation applies
- * the entries in time order among the events. `lift`: the user lifted the queue's stop (`by`: approving a new revision,
- * or Continue); the queue becomes approved and its stopped steps pending again; stops before it no longer count.
+ * the entries in time order among the events.
+ * - `lift`: the user lifted the queue's stop (`by`: approving a new revision, or Continue); the queue becomes approved
+ *   and its stopped steps pending again; stops before it no longer count.
+ * - `status`: the orchestrator's housekeeping: a step to `skipped`, or the queue to `cancelled`.
+ * - `run`: the orchestrator closed a halted run of a queue whose steps are all done or skipped (`finished`).
+ * - `proposal`: the orchestrator proposes that the user lift the stop; cleared by a lift, a later stop or an approval.
  */
 export const StatusChange = z.object({
   at: Time,
-  kind: z.enum(["lift"]),
-  by: z.enum(["user_approval", "user_continue"]),
+  kind: z.enum(["lift", "status", "run", "proposal"]),
+  by: z.enum(["user_approval", "user_continue", "orchestrator"]),
   /** The step it changed; absent: the queue. */
   step: Id.optional(),
   from: z.string(),
@@ -279,6 +283,11 @@ export const Event = z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("queue.report"), queue: Id, path: z.string(), summary: z.string() }),
   z.object({ ...base, type: z.literal("change.proposed"), queue: Id, patch: z.unknown(), reason: z.string() }),
   z.object({ ...base, type: z.literal("queue.drafted"), queue: Id, definition: z.unknown() }),
+  /**
+   * An orchestrator's housekeeping (`nexus queue set`): `to` is `skipped` (with `step`), `finished` (the queue's halted
+   * run), `cancelled` or `propose-lift`. The server checks it and records it in the queue's `changes`.
+   */
+  z.object({ ...base, type: z.literal("status.set"), queue: Id, step: Id.optional(), to: z.string().min(1), reason: z.string().min(1) }),
   /** An orchestrator asks the engine to act on a queue's run; `use_session` continues an existing session. */
   z.object({
     ...base, type: z.literal("session.request"),
@@ -296,7 +305,7 @@ export type EventOf<T extends EventType> = Extract<Event, { type: T }>;
 
 /** Event types a worker session may not write (orchestrators and the user may). */
 export const ORCHESTRATOR_ONLY: ReadonlySet<EventType> = new Set([
-  "answer.given", "queue.drafted", "session.request", "review.accepted",
+  "answer.given", "queue.drafted", "session.request", "review.accepted", "status.set",
 ]);
 
 // ---------------------------------------------------------------- server-owned runtime files
