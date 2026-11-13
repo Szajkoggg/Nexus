@@ -69,6 +69,8 @@ export function StepDetail({ project, queue, step, onChanged }: Props & { step: 
       )}
       {step.status === "review" && step.review_with !== "orchestrator" && <AcceptReview project={id} queue={queue.id} step={step.id} asked={step.asked_user?.text} criteria={step.acceptance} onChanged={onChanged} />}
 
+      <PushLine project={id} queue={queue} step={step.id} onChanged={onChanged} />
+
       {step.sent_back.length > 0 && (
         <Section title="Sent back">
           <ul className="space-y-2">
@@ -223,6 +225,32 @@ export function StepDetail({ project, queue, step, onChanged }: Props & { step: 
             ))}
           </ol>
         </Section>
+      )}
+    </div>
+  );
+}
+
+/** What became of pushing an accepted step: pushed, not pushed (no remote), or failed with Push again. */
+function PushLine({ project, queue, step, onChanged }: { project: string; queue: QueueView; step: string; onChanged: () => void }) {
+  const [error, setError] = useState<string>();
+  const [busy, setBusy] = useState(false);
+  const p = queue.push?.steps[step];
+  if (!p) return null;
+  const failed = p.result === "failed";
+  const latest = failed && queue.push?.error?.step === step;
+  return (
+    <div className={`mt-4 rounded-lg p-3 text-sm ring-1 ${failed ? "bg-red-500/10 ring-red-500/30" : p.result === "pushed" ? "bg-emerald-500/10 ring-emerald-500/30" : "bg-zinc-800/50 ring-zinc-700"}`}>
+      <p>
+        <span className="text-zinc-500">{failed ? "Push failed: " : p.result === "pushed" ? "Pushed: " : "Push: "}</span>
+        <span className={failed ? "text-red-300" : "text-zinc-200"}>{p.text}</span>
+        <span className="text-xs text-zinc-500"> · <TimeAgo at={p.at} /></span>
+      </p>
+      {failed && <p className="mt-1 text-xs text-zinc-400">The step stays accepted. The next accepted step pushes again, or push again now.</p>}
+      {latest && (
+        <div className="mt-2 flex items-center gap-3">
+          <Button variant="quiet" disabled={busy} onClick={() => { setBusy(true); setError(undefined); act(project, "POST", `/queues/${enc(queue.id)}/push`).then(onChanged, (e: Error) => setError(e.message)).finally(() => setBusy(false)); }}>{busy ? "Pushing…" : "Push again"}</Button>
+          {error && <span className="text-xs text-red-400">{error}</span>}
+        </div>
       )}
     </div>
   );

@@ -68,6 +68,7 @@ export function SettingsPanel({ project, onChanged, server }: { project: Project
     reuse: Math.round(project.defaults.context_reuse_threshold * 100),
     care: project.defaults.context_care,
     protectNexus: project.defaults.protect_nexus,
+    pushAccepted: project.defaults.push_accepted,
     worktrees: project.defaults.worktree_dir ?? "",
   }));
   const [busy, setBusy] = useState(false);
@@ -88,7 +89,7 @@ export function SettingsPanel({ project, onChanged, server }: { project: Project
         },
         orchestrator: { notify: f.notify },
         conversations: { notes_dir: f.notesDir || null, runtime: f.ideasRuntime, model: f.ideasModel || null, effort: f.ideasEffort || null },
-        defaults: { review_policy: f.review, usage_pause_threshold: f.usage / 100, context_reuse_threshold: f.reuse / 100, context_care: f.care, protect_nexus: f.protectNexus, worktree_dir: f.worktrees || null },
+        defaults: { review_policy: f.review, usage_pause_threshold: f.usage / 100, context_reuse_threshold: f.reuse / 100, context_care: f.care, protect_nexus: f.protectNexus, push_accepted: f.pushAccepted, worktree_dir: f.worktrees || null },
       });
       if (f.orchModel !== undefined || f.orchEffort !== undefined) {
         await act(project.id, "POST", "/orchestrator/settings", { model: orchModel || null, effort: orchEffort || null });
@@ -171,6 +172,12 @@ export function SettingsPanel({ project, onChanged, server }: { project: Project
 
       <Section title="Defaults">
         <Row label="After each step" hint={f.review === "orchestrator" ? "The orchestrator accepts each step, sends it back, or hands it to you; without an orchestrator, or with its notices off, the step waits for you." : undefined}><Select value={f.review} onChange={(v) => set("review", v as "continue" | "wait" | "orchestrator")} options={[["continue", "go on to the next step"], ["wait", "wait for my review"], ["orchestrator", "wait for the orchestrator's review"]]} /></Row>
+        <Row label="Push what was accepted" hint="When a step is accepted (by you or the orchestrator), Nexus pushes the commit the step was reviewed at to the branch the queue runs on (its upstream remote, else origin). Never forced; a failed push shows on the step.">
+          <span className="flex items-center gap-2 pt-1 text-sm text-zinc-300">
+            <input type="checkbox" checked={f.pushAccepted} onChange={(e) => set("pushAccepted", e.target.checked)} className="accent-sky-500" />
+            push accepted steps
+          </span>
+        </Row>
         <Row label="Pause new steps at" hint="Share of a usage window (Claude's 5 hours, Codex's windows) above which no new step starts.">
           <span className="flex items-center gap-2"><input type="number" min={10} max={100} value={f.usage} onChange={(e) => set("usage", Number(e.target.value))} className={`${field} w-24`} /> %</span>
         </Row>

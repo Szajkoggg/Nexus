@@ -190,6 +190,12 @@ they conflict; when the step has criteria, Nexus lists them and asks before send
 back to you. The orchestrator may send a step back twice (`review_send_back_limit` in the project's defaults); its
 third send-back hands the step to you instead.
 
+**Push accepted steps** (Settings, off by default): when a step is accepted, by you or the orchestrator, Nexus pushes
+the commit the step was reviewed at (not later work) to the branch the queue runs on, at its upstream remote or
+origin. Never forced, never with a prompt. The step shows "Pushed: …" or "Push failed: …"; a failed push leaves the
+step accepted, is tried again with the next accepted step, and has a "Push again" button. Without a remote the step
+says it was not pushed.
+
 "Replace token" in the panel signs every remote device out. To have Nexus start with Windows, without a console
 window, run from the live instance: `powershell -ExecutionPolicy Bypass -File C:\Code\Nexus-live\scripts\autostart.ps1`
 (`-Remove` undoes it; the log goes to `%APPDATA%\Nexus\server.log`). To start it once without a window:

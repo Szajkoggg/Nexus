@@ -9,7 +9,7 @@ import { monotonicFactory } from "ulid";
 import YAML from "yaml";
 import type { z } from "zod";
 import {
-  Activity, Applied, ChatEntry, Refusal, Delivery, Event, InboxEntry, NoteMeta, ProjectFile, QueueFile, RegistryFile, RunFile, RuntimeFile, SessionFile, UsageFile,
+  Activity, Applied, ChatEntry, Refusal, Delivery, Event, InboxEntry, NoteMeta, ProjectFile, PushFile, QueueFile, RegistryFile, RunFile, RuntimeFile, SessionFile, UsageFile,
   type Note,
 } from "./schemas.ts";
 
@@ -166,6 +166,11 @@ export class ProjectStore {
   }
 
   // server-owned runtime files
+  readPush(queueId: string): PushFile | undefined {
+    const f = join(this.queueDir(queueId), "push.yaml");
+    return existsSync(f) ? readYaml(f, PushFile) : undefined;
+  }
+  writePush(queueId: string, p: PushFile): void { writeYaml(join(this.queueDir(queueId), "push.yaml"), PushFile.parse(p)); }
   readRun(queueId: string): RunFile | undefined {
     const f = join(this.queueDir(queueId), "run.yaml");
     return existsSync(f) ? readYaml(f, RunFile) : undefined;

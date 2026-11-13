@@ -2,6 +2,8 @@
 // messages and answers to live sessions, and records what the agent does. See docs/DESIGN.md, "Nexus drives the
 // queue, step by step". All of its state is in files (run.yaml, runtime.json, delivered.jsonl, activity.jsonl);
 // the processes are the only thing a restart loses, and a restart pauses the runs that had one.
+import { AcceptedPusher } from "./accepted.ts";
+import type { GitRunner } from "./deploy.ts";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -30,6 +32,9 @@ export interface EngineOptions {
   /** The first retry's delay; each further one doubles it. Tests make it short. */
   retryBaseMs?: number;
   usageMarginMs?: number;
+  /** How the push of accepted steps runs git, and its time limit (tests). */
+  git?: GitRunner;
+  pushTimeoutMs?: number;
 }
 
 /** A process asked to end for a restart (another model or effort) is killed if it has not exited by then. */
@@ -76,8 +81,15 @@ export class Engine {
     this.changed = changed;
     this.retryBaseMs = options.retryBaseMs ?? RETRY_BASE_MS;
     this.usageMarginMs = options.usageMarginMs ?? USAGE_MARGIN_MS;
+    this.pusher = new AcceptedPusher(store, changed, { run: options.git, timeout: options.pushTimeoutMs });
     this.recoverAfterRestart();
   }
+
+  /** Pushes what was accepted (src/accepted.ts). */
+  readonly pusher: AcceptedPusher;
+
+  /** "Push again" on a queue whose last push of an accepted step failed. */
+  pushAgain(queueId: string): string { return this.pusher.pushAgain(queueId); }
 
   // ---------------------------------------------------------------- user actions
 
@@ -257,6 +269,7 @@ export class Engine {
 
   /** Called after every change to the project's files (debounced by the server). */
   onChange(state: ProjectState): void {
+    if (!this.stopped) this.pusher.onChange(state);
     for (const [, l] of this.live) this.deliverInbox(state, l);
     for (const q of state.queues) if (q.run && (q.run.state === "running" || q.run.state === "pausing")) this.advance(q.id, state);
   }

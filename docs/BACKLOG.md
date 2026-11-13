@@ -14,30 +14,7 @@ would be better still.
 
 ## 3. The orchestrator accepts steps, and Nexus pushes what was accepted
 
-A third review mode beside "go on" and "wait for the user": **the orchestrator checks**. Per project, per queue or
-per step (`review_policy: orchestrator`).
-
-1. The worker finishes a step and commits. It does not push.
-2. The engine holds the step in review and tells the orchestrator, with what it needs: the step's acceptance, its
-   checks and review material, its commits.
-3. The orchestrator checks the result against the acceptance criteria, with its helpers (run-digest for the step's
-   record; the project's own read-only reviewers, such as an invariant reviewer for the diff). Then one of:
-   - **accept** (`review.accepted`, which an orchestrator may already write): Nexus pushes the queue's branch and the
-     queue goes on;
-   - **send back**, with what to fix: a message to the worker, and the step is worked on again (a bounded number of
-     times, then it goes to the user);
-   - **ask the user**, when it is not sure, or when the project's rules say the matter is the user's (in Project
-     Honeycomb the look always is): the step waits in review, the user is notified, and the user's acceptance
-     pushes the same way.
-4. The push is done by the Nexus server (`git push` of the branch the queue runs on), not by an agent: it does not
-   depend on a permission classifier or a sandbox, and it happens only at a step's boundary. A failed push is shown
-   on the step and does not lose the acceptance; it is retried with the next one.
-
-Also: the user's own acceptance of a step in review (the "wait" mode) pushes the same way.
-
-Project Honeycomb's rules say a worker pushes after every step. Once this works, its AGENTS.md needs the change
-proposed in [proposals/honeycomb-push-after-acceptance.md](proposals/honeycomb-push-after-acceptance.md). The user
-approves that change; the orchestrator brings it to the user when the feature is in the live instance.
+Pending with the user: docs/proposals/honeycomb-push-after-acceptance.md, to bring up after deploy.
 
 ## 7. Chains and schedules
 

@@ -431,6 +431,17 @@ A failed push changes nothing about the deploy. The setting lives in `<NEXUS_HOM
 server. It can only be changed from the dashboard (the same Origin rule as withdrawing an approval), so an agent can
 neither push nor turn pushing on.
 
+**Pushing what was accepted** (`src/accepted.ts`, queue N5). The server pushes an accepted step's work, not the
+worker: a worker pushing depends on its permissions and sandbox, and could push work nobody accepted. What is pushed
+is the commit that was HEAD when the step entered review, recorded then, never the branch tip at the time of the
+acceptance: by then the next step may have committed (a run goes on while a step waits, or after it is accepted), and
+that work is not accepted. Only the newest acceptance of a queue is pushed, since its commit includes the earlier
+ones; a failed push is not retried on a timer but at the next acceptance and with Push again, so a refusing remote
+costs one attempt per acceptance. The push reuses the deploy push's rules (plain push, no prompts, 60 s). Off by
+default, per project (`defaults.push_accepted`). Found while testing it against a bare repository with a refusing
+pre-receive hook: a push that changes no ref ("Everything up-to-date") never runs the remote's hooks, so it succeeds
+however the remote is set; the result then says the commit "was already" there.
+
 **What changed for agents** (the user's decision of 2026-11-13). An orchestrator session started before a deploy
 keeps its old briefing and its habits. The `Agents:` lines in commit messages are where its news comes from:
 - The successor collects them from the deployed range (local git, ancestry checked) into

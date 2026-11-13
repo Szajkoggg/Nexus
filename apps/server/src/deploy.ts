@@ -53,8 +53,13 @@ export interface PushResult {
   at: string;
 }
 
-/** Why a failed git run failed, in a line: what git said (rejections, fatal errors), or that it timed out. */
-function reason(err: unknown, timeout: number): string {
+const DEPLOY_MOVED = "its main has commits the deployed one does not; bring them into main and update again";
+
+/**
+ * Why a failed git run failed, in a line: what git said (rejections, fatal errors), or that it timed out. `moved`: what
+ * a rejection because the remote branch moved on means for this push.
+ */
+export function pushFailure(err: unknown, timeout: number, moved = DEPLOY_MOVED): string {
   const e = err as { killed?: boolean; signal?: string; stderr?: string; message?: string; code?: unknown };
   if (e.killed || e.signal) return `no answer within ${Math.round(timeout / 1000)} s (a credential prompt, or the network)`;
   const lines = String(e.stderr ?? "").split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
@@ -62,8 +67,7 @@ function reason(err: unknown, timeout: number): string {
   const rejected = lines.map((l) => /\[(remote )?rejected\].*?\(([^)]+)\)\s*$/.exec(l)).find(Boolean);
   if (rejected) {
     const why = rejected[2]!;
-    const moved = /fetch first|non-fast-forward/i.test(why);
-    return `the remote rejected it (${why})${moved ? ": its main has commits the deployed one does not; bring them into main and update again" : ""}`;
+    return `the remote rejected it (${why})${/fetch first|non-fast-forward/i.test(why) ? `: ${moved}` : ""}`;
   }
   const said = lines.filter((l) => /^(error|fatal|remote: (error|fatal))/i.test(l) && !/^error: failed to push some refs/i.test(l));
   const text = (said.length ? said : lines.slice(-2)).join("; ") || String(e.message ?? err).split("\n")[0]!;
@@ -92,7 +96,7 @@ export async function pushDeployed(o: {
     sha = (await run(o.root, ["rev-parse", "HEAD"], { env, timeout })).stdout.trim();
     remote = (await run(o.root, ["config", "--get", "branch.main.remote"], { env, timeout }).catch(() => ({ stdout: "" }))).stdout.trim();
   } catch (err) {
-    return { result: "failed", text: reason(err, timeout), at };
+    return { result: "failed", text: pushFailure(err, timeout), at };
   }
   if (!remote) return { result: "failed", text: "main has no upstream remote (git branch --set-upstream-to)", at };
   try {
@@ -101,7 +105,7 @@ export async function pushDeployed(o: {
     const already = /Everything up-to-date/i.test(r.stderr + r.stdout);
     return { result: "pushed", text: `${sha.slice(0, 7)} ${already ? "was already" : "is now"} ${remote}/main`, at };
   } catch (err) {
-    return { result: "failed", text: reason(err, timeout), at };
+    return { result: "failed", text: pushFailure(err, timeout), at };
   }
 }
 

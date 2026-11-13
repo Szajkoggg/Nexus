@@ -57,6 +57,7 @@ defaults:
   context_reuse_threshold: 0.6         # max context fill to continue a session
   context_care: true                   # above that fill at a step's end, the next step runs in a fresh session
   protect_nexus: true                  # Claude Code workers' file tools may not write under the project's .nexus
+  push_accepted: false                 # push the commit an accepted step was reviewed at (see "Pushing what was accepted")
   usage_pause_threshold: 0.9           # share of the 5-hour window at which no new step turn starts
   worktree_dir: C:/Code/GameDev/ProjectHoneycomb.worktrees
 runtimes:
@@ -244,6 +245,7 @@ Written only by the server's queue engine; agents never touch them.
 
 | File | What |
 |---|---|
+| `queues/<id>/push.yaml` | Pushing what was accepted: `review` (per step, the HEAD of the checkout when it entered review: `sha` or null, `finished_at`, `at`), `steps` (per accepted step: `acceptance`, `sha`, `result`, `text`, `at`), `pushed` (the last success: `sha`, `step`, `at`, `remote`, `branch`), `error` (the last failure until a success). One writer: the server. See "Pushing what was accepted" |
 | `queues/<id>/run.yaml` | The engine's intent for a queue: `session`, `state` (`running`, `pausing`, `paused`, `halted`, `finished`, `usage_wait`, `retry_wait`: a turn failed for a passing reason and is tried again at `resume_at`), `reason`, the `step` it last opened, `nudged`, `resume_at` (when a usage wait or a retry goes on), `retries` (turns failed in a row for a passing reason; cleared by a turn that ends well or a new step), `failure` (the runtime's code for the failure being retried or that halted the run, e.g. `overloaded`), `resume_after_restart`, `runtime`, `model` and `effort` (the run's own, fixed at its start: the start's choice, else the continued session's, else the project's defaults; a missing model or effort is the runtime's default), `started_at`, `ended_at` (when it last stopped going: set when it becomes `finished`, `halted` or `paused`, kept while it stays so, removed when it goes on; older files without it fall back to `updated_at`), `summary_asked` (context care: the step whose context summary Nexus asked for; asked once), `switches` (each fresh session, oldest first: `at`, `from` and `to` session, `step` the new session began with, `why`: `context` (context care; a record without `why` is this) or `runtime` (the step runs on another runtime), `fill` of the old one from 0 to 1 when known, `summary`: `written` by the worker, `asked` and then written, or `fallback`), `revision` (the queue's revision the run was started on). Start refuses a `stopped` queue, naming the step and the stop's reason, and writes `revision`. Resume refuses a stopped queue too, and a run of an older revision (`revision` below the queue's; a run record without `revision` is older when a revision was replaced, in `history`, after its `started_at`): start the queue instead. Archived records are `run.<time>.yaml` (see "Changes and lifting a stop") |
 | `sessions/<id>/runtime.json` | A launched session's live facts: process state and pid, model, context tokens and window, turns, cost |
 | `sessions/<id>/delivered.jsonl` | What the server handed to the session (notes put into a step turn, inbox entries injected or sent as a turn, or `carried` into the first turn of the session `to` that took over); counts as read |
@@ -300,6 +302,29 @@ text verbatim (it must not be empty). Picture comments (N8.3) are a user's Fix i
   step goes to the user (`review_with: user`, `asked_user` saying so with the text), and the entry is `to_user`. The
   user's Fix it does not count toward the limit.
 - After a Fix it the step's next round waits for the user, whatever the policy (`user_fix` on the derived step).
+
+### Pushing what was accepted
+
+With `defaults.push_accepted` on, an accepted step's work is pushed by the server, not by an agent
+(`apps/server/src/accepted.ts`):
+
+- When a step enters review, the server records the HEAD of the queue's checkout (its worktree, else the project's
+  checkout) in `push.yaml` (`review.<step>`: `sha`, the round's `finished_at`). Recorded with the setting off too, so
+  turning it on later finds the commits.
+- When a step is accepted (`review.accepted`, by the orchestrator or the user), the server pushes, in the background,
+  that commit, never the branch tip: `git push <remote> <sha>:refs/heads/<branch>`. The branch is the queue's
+  `branch`, else the checkout's current one; the remote is the branch's upstream, else `origin`. A branch missing on
+  the remote is created there. As with the push on deploy: a plain push (git refuses anything but a fast-forward,
+  never forced), `GIT_TERMINAL_PROMPT=0` and `GCM_INTERACTIVE=never`, at most 60 s. A commit of the next step made
+  before the push is not pushed.
+- Only the queue's newest acceptance is pushed; its commit includes the earlier ones. One push at a time per queue;
+  an acceptance during a push is taken up after it.
+- The outcome goes in `push.yaml` `steps.<step>` (`acceptance`, the event's id; `sha`; `result` `pushed`, `failed` or
+  `skipped`; `text`; `at`). A failure also sets `error` (`text`, `at`, `sha`, `step`) until a push succeeds; it does
+  not undo the acceptance. It is tried again at the next acceptance, whose commit includes the failed one (which then
+  shows as pushed with it), and with **Push again** (`POST …/queues/:q/push`), which pushes the step of `error`
+  again. Without a remote (no upstream, no `origin`) nothing is pushed, and the step says so (`skipped`).
+- With the setting off nothing is pushed.
 
 ## The user's session
 
@@ -422,7 +447,8 @@ sends (see the CLI).
 | `PATCH /api/projects/:id/queues/:q` | `review_policy` (`continue`, `wait`, `orchestrator` or null) | Queue settings |
 | `POST /api/projects/:id/questions/:qid/answer` | `text`, `continue?` | The user's answer, routed to the asker |
 | `POST /api/projects/:id/queues/:q/run` | `action` (`start`, `pause`, `resume`, `stop`), `model?`, `session?` | Runs the queue through a Nexus-launched session (`session` continues an existing one) |
-| `POST /api/projects/:id/queues/:q/steps/:s/accept` | `text?` | Accepts a step waiting in review |
+| `POST /api/projects/:id/queues/:q/steps/:s/accept` | `text?` | Accepts a step waiting in review (and, with `push_accepted`, pushes it) |
+| `POST /api/projects/:id/queues/:q/push` | | Push again: the step of the queue's last failed push; answers `{ message }` at once, the push runs in the background |
 | `POST /api/projects/:id/queues/:q/steps/:s/send-back` | `text` (required, kept verbatim) | Fix it: sends a step waiting for the user's review back to its worker; answers `{ message }` |
 | `POST /api/projects/:id/queues/:q/continue` | | Continue: lifts the stop of a stopped queue whose current revision is approved and goes on (see "Continue" under `queue.yaml`); refused (409) otherwise |
 | `POST /api/projects/:id/orchestrator/messages` | `text` | A chat message to the orchestrator (starts or wakes it) |

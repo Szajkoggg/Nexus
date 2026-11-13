@@ -79,6 +79,11 @@ export const ProjectFile = z.object({
      * and Write on its absolute path). The nexus CLI, which writes their events, is a process and keeps working.
      */
     protect_nexus: z.boolean().default(true),
+    /**
+     * Push what was accepted: when a step is accepted (by the orchestrator or the user), the server pushes the commit
+     * that was HEAD when it entered review to the branch the queue runs on (its upstream remote, else origin).
+     */
+    push_accepted: z.boolean().default(false),
     usage_pause_threshold: z.number().min(0).max(1).default(0.9),
     worktree_dir: z.string().optional(),
   }).prefault({}),
@@ -328,6 +333,23 @@ export const ORCHESTRATOR_ONLY: ReadonlySet<EventType> = new Set([
 ]);
 
 // ---------------------------------------------------------------- server-owned runtime files
+
+/**
+ * queues/<id>/push.yaml: pushing what was accepted. Written only by the server. `review`: the HEAD of the queue's
+ * checkout when each step last entered review (`finished_at`: the step.done of that round; `sha` null when it could
+ * not be read). `steps`: what became of each accepted step's push (`acceptance`: the review.accepted event's id).
+ * `pushed`: the last successful push; `error`: the last failure, until a push succeeds.
+ */
+export const PushFile = z.object({
+  protocol: z.literal(1),
+  review: z.record(z.string(), z.object({ sha: z.string().nullable(), finished_at: Time, at: Time })).default({}),
+  steps: z.record(z.string(), z.object({
+    acceptance: Id, sha: z.string().optional(), result: z.enum(["pushed", "failed", "skipped"]), text: z.string(), at: Time,
+  })).default({}),
+  pushed: z.object({ sha: z.string(), step: Id, at: Time, remote: z.string(), branch: z.string() }).optional(),
+  error: z.object({ text: z.string(), at: Time, sha: z.string().optional(), step: Id }).optional(),
+});
+export type PushFile = z.infer<typeof PushFile>;
 
 /** queues/<id>/run.yaml: the engine's intent for a queue. Written only by the server. */
 export const RunFile = z.object({

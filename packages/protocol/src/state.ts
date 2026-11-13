@@ -1,6 +1,6 @@
 // Derives the dashboard's view of a project from its files. Pure apart from reading through the store;
 // nothing here is ever written back (state.json, if kept, is only a cache of this).
-import { ORCHESTRATOR_ONLY, type StatusChange, type Event, type InboxEntry, type Note, type ProjectFile, type QueueFile, type QueueStatus, type ReviewItem, type ReviewPolicy, type RunFile, type RuntimeFile, type SessionFile, type StepDef, type StepStatus } from "./schemas.ts";
+import { ORCHESTRATOR_ONLY, type StatusChange, type Event, type InboxEntry, type Note, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type ReviewItem, type ReviewPolicy, type RunFile, type RuntimeFile, type SessionFile, type StepDef, type StepStatus } from "./schemas.ts";
 import { ProjectStore, revisionHash } from "./store.ts";
 import { ENDED_RUN_STATES, type Segment } from "./times.ts";
 
@@ -63,6 +63,8 @@ export interface QueueView extends Omit<QueueFile, "steps"> {
   questions: QuestionView[];
   /** The engine's run of this queue, when Nexus drives it. */
   run?: RunFile;
+  /** Pushing what was accepted (queues/<id>/push.yaml). */
+  push?: PushFile;
   updated?: string;    // time of the latest event about this queue
 }
 export interface SessionView extends SessionFile {
@@ -99,6 +101,7 @@ export function loadProjectState(store: ProjectStore): ProjectState {
       warnings.push(...errors);
       const view = initQueue(q, notes);
       try { view.run = store.readRun(id); } catch (e) { warnings.push(`queue ${id} run: ${(e as Error).message}`); }
+      try { view.push = store.readPush(id); } catch (e) { warnings.push(`queue ${id} push: ${(e as Error).message}`); }
       queues.set(id, view);
     } catch (e) { warnings.push(`queue ${id}: ${(e as Error).message}`); }
   }
