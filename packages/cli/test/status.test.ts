@@ -93,3 +93,15 @@ test("a stopped queue's proposal to lift: under the queue, and in the orchestrat
   assert.match(queues!, proposal);
   assert.match(waiting, /^- stopped S \(the stop came from S1, now skipped\): art: missing\n {2}Continue lifts it\n {2}proposal to lift \(orchestrator, [^)]+\): S2 can run now$/m);
 });
+
+test("a step's own runtime, model and effort: on its line, and in the orchestrator's overview", () => {
+  const store = setup();
+  const p = store.readQueue("P");
+  store.writeQueue({ ...p, steps: [p.steps[0]!, { ...p.steps[1]!, runtime: "codex", model: "gpt-6-luna", effort: "low" }] });
+  approveQueue(store, "P");
+  const plain = status(store);
+  assert.match(plain, /^ {2}P2 {4}pending {2}Step P2 {2}\[on Codex · gpt-6-luna · low effort\]$/m);
+  assert.match(plain, /^ {2}P1 {4}pending {2}Step P1$/m, "a step without its own values: nothing");
+  store.writeSession({ protocol: 1, id: "o", project: "p", role: "orchestrator", runtime: "claude", cwd: store.dir, launched_by: "nexus", created_at: at(0) });
+  assert.match(status(store, "o"), /^ {2}steps: P1 pending, P2 pending \[on Codex · gpt-6-luna · low effort\]$/m);
+});

@@ -6,7 +6,7 @@ import { basename, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { execFileSync } from "node:child_process";
 import {
-  Event, ProjectStore, findNexusDir, loadProjectState, stopPlace, newId, normPath, now, readRegistry, writeRegistry,
+  Event, ProjectStore, findNexusDir, loadProjectState, stepValuesText, stopPlace, newId, normPath, now, readRegistry, writeRegistry,
   type ReviewItem, type Role, type Runtime, type SessionFile,
 } from "@nexus/protocol";
 import { importMarkdownQueues } from "./import-md.ts";
@@ -154,7 +154,7 @@ Queues (${state.queues.length - done.length} open; finished: ${done.map((q) => q
   for (const q of state.queues.filter((x) => !done.includes(x))) {
     const run = q.run ? `; run ${q.run.state}${q.run.step ? ` at ${q.run.step}` : ""} in session ${q.run.session}${q.run.reason ? ` (${q.run.reason})` : ""}` : "";
     console.log(`- ${q.id} [${q.status}] ${q.title}: revision ${q.revision}, ${q.approved ? "approved" : "not approved"}${run}`);
-    console.log(`  steps: ${q.steps.map((x) => `${x.id} ${x.status}${x.review_with ? ` (for ${x.review_with === "user" ? "the user" : "you"})` : ""}`).join(", ")}`);
+    console.log(`  steps: ${q.steps.map((x) => `${x.id} ${x.status}${x.review_with ? ` (for ${x.review_with === "user" ? "the user" : "you"})` : ""}${stepValuesText(x) ? ` [on ${stepValuesText(x)}]` : ""}`).join(", ")}`);
     if (q.status_reason && q.status !== "running") console.log(`  why: ${q.status_reason.replace(/\s+/g, " ").slice(0, 300)}`);
     for (const line of stopLines(q)) console.log(line);
     if (q.start) {
@@ -322,7 +322,8 @@ const commands: Record<string, () => void | Promise<void>> = {
       }
       for (const step of q.steps) {
         const unread = step.notes.filter((n) => !n.read_at);
-        console.log(`  ${step.id.padEnd(5)} ${step.status.padEnd(8)} ${step.title}${unread.length ? `  (${unread.length} unread note${unread.length > 1 ? "s" : ""})` : ""}`);
+        const own = stepValuesText(step);
+        console.log(`  ${step.id.padEnd(5)} ${step.status.padEnd(8)} ${step.title}${own ? `  [on ${own}]` : ""}${unread.length ? `  (${unread.length} unread note${unread.length > 1 ? "s" : ""})` : ""}`);
       }
       const open = q.questions.filter((x) => x.state === "open" || x.state === "escalated");
       for (const x of open) console.log(`  question ${x.qid} [${x.state}]: ${x.text}`);

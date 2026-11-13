@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { Event, StatusChange } from "@nexus/protocol";
 import { stopPlace } from "@nexus/protocol/attention";
+import { stepValuesText } from "@nexus/protocol/steps";
 import { act, enc, fileUrl, useFetch, type ProjectState, type QuestionView, type QueueView, type StepView } from "../api.ts";
 import { noteTargets, pairPictures, showsReviewActions } from "../review.ts";
 import { Button, Composer, Expandable, Markdown, Section, StatusBadge, StepTimes, TimeAgo, reviewLabel } from "./ui.tsx";
@@ -46,9 +47,9 @@ export function StepDetail({ project, queue, step, onChanged }: Props & { step: 
         <StepTimes step={step} />
         {step.commit && <span className="font-mono">{step.commit}</span>}
         {session && <span>by {session.title ?? session.id.slice(-8)} ({session.runtime})</span>}
-        {(step.runtime || step.model || step.effort) && (
+        {stepValuesText(step) && (
           <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-zinc-300" title="This step's own runtime, model and effort; what it leaves out is the run's">
-            runs on {[step.runtime === "codex" ? "Codex" : step.runtime === "claude" ? "Claude Code" : undefined, step.model, step.effort && `${step.effort} effort`].filter(Boolean).join(" · ")}
+            runs on {stepValuesText(step)}
           </span>
         )}
       </div>
@@ -741,6 +742,29 @@ function WithdrawApproval({ project, queue, onChanged }: { project: string; queu
   );
 }
 
+/**
+ * The steps that name their own runtime, model or effort, each with its values, so they are seen before approving;
+ * nothing when every step runs on the run's.
+ */
+function OwnValues({ queue }: { queue: QueueView }) {
+  const own = queue.steps.filter((s) => stepValuesText(s));
+  if (!own.length) return null;
+  return (
+    <Section title="Steps on their own runtime or model">
+      <ul className="space-y-1 text-sm">
+        {own.map((s) => (
+          <li key={s.id} className="flex flex-wrap gap-x-2">
+            <span className="font-mono text-zinc-500">{s.id}</span>
+            <span className="text-zinc-300">{s.title}</span>
+            <span className="text-violet-300">⚙ {stepValuesText(s)}</span>
+          </li>
+        ))}
+      </ul>
+      <p className="mt-1.5 text-xs text-zinc-500">The other steps, and what a step leaves out, run on the run's runtime, model and effort.</p>
+    </Section>
+  );
+}
+
 export function QueueDetail({ project, queue, onChanged }: Props) {
   const id = project.project.id;
   const latest = queue.approvals.at(-1);
@@ -778,6 +802,8 @@ export function QueueDetail({ project, queue, onChanged }: Props) {
         </Section>
       )}
       {queue.questions.length > 0 && <Section title="Questions">{queue.questions.map((q) => <Question key={q.qid} q={q} project={id} onChanged={onChanged} />)}</Section>}
+
+      <OwnValues queue={queue} />
 
       <Section title="Approval">
         {[...queue.approvals.map((a) => ({ ...a, withdrawn: false as const })), ...queue.withdrawals.map((w) => ({ ...w, withdrawn: true as const }))]

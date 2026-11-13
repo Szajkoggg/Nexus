@@ -497,6 +497,10 @@ nexus import <file.md> [--prefix X]            # one-time import of queues writt
 nexus note <queue> <step> <text>               # until the dashboard can add notes
 ```
 
+`nexus status` prints each step of a queue on a line of its own (id, status, title); a step that names its own
+runtime, model or effort ends with them, `[on Codex · gpt-6-luna · low effort]` (what it leaves out is the run's).
+The orchestrator's overview adds the same after the step in its `steps:` line.
+
 `nexus status`, run by a session with a queue, prints that queue's undelivered notes and records them as read
 (`note.read`): being shown to the agent is the delivery.
 Without a session (or with one that has no queue) it lists the queues at work (running, waiting, stopped), then the

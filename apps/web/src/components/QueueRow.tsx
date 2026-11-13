@@ -4,6 +4,7 @@ import { RunChip } from "./Run.tsx";
 import { retryLine } from "@nexus/protocol/times";
 import { stopPlace } from "@nexus/protocol/attention";
 import { StopWays } from "./Attention.tsx";
+import { stepValuesText } from "@nexus/protocol/steps";
 
 export function QueueRow({ queue, onQueue, onStep }: {
   queue: QueueView;
@@ -54,6 +55,17 @@ export function QueueRow({ queue, onQueue, onStep }: {
   );
 }
 
+/** A step's own runtime, model and effort, compact; nothing for a step that runs on the run's. */
+export function StepValues({ step, className = "" }: { step: StepView; className?: string }) {
+  const text = stepValuesText(step);
+  if (!text) return null;
+  return (
+    <span className={`block truncate text-[11px] text-violet-300 ${className}`} title={`This step runs on ${text}; what it leaves out is the run's`}>
+      ⚙ {text}
+    </span>
+  );
+}
+
 function StepCard({ step, current, retry, onClick }: { step: StepView; current: boolean; retry?: string; onClick: () => void }) {
   const t = toneOf(step.status);
   const unread = step.notes.filter((n) => !n.read_at).length;
@@ -73,6 +85,7 @@ function StepCard({ step, current, retry, onClick }: { step: StepView; current: 
         </span>
       </div>
       <div className="mt-1.5 line-clamp-2 text-sm font-medium leading-snug text-zinc-100">{step.title}</div>
+      <StepValues step={step} className="mt-1" />
       <div className="mt-auto text-[11px] text-zinc-500"><StepTimes step={step} compact /></div>
       {retry && <div className="line-clamp-1 text-xs text-amber-300" title={retry}>↻ {retry}</div>}
       {line && !retry && <div className="line-clamp-1 text-xs text-zinc-500">{line.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\*\*|`/g, "")}</div>}
