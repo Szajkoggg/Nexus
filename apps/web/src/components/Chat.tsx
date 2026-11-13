@@ -4,7 +4,9 @@ import type { ChatEntry, RuntimeFile, SessionFile } from "@nexus/protocol";
 import { act, enc, useFetch } from "../api.ts";
 import { Button, Composer, Menu, TimeAgo, type MenuEntry } from "./ui.tsx";
 import { ChatMarkdown, RefText } from "./Refs.tsx";
-import { draftKey } from "../drafts.ts";
+import { draftKey, putDraftAndFocus, readDraft } from "../drafts.ts";
+import { withQuote } from "../quote.ts";
+import { QuoteSelection, QuoteTarget } from "./Quote.tsx";
 import { layerValue } from "../layers.ts";
 import { nav, useNav } from "../nav.ts";
 import { usePhone } from "../phone.ts";
@@ -37,6 +39,8 @@ function ChatColumn({ title, over, who, about, view, ready, place, status, showT
   const full = ready ? view?.chat ?? [] : [];
   const shown = full.map((c, i) => ({ c, i })).filter(({ c }) => showTools || c.kind !== "tool");
   const p = usePlace(place, full, ready, showTools, view?.state);
+  // Quoting (Quote.tsx): a selection or a "reply to this" goes into this chat's box, after its draft.
+  const quote = useCallback((text: string) => putDraftAndFocus(draft, withQuote(readDraft(draft), text)), [draft]);
   // On a desktop the text keeps a chat app's measure: a column of about 780 px in the middle.
   const measure = phone ? "" : "mx-auto w-full max-w-[48.75rem]";
   return (
@@ -53,6 +57,8 @@ function ChatColumn({ title, over, who, about, view, ready, place, status, showT
           {menu && <span className="ml-auto"><Menu items={menu} down label="Chat actions" /></span>}
         </header>
       )}
+      <QuoteTarget.Provider value={quote}>
+      <QuoteSelection scroller={p.scroller} />
       <div className="relative flex min-h-0 flex-1 flex-col">
         <div ref={p.scroller} onScroll={p.onScroll} data-chat-scroll={place} className={`scroll-thin flex-1 overflow-y-auto ${phone ? "px-5 py-4" : "px-6 py-6"}`}>
           <div className={`${measure} ${phone ? "space-y-3" : "space-y-4"}`}>
@@ -67,6 +73,7 @@ function ChatColumn({ title, over, who, about, view, ready, place, status, showT
           </button>
         )}
       </div>
+      </QuoteTarget.Provider>
       <footer className={phone ? "border-t border-line p-3" : "px-6 pb-5 pt-3"}>
         <div className={measure}>
           <Composer rows={3} draft={draft} placeholder={placeholder} button="Send" onSubmit={async (t) => { p.follow(); await onSend(t); }} oneLine={phone} card={!phone} />

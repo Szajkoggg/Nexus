@@ -68,6 +68,13 @@ export const putDraft = (key: string, text: string): void => {
   writeDraft(key, text);
   try { window.dispatchEvent(new CustomEvent(DRAFT_EVENT, { detail: key })); } catch { /* no window */ }
 };
+/** Told after a quote was put in a draft: the open box with that draft takes the focus, its cursor at the end. */
+export const DRAFT_FOCUS_EVENT = "nexus:draft-focus";
+/** Puts a draft and gives its open box the focus, the cursor at the end (a quote: the answer starts below it). */
+export const putDraftAndFocus = (key: string, text: string): void => {
+  putDraft(key, text);
+  try { window.dispatchEvent(new CustomEvent(DRAFT_FOCUS_EVENT, { detail: key })); } catch { /* no window */ }
+};
 export const pruneStoredDrafts = (): void => {
   const all = load();
   const kept = pruneDrafts(all, Date.now());

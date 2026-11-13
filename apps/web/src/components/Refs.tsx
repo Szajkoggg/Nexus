@@ -8,6 +8,8 @@ import { refIndex, splitRefs, type RefIndex, type RefTarget } from "../refs.ts";
 import { queueStatus } from "../queueStatus.ts";
 import { nav } from "../nav.ts";
 import { TONE } from "./QueueRow.tsx";
+import { Replyable } from "./Quote.tsx";
+import { sourceAt } from "../quote.ts";
 
 interface Refs { project: string; queues: readonly QueueView[]; index: RefIndex }
 const RefsContext = createContext<Refs | null>(null);
@@ -69,7 +71,7 @@ const rehypeRefs = (index: RefIndex) => () => (tree: HastNode) => {
   walk(tree);
 };
 
-/** A chat message's Markdown, with its refs as links (outside code and links). */
+/** A chat message's Markdown, with its refs as links (outside code and links), its paragraphs and items repliable. */
 export function ChatMarkdown({ children, className = "" }: { children: string; className?: string }) {
   const refs = useContext(RefsContext);
   const plugins = useMemo(() => (refs ? [rehypeRefs(refs.index)] : []), [refs]);
@@ -84,6 +86,9 @@ export function ChatMarkdown({ children, className = "" }: { children: string; c
           }
           return <a {...p} target="_blank" rel="noreferrer" />;
         },
+        // "Reply to this" on paragraphs and list items (Quote.tsx): quotes the item's Markdown source.
+        p: ({ node, ...p }) => <Replyable as="p" source={sourceAt(children, node?.position)} {...p} />,
+        li: ({ node, ...p }) => <Replyable as="li" source={sourceAt(children, node?.position)} {...p} />,
       }}>
         {children}
       </ReactMarkdown>

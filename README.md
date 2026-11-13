@@ -57,6 +57,11 @@ or between conversations, brings you back where you were. Messages that came mea
 **"N new ↓"** button jumps to them. A chat opened for the first time opens at its newest message. The switch (on a
 phone the bottom bar) shows what you have not read: "Orchestrator 2", a dot on Ideas and on the conversation in its list.
 
+**Quoting.** Select text in a chat and a small **Quote** button appears beside it (on a phone below it); a click, or
+**Alt+Q**, adds it to your message as a quote, after what you had typed, with the cursor below it. Hovering a
+paragraph or a list item of a message shows a **reply** icon at its right edge: one click quotes that item as it was
+written (its Markdown).
+
 **A queue** on the project page shows one status ("running · SF3", "paused · B2", "stopped at W4c", "waiting for
 your review · UX2"…), a progress line with a segment per step, and its steps one line each, in two columns on a
 computer. "Running" means a run is really at work; a queue whose run is paused says so. The step that matters is

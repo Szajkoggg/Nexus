@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { DRAFT_EVENT, readDraft, writeDraft } from "../drafts.ts";
+import { DRAFT_EVENT, DRAFT_FOCUS_EVENT, readDraft, writeDraft } from "../drafts.ts";
 import { usePhone } from "../phone.ts";
 import ReactMarkdown from "react-markdown";
 import { formatClock, formatDuration, runTimes, stepTimes } from "@nexus/protocol/times";
@@ -224,6 +224,21 @@ interface ComposerProps {
 function ComposerBox({ draft, placeholder, button, onSubmit, allowEmpty = false, rows = 3, extra, verbatim = false, oneLine = false, card = false }: ComposerProps) {
   const t = useDraftText({ draft, onSubmit, allowEmpty, verbatim });
   const box = useRef<HTMLTextAreaElement>(null);
+  // A quote put in this draft (putDraftAndFocus): the box takes the focus with the cursor at the end, below the quote.
+  useEffect(() => {
+    const on = (e: Event) => {
+      if ((e as CustomEvent<string>).detail !== draft) return;
+      requestAnimationFrame(() => {
+        const b = box.current;
+        if (!b) return;
+        b.focus();
+        b.setSelectionRange(b.value.length, b.value.length);
+        b.scrollTop = b.scrollHeight;
+      });
+    };
+    window.addEventListener(DRAFT_FOCUS_EVENT, on);
+    return () => window.removeEventListener(DRAFT_FOCUS_EVENT, on);
+  }, [draft]);
   // The one-line box grows with what is typed, up to six lines (the card's up to ten), then scrolls.
   useEffect(() => {
     const b = box.current;
@@ -263,7 +278,7 @@ function ComposerBox({ draft, placeholder, button, onSubmit, allowEmpty = false,
   }
   return (
     <div>
-      <textarea value={t.text} rows={rows} placeholder={placeholder} onChange={(e) => t.change(e.target.value)} onKeyDown={t.onKeyDown} className={TEXTAREA} />
+      <textarea ref={box} value={t.text} rows={rows} placeholder={placeholder} onChange={(e) => t.change(e.target.value)} onKeyDown={t.onKeyDown} className={TEXTAREA} />
       <div className="mt-2 flex flex-wrap items-center gap-3">
         <Button onClick={t.submit} disabled={!t.ready}>{t.busy ? "Sending…" : button}</Button>
         {extra}

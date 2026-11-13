@@ -709,6 +709,26 @@ them:
   Orchestrator tab ("Orchestrator 2"), a dot on Ideas when any conversation's last entry is newer than its `seen`, and
   that conversation's dot in the list. A chat not opened in this session has nothing unread: it opens at its newest.
 
+### Quoting in a chat
+
+Decided by the user on 2026-11-14 (queue CH1; docs/ideas/chat-improvements.md). Two ways to quote a message into the
+chat's box, both through `withQuote` (`apps/web/src/quote.ts`, pure, unit tested): the quote (`> ` on every line, a
+bare `>` for an empty one) goes at the end, after any draft and a blank line, and a blank line follows it; the box
+takes the focus with the cursor at the end, so the answer starts below the quote (`putDraftAndFocus` in drafts.ts,
+which the open `Composer` hears).
+
+- **A selection** in the messages shows a small floating **Quote** button (`QuoteSelection` in Quote.tsx, in a portal,
+  fixed): on a desktop beside the selection's end (below its last line when there is no room beside it), on the phone
+  below the selection, clear of the system's menu above it, and 44 px high. It keeps the selected text when it shows,
+  so a tap that clears the selection still quotes it. **Alt+Q** does the same (Ctrl+Q and Cmd+Q close browsers on some
+  systems). It hides when the selection leaves the chat's view. The browser's right-click menu is not touched.
+- **Reply to this**: hovering a paragraph or a list item of a message (on a phone, tapping it) shows an icon at its
+  right edge (`Replyable`, the Markdown's `p` and `li`); only the innermost hovered item shows one, and a list item's
+  own paragraphs have none. A click quotes the item's **Markdown source**, not its rendered text: `sourceAt` cuts it
+  from the message by the position react-markdown gives the node, and a nested item loses its own indentation, so
+  "  - two steps\n    - SC1" quotes as "- two steps\n  - SC1". The test parses with mdast-util-from-markdown, the
+  parser react-markdown uses, so the positions are the real ones.
+
 ### Colours are theme tokens
 
 Every colour in the dashboard is a theme token: a CSS variable in `apps/web/src/index.css` (Tailwind's `@theme`),
