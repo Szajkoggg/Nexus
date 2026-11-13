@@ -104,4 +104,5 @@ process.stdin.on("data", (d: string) => {
     }
   }
 });
-process.stdin.on("end", () => process.exit(0));
+// FAKE_EXIT_DELAY_MS: the process lingers that long after its input closed.
+process.stdin.on("end", () => setTimeout(() => process.exit(0), Number(process.env.FAKE_EXIT_DELAY_MS ?? 0)));

@@ -238,19 +238,24 @@ for (const runtime of ["claude", "codex"] as const) {
   });
 }
 
-test("a session continued in a second queue tags its refusals with the queue it runs now", async () => {
-  const { store, engine, queue, until } = setup(["done"]);
-  try {
-    engine.start("Q");
-    await until("the first run to finish", () => queue().run?.state === "finished");
-    const session = queue().run!.session;
-    store.writeQueue({ protocol: 1, id: "R", title: "Second", revision: 1, status: "proposed", stop_conditions: [], checks: [], steps: [{ id: "R1", title: "x", goal: "FAKE: refused", acceptance: [] }], approvals: [], history: [] });
-    approveQueue(store, "R");
-    engine.start("R", { session });
-    await until("the second run to finish", () => store.readRun("R")?.state === "finished");
-    assert.ok(store.readRefusals(session).entries.every((r) => r.queue === "R" && r.step === "R1"));
-  } finally { engine.shutdown(); }
-});
+for (const runtime of ["claude", "codex"] as const) {
+  test(`${runtime}: a session continued in a second queue, its process still closing, tags its refusals with the queue it runs now`, async () => {
+    // The finished run's process lingers after its input closed, so the second start always meets it closing: the
+    // engine must wait for its exit and start a new process, not write to the closed one.
+    process.env.FAKE_EXIT_DELAY_MS = "800";
+    const { store, engine, queue, until } = setup(["done"]);
+    try {
+      engine.start("Q", { runtime });
+      await until("the first run to finish", () => queue().run?.state === "finished");
+      const session = queue().run!.session;
+      store.writeQueue({ protocol: 1, id: "R", title: "Second", revision: 1, status: "proposed", stop_conditions: [], checks: [], steps: [{ id: "R1", title: "x", goal: "FAKE: refused", acceptance: [] }], approvals: [], history: [] });
+      approveQueue(store, "R");
+      engine.start("R", { session });
+      await until("the second run to finish", () => store.readRun("R")?.state === "finished");
+      assert.ok(store.readRefusals(session).entries.every((r) => r.queue === "R" && r.step === "R1"));
+    } finally { engine.shutdown(); delete process.env.FAKE_EXIT_DELAY_MS; }
+  });
+}
 
 // ---------------------------------------------------------------- failures of a turn
 

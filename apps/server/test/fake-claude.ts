@@ -74,4 +74,5 @@ process.stdin.on("data", (d: string) => {
     void pump();
   }
 });
-process.stdin.on("end", () => { const wait = () => (busy ? setTimeout(wait, 50) : process.exit(0)); wait(); });
+// FAKE_EXIT_DELAY_MS: the process lingers that long after its input closed (a CLI flushing its transcript).
+process.stdin.on("end", () => { const wait = () => (busy ? setTimeout(wait, 50) : setTimeout(() => process.exit(0), Number(process.env.FAKE_EXIT_DELAY_MS ?? 0))); wait(); });

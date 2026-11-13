@@ -558,7 +558,17 @@ export class Engine {
 
   private ensureProcess(session: SessionFile): Live {
     const existing = this.live.get(session.id);
-    if (existing && existing.proc.state !== "exited") return existing;
+    if (existing && existing.proc.state !== "exited") {
+      // A process Nexus is ending (its run just finished, or its session was switched) cannot take another turn: its
+      // input is closed. Wait for its exit as a restart does (never two processes on one session); the exit handler
+      // then starts the new process and advances the session's runs.
+      if (this.ending.has(session.id) && !this.restarting.has(session.id)) {
+        this.restarting.add(session.id);
+        const proc = existing.proc;
+        this.timers.set(`restart:${session.id}`, setTimeout(() => { this.timers.delete(`restart:${session.id}`); if (proc.state !== "exited") proc.kill(); }, RESTART_KILL_MS));
+      }
+      return existing;
+    }
     const project = this.store.readProject();
     const env = { NEXUS_SESSION: session.id, NEXUS_DIR: this.store.dir };
     let proc: AgentProcess;
