@@ -1,0 +1,76 @@
+// `nexus status`: without a session it lists the queues at work and then the approved ones not running; a session with
+// a queue sees only its own.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { ProjectStore, approveQueue, loadProjectState, newId, orchestratorStatusChange, type Event } from "@nexus/protocol";
+
+const CLI = join(dirname(fileURLToPath(import.meta.url)), "../bin/nexus.js");
+const T0 = Date.now() - 86_400_000;
+const at = (min: number) => new Date(T0 + min * 60_000).toISOString();
+
+function setup() {
+  const root = mkdtempSync(join(tmpdir(), "nexus-cli-status-"));
+  const store = ProjectStore.init(root, { id: "p", name: "P", root });
+  store.writeSession({ protocol: 1, id: "w", project: "p", role: "worker", runtime: "claude", cwd: root, launched_by: "nexus", created_at: at(0), queue: "A" });
+  const queue = (id: string, status: "draft" | "proposed", approve = true) => {
+    store.writeQueue({
+      protocol: 1, id, title: `Queue ${id}`, revision: 1, status, stop_conditions: [], checks: [],
+      steps: [1, 2].map((n) => ({ id: `${id}${n}`, title: `Step ${id}${n}`, goal: "", acceptance: [] })),
+    });
+    if (approve) approveQueue(store, id);
+  };
+  const emit = (min: number, body: Record<string, unknown>) => store.appendEvent({ v: 1, id: newId(), at: at(min), session: "w", ...body } as Event);
+  queue("D", "draft", false);
+  queue("P", "proposed", false);
+  queue("A", "proposed");
+  queue("H", "proposed");
+  queue("R", "proposed");
+  queue("S", "proposed");
+  queue("X", "proposed");
+  queue("C", "proposed");
+  // H: approved, its run halted before any step started.
+  store.writeRun("H", { protocol: 1, session: "w", state: "halted", reason: "the session\nended", step: "H1", started_at: at(1), updated_at: at(2) });
+  emit(3, { type: "step.started", queue: "R", step: "R1" });
+  emit(4, { type: "step.started", queue: "S", step: "S1" });
+  emit(5, { type: "queue.stop", queue: "S", step: "S1", condition: "art", reason: "missing" });
+  for (const n of [1, 2]) {
+    emit(5 + n, { type: "step.started", queue: "X", step: `X${n}` });
+    emit(5 + n, { type: "step.done", queue: "X", step: `X${n}`, summary: "ok" });
+  }
+  orchestratorStatusChange(store, { queue: "C", to: "cancelled", reason: "no longer needed" });
+  return store;
+}
+
+function status(store: ProjectStore, session?: string): string {
+  const env: NodeJS.ProcessEnv = { ...process.env, NEXUS_DIR: store.dir };
+  delete env.NEXUS_SESSION;
+  return execFileSync(process.execPath, [CLI, "status", ...(session ? ["--session", session] : [])], { env, encoding: "utf8" });
+}
+
+const listed = (out: string) => [...out.matchAll(/^queue (\w+) \[(\w+)\]/gm)].map((m) => `${m[1]} ${m[2]}`);
+
+test("without a session: the queues at work, then the approved ones not running, with a run left behind", () => {
+  const store = setup();
+  assert.deepEqual(
+    loadProjectState(store).queues.map((q) => `${q.id} ${q.status}`).sort(),
+    ["A approved", "C cancelled", "D draft", "H approved", "P proposed", "R running", "S stopped", "X done"],
+  );
+  const out = status(store);
+  assert.deepEqual(listed(out), ["R running", "S stopped", "A approved", "H approved"]);
+  assert.match(out, /^ {2}why: art: missing$/m);
+  assert.match(out, /^ {2}run: halted at H1 \(the session ended\)$/m);
+  assert.match(out, /^ {2}A1 {4}pending {2}Step A1$/m);
+  assert.doesNotMatch(out, /no approval recorded/);
+});
+
+test("a session with a queue sees only its own", () => {
+  const store = setup();
+  const out = status(store, "w");
+  assert.match(out, /^session w: worker, claude, queue A$/m);
+  assert.deepEqual(listed(out), ["A approved"]);
+});

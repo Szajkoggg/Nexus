@@ -331,6 +331,9 @@ nexus note <queue> <step> <text>               # until the dashboard can add not
 
 `nexus status`, run by a session with a queue, prints that queue's undelivered notes and records them as read
 (`note.read`): being shown to the agent is the delivery.
+Without a session (or with one that has no queue) it lists the queues at work (running, waiting, stopped), then the
+approved ones not running, each with its steps and, when it is not running, the run left behind (`run: halted at W3
+(...)`). An orchestrator or a thinking partner gets the overview of every queue instead.
 
 Step states also include `stopped` (the step a `queue.stop` named, when it was not finished).
 

@@ -14,7 +14,8 @@ import { importMarkdownQueues } from "./import-md.ts";
 const HELP = `nexus — report to and manage Nexus (protocol 1)
 
 Agent commands (session from NEXUS_SESSION or --session):
-  nexus status                                  current queue, step, notes and open questions
+  nexus status                                  current queue, step, notes and open questions (without a
+                                                session: the queues at work, then the approved ones not running)
   nexus step start <step>
   nexus step progress <step> <text> [--pct N]
   nexus step done <step> --summary <text> [--commit <sha>]
@@ -246,10 +247,18 @@ const commands: Record<string, () => void | Promise<void>> = {
     console.log(`project ${state.project.name} (${state.project.id})`);
     if (s?.role === "orchestrator" || s?.role === "conversation") return overview(state);
     if (s) console.log(`session ${s.id}: ${s.role}, ${s.runtime}, queue ${s.queue ?? "-"}`);
-    const queues = s?.queue ? state.queues.filter((q) => q.id === s.queue) : state.queues.filter((q) => ["running", "waiting", "stopped"].includes(q.status));
+    // Without a queue of its own: the queues at work, then the approved ones not running (ready to start or resume).
+    const queues = s?.queue ? state.queues.filter((q) => q.id === s.queue) : [
+      ...state.queues.filter((q) => ["running", "waiting", "stopped"].includes(q.status)),
+      ...state.queues.filter((q) => ["approved", "paused"].includes(q.status)),
+    ];
     for (const q of queues) {
       console.log(`\nqueue ${q.id} [${q.status}] ${q.title}${q.approved ? "" : " (no approval recorded for this revision)"}`);
       if (q.status_reason) console.log(`  why: ${q.status_reason.slice(0, 300)}`);
+      if (q.run && q.status !== "running") {
+        const why = q.run.reason ? ` (${q.run.reason.replace(/\s+/g, " ").slice(0, 200)})` : "";
+        console.log(`  run: ${q.run.state}${q.run.step ? ` at ${q.run.step}` : ""}${why}`);
+      }
       for (const step of q.steps) {
         const unread = step.notes.filter((n) => !n.read_at);
         console.log(`  ${step.id.padEnd(5)} ${step.status.padEnd(8)} ${step.title}${unread.length ? `  (${unread.length} unread note${unread.length > 1 ? "s" : ""})` : ""}`);
