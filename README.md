@@ -106,8 +106,10 @@ cancels a pending retry.
 
 A queue stopped by a stop condition goes on only when you lift the stop. Either approve a new revision the
 orchestrator drafted (a start then begins at the first pending step), or, when the cause was outside the queue,
-press Continue on the queue: the stopped step runs again in its session. The orchestrator may propose continuing;
-its proposal shows beside Continue. It does housekeeping itself: it skips a step a new revision replaced or that was
+press Continue: the stopped step runs again in its session. Continue is right where the stop shows: on the stopped
+step's line in the queue's card (with the stop's reason, shown there once), on the stop's card in the waiting list,
+and in the queue's bar; a queue whose revision is not approved has "Approve revision N…" there instead, which opens
+the queue. The orchestrator may propose continuing; its proposal shows on the stop's waiting card and in the queue. It does housekeeping itself: it skips a step a new revision replaced or that was
 done elsewhere, closes a halted run whose steps are all done, and cancels a queue that is no longer needed (you get a
 notification). Each queue and step lists these changes: who, when and why. Approving, lifting a stop, marking work
 done and reopening a finished step stay yours.
@@ -116,7 +118,9 @@ The stop box shows what the stopped step left: its own commits, and the uncommit
 are not necessarily that step's, and which Nexus never cleans). When the step committed, Continue and the approval
 of a new revision ask you first: **Keep** (the commits stay; with "push accepted steps" on they go out with the next
 accepted step's push, otherwise they stay local in the branch) or **Discard** (the stop stays, and the orchestrator
-proposes a revision whose first step reverts those commits; approving it lifts the stop). A worker that stops
+proposes a revision whose first step reverts those commits; approving it lifts the stop). The button then reads
+"Continue…" and opens that choice in place, with the step's commits; with nothing to decide, Continue lifts the stop
+at once. A worker that stops
 commits what is consistent and leaves no uncommitted changes behind.
 
 Per project, the dashboard's settings panel (the gear icon) sets the default runtime; for Claude Code workers the

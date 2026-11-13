@@ -1,7 +1,7 @@
 // A queue on the project page (UX proposals, 17B): its header with one honest status, a progress line with a segment
 // per step, and its steps one line each: two columns on the desktop; on the phone one column with the finished run
 // and the steps after the third folded. The step that matters is highlighted with its action.
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import type { QueueView, StepView } from "../api.ts";
 import { TimeAgo, reviewLabel, toneOf } from "./ui.tsx";
 import { retryLine } from "@nexus/protocol/times";
@@ -9,6 +9,7 @@ import { stepValuesText } from "@nexus/protocol/steps";
 import { queueStatus, type Tone } from "../queueStatus.ts";
 import { currentIndex, foldSteps, twoColumns } from "../steplist.ts";
 import { usePhone } from "../phone.ts";
+import { STOP_BUTTON, StopActions, stopVersion } from "./Stop.tsx";
 
 /** The honest status's colours: a dot and a word. */
 const TONE: Record<Tone, [string, string]> = {
@@ -35,21 +36,31 @@ const shownStatus = (step: StepView, queue: QueueView) =>
 
 const plain = (s: string) => s.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\*\*|`/g, "");
 
-export function QueueRow({ queue, onQueue, onStep }: {
+/**
+ * The step that matters, highlighted with its action: the one at work, the stop, or the first one not finished, once
+ * the queue has started (a queue not yet run has none). A stopped queue's reason and Continue are on its line.
+ */
+export function stepThatMatters(queue: Pick<QueueView, "steps" | "current_step">): string | undefined {
+  const c = currentIndex(queue.steps, queue.current_step);
+  const started = queue.steps.some((x) => x.status !== "pending");
+  return started && c < queue.steps.length ? queue.steps[c]!.id : undefined;
+}
+
+export function QueueRow({ project, queue, pushAccepted, onQueue, onStep, onChanged }: {
+  project: string;
   queue: QueueView;
+  pushAccepted: boolean;
   onQueue: () => void;
   onStep: (step: string) => void;
+  onChanged?: () => void;
 }) {
   const phone = usePhone();
   const s = queueStatus(queue);
   const [open, setOpen] = useState<{ before?: boolean; after?: boolean }>({});
-  const c = currentIndex(queue.steps, queue.current_step);
-  // The step that matters, highlighted with its action: the one at work, the stop, or the first one not finished,
-  // once the queue has started (a queue not yet run has none).
-  const started = queue.steps.some((x) => x.status !== "pending");
-  const current = started && c < queue.steps.length ? queue.steps[c]!.id : undefined;
+  const current = stepThatMatters(queue);
   const line = (x: StepView) => (
-    <StepLine key={x.id} step={x} queue={queue} current={x.id === current} phone={phone} onStep={() => onStep(x.id)} onQueue={onQueue} />
+    <StepLine key={x.id} step={x} queue={queue} current={x.id === current} phone={phone} onStep={() => onStep(x.id)} onQueue={onQueue}
+      stop={{ project, pushAccepted, onChanged }} />
   );
   const fold = phone ? foldSteps(queue.steps, current, open) : undefined;
   const [left, right] = twoColumns(queue.steps);
@@ -109,11 +120,13 @@ export function QueueRow({ queue, onQueue, onStep }: {
 
 /**
  * One step, one line: its dot, its id, its title and its status. The step that matters gets two lines more: why it
- * is where it is (the stop's reason, the question, its summary, its progress), and its action, which opens where
- * that action is (the queue's stop box has Continue; the step has the review and the answer).
+ * is where it is (the stop's reason, the question, its summary, its progress), and its action. A stop's is Continue
+ * right here (Stop.tsx: Keep or Discard first, in place, when the step left commits; "Approve revision N…" opens the
+ * queue when its revision is not approved); the others open the step, where the review and the answer are.
  */
-function StepLine({ step, queue, current, phone, onStep, onQueue }: {
+function StepLine({ step, queue, current, phone, onStep, onQueue, stop }: {
   step: StepView; queue: QueueView; current: boolean; phone: boolean; onStep: () => void; onQueue: () => void;
+  stop: { project: string; pushAccepted: boolean; onChanged?: () => void };
 }) {
   const status = shownStatus(step, queue);
   const t = toneOf(status);
@@ -141,19 +154,12 @@ function StepLine({ step, queue, current, phone, onStep, onQueue }: {
   const retry = queue.run?.step === step.id ? retryLine(queue.run, new Date()) : undefined;
   const why = stopHere ? queue.status_reason
     : questions[0]?.text ?? retry ?? (status === "paused" ? queue.status_reason ?? queue.run?.reason : undefined) ?? (status === "running" ? step.progress?.text : undefined) ?? step.reason ?? step.summary ?? step.status_note;
-  const action = stopHere
-    ? { label: queue.approved ? "Continue…" : `Approve revision ${queue.revision}…`, go: onQueue }
+  const action = stopHere ? undefined
     : step.status === "review" && step.review_with !== "orchestrator" ? { label: "Review…", go: onStep }
     : questions.length ? { label: `${questions.length} question${questions.length > 1 ? "s" : ""}`, go: onStep }
     : step.status === "failed" || step.status === "rejected" ? { label: "Open…", go: onStep }
     : undefined;
-  const button = action && (
-    <button onClick={(e) => { e.stopPropagation(); action.go(); }}
-      className="shrink-0 rounded-md border border-line-strong bg-surface-2 px-3 py-1 text-sm font-medium text-fg hover:bg-surface-3 max-lg:min-h-11">
-      {action.label}
-    </button>
-  );
-  return (
+  const render = (button: ReactNode, panel?: ReactNode) => (
     <div role="button" tabIndex={0} onClick={onStep} onKeyDown={(e) => { if (e.key === "Enter") onStep(); }}
       className={`grid cursor-pointer grid-cols-[10px_3.25rem_1fr_auto] gap-x-2.5 rounded-lg px-2 py-2 text-sm ${TINT[status] ?? "bg-surface-3"}`}>
       <span className={`mt-1.5 h-2 w-2 rounded-full ${t.dot}`} />
@@ -165,8 +171,23 @@ function StepLine({ step, queue, current, phone, onStep, onQueue }: {
           <span className="mt-1.5 block h-1 overflow-hidden rounded bg-surface-3"><span className="block h-full bg-accent" style={{ width: `${step.progress.pct}%` }} /></span>
         )}
         {phone && button && <span className="mt-2 flex">{button}</span>}
+        {panel && !phone && <span className="mt-2 block">{panel}</span>}
       </span>
       <span className="flex items-start gap-2">{meta}{!phone && button}</span>
+      {panel && phone && <span className="col-span-full mt-2 block">{panel}</span>}
     </div>
   );
+  if (stopHere) {
+    return (
+      <StopActions project={stop.project} queue={queue.id} approved={queue.approved} revision={queue.revision} version={stopVersion(queue)}
+        onOpen={onQueue} onChanged={stop.onChanged} pushAccepted={stop.pushAccepted} branch={queue.branch}>
+        {(a) => render(a.buttons, a.panel)}
+      </StopActions>
+    );
+  }
+  return render(action && (
+    <button onClick={(e) => { e.stopPropagation(); action.go(); }} className={STOP_BUTTON}>
+      {action.label}
+    </button>
+  ));
 }

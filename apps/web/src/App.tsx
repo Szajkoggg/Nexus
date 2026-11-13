@@ -124,7 +124,8 @@ export function App() {
         </div>
         <div className="space-y-3">
           {g.queues.map((q) => (
-            <QueueRow key={q.id} queue={q} onQueue={() => projectId && nav.item(projectId, q.id)} onStep={(s) => projectId && nav.item(projectId, q.id, s)} />
+            <QueueRow key={q.id} project={state.project.id} queue={q} pushAccepted={state.project.defaults.push_accepted}
+              onQueue={() => projectId && nav.item(projectId, q.id)} onStep={(s) => projectId && nav.item(projectId, q.id, s)} onChanged={reload} />
           ))}
         </div>
         {g.queues.length === 0 && <p className="text-sm text-fg-3">Nothing here.</p>}
@@ -239,7 +240,9 @@ export function App() {
         {banners}
 
         {state && state.attention.length > 0 && (
-          <AttentionPanel items={state.attention} onOpen={(a: AttentionItem) => { if (projectId && a.queue) nav.item(projectId, a.queue, attentionTarget(a)); }} />
+          <AttentionPanel project={state.project.id} items={state.attention} queues={state.queues} pushAccepted={state.project.defaults.push_accepted}
+            onChanged={reload}
+            onOpen={(a: AttentionItem) => { if (projectId && a.queue) nav.item(projectId, a.queue, attentionTarget(a)); }} />
         )}
 
         {queuesPage}

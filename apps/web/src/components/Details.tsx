@@ -13,6 +13,8 @@ import { nav, useNav } from "../nav.ts";
 import { usePhone } from "../phone.ts";
 import { ImageViewer, type ViewerImage } from "./Viewer.tsx";
 import { StepChat } from "./Chat.tsx";
+import { StoppedWork, stopVersion, useContinue, useLeft } from "./Stop.tsx";
+import { needsWorkChoice, stopDecision, type LeftState, type LeftView, type WorkChoice } from "../stopDecision.ts";
 
 interface Props {
   project: ProjectState; queue: QueueView; onChanged: () => void; onClose: () => void;
@@ -960,73 +962,9 @@ function AnswerBox({ q, project, onChanged }: { q: QuestionView; project: string
 // ---------------------------------------------------------------- queue
 
 /**
- * Takes the approval back from a queue that has never run (it is proposed again). A started queue is paused or
- * stopped instead, so this is not offered there.
+ * A stopped queue's stop: why and where, the orchestrator's proposal, what the step left (Stop.tsx); Continue is in the
+ * bar. Continue (the user's lift) only when the current revision is approved; otherwise approving it lifts the stop.
  */
-/**
- * A stopped queue: why, where, and the way on. Continue (the user's lift) only when the current revision is approved;
- * otherwise approving the revision lifts the stop. The orchestrator's proposal, when there is one, is shown with it.
- */
-interface LeftView {
-  step: string;
-  commits: { sha: string; subject: string; author: string; at: string; files: number; insertions: number; deletions: number }[];
-  uncommitted: { status: string; path: string }[];
-  uncommitted_note: string;
-  discarded: { at: string } | null;
-}
-
-/**
- * What the stopped step left: its own commits, with Keep or Discard when there are any, and the checkout's uncommitted
- * changes, which are not necessarily the step's and are never cleaned.
- */
-function StoppedWork({ left, work, setWork, needsChoice, pushAccepted, branch }: {
-  left: LeftView; work?: "keep" | "discard"; setWork: (w: "keep" | "discard") => void; needsChoice: boolean; pushAccepted: boolean; branch?: string;
-}) {
-  if (!left.commits.length && !left.uncommitted.length) return <p className="mt-3 text-xs text-fg-2">Step {left.step} left no commits and no uncommitted changes.</p>;
-  const n = left.commits.length;
-  const option = (value: "keep" | "discard", title: string, text: string) => (
-    <label className={`flex cursor-pointer gap-2 rounded-md p-2 ring-1 ${work === value ? "bg-surface ring-accent/60" : "ring-line-strong hover:bg-surface/60"}`}>
-      <input type="radio" name="stopped-work" checked={work === value} onChange={() => setWork(value)} className="mt-1 accent-accent" />
-      <span><span className="font-medium text-fg">{title}</span><span className="block text-xs text-fg-2">{text}</span></span>
-    </label>
-  );
-  return (
-    <div className="mt-3 space-y-3 rounded-md bg-surface/70 p-2.5">
-      {n > 0 && (
-        <div>
-          <p className="text-xs text-fg-2">Step {left.step} left {n} commit{n === 1 ? "" : "s"} of its own:</p>
-          <ul className="mt-1 space-y-1">
-            {left.commits.map((c) => (
-              <li key={c.sha} className="text-sm">
-                <span className="font-mono text-xs text-fg-3">{c.sha.slice(0, 7)}</span> <span className="text-fg">{c.subject}</span>
-                <span className="block pl-[3.6rem] text-[11px] text-fg-3">{c.files} file{c.files === 1 ? "" : "s"} · <span className="text-ok/80">+{c.insertions}</span> <span className="text-danger/80">−{c.deletions}</span> · <TimeAgo at={c.at} /></span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      {left.uncommitted.length > 0 && (
-        <div>
-          <p className="text-xs text-fg-2">Uncommitted changes {left.uncommitted_note}; Nexus never cleans them:</p>
-          <ul className="mt-1 space-y-0.5 font-mono text-xs text-fg">
-            {left.uncommitted.map((u) => <li key={u.path} className="break-all"><span className="inline-block w-6 text-warn/90">{u.status}</span>{u.path}</li>)}
-          </ul>
-        </div>
-      )}
-      {left.discarded && <p className="text-sm text-fg">You chose to discard these commits <TimeAgo at={left.discarded.at} />: the orchestrator proposes a revision that reverts them, and approving it lifts the stop.</p>}
-      {needsChoice && (
-        <div className="space-y-1.5" role="radiogroup" aria-label="The stopped step's commits">
-          {option("keep", "Keep", pushAccepted
-            ? `The commits stay, and go out with the next accepted step's push${branch ? ` to ${branch}` : ""}.`
-            : `The commits stay, local in the branch${branch ? ` ${branch}` : ""}; nothing is pushed.`)}
-          {option("discard", "Discard", "The stop stays. The orchestrator proposes a revision whose first step reverts these commits (and only these); approving it lifts the stop.")}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/** A stopped queue's stop: why and where, the orchestrator's proposal, what the step left; Continue is in the bar. */
 function StopBox({ queue, left, work, setWork, needsChoice, pushAccepted }: {
   queue: QueueView; left?: LeftView; work?: "keep" | "discard"; setWork: (w: "keep" | "discard") => void; needsChoice: boolean; pushAccepted: boolean;
 }) {
@@ -1083,6 +1021,10 @@ function Changes({ entries, queue }: { entries: StatusChange[]; queue: QueueView
   );
 }
 
+/**
+ * Takes the approval back from a queue that has never run (it is proposed again). A started queue is paused or
+ * stopped instead, so this is not offered there.
+ */
 function WithdrawApproval({ project, queue, onChanged, onCancel }: { project: string; queue: string; onChanged: () => void; onCancel: () => void }) {
   return (
     <div className="rounded-lg border border-stop/30 bg-stop/5 p-3">
@@ -1130,9 +1072,11 @@ export function QueueDetail({ project, queue, onChanged, onClose, of }: Props) {
   const latest = queue.approvals.at(-1);
   const inherited = project.project.defaults.stop_conditions;
   // A stopped queue: what its stopped step left, and the user's Keep or Discard, shared by Continue and the approval.
-  const left = useFetch<LeftView | null>(queue.status === "stopped" ? `/api/projects/${enc(id)}/queues/${enc(queue.id)}/left` : undefined, project.generated_at);
-  const [work, setWork] = useState<"keep" | "discard">();
-  const needsChoice = !!left && left.commits.length > 0 && !left.discarded;
+  // The same read as the step's line and the waiting cards (Stop.tsx), so they never disagree.
+  const leftState = useLeft(id, queue.id, queue.status === "stopped", stopVersion(queue));
+  const left = leftState === "error" ? undefined : leftState;
+  const [work, setWork] = useState<WorkChoice>();
+  const needsChoice = needsWorkChoice(left);
 
   return (
     <>
@@ -1217,7 +1161,7 @@ export function QueueDetail({ project, queue, onChanged, onClose, of }: Props) {
         <p className="mt-6 text-xs text-fg-3">Imported from <span className="font-mono">{queue.source.path}</span> <TimeAgo at={queue.source.imported_at} /></p>
       )}
       </PanelBody>
-      <QueueBar key={queue.id} project={project} queue={queue} onChanged={onChanged} left={left ?? undefined} work={work} needsChoice={needsChoice} />
+      <QueueBar key={queue.id} project={project} queue={queue} onChanged={onChanged} left={leftState} work={work} needsChoice={needsChoice} />
     </>
   );
 }
@@ -1227,24 +1171,16 @@ export function QueueDetail({ project, queue, onChanged, onClose, of }: Props) {
  * ⋯) on one that is not; Withdraw approval (a queue approved but never started) and the review policy under ⋯.
  */
 function QueueBar({ project, queue, onChanged, left, work, needsChoice }: {
-  project: ProjectState; queue: QueueView; onChanged: () => void; left?: LeftView; work?: "keep" | "discard"; needsChoice: boolean;
+  project: ProjectState; queue: QueueView; onChanged: () => void; left: LeftState; work?: WorkChoice; needsChoice: boolean;
 }) {
   const id = project.project.id;
   const stopped = queue.status === "stopped";
-  // What the server said back after Continue or an approval with Keep or Discard (the orchestrator drafts a revert…).
+  // A stop's buttons and hint, as everywhere the stop is shown; Continue itself is the one in Stop.tsx.
+  const d = stopped ? stopDecision({ approved: queue.approved, revision: queue.revision, left, work }) : undefined;
+  const cont = useContinue({ project: id, queue: queue.id, onChanged });
+  // What the server said back after an approval with Keep or Discard (the orchestrator drafts a revert…).
   const [note, setNote] = useState<string>();
   const [error, setError] = useState<string>();
-  const [busy, setBusy] = useState(false);
-  const go = async () => {
-    setBusy(true); setError(undefined); setNote(undefined);
-    try {
-      const r = await actResult<{ message?: string } | string>(id, "POST", `/queues/${enc(queue.id)}/continue`, needsChoice ? { work } : {});
-      if (r && typeof r === "object" && r.message) setNote(r.message);
-      onChanged();
-    }
-    catch (e) { setError((e as Error).message); }
-    finally { setBusy(false); }
-  };
   const wordsKey = draftKey(id, "approval", queue.id);
   const [wordsOpen, setWordsOpen] = useState(() => !!readDraft(wordsKey));
   const words = useDraftText({
@@ -1268,16 +1204,16 @@ function QueueBar({ project, queue, onChanged, left, work, needsChoice }: {
     ...(canWithdraw && !withdrawOpen ? [{ label: "Withdraw approval…", danger: true, onSelect: () => setWithdrawOpen(true) }] : []),
     ...(!policyOpen ? [{ label: `After each step: ${policy}…`, onSelect: () => setPolicyOpen(true) }] : []),
   ];
-  const fail = error ?? words.error;
+  const fail = cont.error ?? error ?? words.error;
+  const said = cont.note ?? note;
   const hint = fail ? <span className="text-danger">{fail}</span>
-    : note ? <span className="text-info">{note}</span>
-    : stopped && queue.approved
-      ? (needsChoice && !work ? "Choose Keep or Discard first." : needsChoice && work === "discard" ? "The stop stays until you approve the orchestrator's revert." : "Lifts the stop; the stopped step runs again in its session, unless it was skipped.")
-      : undefined;
+    : said ? <span className="text-info">{said}</span>
+    : stopped && queue.approved ? d!.hint
+    : undefined;
   const primary = stopped && queue.approved
-    ? <Button disabled={busy || (needsChoice && !work)} onClick={() => void go()}>{needsChoice && work === "discard" ? "Discard and ask for a revert" : "Continue"}</Button>
+    ? d!.confirm && <Button disabled={cont.busy || d!.confirm.disabled} onClick={() => void cont.go(d!.needsChoice, work)}>{d!.confirm.label}</Button>
     : !queue.approved
-      ? <Button disabled={!words.ready} onClick={words.submit}>{words.busy ? "Sending…" : stopped && needsChoice && work === "discard" ? "Discard the step's work" : `Approve revision ${queue.revision}`}</Button>
+      ? <Button disabled={!words.ready} onClick={words.submit}>{words.busy ? "Sending…" : d?.approve?.label ?? `Approve revision ${queue.revision}`}</Button>
       : undefined;
   const opened = (!queue.approved && wordsOpen) || (canWithdraw && withdrawOpen) || policyOpen;
   return (

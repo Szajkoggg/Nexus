@@ -691,8 +691,8 @@ A queue on the project page (UX proposals, 17B) is its header, a progress line w
 status, and its steps one line each: a dot, the id, the title and the status. The step that matters (the one at work,
 the stop, else the first not finished, once the queue has started) is tinted by its status and gets two lines more:
 why it is where it is (the stop's reason, the question, its summary, its progress, why its run is paused) and its
-action, which opens where the action is: **Continue…** (or **Approve revision N…**) opens the queue, whose stop box has
-it; **Review…** and the questions open the step. On the desktop the steps fill two columns, the left first, all of
+action. A stop's is Continue right on its line (see "Continue at the stop" below); **Review…** and the questions
+open the step. On the desktop the steps fill two columns, the left first, all of
 them. On the phone (`foldSteps` in `apps/web/src/steplist.ts`, pure, unit tested) one column folds what does not
 matter now: the leading run of done and skipped steps becomes one line ("W1 – W4b · 3 done, 2 skipped ▸"), and so do
 the steps after the third that follow the step that matters ("+ W6, W7 ▸"); a fold of a single step is shown instead,
@@ -707,6 +707,22 @@ that it did not start); and a queue whose steps say they run while no run goes r
 Proposed reads "needs your approval". Open questions and the steps in review are counted beside it ("5 of 11 · 2 in
 review"). The step lines follow the same rule: a step whose events say it runs while its run does not reads paused,
 without a progress bar. The page's groups are unchanged here; the desktop layouts of the next queue use the same helper.
+
+### Continue at the stop
+
+A stopped queue goes on from where its stop shows (UX proposals, quick fix 4): the stopped step's line in the queue's
+card, the stop's waiting card (in the waiting list across projects, and on the project's page), and the queue's bar.
+The reason is shown once per view: on the project's page the stopped step's line carries it, so the waiting card above
+names the queue instead (unless the card shows no stopped step: a queue that never ran). Every place, the queue's
+drawer and bar included, has one read of what the stopped step left (`useLeft`), one Continue (`useContinue`), both in
+`apps/web/src/components/Stop.tsx`, and its buttons, their words and the hint from one pure decision
+(`stopDecision`, `apps/web/src/stopDecision.ts`, unit tested), so no two places can disagree. With the
+revision approved and nothing to decide, **Continue** lifts the stop at once; when the stopped step left commits of
+its own, **Continue…** opens SC2's Keep or Discard in place (the commits, the uncommitted changes, the two choices,
+then Continue or "Discard and ask for a revert"); once Discard is recorded no place offers Continue (the server would
+ask for the choice again) and each says so instead: approving the orchestrator's revert lifts the stop. A revision not yet approved has **Approve revision N…**, which opens the
+queue. What a stopped step left comes from git on the server, which takes a second or more on Windows: the places
+showing one stop share one request per queue and version (its times) and show the last answer while reading anew.
 
 ### Reviewing: the pictures first, the decision in the viewer
 

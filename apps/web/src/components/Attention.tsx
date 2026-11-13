@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { attentionKey, type AttentionItem, type ProjectSummary } from "../api.ts";
+import { attentionKey, type AttentionItem, type ProjectSummary, type QueueView } from "../api.ts";
 import { mergeAttention, type WaitingItem } from "@nexus/protocol/attention";
 import { TimeAgo } from "./ui.tsx";
+import { OPEN_BUTTON, stopVersion, useStopActions } from "./Stop.tsx";
+import { stepThatMatters } from "./QueueRow.tsx";
 
 const LABEL: Record<AttentionItem["kind"], { text: string; tone: string }> = {
   question: { text: "Question", tone: "text-warn bg-warn/15" },
@@ -15,52 +17,83 @@ const LABEL: Record<AttentionItem["kind"], { text: string; tone: string }> = {
 
 const plain = (s: string) => s.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\*\*|`/g, "");
 
-/** Where an item leads: a stopped queue's item opens the queue, whose stop box has Continue; others their step. */
+/** Where an item leads: a stopped queue's item opens the queue, whose stop box has what the step left; others their step. */
 export const attentionTarget = (a: AttentionItem): string | undefined => (a.lift ? undefined : a.step);
 
 /** The queue and step an item is about; for a stopped queue, where its stop is ("W at step W4b", "W (the stop came …)"). */
 const whereOf = (a: AttentionItem) => (a.lift ? `${a.queue}${a.lift.place}` : `${a.queue ?? ""}${a.step ? `/${a.step}` : ""}`);
 
-/**
- * A stopped queue's way out, as the waiting list and the queue card show it: Continue when the current revision is
- * approved (else approving it lifts the stop), and the orchestrator's proposal to lift it, with its reason and time.
- */
-export function StopWays({ lift, className = "" }: { lift: NonNullable<AttentionItem["lift"]>; className?: string }) {
+/** The orchestrator's proposal to lift a stop, with its reason and time, in a stopped queue's waiting card. */
+function LiftProposal({ lift }: { lift: NonNullable<AttentionItem["lift"]> }) {
+  if (!lift.proposal) return null;
   return (
-    <span className={`block text-xs ${className}`}>
-      <span className="block text-stop">{lift.continue ? "Continue possible: open the queue to lift the stop" : `Approving revision ${lift.revision} lifts the stop`}</span>
-      {lift.proposal && (
-        <span className="mt-1 block rounded-md bg-canvas/60 px-2 py-1 text-fg">
-          <span className="text-fg-3">The orchestrator proposes to continue · <TimeAgo at={lift.proposal.at} /></span>
-          <span className="line-clamp-2 block">{plain(lift.proposal.reason)}</span>
-        </span>
-      )}
+    <span className="mt-1.5 block rounded-md bg-canvas/60 px-2 py-1 text-xs text-fg">
+      <span className="text-fg-3">The orchestrator proposes to continue · <TimeAgo at={lift.proposal.at} /></span>
+      <span className="line-clamp-2 block">{plain(lift.proposal.reason)}</span>
     </span>
   );
 }
 
-export function AttentionPanel({ items, onOpen }: { items: AttentionItem[]; onOpen: (a: AttentionItem) => void }) {
+/**
+ * A stopped queue's way on, in its waiting card: Continue right there (Keep or Discard first when the stopped step
+ * left commits; Stop.tsx), or "Approve revision N…" when its revision is not approved, and Open.
+ */
+function StopRow({ project, a, onOpen, onChanged, pushAccepted, queue }: {
+  project: string; a: AttentionItem & { lift: NonNullable<AttentionItem["lift"]> }; onOpen: () => void; onChanged?: () => void;
+  pushAccepted?: boolean;
+  /** The queue, on its project's page: its branch, and the version its step line uses too. */
+  queue?: QueueView;
+}) {
+  const { buttons, panel } = useStopActions({
+    project, queue: a.queue!, approved: a.lift.continue, revision: a.lift.revision, version: queue ? stopVersion(queue) : a.at,
+    onOpen, onChanged, pushAccepted, branch: queue?.branch, discardShownElsewhere: !!queue && !!stepThatMatters(queue),
+  });
+  return (
+    <div className="px-3.5 pb-3">
+      <div className="flex flex-wrap items-center gap-2">
+        {buttons}
+        <button onClick={onOpen} className={OPEN_BUTTON}>Open</button>
+      </div>
+      {panel && <div className="mt-2">{panel}</div>}
+    </div>
+  );
+}
+
+/**
+ * What waits for the user in this project, on its page. A stopped queue's card names the queue and has Continue; its
+ * reason is shown once, at the stopped step in the queue's card below (only when that card shows no stopped step,
+ * here). `queues` gives the titles and that.
+ */
+export function AttentionPanel({ project, items, queues, pushAccepted, onOpen, onChanged }: {
+  project: string; items: AttentionItem[]; queues: QueueView[]; pushAccepted: boolean;
+  onOpen: (a: AttentionItem) => void; onChanged?: () => void;
+}) {
   return (
     <section className="mb-8">
       <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-warn/90">
         Waiting for you <span className="ml-1 text-xs text-fg-3">{items.length}</span>
       </h2>
-      <div className="grid gap-2 @2xl:grid-cols-2">
-        {items.map((a) => (
-          <button
-            key={attentionKey(a)}
-            onClick={() => onOpen(a)}
-            className="flex items-start gap-3 rounded-lg border border-line bg-surface p-3 text-left hover:border-fg-3/60"
-          >
-            <span className={`shrink-0 rounded-md px-2 py-0.5 text-xs font-semibold ${LABEL[a.kind].tone}`}>{LABEL[a.kind].text}</span>
-            <span className="min-w-0 flex-1">
-              <span className="block font-mono text-xs text-fg-3">{whereOf(a)}</span>
-              <span className="line-clamp-2 text-sm text-fg">{plain(a.text)}</span>
-              {a.lift && <StopWays lift={a.lift} className="mt-1.5" />}
-            </span>
-            {a.at && <span className="shrink-0 text-xs text-fg-3"><TimeAgo at={a.at} /></span>}
-          </button>
-        ))}
+      <div className="grid items-start gap-2 @2xl:grid-cols-2">
+        {items.map((a) => {
+          const q = a.lift ? queues.find((x) => x.id === a.queue) : undefined;
+          const reasonBelow = !!q && !!stepThatMatters(q);
+          return (
+            <div key={attentionKey(a)} className="rounded-lg border border-line bg-surface hover:border-fg-3/60">
+              <button onClick={() => onOpen(a)} className="flex w-full items-start gap-3 p-3 text-left">
+                <span className={`shrink-0 rounded-md px-2 py-0.5 text-xs font-semibold ${LABEL[a.kind].tone}`}>{LABEL[a.kind].text}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block font-mono text-xs text-fg-3">{whereOf(a)}</span>
+                  <span className="line-clamp-2 text-sm text-fg">{reasonBelow ? q!.title : plain(a.text)}</span>
+                  {a.lift && <LiftProposal lift={a.lift} />}
+                </span>
+                {a.at && <span className="shrink-0 text-xs text-fg-3"><TimeAgo at={a.at} /></span>}
+              </button>
+              {a.lift && a.queue && (
+                <StopRow project={project} a={{ ...a, lift: a.lift }} onOpen={() => onOpen(a)} onChanged={onChanged} pushAccepted={pushAccepted} queue={q} />
+              )}
+            </div>
+          );
+        })}
       </div>
     </section>
   );
@@ -106,8 +139,9 @@ export function WaitingList({ projects, onOpen, onChoose }: {
                 {a.at && <span className="shrink-0 text-fg-3"><TimeAgo at={a.at} /></span>}
               </span>
               <span className="mt-1.5 line-clamp-3 text-[15px] leading-snug text-fg">{plain(a.text)}</span>
-              {a.lift && <StopWays lift={a.lift} className="mt-1.5" />}
+              {a.lift && <LiftProposal lift={a.lift} />}
             </button>
+            {a.lift && a.queue && <StopRow project={a.project} a={{ ...a, lift: a.lift }} onOpen={() => onOpen(a)} />}
             {onChoose && a.kind === "question" && !!a.options?.length && (
               <div className="flex flex-wrap gap-2 px-3.5 pb-3">
                 {a.options.map((o, i) => (
