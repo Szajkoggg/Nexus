@@ -1,50 +1,89 @@
-// The queue report at the end of a run: the last-step prompt names a path outside .nexus, and a worker kept out of
-// .nexus (protect_nexus, the default) still ends with the report in the queue's folder, through nexus report.
+// The queue report at the end of a run: the last-step prompt names a file in the project's folder for reports, in the
+// system's temporary directory (outside the working tree and any repository), and a worker kept out of .nexus
+// (protect_nexus, the default) still ends with the report in the queue's folder, through nexus report, which removes
+// the source. A worktree queue then leaves a clean worktree, and its cleanup succeeds.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ProjectStore, approveQueue, loadProjectState, normPath, routeAnswers, type StepDef } from "@nexus/protocol";
+import { ProjectStore, approveQueue, loadProjectState, normPath, reportFile, routeAnswers, type StepDef } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
+import { cleanUp } from "../src/mergeback.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
 process.env.NEXUS_CODEX = join(here, "fake-codex.ts");
 
-test("a worker kept out of .nexus writes the report elsewhere; nexus report puts it in the queue's folder", async () => {
-  const root = mkdtempSync(join(tmpdir(), "nexus-report-"));
-  process.env.NEXUS_HOME = join(root, "home");
-  process.env.FAKE_LOG = join(root, "fake.log");
-  process.env.FAKE_ARGS = join(root, "args.log");
+function setup(o: { git?: boolean } = {}) {
+  const base = mkdtempSync(join(tmpdir(), "nexus-report-"));
+  // A temporary directory of this test's own (the worker inherits it), so tests side by side share no report file.
+  const temp = join(base, "temp");
+  mkdirSync(temp);
+  process.env.TEMP = temp; process.env.TMP = temp; process.env.TMPDIR = temp;
+  const root = join(base, "project");
+  mkdirSync(root);
+  process.env.NEXUS_HOME = join(base, "home");
+  process.env.FAKE_LOG = join(base, "fake.log");
+  process.env.FAKE_ARGS = join(base, "args.log");
+  if (o.git) {
+    const git = (...a: string[]) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", ...a], { cwd: root, stdio: "ignore" });
+    git("init", "-q", "-b", "main"); writeFileSync(join(root, ".gitignore"), ".nexus/\n"); writeFileSync(join(root, "a.txt"), "a\n");
+    git("add", "-A"); git("commit", "-qm", "init");
+  }
   const store = ProjectStore.init(root, { id: "p", name: "P", root });
-  assert.equal(store.readProject().defaults.protect_nexus, true);
   const step = (id: string): StepDef => ({ id, title: `Step ${id}`, goal: "FAKE: done", acceptance: [] });
-  store.writeQueue({ protocol: 1, id: "Q", title: "Queue", revision: 1, status: "proposed", stop_conditions: [], checks: [], steps: [step("Q1"), step("Q2")] });
+  store.writeQueue({ protocol: 1, id: "Q", title: "Queue", revision: 1, status: "proposed", stop_conditions: [], checks: [], steps: [step("Q1"), step("Q2")], ...(o.git ? { worktree: "auto" } : {}) });
   approveQueue(store, "Q");
   const engine: Engine = new Engine(store, () => { routeAnswers(store); engine.onChange(loadProjectState(store)); });
   const queue = () => loadProjectState(store).queues.find((q) => q.id === "Q")!;
-  try {
-    engine.start("Q", { runtime: "claude" });
+  const finished = async () => {
     for (const t = Date.now(); queue().run?.state !== "finished";) {
       if (Date.now() - t > 20_000) assert.fail(`timed out; run ${JSON.stringify(queue().run)}`);
       await new Promise((r) => setTimeout(r, 100));
     }
+  };
+  const prompts = () => readFileSync(process.env.FAKE_LOG!, "utf8").trim().split("\n").map((l) => (JSON.parse(l) as { text: string }).text);
+  return { base, temp, root, store, engine, queue, finished, prompts };
+}
+
+test("the report is written outside the working tree, copied into the queue's folder, and its source removed", async () => {
+  const x = setup();
+  assert.equal(x.store.readProject().defaults.protect_nexus, true);
+  try {
+    x.engine.start("Q", { runtime: "claude" });
+    await x.finished();
     const argv = readFileSync(process.env.FAKE_ARGS!, "utf8").trim().split("\n").map((l) => JSON.parse(l) as { argv?: string[] })[0]!.argv!;
     assert.ok(argv.some((a) => a.includes("Write(//") && a.includes(".nexus/**")), "the worker may not write under .nexus");
 
-    const prompts = readFileSync(process.env.FAKE_LOG!, "utf8").trim().split("\n").map((l) => (JSON.parse(l) as { text: string }).text);
-    const last = prompts.find((t) => /step Q2 \(2 of 2\)/.test(t))!;
-    const line = last.split("\n").find((l) => l.startsWith("This is the queue's last step"))!;
-    assert.match(line, /to tmp\/reports\/Q\.md in your working directory \(or any path outside \.nexus\) and register it with `nexus report Q --file tmp\/reports\/Q\.md --summary "…"`, which copies it into the queue's folder\./);
-    assert.ok(!prompts.find((t) => /step Q1 \(1 of 2\)/.test(t))!.includes("last step"), "only the last step asks for the report");
+    const file = reportFile("p", "Q");
+    assert.equal(file, join(x.temp, "nexus-reports", "p", "Q.md").replaceAll("\\", "/"), "<temp>/nexus-reports/<project>/<queue>.md");
+    assert.ok(!normPath(file).toLowerCase().startsWith(normPath(x.root).toLowerCase() + "/"), "outside the working tree");
+    const line = x.prompts().find((t) => /step Q2 \(2 of 2\)/.test(t))!.split("\n").find((l) => l.startsWith("This is the queue's last step"))!;
+    assert.ok(line.includes(`to ${file} (a folder for reports outside the working tree and any repository: never write it into the working tree, it would block the cleanup of a worktree) and register it with \`nexus report Q --file ${file} --summary "…"\`, which copies it into the queue's folder and removes it from there.`), line);
+    assert.ok(!x.prompts().find((t) => /step Q1 \(1 of 2\)/.test(t))!.includes("last step"), "only the last step asks for the report");
 
-    const target = join(store.queueDir("Q"), "report.md");
-    assert.ok(existsSync(target), "the report is in the queue's folder");
+    const target = join(x.store.queueDir("Q"), "report.md");
     assert.match(readFileSync(target, "utf8"), /fake report of the whole queue/);
-    assert.ok(existsSync(join(root, "tmp/reports/Q.md")), "written where the prompt said");
-    assert.equal(queue().report?.path, normPath(target));
-    assert.equal(queue().report?.summary, "fake report of Q");
-  } finally { engine.shutdown(); }
+    assert.equal(x.queue().report?.path, normPath(target));
+    assert.ok(!existsSync(file), "the source in the folder for reports is removed");
+    assert.ok(!existsSync(join(x.root, "tmp")), "nothing written into the working tree");
+  } finally { x.engine.shutdown(); }
+});
+
+test("a worktree queue ends with a clean worktree, and its cleanup succeeds", async () => {
+  const x = setup({ git: true });
+  try {
+    x.engine.start("Q", { runtime: "claude" });
+    await x.finished();
+    const wt = x.store.readQueue("Q").worktree!;
+    assert.ok(existsSync(wt));
+    assert.equal(execFileSync("git", ["status", "--porcelain"], { cwd: wt, encoding: "utf8" }).trim(), "", "a clean worktree");
+    assert.ok(existsSync(join(x.store.queueDir("Q"), "report.md")));
+    assert.equal(x.queue().status, "done");
+    assert.match(cleanUp(x.store, "Q"), /is removed and branch nexus\/Q deleted/);
+    assert.ok(!existsSync(wt));
+  } finally { x.engine.shutdown(); }
 });

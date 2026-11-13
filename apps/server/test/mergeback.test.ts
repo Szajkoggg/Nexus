@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -96,7 +96,13 @@ test("only a finished worktree queue; cleanup refuses uncommitted changes and an
   const x = setup();
   x.commit(x.wt, "b.txt", "work\n");
   writeFileSync(join(x.wt, "scratch.txt"), "untracked\n");
-  assert.throws(() => cleanUp(x.store, "Q"), /has uncommitted changes \(1 file\).*nothing was removed/);
+  assert.throws(() => cleanUp(x.store, "Q"), /has uncommitted changes \(1 file: \?\? scratch\.txt\): commit or discard them first; nothing was removed/);
+  // The refusal names what blocks it, e.g. a report left in the worktree.
+  mkdirSync(join(x.wt, "tmp/reports"), { recursive: true });
+  writeFileSync(join(x.wt, "tmp/reports/Q.md"), "a report left behind\n");
+  writeFileSync(join(x.wt, "b.txt"), "changed\n");
+  assert.throws(() => cleanUp(x.store, "Q"), /\(3 files: M b\.txt, \?\? scratch\.txt, \?\? tmp\/\): commit or discard/);
+  rmSync(join(x.wt, "tmp"), { recursive: true }); git(x.wt, "checkout", "--", "b.txt");
   assert.ok(existsSync(x.wt));
   git(x.wt, "add", "scratch.txt"); git(x.wt, "commit", "-q", "-m", "scratch");
   assert.throws(() => cleanUp(x.store, "Q"), /nexus\/Q is not merged into main: merge it first; nothing was removed/);

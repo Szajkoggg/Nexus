@@ -1,12 +1,12 @@
 // The `nexus` command. Agents report through it; the user (or Nexus itself) also uses it for setup.
 // Every agent-side command validates its input and appends one event to the session's own log.
-import { readFileSync, existsSync, writeFileSync } from "node:fs";
+import { readFileSync, existsSync, rmSync, writeFileSync } from "node:fs";
 import YAML from "yaml";
 import { basename, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { execFileSync } from "node:child_process";
 import {
-  Event, ProjectStore, findNexusDir, loadProjectState, stepValuesText, stopPlace, newId, normPath, now, readRegistry, writeRegistry,
+  Event, ProjectStore, findNexusDir, inReportFolder, loadProjectState, stepValuesText, stopPlace, newId, normPath, now, readRegistry, writeRegistry,
   type ReviewItem, type Role, type Runtime, type SessionFile,
 } from "@nexus/protocol";
 import { importMarkdownQueues } from "./import-md.ts";
@@ -438,7 +438,11 @@ const commands: Record<string, () => void | Promise<void>> = {
     const same = process.platform === "win32" ? target.toLowerCase() === file.toLowerCase() : target === file;
     if (!same) writeFileSync(target, readFileSync(file));
     emit(st, s, { type: "queue.report", queue, path: target, summary });
-    console.log(`ok: report for queue ${queue} in ${target}${same ? "" : ` (copied from ${file})`}`);
+    // A source in the project's folder for reports (outside every working tree) is removed once copied; one anywhere
+    // else is the worker's or the user's, and stays.
+    const removed = !same && inReportFolder(st.readProject().id, file);
+    if (removed) rmSync(file, { force: true });
+    console.log(`ok: report for queue ${queue} in ${target}${same ? "" : ` (copied from ${file}${removed ? ", which is removed" : ""})`}`);
   },
 
   log() {

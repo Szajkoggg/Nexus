@@ -95,7 +95,12 @@ export function cleanUp(store: ProjectStore, queueId: string): string {
   if (here) {
     const dirty = git(path, ["status", "--porcelain"]);
     if (dirty === undefined) throw new ActionError(`cannot read the state of ${path}`, 409);
-    if (dirty) throw new ActionError(`${path} has uncommitted changes (${dirty.split(/\r?\n/).length} file${dirty.includes("\n") ? "s" : ""}): commit or discard them first; nothing was removed`, 409);
+    if (dirty) {
+      // The files that block it, as git status names them (?? untracked, M modified, D deleted…), so the user sees what they are.
+      const files = dirty.split(/\r?\n/).filter(Boolean);
+      const shown = files.slice(0, 20).map((l) => l.trim().replace(/^(\S+)\s+/, "$1 ")).join(", "); // the output is trimmed: no fixed columns
+      throw new ActionError(`${path} has uncommitted changes (${files.length} file${files.length === 1 ? "" : "s"}: ${shown}${files.length > 20 ? `, and ${files.length - 20} more` : ""}): commit or discard them first; nothing was removed`, 409);
+    }
   }
   // `git branch -d` deletes only a branch merged into its upstream, else into HEAD; checked first, so that a refusal
   // leaves the worktree in place. HEAD is the base's, where it is checked out, else the project's checkout.

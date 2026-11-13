@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  ProjectStore, addNote, answerAsUser, approveQueue, loadProjectState, routeAnswers, runTimes, sendMessage, type StepDef,
+  ProjectStore, addNote, answerAsUser, approveQueue, loadProjectState, reportFolder, routeAnswers, runTimes, sendMessage, type StepDef,
 } from "@nexus/protocol";
 import { Engine, RETRY_LIMIT, type EngineOptions } from "../src/engine.ts";
 
@@ -234,7 +234,7 @@ test("Codex in a queue's own worktree may write the worktree's git paths, and no
     await until("the run to finish", () => queue().run?.state === "finished");
     const wt = store.readQueue("Q").worktree!;
     const gitDir = join(root, ".git"), mine = (p: string) => normalize(p).toLowerCase();
-    const want = [store.dir, join(gitDir, "worktrees", "Q"), join(gitDir, "objects"), join(gitDir, "refs"), join(gitDir, "logs")].map(mine);
+    const want = [store.dir, join(gitDir, "worktrees", "Q"), join(gitDir, "objects"), join(gitDir, "refs"), join(gitDir, "logs"), reportFolder("p")].map(mine);
     const calls = readFileSync(process.env.FAKE_ARGS, "utf8").trim().split("\n").map((l) => JSON.parse(l) as { method: string; writableRoots: string[] | null; cwd?: string });
     const start = calls.filter((c) => c.method === "thread/start"), turns = calls.filter((c) => c.method === "turn/start");
     assert.equal(mine(start[0]!.cwd!), mine(wt));
@@ -243,7 +243,7 @@ test("Codex in a queue's own worktree may write the worktree's git paths, and no
   } finally { engine.shutdown(); delete process.env.FAKE_ARGS; }
 });
 
-test("Codex in the project's own checkout gets no git roots: its .git lies inside it", async () => {
+test("Codex in the project's own checkout gets no git roots (its .git lies inside it), only the folder for reports", async () => {
   const { store, engine, queue, until } = setup(["done"]);
   process.env.FAKE_ARGS = join(dirname(process.env.FAKE_LOG!), "args.log");
   execFileSync("git", ["init", "-q"], { cwd: store.readProject().root, stdio: "ignore" });
@@ -251,8 +251,10 @@ test("Codex in the project's own checkout gets no git roots: its .git lies insid
     engine.start("Q", { runtime: "codex" });
     await until("the run to finish", () => queue().run?.state === "finished");
     const calls = readFileSync(process.env.FAKE_ARGS, "utf8").trim().split("\n").map((l) => JSON.parse(l) as { method: string; writableRoots: string[] | null });
-    assert.deepEqual(calls.filter((c) => c.method === "turn/start").map((c) => c.writableRoots), [[]]);
-    assert.equal(calls.find((c) => c.method === "thread/start")!.writableRoots, null, "no roots, no sandbox config");
+    // Only the folder for reports (outside the checkout, where the last step's report is written).
+    const mine = (p: string) => normalize(p).toLowerCase();
+    assert.deepEqual(calls.filter((c) => c.method === "turn/start").map((c) => c.writableRoots?.map(mine)), [[mine(reportFolder("p"))]]);
+    assert.deepEqual(calls.find((c) => c.method === "thread/start")!.writableRoots?.map(mine), [mine(reportFolder("p"))]);
   } finally { engine.shutdown(); delete process.env.FAKE_ARGS; }
 });
 

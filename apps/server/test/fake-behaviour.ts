@@ -141,7 +141,8 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
       if (!writeDenied(path)) {
         mkdirSync(dirname(path), { recursive: true });
         writeFileSync(path, `# Queue ${report[1]} report\n\nfake report of the whole queue\n`);
-        nexus("report", report[1]!, "--file", path, "--summary", `fake report of ${report[1]}`);
+        // Tests running side by side may share a project id and so a report file: a refusal here is not the test's subject.
+        try { nexus("report", report[1]!, "--file", path, "--summary", `fake report of ${report[1]}`); } catch { /* another test took it */ }
       }
     }
     return `step ${step}: ${behaviour}`;

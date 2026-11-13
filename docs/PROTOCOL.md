@@ -526,7 +526,7 @@ nexus step failed W3 --reason "..."
 nexus stop W3 --condition "user decision" --reason "..."
 nexus ask "Canyon joints: vertical only, or also inclined?" [--option ...] [--can-continue]
 nexus context --topics rock,support --files Runtime/Core/Rock/* <<< "summary text"
-nexus report W --file tmp/reports/W.md --summary "..."   # copies the file to .nexus/queues/W/report.md
+nexus report W --file <temp>/nexus-reports/<project>/W.md --summary "..."   # copied to .nexus/queues/W/report.md
 nexus propose-change W --file patch.yaml --reason "..."
 # orchestrator only
 nexus queue draft --file queue.yaml
@@ -552,8 +552,10 @@ approved ones not running, each with its steps and, when it is not running, the 
 `nexus report <queue> --file <path> --summary <text>` copies the file into `.nexus/queues/<queue>/report.md` (the one
 writer of that file; a path that is already that file is left as it is) and records `queue.report` naming the copy, so
 the dashboard and the run digest read it there. Workers may not write under `.nexus` with their file tools
-(`protect_nexus`), so the last step's prompt asks for the report at `tmp/reports/<queue>.md` in the working directory
-(or any path outside `.nexus`).
+(`protect_nexus`), and a report left in a working tree would block the cleanup of a worktree, so the last step's
+prompt asks for the report in the project's **folder for reports**, outside every working tree and repository:
+`<system temporary directory>/nexus-reports/<project>/<queue>.md` (`reportFile`; a Codex worker gets that folder as a
+writable root). Once copied, a source in that folder is removed; a source anywhere else is kept.
 
 Step states also include `stopped` (the step a `queue.stop` named, when it was not finished).
 
@@ -606,7 +608,7 @@ sends (see the CLI).
 | `GET /api/projects/:id/queues/:q/steps/:s/commits` | | A step's commits per round: `{ rounds: [{ session, start, end, open, commits: [{ sha, subject, author, at, files, insertions, deletions, foreign }] }] }`, newest first; an open round runs to HEAD; null outside a git repository or with nothing recorded |
 | `GET /api/projects/:id/queues/:q/git` | | The queue's branch: `{ branch, base?: { ref, ahead, behind }, upstream?: { ref, ahead, behind, at? } }`; null outside a git repository, before an auto worktree exists, or on no branch |
 | `POST /api/projects/:id/queues/:q/merge` | | Merge back a finished worktree queue's branch into its base (see "Merge back and clean up"); answers `{ ok, result: { message } }` |
-| `POST /api/projects/:id/queues/:q/cleanup` | | Clean up a finished worktree queue: the worktree removed, its branch deleted with `-d`; answers `{ ok, result: { message } }` |
+| `POST /api/projects/:id/queues/:q/cleanup` | | Clean up a finished worktree queue: the worktree removed, its branch deleted with `-d`; answers `{ ok, result: { message } }`. Refused while the worktree has uncommitted changes; the refusal names them as git status does (`?? tmp/`, `M a.txt`, up to 20) |
 | `POST /api/projects/:id/queues/:q/push` | | Push again: the step of the queue's last failed push; answers `{ ok, result: { message } }` at once, the push runs in the background |
 | `POST /api/projects/:id/queues/:q/steps/:s/send-back` | `text` (required, kept verbatim) | Fix it: sends a step waiting for the user's review back to its worker; answers `{ ok, result: { message } }` |
 | `POST /api/projects/:id/queues/:q/continue` | `work?` (`keep` or `discard`) | Continue: lifts the stop of a stopped queue whose current revision is approved and goes on (see "Continue" under `queue.yaml`); refused (409) otherwise. `work` is required when the stopped step left commits of its own; `discard` records it and does not go on |

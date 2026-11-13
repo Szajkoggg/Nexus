@@ -11,7 +11,7 @@ import { existsSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import {
   ENDED_RUN_STATES,
-  ActionError, ProjectStore, USER_SESSION, ensureUserSession, liftByContinue, loadProjectState, stepClosed, stopPlace, newId, normPath, now, readUsage,
+  ActionError, ProjectStore, USER_SESSION, ensureUserSession, liftByContinue, loadProjectState, stepClosed, reportFile, ensureReportFolder, stopPlace, newId, normPath, now, readUsage,
   writeUsage, CLAUDE_EFFORTS, RETRY_LIMIT, effortIssue, formatClock, type Effort, type ProjectFile, type StepDef, type InboxView, type ProjectState, type QueueView, type RunFile, type SessionFile,
   type SessionView, type StepView,
   addNote,
@@ -730,7 +730,7 @@ export class Engine {
       notes.length ? `\nNotes from the user for this step:\n${notes.map((n) => `- ${n.body}`).join("\n")}` : "",
       answers.length ? `\nAnswers to your questions about this step:\n${answers.map((x) => `- "${x.text}": ${x.answers.at(-1)?.text}`).join("\n")}` : "",
       `\nBegin with \`nexus step start ${step.id}\`${mode === "continue" ? " (again is fine)" : ""}. End with \`nexus step done ${step.id} --summary "…"\`, \`nexus step failed\` or \`nexus stop\`, then write \`nexus context\` and end your turn. Do not start another step.`,
-      last ? `\nThis is the queue's last step. After it is done, write a short report of the whole queue (what each step achieved against its acceptance, checks, review material, open questions, a proposed next step) to tmp/reports/${q.id}.md in your working directory (or any path outside .nexus) and register it with \`nexus report ${q.id} --file tmp/reports/${q.id}.md --summary "…"\`, which copies it into the queue's folder.` : "",
+      last ? `\nThis is the queue's last step. After it is done, write a short report of the whole queue (what each step achieved against its acceptance, checks, review material, open questions, a proposed next step) to ${reportFile(project.id, q.id)} (a folder for reports outside the working tree and any repository: never write it into the working tree, it would block the cleanup of a worktree) and register it with \`nexus report ${q.id} --file ${reportFile(project.id, q.id)} --summary "…"\`, which copies it into the queue's folder and removes it from there.` : "",
     ].filter(Boolean);
     live.proc.send([around.before, lines.join("\n"), around.after].filter(Boolean).join("\n\n"));
     for (const n of notes) this.store.appendDelivered(run.session, { at: now(), kind: "note", id: n.id, via: "turn" });
@@ -857,7 +857,8 @@ export class Engine {
       proc = new CodexSession({
         cwd: session.cwd, model: session.model ?? codex.model, effort: session.effort ?? codex.effort, instructions: WORKER_BRIEFING, env,
         threadId: session.native_id, sandbox: codex.sandbox, approvalPolicy: codex.approval_policy, approvalsReviewer: codex.approvals_reviewer,
-        writableRoots: [...(inside ? [] : [this.store.dir]), ...gitWritableRoots(session.cwd)],
+        // The folder for reports: the last step's report is written there (outside the working tree).
+        writableRoots: [...(inside ? [] : [this.store.dir]), ...gitWritableRoots(session.cwd), ensureReportFolder(project.id)],
       });
     } else {
       const claude = project.runtimes.claude;
