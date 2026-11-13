@@ -9,8 +9,9 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import {
-  ActionError, CLAUDE_EFFORTS, Effort, ProjectStore, newId, normPath, now, type ProjectFile, type SessionFile,
+  ActionError, CLAUDE_EFFORTS, Effort, ProjectStore, loadProjectState, newId, normPath, now, type ProjectFile, type SessionFile,
 } from "@nexus/protocol";
+import { findStep, sinceThen, stepSeed } from "./step-seed.ts";
 import type { AgentProcess } from "./agent.ts";
 import { ClaudeSession } from "./claude.ts";
 import { CodexSession } from "./codex.ts";
@@ -51,21 +52,42 @@ export class Conversations {
     return { session: s, state: this.live.get(id)?.proc.state ?? "exited", runtime: this.store.readRuntime(id) ?? null, chat: this.store.readChat(id).entries.slice(-400), model: s.model ?? null, effort: s.effort ?? null, notes_dir: this.store.readProject().conversations.notes_dir ?? null };
   }
 
-  create(body: { title?: unknown; runtime?: unknown; model?: unknown; effort?: unknown }): SessionFile {
+  /**
+   * `queue` and `step` (both or neither) link the conversation to a step ("Chat about this"). Creating it starts no
+   * model turn and changes nothing in the run; the step's context goes to the partner with the user's first message.
+   */
+  create(body: { title?: unknown; runtime?: unknown; model?: unknown; effort?: unknown; queue?: unknown; step?: unknown }): SessionFile {
     const p = this.store.readProject();
     const c = p.conversations;
+    const about = this.stepLink(body.queue, body.step);
     const runtime = body.runtime === "codex" || body.runtime === "claude" ? body.runtime : c.runtime;
     const effort = parseEffort(body.effort) ?? c.effort;
     if (runtime === "claude" && effort && !CLAUDE_EFFORTS.includes(effort)) throw new ActionError(`Claude Code takes effort ${CLAUDE_EFFORTS.join(", ")}`);
-    const title = typeof body.title === "string" && body.title.trim() ? body.title.trim().slice(0, 120) : "New conversation";
+    const title = typeof body.title === "string" && body.title.trim() ? body.title.trim().slice(0, 120)
+      : about ? `${about.step}: ${about.title}`.slice(0, 120) : "New conversation";
     const s: SessionFile = {
       protocol: 1, id: newId(), project: p.id, role: "conversation", runtime, title,
       native_id: runtime === "claude" ? randomUUID() : null, cwd: normPath(p.root), launched_by: "nexus", created_at: now(),
       model: typeof body.model === "string" && body.model.trim() ? body.model.trim() : c.model, effort,
+      ...(about ? { about: { queue: about.queue, step: about.step } } : {}),
     };
     this.store.writeSession(s);
     this.changed();
     return s;
+  }
+
+  /** The step's latest conversation that is not archived (by its last message), if it has one. */
+  latestFor(queue: string, step: string): SessionFile | undefined {
+    return this.list().filter((s) => !s.archived && s.about?.queue === queue && s.about.step === step)
+      .sort((a, b) => b.last_at.localeCompare(a.last_at) || b.created_at.localeCompare(a.created_at))[0];
+  }
+
+  private stepLink(queue: unknown, step: unknown): { queue: string; step: string; title: string } | undefined {
+    if (queue === undefined && step === undefined) return undefined;
+    if (typeof queue !== "string" || typeof step !== "string" || !queue || !step) throw new ActionError("a conversation about a step needs both queue and step");
+    const found = findStep(loadProjectState(this.store), queue, step);
+    if (!found) throw new ActionError(`queue ${queue} has no step ${step}`, 404);
+    return { queue, step, title: found.st.title };
   }
 
   update(id: string, body: { title?: unknown; model?: unknown; effort?: unknown; archived?: unknown }): void {
@@ -87,7 +109,24 @@ export class Conversations {
     if (this.draining) throw new ActionError("Nexus is updating; send it after the restart", 409);
     const s = this.session(id);
     this.store.appendChat(id, { at: now(), from: "user", text: text.trim() });
-    this.deliver(s, text.trim());
+    this.deliver(s, this.withStepContext(s, text.trim()));
+  }
+
+  /**
+   * A conversation about a step: its first message carries the step's context (the seed), and a later one a short
+   * "since then" addition when the step changed state since. The chat keeps the user's words only.
+   */
+  private withStepContext(s: SessionFile, text: string): string {
+    if (!s.about) return text;
+    const state = loadProjectState(this.store);
+    const { queue, step, seeded } = s.about;
+    const context = seeded ? sinceThen(state, queue, step, seeded) : stepSeed(state, queue, step);
+    if (!context) return text;
+    const status = findStep(state, queue, step)?.st.status;
+    this.store.writeSession({ ...this.store.readSession(s.id), about: { queue, step, seeded: status ? { status, at: now() } : seeded } });
+    return `${context}
+
+${text}`;
   }
 
   /** The partner summarizes the conversation; the summary then goes to the orchestrator's chat. */

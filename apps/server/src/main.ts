@@ -445,6 +445,12 @@ app.get("/api/projects/:id/conversations/:cid", (c) => {
   try { return c.json(e.conversations.view(c.req.param("cid"))); } catch (err) { return c.json({ error: (err as Error).message }, 404); }
 });
 app.post("/api/projects/:id/conversations", act((st, b) => conversationsOf(st).create(b)));
+// The step's latest conversation that is not archived ("Chat about this" opens it, or starts one when there is none).
+app.get("/api/projects/:id/queues/:q/steps/:s/conversation", (c) => {
+  const e = projects.get(c.req.param("id"));
+  if (!e) return c.json({ error: "unknown project" }, 404);
+  return c.json({ conversation: e.conversations.latestFor(c.req.param("q"), c.req.param("s")) ?? null });
+});
 app.patch("/api/projects/:id/conversations/:cid", act((st, b, p) => conversationsOf(st).update(p("cid"), b)));
 app.post("/api/projects/:id/conversations/:cid/messages", act((st, b, p) => conversationsOf(st).say(p("cid"), b.text)));
 app.post("/api/projects/:id/conversations/:cid/handoff", act((st, _b, p) => conversationsOf(st).handoff(p("cid"))));

@@ -257,6 +257,15 @@ export const SessionFile = z.object({
   effort: Effort.optional(),
   /** A conversation the user put away: kept, not listed first. */
   archived: z.boolean().optional(),
+  /**
+   * A conversation about a step ("Chat about this"): the queue and step it is about (in this session's project). Kept
+   * apart from `queue`, which makes a session a worker of that queue (`nexus status` would deliver the queue's notes to
+   * it). `seeded`: the step's status when the partner last got its context (the seed, or a "since then" addition).
+   */
+  about: z.object({
+    queue: Id, step: Id,
+    seeded: z.object({ status: StepStatus, at: Time }).optional(),
+  }).optional(),
   /** The session this one took over from (context care: the earlier one's context was full). */
   continues: Id.optional(),
   /** The session that took over from this one. */

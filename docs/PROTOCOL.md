@@ -403,6 +403,10 @@ created_at: ...
 forked_from: null
 continues: 01JD...                     # context care: the session this one took over from
 continued_by: 01JD...                  # context care: the session that took over from this one
+about:                                 # a conversation about a step (role conversation only); not `queue`
+  queue: W
+  step: W3
+  seeded: { status: review, at: ... }  # the step's status when the partner last got its context
 ```
 
 ## The `nexus` CLI
@@ -568,10 +572,24 @@ in `chat.jsonl` (`from: partner` for its replies, whole). It reads the whole pro
 working directory in a `workspace-write` sandbox (`read-only` without a notes folder), approval `never`. It starts no
 work. An idle partner's process ends after 15 minutes; the next message resumes the conversation.
 
-API: `GET /api/projects/:id/conversations`, `POST …/conversations` (`title`, `runtime?`, `model?`, `effort?`),
-`GET …/conversations/:cid` (session, state, chat), `PATCH …/conversations/:cid` (`title`, `model`, `effort`,
-`archived`), `POST …/conversations/:cid/messages` (`text`), `POST …/conversations/:cid/handoff`: the partner writes a
-summary (decisions, open questions, proposed work), which goes whole into the orchestrator's chat.
+API: `GET /api/projects/:id/conversations`, `POST …/conversations` (`title`, `runtime?`, `model?`, `effort?`,
+`queue?` and `step?`, both or neither), `GET …/conversations/:cid` (session, state, chat), `PATCH …/conversations/:cid`
+(`title`, `model`, `effort`, `archived`), `POST …/conversations/:cid/messages` (`text`), `POST
+…/conversations/:cid/handoff`: the partner writes a summary (decisions, open questions, proposed work), which goes
+whole into the orchestrator's chat. `GET …/queues/:q/steps/:s/conversation` answers `{ conversation }`: the step's
+latest conversation that is not archived (the one with the latest message, or the newest when none has one), or
+`null`.
+
+**A conversation about a step** ("Chat about this"): `queue` and `step` are kept in `session.yaml` as `about`, never as
+`queue` (which makes a session a worker of the queue: `nexus status` would deliver the queue's notes to it and mark
+them read). The default title is `<step>: <step title>`. Creating it starts no model turn and changes nothing in the
+run (a step in review keeps waiting); `nexus status` from it prints the orchestrator's overview and writes no event.
+The server builds the step's context, the **seed**, and sends it with the user's first message (the chat keeps the
+user's words only), by the step's state: `pending` and `skipped`: goal, acceptance criteria and notes (and the reason
+of a skip); `running` and `waiting`: also the progress so far; `review`, `done`, `failed`, `stopped` and `rejected`:
+also the summary, the reason, commits, send-backs, checks and review material; open questions of the step in every
+state. It records the step's status in `about.seeded`. When the step's status differs at a later message, a short
+"since then" addition (the change, and the outcome or progress of the new state) goes with that message, once.
 
 ## The orchestrator
 
