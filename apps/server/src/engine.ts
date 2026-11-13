@@ -12,19 +12,20 @@ import { basename, dirname, join } from "node:path";
 import {
   ENDED_RUN_STATES,
   ActionError, ProjectStore, USER_SESSION, ensureUserSession, liftByContinue, loadProjectState, releaseOrphanedSteps, stepClosed, reportFile, ensureReportFolder, newId, normPath, now, readUsage,
-  writeUsage, RETRY_LIMIT, effortIssue, formatClock, type Effort, type ProjectFile, type StepDef, type InboxView, type ProjectState, type QueueView, type RunFile, type SessionFile,
+  RETRY_LIMIT, effortIssue, formatClock, type Effort, type ProjectFile, type StepDef, type InboxView, type ProjectState, type QueueView, type RunFile, type SessionFile,
   type SessionView, type StepView,
   addNote, runIsOlder,
 } from "@nexus/protocol";
-import type { AgentProcess, StreamFacts, TurnFailure } from "./agent.ts";
-import { ClaudeSession, nexusDenyRules } from "./claude.ts";
-import { CodexSession, gitWritableRoots } from "./codex.ts";
+import type { TurnFailure } from "./agent.ts";
+import { AgentHost, ROLE_RECORDS, type Hosted, type Launch } from "./agent-host.ts";
+import { nexusDenyRules } from "./claude.ts";
+import { gitWritableRoots } from "./codex.ts";
 import {
   GOING, assertCanResume, assertCanStart, startedRun, stoppedMessage, toFinished, toHalted, toHeldForUpdate,
   toPaused, toPausedByUser, toResumed, toRetryWait, toUnheld, toUsageWait,
 } from "./run-state.ts";
 
-interface Live { proc: AgentProcess; session: string }
+type Live = Hosted;
 
 export interface StartOptions {
   model?: string; effort?: Effort; session?: string; runtime?: "claude" | "codex";
@@ -108,7 +109,8 @@ export function stepValues(run: StepValues, step: Pick<StepDef, "runtime" | "mod
 }
 
 export class Engine {
-  private readonly live = new Map<string, Live>();   // by Nexus session id
+  /** The workers' processes, by Nexus session id. */
+  private readonly host: AgentHost;
   private readonly store: ProjectStore;
   private readonly changed: () => void;
   private timers = new Map<string, NodeJS.Timeout>();
@@ -132,6 +134,7 @@ export class Engine {
   constructor(store: ProjectStore, changed: () => void, options: EngineOptions = {}) {
     this.store = store;
     this.changed = changed;
+    this.host = new AgentHost(store, ROLE_RECORDS.worker);
     this.retryBaseMs = options.retryBaseMs ?? RETRY_BASE_MS;
     this.usageMarginMs = options.usageMarginMs ?? USAGE_MARGIN_MS;
     this.clock = options.clock ?? REAL_CLOCK;
@@ -202,7 +205,7 @@ export class Engine {
     // Also a queue held for an update: the user's pause wins, so the restart does not resume it. A pending retry or
     // usage wait is cancelled.
     if (run.state === "running" || run.state === "usage_wait" || run.state === "retry_wait" || run.resume_after_restart) {
-      const working = this.live.get(run.session)?.proc.state === "working";
+      const working = this.host.get(run.session)?.proc.state === "working";
       this.clearTimer(queueId);
       this.writeRun(queueId, toPausedByUser(run, "paused by the user", { pausing: working }));
     }
@@ -264,18 +267,18 @@ export class Engine {
       const run = this.store.readRun(id);
       if (run?.state === "retry_wait") { this.writeRun(id, { ...run, resume_after_restart: true }); held.push(id); continue; }
       if (!run || run.state !== "running") continue;
-      const working = this.live.get(run.session)?.proc.state === "working";
+      const working = this.host.get(run.session)?.proc.state === "working";
       const reason = "the Nexus server is updating; it goes on by itself afterwards";
       this.writeRun(id, toHeldForUpdate(run, reason, { pausing: working && !now }));
       held.push(id);
     }
-    if (now) for (const [, l] of this.live) if (l.proc.state === "working") { this.ending.add(l.session); l.proc.kill(); }
+    if (now) for (const l of this.host.all()) if (l.proc.state === "working") { this.ending.add(l.session); l.proc.kill(); }
     return held;
   }
 
   /** No agent of this project is in the middle of a turn. */
   idle(): boolean {
-    return ![...this.live.values()].some((l) => l.proc.state === "working");
+    return this.host.idle();
   }
 
   /** The update did not happen: the queues it held go on now. */
@@ -299,7 +302,7 @@ export class Engine {
   /** Interrupts the running turn and pauses the run. */
   stopNow(queueId: string, text?: string): void {
     const run = this.run(queueId);
-    const live = this.live.get(run.session);
+    const live = this.host.get(run.session);
     this.clearTimer(queueId);
     this.writeRun(queueId, toPausedByUser(run, "stopped by the user"));
     if (live && live.proc.state === "working") {
@@ -361,7 +364,7 @@ export class Engine {
   /** Called after every change to the project's files (debounced by the server). */
   onChange(state: ProjectState): void {
     if (!this.stopped) this.pusher.onChange(state);
-    for (const [, l] of this.live) this.deliverInbox(state, l);
+    for (const l of this.host.all()) this.deliverInbox(state, l);
     for (const q of state.queues) if (q.run && (q.run.state === "running" || q.run.state === "pausing")) this.advance(q.id, state);
     this.checkStarts();
   }
@@ -507,12 +510,12 @@ export class Engine {
     this.timers.clear();
     for (const t of this.clockTimers.values()) this.clock.clearTimeout(t);
     this.clockTimers.clear();
-    for (const [, l] of this.live) l.proc.kill();
+    for (const l of this.host.all()) l.proc.kill();
   }
 
   /** A process of this engine's is still running (after shutdown: not yet exited). */
   alive(): boolean {
-    return [...this.live.values()].some((l) => l.proc.state !== "exited");
+    return this.host.alive();
   }
 
   // ---------------------------------------------------------------- driving
@@ -536,7 +539,7 @@ export class Engine {
     const state = given ?? loadProjectState(this.store);
     const q = this.queue(state, queueId);
     if (this.restarting.has(run.session)) return; // the process restarts with another model or effort
-    const live = this.live.get(run.session);
+    const live = this.host.get(run.session);
     if (!live || live.proc.state === "exited") return this.halt(queueId, "the session's process is not running");
     if (live.proc.state === "working") return;
     if (!q.approved) {
@@ -704,7 +707,7 @@ export class Engine {
 
   private openStep(queueId: string, step: StepView, q: QueueView, mode: "start" | "continue", why?: string, around: { before?: string; after?: string } = {}): void {
     const run = this.run(queueId);
-    const live = this.live.get(run.session);
+    const live = this.host.get(run.session);
     if (!live) return this.halt(queueId, "the session's process is not running");
     const state = loadProjectState(this.store);
     const project = state.project;
@@ -832,8 +835,8 @@ export class Engine {
   }
 
   private ensureProcess(session: SessionFile): Live {
-    const existing = this.live.get(session.id);
-    if (existing && existing.proc.state !== "exited") {
+    const existing = this.host.running(session.id);
+    if (existing) {
       // A process Nexus is ending (its run just finished, or its session was switched) cannot take another turn: its
       // input is closed. Wait for its exit as a restart does (never two processes on one session); the exit handler
       // then starts the new process and advances the session's runs.
@@ -845,24 +848,23 @@ export class Engine {
       return existing;
     }
     const project = this.store.readProject();
-    const env = { NEXUS_SESSION: session.id, NEXUS_DIR: this.store.dir };
-    let proc: AgentProcess;
-    if (session.runtime === "codex") {
-      const codex = project.runtimes.codex;
-      const inside = normPath(this.store.dir).toLowerCase().startsWith(normPath(session.cwd).toLowerCase() + "/");
-      proc = new CodexSession({
-        cwd: session.cwd, model: session.model ?? codex.model, effort: session.effort ?? codex.effort, instructions: WORKER_BRIEFING, env,
-        threadId: session.native_id, sandbox: codex.sandbox, approvalPolicy: codex.approval_policy, approvalsReviewer: codex.approvals_reviewer,
-        // The folder for reports: the last step's report is written there (outside the working tree).
-        writableRoots: [...(inside ? [] : [this.store.dir]), ...gitWritableRoots(session.cwd), ensureReportFolder(project.id)],
-      });
-    } else {
+    const env = this.host.env(session.id);
+    const launch = (resume: boolean): Launch => {
+      if (session.runtime === "codex") {
+        const codex = project.runtimes.codex;
+        const inside = normPath(this.store.dir).toLowerCase().startsWith(normPath(session.cwd).toLowerCase() + "/");
+        return { runtime: "codex", options: {
+          cwd: session.cwd, model: session.model ?? codex.model, effort: session.effort ?? codex.effort, instructions: WORKER_BRIEFING, env,
+          threadId: session.native_id, sandbox: codex.sandbox, approvalPolicy: codex.approval_policy, approvalsReviewer: codex.approvals_reviewer,
+          // The folder for reports: the last step's report is written there (outside the working tree).
+          writableRoots: [...(inside ? [] : [this.store.dir]), ...gitWritableRoots(session.cwd), ensureReportFolder(project.id)],
+        } };
+      }
       const claude = project.runtimes.claude;
-      const transcriptExists = this.store.readRuntime(session.id) !== undefined; // started before: resume it
-      proc = new ClaudeSession({
+      return { runtime: "claude", options: {
         cwd: session.cwd,
         uuid: session.native_id!,
-        resume: transcriptExists,
+        resume, // started before (it has a runtime record): resume it
         model: session.model ?? claude.model,
         effort: session.effort ?? claude.effort,
         permissionMode: claude.permission_mode,
@@ -872,11 +874,8 @@ export class Engine {
         disallowedTools: project.defaults.protect_nexus ? nexusDenyRules(this.store.dir) : undefined,
         appendSystemPrompt: WORKER_BRIEFING,
         env,
-      });
-    }
-    const l: Live = { proc, session: session.id };
-    this.live.set(session.id, l);
-    this.writeRuntime(session.id, { state: "idle", pid: proc.pid });
+      } };
+    };
 
     const tag = () => {
       // The run that drives the session now; a session continued from an earlier queue still has that one's run too.
@@ -884,80 +883,59 @@ export class Engine {
       const run = runs.find(([, r]) => GOING.includes(r!.state)) ?? runs.sort(([, a], [, b]) => b!.updated_at.localeCompare(a!.updated_at))[0];
       return run ? { queue: run[0], step: run[1]?.step } : {};
     };
-    proc.on("activity", (a) => this.store.appendActivity(session.id, { at: now(), ...a, ...tag() }));
-    proc.on("facts", (f) => this.facts(session.id, f));
-    proc.on("refusal", (r) => {
-      // One record per refusal, also across processes of the session (a resumed runtime may repeat its list).
-      if (r.ref && this.store.readRefusals(session.id).entries.some((x) => x.ref === r.ref)) return;
-      this.store.appendRefusal({ at: now(), session: session.id, runtime: session.runtime === "codex" ? "codex" : "claude", ...r, ...tag() });
-      this.changed();
-    });
     const runsOf = () => this.store.queueIds().filter((q) => this.store.readRun(q)?.session === session.id);
-    proc.on("turnEnd", (end) => {
-      this.writeRuntime(session.id, { state: "idle", turns: (this.store.readRuntime(session.id)?.turns ?? 0) + 1 });
-      // A failed turn is decided at once and is not a turn without an outcome.
-      if (end.failure) { for (const q of runsOf()) this.turnFailed(q, end.failure); this.changed(); return; }
-      if (end.ok) for (const q of runsOf()) { const r = this.store.readRun(q); if (r?.retries) this.writeRun(q, { ...r, retries: undefined, failure: undefined }); }
-      // Let the CLI's last events land in the files, then decide. A step that got its outcome in this turn ends its
-      // round of commits here.
-      setTimeout(() => {
-        const state = loadProjectState(this.store);
-        for (const q of state.queues) {
-          if (q.run?.session !== session.id) continue;
-          const st = q.steps.find((s) => s.id === q.run!.step);
-          if (st && OUTCOME.has(st.status)) recordStepEnd(this.store, q.id, st.id);
-          this.advance(q.id);
+    // AgentHost keeps the runtime record (a turn's end counts in `turns`), the facts and the usage windows; these
+    // handlers run after it.
+    return this.host.start(session, launch, {}, () => ({
+      activity: (a) => this.store.appendActivity(session.id, { at: now(), ...a, ...tag() }),
+      refusal: (r) => {
+        // One record per refusal, also across processes of the session (a resumed runtime may repeat its list).
+        if (r.ref && this.store.readRefusals(session.id).entries.some((x) => x.ref === r.ref)) return;
+        this.store.appendRefusal({ at: now(), session: session.id, runtime: session.runtime === "codex" ? "codex" : "claude", ...r, ...tag() });
+        this.changed();
+      },
+      turnEnd: (end) => {
+        // A failed turn is decided at once and is not a turn without an outcome.
+        if (end.failure) { for (const q of runsOf()) this.turnFailed(q, end.failure); this.changed(); return; }
+        if (end.ok) for (const q of runsOf()) { const r = this.store.readRun(q); if (r?.retries) this.writeRun(q, { ...r, retries: undefined, failure: undefined }); }
+        // Let the CLI's last events land in the files, then decide. A step that got its outcome in this turn ends its
+        // round of commits here.
+        setTimeout(() => {
+          const state = loadProjectState(this.store);
+          for (const q of state.queues) {
+            if (q.run?.session !== session.id) continue;
+            const st = q.steps.find((s) => s.id === q.run!.step);
+            if (st && OUTCOME.has(st.status)) recordStepEnd(this.store, q.id, st.id);
+            this.advance(q.id);
+          }
+          this.changed();
+        }, 300);
+      },
+      exit: (code) => {
+        // Ended by Nexus (shutdown, the hand-over of an update, an update's drain with `now`, a finished run): no
+        // failure. Any other exit is a crash, and the turn is tried again on a new process that resumes the session.
+        const byNexus = this.stopped || this.ending.delete(session.id);
+        this.store.appendActivity(session.id, { at: now(), kind: code === 0 || byNexus ? "exit" : "error", text: `process exited (${code ?? "signal"})${byNexus ? ", ended by Nexus" : ""}`, ...tag() });
+        if (this.restarting.delete(session.id)) {
+          clearTimeout(this.timers.get(`restart:${session.id}`));
+          this.timers.delete(`restart:${session.id}`);
+          if (!this.stopped) {
+            try { this.ensureProcess(this.store.readSession(session.id)); }
+            catch (e) { for (const q of runsOf()) this.halt(q, `could not restart the session: ${(e as Error).message}`); }
+            for (const q of runsOf()) this.advance(q);
+          }
+          this.changed();
+          return;
+        }
+        if (!byNexus) for (const q of runsOf()) {
+          // The agent finished the queue's last step and its process then ended (the CLI closing, killed, or crashing
+          // after the report): nothing is left to run, so the run is finished, not a failure to retry.
+          if (this.nothingLeft(q)) { this.finish(q); continue; }
+          this.turnFailed(q, { kind: "passing", code: "processExited", text: `the runtime's process exited (${code ?? "signal"})` });
         }
         this.changed();
-      }, 300);
-    });
-    proc.on("exit", (code) => {
-      // Ended by Nexus (shutdown, the hand-over of an update, an update's drain with `now`, a finished run): no
-      // failure. Any other exit is a crash, and the turn is tried again on a new process that resumes the session.
-      const byNexus = this.stopped || this.ending.delete(session.id);
-      this.writeRuntime(session.id, { state: "exited" });
-      this.store.appendActivity(session.id, { at: now(), kind: code === 0 || byNexus ? "exit" : "error", text: `process exited (${code ?? "signal"})${byNexus ? ", ended by Nexus" : ""}`, ...tag() });
-      if (this.live.get(session.id) === l) this.live.delete(session.id);
-      if (this.restarting.delete(session.id)) {
-        clearTimeout(this.timers.get(`restart:${session.id}`));
-        this.timers.delete(`restart:${session.id}`);
-        if (!this.stopped) {
-          try { this.ensureProcess(this.store.readSession(session.id)); }
-          catch (e) { for (const q of runsOf()) this.halt(q, `could not restart the session: ${(e as Error).message}`); }
-          for (const q of runsOf()) this.advance(q);
-        }
-        this.changed();
-        return;
-      }
-      if (!byNexus) for (const q of runsOf()) {
-        // The agent finished the queue's last step and its process then ended (the CLI closing, killed, or crashing
-        // after the report): nothing is left to run, so the run is finished, not a failure to retry.
-        if (this.nothingLeft(q)) { this.finish(q); continue; }
-        this.turnFailed(q, { kind: "passing", code: "processExited", text: `the runtime's process exited (${code ?? "signal"})` });
-      }
-      this.changed();
-    });
-    return l;
-  }
-
-  private facts(session: string, f: StreamFacts): void {
-    const patch: Record<string, unknown> = {};
-    if (f.model) patch.model = f.model;
-    if (f.contextTokens !== undefined) patch.context_tokens = f.contextTokens;
-    if (f.contextWindow) patch.context_window = f.contextWindow;
-    if (f.costUsd !== undefined) patch.cost_usd = f.costUsd;
-    if (f.contextTokens !== undefined || f.model) patch.state = "working";
-    if (Object.keys(patch).length) this.writeRuntime(session, patch);
-    if (f.usage) writeUsage({ updated_at: now(), windows: { ...readUsage()?.windows, ...f.usage } });
-    if (f.nativeId) {
-      const s = this.store.readSession(session);
-      if (s.native_id !== f.nativeId) this.store.writeSession({ ...s, native_id: f.nativeId });
-    }
-  }
-
-  private writeRuntime(session: string, patch: Record<string, unknown>): void {
-    const old = this.store.readRuntime(session);
-    this.store.writeRuntime(session, { turns: 0, state: "idle", ...old, ...patch, updated_at: now() } as never);
+      },
+    }));
   }
 
   /** A queue's working directory: its worktree (created when it says `auto`), else the project's checkout. */
@@ -1070,7 +1048,7 @@ export class Engine {
       // A process the previous server left behind (killed without its shutdown) would write into the same
       // session as the one a resume starts: end it first.
       if (r.pid && isAlive(r.pid)) { try { process.kill(r.pid); } catch { /* gone or not ours */ } }
-      this.writeRuntime(s, { state: "exited" });
+      this.host.write(s, { state: "exited" });
     }
   }
 

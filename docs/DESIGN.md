@@ -141,6 +141,24 @@ older revision's run is `runIsOlder(run, revision, history)` (protocol). The eng
 orchestrator passes the revision just approved. `test/scenario.test.ts` keeps run.yaml and runtime.json at each point
 of a run in golden files, as a guard for refactoring the engine.
 
+### One host for agent processes
+
+Workers (the engine), the orchestrator and thinking partners (conversations) start their processes through one
+`AgentHost` (`apps/server/src/agent-host.ts`), one host per role. The host starts the runtime the role asks for (Claude
+Code or Codex; it resumes a session that has a runtime record), keeps the session's `runtime.json`, takes the stream's
+facts (the record, the runtime's own session id, the usage windows into `usage.json`) and ends processes so the
+session's next message starts a new one (`retire`, `close`, `restartAfterTurn`, `shutdown`). The role gives its launch
+options and its handlers for texts, activity, refusals, turn ends and exits; they run after the host has kept its
+records. What a role does with a turn stays with the role: the engine keeps its crash, retry, restart and closing
+handling (`ending`, `restarting`, the 300 ms wait before deciding after a turn), the orchestrator its chat, a
+conversation its hand-over and idle timer.
+
+The record differs by role, as it did before the host (`ROLE_RECORDS`): workers and the orchestrator keep `cost_usd`;
+only a worker's record turns `working` at a turn's start and counts `turns`; the others are `working` from the first
+reply's context tokens and keep `turns` at 0. Every role's usage windows reach `usage.json` (one subscription, decided
+with ST1 on 2026-11-14), so the usage display and the usage pause count orchestrator and partner turns too.
+`test/runtime-records.test.ts` keeps each role's `runtime.json` fields against the fakes.
+
 ### Failures
 
 A turn can fail without the worker deciding anything: the service is overloaded, the network drops, a limit is hit,
