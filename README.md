@@ -24,6 +24,13 @@ you. The step lists its conversations, and a conversation shows its step ("about
 a conversation in it, Settings, a queue or step, a review image. With nothing open it leaves Nexus. Escape does the same on a
 computer.
 
+**On a phone** (and in any window narrower than 1024 px) a bar at the bottom has four tabs: **Orchestrator** (the
+chat), **Waiting** (what waits for you in all projects, with the count), **Queues** and **Ideas**. One tap switches.
+The top line has the project picker, what runs in the project, and the settings gear; the update, the usage,
+notifications and remote access are in Settings there. Switching tabs is not a step for Back: Back closes what is
+open (a step, Settings, a conversation) and then leaves. After switching projects the Waiting tab shows. A step or
+queue opened from Waiting says where it stands ("2 of 6 waiting").
+
 **On a wide screen** (1280 px and more) a queue or step opens on the left and the orchestrator or Ideas on the
 right, both at once, with the queue list between them: click another step and the chat stays open.
 

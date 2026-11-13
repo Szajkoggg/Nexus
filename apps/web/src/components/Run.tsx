@@ -302,14 +302,15 @@ export function ContextBar({ s }: { s: SessionView }) {
 }
 
 /** The subscription's windows, from the latest report of any session. */
-export function UsageMeter({ version }: { version: unknown }) {
+export function UsageMeter({ version, always }: { version: unknown; always?: boolean }) {
   const u = useFetch<Usage | null>("/api/usage", version);
-  if (!u) return null;
+  const none = always ? <span className="text-xs text-fg-3">No session has reported it yet.</span> : null;
+  if (!u) return none;
   const windows = Object.entries(u.windows).filter(([, w]) => !w.resets_at || Date.parse(w.resets_at) > Date.now());
-  if (!windows.length) return null;
+  if (!windows.length) return none;
   const name = (k: string) => (k === "five_hour" ? "Claude 5h" : k === "seven_day" ? "Claude 7d" : k.startsWith("codex_") ? `Codex ${k.slice(6)}` : k.replace(/_/g, " "));
   return (
-    <span className="hidden items-center gap-3 text-xs text-fg-3 sm:flex" title={`Reported ${new Date(u.updated_at).toLocaleString()}`}>
+    <span className={`${always ? "flex flex-wrap" : "hidden sm:flex"} items-center gap-3 text-xs text-fg-3`} title={`Reported ${new Date(u.updated_at).toLocaleString()}`}>
       {windows.map(([k, w]) => {
         const pct = Math.round(w.utilization * 100);
         return (

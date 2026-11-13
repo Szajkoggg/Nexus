@@ -1,4 +1,5 @@
-// Switching projects: tabs on a wide screen; on a narrow one, a picker that opens from the current project's name.
+// Switching projects: tabs on a desktop; on the phone (below 1024 px, App decides), a picker that opens from the
+// current project's name.
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { nav } from "../nav.ts";
@@ -12,7 +13,7 @@ const Running = ({ n }: { n: number }) =>
 /** The wide layout: one tab per project. */
 export function ProjectTabs({ projects, current, onPick }: { projects: ProjectSummary[]; current?: string; onPick: (id: string) => void }) {
   return (
-    <nav className="scroll-thin hidden flex-1 gap-1 overflow-x-auto sm:flex">
+    <nav className="scroll-thin flex flex-1 gap-1 overflow-x-auto">
       {projects.map((p) => (
         <button
           key={p.id}
@@ -43,7 +44,7 @@ export function ProjectPicker({ projects, current, open, onPick }: { projects: P
   const here = projects.find((p) => p.id === current);
   const single = projects.length < 2;
   return (
-    <div className="flex min-w-0 flex-1 sm:hidden">
+    <div className="flex min-w-0 shrink">
       <button
         ref={button}
         onClick={() => !single && setOpen(!open)}
@@ -61,9 +62,9 @@ export function ProjectPicker({ projects, current, open, onPick }: { projects: P
       </button>
       {open && createPortal(
         <>
-          <div className="fixed inset-x-0 bottom-0 z-40 bg-scrim/50 sm:hidden" style={{ top }} onClick={() => setOpen(false)} />
+          <div className="fixed inset-x-0 bottom-0 z-40 bg-scrim/50" style={{ top }} onClick={() => setOpen(false)} />
           <ul role="listbox" aria-label="Projects" style={{ top, maxHeight: `calc(100dvh - ${top}px - 4rem)` }}
-            className="scroll-thin fixed inset-x-0 z-50 overflow-y-auto sm:hidden border-b border-line bg-surface py-1 shadow-2xl">
+            className="scroll-thin fixed inset-x-0 z-50 overflow-y-auto border-b border-line bg-surface py-1 shadow-2xl">
             {projects.map((p) => (
               <li key={p.id}>
                 <button

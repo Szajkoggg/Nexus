@@ -251,10 +251,12 @@ export function useNotifications(projects: ProjectSummary[] | undefined) {
   return { supported, on, toggle, push: usePush, toast, busy, dismiss: () => setToast(undefined) };
 }
 
-export function NotifyToggle({ supported, on, toggle, push, toast, busy, dismiss }: {
+export function NotifyToggle({ supported, on, toggle, push, toast, busy, dismiss, labelled }: {
   supported: boolean; on: boolean; toggle: () => void; push: boolean; toast?: Toast; busy: boolean; dismiss: () => void;
+  /** In the phone's Settings: says what a tap does, in words. */
+  labelled?: boolean;
 }) {
-  if (!supported) return null;
+  if (!supported) return labelled ? <span className="text-sm text-fg-3">Not available in this browser.</span> : null;
   return (
     <>
       <button
@@ -266,7 +268,9 @@ export function NotifyToggle({ supported, on, toggle, push, toast, busy, dismiss
           <path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
           {!on && <path d="M3 3l18 18" />}
         </svg>
-        <span className="hidden sm:inline">{on ? "notify" : "notify off"}</span>
+        {labelled
+          ? <span className="text-sm">{on ? `On (${push ? "push to this device" : "in this tab"}): tap to turn off` : "Off: tap to turn on"}</span>
+          : <span className="hidden sm:inline">{on ? "notify" : "notify off"}</span>}
       </button>
       {/* Into <body>: the header's backdrop blur would otherwise make it the box `fixed` positions against. */}
       {toast && createPortal(

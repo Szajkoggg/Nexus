@@ -13,11 +13,15 @@ import { nav, useNav } from "../nav.ts";
 import { ImageViewer, type ViewerImage } from "./Viewer.tsx";
 import { StepChat } from "./Chat.tsx";
 
-interface Props { project: ProjectState; queue: QueueView; onChanged: () => void; onClose: () => void }
+interface Props {
+  project: ProjectState; queue: QueueView; onChanged: () => void; onClose: () => void;
+  /** Where it stands in the waiting list ("2 of 6 waiting"), when it waits for the user (on the phone). */
+  of?: string;
+}
 
 // ---------------------------------------------------------------- step
 
-export function StepDetail({ project, queue, step, onChanged, onClose }: Props & { step: StepView }) {
+export function StepDetail({ project, queue, step, onChanged, onClose, of }: Props & { step: StepView }) {
   const id = project.project.id;
   const questions = queue.questions.filter((q) => q.step === step.id);
   const live = (step.status === "running" || step.status === "waiting") && step.session;
@@ -43,7 +47,7 @@ export function StepDetail({ project, queue, step, onChanged, onClose }: Props &
   return (
     <>
       <PanelHeader
-        where={<><span className="font-mono">{queue.id}</span> · {queue.title}</>}
+        where={<><span className="font-mono">{queue.id}</span> · {queue.title}{of && <span className="ml-2 whitespace-nowrap text-fg-2">· {of}</span>}</>}
         title={<><span className="mr-2 font-mono text-fg-3">{step.id}</span>{step.title}</>}
         status={<>
           <StatusBadge status={step.status} label={reviewLabel(step)} />
@@ -867,7 +871,7 @@ function OwnValues({ queue }: { queue: QueueView }) {
   );
 }
 
-export function QueueDetail({ project, queue, onChanged, onClose }: Props) {
+export function QueueDetail({ project, queue, onChanged, onClose, of }: Props) {
   const id = project.project.id;
   const latest = queue.approvals.at(-1);
   const inherited = project.project.defaults.stop_conditions;
@@ -879,7 +883,7 @@ export function QueueDetail({ project, queue, onChanged, onClose }: Props) {
   return (
     <>
       <PanelHeader
-        where={<>{project.project.name} · queue</>}
+        where={<>{project.project.name} · queue{of && <span className="ml-2 whitespace-nowrap text-fg-2">· {of}</span>}</>}
         title={<><span className="mr-2 font-mono text-fg-3">{queue.id}</span>{queue.title}</>}
         status={<>
           <StatusBadge status={queue.status} />

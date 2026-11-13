@@ -1,7 +1,7 @@
 // The history of open layers: Back closes the topmost; a close button does the same; nothing piles up.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { close, closeThen, closeTop, isOpen, layerValue, navOf, open, panelOrder, raise, type Nav, type Step } from "../src/layers.ts";
+import { close, closeThen, closeTop, isOpen, layerValue, navOf, open, panelOrder, phoneConversation, phoneView, raise, switchProject, switchTab, type Nav, type Step } from "../src/layers.ts";
 
 /** A browser history in memory, to play the steps against. */
 function browser(start: Nav) {
@@ -223,4 +223,85 @@ test("a header button of a panel open underneath brings it up, with the step dra
   // Opened at load (?chat&ideas: entries Nexus did not push): the entry is rewritten in the new order.
   const loaded: Nav = { hash: "#/p", layers: ["chat", "ideas"], depth: 0 };
   assert.deepEqual(raise(loaded, "chat"), { op: "replace", to: { hash: "#/p", layers: ["ideas", "chat"], depth: 0 } });
+});
+
+// ---------------------------------------------------------------- the phone's tabs
+
+test("phone: switching tabs adds no history entry; Back from any tab leaves the app", () => {
+  const b = browser(home);
+  assert.equal(phoneView(b.cur()).tab, "waiting", "the Waiting tab shows first");
+  for (const t of ["chat", "queues", "ideas", "waiting", "chat"] as const) {
+    b.apply(switchTab(b.cur(), t));
+    assert.equal(phoneView(b.cur()).tab, t);
+  }
+  assert.equal(b.length, 1, "no entry was pushed");
+  assert.equal(b.at, 0, "Back leaves the app");
+  assert.deepEqual(switchTab(b.cur(), "chat"), { op: "none" }, "the tab already shown: nothing to do");
+});
+
+test("phone: a sheet opens over the tab, Back closes it and the same tab shows", () => {
+  const b = browser(home);
+  b.apply(switchTab(b.cur(), "queues"));
+  b.apply(open(b.cur(), "item", "#/p/Q/Q1"));
+  assert.deepEqual(b.cur(), { hash: "#/p/Q/Q1", layers: ["item"], depth: 1, tab: "queues" }, "the sheet's entry keeps the tab");
+  b.apply(open(b.cur(), "viewer:0"));
+  b.back();
+  assert.deepEqual(phoneView(b.cur()), { tab: "queues", layers: ["item"] }, "Back closes the image, the step stays");
+  b.back();
+  assert.deepEqual(phoneView(b.cur()), { tab: "queues", layers: [] }, "Back closes the step: the Queues tab again");
+  assert.equal(b.at, 0, "and the next Back leaves");
+});
+
+test("phone: switching tabs with something open closes it first, without leaving an entry behind", () => {
+  const b = browser(home);
+  b.apply(switchTab(b.cur(), "ideas"));
+  b.apply(open(b.cur(), "conversation:01ABC"));
+  assert.deepEqual(phoneView(b.cur()), { tab: "ideas", layers: ["conversation:01ABC"] });
+  b.apply(switchTab(b.cur(), "chat"));
+  assert.deepEqual(b.cur(), { ...home, tab: "chat" });
+  assert.equal(b.at, 0, "the conversation's entry was gone back over");
+  b.apply(switchTab(b.cur(), "ideas"));
+  b.apply(open(b.cur(), "conversation:01ABC"));
+  b.apply(switchTab(b.cur(), "ideas"));
+  assert.deepEqual(phoneView(b.cur()), { tab: "ideas", layers: [] }, "tapping the tab shown closes the conversation: the list");
+});
+
+test("phone: switching projects shows the Waiting tab and closes what was open; on a desktop the tab is left alone", () => {
+  const b = browser(home);
+  b.apply(switchTab(b.cur(), "chat"));
+  b.apply(switchProject(b.cur(), "#/other", true));
+  assert.deepEqual(b.cur(), { hash: "#/other", layers: [], depth: 0, tab: "waiting" });
+  b.apply(switchTab(b.cur(), "queues"));
+  b.apply(open(b.cur(), "item", "#/other/Q/Q1"));
+  b.apply(open(b.cur(), "projects"));
+  b.apply(switchProject(b.cur(), "#/p", true));
+  assert.deepEqual(b.cur(), { hash: "#/p", layers: [], depth: 0, tab: "waiting" }, "the sheet and the picker closed, Back leaves");
+  const d = browser(home);
+  d.apply(switchProject(d.cur(), "#/other", false));
+  assert.deepEqual(d.cur(), { ...home, hash: "#/other" });
+});
+
+test("phone: the chat, Ideas and the waiting list show as tabs, not layers; a conversation over the Ideas tab", () => {
+  assert.deepEqual(phoneView({ ...home, layers: ["chat"] }), { tab: "chat", layers: [] }, "?chat at load");
+  assert.deepEqual(phoneView({ ...home, layers: ["item", "chat", "ideas"] }), { tab: "ideas", layers: ["item"] }, "the topmost wins");
+  assert.deepEqual(phoneView({ ...home, tab: "queues", layers: ["ideas", "conversation:x"] }), { tab: "ideas", layers: ["conversation:x"] });
+  assert.deepEqual(phoneView({ ...home, tab: "queues", layers: ["item"] }), { tab: "queues", layers: ["item"] });
+  assert.deepEqual(navOf({ nexus: { layers: [], depth: 2, tab: "ideas" } }, "#/p", ""), { hash: "#/p", layers: [], depth: 2, tab: "ideas" }, "the tab is read back from the entry");
+  assert.deepEqual(navOf({ nexus: { layers: [], depth: 0, tab: "bogus" } }, "#/p", ""), home, "an unknown tab is dropped");
+});
+
+test("phone: Chat about this on a step's sheet closes the sheet, shows Ideas and opens the conversation over it; Back returns to the list", () => {
+  const b = browser(home);
+  b.apply(switchTab(b.cur(), "queues"));
+  b.apply(open(b.cur(), "item", "#/p/Q/Q1"));
+  b.apply(phoneConversation(b.cur(), "01ABC"));
+  assert.deepEqual(phoneView(b.cur()), { tab: "ideas", layers: ["conversation:01ABC"] });
+  assert.equal(b.cur().hash, "#/p", "the step's sheet closed");
+  b.back();
+  assert.deepEqual(phoneView(b.cur()), { tab: "ideas", layers: [] });
+  assert.equal(b.at, 0);
+  b.apply(phoneConversation(b.cur(), "01ABC"));
+  b.apply(phoneConversation(b.cur(), "01DEF"));
+  assert.deepEqual(b.cur().layers, ["conversation:01DEF"], "from one conversation to another: switched in place");
+  assert.equal(b.at, 1);
 });

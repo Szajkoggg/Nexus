@@ -43,7 +43,11 @@ export function SettingsButton({ onClick }: { onClick: () => void }) {
 
 interface Orch { model: string | null; effort: string | null }
 
-export function SettingsPanel({ project, onChanged, server }: { project: ProjectFile; onChanged: () => void; server?: ServerInfo }) {
+export function SettingsPanel({ project, onChanged, server, tools }: {
+  project: ProjectFile; onChanged: () => void; server?: ServerInfo;
+  /** On the phone, where the header has no icon row: the update, the usage, notifications and remote access. */
+  tools?: ReactNode;
+}) {
   const orch = useFetch<Orch>(`/api/projects/${encodeURIComponent(project.id)}/orchestrator`, project);
   const [f, setF] = useState(() => ({
     name: project.name,
@@ -105,8 +109,9 @@ export function SettingsPanel({ project, onChanged, server }: { project: Project
   const codexAuto = f.codexApproval === "on-request" && f.codexReviewer === "auto_review";
   return (
     <div>
-      <div className="text-xs text-fg-3">{project.root}</div>
+      <div className="break-all pr-8 text-xs text-fg-3">{project.root}</div>
       <h2 className="mt-1 pr-8 text-xl font-semibold text-fg">Project settings</h2>
+      {tools && <div className="mt-6">{tools}</div>}
 
       <Section title="General">
         <Row label="Name"><input value={f.name} onChange={(e) => set("name", e.target.value)} className={field} /></Row>

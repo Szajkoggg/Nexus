@@ -633,6 +633,41 @@ inline script in `index.html` applies the same rules before the stylesheet paint
 Opacity modifiers compile to `color-mix()` on the token, with a fixed Graphite fallback only for browsers without
 `color-mix()`.
 
+### The phone
+
+Below 1024 px (phones and narrow windows; `PHONE` in `apps/web/src/phone.ts`) the dashboard has a phone layout
+(UX proposals, item 18): a top line and a bottom bar instead of the header. The top line is one row: the project
+picker, what runs in the project ("SF running"), and settings (with "offline" while live updates reconnect). The
+bottom bar has four tabs at the thumb: **Orchestrator** (the chat), **Waiting** (everything that waits in all
+projects, with its count), **Queues** (the project's queues; what waits has its own tab) and **Ideas** (the
+conversations). The header's tools (the update, the usage, notifications, remote access) are in Settings there, at
+the top, under "Nexus on this device". From 1024 px the desktop header is unchanged.
+
+The tab is not a layer. It is a field of the history entry (`Nav.tab`), and switching rewrites the entry it is on
+(`switchTab` in `layers.ts`), so:
+
+- **Switching tabs adds no history entry.** Back closes sheets and layers, then leaves the app; it never walks back
+  through tabs.
+- **What is open over a tab closes when the tab changes**, going back over the entries Nexus pushed for it, so none
+  is left behind. Tapping the tab already shown closes what is over it (a conversation goes back to the list).
+- **A sheet keeps the tab under it.** A queue or step, Settings, remote access, an image push entries as on the
+  desktop; their entries carry the tab, so Back from a step opened on Queues shows Queues again.
+- **A project switch shows the Waiting tab** (`switchProject`); the chat does not open by itself.
+- **The chat, Ideas and the waiting list are tabs, not layers, on the phone.** Code that opens them as layers (a link
+  with `?chat`, a window made narrow, "Chat about this" on a step) is shown through `phoneView`: such a layer stands
+  for its tab, the topmost winning; a conversation stays a layer over the Ideas tab. `nav.ts` turns opening or raising
+  them into a tab switch on the phone, and a conversation from a step's sheet closes the sheet, shows Ideas and opens
+  the conversation over it (`phoneConversation`), so Back returns to the list.
+
+On a tab, the chats are inline (`inline` in Chat.tsx): no panel row, since the bottom bar switches and nothing closes
+a tab; the chat's ⋯ moves into its own header, and the Ideas tab shows the list or one conversation at a time.
+
+**What waits, in order.** `waitingPosition` (`apps/web/src/waiting.ts`, pure, unit tested) tells where a place (a
+project, queue and step) stands in the waiting list, newest first, and which item comes next: several items at one
+place count as one; next skips them and wraps round to the first; a place no longer waiting (just answered) has no
+position and its next is the first that waits. The phone's sheets show the place ("2 of 6 waiting") now; the next
+item's button and the desktop's waiting rail build on it.
+
 ## Findings from building phase 3
 
 - **Context fill and usage limits are in the stream.** Every `assistant` message carries its usage (input, cache

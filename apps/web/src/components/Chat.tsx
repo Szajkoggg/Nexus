@@ -15,9 +15,11 @@ export function useOrchestrator(project: string | undefined, version: unknown) {
 }
 
 /** A chat: what it is (under the panel's switch and ⋯), the messages, and the composer. */
-function ChatColumn({ title, over, about, view, status, showTools, empty, draft, placeholder, onSend, onBack }: {
+function ChatColumn({ title, over, about, view, status, showTools, menu, empty, draft, placeholder, onSend, onBack }: {
   title: string; over: string; about?: ReactNode; view: View | undefined; status: string; showTools: boolean; empty: ReactNode;
   draft: string; placeholder: string; onSend: (text: string) => Promise<void>; onBack?: () => void;
+  /** On the phone's tab, where there is no panel row: the chat's menu, at the right of its header. */
+  menu?: MenuEntry[];
 }) {
   const end = useRef<HTMLDivElement>(null);
   const side = useContext(Side);
@@ -38,6 +40,7 @@ function ChatColumn({ title, over, about, view, status, showTools, empty, draft,
         <span className="text-xs text-fg-3">
           {status}{model ? ` · ${model}` : ""}{view?.effort ? ` · ${view.effort} effort` : ""}{pct !== undefined ? ` · ${pct}% context` : ""}
         </span>
+        {menu && <span className="ml-auto"><Menu items={menu} down label="Chat actions" /></span>}
       </header>
       <div className="scroll-thin flex-1 space-y-3 overflow-y-auto px-5 py-4">
         {chat.length === 0 && <div className="mt-10 text-center text-sm text-fg-3">{empty}</div>}
@@ -103,9 +106,13 @@ function PanelSwitch({ which, menu, onClose }: { which: SidePanel; menu?: MenuEn
   );
 }
 
-/** A chat's panel: over the page on narrow screens; on a wide one, beside it on the right, the page still usable. */
-function Panel({ onClose, wide, which, menu, children }: { onClose: () => void; wide?: boolean; which: SidePanel; menu?: MenuEntry[]; children: ReactNode }) {
+/**
+ * A chat's panel: over the page on narrow screens; on a wide one, beside it on the right, the page still usable. On
+ * the phone (`inline`) it is the content of its tab: no panel row, since the bottom bar switches and nothing closes it.
+ */
+function Panel({ onClose, wide, which, menu, inline, children }: { onClose: () => void; wide?: boolean; which: SidePanel; menu?: MenuEntry[]; inline?: boolean; children: ReactNode }) {
   const side = useWide();
+  if (inline) return <Side.Provider value={true}><div className="flex min-h-0 min-w-0 flex-1">{children}</div></Side.Provider>;
   const body = <><PanelSwitch which={which} menu={menu} onClose={onClose} /><div className="flex min-h-0 flex-1">{children}</div></>;
   if (side) {
     return (
@@ -141,8 +148,8 @@ export function OrchestratorButton({ view, onClick }: { view: View | undefined; 
   );
 }
 
-export function ChatPanel({ project, name, view, onClose, onChanged }: {
-  project: string; name: string; view: View | undefined; onClose: () => void; onChanged: () => void;
+export function ChatPanel({ project, name, view, onClose, onChanged, inline }: {
+  project: string; name: string; view: View | undefined; onClose: () => void; onChanged: () => void; inline?: boolean;
 }) {
   const [showTools, setShowTools] = useState(false);
   const menu: MenuEntry[] = [
@@ -156,9 +163,9 @@ export function ChatPanel({ project, name, view, onClose, onChanged }: {
     }] : []),
   ];
   return (
-    <Panel onClose={onClose} which="chat" menu={menu}>
+    <Panel onClose={onClose} which="chat" menu={menu} inline={inline}>
       <ChatColumn
-        over={name} title="Orchestrator" view={view} status={stateText(view)} showTools={showTools}
+        over={name} title="Orchestrator" view={view} status={stateText(view)} showTools={showTools} menu={inline ? menu : undefined}
         empty={<>
           <p>Plan queues with the orchestrator, ask where things stand, or have it start a run.</p>
           <p className="mt-1 text-fg-3">It reads the project and works through <code>nexus</code>; it never edits files or approves queues.</p>
@@ -254,8 +261,8 @@ export function ConversationsButton({ onClick }: { onClick: () => void }) {
   );
 }
 
-export function ConversationsPanel({ project, name, version, onClose, onChanged, defaultRuntime }: {
-  project: string; name: string; version: unknown; onClose: () => void; onChanged: () => void; defaultRuntime: "claude" | "codex";
+export function ConversationsPanel({ project, name, version, onClose, onChanged, defaultRuntime, inline }: {
+  project: string; name: string; version: unknown; onClose: () => void; onChanged: () => void; defaultRuntime: "claude" | "codex"; inline?: boolean;
 }) {
   const list = useFetch<ConversationItem[]>(`/api/projects/${enc(project)}/conversations`, version);
   // The open conversation (or the new-conversation form) is a layer above the panel: Back returns to the list.
@@ -264,7 +271,8 @@ export function ConversationsPanel({ project, name, version, onClose, onChanged,
   const open = creating ? undefined : layer;
   const [showArchived, setShowArchived] = useState(false);
   const view = useFetch<ConversationView>(open ? `/api/projects/${enc(project)}/conversations/${enc(open)}` : undefined, version);
-  const side = useWide();
+  // Narrow like a side panel (the list or one conversation at a time) on a wide screen and on the phone's tab.
+  const side = useWide() || !!inline;
   const current = list?.find((c) => c.id === open);
   const shown = (list ?? []).filter((c) => showArchived || !c.archived);
   const [showTools, setShowTools] = useState(false);
@@ -288,7 +296,7 @@ export function ConversationsPanel({ project, name, version, onClose, onChanged,
   ] : undefined;
 
   return (
-    <Panel onClose={onClose} wide which="ideas" menu={menu}>
+    <Panel onClose={onClose} wide which="ideas" menu={menu} inline={inline}>
       <nav className={side
         ? `${open || creating ? "hidden" : "flex"} w-full flex-col`
         : `${open || creating ? "hidden sm:flex" : "flex"} w-full shrink-0 flex-col border-r border-line sm:w-72`}>
@@ -326,7 +334,7 @@ export function ConversationsPanel({ project, name, version, onClose, onChanged,
       {!creating && open && current && (
         <ChatColumn
           over={`${name} · ideas`} title={current.title ?? "Conversation"} about={<AboutStep project={project} c={current} className="mt-1" />} view={view} status={stateText(view)} onBack={() => nav.close("conversation")}
-          showTools={showTools}
+          showTools={showTools} menu={inline ? menu : undefined}
           empty={<>
             <p>Think something through: gameplay, a mechanic, the look, what to build next.</p>
             <p className="mt-1 text-fg-3">

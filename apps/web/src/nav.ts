@@ -1,6 +1,7 @@
 // Applies layers.ts to the browser: history entries, Back, Escape, and a React hook to read what is open.
 import { useSyncExternalStore } from "react";
-import { close, closeThen, closeTop, isOpen, navOf, open, raise, type Layer, type Nav, type Step } from "./layers.ts";
+import { close, closeThen, closeTop, isOpen, navOf, open, phoneConversation, raise, switchProject, switchTab, type Layer, type Nav, type Step, type Tab } from "./layers.ts";
+import { PHONE } from "./phone.ts";
 
 const write = (n: Nav, how: "push" | "replace") =>
   history[how === "push" ? "pushState" : "replaceState"]({ ...(history.state ?? {}), nexus: n }, "", n.hash || location.pathname + location.search);
@@ -53,6 +54,9 @@ function start(): void {
 /** The hash of the current project's page, without a queue or step. */
 const projectHash = () => current.hash.replace(/^(#\/[^/]+).*$/, "$1");
 const hashOf = (...parts: (string | undefined)[]) => "#/" + parts.filter((x): x is string => !!x).map(encodeURIComponent).join("/");
+/** The phone layout (below 1024 px): the chat, Ideas and the waiting list are tabs there, not layers. */
+const phone = () => typeof matchMedia !== "undefined" && matchMedia(PHONE).matches;
+const TAB_OF: Record<string, Tab> = { chat: "chat", ideas: "ideas", waiting: "waiting" };
 
 /** What is open now; re-renders when it changes. */
 export function useNav(): Nav {
@@ -62,22 +66,26 @@ export function useNav(): Nav {
 
 export const nav = {
   /** Opens a panel or a nested layer ("chat", "conversation:<id>"…) on top. */
-  open: (layer: Layer) => apply(open(current, layer)),
-  /** Brings a panel to the top: up from beneath another, or opened when it is closed (the chat switch, header buttons). */
-  raise: (kind: string) => apply(raise(current, kind)),
-  /** Opens a conversation in the Ideas panel, opening the panel first when it is closed. */
+  open: (layer: Layer) => apply(phone() && layer in TAB_OF ? switchTab(current, TAB_OF[layer]!) : open(current, layer)),
+  /**
+   * Brings a panel to the top: up from beneath another, or opened when it is closed (the chat switch, header buttons).
+   * On the phone the chat and Ideas are tabs: their tab shows.
+   */
+  raise: (kind: string) => apply(phone() && kind in TAB_OF ? switchTab(current, TAB_OF[kind]!) : raise(current, kind)),
+  /** Opens a conversation in the Ideas panel, opening the panel first when it is closed (on the phone, the Ideas tab). */
   conversation: (id: string) => {
+    if (phone()) { apply(phoneConversation(current, id)); return; }
     if (!isOpen(current, "ideas")) apply(open(current, "ideas"));
     apply(open(current, `conversation:${id}`));
   },
+  /** The phone's tabs: Orchestrator, Waiting, Queues, Ideas. A switch adds no history entry. */
+  tab: (tab: Tab) => apply(switchTab(current, tab)),
   /** Closes the layer of this kind and what lies above it. */
   close: (kind: string) => apply(close(current, kind, kind === "item" ? projectHash() : current.hash)),
   /** Opens a queue or step in its drawer; from one already open, it switches in place. */
   item: (project: string, queue: string, step?: string) => apply(open(current, "item", hashOf(project, queue, step))),
   /** Shows a project's page, in place: switching projects is not a layer, so Back does not walk through them. */
-  project: (project: string) => apply(current.layers.length
-    ? closeThen(current, current.layers[0]!.split(":")[0]!, hashOf(project))
-    : { op: "replace", to: { ...current, hash: hashOf(project) } }),
+  project: (project: string) => apply(switchProject(current, hashOf(project), phone())),
   /** Closes a layer, then opens a queue or step in another project (the waiting list). */
   closeThenItem: (kind: string, project: string, queue?: string, step?: string) =>
     apply(queue ? closeThen(current, kind, hashOf(project, queue, step), "item") : closeThen(current, kind, hashOf(project))),
