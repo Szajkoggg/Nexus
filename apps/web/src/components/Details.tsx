@@ -57,7 +57,7 @@ export function StepDetail({ project, queue, step, onChanged }: Props & { step: 
       {(step.summary || step.reason || step.progress) && (
         <div className="mt-4 rounded-lg bg-zinc-800/50 p-3 text-sm">
           {step.summary && <p><span className="text-zinc-500">Summary: </span>{step.summary}</p>}
-          {step.reason && <p className="text-orange-300"><span className="text-zinc-500">Reason: </span>{step.reason}</p>}
+          {step.reason && step.status !== "rejected" && <p className="text-orange-300"><span className="text-zinc-500">Reason: </span>{step.reason}</p>}
           {step.progress && step.status === "running" && (
             <p><span className="text-zinc-500">Now: </span>{step.progress.text} <span className="text-xs text-zinc-500">(<TimeAgo at={step.progress.at} />)</span></p>
           )}
@@ -72,6 +72,8 @@ export function StepDetail({ project, queue, step, onChanged }: Props & { step: 
       {showsReviewActions(step) && <AcceptReview project={id} queue={queue.id} step={step.id} next={noteTargets(queue.steps, step.id).next} asked={step.asked_user?.text} criteria={step.acceptance} onChanged={onChanged} />}
 
       <PushLine project={id} queue={queue} step={step.id} onChanged={onChanged} />
+
+      {step.status === "rejected" && <Rejected step={step} holding={queue.rejection?.step === step.id} />}
 
       {step.sent_back.length > 0 && (
         <Section title="Sent back">
@@ -232,6 +234,55 @@ export function StepDetail({ project, queue, step, onChanged }: Props & { step: 
   );
 }
 
+/** Reject: the step is marked rejected, the run pauses, nothing is reverted; the orchestrator proposes what follows. */
+function RejectStep({ project, queue, step, onChanged }: { project: string; queue: string; step: string; onChanged: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [why, setWhy] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+  if (!open) return <div className="mt-3"><Button variant="danger" onClick={() => setOpen(true)}>Reject…</Button></div>;
+  const reject = () => {
+    setBusy(true); setError(undefined);
+    act(project, "POST", `/queues/${enc(queue)}/steps/${enc(step)}/reject`, why.trim() ? { text: why } : {})
+      .then(() => { setOpen(false); setWhy(""); onChanged(); }, (e: Error) => setError(e.message))
+      .finally(() => setBusy(false));
+  };
+  return (
+    <div className="mt-3 rounded-lg bg-rose-500/10 p-3 ring-1 ring-rose-500/30">
+      <p className="text-sm text-rose-200">Reject this step</p>
+      <p className="mt-1 text-xs text-zinc-400">The run pauses and nothing is reverted. The orchestrator is told and proposes what follows (a revert as a step, changed steps, or a new queue) for your approval; the run goes on only once you approve a new revision, and this step is not run again.</p>
+      <textarea
+        value={why} rows={2} placeholder="Why (optional)…" onChange={(e) => setWhy(e.target.value)}
+        className="mt-2 w-full resize-y rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-rose-500 focus:outline-none"
+      />
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <button disabled={busy} onClick={reject} className="rounded-md bg-rose-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-rose-500 disabled:opacity-40">{busy ? "Rejecting…" : "Reject the step"}</button>
+        <Button variant="quiet" onClick={() => setOpen(false)}>Cancel</Button>
+        {error && <span className="text-xs text-red-400">{error}</span>}
+      </div>
+    </div>
+  );
+}
+
+/** A rejected step: by whom and why, and what the queue waits for while the rejection holds. */
+function Rejected({ step, holding }: { step: StepView; holding: boolean }) {
+  const at = step.timeline.findLast((e) => e.type === "review.rejected")?.at;
+  return (
+    <div className="mt-4 rounded-lg bg-rose-500/10 p-3 text-sm ring-1 ring-rose-500/30">
+      <p>
+        <span className="text-zinc-500">Rejected by you{step.reason ? ": " : ""}</span>
+        {step.reason && <span className="text-rose-200">{step.reason}</span>}
+        {at && <span className="text-xs text-zinc-500"> · <TimeAgo at={at} /></span>}
+      </p>
+      <p className="mt-1 text-xs text-zinc-400">
+        {holding
+          ? "Nothing was reverted. The run waits until you approve a new revision of the queue (the orchestrator proposes one); nothing of the queue is pushed until then."
+          : "A newer revision was approved since; this step is not run again."}
+      </p>
+    </div>
+  );
+}
+
 /** What became of pushing an accepted step: pushed, not pushed (no remote), or failed with Push again. */
 function PushLine({ project, queue, step, onChanged }: { project: string; queue: QueueView; step: string; onChanged: () => void }) {
   const [error, setError] = useState<string>();
@@ -301,6 +352,7 @@ function AcceptReview({ project, queue, step, next, asked, criteria, onChanged }
         {!noteOpen && <button onClick={() => setNoteOpen(true)} className="text-sm text-zinc-400 hover:text-zinc-200">+ Add a note</button>}
         {error && <span className="text-xs text-red-400">{error}</span>}
       </div>
+      <RejectStep project={project} queue={queue} step={step} onChanged={onChanged} />
       <div className="mt-4">
         <p className="mb-1.5 text-sm text-zinc-300">Fix it</p>
         <p className="mb-2 text-xs text-zinc-500">Sends the step back to its worker with your words. Where they conflict with the step's acceptance criteria, your words win.</p>
@@ -357,6 +409,7 @@ function describe(e: Event): string {
     case "review.accepted": return e.text ?? "";
     case "review.sent_back": return e.text;
     case "review.asked_user": return e.text;
+    case "review.rejected": return e.text ?? "";
     default: return "";
   }
 }

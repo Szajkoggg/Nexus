@@ -8,7 +8,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ProjectStore, approveQueue, loadProjectState, routeAnswers } from "@nexus/protocol";
+import { ProjectStore, applyDraft, approveQueue, loadProjectState, routeAnswers } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 
 process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
@@ -149,4 +149,33 @@ test("with push_accepted off nothing is pushed; without a remote the step says s
     assert.equal(s.result, "skipped");
     assert.match(s.text, /not pushed: nexus\/Q has no upstream remote and there is no origin/);
   } finally { none.stop(); }
+});
+
+test("after a rejection nothing of the queue is pushed until a newer revision is approved", async () => {
+  const x = setup();
+  try {
+    const b = x.commit("B");
+    x.engine.start("Q");
+    await x.inReview("Q1");
+    writeFileSync(join(x.remote, "reject"), "");
+    x.engine.acceptReview("Q", "Q1");
+    await x.until("the failure", () => x.store.readPush("Q")?.steps.Q1?.result === "failed");
+    rmSync(join(x.remote, "reject"));
+    x.commit("C");
+    await x.inReview("Q2");
+    x.engine.rejectStep("Q", "Q2", "Not this way.");
+    assert.throws(() => x.engine.pushAgain("Q"), /was rejected: nothing of it is pushed/);
+    await new Promise((r) => setTimeout(r, 600));
+    await x.engine.pusher.settled();
+    assert.equal(x.remoteBranch(), undefined, "nothing pushed after the rejection");
+    // The orchestrator's revision, approved by the user: pushing works again.
+    applyDraft(x.store, { id: "Q", title: "Queue", review_policy: "wait", steps: [
+      { id: "Q1", title: "Step 1", goal: "FAKE: done" }, { id: "Q2", title: "Step 2", goal: "FAKE: done" },
+      { id: "Q3", title: "Step 3", goal: "FAKE: done" }, { id: "Q2b", title: "Revert Q2", goal: "FAKE: done" },
+    ] });
+    approveQueue(x.store, "Q");
+    x.engine.pushAgain("Q");
+    await x.until("pushed", () => x.store.readPush("Q")?.steps.Q1?.result === "pushed");
+    assert.equal(x.remoteBranch(), b, "the accepted commit, not the rejected step's");
+  } finally { x.stop(); }
 });

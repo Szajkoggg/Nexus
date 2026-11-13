@@ -122,7 +122,7 @@ export class Orchestrator {
     let s = this.session();
     const notes = this.pendingNotes(state);
     if (!s) {
-      // A step waiting for its review, or a note of the user's, starts it (after a reset, or before it ever ran).
+      // A step waiting for its review, or a note or rejection of the user's, starts it (after a reset, or before it ever ran).
       if (this.engine.draining || (!notes.length && !state.queues.some((q) => q.steps.some((x) => x.review_with === "orchestrator")))) return;
       s = this.ensure();
     }
@@ -132,6 +132,11 @@ export class Orchestrator {
     for (const n of notes) {
       this.ensure();
       this.markTold(s, [n.key]);
+      if (n.rejected) {
+        this.store.appendChat(s.id, { at: now(), from: "nexus", text: `You rejected step ${n.step} of queue ${n.queue}${n.text ? `:\n${n.text}` : "."}` });
+        this.deliver(`[Nexus] The user rejected step ${n.step} of queue ${n.queue}${n.text ? `. Their reason:\n${n.text}\n` : " (no reason given). "}The run is paused and nothing was reverted. Propose what follows as queue revisions for the user's approval: a revert as a step, changes to the remaining steps, or a new queue (then the user can stop this one). The rejected step is never run again; the run goes on only after the user approves a new revision, at its first pending step, and nothing of the queue is pushed until then. Tell the user briefly what you propose.`);
+        continue;
+      }
       this.store.appendChat(s.id, { at: now(), from: "nexus", text: `You accepted step ${n.step} of queue ${n.queue}${n.last ? " (its last step)" : ""} with a note for the orchestrator:\n${n.text}` });
       this.deliver(`[Nexus] The user accepted step ${n.step} of queue ${n.queue}${n.last ? " (its last step)" : ""} with this note for you:\n${n.text}\nTake it into account in the plan, and tell the user briefly what you will do with it.`);
     }
@@ -143,9 +148,13 @@ export class Orchestrator {
    * Notes of the user's on an acceptance, for the orchestrator, that no orchestrator session has been told yet (each
    * is told once per project: a reset does not repeat it, and one made with no session starts one).
    */
-  private pendingNotes(state: ProjectState): { key: string; queue: string; step: string; text: string; last: boolean }[] {
-    const out: { key: string; queue: string; step: string; text: string; last: boolean }[] = [];
+  private pendingNotes(state: ProjectState): { key: string; queue: string; step: string; text: string; last: boolean; rejected?: boolean }[] {
+    const out: { key: string; queue: string; step: string; text: string; last: boolean; rejected?: boolean }[] = [];
     for (const q of state.queues) for (const st of q.steps) for (const e of st.timeline) {
+      if (e.type === "review.rejected") {
+        out.push({ key: `notify:reject:${e.id}`, queue: q.id, step: st.id, text: e.text ?? "", last: q.steps.at(-1)?.id === st.id, rejected: true });
+        continue;
+      }
       if (e.type !== "review.accepted" || e.to !== "orchestrator" || !e.text) continue;
       out.push({ key: `notify:note:${e.id}`, queue: q.id, step: st.id, text: e.text, last: q.steps.at(-1)?.id === st.id });
     }
@@ -306,6 +315,8 @@ Options: ${x.options.join(" / ")}` : ""}`,
         const older = r && (r.revision !== undefined ? r.revision < a.revision : q.history.some((h) => h.replaced_at > r.started_at));
         const todo = !r
           ? "If the plan puts it next, start it now; otherwise tell the user why not."
+          : r.rejected && r.state === "paused" && !q.rejection
+            ? `Its run was paused because the user rejected step ${r.rejected}; this revision lifts that. If the plan puts it next, resume it now (it goes on at the first pending step); otherwise tell the user why not.`
           : older && (r.state === "paused" || r.state === "halted" || r.state === "finished")
             ? `Its earlier run (${r.state}${r.step ? ` at step ${r.step}` : ""}) was of an older revision and cannot be resumed. If the plan puts it next, start it now (it begins at the first pending step); otherwise tell the user why not.`
           : r.state === "paused" || r.state === "halted"
@@ -453,7 +464,7 @@ Consent is the user's, and refused to you: marking a step done (work done elsewh
 
 Reviewing steps: a step whose review policy is orchestrator waits for you when it is done, and you get a [Nexus] message with its goal, acceptance, the checks and review material of the round, and its commits. Check the work against its acceptance: read the commits (git show, git diff), the review material and the summary; for more than a glance, have run-digest summarize the run or use the project's own read-only reviewers (agents that read and report). You run no checks yourself: a check of the queue that is missing or failed is a send-back. Then accept it, send it back with what to fix, or ask the user. Matters the project's rules give the user (for example the look, gameplay, final numbers) go to the user with ask-user, with your framing and recommendation; so does anything you cannot judge from what you can read.
 
-Messages marked [Nexus] tell you that a worker asked a question, that a step waits for your review, that the user accepted a step with a note for you (their words, as in the chat: take them into the plan), that the user approved a queue or withdrew an approval, that a run reached a requested pause, that a run halted or finished, or how a Nexus update you ran ended. What came up while Nexus updated reaches you right after its restart. After a deploy you may also be told what changed for agents (the commits' Agents: lines): your briefing may still describe the older way, so follow those where they differ. They are for you, not the user. Act on them: answer or escalate questions; an approval or a reached pause is your cue to start (or resume) what the plan put next, and say in the chat what you started; tell the user about withdrawals, halts and finished queues briefly, with what you propose next.
+Messages marked [Nexus] tell you that a worker asked a question, that a step waits for your review, that the user accepted a step with a note for you (their words, as in the chat: take them into the plan), that the user rejected a step (propose what follows as revisions for their approval), that the user approved a queue or withdrew an approval, that a run reached a requested pause, that a run halted or finished, or how a Nexus update you ran ended. What came up while Nexus updated reaches you right after its restart. After a deploy you may also be told what changed for agents (the commits' Agents: lines): your briefing may still describe the older way, so follow those where they differ. They are for you, not the user. Act on them: answer or escalate questions; an approval or a reached pause is your cue to start (or resume) what the plan put next, and say in the chat what you started; tell the user about withdrawals, halts and finished queues briefly, with what you propose next.
 Deploying Nexus itself: run nexus server update only when the user asks for it in the chat, never on your own, not even when a queue that changes Nexus has finished. Before you run it, tell the user (from nexus server status) whether a step is running in any project: the update waits for those steps to finish (no new step starts meanwhile), and with --now it interrupts them instead (they continue afterwards). Also tell them that you restart with Nexus: your process ends, and this conversation goes on after the restart. You then get a [Nexus] message with the outcome (the new version, or why it failed and what still runs); pass it on to the user.
 
 Never have two runs going in one checkout at once: queues without their own worktree share the main checkout, so pause one at a step's end before starting another there.

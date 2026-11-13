@@ -239,6 +239,7 @@ Every line:
 | `queue.drafted` | `queue`, `definition` | Orchestrator only: a new or changed draft queue |
 | `session.request` | `action` (start, resume, pause, stop), `queue`, `use_session?`, `model?`, `reason` | Orchestrator only: asks the engine to act on a queue's run (`use_session` continues an existing session) |
 | `review.sent_back` | `queue`, `step`, `text` | Orchestrator or user only: a step in review goes back to its worker with what to fix (see "Sending a step back") |
+| `review.rejected` | `queue`, `step`, `text?` | User only (the loader ignores it from any other session, the orchestrator's included): rejects a step waiting for the user's review (see "Reject") |
 | `review.asked_user` | `queue`, `step`, `text` | Orchestrator only in practice (the loader takes it from an orchestrator or the user): a step waiting for the orchestrator's review goes to the user, with why |
 | `status.set` | `queue`, `step?`, `to` (`skipped`, `finished`, `cancelled`, `propose-lift`), `reason` | Orchestrator only: housekeeping; the server checks it and records an entry in the queue's `changes` (see `queue.yaml`). A worker's is ignored by derivation, and the server applies only the orchestrator's own requests |
 | `log` | `level`, `text` | Anything else worth keeping |
@@ -286,6 +287,20 @@ held in `review`.
   `applied.jsonl` marks it told, so a reset orchestrator is not told again. The chat shows the note.
 - On the queue's last step (no pending step after it) the note always goes to the orchestrator.
 An acceptance with a note pushes like any other (see "Pushing what was accepted").
+
+**Reject** (the user's only, `POST …/steps/:s/reject` with an optional `text`; only on a step waiting for the user's
+review). The server writes `review.rejected` as the user's session and pauses the run (`run.yaml`: `state: paused`,
+the reason, `rejected: <step>`). Nothing is reverted.
+- The step's status is `rejected` (its `reason` is the text). It is never run again.
+- The derived queue has `rejection` (`step`, `at`, `text?`, `revision`: the revision current when it came) and is
+  `paused`, with the reason, until the user approves a newer revision. Then the rejection lifts.
+- The orchestrator is told once per project, like a note on an acceptance: whatever `notify` says, starting it if it
+  has no session (key `notify:reject:<event id>`). It proposes what follows as queue revisions for the user's
+  approval: a revert as a step, changes to the remaining steps, or a new queue (then the user can stop this one).
+- While the rejection holds, start and resume are refused, and nothing of the queue is pushed (no push of an
+  acceptance, no Push again). After the approval, resume goes on at the first pending step: a run paused by a
+  rejection may resume although it is of an older revision (it takes the new one).
+- The orchestrator's approval notice for such a queue says to resume it.
 
 ### Review
 
@@ -470,6 +485,7 @@ sends (see the CLI).
 | `PATCH /api/projects/:id/queues/:q` | `review_policy` (`continue`, `wait`, `orchestrator` or null) | Queue settings |
 | `POST /api/projects/:id/questions/:qid/answer` | `text`, `continue?` | The user's answer, routed to the asker |
 | `POST /api/projects/:id/queues/:q/run` | `action` (`start`, `pause`, `resume`, `stop`), `model?`, `session?` | Runs the queue through a Nexus-launched session (`session` continues an existing one) |
+| `POST /api/projects/:id/queues/:q/steps/:s/reject` | `text?` | Reject (the user's): the step is rejected, the run pauses until a newer revision is approved; answers `{ message }` |
 | `POST /api/projects/:id/queues/:q/steps/:s/accept` | `text?` (the note), `note_to?` (`next` or `orchestrator`) | Accepts a step waiting in review (and, with `push_accepted`, pushes it); answers where the note went (`to`, `step`) |
 | `POST /api/projects/:id/queues/:q/push` | | Push again: the step of the queue's last failed push; answers `{ message }` at once, the push runs in the background |
 | `POST /api/projects/:id/queues/:q/steps/:s/send-back` | `text` (required, kept verbatim) | Fix it: sends a step waiting for the user's review back to its worker; answers `{ message }` |

@@ -331,6 +331,8 @@ app.post("/api/projects/:id/queues/:queue/continue", act((st, _b, p) => engineOf
 app.post("/api/projects/:id/queues/:queue/steps/:step/send-back", act((st, b, p) => ({ message: sendBack(st, { queue: p("queue"), step: p("step"), from: "user", text: b.text }) })));
 // Push again: the last failed push of an accepted step of this queue, tried again.
 app.post("/api/projects/:id/queues/:queue/push", act((st, _b, p) => ({ message: engineOf(st).pushAgain(p("queue")) })));
+// Reject: the user's, on a step waiting for their review; the run pauses until a new revision is approved.
+app.post("/api/projects/:id/queues/:queue/steps/:step/reject", act((st, b, p) => ({ message: engineOf(st).rejectStep(p("queue"), p("step"), b.text) })));
 app.post("/api/projects/:id/queues/:queue/steps/:step/accept", act((st, b, p) => engineOf(st).acceptReview(p("queue"), p("step"), b.text, b.note_to)));
 
 app.get("/api/projects/:id/sessions/:session/activity", (c) => {

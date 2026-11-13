@@ -306,3 +306,50 @@ test("on the queue's last step the note goes to the orchestrator", async () => {
     await x.until("the run to finish", () => x.state().queues[0]!.run?.state === "finished");
   } finally { x.stop(); }
 });
+
+// ---------------------------------------------------------------- the user's Reject
+
+test("a rejection pauses the run and tells the orchestrator once; the run goes on only after a new approved revision", async () => {
+  const x = setup();
+  try {
+    updateSettings(x.store, { orchestrator: { notify: false } });
+    await x.run("J", 3, { policy: "wait", hello: false });
+    await x.until("the user's review", () => x.step("J", "J1").review_with === "user");
+    assert.throws(() => x.engine.rejectStep("J", "J2"), /not waiting for your review/);
+    assert.match(x.engine.rejectStep("J", "J1", "Wrong approach: no lattice."), /rejected; the run is paused/);
+    const q = () => x.state().queues.find((y) => y.id === "J")!;
+    assert.equal(x.step("J", "J1").status, "rejected");
+    assert.equal(q().run!.state, "paused");
+    assert.equal(q().run!.rejected, "J1");
+    assert.equal(q().status, "paused");
+
+    // Told once, with notices off and no session before.
+    await x.until("the orchestrator told", () => x.delivered().some((t) => t.startsWith("[Nexus] The user rejected step J1 of queue J. Their reason:\nWrong approach: no lattice.")));
+    const told = x.delivered().find((t) => t.startsWith("[Nexus] The user rejected step J1"))!;
+    assert.match(told, /Propose what follows as queue revisions/);
+    assert.ok(x.facts().includes("You rejected step J1 of queue J:\nWrong approach: no lattice."));
+    await new Promise((r) => setTimeout(r, 500));
+    assert.equal(x.delivered().filter((t) => t.startsWith("[Nexus] The user rejected")).length, 1);
+    assert.ok(!x.delivered().some((t) => /Run of J paused/.test(t)), "not told as a requested pause");
+
+    // No resume, no start before a new revision is approved, not even once it is drafted.
+    assert.throws(() => x.engine.resume("J"), /J1 of queue J was rejected/);
+    assert.throws(() => x.engine.start("J"), /J1 of queue J was rejected/);
+    applyDraft(x.store, {
+      id: "J", title: "Reviewed", review_policy: "wait", checks: ["npm test"],
+      steps: [
+        { id: "J1", title: "Step 1", goal: "FAKE: done", acceptance: ["Criterion 1"] },
+        { id: "J2", title: "Step 2, without the lattice", goal: "FAKE: done", acceptance: ["Criterion 2"] },
+        { id: "J3", title: "Step 3", goal: "FAKE: done", acceptance: ["Criterion 3"] },
+      ],
+    });
+    assert.throws(() => x.engine.resume("J"), /was rejected/);
+    approveQueue(x.store, "J");
+    assert.equal(q().rejection, undefined);
+    const before = x.delivered().length;
+    x.engine.resume("J");
+    await x.until("J2 opened", () => x.delivered().some((t) => t.includes("step J2 (2 of 3)")));
+    assert.ok(!x.delivered().slice(before).some((t) => t.includes("step J1 (1 of 3)")), "the rejected step is not run again");
+    assert.equal(x.step("J", "J1").status, "rejected");
+  } finally { x.stop(); }
+});

@@ -1,6 +1,6 @@
 // Derives the dashboard's view of a project from its files. Pure apart from reading through the store;
 // nothing here is ever written back (state.json, if kept, is only a cache of this).
-import { ORCHESTRATOR_ONLY, type StatusChange, type Event, type InboxEntry, type Note, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type ReviewItem, type ReviewPolicy, type RunFile, type RuntimeFile, type SessionFile, type StepDef, type StepStatus } from "./schemas.ts";
+import { ORCHESTRATOR_ONLY, USER_ONLY, type StatusChange, type Event, type InboxEntry, type Note, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type ReviewItem, type ReviewPolicy, type RunFile, type RuntimeFile, type SessionFile, type StepDef, type StepStatus } from "./schemas.ts";
 import { ProjectStore, revisionHash } from "./store.ts";
 import { ENDED_RUN_STATES, type Segment } from "./times.ts";
 import { stopPlace } from "./attention.ts";
@@ -72,6 +72,11 @@ export interface QueueView extends Omit<QueueFile, "steps"> {
   stop_step?: string;
   /** The orchestrator's proposal to lift the queue's stop, until a lift, a later stop or an approval. */
   lift_proposal?: { at: string; reason: string };
+  /**
+   * The user's rejection of a step, while it holds the queue: until the user approves a revision newer than the one
+   * approved when it came (`revision`). Meanwhile the run does not go on and nothing of the queue is pushed.
+   */
+  rejection?: { step: string; at: string; text?: string; revision: number };
   questions: QuestionView[];
   /** The engine's run of this queue, when Nexus drives it. */
   run?: RunFile;
@@ -141,6 +146,9 @@ export function loadProjectState(store: ProjectStore): ProjectState {
         if (ORCHESTRATOR_ONLY.has(e.type) && s.role !== "orchestrator" && s.role !== "user") {
           warnings.push(`session ${id}: ${e.type} is for orchestrators; ignored`); continue;
         }
+        if (USER_ONLY.has(e.type) && s.role !== "user") {
+          warnings.push(`session ${id}: ${e.type} is the user's; ignored`); continue;
+        }
         events.push(e);
       }
     } catch (e) { warnings.push(`session ${id}: ${(e as Error).message}`); }
@@ -166,6 +174,18 @@ export function loadProjectState(store: ProjectStore): ProjectState {
     apply(e, queues, sessions, questions, warnings, project, delivered);
   }
   for (; next < changes.length; next++) applyChange(changes[next]!.q, changes[next]!.c);
+  // A rejection holds until an approval of a newer revision; while it holds the queue is paused.
+  for (const q of queues.values()) {
+    const r = q.rejection;
+    if (!r) continue;
+    if (q.approvals.some((a) => a.at > r.at && a.revision > r.revision)) {
+      q.rejection = undefined;
+      if (q.status === "paused") { q.status = "approved"; q.status_reason = undefined; }
+    } else if (!TERMINAL_QUEUE.has(q.status)) {
+      q.status = "paused"; q.status_reason = `step ${r.step} was rejected${r.text ? `: ${r.text}` : ""}; it goes on once you approve a revision that deals with it`;
+    }
+  }
+
   // An approval after a proposal to lift answers it (approving a stopped queue lifts the stop anyway).
   for (const q of queues.values()) if (q.lift_proposal && q.approvals.some((a) => a.at > q.lift_proposal!.at)) q.lift_proposal = undefined;
 
@@ -388,6 +408,16 @@ function apply(
       const st = stepOf(queueOf(e.queue), e.step);
       if (!st || st.status !== "review" || st.review_with !== "orchestrator") { warnings.push(`event ${e.id}: step ${e.queue}/${e.step} is not waiting for the orchestrator's review; ignored`); return; }
       st.review_with = "user"; st.asked_user = { text: e.text, at: e.at };
+      return;
+    }
+    case "review.rejected": {
+      const q = queueOf(e.queue); const st = stepOf(q, e.step);
+      if (!q || !st) return;
+      if (st.status !== "review" || st.review_with !== "user") { warnings.push(`event ${e.id}: step ${e.queue}/${e.step} is not waiting for the user's review; the rejection is ignored`); return; }
+      st.status = "rejected"; st.review_with = undefined; st.asked_user = undefined; st.reason = e.text;
+      // The revision current when it came: the first one replaced after it, else the queue's present one.
+      const current = q.history.find((h) => h.replaced_at > e.at)?.revision ?? q.revision;
+      q.rejection = { step: st.id, at: e.at, text: e.text, revision: current };
       return;
     }
     case "review.sent_back": {

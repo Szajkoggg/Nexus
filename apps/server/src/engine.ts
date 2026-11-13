@@ -98,6 +98,7 @@ export class Engine {
     if (this.draining) throw new ActionError("Nexus is updating; start the queue after the restart", 409);
     const state = loadProjectState(this.store);
     const q = this.queue(state, queueId);
+    if (q.rejection) throw new ActionError(rejectedMessage(q), 409);
     if (!q.approved) throw new ActionError("approve the queue's current revision first", 409);
     if (q.run && GOING.includes(q.run.state)) throw new ActionError("the queue is already running", 409);
     if (q.status === "stopped") throw new ActionError(stoppedMessage(q), 409);
@@ -177,20 +178,22 @@ export class Engine {
     if (run.state === "finished") throw new ActionError("the run is finished", 409);
     const state = loadProjectState(this.store);
     const q = this.queue(state, queueId);
+    if (q.rejection) throw new ActionError(rejectedMessage(q), 409);
     if (!q.approved) throw new ActionError("approve the queue's current revision first", 409);
     if (q.status === "stopped") throw new ActionError(stoppedMessage(q), 409);
     if (q.status === "cancelled") throw new ActionError(`queue ${q.id} is cancelled`, 409);
     // A run of an older revision would reopen a step the new revision may have replaced, in the old session. A run
-    // without the field is older when a revision was replaced after it started.
+    // without the field is older when a revision was replaced after it started. A run paused by a rejection is the
+    // exception: the approved revision dealt with it, and the run goes on at its first pending step.
     const older = run.revision !== undefined ? run.revision < q.revision : q.history.some((h) => h.replaced_at > run.started_at);
-    if (older) throw new ActionError(`the run belongs to revision ${run.revision ?? "an earlier one"} and the queue is at revision ${q.revision}: start the queue instead of resuming`, 409);
+    if (older && !run.rejected) throw new ActionError(`the run belongs to revision ${run.revision ?? "an earlier one"} and the queue is at revision ${q.revision}: start the queue instead of resuming`, 409);
     const session = this.sessionFile(state, run.session);
     this.ensureProcess(session);
     this.clearTimer(queueId);
-    this.writeRun(queueId, { ...run, state: "running", reason: undefined, nudged: false, resume_after_restart: undefined, resume_at: undefined });
+    this.writeRun(queueId, { ...run, state: "running", reason: undefined, nudged: false, resume_after_restart: undefined, resume_at: undefined, ...(run.rejected ? { rejected: undefined, revision: q.revision } : {}) });
     // A step left unfinished (stopped, failed, interrupted) is continued rather than skipped; one waiting for an
-    // answer just waits on (the answer arrives through the inbox).
-    const open = q.steps.find((s) => s.id === run.step && !["done", "skipped", "review"].includes(s.status));
+    // answer just waits on (the answer arrives through the inbox). A rejected step is never run again.
+    const open = q.steps.find((s) => s.id === run.step && !["done", "skipped", "review", "rejected"].includes(s.status));
     // A step sent back while the run was paused or halted: the send-back, still in the inbox, opens its next turn.
     const sentBack = open && state.sessions.find((x) => x.id === run.session)?.inbox.some((m) => m.type === "send_back" && m.step === open.id && !m.read_at);
     if (open?.status === "waiting" || sentBack) this.changed();
@@ -256,6 +259,30 @@ export class Engine {
         "now",
       );
     }
+  }
+
+  /**
+   * The user rejects a step waiting for their review (review.rejected, with an optional reason): the step is marked
+   * rejected, the run pauses, nothing is reverted. The orchestrator is told (src/orchestrator.ts) and proposes what
+   * follows as revisions; the run goes on only after the user approves a newer revision, at its first pending step,
+   * and nothing of the queue is pushed until then.
+   */
+  rejectStep(queueId: string, step: string, text?: unknown): string {
+    const state = loadProjectState(this.store);
+    const q = this.queue(state, queueId);
+    const st = q.steps.find((s) => s.id === step);
+    if (!st) throw new ActionError(`no step ${step}`, 404);
+    if (st.status !== "review" || st.review_with !== "user") throw new ActionError(`step ${queueId}/${step} is not waiting for your review`, 409);
+    const why = typeof text === "string" && text.trim() ? text.trim() : undefined;
+    const user = ensureUserSession(this.store);
+    this.store.appendEvent({ v: 1, id: newId(), at: now(), session: user.id, type: "review.rejected", queue: queueId, step, text: why });
+    const run = this.store.readRun(queueId);
+    if (run && run.state !== "finished") {
+      this.clearTimer(queueId);
+      this.writeRun(queueId, { ...run, state: "paused", reason: `step ${step} was rejected by the user${why ? `: ${why}` : ""}`, rejected: step, resume_after_restart: undefined, resume_at: undefined });
+    }
+    this.changed();
+    return `step ${queueId}/${step} rejected; the run is paused`;
   }
 
   /**
@@ -851,6 +878,11 @@ export class Engine {
     if (!s || s.id === USER_SESSION) throw new ActionError(`unknown session ${id}`, 404);
     return s;
   }
+}
+
+/** Why a queue with a rejected step does not go on, and what lets it. */
+function rejectedMessage(q: QueueView): string {
+  return `step ${q.rejection!.step} of queue ${q.id} was rejected: the run goes on once you approve a new revision of the queue that deals with it (the orchestrator proposes one)`;
 }
 
 /** Why a stopped queue does not go on: where the stop is and its own reason, and the user's two ways out. */

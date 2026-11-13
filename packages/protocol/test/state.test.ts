@@ -204,3 +204,35 @@ test("the orchestrator accepts a step waiting for it; without an orchestrator or
   assert.equal(s.queues[0]!.steps[0]!.status, "done");
   assert.equal(s.queues[0]!.steps[0]!.review_with, undefined);
 });
+
+test("only the user rejects a step waiting for their review; the rejection holds until a newer revision is approved", () => {
+  const { st, q, session, emit } = setup();
+  const w = session("worker"); const o = session("orchestrator"); const u = session("user");
+  emit(w, { type: "step.started", queue: "Q", step: "Q1" });
+  emit(w, { type: "step.done", queue: "Q", step: "Q1", summary: "ok" });
+  emit(w, { type: "step.started", queue: "Q", step: "Q2" });
+  emit(w, { type: "step.done", queue: "Q", step: "Q2", summary: "ok" }); // Q2's policy is wait
+  emit(w, { type: "review.rejected", queue: "Q", step: "Q2", text: "self" });
+  emit(o, { type: "review.rejected", queue: "Q", step: "Q2", text: "for the user" });
+  let s = loadProjectState(st);
+  assert.equal(s.queues[0]!.steps[1]!.status, "review");
+  assert.equal(s.warnings.filter((x) => /review.rejected is the user's; ignored/.test(x)).length, 2);
+  assert.equal(s.queues[0]!.rejection, undefined);
+
+  emit(u, { type: "review.rejected", queue: "Q", step: "Q2", text: "Wrong approach." });
+  s = loadProjectState(st);
+  assert.equal(s.queues[0]!.steps[1]!.status, "rejected");
+  assert.equal(s.queues[0]!.steps[1]!.reason, "Wrong approach.");
+  const rej = loadProjectState(st).queues[0]!.rejection; assert.deepEqual([rej?.step, rej?.text], ["Q2", "Wrong approach."]);
+  assert.equal(s.queues[0]!.status, "paused");
+  assert.match(s.queues[0]!.status_reason!, /step Q2 was rejected: Wrong approach\./);
+  assert.deepEqual(s.attention, [], "the user's own act waits for no one");
+
+  // A newer revision's approval lifts it.
+  const cur = st.readQueue("Q");
+  st.writeQueue({ ...cur, revision: 2, history: [{ revision: 1, hash: "y", replaced_at: "2026-11-12T10:30:00.000Z" }], steps: [...cur.steps, { id: "Q3", title: "Redo", goal: "", acceptance: [] }], approvals: [...cur.approvals, { revision: 2, at: new Date(Date.parse("2026-11-12T11:00:00Z")).toISOString(), hash: "x" }] });
+  s = loadProjectState(st);
+  assert.equal(s.queues[0]!.rejection, undefined);
+  assert.equal(s.queues[0]!.steps[1]!.status, "rejected", "the step stays rejected");
+  assert.notEqual(s.queues[0]!.status, "paused");
+});

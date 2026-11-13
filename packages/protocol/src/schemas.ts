@@ -20,7 +20,7 @@ export const QueueStatus = z.enum([
 export type QueueStatus = z.infer<typeof QueueStatus>;
 
 export const StepStatus = z.enum([
-  "pending", "running", "waiting", "review", "done", "failed", "skipped", "stopped",
+  "pending", "running", "waiting", "review", "done", "failed", "skipped", "stopped", "rejected",
 ]);
 export type StepStatus = z.infer<typeof StepStatus>;
 
@@ -323,6 +323,11 @@ export const Event = z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("review.accepted"), ...qs, text: z.string().optional(), to: z.enum(["next", "orchestrator"]).optional() }),
   /** The orchestrator (or the user) sends a step in review back to its worker with what to fix. */
   z.object({ ...base, type: z.literal("review.sent_back"), ...qs, text: z.string().min(1) }),
+  /**
+   * The user rejects a step waiting for their review, with an optional reason: the step is marked rejected, the run
+   * pauses, nothing is reverted; the orchestrator proposes what follows. User only.
+   */
+  z.object({ ...base, type: z.literal("review.rejected"), ...qs, text: z.string().optional() }),
   /** The orchestrator hands a step waiting for its review to the user, saying why. */
   z.object({ ...base, type: z.literal("review.asked_user"), ...qs, text: z.string().min(1) }),
 ]);
@@ -334,6 +339,9 @@ export type EventOf<T extends EventType> = Extract<Event, { type: T }>;
 export const ORCHESTRATOR_ONLY: ReadonlySet<EventType> = new Set([
   "answer.given", "queue.drafted", "session.request", "review.accepted", "review.sent_back", "review.asked_user", "status.set",
 ]);
+
+/** Event types only the user's session may write (the server writes them for the dashboard). */
+export const USER_ONLY: ReadonlySet<EventType> = new Set(["review.rejected"]);
 
 // ---------------------------------------------------------------- server-owned runtime files
 
@@ -377,6 +385,8 @@ export const RunFile = z.object({
   retries: z.number().int().optional(),
   /** The runtime's code for the last failure that is being retried (or that halted the run), e.g. `overloaded`. */
   failure: z.string().optional(),
+  /** Paused because the user rejected this step: a resume after a newer revision's approval goes on at the first pending step. */
+  rejected: Id.optional(),
   /** Stopped only for a Nexus update: the server resumes it by itself when it starts again. */
   resume_after_restart: z.boolean().optional(),
   /** The queue's revision the run was started on: a run of an older revision is not resumed. */

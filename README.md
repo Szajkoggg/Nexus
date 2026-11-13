@@ -193,6 +193,12 @@ they conflict; when the step has criteria, Nexus lists them and asks before send
 back to you. The orchestrator may send a step back twice (`review_send_back_limit` in the project's defaults); its
 third send-back hands the step to you instead.
 
+**Reject** ("I want something else", "I don't want this") is the third action on a step waiting for you, with an
+optional reason. The run pauses and nothing is reverted; the orchestrator is told (even with its notifications off)
+and proposes what follows, a revert as a step, changed steps or a new queue, as revisions for you to approve. The
+queue goes on only once you approve a new revision, at its first pending step; the rejected step is not run again,
+and nothing of the queue is pushed in between.
+
 **Push accepted steps** (Settings, off by default): when a step is accepted, by you or the orchestrator, Nexus pushes
 the commit the step was reviewed at (not later work) to the branch the queue runs on, at its upstream remote or
 origin. Never forced, never with a prompt. The step shows "Pushed: …" or "Push failed: …"; a failed push leaves the

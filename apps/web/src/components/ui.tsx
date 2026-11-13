@@ -19,6 +19,7 @@ const TONES: Record<string, Tone> = {
   paused: { dot: "bg-zinc-400", text: "text-zinc-300", ring: "ring-zinc-500/40", bg: "bg-zinc-500/10" },
   stopped: { dot: "bg-orange-400", text: "text-orange-300", ring: "ring-orange-500/50", bg: "bg-orange-500/10" },
   failed: { dot: "bg-red-400", text: "text-red-300", ring: "ring-red-500/50", bg: "bg-red-500/10" },
+  rejected: { dot: "bg-rose-400", text: "text-rose-300", ring: "ring-rose-500/50", bg: "bg-rose-500/10" },
   done: { dot: "bg-emerald-400", text: "text-emerald-300", ring: "ring-emerald-500/30", bg: "bg-emerald-500/5" },
   skipped: { dot: "bg-zinc-600", text: "text-zinc-500", ring: "ring-zinc-800", bg: "bg-zinc-900" },
   cancelled: { dot: "bg-zinc-600", text: "text-zinc-500", ring: "ring-zinc-800", bg: "bg-zinc-900" },
@@ -95,7 +96,7 @@ export function Clock({ at }: { at: string }) {
 
 const sameDay = (a: string, b: string) => new Date(a).toDateString() === new Date(b).toDateString();
 
-const STEP_END: Record<string, string> = { done: "finished", review: "finished", failed: "failed", stopped: "stopped" };
+const STEP_END: Record<string, string> = { done: "finished", review: "finished", rejected: "finished", failed: "failed", stopped: "stopped" };
 
 /** When a step started and ended and how long it took; while it is at work, the elapsed time, updating live. */
 export function StepTimes({ step, compact }: { step: StepView; compact?: boolean }) {

@@ -33,7 +33,8 @@ export class AcceptedPusher {
   onChange(state: ProjectState): void {
     for (const q of state.queues) {
       this.recordReviews(q);
-      if (!state.project.defaults.push_accepted || this.busy.has(q.id)) continue;
+      // After a rejection nothing of the queue is pushed until the user approves a revision that deals with it.
+      if (!state.project.defaults.push_accepted || this.busy.has(q.id) || q.rejection) continue;
       const latest = newestAcceptance(q);
       if (!latest) continue;
       const push = this.store.readPush(q.id);
@@ -47,6 +48,7 @@ export class AcceptedPusher {
     const push = this.store.readPush(queueId);
     if (!push?.error) throw new ActionError(`queue ${queueId} has no failed push`, 409);
     if (this.busy.has(queueId)) throw new ActionError(`a push of queue ${queueId} is under way`, 409);
+    if (this.view(queueId).rejection) throw new ActionError(`a step of queue ${queueId} was rejected: nothing of it is pushed until you approve a revision that deals with it`, 409);
     const step = push.steps[push.error.step];
     this.start(this.view(queueId), push.error.step, step?.acceptance ?? "push-again");
     return `pushing step ${push.error.step} of queue ${queueId} again`;
