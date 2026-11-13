@@ -4,6 +4,7 @@
 //   noop   end the turn without an outcome   stop    report a stop condition
 //   fail   report the step failed            slow    work for FAKE_SLOW_MS (default 1500), then done
 //   stop1  report a stop condition the first time, done once the stop is lifted
+//   slownoop  work for FAKE_SLOW_MS, then end the turn without an outcome (the step stays open)
 //   doneexit  report the step done, then the process exits on a signal before its turn ends
 //   commit    commit a file named after the step in its working directory, then done
 //   commitstop  the same commit, then a stop condition
@@ -108,7 +109,7 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
     const fail = failure(step, behaviour);
     if (fail) return { fail };
     if (/^(overloaded|network|auth|limit|crash|cloudflare)/.test(behaviour)) nexus("step", "done", step, "--summary", `fake finished ${step} after failures`);
-    if (behaviour === "slow") await new Promise((r) => setTimeout(r, Number(process.env.FAKE_SLOW_MS ?? 1500)));
+    if (behaviour === "slow" || behaviour === "slownoop") await new Promise((r) => setTimeout(r, Number(process.env.FAKE_SLOW_MS ?? 1500)));
     // "commit": a commit in the working directory (a file named after the step), then done.
     // "commitstop": the same commit, then a stop condition (as the worker briefing asks: commit, then stop).
     if (behaviour === "commit" || behaviour === "commitstop") {

@@ -581,7 +581,8 @@ function applyChange(q: QueueView, c: StatusChange): void {
       if (c.step) {
         const st = q.steps.find((x) => x.id === c.step);
         if (!st) return;
-        st.status = c.to as StepStatus; st.reason = c.reason;
+        // Back to pending (Nexus, after a revision set its run aside): no reason shows on a step still to run.
+        st.status = c.to as StepStatus; st.reason = c.to === "pending" ? undefined : c.reason;
         endSegment(st, c.at);
       } else if (c.to === "cancelled") {
         q.status = "cancelled"; q.status_reason = c.reason;

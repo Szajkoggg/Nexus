@@ -52,10 +52,12 @@ test("allowed: skip a pending, stopped or failed step; each is an entry with who
 });
 
 test("refused, with the reason: done, approving, lifting, reopening, a step at work, and anything not listed", () => {
-  const { emit, set } = setup();
+  const { store, emit, set } = setup();
   emit(1, { type: "step.started", queue: "Q", step: "Q1" });
   emit(2, { type: "step.done", queue: "Q", step: "Q1", summary: "ok" });
   emit(3, { type: "step.started", queue: "Q", step: "Q2" });
+  // A live run holds Q2: it is at work.
+  store.writeRun("Q", { protocol: 1, session: "w", state: "running", step: "Q2", started_at: at(3), updated_at: at(3), revision: 1 });
   const refused = (to: string, s: string | undefined, why: RegExp) => assert.throws(() => set(to, s), (e: ActionError) => why.test(e.message), `${to} ${s ?? ""}`);
   refused("done", "Q3", /never marks a step done: work done elsewhere is skipped/);
   refused("approved", undefined, /approving is the user's/);
@@ -69,6 +71,14 @@ test("refused, with the reason: done, approving, lifting, reopening, a step at w
   refused("paused", "Q3", /not a status the orchestrator sets/);
   assert.throws(() => set("skipped", "Q9"), /has no step Q9 \(has Q1, Q2, Q3\)/);
   assert.throws(() => orchestratorStatusChange(new ProjectStore(setup().store.dir), { queue: "Q", step: "Q3", to: "skipped", reason: " " }), /reason/);
+
+  // The run moves on to another step (Q2 left running, the W4e shape): no live run holds Q2, so it may be skipped.
+  store.writeRun("Q", { protocol: 1, session: "w", state: "running", step: "Q3", started_at: at(3), updated_at: at(4), revision: 1 });
+  assert.match(set("skipped", "Q2", "replaced"), /Q\/Q2 skipped \(was running\)/);
+  // And with no run at all.
+  const y = setup();
+  y.emit(1, { type: "step.started", queue: "Q", step: "Q1" });
+  assert.match(y.set("skipped", "Q1", "done elsewhere"), /was running/);
 });
 
 test("skipping the last open step makes the queue done, and a halted run on it can be closed as finished", () => {

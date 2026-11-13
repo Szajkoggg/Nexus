@@ -967,7 +967,7 @@ function AnswerBox({ q, project, onChanged }: { q: QuestionView; project: string
 
 // ---------------------------------------------------------------- queue
 
-const WHO: Record<StatusChange["by"], string> = { user_approval: "You, approving", user_continue: "You, with Continue", orchestrator: "Orchestrator" };
+const WHO: Record<StatusChange["by"], string> = { user_approval: "You, approving", user_continue: "You, with Continue", orchestrator: "Orchestrator", nexus: "Nexus" };
 
 /** Status changes made through Nexus (queue.yaml's changes): who, when, what and why; newest first. */
 function Changes({ entries, queue }: { entries: StatusChange[]; queue: QueueView }) {

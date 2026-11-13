@@ -11,7 +11,7 @@ import { existsSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import {
   ENDED_RUN_STATES,
-  ActionError, ProjectStore, USER_SESSION, ensureUserSession, liftByContinue, loadProjectState, stepClosed, reportFile, ensureReportFolder, stopPlace, newId, normPath, now, readUsage,
+  ActionError, ProjectStore, USER_SESSION, ensureUserSession, liftByContinue, loadProjectState, releaseOrphanedSteps, stepClosed, reportFile, ensureReportFolder, stopPlace, newId, normPath, now, readUsage,
   writeUsage, CLAUDE_EFFORTS, RETRY_LIMIT, effortIssue, formatClock, type Effort, type ProjectFile, type StepDef, type InboxView, type ProjectState, type QueueView, type RunFile, type SessionFile,
   type SessionView, type StepView,
   addNote,
@@ -154,13 +154,16 @@ export class Engine {
 
   start(queueId: string, opts: StartOptions = {}): RunFile {
     if (this.draining) throw new ActionError("Nexus is updating; start the queue after the restart", 409);
-    const state = loadProjectState(this.store);
-    const q = this.queue(state, queueId);
+    let state = loadProjectState(this.store);
+    let q = this.queue(state, queueId);
     if (q.rejection) throw new ActionError(rejectedMessage(q), 409);
     if (!q.approved) throw new ActionError("approve the queue's current revision first", 409);
     if (q.run && GOING.includes(q.run.state)) throw new ActionError("the queue is already running", 409);
     if (q.status === "stopped") throw new ActionError(stoppedMessage(q), 409);
     if (q.status === "done" || q.status === "cancelled") throw new ActionError(`the queue is ${q.status}`, 409);
+    // The new run replaces the run record: a step an earlier run left open goes back to pending, so it runs again
+    // when it comes first (and no two steps show running).
+    if (releaseOrphanedSteps(this.store, queueId, { replacing: true }).length) { state = loadProjectState(this.store); q = this.queue(state, queueId); }
     if (q.steps.every((s) => stepClosed(q, s))) throw new ActionError("no step left to run", 409);
 
     // The run's own values: what was asked, else the continued session's, else the project's defaults.
@@ -551,7 +554,12 @@ export class Engine {
     const live = this.live.get(run.session);
     if (!live || live.proc.state === "exited") return this.halt(queueId, "the session's process is not running");
     if (live.proc.state === "working") return;
-    if (!q.approved) return this.halt(queueId, "the queue's revision changed and is not approved");
+    if (!q.approved) {
+      this.halt(queueId, "the queue's revision changed and is not approved");
+      // A newer revision sets the run aside: its open step goes back to pending (a withdrawn approval does not).
+      releaseOrphanedSteps(this.store, queueId);
+      return;
+    }
 
     const current = run.step ? q.steps.find((s) => s.id === run.step) : undefined;
     if (q.status === "stopped") return this.halt(queueId, stoppedMessage(q));
@@ -1040,6 +1048,8 @@ export class Engine {
   // ---------------------------------------------------------------- helpers
 
   private recoverAfterRestart(): void {
+    // A step an earlier run left open while a newer revision went on (no live run of it) goes back to pending.
+    for (const q of this.store.queueIds()) releaseOrphanedSteps(this.store, q);
     const state = loadProjectState(this.store);
     for (const q of this.store.queueIds()) {
       const run = this.store.readRun(q);

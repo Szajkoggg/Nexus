@@ -180,11 +180,13 @@ export type Withdrawal = z.infer<typeof Withdrawal>;
  * - `status`: the orchestrator's housekeeping: a step to `skipped`, or the queue to `cancelled`.
  * - `run`: the orchestrator closed a halted run of a queue whose steps are all done or skipped (`finished`).
  * - `proposal`: the orchestrator proposes that the user lift the stop; cleared by a lift, a later stop or an approval.
+ * - `status` by `nexus`: a step left open (`running` or `waiting`) by a run a revision change set aside goes back to
+ *   `pending` ("its run was replaced by revision N"), so a start of the new revision begins there.
  */
 export const StatusChange = z.object({
   at: Time,
   kind: z.enum(["lift", "status", "run", "proposal", "work"]),
-  by: z.enum(["user_approval", "user_continue", "orchestrator"]),
+  by: z.enum(["user_approval", "user_continue", "orchestrator", "nexus"]),
   /** The step it changed; absent: the queue. */
   step: Id.optional(),
   from: z.string(),

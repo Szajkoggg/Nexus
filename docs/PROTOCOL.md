@@ -123,7 +123,7 @@ history:                               # previous revisions, kept for the record
 changes:                               # status changes made through Nexus; written only by the server
   - at: 2026-11-13T09:40:00Z
     kind: lift                         # lift | status | run | proposal | work (see below)
-    by: user_approval                  # user_approval (approving a new revision) | user_continue | orchestrator
+    by: user_approval                  # user_approval (approving a new revision) | user_continue | orchestrator | nexus
     from: stopped
     to: approved
     reason: "the art is missing: W4 needs the cliff textures"   # the stop's own reason, as it was derived
@@ -136,6 +136,14 @@ changes:                               # status changes made through Nexus; writ
     to: kept                           # kept | discarded
     commits: [4e1a2c9..., 9b07d31...]  # the step's own commits the choice was about
     revision: 3
+  - at: 2026-11-14T08:12:00Z
+    kind: status                       # a step a revision change left open goes back to pending
+    by: nexus
+    step: W4e
+    from: running                      # running | waiting
+    to: pending
+    reason: its run was replaced by revision 4   # or: its run was replaced by a new start
+    revision: 4
 ```
 
 A step's `runtime`, `model` and `effort` are part of what is approved. Each one a step leaves out is the run's
@@ -152,6 +160,16 @@ by the server; nobody edits statuses in the file. Derivation applies each entry 
 event at the same time goes first), so a later event can still change the status again. A `lift` makes a `stopped`
 queue `approved` and its `stopped` steps `pending` again (their reason cleared); a stop before the lift, whether a
 `queue.stop` event or a `stopped` status an import wrote into the file, no longer counts. A stop after it does.
+
+**A step a revision change left open** goes back to `pending` through a `status` entry `by: nexus` (`from: running` or
+`waiting`, `to: pending`, `reason: its run was replaced by revision N`; derivation clears the step's reason), so a
+start of the new revision begins at the first pending step, which is that one when it comes first. The server writes it
+when a run halts because the queue's revision changed (not for a withdrawn approval of the same revision), when a run
+starts, and at server start, for every `running` or `waiting` step opened (its latest stretch at work began) before
+the current revision replaced the one before, unless the run record of the current revision has that step open (a
+halted or paused one too: resume continues it). A start also releases the step of the run record it replaces (`reason:
+its run was replaced by a new start`). A step opened since the last revision change (by a run of this revision, or by
+hand with no run) is left alone. So a queue never shows two running steps after a revision change.
 
 Approving a revision of a stopped queue lifts the stop: the server appends the approval and a `lift` by
 `user_approval` with the stop's derived reason (`condition: reason` for an event stop, the file's `status_note` for
@@ -213,7 +231,7 @@ the derived state and records it as an entry `by: orchestrator` with the request
 
 | Request | Allowed when | Entry, and what derivation does |
 |---|---|---|
-| `--step S skipped` | S is `pending`, `stopped` or `failed`, and the queue is not done or cancelled | `kind: status`, `step`, `from` (S's status), `to: skipped`: S becomes `skipped` with the reason; when every step is then done, skipped or failed the queue is `done`. A stop is not lifted by it |
+| `--step S skipped` | S is `pending`, `stopped` or `failed`, or `running` while no live run (`running`, `pausing`, `usage_wait`, `retry_wait`) has it open, and the queue is not done or cancelled | `kind: status`, `step`, `from` (S's status), `to: skipped`: S becomes `skipped` with the reason; when every step is then done, skipped or failed the queue is `done`. A stop is not lifted by it |
 | `finished` | the queue's run is `halted` and every step is done or skipped | `kind: run`, `from: halted`, `to: finished`; the server also writes `run.yaml` `finished` |
 | `cancelled` | the queue is not done or cancelled and its run is not `running`, `pausing`, `usage_wait` or `retry_wait` | `kind: status`, `from` (the queue's status), `to: cancelled`: the queue is `cancelled` with the reason; a later stop leaves it so. The user gets a push notification; nothing goes into the waiting list |
 | `propose-lift` | the queue is `stopped` | `kind: proposal`, `from: stopped`, `to: lift proposed`: the queue's view carries `lift_proposal` (`at`, `reason`) until a lift, a later `queue.stop` or a later approval |
