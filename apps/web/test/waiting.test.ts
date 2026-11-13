@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { placeOf, waitingPosition } from "../src/waiting.ts";
+import { moveOn, placeOf, waitingPosition } from "../src/waiting.ts";
 
 type W = { project: string; queue?: string; step?: string; lift?: { place: string; continue: boolean; revision: number }; name: string };
 const lift = { place: " at step W4c", continue: true, revision: 1 };
@@ -45,4 +45,15 @@ test("the only place that waits has no next", () => {
 
 test("a place in another project with the same queue and step is another place", () => {
   assert.equal(waitingPosition(list, { project: "nexus", queue: "W", step: "W4c" }).at, 0);
+});
+
+test("one by one: the next item opens once the open one no longer waits, not before; the end when nothing waits", () => {
+  const at = { project: "nexus", queue: "UX", step: "UX2" };
+  assert.equal(moveOn(list, at), undefined, "the review still waits: stay");
+  const after = list.filter((x) => x.name !== "review");
+  assert.equal(moveOn(after, at)?.name, "question", "decided: the first that waits opens");
+  // A question answered on a step that then waits for review: the same place still waits.
+  const answered = [w("review", "honey", "W", "W4c"), ...list.slice(1)];
+  assert.equal(moveOn(answered, { project: "honey", queue: "W", step: "W4c" }), undefined);
+  assert.equal(moveOn([], at), undefined, "nothing left: the round ends");
 });

@@ -14,6 +14,7 @@ import {
   ActionError, Effort, ProjectStore, addNote, updateSettings, answerAsUser, approveQueue, deleteNote, loadProjectState, nexusHome, withdrawApproval, addAllowRule,
   readRegistry, readUsage, commentOnPicture, markPicture, routeAnswers, routeSendBacks, sendBack, sendMessage, setQueueSettings, type ProjectState,
 } from "@nexus/protocol";
+import { newestFirst, projectDigest, projectRunning, type DigestEvent, type DigestResponse, type DigestRunning } from "@nexus/protocol/digest";
 import { Engine } from "./engine.ts";
 import { branchState, leftBehind, stepCommits } from "./gitinfo.ts";
 import { cleanUp, mergeBack } from "./mergeback.ts";
@@ -400,6 +401,30 @@ app.get("/api/projects/:id/refusals", (c) => {
   const all = e.store.sessionIds().flatMap((s) => e.store.readRefusals(s).entries)
     .filter((r) => (!queue || r.queue === queue) && (!step || r.step === step));
   return c.json(all.sort((a, b) => a.at.localeCompare(b.at)));
+});
+
+// The morning digest across projects (UX proposals, 16): what happened after ?since= (ISO 8601; default the last 24
+// hours), newest first, at most 200 lines; and the queues at work now (packages/protocol/src/digest.ts).
+app.get("/api/digest", (c) => {
+  refreshRegistry();
+  const q = c.req.query("since");
+  const since = q && !Number.isNaN(Date.parse(q)) ? new Date(q).toISOString() : new Date(Date.now() - 86_400_000).toISOString();
+  const events: DigestEvent[] = [];
+  const running: DigestRunning[] = [];
+  for (const e of projects.values()) {
+    const state = stateOf(e);
+    if (!state) continue;
+    const ids = e.store.sessionIds();
+    const recent = <T extends { at: string }>(xs: T[]) => xs.filter((x) => x.at > since);
+    events.push(...projectDigest({
+      state,
+      events: ids.flatMap((s) => recent(e.store.readEvents(s).entries)),
+      refusals: ids.flatMap((s) => recent(e.store.readRefusals(s).entries)),
+      activity: ids.flatMap((s) => recent(e.store.readActivity(s).entries.filter((a) => a.kind === "retry"))),
+    }, since));
+    running.push(...projectRunning(state));
+  }
+  return c.json({ since, events: newestFirst(events).slice(0, 200), running } satisfies DigestResponse);
 });
 
 app.get("/api/usage", (c) => c.json(readUsage() ?? null));

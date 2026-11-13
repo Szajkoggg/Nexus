@@ -35,3 +35,14 @@ export function waitingPosition<T extends Pick<WaitingItem, "project" | "queue" 
   }
   return { at: i + 1, total };
 }
+
+/**
+ * Going through what waits one by one (the digest's "Go through them one by one"; UX proposals, 9 and 16): once the
+ * item open at `at` no longer waits (answered, accepted, approved, continued), the item to open next; nothing while
+ * it still waits (a new item at the same place, a review after an answer, counts as still waiting) or when nothing
+ * else does.
+ */
+export function moveOn<T extends Pick<WaitingItem, "project" | "queue" | "step" | "lift">>(items: readonly T[], at: Place): T | undefined {
+  const p = waitingPosition(items, at);
+  return p.at === 0 ? p.next : undefined;
+}

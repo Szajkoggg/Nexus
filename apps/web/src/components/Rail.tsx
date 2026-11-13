@@ -17,13 +17,15 @@ export const RAIL = "23.25rem";
 const Label = ({ children, tone = "text-fg-3" }: { children: ReactNode; tone?: string }) =>
   <h2 className={`text-[11px] font-semibold uppercase tracking-wider ${tone}`}>{children}</h2>;
 
-export function Rail({ projects, state, queuesShown, onOpenWaiting, onClose }: {
+export function Rail({ projects, state, queuesShown, onOpenWaiting, onClose, digest }: {
   projects: ProjectSummary[]; state: ProjectState | undefined;
   /** The project's queues show in the middle: "All queues" is pressed. */
   queuesShown: boolean;
   onOpenWaiting: (w: WaitingItem) => void;
   /** As a drawer (below 1280 px): its ✕. */
   onClose?: () => void;
+  /** The morning digest, at the rail's top when there is something new. */
+  digest?: ReactNode;
 }) {
   const project = state?.project;
   const waiting = projects.reduce((n, p) => n + p.attention.length, 0);
@@ -33,6 +35,7 @@ export function Rail({ projects, state, queuesShown, onOpenWaiting, onClose }: {
   return (
     <div className="flex h-full min-h-0 flex-col" aria-label="What waits and runs">
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-3 pb-4">
+        {digest && <div className="pt-3 empty:hidden">{digest}</div>}
         <div className="flex items-center gap-2 px-1 pb-2.5 pt-4">
           <Label tone="text-warn">Waiting for you · {waiting}</Label>
           <span className="flex-1" />

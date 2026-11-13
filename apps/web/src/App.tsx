@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { QueueStatus } from "@nexus/protocol";
 import { enc, useFetch, useLive, useProjectState, useProjects, type AttentionItem, type QueueView } from "./api.ts";
 import { QueueRow } from "./components/QueueRow.tsx";
@@ -14,7 +14,8 @@ import { ProjectPicker, ProjectSidebar } from "./components/Projects.tsx";
 import { isOpen, phoneView, viewOf } from "./layers.ts";
 import { usePhone } from "./phone.ts";
 import { BottomBar, RunningNow } from "./components/Phone.tsx";
-import { waitingPosition } from "./waiting.ts";
+import { moveOn, placeOf, waitingPosition, type Place } from "./waiting.ts";
+import { Digest } from "./components/Digest.tsx";
 import { mergeAttention, type WaitingItem } from "@nexus/protocol/attention";
 import { nav, useNav } from "./nav.ts";
 import { SettingsButton, SettingsPanel, UpdatePill, useServer } from "./components/Settings.tsx";
@@ -85,6 +86,31 @@ export function App() {
   const tab = phone ? phoneView(route.nav).tab : undefined;
   const view = phone ? undefined : viewOf(route.nav, "desk").tab;
   const waiting = useMemo(() => mergeAttention(projects ?? []), [projects]);
+
+  // "Go through them one by one" (the digest): the first waiting item opens; once the open item no longer waits (an
+  // answer, an acceptance, an approval, Continue), the next one opens in its place (waiting.ts, moveOn). Closing the
+  // item, opening something else by hand, or the end of the list ends the round.
+  const round = useRef<{ place: Place; opened: boolean } | null>(null);
+  const goThrough = () => {
+    const first = waiting[0];
+    if (!first) return;
+    round.current = { place: placeOf(first), opened: false };
+    openWaiting(first);
+  };
+  useEffect(() => {
+    const r = round.current;
+    if (!r || !projectId) return;
+    const here: Place = { project: projectId, queue: route.queue, step: route.step };
+    const there = r.place.project === here.project && r.place.queue === here.queue && (r.place.step ?? "") === (here.step ?? "");
+    if (!there) { if (r.opened) round.current = null; return; } // still on its way, or the user went elsewhere
+    r.opened = true;
+    const next = moveOn(waiting, r.place);
+    if (next?.queue) {
+      round.current = { place: placeOf(next), opened: false };
+      nav.item(next.project, next.queue, attentionTarget(next));
+    } else if (!waiting.length) round.current = null;
+  }, [waiting, projectId, route.queue, route.step]);
+  const digest = <Digest projects={projects ?? []} version={tick} onGoThrough={goThrough} />;
   // On the phone an item that waits for the user says where it stands in the waiting list: "2 of 6".
   const place = phone && projectId && route.queue ? waitingPosition(waiting, { project: projectId, queue: route.queue, step: route.step }) : undefined;
   const of = place?.at ? `${place.at} of ${place.total} waiting` : undefined;
@@ -201,6 +227,7 @@ export function App() {
 
         <main className={scrolls ? "@container scroll-thin min-h-0 flex-1 overflow-y-auto px-4 py-4" : "flex min-h-0 flex-1 flex-col"}>
           {scrolls && banners}
+          {tab === "waiting" && <div className="mb-4 empty:hidden">{digest}</div>}
           {tab === "waiting" && <WaitingList projects={projects ?? []} onOpen={openWaiting} onChoose={(w, o) => { if (w.qid) chooseOption(w.qid, o); openWaiting(w); }} />}
           {tab === "queues" && queuesPage}
           {tab === "chat" && projectId && (
@@ -235,7 +262,7 @@ export function App() {
       </button>
     ),
   };
-  const railProps = { projects: projects ?? [], state, queuesShown: view === "queues", onOpenWaiting: openWaiting };
+  const railProps = { projects: projects ?? [], state, queuesShown: view === "queues", onOpenWaiting: openWaiting, digest };
   const besideShown = !wide && ((itemShown && !fullApproval) || waitingOpen);
   const alerts = (projectsError || projects?.length === 0 || error) && <div className="px-6 pt-4">{banners}</div>;
   return (

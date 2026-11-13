@@ -33,7 +33,11 @@ conversation". On the right, from 1280 px, a rail lists what waits for you in al
 Continue right there), what runs in the project with one honest status each ("1/3", "review", "after SF"), and what
 finished today; **All queues of <project>** at its foot shows the project's queues in the middle. In a narrower window
 the rail is folded into **Waiting N** at the right of the chat's header. In the chat, the project's queue and step
-ids ("SF", "UX2", "W / W4c") are links with the item's status dot: a click opens the queue or step (on a phone too). A queue or step opens on the right, over the
+ids ("SF", "UX2", "W / W4c") are links with the item's status dot: a click opens the queue or step (on a phone too).
+When something happened since you last looked on this device, the top of the rail (on a phone, of the Waiting tab)
+greets you with four numbers (steps finished, queues stopped, what waits, what runs), what happened newest first across
+projects (outcomes, reports, refused actions, retries) and **Go through them one by one**, which opens the first waiting
+item and the next one by itself after each answer or decision; **Mark as seen** folds it until something new comes. A queue or step opens on the right, over the
 rail, and the chat stays where it is and usable: switching to Ideas or the queues keeps it open, and "Chat about this" opens the
 conversation in the middle with the step still beside it. A queue waiting for approval opens in full beside the
 sidebar; "Ask the orchestrator…" there turns it into the panel on the right and puts the queue's reference in the

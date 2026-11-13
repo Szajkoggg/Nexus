@@ -651,6 +651,33 @@ queues and steps (`refIndex`); nothing else counts, so a word that looks like an
 
 Refs link only within the project whose chat it is; another project's ids ("Honeycomb · W/W4c") stay text.
 
+### The morning digest
+
+"Since you last looked" (UX proposals 16, quick fixes 5 and 9; `Digest.tsx`) sits at the top of the right rail on a
+desktop (in the folded rail's drawer between 1024 and 1280 px) and at the top of the Waiting tab on the phone. The
+time is stored per device (`nexus.digest.seen` in local storage; the first time, a day ago). The digest shows when
+something is new after it, a line of what happened or an item that came to wait (`hasNews`); "Mark as seen" stores now
+and folds it until something new comes. It crosses projects through one small read-only API, `GET /api/digest?since=`
+(PROTOCOL.md): steps done or failed, stops, queues done or cancelled with their report, refused actions and retries
+(one line per step with how many); fetching each project's state would have missed the last two, which live in each
+session's refusals and activity, and taken a request per project. It has, in a 372 px column:
+
+- a greeting and the time it counts from; **Mark as seen**;
+- **four numbers** (`digestTiles` in `apps/web/src/digest.ts`, pure, unit tested): steps finished (and queues done)
+  and queues stopped since the time, then what waits now (by kind) and what runs now (the first with how long it has
+  been at its step);
+- **what happened, newest first**: time, the step or queue, the outcome in a word or two with its colour (`outcome`:
+  "done", "stopped at W4c", "queue done", "2 refused actions", "retried twice"), its words and project; six lines,
+  the rest one click away; a tap opens the item, a finished queue's report has "report ▸";
+- **Go through them one by one**, when something waits. The waiting list is the one under the digest (the rail's, the
+  Waiting tab's), not a copy.
+
+**One by one.** The button opens the first waiting item (newest first, as the list) and starts a round in App: once
+the item open no longer waits (an answer, an acceptance, an approval, Continue), the next one opens in its place
+(`moveOn` in `waiting.ts`, on `waitingPosition`: the first that still waits; an item still waiting at the same place,
+such as a review after an answer, keeps it open). Closing the item, opening something else by hand, or the end of the
+list ends the round. On the phone the sheet's "2 of 6 waiting" counts along.
+
 ### Drafts stay in the browser
 
 Unsent text in the dashboard's boxes is kept in `localStorage` (`nexus.drafts`: one map from a target key to the

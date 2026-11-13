@@ -622,9 +622,20 @@ sends (see the CLI).
 
 Also `GET /api/projects/:id/sessions/:session/activity?queue=&step=&limit=`, `GET /api/projects/:id/refusals?queue=&step=`
 (the refused actions of every session of the project, oldest first; optionally only a queue's or a step's), `GET /api/projects/:id/orchestrator`
-(its session, state and chat), `GET /api/usage` and `GET /api/models/:runtime`: the models a runtime offers, asked from the runtime itself
+(its session, state and chat), `GET /api/digest?since=` (below), `GET /api/usage` and `GET /api/models/:runtime`: the models a runtime offers, asked from the runtime itself
 (Claude Code: an `initialize` control request on its stream-json input; Codex: `model/list`), with each model's
 name, description and effort levels; the dashboard offers only these.
+
+`GET /api/digest?since=<ISO 8601>` is the morning digest across every registered project (`packages/protocol/src/digest.ts`):
+`{ since, events, running }`. `since` is the time asked for (an unreadable or missing one means the last 24 hours).
+`events`, newest first and at most 200, is what happened after it, each `{ at, project, project_name, kind, queue?,
+step?, text, count?, report? }`: `done` and `failed` (a `step.done` or `step.failed` event, with its summary or
+reason), `stopped` (a `queue.stop`, with its reason), `queue_done` and `queue_cancelled` (a queue whose status is done
+or cancelled and whose last step finished, else whose run ended, after the time; `text` its title, `report` the path
+of its report, for the file endpoint), `refused` (refusals, one line per queue and step with `count`, `text` the tool
+and input of the latest) and `retried` (activity entries of kind `retry`, one line per step with `count`, `text` the
+latest). `running` lists the queues whose run is running, pausing or waiting for a retry or the usage window, each
+`{ project, project_name, queue, step?, since? }` (`since`: when the step's latest stretch at work began). Read-only.
 
 **Remote access.** A request is local when it comes from a loopback address without proxy headers
 (`X-Forwarded-For`, `Forwarded`, `X-Forwarded-Host`, `Tailscale-User-Login`). Anything else, pages, API and the
