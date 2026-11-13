@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>12 Header: three variants with five projects and an update (desktop)</title>
+<link rel="stylesheet" href="mock.css">
+<style>
+  body { padding: 14px 20px; display: flex; flex-direction: column; gap: 12px; height: 100vh; }
+  .band { display: grid; grid-template-columns: 170px 1fr; gap: 16px; flex: 1; min-height: 0; }
+  .band > .lbl { padding-top: 6px; }
+  .frame { border: 1px solid var(--border-strong); border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; background: var(--bg); }
+  .tab { display: inline-flex; align-items: center; gap: 7px; padding: 7px 12px; color: var(--text-2); border-bottom: 2px solid transparent; }
+  .tab.on { color: var(--text); font-weight: 600; border-bottom-color: var(--accent); }
+  .bar { height: 4px; border-radius: 2px; background: var(--surface-3); width: 56px; overflow: hidden; display: inline-block; } .bar > i { display: block; height: 100%; background: var(--accent); }
+  .ghostpage { flex: 1; padding: 12px 18px; display: flex; flex-direction: column; gap: 8px; }
+  .gl { height: 10px; border-radius: 5px; background: var(--surface-3); }
+  .proj { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 7px; color: var(--text-2); font-size: 13px; }
+  .proj.on { background: var(--surface-3); color: var(--text); font-weight: 600; }
+  .av { width: 20px; height: 20px; border-radius: 5px; display: grid; place-items: center; font-weight: 700; font-size: 10px; background: var(--surface-3); color: var(--text-2); }
+  .proj.on .av { background: var(--accent-strong); color: var(--on-accent); }
+</style></head>
+<body class="theme-graphite">
+<div class="row"><h2>The header with five projects, the usage meter and an update going on</h2><span class="grow"></span><span class="faint small">Today only "Project Honeycomb" fits and the current project is not visible (survey g1)</span></div>
+
+<!-- A: sidebar -->
+<div class="band">
+  <div class="lbl col gap-4"><strong>A · Project sidebar</strong><span class="small muted">Any number of projects; each shows what waits and a dot when something runs. The top keeps nothing; global status sits at the sidebar's foot.</span><span class="small" style="color:var(--ok)">Recommended</span></div>
+  <div class="frame" style="flex-direction: row">
+    <div style="width: 200px; border-right: 1px solid var(--border); background: var(--surface); padding: 10px 8px; display:flex; flex-direction:column; gap:2px">
+      <div class="row" style="padding: 0 8px 6px"><strong>Nexus</strong><span class="grow"></span><span class="count">6</span></div>
+      <div class="proj"><span class="av">PH</span><span class="grow ellipsis">Project Honeycomb</span><span class="count">2</span></div>
+      <div class="proj on"><span class="av">N</span><span class="grow">Nexus</span><span class="st running" style="font-size:0">.</span><span class="count">4</span></div>
+      <div class="proj"><span class="av">CW</span><span class="grow ellipsis">Company website</span></div>
+      <div class="proj"><span class="av">DP</span><span class="grow ellipsis">Data pipeline</span><span class="st running" style="font-size:0">.</span></div>
+      <div class="proj"><span class="av">MA</span><span class="grow ellipsis">Mobile app</span><span class="count quiet">1</span></div>
+      <div style="margin-top:auto" class="col gap-4 tiny faint"><span style="color: var(--info)">⟳ Updating: waiting for 2</span><span>Claude 5h 60% · 7d 81%</span></div>
+    </div>
+    <div class="ghostpage"><div class="gl" style="width: 30%"></div><div class="gl" style="width: 70%"></div><div class="gl" style="width: 55%"></div></div>
+  </div>
+</div>
+
+<!-- B: two rows -->
+<div class="band">
+  <div class="lbl col gap-4"><strong>B · Two-row header</strong><span class="small muted">Row 1: global status and tools. Row 2: projects only, the full width; arrows when they overflow.</span></div>
+  <div class="frame">
+    <div style="background: var(--surface); border-bottom: 1px solid var(--border)">
+      <div class="row gap-12" style="padding: 7px 16px">
+        <strong>Nexus</strong><span class="btn sm" style="color: var(--warn)">Waiting for you <span class="count">6</span></span>
+        <span class="small" style="color: var(--info)">⟳ Updating: waiting for 2 projects</span><span class="grow"></span>
+        <span class="tiny faint">Claude 5h</span><span class="bar"><i style="width:60%"></i></span><span class="tiny faint">7d</span><span class="bar"><i style="width:81%;background:var(--warn)"></i></span>
+        <span class="faint">🔕 ⚙ 📱</span><span class="st done tiny">live</span>
+      </div>
+      <div class="row gap-4" style="padding: 0 10px">
+        <span class="tab">Project Honeycomb <span class="count">2</span></span><span class="tab on"><span class="st running" style="font-size:0">.</span>Nexus <span class="count">4</span></span>
+        <span class="tab">Company website</span><span class="tab"><span class="st running" style="font-size:0">.</span>Data pipeline</span><span class="tab">Mobile app <span class="count quiet">1</span></span>
+      </div>
+    </div>
+    <div class="ghostpage"><div class="gl" style="width: 30%"></div><div class="gl" style="width: 70%"></div></div>
+  </div>
+</div>
+
+<!-- C: footer -->
+<div class="band">
+  <div class="lbl col gap-4"><strong>C · Status footer</strong><span class="small muted">The header keeps the project and what waits; projects and global status move to a slim footer, as in an editor's status bar.</span></div>
+  <div class="frame">
+    <div class="row gap-12" style="padding: 8px 16px; background: var(--surface); border-bottom: 1px solid var(--border)">
+      <strong>Nexus</strong><span class="faint">/</span><strong>Nexus</strong><span class="st running small">SF running</span>
+      <span class="grow"></span><span class="btn sm" style="color: var(--warn)">Waiting for you <span class="count">6</span></span><span class="btn sm">Orchestrator</span><span class="btn sm ghost">Ideas</span>
+    </div>
+    <div class="ghostpage"><div class="gl" style="width: 30%"></div><div class="gl" style="width: 60%"></div></div>
+    <div class="row gap-12 small" style="padding: 5px 14px; background: var(--surface-2); border-top: 1px solid var(--border)">
+      <span class="muted">Honeycomb <span class="count">2</span></span><span style="font-weight:600">● Nexus <span class="count">4</span></span><span class="muted">Website</span><span class="muted">● Pipeline</span><span class="muted">Mobile <span class="count quiet">1</span></span>
+      <span class="grow"></span><span style="color: var(--info)">⟳ Updating: waiting for 2</span><span class="faint">Claude 5h 60% · 7d 81%</span><span class="faint">🔕 ⚙ 📱</span><span class="st done tiny">live</span>
+    </div>
+  </div>
+</div>
+</body></html>

@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>19 Visual identity: three themes side by side (desktop)</title>
+<link rel="stylesheet" href="mock.css">
+<style>
+  body { background: #08090b; padding: 14px 16px; height: 100vh; display: flex; flex-direction: column; gap: 10px; }
+  .cols { flex: 1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; min-height: 0; }
+  .t { background: var(--bg); color: var(--text); border-radius: 12px; border: 1px solid var(--border-strong); padding: 14px; display: flex; flex-direction: column; gap: 12px; overflow: hidden; }
+  .w { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; padding: 9px 12px; align-items: baseline; }
+  .step { grid-template-columns: 10px 40px 1fr auto; padding: 5px 6px; font-size: 13px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .sw { display: flex; gap: 6px; } .sw i { width: 22px; height: 22px; border-radius: 6px; border: 1px solid var(--border-strong); }
+</style></head>
+<body>
+<div class="row" style="color:#e8eaed"><h2 style="white-space:nowrap">Three themes, the same screen</h2><span style="margin-left: 12px; color:#9aa1ad" class="small">Shared rules in all three: status is a dot and a word (no rings), one accent colour for actions, meta text readable (not dim grey), cards without empty space. A switch in settings; the phone may follow the system's light/dark.</span></div>
+<div class="cols">
+<script>
+// The same fragment three times: plain HTML built once, so the three cannot drift apart.
+const frag = (name, note) => `
+  <div class="row"><strong style="font-size:15px">${name}</strong><span class="grow"></span><span class="sw"><i style="background:var(--bg)"></i><i style="background:var(--surface)"></i><i style="background:var(--accent)"></i><i style="background:var(--review)"></i><i style="background:var(--warn)"></i></span></div>
+  <span class="small muted">${note}</span>
+  <span class="label" style="color: var(--warn)">Waiting for you · 3</span>
+  <div class="card list">
+    <div class="w"><span class="kind review">Review</span><span class="ellipsis"><span class="mono faint">UX2</span> Proposals with mockups</span><span class="faint tiny">2 min</span></div>
+    <div class="w"><span class="kind question">Question</span><span class="ellipsis"><span class="mono faint">W4c</span> The canyon stair: smooth it now or later?</span><span class="faint tiny">1 h</span></div>
+    <div class="w"><span class="kind approval">Approval</span><span class="ellipsis"><span class="mono faint">SC</span> A stopped step's work is kept or discarded</span><span class="faint tiny">32 min</span></div>
+  </div>
+  <div class="card pad">
+    <div class="row"><span class="mono faint">W</span><strong class="grow ellipsis">Variant B made a system</strong><span class="st stopped">stopped at W4c</span></div>
+    <div class="steps" style="margin-top: 8px">
+      <div class="step"><span class="dot" style="background:var(--ok)"></span><span class="mono faint">W3</span><span class="ellipsis">Support</span><span class="st done">done</span></div>
+      <div class="step"><span class="dot" style="background:var(--ok)"></span><span class="mono faint">W4b</span><span class="ellipsis">The corner of three heights</span><span class="st done">done</span></div>
+      <div class="step current"><span class="dot" style="background:var(--stop)"></span><span class="mono faint">W4c</span><span class="ellipsis">A clean soil edge</span><span class="st stopped">stopped</span></div>
+      <div class="step"><span class="dot" style="background:var(--text-3)"></span><span class="mono faint">W5</span><span class="ellipsis">Seams between tiles</span><span class="st">pending</span></div>
+    </div>
+    <div class="row" style="margin-top:10px"><span class="small muted grow">Look faults of the step's own remain after three rounds.</span><span class="btn sm">Continue…</span></div>
+  </div>
+  <div class="msgs" style="gap:10px">
+    <div class="msg user small">Mi vár most rám?</div>
+    <div class="msg bot small"><div class="meta">Orchestrator · 14:12</div><p>A <span class="ref">UX2</span> mockupjai és a <span class="ref">W4c</span> kérdése. A kérdésnél azt javaslom: most simítsuk el.</p></div>
+  </div>
+  <div class="row" style="margin-top:auto"><span class="btn sm ghost">⋯</span><span class="grow"></span><span class="btn sm">Fix it…</span><span class="btn sm primary">Accept and go on</span></div>`;
+for (const [cls, name, note] of [["theme-graphite", "Graphite", "A calmer dark: today's look with less colour noise and more contrast in the small text."],
+                                 ["theme-paper", "Paper", "Light, for daytime and long reading; warm off-white rather than pure white."],
+                                 ["theme-honey", "Honey", "Warm dark with an amber accent; a nod to Honeycomb, more character."]])
+  document.write(`<section class="t ${cls}">${frag(name, note)}</section>`);
+</script>
+</div>
+</body></html>

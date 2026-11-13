@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>11B Split: the page and the chat side by side, the chat wider (desktop)</title>
+<link rel="stylesheet" href="mock.css">
+<style>
+  body { display: flex; flex-direction: column; height: 100vh; }
+  header { border-bottom: 1px solid var(--border); background: var(--surface); }
+  .r1 { display: flex; align-items: center; gap: 14px; padding: 8px 20px; height: 44px; }
+  .r2 { display: flex; align-items: flex-end; gap: 2px; padding: 0 16px; height: 40px; }
+  .tab { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 8px 8px 0 0; color: var(--text-2); border-bottom: 2px solid transparent; }
+  .tab.on { color: var(--text); font-weight: 600; border-bottom-color: var(--accent); }
+  .split { flex: 1; display: grid; grid-template-columns: 1fr 8px 760px; min-height: 0; }
+  .page { overflow: hidden; padding: 20px 24px; display: flex; flex-direction: column; gap: 18px; }
+  .handle { background: var(--border); position: relative; cursor: col-resize; }
+  .handle::after { content: ""; position: absolute; left: 2px; top: 50%; width: 4px; height: 36px; margin-top: -18px; border-radius: 2px; background: var(--border-strong); }
+  .chat { display: flex; flex-direction: column; background: var(--surface); min-width: 0; }
+  .chathead { display: flex; align-items: center; gap: 10px; padding: 10px 18px; border-bottom: 1px solid var(--border); }
+  .msgs { flex: 1; overflow: hidden; padding: 20px 28px; }
+  .composer { padding: 12px 18px 16px; }
+  .w { display: grid; grid-template-columns: 86px 1fr auto; gap: 10px; align-items: baseline; padding: 9px 12px; }
+  .q { padding: 12px 14px; }
+  .w > .kind { justify-self: start; }
+  .bar { height: 4px; border-radius: 2px; background: var(--surface-3); width: 64px; overflow: hidden; display: inline-block; } .bar > i { display: block; height: 100%; background: var(--accent); }
+</style></head>
+<body class="theme-graphite">
+<header>
+  <div class="r1">
+    <strong style="font-size:16px">Nexus</strong>
+    <span class="btn sm" style="border-color: color-mix(in srgb, var(--warn) 50%, var(--border)); color: var(--warn)">Waiting for you <span class="count">6</span></span>
+    <span class="small" style="color: var(--info)">⟳ Updating: waiting for 2 projects</span>
+    <span class="grow"></span>
+    <span class="small faint">Claude 5h</span><span class="bar"><i style="width:60%"></i></span><span class="small faint">60%</span>
+    <span class="small faint">7d</span><span class="bar"><i style="width:81%;background:var(--warn)"></i></span><span class="small faint">81%</span>
+    <span class="btn sm ghost">🔕</span><span class="btn sm ghost">⚙</span><span class="btn sm ghost">📱</span><span class="st done small">live</span>
+  </div>
+  <!-- second row: projects only, the whole width; a long list scrolls with arrows -->
+  <div class="r2">
+    <span class="tab">Project Honeycomb <span class="count">2</span></span>
+    <span class="tab on"><span class="st running" style="font-size:0">.</span>Nexus <span class="count">4</span></span>
+    <span class="tab">Company website</span>
+    <span class="tab"><span class="st running" style="font-size:0">.</span>Data pipeline</span>
+    <span class="tab">Mobile app <span class="count quiet">1</span></span>
+  </div>
+</header>
+<div class="split">
+  <div class="page">
+    <div class="col">
+      <span class="label" style="color: var(--warn)">Waiting for you · 4</span>
+      <div class="card list">
+        <div class="w"><span class="kind review">Review</span><span class="ellipsis">UX2 · Proposals with mockups for what the user picked</span><span class="faint small">2 min</span></div>
+        <div class="w"><span class="kind review">Review</span><span class="ellipsis">UX1 · Survey of the everyday uses</span><span class="faint small">18 min</span></div>
+        <div class="w"><span class="kind approval">Approval</span><span class="ellipsis">SC · A stopped step's work is kept or discarded</span><span class="faint small">32 min</span></div>
+        <div class="w"><span class="kind approval">Approval</span><span class="ellipsis">SF · Small fixes: Cloudflare 403, step runtime shown</span><span class="faint small">32 min</span></div>
+      </div>
+    </div>
+    <div class="col">
+      <span class="label">Running</span>
+      <div class="card q">
+        <div class="row"><span class="mono faint">UX</span><strong class="grow ellipsis">A more usable, better-looking dashboard</strong><span class="st review">waiting for your review</span></div>
+        <div class="row small muted" style="margin-top:8px; gap: 14px">
+          <span class="st done">UX1 Survey</span><span class="st review">UX2 Proposals</span><span class="grow"></span><span class="mono faint">nexus/UX</span>
+        </div>
+      </div>
+      <div class="card q">
+        <div class="row"><span class="mono faint">SF</span><strong class="grow ellipsis">Small fixes</strong><span class="st running">running · SF3</span></div>
+        <div class="row small muted" style="margin-top:8px; gap: 14px">
+          <span class="st done">SF1</span><span class="st done">SF2</span><span class="st running">SF3 Server-process tests do not time out</span>
+        </div>
+      </div>
+    </div>
+    <div class="col">
+      <span class="label">Planned</span>
+      <div class="card q"><div class="row"><span class="mono faint">SC</span><span class="grow ellipsis">A stopped step's work is kept or discarded; one-click chat switch</span><span class="st">starts after SF</span></div></div>
+    </div>
+    <div class="row small faint"><span>▸ Finished today · 9</span><span class="grow"></span><span>Refused actions · 4</span><span>Sessions · 8</span></div>
+  </div>
+  <div class="handle" title="Drag to resize; double-click: chat full width"></div>
+  <section class="chat">
+    <div class="chathead">
+      <span class="seg"><span class="on"><span class="st running" style="font-size:0">.</span>Orchestrator</span><span>Ideas · 2</span></span>
+      <span class="faint small">ready · opus-5-5 · 38%</span><span class="grow"></span>
+      <span class="btn sm ghost">⤢ Wider</span><span class="btn sm ghost icon">⋯</span>
+    </div>
+    <div class="msgs msgs">
+      <div class="msg user">Mi vár most rám?</div>
+      <div class="msg bot"><div class="meta">Orchestrator · 14:12</div>
+        <p>Két review és két jóváhagyás:</p>
+        <ul>
+          <li><span class="ref">UX / UX2</span> a mockupok; képenként elfogadhatod vagy kommentelheted.</li>
+          <li><span class="ref">UX / UX1</span> a felmérés; a végén lévő listából válaszd ki, mi legyen a következő.</li>
+          <li><span class="ref">SC</span> és <span class="ref">SF</span> jóváhagyásra várnak; az SF-et javaslom előre, mert mindkettő a jóváhagyó nézetet érinti.</li>
+        </ul>
+      </div>
+      <div class="msg user">Jóváhagytam az SF-et.</div>
+      <div class="notice">Nexus · Queue <span class="ref">SF</span> revision 1 approved · 14:14</div>
+      <div class="tool">$ nexus run SF start --use-session 01M792Z7… --effort high</div>
+      <div class="msg bot"><div class="meta">Orchestrator · 14:14</div>
+        <p>Elindítottam az <strong>SF</strong>-et. Az N6 sessionje folytatja, mert ismeri a motort és a futások menetét; magas effortot kapott, mert az ingadozó tesztek felderítése nehéz munka.</p>
+      </div>
+    </div>
+    <div class="composer">
+      <div class="card" style="padding: 10px 12px; display:flex; align-items:flex-end; gap: 10px; border-radius: 14px; background: var(--bg)">
+        <span class="grow faint" style="padding: 6px 2px">Message the orchestrator…</span><span class="kbd">Ctrl+Enter</span><span class="btn primary">Send</span>
+      </div>
+    </div>
+  </section>
+</div>
+</body></html>

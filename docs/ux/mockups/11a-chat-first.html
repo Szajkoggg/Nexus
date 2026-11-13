@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>11A Chat-first layout (desktop)</title>
+<link rel="stylesheet" href="mock.css">
+<style>
+  .app { display: grid; grid-template-columns: 232px 1fr 372px; height: 100vh; }
+  .side { border-right: 1px solid var(--border); padding: 14px 10px; display: flex; flex-direction: column; gap: 4px; background: var(--surface); }
+  .proj { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; color: var(--text-2); }
+  .proj.on { background: var(--surface-3); color: var(--text); font-weight: 600; }
+  .proj .av { width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; font-weight: 700; font-size: 12px; background: var(--surface-3); color: var(--text-2); }
+  .proj.on .av { background: var(--accent-strong); color: var(--on-accent); }
+  .main { display: flex; flex-direction: column; min-width: 0; }
+  .chathead { display: flex; align-items: center; gap: 12px; padding: 12px 24px; border-bottom: 1px solid var(--border); }
+  .scroll { flex: 1; overflow: hidden; padding: 24px 0; }
+  .col-inner { max-width: 780px; margin: 0 auto; padding: 0 24px; }
+  .composer { padding: 14px 24px 18px; }
+  .rail { border-left: 1px solid var(--border); background: var(--surface); display: flex; flex-direction: column; overflow: hidden; }
+  .rail section { padding: 14px 16px; }
+  .wait { padding: 10px 12px; display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; }
+  .wait + .wait { border-top: 1px solid var(--border); }
+  .qrow { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; padding: 8px 2px; }
+  .bar { height: 4px; border-radius: 2px; background: var(--surface-3); overflow: hidden; } .bar > i { display: block; height: 100%; background: var(--accent); }
+  .global { margin-top: auto; display: flex; flex-direction: column; gap: 8px; padding: 10px; border-top: 1px solid var(--border); }
+  .meter { display: grid; grid-template-columns: 64px 1fr 34px; gap: 8px; align-items: center; font-size: 12px; color: var(--text-3); }
+</style></head>
+<body class="theme-graphite">
+<div class="app">
+  <!-- projects: any number fit; each says what waits and whether something runs -->
+  <aside class="side">
+    <div class="row" style="padding: 4px 8px 12px"><strong style="font-size:16px">Nexus</strong><span class="grow"></span><span class="faint small">live</span><span class="st done" style="font-size:0">.</span></div>
+    <div class="label" style="padding: 4px 10px">Projects</div>
+    <div class="proj"><span class="av">PH</span><span class="grow ellipsis">Project Honeycomb</span><span class="count">2</span></div>
+    <div class="proj on"><span class="av">N</span><span class="grow ellipsis">Nexus</span><span class="st running" style="font-size:0">.</span><span class="count">4</span></div>
+    <div class="proj"><span class="av">CW</span><span class="grow ellipsis">Company website</span></div>
+    <div class="proj"><span class="av">DP</span><span class="grow ellipsis">Data pipeline</span><span class="st running" style="font-size:0">.</span></div>
+    <div class="proj"><span class="av">MA</span><span class="grow ellipsis">Mobile app</span><span class="count quiet">1</span></div>
+    <div class="global">
+      <div class="row small" style="color: var(--info)">⟳ Updating: waiting for 2 projects</div>
+      <div class="meter"><span>Claude 5h</span><div class="bar"><i style="width:60%"></i></div><span>60%</span></div>
+      <div class="meter"><span>Claude 7d</span><div class="bar"><i style="width:81%; background: var(--warn)"></i></div><span>81%</span></div>
+      <div class="row small faint gap-12" style="padding-top:4px"><span>🔔 Notifications off</span><span class="grow"></span><span>⚙</span><span>📱</span></div>
+    </div>
+  </aside>
+
+  <!-- the conversation is the page -->
+  <main class="main">
+    <div class="chathead">
+      <span class="seg"><span class="on"><span class="st running" style="font-size:0">.</span>Orchestrator</span><span>Ideas · 2</span></span>
+      <span class="faint small">ready · opus-5-5 · 38% context</span>
+      <span class="grow"></span>
+      <span class="btn sm ghost">Tool calls</span><span class="btn sm ghost icon">⋯</span>
+    </div>
+    <div class="scroll"><div class="col-inner msgs">
+      <div class="msg user">Hagyjuk jóvá az SF-et, és utána jöhet az SC.</div>
+      <div class="notice">Nexus · Queue <span class="ref">SF</span> revision 1 approved · 13:42</div>
+      <div class="tool">$ nexus run SF start --use-session 01M792Z7… --effort high</div>
+      <div class="msg bot"><div class="meta">Orchestrator · 13:42</div>
+        <p>Elindítottam az <span class="ref"><span class="st running" style="font-size:0">.</span>SF</span>-et. Az N6 sessionje folytatja, mert ismeri a motort és a futások menetét; magas effortot kapott, mert az ingadozó tesztek felderítése nehéz munka.</p>
+        <p>Az <span class="ref">SC</span>-t beláncoltam: magától indul, amint az SF kész. Az <span class="ref"><span class="st review" style="font-size:0">.</span>UX</span> közben a saját worktree-jében fut.</p>
+      </div>
+      <div class="notice">Nexus · A worker asked a question in <span class="ref">UX / UX1</span> · 13:55</div>
+      <div class="msg bot"><div class="meta">Orchestrator · 13:55</div>
+        <p>Az <strong>UX</strong> workere bejelentette, hogy a fejlesztői példánya leállításakor egy túl tág szűrővel két idegen tesztfolyamatot is leállított. Ha az SF-ben 13:55 körül elbukott egy teszt, ez volt az oka, nem a kód.</p>
+        <p>Azt válaszoltam neki, hogy mostantól csak a saját maga indította folyamatokat állítsa le.</p>
+      </div>
+      <div class="msg user">Mi vár most rám?</div>
+      <div class="msg bot"><div class="meta">Orchestrator · 14:12</div>
+        <p>Három dolog:</p>
+        <ul>
+          <li><span class="ref"><span class="st review" style="font-size:0">.</span>UX / UX2</span> a mockupok, képenként fogadhatod el vagy kommentelheted.</li>
+          <li><span class="ref"><span class="st question" style="font-size:0">.</span>W / W4c</span> Honeycomb: a kanyon lépcsője most vagy később, ajánlásom: most.</li>
+          <li><span class="ref"><span class="st stopped" style="font-size:0">.</span>W</span> megállt a W4c-nél; a folytatáshoz a lépcső kérdése kell.</li>
+        </ul>
+      </div>
+    </div></div>
+    <div class="composer"><div class="col-inner" style="padding:0">
+      <div class="card" style="padding: 10px 12px; display:flex; align-items:flex-end; gap: 10px; border-radius: 14px">
+        <span class="grow faint" style="padding: 6px 2px">Message the orchestrator…</span>
+        <span class="kbd">Ctrl+Enter</span><span class="btn primary">Send</span>
+      </div>
+    </div></div>
+  </main>
+
+  <!-- what needs the user, and what runs: always beside the chat -->
+  <aside class="rail">
+    <section>
+      <div class="row between"><span class="label" style="color: var(--warn)">Waiting for you · 4</span><span class="faint tiny">all projects</span></div>
+    </section>
+    <div class="card" style="margin: 0 12px; overflow:hidden">
+      <div class="wait"><span class="row gap-4"><span class="kind review">Review</span><span class="mono faint">UX/UX2</span></span><span class="faint tiny">2 min</span>
+        <span class="clamp2" style="grid-column: 1 / -1">Three mockups for the picks; see the review pictures</span></div>
+      <div class="wait"><span class="row gap-4"><span class="kind question">Question</span><span class="mono faint">Honeycomb · W/W4c</span></span><span class="faint tiny">1 h</span>
+        <span class="clamp2" style="grid-column: 1 / -1">The canyon stair along straight walls: smooth it in W4c, or leave it for a later look pass?</span></div>
+      <div class="wait"><span class="row gap-4"><span class="kind stopped">Stopped</span><span class="mono faint">Honeycomb · W at W4c</span></span><span class="faint tiny">3 h</span>
+        <span class="clamp2" style="grid-column: 1 / -1">Look faults of the step's own remain after the third look round.</span>
+        <span style="grid-column: 1 / -1; margin-top: 6px" class="row"><span class="btn sm">Continue…</span><span class="btn sm ghost">Open</span></span></div>
+      <div class="wait"><span class="row gap-4"><span class="kind approval">Approval</span><span class="mono faint">SC</span></span><span class="faint tiny">32 min</span>
+        <span class="clamp2" style="grid-column: 1 / -1">A stopped step's work is kept or discarded by the user</span></div>
+    </div>
+    <section style="padding-top: 20px"><span class="label">Running in Nexus</span></section>
+    <div style="padding: 0 16px" class="col gap-4">
+      <div class="qrow"><span class="mono faint">SF</span><span class="ellipsis">Small fixes — SF3 Server-process tests</span><span class="st running">2/3</span></div>
+      <div class="qrow"><span class="mono faint">UX</span><span class="ellipsis">A more usable dashboard — UX2</span><span class="st review">review</span></div>
+      <div class="qrow"><span class="mono faint">SC</span><span class="ellipsis">Keep or discard a stopped step's work</span><span class="st">after SF</span></div>
+    </div>
+    <section style="padding-top: 20px"><span class="label">Finished today · 9</span></section>
+    <div style="padding: 0 16px" class="col gap-4 small">
+      <div class="row"><span class="st done">N8</span><span class="grow ellipsis muted">Git and reviewing on the dashboard</span><span class="faint">12:17</span></div>
+      <div class="row"><span class="st done">RP</span><span class="grow ellipsis muted">Queue reports reach the queue folder</span><span class="faint">11:39</span></div>
+      <div class="row"><span class="st done">N7</span><span class="grow ellipsis muted">Chains and schedules</span><span class="faint">11:31</span></div>
+    </div>
+    <div style="margin-top:auto; padding: 12px 16px; border-top: 1px solid var(--border)" class="row"><span class="btn sm grow">All queues of Nexus</span></div>
+  </aside>
+</div>
+</body></html>

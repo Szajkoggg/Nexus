@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>14 Reviewing: the pictures first, the decision in the viewer (desktop)</title>
+<link rel="stylesheet" href="mock.css">
+<style>
+  body { height: 100vh; display: flex; flex-direction: column; background: #050608; }
+  .top { display: flex; align-items: center; gap: 12px; padding: 10px 18px; border-bottom: 1px solid var(--border); background: var(--surface); }
+  .stage { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 12px 18px; min-height: 0; }
+  .side { display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+  .side img { width: 100%; flex: 1; min-height: 0; object-fit: contain; object-position: top; background: #000; border: 1px solid var(--border); border-radius: 8px; }
+  .strip { display: flex; gap: 8px; padding: 8px 18px; background: var(--surface); border-top: 1px solid var(--border); align-items: center; }
+  .th { width: 112px; height: 64px; border-radius: 6px; overflow: hidden; border: 2px solid transparent; position: relative; flex: none; }
+  .th img { width: 100%; height: 100%; object-fit: cover; object-position: top left; }
+  .th.on { border-color: var(--accent); }
+  .th .m { position: absolute; right: 3px; top: 3px; font-size: 11px; background: var(--ok); color: #04170e; border-radius: 4px; padding: 0 4px; font-weight: 700; }
+</style></head>
+<body class="theme-graphite">
+<div class="top">
+  <span class="btn sm ghost">‹ UX2</span>
+  <div class="col gap-4" style="gap:0"><strong>Header variants: sidebar, two rows, footer</strong><span class="tiny faint">picture 3 of 7 · Nexus · UX · UX2 Proposals with mockups</span></div>
+  <span class="grow"></span>
+  <span class="seg"><span>After</span><span class="on">Before | After</span><span>Overlay</span></span>
+  <span class="btn sm ghost">Original ↗</span><span class="btn sm ghost icon">✕</span>
+</div>
+<div class="stage">
+  <div class="side"><span class="small faint">Before · survey g1 (today)</span><img src="../survey/g1-header-5-projects-update-1440.png" alt=""></div>
+  <div class="side"><span class="small faint">After · 12 Header variants</span><img src="shots/12-header-variants-1440.png" alt=""></div>
+</div>
+<div class="strip">
+  <div class="th"><img src="shots/11a-chat-first-1440.png" alt=""><span class="m">✓</span></div>
+  <div class="th"><img src="shots/11b-split-1440.png" alt=""></div>
+  <div class="th on"><img src="shots/12-header-variants-1440.png" alt=""></div>
+  <div class="th"><img src="shots/13-action-bar-1440.png" alt=""></div>
+  <div class="th"><img src="shots/18a-phone-waiting-390.png" alt=""><span class="m">✓</span></div>
+  <div class="th"><img src="shots/18b-phone-chat-390.png" alt=""></div>
+  <div class="th"><img src="shots/19-themes-1440.png" alt=""></div>
+  <span class="grow"></span><span class="small faint">2 of 7 marked · ← → to move</span>
+</div>
+<!-- the same action bar as every panel: per picture on the left, the step's decision on the right -->
+<div class="actionbar" style="background: var(--surface)">
+  <span class="btn">✓ Mark this picture</span><input class="input" style="width: 420px; height: 34px; padding: 6px 12px" placeholder="A comment on this picture…">
+  <span class="grow"></span>
+  <span class="small faint">The step:</span><span class="btn icon">⋯</span><span class="btn">Fix it…</span><span class="btn primary">Accept the step</span>
+</div>
+</body></html>

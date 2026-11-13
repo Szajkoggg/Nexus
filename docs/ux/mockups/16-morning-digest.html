@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>16 The morning digest: what happened since you last looked (desktop)</title>
+<link rel="stylesheet" href="mock.css">
+<style>
+  body { height: 100vh; overflow: hidden; }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 22px 28px; display: flex; flex-direction: column; gap: 18px; }
+  .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .tile { padding: 12px 14px; }
+  .tile .n { font-size: 26px; font-weight: 650; line-height: 1.1; }
+  .two { display: grid; grid-template-columns: 1.35fr 1fr; gap: 18px; }
+  .ev { display: grid; grid-template-columns: 54px 44px 1fr auto; gap: 10px; padding: 9px 12px; align-items: baseline; }
+  .w { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; padding: 10px 12px; align-items: baseline; }
+</style></head>
+<body class="theme-graphite">
+<div class="wrap">
+  <div class="row"><h1>Good morning</h1><span class="muted" style="margin-left: 10px">since you last looked, yesterday 23:40 · all projects</span><span class="grow"></span><span class="btn sm ghost">Mark as seen</span></div>
+  <div class="tiles">
+    <div class="card tile"><div class="n" style="color: var(--ok)">9</div><div class="small muted">steps finished · 4 queues done</div></div>
+    <div class="card tile"><div class="n" style="color: var(--stop)">1</div><div class="small muted">queue stopped · Honeycomb W at W4c</div></div>
+    <div class="card tile"><div class="n" style="color: var(--warn)">4</div><div class="small muted">waiting for you · 2 questions, 1 review, 1 approval</div></div>
+    <div class="card tile"><div class="n" style="color: var(--accent)">1</div><div class="small muted">running now · SF3, 40 min in</div></div>
+  </div>
+  <div class="two">
+    <div class="col">
+      <span class="label">What happened, newest first</span>
+      <div class="card list">
+        <div class="ev"><span class="faint small">10:43</span><span class="mono faint">W</span><span><span class="st stopped">stopped at W4c</span> <span class="muted small">look faults of its own remain after three look rounds</span></span><span class="small faint">Honeycomb</span></div>
+        <div class="ev"><span class="faint small">08:20</span><span class="mono faint">W4b</span><span><span class="st done">done</span> <span class="muted small">a general junction rule; Core suite 587 passed</span></span><span class="small faint">Honeycomb</span></div>
+        <div class="ev"><span class="faint small">08:10</span><span class="mono faint">SQ</span><span><span class="st done">queue done</span> <span class="muted small">statuses change through Nexus; report ▸</span></span><span class="small faint">Nexus</span></div>
+        <div class="ev"><span class="faint small">02:32</span><span class="mono faint">N4</span><span><span class="st done">queue done</span> <span class="muted small">deploy from the orchestrator chat; report ▸</span></span><span class="small faint">Nexus</span></div>
+        <div class="ev"><span class="faint small">01:50</span><span class="mono faint">FQ</span><span><span class="st done">queue done</span> <span class="muted small">finished queues fold into one group; report ▸</span></span><span class="small faint">Nexus</span></div>
+        <div class="ev"><span class="faint small">01:26</span><span class="mono faint">N6</span><span><span class="st done">queue done</span> <span class="muted small">fresh context between steps; report ▸</span></span><span class="small faint">Nexus</span></div>
+        <div class="ev"><span class="faint small">00:54</span><span class="mono faint">N3B</span><span><span class="st failed">1 refused action</span> <span class="muted small">Write .nexus/queues/N7/report.md · allow for this project ▸</span></span><span class="small faint">Nexus</span></div>
+        <div class="ev"><span class="faint small">00:21</span><span class="mono faint">N3</span><span><span class="st waiting">retried twice</span> <span class="muted small">overloaded; went on at 00:24</span></span><span class="small faint">Nexus</span></div>
+      </div>
+      <span class="small faint">▸ 6 more · usage overnight: Claude 5h peaked at 74 %, no waits</span>
+    </div>
+    <div class="col">
+      <span class="label" style="color: var(--warn)">Waiting for you · 4</span>
+      <div class="card list">
+        <div class="w"><span class="kind question">Question</span><span class="clamp2">The canyon stair along straight walls: smooth it in W4c, or leave it for later?</span><span class="faint tiny">1 h</span></div>
+        <div class="w"><span class="kind question">Question</span><span class="clamp2">Which seed should the next look sheet use: 1234 or 777?</span><span class="faint tiny">1 h</span></div>
+        <div class="w"><span class="kind review">Review</span><span class="clamp2">UX1 · Survey of the everyday uses</span><span class="faint tiny">2 h</span></div>
+        <div class="w"><span class="kind approval">Approval</span><span class="clamp2">SC · A stopped step's work is kept or discarded</span><span class="faint tiny">2 h</span></div>
+      </div>
+      <div class="row"><span class="btn primary grow">Go through them one by one →</span></div>
+      <span class="small faint">Opens the first; each answer or decision moves on to the next.</span>
+    </div>
+  </div>
+</div>
+</body></html>
