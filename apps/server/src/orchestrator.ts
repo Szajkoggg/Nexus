@@ -6,7 +6,8 @@ import { randomUUID } from "node:crypto";
 import {
   ActionError, ClaudeEffort, ProjectStore, applyDraft, loadProjectState, orchestratorStatusChange, newId, runIsOlder, now, sendBack, type ChatEntry, type Event, type ProjectState, type QueueView, type SessionFile, type StepView,
 } from "@nexus/protocol";
-import { ClaudeSession } from "./claude.ts";
+import type { AgentProcess } from "./agent.ts";
+import { AgentHost, ROLE_RECORDS } from "./agent-host.ts";
 import type { Engine } from "./engine.ts";
 import { orchestratorAgentsFile } from "./helpers.ts";
 import type { UpdateNotice } from "./lifecycle.ts";
@@ -28,13 +29,11 @@ const NEVER = ["NotebookEdit", "MultiEdit"];
 export interface UserNotice { title: string; body: string; url: string; tag: string }
 
 export class Orchestrator {
-  private proc?: ClaudeSession;
+  private readonly host: AgentHost;
   private readonly store: ProjectStore;
   private readonly engine: Engine;
   private readonly changed: () => void;
   private applying = false;
-  /** New settings wait for the running turn to end; the next message starts a process with them. */
-  private restartAfterTurn = false;
   /**
    * News about Nexus itself: the outcome of an update, for the session that asked for it (src/lifecycle.ts), and the
    * changes for agents of each deploy, for every session older than it (src/deploy.ts).
@@ -47,7 +46,11 @@ export class Orchestrator {
     this.engine = engine;
     this.changed = changed;
     this.news = { update: news.update ?? (() => undefined), changes: news.changes ?? (() => []), push: news.push };
+    this.host = new AgentHost(store, ROLE_RECORDS.orchestrator);
   }
+
+  /** The orchestrator's process (one at a time): the latest one started, until it exits or Nexus ends it. */
+  private get proc(): AgentProcess | undefined { return this.host.all()[0]?.proc; }
 
   /** The current orchestrator session, if one was ever started. */
   session(): SessionFile | undefined {
@@ -102,16 +105,15 @@ export class Orchestrator {
     this.store.writeProject({ ...p, orchestrator: { runtime: "claude", notify: true, session: null, ...p.orchestrator, model: m, effort: e?.data } });
     const s = this.session();
     if (s) this.store.writeSession({ ...s, model: m, effort: e?.data });
-    if (!this.proc || this.proc.state === "exited") return;
-    if (this.proc.state === "working") { this.restartAfterTurn = true; return; }
-    this.proc.kill();
-    this.proc = undefined;
+    // New settings wait for a running turn to end; the next message starts a process with them.
+    const l = this.host.all()[0];
+    if (l) this.host.restartAfterTurn(l.session);
   }
 
   /** Ends the current orchestrator session and starts the next message in a new one (the old transcript stays). */
   reset(): void {
-    this.proc?.close();
-    this.proc = undefined;
+    const l = this.host.all()[0];
+    if (l) this.host.close(l.session);
     const p = this.store.readProject();
     this.store.writeProject({ ...p, orchestrator: { runtime: "claude", notify: true, ...p.orchestrator, session: null } });
   }
@@ -186,7 +188,7 @@ export class Orchestrator {
   }
 
   /** For good: an orchestrator shut down starts no process again (a late change, an agent's exit, may still come in). */
-  shutdown(): void { this.stopped = true; this.proc?.kill(); }
+  shutdown(): void { this.stopped = true; this.host.shutdown(); }
 
   /** Its process is still running (after shutdown: not yet exited). */
   alive(): boolean { return !!this.proc && this.proc.state !== "exited"; }
@@ -214,50 +216,31 @@ export class Orchestrator {
 
   private spawn(s: SessionFile): void {
     const project = this.store.readProject();
-    const resume = this.store.readRuntime(s.id) !== undefined;
-    const proc = new ClaudeSession({
+    this.host.start(s, (resume) => ({ runtime: "claude", options: {
       cwd: s.cwd, uuid: s.native_id!, resume, model: s.model, effort: s.effort,
       permissionMode: "dontAsk",
       allowedTools: [...READ_ONLY_TOOLS, ...DRAFT_TOOLS],
       disallowedTools: NEVER,
       appendSystemPrompt: briefing(project.name, Math.round(project.defaults.context_reuse_threshold * 100)),
       agentsFile: orchestratorAgentsFile(),
-      env: { NEXUS_SESSION: s.id, NEXUS_DIR: this.store.dir },
-    });
-    this.proc = proc;
-    this.runtime(s.id, { state: "idle", pid: proc.pid });
-    // The chat gets the orchestrator's texts whole; the activity log keeps them clipped.
-    proc.on("message", (text) => this.store.appendChat(s.id, { at: now(), from: "orchestrator", text }));
-    proc.on("activity", (a) => {
-      if (a.kind === "tool") this.store.appendChat(s.id, { at: now(), from: "orchestrator", kind: "tool", text: a.text });
-      else if (a.kind === "error" || (a.kind === "turn_end" && a.text.includes("error"))) this.store.appendChat(s.id, { at: now(), from: "nexus", kind: "error", text: a.text });
-      this.store.appendActivity(s.id, { at: now(), ...a });
-    });
-    proc.on("facts", (f) => {
-      const patch: Record<string, unknown> = {};
-      if (f.model) patch.model = f.model;
-      if (f.contextTokens !== undefined) { patch.context_tokens = f.contextTokens; patch.state = "working"; }
-      if (f.contextWindow) patch.context_window = f.contextWindow;
-      if (f.costUsd !== undefined) patch.cost_usd = f.costUsd;
-      if (Object.keys(patch).length) this.runtime(s.id, patch);
-    });
-    proc.on("turnEnd", () => {
-      this.runtime(s.id, { state: "idle" });
-      if (this.restartAfterTurn && this.proc === proc) { this.restartAfterTurn = false; proc.kill(); this.proc = undefined; }
-      this.changed();
-    });
-    proc.on("exit", () => { this.runtime(s.id, { state: "exited" }); if (this.proc === proc) this.proc = undefined; this.changed(); });
+      env: this.host.env(s.id),
+    } }), {}, () => ({
+      // The chat gets the orchestrator's texts whole; the activity log keeps them clipped.
+      message: (text) => this.store.appendChat(s.id, { at: now(), from: "orchestrator", text }),
+      activity: (a) => {
+        if (a.kind === "tool") this.store.appendChat(s.id, { at: now(), from: "orchestrator", kind: "tool", text: a.text });
+        else if (a.kind === "error" || (a.kind === "turn_end" && a.text.includes("error"))) this.store.appendChat(s.id, { at: now(), from: "nexus", kind: "error", text: a.text });
+        this.store.appendActivity(s.id, { at: now(), ...a });
+      },
+      turnEnd: () => this.changed(),
+      exit: () => this.changed(),
+    }));
   }
 
   private deliver(text: string): void {
     const proc = this.proc!;
     proc.send(text, proc.state === "working" ? "next" : undefined);
     this.changed();
-  }
-
-  private runtime(id: string, patch: Record<string, unknown>): void {
-    const old = this.store.readRuntime(id);
-    this.store.writeRuntime(id, { turns: 0, state: "idle", ...old, ...patch, updated_at: now() } as never);
   }
 
   // ---------------------------------------------------------------- requests from the orchestrator
