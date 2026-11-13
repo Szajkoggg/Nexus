@@ -4,7 +4,7 @@
 // drafts under .nexus/drafts/: permission mode dontAsk with a read-only allow list plus the drafts rules.
 import { randomUUID } from "node:crypto";
 import {
-  ActionError, ClaudeEffort, ProjectStore, applyDraft, loadProjectState, orchestratorStatusChange, newId, now, sendBack, type ChatEntry, type Event, type ProjectState, type QueueView, type SessionFile, type StepView,
+  ActionError, ClaudeEffort, ProjectStore, applyDraft, loadProjectState, orchestratorStatusChange, newId, runIsOlder, now, sendBack, type ChatEntry, type Event, type ProjectState, type QueueView, type SessionFile, type StepView,
 } from "@nexus/protocol";
 import { ClaudeSession } from "./claude.ts";
 import type { Engine } from "./engine.ts";
@@ -338,7 +338,7 @@ Options: ${x.options.join(" / ")}` : ""}`,
       q.approvals.forEach((a, i) => {
         if (a.at < since) return;
         // A run of an older revision is not resumed (the engine refuses it): the new revision starts afresh.
-        const older = r && (r.revision !== undefined ? r.revision < a.revision : q.history.some((h) => h.replaced_at > r.started_at));
+        const older = r && runIsOlder(r, a.revision, q.history);
         const todo = !r
           ? "If the plan puts it next, start it now; otherwise tell the user why not."
           : r.rejected && r.state === "paused" && !q.rejection

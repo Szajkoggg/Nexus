@@ -113,6 +113,34 @@ and works the same for both runtimes. If a turn ends without a step outcome, the
 its status, then marks the step `waiting` and tells the orchestrator. A turn that failed is not such a turn: see
 "Failures" below.
 
+### The run's state transitions
+
+A queue's run record (`run.yaml`) changes state only through the named transitions in `apps/server/src/run-state.ts`.
+They are pure functions that each own which fields they set and clear. The engine writes their result, adding
+`ended_at` and `updated_at`, and keeps the side effects (timers, processes, what the agent is told) where they are:
+
+| Transition | To | Clears | Used for |
+|---|---|---|---|
+| `startedRun` | running | (a new record) | a start |
+| `toResumed` | running | reason, `resume_at`, the hold; `nudged` false; a rejection, taking the approved revision | resume, a retry or usage wait come due, the restart after an update |
+| `toUnheld` | running | reason, the hold | a cancelled update releases a pausing run |
+| `toPausedByUser` | pausing / paused | `resume_at`, the hold (the user's pause wins) | Pause, Stop now, a rejected step |
+| `toHeldForUpdate` | pausing / paused | (sets the hold, `resume_after_restart`) | an update drains; the next server takes it over |
+| `toPaused` | paused | nothing (reason when given) | a pausing run's step ended; a pausing turn failed; a server restart |
+| `toHalted` | halted | `resume_at`, the hold (sets `failure` when given) | stops, stalls, lasting failures, out of retries |
+| `toFinished` | finished | reason, `retries`, `failure`, `resume_at`, the hold | every finish |
+| `toUsageWait` | usage_wait | the hold | a full usage window, a runtime's usage limit |
+| `toRetryWait` | retry_wait | nothing (keeps the hold) | a turn that failed for a passing reason |
+
+There is one finish. It used to be written in three places, each clearing different fields, so a run that finished
+while an update drained could keep `resume_after_restart`. A finished run now keeps none of these fields, because
+nothing reads them on it. Writes that change other fields only stay inline in the engine: the hold of a waiting retry
+and its release, `nudged`, `summary_asked`, a session switch, a step opened, and clearing `retries` and `failure` after
+a turn that ended well. The guards `assertCanStart` and `assertCanResume` live beside the transitions. The test of an
+older revision's run is `runIsOlder(run, revision, history)` (protocol). The engine passes the queue's revision; the
+orchestrator passes the revision just approved. `test/scenario.test.ts` keeps run.yaml and runtime.json at each point
+of a run in golden files, as a guard for refactoring the engine.
+
 ### Failures
 
 A turn can fail without the worker deciding anything: the service is overloaded, the network drops, a limit is hit,

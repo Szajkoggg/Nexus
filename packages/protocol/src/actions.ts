@@ -353,9 +353,12 @@ const GOING_RUN = ["running", "pausing", "usage_wait", "retry_wait"];
  * or skipped to `finished`; a queue whose run is not going to `cancelled`; and `propose-lift` on a stopped queue.
  * Consent stays the user's: marking work done, approving, lifting a stop, reopening a finished step.
  */
-/** A run of an older revision than the queue's: one without the field is older when a revision was replaced after it started. */
-export function runIsOlder(run: Pick<RunFile, "revision" | "started_at">, q: Pick<QueueFile, "revision" | "history">): boolean {
-  return run.revision !== undefined ? run.revision < q.revision : q.history.some((h) => h.replaced_at > run.started_at);
+/**
+ * A run of an older revision than `revision` (the queue's current one, or the one just approved): a run without the
+ * field is older when a revision of the queue (its `history`) was replaced after the run started.
+ */
+export function runIsOlder(run: Pick<RunFile, "revision" | "started_at">, revision: number, history: QueueFile["history"]): boolean {
+  return run.revision !== undefined ? run.revision < revision : history.some((h) => h.replaced_at > run.started_at);
 }
 
 /** A live run (one that is going) has the step open: the step is at work. */
@@ -375,7 +378,7 @@ export function releaseOrphanedSteps(store: ProjectStore, queueId: string, o: { 
   const view = loadProjectState(store).queues.find((x) => x.id === queueId);
   if (!view || view.status === "done" || view.status === "cancelled") return [];
   const run = store.readRun(queueId);
-  const current = run && !runIsOlder(run, view) ? run : undefined;
+  const current = run && !runIsOlder(run, view.revision, view.history) ? run : undefined;
   // What a revision change set aside: a step opened (its latest stretch at work began) before the current revision
   // replaced the one before. A step opened since (by a run of this revision, or by hand) is left alone, except the one
   // the run record has open when a new start replaces that record (`replacing`).

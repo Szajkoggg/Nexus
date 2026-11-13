@@ -11,14 +11,18 @@ import { existsSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import {
   ENDED_RUN_STATES,
-  ActionError, ProjectStore, USER_SESSION, ensureUserSession, liftByContinue, loadProjectState, releaseOrphanedSteps, stepClosed, reportFile, ensureReportFolder, stopPlace, newId, normPath, now, readUsage,
+  ActionError, ProjectStore, USER_SESSION, ensureUserSession, liftByContinue, loadProjectState, releaseOrphanedSteps, stepClosed, reportFile, ensureReportFolder, newId, normPath, now, readUsage,
   writeUsage, CLAUDE_EFFORTS, RETRY_LIMIT, effortIssue, formatClock, type Effort, type ProjectFile, type StepDef, type InboxView, type ProjectState, type QueueView, type RunFile, type SessionFile,
   type SessionView, type StepView,
-  addNote,
+  addNote, runIsOlder,
 } from "@nexus/protocol";
 import type { AgentProcess, StreamFacts, TurnFailure } from "./agent.ts";
 import { ClaudeSession, nexusDenyRules } from "./claude.ts";
 import { CodexSession, gitWritableRoots } from "./codex.ts";
+import {
+  GOING, assertCanResume, assertCanStart, startedRun, stoppedMessage, toFinished, toHalted, toHeldForUpdate,
+  toPaused, toPausedByUser, toResumed, toRetryWait, toUnheld, toUsageWait,
+} from "./run-state.ts";
 
 interface Live { proc: AgentProcess; session: string }
 
@@ -103,9 +107,6 @@ export function stepValues(run: StepValues, step: Pick<StepDef, "runtime" | "mod
   return { runtime, model: step.model ?? (same ? run.model : d.model), effort: step.effort ?? (same ? run.effort : d.effort) };
 }
 
-/** States in which a run still goes on by itself. */
-const GOING = ["running", "pausing", "usage_wait", "retry_wait"];
-
 export class Engine {
   private readonly live = new Map<string, Live>();   // by Nexus session id
   private readonly store: ProjectStore;
@@ -156,11 +157,7 @@ export class Engine {
     if (this.draining) throw new ActionError("Nexus is updating; start the queue after the restart", 409);
     let state = loadProjectState(this.store);
     let q = this.queue(state, queueId);
-    if (q.rejection) throw new ActionError(rejectedMessage(q), 409);
-    if (!q.approved) throw new ActionError("approve the queue's current revision first", 409);
-    if (q.run && GOING.includes(q.run.state)) throw new ActionError("the queue is already running", 409);
-    if (q.status === "stopped") throw new ActionError(stoppedMessage(q), 409);
-    if (q.status === "done" || q.status === "cancelled") throw new ActionError(`the queue is ${q.status}`, 409);
+    assertCanStart(q);
     // The new run replaces the run record: a step an earlier run left open goes back to pending, so it runs again
     // when it comes first (and no two steps show running).
     if (releaseOrphanedSteps(this.store, queueId, { replacing: true }).length) { state = loadProjectState(this.store); q = this.queue(state, queueId); }
@@ -191,10 +188,7 @@ export class Engine {
     const session = reused
       ? this.reuseSession(state, reused.id, queueId, want.model, want.effort)
       : this.newSession(state, q, want.runtime, want.model, want.effort);
-    const run: RunFile = {
-      protocol: 1, session: session.id, state: "running", started_at: now(), updated_at: now(), revision: q.revision,
-      runtime: values.runtime, model: values.model, effort: values.effort, after: opts.after,
-    };
+    const run = startedRun({ session: session.id, revision: q.revision, ...values, after: opts.after, at: now() });
     this.store.writeRun(queueId, run);
     this.store.clearStart(queueId); // a planned start is used up by any start
     this.clearClockTimer(`start:${queueId}`);
@@ -210,7 +204,7 @@ export class Engine {
     if (run.state === "running" || run.state === "usage_wait" || run.state === "retry_wait" || run.resume_after_restart) {
       const working = this.live.get(run.session)?.proc.state === "working";
       this.clearTimer(queueId);
-      this.writeRun(queueId, { ...run, state: working ? "pausing" : "paused", reason: "paused by the user", resume_after_restart: undefined, resume_at: undefined });
+      this.writeRun(queueId, toPausedByUser(run, "paused by the user", { pausing: working }));
     }
   }
 
@@ -225,8 +219,7 @@ export class Engine {
     const lift = liftByContinue(this.store, queueId);
     const run = this.store.readRun(queueId);
     const q = this.queue(loadProjectState(this.store), queueId);
-    const older = run && (run.revision !== undefined ? run.revision < q.revision : q.history.some((h) => h.replaced_at > run.started_at));
-    if (!run || run.state === "finished" || older) {
+    if (!run || run.state === "finished" || runIsOlder(run, q.revision, q.history)) {
       const started = this.start(queueId);
       return `the stop is lifted; queue ${queueId} starts at its first pending step in session ${started.session}`;
     }
@@ -241,19 +234,11 @@ export class Engine {
     if (run.state === "finished") throw new ActionError("the run is finished", 409);
     const state = loadProjectState(this.store);
     const q = this.queue(state, queueId);
-    if (q.rejection) throw new ActionError(rejectedMessage(q), 409);
-    if (!q.approved) throw new ActionError("approve the queue's current revision first", 409);
-    if (q.status === "stopped") throw new ActionError(stoppedMessage(q), 409);
-    if (q.status === "cancelled") throw new ActionError(`queue ${q.id} is cancelled`, 409);
-    // A run of an older revision would reopen a step the new revision may have replaced, in the old session. A run
-    // without the field is older when a revision was replaced after it started. A run paused by a rejection is the
-    // exception: the approved revision dealt with it, and the run goes on at its first pending step.
-    const older = run.revision !== undefined ? run.revision < q.revision : q.history.some((h) => h.replaced_at > run.started_at);
-    if (older && !run.rejected) throw new ActionError(`the run belongs to revision ${run.revision ?? "an earlier one"} and the queue is at revision ${q.revision}: start the queue instead of resuming`, 409);
+    assertCanResume(q, run);
     const session = this.sessionFile(state, run.session);
     this.ensureProcess(session);
     this.clearTimer(queueId);
-    this.writeRun(queueId, { ...run, state: "running", reason: undefined, nudged: false, resume_after_restart: undefined, resume_at: undefined, ...(run.rejected ? { rejected: undefined, revision: q.revision } : {}) });
+    this.writeRun(queueId, toResumed(run, q.revision));
     // A step left unfinished (stopped, failed, interrupted) is continued rather than skipped; one waiting for an
     // answer just waits on (the answer arrives through the inbox). A rejected step is never run again.
     const open = q.steps.find((s) => s.id === run.step && !["done", "skipped", "review", "rejected"].includes(s.status));
@@ -281,7 +266,7 @@ export class Engine {
       if (!run || run.state !== "running") continue;
       const working = this.live.get(run.session)?.proc.state === "working";
       const reason = "the Nexus server is updating; it goes on by itself afterwards";
-      this.writeRun(id, { ...run, state: working && !now ? "pausing" : "paused", reason, resume_after_restart: true });
+      this.writeRun(id, toHeldForUpdate(run, reason, { pausing: working && !now }));
       held.push(id);
     }
     if (now) for (const [, l] of this.live) if (l.proc.state === "working") { this.ending.add(l.session); l.proc.kill(); }
@@ -305,7 +290,7 @@ export class Engine {
         continue;
       }
       if (!run?.resume_after_restart) continue;
-      if (run.state === "pausing") this.writeRun(id, { ...run, state: "running", reason: undefined, resume_after_restart: undefined });
+      if (run.state === "pausing") this.writeRun(id, toUnheld(run));
       else if (run.state === "paused") { try { this.resume(id); } catch (e) { this.halt(id, (e as Error).message); } }
     }
     this.checkStarts();
@@ -316,7 +301,7 @@ export class Engine {
     const run = this.run(queueId);
     const live = this.live.get(run.session);
     this.clearTimer(queueId);
-    this.writeRun(queueId, { ...run, state: "paused", reason: "stopped by the user", resume_after_restart: undefined, resume_at: undefined });
+    this.writeRun(queueId, toPausedByUser(run, "stopped by the user"));
     if (live && live.proc.state === "working") {
       live.proc.send(
         `[Nexus] The user asks you to stop now${text ? `: ${text}` : "."} Leave the work in a consistent state, record where you are with \`nexus step progress\`, and end your turn. Do not start anything new.`,
@@ -343,7 +328,7 @@ export class Engine {
     const run = this.store.readRun(queueId);
     if (run && run.state !== "finished") {
       this.clearTimer(queueId);
-      this.writeRun(queueId, { ...run, state: "paused", reason: `step ${step} was rejected by the user${why ? `: ${why}` : ""}`, rejected: step, resume_after_restart: undefined, resume_at: undefined });
+      this.writeRun(queueId, toPausedByUser(run, `step ${step} was rejected by the user${why ? `: ${why}` : ""}`, { rejected: step }));
     }
     this.changed();
     return `step ${queueId}/${step} rejected; the run is paused`;
@@ -595,18 +580,18 @@ export class Engine {
     const next = q.steps.find((s) => s.status === "pending");
     if (!next) {
       // Also when pausing (for the user or an update): nothing is left to pause before.
-      this.writeRun(queueId, { ...run, state: "finished", reason: undefined, resume_after_restart: undefined, retries: undefined });
+      this.writeRun(queueId, toFinished(run));
       this.ending.add(run.session);
       live.proc.close();
       return;
     }
-    if (run.state === "pausing") return this.writeRun(queueId, { ...run, state: "paused" });
+    if (run.state === "pausing") return this.writeRun(queueId, toPaused(run));
     const want = stepValues(this.runValues(state, run), next, state.project);
     const issue = effortIssue(want.runtime, want.effort);
     if (issue) return this.halt(queueId, `step ${next.id}: ${issue}`);
     const wait = this.usageWait(state, want.runtime);
     if (wait) {
-      this.writeRun(queueId, { ...run, state: "usage_wait", reason: wait.reason, resume_at: wait.until });
+      this.writeRun(queueId, toUsageWait(run, wait.reason, wait.until));
       this.schedule(queueId, wait.until, this.usageMarginMs);
       return;
     }
@@ -767,11 +752,12 @@ export class Engine {
     }
   }
 
-  private halt(queueId: string, reason: string): void {
+  /** Halts a run that is not halted yet; `failure`: the runtime's failure that halted it. */
+  private halt(queueId: string, reason: string, failure?: string): void {
     const run = this.store.readRun(queueId);
     if (!run || run.state === "halted") return;
     this.clearTimer(queueId);
-    this.writeRun(queueId, { ...run, state: "halted", reason, resume_after_restart: undefined, resume_at: undefined });
+    this.writeRun(queueId, toHalted(run, reason, failure));
   }
 
   /** The queue has no step left: every step is done or skipped, or rejected by the user and released (stepClosed). */
@@ -785,7 +771,7 @@ export class Engine {
     const run = this.store.readRun(queueId);
     if (!run || (run.state !== "running" && run.state !== "pausing")) return;
     this.clearTimer(queueId);
-    this.writeRun(queueId, { ...run, state: "finished", reason: undefined, retries: undefined, failure: undefined, resume_at: undefined });
+    this.writeRun(queueId, toFinished(run));
   }
 
   /**
@@ -799,18 +785,18 @@ export class Engine {
     if (!run || (run.state !== "running" && run.state !== "pausing")) return;
     const what = `${f.code}: ${f.text}`;
     if (run.state === "pausing" && !run.resume_after_restart) {
-      return this.writeRun(queueId, { ...run, state: "paused", reason: `paused by the user; the last turn failed (${what})` });
+      return this.writeRun(queueId, toPaused(run, `paused by the user; the last turn failed (${what})`));
     }
-    if (f.kind === "lasting") { this.writeRun(queueId, { ...run, failure: f.code }); return this.halt(queueId, `the turn failed (${what})`); }
+    if (f.kind === "lasting") return this.halt(queueId, `the turn failed (${what})`, f.code);
     if (f.kind === "usage" && f.resetsAt) {
-      this.writeRun(queueId, { ...run, state: "usage_wait", reason: `the usage limit was reached (${what}); goes on when it resets`, resume_at: f.resetsAt, resume_after_restart: undefined });
+      this.writeRun(queueId, toUsageWait(run, `the usage limit was reached (${what}); goes on when it resets`, f.resetsAt));
       this.schedule(queueId, f.resetsAt, this.usageMarginMs);
       return;
     }
     const tries = (run.retries ?? 0) + 1;
-    if (tries > RETRY_LIMIT) { this.writeRun(queueId, { ...run, failure: f.code }); return this.halt(queueId, `the turn failed ${tries} times in a row; the last time: ${what}`); }
+    if (tries > RETRY_LIMIT) return this.halt(queueId, `the turn failed ${tries} times in a row; the last time: ${what}`, f.code);
     const at = new Date(this.clock.now() + this.retryBaseMs * 2 ** (tries - 1)).toISOString();
-    this.writeRun(queueId, { ...run, state: "retry_wait", retries: tries, failure: f.code, reason: `the turn failed (${what}); retry ${tries} of ${RETRY_LIMIT}`, resume_at: at });
+    this.writeRun(queueId, toRetryWait(run, { tries, failure: f.code, reason: `the turn failed (${what}); retry ${tries} of ${RETRY_LIMIT}`, at }));
     this.store.appendActivity(run.session, { at: now(), kind: "retry", text: `Nexus tries the turn again at ${formatClock(at, new Date())} (${tries} of ${RETRY_LIMIT}): ${what}`, queue: queueId, step: run.step });
     this.schedule(queueId, at, 0);
   }
@@ -1057,13 +1043,13 @@ export class Engine {
       const left = view?.steps.some((s) => !stepClosed(view, s));
       if (run && (["running", "pausing"].includes(run.state) || run.resume_after_restart) && left === false) {
         // Its last step was done before the server stopped: the run is over, whatever stopped the process.
-        this.writeRun(q, { ...run, state: "finished", reason: undefined, resume_after_restart: undefined, retries: undefined });
+        this.writeRun(q, toFinished(run));
       } else if (run?.state === "retry_wait" && run.resume_at) {
         // A retry pending at the restart (held by an update or not) is made when it is due.
         this.schedule(q, run.resume_at, 0);
       } else if (run?.resume_after_restart) {
         // Held for an update: resumed shortly, once this server is up.
-        this.writeRun(q, { ...run, state: "paused", reason: "resuming after the Nexus update" });
+        this.writeRun(q, toHeldForUpdate(run, "resuming after the Nexus update"));
         this.timers.set(`recover:${q}`, setTimeout(() => {
           this.timers.delete(`recover:${q}`);
           const r = this.store.readRun(q);
@@ -1072,7 +1058,7 @@ export class Engine {
           this.changed();
         }, 1500));
       } else if (run && ["running", "pausing"].includes(run.state)) {
-        this.writeRun(q, { ...run, state: "paused", reason: "the Nexus server restarted; resume to continue" });
+        this.writeRun(q, toPaused(run, "the Nexus server restarted; resume to continue"));
       }
       if (run?.state === "usage_wait" && run.resume_at) this.schedule(q, run.resume_at, this.usageMarginMs);
     }
@@ -1113,16 +1099,6 @@ export class Engine {
     if (!s || s.id === USER_SESSION) throw new ActionError(`unknown session ${id}`, 404);
     return s;
   }
-}
-
-/** Why a queue with a rejected step does not go on, and what lets it. */
-function rejectedMessage(q: QueueView): string {
-  return `step ${q.rejection!.step} of queue ${q.id} was rejected: the run goes on once you approve a new revision of the queue that deals with it (the orchestrator proposes one)`;
-}
-
-/** Why a stopped queue does not go on: where the stop is and its own reason, and the user's two ways out. */
-function stoppedMessage(q: QueueView): string {
-  return `queue ${q.id} is stopped${stopPlace(q)}: ${q.status_reason ?? "a stop condition was met"}. Only the user lifts a stop: with Continue in the dashboard, or by approving a new revision of the queue`;
 }
 
 function formatInbox(m: InboxView, state: ProjectState): string {
