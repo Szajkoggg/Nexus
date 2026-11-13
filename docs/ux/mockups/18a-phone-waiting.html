@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>18A Phone: a bottom bar; the waiting list</title>
+<link rel="stylesheet" href="mock.css"><script src="phone.js"></script>
+<style>
+  .content { position: absolute; top: 52px; bottom: 64px; left: 0; right: 0; overflow: hidden; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+  .wc { padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; }
+  .wc .top { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+</style></head>
+<body class="theme-graphite">
+<div class="phone">
+  <script>document.write(phoneTop("Nexus"))</script>
+  <div class="content">
+    <div class="row"><span class="label" style="color: var(--warn)">Waiting for you · 6</span><span class="grow"></span><span class="faint small">all projects</span></div>
+    <!-- the kind on the top line with where and when; the text gets the full width and three lines -->
+    <div class="card wc"><div class="top"><span class="kind question">Question</span><span class="faint">Honeycomb · W4c</span><span class="grow"></span><span class="faint">1 h</span></div>
+      <span class="clamp3">The canyon stair along straight walls: smooth it in W4c, or leave it for a later look pass?</span>
+      <div class="row" style="margin-top: 6px"><span class="btn sm grow">1 · Smooth it now ✓</span><span class="btn sm grow">2 · Later</span></div></div>
+    <div class="card wc"><div class="top"><span class="kind review">Review</span><span class="faint">Nexus · UX2</span><span class="grow"></span><span class="faint">2 min</span></div>
+      <span class="clamp3">Mockups for the picks: chat-first layout, header variants, one action bar, phone bottom bar and themes.</span></div>
+    <div class="card wc"><div class="top"><span class="kind stopped">Stopped</span><span class="faint">Honeycomb · W at W4c</span><span class="grow"></span><span class="faint">3 h</span></div>
+      <span class="clamp3">Look faults of the step's own remain after the third look round: a stair along canyon straight2, a fin on corner2.</span>
+      <div class="row" style="margin-top: 6px"><span class="btn sm">Continue…</span><span class="btn sm ghost">Open</span></div></div>
+    <div class="card wc"><div class="top"><span class="kind approval">Approval</span><span class="faint">Nexus · SC</span><span class="grow"></span><span class="faint">32 min</span></div>
+      <span class="clamp3">A stopped step's work is kept or discarded by the user; notes to the orchestrator; one-click chat switch</span></div>
+  </div>
+  <script>document.write(phoneBar("waiting"))</script>
+</div>
+</body></html>

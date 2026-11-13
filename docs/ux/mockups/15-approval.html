@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>15 Approving: the whole queue in one scroll (desktop)</title>
+<link rel="stylesheet" href="mock.css">
+<style>
+  body { height: 100vh; display: flex; flex-direction: column; }
+  .top { padding: 16px 28px 14px; border-bottom: 1px solid var(--border); background: var(--surface); }
+  .main { flex: 1; display: grid; grid-template-columns: 300px 1fr; min-height: 0; }
+  .toc { border-right: 1px solid var(--border); padding: 16px 12px; display: flex; flex-direction: column; gap: 2px; }
+  .toc .i { display: grid; grid-template-columns: 38px 1fr; gap: 6px; padding: 7px 10px; border-radius: 7px; color: var(--text-2); font-size: 13px; }
+  .toc .i.on { background: var(--surface-3); color: var(--text); }
+  .doc { overflow: hidden; padding: 18px 32px; display: flex; flex-direction: column; gap: 18px; max-width: 900px; }
+  .stepd { display: flex; flex-direction: column; gap: 8px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+  .acc { display: grid; grid-template-columns: 16px 1fr; gap: 8px; font-size: 13.5px; color: var(--text-2); }
+  .acc::before { content: "◇"; color: var(--text-3); }
+</style></head>
+<body class="theme-graphite">
+<div class="top">
+  <div class="row small faint"><span>Nexus · queue · revision 1</span><span class="grow"></span><span class="btn sm ghost icon">✕</span></div>
+  <div class="row" style="margin-top: 2px"><h1><span class="mono faint">SC</span> A stopped step's work is kept or discarded by the user</h1></div>
+  <div class="row small" style="margin-top: 6px; gap: 14px"><span class="st approval">needs your approval</span><span class="faint">4 steps · on main, after SF · Claude, high · after each step: go on</span><span class="faint">proposed by the orchestrator 32 min ago ▸ its message</span></div>
+</div>
+<div class="main">
+  <nav class="toc">
+    <span class="label" style="padding: 4px 10px 6px">In this queue</span>
+    <div class="i"><span class="faint">≡</span><span>Description</span></div>
+    <div class="i on"><span class="mono faint">SC1</span><span>Keep or Discard in the server, the briefing and the notices</span></div>
+    <div class="i"><span class="mono faint">SC2</span><span>Keep or Discard in the dashboard</span></div>
+    <div class="i"><span class="mono faint">SC3</span><span>User notes on a step in orchestrator review go to the orchestrator</span></div>
+    <div class="i"><span class="mono faint">SC4</span><span>One click between the orchestrator and Ideas chats</span></div>
+    <div class="i"><span class="faint">⚑</span><span>Stop conditions · 5</span></div>
+    <div class="i"><span class="faint">✓</span><span>Checks · 3</span></div>
+  </nav>
+  <div class="doc">
+    <div class="stepd">
+      <div class="row"><span class="mono faint">SC1</span><h2>Keep or Discard in the server, the briefing and the notices</h2></div>
+      <p class="muted">The server works out what a stopped step left: its own commits from git.yaml, without those marked foreign, and the uncommitted changes of the queue's checkout, labelled as not necessarily the step's. Continue and the approval of a new revision of a stopped queue take a choice, Keep or Discard, required when the step left commits. Keep records it and lifts as today; Discard records it, does not lift, and tells the orchestrator.</p>
+      <span class="label" style="margin-top: 4px">Acceptance</span>
+      <div class="acc"><span>Fake runtime tests with a temporary repository: a stopped step with commits requires the choice; Keep lifts and records it; Discard records it, keeps the stop and tells the orchestrator once.</span></div>
+      <div class="acc"><span>Foreign commits are not listed; no commits asks nothing; uncommitted changes are shown as the checkout's.</span></div>
+      <div class="acc"><span>PROTOCOL.md and the briefings updated; an Agents: line in the commit.</span></div>
+    </div>
+    <div class="stepd">
+      <div class="row"><span class="mono faint">SC2</span><h2>Keep or Discard in the dashboard</h2></div>
+      <p class="muted">Continue and the approval of a new revision show what the step left (its commits, the checkout's changes) and ask Keep or Discard; with nothing left behind, nothing is asked.</p>
+      <span class="label" style="margin-top: 4px">Acceptance</span>
+      <div class="acc"><span>Screenshots at 1440, 492 and 390 px of both places, with and without commits.</span></div>
+    </div>
+  </div>
+</div>
+<div class="actionbar"><span class="hint">Approving pins revision 1: these steps, their acceptance, the checks and stop conditions · Ctrl+Enter</span><span class="btn icon">⋯</span><span class="btn">Ask the orchestrator…</span><span class="btn primary">Approve revision 1</span></div>
+</body></html>

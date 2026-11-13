@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>17 Long queues on the phone: a vertical step list</title>
+<link rel="stylesheet" href="mock.css"><script src="phone.js"></script>
+<style>
+  .content { position: absolute; top: 52px; bottom: 64px; left: 0; right: 0; overflow: hidden; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+  .vs { display: grid; grid-template-columns: 10px 40px 1fr auto; gap: 10px; align-items: center; padding: 9px 10px; font-size: 14px; min-height: 44px; }
+  .vs .d { width: 8px; height: 8px; border-radius: 50%; }
+  .vs.cur { background: color-mix(in srgb, var(--stop) 9%, transparent); border-radius: 8px; align-items: start; }
+  .fold { padding: 9px 10px; color: var(--text-2); font-size: 13px; display: flex; gap: 8px; }
+  .prog { display: flex; gap: 3px; } .prog i { flex: 1; height: 5px; border-radius: 3px; background: var(--surface-3); }
+</style></head>
+<body class="theme-graphite">
+<div class="phone">
+  <script>document.write(phoneTop("Project Honeycomb").replace('SF running', 'W stopped').replace('st running', 'st stopped'))</script>
+  <div class="content">
+    <span class="label">Queues · Honeycomb</span>
+    <div class="card" style="padding: 12px 12px 6px">
+      <div class="row"><span class="mono faint">W</span><strong class="grow">Variant B made a system</strong><span class="faint small">5 of 11</span></div>
+      <div class="row small" style="margin: 4px 0 10px"><span class="st stopped">stopped at W4c</span><span class="faint">· 2 questions</span></div>
+      <div class="prog"><i style="background:var(--ok)"></i><i style="background:var(--text-3)"></i><i style="background:var(--ok)"></i><i style="background:var(--text-3)"></i><i style="background:var(--ok)"></i><i style="background:var(--stop)"></i><i></i><i></i><i></i><i></i><i></i></div>
+      <div class="fold" style="margin-top: 6px"><span class="st done">W1 – W4b</span><span>3 done, 2 skipped ▸</span></div>
+      <div class="vs cur"><span class="d" style="background:var(--stop); margin-top: 7px"></span><span class="mono faint">W4c</span>
+        <span><strong>A clean soil edge</strong><br><span class="small muted">Look faults of its own remain after three look rounds.</span><br><span class="row" style="margin-top: 8px"><span class="btn sm">Continue…</span><span class="btn sm ghost">2 questions</span></span></span><span></span></div>
+      <div class="vs"><span class="d" style="background:var(--surface-3)"></span><span class="mono faint">W4d</span><span class="ellipsis">The last holes</span><span class="faint small">pending</span></div>
+      <div class="vs"><span class="d" style="background:var(--surface-3)"></span><span class="mono faint">W4e</span><span class="ellipsis">Cuts that follow the rock</span><span class="faint small">pending</span></div>
+      <div class="vs"><span class="d" style="background:var(--surface-3)"></span><span class="mono faint">W5</span><span>Triangle budget</span><span class="faint small">pending</span></div>
+      <div class="fold"><span>+ W6, W7 ▸</span></div>
+    </div>
+    <div class="card" style="padding: 12px"><div class="row"><span class="mono faint">DW</span><strong class="grow">Workflow queue W</strong><span class="st waiting">waiting · DW4</span></div></div>
+    <div class="card" style="padding: 12px"><div class="row"><span class="mono faint">B</span><strong class="grow">The safety net</strong><span class="st waiting">waiting · B4</span></div></div>
+  </div>
+  <script>document.write(phoneBar("queues", 2))</script>
+</div>
+</body></html>

@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>13 One action bar: approval, review and question panels built the same way (desktop)</title>
+<link rel="stylesheet" href="mock.css">
+<style>
+  body { padding: 14px 16px; height: 100vh; display: flex; flex-direction: column; gap: 10px; }
+  .three { flex: 1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; min-height: 0; }
+  .panel { display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 12px; overflow: hidden; }
+  .ph { padding: 14px 16px 12px; border-bottom: 1px solid var(--border); }
+  .body { flex: 1; overflow: hidden; padding: 14px 16px; display: flex; flex-direction: column; gap: 14px; }
+  .x { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 7px; color: var(--text-3); }
+  .s { display: grid; grid-template-columns: 40px 1fr auto; gap: 8px; padding: 8px 10px; align-items: baseline; }
+  .pics { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .pic { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface-2); }
+  .pic .img { height: 118px; background: linear-gradient(135deg, var(--surface-3), var(--bg)); position: relative; }
+  .pic .img::before { content: ""; position: absolute; inset: 14px 18px auto 18px; height: 8px; border-radius: 4px; background: var(--border-strong); box-shadow: 0 16px 0 var(--border-strong), 0 32px 0 var(--border), 0 48px 0 var(--border); }
+  .pic .cap { padding: 6px 8px; font-size: 12px; display: flex; gap: 6px; align-items: center; }
+  .body .row > span { white-space: nowrap; }
+  .pic img { display:block; width:100%; height:118px; object-fit:cover; object-position: top left; }
+  .rec { border-left: 2px solid var(--accent); padding: 4px 10px; }
+</style></head>
+<body class="theme-graphite">
+<div class="row"><h2>One build for every panel</h2><span class="muted small" style="margin-left: 12px">Header: where, what, status, ✕ (always top right). Body: what to read, evidence first. Action bar at the bottom, always visible: the main action on the right, the second left of it, the rest under ⋯.</span></div>
+<div class="three">
+
+  <!-- approval -->
+  <section class="panel">
+    <div class="ph"><div class="row"><span class="faint small grow">Nexus · queue</span><span class="x">✕</span></div>
+      <h2 style="margin-top:2px"><span class="mono faint">SC</span> A stopped step's work is kept or discarded by the user</h2>
+      <div class="row small" style="margin-top:6px; gap: 12px"><span class="st approval">needs your approval</span><span class="faint">revision 1 · 4 steps · runs after SF</span></div></div>
+    <div class="body">
+      <span class="label">Steps · what you approve</span>
+      <div class="card list">
+        <div class="s"><span class="mono faint">SC1</span><span><strong>Keep or Discard in the server, the briefing and the notices</strong><br><span class="small muted clamp2">The server works out what a stopped step left: its own commits from git.yaml, and the uncommitted changes, labelled as not necessarily the step's.</span></span><span class="faint tiny">5 criteria ▾</span></div>
+        <div class="s"><span class="mono faint">SC2</span><span><strong>Keep or Discard in the dashboard</strong><br><span class="small muted clamp2">Continue and the approval of a new revision show what the step left and ask Keep or Discard.</span></span><span class="faint tiny">4 ▾</span></div>
+        <div class="s"><span class="mono faint">SC3</span><span><strong>User notes on a step in orchestrator review go to the orchestrator</strong></span><span class="faint tiny">3 ▾</span></div>
+        <div class="s"><span class="mono faint">SC4</span><span><strong>One click between the orchestrator and Ideas chats</strong></span><span class="faint tiny">3 ▾</span></div>
+      </div>
+      <div class="row wrap small faint gap-16"><span>▸ Description</span><span>▸ Stop conditions · 5</span><span>▸ Checks · 3</span><span>▸ Runs on Claude, high</span></div>
+    </div>
+    <div class="actionbar"><span class="hint">Ctrl+Enter approves</span><span class="btn icon">⋯</span><span class="btn">Ask the orchestrator…</span><span class="btn primary">Approve revision 1</span></div>
+  </section>
+
+  <!-- review -->
+  <section class="panel">
+    <div class="ph"><div class="row"><span class="faint small grow">Nexus · UX · step 2 of 2</span><span class="x">✕</span></div>
+      <h2 style="margin-top:2px"><span class="mono faint">UX2</span> Proposals with mockups for what the user picked</h2>
+      <div class="row small" style="margin-top:6px; gap: 12px"><span class="st review">waiting for your review</span><span class="faint">took 1 h 10 min · 3 commits</span></div></div>
+    <div class="body">
+      <p>Three mockups for the picks; the chat-first layout is recommended.</p>
+      <div class="row"><span class="label grow">Pictures · 6</span><span class="small faint">2 marked ✓</span></div>
+      <div class="pics">
+        <div class="pic"><img src="../survey/a1-nexus-1440.png" alt=""><div class="cap"><span style="color:var(--ok)">✓</span><span class="ellipsis">Chat-first, desktop</span></div></div>
+        <div class="pic"><img src="../survey/e1-orchestrator-chat-1440.png" alt=""><div class="cap"><span style="color:var(--ok)">✓</span><span class="ellipsis">Split view</span></div></div>
+        <div class="pic"><img src="../survey/g1-header-5-projects-update-1440.png" alt=""><div class="cap"><span class="faint">⇄</span><span class="ellipsis">Header variants</span></div></div>
+        <div class="pic"><img src="../survey/a1-nexus-390.png" alt=""><div class="cap"><span class="faint">⇄</span><span class="ellipsis">Phone bottom bar</span></div></div>
+      </div>
+      <div class="row small gap-16"><span style="color: var(--ok)">✓ typecheck</span><span class="faint">▸ Goal and acceptance</span><span class="faint">▸ Commits · 3</span><span class="faint">▸ Timeline</span></div>
+    </div>
+    <div class="actionbar"><span class="hint">Ctrl+Enter accepts</span><span class="btn icon">⋯</span><span class="btn">Fix it…</span><span class="btn primary">Accept and go on</span></div>
+  </section>
+
+  <!-- question -->
+  <section class="panel">
+    <div class="ph"><div class="row"><span class="faint small grow">Project Honeycomb · W · step W4c</span><span class="x">✕</span></div>
+      <h2 style="margin-top:2px">The canyon stair along straight walls: smooth it in W4c, or leave it for a later look pass?</h2>
+      <div class="row small" style="margin-top:6px; gap: 12px"><span class="st question">question for you</span><span class="faint">the worker waits · 1 h</span></div></div>
+    <div class="body">
+      <div class="rec small"><span class="faint">Orchestrator:</span> A look matter, so yours. Smoothing now costs about one more round of W4c; leaving it keeps W moving. <strong>I recommend: smooth it now</strong>, the stair is visible on every canyon sheet.</div>
+      <button class="choice rec"><span class="n">1</span><span class="grow">Smooth it now</span><span class="tiny" style="color: var(--accent)">recommended</span></button>
+      <button class="choice"><span class="n">2</span><span class="grow">Leave it for later</span></button>
+      <textarea class="input" rows="2" placeholder="Or answer in your own words…"></textarea>
+      <div class="row small faint gap-16"><span>▸ Why W stopped (W4c, 10:43)</span><span>▸ Look sheet · 3 pictures</span></div>
+    </div>
+    <div class="actionbar"><span class="hint">1 or 2 answers at once</span><span class="btn icon">⋯</span><span class="btn">Next waiting →</span><span class="btn primary">Answer</span></div>
+  </section>
+</div>
+</body></html>
