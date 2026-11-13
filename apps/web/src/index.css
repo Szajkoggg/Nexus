@@ -3,8 +3,8 @@
 /*
  * Theme tokens. Every colour in the dashboard is one of these, used through Tailwind (`bg-surface`, `text-fg-2`,
  * `border-line`, `text-warn`, `bg-review/10`, …); Tailwind's own palette is switched off, so a class from that palette
- * produces nothing. The values below are the Graphite theme (docs/ux/mockups/mock.css), the only one
- * for now; another theme sets the same variables under its own selector. The scheme is in docs/DESIGN.md.
+ * produces nothing. The values below are the Graphite theme (docs/ux/mockups/mock.css), the default; Paper and Honey
+ * set the same variables further down. The scheme is in docs/DESIGN.md.
  */
 @theme {
   --color-*: initial;
@@ -42,6 +42,26 @@
 }
 
 :root { color-scheme: dark; }
+
+/* The other themes set the same tokens; theme.ts (and index.html's inline script, before the first paint) puts the
+   chosen one on <html data-theme="…">. Unlayered, so they win over the @theme values. */
+html[data-theme="paper"] {
+  color-scheme: light;
+  --color-canvas: #f4f3ef; --color-surface: #ffffff; --color-surface-2: #f7f6f2; --color-surface-3: #eceae4; --color-surface-4: #e2dfd7;
+  --color-line: #e2dfd7; --color-line-strong: #d2cec3;
+  --color-fg: #1d1f23; --color-fg-2: #4f5562; --color-fg-3: #7a808c;
+  --color-accent: #2f6fec; --color-accent-strong: #1f5ad1; --color-on-accent: #ffffff;
+  --color-ok: #148a5b; --color-warn: #b7791f; --color-stop: #c4501d; --color-review: #7a4fd6; --color-info: #1d7fa8; --color-danger: #c93636;
+  --color-user-bubble: #e3ecfd; --color-scrim: #000000;
+}
+html[data-theme="honey"] {
+  --color-canvas: #13110e; --color-surface: #1c1915; --color-surface-2: #231f1a; --color-surface-3: #2d2821; --color-surface-4: #37312a;
+  --color-line: #2f2a22; --color-line-strong: #3f382d;
+  --color-fg: #f2ece3; --color-fg-2: #c2b6a4; --color-fg-3: #8f8371;
+  --color-accent: #f0a93a; --color-accent-strong: #e0951f; --color-on-accent: #1a1206;
+  --color-ok: #8fd17a; --color-warn: #f0c04a; --color-stop: #ff8b5c; --color-review: #d59cff; --color-info: #7cc7d9; --color-danger: #ff7b6b;
+  --color-user-bubble: #3a2e1c; --color-scrim: #000000;
+}
 
 html, body, #root { height: 100%; }
 body { background: var(--color-canvas); color: var(--color-fg); }

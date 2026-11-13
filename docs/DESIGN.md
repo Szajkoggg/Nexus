@@ -585,9 +585,10 @@ the text across. Drafts untouched for 14 days are pruned when the page loads.
 Every colour in the dashboard is a theme token: a CSS variable in `apps/web/src/index.css` (Tailwind's `@theme`),
 used through Tailwind's utilities (`bg-surface`, `text-fg-2`, `border-line`, `text-warn`, `bg-review/15`). Tailwind's
 own palette is switched off (`--color-*: initial`), so a palette class such as `text-zinc-400` produces no CSS: a
-colour can only come from the scheme. The values are the **Graphite** theme of the UX proposals
-(`docs/ux/mockups/mock.css`, item 19), the only theme for now; another theme sets the same variables under its own
-selector, and every component follows without a change.
+colour can only come from the scheme. The default values are the **Graphite** theme of the UX
+proposals (`docs/ux/mockups/mock.css`, item 19); **Paper** and **Honey** set the same variables under
+`html[data-theme="paper"]` and `html[data-theme="honey"]`, and every component follows without a change. The
+values are the mockup's; `surface-4` (hover over `surface-3`) and `scrim` (black in all three) are additions.
 
 | Token | Use |
 |---|---|
@@ -609,6 +610,14 @@ Rules the components keep:
 - **One accent** for actions: primary buttons, links, focus, checkboxes. Information that is not an action (a
   pending delivery, a planned start) uses `info`.
 - Opacity modifiers derive tints from tokens (`bg-warn/15`), so a theme defines each colour once.
+
+The theme is chosen per browser, not per project (settings, "This browser"): `localStorage` `nexus.theme`, one of
+`graphite`, `paper`, `honey` or `system` (Paper when the system is light, Graphite when dark, following it while the
+page is open); nothing stored, or anything else, is Graphite. Like drafts, it is the device's own matter, so it stays
+out of `.nexus/`. `theme.ts` holds the rules (unit tested). So that a page never shows the wrong theme first, a small
+inline script in `index.html` applies the same rules before the stylesheet paints; a test keeps the two in step.
+Opacity modifiers compile to `color-mix()` on the token, with a fixed Graphite fallback only for browsers without
+`color-mix()`.
 
 ## Findings from building phase 3
 

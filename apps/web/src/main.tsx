@@ -3,8 +3,11 @@ import { createRoot } from "react-dom/client";
 import "./index.css";
 import { App } from "./App.tsx";
 import { pruneStoredDrafts } from "./drafts.ts";
+import { applyTheme, watchTheme } from "./theme.ts";
 
 pruneStoredDrafts();
+applyTheme();
+watchTheme();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

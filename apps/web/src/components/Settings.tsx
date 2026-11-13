@@ -3,6 +3,7 @@ import { useState, type ReactNode } from "react";
 import type { ProjectFile } from "@nexus/protocol";
 import { act, useFetch } from "../api.ts";
 import { Button, Section } from "./ui.tsx";
+import { CHOICES, readChoice, setChoice, type ThemeChoice } from "../theme.ts";
 
 const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 
@@ -200,8 +201,24 @@ export function SettingsPanel({ project, onChanged, server }: { project: Project
         {msg && <span className={`text-sm ${msg.ok ? "text-ok" : "text-danger"}`}>{msg.text}</span>}
       </div>
 
+      <BrowserSection />
       <ServerSection info={server} onChanged={onChanged} />
     </div>
+  );
+}
+
+// ---------------------------------------------------------------- this browser
+
+/** What this browser keeps for itself, for every project: the theme. Applies at once; nothing to save. */
+function BrowserSection() {
+  const [choice, setLocal] = useState<ThemeChoice>(readChoice);
+  return (
+    <Section title="This browser">
+      <Row label="Theme" hint="Kept in this browser only, for every project; other devices keep their own.">
+        <Select value={choice} onChange={(v) => { setChoice(v as ThemeChoice); setLocal(v as ThemeChoice); }}
+          options={CHOICES.map((c) => [c.value, c.label] as [string, string])} />
+      </Row>
+    </Section>
   );
 }
 

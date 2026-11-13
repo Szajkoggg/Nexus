@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="color-scheme" content="dark" />
+    <meta name="color-scheme" content="dark light" />
     <meta name="theme-color" content="#0e0f12" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -12,6 +12,19 @@
     <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <title>Nexus</title>
+    <script>
+      // The theme before the first paint, so the page never shows the wrong one first. The same rules as
+      // src/theme.ts (parseChoice, resolveTheme, THEME_COLOR); keep them in step.
+      (function () {
+        var c = null;
+        try { c = localStorage.getItem("nexus.theme"); } catch (e) {}
+        if (c === "system") c = matchMedia("(prefers-color-scheme: dark)").matches ? "graphite" : "paper";
+        if (c !== "paper" && c !== "honey") c = "graphite";
+        document.documentElement.dataset.theme = c;
+        var bar = { graphite: "#0e0f12", paper: "#f4f3ef", honey: "#13110e" }[c];
+        document.querySelector('meta[name="theme-color"]').setAttribute("content", bar);
+      })();
+    </script>
   </head>
   <body class="bg-canvas text-fg antialiased">
     <div id="root"></div>

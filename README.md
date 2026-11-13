@@ -50,6 +50,11 @@ or reload, also when a phone's browser drops the tab. Each box keeps its own tex
 keeps it. Drafts live in that browser only (not on the server, not on your other devices) and are dropped after 14
 days untouched.
 
+**Themes.** Settings (the gear icon), "This browser", Theme: **Graphite** (dark, the default), **Paper** (light),
+**Honey** (warm dark), or **Follow the system** (Paper when the system is light, Graphite when it is dark, changing
+with it). It applies at once and is kept in that browser only, for every project; your phone and your PC each keep
+their own.
+
 **Status: phase 6** (remote access). Nexus can be used from a phone while the PC is on: through Tailscale (your own
 devices only, no open ports), signing in once with an access token (a QR code on the PC does it), installable as an
 app, with push notifications when something waits for you. See "Remote access" below.
