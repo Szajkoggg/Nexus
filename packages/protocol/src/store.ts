@@ -30,12 +30,35 @@ export function readYaml<S extends z.ZodType>(file: string, schema: S): z.infer<
   return schema.parse(YAML.parse(readFileSync(file, "utf8")));
 }
 
+/** How long a rename is tried again while Windows refuses it (see renameRetrying). */
+export const RENAME_RETRY_MS = 2_000;
+
+/**
+ * renameSync, tried again while Windows refuses it for a moment. Windows does not replace (or move) a file that
+ * another process has open, even only for reading: the rename fails with EPERM (or EACCES, EBUSY) until that process
+ * closes it. A reader in another process is ordinary here (an agent's `nexus` CLI, a test, the other server of an
+ * update, the search indexer or an antivirus). Measured on 2026-11-13: a rename onto a file another Node process held
+ * open failed with EPERM and went through once it was closed. Tried again after 5, 10, 20, … ms (at most 200 ms
+ * apart) for up to RENAME_RETRY_MS; then the last error is thrown. Synchronous, like the writes it serves.
+ */
+export function renameRetrying(from: string, to: string): void {
+  const start = Date.now();
+  for (let wait = 5; ; wait = Math.min(wait * 2, 200)) {
+    try { renameSync(from, to); return; }
+    catch (e) {
+      const code = (e as NodeJS.ErrnoException).code;
+      if ((code !== "EPERM" && code !== "EACCES" && code !== "EBUSY") || Date.now() - start >= RENAME_RETRY_MS) throw e;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, wait);
+    }
+  }
+}
+
 /** Atomic replace: write a temporary file next to the target, then rename it over the target. */
 export function writeYaml(file: string, data: unknown): void {
   mkdirSync(dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
   writeFileSync(tmp, YAML.stringify(data, { lineWidth: 120 }), "utf8");
-  renameSync(tmp, file);
+  renameRetrying(tmp, file);
 }
 
 export interface JsonlRead<T> { entries: T[]; errors: string[] }
@@ -198,7 +221,7 @@ export class ProjectStore {
     const f = join(this.queueDir(queueId), "run.yaml");
     if (!existsSync(f)) return undefined;
     const name = `run.${new Date().toISOString().replace(/[:.]/g, "-")}.yaml`;
-    renameSync(f, join(this.queueDir(queueId), name));
+    renameRetrying(f, join(this.queueDir(queueId), name));
     return name;
   }
   clearRun(queueId: string): void {
@@ -228,7 +251,7 @@ export class ProjectStore {
     const f = join(this.sessionDir(sessionId), "runtime.json");
     const tmp = `${f}.${process.pid}.tmp`;
     writeFileSync(tmp, JSON.stringify(RuntimeFile.parse(r)), "utf8");
-    renameSync(tmp, f);
+    renameRetrying(tmp, f);
   }
 }
 
@@ -242,7 +265,7 @@ export function writeUsage(u: UsageFile): void {
   mkdirSync(nexusHome(), { recursive: true });
   const tmp = `${usageFile()}.${process.pid}.tmp`;
   writeFileSync(tmp, JSON.stringify(UsageFile.parse(u)), "utf8");
-  renameSync(tmp, usageFile());
+  renameRetrying(tmp, usageFile());
 }
 
 function subdirs(dir: string): string[] {

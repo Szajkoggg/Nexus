@@ -47,7 +47,8 @@ async function heldProject() {
   engine.start("Q");
   await until("the first step to run", () => loadProjectState(store).queues[0]!.steps[0]!.status === "running");
   engine.drainForUpdate(false);
-  await until("the hold", () => store.readRun("Q")?.state === "paused" && engine.idle());
+  await until("the hold", () => store.readRun("Q")?.state === "paused" && engine.idle(), 30_000,
+    () => `; run: ${JSON.stringify(store.readRun("Q"))}; idle: ${engine.idle()}; steps: ${loadProjectState(store).queues[0]!.steps.map((s) => `${s.id}=${s.status}`).join(" ")}`);
   engine.shutdown();
   await until("the agent to exit", () => !engine.alive());
   delete process.env.FAKE_SLOW_MS;
@@ -68,10 +69,13 @@ function server(home: string, port: number, env: Record<string, string> = {}) {
   let out = "";
   // Without NEXUS_HANDOVER from this process (helpers.ts); a test that needs one passes it in `env`.
   const child: ChildProcess = spawnServer({ NEXUS_HOME: home, NEXUS_PORT: String(port), FAKE_ARGS: fakeArgs, NEXUS_LOG: "", ...env }, ["ignore", "pipe", "pipe"]);
-  child.stdout!.on("data", (d) => { out += d; });
-  child.stderr!.on("data", (d) => { out += d; });
+  // Each piece of output with the seconds since the start, and the exit: what a time-out's message shows.
+  const t0 = Date.now();
+  const at = () => `[${((Date.now() - t0) / 1000).toFixed(1)}s] `;
+  child.stdout!.on("data", (d) => { out += at() + d; });
+  child.stderr!.on("data", (d) => { out += at() + d; });
   let code: number | null | undefined;
-  child.on("exit", (c) => { code = c; });
+  child.on("exit", (c, signal) => { code = c; out += `${at()}exited (${c ?? signal})\n`; });
   const records = () => (existsSync(fakeArgs) ? readFileSync(fakeArgs, "utf8").trim().split("\n").map((l) => JSON.parse(l) as { argv?: string[]; handover: string | null }) : []);
   return {
     child, out: () => out, exitCode: () => code, startedAgent: () => existsSync(fakeArgs), records,
@@ -167,7 +171,7 @@ test("a successor waits, read-only, until the predecessor hands over; then it re
   const port = await freePort();
   const s = server(home, port, { NEXUS_HANDOVER: dir });
   try {
-    await until("the ready signal", () => existsSync(join(dir, "ready.json")), 30_000, () => `; output: ${s.out()}`);
+    await until("the ready signal", () => existsSync(join(dir, "ready.json")), 30_000, () => `; run: ${JSON.stringify(store.readRun("Q"))}; output: ${s.out()}`);
     const ready = JSON.parse(readFileSync(join(dir, "ready.json"), "utf8")) as { pid: number; commit: string };
     assert.equal(ready.pid, s.child.pid);
     const projects = await fetch(`http://127.0.0.1:${port}/api/projects`);
@@ -198,7 +202,7 @@ test("a successor whose predecessor exits without handing over takes over all th
   const dir = handoverDir(home, gone.pid!); // a predecessor that is no longer running
   const s = server(home, await freePort(), { NEXUS_HANDOVER: dir });
   try {
-    await until("the resumed queue to finish", () => store.readRun("Q")?.state === "finished", 30_000, () => `; output: ${s.out()}`);
+    await until("the resumed queue to finish", () => store.readRun("Q")?.state === "finished", 30_000, () => `; run: ${JSON.stringify(store.readRun("Q"))}; output: ${s.out()}`);
     assert.match(s.out(), /exited without handing over/);
   } finally { s.stop(); }
 });
@@ -209,7 +213,7 @@ test("a start with no predecessor comes up and resumes the held queue as before"
   const { home, store } = await heldProject();
   const s = server(home, await freePort());
   try {
-    await until("the resumed queue to finish", () => store.readRun("Q")?.state === "finished", 30_000, () => `; output: ${s.out()}`);
+    await until("the resumed queue to finish", () => store.readRun("Q")?.state === "finished", 30_000, () => `; run: ${JSON.stringify(store.readRun("Q"))}; output: ${s.out()}`);
   } finally { s.stop(); }
 });
 
@@ -222,7 +226,7 @@ test("a start by an old-style predecessor (no hand-over, the port freed as it ex
   try {
     await sleep(1500);
     await new Promise<void>((r) => old.close(() => r())); // the old server exits
-    await until("the resumed queue to finish", () => store.readRun("Q")?.state === "finished", 30_000, () => `; output: ${s.out()}`);
+    await until("the resumed queue to finish", () => store.readRun("Q")?.state === "finished", 30_000, () => `; run: ${JSON.stringify(store.readRun("Q"))}; output: ${s.out()}`);
     assert.match(s.out(), new RegExp(`Nexus server on http://127.0.0.1:${port}`));
   } finally { s.stop(); if (old.listening) old.close(); }
 });
@@ -263,9 +267,9 @@ test("after taking over, the server's own environment and its agents' have no NE
   const port = await freePort();
   const s = server(home, port, { NEXUS_HANDOVER: dir });
   try {
-    await until("the ready signal", () => existsSync(join(dir, "ready.json")), 30_000, () => `; output: ${s.out()}`);
+    await until("the ready signal", () => existsSync(join(dir, "ready.json")), 30_000, () => `; run: ${JSON.stringify(store.readRun("Q"))}; output: ${s.out()}`);
     writeFileSync(join(dir, "released.json"), JSON.stringify({ at: new Date().toISOString(), log: [] }));
-    await until("the resumed queue to finish", () => store.readRun("Q")?.state === "finished", 30_000, () => `; output: ${s.out()}`);
+    await until("the resumed queue to finish", () => store.readRun("Q")?.state === "finished", 30_000, () => `; run: ${JSON.stringify(store.readRun("Q"))}; output: ${s.out()}`);
     // The model list is asked from a runtime started with the server's own environment, not an agent's.
     const ask = new AbortController();
     void fetch(`http://127.0.0.1:${port}/api/models/claude`, { signal: ask.signal }).catch(() => {});

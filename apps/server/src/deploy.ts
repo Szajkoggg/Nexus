@@ -5,10 +5,10 @@
 //
 // The setting lives in <NEXUS_HOME>/deploy.json (one writer: the server, from the dashboard's setting).
 import { execFile } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
-import { nexusHome, now } from "@nexus/protocol";
+import { nexusHome, now, renameRetrying } from "@nexus/protocol";
 
 const exec = promisify(execFile);
 
@@ -35,7 +35,7 @@ export function writeDeploySettings(s: DeploySettings): void {
   const f = deploySettingsFile();
   mkdirSync(dirname(f), { recursive: true });
   writeFileSync(f + ".tmp", JSON.stringify(s, null, 2) + "\n");
-  renameSync(f + ".tmp", f);
+  renameRetrying(f + ".tmp", f);
 }
 
 /** Runs git in `root`; tests replace it to see how the push is run. */

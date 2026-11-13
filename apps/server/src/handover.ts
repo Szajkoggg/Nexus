@@ -11,9 +11,9 @@
 // until released.json appears or the predecessor's process is gone: no recovery, no resume, no agent, no write under
 // any project's .nexus/. Without ready.json the predecessor rolls back (src/lifecycle.ts) and never releases.
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
-import { ProjectStore, loadProjectState, newId, nexusHome, now, readRegistry } from "@nexus/protocol";
+import { ProjectStore, loadProjectState, newId, nexusHome, now, readRegistry, renameRetrying } from "@nexus/protocol";
 
 /** How long a predecessor waits for its successor's ready signal. */
 export const HANDOVER_TIMEOUT_MS = 60_000;
@@ -42,7 +42,7 @@ const read = <T>(dir: string, name: string): T | undefined => {
 const write = (dir: string, name: string, value: unknown) => {
   const f = join(dir, name);
   writeFileSync(f + ".tmp", JSON.stringify(value, null, 2));
-  renameSync(f + ".tmp", f);
+  renameRetrying(f + ".tmp", f);
 };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 

@@ -680,6 +680,14 @@ the text across. Drafts untouched for 14 days are pruned when the page loads.
   its outcome, keyed by the update's id that `predecessor.json` carries. A new kind of notice still tells everything
   it covers since the orchestrator session began, the first time it runs.
 
+- **Windows does not replace a file another process has open.** Nexus writes its files atomically (a temporary
+  file, then a rename over the target). On Windows the rename fails with `EPERM` while any other process has the
+  target open, even only to read it: an agent's `nexus` CLI reading `run.yaml`, a test polling it, the other server of
+  an update, the search indexer. Measured on 2026-11-13: a rename onto a file another Node process held open failed
+  with `EPERM`, and went through once it was closed. The engine took such a failure for an engine error and halted the
+  run; under load (a full test suite beside CPU-bound processes) the server-process tests timed out now and then for
+  this reason (queue SF, step SF3). Every such rename now tries again for up to 2 s (`renameRetrying` in
+  `packages/protocol/src/store.ts`); other errors are thrown at once.
 - **Queue drafts go through files, not heredocs.** On 2026-11-12 an orchestrator could not upload a long queue
   revision: `cd … && nexus queue draft - <<'EOF'` was refused in `dontAsk` mode (a chained command does not match
   `Bash(nexus:*)`), and the heredoc alone (about 8.5 KB; about 7 KB worked) broke in Claude Code's Bash wrapper on
