@@ -3,8 +3,9 @@ import type { QueueStatus } from "@nexus/protocol";
 import { enc, useFetch, useLive, useProjectState, useProjects, type AttentionItem, type QueueView } from "./api.ts";
 import { QueueRow } from "./components/QueueRow.tsx";
 import { chooseOption, QueueDetail, StepDetail } from "./components/Details.tsx";
-import { Button, Drawer, Section, SIDE, TimeAgo } from "./components/ui.tsx";
-import { AttentionPanel, attentionTarget, NotifyToggle, useNotifications, WaitingButton, WaitingList } from "./components/Attention.tsx";
+import { Button, Drawer, Section, TimeAgo, useWide } from "./components/ui.tsx";
+import { Rail, RAIL } from "./components/Rail.tsx";
+import { AttentionPanel, attentionTarget, NotifyToggle, useNotifications, WaitingList } from "./components/Attention.tsx";
 import { ContextBar, UsageMeter } from "./components/Run.tsx";
 import { ChatPanel, ConversationsPanel, DeskHead, useOrchestrator, type Desk } from "./components/Chat.tsx";
 import { RemoteButton, RemotePanel } from "./components/Remote.tsx";
@@ -88,6 +89,8 @@ export function App() {
   const of = place?.at ? `${place.at} of ${place.total} waiting` : undefined;
 
   const itemShown = !!(state && queue);
+  // From 1280 px the right rail stands beside the chat (UX proposals, 11A).
+  const wide = useWide();
   // A queue waiting for approval opens in the full view on a desktop, the compact list on the phone (UX proposals,
   // 15), unless the user picked the other form for it.
   const [form, setForm] = useApprovalForm(projectId, queue?.id, queue?.revision);
@@ -167,7 +170,7 @@ export function App() {
       <RemotePanel version={tick} />
     </Drawer>
 
-    <Drawer open={itemShown && !fullApproval} onClose={close} beside={!phone} panel>
+    <Drawer open={itemShown && !fullApproval} onClose={close} beside={phone ? undefined : RAIL} panel>
       {state && queue && (step
         ? <StepDetail project={state} queue={queue} step={step} onChanged={reload} onClose={close} of={of} />
         : <QueueDetail project={state} queue={queue} onChanged={reload} onClose={close} of={of}
@@ -214,17 +217,23 @@ export function App() {
   }
 
   // A desktop (from 1024 px; UX proposals, 11A and 12A): the projects in a sidebar with the global status at its foot,
-  // and the middle column: the orchestrator chat (what a project opens on), Ideas, or the project's queues from "All
-  // queues". A queue or step opens beside it, on the right, and the column makes room for it.
+  // the middle column (the orchestrator chat, what a project opens on; Ideas; or the project's queues from "All
+  // queues"), and from 1280 px the rail at the right: what waits, what runs, what finished today. A queue or step opens
+  // over the rail, so the chat never moves. Below 1280 px the rail folds into "Waiting N" in the chat's header and
+  // opens as a drawer in the rail's place; there, the column makes room for the drawer or a queue.
+  const total = waiting.length;
   const desk: Desk = {
     orchestrator,
     ideas: ideas?.filter((c) => !c.archived).length,
-    tools: <>
-      <WaitingButton projects={projects} onClick={() => nav.open("waiting")} />
-      <button onClick={() => nav.tab("queues")} aria-pressed={view === "queues"}
-        className={`shrink-0 rounded-lg border px-3 py-1.5 text-sm ${view === "queues" ? "border-line-strong bg-surface-3 text-fg" : "border-line-strong text-fg-2 hover:bg-surface hover:text-fg"}`}>All queues</button>
-    </>,
+    tools: wide ? null : (
+      <button onClick={() => (waitingOpen ? nav.close("waiting") : nav.open("waiting"))} aria-pressed={waitingOpen} title="What waits for you in all projects, what runs, what finished today"
+        className={`flex shrink-0 items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm ${waitingOpen ? "bg-surface-3" : "hover:bg-surface"} ${total ? "border-warn/40 text-warn" : "border-line-strong text-fg-2"}`}>
+        Waiting{total > 0 && <span className="grid h-4.5 min-w-4.5 place-items-center rounded-full bg-warn px-1.5 text-[11px] font-semibold text-canvas">{total}</span>}
+      </button>
+    ),
   };
+  const railProps = { projects: projects ?? [], state, queuesShown: view === "queues", onOpenWaiting: openWaiting };
+  const besideShown = !wide && ((itemShown && !fullApproval) || waitingOpen);
   const alerts = (projectsError || projects?.length === 0 || error) && <div className="px-6 pt-4">{banners}</div>;
   return (
     <div className="flex h-dvh">
@@ -239,7 +248,7 @@ export function App() {
         </div>
       </>} />
 
-      <main className="flex min-w-0 flex-1 flex-col" style={itemShown && !fullApproval ? { marginRight: SIDE } : undefined}>
+      <main className="flex min-w-0 flex-1 flex-col" style={besideShown ? { marginRight: RAIL } : undefined}>
         {view === "chat" && <>
           {alerts}
           {projectId && <ChatPanel key={`chat-${projectId}`} desk={desk} project={projectId} name={state?.project.name ?? projectId} view={orchestrator} onChanged={() => setTick((t) => t + 1)} />}
@@ -258,7 +267,7 @@ export function App() {
           <div className="@container scroll-thin min-h-0 flex-1 overflow-y-auto px-6 py-6">
             <div className="mx-auto max-w-6xl">
               {banners}
-              {state && state.attention.length > 0 && (
+              {!wide && state && state.attention.length > 0 && (
                 <AttentionPanel project={state.project.id} items={state.attention} queues={state.queues} pushAccepted={state.project.defaults.push_accepted}
                   onChanged={reload}
                   onOpen={(a: AttentionItem) => { if (projectId && a.queue) nav.item(projectId, a.queue, attentionTarget(a)); }} />
@@ -269,8 +278,13 @@ export function App() {
         </>}
       </main>
 
-      <Drawer open={waitingOpen} onClose={() => nav.close("waiting")}>
-        <WaitingList projects={projects ?? []} onOpen={openWaiting} />
+      {wide && (
+        <aside className="shrink-0 border-l border-line bg-surface" style={{ width: RAIL }}>
+          <Rail {...railProps} />
+        </aside>
+      )}
+      <Drawer open={!wide && waitingOpen} onClose={() => nav.close("waiting")} beside={RAIL} panel>
+        <Rail {...railProps} onClose={() => nav.close("waiting")} />
       </Drawer>
 
       {drawers}

@@ -29,9 +29,11 @@ you in it and a dot while something runs; any number fit, the list scrolls. At i
 usage, notifications, the project's settings and remote access; "live" at its top says whether updates arrive. The
 middle is the conversation: clicking a project opens its orchestrator chat. The chat's header switches between
 **Orchestrator** and **Ideas** (with how many conversations there are); "Tool calls" shows the tool lines, ⋯ has "New
-conversation". **All queues** at the right of the header shows the project's queues, what waits in it and its
-finished queues; the inbox button beside it lists what waits in all projects. A queue or step opens on the right, beside
-the chat, which stays usable: switching to Ideas or the queues keeps it open, and "Chat about this" opens the
+conversation". On the right, from 1280 px, a rail lists what waits for you in all projects (a stopped queue with
+Continue right there), what runs in the project with one honest status each ("1/3", "review", "after SF"), and what
+finished today; **All queues of <project>** at its foot shows the project's queues in the middle. In a narrower window
+the rail is folded into **Waiting N** at the right of the chat's header. A queue or step opens on the right, over the
+rail, and the chat stays where it is and usable: switching to Ideas or the queues keeps it open, and "Chat about this" opens the
 conversation in the middle with the step still beside it. A queue waiting for approval opens in full beside the
 sidebar; "Ask the orchestrator…" there turns it into the panel on the right and puts the queue's reference in the
 chat's box.
@@ -253,7 +255,7 @@ On a narrow screen the project sidebar gives way to a picker: the current projec
 "waiting for you" count and running dot. Tap it for the list of all projects (each with its count and dot), tap one to
 switch.
 
-The inbox button (in the chat's header on a computer, the Waiting tab on a phone) counts what waits for you in all projects (questions, approvals, steps in review,
+The rail (or Waiting N on a narrower computer, the Waiting tab on a phone) counts what waits for you in all projects (questions, approvals, steps in review,
 halted runs, failed steps). It opens one list of them, newest first, each with its project; tap an item to open it.
 
 "After each step" (in Settings for the project, under ⋯ in a queue's bar for that queue) can also be "wait for the orchestrator's

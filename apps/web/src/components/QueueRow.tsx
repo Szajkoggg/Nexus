@@ -12,7 +12,7 @@ import { usePhone } from "../phone.ts";
 import { STOP_BUTTON, StopActions, stopVersion } from "./Stop.tsx";
 
 /** The honest status's colours: a dot and a word. */
-const TONE: Record<Tone, [string, string]> = {
+export const TONE: Record<Tone, [string, string]> = {
   running: ["bg-accent animate-pulse", "text-accent"], waiting: ["bg-warn", "text-warn"], review: ["bg-review", "text-review"],
   stopped: ["bg-stop", "text-stop"], failed: ["bg-danger", "text-danger"], approval: ["bg-info", "text-info"],
   paused: ["bg-fg-2", "text-fg-2"], planned: ["bg-fg-3", "text-fg-2"], done: ["bg-ok", "text-ok"], cancelled: ["bg-fg-3", "text-fg-3"],

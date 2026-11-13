@@ -101,18 +101,6 @@ export function AttentionPanel({ project, items, queues, pushAccepted, onOpen, o
 
 // ---------------------------------------------------------------- across all projects
 
-/** The header's way to everything waiting for the user, in every project: an inbox with the total count. */
-export function WaitingButton({ projects, onClick }: { projects: ProjectSummary[] | undefined; onClick: () => void }) {
-  const n = (projects ?? []).reduce((sum, p) => sum + p.attention.length, 0);
-  return (
-    <button onClick={onClick} title={`Waiting for you in all projects: ${n}`} aria-label={`Waiting for you: ${n}`}
-      className={`flex shrink-0 items-center gap-1.5 rounded-lg border px-2 py-1.5 text-sm hover:bg-surface ${n ? "border-warn/40 text-warn" : "border-line-strong text-fg-2"}`}>
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2" /><path d="M5.5 5.1 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.9A2 2 0 0 0 16.7 4H7.3a2 2 0 0 0-1.8 1.1Z" /></svg>
-      {n > 0 && <span className="text-xs font-medium">{n}</span>}
-    </button>
-  );
-}
-
 /**
  * Everything waiting for the user in every project, newest first; a tap opens the item in its project. Each card puts
  * the kind, where it is and when on one line and gives the text the full width; a question's options are buttons
@@ -156,6 +144,34 @@ export function WaitingList({ projects, onOpen, onChoose }: {
         ))}
       </ul>
     </div>
+  );
+}
+
+/**
+ * What waits in every project, as the desktop's rail shows it (mockup 11A): one card, an item a row with its kind,
+ * where it is (with its project when it is not the current one) and when, the text in two lines; a stopped queue has
+ * Continue and Open. A tap opens the item in its project.
+ */
+export function WaitingCards({ projects, current, onOpen }: { projects: ProjectSummary[]; current?: string; onOpen: (w: WaitingItem) => void }) {
+  const items = mergeAttention(projects);
+  if (!items.length) return <p className="px-1 text-sm text-fg-3">Nothing waits for you.</p>;
+  return (
+    <ul className="divide-y divide-line overflow-hidden rounded-xl border border-line bg-surface-2">
+      {items.map((a) => (
+        <li key={`${a.project}/${attentionKey(a)}`}>
+          <button onClick={() => onOpen(a)} className="block w-full px-3 pb-2.5 pt-2.5 text-left hover:bg-surface-3/50">
+            <span className="flex min-w-0 items-center gap-1.5 text-xs">
+              <span className={`shrink-0 rounded px-1.5 py-px font-semibold ${LABEL[a.kind].tone}`}>{LABEL[a.kind].text}</span>
+              <span className="min-w-0 flex-1 truncate font-mono text-fg-3">{a.project !== current && <span className="font-sans">{a.project_name} · </span>}{whereOf(a)}</span>
+              {a.at && <span className="shrink-0 text-fg-3"><TimeAgo at={a.at} /></span>}
+            </span>
+            <span className="mt-1 line-clamp-2 text-sm leading-snug text-fg">{plain(a.text)}</span>
+            {a.lift && <LiftProposal lift={a.lift} />}
+          </button>
+          {a.lift && a.queue && <div className="-mt-1"><StopRow project={a.project} a={{ ...a, lift: a.lift }} onOpen={() => onOpen(a)} /></div>}
+        </li>
+      ))}
+    </ul>
   );
 }
 

@@ -72,8 +72,6 @@ export function useWide(): boolean {
   return wide;
 }
 
-/** The width of a queue or step open beside a desktop's middle column, which keeps what is left of the window. */
-export const SIDE = "min(36rem, 40vw)";
 
 export function useNow(intervalMs = 30_000): number {
   const [now, setNow] = useState(Date.now());
@@ -425,18 +423,19 @@ export function PanelBody({ children }: { children: ReactNode }) {
 // ---------------------------------------------------------------- drawer
 
 /**
- * A panel from the right. Escape and Back close it through nav.ts, which knows which layer is on top. With `beside`, a
- * panel beside the middle column instead (a queue or step on a desktop): no backdrop, the chat usable beside it.
+ * A panel from the right. Escape and Back close it through nav.ts, which knows which layer is on top. With `beside` (a width), a
+ * panel at the right of a desktop instead, where the rail is (a queue or step, the folded rail): no backdrop, the chat
+ * usable beside it.
  * With `panel`, the content brings its own PanelHeader (with ✕), PanelBody and ActionBar; else the drawer scrolls
  * and has ✕ itself.
  */
-export function Drawer({ open, onClose, beside, panel, children }: { open: boolean; onClose: () => void; beside?: boolean; panel?: boolean; children: ReactNode }) {
+export function Drawer({ open, onClose, beside, panel, children }: { open: boolean; onClose: () => void; beside?: string; panel?: boolean; children: ReactNode }) {
   if (!open) return null;
   const content = panel ? children : <><CloseButton onClose={onClose} className="absolute right-3 top-3" /><div className="p-5 pt-6 sm:p-6 max-lg:px-4 max-lg:pt-14">{children}</div></>;
   if (beside) {
     return (
       <aside className={`fixed inset-y-0 right-0 z-20 border-l border-line bg-surface shadow-xl ${panel ? "flex flex-col" : "scroll-thin overflow-y-auto"}`}
-        style={{ width: SIDE }}>
+        style={{ width: beside }}>
         {content}
       </aside>
     );

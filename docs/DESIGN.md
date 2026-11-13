@@ -576,10 +576,9 @@ dot while something runs (from the projects API; the list scrolls, so any number
 its foot: an update going on, the usage windows one per row, notifications, the project's settings, remote access;
 "live" or "offline" sits at its top. The **middle column** shows one of three views: the project's **orchestrator
 chat** (the view a project opens on), **Ideas** (the conversations, the list beside the open one), or the project's
-**queues** ("All queues": what waits in it, its queues, the finished ones, refused actions, sessions). Its header
-(`DeskHead` in Chat.tsx) is the Orchestrator / Ideas switch, what the view says about itself (the chat's state,
-model and context, "Tool calls", ⋯ with "New conversation"), and the column's buttons: what waits in all projects
-(a drawer) and All queues. The chat's text keeps a chat app's measure, at most 780 px wide in the middle; the
+**queues** ("All queues": its queues, the finished ones, refused actions, sessions; below 1280 px also what waits in
+it). Its header (`DeskHead` in Chat.tsx) is the Orchestrator / Ideas switch, what the view says about itself (the
+chat's state, model and context, "Tool calls", ⋯ with "New conversation"), and below 1280 px "Waiting N". The chat's text keeps a chat app's measure, at most 780 px wide in the middle; the
 orchestrator's and the partner's messages are text under a line saying who and when, Nexus's notices a line with a
 rule at the left, the composer a card with Send at its right. The phone keeps its bubbles.
 
@@ -591,7 +590,7 @@ the chat or Ideas into a view switch on both layouts. So:
   conversation, a queue or step, an image, Settings, the waiting list) and then leaves the app.
 - **A project switch shows its orchestrator chat** (`switchProject` with the desk layout) and closes what was open.
 - **What lies beside the column stays when the view switches.** A queue or step opens on the right (`Drawer beside`,
-  no backdrop, `SIDE` wide) and the column makes room for it; switching to Ideas or the queues keeps it open: Nexus
+  no backdrop), in the rail's place (see "The right rail"); switching to Ideas or the queues keeps it open: Nexus
   goes back to the entry below it, rewrites that with the new view and opens it again, so Back still closes it and
   the view stays. A conversation belongs to the Ideas view and closes when another view shows; the Ideas switch with
   a conversation open shows the list again.
@@ -603,9 +602,32 @@ the chat or Ideas into a view switch on both layouts. So:
 The approval's **full view** covers the window right of the sidebar. "Ask the orchestrator…" there turns it into the
 compact list on the right (the form remembered for that revision, as "Show as a panel" does) and shows the chat
 with the reference in its composer, so the queue and the chat are both in view: the full view used to leave a chat
-open beside it its room, which no longer exists as a panel. Between 1024 and 1280 px the same layout holds; the right
-rail of 11A (what waits, what runs, what finished today; from 1280 px, a "Waiting N" drawer below) and items opening
-over it follow in UI4.2. Until then the column's header carries the inbox button and All queues.
+open beside it its room, which no longer exists as a panel.
+
+### The right rail
+
+From 1280 px (`WIDE`) a rail stands at the right of the chat, 372 px wide as in mockup 11A (`RAIL`, `Rail.tsx`):
+
+- **Waiting for you · N, all projects**: one card, an item a row (`WaitingCards` in Attention.tsx): its kind, where
+  it is (with its project's name when it is not the current project) and when, the text in two lines; a stopped
+  queue has Continue and Open, as on the waiting list. A tap opens the item in its project.
+- **Running in <project>**: the project's queues at work (`atWork` in `apps/web/src/rail.ts`, pure, unit tested),
+  each with its honest status from `queueStatus` as a dot and a few words (`shortStatus`): running ("1/3", steps
+  closed of all), waiting (a question, a retry, the usage window), in review, paused, or with a planned start ("after
+  SF"). Running and waiting stay apart (quick fix 3): a stopped or failed queue and one that needs approval are not
+  here but under Waiting for you; an approved queue with no start is not at work.
+- **Finished today · N**: the project's queues done or cancelled today, most recent first, with their time
+  (`finishedToday`, built on `splitFinished`, so one that still waits for the user is not finished).
+- **All queues of <project>** at its foot shows the queues in the middle (pressed while they show).
+
+The rail scrolls as a whole: with many items waiting, what runs and what finished come below them.
+
+**Items open over the rail** (quick fix 10): a queue or step, from the rail, the chat or the queues, is a drawer
+exactly in the rail's place, so the chat never moves, and Back shows the rail again. On the queues page the project's
+own waiting cards are left out from 1280 px, since the rail shows them. **Between 1024 and 1280 px** the rail folds
+into "Waiting N" in the chat's header (N: what waits in all projects): it opens the same rail as a drawer in the
+rail's place (the `waiting` layer, so Back closes it), and the column makes room for it, as it does for a queue or
+step there, which opens over the drawer. Below 1024 px the phone has its Waiting tab instead.
 
 ### Drafts stay in the browser
 
