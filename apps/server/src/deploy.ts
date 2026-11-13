@@ -5,7 +5,7 @@
 //
 // The setting lives in <NEXUS_HOME>/deploy.json (one writer: the server, from the dashboard's setting).
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { nexusHome, now } from "@nexus/protocol";
@@ -103,4 +103,94 @@ export async function pushDeployed(o: {
   } catch (err) {
     return { result: "failed", text: reason(err, timeout), at };
   }
+}
+
+// ---------------------------------------------------------------- what changed for agents
+
+// A commit that changes something agents rely on (a CLI command, a briefing, the protocol, a file an agent reads or
+// writes) carries a line "Agents: <what changed>" (AGENTS.md). At a successful deploy the successor collects those
+// lines from the commits between the old and the new version and records them in <NEXUS_HOME>/deploy-changes.jsonl
+// (one writer: the server); every project's orchestrator session older than the deploy is told them once.
+
+export interface AgentChange { commit: string; text: string }
+/** One deploy's changes for agents. `key` is what an orchestrator's applied.jsonl records once it was told. */
+export interface DeployChanges { key: string; at: string; from: string; to: string; changes: AgentChange[] }
+
+export const deployChangesFile = () => join(nexusHome(), "deploy-changes.jsonl");
+
+/** Every recorded deploy's changes, oldest first, each key once. */
+export function readDeployChanges(): DeployChanges[] {
+  const f = deployChangesFile();
+  if (!existsSync(f)) return [];
+  const seen = new Set<string>();
+  const out: DeployChanges[] = [];
+  for (const line of readFileSync(f, "utf8").split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const d = JSON.parse(line) as DeployChanges;
+      if (!d.key || seen.has(d.key)) continue;
+      seen.add(d.key);
+      out.push(d);
+    } catch { /* a torn line: skip it */ }
+  }
+  return out;
+}
+
+/** Records a deploy's changes, unless that deploy is recorded already (a successor taking the same hand-over again). */
+export function recordDeployChanges(d: DeployChanges): boolean {
+  if (readDeployChanges().some((x) => x.key === d.key)) return false;
+  const f = deployChangesFile();
+  mkdirSync(dirname(f), { recursive: true });
+  appendFileSync(f, JSON.stringify(d) + "\n");
+  return true;
+}
+
+/**
+ * The "Agents:" lines of a commit message. A line may wrap: the lines after it, up to a blank line or a trailer
+ * ("Co-Authored-By: …"), belong to it.
+ */
+export function parseAgentLines(message: string): string[] {
+  const lines = message.split(/\r?\n/);
+  const out: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const m = /^Agents:\s*(.*)$/.exec(lines[i]!.trim());
+    if (!m) continue;
+    let text = m[1]!.trim();
+    for (let j = i + 1; j < lines.length; j++) {
+      const next = lines[j]!.trim();
+      if (!next || /^[A-Za-z][A-Za-z-]*:\s/.test(next)) break;
+      text += ` ${next}`;
+      i = j;
+    }
+    if (text) out.push(text);
+  }
+  return out;
+}
+
+/**
+ * The Agents: lines of the commits from `from` (excluded) to `to`, oldest first; or why there are none to tell: the
+ * old commit was not recorded (a hand-over from a server older than this), is unknown here, or is not an ancestor of
+ * the new one. Local git only, no network.
+ */
+export async function collectAgentChanges(root: string, from: string | undefined, to: string, run: GitRunner = runGit): Promise<{ changes: AgentChange[] } | { skipped: string }> {
+  const opts = { env: process.env, timeout: 30_000 };
+  if (!from) return { skipped: "the predecessor did not record the commit it ran (a hand-over from a server older than this)" };
+  try { await run(root, ["cat-file", "-e", `${from}^{commit}`], opts); }
+  catch { return { skipped: `the old commit ${from.slice(0, 7)} is not in this repository` }; }
+  try { await run(root, ["merge-base", "--is-ancestor", from, to], opts); }
+  catch { return { skipped: `the old commit ${from.slice(0, 7)} is not an ancestor of ${to.slice(0, 7)}` }; }
+  const log = (await run(root, ["log", "--reverse", "--format=%H%x1f%B%x1e", `${from}..${to}`], opts)).stdout;
+  const changes: AgentChange[] = [];
+  for (const rec of log.split("\x1e")) {
+    const [sha, body] = rec.replace(/^\s+/, "").split("\x1f");
+    if (!sha || body === undefined) continue;
+    for (const text of parseAgentLines(body)) changes.push({ commit: sha.slice(0, 7), text });
+  }
+  return { changes };
+}
+
+/** What an orchestrator is told: each deploy's changes, in order. */
+export function describeDeployChanges(list: DeployChanges[]): string {
+  const parts = list.map((d) => `Nexus was deployed (${d.from.slice(0, 7)}..${d.to.slice(0, 7)}). What changed for agents, oldest first:\n${d.changes.map((c) => `- ${c.text} (${c.commit})`).join("\n")}`);
+  return `${parts.join("\n\n")}\nYour briefing may still describe the older way; where it differs, follow these.`;
 }

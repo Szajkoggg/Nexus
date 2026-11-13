@@ -40,6 +40,9 @@ Nexus is developed with Nexus. The agents working on this repository are run by 
   with a small model (Claude: `haiku`; Codex: `gpt-6-luna`), in a temporary directory, and say what it cost.
 - **Documentation**: a change to a file format, event, API or CLI updates PROTOCOL.md in the same commit; a design
   decision or a finding from building goes to DESIGN.md; what the user does differently goes to README.md.
+- **Agents: lines**: a commit that changes something agents rely on (a CLI command, a briefing, the protocol, or a
+  file an agent reads or writes) carries a line `Agents: <what changed>` in its message, one per change, written for
+  an orchestrator whose briefing is older. At a deploy, every project's orchestrator is told these lines.
 - **Screenshots** of the dashboard: headless Edge against a development instance. Its narrowest window is 492 px; for
   a phone's width, put the page in a 390 px iframe.
 

@@ -131,6 +131,12 @@ pushed: <why>". A failed push leaves the update in place; fix the cause and push
 untick "Push the deployed main to GitHub after an update" in the settings panel. Only you can change it, from the
 dashboard. An update to anything other than `main` is never pushed, and agents never push.
 
+After a deploy, every project's orchestrator is also told what changed for agents. A commit that changes something
+agents rely on carries a line `Agents: <what changed>` in its message, and the deploy collects those lines from the
+new commits. With the orchestrator's notifications on, it gets them right away; with them off, they go in with your
+next message to it. They are for the orchestrator only; your chat does not show them. Only commits from 2026-11-13
+on carry these lines, so a deploy that starts from an older version tells nothing about what came before.
+
 ```sh
 npm start        # builds the dashboard, serves it and the API on http://127.0.0.1:4317
 npm run dev      # development, apart from the live instance: API on :4318 with data in %APPDATA%\Nexus-dev,

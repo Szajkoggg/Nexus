@@ -194,6 +194,7 @@ Written only by the server's queue engine; agents never touch them.
 | `sessions/<orchestrator>/chat.jsonl` | The chat shown in the dashboard: the user's messages, the orchestrator's texts (whole, however long) and tool calls, Nexus notices |
 | `<NEXUS_HOME>/usage.json` | The subscription's windows (5-hour, 7-day: utilization and reset time) from the latest `rate_limit_event` |
 | `<NEXUS_HOME>/deploy.json` | `{ push_on_deploy: boolean }` (default `true` when the file is missing). One writer: the server, on `POST /api/server/settings` from the dashboard |
+| `<NEXUS_HOME>/deploy-changes.jsonl` | One line per successful deploy with changes for agents: `key` (`deploy-changes:<new sha>`), `at`, `from`, `to` (full shas), `changes` (`commit`, `text`: the commits' `Agents:` lines, oldest first). One writer: the server that took over (a successor, once per deploy) |
 
 A session launched by Nexus has `launched_by: nexus`, `runtime: claude`, `native_id` (Claude's session UUID, chosen
 by Nexus) and the `model` it was started with. A queue may also say `worktree: auto`: Nexus then creates the worktree
@@ -366,7 +367,7 @@ when it starts one.
 
 | File | Writer | When |
 |---|---|---|
-| `predecessor.json` | predecessor | `pid`, `commit`, `subject` (the version it ran), `at`, `update` (`id`, `by?`); before it stops its agents and starts the successor |
+| `predecessor.json` | predecessor | `pid`, `commit`, `subject` (the version it ran), `at`, `update` (`id`, `by?`, `from`, `to`: the full commits the update went from and to); before it stops its agents and starts the successor |
 | `ready.json` | successor | `pid`, `commit`, `subject`, `at`; it listens, its API (and the dashboard, if built) answers, every registered project's state loads |
 | `failed.json` | successor | `pid`, `at`, `reason`; the smoke check failed or the port never came free; it exits with code 1 |
 | `released.json` | predecessor | `at`, `log` (the update's log so far), `ref` (what the update deployed); it saw `ready.json`, writes nothing more, and exits |
@@ -437,6 +438,19 @@ a prompt. (`Write` and `Edit` are not disallowed: a disallow rule would beat the
   running: <commit> "<subject>"; the queues it held (…) go on.". The keys are `notify:update:<id>:updated` and
   `notify:update:<id>:failed`, and the successor knows the id and the asker from `predecessor.json`. An update the
   user started tells no orchestrator about itself.
+- **What changed for agents.** A commit that changes something agents rely on carries `Agents: <what changed>` in
+  its message (a line, possibly wrapped onto the following lines up to a blank line or a trailer).
+  - **Collecting:** at a successful deploy (not a rollback), the successor collects these lines from `from..to` with
+    local `git log`, and records them in `deploy-changes.jsonl`. Nothing is collected, and the update log says why,
+    when `from` is missing (a predecessor older than this), unknown, or not an ancestor of `to`, or when there are
+    no lines.
+  - **Who gets them:** every project's orchestrator session that is older than the deploy, once, with the key
+    `deploy-changes:<to>` in its `applied.jsonl`. A session started after the deploy gets nothing.
+  - **When:** with `notify` on, as a notice, which starts its turn. With `notify` off, held: they go in front of the
+    next message it gets (the user's, or its update outcome), without waking it, and the key is recorded only then.
+    Several held deploys go in together, oldest first.
+  - **How:** the orchestrator that ran the update gets them in the same message as its outcome. The user's chat
+    never shows them.
 
 ## The `nexus` command inside agents
 

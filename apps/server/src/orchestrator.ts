@@ -10,6 +10,7 @@ import { ClaudeSession } from "./claude.ts";
 import type { Engine } from "./engine.ts";
 import { orchestratorAgentsFile } from "./helpers.ts";
 import type { UpdateNotice } from "./lifecycle.ts";
+import { describeDeployChanges, type DeployChanges } from "./deploy.ts";
 
 // Agent (formerly Task) lets it call subagents; they run within these same read-only permissions.
 const READ_ONLY_TOOLS = [
@@ -31,14 +32,17 @@ export class Orchestrator {
   private applying = false;
   /** New settings wait for the running turn to end; the next message starts a process with them. */
   private restartAfterTurn = false;
-  /** The outcome of a Nexus update, for the orchestrator session that asked for it (src/lifecycle.ts). */
-  private readonly updateNotice: () => UpdateNotice | undefined;
+  /**
+   * News about Nexus itself: the outcome of an update, for the session that asked for it (src/lifecycle.ts), and the
+   * changes for agents of each deploy, for every session older than it (src/deploy.ts).
+   */
+  private readonly news: { update: () => UpdateNotice | undefined; changes: () => DeployChanges[] };
 
-  constructor(store: ProjectStore, engine: Engine, changed: () => void, updateNotice: () => UpdateNotice | undefined = () => undefined) {
+  constructor(store: ProjectStore, engine: Engine, changed: () => void, news: { update?: () => UpdateNotice | undefined; changes?: () => DeployChanges[] } = {}) {
     this.store = store;
     this.engine = engine;
     this.changed = changed;
-    this.updateNotice = updateNotice;
+    this.news = { update: news.update ?? (() => undefined), changes: news.changes ?? (() => []) };
   }
 
   /** The current orchestrator session, if one was ever started. */
@@ -66,7 +70,20 @@ export class Orchestrator {
     if (typeof text !== "string" || !text.trim()) throw new ActionError("the message is empty");
     const s = this.ensure();
     this.store.appendChat(s.id, { at: now(), from: "user", text: text.trim() });
-    this.deliver(text.trim());
+    // Changes for agents held while notices are off go in with this turn (and count as told only now).
+    const held = this.pendingChanges(s);
+    if (held.length) this.markTold(s, held.map((d) => d.key));
+    this.deliver(held.length ? `[Nexus] ${describeDeployChanges(held)}\n\n${text.trim()}` : text.trim());
+  }
+
+  /** Deploys whose changes for agents this session has not been told; none from before it started. */
+  private pendingChanges(s: SessionFile): DeployChanges[] {
+    const told = new Set(this.store.readApplied(s.id).entries.map((a) => a.event));
+    return this.news.changes().filter((d) => d.at >= s.created_at && d.changes.length && !told.has(d.key));
+  }
+
+  private markTold(s: SessionFile, keys: string[]): void {
+    for (const k of keys) this.store.appendApplied(s.id, { at: now(), event: k, ok: true, message: "told" });
   }
 
   /**
@@ -215,10 +232,17 @@ export class Orchestrator {
   private notify(state: ProjectState, s: SessionFile, updateOnly = false): void {
     const told = new Set(this.store.readApplied(s.id).entries.map((a) => a.event));
     const since = s.created_at;
-    // fact: what happened, shown in the chat too; todo: the instruction, for the orchestrator only.
-    const items: { key: string; fact: string; todo: string }[] = [];
-    const update = this.updateNotice();
-    if (update && update.by.project === state.project.id && update.by.session === s.id) items.push(update);
+    // fact: what happened, shown in the chat too (unless `quiet`); todo: the instruction, for the orchestrator only;
+    // more: further text for the orchestrator only, recorded under its own keys.
+    const items: { key: string; fact: string; todo: string; quiet?: boolean; more?: { text: string; keys: string[] } }[] = [];
+    const update = this.news.update();
+    const mine = update && update.by.project === state.project.id && update.by.session === s.id && !told.has(update.key) ? update : undefined;
+    // Changes for agents: with notices on, told now (and they start its turn); with them off, held for its next turn.
+    // The orchestrator that ran the update gets them in the same message as its outcome. The user sees none of them.
+    const changes = this.pendingChanges(s);
+    const more = changes.length ? { text: describeDeployChanges(changes), keys: changes.map((d) => d.key) } : undefined;
+    if (mine) items.push({ key: mine.key, fact: mine.fact, todo: mine.todo, more });
+    else if (more && !updateOnly) items.push({ key: more.keys.join(" "), fact: more.text, todo: "", quiet: true, more: { text: "", keys: more.keys } });
     for (const x of updateOnly ? [] : state.questions) {
       const asker = state.sessions.find((y) => y.id === x.session);
       if (x.state !== "open" || asker?.role !== "worker" || x.asked_at < since) continue;
@@ -269,10 +293,11 @@ Options: ${x.options.join(" / ")}` : ""}`,
     if (!fresh.length) return;
     this.ensure();
     for (const i of fresh) {
-      this.store.appendApplied(s.id, { at: now(), event: i.key, ok: true, message: "told" });
-      // The user sees the fact; the instruction after it is for the orchestrator only.
-      this.store.appendChat(s.id, { at: now(), from: "nexus", text: i.fact });
-      this.deliver(`[Nexus] ${i.fact} ${i.todo}`);
+      if (i.quiet) this.markTold(s, i.more!.keys);
+      else this.markTold(s, [i.key, ...(i.more?.keys ?? [])]);
+      // The user sees the fact; the instruction after it, and any changes for agents, are for the orchestrator only.
+      if (!i.quiet) this.store.appendChat(s.id, { at: now(), from: "nexus", text: i.fact });
+      this.deliver(i.more?.text ? `[Nexus] ${i.fact}\n\n${i.more.text}\n\n${i.todo}` : `[Nexus] ${i.fact}${i.todo ? ` ${i.todo}` : ""}`);
     }
   }
 }
@@ -332,7 +357,7 @@ Helpers (subagents, through the Agent tool; they read only (you also write queue
 - run-digest: when a run halts or finishes, have it summarize the run; tell the user from that.
 - The project's own agents (its .claude/agents) are there too. Use the ones that only read and report, such as one that finds what was decided and where; leave those that build, run checks or edit to the workers.
 
-Messages marked [Nexus] tell you that a worker asked a question, that the user approved a queue or withdrew an approval, that a run reached a requested pause, that a run halted or finished, or how a Nexus update you ran ended. What came up while Nexus updated reaches you right after its restart. Act on them: answer or escalate questions; an approval or a reached pause is your cue to start (or resume) what the plan put next, and say in the chat what you started; tell the user about withdrawals, halts and finished queues briefly, with what you propose next.
+Messages marked [Nexus] tell you that a worker asked a question, that the user approved a queue or withdrew an approval, that a run reached a requested pause, that a run halted or finished, or how a Nexus update you ran ended. What came up while Nexus updated reaches you right after its restart. After a deploy you may also be told what changed for agents (the commits' Agents: lines): your briefing may still describe the older way, so follow those where they differ. They are for you, not the user. Act on them: answer or escalate questions; an approval or a reached pause is your cue to start (or resume) what the plan put next, and say in the chat what you started; tell the user about withdrawals, halts and finished queues briefly, with what you propose next.
 Deploying Nexus itself: run nexus server update only when the user asks for it in the chat, never on your own, not even when a queue that changes Nexus has finished. Before you run it, tell the user (from nexus server status) whether a step is running in any project: the update waits for those steps to finish (no new step starts meanwhile), and with --now it interrupts them instead (they continue afterwards). Also tell them that you restart with Nexus: your process ends, and this conversation goes on after the restart. You then get a [Nexus] message with the outcome (the new version, or why it failed and what still runs); pass it on to the user.
 
 Never have two runs going in one checkout at once: queues without their own worktree share the main checkout, so pause one at a step's end before starting another there.

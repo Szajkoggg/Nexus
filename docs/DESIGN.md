@@ -412,6 +412,17 @@ A failed push changes nothing about the deploy. The setting lives in `<NEXUS_HOM
 server. It can only be changed from the dashboard (the same Origin rule as withdrawing an approval), so an agent can
 neither push nor turn pushing on.
 
+**What changed for agents** (the user's decision of 2026-11-13). An orchestrator session started before a deploy
+keeps its old briefing and its habits. The `Agents:` lines in commit messages are where its news comes from:
+- The successor collects them from the deployed range (local git, ancestry checked) into
+  `<NEXUS_HOME>/deploy-changes.jsonl`. One file for the whole instance means every project's orchestrator reads the
+  same record, and a restart rebuilds nothing.
+- Each session is told the deploys newer than itself and not yet in its `applied.jsonl`.
+- Notifications decide when, not whether: on, the changes go out like any notice and start a turn; off, they ride
+  along with the next message the orchestrator gets. Holding them is why the key is written when they are delivered,
+  not when they are recorded.
+- They never reach the user's chat; the user asked for no "what changed" view.
+
 ## Tech stack
 
 | Part | Choice |

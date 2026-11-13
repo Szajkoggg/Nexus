@@ -162,7 +162,7 @@ test("a failed update tells the orchestrator that ran it why, and what still run
   const engine = new Engine(p.store, () => {});
   // Wired as main.ts wires it: the orchestrator reads the lifecycle's notice; a settled update runs its notices.
   let lifecycle!: Lifecycle;
-  const orchestrator = new Orchestrator(p.store, engine, () => {}, () => lifecycle.notice());
+  const orchestrator = new Orchestrator(p.store, engine, () => {}, { update: () => lifecycle.notice() });
   const onChange = () => orchestrator.onChange(loadProjectState(p.store));
   lifecycle = new Lifecycle(() => [{ id: "p", idle: () => true, drain: () => [], cancel: () => {}, shutdown: () => {} }], () => {}, {
     root: repo, successor: [process.execPath, join(here, "fake-successor.ts")], timeoutMs: 15_000,

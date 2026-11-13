@@ -18,7 +18,7 @@ import { Engine } from "./engine.ts";
 import { Orchestrator } from "./orchestrator.ts";
 import { Conversations } from "./conversations.ts";
 import { listModels } from "./models.ts";
-import { readDeploySettings, writeDeploySettings } from "./deploy.ts";
+import { readDeployChanges, readDeploySettings, writeDeploySettings } from "./deploy.ts";
 import { Standby, refuseHandoverDir, smokeCheck, takeHandoverEnv } from "./handover.ts";
 import { Lifecycle, version } from "./lifecycle.ts";
 import {
@@ -78,8 +78,9 @@ function refreshRegistry(): void {
     if (projects.has(p.id)) continue;
     const store = ProjectStore.forRoot(p.root);
     const engine = new Engine(store, () => changed(p.id));
-    // It is told the outcome of an update it asked for (lifecycle.notice), through its usual notices.
-    const orchestrator = new Orchestrator(store, engine, () => changed(p.id), () => lifecycle.notice());
+    // Through its usual notices it is told the outcome of an update it asked for (lifecycle.notice), and what changed
+    // for agents in each deploy since its session began (deploy-changes.jsonl).
+    const orchestrator = new Orchestrator(store, engine, () => changed(p.id), { update: () => lifecycle.notice(), changes: readDeployChanges });
     projects.set(p.id, { id: p.id, root: p.root, store, engine, orchestrator, conversations: new Conversations(store, orchestrator, () => changed(p.id)) });
     watchProject(p.id, store.dir);
   }

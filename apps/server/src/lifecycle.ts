@@ -20,7 +20,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { newId, now } from "@nexus/protocol";
 import { HANDOVER_TIMEOUT_MS, handOver, isAlive, type PredecessorFile, type ReleasedFile, type UpdateAsker } from "./handover.ts";
-import { pushDeployed, type GitRunner, type PushResult } from "./deploy.ts";
+import { collectAgentChanges, pushDeployed, recordDeployChanges, type GitRunner, type PushResult } from "./deploy.ts";
 
 const run = promisify(execFile);
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -143,10 +143,30 @@ export class Lifecycle {
     this.note(released
       ? `up: ${v.commit} ${v.subject}${from}; the predecessor handed over`
       : `up: ${v.commit} ${v.subject}${from}; the predecessor exited without handing over`);
-    this.pushing = this.pushAfterDeploy(released?.ref);
+    this.pushing = this.afterDeploy(released?.ref, predecessor?.update?.from);
   }
 
-  /** The deploy is up: push it (a live instance's main only). Whatever happens, the deploy stands. */
+  /**
+   * The deploy is up: record what changed for agents (every orchestrator is told), then push it (a live instance's
+   * main only). Whatever happens, the deploy stands.
+   */
+  private async afterDeploy(ref: string | undefined, from: string | undefined): Promise<void> {
+    await this.collectChanges(from).catch((err) => this.note(`agent changes not collected: ${firstLine(err)}`));
+    await this.pushAfterDeploy(ref);
+  }
+
+  /** The Agents: lines of the deployed commits, recorded for every project's orchestrator (src/deploy.ts). */
+  private async collectChanges(from: string | undefined): Promise<void> {
+    const to = await git(this.root, "rev-parse", "HEAD");
+    const r = await collectAgentChanges(this.root, from, to, this.o.git);
+    if ("skipped" in r) { this.note(`no changes for agents sent: ${r.skipped}`); return; }
+    const span = `${from!.slice(0, 7)}..${to.slice(0, 7)}`;
+    if (!r.changes.length) { this.note(`no Agents: lines in ${span}; nothing to tell the orchestrators`); return; }
+    recordDeployChanges({ key: `deploy-changes:${to}`, at: now(), from: from!, to, changes: r.changes });
+    this.note(`${r.changes.length} change${r.changes.length > 1 ? "s" : ""} for agents in ${span}; every project's orchestrator is told`);
+  }
+
+  /** Push the deploy (a live instance's main only). */
   private async pushAfterDeploy(ref: string | undefined): Promise<void> {
     const v = await version(this.root);
     const push = await pushDeployed({ root: this.root, ref, live: v.live, run: this.o.git });
@@ -259,6 +279,7 @@ export class Lifecycle {
     let result: Awaited<ReturnType<typeof handOver>>;
     try {
       const v = await version(this.root);
+      const to = await git(this.root, "rev-parse", "HEAD").catch(() => undefined);
       result = await handOver({
         command: this.o.successor, cwd: this.root,
         // The successor writes its own log (NEXUS_LOG): see main.ts.
@@ -266,7 +287,7 @@ export class Lifecycle {
         // What this server runs: the commit the update started from (the worktree has moved on by now).
         version: this.from ? { commit: this.from.short, subject: this.from.subject } : { commit: v.commit, subject: v.subject },
         release: this.o.release, note: (t) => this.note(t), log: () => this.status.log,
-        ref: this.status.ref, update: { id: this.status.id!, by: this.status.by }, timeoutMs: this.o.timeoutMs,
+        ref: this.status.ref, update: { id: this.status.id!, by: this.status.by, from: this.from?.sha, to }, timeoutMs: this.o.timeoutMs,
       });
     } catch (err) {
       result = { outcome: "failed", reason: `the hand-over failed: ${firstLine(err)}`, pid: undefined };

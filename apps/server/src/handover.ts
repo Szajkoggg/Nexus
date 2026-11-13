@@ -22,8 +22,11 @@ const POLL_MS = 200;
 export interface Version { commit: string; subject: string }
 /** Who asked for an update: an orchestrator session of a project (absent when the user started it). */
 export interface UpdateAsker { project: string; session: string }
-/** The update being handed over: its id (for telling its asker once), and who asked. */
-export interface UpdateInfo { id: string; by?: UpdateAsker }
+/**
+ * The update being handed over: its id (for telling its asker once), who asked, and the full commits it went from and
+ * to (the successor tells the orchestrators the Agents: lines between them).
+ */
+export interface UpdateInfo { id: string; by?: UpdateAsker; from?: string; to?: string }
 export interface PredecessorFile extends Version { pid: number; at: string; update?: UpdateInfo }
 export interface ReadyFile extends Version { pid: number; at: string }
 export interface FailedFile { pid: number; at: string; reason: string }
