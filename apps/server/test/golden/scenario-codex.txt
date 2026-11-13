@@ -1,0 +1,392 @@
+== started: the first step opened
+-- run.yaml
+{
+  "nudged": false,
+  "protocol": 1,
+  "revision": 1,
+  "runtime": "codex",
+  "session": "<session>",
+  "started_at": "2026-01-01T09:00:00.000Z",
+  "state": "running",
+  "step": "Q1",
+  "updated_at": "2026-01-01T09:00:00.000Z"
+}
+-- runtime.json
+{
+  "pid": "<pid>",
+  "state": "idle",
+  "turns": 0,
+  "updated_at": "2026-01-01T09:00:00.000Z"
+}
+
+== Q1 at work
+-- run.yaml
+{
+  "nudged": false,
+  "protocol": 1,
+  "revision": 1,
+  "runtime": "codex",
+  "session": "<session>",
+  "started_at": "2026-01-01T09:00:00.000Z",
+  "state": "running",
+  "step": "Q1",
+  "updated_at": "2026-01-01T09:00:00.000Z"
+}
+-- runtime.json
+{
+  "model": "fake-codex-model",
+  "pid": "<pid>",
+  "state": "working",
+  "turns": 0,
+  "updated_at": "2026-01-01T09:10:00.000Z"
+}
+
+== paused by the user during a turn: pausing
+-- run.yaml
+{
+  "nudged": false,
+  "protocol": 1,
+  "reason": "paused by the user",
+  "revision": 1,
+  "runtime": "codex",
+  "session": "<session>",
+  "started_at": "2026-01-01T09:00:00.000Z",
+  "state": "pausing",
+  "step": "Q1",
+  "updated_at": "2026-01-01T09:20:00.000Z"
+}
+-- runtime.json
+{
+  "model": "fake-codex-model",
+  "pid": "<pid>",
+  "state": "working",
+  "turns": 0,
+  "updated_at": "2026-01-01T09:10:00.000Z"
+}
+
+== the turn ended: paused
+-- run.yaml
+{
+  "ended_at": "2026-01-01T09:30:00.000Z",
+  "nudged": false,
+  "protocol": 1,
+  "reason": "paused by the user",
+  "revision": 1,
+  "runtime": "codex",
+  "session": "<session>",
+  "started_at": "2026-01-01T09:00:00.000Z",
+  "state": "paused",
+  "step": "Q1",
+  "updated_at": "2026-01-01T09:30:00.000Z"
+}
+-- runtime.json
+{
+  "context_tokens": 120,
+  "context_window": 2000,
+  "model": "fake-codex-model",
+  "pid": "<pid>",
+  "state": "idle",
+  "turns": 1,
+  "updated_at": "2026-01-01T09:30:00.000Z"
+}
+
+== resumed by the user: the next step opened
+-- run.yaml
+{
+  "nudged": false,
+  "protocol": 1,
+  "revision": 1,
+  "runtime": "codex",
+  "session": "<session>",
+  "started_at": "2026-01-01T09:00:00.000Z",
+  "state": "running",
+  "step": "Q2",
+  "updated_at": "2026-01-01T09:40:00.000Z"
+}
+-- runtime.json
+{
+  "context_tokens": 120,
+  "context_window": 2000,
+  "model": "fake-codex-model",
+  "pid": "<pid>",
+  "state": "idle",
+  "turns": 1,
+  "updated_at": "2026-01-01T09:30:00.000Z"
+}
+
+== a turn failed for a passing reason: retry_wait
+-- run.yaml
+{
+  "failure": "serverOverloaded",
+  "nudged": false,
+  "protocol": 1,
+  "reason": "the turn failed (serverOverloaded: The server is overloaded); retry 1 of 5",
+  "resume_at": "2026-01-01T09:51:00.000Z",
+  "retries": 1,
+  "revision": 1,
+  "runtime": "codex",
+  "session": "<session>",
+  "started_at": "2026-01-01T09:00:00.000Z",
+  "state": "retry_wait",
+  "step": "Q2",
+  "updated_at": "2026-01-01T09:50:00.000Z"
+}
+-- runtime.json
+{
+  "context_tokens": 120,
+  "context_window": 2000,
+  "model": "fake-codex-model",
+  "pid": "<pid>",
+  "state": "idle",
+  "turns": 2,
+  "updated_at": "2026-01-01T09:50:00.000Z"
+}
+
+== the retry's time came: the step continued
+-- run.yaml
+{
+  "failure": "serverOverloaded",
+  "nudged": false,
+  "protocol": 1,
+  "retries": 1,
+  "revision": 1,
+  "runtime": "codex",
+  "session": "<session>",
+  "started_at": "2026-01-01T09:00:00.000Z",
+  "state": "running",
+  "step": "Q2",
+  "updated_at": "2026-01-01T09:51:00.000Z"
+}
+-- runtime.json
+{
+  "context_tokens": 120,
+  "context_window": 2000,
+  "model": "fake-codex-model",
+  "pid": "<pid>",
+  "state": "idle",
+  "turns": 2,
+  "updated_at": "2026-01-01T09:50:00.000Z"
+}
+
+== the step done with the usage window full: usage_wait
+-- run.yaml
+{
+  "nudged": false,
+  "protocol": 1,
+  "reason": "the Codex 5h window is at 100 % (limit 90 %)",
+  "resume_at": "2026-01-01T10:20:00.000Z",
+  "revision": 1,
+  "runtime": "codex",
+  "session": "<session>",
+  "started_at": "2026-01-01T09:00:00.000Z",
+  "state": "usage_wait",
+  "step": "Q2",
+  "updated_at": "2026-01-01T10:01:00.000Z"
+}
+-- runtime.json
+{
+  "context_tokens": 120,
+  "context_window": 2000,
+  "model": "fake-codex-model",
+  "pid": "<pid>",
+  "state": "idle",
+  "turns": 3,
+  "updated_at": "2026-01-01T10:01:00.000Z"
+}
+
+== the usage window reset: the next step opened
+-- run.yaml
+{
+  "nudged": false,
+  "protocol": 1,
+  "revision": 1,
+  "runtime": "codex",
+  "session": "<session>",
+  "started_at": "2026-01-01T09:00:00.000Z",
+  "state": "running",
+  "step": "Q3",
+  "updated_at": "2026-01-01T10:21:00.000Z"
+}
+-- runtime.json
+{
+  "context_tokens": 120,
+  "context_window": 2000,
+  "model": "fake-codex-model",
+  "pid": "<pid>",
+  "state": "idle",
+  "turns": 3,
+  "updated_at": "2026-01-01T10:01:00.000Z"
+}
+
+== a turn met the runtime's usage limit: usage_wait
+-- run.yaml
+{
+  "nudged": false,
+  "protocol": 1,
+  "reason": "the usage limit was reached (usageLimitExceeded: You have hit your usage limit.); goes on when it resets",
+  "resume_at": "<the runtime's reset time>",
+  "revision": 1,
+  "runtime": "codex",
+  "session": "<session>",
+  "started_at": "2026-01-01T09:00:00.000Z",
+  "state": "usage_wait",
+  "step": "Q3",
+  "updated_at": "2026-01-01T10:31:00.000Z"
+}
+-- runtime.json
+{
+  "context_tokens": 120,
+  "context_window": 2000,
+  "model": "fake-codex-model",
+  "pid": "<pid>",
+  "state": "idle",
+  "turns": 4,
+  "updated_at": "2026-01-01T10:31:00.000Z"
+}
+
+== resumed by the user during the usage wait: the step continued
+-- run.yaml
+{
+  "nudged": false,
+  "protocol": 1,
+  "revision": 1,
+  "runtime": "codex",
+  "session": "<session>",
+  "started_at": "2026-01-01T09:00:00.000Z",
+  "state": "running",
+  "step": "Q3",
+  "updated_at": "2026-01-01T10:41:00.000Z"
+}
+-- runtime.json
+{
+  "context_tokens": 120,
+  "context_window": 2000,
+  "model": "fake-codex-model",
+  "pid": "<pid>",
+  "state": "idle",
+  "turns": 4,
+  "updated_at": "2026-01-01T10:31:00.000Z"
+}
+
+== the last step at work
+-- run.yaml
+{
+  "nudged": false,
+  "protocol": 1,
+  "revision": 1,
+  "runtime": "codex",
+  "session": "<session>",
+  "started_at": "2026-01-01T09:00:00.000Z",
+  "state": "running",
+  "step": "Q4",
+  "updated_at": "2026-01-01T10:51:00.000Z"
+}
+-- runtime.json
+{
+  "context_tokens": 120,
+  "context_window": 2000,
+  "model": "fake-codex-model",
+  "pid": "<pid>",
+  "state": "idle",
+  "turns": 5,
+  "updated_at": "2026-01-01T10:51:00.000Z"
+}
+
+== the server stopped in the middle of a step
+-- run.yaml
+{
+  "nudged": false,
+  "protocol": 1,
+  "revision": 1,
+  "runtime": "codex",
+  "session": "<session>",
+  "started_at": "2026-01-01T09:00:00.000Z",
+  "state": "running",
+  "step": "Q4",
+  "updated_at": "2026-01-01T10:51:00.000Z"
+}
+-- runtime.json
+{
+  "context_tokens": 120,
+  "context_window": 2000,
+  "model": "fake-codex-model",
+  "pid": "<pid>",
+  "state": "exited",
+  "turns": 5,
+  "updated_at": "2026-01-01T11:01:00.000Z"
+}
+
+== the next server started: paused
+-- run.yaml
+{
+  "ended_at": "2026-01-01T11:11:00.000Z",
+  "nudged": false,
+  "protocol": 1,
+  "reason": "the Nexus server restarted; resume to continue",
+  "revision": 1,
+  "runtime": "codex",
+  "session": "<session>",
+  "started_at": "2026-01-01T09:00:00.000Z",
+  "state": "paused",
+  "step": "Q4",
+  "updated_at": "2026-01-01T11:11:00.000Z"
+}
+-- runtime.json
+{
+  "context_tokens": 120,
+  "context_window": 2000,
+  "model": "fake-codex-model",
+  "pid": "<pid>",
+  "state": "exited",
+  "turns": 5,
+  "updated_at": "2026-01-01T11:01:00.000Z"
+}
+
+== resumed by the user after the restart: the step continued
+-- run.yaml
+{
+  "nudged": false,
+  "protocol": 1,
+  "revision": 1,
+  "runtime": "codex",
+  "session": "<session>",
+  "started_at": "2026-01-01T09:00:00.000Z",
+  "state": "running",
+  "step": "Q4",
+  "updated_at": "2026-01-01T11:21:00.000Z"
+}
+-- runtime.json
+{
+  "context_tokens": 120,
+  "context_window": 2000,
+  "model": "fake-codex-model",
+  "pid": "<pid>",
+  "state": "idle",
+  "turns": 5,
+  "updated_at": "2026-01-01T11:21:00.000Z"
+}
+
+== the last step done: finished
+-- run.yaml
+{
+  "ended_at": "2026-01-01T11:31:00.000Z",
+  "nudged": false,
+  "protocol": 1,
+  "revision": 1,
+  "runtime": "codex",
+  "session": "<session>",
+  "started_at": "2026-01-01T09:00:00.000Z",
+  "state": "finished",
+  "step": "Q4",
+  "updated_at": "2026-01-01T11:31:00.000Z"
+}
+-- runtime.json
+{
+  "context_tokens": 120,
+  "context_window": 2000,
+  "model": "fake-codex-model",
+  "pid": "<pid>",
+  "state": "exited",
+  "turns": 6,
+  "updated_at": "2026-01-01T11:31:00.000Z"
+}
