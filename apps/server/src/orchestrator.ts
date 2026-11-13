@@ -9,6 +9,7 @@ import {
 import { ClaudeSession } from "./claude.ts";
 import type { Engine } from "./engine.ts";
 import { orchestratorAgentsFile } from "./helpers.ts";
+import type { UpdateNotice } from "./lifecycle.ts";
 
 // Agent (formerly Task) lets it call subagents; they run within these same read-only permissions.
 const READ_ONLY_TOOLS = [
@@ -30,11 +31,14 @@ export class Orchestrator {
   private applying = false;
   /** New settings wait for the running turn to end; the next message starts a process with them. */
   private restartAfterTurn = false;
+  /** The outcome of a Nexus update, for the orchestrator session that asked for it (src/lifecycle.ts). */
+  private readonly updateNotice: () => UpdateNotice | undefined;
 
-  constructor(store: ProjectStore, engine: Engine, changed: () => void) {
+  constructor(store: ProjectStore, engine: Engine, changed: () => void, updateNotice: () => UpdateNotice | undefined = () => undefined) {
     this.store = store;
     this.engine = engine;
     this.changed = changed;
+    this.updateNotice = updateNotice;
   }
 
   /** The current orchestrator session, if one was ever started. */
@@ -96,8 +100,9 @@ export class Orchestrator {
     const s = this.session();
     if (!s) return;
     this.applyRequests(s);
-    if (state.project.orchestrator?.notify === false || this.engine.draining) return; // told after an update's restart
-    this.notify(state, s);
+    if (this.engine.draining) return; // held until the update settles: told after its restart, or once it fails
+    // With notices off it is still told the outcome of an update it ran itself: that answers its own command.
+    this.notify(state, s, state.project.orchestrator?.notify === false);
   }
 
   shutdown(): void { this.proc?.kill(); }
@@ -207,12 +212,14 @@ export class Orchestrator {
 
   // ---------------------------------------------------------------- what the orchestrator is told
 
-  private notify(state: ProjectState, s: SessionFile): void {
+  private notify(state: ProjectState, s: SessionFile, updateOnly = false): void {
     const told = new Set(this.store.readApplied(s.id).entries.map((a) => a.event));
     const since = s.created_at;
     // fact: what happened, shown in the chat too; todo: the instruction, for the orchestrator only.
     const items: { key: string; fact: string; todo: string }[] = [];
-    for (const x of state.questions) {
+    const update = this.updateNotice();
+    if (update && update.by.project === state.project.id && update.by.session === s.id) items.push(update);
+    for (const x of updateOnly ? [] : state.questions) {
       const asker = state.sessions.find((y) => y.id === x.session);
       if (x.state !== "open" || asker?.role !== "worker" || x.asked_at < since) continue;
       items.push({
@@ -223,7 +230,7 @@ Options: ${x.options.join(" / ")}` : ""}`,
         todo: "Answer it if the answer is settled, otherwise escalate it to the user.",
       });
     }
-    for (const q of state.queues) {
+    for (const q of updateOnly ? [] : state.queues) {
       const r = q.run;
       // Approvals and withdrawals by their position, so withdrawing and approving the same revision again is told again.
       q.approvals.forEach((a, i) => {
@@ -284,6 +291,8 @@ Commands (\`nexus\` is on PATH; your session is set in the environment):
 - nexus run <queue> pause|resume|stop --reason "..."
 - nexus answer <qid> "<answer>" [--continue|--wait]            answer a worker's question whose answer is already settled
 - nexus answer <qid> "<framing, options, recommendation>" --escalate   pass it to the user
+- nexus server status                            the running Nexus version, the steps running in every project, and an update in progress
+- nexus server update [--now]                    deploy: update Nexus itself and restart it (only when the user asks; see below)
 
 Run nexus commands on their own (no cd, no &&, no pipes), since chained commands are refused.
 
@@ -323,7 +332,9 @@ Helpers (subagents, through the Agent tool; they read only (you also write queue
 - run-digest: when a run halts or finishes, have it summarize the run; tell the user from that.
 - The project's own agents (its .claude/agents) are there too. Use the ones that only read and report, such as one that finds what was decided and where; leave those that build, run checks or edit to the workers.
 
-Messages marked [Nexus] tell you that a worker asked a question, that the user approved a queue or withdrew an approval, that a run reached a requested pause, or that a run halted or finished. Act on them: answer or escalate questions; an approval or a reached pause is your cue to start (or resume) what the plan put next, and say in the chat what you started; tell the user about withdrawals, halts and finished queues briefly, with what you propose next.
+Messages marked [Nexus] tell you that a worker asked a question, that the user approved a queue or withdrew an approval, that a run reached a requested pause, that a run halted or finished, or how a Nexus update you ran ended. What came up while Nexus updated reaches you right after its restart. Act on them: answer or escalate questions; an approval or a reached pause is your cue to start (or resume) what the plan put next, and say in the chat what you started; tell the user about withdrawals, halts and finished queues briefly, with what you propose next.
+Deploying Nexus itself: run nexus server update only when the user asks for it in the chat, never on your own, not even when a queue that changes Nexus has finished. Before you run it, tell the user (from nexus server status) whether a step is running in any project: the update waits for those steps to finish (no new step starts meanwhile), and with --now it interrupts them instead (they continue afterwards). Also tell them that you restart with Nexus: your process ends, and this conversation goes on after the restart. You then get a [Nexus] message with the outcome (the new version, or why it failed and what still runs); pass it on to the user.
+
 Never have two runs going in one checkout at once: queues without their own worktree share the main checkout, so pause one at a step's end before starting another there.
 Keep replies short and concrete. Before proposing a queue, read enough of the project to make its steps and acceptance criteria real.`;
 }

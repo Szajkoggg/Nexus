@@ -18,8 +18,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { now } from "@nexus/protocol";
-import { HANDOVER_TIMEOUT_MS, handOver, isAlive, type PredecessorFile, type ReleasedFile } from "./handover.ts";
+import { newId, now } from "@nexus/protocol";
+import { HANDOVER_TIMEOUT_MS, handOver, isAlive, type PredecessorFile, type ReleasedFile, type UpdateAsker } from "./handover.ts";
 import { pushDeployed, type GitRunner, type PushResult } from "./deploy.ts";
 
 const run = promisify(execFile);
@@ -41,7 +41,16 @@ export interface UpdateStatus {
   error?: string;
   /** After a deploy: whether the deployed main was pushed to its upstream (src/deploy.ts). */
   push?: PushResult;
+  /** This update's id: an orchestrator that asked for it is told its outcome once (the key in its applied.jsonl). */
+  id?: string;
+  /** Who asked for it: an orchestrator session (absent when the user started it from the dashboard or a terminal). */
+  by?: UpdateAsker;
+  /** On the successor: the version that came up, and the one it replaced. */
+  up?: { commit: string; subject: string; previous?: string };
 }
+
+/** What the orchestrator that asked for an update is told about its outcome (Orchestrator.notify). */
+export interface UpdateNotice { key: string; by: UpdateAsker; fact: string; todo: string }
 
 /** What the server gives its Lifecycle; tests replace the parts that would touch this checkout or the process. */
 export interface LifecycleOptions {
@@ -63,6 +72,8 @@ export interface LifecycleOptions {
   exit?: () => void;
   /** Runs git for the push on deploy (src/deploy.ts). */
   git?: GitRunner;
+  /** An update has settled (it is up and its push done, it failed, or it was cancelled): notices may go out now. */
+  settled?: () => void;
 }
 
 async function git(root: string, ...args: string[]): Promise<string> {
@@ -116,6 +127,7 @@ export class Lifecycle {
       notify: options.notify ?? (() => {}),
       exit: options.exit ?? (() => setTimeout(() => process.exit(0), 300)),
       git: options.git,
+      settled: options.settled ?? (() => {}),
     };
   }
 
@@ -123,7 +135,10 @@ export class Lifecycle {
 
   /** This server took over from its predecessor: the update's log (the predecessor's lines first) and what is up. */
   arrived(v: { commit: string; subject: string }, predecessor: PredecessorFile | undefined, released: ReleasedFile | undefined): void {
-    this.status = { phase: "updated", since: now(), held: [], waiting: [], log: [...(released?.log ?? [])] };
+    this.status = {
+      phase: "updated", since: now(), held: [], waiting: [], log: [...(released?.log ?? [])],
+      id: predecessor?.update?.id, by: predecessor?.update?.by, up: { commit: v.commit, subject: v.subject, previous: predecessor?.commit },
+    };
     const from = predecessor ? ` (was ${predecessor.commit})` : "";
     this.note(released
       ? `up: ${v.commit} ${v.subject}${from}; the predecessor handed over`
@@ -139,13 +154,40 @@ export class Lifecycle {
     this.note(push.result === "pushed" ? `pushed: ${push.text}`
       : push.result === "failed" ? `push failed: ${push.text}; the deploy stands`
       : `not pushed: ${push.text}`);
+    this.o.settled();
   }
 
-  start(opts: { now?: boolean; ref?: string }): UpdateStatus {
+  /**
+   * The outcome to tell the orchestrator that asked for this update, once the update has settled: up (with its push)
+   * or failed. None for an update the user started, or while one is still under way.
+   */
+  notice(): UpdateNotice | undefined {
+    const s = this.status;
+    if (!s.id || !s.by) return undefined;
+    if (s.phase === "updated" && s.push && s.up) {
+      const push = s.push.result === "pushed" ? ` Pushed: ${s.push.text}.` : s.push.result === "failed" ? ` The push failed: ${s.push.text}.` : ` Not pushed: ${s.push.text}.`;
+      return {
+        key: `notify:update:${s.id}:updated`, by: s.by,
+        fact: `Nexus was updated as asked: ${s.up.commit} "${s.up.subject}" is up${s.up.previous ? ` (was ${s.up.previous})` : ""}.${push}`,
+        todo: "You restarted with it; tell the user briefly, with anything the held queues need.",
+      };
+    }
+    if (s.phase === "failed") {
+      const still = this.from ? `${this.from.short} "${this.from.subject}"` : "the version from before the update";
+      return {
+        key: `notify:update:${s.id}:failed`, by: s.by,
+        fact: `The Nexus update you ran failed: ${s.error ?? "no reason given"}. Still running: ${still}${s.held.length ? `; the queues it held (${s.held.join(", ")}) go on` : ""}.`,
+        todo: "Tell the user briefly, with what you propose.",
+      };
+    }
+    return undefined;
+  }
+
+  start(opts: { now?: boolean; ref?: string; by?: UpdateAsker }): UpdateStatus {
     if (this.busy) throw new Error(`an update is already ${this.status.phase}`);
     const held: string[] = [];
     for (const p of this.parts()) for (const q of p.drain(!!opts.now)) held.push(`${p.id}/${q}`);
-    this.status = { phase: "draining", since: now(), now: !!opts.now, ref: opts.ref || "main", held, waiting: [], log: [] };
+    this.status = { phase: "draining", since: now(), now: !!opts.now, ref: opts.ref || "main", held, waiting: [], log: [], id: newId(), by: opts.by };
     this.from = undefined;
     this.note(held.length ? `holding ${held.join(", ")} at the end of their current step` : "no queue is running");
     this.timer = setInterval(() => void this.tick(), 2000);
@@ -160,6 +202,7 @@ export class Lifecycle {
     for (const p of this.parts()) p.cancel();
     this.status = { ...this.status, phase: "idle", waiting: [] };
     this.note("cancelled; the held queues go on");
+    this.o.settled();
   }
 
   private note(text: string): void {
@@ -180,8 +223,8 @@ export class Lifecycle {
     } catch (err) {
       // Nothing was handed over: this server still runs and owns the files. Only the worktree may have moved.
       const back = await this.restoreWorktree();
+      for (const p of this.parts()) p.cancel(); // first: the notices held while draining may go out once it settles
       this.fail(`${firstLine(err)}${back}`, `${(err as Error).message.slice(0, 2000)}${back}`);
-      for (const p of this.parts()) p.cancel();
       return;
     }
     await this.restart();
@@ -223,7 +266,7 @@ export class Lifecycle {
         // What this server runs: the commit the update started from (the worktree has moved on by now).
         version: this.from ? { commit: this.from.short, subject: this.from.subject } : { commit: v.commit, subject: v.subject },
         release: this.o.release, note: (t) => this.note(t), log: () => this.status.log,
-        ref: this.status.ref, timeoutMs: this.o.timeoutMs,
+        ref: this.status.ref, update: { id: this.status.id!, by: this.status.by }, timeoutMs: this.o.timeoutMs,
       });
     } catch (err) {
       result = { outcome: "failed", reason: `the hand-over failed: ${firstLine(err)}`, pid: undefined };
@@ -282,5 +325,6 @@ export class Lifecycle {
     this.status = { ...this.status, phase: "failed", error };
     this.note(`update failed: ${summary}; the held queues go on`);
     this.o.notify(`Update failed: ${summary}.`);
+    this.o.settled();
   }
 }

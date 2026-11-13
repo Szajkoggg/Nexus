@@ -12,17 +12,6 @@ and serving; if it does not within a minute, put the live worktree back on the p
 say so in the log and the dashboard. A smoke check (the API answers, a project loads) before the predecessor exits
 would be better still.
 
-## 2. Deploying from the orchestrator chat, and pushing on deploy
-
-- **Push on deploy.** Deploying a version to the live instance is the moment the user accepts it, so the update
-  pushes `main` to its remote (after the build, before the restart). A failed push does not stop the deploy; the
-  dashboard and the update log say it failed and why. A project setting can turn it off.
-- **Deploy when asked.** The orchestrator may run `nexus server update` (it already may; workers and partners may
-  not) only when the user asks for it in the chat, never on its own. Before it does, it says whether a step is
-  running anywhere (the update waits for it; `--now` interrupts instead), and that it restarts with Nexus.
-- **Told afterwards.** After a restart that came from an update, the orchestrator that asked for it is told the
-  outcome (the new version, or why it failed and what still runs), and passes it on.
-
 ## 3. The orchestrator accepts steps, and Nexus pushes what was accepted
 
 A third review mode beside "go on" and "wait for the user": **the orchestrator checks**. Per project, per queue or

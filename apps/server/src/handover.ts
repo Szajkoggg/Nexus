@@ -20,7 +20,11 @@ export const HANDOVER_TIMEOUT_MS = 60_000;
 const POLL_MS = 200;
 
 export interface Version { commit: string; subject: string }
-export interface PredecessorFile extends Version { pid: number; at: string }
+/** Who asked for an update: an orchestrator session of a project (absent when the user started it). */
+export interface UpdateAsker { project: string; session: string }
+/** The update being handed over: its id (for telling its asker once), and who asked. */
+export interface UpdateInfo { id: string; by?: UpdateAsker }
+export interface PredecessorFile extends Version { pid: number; at: string; update?: UpdateInfo }
 export interface ReadyFile extends Version { pid: number; at: string }
 export interface FailedFile { pid: number; at: string; reason: string }
 /** `ref`: what the update deployed (absent from older predecessors). */
@@ -100,6 +104,8 @@ export interface HandoverOptions {
   note: (text: string) => void;
   /** This update's log so far; it goes to the successor with released.json. */
   log: () => string[];
+  /** The update itself (id, who asked); it goes to the successor with predecessor.json. */
+  update?: UpdateInfo;
   /** What the update deployed; it goes to the successor with released.json (push on deploy only pushes main). */
   ref?: string;
   timeoutMs?: number;
@@ -116,7 +122,7 @@ export async function handOver(o: HandoverOptions): Promise<HandoverOutcome> {
   if (existsSync(root)) for (const d of readdirSync(root)) rmSync(join(root, d), { recursive: true, force: true });
   const dir = join(root, newId());
   mkdirSync(dir, { recursive: true });
-  write(dir, "predecessor.json", { pid: process.pid, ...o.version, at: now() } satisfies PredecessorFile);
+  write(dir, "predecessor.json", { pid: process.pid, ...o.version, at: now(), update: o.update } satisfies PredecessorFile);
   await o.release();
   o.note(`stopped every agent and freed the port; starting the successor (waiting up to ${Math.round(timeoutMs / 1000)} s for it)`);
 

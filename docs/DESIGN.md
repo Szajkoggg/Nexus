@@ -567,6 +567,19 @@ the text across. Drafts untouched for 14 days are pruned when the page loads.
   panel rendered without its Nexus section: `/api/server` did not reach the dashboard there, while the project API
   did. The same iframe inside a page served over http from 127.0.0.1 shows it, so phone-width screenshots use an http
   parent.
+- **Notices held by an update waited for the next write.** On 2026-11-13 the live instance updated from 6f7d2e6 to
+  21bf813 while queue N3 ran. During the drain, the user approved SP (23:17 UTC) and N3 finished (23:22:05). Both
+  notices were held, as they should be while draining. The successor took over at 23:22:05, but nobody told the
+  orchestrator. Its notices only run in a project's change pass, and that pass ran only when a watcher saw a file
+  change. The watchers ignore the files already there (`ignoreInitial`), so nothing ran until the user wrote in the
+  chat at 23:23:22 ("did you get a notice about the update?"). That write delivered the held notices 77 s late, inside
+  the user's own turn. Their turn did not start by itself.
+
+  The same pass also told 19 approvals at once, some hours old, because approval notices were new in that version
+  and nothing had marked old approvals as told. Now every server, once active, runs one pass over every project, and
+  so does every update that settles (up and pushed, failed, cancelled). An orchestrator that ran the update is told
+  its outcome, keyed by the update's id that `predecessor.json` carries. A new kind of notice still tells everything
+  it covers since the orchestrator session began, the first time it runs.
 
 - **Queue drafts go through files, not heredocs.** On 2026-11-12 an orchestrator could not upload a long queue
   revision: `cd … && nexus queue draft - <<'EOF'` was refused in `dontAsk` mode (a chained command does not match

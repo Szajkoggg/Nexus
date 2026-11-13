@@ -40,7 +40,7 @@ Setup:
   nexus note <queue> <step> <text> [--from user|orchestrator]
 
 The server (NEXUS_PORT, default 4317):
-  nexus server status                 version, and an update in progress
+  nexus server status                 version, the steps running in each project, and an update in progress
   nexus server update [--now] [--ref <commit|branch>]
                                       let running steps finish (or stop them with --now), move the live worktree to
                                       <ref> (default main), build, restart; queues held for it go on by themselves
@@ -205,8 +205,16 @@ const commands: Record<string, () => void | Promise<void>> = {
     if (sub === "status") {
       const s = await server("GET", "/api/server");
       console.log(`Nexus ${s.commit} "${s.subject}" from ${s.root} (${s.live ? "live worktree" : `development checkout, branch ${s.branch}`})`);
+      // What an update would wait for (or interrupt with --now).
+      const running = (s.running ?? []) as { project: string; name: string; steps: { queue: string; step: string; title: string; session: string | null }[] }[];
+      if (!running.length) console.log("running steps: none");
+      for (const p of running) {
+        console.log(`running steps in ${p.name} (${p.project}):`);
+        for (const x of p.steps) console.log(`  ${x.queue}/${x.step} ${x.title}${x.session ? `  (session ${x.session})` : ""}`);
+      }
       return printUpdate(s.update);
     }
+    let by: { project: string; session: string } | undefined;
     if (sub === "update" || sub === "cancel") {
       // Restarting Nexus restarts every agent's runtime: the user's call, which an orchestrator may carry out when
       // asked. A worker or a thinking partner never may (they run on the very server they would restart).
@@ -214,11 +222,14 @@ const commands: Record<string, () => void | Promise<void>> = {
       if (sid) {
         const dir = process.env.NEXUS_DIR ?? findNexusDir();
         let role: string | undefined;
-        try { role = dir ? new ProjectStore(dir).readSession(sid).role : undefined; } catch { role = undefined; }
+        let project: string | undefined;
+        try { const st = dir ? new ProjectStore(dir) : undefined; role = st?.readSession(sid).role; project = st?.readProject().id; } catch { role = undefined; }
         if (role !== "orchestrator") throw new UsageError(`only the user or an orchestrator may ${sub} the Nexus server, not a ${role ?? "session"}`);
+        // The orchestrator that asks is told the outcome after the restart (or if the update fails).
+        if (project) by = { project, session: sid };
       }
     }
-    if (sub === "update") return printUpdate(await server("POST", "/api/server/update", { now: !!o.now, ref: o.ref }));
+    if (sub === "update") return printUpdate(await server("POST", "/api/server/update", { now: !!o.now, ref: o.ref, by }));
     if (sub === "cancel") return printUpdate(await server("POST", "/api/server/cancel"));
     throw new UsageError("nexus server status|update|cancel");
   },

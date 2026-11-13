@@ -78,7 +78,8 @@ function refreshRegistry(): void {
     if (projects.has(p.id)) continue;
     const store = ProjectStore.forRoot(p.root);
     const engine = new Engine(store, () => changed(p.id));
-    const orchestrator = new Orchestrator(store, engine, () => changed(p.id));
+    // It is told the outcome of an update it asked for (lifecycle.notice), through its usual notices.
+    const orchestrator = new Orchestrator(store, engine, () => changed(p.id), () => lifecycle.notice());
     projects.set(p.id, { id: p.id, root: p.root, store, engine, orchestrator, conversations: new Conversations(store, orchestrator, () => changed(p.id)) });
     watchProject(p.id, store.dir);
   }
@@ -167,6 +168,8 @@ const lifecycle = new Lifecycle(() => [...projects.values()].map((e) => ({
 })), () => { for (const s of sockets) if (s.readyState === s.OPEN) s.send(JSON.stringify({ type: "server" })); }, {
   release, reacquire,
   notify: (text) => void push({ title: "Nexus: update failed", body: text.slice(0, 180), url: "/?settings", tag: "nexus-update" }),
+  // Settled (up and pushed, failed, cancelled): what was held while it drained, and its outcome, go out now.
+  settled: () => { for (const id of projects.keys()) changed(id); },
 });
 const watch = new AttentionWatch();
 
@@ -337,7 +340,17 @@ app.get("/api/projects/:id/refusals", (c) => {
 app.get("/api/usage", (c) => c.json(readUsage() ?? null));
 
 // Nexus itself: its version, and updating it without cutting off running work (src/lifecycle.ts).
-app.get("/api/server", async (c) => c.json({ ...(await version()), update: lifecycle.status, push_on_deploy: readDeploySettings().push_on_deploy }));
+app.get("/api/server", async (c) => c.json({ ...(await version()), update: lifecycle.status, push_on_deploy: readDeploySettings().push_on_deploy, running: runningSteps() }));
+
+/** The steps running now, per project: what an update would wait for (nexus server status shows them). */
+function runningSteps() {
+  return [...projects.values()].flatMap((e) => {
+    const s = stateOf(e);
+    const steps = (s?.queues ?? []).flatMap((q) => q.steps.filter((x) => x.status === "running")
+      .map((x) => ({ queue: q.id, step: x.id, title: x.title, session: q.run?.session ?? null, run: q.run?.state ?? null })));
+    return steps.length ? [{ project: e.id, name: s?.project.name ?? e.id, steps }] : [];
+  });
+}
 // Whether a deploy pushes the deployed main (src/deploy.ts): the user's to switch, from the dashboard only.
 app.post("/api/server/settings", userOnly("change pushing on deploy"), async (c) => {
   const b = (await c.req.json().catch(() => ({}))) as { push_on_deploy?: unknown };
@@ -347,8 +360,15 @@ app.post("/api/server/settings", userOnly("change pushing on deploy"), async (c)
   return c.json({ ok: true, push_on_deploy: b.push_on_deploy });
 });
 app.post("/api/server/update", async (c) => {
-  const b = (await c.req.json().catch(() => ({}))) as { now?: unknown; ref?: unknown };
-  try { return c.json(lifecycle.start({ now: b.now === true, ref: typeof b.ref === "string" ? b.ref : undefined })); }
+  const b = (await c.req.json().catch(() => ({}))) as { now?: unknown; ref?: unknown; by?: { project?: unknown; session?: unknown } };
+  // `by`: the orchestrator session that ran `nexus server update` (the CLI sends it); it is told the outcome. Only an
+  // orchestrator session of a registered project counts; the dashboard sends none.
+  let by: { project: string; session: string } | undefined;
+  const e = typeof b.by?.project === "string" ? projects.get(b.by.project) : undefined;
+  if (e && typeof b.by?.session === "string") {
+    try { if (e.store.readSession(b.by.session).role === "orchestrator") by = { project: e.id, session: b.by.session }; } catch { /* no such session */ }
+  }
+  try { return c.json(lifecycle.start({ now: b.now === true, ref: typeof b.ref === "string" ? b.ref : undefined, by })); }
   catch (e) { return c.json({ error: (e as Error).message }, 409); }
 });
 app.post("/api/server/cancel", (c) => {
@@ -430,6 +450,10 @@ function activate(): void {
   refreshRegistry();
   // The first look at each project is the baseline for push notifications: old news is not pushed after a restart.
   for (const e of projects.values()) { const s = stateOf(e); if (s) watch.check({ id: e.id, name: s.project.name }, s.attention); }
+  // Then one pass over every project, as after a change: the watchers report only changes from now on, so what came
+  // up while the predecessor drained or restarted (a run finished, an approval, a question) would wait for the next
+  // write in that project. This tells each orchestrator now, and starts its turn.
+  for (const id of projects.keys()) changed(id);
 }
 
 /** The successor's side of an update: prove it is up, say so, and take over once the predecessor has let go. */

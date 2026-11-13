@@ -110,7 +110,9 @@ cd ../Nexus-live && npm start                                 # the live instanc
 ```
 
 To bring a new version to it: commit to `main` here, then `nexus server update` (or "Update Nexus" in the settings
-panel). Running steps finish first and no new step starts meanwhile; then the live worktree moves to `main`,
+panel), or ask the orchestrator in its chat to deploy. The orchestrator does it only when you ask, never on its own.
+First it tells you which steps are running and will be waited for, and that it restarts with Nexus. After the
+restart it tells you which version came up, or why the update failed. Running steps finish first and no new step starts meanwhile; then the live worktree moves to `main`,
 installs what changed, builds and restarts itself, and the queues it held (also those waiting to retry) go on by
 themselves. Queues paused by you,
 stopped by a stop condition, waiting for an answer or for the usage window stay as they are. `--now` stops the

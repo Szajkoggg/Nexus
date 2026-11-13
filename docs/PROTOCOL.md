@@ -343,8 +343,12 @@ list as found when the server starts is the baseline.
 **Nexus itself.** `GET /api/server` gives the version (`commit`, `subject`, `live`, `branch`, `root`) and `update`:
 `phase` (`idle`, `draining`, `updating`, `restarting`, `failed`, or `updated` on a server that took over from an
 update), `held`, `waiting`, `log`, `error?`, and after a deploy `push?` (`result`: `pushed`, `failed` or `skipped`,
-`text`, `at`). It also gives `push_on_deploy`. `POST /api/server/update` (`now?`, `ref?`) and
-`POST /api/server/cancel` start and cancel an update. `POST /api/server/settings` (`push_on_deploy`: boolean) is the
+`text`, `at`), `id` (the update's id), `by?` (`project`, `session`: the orchestrator that asked for it) and, on a
+successor, `up` (`commit`, `subject`, `previous?`). It also gives `push_on_deploy` and `running`: the steps running
+now, per project (`project`, `name`, `steps`: `queue`, `step`, `title`, `session`, `run`), which `nexus server status`
+prints. `POST /api/server/update` (`now?`, `ref?`, `by?`) and `POST /api/server/cancel` start and cancel an update.
+`by` is sent by `nexus server update` run in an orchestrator session (from `NEXUS_SESSION` and its project); the
+server keeps it only for an orchestrator session of a registered project. The dashboard sends none. `POST /api/server/settings` (`push_on_deploy`: boolean) is the
 user's only: like withdrawing an approval, it is refused without the dashboard page's own `Origin`. A server waiting
 to take over answers every `/api/projects…` request, and every write under `/api/server/`, with 503.
 
@@ -362,7 +366,7 @@ when it starts one.
 
 | File | Writer | When |
 |---|---|---|
-| `predecessor.json` | predecessor | `pid`, `commit`, `subject`, `at`; before it stops its agents and starts the successor |
+| `predecessor.json` | predecessor | `pid`, `commit`, `subject` (the version it ran), `at`, `update` (`id`, `by?`); before it stops its agents and starts the successor |
 | `ready.json` | successor | `pid`, `commit`, `subject`, `at`; it listens, its API (and the dashboard, if built) answers, every registered project's state loads |
 | `failed.json` | successor | `pid`, `at`, `reason`; the smoke check failed or the port never came free; it exits with code 1 |
 | `released.json` | predecessor | `at`, `log` (the update's log so far), `ref` (what the update deployed); it saw `ready.json`, writes nothing more, and exits |
@@ -422,8 +426,17 @@ a prompt. (`Write` and `Edit` are not disallowed: a disallow rule would beat the
   nor the pause of a server restart or of an update), and when a run halts or finishes. The chat shows only the fact;
   the instruction goes to the orchestrator alone. Each notice is told once, recorded in `applied.jsonl` (`notify:…`
   keys; approvals and withdrawals by their position in the queue's `approvals` and `withdrawals`, so approving a
-  withdrawn revision again is told again). Nothing older than the orchestrator session is told; what happens during
-  an update's drain is told once after the restart.
+  withdrawn revision again is told again). Nothing older than the orchestrator session is told.
+- Nothing is held back across a restart. While an update drains, notices wait. Every server, once active, runs one
+  pass over every project, as after a change: plain starts, successors after their hand-over, and a predecessor that
+  took the port back after a rollback. The same pass runs whenever an update settles: it is up and its push done, it
+  failed, or it was cancelled. So what came up meanwhile is told right then, and it starts the orchestrator's turn.
+- The orchestrator session that ran `nexus server update` (`update.by`) is told the outcome once, even with `notify`
+  off. After the restart: "Nexus was updated as asked: <commit> "<subject>" is up (was <commit>).", with the push
+  result. If it failed, before the hand-over or by a rollback: "The Nexus update you ran failed: <reason>. Still
+  running: <commit> "<subject>"; the queues it held (…) go on.". The keys are `notify:update:<id>:updated` and
+  `notify:update:<id>:failed`, and the successor knows the id and the asker from `predecessor.json`. An update the
+  user started tells no orchestrator about itself.
 
 ## The `nexus` command inside agents
 
