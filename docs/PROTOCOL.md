@@ -581,7 +581,8 @@ The template is a project setting, so each project can phrase it in its own term
 
 ## Server API
 
-Reads: `GET /api/projects` (with each project's "waiting for you" list), `GET /api/projects/:id/state`,
+Reads: `GET /api/projects` (with each project's "waiting for you" list; a question's item carries its `qid` and its
+`options`, if it has any), `GET /api/projects/:id/state`,
 `GET /api/projects/:id/file?path=` (files under the project, its worktree directory or a session's directory only).
 Live: a WebSocket at `/ws` sends `{"type":"changed","project":id}` and `{"type":"projects"}`.
 

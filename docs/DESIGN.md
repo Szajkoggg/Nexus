@@ -662,6 +662,23 @@ The tab is not a layer. It is a field of the history entry (`Nav.tab`), and swit
 On a tab, the chats are inline (`inline` in Chat.tsx): no panel row, since the bottom bar switches and nothing closes
 a tab; the chat's ⋯ moves into its own header, and the Ideas tab shows the list or one conversation at a time.
 
+**Sheets.** On the phone a queue or step, Settings and remote access open as full-screen sheets. A panel's header
+becomes one row: ‹ (back to what was under the sheet), where it is, its place among what waits ("1 of 6 waiting")
+and ✕; the title and status follow below it. Every sheet closes with ‹, ✕ or Back, and every button of a sheet's
+header and action bar, the bottom bar and the waiting cards is at least 44 px high (Tailwind's `max-lg:`, the same
+breakpoint as the phone layout).
+
+**Questions.** A step with an open question opens on the phone as the question's sheet (`QuestionSheet` in
+Details.tsx): the question first, what the orchestrator said passing it on, the options as 48 px buttons, the user's
+own words, whether the worker may go on, then the step's details below; Answer in the action bar. An option and words
+go together in one answer: the option, a blank line, the words. A waiting card shows a question's options as buttons
+(the attention item carries `options`); a tap opens the sheet with that option chosen and the user confirms there.
+The choice travels in memory (`chooseOption`), not in the URL: a reload opens the sheet with nothing chosen. On the
+desktop the card has no option buttons and the step keeps its answer box in the action bar.
+
+**Waiting cards** put the kind, where it is and when on one line and give the text the full width (three lines). The
+phone's chat composer is one line that grows with the text (up to six) and a round Send.
+
 **What waits, in order.** `waitingPosition` (`apps/web/src/waiting.ts`, pure, unit tested) tells where a place (a
 project, queue and step) stands in the waiting list, newest first, and which item comes next: several items at one
 place count as one; next skips them and wraps round to the first; a place no longer waiting (just answered) has no

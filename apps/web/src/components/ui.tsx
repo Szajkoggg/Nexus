@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { readDraft, writeDraft } from "../drafts.ts";
+import { usePhone } from "../phone.ts";
 import ReactMarkdown from "react-markdown";
 import { formatClock, formatDuration, runTimes, stepTimes } from "@nexus/protocol/times";
 import type { QueueView, StepView } from "../api.ts";
@@ -211,10 +212,36 @@ interface ComposerProps {
   allowEmpty?: boolean; rows?: number; extra?: ReactNode;
   /** Hands the text over as typed (not trimmed): words recorded verbatim. */
   verbatim?: boolean;
+  /** One line that grows with the text (up to six), and a round Send beside it: the phone's chat. */
+  oneLine?: boolean;
 }
 
-function ComposerBox({ draft, placeholder, button, onSubmit, allowEmpty = false, rows = 3, extra, verbatim = false }: ComposerProps) {
+function ComposerBox({ draft, placeholder, button, onSubmit, allowEmpty = false, rows = 3, extra, verbatim = false, oneLine = false }: ComposerProps) {
   const t = useDraftText({ draft, onSubmit, allowEmpty, verbatim });
+  const box = useRef<HTMLTextAreaElement>(null);
+  // The one-line box grows with what is typed, up to six lines, then scrolls.
+  useEffect(() => {
+    const b = box.current;
+    if (!oneLine || !b) return;
+    b.style.height = "auto";
+    b.style.height = `${Math.min(b.scrollHeight, 6 * 22 + 22)}px`;
+  }, [oneLine, t.text]);
+  if (oneLine) {
+    return (
+      <div>
+        <div className="flex items-end gap-2">
+          <textarea ref={box} value={t.text} rows={1} placeholder={placeholder} aria-label={placeholder}
+            onChange={(e) => t.change(e.target.value)} onKeyDown={t.onKeyDown}
+            className="min-h-11 flex-1 resize-none rounded-[22px] border border-line-strong bg-canvas px-4 py-2.5 text-sm leading-[22px] text-fg placeholder:text-fg-3 focus:border-accent focus:outline-none" />
+          <button onClick={t.submit} disabled={!t.ready} aria-label={button} title={`${button} (Ctrl+Enter)`}
+            className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-accent-strong text-on-accent hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M3.4 20.4 21 12 3.4 3.6l-.1 6.5L15 12 3.3 13.9z" /></svg>
+          </button>
+        </div>
+        {t.error && <p className="mt-1 text-xs text-danger">{t.error}</p>}
+      </div>
+    );
+  }
   return (
     <div>
       <textarea value={t.text} rows={rows} placeholder={placeholder} onChange={(e) => t.change(e.target.value)} onKeyDown={t.onKeyDown} className={TEXTAREA} />
@@ -239,7 +266,7 @@ export function Button({ children, onClick, disabled, variant = "primary", press
     danger: "text-danger hover:bg-danger/10",
   }[variant];
   return (
-    <button onClick={onClick} disabled={disabled} aria-pressed={pressed} className={`rounded-md px-3 py-1.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-40 ${style}`}>
+    <button onClick={onClick} disabled={disabled} aria-pressed={pressed} className={`rounded-md px-3 py-1.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-40 max-lg:min-h-11 max-lg:px-4 ${style}`}>
       {children}
     </button>
   );
@@ -269,7 +296,7 @@ export function Menu({ items, down = false, label = "More actions" }: { items: M
   return (
     <div className="relative">
       <button onClick={() => setOpen(!open)} aria-label={label} title={label} aria-haspopup="menu" aria-expanded={open}
-        className="grid h-8 w-8 place-items-center rounded-md border border-line-strong bg-surface-2 text-fg-2 hover:bg-surface-3 hover:text-fg">
+        className="grid h-8 w-8 place-items-center rounded-md border border-line-strong bg-surface-2 text-fg-2 hover:bg-surface-3 hover:text-fg max-lg:h-11 max-lg:w-11">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" /></svg>
       </button>
       {open && (
@@ -281,7 +308,7 @@ export function Menu({ items, down = false, label = "More actions" }: { items: M
               : (
                 <button key={i} role={m.checked === undefined ? "menuitem" : "menuitemcheckbox"} aria-checked={m.checked}
                   onClick={() => { setOpen(false); m.onSelect(); }}
-                  className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-surface-3 ${m.danger ? "text-danger" : "text-fg"}`}>
+                  className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-surface-3 max-lg:min-h-11 ${m.danger ? "text-danger" : "text-fg"}`}>
                   {m.checked !== undefined && <span className={`w-3 shrink-0 ${m.checked ? "text-accent" : "invisible"}`}>✓</span>}
                   <span className="min-w-0">{m.label}</span>
                 </button>
@@ -316,18 +343,48 @@ export function ActionBar({ hint, menu, secondary, primary, children }: {
 
 export function CloseButton({ onClose, className = "" }: { onClose: () => void; className?: string }) {
   return (
-    <button onClick={onClose} aria-label="Close" className={`shrink-0 rounded-md p-1.5 text-fg-2 hover:bg-surface-3 hover:text-fg ${className}`}>
+    <button onClick={onClose} aria-label="Close" className={`grid shrink-0 place-items-center rounded-md p-1.5 text-fg-2 hover:bg-surface-3 hover:text-fg max-lg:h-11 max-lg:w-11 ${className}`}>
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 6l12 12M18 6L6 18" /></svg>
     </button>
   );
 }
 
-/** A panel's header: where it is, what it is, its status, and ✕ always at the top right. */
-export function PanelHeader({ where, title, status, onClose }: { where: ReactNode; title: ReactNode; status?: ReactNode; onClose: () => void }) {
+/**
+ * A panel's header: where it is, what it is, its status, and ✕ always at the top right. On the phone, where panels
+ * are full-screen sheets, its top row is ‹ (back to what was under the sheet), where it is, its place among what waits
+ * ("1 of 6") and ✕; `bare` leaves the title and status to the body (a question sheet puts the question first).
+ */
+export function PanelHeader({ where, title, status, onClose, of, bare }: {
+  where: ReactNode; title: ReactNode; status?: ReactNode; onClose: () => void;
+  /** Where it stands among what waits ("2 of 6"). */
+  of?: string;
+  bare?: boolean;
+}) {
+  const phone = usePhone();
+  if (phone) {
+    return (
+      <header className="shrink-0 border-b border-line">
+        <div className="flex min-h-13 items-center gap-1 px-1">
+          <button onClick={onClose} aria-label="Back" className="grid h-11 w-11 shrink-0 place-items-center rounded-md text-fg-2 hover:bg-surface-3 hover:text-fg">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
+          </button>
+          <div className="min-w-0 flex-1 truncate text-sm text-fg-2">{where}</div>
+          {of && <span className="shrink-0 whitespace-nowrap px-1 text-sm text-fg-3">{of}</span>}
+          <CloseButton onClose={onClose} />
+        </div>
+        {!bare && (
+          <div className="px-4 pb-3">
+            <h2 className="text-lg font-semibold leading-snug text-fg">{title}</h2>
+            {status && <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-fg-3">{status}</div>}
+          </div>
+        )}
+      </header>
+    );
+  }
   return (
     <header className="shrink-0 border-b border-line px-5 pb-3 pt-3 sm:px-6">
       <div className="flex items-start gap-2">
-        <div className="min-w-0 flex-1 pt-1.5 text-xs text-fg-3">{where}</div>
+        <div className="min-w-0 flex-1 pt-1.5 text-xs text-fg-3">{where}{of && <span className="ml-2 whitespace-nowrap text-fg-2">· {of}</span>}</div>
         <CloseButton onClose={onClose} className="-mr-2" />
       </div>
       <h2 className="mt-0.5 text-xl font-semibold text-fg">{title}</h2>
@@ -338,7 +395,7 @@ export function PanelHeader({ where, title, status, onClose }: { where: ReactNod
 
 /** What a panel shows between its header and its action bar; it scrolls, they stay. */
 export function PanelBody({ children }: { children: ReactNode }) {
-  return <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-5 pb-6 pt-4 sm:px-6">{children}</div>;
+  return <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-5 pb-6 pt-4 sm:px-6 max-lg:px-4">{children}</div>;
 }
 
 // ---------------------------------------------------------------- drawer
@@ -351,7 +408,7 @@ export function PanelBody({ children }: { children: ReactNode }) {
  */
 export function Drawer({ open, onClose, left, panel, children }: { open: boolean; onClose: () => void; left?: boolean; panel?: boolean; children: ReactNode }) {
   if (!open) return null;
-  const content = panel ? children : <><CloseButton onClose={onClose} className="absolute right-3 top-3" /><div className="p-5 pt-6 sm:p-6">{children}</div></>;
+  const content = panel ? children : <><CloseButton onClose={onClose} className="absolute right-3 top-3" /><div className="p-5 pt-6 sm:p-6 max-lg:px-4 max-lg:pt-14">{children}</div></>;
   if (left) {
     return (
       <aside className={`fixed bottom-0 left-0 z-20 border-r border-line bg-surface shadow-xl ${panel ? "flex flex-col" : "scroll-thin overflow-y-auto"}`}
@@ -363,7 +420,7 @@ export function Drawer({ open, onClose, left, panel, children }: { open: boolean
   return (
     <div className="fixed inset-0 z-40 flex justify-end">
       <div className="absolute inset-0 bg-scrim/50" onClick={onClose} />
-      <aside className={`relative h-full w-full max-w-2xl border-l border-line bg-surface pt-[env(safe-area-inset-top)] shadow-2xl ${panel ? "flex flex-col" : "scroll-thin overflow-y-auto"}`}>
+      <aside className={`relative h-full w-full max-w-2xl border-l border-line bg-surface pt-[env(safe-area-inset-top)] shadow-2xl max-lg:max-w-none max-lg:border-l-0 ${panel ? "flex flex-col" : "scroll-thin overflow-y-auto"}`}>
         {content}
       </aside>
     </div>

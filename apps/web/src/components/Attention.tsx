@@ -80,30 +80,44 @@ export function WaitingButton({ projects, onClick }: { projects: ProjectSummary[
   );
 }
 
-/** Everything waiting for the user in every project, newest first; a tap opens the item in its project. */
-export function WaitingList({ projects, onOpen }: { projects: ProjectSummary[]; onOpen: (w: WaitingItem) => void }) {
+/**
+ * Everything waiting for the user in every project, newest first; a tap opens the item in its project. Each card puts
+ * the kind, where it is and when on one line and gives the text the full width; a question's options are buttons
+ * that open its sheet with that option chosen, for the user to confirm there (`onChoose`).
+ */
+export function WaitingList({ projects, onOpen, onChoose }: {
+  projects: ProjectSummary[]; onOpen: (w: WaitingItem) => void; onChoose?: (w: WaitingItem, option: string) => void;
+}) {
   const items = mergeAttention(projects);
   return (
     <div>
-      <h2 className="pr-8 text-xl font-semibold text-fg">Waiting for you</h2>
-      <p className="mt-1 text-sm text-fg-3">In all projects, newest first.</p>
+      <div className="flex items-baseline gap-3 pr-10 lg:pr-8">
+        <h2 className="text-sm font-semibold uppercase tracking-wider text-warn">Waiting for you · {items.length}</h2>
+        <span className="ml-auto text-xs text-fg-3">all projects, newest first</span>
+      </div>
       {items.length === 0 && <p className="mt-6 text-sm text-fg-2">Nothing waits for you.</p>}
-      <ul className="mt-4 space-y-2">
+      <ul className="mt-3 space-y-2.5">
         {items.map((a) => (
-          <li key={`${a.project}/${attentionKey(a)}`}>
-            <button onClick={() => onOpen(a)}
-              className="flex w-full items-start gap-3 rounded-lg border border-line bg-surface p-3 text-left hover:border-fg-3/60">
-              <span className={`shrink-0 rounded-md px-2 py-0.5 text-xs font-semibold ${LABEL[a.kind].tone}`}>{LABEL[a.kind].text}</span>
-              <span className="min-w-0 flex-1">
-                <span className="flex min-w-0 flex-wrap gap-x-2 text-xs">
-                  <span className="max-w-full truncate font-medium text-fg">{a.project_name}</span>
-                  {a.queue && <span className="min-w-0 break-words font-mono text-fg-3">{whereOf(a)}</span>}
-                </span>
-                <span className="line-clamp-2 text-sm text-fg">{plain(a.text)}</span>
-                {a.lift && <StopWays lift={a.lift} className="mt-1.5" />}
+          <li key={`${a.project}/${attentionKey(a)}`} className="rounded-lg border border-line bg-surface hover:border-fg-3/60">
+            <button onClick={() => onOpen(a)} className="block w-full px-3.5 pb-3 pt-3 text-left">
+              <span className="flex min-w-0 items-center gap-2 text-xs">
+                <span className={`shrink-0 rounded-md px-2 py-0.5 font-semibold ${LABEL[a.kind].tone}`}>{LABEL[a.kind].text}</span>
+                <span className="min-w-0 flex-1 truncate text-fg-3">{a.project_name}{a.queue && <> · <span className="font-mono">{whereOf(a)}</span></>}</span>
+                {a.at && <span className="shrink-0 text-fg-3"><TimeAgo at={a.at} /></span>}
               </span>
-              {a.at && <span className="shrink-0 text-xs text-fg-3"><TimeAgo at={a.at} /></span>}
+              <span className="mt-1.5 line-clamp-3 text-[15px] leading-snug text-fg">{plain(a.text)}</span>
+              {a.lift && <StopWays lift={a.lift} className="mt-1.5" />}
             </button>
+            {onChoose && a.kind === "question" && !!a.options?.length && (
+              <div className="flex flex-wrap gap-2 px-3.5 pb-3">
+                {a.options.map((o, i) => (
+                  <button key={o} onClick={() => onChoose(a, o)} title="Opens the question with this option chosen; you confirm there"
+                    className="min-h-11 min-w-[40%] flex-1 rounded-md border border-line-strong bg-surface-2 px-3 py-2 text-sm font-medium text-fg hover:bg-surface-3">
+                    {i + 1} · {o}
+                  </button>
+                ))}
+              </div>
+            )}
           </li>
         ))}
       </ul>

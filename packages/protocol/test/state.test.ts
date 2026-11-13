@@ -67,6 +67,16 @@ test("a blocking question waits until the orchestrator answers; workers cannot a
   assert.equal(s.queues[0]!.steps[0]!.status, "running");
 });
 
+test("a question with options carries them to the user's waiting list", () => {
+  const { st, session, emit } = setup();
+  const w = session("worker");
+  emit(w, { type: "step.started", queue: "Q", step: "Q1" });
+  emit(w, { type: "question.asked", queue: "Q", step: "Q1", qid: "q1", text: "Smooth it now?", options: ["Now", "Later"], can_continue: false });
+  emit(w, { type: "question.asked", queue: "Q", step: "Q1", qid: "q2", text: "Anything else?", can_continue: true });
+  const a = loadProjectState(st).attention.filter((x) => x.kind === "question");
+  assert.deepEqual(a.map((x) => [x.qid, x.options]).sort(), [["q1", ["Now", "Later"]], ["q2", undefined]]);
+});
+
 test("a stop halts the queue; an approval pins one revision", () => {
   const { st, q, session, emit } = setup();
   const approval = { revision: 1, at: now(), hash: revisionHash(q) };

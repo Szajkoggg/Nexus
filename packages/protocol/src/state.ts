@@ -19,6 +19,8 @@ export interface AttentionItem {
   kind: "question" | "stopped" | "approval" | "review" | "failed" | "start";
   queue?: string; step?: string; qid?: string;
   text: string; at?: string;
+  /** A question's options, as the worker gave them (the waiting list shows them as buttons). */
+  options?: string[];
   /**
    * A stopped queue's ways out (kind `stopped` of a queue whose status is stopped, not a halted run): `place` is where
    * the stop is (stopPlace); `continue`: the current revision is approved, so Continue lifts it (else approving the
@@ -301,7 +303,7 @@ function attentionOf(queues: QueueView[], questions: QuestionView[]): AttentionI
   for (const x of questions) {
     if (x.state !== "open" && x.state !== "escalated") continue;
     const by = x.answers.at(-1);
-    out.push({ kind: "question", queue: x.queue, step: x.step, qid: x.qid, text: x.text, at: by?.at ?? x.asked_at });
+    out.push({ kind: "question", queue: x.queue, step: x.step, qid: x.qid, text: x.text, at: by?.at ?? x.asked_at, ...(x.options?.length ? { options: x.options } : {}) });
   }
   for (const q of queues) {
     // A finished queue does not wait for the user, whatever its last run says (a halt after its last step is done,

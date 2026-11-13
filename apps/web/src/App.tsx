@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { QueueStatus } from "@nexus/protocol";
 import { useLive, useProjectState, useProjects, type AttentionItem, type QueueView } from "./api.ts";
 import { QueueRow } from "./components/QueueRow.tsx";
-import { QueueDetail, StepDetail } from "./components/Details.tsx";
+import { chooseOption, QueueDetail, StepDetail } from "./components/Details.tsx";
 import { Button, Drawer, Section, SIDE_LEFT, SIDE_RIGHT, TimeAgo, useWide } from "./components/ui.tsx";
 import { AttentionPanel, attentionTarget, NotifyToggle, useNotifications, WaitingButton, WaitingList } from "./components/Attention.tsx";
 import { ContextBar, UsageMeter } from "./components/Run.tsx";
@@ -13,7 +13,7 @@ import { isOpen, panelOrder, phoneView } from "./layers.ts";
 import { usePhone } from "./phone.ts";
 import { BottomBar, RunningNow } from "./components/Phone.tsx";
 import { waitingPosition } from "./waiting.ts";
-import { mergeAttention } from "@nexus/protocol/attention";
+import { mergeAttention, type WaitingItem } from "@nexus/protocol/attention";
 import { nav, useNav } from "./nav.ts";
 import { SettingsButton, SettingsPanel, UpdatePill, useServer } from "./components/Settings.tsx";
 import { ProjectRefusals } from "./components/Refusals.tsx";
@@ -76,6 +76,7 @@ export function App() {
   const queue = state?.queues.find((q) => q.id === route.queue);
   const step = queue?.steps.find((s) => s.id === route.step);
   const close = () => nav.close("item");
+  const openWaiting = (w: WaitingItem) => nav.closeThenItem("waiting", w.project, w.queue, attentionTarget(w));
   // Below 1024 px: the phone layout, with a tab instead of the chat, Ideas and waiting layers (layers.ts phoneView).
   const phone = usePhone();
   const tab = phone ? phoneView(route.nav).tab : undefined;
@@ -194,7 +195,7 @@ export function App() {
 
         <main className={scrolls ? "@container scroll-thin min-h-0 flex-1 overflow-y-auto px-4 py-4" : "flex min-h-0 flex-1 flex-col"}>
           {scrolls && banners}
-          {tab === "waiting" && <WaitingList projects={projects ?? []} onOpen={(w) => nav.closeThenItem("waiting", w.project, w.queue, attentionTarget(w))} />}
+          {tab === "waiting" && <WaitingList projects={projects ?? []} onOpen={openWaiting} onChoose={(w, o) => { if (w.qid) chooseOption(w.qid, o); openWaiting(w); }} />}
           {tab === "queues" && queuesPage}
           {tab === "chat" && projectId && (
             <ChatPanel key={`chat-${projectId}`} inline project={projectId} name={state?.project.name ?? projectId} view={orchestrator} onClose={() => nav.tab("waiting")} onChanged={() => setTick((t) => t + 1)} />
@@ -255,7 +256,7 @@ export function App() {
         ))}
 
       <Drawer open={waitingOpen} onClose={() => nav.close("waiting")}>
-        <WaitingList projects={projects ?? []} onOpen={(w) => nav.closeThenItem("waiting", w.project, w.queue, attentionTarget(w))} />
+        <WaitingList projects={projects ?? []} onOpen={openWaiting} />
       </Drawer>
 
       {drawers}

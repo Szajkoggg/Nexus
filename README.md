@@ -29,7 +29,9 @@ chat), **Waiting** (what waits for you in all projects, with the count), **Queue
 The top line has the project picker, what runs in the project, and the settings gear; the update, the usage,
 notifications and remote access are in Settings there. Switching tabs is not a step for Back: Back closes what is
 open (a step, Settings, a conversation) and then leaves. After switching projects the Waiting tab shows. A step or
-queue opened from Waiting says where it stands ("2 of 6 waiting").
+queue opens as a full-screen sheet with ‹ and ✕ at the top and says where it stands ("2 of 6 waiting"). A question's
+options are buttons right in its waiting card: a tap opens the question with that option chosen, and **Answer**
+confirms it (words of your own can go with it). The chat's box is one line with a round Send.
 
 **On a wide screen** (1280 px and more) a queue or step opens on the left and the orchestrator or Ideas on the
 right, both at once, with the queue list between them: click another step and the chat stays open.

@@ -6,6 +6,7 @@ import { Button, CloseButton, Composer, Markdown, Menu, SIDE_RIGHT, TimeAgo, use
 import { draftKey } from "../drafts.ts";
 import { layerValue, type SidePanel } from "../layers.ts";
 import { nav, useNav } from "../nav.ts";
+import { usePhone } from "../phone.ts";
 import { EffortSelect, ModelSelect, useEfforts } from "./Settings.tsx";
 
 interface View { session: SessionFile | null; state: "working" | "idle" | "exited"; runtime: RuntimeFile | null; chat: ChatEntry[]; model: string | null; effort: string | null }
@@ -23,6 +24,7 @@ function ChatColumn({ title, over, about, view, status, showTools, menu, empty, 
 }) {
   const end = useRef<HTMLDivElement>(null);
   const side = useContext(Side);
+  const phone = usePhone();
   const chat = (view?.chat ?? []).filter((c) => showTools || c.kind !== "tool");
   useEffect(() => { end.current?.scrollIntoView({ block: "end" }); }, [chat.length, view?.state]);
   const rt = view?.runtime;
@@ -48,8 +50,8 @@ function ChatColumn({ title, over, about, view, status, showTools, menu, empty, 
         {view?.state === "working" && <div className="text-xs text-fg-3"><span className="animate-pulse">●</span> working…</div>}
         <div ref={end} />
       </div>
-      <footer className="border-t border-line p-4">
-        <Composer rows={3} draft={draft} placeholder={placeholder} button="Send" onSubmit={onSend} />
+      <footer className="border-t border-line p-4 max-lg:p-3">
+        <Composer rows={3} draft={draft} placeholder={placeholder} button="Send" onSubmit={onSend} oneLine={phone} />
       </footer>
     </div>
   );
@@ -225,12 +227,12 @@ export function StepChat({ project, queue, step, version }: { project: string; q
     <div>
       <div className="flex flex-wrap items-center gap-2">
         <button onClick={() => void go(false)} disabled={busy} title="Talk this step through with a thinking partner; nothing changes in the run"
-          className="flex items-center gap-1.5 rounded-md border border-line-strong px-2.5 py-1 text-sm text-fg hover:border-fg-3/60 hover:bg-surface-3 disabled:opacity-40">
+          className="flex items-center gap-1.5 rounded-md border border-line-strong px-2.5 py-1 text-sm text-fg hover:border-fg-3/60 hover:bg-surface-3 disabled:opacity-40 max-lg:min-h-11 max-lg:px-3.5">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
           Chat about this
         </button>
         {mine.length > 0 && (
-          <button onClick={() => void go(true)} disabled={busy} className="rounded-md px-2 py-1 text-xs text-fg-2 hover:bg-surface-3 hover:text-fg disabled:opacity-40">
+          <button onClick={() => void go(true)} disabled={busy} className="rounded-md px-2 py-1 text-xs text-fg-2 hover:bg-surface-3 hover:text-fg disabled:opacity-40 max-lg:min-h-11 max-lg:px-3">
             New conversation
           </button>
         )}

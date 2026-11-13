@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import type { Event, StatusChange } from "@nexus/protocol";
 import { stopPlace } from "@nexus/protocol/attention";
 import { stepValuesText } from "@nexus/protocol/steps";
@@ -10,6 +10,7 @@ import { StepRefusals } from "./Refusals.tsx";
 import { draftKey, readDraft } from "../drafts.ts";
 import { layerValue } from "../layers.ts";
 import { nav, useNav } from "../nav.ts";
+import { usePhone } from "../phone.ts";
 import { ImageViewer, type ViewerImage } from "./Viewer.tsx";
 import { StepChat } from "./Chat.tsx";
 
@@ -44,25 +45,12 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
   // first, if there are several; the others keep their answer box in their card).
   const reviewing = showsReviewActions(step);
   const asking = reviewing ? undefined : questions.find((q) => q.state === "open" || q.state === "escalated");
-  return (
+  // On the phone a step with an open question is the question's sheet: the question first, its options as buttons,
+  // the answer in the body and Answer in the bar; the step's details follow below it.
+  const phone = usePhone();
+  const questionFirst = phone && !!asking;
+  const body = (
     <>
-      <PanelHeader
-        where={<><span className="font-mono">{queue.id}</span> · {queue.title}{of && <span className="ml-2 whitespace-nowrap text-fg-2">· {of}</span>}</>}
-        title={<><span className="mr-2 font-mono text-fg-3">{step.id}</span>{step.title}</>}
-        status={<>
-          <StatusBadge status={step.status} label={reviewLabel(step)} />
-          <StepTimes step={step} />
-          {step.commit && <span className="font-mono">{step.commit}</span>}
-          {session && <span>by {session.title ?? session.id.slice(-8)} ({session.runtime})</span>}
-          {stepValuesText(step) && (
-            <span className="rounded bg-surface-3 px-1.5 py-0.5 text-fg" title="This step's own runtime, model and effort; what it leaves out is the run's">
-              runs on {stepValuesText(step)}
-            </span>
-          )}
-        </>}
-        onClose={onClose}
-      />
-      <PanelBody>
       <StepChat project={id} queue={queue.id} step={step.id} version={project.generated_at} />
 
       {queue.run?.state === "retry_wait" && queue.run.step === step.id && (
@@ -124,7 +112,11 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
         </Section>
       )}
 
-      {questions.length > 0 && <Section title="Questions">{questions.map((q) => <Question key={q.qid} q={q} project={id} onChanged={onChanged} inBar={q.qid === asking?.qid} />)}</Section>}
+      {questions.some((q) => !(questionFirst && q.qid === asking?.qid)) && (
+        <Section title={questionFirst ? "Other questions" : "Questions"}>
+          {questions.filter((q) => !(questionFirst && q.qid === asking?.qid)).map((q) => <Question key={q.qid} q={q} project={id} onChanged={onChanged} inBar={q.qid === asking?.qid} />)}
+        </Section>
+      )}
 
       {step.status_note && (
         <Section title="Recorded state">
@@ -257,13 +249,110 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
           </ol>
         </Section>
       )}
-      </PanelBody>
-      {reviewing
+    </>
+  );
+  return (
+    <>
+      <PanelHeader
+        where={phone
+          ? <>{project.project.name} · {queue.id} · <span className="text-fg">{step.id}</span> {step.title}</>
+          : <><span className="font-mono">{queue.id}</span> · {queue.title}</>}
+        of={of} bare={questionFirst}
+        title={<><span className="mr-2 font-mono text-fg-3">{step.id}</span>{step.title}</>}
+        status={<>
+          <StatusBadge status={step.status} label={reviewLabel(step)} />
+          <StepTimes step={step} />
+          {step.commit && <span className="font-mono">{step.commit}</span>}
+          {session && <span>by {session.title ?? session.id.slice(-8)} ({session.runtime})</span>}
+          {stepValuesText(step) && (
+            <span className="rounded bg-surface-3 px-1.5 py-0.5 text-fg" title="This step's own runtime, model and effort; what it leaves out is the run's">
+              runs on {stepValuesText(step)}
+            </span>
+          )}
+        </>}
+        onClose={onClose}
+      />
+      {questionFirst
+        ? <QuestionSheet key={asking!.qid} q={asking!} project={id} onChanged={onChanged}>{body}</QuestionSheet>
+        : <PanelBody>{body}</PanelBody>}
+      {questionFirst ? null : reviewing
         ? <ReviewBar key={step.id} project={id} queue={queue.id} step={step.id} next={noteTargets(queue.steps, step.id).next} criteria={step.acceptance} onChanged={onChanged} />
         : asking && <AnswerBar key={asking.qid} q={asking} project={id} onChanged={onChanged} />}
     </>
   );
 }
+
+/**
+ * An option the user tapped in a waiting card, for the question's sheet to open with it chosen (the user confirms
+ * there). Kept in memory until the sheet takes it.
+ */
+const chosen = new Map<string, string>();
+export const chooseOption = (qid: string, option: string) => { chosen.set(qid, option); };
+
+/**
+ * A question's sheet on the phone: the question first (what kind, whether the worker waits, since when), what the
+ * orchestrator said passing it on, the options as 48 px buttons, the user's own words, then the step's details
+ * (`children`); Answer in the action bar. An option and words go together: the option, then the words.
+ */
+function QuestionSheet({ q, project, onChanged, children }: { q: QuestionView; project: string; onChanged: () => void; children: ReactNode }) {
+  const [choice, setChoice] = useState<string | undefined>(() => { const c = chosen.get(q.qid); chosen.delete(q.qid); return c; });
+  const [goOn, setGoOn] = useState(true);
+  const t = useDraftText({
+    draft: draftKey(project, "answer", q.qid), allowEmpty: true,
+    onSubmit: async (words) => {
+      const text = [choice, words].filter(Boolean).join(PARAGRAPH);
+      if (!text) throw new Error("Choose an option or write your answer.");
+      await act(project, "POST", `/questions/${enc(q.qid)}/answer`, { text, continue: goOn });
+      onChanged();
+    },
+  });
+  const ready = !t.busy && (!!choice || !!t.text.trim());
+  const passed = q.answers.filter((a) => a.escalate);
+  return (
+    <>
+      <PanelBody>
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+          <StatusBadge status={q.state === "escalated" ? "review" : "waiting"} label={q.state === "escalated" ? "passed to you" : "question for you"} className="text-sm" />
+          <span className="text-fg-3">· {q.can_continue ? "the worker goes on meanwhile" : "the worker waits"} · <TimeAgo at={q.asked_at} /></span>
+        </div>
+        <h1 className="mt-3 text-[19px] font-semibold leading-snug text-fg">{q.text}</h1>
+        {passed.map((a) => (
+          <div key={a.id} className="mt-3 border-l-2 border-accent py-1 pl-3 text-sm text-fg">
+            <span className="text-fg-3">Orchestrator: </span><Markdown className="inline [&_p]:inline [&_p]:m-0">{a.text}</Markdown>
+          </div>
+        ))}
+        {!!q.options?.length && (
+          <div className="mt-4 space-y-2.5" role="radiogroup" aria-label="Options">
+            {q.options.map((o, i) => (
+              <button key={o} role="radio" aria-checked={choice === o} onClick={() => setChoice(choice === o ? undefined : o)}
+                className={`flex min-h-12 w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left text-[15px] text-fg ${choice === o ? "border-accent bg-accent/10 ring-1 ring-accent" : "border-line-strong bg-surface-2 hover:bg-surface-3"}`}>
+                <span className={`grid h-6 w-6 shrink-0 place-items-center rounded-md text-xs ${choice === o ? "bg-accent-strong text-on-accent" : "bg-surface-3 text-fg-2"}`}>{i + 1}</span>
+                <span className="min-w-0 flex-1">{o}</span>
+                {choice === o && <span className="shrink-0 text-xs text-accent">chosen</span>}
+              </button>
+            ))}
+          </div>
+        )}
+        <textarea value={t.text} rows={2} onChange={(e) => t.change(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); if (ready) void t.submit(); } }}
+          placeholder={q.options?.length ? (choice ? "Add words to your answer (optional)…" : "Or answer in your own words…") : "Your answer…"}
+          className={`mt-4 ${TEXTAREA}`} />
+        <label className="mt-1 flex min-h-11 items-center gap-2 text-sm text-fg-2">
+          <input type="checkbox" checked={goOn} onChange={(e) => setGoOn(e.target.checked)} className="h-4 w-4 accent-accent" />
+          the worker may go on
+        </label>
+        <div className="mt-6 border-t border-line pt-4">{children}</div>
+      </PanelBody>
+      <ActionBar
+        hint={t.error ? <span className="text-danger">{t.error}</span> : choice ? `Answers “${choice}”${t.text.trim() ? " with your words" : ""}` : undefined}
+        primary={<Button onClick={t.submit} disabled={!ready}>{t.busy ? "Sending…" : "Answer"}</Button>}
+      />
+    </>
+  );
+}
+
+/** Between an option and the user's words in one answer. */
+const PARAGRAPH = String.fromCharCode(10, 10);
 
 /** Reject: the step is marked rejected, the run pauses, nothing is reverted; the orchestrator proposes what follows. */
 function RejectStep({ project, queue, step, onChanged, onCancel }: { project: string; queue: string; step: string; onChanged: () => void; onCancel: () => void }) {
@@ -883,7 +972,7 @@ export function QueueDetail({ project, queue, onChanged, onClose, of }: Props) {
   return (
     <>
       <PanelHeader
-        where={<>{project.project.name} · queue{of && <span className="ml-2 whitespace-nowrap text-fg-2">· {of}</span>}</>}
+        where={<>{project.project.name} · queue</>} of={of}
         title={<><span className="mr-2 font-mono text-fg-3">{queue.id}</span>{queue.title}</>}
         status={<>
           <StatusBadge status={queue.status} />
