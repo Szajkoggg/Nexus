@@ -30,7 +30,12 @@ const ORDER: Tab[] = ["chat", "waiting", "queues", "ideas"];
  * The bottom bar: Orchestrator, Waiting (with what waits in all projects), Queues, Ideas. One tap switches; the tab
  * shown is marked. A dot on Orchestrator while it works.
  */
-export function BottomBar({ tab, waiting, working, onTab }: { tab: Tab; waiting: number; working: boolean; onTab: (t: Tab) => void }) {
+export function BottomBar({ tab, waiting, working, unread, onTab }: {
+  tab: Tab; waiting: number; working: boolean;
+  /** Unread in the chats (chatPlace.ts): a count on Orchestrator, a dot on Ideas. */
+  unread: { chat: number; ideas: boolean };
+  onTab: (t: Tab) => void;
+}) {
   return (
     <nav aria-label="Tabs" className="grid shrink-0 grid-cols-4 border-t border-line bg-surface pb-[env(safe-area-inset-bottom)]">
       {ORDER.map((t) => (
@@ -41,7 +46,11 @@ export function BottomBar({ tab, waiting, working, onTab }: { tab: Tab; waiting:
           {t === "waiting" && waiting > 0 && (
             <span className="absolute left-[calc(50%+4px)] top-1.5 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-warn px-1 text-[11px] font-semibold text-canvas">{waiting}</span>
           )}
-          {t === "chat" && working && <span className="absolute left-[calc(50%+8px)] top-2.5 h-2 w-2 animate-pulse rounded-full bg-accent" title="The orchestrator is working" />}
+          {t === "chat" && unread.chat > 0 && (
+            <span className="absolute left-[calc(50%+4px)] top-1.5 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-accent-strong px-1 text-[11px] font-semibold text-on-accent" aria-label={`${unread.chat} new`}>{unread.chat}</span>
+          )}
+          {t === "chat" && working && !unread.chat && <span className="absolute left-[calc(50%+8px)] top-2.5 h-2 w-2 animate-pulse rounded-full bg-accent" title="The orchestrator is working" />}
+          {t === "ideas" && unread.ideas && <span className="absolute left-[calc(50%+8px)] top-2.5 h-2 w-2 rounded-full bg-accent" aria-label="new messages" />}
         </button>
       ))}
     </nav>

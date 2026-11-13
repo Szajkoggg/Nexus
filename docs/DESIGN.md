@@ -688,6 +688,27 @@ The key names the project and the target (`<project>/orchestrator`, `/conversati
 moving from one step or conversation to another remounts the box with that target's own text instead of carrying
 the text across. Drafts untouched for 14 days are pruned when the page loads.
 
+### Each chat keeps its place
+
+Decided by the user on 2026-11-14 (queue CH1). The chats are views (the desktop's middle column, the phone's tabs), so
+switching unmounts one and mounts the other; each chat, the orchestrator's and every conversation, now keeps its place
+for the browser session in `sessionStorage` (`nexus.place:<project>/orchestrator`, `…/conversation/<id>`, like the
+drafts' keys): the entry at the top of the view (its index in the whole chat, tool lines included, so showing or
+hiding them keeps it) and how far past it, whether the view was at the end, and `seen`, the time of the latest entry
+that has been in view. The rules are pure (`apps/web/src/chatPlace.ts`, unit tested); `usePlace` in Chat.tsx applies
+them:
+
+- **Opening waits for the chat to load** (`ready`: the fetched view is this chat's, not the one shown before), then
+  goes to the place, or to the newest message when there is none (the first time in this session, or a chat started
+  over and now shorter than the place).
+- **Messages that came while away do not move the view**: they are below it, and a "N new ↓" button (messages of
+  others after `seen`, not the user's own, not tool lines) jumps to the first of them.
+- **While the chat is open and at its end, new messages keep it at the end**; scrolled up, they are counted by the
+  button instead. Sending a message goes to the end.
+- **Unread markers** come from the same state: a count on the orchestrator's side of the switch and on the phone's
+  Orchestrator tab ("Orchestrator 2"), a dot on Ideas when any conversation's last entry is newer than its `seen`, and
+  that conversation's dot in the list. A chat not opened in this session has nothing unread: it opens at its newest.
+
 ### Colours are theme tokens
 
 Every colour in the dashboard is a theme token: a CSS variable in `apps/web/src/index.css` (Tailwind's `@theme`),

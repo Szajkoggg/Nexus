@@ -8,7 +8,8 @@ import { Rail, RAIL } from "./components/Rail.tsx";
 import { RefsProvider } from "./components/Refs.tsx";
 import { AttentionPanel, attentionTarget, NotifyToggle, useNotifications, WaitingList } from "./components/Attention.tsx";
 import { ContextBar, UsageMeter } from "./components/Run.tsx";
-import { ChatPanel, ConversationsPanel, DeskHead, useOrchestrator, type Desk } from "./components/Chat.tsx";
+import { ChatPanel, ConversationsPanel, DeskHead, useOrchestrator, type Desk, type Unread } from "./components/Chat.tsx";
+import { hasUnread, placeKey, readPlace, unreadCount, usePlaces } from "./chatPlace.ts";
 import { RemoteButton, RemotePanel } from "./components/Remote.tsx";
 import { ProjectPicker, ProjectSidebar } from "./components/Projects.tsx";
 import { isOpen, phoneView, viewOf } from "./layers.ts";
@@ -123,7 +124,13 @@ export function App() {
   const [form, setForm] = useApprovalForm(projectId, queue?.id, queue?.revision);
   const fullApproval = !!(queue && !step && needsApproval(queue) && (form ?? (phone ? "panel" : "full")) === "full");
   // "Ideas · N" in a desktop's switch: the conversations that are not archived.
-  const ideas = useFetch<{ archived?: boolean }[]>(!phone && projectId ? `/api/projects/${enc(projectId)}/conversations` : undefined, tick);
+  const ideas = useFetch<{ id: string; archived?: boolean; last_at?: string }[]>(projectId ? `/api/projects/${enc(projectId)}/conversations` : undefined, tick);
+  // Unread markers on the chat switch and the phone's tabs, from each chat's place (chatPlace.ts).
+  usePlaces();
+  const unread: Unread = {
+    chat: projectId ? unreadCount(orchestrator?.chat ?? [], readPlace(placeKey(projectId, "orchestrator"))?.seen) : 0,
+    ideas: !!projectId && (ideas ?? []).some((c) => !c.archived && hasUnread(c.last_at, readPlace(placeKey(projectId, "conversation", c.id))?.seen)),
+  };
 
   const banners = <>
     {projectsError && <Banner>Cannot reach the Nexus server: {projectsError}</Banner>}
@@ -239,7 +246,7 @@ export function App() {
           )}
         </main>
 
-        <BottomBar tab={tab!} waiting={waiting.length} working={orchestrator?.state === "working"} onTab={(t) => nav.tab(t)} />
+        <BottomBar tab={tab!} waiting={waiting.length} working={orchestrator?.state === "working"} unread={unread} onTab={(t) => nav.tab(t)} />
         {drawers}
       </div>
       </RefsProvider>
@@ -255,6 +262,7 @@ export function App() {
   const desk: Desk = {
     orchestrator,
     ideas: ideas?.filter((c) => !c.archived).length,
+    unread,
     tools: wide ? null : (
       <button onClick={() => (waitingOpen ? nav.close("waiting") : nav.open("waiting"))} aria-pressed={waitingOpen} title="What waits for you in all projects, what runs, what finished today"
         className={`flex shrink-0 items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm ${waitingOpen ? "bg-surface-3" : "hover:bg-surface"} ${total ? "border-warn/40 text-warn" : "border-line-strong text-fg-2"}`}>

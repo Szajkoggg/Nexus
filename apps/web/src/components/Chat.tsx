@@ -1,5 +1,5 @@
 // Chats: the project's orchestrator, and conversations with a thinking partner.
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { ChatEntry, RuntimeFile, SessionFile } from "@nexus/protocol";
 import { act, enc, useFetch } from "../api.ts";
 import { Button, Composer, Menu, TimeAgo, type MenuEntry } from "./ui.tsx";
@@ -8,6 +8,7 @@ import { draftKey } from "../drafts.ts";
 import { layerValue } from "../layers.ts";
 import { nav, useNav } from "../nav.ts";
 import { usePhone } from "../phone.ts";
+import { firstUnread, hasUnread, opening, placeKey, readPlace, seenUpTo, unreadCount, usePlaces, writePlace } from "../chatPlace.ts";
 import { EffortSelect, ModelSelect, useEfforts } from "./Settings.tsx";
 
 interface View { session: SessionFile | null; state: "working" | "idle" | "exited"; runtime: RuntimeFile | null; chat: ChatEntry[]; model: string | null; effort: string | null }
@@ -17,8 +18,12 @@ export function useOrchestrator(project: string | undefined, version: unknown) {
 }
 
 /** A chat: what it is (its header; on a desktop's orchestrator chat, in the middle column's header), the messages, and the composer. */
-function ChatColumn({ title, over, who, about, view, status, showTools, menu, empty, draft, placeholder, onSend, onBack, bare }: {
+function ChatColumn({ title, over, who, about, view, ready, place, status, showTools, menu, empty, draft, placeholder, onSend, onBack, bare }: {
   title: string; over: string;
+  /** The view holds this chat (not the one shown before it, still there while this one loads). */
+  ready: boolean;
+  /** Where its place is kept (chatPlace.ts, placeKey). */
+  place: string;
   /** Who answers, over each of its messages on a desktop: "Orchestrator", "Partner". */
   who: string; about?: ReactNode; view: View | undefined; status: string; showTools: boolean; empty: ReactNode;
   draft: string; placeholder: string; onSend: (text: string) => Promise<void>; onBack?: () => void;
@@ -27,11 +32,11 @@ function ChatColumn({ title, over, who, about, view, status, showTools, menu, em
   /** No header of its own: the desktop's orchestrator chat, whose state is in the middle column's header. */
   bare?: boolean;
 }) {
-  const end = useRef<HTMLDivElement>(null);
   const side = useContext(Side);
   const phone = usePhone();
-  const chat = (view?.chat ?? []).filter((c) => showTools || c.kind !== "tool");
-  useEffect(() => { end.current?.scrollIntoView({ block: "end" }); }, [chat.length, view?.state]);
+  const full = ready ? view?.chat ?? [] : [];
+  const shown = full.map((c, i) => ({ c, i })).filter(({ c }) => showTools || c.kind !== "tool");
+  const p = usePlace(place, full, ready, showTools, view?.state);
   // On a desktop the text keeps a chat app's measure: a column of about 780 px in the middle.
   const measure = phone ? "" : "mx-auto w-full max-w-[48.75rem]";
   return (
@@ -48,21 +53,100 @@ function ChatColumn({ title, over, who, about, view, status, showTools, menu, em
           {menu && <span className="ml-auto"><Menu items={menu} down label="Chat actions" /></span>}
         </header>
       )}
-      <div className={`scroll-thin flex-1 overflow-y-auto ${phone ? "px-5 py-4" : "px-6 py-6"}`}>
-        <div className={`${measure} ${phone ? "space-y-3" : "space-y-4"}`}>
-          {chat.length === 0 && <div className="mt-10 text-center text-sm text-fg-3">{empty}</div>}
-          {chat.map((c, i) => <Entry key={i} c={c} flat={!phone} who={who} />)}
-          {view?.state === "working" && <div className="text-xs text-fg-3"><span className="animate-pulse">●</span> working…</div>}
-          <div ref={end} />
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        <div ref={p.scroller} onScroll={p.onScroll} data-chat-scroll={place} className={`scroll-thin flex-1 overflow-y-auto ${phone ? "px-5 py-4" : "px-6 py-6"}`}>
+          <div className={`${measure} ${phone ? "space-y-3" : "space-y-4"}`}>
+            {ready && shown.length === 0 && <div className="mt-10 text-center text-sm text-fg-3">{empty}</div>}
+            {shown.map(({ c, i }) => <div key={i} data-i={i}><Entry c={c} flat={!phone} who={who} /></div>)}
+            {ready && view?.state === "working" && <div className="text-xs text-fg-3"><span className="animate-pulse">●</span> working…</div>}
+          </div>
         </div>
+        {p.unread > 0 && (
+          <button onClick={p.jump} className="absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-line-strong bg-surface-3 px-3.5 py-1.5 text-xs font-semibold text-fg shadow-lg hover:bg-surface-4 max-lg:min-h-11 max-lg:px-4">
+            {p.unread} new ↓
+          </button>
+        )}
       </div>
       <footer className={phone ? "border-t border-line p-3" : "px-6 pb-5 pt-3"}>
         <div className={measure}>
-          <Composer rows={3} draft={draft} placeholder={placeholder} button="Send" onSubmit={onSend} oneLine={phone} card={!phone} />
+          <Composer rows={3} draft={draft} placeholder={placeholder} button="Send" onSubmit={async (t) => { p.follow(); await onSend(t); }} oneLine={phone} card={!phone} />
         </div>
       </footer>
     </div>
   );
+}
+
+/**
+ * A chat's place (chatPlace.ts): once the chat has loaded it opens where the user left it, or at its newest message the
+ * first time; scrolling records the entry at the top, whether the view is at the end and what has been seen. While the
+ * chat is open and at its end, new messages keep it there; otherwise they do not move it, and `unread` counts them for
+ * the "N new" button, which jumps to the first.
+ */
+function usePlace(key: string, full: readonly ChatEntry[], ready: boolean, showTools: boolean, state: string | undefined) {
+  const scroller = useRef<HTMLDivElement>(null);
+  const restored = useRef(false);
+  const atEnd = useRef(true);
+  const chat = useRef(full);
+  chat.current = full;
+  const [shown, setShown] = useState<{ end: boolean; seen?: string }>({ end: true, seen: readPlace(key)?.seen });
+
+  /** Reads the view: the entry at its top, whether it is at the end, the last entry in it; stores the place. */
+  const record = useCallback(() => {
+    const box = scroller.current;
+    if (!box || !restored.current) return;
+    const top = box.getBoundingClientRect().top, bottom = top + box.clientHeight;
+    const items = [...box.querySelectorAll<HTMLElement>("[data-i]")];
+    const first = items.find((el) => el.getBoundingClientRect().bottom > top + 1);
+    let last = -1;
+    for (const el of items) if (el.getBoundingClientRect().top < bottom - 1) last = Number(el.dataset.i);
+    const end = box.scrollHeight - box.scrollTop - box.clientHeight < 32;
+    const all = chat.current;
+    const seen = seenUpTo(all, end ? all.length - 1 : last, readPlace(key)?.seen);
+    writePlace(key, { anchor: first ? Number(first.dataset.i) : 0, offset: first ? first.getBoundingClientRect().top - top : 0, end, ...(seen ? { seen } : {}) });
+    atEnd.current = end;
+    setShown((s) => (s.end === end && s.seen === seen ? s : { end, seen }));
+  }, [key]);
+
+  /** Puts the view at the stored place (or at the end) and records it. */
+  const restore = useCallback(() => {
+    const box = scroller.current;
+    if (!box) return;
+    const o = opening(readPlace(key), chat.current.length);
+    if (o.at === "end") box.scrollTop = box.scrollHeight;
+    else {
+      const el = [...box.querySelectorAll<HTMLElement>("[data-i]")].find((x) => Number(x.dataset.i) >= o.anchor);
+      if (el) box.scrollTop += el.getBoundingClientRect().top - box.getBoundingClientRect().top - (Number(el.dataset.i) === o.anchor ? o.offset : 0);
+      else box.scrollTop = box.scrollHeight;
+    }
+    restored.current = true;
+    record();
+  }, [key, record]);
+
+  // Opening: only once the chat has loaded, so a chat opened for the first time lands at its newest message.
+  useLayoutEffect(() => { if (ready && !restored.current) restore(); }, [ready, full.length, restore]);
+  // Showing or hiding the tool lines keeps the entry at the top.
+  useLayoutEffect(() => { if (restored.current) restore(); }, [showTools, restore]);
+  // New entries (or "working…") while the chat is open: followed at the end, else left below the view.
+  useLayoutEffect(() => {
+    const box = scroller.current;
+    if (!box || !restored.current) return;
+    if (atEnd.current) box.scrollTop = box.scrollHeight;
+    record();
+  }, [full.length, state, record]);
+
+  const frame = useRef(0);
+  const onScroll = () => { cancelAnimationFrame(frame.current); frame.current = requestAnimationFrame(record); };
+  const jump = () => {
+    const box = scroller.current;
+    const i = firstUnread(chat.current, readPlace(key)?.seen);
+    const el = box && i !== undefined ? [...box.querySelectorAll<HTMLElement>("[data-i]")].find((x) => Number(x.dataset.i) >= i) : undefined;
+    if (box && el) box.scrollTo({ top: box.scrollTop + el.getBoundingClientRect().top - box.getBoundingClientRect().top - 12, behavior: "smooth" });
+    else if (box) box.scrollTo({ top: box.scrollHeight, behavior: "smooth" });
+  };
+  const unread = shown.end ? 0 : unreadCount(full, shown.seen);
+  /** The user sends: the view goes to the end and follows. */
+  const follow = () => { atEnd.current = true; const box = scroller.current; if (box) box.scrollTop = box.scrollHeight; };
+  return { scroller, onScroll, unread, jump, follow };
 }
 
 /** What a chat's session is doing, its model, effort and how full its context is: "ready · opus-5-5 · 38% context". */
@@ -129,6 +213,8 @@ export interface Desk {
   orchestrator: View | undefined;
   /** Conversations that are not archived, for "Ideas · N". */
   ideas: number | undefined;
+  /** Unread on the switch (chatPlace.ts): messages in the orchestrator's chat, and whether a conversation has any. */
+  unread: Unread;
   /** The column's buttons at the right: what waits, All queues. */
   tools: ReactNode;
 }
@@ -147,14 +233,25 @@ export function DeskHead({ which, desk, children }: { which?: "chat" | "ideas"; 
   return (
     <header className="flex min-h-15 shrink-0 items-center gap-3 border-b border-line px-6 py-2.5">
       <div className="flex shrink-0 items-center gap-0.5 rounded-lg border border-line bg-surface-2 p-0.5" role="group" aria-label="Chats">
-        {item("chat", <><span className={`h-2 w-2 rounded-full ${o?.state === "working" ? "animate-pulse bg-accent" : o?.session ? "bg-ok" : "bg-fg-3"}`} />Orchestrator</>)}
-        {item("ideas", <>Ideas{desk.ideas ? <span className="text-fg-3">· {desk.ideas}</span> : null}</>)}
+        {item("chat", <><span className={`h-2 w-2 rounded-full ${o?.state === "working" ? "animate-pulse bg-accent" : o?.session ? "bg-ok" : "bg-fg-3"}`} />Orchestrator<UnreadMark n={desk.unread.chat} /></>)}
+        {item("ideas", <>Ideas{desk.ideas ? <span className="text-fg-3">· {desk.ideas}</span> : null}<UnreadMark n={desk.unread.ideas ? -1 : 0} /></>)}
       </div>
       {children}
       <span className="flex-1" />
       {desk.tools}
     </header>
   );
+}
+
+/** What is unread in a project's chats, for the switch and the phone's tabs. */
+export interface Unread { chat: number; ideas: boolean }
+
+/** An unread marker: the count of new messages ("Orchestrator (2)"), or a dot when only "something" is new (`n` < 0). */
+export function UnreadMark({ n }: { n: number }) {
+  if (n === 0) return null;
+  return n < 0
+    ? <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" title="New messages" aria-label="new messages" />
+    : <span className="grid h-4 min-w-4 shrink-0 place-items-center rounded-full bg-accent-strong px-1 text-[10.5px] font-semibold text-on-accent" title={`${n} new`} aria-label={`${n} new`}>{n}</span>;
 }
 
 /**
@@ -203,7 +300,8 @@ export function ChatPanel({ project, name, view, onChanged, inline, desk }: {
   return (
     <Panel inline={inline} desk={desk} which="chat" head={head}>
       <ChatColumn
-        over={name} title="Orchestrator" who="Orchestrator" view={view} status={stateText(view)} showTools={showTools} menu={inline ? menu : undefined} bare={!!desk}
+        over={name} title="Orchestrator" who="Orchestrator" view={view} status={stateText(view)}
+        ready={!!view && (!view.session || view.session.project === project)} place={placeKey(project, "orchestrator")} showTools={showTools} menu={inline ? menu : undefined} bare={!!desk}
         empty={<>
           <p>Plan queues with the orchestrator, ask where things stand, or have it start a run.</p>
           <p className="mt-1 text-fg-3">It reads the project and works through <code>nexus</code>; it never edits files or approves queues.</p>
@@ -295,6 +393,7 @@ export function ConversationsPanel({ project, name, version, onChanged, defaultR
   project: string; name: string; version: unknown; onChanged: () => void; defaultRuntime: "claude" | "codex"; inline?: boolean; desk?: Desk;
 }) {
   const list = useFetch<ConversationItem[]>(`/api/projects/${enc(project)}/conversations`, version);
+  usePlaces(); // the list's unread dots follow each conversation's place
   // The open conversation (or the new-conversation form) is a layer above the panel: Back returns to the list.
   const layer = layerValue(useNav(), "conversation");
   const creating = layer === "new";
@@ -346,6 +445,7 @@ export function ConversationsPanel({ project, name, version, onChanged, defaultR
                 className={`w-full rounded-lg px-3 py-2 text-left text-sm ${c.id === open ? "bg-surface-3 text-fg" : "text-fg hover:bg-surface-3/60"} ${c.archived ? "opacity-50" : ""}`}>
                 <span className="flex items-center gap-2">
                   {c.state === "working" && <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-accent" />}
+                  {c.id !== open && hasUnread(c.last_at, readPlace(placeKey(project, "conversation", c.id))?.seen) && <UnreadMark n={-1} />}
                   <span className="truncate">{c.title}</span>
                 </span>
                 <span className="block text-xs text-fg-3">{c.about && <span className="font-mono text-accent/80">{c.about.queue}/{c.about.step} · </span>}{c.runtime} · {c.messages} messages · <TimeAgo at={c.last_at} /></span>
@@ -364,7 +464,8 @@ export function ConversationsPanel({ project, name, version, onChanged, defaultR
       {creating && <NewConversation project={project} defaultRuntime={defaultRuntime} onBack={() => nav.close("conversation")}
         onCreated={(id) => { nav.open(`conversation:${id}`); onChanged(); }} />}
       {!creating && open && current && (
-        <ChatColumn
+        <ChatColumn key={open}
+          ready={view?.session?.id === open} place={placeKey(project, "conversation", open)}
           over={`${name} · ideas`} title={current.title ?? "Conversation"} who="Partner" about={<AboutStep project={project} c={current} className="mt-1" />} view={view} status={stateText(view)} onBack={() => nav.close("conversation")}
           showTools={showTools} menu={menu}
           empty={<>
