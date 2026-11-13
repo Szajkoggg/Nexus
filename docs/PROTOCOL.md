@@ -725,7 +725,10 @@ API: `GET /api/projects/:id/conversations`, `POST …/conversations` (`title`, `
 `queue?` and `step?`, both or neither), `GET …/conversations/:cid` (session, state, chat), `PATCH …/conversations/:cid`
 (`title`, `model`, `effort`, `archived`), `POST …/conversations/:cid/messages` (`text`), `POST
 …/conversations/:cid/handoff`: the partner writes a summary (decisions, open questions, proposed work), which goes
-whole into the orchestrator's chat. `GET …/queues/:q/steps/:s/conversation` answers `{ conversation }`: the step's
+whole into the orchestrator's chat. The summary covers only the topics discussed in that conversation, unless the
+user asked in it to include others: from a notes file, what this conversation decided or recorded; another topic in
+the notes folder, even a related one, is named at most as "see also" (its file), without its content. Only a notes
+file's Decided section holds decisions, and the summary names the dates of the Decided entries it covers. `GET …/queues/:q/steps/:s/conversation` answers `{ conversation }`: the step's
 latest conversation that is not archived (the one with the latest message, or the newest when none has one), or
 `null`.
 

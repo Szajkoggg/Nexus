@@ -18,6 +18,8 @@ import { CodexSession } from "./codex.ts";
 import type { Orchestrator } from "./orchestrator.ts";
 
 const READ = ["Read", "Grep", "Glob", "Bash(nexus status:*)", "Bash(git log:*)", "Bash(git status:*)", "Bash(git diff:*)", "Bash(git show:*)"];
+/** What a hand-over covers (decided 2026-11-14): this conversation's topics, and the dates of the decisions it passes on. */
+export const HANDOFF_SCOPE = "Summarize only the topics discussed in this conversation, unless the user asked you to include others. From a notes file, pass on what this conversation decided or recorded; another topic in the notes folder, even a related one, is not part of this hand-over: name its file at most, as 'see also', without its content. In every notes file only the Decided section holds decisions. Name the dates of the Decided entries you cover.";
 const IDLE_MS = 15 * 60_000; // an idle partner's process ends; the next message resumes the conversation
 
 interface Live { proc: AgentProcess; timer?: NodeJS.Timeout; handoff?: boolean }
@@ -136,7 +138,7 @@ ${text}`;
     this.store.appendChat(id, { at: now(), from: "nexus", text: "Summarizing this conversation for the orchestrator…" });
     const l = this.ensure(s);
     l.handoff = true;
-    this.deliver(s, `[Nexus] The user hands this conversation to the orchestrator, who plans and runs work in queues. Write a summary for it, in English: what was decided (only what the user decided), the open questions, the work you propose (as steps with what each should achieve), and the files where the notes are. Reply with the summary only.`);
+    this.deliver(s, `[Nexus] The user hands this conversation to the orchestrator, who plans and runs work in queues. Write a summary for it, in English: what was decided (only what the user decided), the open questions, the work you propose (as steps with what each should achieve), and the files where the notes are. ${HANDOFF_SCOPE} Reply with the summary only.`);
   }
 
   idle(): boolean { return ![...this.live.values()].some((l) => l.proc.state === "working"); }

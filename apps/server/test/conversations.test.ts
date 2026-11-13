@@ -122,3 +122,20 @@ test("the notes folder must lie inside the project", () => {
     assert.equal(store.readProject().conversations.notes_dir, "Dev/Concepts/Gameplay");
   } finally { stop(); }
 });
+
+test("the hand-over instruction keeps to this conversation's topics and asks for the dates of the decisions", async () => {
+  const { root, conversations, orchestrator, until, stop } = setup("Dev/Notes");
+  process.env.FAKE_LOG = join(root, "fake.log");
+  try {
+    const c = conversations.create({ title: "Mining" });
+    conversations.handoff(c.id);
+    await until("the summary in the orchestrator's chat", () => orchestrator.view().chat.some((x) => x.from === "user" && x.text.includes("SUMMARY")));
+    const sent = readFileSync(process.env.FAKE_LOG!, "utf8").trim().split("\n").map((l) => (JSON.parse(l) as { text: string }).text)
+      .find((t) => t.startsWith("[Nexus] The user hands this conversation to the orchestrator"))!;
+    assert.ok(sent.includes("Summarize only the topics discussed in this conversation, unless the user asked you to include others."), "the scope rule");
+    assert.ok(sent.includes("another topic in the notes folder, even a related one, is not part of this hand-over: name its file at most, as 'see also', without its content."));
+    assert.ok(sent.includes("In every notes file only the Decided section holds decisions. Name the dates of the Decided entries you cover."), "the dates rule");
+    assert.ok(sent.includes("what was decided (only what the user decided), the open questions, the work you propose"), "the rest unchanged");
+    assert.ok(sent.endsWith("Reply with the summary only."));
+  } finally { stop(); delete process.env.FAKE_LOG; }
+});
