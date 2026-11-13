@@ -159,6 +159,19 @@ reply's context tokens and keep `turns` at 0. Every role's usage windows reach `
 with ST1 on 2026-11-14), so the usage display and the usage pause count orchestrator and partner turns too.
 `test/runtime-records.test.ts` keeps each role's `runtime.json` fields against the fakes.
 
+### The texts agents receive
+
+What Nexus says to agents lives in one module, `apps/server/src/prompts.ts`, as pure functions of their inputs: the
+worker's briefing, the step-opening text, inbox entries as delivered, the fresh-session seed and the nudges; the
+orchestrator's briefing, its helpers' prompts and its notices; the thinking partner's briefing. The roles decide when a
+text goes out and to whom; the module decides only its words. Agents rely on these texts (a change carries an
+`Agents:` line), so `test/prompts.test.ts` drives the engine, the orchestrator and conversations with stand-in processes
+(`AgentHostOptions.spawn`) and compares everything they receive with golden files (`test/golden/prompts-*.txt`). A
+change of a text is made in the module and shows as a changed golden file in the same commit
+(`NEXUS_UPDATE_GOLDEN=1 node --test apps/server/test/prompts.test.ts`). Not in the module: error messages, activity
+lines and chat lines for the user, the step chat's seed (`step-seed.ts`) and the hand-over request
+(`conversations.ts`).
+
 ### Failures
 
 A turn can fail without the worker deciding anything: the service is overloaded, the network drops, a limit is hit,

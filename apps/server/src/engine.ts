@@ -12,13 +12,17 @@ import { basename, dirname, join } from "node:path";
 import {
   ENDED_RUN_STATES,
   ActionError, ProjectStore, USER_SESSION, ensureUserSession, liftByContinue, loadProjectState, releaseOrphanedSteps, stepClosed, reportFile, ensureReportFolder, newId, normPath, now, readUsage,
-  RETRY_LIMIT, effortIssue, formatClock, type Effort, type ProjectFile, type StepDef, type InboxView, type ProjectState, type QueueView, type RunFile, type SessionFile,
+  RETRY_LIMIT, effortIssue, formatClock, type Effort, type ProjectFile, type StepDef, type ProjectState, type QueueView, type RunFile, type SessionFile,
   type SessionView, type StepView,
   addNote, runIsOlder,
 } from "@nexus/protocol";
 import type { TurnFailure } from "./agent.ts";
 import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Hosted, type Launch } from "./agent-host.ts";
 import { nexusDenyRules } from "./claude.ts";
+import {
+  RUNTIME_NAME, WORKER_BRIEFING, carriedMessages, formatInbox, freshSessionSeed, noOutcomeNudge, stepOpening, summaryReason,
+  summaryRequest, switchReason, userStopNow,
+} from "./prompts.ts";
 import { gitWritableRoots } from "./codex.ts";
 import {
   GOING, assertCanResume, assertCanStart, startedRun, stoppedMessage, toFinished, toHalted, toHeldForUpdate,
@@ -93,8 +97,6 @@ export function usageReset(runtime: "claude" | "codex", threshold: number, nowMs
 
 /** A process asked to end for a restart (another model or effort) is killed if it has not exited by then. */
 export const RESTART_KILL_MS = 10_000;
-
-const RUNTIME_NAME = { claude: "Claude Code", codex: "Codex" } as const;
 
 /** The runtime, model and effort a step runs on. */
 export interface StepValues { runtime: "claude" | "codex"; model?: string; effort?: Effort }
@@ -309,7 +311,7 @@ export class Engine {
     this.writeRun(queueId, toPausedByUser(run, "stopped by the user"));
     if (live && live.proc.state === "working") {
       live.proc.send(
-        `[Nexus] The user asks you to stop now${text ? `: ${text}` : "."} Leave the work in a consistent state, record where you are with \`nexus step progress\`, and end your turn. Do not start anything new.`,
+        userStopNow(text),
         "now",
       );
     }
@@ -567,7 +569,7 @@ export class Engine {
           // The turn ended and the step has no outcome: ask once, then hand it to the user.
           if (run.nudged) return this.halt(queueId, `step ${current.id} ended twice without an outcome`);
           this.writeRun(queueId, { ...run, nudged: true });
-          live.proc.send(`[Nexus] Your turn ended, but step ${current.id} has no outcome yet. Continue the step if work remains; otherwise report it with \`nexus step done ${current.id} --summary "…"\`, \`nexus step failed\`, \`nexus stop\`, or ask with \`nexus ask\` and end your turn.`);
+          live.proc.send(noOutcomeNudge(current.id));
           return;
         }
         case "waiting":
@@ -629,9 +631,9 @@ export class Engine {
       const fresh = !!done && !!old.context && old.context.at >= since;
       const asked = !!done && run.summary_asked === done.id;
       if (done && !fresh && !asked) {
-        const because = why === "runtime" ? `step ${next.id} runs on ${RUNTIME_NAME[want.runtime]}` : `this session's context is ${Math.round(fill! * 100)}% full`;
+        const because = summaryReason(why, next.id, want.runtime, fill);
         this.writeRun(queueId, { ...run, summary_asked: done.id });
-        live.proc.send(`[Nexus] Step ${done.id} is over, and ${because}: the next step runs in a fresh session. Before that, write your context summary with \`nexus context "<what a successor needs to know>" --topics a,b --files x,y\` (what was decided and why, where things are, what is still open), then end your turn. Do not start anything else.`);
+        live.proc.send(summaryRequest(done.id, because));
         this.store.appendActivity(old.id, { at: now(), kind: "turn_start", text: `Nexus asked for the context summary of step ${done.id} (${because})`, queue: queueId, step: done.id });
         return true;
       }
@@ -674,9 +676,7 @@ export class Engine {
     const unread = (loadProjectState(this.store).sessions.find((x) => x.id === old.id)?.inbox ?? []).filter((m) => !m.read_at);
     this.ending.add(old.id);
     live.proc.close();
-    const because = why === "runtime"
-      ? `step ${next.id} runs on ${RUNTIME_NAME[want.runtime]}, and the session that ran the queue so far is a ${RUNTIME_NAME[old.runtime as "claude" | "codex"]} session`
-      : `the session that ran the queue so far had its context ${Math.round(fill! * 100)}% full`;
+    const because = switchReason(why, next.id, want.runtime, old.runtime as "claude" | "codex", fill);
     this.writeRun(queueId, {
       ...run, session: fresh.id, summary_asked: undefined,
       switches: [...(run.switches ?? []), { at: now(), from: old.id, to: fresh.id, step: next.id, why, fill, summary: source }],
@@ -685,18 +685,8 @@ export class Engine {
     for (const m of unread) this.store.appendDelivered(old.id, { at: now(), kind: "inbox", id: m.id, via: "carried", to: fresh.id });
     const state = loadProjectState(this.store);
     this.ensureProcess(fresh);
-    const summary = source === "fallback" ? undefined : old.context;
-    const seed = [
-      `[Nexus] You take over queue ${q.id} "${q.title}" in a fresh session: ${because}. You have not seen its work, only what follows.`,
-      summary && done
-        ? `\nIts context summary at the end of ${done.id}:\n${summary.text}${summary.topics.length ? `\nTopics: ${summary.topics.join(", ")}` : ""}${summary.files.length ? `\nFiles: ${summary.files.join(", ")}` : ""}`
-        : `\nIt left no context summary${done ? ` of ${done.id}` : ""}; the queue's description and its finished steps' summaries below are what there is.`,
-      `\nThe queue${q.description ? `:\n${q.description.trim()}` : ` has no description.`}`,
-      `\nIts steps:\n${q.steps.map((s) => `- ${s.id} ${s.title}: ${s.id === next.id ? "yours now" : s.status}${s.summary ? `. ${s.summary}` : ""}`).join("\n")}`,
-    ].join("\n");
-    const carried = unread.length
-      ? `Messages that came for the previous session and were not read yet:\n\n${unread.map((m) => formatInbox(m, state)).join("\n\n")}`
-      : undefined;
+    const seed = freshSessionSeed(q, because, done, next, source === "fallback" ? undefined : old.context);
+    const carried = carriedMessages(unread.map((m) => formatInbox(m, state)));
     this.openStep(queueId, next, this.queue(state, queueId), "start", undefined, { before: seed, after: carried });
   }
 
@@ -716,21 +706,11 @@ export class Engine {
     const notes = step.notes.filter((n) => !n.read_at && n.to !== "orchestrator"); // the orchestrator's are not the worker's
     const answers = state.questions.filter((x) => x.session === run.session && x.step === step.id && x.state === "answered");
     const last = !q.steps.some((s) => s.status === "pending" && s.id !== step.id);
-    const index = q.steps.findIndex((s) => s.id === step.id);
-    const lines = [
-      `[Nexus] Queue ${q.id} "${q.title}" (revision ${q.revision}, approved), step ${step.id} (${index + 1} of ${q.steps.length}): ${step.title}.`,
-      mode === "continue" ? `Continue this step where it was left${why ? ` (${why})` : step.reason ? ` (it was left: ${step.reason})` : ""}.` : "",
-      step.goal ? `\nGoal:\n${step.goal}` : "",
-      step.acceptance.length ? `\nAcceptance:\n${step.acceptance.map((a) => `- ${a}`).join("\n")}` : "",
-      q.checks.length ? `\nChecks for every step:\n${q.checks.map((c) => `- ${c}`).join("\n")}` : "",
-      step.review?.prepare ? `\nReview to prepare: ${step.review.prepare}` : "",
-      `\nStop conditions (meeting one ends the queue: report it with \`nexus stop\`):\n${[...q.stop_conditions, ...project.defaults.stop_conditions].map((c) => `- ${c}`).join("\n") || "- none beyond your judgement"}`,
-      notes.length ? `\nNotes from the user for this step:\n${notes.map((n) => `- ${n.body}`).join("\n")}` : "",
-      answers.length ? `\nAnswers to your questions about this step:\n${answers.map((x) => `- "${x.text}": ${x.answers.at(-1)?.text}`).join("\n")}` : "",
-      `\nBegin with \`nexus step start ${step.id}\`${mode === "continue" ? " (again is fine)" : ""}. End with \`nexus step done ${step.id} --summary "…"\`, \`nexus step failed\` or \`nexus stop\`, then write \`nexus context\` and end your turn. Do not start another step.`,
-      last ? `\nThis is the queue's last step. After it is done, write a short report of the whole queue (what each step achieved against its acceptance, checks, review material, open questions, a proposed next step) to ${reportFile(project.id, q.id)} (a folder for reports outside the working tree and any repository: never write it into the working tree, it would block the cleanup of a worktree) and register it with \`nexus report ${q.id} --file ${reportFile(project.id, q.id)} --summary "…"\`, which copies it into the queue's folder and removes it from there.` : "",
-    ].filter(Boolean);
-    live.proc.send([around.before, lines.join("\n"), around.after].filter(Boolean).join("\n\n"));
+    const opening = stepOpening({
+      q, step, mode, why, projectStopConditions: project.defaults.stop_conditions, notes, answers, last,
+      report: reportFile(project.id, q.id),
+    });
+    live.proc.send([around.before, opening, around.after].filter(Boolean).join("\n\n"));
     for (const n of notes) this.store.appendDelivered(run.session, { at: now(), kind: "note", id: n.id, via: "turn" });
     recordStepStart(this.store, queueId, step.id, run.session);
     this.writeRun(queueId, { ...run, step: step.id, nudged: false, ...(mode === "start" ? { retries: undefined, failure: undefined, summary_asked: undefined } : {}) });
@@ -1083,31 +1063,6 @@ export class Engine {
   }
 }
 
-function formatInbox(m: InboxView, state: ProjectState): string {
-  if (m.type === "answer") {
-    const q = state.questions.find((x) => x.qid === m.qid);
-    const how = m.continue === false ? " Wait for further word before going on." : "";
-    return `[Nexus] Answer from the ${m.from} to your question${q ? ` "${q.text}"` : ""}:\n${m.text}${how}`;
-  }
-  if (m.type === "message") return `[Nexus] Message from the ${m.from}${m.step ? ` about step ${m.step}` : ""}:\n${m.text}`;
-  if (m.type === "send_back") {
-    const step = state.queues.find((q) => q.id === m.queue)?.steps.find((s) => s.id === m.step);
-    const lines = m.from === "user"
-      ? [
-        `[Nexus] The user sent step ${m.step} of queue ${m.queue} back to you (round ${m.round}). What the user wants:`,
-        m.text,
-        `The user's words win over the step's acceptance criteria where they conflict; the rest of the criteria still hold.`,
-      ]
-      : [`[Nexus] The orchestrator reviewed step ${m.step} of queue ${m.queue} and sent it back to you (round ${m.round}). What to fix:`, m.text];
-    return [
-      ...lines,
-      step?.acceptance.length ? `\nAcceptance criteria of the step:\n${step.acceptance.map((a) => `- ${a}`).join("\n")}` : "",
-      `\nWork on it in this step: \`nexus step start ${m.step}\`, then the checks, review material for this round (\`nexus review add ${m.step} … --round ${m.round}\`), and \`nexus step done ${m.step} --summary "…"\` (or \`nexus step failed\` / \`nexus stop\`), then \`nexus context\`, and end your turn.`,
-    ].filter(Boolean).join("\n");
-  }
-  return `[Nexus] The ${m.from} asks you to stop now${m.text ? `: ${m.text}` : "."} Leave the work consistent and end your turn.`;
-}
-
 function isAlive(pid: number): boolean {
   try { process.kill(pid, 0); return true; } catch { return false; }
 }
@@ -1116,19 +1071,4 @@ function gitBranch(cwd: string): string | null {
   try { return execFileSync("git", ["branch", "--show-current"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() || null; }
   catch { return null; }
 }
-
-const WORKER_BRIEFING = `You are a worker session run by Nexus, the dashboard through which the user follows and steers your work.
-Nexus sends you one step of an approved queue at a time. Work on that step only; when its outcome is reported, end your turn: Nexus opens the next step.
-Report through the \`nexus\` command (on PATH; your session is set in the environment as NEXUS_SESSION):
-- nexus step start <step>                                   when you begin a step
-- nexus step progress <step> "<short status>" [--pct N]     at milestones, so the user sees where you are
-- nexus review add <step> <file|url>... --label "..."       review material (pictures, sheets, reports)
-- nexus check <step> <name> --ok|--fail --summary "..."      results of the step's checks
-- nexus step done <step> --summary "..." [--commit <sha>]   when the acceptance criteria are met
-- nexus step failed <step> --reason "..."                   when the step cannot be done as written
-- nexus stop <step> --condition "..." --reason "..."        when a stop condition is met (first commit what is consistent, see below)
-- nexus ask "<question>" --step <step> [--can-continue]     a question for the orchestrator or the user; without --can-continue, end your turn after asking: the answer arrives as a message
-- nexus context "<what a successor needs to know>" --topics a,b --files x,y   at the end of each step
-Messages from the user may arrive while you work, marked [Nexus]; follow them.
-Before you stop (nexus stop, or a stop condition you meet): commit what is in a consistent state, with a message that says so, and leave the working tree clean (no uncommitted changes); what is not consistent, set aside or undo, and say in the reason what you left out. The user then decides whether the stopped step's commits are kept or reverted; changes nobody committed cannot be attributed to the step.`;
 

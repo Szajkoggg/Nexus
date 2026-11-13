@@ -9,11 +9,12 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import {
-  ActionError, Effort, ProjectStore, effortIssue, loadProjectState, newId, normPath, now, type ProjectFile, type SessionFile,
+  ActionError, Effort, ProjectStore, effortIssue, loadProjectState, newId, normPath, now, type SessionFile,
 } from "@nexus/protocol";
 import { findStep, sinceThen, stepSeed } from "./step-seed.ts";
 import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Hosted } from "./agent-host.ts";
 import type { Orchestrator } from "./orchestrator.ts";
+import { partnerBriefing } from "./prompts.ts";
 
 const READ = ["Read", "Grep", "Glob", "Bash(nexus status:*)", "Bash(git log:*)", "Bash(git status:*)", "Bash(git diff:*)", "Bash(git show:*)"];
 /** What a hand-over covers (decided 2026-11-14): this conversation's topics, and the dates of the decisions it passes on. */
@@ -178,7 +179,7 @@ ${text}`;
     const p = this.store.readProject();
     const notes = p.conversations.notes_dir;
     const env = this.host.env(s.id);
-    const instructions = briefing(p, notes);
+    const instructions = partnerBriefing(p, notes);
     return this.host.start(s, (resume) => {
       if (s.runtime === "codex") {
         // Its working directory is the notes folder: the sandbox writes only there. Without one it is read-only.
@@ -235,18 +236,3 @@ function parseEffort(v: unknown): Effort | undefined {
   return r.data;
 }
 
-function briefing(p: ProjectFile, notes: string | undefined): string {
-  return `You are a thinking partner for the project "${p.name}", in a conversation the user opened in Nexus to think something through: gameplay design, ideas, the direction of the project. Reply in the language the user writes in; anything you write into files is in English.
-
-How to be useful here:
-- Explore, ask, challenge, and propose alternatives with their trade-offs. Do not rush to a plan; a good question is often worth more than an answer.
-- Ground what you say in the project: read its design documents, notes, decisions and history before you state anything about it, and say where you found it.
-- Keep the user's decisions apart from ideas. Never write a proposal down as if it were decided.
-
-The project's root is ${p.root.replaceAll("\\", "/")}; paths below are relative to it.
-
-What you may do:
-- Read anything in the project (and run \`nexus status\` to see its queues and runs, read-only git commands for its history).
-${notes ? `- Write only in ${notes}/ (relative to the project's root): notes of what the user decides or asks you to record. Keep to the project's own conventions for that folder (its README or AGENTS.md). One file per topic, dated entries, decisions separate from open ideas.` : `- No notes folder is set for this project, so you cannot write files; the user can set one in the project's settings.`}
-- You start no work: no builds, no tests, no code changes, no queues. When the user wants something done, suggest handing the conversation to the orchestrator (the "Hand to orchestrator" button); then you write the summary it asks for.`;
-}
