@@ -4,11 +4,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ProjectStore, applyDraft, approveQueue, loadProjectState, newId, now, routeAnswers, sendBack, updateSettings } from "@nexus/protocol";
+import { ProjectStore, addNote, applyDraft, approveQueue, commentOnPicture, loadProjectState, newId, now, routeAnswers, sendBack, updateSettings } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 
@@ -382,5 +382,59 @@ test("after a rejection and a newer approved revision, start runs what is pendin
     assert.equal(x.step("K", "K1").reason, "Not this way.");
     assert.equal(x.delivered().filter((t) => t.includes("step K1 (1 of 2)")).length, 1, "the rejected step is not run again");
     assert.ok(!x.state().attention.some((a) => a.queue === "K"), "nothing of K waits for the user");
+  } finally { x.stop(); }
+});
+
+// ---------------------------------------------------------------- the user's notes on a step in the orchestrator's review
+
+test("a note on a step in orchestrator review goes to the orchestrator, whatever notify says and with no session", async () => {
+  const x = setup();
+  try {
+    await x.run("N", 2);
+    await x.until("the orchestrator's review", () => x.step("N", "N1").review_with === "orchestrator");
+    x.orchestrator.reset();
+    // Written while the orchestrator holds the step; notices turned off before it is told: it is told all the same.
+    addNote(x.store, "N", "N1", "The shader looks right, but the moss is too bright: fix that.");
+    updateSettings(x.store, { orchestrator: { notify: false } });
+    const note = x.step("N", "N1").notes[0]!;
+    assert.equal(note.to, "orchestrator");
+    await x.until("the note told", () => x.delivered().some((t) => t.startsWith("[Nexus] The user wrote a note on step N1 of queue N, which waits for your review:\nThe shader looks right, but the moss is too bright: fix that.")));
+    const told = x.delivered().find((t) => t.startsWith("[Nexus] The user wrote a note on step N1"))!;
+    assert.match(told, /Weigh it in your acceptance of the step\. If it asks for a fix, send the step back with nexus review send-back N N1/);
+    assert.ok(x.facts().some((t) => t.startsWith("Your note on step N1 of queue N, in the orchestrator's review:")));
+    await x.until("marked delivered", () => !!x.step("N", "N1").notes[0]!.read_at);
+    await new Promise((r) => setTimeout(r, 500));
+    assert.equal(x.delivered().filter((t) => t.startsWith("[Nexus] The user wrote a note on step N1")).length, 1, "once");
+  } finally { x.stop(); }
+});
+
+test("a picture comment on a step in orchestrator review goes to the orchestrator too", async () => {
+  const x = setup();
+  try {
+    await x.run("P", 2);
+    await x.until("the orchestrator's review", () => x.step("P", "P1").review_with === "orchestrator");
+    const pic = join(x.store.dir, "..", "cliff.png").replaceAll("\\", "/");
+    writeFileSync(pic, "png");
+    const worker = x.state().queues.find((q) => q.id === "P")!.run!.session;
+    x.store.appendEvent({ v: 1, id: newId(), at: now(), session: worker, type: "review.added", queue: "P", step: "P1", items: [{ path: pic, label: "Cliff" }] });
+    assert.match(commentOnPicture(x.store, { queue: "P", step: "P1", path: pic, text: "Too dark at the bottom." }), /goes to the orchestrator/);
+    await x.until("the comment told", () => x.delivered().some((t) => t.startsWith("[Nexus] The user wrote a note on step P1 of queue P") && t.includes(`About the picture "Cliff" (${pic}):\nToo dark at the bottom.`)));
+    assert.equal(x.step("P", "P1").pictures[pic]!.comments[0]!.to, "orchestrator");
+    assert.equal(x.step("P", "P1").status, "review", "nothing sent back by itself");
+  } finally { x.stop(); }
+});
+
+test("a note on a pending step still waits for that step, and never goes to the orchestrator", async () => {
+  const x = setup();
+  try {
+    await x.run("W", 2);
+    await x.until("the orchestrator's review", () => x.step("W", "W1").review_with === "orchestrator");
+    addNote(x.store, "W", "W2", "Use the grassland settings.");
+    assert.equal(x.step("W", "W2").notes[0]!.to, undefined);
+    await new Promise((r) => setTimeout(r, 600));
+    assert.ok(!x.delivered().some((t) => t.includes("Use the grassland settings.")), "nobody told yet");
+    x.orchestrator.say(`FAKE-NEXUS: ["review","accept","W","W1"]`);
+    await x.until("W2 opened with the note", () => x.delivered().some((t) => t.includes("step W2 (2 of 2)") && t.includes("Notes from the user for this step:\n- Use the grassland settings.")));
+    assert.ok(!x.delivered().some((t) => t.startsWith("[Nexus] The user wrote a note")), "not the orchestrator's");
   } finally { x.stop(); }
 });

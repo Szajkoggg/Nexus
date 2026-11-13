@@ -715,7 +715,7 @@ export class Engine {
     if (!live) return this.halt(queueId, "the session's process is not running");
     const state = loadProjectState(this.store);
     const project = state.project;
-    const notes = step.notes.filter((n) => !n.read_at);
+    const notes = step.notes.filter((n) => !n.read_at && n.to !== "orchestrator"); // the orchestrator's are not the worker's
     const answers = state.questions.filter((x) => x.session === run.session && x.step === step.id && x.state === "answered");
     const last = !q.steps.some((s) => s.status === "pending" && s.id !== step.id);
     const index = q.steps.findIndex((s) => s.id === step.id);

@@ -132,6 +132,12 @@ export class Orchestrator {
     for (const n of notes) {
       this.ensure();
       this.markTold(s, [n.key]);
+      if (n.note) {
+        this.store.appendDelivered(s.id, { at: now(), kind: "note", id: n.note, via: "turn" });
+        this.store.appendChat(s.id, { at: now(), from: "nexus", text: `Your note on step ${n.step} of queue ${n.queue}, in the orchestrator's review:\n${n.text}` });
+        this.deliver(`[Nexus] The user wrote a note on step ${n.step} of queue ${n.queue}, which waits for your review:\n${n.text}\nWeigh it in your acceptance of the step. If it asks for a fix, send the step back with nexus review send-back ${n.queue} ${n.step} "what to fix" (keep the user's words); if it raises what you cannot judge, hand the review to the user with nexus review ask-user. Tell the user briefly what you did with it.`);
+        continue;
+      }
       if (n.discard) {
         const list = n.discard.map((sha) => `- ${sha}`).join("\n");
         this.store.appendChat(s.id, { at: now(), from: "nexus", text: `You chose to discard the work of stopped step ${n.step} of queue ${n.queue} (${n.discard.length} commit${n.discard.length === 1 ? "" : "s"}). The stop stays until you approve a revision that reverts it.` });
@@ -154,8 +160,13 @@ export class Orchestrator {
    * Notes of the user's on an acceptance, for the orchestrator, that no orchestrator session has been told yet (each
    * is told once per project: a reset does not repeat it, and one made with no session starts one).
    */
-  private pendingNotes(state: ProjectState): { key: string; queue: string; step: string; text: string; last: boolean; rejected?: boolean; discard?: string[] }[] {
-    const out: { key: string; queue: string; step: string; text: string; last: boolean; rejected?: boolean; discard?: string[] }[] = [];
+  private pendingNotes(state: ProjectState): { key: string; queue: string; step: string; text: string; last: boolean; rejected?: boolean; discard?: string[]; note?: string }[] {
+    const out: { key: string; queue: string; step: string; text: string; last: boolean; rejected?: boolean; discard?: string[]; note?: string }[] = [];
+    // The user's notes on a step the orchestrator held in review (picture comments on it too): told like a chat message.
+    for (const q of state.queues) for (const st of q.steps) for (const n of st.notes) {
+      if (n.to !== "orchestrator" || n.from !== "user") continue;
+      out.push({ key: `notify:stepnote:${n.id}`, queue: q.id, step: st.id, text: n.body, last: false, note: n.id });
+    }
     // The user's Discard of a stopped step's work (src/stopwork.ts): told like the user's chat message.
     for (const q of state.queues) q.changes.forEach((c, i) => {
       if (c.kind !== "work" || c.to !== "discarded" || !c.step) return;
@@ -491,7 +502,7 @@ Statuses change through Nexus, never by editing files. Housekeeping is yours, wi
 - nexus queue set <queue> propose-lift --reason "..."         propose that the user lift the stop of a stopped queue; they decide in the dashboard
 Consent is the user's, and refused to you: marking a step done (work done elsewhere is skipped, with the reason saying where), approving, lifting a stop, reopening a finished step. A stopped queue goes on only when the user lifts the stop: by approving a new revision (then a start begins at the first pending step) or with Continue. When you draft a new revision of a stopped queue to replace the stopped step, keep that step in the draft (a draft may not drop a step that has started or stopped, nor change a step's status) and skip it with nexus queue set once the user has approved, so the record shows what became of it.
 
-Reviewing steps: a step whose review policy is orchestrator waits for you when it is done, and you get a [Nexus] message with its goal, acceptance, the checks and review material of the round, and its commits. Check the work against its acceptance: read the commits (git show, git diff), the review material and the summary; for more than a glance, have run-digest summarize the run or use the project's own read-only reviewers (agents that read and report). You run no checks yourself: a check of the queue that is missing or failed is a send-back. Then accept it, send it back with what to fix, or ask the user. Matters the project's rules give the user (for example the look, gameplay, final numbers) go to the user with ask-user, with your framing and recommendation; so does anything you cannot judge from what you can read.
+Reviewing steps: the user may write a note on a step you hold in review (or comment on one of its pictures); you get it as a [Nexus] message: weigh it in your acceptance, and send the step back if it asks for a fix. A step whose review policy is orchestrator waits for you when it is done, and you get a [Nexus] message with its goal, acceptance, the checks and review material of the round, and its commits. Check the work against its acceptance: read the commits (git show, git diff), the review material and the summary; for more than a glance, have run-digest summarize the run or use the project's own read-only reviewers (agents that read and report). You run no checks yourself: a check of the queue that is missing or failed is a send-back. Then accept it, send it back with what to fix, or ask the user. Matters the project's rules give the user (for example the look, gameplay, final numbers) go to the user with ask-user, with your framing and recommendation; so does anything you cannot judge from what you can read.
 
 Messages marked [Nexus] tell you that a worker asked a question, that a step waits for your review, that the user accepted a step with a note for you (their words, as in the chat: take them into the plan), that the user rejected a step (propose what follows as revisions for their approval), that the user approved a queue or withdrew an approval, that a run reached a requested pause, that a run halted or finished, or how a Nexus update you ran ended. What came up while Nexus updated reaches you right after its restart. After a deploy you may also be told what changed for agents (the commits' Agents: lines): your briefing may still describe the older way, so follow those where they differ. They are for you, not the user. Act on them: answer or escalate questions; an approval or a reached pause is your cue to start (or resume) what the plan put next, and say in the chat what you started; tell the user about withdrawals, halts and finished queues briefly, with what you propose next.
 Deploying Nexus itself: run nexus server update only when the user asks for it in the chat, never on your own, not even when a queue that changes Nexus has finished. Before you run it, tell the user (from nexus server status) whether a step is running in any project: the update waits for those steps to finish (no new step starts meanwhile), and with --now it interrupts them instead (they continue afterwards). Also tell them that you restart with Nexus: your process ends, and this conversation goes on after the restart. You then get a [Nexus] message with the outcome (the new version, or why it failed and what still runs); pass it on to the user.

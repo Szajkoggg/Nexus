@@ -287,7 +287,7 @@ test("a comment on a review picture goes back with a send-back while the step wa
   let s = loadProjectState(st);
   assert.deepEqual(commentTarget(s.queues[0]!, "Q2"), { to: "send_back" });
   assert.deepEqual(commentTarget(s.queues[0]!, "Q1"), { to: "note", step: "Q3" }, "done: the next pending step");
-  assert.deepEqual(commentTarget({ steps: [{ ...s.queues[0]!.steps[1]!, review_with: "orchestrator" as const }, s.queues[0]!.steps[2]!] }, "Q2"), { to: "note", step: "Q3" }, "held by the orchestrator: not a Fix it");
+  assert.deepEqual(commentTarget({ steps: [{ ...s.queues[0]!.steps[1]!, review_with: "orchestrator" as const }, s.queues[0]!.steps[2]!] }, "Q2"), { to: "orchestrator" }, "held by the orchestrator: to its review, not a Fix it");
   assert.deepEqual(commentTarget({ steps: s.queues[0]!.steps.slice(0, 1) }, "Q1"), { to: "none" });
 
   assert.match(commentOnPicture(st, { queue: "Q", step: "Q1", path: pic, text: "Warmer light." }), /a note on step Q3/);

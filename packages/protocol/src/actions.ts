@@ -41,10 +41,16 @@ export function ensureUserSession(store: ProjectStore): SessionFile {
 
 // ---------------------------------------------------------------- notes and messages
 
+/**
+ * The user's note on a step: for its worker, delivered when the step starts; on a step the orchestrator holds in
+ * review, for the orchestrator (`to: orchestrator`), which is told it like a chat message of the user.
+ */
 export function addNote(store: ProjectStore, queue: string, step: string, text: unknown): string {
   stepOf(store, queue, step);
   const id = newId();
-  store.writeNote(queue, { id, step, from: "user", at: now() }, nonEmpty(text, "the note"));
+  const st = loadProjectState(store).queues.find((q) => q.id === queue)?.steps.find((s) => s.id === step);
+  const to = st?.status === "review" && st.review_with === "orchestrator" ? "orchestrator" as const : undefined;
+  store.writeNote(queue, { id, step, from: "user", at: now(), to }, nonEmpty(text, "the note"));
   return id;
 }
 
@@ -190,6 +196,10 @@ export function commentOnPicture(store: ProjectStore, req: { queue: string; step
   const user = ensureUserSession(store);
   store.appendEvent({ v: 1, id: newId(), at: now(), session: user.id, type: "review.commented", queue: req.queue, step: req.step, path, text, to: target.to, note_step: target.to === "note" ? target.step : undefined });
   if (target.to === "send_back") return sendBack(store, { queue: req.queue, step: req.step, from: "user", text: about });
+  if (target.to === "orchestrator") {
+    addNote(store, req.queue, req.step, about); // the step is in the orchestrator's review: a note for it
+    return `the comment goes to the orchestrator, which weighs it in its review of step ${req.step}`;
+  }
   addNote(store, req.queue, target.step, about);
   return `the comment is a note on step ${target.step}, delivered when it starts`;
 }

@@ -56,7 +56,7 @@ export interface StepView extends StepDef {
    * The user's marks and comments on review pictures, by the picture's path: `accepted` with its time while marked;
    * comments oldest first, with where each went.
    */
-  pictures: Record<string, { accepted?: string; comments: { text: string; at: string; to: "send_back" | "note"; note_step?: string }[] }>;
+  pictures: Record<string, { accepted?: string; comments: { text: string; at: string; to: "send_back" | "note" | "orchestrator"; note_step?: string }[] }>;
   checks: CheckView[];
   notes: (Note & { read_at?: string })[];
   /** Messages sent to a session about this step while it ran. */
@@ -611,13 +611,14 @@ function resume(x: QuestionView, queues: Map<string, QueueView>, e: Event): void
 
 /**
  * Where the user's comment on a review picture of a step goes: back to the worker with a send-back (a Fix it) while
- * the step waits for the user's review; otherwise a note on the next pending step after it; else nowhere.
+ * the step waits for the user's review; to the orchestrator (as a note on the step for it) while the orchestrator holds
+ * it in review; otherwise a note on the next pending step after it; else nowhere.
  */
-export function commentTarget(q: Pick<QueueView, "steps">, step: string): { to: "send_back" } | { to: "note"; step: string } | { to: "none" } {
+export function commentTarget(q: Pick<QueueView, "steps">, step: string): { to: "send_back" } | { to: "orchestrator" } | { to: "note"; step: string } | { to: "none" } {
   const i = q.steps.findIndex((s) => s.id === step);
   const st = q.steps[i];
   if (!st) return { to: "none" };
-  if (st.status === "review" && st.review_with !== "orchestrator") return { to: "send_back" };
+  if (st.status === "review") return st.review_with === "orchestrator" ? { to: "orchestrator" } : { to: "send_back" };
   const next = q.steps.slice(i + 1).find((s) => s.status === "pending");
   return next ? { to: "note", step: next.id } : { to: "none" };
 }

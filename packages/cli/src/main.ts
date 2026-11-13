@@ -321,7 +321,7 @@ const commands: Record<string, () => void | Promise<void>> = {
         console.log(`  run: ${q.run.state}${q.run.step ? ` at ${q.run.step}` : ""}${why}`);
       }
       for (const step of q.steps) {
-        const unread = step.notes.filter((n) => !n.read_at);
+        const unread = step.notes.filter((n) => !n.read_at && n.to !== "orchestrator");
         const own = stepValuesText(step);
         console.log(`  ${step.id.padEnd(5)} ${step.status.padEnd(8)} ${step.title}${own ? `  [on ${own}]` : ""}${unread.length ? `  (${unread.length} unread note${unread.length > 1 ? "s" : ""})` : ""}`);
       }
@@ -345,7 +345,7 @@ const commands: Record<string, () => void | Promise<void>> = {
     }
     if (s?.queue) {
       const q = state.queues.find((x) => x.id === s.queue);
-      for (const step of q?.steps ?? []) for (const n of step.notes.filter((x) => !x.read_at)) {
+      for (const step of q?.steps ?? []) for (const n of step.notes.filter((x) => !x.read_at && x.to !== "orchestrator")) {
         console.log(`\nnote ${n.id} for ${step.id} from ${n.from} (${n.at}):\n${n.body}`);
         // Shown to the session's agent: that is the delivery, so it is recorded as read.
         st.appendEvent({ v: 1, id: newId(), at: now(), session: s.id, type: "note.read", note: n.id });

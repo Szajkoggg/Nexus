@@ -233,6 +233,11 @@ export const NoteMeta = z.object({
   step: Id,
   from: z.enum(["user", "orchestrator"]),
   at: Time,
+  /**
+   * `orchestrator`: written on a step the orchestrator held in review; it goes to the orchestrator (told like the
+   * user's chat message), never to a worker.
+   */
+  to: z.enum(["orchestrator"]).optional(),
 });
 export type NoteMeta = z.infer<typeof NoteMeta>;
 export type Note = NoteMeta & { queue: string; body: string };
@@ -351,7 +356,7 @@ export const Event = z.discriminatedUnion("type", [
    * The user's comment on one review picture, and where it went: `send_back` (the step waited for the user's review: a
    * Fix it) or `note` (on `note_step`, the next pending step).
    */
-  z.object({ ...base, type: z.literal("review.commented"), ...qs, path: z.string().min(1), text: z.string().min(1), to: z.enum(["send_back", "note"]), note_step: Id.optional() }),
+  z.object({ ...base, type: z.literal("review.commented"), ...qs, path: z.string().min(1), text: z.string().min(1), to: z.enum(["send_back", "note", "orchestrator"]), note_step: Id.optional() }),
   /** The orchestrator hands a step waiting for its review to the user, saying why. */
   z.object({ ...base, type: z.literal("review.asked_user"), ...qs, text: z.string().min(1) }),
 ]);

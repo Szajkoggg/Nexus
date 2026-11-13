@@ -22,7 +22,9 @@ export function StepDetail({ project, queue, step, onChanged }: Props & { step: 
   const questions = queue.questions.filter((q) => q.step === step.id);
   const live = (step.status === "running" || step.status === "waiting") && step.session;
   const session = live ? project.sessions.find((s) => s.id === step.session) : undefined;
-  const notesOpen = step.status === "pending" || step.status === "stopped";
+  // A note on a step the orchestrator holds in review goes to the orchestrator, not the worker.
+  const forOrchestrator = step.status === "review" && step.review_with === "orchestrator";
+  const notesOpen = step.status === "pending" || step.status === "stopped" || forOrchestrator;
   // Review images open in the in-app viewer, a layer above the step (Back closes it); other items as links.
   const isImage = (r: StepView["review_items"][number]) => !!r.path && /\.(png|jpe?g|gif|webp|svg)$/i.test(r.path);
   // Each picture with its before, if it has one (an explicit --before, else the same label in an earlier round).
@@ -176,13 +178,13 @@ export function StepDetail({ project, queue, step, onChanged }: Props & { step: 
         </Section>
       )}
 
-      <Section title="Notes" aside={<span className="text-xs text-zinc-600">delivered when the step starts</span>}>
+      <Section title="Notes" aside={<span className="text-xs text-zinc-600">{forOrchestrator ? "go to the orchestrator, which weighs them in its review" : "delivered when the step starts"}</span>}>
         <div className="space-y-2">
           {step.notes.map((n) => (
             <div key={n.id} className="rounded-lg border border-zinc-800 p-3">
               <div className="mb-1 flex items-center gap-2 text-xs text-zinc-500">
-                <span>from {n.from}</span><TimeAgo at={n.at} />
-                <span className={`ml-auto ${n.read_at ? "text-emerald-400" : "text-sky-400"}`}>{n.read_at ? "delivered" : "waiting for the step"}</span>
+                <span>from {n.from}{n.to === "orchestrator" ? ", to the orchestrator" : ""}</span><TimeAgo at={n.at} />
+                <span className={`ml-auto ${n.read_at ? "text-emerald-400" : "text-sky-400"}`}>{n.read_at ? (n.to === "orchestrator" ? "told the orchestrator" : "delivered") : n.to === "orchestrator" ? "on its way to the orchestrator" : "waiting for the step"}</span>
                 {!n.read_at && <WithdrawNote project={id} queue={queue.id} step={step.id} note={n.id} onChanged={onChanged} />}
               </div>
               <Markdown>{n.body}</Markdown>
@@ -194,7 +196,7 @@ export function StepDetail({ project, queue, step, onChanged }: Props & { step: 
           <div className="mt-3">
             <Composer
               draft={draftKey(id, "note", queue.id, step.id)}
-              placeholder={`A note for ${step.id}: the agent reads it when it starts this step…`}
+              placeholder={forOrchestrator ? `A note for the orchestrator's review of ${step.id}: it weighs it, and sends the step back if you ask for a fix…` : `A note for ${step.id}: the agent reads it when it starts this step…`}
               button="Add note"
               onSubmit={async (text) => { await act(id, "POST", `/queues/${enc(queue.id)}/steps/${enc(step.id)}/notes`, { text }); onChanged(); }}
             />
@@ -318,6 +320,7 @@ function PictureActions({ project, queue, step, path, onChanged }: { project: st
   const [error, setError] = useState<string>();
   const next = noteTargets(queue.steps, step.id).next;
   const where = showsReviewActions(step) ? "goes back to the worker with the step (a Fix it: your words win over its criteria)"
+    : step.status === "review" && step.review_with === "orchestrator" ? "goes to the orchestrator, which weighs it in its review of the step and sends the step back if you ask for a fix"
     : next ? `becomes a note on step ${next}, delivered when it starts` : undefined;
   const base = `/queues/${enc(queue.id)}/steps/${enc(step.id)}/pictures`;
   return (
@@ -334,7 +337,7 @@ function PictureActions({ project, queue, step, path, onChanged }: { project: st
       {marks?.comments.map((c, i) => (
         <div key={i} className="rounded-md bg-white/5 px-2 py-1.5">
           <p className="whitespace-pre-wrap text-zinc-200">{c.text}</p>
-          <p className="text-[11px] text-zinc-500">{c.to === "send_back" ? "sent back to the worker" : `a note on step ${c.note_step}`} · <TimeAgo at={c.at} /></p>
+          <p className="text-[11px] text-zinc-500">{c.to === "send_back" ? "sent back to the worker" : c.to === "orchestrator" ? "to the orchestrator's review" : `a note on step ${c.note_step}`} · <TimeAgo at={c.at} /></p>
         </div>
       ))}
       {where ? (

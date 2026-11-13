@@ -237,11 +237,20 @@ id: 01JD...
 step: W3
 from: user                             # user | orchestrator
 at: 2026-11-12T10:02:00Z
+to: orchestrator                       # optional: only on a note for the orchestrator's review (see below)
 ---
 Keep the debris as it is; only the wall bodies need support.
 ```
 
 Delivered as part of the step's opening turn. The worker acknowledges with a `note.read` event.
+
+A note the user writes on a step the orchestrator holds in review (status `review`, `review_with: orchestrator`) is
+written with `to: orchestrator`. It goes to the orchestrator, never to a worker: the orchestrator is told it once per
+project (key `notify:stepnote:<note id>` in any orchestrator session's `applied.jsonl`), like a chat message of the
+user, whatever `notify` says and starting it if it has no session, with the queue, the step and the text, and the
+instruction to weigh it in its acceptance and send the step back if it asks for a fix. Telling it records a delivery
+(`kind: note`) in the orchestrator session's `delivered.jsonl`, so the note shows as delivered. Notes on other steps
+behave as before.
 
 ## Events: `sessions/<id>/events.jsonl`
 
@@ -257,7 +266,7 @@ Every line:
 | `step.progress` | `queue`, `step`, `text`, `pct?` | A short status line for the dashboard |
 | `review.added` | `queue`, `step`, `items: [{path or url, label, kind?, before?}]`, `round?` | Review material, `kind` = image, sheet, doc, data, link; `before`: the path of the picture this one is compared with (see "Review pictures") |
 | `review.marked` | `queue`, `step`, `path`, `accepted` | User only: a review picture marked accepted (or the mark taken back). A mark only: it does not accept the step |
-| `review.commented` | `queue`, `step`, `path`, `text`, `to` (`send_back`, `note`), `note_step?` | User only: a comment on a review picture, and where it went (see "Review pictures") |
+| `review.commented` | `queue`, `step`, `path`, `text`, `to` (`send_back`, `note`, `orchestrator`), `note_step?` | User only: a comment on a review picture, and where it went (see "Review pictures") |
 | `check.result` | `queue`, `step`, `name`, `ok`, `summary` | One check's outcome |
 | `step.done` | `queue`, `step`, `summary`, `commit?` | Acceptance met; the step's work is finished |
 | `step.failed` | `queue`, `step`, `reason` | The step cannot be finished as written |
@@ -406,8 +415,10 @@ The server reads git for the dashboard (`apps/server/src/gitinfo.ts`), only loca
   mark only: the step is not accepted by it. The derived step has `pictures.<path>` (`accepted`: when, while marked;
   `comments`).
 - **Comments.** A comment on a picture goes, while the step waits for the user's review, back to the worker with a
-  send-back (a user's Fix it, see "Sending a step back"); otherwise it becomes a note from the user on the next pending
-  step after it, delivered when that step starts. With neither it is refused. The text sent says which picture
+  send-back (a user's Fix it, see "Sending a step back"); while the orchestrator holds the step in review, to the
+  orchestrator, as a note for it on that step (`to: orchestrator`, see "Notes"; `review.commented` `to: orchestrator`);
+  otherwise it becomes a note from the user on the next pending step after it, delivered when that step starts. With
+  none of these it is refused. The text sent says which picture
   (`About the picture "<label>" (<path>): …`); `review.commented` records the user's own words and where they went.
 
 ### Merge back and clean up
