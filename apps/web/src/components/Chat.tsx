@@ -4,7 +4,7 @@ import type { ChatEntry, RuntimeFile, SessionFile } from "@nexus/protocol";
 import { act, enc, useFetch } from "../api.ts";
 import { Button, Composer, Markdown, SIDE_RIGHT, TimeAgo, useWide } from "./ui.tsx";
 import { draftKey } from "../drafts.ts";
-import { layerValue } from "../layers.ts";
+import { layerValue, type SidePanel } from "../layers.ts";
 import { nav, useNav } from "../nav.ts";
 import { EffortSelect, ModelSelect, useEfforts } from "./Settings.tsx";
 
@@ -98,14 +98,31 @@ function Entry({ c }: { c: ChatEntry }) {
  */
 const Side = createContext(false);
 
+/**
+ * At the top of each chat panel: Orchestrator | Ideas. The other one comes to the top in one click on every screen
+ * size (opened when it is closed); Back then shows this one again.
+ */
+function PanelSwitch({ which }: { which: SidePanel }) {
+  const item = (p: SidePanel, label: string) => (
+    <button key={p} onClick={() => { if (p !== which) nav.raise(p); }} aria-pressed={p === which}
+      className={`rounded-md px-3 py-1 text-xs font-medium ${p === which ? "bg-zinc-700 text-zinc-50" : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"}`}>{label}</button>
+  );
+  return (
+    <div className="flex shrink-0 items-center gap-1 border-b border-zinc-800 px-3 py-1.5" role="group" aria-label="Chats">
+      {item("chat", "Orchestrator")}{item("ideas", "Ideas")}
+    </div>
+  );
+}
+
 /** A chat's panel: over the page on narrow screens; on a wide one, beside it on the right, the page still usable. */
-function Panel({ onClose, wide, children }: { onClose: () => void; wide?: boolean; children: ReactNode }) {
+function Panel({ onClose, wide, which, children }: { onClose: () => void; wide?: boolean; which: SidePanel; children: ReactNode }) {
   const side = useWide();
+  const body = <><PanelSwitch which={which} /><div className="flex min-h-0 flex-1">{children}</div></>;
   if (side) {
     return (
       <Side.Provider value={true}>
-        <aside className="fixed bottom-0 right-0 z-20 flex border-l border-zinc-800 bg-zinc-900 shadow-xl" style={{ top: "var(--header-h, 0px)", width: SIDE_RIGHT }}>
-          {children}
+        <aside className="fixed bottom-0 right-0 z-20 flex flex-col border-l border-zinc-800 bg-zinc-900 shadow-xl" style={{ top: "var(--header-h, 0px)", width: SIDE_RIGHT }}>
+          {body}
         </aside>
       </Side.Provider>
     );
@@ -113,8 +130,8 @@ function Panel({ onClose, wide, children }: { onClose: () => void; wide?: boolea
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <aside className={`relative flex h-full w-full ${wide ? "max-w-5xl" : "max-w-2xl"} border-l border-zinc-800 bg-zinc-900 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] shadow-2xl`}>
-        {children}
+      <aside className={`relative flex h-full w-full flex-col ${wide ? "max-w-5xl" : "max-w-2xl"} border-l border-zinc-800 bg-zinc-900 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] shadow-2xl`}>
+        {body}
       </aside>
     </div>
   );
@@ -139,7 +156,7 @@ export function ChatPanel({ project, name, view, onClose, onChanged }: {
   project: string; name: string; view: View | undefined; onClose: () => void; onChanged: () => void;
 }) {
   return (
-    <Panel onClose={onClose}>
+    <Panel onClose={onClose} which="chat">
       <ChatColumn
         over={name} title="Orchestrator" view={view} status={stateText(view)}
         actions={<>
@@ -262,7 +279,7 @@ export function ConversationsPanel({ project, name, version, onClose, onChanged,
   const shown = (list ?? []).filter((c) => showArchived || !c.archived);
 
   return (
-    <Panel onClose={onClose} wide>
+    <Panel onClose={onClose} wide which="ideas">
       <nav className={side
         ? `${open || creating ? "hidden" : "flex"} w-full flex-col`
         : `${open || creating ? "hidden sm:flex" : "flex"} w-full shrink-0 flex-col border-r border-zinc-800 sm:w-72`}>

@@ -100,8 +100,8 @@ export function App() {
           <WaitingButton projects={projects} onClick={() => nav.open("waiting")} />
           <div className="basis-full sm:hidden" />
           <UpdatePill info={server} />
-          {projectId && <ConversationsButton onClick={() => nav.open("ideas")} />}
-          {projectId && <OrchestratorButton view={orchestrator} onClick={() => nav.open("chat")} />}
+          {projectId && <ConversationsButton onClick={() => nav.raise("ideas")} />}
+          {projectId && <OrchestratorButton view={orchestrator} onClick={() => nav.raise("chat")} />}
           <UsageMeter version={tick} />
           <NotifyToggle {...notify} />
           {state && <SettingsButton onClick={() => nav.open("settings")} />}

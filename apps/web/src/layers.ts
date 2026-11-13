@@ -67,6 +67,24 @@ export function open(cur: Nav, layer: Layer, hash = cur.hash): Step {
 }
 
 /**
+ * Brings a layer that is open lower down (the chat under the Ideas panel, or the other way round) to the top, with the
+ * layers that belong to it (a conversation with its Ideas panel); the layers that lay above it stay open, now below
+ * it. Back afterwards closes it and shows the one beneath. One that is closed is opened; one on top stays as it is.
+ * When Nexus pushed the entries, that is going back to before it and opening the others and then it again; when it
+ * did not (the app started with them open), the entry is rewritten in the new order.
+ */
+export function raise(cur: Nav, kind: string): Step {
+  const i = cur.layers.findIndex((x) => kindOf(x) === kind);
+  if (i < 0) return open(cur, kind);
+  const mine = cur.layers.slice(i).filter((l) => belongsTo(l, kind));
+  const others = cur.layers.slice(i + 1).filter((l) => !belongsTo(l, kind));
+  if (!others.length) return { op: "none" };
+  const k = cur.layers.length - i;
+  if (cur.depth >= k) return { op: "back", steps: k, then: (arrived) => reopen(arrived, [...others, ...mine], cur.hash) };
+  return { op: "replace", to: { ...cur, layers: [...cur.layers.slice(0, i), ...others, ...mine] } };
+}
+
+/**
  * Closes the layer of a kind and the layers that belong to it (a conversation with the Ideas panel, an image with
  * its step). When Nexus pushed their entries, that is going back; layers above it that do not belong to it (the
  * chat beside a step on a wide screen) are opened again after it. When Nexus did not push them (the app started

@@ -1,7 +1,7 @@
 // The history of open layers: Back closes the topmost; a close button does the same; nothing piles up.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { close, closeThen, closeTop, isOpen, layerValue, navOf, open, panelOrder, type Nav, type Step } from "../src/layers.ts";
+import { close, closeThen, closeTop, isOpen, layerValue, navOf, open, panelOrder, raise, type Nav, type Step } from "../src/layers.ts";
 
 /** A browser history in memory, to play the steps against. */
 function browser(start: Nav) {
@@ -188,4 +188,39 @@ test("the chat and the Ideas panel stack in the order opened; a conversation cou
   assert.deepEqual(panelOrder(c.cur()), ["ideas"]);
   // With the step drawer and others in the stack, only the two panels are ordered.
   assert.deepEqual(panelOrder({ hash: "#/p/Q", layers: ["item", "conversation:x", "waiting", "chat"], depth: 4 }), ["ideas", "chat"]);
+});
+
+test("the chat switch brings the other panel to the top in one step; Back then shows the one beneath", () => {
+  const b = browser(home);
+  b.apply(open(b.cur(), "chat"));
+  b.apply(raise(b.cur(), "ideas")); // closed: opened on top
+  assert.deepEqual(panelOrder(b.cur()), ["chat", "ideas"]);
+  b.apply(open(b.cur(), "conversation:01ABC"));
+  b.apply(raise(b.cur(), "chat")); // under Ideas: brought up, Ideas and its conversation stay open beneath
+  assert.deepEqual(b.cur().layers, ["ideas", "conversation:01ABC", "chat"]);
+  assert.deepEqual(panelOrder(b.cur()), ["ideas", "chat"]);
+  assert.deepEqual(raise(b.cur(), "chat"), { op: "none" }, "already on top");
+  b.apply(raise(b.cur(), "ideas")); // and back: the conversation comes up with its panel
+  assert.deepEqual(b.cur().layers, ["chat", "ideas", "conversation:01ABC"]);
+  b.back();
+  assert.deepEqual(b.cur().layers, ["chat", "ideas"], "Back closes the conversation");
+  b.back();
+  assert.deepEqual(b.cur().layers, ["chat"], "then the Ideas panel, showing the chat beneath");
+  b.back();
+  assert.deepEqual(b.cur(), home);
+});
+
+test("a header button of a panel open underneath brings it up, with the step drawer staying where it is", () => {
+  const b = browser(home);
+  b.apply(open(b.cur(), "item", "#/p/Q/Q1"));
+  b.apply(open(b.cur(), "ideas"));
+  b.apply(open(b.cur(), "chat"));
+  b.apply(raise(b.cur(), "ideas"));
+  assert.deepEqual(b.cur(), { hash: "#/p/Q/Q1", layers: ["item", "chat", "ideas"], depth: 3 });
+  b.back();
+  assert.deepEqual(b.cur().layers, ["item", "chat"], "Back shows the chat beneath");
+
+  // Opened at load (?chat&ideas: entries Nexus did not push): the entry is rewritten in the new order.
+  const loaded: Nav = { hash: "#/p", layers: ["chat", "ideas"], depth: 0 };
+  assert.deepEqual(raise(loaded, "chat"), { op: "replace", to: { hash: "#/p", layers: ["ideas", "chat"], depth: 0 } });
 });
