@@ -305,6 +305,21 @@ The engine watches the subscription limits: Claude Code's 5-hour and 7-day usage
 new step turns; running turns finish. Queues paused this way resume when the window resets, and the dashboard says
 why they wait. Where Claude Code reports these figures in print mode is to be confirmed when the adapter is built.
 
+### Chains
+
+"When queue A is done, start B" is a planned start kept in a file of B's (`start.yaml`), not a timer or a process:
+the engine looks at the plans after every change and when it starts, so a plan survives restarts and updates, and
+nothing fires while an update drains. Decisions:
+
+- It fires only when A is done. A halt, pause or stop of A is something to look at, not a reason to start B on work
+  that may depend on A's; the plan waits and says what it waits for.
+- B is checked when the plan comes due, not when it is made: the user may approve B in the meantime, and an approval
+  withdrawn or a revision proposed since must not start unapproved work. "Approved" means the revision current at
+  that moment is approved (an approval of a later revision counts). When B cannot start, the plan stays as an item
+  for the user instead of vanishing or retrying by itself; starting B or cancelling ends it.
+- A plan to continue a session waits while that session runs another queue, rather than failing: one session never
+  runs two queues, and chaining a queue into the session of the queue before it is the common case.
+
 ### Review material
 
 A step's review spec says what to prepare (e.g. "before/after shots of fixtures X, Y; one phone-width sheet").

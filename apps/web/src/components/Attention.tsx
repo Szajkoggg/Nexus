@@ -10,6 +10,7 @@ const LABEL: Record<AttentionItem["kind"], { text: string; tone: string }> = {
   approval: { text: "Needs approval", tone: "text-sky-300 bg-sky-500/10 ring-sky-500/40" },
   review: { text: "Review", tone: "text-violet-300 bg-violet-500/10 ring-violet-500/40" },
   failed: { text: "Failed", tone: "text-red-300 bg-red-500/10 ring-red-500/40" },
+  start: { text: "Did not start", tone: "text-orange-300 bg-orange-500/10 ring-orange-500/40" },
 };
 
 const plain = (s: string) => s.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\*\*|`/g, "");

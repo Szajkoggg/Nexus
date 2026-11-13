@@ -56,11 +56,45 @@ function SessionSwitches({ run, sessions }: { run: NonNullable<QueueView["run"]>
   );
 }
 
+/**
+ * A planned start of the queue: the queue it waits for and why it has not come yet, or why it could not start; with
+ * Cancel. Amber while it waits on something only the user or the orchestrator can change.
+ */
+function PlannedStart({ queue, busy, onCancel }: { queue: QueueView; busy: boolean; onCancel: () => void }) {
+  const p = queue.start;
+  if (!p) return null;
+  const options = [p.session ? `continues session ${p.session.slice(-8)}` : p.runtime === "codex" ? "Codex" : p.runtime === "claude" ? "Claude Code" : undefined, p.model, p.effort && `${p.effort} effort`].filter(Boolean);
+  const tone = p.failed ? "bg-orange-500/10 ring-orange-500/30" : p.blocked ? "bg-amber-500/10 ring-amber-500/30" : "bg-sky-500/10 ring-sky-500/30";
+  return (
+    <div className={`mb-3 rounded-lg p-3 text-sm ring-1 ${tone}`}>
+      <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
+        <p className="min-w-0 flex-1">
+          {p.failed
+            ? <span className="text-orange-200">It was to start when <span className="font-mono">{p.after}</span> was done, but could not: {p.failed.reason}</span>
+            : <span className="text-zinc-100">Starts when <span className="font-mono">{p.after}</span> is done.</span>}
+          <span className="mt-1 block text-xs text-zinc-400">
+            {p.failed ? <>Start it yourself, or dismiss the plan. · <TimeAgo at={p.failed.at} /></> : <>Now: {p.waiting}.</>}
+          </span>
+          <span className="mt-1 block text-xs text-zinc-500">
+            Planned by {p.by === "user" ? "you" : "the orchestrator"} · <TimeAgo at={p.created_at} />{options.length ? ` · ${options.join(" · ")}` : ""}{p.reason ? ` · ${p.reason}` : ""}
+          </span>
+        </p>
+        <Button variant="quiet" disabled={busy} onClick={onCancel}>{p.failed ? "Dismiss" : "Cancel"}</Button>
+      </div>
+    </div>
+  );
+}
+
 /** A run that halted although its queue is done (or cancelled): it has ended; nothing waits on it. */
 const endedHalt = (queue: QueueView) => queue.run?.state === "halted" && (queue.status === "done" || queue.status === "cancelled");
 
 export function RunChip({ queue }: { queue: QueueView }) {
   const r = queue.run;
+  const going = r && ["running", "pausing", "usage_wait", "retry_wait"].includes(r.state);
+  if (queue.start && !going) {
+    const tone = queue.start.failed || queue.start.blocked ? "text-orange-300 bg-orange-500/10 ring-orange-500/40" : "text-sky-300 bg-sky-500/10 ring-sky-500/40";
+    return <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs ring-1 ${tone}`}>{queue.start.failed ? "did not start" : "starts"} after {queue.start.after}</span>;
+  }
   if (!r || r.state === "finished" || endedHalt(queue)) return null;
   return (
     <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs ring-1 ${RUN_TONE[r.state]}`}>
@@ -80,6 +114,7 @@ export function RunControls({ project, queue, onChanged }: { project: ProjectSta
   const defaultModel = project.project.runtimes[runtime].model;
   const defaultEffort = project.project.runtimes[runtime].effort;
   const [session, setSession] = useState("");
+  const [after, setAfter] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const run = queue.run;
@@ -98,9 +133,17 @@ export function RunControls({ project, queue, onChanged }: { project: ProjectSta
   const ended = endedHalt(queue);
   // Shown as finished: the label, its colour and the times say "ended", and there is nothing to resume.
   const shown = run && ended ? { ...run, state: "finished" as const } : run;
+  // Queues this one can start after: any other that is not cancelled (a done one starts this one now).
+  const chainable = project.queues.filter((x) => x.id !== queue.id && x.status !== "cancelled");
 
   return (
     <Section title="Run with Nexus">
+      <PlannedStart queue={queue} busy={busy} onCancel={() => call({ action: "cancel_start" })} />
+      {!!queue.starts_next?.length && (
+        <p className="mb-3 text-xs text-zinc-400">
+          <span className="text-sky-400">→</span> When this queue is done, {queue.starts_next.map((x, i) => <span key={x}>{i ? ", " : ""}<span className="font-mono text-zinc-200">{x}</span></span>)} start{queue.starts_next.length === 1 ? "s" : ""}.
+        </p>
+      )}
       {run && (
         <div className="mb-3 rounded-lg bg-zinc-800/50 p-3 text-sm">
           <div className="flex flex-wrap items-center gap-2">
@@ -113,6 +156,7 @@ export function RunControls({ project, queue, onChanged }: { project: ProjectSta
             ? <p className="mt-1 text-xs text-zinc-500">The queue is done. The run's last note: {run.reason}</p>
             : <p className="mt-1 text-zinc-300">{run.reason}</p>)}
           {runSession && <p className="mt-1 text-xs text-zinc-500">Session: {runSession.title ?? runSession.id} {runSession.live?.model ? `· ${runSession.live.model}` : ""}{runSession.effort ? ` · ${runSession.effort} effort` : ""} <ContextBar s={runSession} /></p>}
+          {run.after && <p className="mt-1 text-xs text-zinc-500">Started by its plan when <span className="font-mono">{run.after}</span> was done.</p>}
           <SessionSwitches run={run} sessions={project.sessions} />
           {run.summary_asked && run.state === "running" && <p className="mt-1 text-xs text-sky-300">↪ The context is full: the session writes its summary of {run.summary_asked}; the next step runs in a fresh session.</p>}
           {run.state === "usage_wait" && run.resume_at && <p className="mt-1 text-xs text-zinc-500">Resumes by itself at {new Date(run.resume_at).toLocaleTimeString()}.</p>}
@@ -144,9 +188,9 @@ export function RunControls({ project, queue, onChanged }: { project: ProjectSta
               <option value="codex">Codex</option>
             </select>
           </label>
-          <label className="text-xs text-zinc-400">
+          <label className="max-w-full text-xs text-zinc-400">
             <span className="mb-1 block">Model</span>
-            <ModelSelect runtime={runtime} value={model} onChange={setModel} disabled={!!session}
+            <ModelSelect runtime={runtime} value={model} onChange={setModel} disabled={!!session} className="max-w-full"
               defaultLabel={session ? "as before" : defaultModel ? `default: ${defaultModel}` : "runtime default"} />
           </label>
           <label className="text-xs text-zinc-400">
@@ -154,8 +198,15 @@ export function RunControls({ project, queue, onChanged }: { project: ProjectSta
             <EffortSelect runtime={runtime} model={model || (project.project.runtimes[runtime].model ?? "")} value={effort} onChange={setEffort}
               defaultLabel={session ? "as before" : defaultEffort ? `default: ${defaultEffort}` : "default"} />
           </label>
-          <Button disabled={busy} onClick={() => call({ action: "start", model: model || undefined, effort: effort || undefined, session: session || undefined, runtime: session ? undefined : runtime })}>
-            {run ? "Start a new run" : "Start"}
+          <label className="text-xs text-zinc-400">
+            <span className="mb-1 block">When</span>
+            <select value={after} onChange={(e) => setAfter(e.target.value)} className="max-w-60 rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm text-zinc-200">
+              <option value="">Now</option>
+              {chainable.map((x) => <option key={x.id} value={x.id}>When {x.id} is done{x.status === "done" ? " (it is: now)" : ""}</option>)}
+            </select>
+          </label>
+          <Button disabled={busy} onClick={() => call({ action: "start", model: model || undefined, effort: effort || undefined, session: session || undefined, runtime: session ? undefined : runtime, after: after || undefined })}>
+            {after ? `Start after ${after}` : run ? "Start a new run" : "Start"}
           </Button>
         </div>
       )}

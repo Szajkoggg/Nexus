@@ -314,15 +314,21 @@ const engineOf = (st: ProjectStore) => [...projects.values()].find((e) => e.stor
 app.post("/api/projects/:id/queues/:queue/run", act((st, b, p) => {
   const engine = engineOf(st); const q = p("queue");
   switch (b.action) {
-    case "start": return engine.start(q, {
-      model: (b.model as string) || undefined, session: (b.session as string) || undefined,
-      effort: Effort.safeParse(b.effort).success ? (b.effort as Effort) : undefined,
-      runtime: b.runtime === "codex" || b.runtime === "claude" ? b.runtime : undefined,
-    });
+    case "start": {
+      const options = {
+        model: (b.model as string) || undefined, session: (b.session as string) || undefined,
+        effort: Effort.safeParse(b.effort).success ? (b.effort as Effort) : undefined,
+        runtime: b.runtime === "codex" || b.runtime === "claude" ? b.runtime as "claude" | "codex" : undefined,
+      };
+      // With `after`: a chain, the queue starts when that one is done.
+      if (typeof b.after === "string" && b.after) return { message: engine.chain(q, { ...options, after: b.after, by: "user" }) };
+      return engine.start(q, options);
+    }
     case "pause": return engine.pause(q);
     case "resume": return engine.resume(q);
     case "stop": return engine.stopNow(q, b.text as string | undefined);
-    default: throw new ActionError("action is start, pause, resume or stop");
+    case "cancel_start": return { message: engine.cancelStart(q) };
+    default: throw new ActionError("action is start, pause, resume, stop or cancel_start");
   }
 }));
 // Continue on a stopped queue: the user's lift of the stop, then the run goes on (only from the dashboard, as every write).

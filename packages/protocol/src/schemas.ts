@@ -320,9 +320,11 @@ export const Event = z.discriminatedUnion("type", [
   /** An orchestrator asks the engine to act on a queue's run; `use_session` continues an existing session. */
   z.object({
     ...base, type: z.literal("session.request"),
-    action: z.enum(["start", "resume", "pause", "stop"]), queue: Id,
+    action: z.enum(["start", "resume", "pause", "stop", "cancel_start"]), queue: Id,
     use_session: Id.optional(), model: z.string().optional(), effort: Effort.optional(),
     runtime: z.enum(["claude", "codex"]).optional(), reason: z.string(),
+    /** With `start`: start when this queue is done instead of now (a chain, queues/<queue>/start.yaml). */
+    after: Id.optional(),
   }),
   z.object({ ...base, type: z.literal("log"), level: z.enum(["info", "warn", "error"]), text: z.string() }),
   /**
@@ -371,6 +373,28 @@ export const PushFile = z.object({
 });
 export type PushFile = z.infer<typeof PushFile>;
 
+/**
+ * queues/<id>/start.yaml: a planned start of the queue. Written only by the server. `after`: it starts when that
+ * queue is done (a chain). `runtime`, `model`, `effort`, `session` are the start's options, as a start takes them.
+ * `failed`: it came due but the queue could not start (not approved, …); it stays, as an item waiting for the user,
+ * until the queue is started or the plan cancelled or replaced. Starting the queue or cancelling removes the file.
+ */
+export const StartFile = z.object({
+  protocol: z.literal(1),
+  after: Id,
+  runtime: z.enum(["claude", "codex"]).optional(),
+  model: z.string().optional(),
+  effort: Effort.optional(),
+  session: Id.optional(),
+  by: z.enum(["user", "orchestrator"]),
+  reason: z.string().optional(),
+  /** The queue's revision when the plan was made (shown; the start needs the then current revision approved). */
+  revision: z.number().int().positive(),
+  created_at: Time,
+  failed: z.object({ at: Time, reason: z.string() }).optional(),
+});
+export type StartFile = z.infer<typeof StartFile>;
+
 /** queues/<id>/run.yaml: the engine's intent for a queue. Written only by the server. */
 export const RunFile = z.object({
   protocol: z.literal(1),
@@ -382,6 +406,8 @@ export const RunFile = z.object({
    * service overloaded, the network, a crashed runtime); the turn is tried again at resume_at.
    */
   state: z.enum(["running", "pausing", "paused", "halted", "finished", "usage_wait", "retry_wait"]),
+  /** Started by a chain: when this queue was done. */
+  after: Id.optional(),
   reason: z.string().optional(),
   step: Id.optional(),        // the step the engine last opened
   nudged: z.boolean().optional(),

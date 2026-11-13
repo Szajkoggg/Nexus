@@ -1,6 +1,6 @@
 // Derives the dashboard's view of a project from its files. Pure apart from reading through the store;
 // nothing here is ever written back (state.json, if kept, is only a cache of this).
-import { ORCHESTRATOR_ONLY, USER_ONLY, type StatusChange, type Event, type InboxEntry, type Note, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type ReviewItem, type ReviewPolicy, type RunFile, type RuntimeFile, type SessionFile, type StepDef, type StepStatus } from "./schemas.ts";
+import { ORCHESTRATOR_ONLY, USER_ONLY, type StatusChange, type Event, type InboxEntry, type Note, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type ReviewItem, type ReviewPolicy, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type StepDef, type StepStatus } from "./schemas.ts";
 import { ProjectStore, revisionHash } from "./store.ts";
 import { ENDED_RUN_STATES, type Segment } from "./times.ts";
 import { stopPlace } from "./attention.ts";
@@ -15,7 +15,8 @@ export interface QuestionView {
 }
 export type InboxView = InboxEntry & { read_at?: string };
 export interface AttentionItem {
-  kind: "question" | "stopped" | "approval" | "review" | "failed";
+  /** `start`: a planned start came due and the queue could not start (queues/<id>/start.yaml `failed`). */
+  kind: "question" | "stopped" | "approval" | "review" | "failed" | "start";
   queue?: string; step?: string; qid?: string;
   text: string; at?: string;
   /**
@@ -82,8 +83,18 @@ export interface QueueView extends Omit<QueueFile, "steps"> {
   run?: RunFile;
   /** Pushing what was accepted (queues/<id>/push.yaml). */
   push?: PushFile;
+  /** A planned start of this queue (queues/<id>/start.yaml), with why it has not come yet. */
+  start?: StartView;
+  /** Queues planned to start when this one is done. */
+  starts_next?: string[];
   updated?: string;    // time of the latest event about this queue
 }
+/**
+ * A planned start as the dashboard shows it. `waiting`: why it has not started yet (the queue it waits for is still
+ * running, halted, stopped, …; or the session it continues is busy). `blocked`: it waits on something only the user
+ * or the orchestrator can change (the other queue halted, stopped, paused or cancelled).
+ */
+export type StartView = StartFile & { waiting: string; blocked: boolean };
 export interface SessionView extends SessionFile {
   last_event_at?: string;
   last_event?: string;
@@ -119,6 +130,10 @@ export function loadProjectState(store: ProjectStore): ProjectState {
       const view = initQueue(q, notes);
       try { view.run = store.readRun(id); } catch (e) { warnings.push(`queue ${id} run: ${(e as Error).message}`); }
       try { view.push = store.readPush(id); } catch (e) { warnings.push(`queue ${id} push: ${(e as Error).message}`); }
+      try {
+        const plan = store.readStart(id);
+        if (plan) view.start = { ...plan, waiting: "", blocked: false };
+      } catch (e) { warnings.push(`queue ${id} start: ${(e as Error).message}`); }
       queues.set(id, view);
     } catch (e) { warnings.push(`queue ${id}: ${(e as Error).message}`); }
   }
@@ -211,6 +226,14 @@ export function loadProjectState(store: ProjectStore): ProjectState {
       ?? q.steps.findLast((s) => s.status === "stopped"))?.id;
   }
 
+  // Planned starts: shown on both queues, with why each waits.
+  for (const q of queues.values()) {
+    if (!q.start) continue;
+    const a = queues.get(q.start.after);
+    if (a) (a.starts_next ??= []).push(q.id);
+    Object.assign(q.start, startWait(q.start, a, [...queues.values()]));
+  }
+
   // Messages sent to sessions, shown on the step they were about.
   for (const s of sessions.values()) {
     for (const m of s.inbox) {
@@ -228,6 +251,27 @@ export function loadProjectState(store: ProjectStore): ProjectState {
     warnings,
     generated_at: new Date().toISOString(),
   };
+}
+
+/** GOING run states: a session with such a run is busy. */
+const BUSY_RUN = new Set(["running", "pausing", "usage_wait", "retry_wait"]);
+
+/** Why a planned start has not come yet. */
+function startWait(plan: StartFile, a: QueueView | undefined, queues: QueueView[]): { waiting: string; blocked: boolean } {
+  if (!a) return { waiting: `queue ${plan.after} does not exist`, blocked: true };
+  if (a.status === "done") {
+    const busy = plan.session ? queues.find((x) => x.id !== plan.after && !!x.run && x.run.session === plan.session && BUSY_RUN.has(x.run.state)) : undefined;
+    return busy ? { waiting: `queue ${plan.after} is done; the session to continue is running queue ${busy.id}`, blocked: false }
+      : { waiting: `queue ${plan.after} is done`, blocked: false };
+  }
+  if (a.status === "cancelled") return { waiting: `queue ${plan.after} is cancelled`, blocked: true };
+  if (a.status === "stopped") return { waiting: `queue ${plan.after} is stopped${a.status_reason ? `: ${a.status_reason}` : ""}`, blocked: true };
+  const r = a.run;
+  if (r?.state === "halted") return { waiting: `the run of ${plan.after} halted${r.reason ? `: ${r.reason}` : ""}`, blocked: true };
+  if (r?.state === "paused") return { waiting: `the run of ${plan.after} is paused${r.reason ? `: ${r.reason}` : ""}`, blocked: true };
+  if (r && BUSY_RUN.has(r.state)) return { waiting: `queue ${plan.after} is running${r.step ? ` (at ${r.step})` : ""}`, blocked: false };
+  if (a.status === "running" || a.status === "waiting") return { waiting: `queue ${plan.after} is ${a.status === "waiting" ? "waiting (a question or a review)" : "running"}`, blocked: false };
+  return { waiting: `queue ${plan.after} has not started yet`, blocked: false };
 }
 
 function attentionOf(queues: QueueView[], questions: QuestionView[]): AttentionItem[] {
@@ -249,6 +293,7 @@ function attentionOf(queues: QueueView[], questions: QuestionView[]): AttentionI
       });
     }
     if (q.status === "proposed") out.push({ kind: "approval", queue: q.id, text: q.title, at: q.updated_at });
+    if (q.start?.failed) out.push({ kind: "start", queue: q.id, text: `Did not start after ${q.start.after}: ${q.start.failed.reason}`, at: q.start.failed.at });
     if (q.status === "cancelled" || q.status === "done") continue;
     for (const s of q.steps) {
       // A review the orchestrator does is not the user's (the queue still shows it waiting).

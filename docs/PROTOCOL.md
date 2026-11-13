@@ -237,7 +237,7 @@ Every line:
 | `queue.report` | `queue`, `path`, `summary` | The worker's report of the whole queue, written when it ends (done or stopped) |
 | `change.proposed` | `queue`, `patch`, `reason` | A proposed change to a queue definition (needs a new approval) |
 | `queue.drafted` | `queue`, `definition` | Orchestrator only: a new or changed draft queue |
-| `session.request` | `action` (start, resume, pause, stop), `queue`, `use_session?`, `model?`, `reason` | Orchestrator only: asks the engine to act on a queue's run (`use_session` continues an existing session) |
+| `session.request` | `action` (start, resume, pause, stop, cancel_start), `queue`, `use_session?`, `runtime?`, `model?`, `effort?`, `after?`, `reason` | Orchestrator only: asks the engine to act on a queue's run (`use_session` continues an existing session). `start` with `after`: start when that queue is done (a chain, see "Chains"); `cancel_start`: cancel the queue's planned start |
 | `review.sent_back` | `queue`, `step`, `text` | Orchestrator or user only: a step in review goes back to its worker with what to fix (see "Sending a step back") |
 | `review.rejected` | `queue`, `step`, `text?` | User only (the loader ignores it from any other session, the orchestrator's included): rejects a step waiting for the user's review (see "Reject") |
 | `review.asked_user` | `queue`, `step`, `text` | Orchestrator only in practice (the loader takes it from an orchestrator or the user): a step waiting for the orchestrator's review goes to the user, with why |
@@ -260,7 +260,8 @@ Written only by the server's queue engine; agents never touch them.
 | File | What |
 |---|---|
 | `queues/<id>/push.yaml` | Pushing what was accepted: `review` (per step, the HEAD of the checkout when it entered review: `sha` or null, `finished_at`, `at`), `steps` (per accepted step: `acceptance`, `sha`, `result`, `text`, `at`), `pushed` (the last success: `sha`, `step`, `at`, `remote`, `branch`), `error` (the last failure until a success). One writer: the server. See "Pushing what was accepted" |
-| `queues/<id>/run.yaml` | The engine's intent for a queue: `session`, `state` (`running`, `pausing`, `paused`, `halted`, `finished`, `usage_wait`, `retry_wait`: a turn failed for a passing reason and is tried again at `resume_at`), `reason`, the `step` it last opened, `nudged`, `resume_at` (when a usage wait or a retry goes on), `retries` (turns failed in a row for a passing reason; cleared by a turn that ends well or a new step), `failure` (the runtime's code for the failure being retried or that halted the run, e.g. `overloaded`), `resume_after_restart`, `runtime`, `model` and `effort` (the run's own, fixed at its start: the start's choice, else the continued session's, else the project's defaults; a missing model or effort is the runtime's default), `started_at`, `ended_at` (when it last stopped going: set when it becomes `finished`, `halted` or `paused`, kept while it stays so, removed when it goes on; older files without it fall back to `updated_at`), `summary_asked` (context care: the step whose context summary Nexus asked for; asked once), `switches` (each fresh session, oldest first: `at`, `from` and `to` session, `step` the new session began with, `why`: `context` (context care; a record without `why` is this) or `runtime` (the step runs on another runtime), `fill` of the old one from 0 to 1 when known, `summary`: `written` by the worker, `asked` and then written, or `fallback`), `revision` (the queue's revision the run was started on). Start refuses a `stopped` queue, naming the step and the stop's reason, and writes `revision`. Resume refuses a stopped queue too, and a run of an older revision (`revision` below the queue's; a run record without `revision` is older when a revision was replaced, in `history`, after its `started_at`): start the queue instead. Archived records are `run.<time>.yaml` (see "Changes and lifting a stop") |
+| `queues/<id>/start.yaml` | A planned start of the queue (see "Chains"): `after` (the queue it waits for), the start's `runtime?`, `model?`, `effort?`, `session?` (a session to continue), `by` (`user` or `orchestrator`), `reason?`, `revision` (the queue's when planned), `created_at`, `failed?` (`at`, `reason`: it came due and the queue could not start). One writer: the server; a start of the queue or a cancel removes it |
+| `queues/<id>/run.yaml` | The engine's intent for a queue: `session`, `after` (started by a chain: the queue that was done), `state` (`running`, `pausing`, `paused`, `halted`, `finished`, `usage_wait`, `retry_wait`: a turn failed for a passing reason and is tried again at `resume_at`), `reason`, the `step` it last opened, `nudged`, `resume_at` (when a usage wait or a retry goes on), `retries` (turns failed in a row for a passing reason; cleared by a turn that ends well or a new step), `failure` (the runtime's code for the failure being retried or that halted the run, e.g. `overloaded`), `resume_after_restart`, `runtime`, `model` and `effort` (the run's own, fixed at its start: the start's choice, else the continued session's, else the project's defaults; a missing model or effort is the runtime's default), `started_at`, `ended_at` (when it last stopped going: set when it becomes `finished`, `halted` or `paused`, kept while it stays so, removed when it goes on; older files without it fall back to `updated_at`), `summary_asked` (context care: the step whose context summary Nexus asked for; asked once), `switches` (each fresh session, oldest first: `at`, `from` and `to` session, `step` the new session began with, `why`: `context` (context care; a record without `why` is this) or `runtime` (the step runs on another runtime), `fill` of the old one from 0 to 1 when known, `summary`: `written` by the worker, `asked` and then written, or `fallback`), `revision` (the queue's revision the run was started on). Start refuses a `stopped` queue, naming the step and the stop's reason, and writes `revision`. Resume refuses a stopped queue too, and a run of an older revision (`revision` below the queue's; a run record without `revision` is older when a revision was replaced, in `history`, after its `started_at`): start the queue instead. Archived records are `run.<time>.yaml` (see "Changes and lifting a stop") |
 | `sessions/<id>/runtime.json` | A launched session's live facts: process state and pid, model, context tokens and window, turns, cost |
 | `sessions/<id>/delivered.jsonl` | What the server handed to the session (notes put into a step turn, inbox entries injected or sent as a turn, or `carried` into the first turn of the session `to` that took over); counts as read |
 | `sessions/<id>/refusals.jsonl` | One line per action the agent wanted but was refused: `at`, `session`, `runtime`, `by` (`permissions`: Claude Code's permission mode or rules; `nexus`: Nexus declined a Codex approval request; `auto_review`: Codex's auto reviewer), `tool` (Claude Code's tool name; for Codex `command`, `file_change`, `network`, `mcp`, `permissions`, …), `input` in short (the command, path or host, at most 300 characters), `reason` when the runtime gave one, `ref` (the runtime's id for the call: one record per refusal), `queue`, `step` |
@@ -488,7 +489,7 @@ sends (see the CLI).
 | `POST /api/projects/:id/queues/:q/withdraw` | `reason?` | The user takes back the approval of a queue that never ran. There is no CLI command and no event for it |
 | `PATCH /api/projects/:id/queues/:q` | `review_policy` (`continue`, `wait`, `orchestrator` or null) | Queue settings |
 | `POST /api/projects/:id/questions/:qid/answer` | `text`, `continue?` | The user's answer, routed to the asker |
-| `POST /api/projects/:id/queues/:q/run` | `action` (`start`, `pause`, `resume`, `stop`), `model?`, `session?` | Runs the queue through a Nexus-launched session (`session` continues an existing one) |
+| `POST /api/projects/:id/queues/:q/run` | `action` (`start`, `pause`, `resume`, `stop`, `cancel_start`), `runtime?`, `model?`, `effort?`, `session?`, `after?` | Runs the queue through a Nexus-launched session (`session` continues an existing one). `start` with `after`: a chain, the queue starts when that one is done (`{message}`); `cancel_start` cancels the planned start (`{message}`) |
 | `POST /api/projects/:id/queues/:q/steps/:s/reject` | `text?` | Reject (the user's): the step is rejected, the run pauses until a newer revision is approved; answers `{ message }` |
 | `POST /api/projects/:id/queues/:q/steps/:s/accept` | `text?` (the note), `note_to?` (`next` or `orchestrator`) | Accepts a step waiting in review (and, with `push_accepted`, pushes it); answers where the note went (`to`, `step`) |
 | `POST /api/projects/:id/queues/:q/push` | | Push again: the step of the queue's last failed push; answers `{ message }` at once, the push runs in the background |
@@ -609,7 +610,9 @@ a prompt. (`Write` and `Edit` are not disallowed: a disallow rule would beat the
 - `nexus queue draft <file|->` sends a queue definition (YAML) as `queue.drafted`. The server writes it: a new queue
   becomes `proposed` (or `draft`); a change to an existing queue's steps, checks or stop conditions makes a new
   revision, which needs the user's approval again.
-- `nexus run <queue> start|pause|resume|stop --reason … [--use-session <id>] [--model <m>]` sends `session.request`.
+- `nexus run <queue> start|pause|resume|stop --reason … [--use-session <id>] [--runtime claude|codex] [--model <m>] [--effort <e>] [--after <queue>]`
+  sends `session.request`; `start --after A` plans the start for when queue A is done (a chain), and
+  `nexus run <queue> cancel-start --reason …` cancels it.
   Starting an unapproved revision is refused.
 - `nexus review accept <queue> <step> [--note <text>]`, `nexus review send-back <queue> <step> <what to fix>` and
   `nexus review ask-user <queue> <step> <why>` write `review.accepted` (the note as its `text`), `review.sent_back`
@@ -662,6 +665,28 @@ a prompt. (`Write` and `Edit` are not disallowed: a disallow rule would beat the
 The server writes `<NEXUS_HOME>/bin/nexus.cmd` (for cmd and PowerShell, where npm's `.ps1` shim is blocked when
 scripts are disabled, as in Codex's shell) and `<NEXUS_HOME>/bin/nexus` (for Git Bash), both running this checkout's
 CLI with the server's Node, and puts that directory first on every launched agent's `PATH`.
+
+## Chains
+
+"When queue A is done, start B": a planned start, `queues/B/start.yaml`, set by the user in the dashboard (the start
+form's "When") or by the orchestrator (`nexus run B start --after A`), with the options of a start (runtime, model,
+effort, a session to continue). One per queue: a new plan replaces the old one. Refused: a queue after itself, a
+loop through other plans, an unknown or cancelled A, a B that is done, cancelled or running, an effort the runtime does
+not take, a session that is not a worker session Nexus launched. B need not be approved yet.
+
+- It fires when A is done (every step done or skipped; its run finished). If A already is, B starts at once.
+- If A's run halts or pauses, or A is stopped or cancelled, the plan waits; the dashboard shows why (`waiting`,
+  `blocked` in the state).
+- At the moment it fires, B starts as a start does: its current revision must be approved, and it must not be stopped
+  or have a rejected step. If it cannot start, the plan stays with `failed` and the user gets an attention item of kind
+  `start` ("Did not start after A: …"); it is not tried again by itself. Starting B or cancelling the plan ends it.
+- A plan that continues a session waits while that session runs another queue, and fires when it is free (A's own
+  session is free once A's run is finished): one session never runs two queues.
+- Nothing fires while an update drains: the plans stay in their files, and the next server (or a cancelled update)
+  looks at them once it is up. The server looks at the plans after every change to the project's files and 1.5 s
+  after it starts.
+- The run B gets records `after: A`. The dashboard shows the plan on B (with Cancel) and on A ("When this queue is
+  done, B starts"), and a chip on B's row.
 
 ## Runtime, model and effort per step
 

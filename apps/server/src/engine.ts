@@ -21,7 +21,14 @@ import { CodexSession, gitWritableRoots } from "./codex.ts";
 
 interface Live { proc: AgentProcess; session: string }
 
-export interface StartOptions { model?: string; effort?: Effort; session?: string; runtime?: "claude" | "codex" }
+export interface StartOptions {
+  model?: string; effort?: Effort; session?: string; runtime?: "claude" | "codex";
+  /** Started by a chain: the queue whose being done started it (recorded on the run). */
+  after?: string;
+}
+
+/** A chain: start the queue when another one is done (queues/<id>/start.yaml). */
+export interface ChainOptions extends Omit<StartOptions, "after"> { after: string; by: "user" | "orchestrator"; reason?: string }
 
 /** A turn that failed for a passing reason is tried again RETRY_LIMIT times (5), after 1, 2, 4, 8 and 16 minutes. */
 export { RETRY_LIMIT };
@@ -74,6 +81,8 @@ export class Engine {
   private readonly ending = new Set<string>();
   /** Sessions whose process Nexus ends to start it again with another model or effort (Claude Code). */
   private readonly restarting = new Set<string>();
+  /** Set while checkStarts runs: a start inside it notifies changes, which must not look again meanwhile. */
+  private checkingStarts = false;
   private readonly retryBaseMs: number;
   private readonly usageMarginMs: number;
 
@@ -84,6 +93,7 @@ export class Engine {
     this.usageMarginMs = options.usageMarginMs ?? USAGE_MARGIN_MS;
     this.pusher = new AcceptedPusher(store, changed, { run: options.git, timeout: options.pushTimeoutMs });
     this.recoverAfterRestart();
+    this.timers.set("starts", setTimeout(() => { this.timers.delete("starts"); this.checkStarts(); }, 1500));
   }
 
   /** Pushes what was accepted (src/accepted.ts). */
@@ -132,9 +142,10 @@ export class Engine {
       : this.newSession(state, q, want.runtime, want.model, want.effort);
     const run: RunFile = {
       protocol: 1, session: session.id, state: "running", started_at: now(), updated_at: now(), revision: q.revision,
-      runtime: values.runtime, model: values.model, effort: values.effort,
+      runtime: values.runtime, model: values.model, effort: values.effort, after: opts.after,
     };
     this.store.writeRun(queueId, run);
+    this.store.clearStart(queueId); // a planned start is used up by any start
     this.ensureProcess(session);
     this.advance(queueId);
     return run;
@@ -245,6 +256,7 @@ export class Engine {
       if (run.state === "pausing") this.writeRun(id, { ...run, state: "running", reason: undefined, resume_after_restart: undefined });
       else if (run.state === "paused") { try { this.resume(id); } catch (e) { this.halt(id, (e as Error).message); } }
     }
+    this.checkStarts();
   }
 
   /** Interrupts the running turn and pauses the run. */
@@ -314,6 +326,84 @@ export class Engine {
     if (!this.stopped) this.pusher.onChange(state);
     for (const [, l] of this.live) this.deliverInbox(state, l);
     for (const q of state.queues) if (q.run && (q.run.state === "running" || q.run.state === "pausing")) this.advance(q.id, state);
+    this.checkStarts();
+  }
+
+  // ---------------------------------------------------------------- chains
+
+  /**
+   * Plans to start `queueId` when queue `o.after` is done. When it already is, the queue starts now (or, while an
+   * update drains, right after it). Replaces an earlier plan of the queue. Returns what happened, in a sentence.
+   */
+  chain(queueId: string, o: ChainOptions): string {
+    const state = loadProjectState(this.store);
+    const q = this.queue(state, queueId);
+    const a = state.queues.find((x) => x.id === o.after);
+    if (!a) throw new ActionError(`unknown queue ${o.after}`, 404);
+    if (a.id === q.id) throw new ActionError("a queue cannot start after itself");
+    if (q.status === "done" || q.status === "cancelled") throw new ActionError(`queue ${q.id} is ${q.status}`, 409);
+    if (q.run && GOING.includes(q.run.state)) throw new ActionError(`queue ${q.id} is already running`, 409);
+    if (a.status === "cancelled") throw new ActionError(`queue ${a.id} is cancelled: it will never be done`, 409);
+    // No loop: following the plans from A must not come back to this queue.
+    for (let at: string | undefined = a.id, seen = new Set<string>(); at && !seen.has(at); seen.add(at), at = this.store.readStart(at)?.after) {
+      if (at === q.id) throw new ActionError(`queue ${a.id} already waits for ${q.id} (through its planned starts): that would be a loop`, 409);
+    }
+    const runtime = o.session ? undefined : o.runtime ?? state.project.runtimes.default;
+    const issue = runtime ? effortIssue(runtime, o.effort) : undefined;
+    if (issue) throw new ActionError(issue);
+    if (o.session) {
+      const s = state.sessions.find((x) => x.id === o.session);
+      if (!s || s.role !== "worker" || s.launched_by !== "nexus" || s.runtime === "external") throw new ActionError(`session ${o.session} is not a worker session Nexus launched`, 409);
+    }
+    const options = { runtime: o.session ? undefined : o.runtime, model: o.model, effort: o.effort, session: o.session };
+    const busy = o.session ? state.queues.find((x) => x.id !== q.id && !!x.run && x.run.session === o.session && GOING.includes(x.run.state)) : undefined;
+    if (a.status === "done" && !this.draining && !busy) {
+      const run = this.start(q.id, { ...options, after: a.id });
+      return `queue ${a.id} is already done: queue ${q.id} started now in session ${run.session}`;
+    }
+    this.store.writeStart(q.id, {
+      protocol: 1, after: a.id, ...options, by: o.by, reason: o.reason, revision: q.revision, created_at: now(),
+    });
+    this.changed();
+    if (a.status !== "done") return `queue ${q.id} starts when queue ${a.id} is done`;
+    return busy ? `queue ${q.id} starts when session ${o.session} is free (it runs queue ${busy.id}; queue ${a.id} is done)`
+      : `queue ${q.id} starts after the Nexus update (queue ${a.id} is done)`;
+  }
+
+  /** Cancels the planned start of a queue. */
+  cancelStart(queueId: string): string {
+    const plan = this.store.readStart(queueId);
+    if (!plan) throw new ActionError(`queue ${queueId} has no planned start`, 409);
+    this.store.clearStart(queueId);
+    this.changed();
+    return `the planned start of queue ${queueId} (after ${plan.after}) is cancelled`;
+  }
+
+  /**
+   * Starts each queue whose planned start is due: the queue it waits for is done. Not while an update drains (the
+   * plans stay, and the next server or cancelDrain looks again). A plan whose session to continue is busy waits for
+   * it to free (one session never runs two queues). A start that fails (the queue not approved, stopped, …) is
+   * recorded on the plan as `failed`, an item waiting for the user; it is not tried again by itself.
+   */
+  private checkStarts(): void {
+    if (this.stopped || this.draining || this.checkingStarts) return;
+    this.checkingStarts = true;
+    try {
+      const state = loadProjectState(this.store);
+      for (const q of state.queues) {
+        const plan = q.start;
+        if (!plan || plan.failed) continue;
+        if (state.queues.find((x) => x.id === plan.after)?.status !== "done") continue;
+        if (plan.session && state.queues.some((x) => x.id !== q.id && !!x.run && x.run.session === plan.session && GOING.includes(x.run.state))) continue;
+        try {
+          const run = this.start(q.id, { runtime: plan.runtime, model: plan.model, effort: plan.effort, session: plan.session, after: plan.after });
+          this.store.appendActivity(run.session, { at: now(), kind: "turn_start", text: `Nexus started queue ${q.id}: queue ${plan.after} is done`, queue: q.id });
+        } catch (e) {
+          const { waiting: _w, blocked: _b, ...file } = plan;
+          this.store.writeStart(q.id, { ...file, failed: { at: now(), reason: (e as Error).message } });
+        }
+      }
+    } finally { this.checkingStarts = false; }
   }
 
   /** Activity of a session, optionally only what was tagged with a step. */

@@ -37,7 +37,8 @@ Agent commands (session from NEXUS_SESSION or --session):
                                       housekeeping: skip a pending, stopped or failed step; close a halted run of a
                                       queue whose steps are all done or skipped; cancel a queue that is not running;
                                       propose that the user lift a stop. Done, approving and lifting are the user's
-  nexus run <queue> start|pause|resume|stop --reason <text> [--use-session <id>] [--runtime claude|codex] [--model <m>] [--effort <e>]   (orchestrator only)
+  nexus run <queue> start|pause|resume|stop --reason <text> [--use-session <id>] [--runtime claude|codex] [--model <m>] [--effort <e>] [--after <queue>]   (orchestrator only; start --after: when that queue is done)
+  nexus run <queue> cancel-start --reason <text>   (orchestrator only: cancels the queue's planned start)
   (--queue <id> picks the queue when the session has none or the step id is ambiguous)
 
 Setup:
@@ -63,7 +64,7 @@ const { values: o, positionals: args } = parseArgs({
     condition: { type: "string" }, pct: { type: "string" }, label: { type: "string" },
     kind: { type: "string" }, round: { type: "string" }, ok: { type: "boolean" }, fail: { type: "boolean" },
     option: { type: "string", multiple: true }, "can-continue": { type: "boolean" },
-    "use-session": { type: "string" }, model: { type: "string" }, effort: { type: "string" },
+    "use-session": { type: "string" }, model: { type: "string" }, effort: { type: "string" }, after: { type: "string" },
     topics: { type: "string" }, files: { type: "string" }, file: { type: "string" }, level: { type: "string" },
     escalate: { type: "boolean" }, continue: { type: "boolean" }, wait: { type: "boolean" },
     id: { type: "string" }, name: { type: "string" }, prefix: { type: "string" },
@@ -146,6 +147,12 @@ Queues (${state.queues.length - done.length} open; finished: ${done.map((q) => q
     console.log(`  steps: ${q.steps.map((x) => `${x.id} ${x.status}${x.review_with ? ` (for ${x.review_with === "user" ? "the user" : "you"})` : ""}`).join(", ")}`);
     if (q.status_reason && q.status !== "running") console.log(`  why: ${q.status_reason.replace(/\s+/g, " ").slice(0, 300)}`);
     for (const line of stopLines(q)) console.log(line);
+    if (q.start) {
+      const p = q.start;
+      console.log(p.failed
+        ? `  planned start after ${p.after} did not happen: ${p.failed.reason} (the user sees it; start the queue or cancel the plan with nexus run ${q.id} cancel-start)`
+        : `  starts when ${p.after} is done${p.session ? `, in session ${p.session}` : ""}; now: ${p.waiting}`);
+    }
   }
   const open = state.questions.filter((x) => x.state === "open" || x.state === "escalated");
   console.log(`
@@ -439,9 +446,13 @@ const commands: Record<string, () => void | Promise<void>> = {
   run() {
     const st = store(); const s = orchestrator(st);
     const queue = need(args[1], "<queue>");
-    const action = need(args[2], "start|pause|resume|stop");
-    if (!["start", "pause", "resume", "stop"].includes(action)) throw new UsageError("the action is start, pause, resume or stop");
-    const e = emit(st, s, { type: "session.request", action, queue, use_session: o["use-session"], model: o.model, effort: o.effort, runtime: o.runtime, reason: need(o.reason, "--reason") });
+    const action = need(args[2], "start|pause|resume|stop|cancel-start");
+    if (!["start", "pause", "resume", "stop", "cancel-start"].includes(action)) throw new UsageError("the action is start, pause, resume, stop or cancel-start");
+    if (o.after && action !== "start") throw new UsageError("--after goes with start");
+    const e = emit(st, s, {
+      type: "session.request", action: action === "cancel-start" ? "cancel_start" : action, queue, use_session: o["use-session"],
+      model: o.model, effort: o.effort, runtime: o.runtime, after: o.after, reason: need(o.reason, "--reason"),
+    });
     report(waitApplied(st, s.id, e.id));
   },
 
