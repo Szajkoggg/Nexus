@@ -249,6 +249,49 @@ function report(r: { ok: boolean; message: string } | undefined): void {
 const list = (v?: string) => (v ? v.split(",").map((x) => x.trim()).filter(Boolean) : []);
 const readText = (v: string) => (v === "-" ? readFileSync(0, "utf8").trim() : v);
 
+/** git's output in `cwd`, trimmed; undefined when git fails (not a repository, no git). */
+function gitOut(cwd: string, args: string[]): string | undefined {
+  try { return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim(); }
+  catch { return undefined; }
+}
+
+/**
+ * The step's end in its checkout (the session's working directory), by Nexus's standard (nexus help commits): tracked
+ * files with uncommitted changes (the thinking partners' notes folder left out: the main checkout also holds the
+ * user's own notes), and a HEAD that moved since the step started (queues/<id>/git.yaml) while no commit is named.
+ * Undefined when all is well, or when the checkout is not a git repository.
+ */
+function stepEndWarning(st: ProjectStore, s: SessionFile, queue: string, step: string, commit: string | undefined): string | undefined {
+  const cwd = s.cwd || process.cwd();
+  if (gitOut(cwd, ["rev-parse", "--is-inside-work-tree"]) !== "true") return undefined;
+  const notes = st.readProject().conversations.notes_dir;
+  const status = gitOut(cwd, ["status", "--porcelain", "--untracked-files=no", "--", ".", ...(notes ? [`:(exclude)${notes}`] : [])]);
+  const dirty = (status ?? "").split(/\r?\n/).map((l) => l.trim()).filter(Boolean).map((l) => l.replace(/^\S+\s+/, ""));
+  const out: string[] = [];
+  if (dirty.length) {
+    out.push(`${dirty.length} tracked file${dirty.length === 1 ? " has" : "s have"} uncommitted changes: ${dirty.slice(0, 10).join(", ")}${dirty.length > 10 ? ", …" : ""}. Commit the step's own files (by name) and name the commit with --commit; changes that are not the step's, leave and say so in the summary.`);
+  }
+  const start = st.readGit(queue)?.steps[step]?.at(-1)?.start;
+  const now = gitOut(cwd, ["rev-parse", "HEAD"]);
+  if (!commit && start && now && now !== start) {
+    out.push(`HEAD moved since the step started (${start.slice(0, 7)} -> ${now.slice(0, 7)}) but no commit is named: run nexus step done again with --commit ${now.slice(0, 7)} (the step's last commit).`);
+  }
+  return out.length ? `${out.join(" ")} (nexus help commits)` : undefined;
+}
+
+/** nexus step done: records the outcome; warns (never refuses) about an unclean end, and records the warning. */
+function stepDone(stepArg: string | undefined): void {
+  const st = store(); const s = session(st);
+  const step = need(stepArg, "<step>");
+  const queue = queueFor(st, s, step);
+  checkStep(st, queue, step);
+  const summary = need(o.summary, "--summary");
+  const warning = stepEndWarning(st, s, queue, step, o.commit);
+  emit(st, s, { type: "step.done", queue, step, summary, commit: o.commit, ...(warning ? { warning } : {}) });
+  console.log(`ok: step.done ${queue}/${step}`);
+  if (warning) console.log(`warning: ${warning}`);
+}
+
 function gitBranch(cwd: string): string | null {
   try { return execFileSync("git", ["branch", "--show-current"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() || null; }
   catch { return null; }
@@ -373,7 +416,7 @@ const commands: Record<string, () => void | Promise<void>> = {
     const sub = args[1];
     if (sub === "start") return stepEvent("step.started", args[2]);
     if (sub === "progress") return stepEvent("step.progress", args[2], () => ({ text: need(args[3], "<text>"), pct: o.pct ? Number(o.pct) : undefined }));
-    if (sub === "done") return stepEvent("step.done", args[2], () => ({ summary: need(o.summary, "--summary"), commit: o.commit }));
+    if (sub === "done") return stepDone(args[2]);
     if (sub === "failed") return stepEvent("step.failed", args[2], () => ({ reason: need(o.reason, "--reason") }));
     throw new UsageError("nexus step start|progress|done|failed <step>");
   },

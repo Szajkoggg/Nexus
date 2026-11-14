@@ -318,7 +318,7 @@ Every line:
 | `review.marked` | `queue`, `step`, `path`, `accepted` | User only: a review picture marked accepted (or the mark taken back). A mark only: it does not accept the step |
 | `review.commented` | `queue`, `step`, `path`, `text`, `to` (`send_back`, `note`, `orchestrator`), `note_step?` | User only: a comment on a review picture, and where it went (see "Review pictures") |
 | `check.result` | `queue`, `step`, `name`, `ok`, `summary` | One check's outcome |
-| `step.done` | `queue`, `step`, `summary`, `commit?` | Acceptance met; the step's work is finished |
+| `step.done` | `queue`, `step`, `summary`, `commit?`, `warning?` | Acceptance met; the step's work is finished. `warning`: what `nexus step done` warned about at the step's end (see the CLI) |
 | `step.failed` | `queue`, `step`, `reason` | The step cannot be finished as written |
 | `queue.stop` | `queue`, `step`, `condition`, `reason` | A stop condition was met; the engine halts the queue |
 | `question.asked` | `queue?`, `step?`, `qid`, `text`, `options?`, `can_continue` | A question; `can_continue` says whether independent work remains |
@@ -606,7 +606,7 @@ nexus review add W3 tmp/review/w3/lit.png --before tmp/review/w3/unlit.png --lab
 nexus help review                              # the standard for review material (nexus help: the topics)
 nexus help summaries|questions|refusals|commits   # the other standards
 nexus check W3 core-tests --ok --summary "548 passed"
-nexus step done W3 --summary "No floating body on any fixture" [--commit 1a2b3c]
+nexus step done W3 --summary "No floating body on any fixture" [--commit 1a2b3c]   # warns at an unclean end
 nexus step failed W3 --reason "..."
 nexus stop W3 --condition "user decision" --reason "..."
 nexus ask "Canyon joints: vertical only, or also inclined?" [--option ...] [--can-continue]
@@ -644,6 +644,13 @@ the dashboard and the run digest read it there. Workers may not write under `.ne
 prompt asks for the report in the project's **folder for reports**, outside every working tree and repository:
 `<system temporary directory>/nexus-reports/<project>/<queue>.md` (`reportFile`; a Codex worker gets that folder as a
 writable root). Once copied, a source in that folder is removed; a source anywhere else is kept.
+
+`nexus step done` checks the step's end by the `commits` standard and **warns, never refuses**: in the session's
+working directory (when it is a git repository), tracked files with uncommitted changes (untracked files do not count,
+nor the thinking partners' notes folder, `conversations.notes_dir`, since the main checkout also holds the user's own
+notes), and a HEAD that moved since the step started (the round's `start` in `queues/<id>/git.yaml`) while no
+`--commit` is given. The warning names the files or the commits and says what to do; it is printed after `ok:` and
+recorded as `warning` on the `step.done` event (the session's own log). Nothing else changes: the step is done.
 
 `nexus help <topic>` prints one of Nexus's standards (needs no session or project, records nothing); `nexus help`
 alone prints the commands and the topics. The topics live in `packages/cli/src/help.ts`:
