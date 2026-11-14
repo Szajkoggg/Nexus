@@ -894,8 +894,9 @@ reason), `stopped` (a `queue.stop`, with its reason), `queue_done` and `queue_ca
 or cancelled and whose last step finished, else whose run ended, after the time; `text` its title, `report` the path
 of its report, for the file endpoint), `refused` (refusals, one line per queue and step with `count`, `text` the tool
 and input of the latest) and `retried` (activity entries of kind `retry`, one line per step with `count`, `text` the
-latest). `running` lists the queues whose run is running, pausing or waiting for a retry or the usage window (not
-one waiting for an approval: that one waits for the user, as an attention item of kind `approval`), each
+latest). `running` lists the queues that run now (`runsNow`, the same as the dashboard's "running" status and the
+rail's "Running in", queue FU): the run is running or pausing, and no review, blocking question or revision waiting
+for approval holds it (a run waiting for a retry, the usage window or an approval is not running), each
 `{ project, project_name, queue, step?, since? }` (`since`: when the step's latest stretch at work began). `usage` is
 the usage line's numbers since the time (`usageSince`), from `<NEXUS_HOME>/turns.jsonl` and the runs now:
 `{ turns, peak_5h?, now_7d?, waits, wait_ms }`: how many turns ended in the period; the highest 5-hour utilization

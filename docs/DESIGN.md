@@ -825,7 +825,8 @@ session's refusals and activity, and taken a request per project. It has, in a 3
 - a greeting and the time it counts from; **Mark as seen**;
 - **four numbers** (`digestTiles` in `apps/web/src/digest.ts`, pure, unit tested): steps finished (and queues done)
   and queues stopped since the time, then what waits now (by kind) and what runs now (the first with how long it has
-  been at its step);
+  been at its step; by the rail's definition, `runsNow`, so a run waiting for a retry or the usage window is not
+  counted: queue FU);
 - **what happened, newest first**: time, the step or queue, the outcome in a word or two with its colour (`outcome`:
   "done", "stopped at W4c", "queue done", "2 refused actions", "retried twice"), its words and project; six lines,
   the rest one click away; a tap opens the item, a finished queue's report has "report ▸";

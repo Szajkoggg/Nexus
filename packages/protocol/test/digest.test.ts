@@ -45,7 +45,7 @@ test("refused actions and retries: one line per step with how many, at the lates
   assert.equal(d[2]!.text, "overloaded; went on");
 });
 
-test("across projects the lines merge newest first; what is at work now, with since when", () => {
+test("across projects the lines merge newest first; what runs now, with since when", () => {
   const a = { at: T("08:00"), project: "a", project_name: "A", kind: "done", text: "" } as DigestEvent;
   const b = { at: T("09:00"), project: "b", project_name: "B", kind: "stopped", text: "" } as DigestEvent;
   assert.deepEqual(newestFirst([a, b]).map((e) => e.project), ["b", "a"]);
@@ -54,10 +54,18 @@ test("across projects the lines merge newest first; what is at work now, with si
     queue("P", "running", { run: { state: "paused", step: "P1" } }),
     queue("U", "waiting", { run: { state: "usage_wait", started_at: T("06:00") }, current_step: "U2", steps: [] }),
     queue("AW", "running", { run: { state: "approval_wait", step: "AW1", started_at: T("06:00") }, steps: [] }), // waits for the user
+    queue("PS", "running", { run: { state: "pausing", step: "PS1", started_at: T("09:00") }, steps: [{ id: "PS1", status: "running", segments: [{ start: T("09:30") }] }] }),
+    queue("RT", "running", { run: { state: "retry_wait", step: "RT1", started_at: T("09:00") }, steps: [] }),
+    queue("RV", "running", { run: { state: "running", step: "RV1", started_at: T("09:00") }, steps: [{ id: "RV1", status: "review", review_with: "orchestrator", segments: [] }] }),
+    queue("QU", "waiting", { run: { state: "running", step: "QU1", started_at: T("09:00") }, steps: [{ id: "QU1", status: "waiting", segments: [] }], questions: [{ state: "open", can_continue: false }] }),
+    queue("QC", "running", { run: { state: "running", step: "QC1", started_at: T("09:00") }, steps: [{ id: "QC1", status: "running", segments: [] }], questions: [{ state: "open", can_continue: true }] }),
   ]);
+  // Only runs that go and that nothing holds (runsNow): as the rail's "Running in" (queue FU). The usage window, a
+  // retry, a review or a blocking question is not running.
   assert.deepEqual(projectRunning(s), [
     { project: "p", project_name: "Proj", queue: "SF", step: "SF3", since: T("11:20") },
-    { project: "p", project_name: "Proj", queue: "U", step: "U2", since: T("06:00") },
+    { project: "p", project_name: "Proj", queue: "PS", step: "PS1", since: T("09:30") },
+    { project: "p", project_name: "Proj", queue: "QC", step: "QC1", since: T("09:00") },
   ]);
 });
 

@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { digestTiles, hasNews, outcome, usageLine } from "../src/digest.ts";
-import type { DigestEvent } from "@nexus/protocol/digest";
+import { projectRunning, type DigestEvent } from "@nexus/protocol/digest";
 
 const T = (hhmm: string) => `2026-11-13T${hhmm}:00.000Z`;
 const ev = (at: string, kind: DigestEvent["kind"], over: Partial<DigestEvent> = {}): DigestEvent =>
@@ -48,4 +48,18 @@ test("the usage line: the 5-hour peak, the 7-day window now, the waits; what is 
   assert.match(usageLine({ turns: 3, peak_5h: 1, now_7d: 0.5, waits: 2, wait_ms: 65 * 60_000 }), /^Usage: 5-hour window peak 100%, 7-day window now 50%, 2 waits \(1 ?h 5 ?min in all\)$/);
   assert.match(usageLine({ turns: 3, now_7d: 0.07, waits: 1, wait_ms: 20 * 60_000 }), /^Usage: 7-day window now 7%, 1 wait \(20 ?min\)$/);
   assert.equal(usageLine({ turns: 0, waits: 0, wait_ms: 0 }), "Usage: no agent turns");
+});
+
+test("the running-now tile counts what runs, as the rail does: not a run waiting for the usage window or a retry", () => {
+  const state = {
+    project: { id: "demo", name: "Demo app" },
+    queues: [
+      { id: "RN", status: "running", approved: true, revision: 1, questions: [], run: { state: "running", step: "RN1", started_at: T("10:00") }, steps: [{ id: "RN1", status: "running", segments: [{ start: T("10:20") }] }] },
+      { id: "UW", status: "running", approved: true, revision: 1, questions: [], run: { state: "usage_wait", step: "UW1", started_at: T("09:00") }, steps: [{ id: "UW1", status: "running", segments: [] }] },
+      { id: "RT", status: "running", approved: true, revision: 1, questions: [], run: { state: "retry_wait", step: "RT1", started_at: T("09:00") }, steps: [{ id: "RT1", status: "running", segments: [] }] },
+    ],
+  } as unknown as Parameters<typeof projectRunning>[0];
+  const tiles = digestTiles([], [], projectRunning(state), new Date(T("11:00")));
+  assert.equal(tiles.running.n, 1);
+  assert.match(tiles.running.text, /^running now · RN1, 40 ?min in$/);
 });

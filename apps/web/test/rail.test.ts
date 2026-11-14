@@ -3,6 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { atWork, finishedToday, shortStatus } from "../src/rail.ts";
 import { queueStatus } from "../src/queueStatus.ts";
+import { runsNow } from "@nexus/protocol/digest";
 
 type Step = { id: string; status: string; started_at?: string; finished_at?: string; review_with?: "orchestrator" | "user" };
 const q = (id: string, status: string, over: Record<string, unknown> = {}) =>
@@ -27,6 +28,9 @@ test("running in the project: only runs that go (running, pausing); waiting, rev
     q("OR", "running", { steps: [{ id: "OR1", status: "review", review_with: "orchestrator" }], run: { state: "running", step: "OR1" } }),
   ];
   assert.deepEqual(atWork(queues).map((x) => [x.queue.id, shortStatus(x.status)]), [["SF", "1/3"], ["PS", "pausing"]]);
+  // The digest's "running now" counts by the same definition (runsNow, on the server): the two numbers never differ.
+  const full = queues.map((x) => ({ approved: true, revision: 1, ...x }) as unknown as Parameters<typeof runsNow>[0] & { id: string });
+  assert.deepEqual(full.filter(runsNow).map((x) => x.id), atWork(queues).map((x) => x.queue.id));
 });
 
 test("the status in a few words", () => {

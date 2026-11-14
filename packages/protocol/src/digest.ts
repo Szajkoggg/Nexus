@@ -2,8 +2,7 @@
 // steps done or failed, queues stopped, done or cancelled (with their report), refused actions and retries. The
 // server serves it across projects (GET /api/digest?since=); this part is pure and unit tested.
 import type { Activity, Event, Refusal, TurnRecord } from "./schemas.ts";
-import { HOLDING_RUN_STATES } from "./times.ts";
-import type { ProjectState } from "./state.ts";
+import type { ProjectState, QueueView } from "./state.ts";
 
 export type DigestKind = "done" | "failed" | "stopped" | "queue_done" | "queue_cancelled" | "refused" | "retried";
 
@@ -88,12 +87,24 @@ export function projectDigest(input: ProjectDigestInput, since: string): DigestE
 export const newestFirst = (events: DigestEvent[]) => events.sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
 
 /**
- * The project's queues at work now: a run that holds its session (HOLDING_RUN_STATES), except one waiting for an
- * approval: that one waits for the user (an attention item of kind approval), it is not running.
+ * Whether a queue runs now: its run goes (running, or pausing after its step) and nothing holds it, the same as the
+ * dashboard's honest status "running" (apps/web/src/queueStatus.ts; the rail's "Running in" lists these). Not running:
+ * a stopped or cancelled queue, one whose newer revision waits for approval, a step waiting for a review (the user's
+ * or the orchestrator's) or for an answer to a blocking question; and a run waiting for a retry, the usage window or
+ * an approval, paused, halted or finished. Decided 2026-11-14, queue FU: the digest's "running now" counts the same.
  */
+export function runsNow(q: Pick<QueueView, "status" | "approved" | "revision" | "run" | "steps" | "questions">): boolean {
+  if (!q.run || (q.run.state !== "running" && q.run.state !== "pausing")) return false;
+  if (q.status === "cancelled" || q.status === "stopped") return false;
+  if (q.approved === false && q.status !== "done" && q.status !== "draft" && ((q.revision ?? 1) > 1 || q.status !== "proposed")) return false;
+  if (q.steps.some((s) => s.status === "review")) return false;
+  return !q.questions.some((x) => (x.state === "open" || x.state === "escalated") && !x.can_continue);
+}
+
+/** The project's queues running now (runsNow), each with its step and since when it has been at it. */
 export function projectRunning(state: ProjectState): DigestRunning[] {
   return state.queues
-    .filter((q) => q.run && HOLDING_RUN_STATES.includes(q.run.state) && q.run.state !== "approval_wait")
+    .filter(runsNow)
     .map((q) => {
       const step = q.run!.step ?? q.current_step;
       const since = step ? q.steps.find((s) => s.id === step)?.segments.at(-1)?.start ?? q.run!.started_at : q.run!.started_at;
