@@ -9,6 +9,7 @@ import { rich, t, type Key } from "../i18n.ts";
 import { CHOICES, readChoice, setChoice, type ThemeChoice } from "../theme.ts";
 import { EDITOR_CHOICES, readEditor, setEditor, type Editor } from "../editor.ts";
 import { levelTitle } from "./Levels.tsx";
+import { PlannedDeployCard, type PlannedDeploy } from "./DeployPlan.tsx";
 
 const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 
@@ -445,6 +446,8 @@ export interface ServerInfo {
   max_running?: number;
   /** The user's away mode now (PROTOCOL.md, "Away mode"). */
   away?: { on: boolean; since?: string; until?: string };
+  /** The planned deploy, if any (PROTOCOL.md, "Planned deploys"). */
+  plan?: PlannedDeploy | null;
 }
 
 const PUSH_TONE = { pushed: "text-ok", failed: "text-danger", skipped: "text-fg-2" } as const;
@@ -494,6 +497,10 @@ export function ServerSection({ info, onChanged }: { info: ServerInfo | undefine
           {u.error && <div className="mt-1 whitespace-pre-wrap text-danger">{u.error}</div>}
         </div>
       )}
+      <div className="mt-3 rounded-lg bg-canvas p-3">
+        {info.plan ? <PlannedDeployCard plan={info.plan} onChanged={onChanged} framed={false} />
+          : <p className="text-xs text-fg-3">{t("settings.server.noPlan")}</p>}
+      </div>
       <div className="mt-3 flex flex-wrap items-center gap-2">
         {!busy && <Button onClick={() => void call("/api/server/update")}>{t("settings.server.updateButton")}</Button>}
         {!busy && <Button variant="quiet" onClick={() => { if (confirm(t("settings.server.nowConfirm"))) void call("/api/server/update", { now: true }); }}>{t("settings.server.now")}</Button>}

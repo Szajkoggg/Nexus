@@ -309,6 +309,22 @@ the live worktree back, rebuilds and takes the port again. The settings panel th
 reason and "rolled back to <commit>", and your devices get a notification. There is nothing to undo by hand: fix the
 commit and update again. After a restart the server writes its log to `%APPDATA%\Nexus\server.log`.
 
+A deploy can also wait. Ask the orchestrator to deploy after a step ("deploy once PD3 is in"), after a whole queue,
+or at a time ("deploy at 6:00, and by 7:00 at the latest"), or plan it yourself: `nexus server update --after
+<queue>[/<step>]`, or `--at <HH:MM|"YYYY-MM-DD HH:MM"> [--deadline <time>]`. One plan at a time.
+- After a step: the deploy starts the moment the step is done (or, if it waits for your review, once accepted). Its
+  queue opens no next step until the deploy is done, then goes on by itself.
+- After a queue: only once every step is closed, its closing step included. A stopped or failed step means no deploy.
+- At a time: from then no new step starts and the deploy waits for the running ones. At the deadline, steps still
+  running are interrupted and continue after the restart; without a deadline it simply waits.
+- With provisional work set not to count, a planned deploy waits until you have confirmed the provisional work it
+  would include; meanwhile only its own queue waits.
+
+The plan shows at the top of the right rail (the Waiting tab on the phone) and in the Nexus section of the global
+settings: what it waits for, and Cancel plan. If its step fails, stops or is rejected, or the update fails, the plan
+is dropped and you get a notification. It stays across a restart of the server; `nexus server status` shows it, and
+`nexus server cancel-plan` cancels it.
+
 Once an update of `main` is up, Nexus pushes the deployed commit to GitHub, to the upstream of `main`. It never
 forces: if GitHub's `main` has commits the deployed one lacks, the push is refused. It never asks for credentials:
 git must already be able to push without a prompt, or the push counts as failed after at most 60 seconds. The settings

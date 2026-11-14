@@ -8,6 +8,7 @@ import { Rail, RAIL } from "./components/Rail.tsx";
 import { RefsProvider } from "./components/Refs.tsx";
 import { AttentionPanel, attentionTarget, NotifyToggle, useNotifications, WaitingList } from "./components/Attention.tsx";
 import { AwaySign, AwaySwitch } from "./components/Levels.tsx";
+import { PlannedDeployCard } from "./components/DeployPlan.tsx";
 import { ContextBar, UsageMeter } from "./components/Run.tsx";
 import { ChatPanel, ConversationsPanel, DeskHead, useOrchestrator, type Desk, type Unread } from "./components/Chat.tsx";
 import { hasUnread, placeKey, readPlace, unreadCount, usePlaces } from "./chatPlace.ts";
@@ -252,6 +253,7 @@ export function App() {
 
         <main className={scrolls ? "@container scroll-thin min-h-0 flex-1 overflow-y-auto px-4 py-4" : "flex min-h-0 flex-1 flex-col"}>
           {scrolls && banners}
+          {tab === "waiting" && server?.plan && <div className="mb-4"><PlannedDeployCard plan={server.plan} onChanged={() => setTick((n) => n + 1)} names={new Map((projects ?? []).map((p) => [p.id, p.name]))} /></div>}
           {tab === "waiting" && <div className="mb-4 empty:hidden">{digest}</div>}
           {tab === "waiting" && <WaitingList projects={projects ?? []} onOpen={openWaiting} onChoose={(w, o) => { if (w.qid) chooseOption(w.qid, o); openWaiting(w); }} />}
           {tab === "queues" && queuesPage}
@@ -288,7 +290,7 @@ export function App() {
       </button>
     ),
   };
-  const railProps = { projects: projects ?? [], state, queuesShown: view === "queues", onOpenWaiting: openWaiting, digest };
+  const railProps = { projects: projects ?? [], state, queuesShown: view === "queues", onOpenWaiting: openWaiting, digest, plan: server?.plan, onChanged: () => setTick((n) => n + 1) };
   const besideShown = !wide && ((itemShown && !fullApproval) || waitingOpen);
   const alerts = (projectsError || projects?.length === 0 || error) && <div className="px-6 pt-4">{banners}</div>;
   return (

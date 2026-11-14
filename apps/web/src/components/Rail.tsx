@@ -10,6 +10,7 @@ import { WaitingCards } from "./Attention.tsx";
 import { TONE } from "./QueueRow.tsx";
 import { Clock, CloseButton } from "./ui.tsx";
 import { AwaySign } from "./Levels.tsx";
+import { PlannedDeployCard, type PlannedDeploy } from "./DeployPlan.tsx";
 import { nav } from "../nav.ts";
 import { t } from "../i18n.ts";
 
@@ -19,7 +20,7 @@ export const RAIL = "23.25rem";
 const Label = ({ children, tone = "text-fg-3" }: { children: ReactNode; tone?: string }) =>
   <h2 className={`text-[11px] font-semibold uppercase tracking-wider ${tone}`}>{children}</h2>;
 
-export function Rail({ projects, state, queuesShown, onOpenWaiting, onClose, digest }: {
+export function Rail({ projects, state, queuesShown, onOpenWaiting, onClose, digest, plan, onChanged }: {
   projects: ProjectSummary[]; state: ProjectState | undefined;
   /** The project's queues show in the middle: "All queues" is pressed. */
   queuesShown: boolean;
@@ -28,6 +29,9 @@ export function Rail({ projects, state, queuesShown, onOpenWaiting, onClose, dig
   onClose?: () => void;
   /** The morning digest, at the rail's top when there is something new. */
   digest?: ReactNode;
+  /** The planned deploy (one for the whole server), at the rail's top; Cancel reloads through onChanged. */
+  plan?: PlannedDeploy | null;
+  onChanged?: () => void;
 }) {
   const project = state?.project;
   const waiting = projects.reduce((n, p) => n + p.attention.length, 0);
@@ -38,6 +42,7 @@ export function Rail({ projects, state, queuesShown, onOpenWaiting, onClose, dig
     <div className="flex h-full min-h-0 flex-col" aria-label={t("rail.label")}>
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-3 pb-4">
         {state?.away.on && <div className="mt-3 rounded-lg border border-review/30 bg-review/5 px-3 py-2"><AwaySign away={state.away} long /></div>}
+        {plan && <div className="mt-3"><PlannedDeployCard plan={plan} onChanged={onChanged ?? (() => {})} names={new Map(projects.map((p) => [p.id, p.name]))} /></div>}
         {digest && <div className="pt-3 empty:hidden">{digest}</div>}
         <div className="flex items-center gap-2 px-1 pb-2.5 pt-4">
           <Label tone="text-warn">{t("waiting.titleCount", { count: waiting })}</Label>
