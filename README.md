@@ -252,6 +252,11 @@ it appears under "Waiting for you". The plan shows on both queues and can be can
 why, and if B is not approved when A is done, B waits for your approval and starts once you give it. If A is stopped
 or cancelled, B waits and it appears under "Waiting for you". What you set in the plan is yours: the orchestrator
 builds around it and may only propose a change, which appears under "Waiting for you" too.
+To change the order, use "After…" on a queue in the plan (or drag it onto another; onto "Next" to put it first): the
+queue then waits for the one you chose, and the queues that waited for it wait for what it waited for before, as when
+you move an item in a list. An approved queue outside the plan is listed under it, with "After…" to put it in. The
+orchestrator's proposal shows on the queue and in "Waiting for you" with Accept and Decline; ↩ on a dependency you set
+("after A · set by you") hands it back to the orchestrator.
 Queues run side by side only in worktrees of their own: never two in one checkout, and no more at once, across all
 projects, than "Queues running at once" in the settings panel's Nexus section (Global tab) (2 by default; a queue waiting for your
 review or an answer does not count). A queue paused or waiting keeps its checkout. Starting a queue whose checkout

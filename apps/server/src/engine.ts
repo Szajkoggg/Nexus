@@ -469,6 +469,9 @@ export class Engine implements Member {
    */
   plan(queueId: string, o: PlanOptions): string { return this.scheduler.plan(queueId, o); }
 
+  /** The user's reorder: `queueId` after `after` (null: none before it), as in a list (Scheduler.move). */
+  move(queueId: string, after: string | null): string { return this.scheduler.move(queueId, after); }
+
   /**
    * Plans to start `queueId` at a time (`o.at`, ISO 8601, in the future), or when the usage window of the runtime it
    * would run on resets (`o.at` = "usage-reset"). Replaces an earlier plan of the queue. Returns what happened.

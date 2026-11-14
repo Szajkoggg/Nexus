@@ -390,16 +390,21 @@ app.post("/api/projects/:id/queues/:queue/run", act((st, b, p) => {
   }
 }));
 // The user's answers about the plan (PROTOCOL.md, "The plan"): accept or decline the orchestrator's proposal for the
-// queue, or hand a dependency they set back to the orchestrator (`after`: one predecessor; without it, all of them).
+// queue, or hand a dependency they set back to the orchestrator (`after`: one predecessor; without it, all of them);
+// and the user's reorder: `move` the queue after `after` (null: with no queue before it), as in a list.
 app.post("/api/projects/:id/queues/:queue/plan", act((st, b, p) => {
   switch (b.action) {
+    case "move": {
+      if (b.after !== null && (typeof b.after !== "string" || !b.after)) throw new ActionError("after is a queue id, or null for none before it");
+      return { message: engineOf(st).move(p("queue"), b.after as string | null) };
+    }
     case "accept": return { message: acceptPlanProposal(st, p("queue")) };
     case "decline": return { message: declinePlanProposal(st, p("queue")) };
     case "hand_back": {
       if (b.after !== undefined && (typeof b.after !== "string" || !b.after)) throw new ActionError("after is a queue id");
       return { message: handBackPlan(st, p("queue"), b.after as string | undefined) };
     }
-    default: throw new ActionError("action is accept, decline or hand_back");
+    default: throw new ActionError("action is move, accept, decline or hand_back");
   }
 }));
 // Continue on a stopped queue: the user's lift of the stop, then the run goes on (only from the dashboard, as every write).

@@ -468,6 +468,12 @@ The Queues view shows the plan above the queue lists (`apps/web/src/plan.ts`, `c
 - On each planned queue what it waits for, what only the user can do first: a failed start, its approval, a
   predecessor stopped or gone; then its time, the usage window, its checkout or the limit. Running ones show their
   honest status (queueStatus), which already says review, usage window or stop.
+- Reordering is a list's, as the user decided: moving B after Y takes B out of where it was (those after it close up
+  to B's old predecessors) and puts it after Y. The rule lives in the protocol (`reorderedFollowers`) and the server
+  applies it, so the dashboard's "After…" and dragging only name the move. Dropping onto a queue means "after it";
+  dropping onto "Next" means first. Every entry a move writes is the user's, since the user made it.
+- Proposals and hand-backs act where the dependency shows (the card) and where the user looks for decisions (the
+  waiting list), with the same two buttons.
 
 ### Never two queues in one checkout
 

@@ -13,6 +13,8 @@ export interface PlanQueue extends Omit<QueueLike, "plan" | "start"> {
     used: boolean;
     created_at?: string;
     after: readonly { queue: string; by: "user" | "orchestrator"; done: boolean; cause?: "stopped" | "cancelled" | "missing" }[];
+    /** The orchestrator's proposal to change dependencies the user set, until the user decides. */
+    proposal?: { after: readonly string[]; reason: string };
   };
   start?: {
     at?: string; after?: string; usage?: "claude" | "codex"; created_at?: string;
@@ -42,6 +44,10 @@ export interface PlanNode {
   why: Why[];
   /** The queues it waits for, in its plan's order (an unused plan). */
   before: Before[];
+  /** The orchestrator's proposal for it, waiting for the user. */
+  proposal?: { after: readonly string[]; reason: string };
+  /** The user may move it in the plan: not in progress now. */
+  movable: boolean;
 }
 
 export interface PlanLayout {
@@ -141,6 +147,7 @@ export function planLayout(all: readonly PlanQueue[], now = new Date()): PlanLay
     nodes.set(id, {
       id, title: q.title, column: column.get(id)!, now: n, planned: isPlanned(q),
       status: queueStatus(q as QueueLike, now), why: n ? [] : whyOf(q, now), before: n ? [] : beforeOf(q),
+      ...(q.plan && !q.plan.used && q.plan.proposal ? { proposal: q.plan.proposal } : {}), movable: !n,
     });
   }
   const width = Math.max(0, ...[...nodes.values()].map((n) => n.column)) + 1;
@@ -161,6 +168,17 @@ export function planLayout(all: readonly PlanQueue[], now = new Date()): PlanLay
   const outside = all.filter((q) => !shown.has(q.id) && q.status === "approved" && q.approved !== false && !q.run)
     .map((q) => ({ id: q.id, title: q.title }));
   return { columns, edges, outside };
+}
+
+/**
+ * What the user may move a queue after: every other queue not ended (cancelled ones never come, done ones would start
+ * it at once: "first" says that), those in the plan's order first.
+ */
+export function moveTargets(l: PlanLayout, all: readonly PlanQueue[], queue: string): { id: string; title: string }[] {
+  const shown = planList(l).map((n) => n.id);
+  return all.filter((q) => q.id !== queue && !ENDED.has(q.status))
+    .sort((a, b) => (shown.indexOf(a.id) + 1 || 1e9) - (shown.indexOf(b.id) + 1 || 1e9) || a.id.localeCompare(b.id))
+    .map((q) => ({ id: q.id, title: q.title }));
 }
 
 /** The phone's list: the columns one after another, each in its order. */

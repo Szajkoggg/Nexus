@@ -2,7 +2,7 @@
 // queue waits, the queues shown because a planned one waits for them, and the approved ones outside the plan.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isNow, isPlanned, planLayout, planList, whyOf, type PlanQueue } from "../src/plan.ts";
+import { isNow, isPlanned, moveTargets, planLayout, planList, whyOf, type PlanQueue } from "../src/plan.ts";
 import { t } from "../src/i18n.ts";
 
 const q = (id: string, over: Partial<PlanQueue> = {}): PlanQueue => ({ id, title: `Queue ${id}`, status: "approved", steps: [], questions: [], approved: true, revision: 1, ...over });
@@ -63,4 +63,19 @@ test("why a planned queue waits: approval first; a predecessor stopped or gone; 
   assert.deepEqual(words(q("A", { start: { at: "2026-11-14T10:00:00", held: { kind: "limit", reason: "waits: 2 queues run, the limit is 2" } } })), ["waits: 2 queues run, the limit is 2"], "a held schedule: its time is past");
   assert.deepEqual(words(q("A", { start: { failed: { reason: "the queue is stopped" } } })), ["did not start: the queue is stopped"]);
   assert.deepEqual(words(q("A", { plan: after(["B", "user", true]) })), ["starts now"]);
+});
+
+test("moving: the targets are the other queues not ended, the plan's order first; the proposal and who may move", () => {
+  const all = [
+    q("RN", { status: "running", run: { state: "running" } }),
+    q("CL", { plan: { ...after(["RN", "user"]), proposal: { after: ["UW"], reason: "why" } } }),
+    q("AA"),
+    q("DN", { status: "done" }),
+    q("XX", { status: "cancelled" }),
+  ];
+  const l = planLayout(all);
+  assert.deepEqual(moveTargets(l, all, "CL").map((x) => x.id), ["RN", "AA"]);
+  const cl = l.columns[1]!.find((n) => n.id === "CL")!;
+  assert.deepEqual([cl.movable, cl.proposal], [true, { after: ["UW"], reason: "why" }]);
+  assert.equal(l.columns[0]![0]!.movable, false, "what runs now is not moved");
 });

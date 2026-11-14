@@ -1011,7 +1011,7 @@ from every agent session, and the others from every session but an orchestrator'
 | `PUT /api/projects/:id/queues/:q/steps/:s/level` | `level` (1, 2, 3 or null: the step's drafted level) | The user's review level of a step (`user_levels`); asks for no new approval, and later revisions keep it |
 | `POST /api/projects/:id/questions/:qid/answer` | `text`, `continue?` | The user's answer, routed to the asker |
 | `POST /api/projects/:id/queues/:q/run` | `action` (`start`, `pause`, `resume`, `stop`, `cancel_start`), `runtime?`, `model?`, `effort?`, `session?`, `after?`, `next?`, `at?` | Runs the queue through a Nexus-launched session (`session` continues an existing one). `start` with `after` (a queue id or a list): the user's place for the queue in the plan, it starts when those are done; with `next: true`: in the plan with none before it (`{message}`; see "The plan"); with `at` (ISO 8601, or `usage-reset`): a schedule (`{message}`); `cancel_start` takes the queue out of the plan (`{message}`) |
-| `POST /api/projects/:id/queues/:q/plan` | `action` (`accept`, `decline`, `hand_back`), `after?` | The user's answers about the queue's plan: accept or decline the orchestrator's proposal; hand a dependency the user set (`after`; without it, all of them) back to the orchestrator (`{message}`; see "The plan") |
+| `POST /api/projects/:id/queues/:q/plan` | `action` (`move`, `accept`, `decline`, `hand_back`), `after?` | The user's plan: `move` the queue after `after` (a queue id; `null`: with no queue before it), as in a list (see "The plan"); accept or decline the orchestrator's proposal; hand a dependency the user set (`after`; without it, all of them) back to the orchestrator (`{message}`) |
 | `POST /api/projects/:id/queues/:q/steps/:s/pictures/mark` | `path`, `accepted` | The user's mark on a review picture (`review.marked`) |
 | `POST /api/projects/:id/queues/:q/steps/:s/pictures/comment` | `path`, `text` | The user's comment on a review picture: a send-back or a note (see "Review pictures"); answers `{ ok, result: { message } }` |
 | `POST /api/projects/:id/queues/:q/steps/:s/reject` | `text?` | Reject (the user's): the step is rejected, the run pauses until a newer revision is approved; answers `{ ok, result: { message } }` |
@@ -1403,6 +1403,11 @@ in `start.yaml`.
   decision: you may not change that; keep it (--after A), or propose the change to the user: …"); entries it keeps
   stay as they were, new ones are its own. The orchestrator may not take out of the plan (`cancel-start`) a queue the
   user put in or made wait. Its own dependencies it changes freely.
+- The user reorders the plan as a list (decided 2026-11-14; `POST …/queues/:q/plan` with `move`, from the
+  dashboard's "After…" or by dragging): moving B after Y makes Y B's only predecessor, and every queue whose unused
+  plan waited for B waits for B's old predecessors instead (keeping its other ones; no repeats), those entries the
+  user's; `after: null` puts B first, with none before it. B's start options stay; a schedule goes. Refused like a
+  plan (B done, cancelled or running; Y unknown or cancelled; B after itself; a loop in the plan as it will be).
 - To change the user's, the orchestrator proposes: `nexus plan propose B [--after X]... --reason …` (event
   `plan.proposed`), the whole new list; refused when it drops no predecessor the user set ("set it yourself"). A new
   proposal replaces one waiting. The user gets an item of kind `plan` (`plan.proposal`: `after`, `reason`, `current`)

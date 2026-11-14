@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   ActionError, ProjectStore, acceptPlanProposal, approveQueue, declinePlanProposal, handBackPlan, inPlan, loadProjectState,
-  newId, newPlan, now, planLoop, proposePlan, checkPredecessors, type Event, type PlanFile,
+  newId, newPlan, now, planLoop, proposePlan, checkPredecessors, reorderedFollowers, type Event, type PlanFile,
 } from "../src/index.ts";
 
 function setup(ids: string[]) {
@@ -186,4 +186,23 @@ test("the chains from before the plan: read as a plan at once, and moved into pl
   assert.deepEqual([start.after, start.model, start.by], [undefined, "m", "orchestrator"]);
   assert.deepEqual(x.st.migrateChains(), [], "once");
   assert.deepEqual(x.queue("B").plan?.after.map((e) => e.queue), ["A"]);
+});
+
+test("reordering is a list's: the moved queue waits for the one chosen; those that waited for it wait for its old predecessors", () => {
+  const p = (after: [string, "user" | "orchestrator"][]): PlanFile => ({ protocol: 1, by: "user", created_at: "t0", updated_at: "t0", after: after.map(([queue, by]) => ({ queue, by, at: "t0" })), decisions: [] });
+  // A, then B, then C (and D waits for B and E).
+  const plans = new Map<string, PlanFile>([["B", p([["A", "orchestrator"]])], ["C", p([["B", "orchestrator"]])], ["D", p([["B", "user"], ["E", "orchestrator"]])]]);
+  // B after C: C and D wait for A instead of B (the user's now); D keeps E.
+  const moved = reorderedFollowers(plans, "B", "C", "t1");
+  assert.deepEqual([...moved.keys()], ["C", "D"]);
+  assert.deepEqual(moved.get("C")!.after, [{ queue: "A", by: "user", at: "t1" }]);
+  assert.deepEqual(moved.get("D")!.after.map((e) => [e.queue, e.by]), [["A", "user"], ["E", "orchestrator"]]);
+  assert.equal(moved.get("D")!.updated_at, "t1");
+  // B to the front: the same for those after it; B has no queue before it (set by the scheduler).
+  assert.deepEqual(reorderedFollowers(plans, "B", null, "t1").get("C")!.after.map((e) => e.queue), ["A"]);
+  // A queue with no predecessor moved: those after it lose it and wait for nothing more of it.
+  assert.deepEqual(reorderedFollowers(new Map([["C", p([["B", "user"]])]]), "B", "C", "t1").get("C")!.after, []);
+  // No repeats: one that waited for both the moved queue and its predecessor keeps the latter once.
+  assert.deepEqual(reorderedFollowers(new Map([["B", p([["A", "user"]])], ["C", p([["A", "orchestrator"], ["B", "user"]])]]), "B", "X", "t1").get("C")!.after.map((e) => [e.queue, e.by]), [["A", "orchestrator"]]);
+  assert.throws(() => reorderedFollowers(plans, "B", "B", "t1"), refused(/cannot start after itself/));
 });

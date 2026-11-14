@@ -8,6 +8,7 @@ import { OPEN_BUTTON, stopVersion, useStopActions } from "./Stop.tsx";
 import { stepThatMatters } from "./QueueRow.tsx";
 import { BatchRows } from "./Levels.tsx";
 import { nav } from "../nav.ts";
+import { PlanRow } from "./Plan.tsx";
 
 const KIND: Record<AttentionItem["kind"], { key: Key; tone: string }> = {
   question: { key: "waiting.kind.question", tone: "text-warn bg-warn/15" },
@@ -108,6 +109,7 @@ export function AttentionPanel({ project, items, queues, pushAccepted, onOpen, o
                 <StopRow project={project} a={{ ...a, lift: a.lift }} onOpen={() => onOpen(a)} onChanged={onChanged} pushAccepted={pushAccepted} queue={q} />
               )}
               {a.kind === "provisional" && <BatchRows project={project} item={a} onOpen={(queue, step) => nav.item(project, queue, step)} onChanged={onChanged} />}
+              {a.kind === "plan" && <PlanRow project={project} a={a} onChanged={onChanged} />}
             </div>
           );
         })}
@@ -148,6 +150,7 @@ export function WaitingList({ projects, onOpen, onChoose }: {
             </button>
             {a.lift && a.queue && <StopRow project={a.project} a={{ ...a, lift: a.lift }} onOpen={() => onOpen(a)} />}
             {a.kind === "provisional" && <BatchRows project={a.project} item={a} onOpen={(queue, step) => nav.item(a.project, queue, step)} />}
+            {a.kind === "plan" && <PlanRow project={a.project} a={a} />}
             {onChoose && a.kind === "question" && !!a.options?.length && (
               <div className="flex flex-wrap gap-2 px-3.5 pb-3">
                 {a.options.map((o, i) => (
@@ -189,6 +192,7 @@ export function WaitingCards({ projects, current, onOpen }: { projects: ProjectS
           </button>
           {a.lift && a.queue && <div className="-mt-1"><StopRow project={a.project} a={{ ...a, lift: a.lift }} onOpen={() => onOpen(a)} /></div>}
           {a.kind === "provisional" && <div className="-mx-0.5"><BatchRows project={a.project} item={a} onOpen={(queue, step) => nav.item(a.project, queue, step)} /></div>}
+          {a.kind === "plan" && <div className="-mx-3.5 -mb-3"><PlanRow project={a.project} a={a} /></div>}
         </li>
       ))}
     </ul>

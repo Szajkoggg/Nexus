@@ -185,3 +185,21 @@ test("the orchestrator cannot change what the user set: it builds around it, pro
     await x.until("D after B", () => x.store.readPlan("D")?.after.map((e) => e.queue).join() === "B");
   } finally { x.stop(); }
 });
+
+test("the user's reorder: B after C makes those after B wait for B's predecessor; to the front, B starts once it may", async () => {
+  const x = setup({ A: ["noop"], B: ["done"], C: ["noop"], D: ["noop"] });
+  try {
+    x.engine.plan("B", { after: ["A"], by: "orchestrator", model: "m1" });
+    x.engine.plan("C", { after: ["B"], by: "orchestrator" });
+    x.engine.plan("D", { after: ["B"], by: "user" });
+    assert.match(x.engine.move("B", "C"), /^queue B starts when queue C is done; C now waits for A; D now waits for A$/);
+    assert.deepEqual(x.store.readPlan("B")!.after.map((e) => [e.queue, e.by]), [["C", "user"]]);
+    assert.deepEqual(x.store.readPlan("C")!.after.map((e) => [e.queue, e.by]), [["A", "user"]]);
+    assert.deepEqual(x.store.readPlan("D")!.after.map((e) => [e.queue, e.by]), [["A", "user"]]);
+    assert.equal(x.store.readStart("B")!.model, "m1", "the start's options stay");
+    assert.throws(() => x.engine.move("B", "B"), /cannot start after itself/);
+    // To the front: nothing before it, so it starts now.
+    assert.match(x.engine.move("B", null), /^queue B started now in session /);
+    await x.until("B to finish", () => x.queue("B").run?.state === "finished", LONGER.run);
+  } finally { x.stop(); }
+});

@@ -89,6 +89,9 @@ export class EdgeBrowser implements Browser {
     return r.result.value;
   }
 
+  /** Evaluates an expression in the dashboard (a script that checks the page, not the capture's own views). */
+  evaluate<T>(expr: string): Promise<T> { return this.js<T>(expr); }
+
   async open(url: string, width: number, height: number): Promise<void> {
     this.framed = width < NARROWEST;
     this.frame = { width, height };

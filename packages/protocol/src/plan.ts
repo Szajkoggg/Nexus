@@ -109,10 +109,10 @@ export function planLoop(edges: ReadonlyMap<string, readonly string[]>, queue: s
 const loopText = (path: string[]) => path.slice(0, -1).map((x, i) => `${x} waits for ${path[i + 1]}`).join(", ");
 
 /**
- * Checks a new list of predecessors for `queue`: each exists, is not the queue itself nor cancelled, and the plan gets
- * no loop. Returns the list without repeats.
+ * Checks a new list of predecessors for `queue`: each exists, is not the queue itself nor cancelled, and (unless `loop`
+ * is false) the plan gets no loop. Returns the list without repeats.
  */
-export function checkPredecessors(state: Pick<ProjectState, "queues">, queue: string, after: readonly string[]): string[] {
+export function checkPredecessors(state: Pick<ProjectState, "queues">, queue: string, after: readonly string[], o: { loop?: boolean } = {}): string[] {
   const list = [...new Set(after)];
   for (const id of list) {
     if (id === queue) throw new ActionError("a queue cannot start after itself");
@@ -120,7 +120,8 @@ export function checkPredecessors(state: Pick<ProjectState, "queues">, queue: st
     if (!a) throw new ActionError(`unknown queue ${id}`, 404);
     if (a.status === "cancelled") throw new ActionError(`queue ${id} is cancelled: it will never be done`, 409);
   }
-  const loop = planLoop(planEdges(state), queue, list);
+  // A reorder checks its loop on the plan as it will be (reorderedFollowers).
+  const loop = o.loop === false ? undefined : planLoop(planEdges(state), queue, list);
   if (loop) throw new ActionError(`that would be a loop in the plan: ${loopText(loop)}`, 409);
   return list;
 }
@@ -174,6 +175,37 @@ const listText = (ids: readonly string[]) => ids.length ? `after ${ids.join(", "
 export function proposalText(queue: string, plan: Pick<PlanFile, "after" | "proposal">): string {
   const p = plan.proposal!;
   return `The orchestrator proposes queue ${queue} ${listText(p.after)} instead of ${listText(plan.after.map((e) => e.queue))}: ${p.reason}`;
+}
+
+/**
+ * The user's reorder, as in a list (decided 2026-11-14): moving `queue` after `after` (null: to the front, with no
+ * queue before it) makes `after` its only predecessor, and every queue that waited for it waits for its old
+ * predecessors instead (keeping its other ones). `plans`: the unused plans by queue (used ones are history and stay).
+ * Returns the plans of the queues that waited for it, changed (the moved queue's own plan is set by the scheduler,
+ * which may start it); the entries that take the moved queue's place are the user's. Throws when the plan would get a
+ * loop.
+ */
+export function reorderedFollowers(plans: ReadonlyMap<string, PlanFile>, queue: string, after: string | null, at: string): Map<string, PlanFile> {
+  if (after === queue) throw new ActionError("a queue cannot start after itself");
+  const old = plans.get(queue)?.after ?? [];
+  const out = new Map<string, PlanFile>();
+  for (const [id, plan] of plans) {
+    if (id === queue || !plan.after.some((e) => e.queue === queue)) continue;
+    const next: PlanEntry[] = [];
+    for (const e of plan.after) {
+      if (e.queue !== queue) { if (!next.some((x) => x.queue === e.queue)) next.push(e); continue; }
+      // In the moved queue's place: its old predecessors, as the user's now.
+      for (const o of old) {
+        if (o.queue !== id && !next.some((x) => x.queue === o.queue) && !plan.after.some((x) => x.queue === o.queue)) next.push({ queue: o.queue, by: "user", at });
+      }
+    }
+    out.set(id, { ...plan, after: next, updated_at: at });
+  }
+  const edges = new Map<string, string[]>([...plans].map(([id, p]) => [id, (out.get(id) ?? p).after.map((e) => e.queue)]));
+  edges.set(queue, after ? [after] : []);
+  const loop = after ? planLoop(edges, queue, [after]) : undefined;
+  if (loop) throw new ActionError(`that would be a loop in the plan: ${loopText(loop)}`, 409);
+  return out;
 }
 
 /**

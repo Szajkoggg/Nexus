@@ -3,7 +3,7 @@
 // engine owns the runs; the scheduler decides when a planned start comes due and asks the engine to start the queue. Also the long timers both use (ClockTimers): a retry or usage wait
 // of a run, and a schedule's time, armed on a clock tests can move.
 import {
-  ActionError, HOLDING_RUN_STATES, checkPredecessors, doneForPlan, effortIssue, formatClock, loadProjectState, newPlan, now, readUsage,
+  ActionError, HOLDING_RUN_STATES, checkPredecessors, doneForPlan, effortIssue, formatClock, loadProjectState, newPlan, now, readUsage, reorderedFollowers,
   type PlanBy, type ProjectState, type ProjectStore, type QueueView, type RunFile, type StartFile, type StartView,
 } from "@nexus/protocol";
 import type { StartOptions } from "./engine.ts";
@@ -164,6 +164,27 @@ export class Scheduler {
     if (block) return `${lead}queue ${q.id} ${waitingText(block)}; it starts by itself then${yours}`;
     return busy ? `queue ${q.id} starts when session ${o.session} is free (it runs queue ${busy.id}${doneText ? `; ${doneText}` : ""})${yours}`
       : `queue ${q.id} starts after the Nexus update${doneText ? ` (${doneText})` : ""}${yours}`;
+  }
+
+  /**
+   * The user's reorder (plan.ts, reorderedFollowers): `queueId` after `after` (null: with no queue before it); those
+   * that waited for it wait for its old predecessors. Its start's options stay; a schedule goes. Returns what happened.
+   */
+  move(queueId: string, after: string | null): string {
+    const state = loadProjectState(this.store);
+    const q = queueOf(state, queueId);
+    if (after) checkPredecessors(state, q.id, [after], { loop: false });
+    this.planOptions(state, q, {});
+    const plans = new Map(state.queues.flatMap((x) => {
+      const p = x.id === q.id || (x.plan && !x.plan.used) ? this.store.readPlan(x.id) : undefined;
+      return p && !p.started_at ? [[x.id, p] as const] : [];
+    }));
+    const followers = reorderedFollowers(plans, q.id, after, now());
+    for (const [id, p] of followers) this.store.writePlan(id, p);
+    const start = this.store.readStart(q.id);
+    const said = this.plan(q.id, { after: after ? [after] : [], by: "user", runtime: start?.runtime, model: start?.model, effort: start?.effort, session: start?.session });
+    const moved = [...followers.entries()].map(([id, p]) => `${id} now waits for ${p.after.length ? p.after.map((e) => e.queue).join(", ") : "nothing before it"}`);
+    return moved.length ? `${said}; ${moved.join("; ")}` : said;
   }
 
   /**

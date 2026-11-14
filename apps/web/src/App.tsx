@@ -161,7 +161,7 @@ export function App() {
   // The project's queues (the desktop's page; the phone's Queues tab, where what waits has a tab of its own).
   const queuesPage = <>
     {state && <RulesWarning key={state.project.id} project={state} />}
-    {state && <PlanView queues={state.queues} onOpen={(id) => projectId && nav.item(projectId, id)} />}
+    {state && <PlanView project={state.project.id} queues={state.queues} onOpen={(id) => projectId && nav.item(projectId, id)} onChanged={reload} />}
     {state && byGroup.map((g) => (
       <section key={g.title} className="mb-8">
         <div className="mb-3 flex items-baseline gap-3">

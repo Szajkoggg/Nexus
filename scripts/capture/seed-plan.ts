@@ -5,7 +5,7 @@
 // Now: RN runs (held "for an update", so the instance resumes it; its first step, FAKE: bglong, leaves background work
 // running, so the run stays running while the pictures are taken), UW waits for the usage window, RV has a step
 // waiting for the user's review, ST is stopped.
-// The plan: CL after RN (set by the user), MP after RN (the user's) and RV (the orchestrator's), DP after CL (the
+// The plan: CL after RN (set by the user; the orchestrator proposes UW instead), MP after RN (the user's) and RV (the orchestrator's), DP after CL (the
 // orchestrator's), AP after RN but its revision 2 waits for approval, SC at 22:00, WT after DN (done) but waits for
 // the checkout RN holds, XB after ST (stopped). NP is approved but not in the plan; DN is done.
 // It uses only what the protocol has had since queue PV1 (plan.yaml), so it also seeds the code of a base commit from
@@ -73,6 +73,8 @@ emit(user, 119, { type: "review.accepted", queue: "DN", step: "DN1" });
 // The plan.
 queue("CL", "Cliff paths", [["CL1", "Path mesh"], ["CL2", "Railings"]]);
 plan("CL", [["RN", "user"]], 40);
+// The orchestrator proposes to change the user's dependency: CL after UW instead of RN.
+st.writePlan("CL", { ...st.readPlan("CL")!, proposal: { at: ago(5), after: ["UW"], reason: "The cliff paths reuse the ambient beds of Hive sounds; the search does not touch them." } });
 queue("MP", "Map of the island", [["MP1", "Tiles"], ["MP2", "Legend"]]);
 plan("MP", [["RN", "user"], ["RV", "orchestrator"]], 38);
 queue("DP", "Deploy notes", [["DP1", "Notes"]]);
