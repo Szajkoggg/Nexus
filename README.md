@@ -185,6 +185,13 @@ A queue can be started when another one is done, at a time, or when the usage wi
 form (or the orchestrator's `nexus run B start --after A`, `--at "2026-11-14 22:00"`, `--at usage-reset`). A schedule
 missed while Nexus was not running does not start late; it appears under "Waiting for you". The plan shows on both queues and can be cancelled; if A halts it waits and says why,
 and if B is not approved when A is done, B does not start and the item appears under "Waiting for you".
+Queues run side by side only in worktrees of their own: never two in one checkout, and no more at once, across all
+projects, than "Queues running at once" in the settings panel's Nexus section (2 by default; a queue waiting for your
+review or an answer does not count). A queue paused or waiting keeps its checkout. Starting a queue whose checkout
+another queue holds, or over the limit, is refused with the reason. A chain or a schedule that comes due then waits
+instead: its row and the rail say "waits for the checkout" or "waits: limit reached", the plan on the queue (and
+`nexus status`) says which queue holds the checkout or how many run, and it starts by itself once it may, in the order
+the plans were made. A schedule waiting this way is not missed.
 A step in a queue may name its own runtime, model and effort (`runtime`, `model`, `effort` in the queue YAML, shown
 on the step); a step without them runs on the run's. Another runtime runs the step in a fresh session given the
 previous step's summary; another model or effort keeps the session.

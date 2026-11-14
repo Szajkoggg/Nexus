@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { queueStatus, type QueueLike } from "../src/queueStatus.ts";
+import { shortStatus } from "../src/rail.ts";
 
 const q = (over: Partial<QueueLike> & { steps?: QueueLike["steps"] }): QueueLike => ({ status: "approved", steps: [], questions: [], ...over });
 const st = (spec: string) => spec.split(" ").map((x) => { const [id, status, by] = x.split(":"); return { id: id!, status: status!, ...(by ? { review_with: by as "user" | "orchestrator" } : {}) }; });
@@ -52,6 +53,11 @@ test("before it runs: approval, approved, a planned start; after: done, cancelle
   assert.equal(queueStatus(q({ status: "approved", start: { at: "2026-11-14T08:30:00Z" } }), new Date("2026-11-14T06:00:00Z")).tone, "planned");
   assert.deepEqual(pick(queueStatus(q({ status: "approved", start: { at: "2026-11-14T08:30:00Z", failed: { reason: "x" } } }))), ["failed", "did not start"]);
   assert.deepEqual(pick(queueStatus(q({ status: "done", steps: st("D1:done D2:skipped") }))), ["done", "done"]);
+  // Came due, but waits for its checkout or for a place under the limit (it starts by itself).
+  assert.deepEqual(pick(queueStatus(q({ status: "approved", start: { after: "SF", held: { kind: "checkout" } } }))), ["planned", "waits for the checkout"]);
+  assert.deepEqual(pick(queueStatus(q({ status: "approved", start: { at: "2026-11-14T08:30:00Z", held: { kind: "limit" } } }))), ["planned", "waits: limit reached"]);
+  assert.equal(shortStatus(queueStatus(q({ status: "approved", start: { after: "SF", held: { kind: "checkout" } } }))), "waits: checkout");
+  assert.equal(shortStatus(queueStatus(q({ status: "approved", start: { after: "SF", held: { kind: "limit" } } }))), "waits: limit");
   assert.deepEqual(pick(queueStatus(q({ status: "cancelled" }))), ["cancelled", "cancelled"]);
 });
 

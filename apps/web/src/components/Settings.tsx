@@ -238,6 +238,8 @@ export interface ServerInfo {
   };
   /** Whether a deploy pushes the deployed main to its upstream. */
   push_on_deploy: boolean;
+  /** How many queues may run at once, across all projects. */
+  max_running?: number;
 }
 
 const PUSH_TONE = { pushed: "text-ok", failed: "text-danger", skipped: "text-fg-2" } as const;
@@ -297,6 +299,22 @@ export function ServerSection({ info, onChanged }: { info: ServerInfo | undefine
           onChange={(e) => void call("/api/server/settings", { push_on_deploy: e.target.checked })} />
         <span>Push the deployed main to GitHub after an update{info.live ? "" : " (only a live instance pushes)"}</span>
       </label>
+      {info.max_running !== undefined && (
+        <div className="mt-3 text-sm text-fg">
+          <label className="flex flex-wrap items-center gap-2">
+            <span>Queues running at once, across all projects:</span>
+            <select className="rounded-md border border-line-strong bg-canvas px-2 py-1 text-sm text-fg" value={info.max_running}
+              onChange={(e) => void call("/api/server/settings", { max_running: Number(e.target.value) })}>
+              {[...new Set([...Array.from({ length: 10 }, (_, i) => i + 1), info.max_running])].sort((a, b) => a - b).map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </label>
+          <p className="mt-1 text-xs text-fg-3">
+            Queues run side by side only in worktrees of their own, never two in one checkout. A queue waiting for a
+            review or an answer does not count. A start over the limit, or into a checkout another queue holds, is
+            refused; a chain or a schedule waits and starts by itself once it may.
+          </p>
+        </div>
+      )}
       <p className="mt-2 text-xs text-fg-3">
         Update Nexus lets every running step finish (new steps wait), moves this instance to the newest commit on main,
         builds it and restarts. The queues it held go on by themselves; paused or stopped ones stay as they are. Once the

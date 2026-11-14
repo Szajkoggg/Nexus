@@ -593,6 +593,9 @@ nexus note <queue> <step> <text>               # until the dashboard can add not
 `nexus status` prints each step of a queue on a line of its own (id, status, title); a step that names its own
 runtime, model or effort ends with them, `[on Codex · gpt-6-luna · low effort]` (what it leaves out is the run's).
 The orchestrator's overview adds the same after the step in its `steps:` line.
+A queue with a planned start gets a line `planned start after A; now: <waiting>` (or `at <local time>`), ending in
+`(it starts by itself)` when the plan came due and waits for its checkout or for the limit (`held`); the
+orchestrator's overview shows a held schedule the same way (`its time came, now: <waiting>`).
 
 `nexus status`, run by a session with a queue, prints that queue's undelivered notes and records them as read
 (`note.read`): being shown to the agent is the delivery.

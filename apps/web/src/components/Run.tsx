@@ -97,6 +97,7 @@ function PlannedStart({ queue, busy, onCancel }: { queue: QueueView; busy: boole
               : <span className="text-fg">Starts at <span className="font-medium">{formatClock(p.at!, new Date())}</span>{p.usage ? `, when the ${p.usage === "codex" ? "Codex" : "Claude Code"} usage window resets` : ""}.</span>)}
           <span className="mt-1 block text-xs text-fg-2">
             {p.failed ? <>Start it yourself, or dismiss the plan. · <TimeAgo at={p.failed.at} /></>
+              : p.held ? <>{p.after ? <><span className="font-mono">{p.after}</span> is done</> : "Its time came"}; it {p.held.reason}. It starts by itself once it may.</>
               : p.after ? <>Now: {p.waiting}.</> : <>In <Until at={p.at!} />. It must be approved then, and its session free.</>}
           </span>
           <span className="mt-1 block text-xs text-fg-3">

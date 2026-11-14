@@ -25,7 +25,8 @@ export interface QueueLike {
   run?: { state: string; step?: string };
   stop_step?: string;
   current_step?: string;
-  start?: { at?: string; after?: string; failed?: unknown };
+  /** `held`: it came due but waits for its checkout or for a place under the limit on queues running at once. */
+  start?: { at?: string; after?: string; failed?: unknown; held?: { kind: "checkout" | "limit" } };
   /** The latest approval pins the current revision; absent: taken as approved (older callers). */
   approved?: boolean;
   revision?: number;
@@ -85,6 +86,8 @@ export function queueStatus(q: QueueLike, now = new Date()): HonestStatus {
   // A planned start that has not come, or could not start.
   if (q.start) {
     if (q.start.failed) return at("failed", "did not start");
+    // Came due, but another queue works in its checkout, or as many run as the limit allows: it starts by itself.
+    if (q.start.held) return at("planned", q.start.held.kind === "checkout" ? "waits for the checkout" : "waits: limit reached");
     return at("planned", startText(q.start, now));
   }
   // The steps say a run is at work, but none runs: honest about it.

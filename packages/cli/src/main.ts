@@ -165,7 +165,7 @@ Queues (${state.queues.length - done.length} open; finished: ${done.map((q) => q
       console.log(p.failed
         ? `  planned start ${when} did not happen: ${p.failed.reason} (the user sees it; start the queue or cancel the plan with nexus run ${q.id} cancel-start)`
         : p.after ? `  ${q.approved ? "" : "then "}starts when ${p.after} is done${p.session ? `, in session ${p.session}` : ""}; now: ${p.waiting}`
-          : `  ${q.approved ? "" : "then "}starts ${when}${p.session ? `, in session ${p.session}` : ""}`);
+          : `  ${q.approved ? "" : "then "}starts ${when}${p.session ? `, in session ${p.session}` : ""}${p.held ? `; its time came, now: ${p.waiting} (it starts by itself)` : ""}`);
     }
   }
   const open = state.questions.filter((x) => x.state === "open" || x.state === "escalated");
@@ -321,6 +321,12 @@ const commands: Record<string, () => void | Promise<void>> = {
       if (q.run && q.status !== "running") {
         const why = q.run.reason ? ` (${q.run.reason.replace(/\s+/g, " ").slice(0, 200)})` : "";
         console.log(`  run: ${q.run.state}${q.run.step ? ` at ${q.run.step}` : ""}${why}`);
+      }
+      // A planned start, and why it has not come (also: waiting for its checkout or for a place under the limit).
+      const p = q.start;
+      if (p) {
+        const when = p.after ? `after ${p.after}` : `at ${new Date(p.at!).toLocaleString("sv-SE").slice(0, 16)}`;
+        console.log(p.failed ? `  planned start ${when} did not happen: ${p.failed.reason}` : `  planned start ${when}; now: ${p.waiting}${p.held ? " (it starts by itself)" : ""}`);
       }
       for (const step of q.steps) {
         const unread = step.notes.filter((n) => !n.read_at && n.to !== "orchestrator");
