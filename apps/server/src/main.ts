@@ -93,6 +93,9 @@ function refreshRegistry(): void {
     const store = ProjectStore.forRoot(p.root);
     try { if (store.migrateProject()) console.log(`settings of project ${p.id}: migrated to follow the global settings where equal`); }
     catch (err) { console.error(`settings of project ${p.id}: not migrated: ${(err as Error).message}`); }
+    // Steps done before review levels keep the meaning they had (PROTOCOL.md, "Before review levels").
+    try { if (store.markReviewLevels()) console.log(`project ${p.id}: steps done from now on are reviewed by level`); }
+    catch (err) { console.error(`project ${p.id}: review levels not marked: ${(err as Error).message}`); }
     const engine = new Engine(store, () => changed(p.id), { coordinator });
     // Through its usual notices it is told the outcome of an update it asked for (lifecycle.notice), and what changed
     // for agents in each deploy since its session began (deploy-changes.jsonl).

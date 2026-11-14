@@ -293,8 +293,9 @@ function hasStarted(v: { segments: unknown[]; status: string }): boolean {
   return v.segments.length > 0 || !["pending", "skipped"].includes(v.status);
 }
 
-function keptLevels(levels: QueueFile["user_levels"], steps: { id: string }[]): QueueFile["user_levels"] {
-  const kept = Object.entries(levels ?? {}).filter(([id]) => steps.some((s) => s.id === id));
+/** A record by step id with only the steps a revision keeps (undefined when none is left). */
+function keptLevels<T>(byStep: Record<string, T> | undefined, steps: { id: string }[]): Record<string, T> | undefined {
+  const kept = Object.entries(byStep ?? {}).filter(([id]) => steps.some((s) => s.id === id));
   return kept.length ? Object.fromEntries(kept) : undefined;
 }
 
@@ -309,8 +310,9 @@ export function applyDraft(store: ProjectStore, definition: unknown): string {
   const input = (definition ?? {}) as Record<string, unknown>;
   const parsed = QueueFile.safeParse({ protocol: 1, status: "proposed", ...input });
   if (!parsed.success) throw new ActionError(parsed.error.issues.map((i) => `${i.path.join(".") || "queue"}: ${i.message}`).join("; "));
-  // The levels the user set are the user's: a draft does not bring any (an existing queue's stay, below).
-  const draft = { ...parsed.data, user_levels: undefined };
+  // The levels the user set are the user's, and old policies are the server's: a draft brings neither (an existing
+  // queue's stay, below).
+  const draft = { ...parsed.data, user_levels: undefined, legacy_policies: undefined };
   if (draft.status !== "draft" && draft.status !== "proposed") throw new ActionError("a drafted queue's status is draft or proposed");
   if (!/^[A-Za-z0-9][\w.-]{0,31}$/.test(draft.id)) throw new ActionError("a queue id is 1-32 letters, digits, dots, dashes or underscores");
   const ids = draft.steps.map((s) => s.id);
@@ -369,6 +371,8 @@ export function applyDraft(store: ProjectStore, definition: unknown): string {
     review_level: draft.review_level ?? old.review_level,
     // The user's levels stay over whatever the revision drafts, for the steps it keeps.
     user_levels: keptLevels(old.user_levels, steps),
+    // What the steps done before review levels meant stays with them.
+    legacy_policies: keptLevels(old.legacy_policies, steps),
     stop_conditions: draft.stop_conditions, checks: draft.checks, steps, updated_at: at,
   };
   const changed = revisionHash(next) !== revisionHash(old);

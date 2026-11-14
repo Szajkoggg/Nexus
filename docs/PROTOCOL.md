@@ -57,6 +57,7 @@ id: honeycomb
 name: Project Honeycomb
 root: C:/Code/GameDev/ProjectHoneycomb
 follows_global: true                   # this file is in the form below (absent: from before global settings, migrated once)
+review_levels_since: 2026-11-14T15:00:00Z   # set once by the server; steps done before it keep their old review policy (see "Review")
 defaults:
   stop_conditions:                     # every queue inherits these
     - A decision that is the user's comes up (the look, gameplay, a final number).
@@ -186,6 +187,7 @@ revision: 3                            # increases on every change to steps, cri
 status: running                        # mirrors the derived state; the event logs are authoritative for progress
 review_level: 2                        # optional: the level of steps that set none (see "Review")
 user_levels: { W3: 1 }                 # levels the user set on steps; written only by the server (see "Review")
+legacy_policies: { W1: continue }      # each step's review policy from before review levels; written only by the server
 stop_conditions:                       # in addition to the project defaults
   - The climb probe finds a way up a wall of two levels or more that two attempts within the step do not remove.
 checks:                                # run for every step
@@ -549,6 +551,16 @@ wins. Files keep the old keys until their next write, which writes the level; dr
 the same way. An approval of the old form stays valid: when `queue.yaml` is read (`parseQueue` in `store.ts`), an
 approval of the current revision whose hash is that of the same content in the old form (each step's review with its
 `policy`) is taken as pinning the new form, and written so at the queue's next write.
+
+**Steps done before review levels keep their meaning.** The server records once, at its first start with review
+levels, when the project's steps began to be reviewed by level (`review_levels_since` in `project.yaml`;
+`ProjectStore.markReviewLevels`). A `step.done` from before that time is derived by the old policy of its step: its
+own, else its queue's, kept from the old fields as `legacy_policies` in `queue.yaml` when the file is first read in the
+new form (and kept by later revisions for the steps they keep). `continue`: the step is done, with no review; `wait`:
+it waits for the user; `orchestrator`: for the orchestrator (an acceptance it gave then stands). A step without an old
+policy (its queue had none, or the file lost the old fields) reads `wait` from level 1, else `continue`, the old
+built-in default. A `step.done` after that time, and every one in a project without the mark (a new one), goes by its
+level. So queues finished before the change stay finished, and nothing about them is told.
 
 The derived step has `review_with` (`orchestrator` or `user`) while in `review`, `asked_user` (`text`, `at`) after a
 hand-over in the current round, and `sent_back` (each `id`, `text`, `at`, `by`, `round`, `delivered`, `to_user?`). Only a step waiting for the user is in the

@@ -207,6 +207,12 @@ export const ProjectFile = z.object({
     /** The one folder they may write in (their notes), relative to the project's root. */
     notes_dir: z.string().optional(),
   }).prefault({}),
+  /**
+   * When this project's steps began to be reviewed by level (set once by the server at its first start with review
+   * levels). A step.done from before it is derived by the old review policies (PROTOCOL.md, "Before review levels").
+   * Absent: every step.done is derived by level.
+   */
+  review_levels_since: Time.optional(),
   orchestrator: OrchestratorSettings.extend({ session: Id.nullable().default(null) }).optional(),
   languages: LanguageSettings.extend({
     /** The working language (project only): files, code, comments, commits, context cards, notes. */
@@ -231,6 +237,13 @@ export const StoredProject = z.object({
   name: z.string(),
   root: z.string(),
   follows_global: z.literal(true).optional(),
+  /**
+   * When this project's steps began to be reviewed by level (set once by the server at its first start with review
+   * levels). A step.done from before it is derived by the old review policies (PROTOCOL.md, "Before review levels").
+   * Absent: every step.done is derived by level.
+   */
+  review_levels_since: Time.optional(),
+
   defaults: z.preprocess(legacyDefaults, z.object({
     stop_conditions: own(z.array(z.string())),
     review_level: own(ReviewLevel),
@@ -373,6 +386,12 @@ const QueueShape = z.object({
    * server, from the user's action; kept across revisions; not part of what an approval pins (revisionHash).
    */
   user_levels: z.record(Id, ReviewLevel).optional(),
+  /**
+   * The review policy each step had before review levels (its own, else its queue's), kept from the old fields when
+   * the file is first read in the new form (store.ts, parseQueue): a step.done from before the project's
+   * review_levels_since is derived by it. Written only by the server; not part of what an approval pins.
+   */
+  legacy_policies: z.record(Id, LegacyReviewPolicy).optional(),
   stop_conditions: z.array(z.string()).default([]),
   checks: z.array(z.string()).default([]),
   steps: z.array(StepDef).default([]),

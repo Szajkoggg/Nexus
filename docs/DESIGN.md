@@ -1451,6 +1451,14 @@ busy-loop processes on the user's 16 logical cores and 4 to 6 copies of the test
   for nothing. Now a process that ends while its run's step waits for its review is no failure: the run waits for the
   review, and then finishes if nothing is left, or starts a process that resumes the session for what comes next (the
   next step, a send-back).
+- **Levels apply from the change on, not to the past** (the orchestrator's send-back of RL1). The first version
+  derived every recorded `step.done` by level, so after its deploy about 38 long-finished queues stood `waiting`, their
+  `continue` steps in review for the orchestrator. The simplest fix of the options: one time per project,
+  `review_levels_since`, set by the server at its first start with levels; an earlier `step.done` is derived by the
+  old policy of its step, which the queue file keeps (`legacy_policies`) once the old fields are gone. A marker on each
+  new `step.done` would have needed every writer of events (the CLI, tests, seeds) to change, and the events written
+  between the two deploys would still have been ambiguous. Checked read-only against this repository's 136 steps in
+  55 queues: derived with the code before levels and with this one, none differs (without the time, 95 did).
 - **A pause takes effect at the review.** A run asked to pause (by the user, or by an update's drain) paused at the
   step's end, and a step in review never reached it: the run stayed `pausing` until the review, and an update would
   have waited for an orchestrator that is not told anything during a drain. A step in review has finished its turn,

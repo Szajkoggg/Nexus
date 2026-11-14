@@ -1,5 +1,6 @@
-// Review levels (PROTOCOL.md, "Review levels"): the old review policies read as levels in every file that had them, an
-// approval of the old form that stays, and the levels the user sets on steps (kept across revisions, no new approval).
+// Review levels (PROTOCOL.md, "Review"): the old review policies read as levels in every file that had them, an
+// approval of the old form that stays, the levels the user sets on steps (kept across revisions, no new approval), and
+// steps done before the change, which keep the meaning they had.
 // Where a level comes from and whom a step's review goes to are in state.test.ts.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -10,7 +11,7 @@ import { join } from "node:path";
 import YAML from "yaml";
 import {
   ActionError, GlobalSettings, ProjectFile, ProjectStore, QueueFile, StoredProject, applyDraft, approveQueue, isApproved, legacyLevel,
-  loadProjectState, readGlobalSettings, setStepLevel, type StepDef,
+  loadProjectState, newId, readGlobalSettings, setStepLevel, type Event, type StepDef,
 } from "../src/index.ts";
 
 function setup() {
@@ -139,4 +140,94 @@ test("a draft with the old review fields is read as levels, so the orchestrator'
   // The same draft again (as an older orchestrator would send it): no change, the approval stands.
   assert.match(applyDraft(store, { id: "Q", title: "Queue", review_policy: "wait", steps: [{ ...step("Q1"), review: { policy: "orchestrator" } }, step("Q2")] }), /no change/);
   assert.ok(isApproved(store.readQueue("Q")));
+});
+
+// ---------------------------------------------------------------- steps done before review levels
+
+/** Sessions and an event writer for the tests below (times in minutes after 10:00 on 2026-11-13). */
+function sessions(store: ProjectStore) {
+  for (const [id, role] of [["w", "worker"], ["o", "orchestrator"], ["u", "user"]] as const) {
+    store.writeSession({ protocol: 1, id, project: "p", role, runtime: "claude", cwd: ".", launched_by: "nexus", created_at: "2026-11-13T09:00:00.000Z" });
+  }
+  const at = (min: number) => new Date(Date.parse("2026-11-13T10:00:00Z") + min * 60_000).toISOString();
+  const emit = (min: number, session: string, body: Record<string, unknown>) =>
+    store.appendEvent({ v: 1, id: newId(), at: at(min), session, ...body } as Event);
+  const done = (min: number, queue: string, step: string) => {
+    emit(min, "w", { type: "step.started", queue, step });
+    emit(min, "w", { type: "step.done", queue, step, summary: "ok" });
+  };
+  return { at, emit, done };
+}
+
+/** queue.yaml as written before review levels: `policy` on the queue, and on a step if given. */
+function oldQueue(store: ProjectStore, id: string, policy: string, stepPolicies: (string | undefined)[]) {
+  mkdirSync(store.queueDir(id), { recursive: true });
+  const steps = stepPolicies.map((p, i) => ({ id: `${id}${i + 1}`, title: `Step ${i + 1}`, goal: "", acceptance: [], ...(p ? { review: { policy: p } } : {}) }));
+  writeFileSync(join(store.queueDir(id), "queue.yaml"), YAML.stringify({ protocol: 1, id, title: id, revision: 1, status: "approved", review_policy: policy, steps }));
+}
+
+test("a queue finished under the old `continue` stays done after the change to levels: nothing waits, nothing is told", () => {
+  const { store } = setup();
+  const { at, done } = sessions(store);
+  store.updateProject((p) => ({ ...p, orchestrator: { runtime: "claude", notify: true, session: null } }));
+  oldQueue(store, "C", "continue", [undefined, undefined]);
+  done(1, "C", "C1"); done(2, "C", "C2");
+  assert.equal(store.markReviewLevels(at(10)), true, "the server's first start with review levels");
+  assert.equal(store.markReviewLevels(at(20)), false, "once");
+  assert.equal(store.readProject().review_levels_since, at(10));
+  const view = () => loadProjectState(store);
+  const q = () => view().queues.find((x) => x.id === "C")!;
+  assert.deepEqual([q().status, ...q().steps.map((s) => `${s.status}:${s.review_with ?? ""}`)], ["done", "done:", "done:"]);
+  assert.deepEqual(view().attention, [], "nothing waits for the user");
+  // The orchestrator's review notices come from steps waiting for it: there are none.
+  assert.ok(!view().queues.some((x) => x.steps.some((s) => s.review_with === "orchestrator")));
+
+  // Written in the new form (the server's next write), the old meaning stays with the file.
+  store.writeQueue(store.readQueue("C"));
+  assert.doesNotMatch(readFileSync(join(store.queueDir("C"), "queue.yaml"), "utf8"), /review_policy/);
+  assert.deepEqual(store.readQueue("C").legacy_policies, { C1: "continue", C2: "continue" });
+  assert.equal(q().status, "done");
+});
+
+test("before review levels an orchestrator's acceptance stands, a review still open stays open, and later steps go by level", () => {
+  const { store } = setup();
+  const { at, emit, done } = sessions(store);
+  store.updateProject((p) => ({ ...p, orchestrator: { runtime: "claude", notify: true, session: null } }));
+  oldQueue(store, "O", "orchestrator", [undefined, undefined, "continue", undefined]);
+  done(1, "O", "O1");
+  emit(2, "o", { type: "review.accepted", queue: "O", step: "O1" }); // accepted by the old orchestrator review
+  done(3, "O", "O2"); // waiting for the orchestrator at the change
+  store.markReviewLevels(at(10));
+  emit(11, "o", { type: "review.accepted", queue: "O", step: "O2" });
+  done(12, "O", "O3"); // its old policy was continue, but it is done after the change: reviewed by its level
+  const steps = () => loadProjectState(store).queues.find((x) => x.id === "O")!.steps.map((s) => `${s.id}=${s.status}:${s.review_with ?? ""}`);
+  assert.deepEqual(steps(), ["O1=done:", "O2=done:", "O3=review:orchestrator", "O4=pending:"]);
+
+  // A revision keeps what the steps done before meant; the user's own steps (old `wait`) waited for the user.
+  applyDraft(store, { id: "O", title: "O", steps: [1, 2, 3, 4].map((n) => ({ id: `O${n}`, title: `Step ${n}`, goal: "", acceptance: [], ...(n === 3 ? { review: { level: 2 } } : {}) })) });
+  assert.deepEqual(store.readQueue("O").legacy_policies, { O1: "orchestrator", O2: "orchestrator", O3: "continue", O4: "orchestrator" });
+  oldQueue(store, "W", "wait", [undefined, "continue"]);
+  done(4, "W", "W1"); done(5, "W", "W2");
+  const w = loadProjectState(store).queues.find((x) => x.id === "W")!;
+  assert.deepEqual(w.steps.map((s) => `${s.status}:${s.review_with ?? ""}`), ["review:user", "done:"]);
+});
+
+test("without the old fields (a file the first level code rewrote), a step done before the change reads by its level", () => {
+  const { store } = setup();
+  const { at, done } = sessions(store);
+  for (const [id, level] of [["A", 2], ["B", 1]] as const) {
+    store.writeQueue({ protocol: 1, id, title: id, revision: 1, status: "approved", review_level: level, stop_conditions: [], checks: [], steps: [{ id: `${id}1`, title: "One", goal: "", acceptance: [] }] });
+    done(1, id, `${id}1`);
+  }
+  store.markReviewLevels(at(10));
+  const s = loadProjectState(store);
+  assert.deepEqual(s.queues.map((q) => `${q.id}:${q.status}:${q.steps[0]!.status}:${q.steps[0]!.review_with ?? ""}`), ["A:done:done:", "B:waiting:review:user"]);
+});
+
+test("a project without the mark (a new one) reviews every step by level", () => {
+  const { store } = setup();
+  const { done } = sessions(store);
+  oldQueue(store, "C", "continue", [undefined]);
+  done(1, "C", "C1");
+  assert.equal(loadProjectState(store).queues[0]!.steps[0]!.status, "review");
 });

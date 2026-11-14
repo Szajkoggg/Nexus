@@ -9,7 +9,7 @@ import { monotonicFactory } from "ulid";
 import YAML from "yaml";
 import type { z } from "zod";
 import {
-  Activity, Applied, ChatEntry, PinsFile, Refusal, Delivery, Event, GlobalSettings, InboxEntry, NoteMeta, GitFile, ProjectFile, PushFile, QueueFile, type QueueInput, RegistryFile, RunFile, RuntimeFile, SessionFile, StartFile, StoredProject, TurnRecord, UsageFile,
+  Activity, Applied, ChatEntry, PinsFile, Refusal, Delivery, Event, GlobalSettings, InboxEntry, NoteMeta, GitFile, ProjectFile, PushFile, QueueFile, type QueueInput, LegacyReviewPolicy, RegistryFile, RunFile, RuntimeFile, SessionFile, StartFile, StoredProject, TurnRecord, UsageFile,
   type Note,
 } from "./schemas.ts";
 import { applyChange, builtInSettings, effectiveProject, migrateStored, storedFrom } from "./settings.ts";
@@ -180,6 +180,18 @@ export class ProjectStore {
     const migrated = migrateStored(YAML.parse(readFileSync(this.projectFile, "utf8")), readGlobalSettings());
     if (migrated) this.writeStoredProject(migrated);
     return !!migrated;
+  }
+
+  /**
+   * Records when the project's steps began to be reviewed by level (`review_levels_since`), once: a step.done from
+   * before it keeps the meaning it had under the old review policies. Run by the server at its start; returns whether
+   * it wrote.
+   */
+  markReviewLevels(at = now()): boolean {
+    const stored = this.readStoredProject();
+    if (stored.review_levels_since) return false;
+    this.writeStoredProject({ ...stored, review_levels_since: at });
+    return true;
   }
 
   // queues
@@ -391,9 +403,26 @@ function legacyRevisionHash(raw: unknown, q: QueueFile): string | undefined {
  * in the new form at its next write.
  */
 export function parseQueue(raw: unknown): QueueFile {
-  const q = QueueFile.parse(raw);
+  const parsed = QueueFile.parse(raw);
+  const q = parsed.legacy_policies ? parsed : { ...parsed, legacy_policies: legacyPolicies(raw) };
   const legacy = legacyRevisionHash(raw, q);
   if (legacy === undefined) return q;
   const hash = revisionHash(q);
   return { ...q, approvals: q.approvals.map((a) => (a.revision === q.revision && a.hash === legacy ? { ...a, hash } : a)) };
+}
+
+/**
+ * The review policy each step of a queue.yaml from before review levels had (its own, else its queue's), by step id;
+ * undefined for a file without the old fields. Steps done before the project's review_levels_since are derived by it.
+ */
+function legacyPolicies(raw: unknown): Record<string, LegacyReviewPolicy> | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const r = raw as { review_policy?: unknown; steps?: unknown };
+  const policy = (x: unknown) => (LegacyReviewPolicy.safeParse(x).success ? x as LegacyReviewPolicy : undefined);
+  const out: Record<string, LegacyReviewPolicy> = {};
+  for (const st of Array.isArray(r.steps) ? r.steps as { id?: unknown; review?: { policy?: unknown } }[] : []) {
+    const p = policy(st?.review?.policy) ?? policy(r.review_policy);
+    if (typeof st?.id === "string" && p) out[st.id] = p;
+  }
+  return Object.keys(out).length ? out : undefined;
 }

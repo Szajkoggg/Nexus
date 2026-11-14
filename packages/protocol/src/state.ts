@@ -1,6 +1,6 @@
 // Derives the dashboard's view of a project from its files. Pure apart from reading through the store;
 // nothing here is ever written back (state.json, if kept, is only a cache of this).
-import { ORCHESTRATOR_ONLY, USER_ONLY, type StatusChange, type Event, type InboxEntry, type Note, type GitFile, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type ReviewItem, type ReviewLevel, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type StepDef, type StepStatus } from "./schemas.ts";
+import { ORCHESTRATOR_ONLY, USER_ONLY, type StatusChange, type Event, type InboxEntry, type Note, type GitFile, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type ReviewItem, type ReviewLevel, type LegacyReviewPolicy, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type StepDef, type StepStatus } from "./schemas.ts";
 import { ProjectStore, revisionHash } from "./store.ts";
 import { ENDED_RUN_STATES, HOLDING_RUN_STATES, formatClock, type Segment } from "./times.ts";
 import { stopPlace } from "./attention.ts";
@@ -398,6 +398,15 @@ function initQueue(q: QueueFile, notes: Note[], project: Pick<ProjectFile, "defa
   };
 }
 
+/**
+ * The review policy a step.done from before review levels was derived by: the step's own or its queue's, kept from the
+ * old fields (`legacy_policies`); else what its level says of it (1 came from `wait`; else `continue`, the old
+ * built-in default: an `orchestrator` the file no longer shows is read as `continue`).
+ */
+function legacyPolicy(q: Pick<QueueFile, "legacy_policies">, st: Pick<StepView, "id" | "level">): LegacyReviewPolicy {
+  return q.legacy_policies?.[st.id] ?? (st.level === 1 ? "wait" : "continue");
+}
+
 export type LevelSource = "user" | "step" | "queue" | "project";
 /**
  * The review level that applies to a step, and what set it: the level the user set on it, else the one it was drafted
@@ -479,12 +488,20 @@ function apply(
       const q = queueOf(e.queue); const st = stepOf(q, e.step);
       if (!q || !st) return;
       // Every level is reviewed: level 1 by the user, 2 and 3 by the orchestrator (the user's without one, below).
-      // After the user's Fix it, the round's review is the user's.
-      st.status = "review";
-      st.review_with = st.user_fix || st.level === 1 ? "user" : "orchestrator";
-      st.asked_user = undefined; st.user_fix = undefined;
+      // A step.done from before the project's review levels keeps its old meaning (legacyPolicy): `continue` went on
+      // without review. After the user's Fix it, the round's review is the user's.
+      const policy = project.review_levels_since && e.at < project.review_levels_since ? legacyPolicy(q, st) : undefined;
+      st.asked_user = undefined;
       st.finished_at = e.at; st.summary = e.summary; st.commit = e.commit;
       endSegment(st, e.at);
+      if (policy === "continue" && !st.user_fix) {
+        st.status = "done"; st.review_with = undefined;
+        if (q.steps.every((x) => FINISHED_STEP.has(x.status))) q.status = "done";
+        return;
+      }
+      st.status = "review";
+      st.review_with = st.user_fix || (policy ? policy === "wait" : st.level === 1) ? "user" : "orchestrator";
+      st.user_fix = undefined;
       q.status = "waiting";
       return;
     }
