@@ -73,10 +73,21 @@ THE PROCESS
   5. In the step summary say what is compared with what, and which views were taken by hand or left out, and why.
 
 THE CAPTURE TOOL
-  Where a project has a capture tool (see its AGENTS.md), use it: the views are data (key, route or scene, window
-  size, a few setup actions), the tool takes the afters, and the same list run against the step's base commit takes
-  the befores. A tool never blocks a step or a review: a view it cannot take is taken by hand, under the same
+  Where a project has a capture tool (see its AGENTS.md or README), use it: the views are data (key, route or scene,
+  window size, a few setup actions), the tool takes the afters, and the same list run against the step's base commit
+  takes the befores. A tool never blocks a step or a review: a view it cannot take is taken by hand, under the same
   conditions, and the step summary says so. The pair rules apply to both alike.
+  Nexus's own dashboard has one in the Nexus repository:
+    node scripts/capture.ts <views.yaml> --step <queue>/<step>
+  The view list (example: scripts/capture/examples/dashboard.yaml):
+    seed: scripts/capture/seed-demo.ts          # writes the test projects
+    views:
+      - key: viewer-before-after@390            # the width comes from the key; height 844, 900 from 1024 wide
+        route: "#/demo/UI/UI1"
+        label: "The viewer, phone"
+        actions:                                # click: <text> | click: {selector}, type: {text, into?},
+          - click: { selector: "img[alt='Waiting tab']" }   # press: <key>, wait: <ms>
+  It prints the nexus review add commands for what it took, befores first, and what it could not take, with why.
 `,
   },
 };

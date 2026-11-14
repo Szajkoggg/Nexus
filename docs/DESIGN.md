@@ -439,6 +439,12 @@ The worker registers what it produced with `nexus review add <path>…`. The fil
 them (e.g. Honeycomb's `tmp/review/<step>/`); Nexus serves them read-only and renders images, Markdown, HTML and
 JSON. Artifact links and similar URLs can be registered too.
 
+Pictures pair by a view key and a named role, checked when they are added (decided 2026-11-14, queue RS; the
+standard is `nexus help review`, the rules in `packages/protocol/src/pictures.ts`). For Nexus's own dashboard,
+`scripts/capture.ts` takes them: the views are data (key, route, setup actions), the afters come from the checkout,
+the befores from the same list at the step's base commit in a temporary worktree, each side on its own development
+instance with seeded test projects. It never blocks: what it cannot take is reported and taken by hand.
+
 ### Approvals
 
 Approving is a dashboard action: the user picks a queue revision, writes their words (optional, kept verbatim), and
@@ -1137,6 +1143,10 @@ a swipe moves in every view: the picture alone, before and after, and the overla
   permits `Write` there, creating missing directories, while `Write(<path>/**)` alone permits nothing; Nexus keeps
   both rules so the allow list says what is meant. `Write` and `Edit` must not be disallowed, since a disallow rule
   beats an allow rule.
+- **Git for Windows cannot remove a worktree with node_modules in it** unless `core.longpaths` is on: it drops the
+  worktree from its list, deletes what it can and fails with "Directory not empty" on paths beyond 260 characters
+  (seen 2026-11-14, the capture tool's base worktree under the temporary folder). The capture tool asks git a few
+  times, then deletes the rest with Node's `rmSync` (long paths, retries; junctions not followed) and prunes.
 
 ## Open questions
 

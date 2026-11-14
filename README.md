@@ -266,6 +266,30 @@ npm run typecheck
 
 `NEXUS_PORT` and `NEXUS_HOST` change where the server listens (default `127.0.0.1:4317`, this machine only).
 
+### Pictures of the dashboard for review
+
+`scripts/capture.ts` takes the review pictures of a change to the dashboard: one fixed-viewport picture per view (the
+window, not the whole page), each with its view key, and the same views as they were before the change.
+
+```sh
+node scripts/capture.ts scripts/capture/examples/dashboard.yaml --step RS/RS3   # befores at the step's base commit
+node scripts/capture.ts views.yaml --base 8800a05 --out tmp/review/X1          # or a commit of your choice
+node scripts/capture.ts views.yaml --no-before                                  # afters only (new screens: results)
+```
+
+The view list names a seed script that writes the test projects (`scripts/capture/seed-demo.ts`, a demo project
+with a step waiting for review) and the views: a key such as `viewer-before-after@390` (the width comes from it),
+a route such as `#/demo/UI/UI1`, a label, and a few setup actions (click a button by its text or an element by a CSS
+selector, type, press a key, wait). The format is in `nexus help review`. The tool builds this checkout's dashboard,
+seeds a development instance (port 4318 and up, its own data in a temporary folder, the fake runtimes, and
+`NEXUS_DIR`, `NEXUS_HANDOVER` and `NEXUS_SESSION` cleared) and takes the afters with headless Edge. For the befores
+it makes a temporary git worktree at the base commit (the step's first start, from `.nexus/queues/<queue>/git.yaml`),
+installs and builds it (a few minutes), runs the same seed and views against it, and removes it. Pictures go to
+`tmp/review/<step>/` as `<key>.png` and `<key>.before.png`. At the end it prints the `nexus review add` commands,
+befores first. It also lists any view it could not take, and why: take those by hand. A seed that does not fit the
+older code also shows up there. It never stops the step. Views narrower than Edge's 492 px are shown in a frame of
+their width. `NEXUS_CAPTURE_BROWSER` points it to another Edge or Chrome.
+
 ## Remote access
 
 The server listens on this PC only. Everything from this PC works without signing in; anything that comes through a

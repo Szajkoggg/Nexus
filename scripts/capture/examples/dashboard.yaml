@@ -1,0 +1,28 @@
+# Three views of the dashboard at two widths, on the demo project of scripts/capture/seed-demo.ts.
+#   node scripts/capture.ts scripts/capture/examples/dashboard.yaml --step <queue>/<step>
+seed: scripts/capture/seed-demo.ts
+views:
+  - key: project-start@1440
+    route: "#/demo"
+    label: "The project's first page (the orchestrator's chat)"
+  - key: project-start@390
+    route: "#/demo"
+    label: "The project's first page, phone (the Waiting tab)"
+  - key: step-in-review@1440
+    route: "#/demo/UI/UI1"
+    label: "A step waiting for review"
+  - key: step-in-review@390
+    route: "#/demo/UI/UI1"
+    label: "A step waiting for review, phone"
+  - key: viewer-before-after@1440
+    route: "#/demo/UI/UI1"
+    label: "The viewer: a before and its after"
+    actions:
+      - click: { selector: "img[alt='Waiting tab']" }
+      - wait: 600
+  - key: viewer-before-after@390
+    route: "#/demo/UI/UI1"
+    label: "The viewer: a before and its after, phone"
+    actions:
+      - click: { selector: "img[alt='Waiting tab']" }
+      - wait: 600
