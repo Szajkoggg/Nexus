@@ -86,7 +86,8 @@ for a project then. Same paths as in `project.yaml`:
 ```yaml
 protocol: 1
 defaults: { stop_conditions: [], review_level: 2, review_send_back_limit: 2, context_reuse_threshold: 0.6,
-            context_care: true, protect_nexus: true, push_accepted: false, usage_pause_threshold: 0.9 }
+            context_care: true, protect_nexus: true, push_accepted: false, provisional_counts: true,
+            usage_pause_threshold: 0.9 }
 runtimes:
   default: claude
   claude: { permission_mode: acceptEdits }            # model, effort: none (the runtime's default)
@@ -130,7 +131,7 @@ one: `null`). The effective settings do not change. It writes only such a file, 
 
 | Kind | Settings |
 |---|---|
-| Global, with a project override | `defaults`: `stop_conditions`, `review_level`, `review_send_back_limit`, `context_reuse_threshold`, `context_care`, `protect_nexus`, `push_accepted`, `usage_pause_threshold`. `runtimes`: `default`; `claude`: `model`, `effort`, `permission_mode`; `codex`: `model`, `effort`, `sandbox`, `approval_policy`, `approvals_reviewer`. `conversations`: `runtime`, `model`, `effort`. `orchestrator`: `runtime`, `model`, `effort`, `notify`. `languages`: `reader` |
+| Global, with a project override | `defaults`: `stop_conditions`, `review_level`, `review_send_back_limit`, `context_reuse_threshold`, `context_care`, `protect_nexus`, `push_accepted`, `provisional_counts`, `usage_pause_threshold`. `runtimes`: `default`; `claude`: `model`, `effort`, `permission_mode`; `codex`: `model`, `effort`, `sandbox`, `approval_policy`, `approvals_reviewer`. `conversations`: `runtime`, `model`, `effort`. `orchestrator`: `runtime`, `model`, `effort`, `notify`. `languages`: `reader` |
 | Project only | `name`, `defaults.worktree_dir`, `runtimes.claude.allowed_tools` (the project's own allow rules), `conversations.notes_dir`, `languages.working` (`id` and `root` identify the project) |
 | Global only | Remote access (`<NEXUS_HOME>/auth.json`, `push.json`), the deploy push (`deploy.json`), the server; each stays in its own file |
 | State, not a setting | `orchestrator.session` |
@@ -440,6 +441,9 @@ Every line:
 | `review.sent_back` | `queue`, `step`, `text` | Orchestrator or user only: a step in review goes back to its worker with what to fix (see "Sending a step back") |
 | `review.rejected` | `queue`, `step`, `text?` | User only (the loader ignores it from any other session, the orchestrator's included): rejects a step waiting for the user's review (see "Reject") |
 | `review.asked_user` | `queue`, `step`, `text` | Orchestrator only in practice (the loader takes it from an orchestrator or the user): a step waiting for the orchestrator's review goes to the user, with why |
+| `review.provisional` | `queue`, `step`, `text?` | Orchestrator only (the loader ignores the user's too): a step of review level 3 waiting for its review is accepted provisionally, `text` what the user should look at; the run goes on (see "Provisional acceptances") |
+| `review.confirmed` | `queue`, `step` | User only: confirms a provisional acceptance |
+| `review.fix_asked` | `queue`, `step`, `text` | User only: Fix it on a provisional acceptance; the orchestrator drafts a revision with a step that fixes it |
 | `status.set` | `queue`, `step?`, `to` (`skipped`, `finished`, `cancelled`, `propose-lift`), `reason` | Orchestrator only: housekeeping; the server checks it and records an entry in the queue's `changes` (see `queue.yaml`). A worker's is ignored by derivation, and the server applies only the orchestrator's own requests |
 | `log` | `level`, `text` | Anything else worth keeping |
 
@@ -459,7 +463,7 @@ Written only by the server's queue engine; agents never touch them.
 | File | What |
 |---|---|
 | `queues/<id>/git.yaml` | The HEAD of the queue's checkout around each step's work (`src/gitinfo.ts`): `base` (an auto worktree's: `ref`, the branch or commit it was made from, its `sha`, `at`), `base.branch` (whether `ref` names a branch: only a branch can be merged back into), `merged` (`at`, `into`, `path`, `sha`, `fast_forward`), `cleaned` (`at`, `path`, `branch`), `steps.<step>` (rounds, oldest first: `session`, `start` (HEAD when the step opened, or when a send-back reopened it), `started_at`, `end` (HEAD at the end of the turn in which the step got its outcome: done, review, failed or stopped), `ended_at`; a sha is null outside a git repository). A continued step keeps its open round. One writer: the server. See "Git on the dashboard" |
-| `queues/<id>/push.yaml` | Pushing what was accepted: `review` (per step, the HEAD of the checkout when it entered review: `sha` or null, `finished_at`, `at`), `steps` (per accepted step: `acceptance`, `sha`, `result`, `text`, `at`), `pushed` (the last success: `sha`, `step`, `at`, `remote`, `branch`), `error` (the last failure until a success). One writer: the server. See "Pushing what was accepted" |
+| `queues/<id>/push.yaml` | Pushing what was accepted: `review` (per step, the HEAD of the checkout when it entered review: `sha` or null, `finished_at`, `at`), `steps` (per accepted step: `acceptance`, `sha`, `result` (`pushed`, `failed`, `skipped`, `held`), `text`, `at`, `held_by?`), `pushed` (the last success: `sha`, `step`, `at`, `remote`, `branch`), `error` (the last failure until a success). One writer: the server. See "Pushing what was accepted" |
 | `queues/<id>/start.yaml` | A planned start of the queue (see "Chains" and "Schedules"): either `after` (the queue it waits for) or `at` (the time, ISO 8601; with `usage`, `claude` or `codex`, when that is the usage window's reset plus the margin), the start's `runtime?`, `model?`, `effort?`, `session?` (a session to continue), `by` (`user` or `orchestrator`), `reason?`, `revision` (the queue's when planned), `created_at`, `failed?` (`at`, `reason`, `missed?`: it came due and the queue could not start; `missed`: a schedule more than 15 minutes late, the server not running at its time), `held?` (`since`, `kind`: `checkout` or `limit`, `reason`: it came due but waits for its checkout or for a place under the limit, and starts by itself; see "One queue per checkout, and a limit"). One writer: the server; a start of the queue or a cancel removes it |
 | `queues/<id>/run.yaml` | The engine's intent for a queue: `session`, `after` (started by a chain: the queue that was done), `state` (`running`, `pausing`, `paused`, `halted`, `finished`, `usage_wait`, `retry_wait`: a turn failed for a passing reason and is tried again at `resume_at`, `approval_wait`: a step ended while a newer revision waits for the user's approval, and the run goes on by itself once approved, see "A new revision of a running queue never stops the running step"; `running`, `pausing`, `usage_wait`, `retry_wait` and `approval_wait` hold the run's session and checkout: `HOLDING_RUN_STATES` in the protocol), `reason`, the `step` it last opened, `nudged`, `resume_at` (when a usage wait or a retry goes on), `retries` (turns failed in a row for a passing reason; cleared by a turn that ends well or a new step), `failure` (the runtime's code for the failure being retried or that halted the run, e.g. `overloaded`), `resume_after_restart`, `runtime`, `model` and `effort` (the run's own as its start resolved them: the start's choice, else the continued session's, else the project's effective defaults; a missing model or effort is the runtime's default), `from_defaults` (which of the three came from the project's defaults: resolved again when each step opens; see "Runtime, model and effort per step"), `started_at`, `ended_at` (when it last stopped going: set when it becomes `finished`, `halted` or `paused`, kept while it stays so, removed when it goes on; older files without it fall back to `updated_at`), `summary_asked` (context care: the step whose context summary Nexus asked for; asked once), `switches` (each fresh session, oldest first: `at`, `from` and `to` session, `step` the new session began with, `why`: `context` (context care; a record without `why` is this) or `runtime` (the step runs on another runtime), `fill` of the old one from 0 to 1 when known, `summary`: `written` by the worker, `asked` and then written, or `fallback`), `revision` (the queue's revision the run goes by: written at the start, moved to the current approved one at the end of a step). Start refuses a `stopped` queue, naming the step and the stop's reason, and writes `revision`; it also refuses while the run holds its session (`approval_wait` included). Resume refuses a stopped or cancelled queue, an unapproved revision unless the run is of an older one (`revision` below the queue's; a run record without `revision` is older when a revision was replaced, in `history`, after its `started_at`: such a run goes on mid-step while the newer revision waits), and an `approval_wait` run until its revision is approved. A run of an older revision is resumed like any: a revision changes no started step. Archived records are `run.<time>.yaml` (see "Changes and lifting a stop") |
 | `sessions/<id>/runtime.json` | A launched session's live facts: process state (`working` from a turn's start to its end, `idle` between turns, `exited`) and pid, model, context tokens and window, turns, cost |
@@ -519,8 +523,23 @@ Every step is reviewed when it is done; there is no level without review. A step
   give the user) goes to the user. The step is held in `review` for the project's orchestrator; the queue is
   `waiting`. The orchestrator accepts it (`review.accepted`), sends it back (`review.sent_back`) or hands it to the
   user (`review.asked_user`, with why).
-- `3`: the orchestrator judges everything and the queue goes on. For now (until RL2) it is held for the orchestrator
-  as level 2.
+- `3`: the orchestrator judges everything and the queue goes on. The step is held for the orchestrator as at level 2;
+  it accepts what has nothing of the user's (`review.accepted`), accepts provisionally what has
+  (`review.provisional`: the run goes on, see "Provisional acceptances"), or sends it back. Beyond the limit of
+  send-backs the step goes to the user as at level 2, and its queue waits at that step. It may still hand the review
+  to the user (`review.asked_user`) when it cannot decide.
+
+**Provisional acceptances.** A `review.provisional` (only the orchestrator's, only of a level-3 step waiting for its
+review; any other is ignored with a warning) makes the step `done` with `provisional` (`at`, `event`, `text?`) on the
+derived step, and the run goes on. Until the user deals with it, it is in the **return batch**: one item of kind
+`provisional` in the attention list ("N provisional acceptances wait for your confirmation"), with `provisional`, the
+steps oldest first (`queue`, `step`, `title`, `at`, `text?`, `summary?`); a finished queue's steps too. For each the
+user either confirms it (`review.confirmed`, `POST …/steps/:s/confirm`; `provisional.confirmed`) or asks a fix
+(`review.fix_asked`, **Fix it**: the same `POST …/steps/:s/send-back`; `provisional.fix` with `text` and `at`). Both
+are the user's only: the orchestrator never confirms, and the CLI has no command for either. A Fix it does not reopen
+the step: the step and its work stay, and the orchestrator is told (whatever `notify` says) to draft a revision with a
+step that fixes it. A queue that went on waits for that revision's approval at its running step's end
+(`approval_wait`, see "A new revision of a running queue never stops the running step"); a finished queue gets a revision the user approves and starts.
 
 A step in review has finished its turn: a pause asked for while it ran (the user's, or an update's drain) takes
 effect then (`pausing` becomes `paused`), and the review goes on meanwhile. A worker's process that ends on its own
@@ -715,8 +734,16 @@ With `defaults.push_accepted` on, an accepted step's work is pushed by the serve
   before the push is not pushed.
 - Only the queue's newest acceptance is pushed; its commit includes the earlier ones. One push at a time per queue;
   an acceptance during a push is taken up after it.
-- The outcome goes in `push.yaml` `steps.<step>` (`acceptance`, the event's id; `sha`; `result` `pushed`, `failed` or
-  `skipped`; `text`; `at`). A failure also sets `error` (`text`, `at`, `sha`, `step`) until a push succeeds; it does
+- A provisional acceptance (`review.provisional`) is an acceptance here when `defaults.provisional_counts` is on (the
+  default). With it off, a push waits while its commit contains provisional work the user has not confirmed: a step
+  of the project with a provisional acceptance waiting for the user, whose recorded review commit is the commit or an
+  ancestor of it, and that made commits of its own (its first round in `git.yaml` did not start at that commit). The
+  step is then recorded `held`, with `held_by` (`queue/step`, what holds it); the push is tried again once one of those
+  is confirmed or sent to a fix (the user has seen it; the fix is a step reviewed on its own), or the setting is turned
+  on. So neither the provisional work nor anything built on it (an accepted step after it, in its queue or another
+  in the same history) is pushed until then.
+- The outcome goes in `push.yaml` `steps.<step>` (`acceptance`, the event's id; `sha`; `result` `pushed`, `failed`,
+  `skipped` or `held`; `text`; `at`; `held_by?`). A failure also sets `error` (`text`, `at`, `sha`, `step`) until a push succeeds; it does
   not undo the acceptance. It is tried again at the next acceptance, whose commit includes the failed one (which then
   shows as pushed with it), and with **Push again** (`POST …/queues/:q/push`), which pushes the step of `error`
   again. Without a remote (no upstream, no `origin`) nothing is pushed, and the step says so (`skipped`).
@@ -901,6 +928,7 @@ sends (see the CLI).
 | `POST /api/projects/:id/queues/:q/steps/:s/pictures/mark` | `path`, `accepted` | The user's mark on a review picture (`review.marked`) |
 | `POST /api/projects/:id/queues/:q/steps/:s/pictures/comment` | `path`, `text` | The user's comment on a review picture: a send-back or a note (see "Review pictures"); answers `{ ok, result: { message } }` |
 | `POST /api/projects/:id/queues/:q/steps/:s/reject` | `text?` | Reject (the user's): the step is rejected, the run pauses until a newer revision is approved; answers `{ ok, result: { message } }` |
+| `POST /api/projects/:id/queues/:q/steps/:s/confirm` | | The user confirms a provisional acceptance (`review.confirmed`); answers `{ message }`. Fix it on one is `…/send-back` (`review.fix_asked`) |
 | `POST /api/projects/:id/queues/:q/steps/:s/accept` | `text?` (the note), `note_to?` (`next` or `orchestrator`) | Accepts a step waiting in review (and, with `push_accepted`, pushes it); answers where the note went (`to`, `step`) |
 | `GET /api/projects/:id/queues/:q/steps/:s/commits` | | A step's commits per round: `{ rounds: [{ session, start, end, open, commits: [{ sha, subject, author, at, files, insertions, deletions, foreign }] }] }`, newest first; an open round runs to HEAD; null outside a git repository or with nothing recorded |
 | `GET /api/projects/:id/queues/:q/git` | | The queue's branch: `{ branch, base?: { ref, ahead, behind }, upstream?: { ref, ahead, behind, at? } }`; null outside a git repository, before an auto worktree exists, or on no branch |
@@ -908,7 +936,7 @@ sends (see the CLI).
 | `POST /api/projects/:id/queues/:q/cleanup` | | Clean up a finished worktree queue: the worktree removed, its branch deleted with `-d`; answers `{ ok, result: { message } }`. Refused while the worktree has uncommitted changes; the refusal names them as git status does (`?? tmp/`, `M a.txt`, up to 20) |
 | `POST /api/projects/:id/rules/fix` | `version` (the check's) | The fix of the rules files as the check showed it (see "A project's rules files"); answers `{ ok, result: { message } }`. Commits nothing |
 | `POST /api/projects/:id/queues/:q/push` | | Push again: the step of the queue's last failed push; answers `{ ok, result: { message } }` at once, the push runs in the background |
-| `POST /api/projects/:id/queues/:q/steps/:s/send-back` | `text` (required, kept verbatim) | Fix it: sends a step waiting for the user's review back to its worker; answers `{ ok, result: { message } }` |
+| `POST /api/projects/:id/queues/:q/steps/:s/send-back` | `text` (required, kept verbatim) | Fix it: sends a step waiting for the user's review back to its worker; on a provisional acceptance it asks the orchestrator for a fix (`review.fix_asked`); answers `{ ok, result: { message } }` |
 | `POST /api/projects/:id/queues/:q/continue` | `work?` (`keep` or `discard`) | Continue: lifts the stop of a stopped queue whose current revision is approved and goes on (see "Continue" under `queue.yaml`); refused (409) otherwise. `work` is required when the stopped step left commits of its own; `discard` records it and does not go on |
 | `GET /api/projects/:id/queues/:q/left` | | What a stopped queue's stopped step left (see "The work a stopped step left"); null when not stopped at a step |
 | `GET /api/projects/:id/sessions/:session/chat` | query `from`, `to` (lines) | A chat's entries with lines from `from` up to, not including, `to`: `{ chat: [entry + line] }`; what is older than a chat view's window. Only the orchestrator's or a conversation's session (404 otherwise) |
@@ -1111,8 +1139,10 @@ a prompt. (`Write` and `Edit` are not disallowed: a disallow rule would beat the
   Starting an unapproved revision is refused.
 - `nexus review accept <queue> <step> [--note <text>]`, `nexus review send-back <queue> <step> <what to fix>` and
   `nexus review ask-user <queue> <step> <why>` write `review.accepted` (the note as its `text`), `review.sent_back`
-  and `review.asked_user`. The CLI refuses them from any session but an orchestrator, and for a step that is not
-  waiting for the orchestrator's review. `send-back` waits for the server's result and prints it ("sent back to its
+  and `review.asked_user`; `nexus review provisional <queue> <step> [--note <text>]` writes `review.provisional`
+  (refused for a step not at review level 3). The CLI refuses them from any session but an orchestrator, and for a
+  step that is not waiting for the orchestrator's review. The orchestrator's overview marks a step accepted
+  provisionally: waiting for the user's confirmation, confirmed, or with the fix the user asked. `send-back` waits for the server's result and prints it ("sent back to its
   worker as round N", or that the step goes to the user beyond the limit).
 - `nexus queue set <queue> [--step <step>] skipped|finished|cancelled|propose-lift --reason …` sends `status.set`
   and prints the server's result: housekeeping (see "Housekeeping by the orchestrator" under `queue.yaml`). A worker
@@ -1123,10 +1153,13 @@ a prompt. (`Write` and `Edit` are not disallowed: a disallow rule would beat the
   requested pause ("Run of X paused after step S.": a pause asked for by the user or the orchestrator, not a stop now,
   nor the pause of a server restart or of an update), when a step waits for its review ("Step S of queue X is done and
   waits for your review: <summary>", with the step's goal, acceptance, the checks reported this round and those of the
-  queue not reported, the review material of the round, the commits, and the three commands; key
+  queue not reported, the review material of the round, the commits, and the commands: accept, send back, ask the
+  user, and at review level 3 also `nexus review provisional`; key
   `notify:review:<queue>:<step>:<finished_at>`, once per round and session, also for a step that entered review before
   the session started, so a reset orchestrator is told; a step waiting for it starts an orchestrator that has no
-  session), and when a run halts or finishes. The chat shows only the fact;
+  session), and when a run halts or finishes. Whatever `notify` says, like a rejection, it is told the user's Fix it on
+  a step it accepted provisionally (key `notify:fix:<event id>`; "The user asked a fix of step S of queue X, which you
+  accepted provisionally: …", with the instruction to draft a revision with a step that fixes it). The chat shows only the fact;
   the instruction goes to the orchestrator alone. Each notice is told once, recorded in `applied.jsonl` (`notify:…`
   keys; approvals and withdrawals by their position in the queue's `approvals` and `withdrawals`, so approving a
   withdrawn revision again is told again). Nothing older than the orchestrator session is told, except a step waiting

@@ -40,6 +40,8 @@ Agent commands (session from NEXUS_SESSION or --session):
   nexus review accept <queue> <step> [--note <text>]             (orchestrator only) a step waiting for your review
   nexus review send-back <queue> <step> <what to fix>             (orchestrator only) back to its worker
   nexus review ask-user <queue> <step> <why>                      (orchestrator only) hand the review to the user
+  nexus review provisional <queue> <step> [--note <text>]        (orchestrator only) level 3: accept provisionally;
+                                      the run goes on, the user confirms it or asks a fix on their return
   nexus queue set <queue> [--step <step>] skipped|finished|cancelled|propose-lift --reason <text>   (orchestrator only)
                                       housekeeping: skip a pending, stopped or failed step; close a halted run of a
                                       queue whose steps are all done or skipped; cancel a queue that is not running;
@@ -158,6 +160,14 @@ function localTime(text: string): string {
   return d.toISOString();
 }
 
+/** A provisional acceptance in the overview: waiting for the user, confirmed, or sent to a fix. */
+function provisionalText(x: { provisional?: { confirmed?: string; fix?: { text: string } } }): string {
+  const p = x.provisional;
+  if (!p) return "";
+  return p.fix ? ` (accepted provisionally; the user asked a fix: ${p.fix.text.replace(/\s+/g, " ").slice(0, 120)})`
+    : p.confirmed ? " (accepted provisionally, confirmed by the user)" : " (accepted provisionally, waits for the user's confirmation)";
+}
+
 /** What an orchestrator needs to see: every queue, run, open question and worker session with its context card. */
 function overview(state: ReturnType<typeof loadProjectState>): void {
   const pct = (t?: number, w?: number) => (t && w ? `${Math.round((100 * t) / w)} % context` : "context unknown");
@@ -169,7 +179,7 @@ Queues (${state.queues.length - done.length} open; finished: ${done.map((q) => q
     console.log(`- ${q.id} [${q.status}] ${q.title}: revision ${q.revision}, ${q.approved ? "approved" : "not approved"}${run}`);
     // A revision waiting for approval comes first: nothing runs and no planned start fires until the user approves it.
     if (!q.approved) console.log(`  needs approval (revision ${q.revision})${q.start && !q.start.failed ? ": the planned start below waits for it" : ""}`);
-    console.log(`  steps: ${q.steps.map((x) => `${x.id} ${x.status} (level ${x.level}${x.level_from === "user" ? ", set by the user" : ""})${x.review_with ? ` (for ${x.review_with === "user" ? "the user" : "you"})` : ""}${stepValuesText(x) ? ` [on ${stepValuesText(x)}]` : ""}`).join(", ")}`);
+    console.log(`  steps: ${q.steps.map((x) => `${x.id} ${x.status} (level ${x.level}${x.level_from === "user" ? ", set by the user" : ""})${provisionalText(x)}${x.review_with ? ` (for ${x.review_with === "user" ? "the user" : "you"})` : ""}${stepValuesText(x) ? ` [on ${stepValuesText(x)}]` : ""}`).join(", ")}`);
     if (q.status_reason && q.status !== "running") console.log(`  why: ${q.status_reason.replace(/\s+/g, " ").slice(0, 300)}`);
     for (const line of stopLines(q)) console.log(line);
     if (q.start) {
@@ -228,8 +238,11 @@ function waitApplied(st: ProjectStore, session: string, event: string, ms = 15_0
   return undefined;
 }
 
-/** The orchestrator's decision on a step waiting for its review: accept, send back, or hand it to the user. */
-function reviewDecision(action: "accept" | "send-back" | "ask-user"): void {
+/**
+ * The orchestrator's decision on a step waiting for its review: accept, send back, hand it to the user, or (review
+ * level 3) accept it provisionally.
+ */
+function reviewDecision(action: "accept" | "send-back" | "ask-user" | "provisional"): void {
   const st = store(); const s = orchestrator(st);
   const queue = need(args[2], "<queue>"); const step = need(args[3], "<step>");
   checkStep(st, queue, step);
@@ -239,6 +252,12 @@ function reviewDecision(action: "accept" | "send-back" | "ask-user"): void {
   if (action === "accept") {
     emit(st, s, { type: "review.accepted", queue, step, text: o.note?.trim() || undefined });
     console.log(`ok: ${queue}/${step} accepted; the run goes on`);
+    return;
+  }
+  if (action === "provisional") {
+    if (view.level !== 3) throw new UsageError(`step ${queue}/${step} is at review level ${view.level}: a provisional acceptance is for level 3. Accept it, send it back, or hand it to the user`);
+    emit(st, s, { type: "review.provisional", queue, step, text: o.note?.trim() || undefined });
+    console.log(`ok: ${queue}/${step} accepted provisionally; the run goes on, and the step waits in the user's return batch`);
     return;
   }
   const text = need(args.slice(4).join(" ").trim(), action === "send-back" ? "<what to fix>" : "<why>");
@@ -430,8 +449,8 @@ const commands: Record<string, () => void | Promise<void>> = {
   },
 
   review() {
-    if (args[1] === "accept" || args[1] === "send-back" || args[1] === "ask-user") return reviewDecision(args[1]);
-    if (args[1] !== "add") throw new UsageError("nexus review add <step> <path|url>... (orchestrators: nexus review accept|send-back|ask-user <queue> <step>)");
+    if (args[1] === "accept" || args[1] === "send-back" || args[1] === "ask-user" || args[1] === "provisional") return reviewDecision(args[1]);
+    if (args[1] !== "add") throw new UsageError("nexus review add <step> <path|url>... (orchestrators: nexus review accept|send-back|ask-user|provisional <queue> <step>)");
     const st = store(); const s = session(st);
     const step = need(args[2], "<step>");
     const queue = queueFor(st, s, step);

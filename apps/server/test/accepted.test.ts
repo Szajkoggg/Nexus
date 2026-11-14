@@ -8,14 +8,14 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ProjectStore, applyDraft, approveQueue, loadProjectState, routeAnswers } from "@nexus/protocol";
+import { ProjectStore, applyDraft, approveQueue, confirmProvisional, loadProjectState, newId, routeAnswers } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 
 process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
 const G = ["-c", "user.name=test", "-c", "user.email=test@example.invalid", "-c", "init.defaultBranch=main", "-c", "commit.gpgsign=false"];
 const git = (cwd: string, ...args: string[]) => execFileSync("git", [...G, ...args], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 
-function setup(o: { push?: boolean; remote?: boolean; steps?: number } = {}) {
+function setup(o: { push?: boolean; remote?: boolean; steps?: number; goal?: string; levels?: (1 | 2 | 3)[]; counts?: boolean } = {}) {
   const base = mkdtempSync(join(tmpdir(), "nexus-accepted-"));
   process.env.NEXUS_HOME = join(base, "home");
   process.env.FAKE_LOG = join(base, "fake.log");
@@ -37,8 +37,14 @@ function setup(o: { push?: boolean; remote?: boolean; steps?: number } = {}) {
 
   const store = ProjectStore.init(root, { id: "p", name: "P", root });
   const p = store.readProject();
-  store.writeProject({ ...p, defaults: { ...p.defaults, push_accepted: o.push !== false } });
-  const steps = Array.from({ length: o.steps ?? 3 }, (_, i) => ({ id: `Q${i + 1}`, title: `Step ${i + 1}`, goal: "FAKE: done", acceptance: [] }));
+  store.writeProject({
+    ...p, defaults: { ...p.defaults, push_accepted: o.push !== false, provisional_counts: o.counts ?? true },
+    // With levels, an orchestrator reviews levels 2 and 3 (its decisions are written as its events below).
+    ...(o.levels ? { orchestrator: { runtime: "claude" as const, notify: true, session: null } } : {}),
+  });
+  const steps = Array.from({ length: o.steps ?? 3 }, (_, i) => ({
+    id: `Q${i + 1}`, title: `Step ${i + 1}`, goal: o.goal ?? "FAKE: done", acceptance: [], ...(o.levels?.[i] ? { review: { level: o.levels[i]! } } : {}),
+  }));
   store.writeQueue({ protocol: 1, id: "Q", title: "Queue", revision: 1, status: "proposed", review_level: 1, stop_conditions: [], checks: [], steps, approvals: [], history: [] });
   approveQueue(store, "Q");
   const engine: Engine = new Engine(store, () => { routeAnswers(store); engine.onChange(loadProjectState(store)); });
@@ -56,7 +62,13 @@ function setup(o: { push?: boolean; remote?: boolean; steps?: number } = {}) {
   /** The step's review, with its HEAD recorded. */
   const inReview = (id: string) => until(`${id} in review`, () => step(id).status === "review" && !!store.readPush("Q")?.review[id]);
   const stop = () => { clearInterval(timer); engine.shutdown(); };
-  return { base, remote, root, store, engine, queue, step, until, commit, remoteBranch, inReview, stop, a };
+  /** The orchestrator's decision, as `nexus review provisional|accept` writes it. */
+  const orchestrator = (type: "review.provisional" | "review.accepted", stepId: string) => {
+    store.writeSession({ protocol: 1, id: "orch", project: "p", role: "orchestrator", runtime: "claude", cwd: root, launched_by: "nexus", created_at: new Date().toISOString() });
+    store.appendEvent({ v: 1, id: newId(), at: new Date().toISOString(), session: "orch", type, queue: "Q", step: stepId });
+    engine.onChange(loadProjectState(store));
+  };
+  return { base, remote, root, store, engine, queue, step, until, commit, remoteBranch, inReview, orchestrator, stop, a };
 }
 
 test("an accepted step pushes the commit it was reviewed at, not a later one of the next step", async () => {
@@ -177,5 +189,48 @@ test("after a rejection nothing of the queue is pushed until a newer revision is
     x.engine.pushAgain("Q");
     await x.until("pushed", () => x.store.readPush("Q")?.steps.Q1?.result === "pushed");
     assert.equal(x.remoteBranch(), b, "the accepted commit, not the rejected step's");
+  } finally { x.stop(); }
+});
+
+// ---------------------------------------------------------------- provisional acceptances (review level 3)
+
+test("provisional work counts (the default): a provisional acceptance pushes like an acceptance", async () => {
+  const x = setup({ steps: 2, goal: "FAKE: commit", levels: [3, 1] });
+  try {
+    x.engine.start("Q");
+    await x.inReview("Q1");
+    const q1 = x.store.readPush("Q")!.review.Q1!.sha!;
+    x.orchestrator("review.provisional", "Q1");
+    await x.until("Q1 pushed", () => x.store.readPush("Q")?.steps.Q1?.result === "pushed");
+    assert.equal(x.remoteBranch(), q1);
+    assert.equal(x.step("Q1").provisional?.confirmed, undefined, "pushed though not confirmed");
+    await x.inReview("Q2");
+    x.engine.acceptReview("Q", "Q2");
+    await x.until("Q2 pushed", () => x.store.readPush("Q")?.steps.Q2?.result === "pushed");
+    assert.equal(x.remoteBranch(), x.store.readPush("Q")!.review.Q2!.sha);
+  } finally { x.stop(); }
+});
+
+test("provisional work does not count: neither it nor an accepted step built on it is pushed until the user confirms it", async () => {
+  const x = setup({ steps: 2, goal: "FAKE: commit", levels: [3, 1], counts: false });
+  try {
+    x.engine.start("Q");
+    await x.inReview("Q1");
+    x.orchestrator("review.provisional", "Q1");
+    await x.until("Q1 held", () => x.store.readPush("Q")?.steps.Q1?.result === "held");
+    assert.deepEqual(x.store.readPush("Q")!.steps.Q1!.held_by, ["Q/Q1"]);
+
+    await x.inReview("Q2");
+    const q2 = x.store.readPush("Q")!.review.Q2!.sha!;
+    x.engine.acceptReview("Q", "Q2"); // accepted by the user, but built on Q1's provisional work
+    await x.until("Q2 held", () => x.store.readPush("Q")?.steps.Q2?.result === "held");
+    assert.match(x.store.readPush("Q")!.steps.Q2!.text, /provisional work the user has not confirmed \(Q\/Q1\)/);
+    await new Promise((r) => setTimeout(r, 500));
+    assert.equal(x.remoteBranch(), undefined, "nothing pushed before the confirmation");
+
+    confirmProvisional(x.store, "Q", "Q1");
+    x.engine.onChange(loadProjectState(x.store));
+    await x.until("Q2 pushed", () => x.store.readPush("Q")?.steps.Q2?.result === "pushed");
+    assert.equal(x.remoteBranch(), q2, "the newest acceptance, Q1's work in it");
   } finally { x.stop(); }
 });

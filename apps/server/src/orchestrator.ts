@@ -15,7 +15,7 @@ import type { UpdateNotice } from "./lifecycle.ts";
 import { describeDeployChanges, type DeployChanges } from "./deploy.ts";
 import {
   acceptedNoteNotice, approvalNotice, discardNotice, liftNotice, missedStartNotice, noticeText, orchestratorBriefing, pausedNotice,
-  questionNotice, rejectionNotice, reviewNotice, runEndNotice, stepNoteNotice, userMessage, withdrawalNotice,
+  questionNotice, rejectionNotice, fixAskedNotice, reviewNotice, runEndNotice, stepNoteNotice, userMessage, withdrawalNotice,
 } from "./prompts.ts";
 
 // Agent (formerly Task) lets it call subagents; they run within these same read-only permissions.
@@ -162,6 +162,12 @@ export class Orchestrator {
         this.deliver(discardNotice(n, n.discard));
         continue;
       }
+      if (n.fix) {
+        this.store.appendChat(s.id, { at: now(), from: "nexus", text: `You asked a fix of step ${n.step} of queue ${n.queue}, which the orchestrator accepted provisionally:
+${n.text}` });
+        this.deliver(fixAskedNotice({ queue: n.queue, step: n.step, text: n.text, done: n.last }));
+        continue;
+      }
       if (n.rejected) {
         this.store.appendChat(s.id, { at: now(), from: "nexus", text: `You rejected step ${n.step} of queue ${n.queue}${n.text ? `:\n${n.text}` : "."}` });
         this.deliver(rejectionNotice(n));
@@ -178,8 +184,8 @@ export class Orchestrator {
    * Notes of the user's on an acceptance, for the orchestrator, that no orchestrator session has been told yet (each
    * is told once per project: a reset does not repeat it, and one made with no session starts one).
    */
-  private pendingNotes(state: ProjectState): { key: string; queue: string; step: string; text: string; last: boolean; rejected?: boolean; discard?: string[]; note?: string }[] {
-    const out: { key: string; queue: string; step: string; text: string; last: boolean; rejected?: boolean; discard?: string[]; note?: string }[] = [];
+  private pendingNotes(state: ProjectState): { key: string; queue: string; step: string; text: string; last: boolean; rejected?: boolean; fix?: boolean; discard?: string[]; note?: string }[] {
+    const out: { key: string; queue: string; step: string; text: string; last: boolean; rejected?: boolean; fix?: boolean; discard?: string[]; note?: string }[] = [];
     // The user's notes on a step the orchestrator held in review (picture comments on it too): told like a chat message.
     for (const q of state.queues) for (const st of q.steps) for (const n of st.notes) {
       if (n.to !== "orchestrator" || n.from !== "user") continue;
@@ -193,6 +199,11 @@ export class Orchestrator {
     for (const q of state.queues) for (const st of q.steps) for (const e of st.timeline) {
       if (e.type === "review.rejected") {
         out.push({ key: `notify:reject:${e.id}`, queue: q.id, step: st.id, text: e.text ?? "", last: q.steps.at(-1)?.id === st.id, rejected: true });
+        continue;
+      }
+      // The user's Fix it on a provisional acceptance: the orchestrator drafts the fix, whatever notify says.
+      if (e.type === "review.fix_asked" && st.provisional?.fix?.at === e.at) {
+        out.push({ key: `notify:fix:${e.id}`, queue: q.id, step: st.id, text: e.text, last: q.status === "done", fix: true });
         continue;
       }
       if (e.type !== "review.accepted" || e.to !== "orchestrator" || !e.text) continue;

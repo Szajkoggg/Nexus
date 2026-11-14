@@ -18,6 +18,7 @@ export interface Tiles { finished: Tile; stopped: Tile; waiting: Tile; running: 
 const KIND_WORDS: Record<WaitingItem["kind"], Key> = {
   question: "digest.kind.question", review: "digest.kind.review", approval: "digest.kind.approval",
   stopped: "digest.kind.stopped", failed: "digest.kind.failed", start: "digest.kind.start",
+  provisional: "digest.kind.provisional",
 };
 
 /**

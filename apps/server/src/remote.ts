@@ -178,6 +178,7 @@ export async function push(payload: { title: string; body: string; url: string; 
 
 const LABEL: Record<AttentionItem["kind"], string> = {
   question: "Question", stopped: "Stopped", approval: "Needs approval", review: "Review", failed: "Failed", start: "Did not start",
+  provisional: "To confirm",
 };
 // A stopped queue is one item whatever happens to its step (a skip by the orchestrator is no news for the user).
 const key = (a: AttentionItem) => [a.kind, a.queue, a.lift ? undefined : a.step, a.qid].join("/");

@@ -20,12 +20,18 @@ export interface QuestionView {
 }
 export type InboxView = InboxEntry & { read_at?: string };
 export interface AttentionItem {
-  /** `start`: a planned start came due and the queue could not start (queues/<id>/start.yaml `failed`). */
-  kind: "question" | "stopped" | "approval" | "review" | "failed" | "start";
+  /**
+   * `start`: a planned start came due and the queue could not start (queues/<id>/start.yaml `failed`). `provisional`:
+   * the return batch, one item for the project: the steps the orchestrator accepted provisionally that wait for the
+   * user's confirmation or Fix it (`provisional`, oldest first).
+   */
+  kind: "question" | "stopped" | "approval" | "review" | "failed" | "start" | "provisional";
   queue?: string; step?: string; qid?: string;
   text: string; at?: string;
   /** A question's options, as the worker gave them (the waiting list shows them as buttons). */
   options?: string[];
+  /** The return batch's steps (kind `provisional`). */
+  provisional?: { queue: string; step: string; title: string; at: string; text?: string; summary?: string }[];
   /** The option recommended to the user (its button is marked). */
   recommended?: string;
   /** A stop's condition (kind `stopped`), apart from its reason (`text`); none for a stop known as one text. */
@@ -54,6 +60,12 @@ export interface StepView extends StepDef {
    * user at level 1, and also at 2 and 3 when the project has no orchestrator or its notices are off.
    */
   review_with?: "orchestrator" | "user";
+  /**
+   * The orchestrator's provisional acceptance (review level 3: the step is done and the run went on): `event` the
+   * review.provisional's id, `text` what the user should look at. In the user's return batch until the user
+   * `confirmed` it, or asked a `fix` (Fix it: the orchestrator drafts a revision with a step that fixes it).
+   */
+  provisional?: { at: string; event: string; text?: string; confirmed?: string; fix?: { text: string; at: string } };
   /** The orchestrator's reason for handing the step's review to the user, in the current round. */
   asked_user?: { text: string; at: string };
   /**
@@ -364,7 +376,20 @@ function attentionOf(queues: QueueView[], questions: QuestionView[]): AttentionI
       if (s.status === "failed") out.push({ kind: "failed", queue: q.id, step: s.id, text: s.reason ?? s.title, at: s.finished_at });
     }
   }
+  // The return batch: every provisional acceptance not confirmed or sent to a fix, also of a finished queue.
+  const batch = queues.flatMap((q) => q.steps.filter((s) => pendingProvisional(s)).map((s) => ({
+    queue: q.id, step: s.id, title: s.title, at: s.provisional!.at,
+    ...(s.provisional!.text ? { text: s.provisional!.text } : {}), ...(s.summary ? { summary: s.summary } : {}),
+  }))).sort((a, b) => a.at.localeCompare(b.at));
+  if (batch.length) {
+    out.push({ kind: "provisional", text: `${batch.length} provisional acceptance${batch.length === 1 ? "" : "s"} wait${batch.length === 1 ? "s" : ""} for your confirmation`, at: batch.at(-1)!.at, provisional: batch });
+  }
   return out.sort((a, b) => (b.at ?? "").localeCompare(a.at ?? ""));
+}
+
+/** A provisional acceptance the user has neither confirmed nor sent to a fix: it is in the return batch. */
+export function pendingProvisional(st: Pick<StepView, "provisional">): boolean {
+  return !!st.provisional && !st.provisional.confirmed && !st.provisional.fix;
 }
 
 /** The latest approval pins the current revision, and no withdrawal came after it. */
@@ -606,6 +631,29 @@ function apply(
       st.status = "done";
       if (q.steps.every((x) => FINISHED_STEP.has(x.status))) q.status = "done";
       else if (q.status === "waiting" && !q.steps.some((x) => x.status === "waiting" || x.status === "review")) q.status = "running";
+      return;
+    }
+    case "review.provisional": {
+      // The orchestrator's provisional acceptance: only of a level-3 step waiting for its review.
+      const q = queueOf(e.queue); const st = stepOf(q, e.step);
+      if (!q || !st) return;
+      if (s?.role !== "orchestrator") { warnings.push(`event ${e.id}: a provisional acceptance is the orchestrator's; ignored`); return; }
+      if (st.status !== "review" || st.review_with !== "orchestrator") { warnings.push(`event ${e.id}: step ${e.queue}/${e.step} is not waiting for the orchestrator's review; the provisional acceptance is ignored`); return; }
+      if (st.level !== 3) { warnings.push(`event ${e.id}: step ${e.queue}/${e.step} is at review level ${st.level}; a provisional acceptance is for level 3, and is ignored`); return; }
+      st.review_with = undefined;
+      st.status = "done";
+      st.provisional = { at: e.at, event: e.id, ...(e.text ? { text: e.text } : {}) };
+      if (q.steps.every((x) => FINISHED_STEP.has(x.status))) q.status = "done";
+      else if (q.status === "waiting" && !q.steps.some((x) => x.status === "waiting" || x.status === "review")) q.status = "running";
+      return;
+    }
+    case "review.confirmed":
+    case "review.fix_asked": {
+      const st = stepOf(queueOf(e.queue), e.step);
+      if (!st) return;
+      if (!st.provisional || !pendingProvisional(st)) { warnings.push(`event ${e.id}: step ${e.queue}/${e.step} has no provisional acceptance waiting for the user; ignored`); return; }
+      if (e.type === "review.confirmed") st.provisional.confirmed = e.at;
+      else st.provisional.fix = { text: e.text, at: e.at };
       return;
     }
     case "message.read": {

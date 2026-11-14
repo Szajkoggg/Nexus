@@ -12,7 +12,7 @@ import chokidar, { type FSWatcher } from "chokidar";
 import type { Server } from "node:http";
 import {
   ActionError, Effort, ProjectStore, addNote, updateSettings, answerAsUser, approveQueue, deleteNote, loadProjectState, nexusHome, withdrawApproval, addAllowRule,
-  ensureGlobalSettings, readGlobalSettings, updateGlobalSettings, ownKeys, OVERRIDABLE, settingKey, readRegistry, readUsage, readTurns, commentOnPicture, markPicture, routeAnswers, routeSendBacks, sendBack, sendMessage, setQueueSettings, setStepLevel, type ProjectState,
+  ensureGlobalSettings, readGlobalSettings, updateGlobalSettings, ownKeys, OVERRIDABLE, settingKey, readRegistry, readUsage, readTurns, commentOnPicture, markPicture, routeAnswers, routeSendBacks, sendBack, sendMessage, setQueueSettings, setStepLevel, confirmProvisional, type ProjectState,
 } from "@nexus/protocol";
 import { newestFirst, projectDigest, projectRunning, usageSince, type DigestEvent, type DigestResponse, type DigestRunning, type UsageRun } from "@nexus/protocol/digest";
 import { Engine } from "./engine.ts";
@@ -381,6 +381,8 @@ app.post("/api/projects/:id/queues/:queue/steps/:step/pictures/mark", act((st, b
 app.post("/api/projects/:id/queues/:queue/steps/:step/pictures/comment", act((st, b, p) => ({ message: commentOnPicture(st, { queue: p("queue"), step: p("step"), path: b.path, text: b.text }) })));
 // Reject: the user's, on a step waiting for their review; the run pauses until a new revision is approved.
 app.post("/api/projects/:id/queues/:queue/steps/:step/reject", act((st, b, p) => ({ message: engineOf(st).rejectStep(p("queue"), p("step"), b.text) })));
+// The user confirms a step the orchestrator accepted provisionally (review level 3); Fix it on one is the send-back.
+app.post("/api/projects/:id/queues/:queue/steps/:step/confirm", act((st, _b, p) => ({ message: confirmProvisional(st, p("queue"), p("step")) })));
 app.post("/api/projects/:id/queues/:queue/steps/:step/accept", act((st, b, p) => engineOf(st).acceptReview(p("queue"), p("step"), b.text, b.note_to)));
 
 // A picture for a chat message (src/uploads.ts): the body's size is checked before it is read or parsed (also when it

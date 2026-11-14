@@ -6,7 +6,7 @@ import { ProjectFile, QueueFile, USER_SESSION, type GlobalSettings, effortIssue,
 import { ProjectStore, newId, now, readGlobalSettings, revisionHash, writeGlobalSettings } from "./store.ts";
 import { OVERRIDABLE, changedGlobal, settingKey } from "./settings.ts";
 import { HOLDING_RUN_STATES } from "./times.ts";
-import { commentTarget, isApproved, loadProjectState, type ProjectState } from "./state.ts";
+import { commentTarget, isApproved, loadProjectState, pendingProvisional, type ProjectState } from "./state.ts";
 import { validAllowRule } from "./refusals.ts";
 
 export class ActionError extends Error {
@@ -262,6 +262,8 @@ export function sendBack(store: ProjectStore, req: { queue: string; step: string
   let id = req.event;
   if (req.from === "user") {
     const st = loadProjectState(store).queues.find((q) => q.id === req.queue)!.steps.find((s) => s.id === req.step)!;
+    // Fix it on a step the orchestrator accepted provisionally: it stays done; the orchestrator drafts the fix.
+    if (pendingProvisional(st)) return askFix(store, req.queue, req.step, text);
     if (st.status !== "review" || st.review_with !== "user") throw new ActionError(`step ${req.queue}/${req.step} is not waiting for your review`, 409);
     const user = ensureUserSession(store);
     id = newId();
@@ -279,6 +281,45 @@ export function sendBack(store: ProjectStore, req: { queue: string; step: string
   if (b.to_user) return `step ${req.queue}/${req.step} goes to the user: it was sent back ${state.project.defaults.review_send_back_limit} times already`;
   if (!b.delivered) throw new ActionError(`step ${req.queue}/${req.step} has no worker session to send it back to`, 409);
   return `step ${req.queue}/${req.step} sent back to its worker as round ${b.round}`;
+}
+
+// ---------------------------------------------------------------- provisional acceptances (review level 3)
+
+/** A step of the queue with a provisional acceptance waiting for the user, or a refusal saying why not. */
+function provisionalStep(store: ProjectStore, queue: string, step: string) {
+  stepOf(store, queue, step);
+  const st = loadProjectState(store).queues.find((q) => q.id === queue)!.steps.find((s) => s.id === step)!;
+  if (!pendingProvisional(st)) {
+    throw new ActionError(st.provisional?.confirmed ? `step ${queue}/${step} is confirmed already`
+      : st.provisional?.fix ? `a fix of step ${queue}/${step} was asked already`
+      : `step ${queue}/${step} has no provisional acceptance waiting for you`, 409);
+  }
+  return st;
+}
+
+/**
+ * The user confirms a step the orchestrator accepted provisionally: it leaves the return batch (and, with
+ * provisional_counts off, what builds on it may be pushed). Only the user: the dashboard calls this; there is no CLI
+ * command, and the orchestrator's review.confirmed is ignored.
+ */
+export function confirmProvisional(store: ProjectStore, queue: string, step: string): string {
+  provisionalStep(store, queue, step);
+  const user = ensureUserSession(store);
+  store.appendEvent({ v: 1, id: newId(), at: now(), session: user.id, type: "review.confirmed", queue, step });
+  return `step ${queue}/${step} confirmed`;
+}
+
+/**
+ * The user's Fix it on a step the orchestrator accepted provisionally (`text`: what to fix, verbatim). The step stays
+ * done and its work stays: the orchestrator is told (whatever its notices say) and drafts a revision with a step that
+ * fixes it. A queue that went on waits for that approval at its running step's end (approval_wait); a finished queue
+ * gets a revision the user approves and starts.
+ */
+function askFix(store: ProjectStore, queue: string, step: string, text: string): string {
+  provisionalStep(store, queue, step);
+  const user = ensureUserSession(store);
+  store.appendEvent({ v: 1, id: newId(), at: now(), session: user.id, type: "review.fix_asked", queue, step, text });
+  return `the orchestrator drafts a fix of step ${queue}/${step} as a new revision of queue ${queue}`;
 }
 
 // ---------------------------------------------------------------- queue drafts (from an orchestrator)

@@ -1472,6 +1472,20 @@ busy-loop processes on the user's 16 logical cores and 4 to 6 copies of the test
   same content over to the new form (`parseQueue`), and the next write stores it so; checked against the 55 queues of
   this repository's own `.nexus` (read only): none changed its approved state.
 
+## Level 3: provisional acceptances (queue RL2)
+
+- **At level 3 the orchestrator still accepts what has nothing of the user's.** The queue's text named two choices
+  (accept provisionally, send back); asked, the orchestrator settled it from the decision ("what is the user's goes
+  into a batch"): a step with only checkable criteria is accepted for good, as at level 2, and only what has something
+  of the user's goes to the return batch. Otherwise away mode, which runs level 2 as 3, would fill the batch with every
+  technical step.
+- **A Fix it on a provisional step does not reopen it.** Later steps may already build on it, so the step and its work
+  stay and the fix becomes a new step: the orchestrator drafts it as a revision, which a running queue waits for at its
+  running step's end (the approval wait it already had) and a finished queue gets approved and started.
+- **"Built on it" is git ancestry.** With provisional work not counting, a push is held when the commit to push has the
+  provisional step's review commit in its history (and that step made commits of its own), whatever queue it came
+  from: the same rule covers a later step of the same queue and another queue in the same checkout.
+
 ## Open questions
 
 1. **The orchestrator on Codex.** The orchestrator runs on Claude Code only: its read-only guarantee rests on Claude

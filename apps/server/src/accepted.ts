@@ -5,8 +5,14 @@
 // anything but a fast-forward), no prompt, a time limit. A failed push does not undo the acceptance; it shows on the
 // step and is tried again at the next acceptance or with "push again". On only with the project's
 // defaults.push_accepted. Everything goes in queues/<id>/push.yaml (one writer: the server).
+//
+// A provisional acceptance (review level 3) counts as an acceptance when the project's defaults.provisional_counts is
+// on (the default). With it off, a push waits while the commit to push contains provisional work the user has not
+// confirmed (in any queue of the project: a step whose recorded review commit is in it and that made commits of its
+// own): the push is recorded `held`, with what holds it, and is tried again once one of those is confirmed (or sent to
+// a fix: the user has seen it, and the fix is a step reviewed on its own).
 import { execFileSync } from "node:child_process";
-import { ActionError, loadProjectState, normPath, now, type ProjectState, type ProjectStore, type PushFile, type QueueView } from "@nexus/protocol";
+import { ActionError, loadProjectState, normPath, now, pendingProvisional, type ProjectState, type ProjectStore, type PushFile, type QueueView } from "@nexus/protocol";
 import { checkoutOf } from "./gitinfo.ts";
 import { PUSH_ENV, PUSH_TIMEOUT_MS, pushFailure, runGit, type GitRunner } from "./deploy.ts";
 
@@ -39,7 +45,9 @@ export class AcceptedPusher {
       const latest = newestAcceptance(q);
       if (!latest) continue;
       const push = this.store.readPush(q.id);
-      if (Object.values(push?.steps ?? {}).some((s) => s.acceptance === latest.event)) continue;
+      const done = Object.values(push?.steps ?? {}).find((s) => s.acceptance === latest.event);
+      // A held push goes again once what held it is no longer waiting for the user (or provisional work counts now).
+      if (done && !(done.result === "held" && (state.project.defaults.provisional_counts || !(done.held_by ?? []).every((k) => pendingKeys(state).has(k))))) continue;
       this.start(q, latest.step, latest.event);
     }
   }
@@ -87,6 +95,13 @@ export class AcceptedPusher {
     if (!sha) return this.record(q.id, step, acceptance, sha, { result: "failed", text: "no commit was recorded when the step entered review (is the checkout a git repository?)" });
     const env = { ...process.env, ...PUSH_ENV };
     const git = (args: string[]) => this.run(dir, args, { env, timeout: this.timeout });
+    const state = loadProjectState(this.store);
+    if (!state.project.defaults.provisional_counts) {
+      const holders = await this.provisionalIn(state, dir, sha);
+      if (holders.length) {
+        return this.record(q.id, step, acceptance, sha, { result: "held", text: `not pushed yet: it contains provisional work the user has not confirmed (${holders.join(", ")})` }, undefined, holders);
+      }
+    }
     const branch = q.branch ?? (await git(["branch", "--show-current"]).catch(() => ({ stdout: "" }))).stdout.trim();
     if (!branch) return this.record(q.id, step, acceptance, sha, { result: "failed", text: "the queue's checkout is on no branch" });
     const upstream = (await git(["config", "--get", `branch.${branch}.remote`]).catch(() => ({ stdout: "" }))).stdout.trim();
@@ -102,11 +117,29 @@ export class AcceptedPusher {
     }
   }
 
+  /**
+   * The provisional steps waiting for the user (`queue/step`) whose work is in commit `sha`: the commit recorded when
+   * the step entered review is `sha` or an ancestor of it, and the step made commits of its own (its first round did
+   * not start at that commit).
+   */
+  private async provisionalIn(state: ProjectState, dir: string, sha: string): Promise<string[]> {
+    const out: string[] = [];
+    for (const q of state.queues) for (const st of q.steps) {
+      if (!pendingProvisional(st)) continue;
+      const own = this.store.readPush(q.id)?.review[st.id]?.sha;
+      if (!own) continue;
+      if (this.store.readGit(q.id)?.steps[st.id]?.[0]?.start === own) continue; // no commits of its own
+      const inIt = own === sha || await this.run(dir, ["merge-base", "--is-ancestor", own, sha], { env: process.env, timeout: this.timeout }).then(() => true, () => false);
+      if (inIt) out.push(`${q.id}/${st.id}`);
+    }
+    return out;
+  }
+
   /** Writes the outcome; a successful push also marks earlier failed steps whose commit it includes as pushed. */
-  private async record(queueId: string, step: string, acceptance: string, sha: string | undefined, r: { result: "pushed" | "failed" | "skipped"; text: string }, pushed?: { remote: string; branch: string; dir: string }): Promise<void> {
+  private async record(queueId: string, step: string, acceptance: string, sha: string | undefined, r: { result: "pushed" | "failed" | "skipped" | "held"; text: string }, pushed?: { remote: string; branch: string; dir: string }, heldBy?: string[]): Promise<void> {
     const at = now();
     const push: PushFile = this.store.readPush(queueId) ?? { protocol: 1, review: {}, steps: {} };
-    push.steps[step] = { acceptance, sha, result: r.result, text: r.text, at };
+    push.steps[step] = { acceptance, sha, result: r.result, text: r.text, at, ...(heldBy ? { held_by: heldBy } : {}) };
     if (r.result === "failed") push.error = { text: r.text, at, sha, step };
     if (r.result === "pushed" && pushed && sha) {
       push.pushed = { sha, step, at, remote: pushed.remote, branch: pushed.branch };
@@ -121,12 +154,17 @@ export class AcceptedPusher {
   }
 }
 
-/** The newest review.accepted of the queue (its step and event), if any. */
+/** The newest acceptance of the queue, the orchestrator's provisional ones included (its step and event), if any. */
 function newestAcceptance(q: QueueView): { step: string; event: string; at: string } | undefined {
   let best: { step: string; event: string; at: string } | undefined;
   for (const s of q.steps) for (const e of s.timeline) {
-    if (e.type === "review.accepted" && s.status === "done" && (!best || e.at > best.at)) best = { step: s.id, event: e.id, at: e.at };
+    if ((e.type === "review.accepted" || e.type === "review.provisional") && s.status === "done" && (!best || e.at > best.at)) best = { step: s.id, event: e.id, at: e.at };
   }
   return best;
+}
+
+/** The provisional steps of the project waiting for the user, as `queue/step`. */
+function pendingKeys(state: ProjectState): Set<string> {
+  return new Set(state.queues.flatMap((q) => q.steps.filter((s) => pendingProvisional(s)).map((s) => `${q.id}/${s.id}`)));
 }
 

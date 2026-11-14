@@ -231,3 +231,33 @@ test("a project without the mark (a new one) reviews every step by level", () =>
   done(1, "C", "C1");
   assert.equal(loadProjectState(store).queues[0]!.steps[0]!.status, "review");
 });
+
+// ---------------------------------------------------------------- provisional acceptances (review level 3)
+
+test("a provisional acceptance is the orchestrator's, at level 3 only; confirming and Fix it are the user's, once", () => {
+  const { store } = setup();
+  const { emit, done } = sessions(store);
+  store.updateProject((p) => ({ ...p, orchestrator: { runtime: "claude", notify: true, session: null } }));
+  applyDraft(store, { id: "Q", title: "Q", steps: [step("Q1", { level: 3 }), step("Q2", { level: 2 }), step("Q3", { level: 3 })] });
+  approveQueue(store, "Q");
+  const st = (id: string) => loadProjectState(store).queues[0]!.steps.find((s) => s.id === id)!;
+  done(1, "Q", "Q1"); done(1, "Q", "Q2"); done(1, "Q", "Q3");
+  emit(2, "u", { type: "review.provisional", queue: "Q", step: "Q1" }); // the user's: ignored
+  emit(2, "o", { type: "review.provisional", queue: "Q", step: "Q2" }); // level 2: ignored
+  assert.deepEqual([st("Q1").status, st("Q2").status], ["review", "review"]);
+  emit(3, "o", { type: "review.provisional", queue: "Q", step: "Q1", text: "Check the look." });
+  emit(3, "o", { type: "review.provisional", queue: "Q", step: "Q3" });
+  assert.deepEqual([st("Q1").status, st("Q1").provisional?.text], ["done", "Check the look."]);
+  emit(4, "o", { type: "review.confirmed", queue: "Q", step: "Q1" }); // USER_ONLY: ignored
+  assert.equal(st("Q1").provisional?.confirmed, undefined);
+  emit(5, "u", { type: "review.confirmed", queue: "Q", step: "Q1" });
+  emit(6, "u", { type: "review.fix_asked", queue: "Q", step: "Q1", text: "too late" }); // confirmed already: ignored
+  emit(6, "u", { type: "review.fix_asked", queue: "Q", step: "Q3", text: "Bigger." });
+  const s = loadProjectState(store);
+  assert.deepEqual([st("Q1").provisional?.confirmed !== undefined, st("Q1").provisional?.fix], [true, undefined]);
+  assert.deepEqual(st("Q3").provisional?.fix?.text, "Bigger.");
+  assert.equal(s.attention.filter((a) => a.kind === "provisional").length, 0, "both resolved: no batch");
+  assert.ok(s.warnings.some((w) => /review.confirmed is the user's; ignored/.test(w)));
+  assert.ok(s.warnings.some((w) => /a provisional acceptance is the orchestrator's; ignored/.test(w)));
+  assert.ok(s.warnings.some((w) => /at review level 2; a provisional acceptance is for level 3/.test(w)));
+});

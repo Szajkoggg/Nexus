@@ -126,6 +126,12 @@ const DefaultsShape = z.object({
    * that was HEAD when it entered review to the branch the queue runs on (its upstream remote, else origin).
    */
   push_accepted: z.boolean().default(false),
+  /**
+   * Whether work the orchestrator accepted provisionally (review level 3) counts as accepted for pushing: true (the
+   * default), it is pushed like an accepted step; false, neither it nor anything built on it is pushed until the user
+   * confirms it.
+   */
+  provisional_counts: z.boolean().default(true),
   usage_pause_threshold: Fraction.default(0.9),
 });
 /** `defaults` as read: an old `review_policy` becomes its `review_level`. */
@@ -252,6 +258,7 @@ export const StoredProject = z.object({
     context_care: own(z.boolean()),
     protect_nexus: own(z.boolean()),
     push_accepted: own(z.boolean()),
+    provisional_counts: own(z.boolean()),
     usage_pause_threshold: own(Fraction),
     worktree_dir: z.string().optional(),
   })).prefault({}),
@@ -558,6 +565,18 @@ export const Event = z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("review.commented"), ...qs, path: z.string().min(1), text: z.string().min(1), to: z.enum(["send_back", "note", "orchestrator"]), note_step: Id.optional() }),
   /** The orchestrator hands a step waiting for its review to the user, saying why. */
   z.object({ ...base, type: z.literal("review.asked_user"), ...qs, text: z.string().min(1) }),
+  /**
+   * The orchestrator accepts a step of review level 3 provisionally (`text`: what the user should look at): the run goes
+   * on, and the step waits in the user's return batch for a confirmation or a Fix it. Orchestrator only.
+   */
+  z.object({ ...base, type: z.literal("review.provisional"), ...qs, text: z.string().optional() }),
+  /** The user confirms a provisional acceptance. User only: the orchestrator never confirms. */
+  z.object({ ...base, type: z.literal("review.confirmed"), ...qs }),
+  /**
+   * The user's Fix it on a provisionally accepted step (`text`: what to fix): the step stays done, and the orchestrator
+   * drafts a revision with a step that fixes it. User only.
+   */
+  z.object({ ...base, type: z.literal("review.fix_asked"), ...qs, text: z.string().min(1) }),
 ]);
 export type Event = z.infer<typeof Event>;
 export type EventType = Event["type"];
@@ -566,10 +585,11 @@ export type EventOf<T extends EventType> = Extract<Event, { type: T }>;
 /** Event types a worker session may not write (orchestrators and the user may). */
 export const ORCHESTRATOR_ONLY: ReadonlySet<EventType> = new Set([
   "answer.given", "queue.drafted", "session.request", "review.accepted", "review.sent_back", "review.asked_user", "status.set",
+  "review.provisional",
 ]);
 
 /** Event types only the user's session may write (the server writes them for the dashboard). */
-export const USER_ONLY: ReadonlySet<EventType> = new Set(["review.rejected", "review.marked", "review.commented"]);
+export const USER_ONLY: ReadonlySet<EventType> = new Set(["review.rejected", "review.marked", "review.commented", "review.confirmed", "review.fix_asked"]);
 
 // ---------------------------------------------------------------- server-owned runtime files
 
@@ -604,7 +624,9 @@ export const PushFile = z.object({
   protocol: z.literal(1),
   review: z.record(z.string(), z.object({ sha: z.string().nullable(), finished_at: Time, at: Time })).default({}),
   steps: z.record(z.string(), z.object({
-    acceptance: Id, sha: z.string().optional(), result: z.enum(["pushed", "failed", "skipped"]), text: z.string(), at: Time,
+    acceptance: Id, sha: z.string().optional(), result: z.enum(["pushed", "failed", "skipped", "held"]), text: z.string(), at: Time,
+    /** `held`: the provisional steps (`queue/step`) not confirmed yet that the commit builds on. */
+    held_by: z.array(z.string()).optional(),
   })).default({}),
   pushed: z.object({ sha: z.string(), step: Id, at: Time, remote: z.string(), branch: z.string() }).optional(),
   error: z.object({ text: z.string(), at: Time, sha: z.string().optional(), step: Id }).optional(),
