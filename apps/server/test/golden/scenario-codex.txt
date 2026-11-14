@@ -335,7 +335,7 @@
   "context_window": 2000,
   "model": "fake-codex-model",
   "pid": "<pid>",
-  "state": "idle",
+  "state": "working",
   "turns": 5,
   "updated_at": "2026-01-01T10:51:00.000Z"
 }

@@ -127,7 +127,13 @@ export class AgentHost<E extends object = object> {
     // streams after the previous turn's end.
     let open: OpenTurn | undefined;
     let model: string | undefined;
-    const begin = () => { open ??= { started: now(), windows: this.windows(session.runtime), tag: on.tag?.() ?? {} }; };
+    // A turn that begins marks the record `working`, so `idle` always means between turns: a Codex reply's text comes
+    // before its token figures, and a record still `idle` from the start then read as a turn already over (queue FU4).
+    const begin = (mark = true) => {
+      if (open) return;
+      open = { started: now(), windows: this.windows(session.runtime), tag: on.tag?.() ?? {} };
+      if (mark) this.write(session.id, { state: "working" });
+    };
     proc.on("message", (text) => { begin(); on.message?.(text); });
     // Not an error line: a process that exits writes one after its last turn, and that is no new turn.
     proc.on("activity", (a) => { if (a.kind !== "error") begin(); on.activity?.(a); });
@@ -139,7 +145,7 @@ export class AgentHost<E extends object = object> {
       this.facts(session.id, f); on.facts?.(f);
     });
     proc.on("turnEnd", (end) => {
-      begin();
+      begin(false);
       this.recordTurn(session, open!, model, end);
       open = undefined;
       this.write(session.id, this.record.countTurns ? { state: "idle", turns: (this.store.readRuntime(session.id)?.turns ?? 0) + 1 } : { state: "idle" });

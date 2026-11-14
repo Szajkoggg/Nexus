@@ -245,6 +245,11 @@ test("a send-back on a halted run waits for the resume", async () => {
   try {
     await x.run("H", 1);
     await x.until("the review", () => x.step("H", "H1").review_with === "orchestrator");
+    // The step's outcome lands while the worker's turn still runs (the last step's report comes after it). A run is
+    // halted only between turns (a halt follows a turn's end), so the test waits for that end: halted mid-turn, the
+    // send-back went into the running turn, as any message to a working process does (queue FU4).
+    const session = x.store.readRun("H")!.session;
+    await x.until("the worker's turn to end", () => { const r = x.store.readRuntime(session); return !!r && r.turns >= 1 && r.state === "idle"; });
     const run = x.store.readRun("H")!;
     x.store.writeRun("H", { ...run, state: "halted", reason: "halted for the test", updated_at: now() });
     x.orchestrator.say(`FAKE-NEXUS: ["review","send-back","H","H1","Redo the sheet."]`);

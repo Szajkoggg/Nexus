@@ -39,9 +39,12 @@ function setup(o: { git?: boolean } = {}) {
   approveQueue(store, "Q");
   const engine: Engine = new Engine(store, () => { routeAnswers(store); engine.onChange(loadProjectState(store)); });
   const queue = () => loadProjectState(store).queues.find((q) => q.id === "Q")!;
+  // The run takes two steps and a report: about eight node processes (the fake worker, each nexus call), each started
+  // in a second here but in two to four under load, where a step took 14 s (scripts/load-tests.mjs, 12 busy cores
+  // and 6 copies, queue FU4). The wait is for that work, not for a hang: 60 s.
   const finished = async () => {
     for (const t = Date.now(); queue().run?.state !== "finished";) {
-      if (Date.now() - t > 20_000) assert.fail(`timed out; run ${JSON.stringify(queue().run)}`);
+      if (Date.now() - t > 60_000) assert.fail(`timed out; run ${JSON.stringify(queue().run)}`);
       await new Promise((r) => setTimeout(r, 100));
     }
   };
@@ -78,6 +81,13 @@ test("a worktree queue ends with a clean worktree, and its cleanup succeeds", as
   try {
     x.engine.start("Q", { runtime: "claude" });
     await x.finished();
+    // The run is finished when its last step is; its process then ends. Windows does not remove a folder a process
+    // still runs in ("Permission denied"), so the cleanup, as the user's would, comes after the exit (queue FU4).
+    const session = x.queue().run!.session;
+    for (const t = Date.now(); x.store.readRuntime(session)?.state !== "exited";) {
+      if (Date.now() - t > 20_000) assert.fail("the worker's process did not exit");
+      await new Promise((r) => setTimeout(r, 100));
+    }
     const wt = x.store.readQueue("Q").worktree!;
     assert.ok(existsSync(wt));
     assert.equal(execFileSync("git", ["status", "--porcelain"], { cwd: wt, encoding: "utf8" }).trim(), "", "a clean worktree");

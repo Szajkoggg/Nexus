@@ -319,7 +319,11 @@ npm run dev      # development, apart from the live instance: API on :4318 with 
                  # dashboard with hot reload on http://localhost:5173
 npm test         # protocol, importer, engine and orchestrator tests (the last two run a fake `claude`)
 npm run typecheck
+node scripts/load-tests.mjs --burners 12 --copies 4 --rounds 5 apps/server/test/review.test.ts   # tests under load
 ```
+
+A test that fails only now and then usually fails on a busy machine: `scripts/load-tests.mjs` runs the files given
+several times at once beside busy-loop processes and reports each run, its failures and its slow tests.
 
 `NEXUS_PORT` and `NEXUS_HOST` change where the server listens (default `127.0.0.1:4317`, this machine only).
 

@@ -1416,6 +1416,28 @@ file is missing ("I can't read the image because the file is missing"); the adap
 Total cost of the probes: about $0.009 of Claude usage (two turns) and, for Codex (gpt-6-luna, seven one-turn
 threads), about 117k input tokens, about 90k of them cached, and under 100 output tokens.
 
+## Findings from the flaky tests (queue FU4)
+
+Four server tests failed now and then on a busy machine. `scripts/load-tests.mjs` brings such failures out (12
+busy-loop processes on the user's 16 logical cores and 4 to 6 copies of the test files at once); with 6 copies,
+9 of 12 runs failed before the fixes. The causes:
+
+- **A hand-over during a turn handed over that turn's reply** (conversations.test.ts). The instruction went into the
+  running turn (`next`, or Codex's steer) with the hand-over flag already set, so that turn's end took its reply, the
+  answer to the earlier message, as the summary. Real, not only a test's: a user who hands over while the partner
+  still writes. Now the instruction waits for the turn's end and runs as its own turn.
+- **A runtime record was `idle` during a turn** (runtime-records.test.ts, Codex). The record went `working` only with
+  the context tokens, and a Codex reply's text comes before them, so a record still `idle` from the process start read
+  as a finished turn. `AgentHost` now marks it `working` when a turn begins; `idle` means between turns.
+- **A test halted a run in the middle of its worker's turn** (review.test.ts, "a send-back on a halted run waits for
+  the resume"). The step's outcome lands while the turn still runs (the last step's report follows it), and a message
+  to a working process goes into its turn whatever the run's state. The engine halts only between turns, so the test
+  now waits for the turn's end, as a real halt does.
+- **A worktree was removed while its worker's process was still exiting** (report.test.ts): Windows refuses to delete
+  a folder a process runs in ("Permission denied"). The test now cleans up after the process has exited, as a user's
+  cleanup comes. Its other failure was time: two steps and a report start about eight node processes, a step took 14 s
+  under that load, and the 20 s wait was shorter than the work: now 60 s, the cost written beside it.
+
 ## Open questions
 
 1. **The orchestrator on Codex.** The orchestrator runs on Claude Code only: its read-only guarantee rests on Claude

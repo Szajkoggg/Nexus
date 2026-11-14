@@ -1,6 +1,7 @@
 // Conversations against the fake runtimes: what a thinking partner may do, and handing it to the orchestrator.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -9,6 +10,7 @@ import { ProjectStore, loadProjectState, updateSettings } from "@nexus/protocol"
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { Conversations } from "../src/conversations.ts";
+import type { AgentEvents, AgentProcess } from "../src/agent.ts";
 import { longReply } from "./fake-behaviour.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -111,6 +113,54 @@ for (const runtime of ["claude", "codex"] as const) {
     } finally { stop(); }
   });
 }
+
+for (const runtime of ["claude", "codex"] as const) {
+  test(`a ${runtime} hand-over asked while the partner is still at a turn waits for it, and hands over the summary`, async () => {
+    process.env.FAKE_CHAT_SLOW_MS = "2500";
+    const { store, conversations, orchestrator, until, stop } = setup("Dev/Notes");
+    try {
+      const c = conversations.create({ title: "Busy", runtime });
+      conversations.say(c.id, "FAKE-SLOW");
+      await until("the partner at work", () => chatFile(store, c.id).some((x) => x.kind === "tool" && x.text.includes("FAKE-SLOW")));
+      conversations.handoff(c.id);
+      await until("the summary in the orchestrator's chat", () => orchestrator.view().chat.some((x) => x.from === "user"));
+      const sent = chatFile(store, orchestrator.session()!.id).filter((x) => x.from === "user").map((x) => x.text);
+      assert.deepEqual(sent, [`[From the conversation "Busy"]
+
+${longReply("SUMMARY")}`], "the summary, not the running turn's reply");
+      assert.ok(chatFile(store, c.id).some((x) => x.from === "partner" && x.kind === "message" && x.text === "slow reply"), "the running turn's reply stays the partner's");
+    } finally { stop(); delete process.env.FAKE_CHAT_SLOW_MS; }
+  });
+}
+
+test("a turn's end that comes after the shutdown arms no idle timer: a stopped Nexus is not kept alive", () => {
+  const root = mkdtempSync(join(tmpdir(), "nexus-conv-idle-"));
+  process.env.NEXUS_HOME = join(root, "home");
+  const store = ProjectStore.init(root, { id: "p", name: "P", root });
+  /** A stand-in partner process: what is sent is dropped; the test ends its turn. */
+  class Stand extends EventEmitter<AgentEvents> implements AgentProcess {
+    state: AgentProcess["state"] = "idle";
+    readonly pid = 4242;
+    send(): void { this.state = "working"; }
+    stop(): boolean { return false; }
+    close(): void { this.state = "exited"; }
+    kill(): void { this.state = "exited"; }
+  }
+  const stands: Stand[] = [];
+  const engine = new Engine(store, () => {});
+  const orchestrator = new Orchestrator(store, engine, () => {});
+  const conversations = new Conversations(store, orchestrator, () => {}, { spawn: () => { const p = new Stand(); stands.push(p); return p; } });
+  const timeouts = () => process.getActiveResourcesInfo().filter((r) => r === "Timeout").length;
+  try {
+    const c = conversations.create({ title: "Idle" });
+    conversations.say(c.id, "Hello");
+    const before = timeouts();
+    conversations.shutdown();
+    stands[0]!.state = "idle";
+    stands[0]!.emit("turnEnd", { ok: true, text: "late" });
+    assert.ok(timeouts() <= before, "no timer armed after the shutdown");
+  } finally { conversations.shutdown(); orchestrator.shutdown(); engine.shutdown(); }
+});
 
 test("the notes folder must lie inside the project", () => {
   const { store, stop } = setup();

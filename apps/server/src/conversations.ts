@@ -23,15 +23,22 @@ export const HANDOFF_SCOPE = "Summarize only the topics discussed in this conver
 const IDLE_MS = 15 * 60_000; // an idle partner's process ends; the next message resumes the conversation
 
 /** What a partner's process keeps beside it: its idle timer, and whether its running turn writes a hand-over. */
-type Live = Hosted<{ timer?: NodeJS.Timeout; handoff?: boolean }>;
+/**
+ * `handoff`: the running turn is the hand-over's, its reply the summary. `handoffNext`: the hand-over was asked while
+ * another turn ran; its instruction waits as the next turn, and that turn is the hand-over's.
+ */
+type Extra = { timer?: NodeJS.Timeout; handoff?: boolean; handoffNext?: boolean };
+type Live = Hosted<Extra>;
 
 export class Conversations {
   private readonly store: ProjectStore;
   private readonly orchestrator: Orchestrator;
   private readonly changed: () => void;
-  private readonly host: AgentHost<{ timer?: NodeJS.Timeout; handoff?: boolean }>;
+  private readonly host: AgentHost<Extra>;
   /** Set while Nexus drains for an update: no new turn starts. */
   draining = false;
+  /** Set by shutdown: no idle timer is armed after it. */
+  private stopped = false;
 
   /** `host`: how the partners' processes are made (tests give a stand-in). */
   constructor(store: ProjectStore, orchestrator: Orchestrator, changed: () => void, host: AgentHostOptions = {}) {
@@ -154,13 +161,18 @@ ${text}`;
     const s = this.session(id);
     this.store.appendChat(id, { at: now(), from: "nexus", text: "Summarizing this conversation for the orchestrator…" });
     const l = this.ensure(s);
-    l.handoff = true;
-    this.deliver(s, `[Nexus] The user hands this conversation to the orchestrator, who plans and runs work in queues. Write a summary for it, in ${languageName(this.store.readProject().languages.working)}: what was decided (only what the user decided), the open questions, the work you propose (as steps with what each should achieve), and the files where the notes are. ${HANDOFF_SCOPE} Reply with the summary only.`);
+    // While the partner is still at a turn (its reply on the way), the instruction waits for that turn's end and runs
+    // as a turn of its own: put into the running turn, that turn's reply (not a summary) went over as the summary
+    // (queue FU4). Idle, it starts the turn at once.
+    clearTimeout(l.timer);
+    if (l.proc.state === "working") l.handoffNext = true; else l.handoff = true;
+    l.proc.send(`[Nexus] The user hands this conversation to the orchestrator, who plans and runs work in queues. Write a summary for it, in ${languageName(this.store.readProject().languages.working)}: what was decided (only what the user decided), the open questions, the work you propose (as steps with what each should achieve), and the files where the notes are. ${HANDOFF_SCOPE} Reply with the summary only.`);
+    this.changed();
   }
 
   idle(): boolean { return this.host.idle(); }
 
-  shutdown(): void { for (const l of this.host.all()) clearTimeout(l.timer); this.host.shutdown(); }
+  shutdown(): void { this.stopped = true; for (const l of this.host.all()) clearTimeout(l.timer); this.host.shutdown(); }
 
   /** A partner's process is still running (after shutdown: not yet exited). */
   alive(): boolean { return this.host.alive(); }
@@ -258,11 +270,18 @@ ${text}`;
               } catch (e) { this.store.appendChat(s.id, { at: now(), from: "nexus", kind: "error", text: `Could not hand it over: ${(e as Error).message}` }); }
             }
           }
+          // A hand-over asked during the turn that just ended: the next turn, its instruction, is the hand-over's.
+          else if (l.handoffNext) { l.handoffNext = false; l.handoff = true; }
           clearTimeout(l.timer);
-          l.timer = setTimeout(() => { if (l.proc.state !== "working" && this.host.get(s.id) === l) { this.host.retire(s.id); this.changed(); } }, IDLE_MS);
+          // Not after shutdown: a turn's end the stopped process still delivers would arm it again, and an armed timer
+          // kept a stopped Nexus (a test's process) alive for its 15 minutes (queue FU4). It never keeps Node up.
+          if (!this.stopped) {
+            l.timer = setTimeout(() => { if (l.proc.state !== "working" && this.host.get(s.id) === l) { this.host.retire(s.id); this.changed(); } }, IDLE_MS);
+            l.timer.unref();
+          }
           this.changed();
         },
-        exit: () => this.changed(),
+        exit: () => { clearTimeout(l.timer); this.changed(); },
       };
     });
   }

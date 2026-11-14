@@ -73,6 +73,18 @@ test("claude orchestrator: the runtime record keeps the cost and counts no turns
 });
 
 for (const runtime of ["claude", "codex"] as const) {
+  test(`${runtime} conversation: the record is working during a turn, so idle means the turn is over`, async () => {
+    process.env.FAKE_CHAT_SLOW_MS = "2000";
+    const { store, conversations, until, stop } = setup();
+    try {
+      const c = conversations.create({ title: "Talk", runtime });
+      conversations.say(c.id, "FAKE-SLOW");
+      await until("the turn at work", () => conversations.view(c.id).chat.some((x) => x.kind === "tool"));
+      assert.equal(store.readRuntime(c.id)?.state, "working");
+      await until("the reply", () => conversations.view(c.id).chat.some((x) => x.from === "partner" && x.kind === "message") && store.readRuntime(c.id)?.state === "idle");
+    } finally { stop(); delete process.env.FAKE_CHAT_SLOW_MS; }
+  });
+
   test(`${runtime} conversation: the runtime record has no cost and counts no turns`, async () => {
     const { store, conversations, until, stop } = setup();
     try {

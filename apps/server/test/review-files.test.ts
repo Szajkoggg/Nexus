@@ -50,7 +50,7 @@ test("a protected worker's review files are copied into the queue's folder; the 
   try {
     engine.start("Q", { runtime: "claude" });
     for (const t = Date.now(); queue().run?.state !== "finished";) {
-      if (Date.now() - t > 20_000) assert.fail(`timed out; run ${JSON.stringify(queue().run)}`);
+      if (Date.now() - t > 60_000) assert.fail(`timed out; run ${JSON.stringify(queue().run)}`); // as report.test.ts: the work, under load
       await new Promise((r) => setTimeout(r, 100));
     }
     const argv = readFileSync(process.env.FAKE_ARGS!, "utf8").trim().split("\n").map((l) => JSON.parse(l) as { argv?: string[] })[0]!.argv!;
@@ -65,6 +65,11 @@ test("a protected worker's review files are copied into the queue's folder; the 
     for (const x of items) assert.ok(existsSync(x.path!), x.path);
     assert.ok(existsSync(join(temp, "nexus-review", "R1", "notes.md")), "the source stays where the worker wrote it");
 
+    // As in report.test.ts: the cleanup comes after the worker's process has exited (Windows keeps its folder).
+    for (const t = Date.now(); store.readRuntime(queue().run!.session)?.state !== "exited";) {
+      if (Date.now() - t > 20_000) assert.fail("the worker's process did not exit");
+      await new Promise((r) => setTimeout(r, 100));
+    }
     const wt = store.readQueue("Q").worktree!;
     assert.equal(execFileSync("git", ["status", "--porcelain"], { cwd: wt, encoding: "utf8" }).trim(), "", "a clean worktree");
     assert.match(cleanUp(store, "Q"), /is removed and branch nexus\/Q deleted/);

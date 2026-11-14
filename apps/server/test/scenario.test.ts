@@ -143,9 +143,10 @@ for (const runtime of ["claude", "codex"] as const) {
       engine.resume("Q");
       record("resumed by the user during the usage wait: the step continued");
       later();
-      // (Codex reports nothing during this turn until its end: its runtime record stays idle meanwhile.)
+      // The record is working from the turn's start, for both runtimes (until queue FU4, Codex's stayed idle until the
+      // turn's token figures came, so idle did not mean the turn was over).
       await until("Q4 at work", () => stepIs("Q3", "done") && stepIs("Q4", "running") && runtimeState()?.turns === 5
-        && runtimeState()?.state === (runtime === "claude" ? "working" : "idle"));
+        && runtimeState()?.state === "working");
       record("the last step at work");
 
       // The server stops in the middle of the step; the next one pauses the run, and a resume continues the step.
