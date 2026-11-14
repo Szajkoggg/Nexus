@@ -288,15 +288,20 @@ export class DeployPlanner {
   cancel(by?: UpdateAsker): string {
     const p = this.f.plan;
     if (!p) throw new PlanError("no deploy is planned");
-    let also = "";
-    if (p.started && this.o.lifecycle.status.id === p.started.update && this.o.lifecycle.status.phase === "draining") {
-      this.end("cancelled", "the plan was cancelled", by);
-      this.o.lifecycle.cancel();
-      also = "; the update it started is cancelled, the held queues go on";
-    } else if (p.started && this.o.lifecycle.busy) {
+    const draining = this.drains(p);
+    if (p.started && !draining && this.o.lifecycle.busy) {
       throw new PlanError(`the update it started is already ${this.o.lifecycle.status.phase}; it cannot be cancelled now`);
-    } else this.end("cancelled", "the plan was cancelled", by);
-    return `the deploy planned ${whenText(p)} is cancelled${also}`;
+    }
+    this.end("cancelled", "the plan was cancelled", by);
+    if (!draining) return `the deploy planned ${whenText(p)} is cancelled`;
+    this.o.lifecycle.cancel();
+    return `the deploy planned ${whenText(p)} is cancelled; the update it started is cancelled, the held queues go on`;
+  }
+
+  /** The update plan `p` started still drains (waits for running steps): it can be cancelled, or hurried. */
+  private drains(p: DeployPlan): boolean {
+    const s = this.o.lifecycle.status;
+    return !!p.started && s.id === p.started.update && s.phase === "draining";
   }
 
   /** After a change in a project: starts the deploy once it is due, waits, or drops the plan when it will not be. */
@@ -398,7 +403,7 @@ export class DeployPlanner {
       if (!q || q.id !== p.id) return;
       if (!q.started) { this.evaluate(); return; }
       // The deadline: a drain still waiting for running steps interrupts them (they continue after the restart).
-      if (this.o.lifecycle.status.id === q.started.update && this.o.lifecycle.status.phase === "draining") this.o.lifecycle.hurry();
+      if (this.drains(q)) this.o.lifecycle.hurry();
     };
     const wait = due - Date.now();
     if (wait <= 0) { queueMicrotask(fire); return; }
