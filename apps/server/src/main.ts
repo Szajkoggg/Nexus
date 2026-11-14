@@ -1,9 +1,8 @@
 // The Nexus server: reads every registered project's .nexus/ directory, serves the dashboard and its API,
 // and tells connected dashboards when a project's files change. It writes nothing in phase 1.
-import { createReadStream, createWriteStream, existsSync, mkdirSync, realpathSync, statSync, type WriteStream } from "node:fs";
-import { dirname, extname, join, resolve } from "node:path";
+import { createWriteStream, existsSync, mkdirSync, type WriteStream } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Readable } from "node:stream";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { serve, type HttpBindings } from "@hono/node-server";
@@ -28,6 +27,7 @@ import { readDeployChanges, readDeploySettings, writeDeploySettings } from "./de
 import { Standby, refuseHandoverDir, smokeCheck, takeHandoverEnv } from "./handover.ts";
 import { Lifecycle, version } from "./lifecycle.ts";
 import { MAX_UPLOAD_BODY, UploadError, saveUpload } from "./uploads.ts";
+import { COMMIT_HASH, commitDetail, fileResponse, locate } from "./files.ts";
 import {
   AttentionWatch, allowed, auth, authCookie, isLocal, loginPage, push, pushDevices, pushKey, qrSvg, rotateToken,
   subscribe, tailscaleInfo, tokenMatches, unsubscribe,
@@ -164,16 +164,8 @@ chokidar.watch(join(nexusHome(), "projects.yaml"), { ignoreInitial: true }).on("
 /** A file is served when it lies under the project, its worktree directory or a session's working directory. */
 function allowedRoots(e: Entry, state: ProjectState): string[] {
   const roots = [e.root, state.project.defaults.worktree_dir, ...state.sessions.map((s) => s.cwd)];
-  return roots.filter((r): r is string => !!r && existsSync(r)).map((r) => realpathSync(r).toLowerCase());
+  return roots.filter((r): r is string => !!r && existsSync(r));
 }
-
-const MIME: Record<string, string> = {
-  ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp",
-  ".svg": "image/svg+xml", ".md": "text/markdown; charset=utf-8", ".txt": "text/plain; charset=utf-8",
-  ".json": "application/json", ".yaml": "text/plain; charset=utf-8", ".yml": "text/plain; charset=utf-8",
-  ".log": "text/plain; charset=utf-8", ".csv": "text/plain; charset=utf-8", ".html": "text/plain; charset=utf-8",
-  ".pdf": "application/pdf",
-};
 
 // ---------------------------------------------------------------- HTTP
 
@@ -244,17 +236,18 @@ app.get("/api/projects/:id/file", (c) => {
   const s = e && stateOf(e);
   const path = c.req.query("path");
   if (!e || !s || !path) return c.json({ error: "unknown project or no path" }, 404);
-  let real: string;
-  try { real = realpathSync(path); } catch { return c.json({ error: "not found" }, 404); }
-  const lower = real.toLowerCase();
-  if (!allowedRoots(e, s).some((r) => lower === r || lower.startsWith(r + "\\") || lower.startsWith(r + "/"))) {
-    return c.json({ error: "outside the project" }, 403);
-  }
-  if (!statSync(real).isFile()) return c.json({ error: "not a file" }, 404);
-  const type = MIME[extname(real).toLowerCase()] ?? "application/octet-stream";
-  return new Response(Readable.toWeb(createReadStream(real)) as ReadableStream, {
-    headers: { "content-type": type, "cache-control": "no-cache", "x-content-type-options": "nosniff" },
-  });
+  const at = locate(e.root, allowedRoots(e, s), path);
+  if ("error" in at) return c.json({ error: at.error }, at.status);
+  return fileResponse(at.real);
+});
+
+app.get("/api/projects/:id/commits/:hash", (c) => {
+  const e = projects.get(c.req.param("id"));
+  if (!e) return c.json({ error: "unknown project" }, 404);
+  const hash = c.req.param("hash");
+  if (!COMMIT_HASH.test(hash)) return c.json({ error: "not a commit hash (7 to 40 lowercase hex digits)" }, 400);
+  const commit = commitDetail(e.root, hash);
+  return commit ? c.json(commit) : c.json({ error: "not found" }, 404);
 });
 
 // ---------------------------------------------------------------- writes (the user's actions)

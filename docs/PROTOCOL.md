@@ -797,7 +797,8 @@ The template is a project setting, so each project can phrase it in its own term
 
 Reads: `GET /api/projects` (with each project's "waiting for you" list; a question's item carries its `qid` and its
 `options`, if it has any), `GET /api/projects/:id/state`,
-`GET /api/projects/:id/file?path=` (files under the project, its worktree directory or a session's directory only).
+`GET /api/projects/:id/file?path=` (files under the project, its worktree directory or a session's directory only;
+see "Files and commits" below), `GET /api/projects/:id/commits/:hash` (one commit; see there too).
 Live: a WebSocket at `/ws` sends `{"type":"changed","project":id}` and `{"type":"projects"}`.
 
 Writes (JSON bodies only; a request with a foreign `Origin` is refused). Every write is a user action and is taken
@@ -870,6 +871,28 @@ dashboard puts the returned path into the message, on its own line, and the file
 Code opens the picture from the path with `Read` (the orchestrator's and a partner's allow lists hold a bare
 `Read`); Codex does not open a path from the text, so the adapter adds the picture as a `localImage` input item (see
 "How the engine runs a Codex session").
+
+**Files and commits.** `GET /api/projects/:id/file?path=` serves a file to the dashboard (its file viewer, review
+material, reports). A relative path is taken relative to the project's root (never the server's working folder). The
+file must lie under the project's root, its worktree directory or a session's working directory, both as written and
+with its links followed (a symlink or junction pointing out is refused, 403); a path with a `..` segment, and a UNC
+or device path (`\\server\share`, `\\?\…`, `//…`), are refused (403) before anything touches the disk; a missing file is
+404. Every response carries `X-Content-Type-Options: nosniff`, `Cache-Control: no-cache`, `X-Nexus-Size` (the whole
+file's bytes), `X-Nexus-Kind` (`text`, `picture`, `pdf` or `binary`) and a `Content-Security-Policy`:
+`default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox` for everything but PDFs, which get
+the same without `sandbox` (a sandboxed document cannot use the browser's PDF viewer; `default-src 'none'` still lets
+nothing in it run). So an SVG or HTML file opened from the dashboard's origin runs no script. Pictures (`.png`,
+`.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`) and PDFs are served whole with their types. Any other file is text unless
+its first 8 KB hold a NUL byte: text is served as `text/plain; charset=utf-8` (`.md` as `text/markdown`, `.json` as
+`application/json`; `.html` is plain text), and text over 1 MiB is cut at the last line end within the first 1 MiB,
+with `X-Nexus-Truncated: 1`. A binary file is served as `application/octet-stream` with `Content-Disposition:
+attachment`: a download, never shown.
+
+`GET /api/projects/:id/commits/:hash` answers one commit of the project's repository (local git only):
+`{ sha, subject, author, at, files: [{ path, insertions, deletions }], insertions, deletions }` (`at` ISO 8601, the
+author date; a binary file's `insertions` and `deletions` are null; a merge's files are against its first parent).
+The hash must be 7 to 40 lowercase hex digits (else 400, before git runs); it is passed to git as `<hash>^{commit}`,
+so an unknown or ambiguous hash, or one naming something other than a commit, is 404.
 
 **Remote access.** A request is local when it comes from a loopback address without proxy headers
 (`X-Forwarded-For`, `Forwarded`, `X-Forwarded-Host`, `Tailscale-User-Login`). Anything else, pages, API and the
