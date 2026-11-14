@@ -1,7 +1,7 @@
 // Derives the dashboard's view of a project from its files. Pure apart from reading through the store;
 // nothing here is ever written back (state.json, if kept, is only a cache of this).
 import { ORCHESTRATOR_ONLY, USER_ONLY, type StatusChange, type Event, type InboxEntry, type Note, type GitFile, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type ReviewItem, type ReviewLevel, type LegacyReviewPolicy, type AwayFile, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type PlanFile, type StepDef, type StepStatus } from "./schemas.ts";
-import { ProjectStore, readAway, revisionHash } from "./store.ts";
+import { ProjectStore, chainPlan, readAway, revisionHash } from "./store.ts";
 import { awayAt, awayNow, type AwayNow } from "./away.ts";
 import { ENDED_RUN_STATES, HOLDING_RUN_STATES, formatClock, type Segment } from "./times.ts";
 import { stopPlace } from "./attention.ts";
@@ -200,7 +200,7 @@ export function loadProjectState(store: ProjectStore): ProjectState {
         if (plan) view.start = { ...plan, waiting: "", blocked: false };
       } catch (e) { warnings.push(`queue ${id} start: ${(e as Error).message}`); }
       try {
-        const plan = store.readPlan(id) ?? legacyPlan(view.start);
+        const plan = store.readPlan(id) ?? chainPlan(view.start);
         if (plan) plans.set(id, plan);
         if (view.start?.after) view.start.after = undefined;
       } catch (e) { warnings.push(`queue ${id} plan: ${(e as Error).message}`); }
@@ -348,15 +348,6 @@ export function loadProjectState(store: ProjectStore): ProjectState {
   };
 }
 
-
-/** A start.yaml from before the plan, with `after`: read as the plan it becomes (the server moves it at its start). */
-function legacyPlan(start: StartFile | undefined): PlanFile | undefined {
-  if (!start?.after) return undefined;
-  return {
-    protocol: 1, by: start.by, reason: start.reason, created_at: start.created_at, updated_at: start.created_at,
-    after: [{ queue: start.after, by: start.by, at: start.created_at, reason: start.reason }], decisions: [],
-  };
-}
 
 /**
  * Why a planned start has not come yet: the plan's predecessors or its approval, a schedule's time, a held checkout or

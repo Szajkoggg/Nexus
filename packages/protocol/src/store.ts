@@ -126,6 +126,19 @@ export function findNexusDir(cwd = process.cwd()): string | null {
   return null;
 }
 
+/**
+ * The plan a chain from before the plan becomes: a start.yaml with `after` (the one queue it waited for) read as a
+ * plan.yaml with that predecessor, set by whoever made the chain; undefined without `after`. `updatedAt`: when the plan
+ * file is written.
+ */
+export function chainPlan(start: StartFile | undefined, updatedAt?: string): PlanFile | undefined {
+  if (!start?.after) return undefined;
+  return {
+    protocol: 1, by: start.by, reason: start.reason, created_at: start.created_at, updated_at: updatedAt ?? start.created_at,
+    after: [{ queue: start.after, by: start.by, at: start.created_at, reason: start.reason }], decisions: [],
+  };
+}
+
 // ---------------------------------------------------------------- a project's store
 
 export class ProjectStore {
@@ -278,14 +291,10 @@ export class ProjectStore {
     for (const id of this.queueIds()) {
       let start: StartFile | undefined;
       try { start = this.readStart(id); } catch { continue; }
-      if (!start?.after) continue;
-      const { after, ...rest } = start;
-      if (!this.readPlan(id)) {
-        this.writePlan(id, {
-          protocol: 1, by: start.by, reason: start.reason, created_at: start.created_at, updated_at: new Date().toISOString(),
-          after: [{ queue: after, by: start.by, at: start.created_at, reason: start.reason }], decisions: [],
-        });
-      }
+      const plan = chainPlan(start, now());
+      if (!start || !plan) continue;
+      const { after: _after, ...rest } = start;
+      if (!this.readPlan(id)) this.writePlan(id, plan);
       this.writeStart(id, rest);
       moved.push(id);
     }
