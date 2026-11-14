@@ -623,6 +623,28 @@ dashboard's own requests, so neither the orchestrator nor a worker can trigger t
   checkout, as `git branch -d` decides). Then `git worktree remove` (never `--force`) and `git branch -d` (never `-D`).
 - Both are recorded in `git.yaml` (`merged`, `cleaned`) and shown on the queue.
 
+### A project's rules files
+
+Nexus's convention: a project's rules are in its `AGENTS.md` (Codex reads it), and its `CLAUDE.md` pulls them in with
+a line `@AGENTS.md` (Claude Code reads `CLAUDE.md` only). The check is pure, from the two files' contents
+(`packages/protocol/src/rules.ts`, `checkRules`): `CLAUDE.md` is **linked** when a line `@AGENTS.md` or `@./AGENTS.md`
+(surrounding blanks allowed) stands anywhere in it outside code fences.
+
+| Files | State | Who would not see the rules | The fix |
+|---|---|---|---|
+| both, linked | `linked` | | |
+| neither (or only a `CLAUDE.md` that holds nothing but the link) | `neither` | | |
+| only `AGENTS.md` | `only-agents` | Claude Code | create `CLAUDE.md` as the line `@AGENTS.md`, in `AGENTS.md`'s line endings |
+| only `CLAUDE.md` | `only-claude` | Codex | move `CLAUDE.md`'s content, byte for byte (BOM, line endings), into a new `AGENTS.md` (its link lines left out), and leave `CLAUDE.md` as `@AGENTS.md` with its BOM and line endings; the @imports in the moved text (`@path` outside code), which Codex does not follow, are listed |
+| both, not linked | `unlinked` | Claude Code | add `@AGENTS.md` as the first line of `CLAUDE.md` (after its BOM, in its line endings) |
+
+`nexus project add` prints the check's result. The dashboard shows it on the project's page, with the fix as the
+user's action: the change is shown (each file's lines removed and added) before it is made. The server
+(`apps/server/src/rulesfix.ts`) writes the files and commits nothing; the user commits them. It is refused (409) while
+a run in the project's own checkout holds it (a run state of the checkout's, paused included: see "One queue per
+checkout"), when either file changed since the change was shown (the check's `version`), when there is nothing to fix,
+and when a file to rewrite is not UTF-8. There is no CLI command or event for the fix.
+
 ### Pushing what was accepted
 
 With `defaults.push_accepted` on, an accepted step's work is pushed by the server, not by an agent
@@ -723,7 +745,7 @@ nexus answer <qid> "..." [--escalate [--recommend <option>]] [--continue|--wait]
 nexus session start|resume|fork|pause|stop ...
 nexus attach                                   # register a hand-started session as external
 # setup (the user)
-nexus project add <path> [--id] [--name]       # creates .nexus/ (self-ignoring) and registers the project
+nexus project add <path> [--id] [--name]       # creates .nexus/ (self-ignoring), registers the project, prints the rules files' check
 nexus import <file.md> [--prefix X]            # one-time import of queues written as Markdown tables
 nexus note <queue> <step> <text>               # until the dashboard can add notes
 ```
@@ -799,7 +821,9 @@ The template is a project setting, so each project can phrase it in its own term
 Reads: `GET /api/projects` (with each project's "waiting for you" list; a question's item carries its `qid` and its
 `options`, if it has any), `GET /api/projects/:id/state`,
 `GET /api/projects/:id/file?path=` (files under the project, its worktree directory or a session's directory only;
-see "Files and commits" below), `GET /api/projects/:id/commits/:hash` (one commit; see there too).
+see "Files and commits" below), `GET /api/projects/:id/commits/:hash` (one commit; see there too),
+`GET /api/projects/:id/rules` (the rules files' check: `{ state, agents, claude, unseen_by?, fix?: { changes: [{ file,
+action, before?, after }], imports }, version, root }`; see "A project's rules files").
 Live: a WebSocket at `/ws` sends `{"type":"changed","project":id}` and `{"type":"projects"}`.
 
 Writes (JSON bodies only; a request with a foreign `Origin` is refused). Every write is a user action and is taken
@@ -826,6 +850,7 @@ sends (see the CLI).
 | `GET /api/projects/:id/queues/:q/git` | | The queue's branch: `{ branch, base?: { ref, ahead, behind }, upstream?: { ref, ahead, behind, at? } }`; null outside a git repository, before an auto worktree exists, or on no branch |
 | `POST /api/projects/:id/queues/:q/merge` | | Merge back a finished worktree queue's branch into its base (see "Merge back and clean up"); answers `{ ok, result: { message } }` |
 | `POST /api/projects/:id/queues/:q/cleanup` | | Clean up a finished worktree queue: the worktree removed, its branch deleted with `-d`; answers `{ ok, result: { message } }`. Refused while the worktree has uncommitted changes; the refusal names them as git status does (`?? tmp/`, `M a.txt`, up to 20) |
+| `POST /api/projects/:id/rules/fix` | `version` (the check's) | The fix of the rules files as the check showed it (see "A project's rules files"); answers `{ ok, result: { message } }`. Commits nothing |
 | `POST /api/projects/:id/queues/:q/push` | | Push again: the step of the queue's last failed push; answers `{ ok, result: { message } }` at once, the push runs in the background |
 | `POST /api/projects/:id/queues/:q/steps/:s/send-back` | `text` (required, kept verbatim) | Fix it: sends a step waiting for the user's review back to its worker; answers `{ ok, result: { message } }` |
 | `POST /api/projects/:id/queues/:q/continue` | `work?` (`keep` or `discard`) | Continue: lifts the stop of a stopped queue whose current revision is approved and goes on (see "Continue" under `queue.yaml`); refused (409) otherwise. `work` is required when the stopped step left commits of its own; `discard` records it and does not go on |

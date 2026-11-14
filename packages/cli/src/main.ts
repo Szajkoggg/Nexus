@@ -10,6 +10,7 @@ import {
   PICTURE_ROLES, REVIEW_HELP, checkPicture, pictureSize, recommendedOption,
   type PictureRole, type ReviewItem, type Role, type Runtime, type SessionFile,
 } from "@nexus/protocol";
+import { checkRules, describeRules } from "@nexus/protocol/rules";
 import { importMarkdownQueues } from "./import-md.ts";
 import { HELP_TOPICS, topicList } from "./help.ts";
 
@@ -595,6 +596,9 @@ const commands: Record<string, () => void | Promise<void>> = {
     const reg = readRegistry();
     if (!reg.projects.some((p) => p.id === id)) { reg.projects.push({ id, root }); writeRegistry(reg); }
     console.log(`ok: project ${id} at ${root}\n    ${st.dir}`);
+    // Whether both runtimes would see the project's rules (AGENTS.md, pulled into CLAUDE.md); the fix is the user's, in the dashboard.
+    const text = (name: string) => { try { return readFileSync(join(root, name), "utf8"); } catch { return undefined; } };
+    console.log(describeRules(checkRules({ agents: text("AGENTS.md"), claude: text("CLAUDE.md") })));
   },
 
   import() {

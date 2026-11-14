@@ -267,8 +267,12 @@ nexus import docs/QUEUE.md
 nexus import Dev/Workflow/QUEUE.md --prefix D       # a second file whose queue ids would clash
 ```
 
-`project add` creates `.nexus/` in the project with its own `.gitignore`, so the project's files are untouched. The
-list of registered projects is in `%APPDATA%/Nexus/projects.yaml` (`NEXUS_HOME` overrides the directory).
+`project add` creates `.nexus/` in the project with its own `.gitignore`, so the project's files are untouched. It also
+says whether both runtimes would see the project's rules: Nexus's convention is that they are in `AGENTS.md` (Codex
+reads it) and `CLAUDE.md` pulls them in with the line `@AGENTS.md` (Claude Code reads only `CLAUDE.md`). When one
+would not, the project's page in the dashboard warns and offers the fix: it shows the change to the two files, and
+makes it when you confirm (not while a queue runs in the project's own checkout). Nexus does not commit it: you do.
+The list of registered projects is in `%APPDATA%/Nexus/projects.yaml` (`NEXUS_HOME` overrides the directory).
 Pictures added to chat messages are kept in the project's `.nexus/uploads/`, named by the time and a short hash. Nexus
 never deletes them: clear the folder by hand when you no longer need them.
 

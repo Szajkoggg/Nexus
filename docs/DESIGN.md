@@ -634,7 +634,8 @@ Phase 1 and 2 already help with sessions started by hand in a terminal; phase 3 
 
 ## What projects need to change
 
-A project joins Nexus by registering and adding a short rule to its agent instructions (`AGENTS.md` / `CLAUDE.md`):
+A project joins Nexus by registering and adding a short rule to its agent instructions (its `AGENTS.md`, pulled into
+`CLAUDE.md` with `@AGENTS.md`; see the README, Setup):
 when a session runs under Nexus (the `NEXUS_SESSION` environment variable is set), queue state, notes and questions go
 through `nexus`. Honeycomb's working rules (approved queues, stop conditions, the look loop, review sheets) stay;
 only where the queue's state lives changes. That edit is made in the project with the user's agreement, not by Nexus.
@@ -1208,6 +1209,28 @@ while it waits for the user, the drawer's decision (⋯ with Reject and a note, 
 decides after the last picture without leaving the viewer. Both bars share one hook (`useReviewDecision`); each keeps
 its own open forms, and Fix it's text is the same draft in both. The arrow keys move (not while typing in a box), and
 a swipe moves in every view: the picture alone, before and after, and the overlay outside its slider.
+
+### A project's rules: AGENTS.md, pulled into CLAUDE.md
+
+Decided by the user on 2026-11-14 (notes in docs/ideas/project-rules-file.md, queue PR). The two runtimes load
+different files by themselves: Codex reads `AGENTS.md`; Claude Code reads `CLAUDE.md` and sees `AGENTS.md` only when
+`CLAUDE.md` pulls it in. Nexus's convention, as in Nexus itself: a project's rules are in its `AGENTS.md`, and its
+`CLAUDE.md` pulls them in with a line `@AGENTS.md`; the orchestrator's briefing says that rules it proposes go into
+`AGENTS.md`. Decisions that send a project's own conventions "to its AGENTS.md" (review material, refactoring) rely on
+both runtimes seeing that file.
+
+- **The check is pure** (`packages/protocol/src/rules.ts`), from the two files' contents: linked is a line `@AGENTS.md`
+  or `@./AGENTS.md` outside code fences. `nexus project add` prints it; the project's page warns, naming the runtime
+  that would not see the rules. A project with neither file gets no warning.
+- **The fix is the user's** and changes the project's own files, which is new for Nexus (it otherwise writes only
+  under `.nexus/`): a dashboard action only, shown as the change to each file before it is made, written by the server
+  and not committed. It keeps the files' bytes (BOM, line endings) and refuses a file that is not UTF-8 rather than
+  re-encode it. "A run in the root checkout is not finished" is read as a run that holds that checkout
+  (`CHECKOUT_RUN_STATES`, paused included): a halted run holds nothing and does not block the fix; a worker that comes
+  back to a changed file reads it again at its next turn. The fix carries the check's `version` (a hash of both files),
+  so a file changed after the user looked is never overwritten by a change the user did not see.
+- **Moving `CLAUDE.md` into `AGENTS.md`** leaves the link lines out of the moved text (they would import the file
+  itself), and lists the @imports it holds: Codex does not follow them, so the confirmation says so.
 
 ## Findings from building phase 3
 

@@ -19,6 +19,7 @@ import { Engine } from "./engine.ts";
 import { Coordinator, readLimits, validLimit, writeLimits } from "./coordinator.ts";
 import { branchState, leftBehind, stepCommits } from "./gitinfo.ts";
 import { cleanUp, mergeBack } from "./mergeback.ts";
+import { fixProjectRules, projectRules } from "./rulesfix.ts";
 import { decideStoppedWork, discardRecorded } from "./stopwork.ts";
 import { Orchestrator } from "./orchestrator.ts";
 import { Conversations } from "./conversations.ts";
@@ -242,6 +243,13 @@ app.get("/api/projects/:id/file", (c) => {
   return fileResponse(at.real);
 });
 
+// The project's rules files: does each runtime see the rules, and the fix the user may make (src/rulesfix.ts).
+app.get("/api/projects/:id/rules", (c) => {
+  const e = projects.get(c.req.param("id"));
+  if (!e) return c.json({ error: "unknown project" }, 404);
+  return c.json(projectRules(e.root));
+});
+
 app.get("/api/projects/:id/commits/:hash", (c) => {
   const e = projects.get(c.req.param("id"));
   if (!e) return c.json({ error: "unknown project" }, 404);
@@ -359,6 +367,8 @@ app.post("/api/projects/:id/queues/:queue/steps/:step/send-back", act((st, b, p)
 app.post("/api/projects/:id/queues/:queue/merge", act((st, _b, p) => ({ message: mergeBack(st, p("queue")) })));
 app.post("/api/projects/:id/queues/:queue/cleanup", act((st, _b, p) => ({ message: cleanUp(st, p("queue")) })));
 // Push again: the last failed push of an accepted step of this queue, tried again.
+// The fix of the rules files, as the user saw it (`version`): it changes the project's own files and commits nothing.
+app.post("/api/projects/:id/rules/fix", act((st, b) => ({ message: fixProjectRules(st, b.version) })));
 app.post("/api/projects/:id/queues/:queue/push", act((st, _b, p) => ({ message: engineOf(st).pushAgain(p("queue")) })));
 // Review pictures: the user's mark (a mark only) and comment (a Fix it while the step waits for the user, else a note
 // on the next pending step).
