@@ -1,11 +1,12 @@
 // Derives the dashboard's view of a project from its files. Pure apart from reading through the store;
 // nothing here is ever written back (state.json, if kept, is only a cache of this).
-import { ORCHESTRATOR_ONLY, USER_ONLY, type StatusChange, type Event, type InboxEntry, type Note, type GitFile, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type ReviewItem, type ReviewLevel, type LegacyReviewPolicy, type AwayFile, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type StepDef, type StepStatus } from "./schemas.ts";
+import { ORCHESTRATOR_ONLY, USER_ONLY, type StatusChange, type Event, type InboxEntry, type Note, type GitFile, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type ReviewItem, type ReviewLevel, type LegacyReviewPolicy, type AwayFile, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type PlanFile, type StepDef, type StepStatus } from "./schemas.ts";
 import { ProjectStore, readAway, revisionHash } from "./store.ts";
 import { awayAt, awayNow, type AwayNow } from "./away.ts";
 import { ENDED_RUN_STATES, HOLDING_RUN_STATES, formatClock, type Segment } from "./times.ts";
 import { stopPlace } from "./attention.ts";
 import { closingStepId, stepDefs } from "./closing.ts";
+import { planView, proposalText, type PlanView } from "./plan.ts";
 
 import type { CheckView } from "./steps.ts";
 export interface AnswerView { id: string; text: string; at: string; escalate?: boolean; continue?: boolean; session: string; by: "orchestrator" | "user" }
@@ -25,9 +26,11 @@ export interface AttentionItem {
   /**
    * `start`: a planned start came due and the queue could not start (queues/<id>/start.yaml `failed`). `provisional`:
    * the return batch, one item for the project: the steps the orchestrator accepted provisionally that wait for the
-   * user's confirmation or Fix it (`provisional`, oldest first).
+   * user's confirmation or Fix it (`provisional`, oldest first). `plan`: the plan needs the user: the orchestrator
+   * proposes to change a dependency the user set (`plan.proposal`), or a planned queue waits for one that is stopped,
+   * cancelled or does not exist (`plan.predecessor`).
    */
-  kind: "question" | "stopped" | "approval" | "review" | "failed" | "start" | "provisional";
+  kind: "question" | "stopped" | "approval" | "review" | "failed" | "start" | "provisional" | "plan";
   queue?: string; step?: string; qid?: string;
   text: string; at?: string;
   /** A question's options, as the worker gave them (the waiting list shows them as buttons). */
@@ -44,6 +47,8 @@ export interface AttentionItem {
    * revision does); `proposal`: the orchestrator's proposal to lift it.
    */
   lift?: { place: string; continue: boolean; revision: number; proposal?: { at: string; reason: string } };
+  /** Kind `plan`: the orchestrator's proposal (the new predecessors, why, and the current ones), or the predecessor that holds the plan. */
+  plan?: { proposal?: { after: string[]; reason: string; current: string[] }; predecessor?: string; cause?: "stopped" | "cancelled" | "missing" };
 }
 export interface StepView extends StepDef {
   status: StepStatus;
@@ -128,9 +133,11 @@ export interface QueueView extends Omit<QueueFile, "steps"> {
   push?: PushFile;
   /** Git records of the queue (queues/<id>/git.yaml): its base, and a merge back and cleanup by the user. */
   git?: GitFile;
-  /** A planned start of this queue (queues/<id>/start.yaml), with why it has not come yet. */
+  /** The queue's next start as planned (queues/<id>/start.yaml): its options, a schedule; why it has not come yet. */
   start?: StartView;
-  /** Queues planned to start when this one is done. */
+  /** The queue's place in the plan (queues/<id>/plan.yaml): the queues it waits for, each as it stands. */
+  plan?: PlanView;
+  /** Queues whose plan waits for this one (unused plans only). */
   starts_next?: string[];
   updated?: string;    // time of the latest event about this queue
 }
@@ -178,6 +185,7 @@ export function loadProjectState(store: ProjectStore): ProjectState {
   const away = readAway();
 
   const queues = new Map<string, QueueView>();
+  const plans = new Map<string, PlanFile>();
   for (const id of store.queueIds()) {
     try {
       const q = store.readQueue(id);
@@ -191,6 +199,11 @@ export function loadProjectState(store: ProjectStore): ProjectState {
         const plan = store.readStart(id);
         if (plan) view.start = { ...plan, waiting: "", blocked: false };
       } catch (e) { warnings.push(`queue ${id} start: ${(e as Error).message}`); }
+      try {
+        const plan = store.readPlan(id) ?? legacyPlan(view.start);
+        if (plan) plans.set(id, plan);
+        if (view.start?.after) view.start.after = undefined;
+      } catch (e) { warnings.push(`queue ${id} plan: ${(e as Error).message}`); }
       queues.set(id, view);
     } catch (e) { warnings.push(`queue ${id}: ${(e as Error).message}`); }
   }
@@ -299,12 +312,20 @@ export function loadProjectState(store: ProjectStore): ProjectState {
       ?? q.steps.findLast((s) => s.status === "stopped"))?.id;
   }
 
-  // Planned starts: shown on both queues, with why each waits.
+  // The plan: on each planned queue the queues it waits for, as they stand; on those, who waits for them.
+  for (const [id, plan] of plans) {
+    const q = queues.get(id);
+    if (!q) continue;
+    q.plan = planView(project, q, plan, queues);
+    if (q.plan.used) continue;
+    for (const e of q.plan.after) {
+      const a = queues.get(e.queue);
+      if (a && !(a.starts_next ??= []).includes(id)) a.starts_next.push(id);
+    }
+  }
+  // Planned starts, with why each waits.
   for (const q of queues.values()) {
-    if (!q.start) continue;
-    const a = q.start.after ? queues.get(q.start.after) : undefined;
-    if (a) (a.starts_next ??= []).push(q.id);
-    Object.assign(q.start, startWait(q.start, a, [...queues.values()]));
+    if (q.start) Object.assign(q.start, startWait(q.start, q, [...queues.values()]));
   }
 
   // Messages sent to sessions, shown on the step they were about.
@@ -328,27 +349,29 @@ export function loadProjectState(store: ProjectStore): ProjectState {
 }
 
 
-/** Why a planned start has not come yet. */
-function startWait(plan: StartFile, a: QueueView | undefined, queues: QueueView[]): { waiting: string; blocked: boolean } {
-  if (plan.at && plan.held) return { waiting: plan.held.reason, blocked: false };
+/** A start.yaml from before the plan, with `after`: read as the plan it becomes (the server moves it at its start). */
+function legacyPlan(start: StartFile | undefined): PlanFile | undefined {
+  if (!start?.after) return undefined;
+  return {
+    protocol: 1, by: start.by, reason: start.reason, created_at: start.created_at, updated_at: start.created_at,
+    after: [{ queue: start.after, by: start.by, at: start.created_at, reason: start.reason }], decisions: [],
+  };
+}
+
+/**
+ * Why a planned start has not come yet: the plan's predecessors or its approval, a schedule's time, a held checkout or
+ * the limit, the session to continue busy.
+ */
+function startWait(plan: StartFile, q: QueueView, queues: QueueView[]): { waiting: string; blocked: boolean } {
+  const p = q.plan && !q.plan.used ? q.plan : undefined;
+  if (p && !p.ready) return { waiting: p.waiting, blocked: p.blocked };
+  const done = p?.after.length ? `${p.after.map((e) => e.waiting).join("; ")}; ` : "";
+  if (plan.held) return { waiting: `${done}${plan.held.reason}`, blocked: false };
   if (plan.at) return { waiting: plan.usage ? `the ${plan.usage === "codex" ? "Codex" : "Claude Code"} usage window resets` : "its time", blocked: false };
-  if (!a) return { waiting: `queue ${plan.after} does not exist`, blocked: true };
-  // Came due, but its checkout is held or the limit is reached (the server says which): it starts by itself.
-  if (plan.held && a.status === "done") return { waiting: `queue ${plan.after} is done; ${plan.held.reason}`, blocked: false };
-  if (a.status === "done") {
-    const busy = plan.session ? queues.find((x) => x.id !== plan.after && !!x.run && x.run.session === plan.session && HOLDING_RUN_STATES.includes(x.run.state)) : undefined;
-    return busy ? { waiting: `queue ${plan.after} is done; the session to continue is running queue ${busy.id}`, blocked: false }
-      : { waiting: `queue ${plan.after} is done`, blocked: false };
-  }
-  if (a.status === "cancelled") return { waiting: `queue ${plan.after} is cancelled`, blocked: true };
-  if (a.status === "stopped") return { waiting: `queue ${plan.after} is stopped${a.status_reason ? `: ${a.status_reason}` : ""}`, blocked: true };
-  const r = a.run;
-  if (r?.state === "halted") return { waiting: `the run of ${plan.after} halted${r.reason ? `: ${r.reason}` : ""}`, blocked: true };
-  if (r?.state === "paused") return { waiting: `the run of ${plan.after} is paused${r.reason ? `: ${r.reason}` : ""}`, blocked: true };
-  if (r?.state === "approval_wait") return { waiting: `queue ${plan.after} waits for approval of revision ${a.revision}${r.step ? ` (after ${r.step})` : ""}`, blocked: true };
-  if (r && HOLDING_RUN_STATES.includes(r.state)) return { waiting: `queue ${plan.after} is running${r.step ? ` (at ${r.step})` : ""}`, blocked: false };
-  if (a.status === "running" || a.status === "waiting") return { waiting: `queue ${plan.after} is ${a.status === "waiting" ? "waiting (a question or a review)" : "running"}`, blocked: false };
-  return { waiting: `queue ${plan.after} has not started yet`, blocked: false };
+  if (p?.approval) return { waiting: `${done}${p.waiting}`, blocked: false };
+  const busy = plan.session ? queues.find((x) => x.id !== q.id && !!x.run && x.run.session === plan.session && HOLDING_RUN_STATES.includes(x.run.state)) : undefined;
+  if (busy) return { waiting: `${done}the session to continue is running queue ${busy.id}`, blocked: false };
+  return { waiting: done ? done.slice(0, -2) : "it may start", blocked: false };
 }
 
 function attentionOf(queues: QueueView[], questions: QuestionView[]): AttentionItem[] {
@@ -376,8 +399,18 @@ function attentionOf(queues: QueueView[], questions: QuestionView[]): AttentionI
     else if (q.run?.state === "approval_wait" && !q.approved) {
       out.push({ kind: "approval", queue: q.id, text: `The run waits for approval of revision ${q.revision}${q.run.step ? ` after step ${q.run.step}` : ""}; it goes on by itself once you approve`, at: q.run.updated_at });
     }
+    if (q.plan && !q.plan.used && q.status !== "done" && q.status !== "cancelled") {
+      if (q.plan.proposal) {
+        out.push({ kind: "plan", queue: q.id, text: proposalText(q.id, q.plan), at: q.plan.proposal.at,
+          plan: { proposal: { after: q.plan.proposal.after, reason: q.plan.proposal.reason, current: q.plan.after.map((e) => e.queue) } } });
+      }
+      for (const e of q.plan.after) {
+        if (e.cause) out.push({ kind: "plan", queue: q.id, text: `Queue ${q.id} waits, but ${e.waiting}`, at: q.plan.updated_at, plan: { predecessor: e.queue, cause: e.cause } });
+      }
+    }
     if (q.start?.failed) {
-      const when = q.start.after ? `after ${q.start.after}` : `at ${formatClock(q.start.at!, new Date())}`;
+      const after = q.plan && !q.start.at ? q.plan.after.map((e) => e.queue) : [];
+      const when = q.start.at ? `at ${formatClock(q.start.at, new Date())}` : after.length ? `after ${after.join(", ")}` : "by the plan";
       out.push({ kind: "start", queue: q.id, text: `Did not start ${when}: ${q.start.failed.reason}`, at: q.start.failed.at });
     }
     if (q.status === "cancelled" || q.status === "done") continue;

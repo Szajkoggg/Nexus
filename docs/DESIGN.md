@@ -408,20 +408,31 @@ The engine watches the subscription limits: Claude Code's 5-hour and 7-day usage
 new step turns; running turns finish. Queues paused this way resume when the window resets, and the dashboard says
 why they wait. Where Claude Code reports these figures in print mode is to be confirmed when the adapter is built.
 
-### Chains
+### The plan
 
-"When queue A is done, start B" is a planned start kept in a file of B's (`start.yaml`), not a timer or a process:
-the engine looks at the plans after every change and when it starts, so a plan survives restarts and updates, and
-nothing fires while an update drains. Decisions:
+"When queues A and C are done, start B" is a place in the plan kept in a file of B's (`plan.yaml`, with the start's
+options in `start.yaml`), not a timer or a process: the engine looks at the plans after every change and when it
+starts, so a plan survives restarts and updates, and nothing fires while an update drains. The user decided
+(2026-11-14) that the plan is binding: Nexus starts by itself only a queue in the plan, and the plan generalizes the
+chains of one predecessor to several. Decisions:
 
-- It fires only when A is done. A halt, pause or stop of A is something to look at, not a reason to start B on work
-  that may depend on A's; the plan waits and says what it waits for.
-- B is checked when the plan comes due, not when it is made: the user may approve B in the meantime, and an approval
-  withdrawn or a revision proposed since must not start unapproved work. "Approved" means the revision current at
-  that moment is approved (an approval of a later revision counts). When B cannot start, the plan stays as an item
-  for the user instead of vanishing or retrying by itself; starting B or cancelling ends it.
+- It fires only when every predecessor is done. A halt, pause or stop of one is something to look at, not a reason to
+  start B on work that may depend on it; the plan waits and says what it waits for. A stopped, cancelled or missing
+  predecessor is told to the user and the orchestrator, since only they can change it.
+- B's approval is checked when the plan comes due, not when it is made, and an unapproved B waits for it rather than
+  failing (it used to fail): the plan shows what will happen, and "needs approval" is part of it. "Approved" means
+  the revision current at that moment is approved. When B cannot start for another reason (stopped), the plan stays
+  as an item for the user instead of vanishing or retrying by itself.
+- The plan stays after B starts (marked used), so the view can show what came after what; a used plan waits for
+  nothing and takes no part in the loop check.
+- Each dependency records who set it. The user's are the user's: the orchestrator's requests that would drop one are
+  refused with the way to propose it instead, so the rule holds in the files, not only in the briefing. A proposal is
+  one whole list, as the orchestrator would set it; the user's answer is one action, and a hand-back makes the
+  dependency the orchestrator's, as if it had set it.
+- While the user is away, the orchestrator starts nothing outside the plan; the server refuses it, as it refuses the
+  orchestrator's changes to the user's dependencies.
 - A plan to continue a session waits while that session runs another queue, rather than failing: one session never
-  runs two queues, and chaining a queue into the session of the queue before it is the common case.
+  runs two queues, and planning a queue into the session of the queue before it is the common case.
 
 A schedule ("at 22:00", "when the usage window resets") is the same kind of plan with a time instead of a queue.
 Decisions:
@@ -437,10 +448,11 @@ Decisions:
 - Long timers are armed in pieces of at most a day: Node fires a timer longer than 2^31-1 ms (about 24.8 days) at once,
   which a weekly usage window can exceed. Tests drive these timers with a clock of their own.
 
-The code is `apps/server/src/scheduler.ts`: `Scheduler` keeps the plans (chain, schedule, cancel; `duePlans` and
+The code is `packages/protocol/src/plan.ts` (the rules and the views: who may change what, the loop check, proposals
+and the user's answers) and `apps/server/src/scheduler.ts`: `Scheduler` keeps the plans (plan, schedule, cancel; `duePlans` and
 `startDue`, which the coordinator's pass calls to start what came due) and asks the engine to start a queue; `ClockTimers` arms the long timers on the engine's
 clock, for the schedules and for the engine's own retry and usage waits. The engine owns the runs and keeps the public
-`chain`, `scheduleStart` and `cancelStart`, which hand over to the scheduler.
+`plan`, `scheduleStart` and `cancelStart`, which hand over to the scheduler.
 
 ### Never two queues in one checkout
 

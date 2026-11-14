@@ -15,3 +15,4 @@ export * from "./chat.ts";
 export * from "./rules.ts";
 export * from "./away.ts";
 export * from "./closing.ts";
+export * from "./plan.ts";

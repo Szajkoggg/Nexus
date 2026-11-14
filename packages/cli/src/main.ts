@@ -46,8 +46,10 @@ Agent commands (session from NEXUS_SESSION or --session):
                                       housekeeping: skip a pending, stopped or failed step; close a halted run of a
                                       queue whose steps are all done or skipped; cancel a queue that is not running;
                                       propose that the user lift a stop. Done, approving and lifting are the user's
-  nexus run <queue> start|pause|resume|stop --reason <text> [--use-session <id>] [--runtime claude|codex] [--model <m>] [--effort <e>] [--after <queue> | --at "YYYY-MM-DD HH:MM" | --at usage-reset]   (orchestrator only; start --after: when that queue is done; --at: at that local time, or when the runtime's usage window resets)
-  nexus run <queue> cancel-start --reason <text>   (orchestrator only: cancels the queue's planned start)
+  nexus run <queue> start|pause|resume|stop --reason <text> [--use-session <id>] [--runtime claude|codex] [--model <m>] [--effort <e>] [--after <queue>... | --next | --at "YYYY-MM-DD HH:MM" | --at usage-reset]   (orchestrator only; start --after: into the plan, when those queues are done (repeat it for each); --next: into the plan with none before it; --at: at that local time, or when the runtime's usage window resets)
+  nexus run <queue> cancel-start --reason <text>   (orchestrator only: takes the queue out of the plan; not one the user put in)
+  nexus plan propose <queue> [--after <queue>]... --reason <text>   (orchestrator only) propose to the user a new list of
+                                      predecessors that changes dependencies the user set; the user accepts or declines
   (--queue <id> picks the queue when the session has none or the step id is ambiguous)
 
 Help:
@@ -87,7 +89,7 @@ const { values: o, positionals: args } = parseArgs({
     condition: { type: "string" }, pct: { type: "string" }, label: { type: "string" },
     kind: { type: "string" }, round: { type: "string" }, duration: { type: "string" }, ok: { type: "boolean" }, fail: { type: "boolean" },
     option: { type: "string", multiple: true }, "can-continue": { type: "boolean" }, recommend: { type: "string" },
-    "use-session": { type: "string" }, model: { type: "string" }, effort: { type: "string" }, after: { type: "string" }, at: { type: "string" }, deadline: { type: "string" },
+    "use-session": { type: "string" }, model: { type: "string" }, effort: { type: "string" }, after: { type: "string", multiple: true }, next: { type: "boolean" }, at: { type: "string" }, deadline: { type: "string" },
     topics: { type: "string" }, files: { type: "string" }, file: { type: "string" }, level: { type: "string" },
     escalate: { type: "boolean" }, continue: { type: "boolean" }, wait: { type: "boolean" },
     id: { type: "string" }, name: { type: "string" }, prefix: { type: "string" },
@@ -163,6 +165,25 @@ function stopLines(q: QueueOf): string[] {
   return [`  stopped${stopPlace(q)}; ${how}`, ...(p ? [`  proposal to lift (orchestrator, ${p.at}): ${p.reason.replace(/\s+/g, " ").slice(0, 300)}`] : [])];
 }
 
+/**
+ * A queue's place in the plan: the queues it waits for (each with who set it and how it stands), a proposal waiting for
+ * the user, its planned start, and why it has not started.
+ */
+function planLines(q: QueueOf): string[] {
+  const out: string[] = [];
+  const plan = q.plan && !q.plan.used ? q.plan : undefined;
+  const p = q.start;
+  if (plan) {
+    const entries = plan.after.map((e) => `${e.queue} (${e.by === "user" ? "set by the user" : "yours"}${e.done ? ", done" : ""})`);
+    out.push(`  in the plan${plan.by === "user" ? " (put in by the user)" : ""}: ${entries.length ? `starts after ${entries.join(", ")}` : "starts as soon as it may"}${p?.session ? `, in session ${p.session}` : ""}`);
+    if (plan.proposal) out.push(`  your proposal waits for the user: ${plan.proposal.after.length ? `after ${plan.proposal.after.join(", ")}` : "with no queue before it"} (${plan.proposal.reason.replace(/\s+/g, " ").slice(0, 200)})`);
+  }
+  if (p?.at) out.push(`  scheduled at ${new Date(p.at).toLocaleString("sv-SE").slice(0, 16)}${p.usage ? " (usage reset)" : ""}${p.session ? `, in session ${p.session}` : ""}`);
+  if (p?.failed) out.push(`  the planned start did not happen: ${p.failed.reason} (the user sees it; start the queue or take it out of the plan with nexus run ${q.id} cancel-start)`);
+  else if (p || plan) out.push(`  now: ${(p?.waiting || plan?.waiting || "it may start")}${p?.held ? " (it starts by itself)" : ""}`);
+  return out;
+}
+
 /** "YYYY-MM-DD HH:MM" in this machine's local time, as ISO 8601. */
 function localTime(text: string): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})$/.exec(text.trim());
@@ -196,18 +217,11 @@ Queues (${state.queues.length - done.length} open; finished: ${done.map((q) => `
     const run = q.run ? `; run ${q.run.state}${q.run.step ? ` at ${q.run.step}` : ""} in session ${q.run.session}${q.run.reason ? ` (${q.run.reason})` : ""}` : "";
     console.log(`- ${q.id} [${q.status}] ${q.title}: revision ${q.revision}, ${q.approved ? "approved" : "not approved"}${run}`);
     // A revision waiting for approval comes first: nothing runs and no planned start fires until the user approves it.
-    if (!q.approved) console.log(`  needs approval (revision ${q.revision})${q.start && !q.start.failed ? ": the planned start below waits for it" : ""}`);
+    if (!q.approved) console.log(`  needs approval (revision ${q.revision})${(q.start && !q.start.failed) || (q.plan && !q.plan.used) ? ": its planned start below waits for it" : ""}`);
     console.log(`  steps: ${q.steps.map((x) => `${x.id} ${x.status} (level ${x.level}${x.level_from === "user" ? ", set by the user" : ""})${provisionalText(x)}${x.closing && x.status === "skipped" ? ` (${closingSkipped(q)})` : ""}${x.review_with ? ` (for ${x.review_with === "user" ? "the user" : "you"})` : ""}${stepValuesText(x) ? ` [on ${stepValuesText(x)}]` : ""}`).join(", ")}`);
     if (q.status_reason && q.status !== "running") console.log(`  why: ${q.status_reason.replace(/\s+/g, " ").slice(0, 300)}`);
     for (const line of stopLines(q)) console.log(line);
-    if (q.start) {
-      const p = q.start;
-      const when = p.after ? `after ${p.after}` : `at ${new Date(p.at!).toLocaleString("sv-SE").slice(0, 16)}${p.usage ? " (usage reset)" : ""}`;
-      console.log(p.failed
-        ? `  planned start ${when} did not happen: ${p.failed.reason} (the user sees it; start the queue or cancel the plan with nexus run ${q.id} cancel-start)`
-        : p.after ? `  ${q.approved ? "" : "then "}starts when ${p.after} is done${p.session ? `, in session ${p.session}` : ""}; now: ${p.waiting}`
-          : `  ${q.approved ? "" : "then "}starts ${when}${p.session ? `, in session ${p.session}` : ""}${p.held ? `; its time came, now: ${p.waiting} (it starts by itself)` : ""}`);
-    }
+    for (const line of planLines(q)) console.log(line);
   }
   const open = state.questions.filter((x) => x.state === "open" || x.state === "escalated");
   console.log(`
@@ -402,22 +416,23 @@ const commands: Record<string, () => void | Promise<void>> = {
         let role: string | undefined;
         let project: string | undefined;
         try { const st = store(); role = st.readSession(sid).role; project = st.readProject().id; } catch { role = undefined; }
-        const what = sub === "cancel-plan" ? "cancel a planned update of" : o.after !== undefined || o.at !== undefined ? "plan an update of" : sub;
+        const what = sub === "cancel-plan" ? "cancel a planned update of" : o.after?.length || o.at !== undefined ? "plan an update of" : sub;
         if (role !== "orchestrator") throw new UsageError(`only the user or an orchestrator may ${what} the Nexus server, not a ${role ?? "session"}`);
         // The orchestrator that asks is told the outcome after the restart (or if the update fails).
         if (project) by = { project, session: sid };
       }
     }
     if (sub === "update" && o.at !== undefined) {
-      if (o.now || o.after !== undefined) throw new UsageError("--at goes alone: not with --now or --after");
+      if (o.now || o.after?.length) throw new UsageError("--at goes alone: not with --now or --after");
       const r = await server("POST", "/api/server/plan", { at: need(o.at, "--at <HH:MM|\"YYYY-MM-DD HH:MM\">"), deadline: o.deadline, ref: o.ref, by });
       console.log(`ok: ${r.text}`);
       return;
     }
     if (o.deadline !== undefined) throw new UsageError("--deadline goes with --at");
-    if (sub === "update" && o.after !== undefined) {
+    if (sub === "update" && o.after?.length) {
       if (o.now) throw new UsageError("--now goes with an update at once, not with --after");
-      const [queue, step, more] = need(o.after, "--after <queue>[/<step>]").split("/");
+      if (o.after.length > 1) throw new UsageError("--after goes once with an update: one queue or step");
+      const [queue, step, more] = need(o.after[0], "--after <queue>[/<step>]").split("/");
       if (!queue || more !== undefined || step === "") throw new UsageError("--after <queue>[/<step>], e.g. --after PD or --after PD/PD1");
       // The queue is one of this project's: the orchestrator's own, or the one of the directory this runs in.
       let project: string | undefined;
@@ -466,12 +481,8 @@ const commands: Record<string, () => void | Promise<void>> = {
         const why = q.run.reason ? ` (${q.run.reason.replace(/\s+/g, " ").slice(0, 200)})` : "";
         console.log(`  run: ${q.run.state}${q.run.step ? ` at ${q.run.step}` : ""}${why}`);
       }
-      // A planned start, and why it has not come (also: waiting for its checkout or for a place under the limit).
-      const p = q.start;
-      if (p) {
-        const when = p.after ? `after ${p.after}` : `at ${new Date(p.at!).toLocaleString("sv-SE").slice(0, 16)}`;
-        console.log(p.failed ? `  planned start ${when} did not happen: ${p.failed.reason}` : `  planned start ${when}; now: ${p.waiting}${p.held ? " (it starts by itself)" : ""}`);
-      }
+      // Its place in the plan, and why it has not started (also: waiting for its checkout or for a place under the limit).
+      for (const line of planLines(q)) console.log(line);
       for (const step of q.steps) {
         const unread = step.notes.filter((n) => !n.read_at && n.to !== "orchestrator");
         const own = stepValuesText(step);
@@ -648,13 +659,23 @@ const commands: Record<string, () => void | Promise<void>> = {
     const queue = need(args[1], "<queue>");
     const action = need(args[2], "start|pause|resume|stop|cancel-start");
     if (!["start", "pause", "resume", "stop", "cancel-start"].includes(action)) throw new UsageError("the action is start, pause, resume, stop or cancel-start");
-    if ((o.after || o.at) && action !== "start") throw new UsageError("--after and --at go with start");
-    if (o.after && o.at) throw new UsageError("give --after or --at, not both");
+    if ((o.after?.length || o.next || o.at) && action !== "start") throw new UsageError("--after, --next and --at go with start");
+    if ((o.after?.length || o.next) && o.at) throw new UsageError("give --after (or --next) or --at, not both");
+    if (o.after?.length && o.next) throw new UsageError("--next is for a queue with no queue before it: not with --after");
     const startAt = o.at === undefined ? undefined : o.at === "usage-reset" ? o.at : localTime(o.at);
     const e = emit(st, s, {
       type: "session.request", action: action === "cancel-start" ? "cancel_start" : action, queue, use_session: o["use-session"],
-      model: o.model, effort: o.effort, runtime: o.runtime, after: o.after, start_at: startAt, reason: need(o.reason, "--reason"),
+      model: o.model, effort: o.effort, runtime: o.runtime, after: o.after?.length ? o.after : undefined, next: o.next || undefined,
+      start_at: startAt, reason: need(o.reason, "--reason"),
     });
+    report(waitApplied(st, s.id, e.id));
+  },
+
+  plan() {
+    if (args[1] !== "propose") throw new UsageError("nexus plan propose <queue> [--after <queue>]... --reason <text>");
+    const st = store(); const s = orchestrator(st);
+    const queue = need(args[2], "<queue>");
+    const e = emit(st, s, { type: "plan.proposed", queue, after: o.after ?? [], reason: need(o.reason, "--reason") });
     report(waitApplied(st, s.id, e.id));
   },
 

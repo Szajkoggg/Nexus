@@ -88,14 +88,16 @@ function Until({ at }: { at: string }) {
 function PlannedStart({ queue, busy, onCancel }: { queue: QueueView; busy: boolean; onCancel: () => void }) {
   const p = queue.start;
   if (!p) return null;
+  // The queues it waits for in the plan (the plan view shows them in full).
+  const ids = queue.plan && !queue.plan.used ? queue.plan.after.map((e) => e.queue) : [];
   const options = [p.session ? t("run.plan.continues", { session: p.session.slice(-8) }) : p.runtime === "codex" ? "Codex" : p.runtime === "claude" ? "Claude Code" : undefined, p.model, p.effort && t("run.effort", { effort: p.effort })].filter(Boolean);
-  const after = p.after && <span key="queue" className="font-mono">{p.after}</span>;
+  const after = ids.length > 0 && <span key="queue" className="font-mono">{ids.join(", ")}</span>;
   const tone = p.failed ? "border-stop/30 bg-stop/10" : p.blocked ? "border-warn/30 bg-warn/10" : "border-info/30 bg-info/10";
   return (
     <div className={`mb-3 rounded-lg border p-3 text-sm ${tone}`}>
       <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
         <p className="min-w-0 flex-1">
-          {p.after
+          {!p.at
             ? (p.failed
               ? <span className="text-stop">{rich("run.plan.afterFailed", { queue: after, reason: p.failed.reason })}</span>
               : <span className="text-fg">{rich("run.plan.after", { queue: after })}</span>)
@@ -106,8 +108,8 @@ function PlannedStart({ queue, busy, onCancel }: { queue: QueueView; busy: boole
               })}</span>)}
           <span className="mt-1 block text-xs text-fg-2">
             {p.failed ? <>{t("run.plan.startYourself")} · <TimeAgo at={p.failed.at} /></>
-              : p.held ? rich(p.after ? "run.plan.heldAfter" : "run.plan.heldAt", { queue: after, reason: p.held.reason })
-              : p.after ? t("run.plan.now", { waiting: p.waiting ?? "" }) : rich("run.plan.in", { duration: <Until key="until" at={p.at!} /> })}
+              : p.held ? (p.at ? rich("run.plan.heldAt", { reason: p.held.reason }) : t("run.plan.now", { waiting: p.waiting ?? "" }))
+              : !p.at ? t("run.plan.now", { waiting: p.waiting ?? "" }) : rich("run.plan.in", { duration: <Until key="until" at={p.at} /> })}
           </span>
           <span className="mt-1 block text-xs text-fg-3">
             {t(p.by === "user" ? "run.plan.byYou" : "run.plan.byOrchestrator")} · <TimeAgo at={p.created_at} />{options.length ? ` · ${options.join(" · ")}` : ""}{p.reason ? ` · ${p.reason}` : ""}
@@ -180,7 +182,7 @@ export function RunControls({ project, queue, onChanged }: { project: ProjectSta
             ? <p className="mt-1 text-xs text-fg-3">{t("run.lastNote", { reason: run.reason })}</p>
             : <p className="mt-1 text-fg">{run.reason}</p>)}
           {runSession && <p className="mt-1 text-xs text-fg-3">{t("run.session", { session: runSession.title ?? runSession.id })} {runSession.live?.model ? `· ${runSession.live.model}` : ""}{runSession.effort ? ` · ${t("run.effort", { effort: runSession.effort })}` : ""} <ContextBar s={runSession} /></p>}
-          {run.after && <p className="mt-1 text-xs text-fg-3">{rich("run.startedByPlan", { queue: <span key="queue" className="font-mono">{run.after}</span> })}</p>}
+          {run.after && <p className="mt-1 text-xs text-fg-3">{rich("run.startedByPlan", { queue: <span key="queue" className="font-mono">{[run.after].flat().join(", ")}</span> })}</p>}
           <SessionSwitches run={run} sessions={project.sessions} />
           {run.summary_asked && run.state === "running" && <p className="mt-1 text-xs text-info">↪ {t("run.summaryAsked", { what: run.summary_asked })}</p>}
           {run.state === "usage_wait" && run.resume_at && <p className="mt-1 text-xs text-fg-3">{t("run.resumesAt", { time: formatTime(run.resume_at) })}</p>}

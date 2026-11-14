@@ -17,6 +17,7 @@ const KIND: Record<AttentionItem["kind"], { key: Key; tone: string }> = {
   failed: { key: "waiting.kind.failed", tone: "text-danger bg-danger/15" },
   start: { key: "waiting.kind.start", tone: "text-stop bg-stop/15" },
   provisional: { key: "waiting.kind.provisional", tone: "text-review bg-review/15" },
+  plan: { key: "waiting.kind.plan", tone: "text-warn bg-warn/15" },
 };
 /** An item's kind in a word and its colour, in the interface language. */
 const label = (kind: AttentionItem["kind"]) => ({ text: t(KIND[kind].key), tone: KIND[kind].tone });

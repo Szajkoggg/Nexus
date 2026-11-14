@@ -4,7 +4,7 @@
 // drafts under .nexus/drafts/: permission mode dontAsk with a read-only allow list plus the drafts rules.
 import { randomUUID } from "node:crypto";
 import {
-  ActionError, ClaudeEffort, ProjectStore, applyDraft, loadProjectState, readAway, orchestratorStatusChange, newId, now, sendBack, type ChatEntry, type Event, type ProjectState, type SessionFile,
+  ActionError, ClaudeEffort, HOLDING_RUN_STATES, ProjectStore, applyDraft, inPlan, loadProjectState, proposePlan, readAway, orchestratorStatusChange, newId, now, sendBack, type ChatEntry, type Event, type ProjectState, type SessionFile,
 } from "@nexus/protocol";
 import type { AgentProcess } from "./agent.ts";
 import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Launch } from "./agent-host.ts";
@@ -16,7 +16,7 @@ import { describeDeployChanges, type DeployChanges } from "./deploy.ts";
 import type { PlanNotice } from "./deploy-plan.ts";
 import {
   acceptedNoteNotice, approvalNotice, discardNotice, liftNotice, missedStartNotice, noticeText, orchestratorBriefing, pausedNotice,
-  questionNotice, rejectionNotice, fixAskedNotice, reviewNotice, awayOnNotice, awayEndNotice, awayStuckNotice, runEndNotice, stepNoteNotice, userMessage, withdrawalNotice,
+  questionNotice, rejectionNotice, fixAskedNotice, reviewNotice, awayOnNotice, awayEndNotice, awayStuckNotice, planDecisionNotice, planHeldNotice, runEndNotice, stepNoteNotice, userMessage, withdrawalNotice,
 } from "./prompts.ts";
 
 // Agent (formerly Task) lets it call subagents; they run within these same read-only permissions.
@@ -294,7 +294,7 @@ ${n.text}` });
     this.applying = true;
     try {
       const done = new Set(this.store.readApplied(s.id).entries.map((a) => a.event));
-      const pending = this.store.readEvents(s.id).entries.filter((e) => (e.type === "queue.drafted" || e.type === "session.request" || e.type === "status.set" || e.type === "review.sent_back") && !done.has(e.id));
+      const pending = this.store.readEvents(s.id).entries.filter((e) => (e.type === "queue.drafted" || e.type === "session.request" || e.type === "status.set" || e.type === "review.sent_back" || e.type === "plan.proposed") && !done.has(e.id));
       for (const e of pending) {
         let ok = true; let message: string;
         try { message = this.apply(e); }
@@ -307,6 +307,7 @@ ${n.text}` });
   private apply(e: Event): string {
     if (e.type === "queue.drafted") return applyDraft(this.store, e.definition);
     if (e.type === "review.sent_back") return sendBack(this.store, { queue: e.queue, step: e.step, from: "orchestrator", text: e.text, event: e.id });
+    if (e.type === "plan.proposed") return proposePlan(this.store, e.queue, e.after, e.reason);
     if (e.type === "status.set") {
       const message = orchestratorStatusChange(this.store, { queue: e.queue, step: e.step, to: e.to, reason: e.reason });
       // A cancel reaches the user as a push notification, like other notifications; nothing waits in their list.
@@ -319,17 +320,38 @@ ${n.text}` });
     if (e.type !== "session.request") return "ignored";
     switch (e.action) {
       case "start": {
-        if (e.after && e.start_at) throw new ActionError("give --after or --at, not both");
+        const after = e.after === undefined ? [] : [e.after].flat();
+        const planned = after.length > 0 || !!e.next;
+        if (planned && e.start_at) throw new ActionError("give --after (or --next) or --at, not both");
+        this.awayRule(e.queue, planned || !!e.start_at);
         if (e.start_at) return this.engine.scheduleStart(e.queue, { at: e.start_at, session: e.use_session, model: e.model, effort: e.effort, runtime: e.runtime, by: "orchestrator", reason: e.reason });
-        if (e.after) return this.engine.chain(e.queue, { after: e.after, session: e.use_session, model: e.model, effort: e.effort, runtime: e.runtime, by: "orchestrator", reason: e.reason });
+        if (planned) return this.engine.plan(e.queue, { after, session: e.use_session, model: e.model, effort: e.effort, runtime: e.runtime, by: "orchestrator", reason: e.reason });
         const run = this.engine.start(e.queue, { session: e.use_session, model: e.model, effort: e.effort, runtime: e.runtime });
         return `queue ${e.queue} started in session ${run.session}`;
       }
-      case "cancel_start": return this.engine.cancelStart(e.queue);
+      case "cancel_start": return this.engine.cancelStart(e.queue, "orchestrator");
       case "pause": this.engine.pause(e.queue); return `queue ${e.queue} pauses after its current step`;
       case "resume": this.engine.resume(e.queue); return `queue ${e.queue} resumed`;
       case "stop": this.engine.stopNow(e.queue, e.reason); return `queue ${e.queue} stopped`;
     }
+  }
+
+  /**
+   * While the user is away, only the plan's next queues start: the orchestrator starts no queue outside the plan, and
+   * puts none into it that would start without the user (an approved queue not in the plan yet). A direct start is
+   * left for a queue the plan would start now itself (in the plan, its predecessors done, approved).
+   */
+  private awayRule(queue: string, planning: boolean): void {
+    const state = loadProjectState(this.store);
+    if (!state.away.on) return;
+    const q = state.queues.find((x) => x.id === queue);
+    if (!q) return; // the engine refuses an unknown queue
+    if (planning) {
+      if (inPlan(q) || !q.approved) return;
+      throw new ActionError(`the user is away: only the queues in the plan start meanwhile; queue ${queue} is approved but not in the plan, so planning it now would start it without the user. Leave it for the user's return, and say so in the chat`, 409);
+    }
+    const next = inPlan(q) && (!q.plan || q.plan.used || q.plan.ready) && !q.start?.at && q.approved;
+    if (!next) throw new ActionError(`the user is away: only the plan's next queue starts meanwhile, and Nexus starts it by itself; queue ${queue} is ${inPlan(q) ? `not next in the plan (${q.start?.waiting || q.plan?.waiting || "it waits"})` : "not in the plan"}`, 409);
   }
 
   // ---------------------------------------------------------------- what the orchestrator is told
@@ -397,10 +419,21 @@ ${n.text}` });
           if (st.status !== "review" || st.review_with !== "user") continue;
           const why = st.sent_back.some((b) => b.to_user) && st.asked_user ? "your send-backs reached the limit"
             : st.asked_user ? "you handed it to the user" : st.level === 1 ? "review level 1: the user reviews it" : "the user reviews it";
-          const startable = this.engine.startable(state).filter((x) => x.id !== q.id).map((x) => ({ id: x.id, title: x.title, paused: x.status === "paused" }));
-          items.push({ key: `notify:awaywait:${q.id}:${st.id}:${st.asked_user?.at ?? st.finished_at}`, ...awayStuckNotice(q, st, why, startable) });
+          const next = state.queues.filter((x) => x.id !== q.id && inPlan(x) && x.status !== "done" && x.status !== "cancelled" && !(x.run && HOLDING_RUN_STATES.includes(x.run.state)))
+            .map((x) => ({ id: x.id, title: x.title, waiting: x.start?.waiting || x.plan?.waiting || "it may start" }));
+          const paused = this.engine.startable(state).filter((x) => x.id !== q.id && x.status === "paused").map((x) => ({ id: x.id, title: x.title }));
+          items.push({ key: `notify:awaywait:${q.id}:${st.id}:${st.asked_user?.at ?? st.finished_at}`, ...awayStuckNotice(q, st, why, next, paused) });
         }
       }
+      // The plan: a planned queue whose predecessor is stopped, cancelled or gone waits (the user has it in their list);
+      // the user's answers to proposals and the dependencies handed back. Each told once.
+      if (q.plan && !q.plan.used && q.status !== "done" && q.status !== "cancelled") {
+        for (const e of q.plan.after) if (e.cause) items.push({ key: `notify:planheld:${q.id}:${e.queue}:${e.cause}`, ...planHeldNotice(q, e) });
+      }
+      q.plan?.decisions.forEach((d, i) => {
+        if (d.at < since) return;
+        items.push({ key: `notify:plandecision:${q.id}:${i}`, ...planDecisionNotice(q, d) });
+      });
       // A scheduled start missed because the server was not running at its time: the user has it in their list.
       const missed = q.start?.failed?.missed ? q.start : undefined;
       if (missed && missed.failed!.at >= since) {

@@ -13,7 +13,7 @@ import type { Server } from "node:http";
 import {
   ActionError, Effort, ProjectStore, addNote, closingToSkip, updateSettings, answerAsUser, approveQueue, deleteNote, loadProjectState, nexusHome, withdrawApproval, addAllowRule,
   ensureGlobalSettings, readGlobalSettings, updateGlobalSettings, ownKeys, OVERRIDABLE, settingKey, readRegistry, readUsage, readTurns, commentOnPicture, markPicture, routeAnswers, routeSendBacks, sendBack, sendMessage, setQueueSettings, setStepLevel, confirmProvisional, type ProjectState,
-  readAway, writeAway, awayNow, awayUntil, turnAway, expireAway,
+  readAway, writeAway, awayNow, awayUntil, turnAway, expireAway, acceptPlanProposal, declinePlanProposal, handBackPlan,
 } from "@nexus/protocol";
 import { newestFirst, projectDigest, projectRunning, usageSince, type DigestEvent, type DigestResponse, type DigestRunning, type UsageRun } from "@nexus/protocol/digest";
 import { Engine } from "./engine.ts";
@@ -372,9 +372,13 @@ app.post("/api/projects/:id/queues/:queue/run", act((st, b, p) => {
         effort: Effort.safeParse(b.effort).success ? (b.effort as Effort) : undefined,
         runtime: b.runtime === "codex" || b.runtime === "claude" ? b.runtime as "claude" | "codex" : undefined,
       };
-      // With `after`: a chain, the queue starts when that one is done. With `at` (ISO 8601, or usage-reset): a schedule.
-      if (typeof b.after === "string" && b.after && typeof b.at === "string" && b.at) throw new ActionError("give after or at, not both");
-      if (typeof b.after === "string" && b.after) return { message: engine.chain(q, { ...options, after: b.after, by: "user" }) };
+      // With `after` (a queue id or a list): the queue's place in the plan, it starts when those are done; `next: true`:
+      // in the plan with none before it. With `at` (ISO 8601, or usage-reset): a schedule.
+      const after = typeof b.after === "string" && b.after ? [b.after] : Array.isArray(b.after) ? b.after : undefined;
+      if (after && !after.every((x) => typeof x === "string" && x)) throw new ActionError("after is a queue id or a list of them");
+      const planned = !!after?.length || b.next === true;
+      if (planned && typeof b.at === "string" && b.at) throw new ActionError("give after or at, not both");
+      if (planned) return { message: engine.plan(q, { ...options, after: (after ?? []) as string[], by: "user" }) };
       if (typeof b.at === "string" && b.at) return { message: engine.scheduleStart(q, { ...options, at: b.at, by: "user" }) };
       return engine.start(q, options);
     }
@@ -383,6 +387,19 @@ app.post("/api/projects/:id/queues/:queue/run", act((st, b, p) => {
     case "stop": return engine.stopNow(q, b.text as string | undefined);
     case "cancel_start": return { message: engine.cancelStart(q) };
     default: throw new ActionError("action is start, pause, resume, stop or cancel_start");
+  }
+}));
+// The user's answers about the plan (PROTOCOL.md, "The plan"): accept or decline the orchestrator's proposal for the
+// queue, or hand a dependency they set back to the orchestrator (`after`: one predecessor; without it, all of them).
+app.post("/api/projects/:id/queues/:queue/plan", act((st, b, p) => {
+  switch (b.action) {
+    case "accept": return { message: acceptPlanProposal(st, p("queue")) };
+    case "decline": return { message: declinePlanProposal(st, p("queue")) };
+    case "hand_back": {
+      if (b.after !== undefined && (typeof b.after !== "string" || !b.after)) throw new ActionError("after is a queue id");
+      return { message: handBackPlan(st, p("queue"), b.after as string | undefined) };
+    }
+    default: throw new ActionError("action is accept, decline or hand_back");
   }
 }));
 // Continue on a stopped queue: the user's lift of the stop, then the run goes on (only from the dashboard, as every write).

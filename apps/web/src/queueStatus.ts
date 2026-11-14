@@ -31,17 +31,23 @@ export interface QueueLike {
   run?: { state: string; step?: string };
   stop_step?: string;
   current_step?: string;
-  /** `held`: it came due but waits for its checkout or for a place under the limit on queues running at once. */
-  start?: { at?: string; after?: string; failed?: unknown; held?: { kind: "checkout" | "limit" } };
+  /**
+   * `held`: it came due but waits for its approval, its checkout or a place under the limit on queues running at once.
+   * `after`: only in files from before the plan.
+   */
+  start?: { at?: string; after?: string; failed?: unknown; held?: { kind: "approval" | "checkout" | "limit" } };
+  /** Its place in the plan: the queues it waits for (`used`: it started since). */
+  plan?: { used: boolean; after: readonly { queue: string }[] };
   /** The latest approval pins the current revision; absent: taken as approved (older callers). */
   approved?: boolean;
   revision?: number;
 }
 
 /** A planned start: "starts after HS", "starts at 14:00", "planned". */
-function startOf(start: NonNullable<QueueLike["start"]>, now: Date): { key: Key; params?: Params } {
-  if (start.after) return { key: "status.startsAfter", params: { queue: start.after } };
-  if (start.at) return { key: "status.startsAt", params: { time: formatClock(start.at, now) } };
+function startOf(q: QueueLike, now: Date): { key: Key; params?: Params } {
+  const after = q.plan && !q.plan.used ? q.plan.after.map((e) => e.queue) : q.start?.after ? [q.start.after] : [];
+  if (q.start?.at) return { key: "status.startsAt", params: { time: formatClock(q.start.at, now) } };
+  if (after.length) return { key: "status.startsAfter", params: { queue: after.join(", ") } };
   return { key: "status.planned" };
 }
 
@@ -71,9 +77,10 @@ export function queueStatus(q: QueueLike, now = new Date()): HonestStatus {
   if (q.approved === false && run?.state === "approval_wait") {
     return run.step ? is("approval", "status.approvalWaitAfter", { revision, step: run.step }) : is("approval", "status.approvalWait", { revision });
   }
-  if (q.approved === false && q.status !== "done" && q.status !== "draft" && (revision > 1 || q.start || q.status !== "proposed")) {
-    if (q.start && !q.start.failed) {
-      const st = startOf(q.start, now);
+  const planned = !!q.start || (!!q.plan && !q.plan.used);
+  if (q.approved === false && q.status !== "done" && q.status !== "draft" && (revision > 1 || planned || q.status !== "proposed")) {
+    if (planned && !q.start?.failed) {
+      const st = startOf(q, now);
       return is("approval", "status.needsApprovalThen", { revision, start: t(st.key, st.params), startKind: st.key, ...st.params });
     }
     return is("approval", "status.needsApprovalRevision", { revision });
@@ -103,11 +110,11 @@ export function queueStatus(q: QueueLike, now = new Date()): HonestStatus {
   }
   if (q.status === "done") return is("done", "status.done");
   // A planned start that has not come, or could not start.
-  if (q.start) {
-    if (q.start.failed) return is("failed", "status.didNotStart");
+  if (planned) {
+    if (q.start?.failed) return is("failed", "status.didNotStart");
     // Came due, but another queue works in its checkout, or as many run as the limit allows: it starts by itself.
-    if (q.start.held) return is("planned", q.start.held.kind === "checkout" ? "status.heldCheckout" : "status.heldLimit");
-    const st = startOf(q.start, now);
+    if (q.start?.held && q.start.held.kind !== "approval") return is("planned", q.start.held.kind === "checkout" ? "status.heldCheckout" : "status.heldLimit");
+    const st = startOf(q, now);
     return is("planned", st.key, st.params);
   }
   // The steps say a run is at work, but none runs: honest about it.

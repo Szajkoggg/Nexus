@@ -9,6 +9,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ProjectStore, applyDraft, approveQueue, formatClock, loadProjectState, routeAnswers, writeUsage, type StepDef } from "@nexus/protocol";
 import { Engine, MAX_TIMER_MS, type Clock } from "../src/engine.ts";
+import { MISSED_MS } from "../src/scheduler.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
 import { WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
@@ -158,7 +159,7 @@ test("a schedule missed while the server was down gives an item and the orchestr
   } finally { x.stop(); }
 });
 
-test("a schedule whose queue is no longer approved, or whose session is busy, does not start: the user gets an item", async () => {
+test("a schedule whose session is busy does not start: the user gets an item; one no longer approved waits for its approval", async () => {
   process.env.FAKE_SLOW_MS = "4000";
   const x = setup({ B: ["done"], C: ["done"], D: ["slow"] });
   try {
@@ -171,15 +172,17 @@ test("a schedule whose queue is no longer approved, or whose session is busy, do
     const b = x.store.readQueue("B");
     applyDraft(x.store, { id: "B", title: b.title, steps: [...b.steps, { id: "B2", title: "Step 2", goal: "FAKE: done" }] });
     x.clock.advance(HOUR);
-    // C fails at once (its session is busy); B is held while D holds the checkout, which D's slow step does for
-    // FAKE_SLOW_MS (4 s), and fails once it may start: the test's own time, then the usual wait.
-    await x.until("both plans to fail", () => !!x.queue("B").start?.failed && !!x.queue("C").start?.failed, Number(process.env.FAKE_SLOW_MS) + WAIT_MS);
-    assert.equal(x.queue("B").start!.failed!.reason, "approve the queue's current revision first");
+    // C fails at once (its session is busy); B waits for its approval (never missed, however long it waits).
+    await x.until("C to fail and B to wait", () => !!x.queue("C").start?.failed && x.queue("B").start?.held?.kind === "approval");
     assert.equal(x.queue("C").start!.failed!.reason, `session ${busy} was running queue D`);
-    assert.equal(x.queue("B").run, undefined);
+    assert.deepEqual([x.queue("B").start!.failed, x.queue("B").start!.waiting], [undefined, "waits for approval of revision 2"]);
     assert.equal(x.queue("C").run, undefined);
     const items = loadProjectState(x.store).attention.filter((a) => a.kind === "start").map((a) => a.queue).sort();
-    assert.deepEqual(items, ["B", "C"]);
+    assert.deepEqual(items, ["C"]);
+    x.clock.advance(MISSED_MS + 60_000);
+    approveQueue(x.store, "B");
+    // Approved, B waits for the checkout D holds for FAKE_SLOW_MS (4 s), then starts by itself.
+    await x.until("B to finish", () => x.queue("B").run?.state === "finished", Number(process.env.FAKE_SLOW_MS) + LONGER.run);
   } finally { x.stop(); }
 });
 

@@ -543,11 +543,21 @@ export const Event = z.discriminatedUnion("type", [
     action: z.enum(["start", "resume", "pause", "stop", "cancel_start"]), queue: Id,
     use_session: Id.optional(), model: z.string().optional(), effort: Effort.optional(),
     runtime: z.enum(["claude", "codex"]).optional(), reason: z.string(),
-    /** With `start`: start when this queue is done instead of now (a chain, queues/<queue>/start.yaml). */
-    after: Id.optional(),
+    /**
+     * With `start`: start when these queues are done instead of now: the queue's dependencies in the plan
+     * (queues/<queue>/plan.yaml). One id (an older CLI) or a list.
+     */
+    after: z.union([Id, z.array(Id)]).optional(),
+    /** With `start`: put the queue into the plan with no predecessor: it starts as soon as it may. */
+    next: z.boolean().optional(),
     /** With `start`: start at this time (ISO 8601) or `usage-reset` (when the runtime's usage window resets): a schedule. */
     start_at: z.string().optional(),
   }),
+  /**
+   * The orchestrator proposes new predecessors for a queue in the plan (`after`, the whole list), changing dependencies
+   * the user set, which it may not change itself; the user accepts or declines (queues/<queue>/plan.yaml `proposal`).
+   */
+  z.object({ ...base, type: z.literal("plan.proposed"), queue: Id, after: z.array(Id), reason: z.string().min(1) }),
   z.object({ ...base, type: z.literal("log"), level: z.enum(["info", "warn", "error"]), text: z.string() }),
   /**
    * The user (or orchestrator) accepts a step waiting in review. The user's note (`text`) goes `to` the next step (as
@@ -590,7 +600,7 @@ export type EventOf<T extends EventType> = Extract<Event, { type: T }>;
 /** Event types a worker session may not write (orchestrators and the user may). */
 export const ORCHESTRATOR_ONLY: ReadonlySet<EventType> = new Set([
   "answer.given", "queue.drafted", "session.request", "review.accepted", "review.sent_back", "review.asked_user", "status.set",
-  "review.provisional",
+  "review.provisional", "plan.proposed",
 ]);
 
 /** Event types only the user's session may write (the server writes them for the dashboard). */
@@ -639,14 +649,16 @@ export const PushFile = z.object({
 export type PushFile = z.infer<typeof PushFile>;
 
 /**
- * queues/<id>/start.yaml: a planned start of the queue. Written only by the server. Either `after`: it starts when that
- * queue is done (a chain); or `at`: it starts at that time (a schedule; `usage` when the time is the reset of that
- * runtime's usage window, plus a margin). `runtime`, `model`, `effort`, `session` are the start's options, as a start
- * takes them. `failed`: it came due but the queue could not start (not approved, its session busy, or `missed`: the
- * server was not running then); it stays, as an item waiting for the user, until the queue is started or the plan
- * cancelled or replaced. `held`: it came due but waits, and starts by itself once it may: its checkout is held by
- * another queue (`checkout`), or as many queues run as the limit allows (`limit`); `reason` says which. A held schedule
- * is never missed. Starting the queue or cancelling removes the file.
+ * queues/<id>/start.yaml: the queue's next start as planned. Written only by the server. `at`: it starts at that time (a
+ * schedule; `usage` when the time is the reset of that runtime's usage window, plus a margin); without `at` it holds
+ * the options of a start by the plan (plan.yaml, "The plan"). `after`: only in files from before the plan, where it was
+ * the one queue this one waited for; the server moves it into plan.yaml when it starts. `runtime`, `model`, `effort`,
+ * `session` are the start's options, as a start takes them. `failed`: it came due but the queue could not start (stopped,
+ * its session busy, or `missed`: the server was not running then); it stays, as an item waiting for the user, until the
+ * queue is started or the plan cancelled or replaced. `held`: it came due but waits, and starts by itself once it may:
+ * its current revision waits for the user's approval (`approval`), its checkout is held by another queue (`checkout`),
+ * or as many queues run as the limit allows (`limit`); `reason` says which. A held schedule is never missed. Starting
+ * the queue or cancelling removes the file.
  */
 export const StartFile = z.object({
   protocol: z.literal(1),
@@ -663,9 +675,47 @@ export const StartFile = z.object({
   revision: z.number().int().positive(),
   created_at: Time,
   failed: z.object({ at: Time, reason: z.string(), missed: z.boolean().optional() }).optional(),
-  held: z.object({ since: Time, kind: z.enum(["checkout", "limit"]), reason: z.string() }).optional(),
-}).refine((s) => !!s.after !== !!s.at, { message: "a planned start has either after or at" });
+  held: z.object({ since: Time, kind: z.enum(["approval", "checkout", "limit"]), reason: z.string() }).optional(),
+}).refine((s) => !(s.after && s.at), { message: "a planned start has after or at, not both" });
 export type StartFile = z.infer<typeof StartFile>;
+
+/** Who set a dependency, or put a queue into the plan: the user's are theirs; the orchestrator only proposes changes. */
+export const PlanBy = z.enum(["user", "orchestrator"]);
+export type PlanBy = z.infer<typeof PlanBy>;
+
+/** A queue a planned queue waits for: who set it, when, and why. */
+export const PlanEntry = z.object({ queue: Id, by: PlanBy, at: Time, reason: z.string().optional() });
+export type PlanEntry = z.infer<typeof PlanEntry>;
+
+/**
+ * queues/<id>/plan.yaml: the queue's place in the plan (PROTOCOL.md, "The plan"). Written only by the server. Nexus
+ * starts a queue by the plan once every queue in `after` is done and its current revision is approved (and its
+ * checkout and the limit allow); `after` empty: as soon as it may ("starts now"). `by`: who put it into the plan.
+ * `started_at`: it started since (by the plan or directly): the plan is used and stays, for the view, until the queue
+ * is planned again. `proposal`: the orchestrator's proposal to change dependencies the user set (the whole new list),
+ * until the user accepts or declines it. `decisions`: the user's answers to proposals and the dependencies handed back
+ * to the orchestrator, oldest first (each told to the orchestrator once).
+ */
+export const PlanFile = z.object({
+  protocol: z.literal(1),
+  by: PlanBy,
+  reason: z.string().optional(),
+  after: z.array(PlanEntry),
+  created_at: Time,
+  updated_at: Time,
+  started_at: Time.optional(),
+  proposal: z.object({ at: Time, after: z.array(Id), reason: z.string() }).optional(),
+  decisions: z.array(z.object({
+    at: Time,
+    kind: z.enum(["accepted", "declined", "handed_back"]),
+    /** accepted, declined: the proposal's list and reason. */
+    after: z.array(Id).optional(),
+    reason: z.string().optional(),
+    /** handed_back: the predecessors handed back. */
+    queues: z.array(Id).optional(),
+  })).default([]),
+});
+export type PlanFile = z.infer<typeof PlanFile>;
 
 /** queues/<id>/run.yaml: the engine's intent for a queue. Written only by the server. */
 export const RunFile = z.object({
@@ -679,8 +729,8 @@ export const RunFile = z.object({
    * ended while a newer revision of the queue waits for the user's approval; it goes on by itself once approved.
    */
   state: z.enum(["running", "pausing", "paused", "halted", "finished", "usage_wait", "retry_wait", "approval_wait"]),
-  /** Started by a chain: when this queue was done. */
-  after: Id.optional(),
+  /** Started by the plan: when these queues were done (one id in older records). */
+  after: z.union([Id, z.array(Id)]).optional(),
   reason: z.string().optional(),
   step: Id.optional(),        // the step the engine last opened
   nudged: z.boolean().optional(),

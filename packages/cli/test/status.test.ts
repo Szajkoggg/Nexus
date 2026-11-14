@@ -118,13 +118,13 @@ test("a planned queue whose new revision waits for approval says so first, the p
   approveQueue(store, "ST");
   store.writeStart("ST", { protocol: 1, after: "A", by: "orchestrator", revision: 1, created_at: at(1) });
   let out = status(store, "o");
-  assert.match(out, /^- ST \[approved\] Queue ST: revision 1, approved\n {2}steps: [^\n]*\n {2}starts when A is done/m, "approved: the plan alone");
+  assert.match(out, /^- ST \[approved\] Queue ST: revision 1, approved\n {2}steps: [^\n]*\n {2}in the plan: starts after A \(yours\)\n {2}now: queue A has not started yet$/m, "approved: the plan alone");
   assert.doesNotMatch(out.split("\n- ST")[1]!.split("\n- ")[0]!, /needs approval/);
 
   // The orchestrator changes it: revision 2, not approved yet.
   applyDraft(store, { id: "ST", title: "Queue ST", stop_conditions: [], checks: [], steps: [{ id: "ST1", title: "Step, revised", goal: "", acceptance: [] }] });
   out = status(store, "o");
-  assert.match(out, /^- ST \[\w+\] Queue ST: revision 2, not approved\n {2}needs approval \(revision 2\): the planned start below waits for it\n {2}steps: [^\n]*\n {2}then starts when A is done/m);
+  assert.match(out, /^- ST \[\w+\] Queue ST: revision 2, not approved\n {2}needs approval \(revision 2\): its planned start below waits for it\n {2}steps: [^\n]*\n {2}in the plan: starts after A \(yours\)\n {2}now: needs approval of revision 2; queue A has not started yet$/m);
   // Without a session: listed with its approval, when its status puts it in the list.
   if (loadProjectState(store).queues.find((q) => q.id === "ST")!.status !== "proposed") assert.match(status(store), /^queue ST \[\w+\] Queue ST \(needs approval: revision 2\)$/m);
 });

@@ -129,7 +129,7 @@ test("a revision that removes every remaining step: the queue is done only once 
   const e = x.engine();
   try {
     e.start("W");
-    assert.match(e.chain("C", { after: "W", by: "user" }), /starts when queue W is done/);
+    assert.match(e.plan("C", { after: ["W"], by: "user" }), /starts when queue W is done/);
     await x.until("W1 at work", () => x.queue().steps[0]!.segments.length > 0, LONGER.step);
     x.revise({ drop: ["W2"] });
     work.release(); // W1 may end now: the revision came while it worked
@@ -279,7 +279,7 @@ test("while a run waits for approval: a start, a session chain onto its session 
     // A chain onto the session waits for it, also once the queue it follows is done.
     e.start("A");
     await x.until("A to finish", () => x.queue("A").run?.state === "finished", LONGER.run);
-    assert.match(e.chain("O", { after: "A", by: "user", session }), /starts when session \S+ is free \(it runs queue W; queue A is done\)/);
+    assert.match(e.plan("O", { after: ["A"], by: "user", session }), /starts when session \S+ is free \(it runs queue W; queue A is done\)/);
     await new Promise((r) => setTimeout(r, 1700));
     assert.equal(x.queue("O").run, undefined, "the chain waits for the session");
     assert.throws(() => orchestratorStatusChange(x.store, { queue: "W", to: "cancelled", reason: "no longer needed" }), /queue W is running \(approval_wait\): stop its run first/);

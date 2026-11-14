@@ -8,7 +8,7 @@ import { ActionError, HOLDING_RUN_STATES, runIsOlder, stopPlace, type Effort, ty
 
 /** A new run record, running from `at` (it replaces the earlier one). */
 export function startedRun(o: {
-  session: string; revision: number; runtime: "claude" | "codex"; model?: string; effort?: Effort; after?: string; at: string;
+  session: string; revision: number; runtime: "claude" | "codex"; model?: string; effort?: Effort; after?: string[]; at: string;
   from_defaults?: ("runtime" | "model" | "effort")[];
 }): RunFile {
   return {

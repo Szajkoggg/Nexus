@@ -98,9 +98,9 @@ test("two queues chained after the same queue in the project's checkout run one 
   const p = w.add("p", { A: ["done"], B: ["slow"], C: ["slow"] });
   try {
     // C's plan is made first: it goes first, though B comes first by name.
-    p.engine.chain("C", { after: "A", by: "user" });
+    p.engine.plan("C", { after: ["A"], by: "user" });
     await sleep(10);
-    p.engine.chain("B", { after: "A", by: "user" });
+    p.engine.plan("B", { after: ["A"], by: "user" });
     p.engine.start("A");
     await w.until("C to start", () => !!p.queue("C").run, LONGER.step);
     assert.equal(p.queue("B").run, undefined, "B waits while C works in the checkout");
@@ -173,7 +173,7 @@ test("a third queue over the limit waits and starts when one ends, also across t
     assert.throws(() => r.engine.start("Z"), /queue Z cannot start: 2 queues run, the limit is 2/, "the limit counts every project's queues");
     // A planned start in the other project waits for a place.
     doneByHand(r.store, "Z0", ["Z01"]);
-    assert.equal(r.engine.chain("Z", { after: "Z0", by: "user" }), "queue Z0 is done; queue Z waits: 2 queues run, the limit is 2; it starts by itself then");
+    assert.equal(r.engine.plan("Z", { after: ["Z0"], by: "user" }), "queue Z0 is done; queue Z waits: 2 queues run, the limit is 2; it starts by itself then");
     assert.equal(r.queue("Z").start!.waiting, "queue Z0 is done; waits: 2 queues run, the limit is 2");
     assert.equal(r.queue("Z").start!.held!.kind, "limit");
     await w.until("A to finish", () => p.queue("A").run?.state === "finished", LONGER.run);

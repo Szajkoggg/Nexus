@@ -50,6 +50,10 @@ test("before it runs: approval, approved, a planned start; after: done, cancelle
   assert.deepEqual(pick(queueStatus(q({ status: "proposed" }))), ["approval", "needs your approval"]);
   assert.deepEqual(pick(queueStatus(q({ status: "approved" }))), ["planned", "approved"]);
   assert.deepEqual(pick(queueStatus(q({ status: "approved", start: { after: "SF" } }))), ["planned", "starts after SF"]);
+  // The plan: several predecessors; a used plan says nothing; one waiting for its approval says it needs approval.
+  assert.deepEqual(pick(queueStatus(q({ status: "approved", plan: { used: false, after: [{ queue: "SF" }, { queue: "HS" }] } }))), ["planned", "starts after SF, HS"]);
+  assert.deepEqual(pick(queueStatus(q({ status: "approved", plan: { used: true, after: [{ queue: "SF" }] } }))), ["planned", "approved"]);
+  assert.deepEqual(pick(queueStatus(q({ status: "approved", approved: false, revision: 2, plan: { used: false, after: [{ queue: "SF" }] }, start: { held: { kind: "approval" } } }))), ["approval", "needs approval (revision 2) · then starts after SF"]);
   assert.equal(queueStatus(q({ status: "approved", start: { at: "2026-11-14T08:30:00Z" } }), new Date("2026-11-14T06:00:00Z")).tone, "planned");
   assert.deepEqual(pick(queueStatus(q({ status: "approved", start: { at: "2026-11-14T08:30:00Z", failed: { reason: "x" } } }))), ["failed", "did not start"]);
   assert.deepEqual(pick(queueStatus(q({ status: "done", steps: st("D1:done D2:skipped") }))), ["done", "done"]);

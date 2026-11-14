@@ -11,7 +11,7 @@ import {
   CHECKOUT_RUN_STATES, ENDED_RUN_STATES, HOLDING_RUN_STATES,
   ActionError, ProjectStore, USER_SESSION, ensureUserSession, liftByContinue, loadProjectState, releaseOrphanedSteps, stepClosed, reportFile, ensureReportFolder, newId, normPath, now, readUsage,
   RETRY_LIMIT, effortIssue, formatClock, type Effort, type ProjectFile, type StepDef, type ProjectState, type QueueView, type RunFile, type SessionFile,
-  type SessionView, type StepView,
+  type SessionView, type StepView, type PlanBy,
   addNote,
 } from "@nexus/protocol";
 import type { TurnFailure } from "./agent.ts";
@@ -22,7 +22,7 @@ import {
   summaryRequest, switchReason, userStopNow,
 } from "./prompts.ts";
 import {
-  ClockTimers, REAL_CLOCK, Scheduler, type ChainOptions, type Clock, type ScheduleOptions,
+  ClockTimers, REAL_CLOCK, Scheduler, type PlanOptions, type Clock, type ScheduleOptions,
 } from "./scheduler.ts";
 import { gitBranch, worktreeFor } from "./worktree.ts";
 import { closingContext } from "./closing.ts";
@@ -37,8 +37,8 @@ type Live = Hosted;
 
 export interface StartOptions {
   model?: string; effort?: Effort; session?: string; runtime?: "claude" | "codex";
-  /** Started by a chain: the queue whose being done started it (recorded on the run). */
-  after?: string;
+  /** Started by the plan: the queues whose being done started it (recorded on the run). */
+  after?: string[];
 }
 
 // Moved to src/scheduler.ts; still exported here, where the tests import them.
@@ -160,6 +160,8 @@ export class Engine implements Member {
     this.coordinator.add(this);
     this.pusher = new AcceptedPusher(store, changed, { run: options.git, timeout: options.pushTimeoutMs });
     this.recoverAfterRestart();
+    // Chains from before the plan move into it (start.yaml's `after` becomes plan.yaml).
+    try { this.store.migrateChains(); } catch { /* an unreadable start.yaml shows as a warning in the state */ }
     // Schedules are armed again; what came due while no server ran is looked at once this one is up.
     this.scheduler.armAll();
     this.timers.set("starts", setTimeout(() => { this.timers.delete("starts"); this.checkStarts(); }, 1500));
@@ -227,6 +229,9 @@ export class Engine implements Member {
     const run = startedRun({ session: session.id, revision: q.revision, ...values, after: opts.after, at: now(), from_defaults: [...from_defaults] });
     this.store.writeRun(queueId, run);
     this.store.clearStart(queueId); // a planned start is used up by any start
+    // The plan stays, used: the queue started since it was planned (a proposal about it is moot).
+    const plan = this.store.readPlan(queueId);
+    if (plan && !plan.started_at) this.store.writePlan(queueId, { ...plan, started_at: now(), proposal: undefined });
     this.scheduler.disarm(queueId);
     this.ensureProcess(session);
     this.advance(queueId);
@@ -455,13 +460,14 @@ export class Engine implements Member {
     try { this.resume(queueId); } catch (e) { this.halt(queueId, `could not go on after the approval: ${(e as Error).message}`); }
   }
 
-  // ---------------------------------------------------------------- planned starts: chains and schedules (src/scheduler.ts)
+  // ---------------------------------------------------------------- the plan and schedules (src/scheduler.ts)
 
   /**
-   * Plans to start `queueId` when queue `o.after` is done. When it already is, the queue starts now (or, while an
-   * update drains, right after it). Replaces an earlier plan of the queue. Returns what happened, in a sentence.
+   * Puts `queueId` into the plan: it starts when the queues `o.after` are done (none: as soon as it may) and it is
+   * approved. When it may start already, it starts now (or, while an update drains, right after it). Replaces its
+   * earlier predecessors by `o.by`'s rule (plan.ts). Returns what happened, in a sentence.
    */
-  chain(queueId: string, o: ChainOptions): string { return this.scheduler.chain(queueId, o); }
+  plan(queueId: string, o: PlanOptions): string { return this.scheduler.plan(queueId, o); }
 
   /**
    * Plans to start `queueId` at a time (`o.at`, ISO 8601, in the future), or when the usage window of the runtime it
@@ -469,8 +475,8 @@ export class Engine implements Member {
    */
   scheduleStart(queueId: string, o: ScheduleOptions): string { return this.scheduler.scheduleStart(queueId, o); }
 
-  /** Cancels the planned start of a queue. */
-  cancelStart(queueId: string): string { return this.scheduler.cancelStart(queueId); }
+  /** Takes a queue out of the plan, with its planned start (the orchestrator not one the user put in). */
+  cancelStart(queueId: string, by: PlanBy = "user"): string { return this.scheduler.cancelStart(queueId, by); }
 
   /** Starts the queues whose planned starts are due, in every project (the coordinator's pass). */
   private checkStarts(): void { this.coordinator.checkStarts(); }

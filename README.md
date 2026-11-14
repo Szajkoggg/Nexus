@@ -243,13 +243,17 @@ With context care on (the default, under Defaults), a run whose session is fulle
 the end of a step goes on in a fresh session of the same runtime, model and effort, given the previous session's
 context summary; the run's panel lists each such switch.
 A queue can be started when another one is done, at a time, or when the usage window resets: "When" in the start
-form (or the orchestrator's `nexus run B start --after A`, `--at "2026-11-14 22:00"`, `--at usage-reset`). A schedule
-missed while Nexus was not running does not start late; it appears under "Waiting for you". The plan shows on both queues and can be cancelled; if A halts it waits and says why,
-and if B is not approved when A is done, B does not start and the item appears under "Waiting for you".
+form (or the orchestrator's `nexus run B start --after A [--after C]`, `--at "2026-11-14 22:00"`, `--at usage-reset`).
+This is the plan: Nexus starts by itself only the queues in it, each once the queues it waits for are done and it is
+approved; an approved queue outside the plan waits. A schedule missed while Nexus was not running does not start late;
+it appears under "Waiting for you". The plan shows on both queues and can be cancelled; if A halts it waits and says
+why, and if B is not approved when A is done, B waits for your approval and starts once you give it. If A is stopped
+or cancelled, B waits and it appears under "Waiting for you". What you set in the plan is yours: the orchestrator
+builds around it and may only propose a change, which appears under "Waiting for you" too.
 Queues run side by side only in worktrees of their own: never two in one checkout, and no more at once, across all
 projects, than "Queues running at once" in the settings panel's Nexus section (Global tab) (2 by default; a queue waiting for your
 review or an answer does not count). A queue paused or waiting keeps its checkout. Starting a queue whose checkout
-another queue holds, or over the limit, is refused with the reason. A chain or a schedule that comes due then waits
+another queue holds, or over the limit, is refused with the reason. A planned queue or a schedule that comes due then waits
 instead: its row and the rail say "waits for the checkout" or "waits: limit reached", the plan on the queue (and
 `nexus status`) says which queue holds the checkout or how many run, and it starts by itself once it may, in the order
 the plans were made. A schedule waiting this way is not missed.

@@ -26,10 +26,11 @@ export interface RunSettings {
  * runtime, model and effort (the run's, else its planned start's, else the project's defaults), what happens after
  * each step, and the steps with values of their own.
  */
-export function runSettings(q: Pick<QueueView, "steps" | "branch" | "worktree" | "start" | "run" | "review_level">, project: Pick<ProjectFile, "defaults" | "runtimes">, now = new Date()): RunSettings {
+export function runSettings(q: Pick<QueueView, "steps" | "branch" | "worktree" | "start" | "plan" | "run" | "review_level">, project: Pick<ProjectFile, "defaults" | "runtimes">, now = new Date()): RunSettings {
   const n = q.steps.length;
   const where = q.worktree ? (q.branch ? t("approval.run.worktreeOn", { branch: q.branch }) : t("approval.run.worktree")) : q.branch ? t("approval.run.on", { branch: q.branch }) : undefined;
-  const when = q.start?.after ? t("approval.run.after", { queue: q.start.after }) : q.start?.at ? t("approval.run.at", { time: formatClock(q.start.at, now) }) : undefined;
+  const after = q.plan && !q.plan.used ? q.plan.after.map((e) => e.queue) : q.start?.after ? [q.start.after] : [];
+  const when = q.start?.at ? t("approval.run.at", { time: formatClock(q.start.at, now) }) : after.length ? t("approval.run.after", { queue: after.join(", ") }) : undefined;
   const rt = q.run?.runtime ?? q.start?.runtime ?? project.runtimes.default;
   const model = q.run?.model ?? q.start?.model ?? project.runtimes[rt].model;
   const effort = q.run?.effort ?? q.start?.effort ?? project.runtimes[rt].effort;

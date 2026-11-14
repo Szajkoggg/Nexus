@@ -1,6 +1,6 @@
 // The user's away mode (PROTOCOL.md, "Away mode"), against the fake `claude`: while it is on, level-2 steps are reviewed
 // as level 3 and level-1 steps are not; when its time comes it ends; a queue that waits for the user meanwhile brings
-// the orchestrator a list of the approved queues that can really start (none in the same checkout); agents cannot
+// the orchestrator what the plan starts next, and it starts nothing outside the plan; agents cannot
 // switch it; and a real server (a development instance on a free port, its own NEXUS_HOME) keeps it across a restart
 // and ends it at its time.
 import { test } from "node:test";
@@ -93,13 +93,14 @@ test("away mode: level 2 runs as level 3 and level 1 still waits for the user; w
   } finally { x.stop(); }
 });
 
-test("away mode: a queue waiting for the user brings a list of the approved queues that can start, none in its checkout", async () => {
+test("away mode: a queue waiting for the user brings what the plan starts next; the orchestrator starts nothing outside the plan", async () => {
   const x = setup();
   try {
     await x.hello();
     x.queueOf("S", [1]);                                  // waits for the user, in the project's checkout
-    x.queueOf("B", [2]);                                  // approved, the same checkout: cannot start
-    x.queueOf("C", [2], join(x.root, "..", `${Date.now()}-c`)); // approved, a checkout of its own: can start
+    x.queueOf("B", [2]);                                  // approved, in the plan after S
+    x.queueOf("C", [2], join(x.root, "..", `${Date.now()}-c`)); // approved, a checkout of its own, not in the plan
+    x.engine.plan("B", { after: ["S"], by: "user" });
     away(inMs(3_600_000));
     x.engine.start("S");
     await x.inReview("S", "S1", "user");
@@ -107,16 +108,17 @@ test("away mode: a queue waiting for the user brings a list of the approved queu
     // The chat shows the notice before the orchestrator's process has it: wait for what is checked, its delivery.
     await x.until("the notice delivered", () => x.delivered().some((t) => t.includes("Queue S waits for the user at step S1")));
     const notice = x.delivered().find((t) => t.includes("Queue S waits for the user at step S1"))!;
-    assert.match(notice, /Approved queues that can start now: C "Queue C"/);
-    assert.doesNotMatch(notice, /\bB "Queue B"/, "not in the checkout S holds");
+    assert.match(notice, /Next in the plan \(Nexus starts them by itself\): B "Queue B" \(now: queue S is running/);
+    assert.doesNotMatch(notice, /C "Queue C"/, "not in the plan");
+    assert.match(notice, /Start no queue outside the plan while the user is away/);
 
-    // With C running too, nothing else can start: told so for the next wait.
-    x.engine.start("C");
-    await x.inReview("C", "C1");
-    x.say("review", "ask-user", "C", "C1", "I cannot judge this.");
-    await x.until("the second notice", () => x.said(/^Queue C waits for the user at step C1 \(you handed it to the user\)/));
-    await x.until("the second notice delivered", () => x.delivered().some((t) => t.includes("Queue C waits for the user at step C1")));
-    assert.match(x.delivered().find((t) => t.includes("Queue C waits for the user at step C1"))!, /no other approved queue can start now/);
+    // Starting C, or putting it into the plan (it would start at once), is refused while the user is away.
+    x.say("run", "C", "start", "--reason", "it can start");
+    await x.until("the refusal of the start", () => x.said(/the user is away: only the plan's next queue starts meanwhile, and Nexus starts it by itself; queue C is not in the plan/));
+    x.say("run", "C", "start", "--next", "--reason", "it can start");
+    await x.until("the refusal of the plan", () => x.said(/the user is away: only the queues in the plan start meanwhile; queue C is approved but not in the plan/));
+    assert.equal(x.queue("C").run, undefined);
+    assert.equal(x.queue("C").plan, undefined);
   } finally { x.stop(); away(null); }
 });
 

@@ -9,7 +9,7 @@ import { monotonicFactory } from "ulid";
 import YAML from "yaml";
 import type { z } from "zod";
 import {
-  Activity, Applied, AwayFile, ChatEntry, PinsFile, Refusal, Delivery, Event, GlobalSettings, InboxEntry, NoteMeta, GitFile, ProjectFile, PushFile, QueueFile, type QueueInput, LegacyReviewPolicy, RegistryFile, RunFile, RuntimeFile, SessionFile, StartFile, StoredProject, TurnRecord, UsageFile,
+  Activity, Applied, AwayFile, ChatEntry, PinsFile, Refusal, Delivery, Event, GlobalSettings, InboxEntry, NoteMeta, GitFile, ProjectFile, PushFile, QueueFile, type QueueInput, LegacyReviewPolicy, RegistryFile, RunFile, RuntimeFile, SessionFile, StartFile, PlanFile, StoredProject, TurnRecord, UsageFile,
   type Note,
 } from "./schemas.ts";
 import { applyChange, builtInSettings, effectiveProject, migrateStored, storedFrom } from "./settings.ts";
@@ -258,6 +258,38 @@ export class ProjectStore {
   clearStart(queueId: string): void {
     const f = join(this.queueDir(queueId), "start.yaml");
     if (existsSync(f)) unlinkSync(f);
+  }
+  readPlan(queueId: string): PlanFile | undefined {
+    const f = join(this.queueDir(queueId), "plan.yaml");
+    return existsSync(f) ? readYaml(f, PlanFile) : undefined;
+  }
+  writePlan(queueId: string, p: PlanFile): void { writeYaml(join(this.queueDir(queueId), "plan.yaml"), PlanFile.parse(p)); }
+  clearPlan(queueId: string): void {
+    const f = join(this.queueDir(queueId), "plan.yaml");
+    if (existsSync(f)) unlinkSync(f);
+  }
+  /**
+   * Moves the chains of before the plan into it: a start.yaml with `after` (one queue it waited for) becomes a
+   * plan.yaml with that predecessor, set by whoever made the chain, and the start.yaml keeps the start's options. Run by
+   * the server at its start; returns the queues moved.
+   */
+  migrateChains(): string[] {
+    const moved: string[] = [];
+    for (const id of this.queueIds()) {
+      let start: StartFile | undefined;
+      try { start = this.readStart(id); } catch { continue; }
+      if (!start?.after) continue;
+      const { after, ...rest } = start;
+      if (!this.readPlan(id)) {
+        this.writePlan(id, {
+          protocol: 1, by: start.by, reason: start.reason, created_at: start.created_at, updated_at: new Date().toISOString(),
+          after: [{ queue: after, by: start.by, at: start.created_at, reason: start.reason }], decisions: [],
+        });
+      }
+      this.writeStart(id, rest);
+      moved.push(id);
+    }
+    return moved;
   }
   readRun(queueId: string): RunFile | undefined {
     const f = join(this.queueDir(queueId), "run.yaml");

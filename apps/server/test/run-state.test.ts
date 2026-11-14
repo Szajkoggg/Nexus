@@ -29,9 +29,9 @@ function delta(after: RunFile, before: RunFile = FULL): { set: Record<string, un
 }
 
 test("startedRun: a new running record of the revision, with the run's own values", () => {
-  assert.deepEqual(startedRun({ session: "S", revision: 3, runtime: "codex", model: "m", effort: "low", after: "P", at: "2026-01-01T09:00:00.000Z" }), {
+  assert.deepEqual(startedRun({ session: "S", revision: 3, runtime: "codex", model: "m", effort: "low", after: ["P"], at: "2026-01-01T09:00:00.000Z" }), {
     protocol: 1, session: "S", state: "running", started_at: "2026-01-01T09:00:00.000Z", updated_at: "2026-01-01T09:00:00.000Z",
-    revision: 3, runtime: "codex", model: "m", effort: "low", after: "P",
+    revision: 3, runtime: "codex", model: "m", effort: "low", after: ["P"],
   });
 });
 
