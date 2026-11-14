@@ -12,6 +12,7 @@ import { ProjectStore, approveQueue, loadProjectState, routeAnswers } from "@nex
 import { Engine } from "../src/engine.ts";
 import { branchState, recordBase, recordStepEnd, recordStepStart, stepCommits } from "../src/gitinfo.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
+import { until, LONGER } from "./wait.ts";
 
 process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
 const G = ["-c", "user.name=test", "-c", "user.email=test@example.invalid", "-c", "init.defaultBranch=main", "-c", "commit.gpgsign=false"];
@@ -49,11 +50,9 @@ test("the engine records HEAD when a step opens and when its outcome's turn ends
   try {
     const start = git(root, ["rev-parse", "HEAD"]);
     engine.start("Q");
-    const t = Date.now();
-    while (!(queue().run?.state === "finished" && store.readGit("Q")?.steps.Q2?.[0]?.end)) {
-      if (Date.now() - t > 30_000) assert.fail(`timed out; git: ${JSON.stringify(store.readGit("Q"))}`);
-      await new Promise((r) => setTimeout(r, 100));
-    }
+    // Two steps that each commit (git, the fake worker, the nexus CLI): a named longer wait.
+    await until("the run to finish with both steps' commits", () => queue().run?.state === "finished" && !!store.readGit("Q")?.steps.Q2?.[0]?.end,
+      LONGER.processes, () => `; git: ${JSON.stringify(store.readGit("Q"))}`);
     const g = store.readGit("Q")!;
     const [r1, r2] = [g.steps.Q1![0]!, g.steps.Q2![0]!];
     assert.equal(r1.start, start, "HEAD when Q1 opened");

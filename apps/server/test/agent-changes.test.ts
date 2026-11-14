@@ -16,15 +16,12 @@ import { Engine } from "../src/engine.ts";
 import { Lifecycle } from "../src/lifecycle.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { deployChangesFile, parseAgentLines, readDeployChanges } from "../src/deploy.ts";
+import { until, LONGER } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-async function until(what: string, pred: () => boolean, ms = 20_000, detail = () => ""): Promise<void> {
-  const t = Date.now();
-  while (!pred()) { if (Date.now() - t > ms) assert.fail(`timed out waiting for ${what}${detail()}`); await sleep(100); }
-}
 
 const B_LINE = "nexus queue draft takes a file";
 const D_LINE = "the orchestrator uploads drafts from files (.nexus/drafts/), not heredocs";
@@ -105,7 +102,7 @@ test("a deploy's Agents: lines reach every project's orchestrator once, start it
   const t = setup({ projects: [{ id: "p1" }, { id: "p2" }] });
   try {
     await t.deploy(t.r.a);
-    await until("both orchestrators told", () => t.changesMsgs().length === 2, 20_000, () => `; log: ${t.lifecycle.status.log.join(" | ")}`);
+    await until("both orchestrators told", () => t.changesMsgs().length === 2, LONGER.processes, () => `; log: ${t.lifecycle.status.log.join(" | ")}`);
     for (const m of t.changesMsgs()) {
       assert.ok(m.text.startsWith(`[Nexus] Nexus was deployed (${t.r.a.slice(0, 7)}..${t.r.d.slice(0, 7)})`), m.text);
       assert.ok(m.text.indexOf(B_LINE) > 0 && m.text.indexOf(B_LINE) < m.text.indexOf(D_LINE), "both lines, oldest first, the wrapped one joined");
@@ -175,7 +172,7 @@ test("nothing is sent without Agents: lines, after a rollback, or without a usab
     // A rollback: the successor crashes, the worktree goes back. Not a deploy, so nothing is collected.
     process.env.FAKE_SUCCESSOR = "crash";
     t.lifecycle.start({ ref: "side" });
-    await until("the rollback", () => t.lifecycle.status.phase === "failed", 20_000, () => `; ${JSON.stringify(t.lifecycle.status)}`);
+    await until("the rollback", () => t.lifecycle.status.phase === "failed", LONGER.processes, () => `; ${JSON.stringify(t.lifecycle.status)}`);
     await sleep(500);
     assert.ok(!existsSync(deployChangesFile()), "nothing recorded");
     assert.equal(t.changesMsgs().length, 0);

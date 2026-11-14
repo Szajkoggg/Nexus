@@ -12,6 +12,7 @@ import { Conversations } from "../src/conversations.ts";
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
+import { WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -30,12 +31,7 @@ function setup(behaviours: string[] = ["done"]) {
   const conversations = new Conversations(store, orchestrator, () => tick());
   function tick() { routeAnswers(store); acceptReviews(store); engine.onChange(loadProjectState(store)); }
   const queue = () => loadProjectState(store).queues.find((q) => q.id === "Q")!;
-  const until = async (what: string, pred: () => boolean, ms = 20_000) => {
-    for (const t = Date.now(); !pred();) {
-      if (Date.now() - t > ms) assert.fail(`timed out waiting for ${what}; turns: ${JSON.stringify(readTurns().entries)}`);
-      await new Promise((r) => setTimeout(r, 100));
-    }
-  };
+  const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms, () => `; turns: ${JSON.stringify(readTurns().entries)}`);
   const stop = () => { conversations.shutdown(); orchestrator.shutdown(); engine.shutdown(); };
   return { store, engine, orchestrator, conversations, queue, until, stop };
 }
@@ -46,7 +42,7 @@ test("a worker's, an orchestrator's and a partner's turn each yield one record",
   const { engine, orchestrator, conversations, queue, until, stop } = setup(["done"]);
   try {
     engine.start("Q", { runtime: "claude" });
-    await until("the run to finish", () => queue().run?.state === "finished");
+    await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
     orchestrator.say("Hello");
     await until("the orchestrator's turn", () => turnsOf("orchestrator").length === 1);
     const c = conversations.create({ title: "Mining" });
@@ -78,7 +74,7 @@ test("a failed turn is recorded with its kind and code; a turn its process does 
   const a = setup(["auth"]);
   try {
     a.engine.start("Q", { runtime: "codex" });
-    await a.until("the halt", () => a.queue().run?.state === "halted");
+    await a.until("the halt", () => a.queue().run?.state === "halted", LONGER.run);
     const [t] = turnsOf("worker");
     assert.deepEqual([t!.runtime, t!.outcome, t!.failure, t!.step], ["codex", "lasting", "unauthorized", "Q1"]);
   } finally { a.stop(); }
@@ -87,7 +83,7 @@ test("a failed turn is recorded with its kind and code; a turn its process does 
   const b = setup(["slow"]);
   try {
     b.engine.start("Q", { runtime: "claude" });
-    await b.until("the step to run", () => b.queue().steps[0]!.status === "running");
+    await b.until("the step to run", () => b.queue().steps[0]!.status === "running", LONGER.step);
     b.engine.shutdown(); // as an update's hand-over or a stop of the server: the process ends mid-turn
     await b.until("the record", () => turnsOf("worker").length === 1);
     const [t] = turnsOf("worker");

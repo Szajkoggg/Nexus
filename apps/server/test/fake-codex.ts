@@ -2,7 +2,7 @@
 // uses and sends the notifications Nexus reads. What it does with a message is in fake-behaviour.ts; a turn/steer
 // is recorded with priority "next", like Claude's mid-turn messages.
 import { randomUUID } from "node:crypto";
-import { PARTIAL, contextTokens, interrupt, record, recordArgs, respond, type Fake, type FakeFailure } from "./fake-behaviour.ts";
+import { PARTIAL, actOnRead, contextTokens, interrupt, record, recordArgs, respond, type Fake, type FakeFailure } from "./fake-behaviour.ts";
 
 const out = (m: unknown) => process.stdout.write(JSON.stringify(m) + "\n");
 const notify = (method: string, params: unknown) => out({ method, params });
@@ -32,13 +32,14 @@ function takeIn(turn: string, text: string): void {
 async function runTurn(id: string, text: string): Promise<void> {
   notify("turn/started", { threadId, turn: { id, status: "inProgress", items: [] } });
   takeIn(id, text);
-  const reply = await respond(fake, text, (command) => {
+  const first = await respond(fake, text, (command) => {
     const item = { type: "commandExecution", id: randomUUID(), command: `"powershell.exe" -Command '${command}'`, status: "inProgress" };
     notify("item/started", { threadId, turnId: id, item });
     notify("item/completed", { threadId, turnId: id, item: { ...item, status: "completed", exitCode: 0 } });
   }, () => refused(id));
-  if (typeof reply !== "string") return "exit" in reply ? exitOnSignal() : "interrupted" in reply ? interrupted(id) : fail(id, reply.fail);
+  if (typeof first !== "string") return "exit" in first ? exitOnSignal() : "interrupted" in first ? interrupted(id) : fail(id, first.fail);
   for (const s of steered) takeIn(id, s);
+  const reply = actOnRead(steered, first);
   steered = [];
   notify("item/completed", { threadId, turnId: id, item: { type: "agentMessage", id: randomUUID(), text: reply } });
   // Two model requests per turn, each with its `last` and the thread's running `total` (checked live). Turn n:

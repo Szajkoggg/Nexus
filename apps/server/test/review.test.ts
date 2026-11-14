@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { ProjectStore, addNote, applyDraft, approveQueue, commentOnPicture, loadProjectState, newId, now, routeAnswers, sendBack, updateSettings } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
+import { WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
 
 process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
 const CLI = join(dirname(fileURLToPath(import.meta.url)), "../../../packages/cli/bin/nexus.js");
@@ -27,13 +28,7 @@ function setup() {
   const timer = setInterval(tick, 150);
   const state = () => loadProjectState(store);
   const step = (q: string, s: string) => state().queues.find((x) => x.id === q)!.steps.find((x) => x.id === s)!;
-  const until = async (what: string, pred: () => boolean, ms = 30_000) => {
-    const t = Date.now();
-    while (!pred()) {
-      if (Date.now() - t > ms) assert.fail(`timed out waiting for ${what}; chat: ${JSON.stringify(orchestrator.view().chat.slice(-4))}`);
-      await new Promise((r) => setTimeout(r, 100));
-    }
-  };
+  const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms, () => `; chat: ${JSON.stringify(orchestrator.view().chat.slice(-4))}`);
   const facts = () => orchestrator.view().chat.filter((c) => c.from === "nexus").map((c) => c.text);
   const delivered = () => existsSync(process.env.FAKE_LOG!)
     ? readFileSync(process.env.FAKE_LOG!, "utf8").split("\n").filter(Boolean).map((l) => (JSON.parse(l) as { text: string }).text) : [];
@@ -74,10 +69,10 @@ test("the orchestrator is told of a step waiting for its review, and its accept 
     assert.ok(!x.facts().find(reviewFact("V", "V1"))!.includes("nexus review"), "the chat shows only the fact");
 
     x.orchestrator.say(`FAKE-NEXUS: ["review","accept","V","V1","--note","fine"]`);
-    await x.until("V2 in review", () => x.step("V", "V2").status === "review");
+    await x.until("V2 in review", () => x.step("V", "V2").status === "review", LONGER.step);
     assert.equal(x.step("V", "V1").status, "done");
     x.orchestrator.say(`FAKE-NEXUS: ["review","accept","V","V2"]`);
-    await x.until("the run to finish", () => x.state().queues[0]!.run?.state === "finished");
+    await x.until("the run to finish", () => x.state().queues[0]!.run?.state === "finished", LONGER.run);
   } finally { x.stop(); }
 });
 
@@ -98,7 +93,7 @@ test("ask-user hands the review to the user, and the run waits for them", async 
     assert.equal(x.step("U", "U1").status, "review");
     assert.equal(x.step("U", "U2").status, "pending");
     x.engine.acceptReview("U", "U1");
-    await x.until("U2 in review", () => x.step("U", "U2").status === "review");
+    await x.until("U2 in review", () => x.step("U", "U2").status === "review", LONGER.step);
   } finally { x.stop(); }
 });
 
@@ -129,7 +124,7 @@ test("a reset orchestrator is told of a step that entered review before it start
     await new Promise((r) => setTimeout(r, 600));
     assert.equal(x.facts().filter(reviewFact("R", "R1")).length, 1, "once per session");
     x.orchestrator.say(`FAKE-NEXUS: ["review","accept","R","R1"]`);
-    await x.until("the run to finish", () => x.state().queues[0]!.run?.state === "finished");
+    await x.until("the run to finish", () => x.state().queues[0]!.run?.state === "finished", LONGER.run);
   } finally { x.stop(); }
 });
 
@@ -169,12 +164,12 @@ test("a send-back reaches the worker as round 2, and the round comes back to the
     await x.until("the review", () => x.step("B", "B1").review_with === "orchestrator");
     x.orchestrator.say(`FAKE-NEXUS: ["review","send-back","B","B1","Measure the build time too."]`);
     await x.until("the result", () => chatSays(x, /sent back to its worker as round 2/));
-    await x.until("round 2 at the worker", () => x.delivered().some(roundTurn("B1", 2)));
+    await x.until("round 2 at the worker", () => x.delivered().some(roundTurn("B1", 2)), LONGER.step);
     const turn = x.delivered().find(roundTurn("B1", 2))!;
     assert.match(turn, /What to fix:\nMeasure the build time too\./);
     assert.match(turn, /Acceptance criteria of the step:\n- Criterion 1/);
     assert.doesNotMatch(turn, /words win/);
-    await x.until("round 2 in review", () => x.step("B", "B1").status === "review" && x.step("B", "B1").summary === "fake finished B1 round 2");
+    await x.until("round 2 in review", () => x.step("B", "B1").status === "review" && x.step("B", "B1").summary === "fake finished B1 round 2", LONGER.step);
     assert.equal(x.step("B", "B1").review_with, "orchestrator");
     assert.equal(x.step("B", "B1").session, x.state().queues[0]!.run!.session, "the same session");
     await x.until("told again", () => x.facts().filter(reviewFact("B", "B1")).length === 2);
@@ -186,11 +181,11 @@ test("the orchestrator's third send-back hands the step to the user", async () =
   try {
     await x.run("T", 1);
     for (const round of [2, 3]) {
-      await x.until(`round ${round - 1} in review`, () => x.step("T", "T1").status === "review" && x.step("T", "T1").review_with === "orchestrator" && x.facts().filter(reviewFact("T", "T1")).length === round - 1);
+      await x.until(`round ${round - 1} in review`, () => x.step("T", "T1").status === "review" && x.step("T", "T1").review_with === "orchestrator" && x.facts().filter(reviewFact("T", "T1")).length === round - 1, LONGER.step);
       x.orchestrator.say(`FAKE-NEXUS: ["review","send-back","T","T1","Not yet ${round}."]`);
-      await x.until(`round ${round}`, () => x.delivered().some(roundTurn("T1", round)));
+      await x.until(`round ${round}`, () => x.delivered().some(roundTurn("T1", round)), LONGER.step);
     }
-    await x.until("round 3 in review", () => x.step("T", "T1").status === "review" && x.step("T", "T1").review_with === "orchestrator" && x.facts().filter(reviewFact("T", "T1")).length === 3);
+    await x.until("round 3 in review", () => x.step("T", "T1").status === "review" && x.step("T", "T1").review_with === "orchestrator" && x.facts().filter(reviewFact("T", "T1")).length === 3, LONGER.step);
     x.orchestrator.say(`FAKE-NEXUS: ["review","send-back","T","T1","Still not."]`);
     await x.until("the result", () => chatSays(x, /goes to the user: it was sent back 2 times already/));
     const st = x.step("T", "T1");
@@ -210,20 +205,20 @@ test("the user's Fix it: verbatim, with the override wording, not counted, and i
     await x.run("F", 1);
     await x.until("the review", () => x.step("F", "F1").review_with === "orchestrator");
     x.orchestrator.say(`FAKE-NEXUS: ["review","send-back","F","F1","Tighten it."]`);
-    await x.until("round 2 in review", () => x.step("F", "F1").summary === "fake finished F1 round 2" && x.step("F", "F1").review_with === "orchestrator");
+    await x.until("round 2 in review", () => x.step("F", "F1").summary === "fake finished F1 round 2" && x.step("F", "F1").review_with === "orchestrator", LONGER.step);
     x.orchestrator.say(`FAKE-NEXUS: ["review","ask-user","F","F1","The colour is yours."]`);
     await x.until("the user's review", () => x.step("F", "F1").review_with === "user");
 
     assert.throws(() => sendBack(x.store, { queue: "F", step: "F1", from: "user", text: "   " }), /what to fix is empty/);
     const words = "  Blue, not red: ignore the criterion about red.\nAnd keep the old shape.  ";
     assert.match(sendBack(x.store, { queue: "F", step: "F1", from: "user", text: words }), /sent back to its worker as round 3/);
-    await x.until("round 3 at the worker", () => x.delivered().some(roundTurn("F1", 3)));
+    await x.until("round 3 at the worker", () => x.delivered().some(roundTurn("F1", 3)), LONGER.step);
     const turn = x.delivered().find(roundTurn("F1", 3))!;
     assert.match(turn, /The user sent step F1 of queue F back to you \(round 3\)/);
     assert.ok(turn.includes(words), "the user's words, verbatim");
     assert.match(turn, /The user's words win over the step's acceptance criteria where they conflict/);
 
-    await x.until("round 3 in review", () => x.step("F", "F1").summary === "fake finished F1 round 3" && x.step("F", "F1").status === "review");
+    await x.until("round 3 in review", () => x.step("F", "F1").summary === "fake finished F1 round 3" && x.step("F", "F1").status === "review", LONGER.step);
     const st = x.step("F", "F1");
     assert.equal(st.review_with, "user", "after a Fix it the round is the user's, though the level is 2");
     const fix = st.sent_back.find((b) => b.by === "user")!;
@@ -258,8 +253,8 @@ test("a send-back on a halted run waits for the resume", async () => {
     assert.ok(!x.delivered().some(roundTurn("H1", 2)), "nothing reaches the worker while halted");
     assert.equal(x.step("H", "H1").status, "running", "reopened, waiting");
     x.engine.resume("H");
-    await x.until("round 2 at the worker", () => x.delivered().some(roundTurn("H1", 2)));
-    await x.until("round 2 in review", () => x.step("H", "H1").summary === "fake finished H1 round 2" && x.step("H", "H1").status === "review");
+    await x.until("round 2 at the worker", () => x.delivered().some(roundTurn("H1", 2)), LONGER.step);
+    await x.until("round 2 in review", () => x.step("H", "H1").summary === "fake finished H1 round 2" && x.step("H", "H1").status === "review", LONGER.step);
   } finally { x.stop(); }
 });
 
@@ -308,7 +303,7 @@ test("on the queue's last step the note goes to the orchestrator", async () => {
     await x.until("the user's review", () => x.step("L", "L1").review_with === "user");
     assert.deepEqual(x.engine.acceptReview("L", "L1", "Good; next, the sound pass.", "next"), { to: "orchestrator", step: undefined });
     await x.until("the note told", () => x.delivered().some((t) => t.startsWith("[Nexus] The user accepted step L1 of queue L (its last step) with this note for you:\nGood; next, the sound pass.")));
-    await x.until("the run to finish", () => x.state().queues[0]!.run?.state === "finished");
+    await x.until("the run to finish", () => x.state().queues[0]!.run?.state === "finished", LONGER.run);
   } finally { x.stop(); }
 });
 
@@ -383,7 +378,7 @@ test("after a rejection and a newer approved revision, start runs what is pendin
     x.engine.start("K");
     await x.until("K2 waits for the user", () => x.step("K", "K2").review_with === "user"); // notices off: the user's
     x.engine.acceptReview("K", "K2");
-    await x.until("the run to finish", () => q().run?.state === "finished");
+    await x.until("the run to finish", () => q().run?.state === "finished", LONGER.run);
     assert.equal(q().status, "done");
     assert.deepEqual(q().steps.map((s) => s.status), ["rejected", "done"]);
     assert.equal(x.step("K", "K1").reason, "Not this way.");
@@ -398,7 +393,7 @@ test("a note on a step in orchestrator review goes to the orchestrator, whatever
   const x = setup();
   try {
     await x.run("N", 2);
-    await x.until("the orchestrator's review", () => x.step("N", "N1").review_with === "orchestrator");
+    await x.until("the orchestrator's review", () => x.step("N", "N1").review_with === "orchestrator", LONGER.step);
     x.orchestrator.reset();
     // Written while the orchestrator holds the step; notices turned off before it is told: it is told all the same.
     addNote(x.store, "N", "N1", "The shader looks right, but the moss is too bright: fix that.");
@@ -419,7 +414,7 @@ test("a picture comment on a step in orchestrator review goes to the orchestrato
   const x = setup();
   try {
     await x.run("P", 2);
-    await x.until("the orchestrator's review", () => x.step("P", "P1").review_with === "orchestrator");
+    await x.until("the orchestrator's review", () => x.step("P", "P1").review_with === "orchestrator", LONGER.step);
     const pic = join(x.store.dir, "..", "cliff.png").replaceAll("\\", "/");
     writeFileSync(pic, "png");
     const worker = x.state().queues.find((q) => q.id === "P")!.run!.session;
@@ -435,7 +430,7 @@ test("a note on a pending step still waits for that step, and never goes to the 
   const x = setup();
   try {
     await x.run("W", 2);
-    await x.until("the orchestrator's review", () => x.step("W", "W1").review_with === "orchestrator");
+    await x.until("the orchestrator's review", () => x.step("W", "W1").review_with === "orchestrator", LONGER.step);
     addNote(x.store, "W", "W2", "Use the grassland settings.");
     assert.equal(x.step("W", "W2").notes[0]!.to, undefined);
     await new Promise((r) => setTimeout(r, 600));
@@ -459,14 +454,14 @@ test("the pointer to nexus help review: in the opening of a step with a review s
     approveQueue(x.store, "H");
     x.engine.start("H");
     const opening = (s: string) => x.delivered().find((t) => t.includes(`step ${s} (`) && t.startsWith("[Nexus] Queue H"));
-    await x.until("H1 in review", () => x.step("H", "H1").status === "review");
+    await x.until("H1 in review", () => x.step("H", "H1").status === "review", LONGER.step);
     assert.match(opening("H1")!, /Review to prepare: waiting-tab@492 before -> after\nPrepare it by Nexus's standard: read `nexus help review` first/);
 
     sendBack(x.store, { queue: "H", step: "H1", from: "user", text: "The after is at another width." });
-    await x.until("round 2 at the worker", () => x.delivered().some(roundTurn("H1", 2)));
+    await x.until("round 2 at the worker", () => x.delivered().some(roundTurn("H1", 2)), LONGER.step);
     assert.match(x.delivered().find(roundTurn("H1", 2))!, /--round 2`, pictures with the same keys as before: `nexus help review`\)/);
 
-    await x.until("round 2 in review", () => x.step("H", "H1").summary === "fake finished H1 round 2" && x.step("H", "H1").status === "review");
+    await x.until("round 2 in review", () => x.step("H", "H1").summary === "fake finished H1 round 2" && x.step("H", "H1").status === "review", LONGER.step);
     x.engine.acceptReview("H", "H1");
     await x.until("H2 opened", () => !!opening("H2"));
     assert.ok(!opening("H2")!.includes("nexus help review"), "no pointer without a review spec");

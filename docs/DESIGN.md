@@ -1416,6 +1416,60 @@ file is missing ("I can't read the image because the file is missing"); the adap
 Total cost of the probes: about $0.009 of Claude usage (two turns) and, for Codex (gpt-6-luna, seven one-turn
 threads), about 117k input tokens, about 90k of them cached, and under 100 output tokens.
 
+## The tests' waits (queue TS1)
+
+Decided by the user on 2026-11-14 (docs/ideas/test-speed.md): the tests that run fake runtimes, servers or git wait
+briefly, so that a change that breaks many tests fails the suite in minutes. Before, each test file had its own wait
+of 20 or 30 s polled every 100 ms, and a broken change took the suite past an hour (605 tests with 138 failures in 97
+minutes, almost all of them "timed out waiting for the run to finish").
+
+- **One helper, `apps/server/test/wait.ts`**: `until(what, pred, ms, detail)` looks every 25 ms (`POLL_MS`) and fails
+  after `WAIT_MS`, 10000 by default, set with `NEXUS_TEST_WAIT_MS` (higher on a slow machine). Every test file uses it;
+  their own `until` keeps only its failure detail. `serverUp(url)` waits for a server a test started.
+- **Longer waits are named** (`LONGER`), as multiples of `WAIT_MS`, so the variable scales them too, each with its
+  reason measured: `LONGER.step` (2×) for one step of a worker's, or one agent's turn after another's (the
+  orchestrator sends a step back, the worker takes round 2), which took 2.5 to 3.5 s in a full run and over 5 s in a
+  slower one; `LONGER.run` (3×) for a whole run or chain of runs to its end (finished, halted, stopped, paused):
+  every step starts the fake worker's turn and calls the nexus CLI, each a node process; alone a two-step run takes
+  about 2 s, in the full suite, whose files run side by side, such waits took 4 to 8 s. `LONGER.processes` (6×) for
+  work made of many processes waited on together: a server's start, an update's hand-over and rollback, a push by
+  git, a run that commits in a worktree; the longest took 12 s (a rollback). A test that waits for a time of its own
+  (an away mode that ends in 8 s, a slow fake step of 4 s) waits that time plus `WAIT_MS`. `NEXUS_TEST_WAIT_LOG`
+  names a file that gets every wait over 2 s: how these were measured.
+- **10 s, not 5** (decided 2026-11-14 with the orchestrator; the user's 5 s was an example). At 5 s, with the
+  causes below fixed and the named waits in place, an agent's turn or a worker's step still took 5 to 7 s now and
+  then in a full run: the user's machine runs other applications (18 to 25 % of the CPU when idle) and a full run took
+  185 to 240 s; a different test failed in nearly every run. The goal stays: a change that breaks many tests fails
+  the suite in minutes, not hours.
+- **Under made-up load** (`scripts/load-tests.mjs`) the waits took four to five times as long as in a full run, so
+  the script sets `NEXUS_TEST_WAIT_MS` to 50000 unless told otherwise (`--wait-ms`): a load run looks for races, not
+  slowness.
+- **What the shorter, faster waits brought out**, each fixed at its cause:
+  - away.test.ts waited for a chat line and then read the orchestrator process's log, which the delivery reaches a
+    little later; polled every 100 ms the gap was hidden, every 25 ms it showed. It now waits for the delivery it
+    checks, as do three waits of orchestrator.test.ts that slept 700 ms or not at all before such a read.
+  - away.test.ts turned away mode on for a real 8 s that the run had to fit in; under load the run outlasted it. Its
+    end is now set to "now" when the test gets there, as the server's own timer would end it.
+  - deploy-notices.test.ts started a request to the server on every look without awaiting it; at 25 ms they piled up
+    (40 a second) and the update did not settle in time. It now asks once at a time (`untilAsync`).
+  - Tests that waited for a passing state (a step "running" for 0.3 to 2.5 s, two steps running at the same moment)
+    missed it on a busy machine. Where a test acts while a step works, the fake step now works `WORK_MS` (half of
+    `WAIT_MS`) and the test waits for the step to have begun (its first stretch at work recorded); where it checks
+    that two runs went side by side, it compares their recorded times afterwards.
+  - provisional.test.ts waited for a step "at work" between two rounds, a state a fast fake round can leave between
+    two looks; it now waits for the send-back's record, and the next round's review for its end.
+  - review.test.ts sent the orchestrator's fake a command (`FAKE-NEXUS`) once a review notice showed in the chat;
+    sooner now, the command often arrived while the fake still answered the notice, as a message read mid-turn, which
+    the fakes only kept in their history: the command was lost. The fakes now act on a command read mid-turn before
+    the turn ends, as an agent does (`actOnRead`).
+  - One was the engine's: gitinfo.test.ts saw a step's recorded first HEAD include the step's own commit. The engine
+    sent the worker its step and then read HEAD (git), which took one to two seconds on a busy machine; the fake worker
+    had started and committed meanwhile. The engine now records the rounds (the step before ends its round, this one
+    begins) before the worker hears of the step.
+- **Failing fast.** With the engine deliberately broken (a done step never moves the run on), the suite failed 147 of
+  625 tests in 9 minutes (561 s), where it had taken over an hour; the longest file is the one with the most waits for
+  whole runs, at 15 s each.
+
 ## Findings from the flaky tests (queue FU4)
 
 Four server tests failed now and then on a busy machine. `scripts/load-tests.mjs` brings such failures out (12
@@ -1441,7 +1495,7 @@ busy-loop processes on the user's 16 logical cores and 4 to 6 copies of the test
 - **A worktree was removed while its worker's process was still exiting** (report.test.ts): Windows refuses to delete
   a folder a process runs in ("Permission denied"). The test now cleans up after the process has exited, as a user's
   cleanup comes. Its other failure was time: two steps and a report start about eight node processes, a step took 14 s
-  under that load, and the 20 s wait was shorter than the work: now 60 s, the cost written beside it.
+  under that load, and the 20 s wait was shorter than the work: now a named longer wait (see "The tests' waits").
 
 ## Findings from review levels (queue RL1)
 

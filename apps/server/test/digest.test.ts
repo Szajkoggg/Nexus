@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { ProjectStore, approveQueue, writeRegistry, type Event } from "@nexus/protocol";
 import type { DigestResponse } from "@nexus/protocol/digest";
 import { spawnServer } from "./helpers.ts";
+import { serverUp } from "./wait.ts";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const freePort = () => new Promise<number>((resolve) => {
@@ -46,7 +47,7 @@ test("GET /api/digest: every project's steps, stops, refusals and retries after 
   const child = spawnServer({ NEXUS_PORT: String(port), NEXUS_LOG: "" });
   const url = `http://127.0.0.1:${port}`;
   try {
-    for (let i = 0; i < 100; i++) { try { if ((await fetch(url + "/api/projects")).ok) break; } catch { /* not up yet */ } await sleep(100); }
+    await serverUp(url + "/api/projects");
     const d = (await (await fetch(`${url}/api/digest?since=${encodeURIComponent(at(1, 30))}`)).json()) as DigestResponse;
     assert.equal(d.since, at(1, 30));
     assert.deepEqual(d.events.map((e) => `${e.project}:${e.kind}:${e.step ?? ""}`), ["b:refused:Q1", "a:stopped:Q2", "a:retried:Q2", "a:done:Q1"]);

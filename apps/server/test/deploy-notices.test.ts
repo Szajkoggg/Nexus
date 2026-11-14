@@ -19,6 +19,7 @@ import { Engine } from "../src/engine.ts";
 import { Lifecycle } from "../src/lifecycle.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { serverEnv, spawnServer } from "./helpers.ts";
+import { until, LONGER, untilAsync } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const REPO = join(here, "..", "..", "..");
@@ -26,10 +27,6 @@ const CLI = join(REPO, "packages", "cli", "bin", "nexus.js");
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-async function until(what: string, pred: () => boolean, ms = 30_000, detail = () => ""): Promise<void> {
-  const t = Date.now();
-  while (!pred()) { if (Date.now() - t > ms) assert.fail(`timed out waiting for ${what}${detail()}`); await sleep(100); }
-}
 const freePort = () => new Promise<number>((resolve) => {
   const s = createServer();
   s.listen(0, "127.0.0.1", () => { const p = (s.address() as { port: number }).port; s.close(() => resolve(p)); });
@@ -82,7 +79,9 @@ async function serverInfo(port: number): Promise<any> {
 /** The successor took over and its update settled (its push, here never made from a development checkout, is done). */
 async function settled(port: number, s: { out: () => string }) {
   let info: any;
-  await until("the update to settle", () => { void serverInfo(port).then((i) => { info = i; }); return !!info?.update?.push; }, 30_000, () => `; output: ${s.out()}`);
+  // One request at a time: started on every look without being awaited, they piled up on the server (40 a second at
+  // the 25 ms look, queue TS1) and the update did not settle within the wait.
+  await untilAsync("the update to settle", async () => { info = await serverInfo(port); return !!info?.update?.push; }, LONGER.processes, () => `; output: ${s.out()}`);
   return info;
 }
 
@@ -104,7 +103,7 @@ test("the orchestrator that ran the update is told once, after the restart, whic
   const told = () => received(log).filter((m) => m.text.startsWith("[Nexus] Nexus was updated as asked"));
   try {
     await settled(port, s);
-    await until("the outcome to reach the orchestrator", () => told().length > 0, 30_000, () => `; output: ${s.out()}`);
+    await until("the outcome to reach the orchestrator", () => told().length > 0, LONGER.processes, () => `; output: ${s.out()}`);
     const m = told()[0]!;
     assert.match(m.text, new RegExp(`^\\[Nexus\\] Nexus was updated as asked: ${head()} ".*" is up \\(was old1234\\)\\. Not pushed: not a live instance`));
     assert.equal(m.priority, null, "it starts a turn of its own");
@@ -171,7 +170,7 @@ test("a failed update tells the orchestrator that ran it why, and what still run
   const told = () => received(log).filter((m) => m.text.startsWith("[Nexus] The Nexus update you ran failed"));
   try {
     lifecycle.start({ ref: "next", by: { project: "p", session } });
-    await until("the outcome to reach the orchestrator", () => told().length > 0, 30_000, () => `; status: ${JSON.stringify(lifecycle.status)}`);
+    await until("the outcome to reach the orchestrator", () => told().length > 0, LONGER.processes, () => `; status: ${JSON.stringify(lifecycle.status)}`);
     assert.match(told()[0]!.text, new RegExp(`failed: the successor exited \\(1\\) before it was ready; rolled back to ${a}\\. Still running: ${a} "A: where it runs"`));
     onChange(); onChange();
     await sleep(500);
@@ -248,7 +247,7 @@ test("nexus server status lists the running steps per project", async () => {
   const port = await freePort();
   const s = server(home, port, {});
   try {
-    await until("the server", () => s.out().includes("Nexus server on"), 30_000, () => s.out());
+    await until("the server", () => s.out().includes("Nexus server on"), LONGER.processes, () => s.out());
     const out = execFileSync(process.execPath, [CLI, "server", "status"], {
       env: { ...serverEnv({ NEXUS_HOME: home, NEXUS_PORT: String(port) }), NEXUS_SESSION: "", NEXUS_DIR: "" }, encoding: "utf8",
     });

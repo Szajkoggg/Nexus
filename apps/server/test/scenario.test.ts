@@ -21,6 +21,7 @@ import { performance } from "node:perf_hooks";
 import { ProjectStore, approveQueue, loadProjectState, routeAnswers, writeUsage, type StepDef } from "@nexus/protocol";
 import { Engine, type Clock } from "../src/engine.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
+import { WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -86,13 +87,7 @@ for (const runtime of ["claude", "codex"] as const) {
 
     const queue = () => loadProjectState(store).queues.find((q) => q.id === "Q")!;
     const runtimeState = () => { const r = store.readRun("Q"); return r ? store.readRuntime(r.session) : undefined; };
-    const until = async (what: string, pred: () => boolean, ms = 30_000) => {
-      const start = performance.now();
-      while (!pred()) {
-        if (performance.now() - start > ms) assert.fail(`timed out waiting for ${what}; run: ${JSON.stringify(store.readRun("Q"))}; runtime: ${JSON.stringify(runtimeState())}; steps: ${queue().steps.map((s) => `${s.id}=${s.status}`).join(" ")}`);
-        await new Promise((r) => setTimeout(r, 20));
-      }
-    };
+    const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms, () => `; run: ${JSON.stringify(store.readRun("Q"))}; runtime: ${JSON.stringify(runtimeState())}; steps: ${queue().steps.map((s) => `${s.id}=${s.status}`).join(" ")}`);
     const stepIs = (id: string, status: string) => queue().steps.find((s) => s.id === id)?.status === status;
     const idleAfter = (turns: number) => runtimeState()?.state === "idle" && runtimeState()?.turns === turns;
 
@@ -104,13 +99,13 @@ for (const runtime of ["claude", "codex"] as const) {
       later();
 
       // Pause during the step: pausing until its turn ends, then paused.
-      await until("Q1 at work", () => stepIs("Q1", "running") && runtimeState()?.state === "working");
+      await until("Q1 at work", () => stepIs("Q1", "running") && runtimeState()?.state === "working", LONGER.step);
       record("Q1 at work");
       later();
       engine.pause("Q");
       record("paused by the user during a turn: pausing");
       later();
-      await until("the pause", () => store.readRun("Q")?.state === "paused" && idleAfter(1));
+      await until("the pause", () => store.readRun("Q")?.state === "paused" && idleAfter(1), LONGER.run);
       record("the turn ended: paused");
 
       // Resume: the next step opens; its turn fails for a passing reason and waits for its retry.
@@ -147,7 +142,7 @@ for (const runtime of ["claude", "codex"] as const) {
       // The record is working from the turn's start, for both runtimes (until queue FU4, Codex's stayed idle until the
       // turn's token figures came, so idle did not mean the turn was over).
       await until("Q4 at work", () => stepIs("Q3", "done") && stepIs("Q4", "running") && runtimeState()?.turns === 5
-        && runtimeState()?.state === "working");
+        && runtimeState()?.state === "working", LONGER.step);
       record("the last step at work");
 
       // The server stops in the middle of the step; the next one pauses the run, and a resume continues the step.
@@ -164,7 +159,7 @@ for (const runtime of ["claude", "codex"] as const) {
       later();
 
       // Finishing: the last step done, the process closed.
-      await until("the finish", () => store.readRun("Q")?.state === "finished" && runtimeState()?.state === "exited");
+      await until("the finish", () => store.readRun("Q")?.state === "finished" && runtimeState()?.state === "exited", LONGER.run);
       record("the last step done: finished");
     } finally { engine.shutdown(); delete process.env.FAKE_SLOW_MS; }
 

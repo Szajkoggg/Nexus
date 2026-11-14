@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { ProjectStore, approveQueue, loadProjectState, routeAnswers, sendMessage, type StepDef } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
+import { WAIT_MS, until as waitUntil, LONGER, WORK_MS } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -33,13 +34,7 @@ function setup(behaviours: string[], opts: { fill: number; care?: boolean; noSum
   const engine: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store); engine.onChange(loadProjectState(store)); }, { retryBaseMs: 30, usageMarginMs: 100 });
   const queue = () => loadProjectState(store).queues.find((q) => q.id === "Q")!;
   const received = (): Received[] => (existsSync(process.env.FAKE_LOG!) ? readFileSync(process.env.FAKE_LOG!, "utf8").trim().split("\n").map((l) => JSON.parse(l) as Received) : []);
-  const until = async (what: string, pred: () => boolean, ms = 20_000) => {
-    const t = Date.now();
-    while (!pred()) {
-      if (Date.now() - t > ms) assert.fail(`timed out waiting for ${what}; run: ${JSON.stringify(queue().run)}; steps: ${queue().steps.map((s) => `${s.id}=${s.status}`).join(" ")}`);
-      await new Promise((r) => setTimeout(r, 100));
-    }
-  };
+  const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms, () => `; run: ${JSON.stringify(queue().run)}; steps: ${queue().steps.map((s) => `${s.id}=${s.status}`).join(" ")}`);
   const done = () => { engine.shutdown(); delete process.env.FAKE_CONTEXT_FILL; delete process.env.FAKE_NO_SUMMARY; delete process.env.FAKE_SLOW_MS; };
   return { store, engine, queue, received, until, done };
 }
@@ -51,7 +46,7 @@ for (const runtime of ["claude", "codex"] as const) {
     const { store, engine, queue, received, until, done } = setup(["summary", "done"], { fill: 0.8 });
     try {
       engine.start("Q", { runtime, model: "fake-model-x", effort: "low" });
-      await until("the run to finish", () => queue().run?.state === "finished");
+      await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
       const q = queue();
       const [first, second] = q.steps.map((s) => s.session!);
       assert.ok(first && second);
@@ -81,7 +76,7 @@ for (const runtime of ["claude", "codex"] as const) {
     const { engine, queue, received, until, done } = setup(["summary", "done"], { fill: 0.5 });
     try {
       engine.start("Q", { runtime });
-      await until("the run to finish", () => queue().run?.state === "finished");
+      await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
       const q = queue();
       assert.equal(q.steps[0]!.session, q.steps[1]!.session);
       assert.equal(q.run!.switches, undefined);
@@ -93,7 +88,7 @@ for (const runtime of ["claude", "codex"] as const) {
     const { engine, queue, received, until, done } = setup(["done", "done"], { fill: 0.8 });
     try {
       engine.start("Q", { runtime });
-      await until("the run to finish", () => queue().run?.state === "finished");
+      await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
       const q = queue();
       assert.equal(asks(received()).length, 1);
       assert.equal(asks(received())[0]!.session, q.steps[0]!.session, "the old session is asked");
@@ -107,7 +102,7 @@ for (const runtime of ["claude", "codex"] as const) {
     const { engine, queue, received, until, done } = setup(["done", "done", "done"], { fill: 0.8, noSummary: true });
     try {
       engine.start("Q", { runtime });
-      await until("the run to finish", () => queue().run?.state === "finished");
+      await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
       const q = queue();
       // Asked once at the end of each step that has a next step (Q1 in the first session, Q2 in the second).
       assert.deepEqual(asks(received()).map((m) => m.session), [q.steps[0]!.session, q.steps[1]!.session]);
@@ -122,19 +117,19 @@ for (const runtime of ["claude", "codex"] as const) {
   });
 
   test(`${runtime}: a message unread at the switch reaches the new session's first turn`, async () => {
-    process.env.FAKE_SLOW_MS = "1500";
+    process.env.FAKE_SLOW_MS = WORK_MS;
     const { store, engine, queue, received, until, done } = setup(["summaryslow", "done"], { fill: 0.8 });
     try {
       engine.start("Q", { runtime });
       // Accepted at once, while the step's turn still runs (the summary comes slowly).
-      await until("Q1 in review", () => queue().steps[0]!.status === "review");
+      await until("Q1 in review", () => queue().steps[0]!.status === "review", LONGER.step);
       acceptReviews(store);
       await until("Q1 to be done", () => queue().steps[0]!.status === "done");
       // Written to the old session's inbox while its turn still runs, and not handed over (no onChange) before the
       // turn ends: unread when the switch comes.
       const old = queue().run!.session;
       sendMessage(store, old, "Use the grassland settings.", { queue: "Q", step: "Q1" });
-      await until("the run to finish", () => queue().run?.state === "finished");
+      await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
       const q = queue();
       assert.notEqual(q.steps[1]!.session, old);
       assert.equal(received().filter((m) => m.session === old && m.text.includes("grassland")).length, 0, "the old session never got it");
@@ -151,7 +146,7 @@ for (const runtime of ["claude", "codex"] as const) {
     const { engine, queue, received, until, done } = setup(["done", "done"], { fill: 0.9, care: false });
     try {
       engine.start("Q", { runtime });
-      await until("the run to finish", () => queue().run?.state === "finished");
+      await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
       const q = queue();
       assert.equal(q.steps[0]!.session, q.steps[1]!.session);
       assert.equal(q.run!.switches, undefined);

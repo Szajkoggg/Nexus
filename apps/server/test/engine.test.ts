@@ -12,6 +12,7 @@ import {
 } from "@nexus/protocol";
 import { Engine, RETRY_LIMIT, type EngineOptions } from "../src/engine.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
+import { WAIT_MS, until as waitUntil, LONGER, WORK_MS } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -33,13 +34,7 @@ function setup(behaviours: string[], options: EngineOptions = FAST) {
   const engine: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store); engine.onChange(loadProjectState(store)); }, options);
   const queue = () => loadProjectState(store).queues.find((q) => q.id === "Q")!;
   const received = () => (existsSync(process.env.FAKE_LOG!) ? readFileSync(process.env.FAKE_LOG!, "utf8").trim().split("\n").map((l) => JSON.parse(l) as { text: string; priority: string | null; busy: boolean }) : []);
-  const until = async (what: string, pred: () => boolean, ms = 20_000) => {
-    const t = Date.now();
-    while (!pred()) {
-      if (Date.now() - t > ms) assert.fail(`timed out waiting for ${what}; run: ${JSON.stringify(queue().run)}; steps: ${queue().steps.map((s) => `${s.id}=${s.status}`).join(" ")}`);
-      await new Promise((r) => setTimeout(r, 100));
-    }
-  };
+  const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms, () => `; run: ${JSON.stringify(queue().run)}; steps: ${queue().steps.map((s) => `${s.id}=${s.status}`).join(" ")}`);
   return { store, engine, queue, received, until };
 }
 
@@ -49,7 +44,7 @@ for (const runtime of ["claude", "codex"] as const) {
     addNote(store, "Q", "Q2", "Keep the debris as it is.");
     try {
       engine.start("Q", { runtime });
-      await until("the run to finish", () => queue().run?.state === "finished");
+      await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
       const q = queue();
       assert.deepEqual(q.steps.map((s) => s.status), ["done", "done"]);
       assert.equal(q.status, "done");
@@ -75,7 +70,7 @@ for (const runtime of ["claude", "codex"] as const) {
     const { store, engine, queue, received, until } = setup(["noop"]);
     try {
       engine.start("Q", { runtime });
-      await until("the run to halt", () => queue().run?.state === "halted");
+      await until("the run to halt", () => queue().run?.state === "halted", LONGER.run);
       assert.match(queue().run!.reason!, /without an outcome/);
       assert.equal(received().filter((m) => m.text.includes("has no outcome yet")).length, 1);
       assert.ok(loadProjectState(store).attention.some((a) => a.kind === "stopped" && a.queue === "Q"));
@@ -86,14 +81,14 @@ for (const runtime of ["claude", "codex"] as const) {
     const { store, engine, queue, received, until } = setup(["ask", "done"]);
     try {
       engine.start("Q", { runtime });
-      await until("the question", () => queue().steps[0]!.status === "waiting");
+      await until("the question", () => queue().steps[0]!.status === "waiting", LONGER.step);
       await new Promise((r) => setTimeout(r, 500));
       assert.equal(queue().run?.state, "running", "waiting on a question is not a halt");
       assert.equal(queue().steps[1]!.status, "pending");
       const qid = loadProjectState(store).questions[0]!.qid;
       answerAsUser(store, qid, "Left.", true);
       engine.onChange(loadProjectState(store));
-      await until("the run to finish", () => queue().run?.state === "finished");
+      await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
       const answer = received().find((m) => m.text.startsWith("[Nexus] Answer"));
       assert.ok(answer);
       assert.match(answer.text, /Left\./);
@@ -102,14 +97,14 @@ for (const runtime of ["claude", "codex"] as const) {
   });
 
   test(`${runtime}: a message reaches a working turn as 'next', without interrupting it`, async () => {
-    process.env.FAKE_SLOW_MS = "2500";
+    process.env.FAKE_SLOW_MS = WORK_MS;
     const { store, engine, queue, received, until } = setup(["slow"]);
     try {
       engine.start("Q", { runtime });
-      await until("the step to run", () => queue().steps[0]!.status === "running");
+      await until("the step to run", () => queue().steps[0]!.status === "running", LONGER.step);
       sendMessage(store, queue().run!.session, "Use the grassland settings.", { queue: "Q", step: "Q1" });
       engine.onChange(loadProjectState(store));
-      await until("the run to finish", () => queue().run?.state === "finished");
+      await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
       const m = received().find((x) => x.text.includes("grassland"));
       assert.deepEqual([m?.priority, m?.busy], ["next", true]);
       assert.ok(queue().steps[0]!.messages[0]!.read_at, "the message counts as delivered");
@@ -120,7 +115,7 @@ for (const runtime of ["claude", "codex"] as const) {
     const { engine, queue, until } = setup(["stop", "done"]);
     try {
       engine.start("Q", { runtime });
-      await until("the run to halt", () => queue().run?.state === "halted");
+      await until("the run to halt", () => queue().run?.state === "halted", LONGER.run);
       assert.equal(queue().status, "stopped");
       assert.ok(queue().run!.ended_at, "a halted run records when it halted");
       assert.equal(queue().steps[1]!.status, "pending");
@@ -128,20 +123,20 @@ for (const runtime of ["claude", "codex"] as const) {
   });
 
   test(`${runtime}: pause takes effect after the running step; resume goes on`, async () => {
-    process.env.FAKE_SLOW_MS = "1500";
+    process.env.FAKE_SLOW_MS = WORK_MS;
     const { engine, queue, until } = setup(["slow", "done"]);
     try {
       engine.start("Q", { runtime });
-      await until("the step to run", () => queue().steps[0]!.status === "running");
+      await until("the step to run", () => queue().steps[0]!.status === "running", LONGER.step);
       engine.pause("Q");
       assert.equal(queue().run?.state, "pausing");
-      await until("the pause", () => queue().run?.state === "paused");
+      await until("the pause", () => queue().run?.state === "paused", LONGER.run);
       assert.deepEqual(queue().steps.map((s) => s.status), ["done", "pending"]);
       const paused = queue().run!.ended_at;
       assert.ok(paused, "a paused run records when it stopped going");
       engine.resume("Q");
       assert.equal(queue().run!.ended_at, undefined, "going on clears it");
-      await until("the run to finish", () => queue().run?.state === "finished");
+      await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
       assert.ok(queue().run!.ended_at! > paused);
     } finally { engine.shutdown(); delete process.env.FAKE_SLOW_MS; }
   });
@@ -152,7 +147,7 @@ test("model and effort reach Claude Code as flags, and are kept on the session",
   process.env.FAKE_ARGS = join(dirname(process.env.FAKE_LOG!), "args.log");
   try {
     engine.start("Q", { runtime: "claude", model: "sonnet", effort: "high" });
-    await until("the run to finish", () => queue().run?.state === "finished");
+    await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
     const argv = (JSON.parse(readFileSync(process.env.FAKE_ARGS, "utf8").trim().split("\n")[0]!) as { argv: string[] }).argv;
     assert.equal(argv[argv.indexOf("--model") + 1], "sonnet");
     assert.equal(argv[argv.indexOf("--effort") + 1], "high");
@@ -174,7 +169,7 @@ test("a Claude worker's file tools may not write under the project's .nexus: den
   process.env.FAKE_ARGS = join(dirname(process.env.FAKE_LOG!), "args.log");
   try {
     x.engine.start("Q", { runtime: "claude" });
-    await x.until("the run to finish", () => x.queue().run?.state === "finished");
+    await x.until("the run to finish", () => x.queue().run?.state === "finished", LONGER.run);
     const p = posix(x.store.dir);
     assert.ok(/^\/\/[a-z]\/|^\/\//.test(p));
     assert.deepEqual(denied(argvOf(x.store)), [`Edit(${p}/**)`, `Write(${p}/**)`]);
@@ -190,7 +185,7 @@ test("a Claude worker's file tools may not write under the project's .nexus: den
   x.store.writeQueue({ ...x.store.readQueue("Q"), worktree: "auto" });
   try {
     x.engine.start("Q", { runtime: "claude" });
-    await x.until("the run to finish", () => x.queue().run?.state === "finished");
+    await x.until("the run to finish", () => x.queue().run?.state === "finished", LONGER.run);
     const wt = x.store.readQueue("Q").worktree!;
     assert.ok(!normalize(wt).toLowerCase().startsWith(normalize(root).toLowerCase() + "\\.nexus"));
     assert.deepEqual(denied(argvOf(x.store)), [`Edit(${posix(x.store.dir)}/**)`, `Write(${posix(x.store.dir)}/**)`]);
@@ -203,7 +198,7 @@ test("a Claude worker's file tools may not write under the project's .nexus: den
   x.store.writeProject({ ...pf, defaults: { ...pf.defaults, protect_nexus: false } });
   try {
     x.engine.start("Q", { runtime: "claude" });
-    await x.until("the run to finish", () => x.queue().run?.state === "finished");
+    await x.until("the run to finish", () => x.queue().run?.state === "finished", LONGER.run);
     assert.deepEqual(denied(argvOf(x.store)), []);
   } finally { x.engine.shutdown(); delete process.env.FAKE_ARGS; }
 });
@@ -216,7 +211,7 @@ test("Codex gets the effort on every turn and the project's reviewer when the th
   try {
     assert.throws(() => engine.start("Q", { runtime: "claude", effort: "ultra" }), /Claude Code takes effort/);
     engine.start("Q", { runtime: "codex" });
-    await until("the run to finish", () => queue().run?.state === "finished");
+    await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
     const calls = readFileSync(process.env.FAKE_ARGS, "utf8").trim().split("\n").map((l) => JSON.parse(l) as Record<string, unknown>);
     assert.deepEqual(calls.filter((c) => c.method === "thread/start").map((c) => [c.approvalPolicy, c.approvalsReviewer]), [["on-request", "auto_review"]]);
     assert.deepEqual(calls.filter((c) => c.method === "turn/start").map((c) => c.effort), ["medium", "medium"]);
@@ -232,7 +227,7 @@ test("Codex in a queue's own worktree may write the worktree's git paths, and no
   store.writeQueue({ ...store.readQueue("Q"), worktree: "auto" });
   try {
     engine.start("Q", { runtime: "codex" });
-    await until("the run to finish", () => queue().run?.state === "finished");
+    await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
     const wt = store.readQueue("Q").worktree!;
     const gitDir = join(root, ".git"), mine = (p: string) => normalize(p).toLowerCase();
     const want = [store.dir, join(gitDir, "worktrees", "Q"), join(gitDir, "objects"), join(gitDir, "refs"), join(gitDir, "logs"), reportFolder("p")].map(mine);
@@ -250,7 +245,7 @@ test("Codex in the project's own checkout gets no git roots (its .git lies insid
   execFileSync("git", ["init", "-q"], { cwd: store.readProject().root, stdio: "ignore" });
   try {
     engine.start("Q", { runtime: "codex" });
-    await until("the run to finish", () => queue().run?.state === "finished");
+    await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
     const calls = readFileSync(process.env.FAKE_ARGS, "utf8").trim().split("\n").map((l) => JSON.parse(l) as { method: string; writableRoots: string[] | null });
     // Only the folder for reports (outside the checkout, where the last step's report is written).
     const mine = (p: string) => normalize(p).toLowerCase();
@@ -278,7 +273,7 @@ for (const runtime of ["claude", "codex"] as const) {
     const { store, engine, queue, until } = setup(["done", "refused"]);
     try {
       engine.start("Q", { runtime });
-      await until("the run to finish", () => queue().run?.state === "finished");
+      await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
       const session = queue().run!.session;
       const records = store.readRefusals(session).entries;
       assert.deepEqual(records.map(({ by, tool, input, reason, ref }) => ({ by, tool, input, reason, ref })), REFUSED[runtime],
@@ -296,12 +291,12 @@ for (const runtime of ["claude", "codex"] as const) {
     const { store, engine, queue, until } = setup(["done"]);
     try {
       engine.start("Q", { runtime });
-      await until("the first run to finish", () => queue().run?.state === "finished");
+      await until("the first run to finish", () => queue().run?.state === "finished", LONGER.run);
       const session = queue().run!.session;
       store.writeQueue({ protocol: 1, id: "R", title: "Second", revision: 1, status: "proposed", stop_conditions: [], checks: [], steps: [{ id: "R1", title: "x", goal: "FAKE: refused", acceptance: [] }], approvals: [], history: [] });
       approveQueue(store, "R");
       engine.start("R", { session });
-      await until("the second run to finish", () => store.readRun("R")?.state === "finished");
+      await until("the second run to finish", () => store.readRun("R")?.state === "finished", LONGER.run);
       assert.ok(store.readRefusals(session).entries.every((r) => r.queue === "R" && r.step === "R1"));
     } finally { engine.shutdown(); delete process.env.FAKE_EXIT_DELAY_MS; }
   });
@@ -322,7 +317,7 @@ for (const runtime of ["claude", "codex"] as const) {
     const { store, engine, queue, received, until } = setup(["overloaded2", "done"]);
     try {
       engine.start("Q", { runtime });
-      await until("the run to finish", () => queue().run?.state === "finished");
+      await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
       assert.deepEqual(queue().steps.map((s) => s.status), ["done", "done"]);
       assert.equal(queue().run?.retries, undefined, "a turn that ended well clears the count");
       const opened = received().filter((m) => m.text.includes("step Q1 (1 of 2)"));
@@ -339,7 +334,7 @@ for (const runtime of ["claude", "codex"] as const) {
     const { engine, queue, received, until } = setup(["overloaded"]);
     try {
       engine.start("Q", { runtime });
-      await until("the halt", () => queue().run?.state === "halted");
+      await until("the halt", () => queue().run?.state === "halted", LONGER.run);
       assert.match(queue().run!.reason!, new RegExp(`failed ${RETRY_LIMIT + 1} times in a row.*(overloaded|serverOverloaded)`));
       assert.equal(received().filter((m) => m.text.includes("step Q1")).length, RETRY_LIMIT + 1);
     } finally { engine.shutdown(); }
@@ -349,14 +344,14 @@ for (const runtime of ["claude", "codex"] as const) {
     const { engine, queue, received, until } = setup(["cloudflare2", "done"]);
     try {
       engine.start("Q", { runtime });
-      await until("the run to finish", () => queue().run?.state === "finished");
+      await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
       assert.deepEqual(queue().steps.map((s) => s.status), ["done", "done"]);
       assert.equal(received().filter((m) => m.text.includes("step Q1 (1 of 2)")).length, 3, "the first turn and two retries");
     } finally { engine.shutdown(); }
     const six = setup(["cloudflare6", "done"]);
     try {
       six.engine.start("Q", { runtime });
-      await six.until("the halt", () => six.queue().run?.state === "halted");
+      await six.until("the halt", () => six.queue().run?.state === "halted", LONGER.run);
       const reason = six.queue().run!.reason!;
       assert.match(reason, new RegExp(`failed ${RETRY_LIMIT + 1} times in a row; the last time: edge_block_403: .*403.*Cloudflare`));
       assert.equal(six.queue().run!.failure, "edge_block_403");
@@ -368,7 +363,7 @@ for (const runtime of ["claude", "codex"] as const) {
     const { store, engine, queue, received, until } = setup(["auth", "done"]);
     try {
       engine.start("Q", { runtime });
-      await until("the halt", () => queue().run?.state === "halted");
+      await until("the halt", () => queue().run?.state === "halted", LONGER.run);
       assert.match(queue().run!.reason!, /authentication_failed|unauthorized/);
       await new Promise((r) => setTimeout(r, 400));
       assert.equal(received().length, 1, "no retry and no nudge");
@@ -381,7 +376,7 @@ for (const runtime of ["claude", "codex"] as const) {
     process.env.FAKE_ARGS = join(dirname(process.env.FAKE_LOG!), "args.log");
     try {
       engine.start("Q", { runtime });
-      await until("the run to finish", () => queue().run?.state === "finished");
+      await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
       const calls = readFileSync(process.env.FAKE_ARGS, "utf8").trim().split("\n").map((l) => JSON.parse(l) as { argv?: string[]; method?: string; threadId?: string });
       const session = store.readSession(queue().run!.session);
       if (runtime === "claude") {
@@ -403,7 +398,7 @@ for (const runtime of ["claude", "codex"] as const) {
       const run = queue().run!;
       assert.ok(run.resume_at && Date.parse(run.resume_at) > Date.now() - 1000, "it waits for the reset the runtime named");
       assert.equal(run.retries, undefined, "not counted as a retry");
-      await until("the run to finish", () => queue().run?.state === "finished");
+      await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
     } finally { engine.shutdown(); }
   });
 
@@ -413,7 +408,7 @@ for (const runtime of ["claude", "codex"] as const) {
     let next: Engine | undefined;
     try {
       engine.start("Q", { runtime });
-      await until("the step to run", () => queue().steps[0]!.status === "running");
+      await until("the step to run", () => queue().steps[0]!.status === "running", LONGER.step);
       const session = queue().run!.session;
       engine.shutdown();
       await until("the process to exit", () => store.readRuntime(session)?.state === "exited");
@@ -437,7 +432,7 @@ for (const runtime of ["claude", "codex"] as const) {
       engine.shutdown();
       next = restart(store, { retryBaseMs: 1500, usageMarginMs: 100 });
       assert.equal(queue().run?.state, "retry_wait", "it still waits for its retry");
-      await until("the run to finish", () => queue().run?.state === "finished");
+      await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
       assert.deepEqual(queue().steps.map((s) => s.status), ["done", "done"]);
     } finally { engine.shutdown(); next?.shutdown(); }
   });
@@ -465,21 +460,21 @@ test("a pause or a stop by the user cancels a pending retry", async () => {
  */
 for (const behaviours of [["slow"], ["slow", "done"]]) {
   test(`an update's hand-over right after the last turn of a step: the run ${behaviours.length === 1 ? "ends finished" : "resumes"}`, async () => {
-    process.env.FAKE_SLOW_MS = "1000";
+    process.env.FAKE_SLOW_MS = WORK_MS;
     const { store, engine, queue, until } = setup(behaviours);
     let next: Engine | undefined;
     try {
       engine.start("Q");
-      await until("the step to run", () => queue().steps[0]!.status === "running");
+      await until("the step to run", () => queue().steps[0]!.status === "running", LONGER.step);
       engine.drainForUpdate(false);
-      for (const t = Date.now(); !engine.idle() && Date.now() - t < 10_000;) await new Promise((r) => setTimeout(r, 5));
+      await waitUntil("the engine to be idle", () => engine.idle());
       assert.equal(queue().run?.state, "pausing", "caught before the engine's own look at the ended turn");
       engine.shutdown(); // the hand-over
       const session = queue().run!.session;
       await until("the process to exit", () => store.readRuntime(session)?.state === "exited");
       assert.notEqual(queue().run?.state, "halted");
       next = restart(store);
-      await until("the run to finish", () => queue().run?.state === "finished");
+      await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
       assert.ok(queue().steps.every((s) => s.status === "done"));
       assert.equal(queue().run?.resume_after_restart, undefined);
     } finally { engine.shutdown(); next?.shutdown(); delete process.env.FAKE_SLOW_MS; }
@@ -507,14 +502,14 @@ function fixtureRun(store: ProjectStore, id: string, state: "paused" | "halted",
 }
 
 test("an update holds a running queue at its step's end; the next server resumes it, and only it", async () => {
-  process.env.FAKE_SLOW_MS = "1500";
+  process.env.FAKE_SLOW_MS = WORK_MS;
   const { store, engine, queue, until } = setup(["slow", "done"]);
   fixtureRun(store, "R", "paused", "paused by the user");
   fixtureRun(store, "H", "halted", "fake condition: fake stop");
   let next: Engine | undefined;
   try {
     engine.start("Q");
-    await until("the step to run", () => queue().steps[0]!.status === "running");
+    await until("the step to run", () => queue().steps[0]!.status === "running", LONGER.step);
     assert.deepEqual(engine.drainForUpdate(false), ["Q"]);
     assert.equal(queue().run?.state, "pausing");
     assert.throws(() => engine.start("R"), /updating/);
@@ -524,21 +519,21 @@ test("an update holds a running queue at its step's end; the next server resumes
 
     // The restart: a new engine on the same files.
     next = new Engine(store, () => { routeAnswers(store); acceptReviews(store); next!.onChange(loadProjectState(store)); });
-    await until("the resumed run to finish", () => queue().run?.state === "finished");
+    await until("the resumed run to finish", () => queue().run?.state === "finished", LONGER.run);
     assert.equal(store.readRun("R")?.state, "paused", "a queue the user paused stays paused");
     assert.equal(store.readRun("H")?.state, "halted", "a halted queue stays halted");
   } finally { engine.shutdown(); next?.shutdown(); delete process.env.FAKE_SLOW_MS; }
 });
 
 test("pausing during an update, or a stop condition met, keeps a queue from resuming after the restart", async () => {
-  process.env.FAKE_SLOW_MS = "1200";
+  process.env.FAKE_SLOW_MS = WORK_MS;
   const a = setup(["slow", "done"]);
   try {
     a.engine.start("Q");
-    await a.until("the step to run", () => a.queue().steps[0]!.status === "running");
+    await a.until("the step to run", () => a.queue().steps[0]!.status === "running", LONGER.step);
     a.engine.drainForUpdate(false);
     a.engine.pause("Q");
-    await a.until("the pause", () => a.queue().run?.state === "paused");
+    await a.until("the pause", () => a.queue().run?.state === "paused", LONGER.run);
     assert.equal(a.queue().run?.resume_after_restart, undefined, "the user's pause wins");
   } finally { a.engine.shutdown(); delete process.env.FAKE_SLOW_MS; }
 
@@ -546,21 +541,21 @@ test("pausing during an update, or a stop condition met, keeps a queue from resu
   try {
     b.engine.start("Q");
     b.engine.drainForUpdate(false);
-    await b.until("the halt", () => b.queue().run?.state === "halted");
+    await b.until("the halt", () => b.queue().run?.state === "halted", LONGER.run);
     assert.equal(b.queue().run?.resume_after_restart, undefined, "a stop condition is not undone by a restart");
   } finally { b.engine.shutdown(); }
 });
 
 test("a cancelled update lets the held queue go on", async () => {
-  process.env.FAKE_SLOW_MS = "1200";
+  process.env.FAKE_SLOW_MS = WORK_MS;
   const { engine, queue, until } = setup(["slow", "done"]);
   try {
     engine.start("Q");
-    await until("the step to run", () => queue().steps[0]!.status === "running");
+    await until("the step to run", () => queue().steps[0]!.status === "running", LONGER.step);
     engine.drainForUpdate(false);
     engine.cancelDrain();
     assert.equal(queue().run?.state, "running");
-    await until("the run to finish", () => queue().run?.state === "finished");
+    await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
   } finally { engine.shutdown(); delete process.env.FAKE_SLOW_MS; }
 });
 
@@ -572,7 +567,7 @@ for (const runtime of ["claude", "codex"] as const) {
     const watch = setInterval(() => { const s = store.readRun("Q")?.state; if (s) seen.add(s); }, 20);
     try {
       engine.start("Q", { runtime });
-      await until("the run to finish", () => queue().run?.state === "finished");
+      await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
       await new Promise((r) => setTimeout(r, 1500)); // time enough for a retry or a new process, were there one
       const q = queue();
       assert.equal(q.status, "done");
@@ -594,11 +589,11 @@ for (const runtime of ["claude", "codex"] as const) {
     const watch = setInterval(() => { const s = store.readRun("Q")?.state; if (s) seen.add(s); }, 20);
     try {
       engine.start("Q", { runtime });
-      await until("Q1 in review", () => queue().steps[0]!.status === "review");
+      await until("Q1 in review", () => queue().steps[0]!.status === "review", LONGER.step);
       await new Promise((r) => setTimeout(r, 1500)); // time enough for the exit, and for a retry were there one
       assert.equal(queue().run?.state, "running", "the run waits for the review");
       engine.acceptReview("Q", "Q1");
-      await until("the run to finish", () => queue().run?.state === "finished");
+      await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
       const q = queue();
       assert.ok(!seen.has("retry_wait") && !seen.has("halted"), `states seen: ${[...seen].join(", ")}`);
       assert.equal(q.steps[1]!.session, q.steps[0]!.session, "Q2 ran in the same session");

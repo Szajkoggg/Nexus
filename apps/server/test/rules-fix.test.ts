@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { ActionError, ProjectStore, newId, now, writeRegistry, type RunFile } from "@nexus/protocol";
 import { fixProjectRules, projectRules } from "../src/rulesfix.ts";
 import { spawnServer } from "./helpers.ts";
+import { serverUp } from "./wait.ts";
 
 const BOM = Buffer.from([0xef, 0xbb, 0xbf]);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -111,7 +112,7 @@ test("the API: the check for anyone on this machine, the fix only from the dashb
   const post = (body: unknown, headers: Record<string, string> = {}) =>
     fetch(`${base}/api/projects/p/rules/fix`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
   try {
-    for (let i = 0; i < 100; i++) { try { if ((await fetch(base + "/api/projects")).ok) break; } catch { /* not up yet */ } await sleep(100); }
+    await serverUp(base + "/api/projects");
     const check = await (await fetch(`${base}/api/projects/p/rules`)).json() as { state: string; version: string; unseen_by: string };
     assert.equal(check.state, "only-agents");
     assert.equal(check.unseen_by, "claude");

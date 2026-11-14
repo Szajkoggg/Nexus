@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { ProjectStore, applyDraft, approveQueue, loadProjectState, orchestratorStatusChange, routeAnswers, type StepDef } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
+import { WAIT_MS, until as waitUntil, LONGER, WORK_MS } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -29,12 +30,7 @@ function setup(steps: StepDef[]) {
   const opened = () => (existsSync(process.env.FAKE_LOG!) ? readFileSync(process.env.FAKE_LOG!, "utf8").trim().split("\n") : [])
     .map((l) => (JSON.parse(l) as { text: string }).text).filter((t) => t.startsWith("[Nexus] Queue"))
     .map((t) => /step (\S+) \(/.exec(t)![1]!);
-  const until = async (what: string, pred: () => boolean, ms = 20_000) => {
-    for (const t = Date.now(); !pred();) {
-      if (Date.now() - t > ms) assert.fail(`timed out waiting for ${what}; run: ${JSON.stringify(queue().run)}; steps: ${queue().steps.map((s) => `${s.id}=${s.status}`).join(" ")}`);
-      await new Promise((r) => setTimeout(r, 100));
-    }
-  };
+  const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms, () => `; run: ${JSON.stringify(queue().run)}; steps: ${queue().steps.map((s) => `${s.id}=${s.status}`).join(" ")}`);
   /** Revision 2: a new step Q2b after Q2; the steps there are kept as they are (a revision changes no started step). */
   const revise = () => applyDraft(store, {
     id: "Q", title: "Queue", stop_conditions: ["the art is missing"], checks: [],
@@ -60,7 +56,7 @@ for (const runtime of ["claude", "codex"] as const) {
     const { store, engine, state, queue, opened, until, revise } = setup([step("Q1", "done"), step("Q2", "stop1"), step("Q3", "done")]);
     try {
       engine.start("Q", { runtime });
-      await until("the halt", () => queue().run?.state === "halted");
+      await until("the halt", () => queue().run?.state === "halted", LONGER.run);
       assert.equal(queue().status, "stopped");
       assert.match(queue().run!.reason!, /stopped at step Q2: fake condition: fake stop/, "the halt names the step and the cause");
       assert.throws(() => engine.start("Q", { runtime }), /queue Q is stopped at step Q2: fake condition: fake stop/);
@@ -76,7 +72,7 @@ for (const runtime of ["claude", "codex"] as const) {
 
       engine.start("Q", { runtime });
       assert.equal(queue().run?.revision, 2, "the run records the revision it was started on");
-      await until("the run to finish", () => queue().run?.state === "finished");
+      await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
       assert.deepEqual(opened(), ["Q1", "Q2", "Q2", "Q2b", "Q3"], "after the lift the first pending step is the stopped one");
       assert.deepEqual(queue().steps.map((x) => x.status), ["done", "done", "done", "done"]);
       assert.equal(queue().status, "done");
@@ -104,19 +100,19 @@ test("a queue imported as stopped is lifted the same way, and its stop note is k
     assert.equal(store.readQueue("Q").status, "approved", "approving writes the queue approved");
 
     engine.start("Q");
-    await until("the run to finish", () => queue().run?.state === "finished");
+    await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
     assert.deepEqual(opened(), ["Q2", "Q2b", "Q3"], "the done step stays done; the stopped one runs again");
   } finally { engine.shutdown(); }
 });
 
 test("resume goes on with a run of an older revision (also a run record without its revision) in its session; it takes the new revision", async () => {
-  process.env.FAKE_SLOW_MS = "800";
+  process.env.FAKE_SLOW_MS = WORK_MS;
   const { store, engine, queue, opened, until, revise } = setup([step("Q1", "slow"), step("Q2", "done"), step("Q3", "done")]);
   try {
     engine.start("Q");
-    await until("the step to run", () => queue().steps[0]!.status === "running");
+    await until("the step to run", () => queue().steps[0]!.status === "running", LONGER.step);
     engine.pause("Q");
-    await until("the pause", () => queue().run?.state === "paused");
+    await until("the pause", () => queue().run?.state === "paused", LONGER.run);
     revise();
     approveQueue(store, "Q");
     assert.ok(store.readRun("Q"), "a queue that was not stopped keeps its run record");
@@ -126,7 +122,7 @@ test("resume goes on with a run of an older revision (also a run record without 
     const session = legacy.session;
 
     engine.resume("Q");
-    await until("the run to finish", () => queue().run?.state === "finished");
+    await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
     assert.deepEqual(opened(), ["Q1", "Q2", "Q2b", "Q3"]);
     assert.equal(queue().run!.session, session, "the same session");
     assert.equal(queue().run!.revision, 2, "the run took the new revision");
@@ -140,12 +136,12 @@ for (const runtime of ["claude", "codex"] as const) {
     const { store, engine, queue, opened, until } = setup([step("Q1", "done"), step("Q2", "stop1"), step("Q3", "done")]);
     try {
       engine.start("Q", { runtime });
-      await until("the stop", () => queue().run?.state === "halted");
+      await until("the stop", () => queue().run?.state === "halted", LONGER.run);
       const session = queue().run!.session;
       assert.match(engine.continueQueue("Q"), /the stop is lifted; queue Q goes on/);
       const lift = queue().changes.at(-1)!;
       assert.deepEqual([lift.kind, lift.by, lift.from, lift.to, lift.reason], ["lift", "user_continue", "stopped", "approved", "fake condition: fake stop"]);
-      await until("the run to finish", () => queue().run?.state === "finished");
+      await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
       assert.deepEqual(opened(), ["Q1", "Q2", "Q2", "Q3"]);
       assert.equal(queue().run!.session, session, "the same session goes on");
       assert.deepEqual(queue().steps.map((s) => s.status), ["done", "done", "done"]);
@@ -165,7 +161,7 @@ test("Continue with no run record (an imported stop) starts at the first pending
   try {
     assert.equal(store.readRun("Q"), undefined);
     assert.match(engine.continueQueue("Q"), /starts at its first pending step/);
-    await until("the run to finish", () => queue().run?.state === "finished");
+    await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
     assert.deepEqual(opened(), ["Q2", "Q3"]);
     assert.equal(queue().changes.at(-1)!.reason, "Stopped at Q2: waiting for the art");
   } finally { engine.shutdown(); }
@@ -176,7 +172,7 @@ test("Continue is refused unless the queue is stopped and its current revision a
   try {
     assert.throws(() => engine.continueQueue("Q"), /queue Q is not stopped \(it is approved\)/);
     engine.start("Q");
-    await until("the stop", () => queue().run?.state === "halted");
+    await until("the stop", () => queue().run?.state === "halted", LONGER.run);
     revise();
     assert.throws(() => engine.continueQueue("Q"), /revision 2 of queue Q is not approved: approve it instead/);
     assert.equal(queue().status, "stopped", "nothing was lifted");
@@ -188,10 +184,10 @@ test("Continue after the orchestrator skipped the stopped step opens the next pe
   const { store, engine, queue, opened, until } = setup([step("Q1", "stop"), step("Q2", "done")]);
   try {
     engine.start("Q");
-    await until("the stop", () => queue().run?.state === "halted");
+    await until("the stop", () => queue().run?.state === "halted", LONGER.run);
     orchestratorStatusChange(store, { queue: "Q", step: "Q1", to: "skipped", reason: "done by hand" });
     engine.continueQueue("Q");
-    await until("the run to finish", () => queue().run?.state === "finished");
+    await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
     assert.deepEqual(opened(), ["Q1", "Q2"]);
     assert.deepEqual(queue().steps.map((s) => s.status), ["skipped", "done"]);
   } finally { engine.shutdown(); }
@@ -204,7 +200,7 @@ for (const runtime of ["claude", "codex"] as const) {
     const { store, engine, state, queue, opened, until } = setup([step("W1", "done"), step("W4b", "stop"), step("W4c", "done"), step("W5", "done")]);
     try {
       engine.start("Q", { runtime });
-      await until("the stop", () => queue().run?.state === "halted");
+      await until("the stop", () => queue().run?.state === "halted", LONGER.run);
       assert.match(queue().run!.reason!, /queue Q is stopped at step W4b: fake condition: fake stop\. Only the user lifts a stop: with Continue in the dashboard, or by approving a new revision/);
 
       orchestratorStatusChange(store, { queue: "Q", step: "W4b", to: "skipped", reason: "replaced by W4c" });
@@ -222,7 +218,7 @@ for (const runtime of ["claude", "codex"] as const) {
       assert.throws(() => engine.start("Q", { runtime }), /with Continue in the dashboard/);
 
       assert.match(engine.continueQueue("Q"), /goes on in session/);
-      await until("the run to finish", () => queue().run?.state === "finished");
+      await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
       assert.deepEqual(opened(), ["W1", "W4b", "W4c", "W5"], "Continue opens W4c; nothing reopens W4b");
       assert.deepEqual(queue().steps.map((x) => x.status), ["done", "skipped", "done", "done"]);
       assert.ok(!state().attention.some((a) => a.queue === "Q"));

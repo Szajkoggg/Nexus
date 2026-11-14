@@ -11,6 +11,7 @@ import { ProjectStore, applyDraft, approveQueue, formatClock, loadProjectState, 
 import { Engine, MAX_TIMER_MS, type Clock } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
+import { WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
 
 process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
 
@@ -57,13 +58,7 @@ function setup(queues: Record<string, string[]>, opts: { orchestrator?: boolean 
   if (opts.orchestrator) orchestrator = new Orchestrator(store, engine, tick);
   const timer = setInterval(tick, 150);
   const queue = (id: string) => loadProjectState(store).queues.find((q) => q.id === id)!;
-  const until = async (what: string, pred: () => boolean, ms = 30_000) => {
-    const t = Date.now();
-    while (!pred()) {
-      if (Date.now() - t > ms) assert.fail(`timed out waiting for ${what}; ${Object.keys(queues).map((id) => `${id}: ${queue(id).status} run=${JSON.stringify(queue(id).run?.state)} start=${JSON.stringify(queue(id).start)}`).join("; ")}`);
-      await new Promise((r) => setTimeout(r, 100));
-    }
-  };
+  const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms, () => `; ${Object.keys(queues).map((id) => `${id}: ${queue(id).status} run=${JSON.stringify(queue(id).run?.state)} start=${JSON.stringify(queue(id).start)}`).join("; ")}`);
   const restart = () => { engine.shutdown(); engine = newEngine(); return engine; };
   const stop = () => { clearInterval(timer); orchestrator?.shutdown(); for (const e of engines) e.shutdown(); delete process.env.FAKE_SLOW_MS; };
   return { store, clock, get engine() { return engine; }, orchestrator, queue, until, restart, stop };
@@ -82,7 +77,7 @@ test("a schedule fires at its time, not before; the plan shows its time until th
     await sleep(300);
     assert.equal(x.queue("B").run, undefined, "a minute early: nothing");
     x.clock.advance(MIN);
-    await x.until("B to finish", () => x.queue("B").run?.state === "finished");
+    await x.until("B to finish", () => x.queue("B").run?.state === "finished", LONGER.run);
     assert.equal(x.store.readStart("B"), undefined, "the plan is used up");
   } finally { x.stop(); }
 });
@@ -104,7 +99,7 @@ test("usage-reset is refused without usage data, and fires after the window rese
     await sleep(300);
     assert.equal(x.queue("B").run, undefined, "not before the margin has passed");
     x.clock.advance(1000);
-    await x.until("B to finish", () => x.queue("B").run?.state === "finished");
+    await x.until("B to finish", () => x.queue("B").run?.state === "finished", LONGER.run);
   } finally { x.stop(); }
 });
 
@@ -119,7 +114,7 @@ test("a schedule 30 days ahead is armed in pieces of at most a day and does not 
     await sleep(300);
     assert.equal(x.queue("B").run, undefined, "after 29 days: nothing");
     x.clock.advance(DAY);
-    await x.until("B to finish", () => x.queue("B").run?.state === "finished");
+    await x.until("B to finish", () => x.queue("B").run?.state === "finished", LONGER.run);
   } finally { x.stop(); }
 });
 
@@ -156,9 +151,9 @@ test("a schedule missed while the server was down gives an item and the orchestr
     assert.equal(x.queue("B").run, undefined, "a missed schedule does not start");
     const item = loadProjectState(x.store).attention.find((a) => a.kind === "start" && a.queue === "B");
     assert.equal(item?.text, `Did not start at ${formatClock(iso(missed), new Date())}: missed: Nexus was not running at ${formatClock(iso(missed), new Date(x.clock.now()))}`);
-    await x.until("C1 in the orchestrator's review", () => x.queue("C").steps[0]!.review_with === "orchestrator");
+    await x.until("C1 in the orchestrator's review", () => x.queue("C").steps[0]!.review_with === "orchestrator", LONGER.step);
     x.orchestrator!.say(`FAKE-NEXUS: ["review","accept","C","C1"]`);
-    await x.until("C, 5 minutes late, to finish", () => x.queue("C").run?.state === "finished");
+    await x.until("C, 5 minutes late, to finish", () => x.queue("C").run?.state === "finished", LONGER.run);
     await x.until("the orchestrator to be told", () => x.orchestrator!.view().chat.some((c) => c.from === "nexus" && /scheduled start of queue B .* was missed/.test(c.text)));
   } finally { x.stop(); }
 });
@@ -169,14 +164,16 @@ test("a schedule whose queue is no longer approved, or whose session is busy, do
   try {
     x.engine.start("D");
     const busy = x.queue("D").run!.session;
-    await x.until("D to work", () => x.queue("D").steps[0]!.status === "running");
+    await x.until("D to work", () => x.queue("D").steps[0]!.status === "running", LONGER.step);
     const at = x.clock.now() + HOUR;
     x.engine.scheduleStart("B", { at: iso(at), by: "user" });
     x.engine.scheduleStart("C", { at: iso(at), session: busy, by: "user" });
     const b = x.store.readQueue("B");
     applyDraft(x.store, { id: "B", title: b.title, steps: [...b.steps, { id: "B2", title: "Step 2", goal: "FAKE: done" }] });
     x.clock.advance(HOUR);
-    await x.until("both plans to fail", () => !!x.queue("B").start?.failed && !!x.queue("C").start?.failed);
+    // C fails at once (its session is busy); B is held while D holds the checkout, which D's slow step does for
+    // FAKE_SLOW_MS (4 s), and fails once it may start: the test's own time, then the usual wait.
+    await x.until("both plans to fail", () => !!x.queue("B").start?.failed && !!x.queue("C").start?.failed, Number(process.env.FAKE_SLOW_MS) + WAIT_MS);
     assert.equal(x.queue("B").start!.failed!.reason, "approve the queue's current revision first");
     assert.equal(x.queue("C").start!.failed!.reason, `session ${busy} was running queue D`);
     assert.equal(x.queue("B").run, undefined);
@@ -196,7 +193,7 @@ test("a restart arms the schedules again; a cancelled one stays cancelled", asyn
     x.restart();
     assert.equal(x.clock.pending().filter((ms) => ms === 3 * HOUR).length, 1, "one schedule armed again");
     x.clock.advance(3 * HOUR);
-    await x.until("B to finish", () => x.queue("B").run?.state === "finished");
+    await x.until("B to finish", () => x.queue("B").run?.state === "finished", LONGER.run);
     await sleep(500);
     assert.equal(x.queue("C").run, undefined);
   } finally { x.stop(); }

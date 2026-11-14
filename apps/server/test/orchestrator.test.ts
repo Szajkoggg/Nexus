@@ -11,6 +11,7 @@ import { Engine } from "../src/engine.ts";
 import { Orchestrator, type UserNotice } from "../src/orchestrator.ts";
 import { longReply } from "./fake-behaviour.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
+import { WAIT_MS, until as waitUntil, LONGER, untilAsync, WORK_MS } from "./wait.ts";
 
 process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
 
@@ -43,13 +44,7 @@ function setup(again?: string, push?: (n: UserNotice) => void) {
   function tick() { routeAnswers(store); acceptReviews(store); orchestrator.onChange(loadProjectState(store)); engine.onChange(loadProjectState(store)); }
   const timer = setInterval(tick, 150);
   const state = () => loadProjectState(store);
-  const until = async (what: string, pred: () => boolean, ms = 30_000) => {
-    const t = Date.now();
-    while (!pred()) {
-      if (Date.now() - t > ms) assert.fail(`timed out waiting for ${what}; chat: ${JSON.stringify(orchestrator.view().chat.slice(-4))}`);
-      await new Promise((r) => setTimeout(r, 100));
-    }
-  };
+  const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms, () => `; chat: ${JSON.stringify(orchestrator.view().chat.slice(-4))}`);
   const stop = () => { clearInterval(timer); engine.shutdown(); orchestrator.shutdown(); };
   return { root, store, engine, orchestrator, state, until, stop };
 }
@@ -70,7 +65,7 @@ test("the orchestrator drafts a queue, runs it, answers the worker and hears tha
 
     approveQueue(store, "R", "Go.");
     orchestrator.say(`FAKE-NEXUS: ["run","R","start","--reason","approved"]`);
-    await until("the run to finish", () => state().queues.find((q) => q.id === "R")?.run?.state === "finished");
+    await until("the run to finish", () => state().queues.find((q) => q.id === "R")?.run?.state === "finished", LONGER.run);
 
     const s = state();
     const question = s.questions.find((x) => x.queue === "R")!;
@@ -79,7 +74,7 @@ test("the orchestrator drafts a queue, runs it, answers the worker and hears tha
     assert.equal(question.answers[0]!.text, "fake answer");
     assert.deepEqual(s.queues.find((q) => q.id === "R")!.steps.map((x) => x.status), ["done", "done"]);
 
-    await until("the finish notice", () => orchestrator.view().chat.some((c) => c.from === "nexus" && /Queue R finished/.test(c.text)));
+    await until("the finish notice", () => orchestrator.view().chat.some((c) => c.from === "nexus" && /Queue R finished/.test(c.text)), LONGER.run);
     const chat = orchestrator.view().chat;
     assert.ok(chat.some((c) => c.from === "user"));
     assert.ok(chat.some((c) => c.from === "nexus" && /A worker asked a question in queue R, step R1/.test(c.text)));
@@ -141,7 +136,7 @@ test("the orchestrator gets Nexus's helper agents, which only read", async () =>
   process.env.FAKE_ARGS = args;
   try {
     orchestrator.say("Hello");
-    await until("the process to start", () => existsSync(args));
+    await until("the process to start", () => existsSync(args), LONGER.step);
     const { readFileSync } = await import("node:fs");
     const argv = (JSON.parse(readFileSync(args, "utf8").trim().split("\n")[0]!) as { argv: string[] }).argv;
     assert.ok(argv.slice(argv.indexOf("--allowedTools") + 1).includes("Agent"), "it may call subagents");
@@ -159,7 +154,7 @@ test("the orchestrator may write only queue drafts, and its briefing uploads the
   process.env.FAKE_ARGS = args;
   try {
     orchestrator.say("Hello");
-    await until("the process to start", () => existsSync(args));
+    await until("the process to start", () => existsSync(args), LONGER.step);
     const { readFileSync } = await import("node:fs");
     const argv = (JSON.parse(readFileSync(args, "utf8").trim().split("\n")[0]!) as { argv: string[] }).argv;
     assert.equal(argv[argv.indexOf("--permission-mode") + 1], "dontAsk");
@@ -255,7 +250,9 @@ test("approvals and withdrawals are told once each, by their position, the chat 
       "Queue A revision 1 approved.",
       "Queue A revision 2 approved.",
     ]);
-    await until("the deliveries", () => true);
+    // The chat shows the facts before the orchestrator's process has them (they reach it once its turn is over): wait
+    // for the deliveries themselves, which are what is checked (queue TS1).
+    await untilAsync("the deliveries", async () => (await delivered()).filter((t) => t.startsWith("[Nexus] Queue A revision")).length >= 3, LONGER.step);
     const sent = (await delivered()).filter((t) => t.startsWith("[Nexus] Queue A revision"));
     assert.equal(sent.length, 3);
     assert.ok(sent.every((t) => /If the plan puts it next, start it now; otherwise tell the user why not/.test(t)), "no run yet: start it");
@@ -275,11 +272,11 @@ test("approving a halted queue's new revision says resume: the run goes on under
       applyDraft(x.store, queueDef("H", [first, "done"]));
       approveQueue(x.store, "H");
       x.engine.start("H");
-      await x.until("the halt", () => runOf(x, "H")?.state === "halted");
+      await x.until("the halt", () => runOf(x, "H")?.state === "halted", LONGER.run);
       applyDraft(x.store, { ...queueDef("H", [first, "done"]), stop_conditions: ["Changed."] });
       approveQueue(x.store, "H");
       await x.until("the approval", () => facts(x.orchestrator).includes("Queue H revision 2 approved."));
-      await settle();
+      await untilAsync("its delivery", async () => (await delivered()).some((t) => t.startsWith("[Nexus] Queue H revision 2 approved.")), LONGER.step);
       const sent = (await delivered()).find((t) => t.startsWith("[Nexus] Queue H revision 2 approved."));
       assert.match(sent ?? "", told, first);
       if (first === "fail") {
@@ -291,7 +288,7 @@ test("approving a halted queue's new revision says resume: the run goes on under
 });
 
 test("a requested pause reached is told once with its step; a stop, a restart's and an update's pauses are not", async () => {
-  process.env.FAKE_SLOW_MS = "800";
+  process.env.FAKE_SLOW_MS = WORK_MS;
   const first = setup();
   let second: Setup | undefined;
   let third: Setup | undefined;
@@ -305,13 +302,13 @@ test("a requested pause reached is told once with its step; a stop, a restart's 
     engine.start("P");
     await until("step 1 working", () => working(first));
     engine.pause("P");
-    await until("the pause", () => facts(orchestrator).includes("Run of P paused after step P1."));
+    await until("the pause", () => facts(orchestrator).includes("Run of P paused after step P1."), LONGER.run);
 
     // A stop: nothing.
     engine.resume("P");
     await until("step 2 working", () => working(first));
     engine.stopNow("P");
-    await until("stopped", () => runOf(first, "P")?.state === "paused" && engine.idle());
+    await until("stopped", () => runOf(first, "P")?.state === "paused" && engine.idle(), LONGER.run);
     await settle();
     assert.deepEqual(facts(orchestrator).filter((t) => t.startsWith("Run of")), ["Run of P paused after step P1."]);
 
@@ -322,7 +319,7 @@ test("a requested pause reached is told once with its step; a stop, a restart's 
     first.stop();
     second = setup(first.root);
     const s2 = second;
-    await until("the restart's pause", () => /restarted/.test(runOf(s2, "P")?.reason ?? ""));
+    await until("the restart's pause", () => /restarted/.test(runOf(s2, "P")?.reason ?? ""), LONGER.run);
     await settle();
     assert.equal(s2.orchestrator.session()!.id, orchestrator.session()!.id, "the same orchestrator session");
     assert.deepEqual(facts(s2.orchestrator), before, "nothing new, nothing repeated");
@@ -367,7 +364,7 @@ test("the orchestrator skips the stopped step a new revision replaced; then a st
     applyDraft(x.store, queueDef("S", ["done", "stop", "done"]));
     approveQueue(x.store, "S");
     x.engine.start("S");
-    await x.until("the stop", () => runOf(x, "S")?.state === "halted");
+    await x.until("the stop", () => runOf(x, "S")?.state === "halted", LONGER.run);
     // Revision 2 keeps the stopped step and adds its replacement; the user approves it (which lifts the stop).
     const def = queueDef("S", ["done", "stop", "done"]);
     applyDraft(x.store, { ...def, steps: [def.steps[0], def.steps[1], { id: "S2b", title: "Instead", goal: "FAKE: done", acceptance: ["Done"] }, def.steps[2]] });
@@ -375,7 +372,7 @@ test("the orchestrator skips the stopped step a new revision replaced; then a st
     x.orchestrator.say(`FAKE-NEXUS: ["queue","set","S","--step","S2","skipped","--reason","replaced by S2b"]`);
     await x.until("the skip", () => said(x.orchestrator, /step S\/S2 skipped \(was pending\)/));
     x.engine.start("S");
-    await x.until("the run to finish", () => runOf(x, "S")?.state === "finished");
+    await x.until("the run to finish", () => runOf(x, "S")?.state === "finished", LONGER.run);
     assert.deepEqual(await opened("S"), ["S1", "S2", "S2b", "S3"], "S2 ran once, before the stop; after the skip only the new steps");
     const q = x.state().queues.find((y) => y.id === "S")!;
     assert.deepEqual(q.steps.map((st) => st.status), ["done", "skipped", "done", "done"]);
@@ -384,17 +381,19 @@ test("the orchestrator skips the stopped step a new revision replaced; then a st
 });
 
 test("the orchestrator skips a pending step of a running queue; the engine never opens it", async () => {
-  process.env.FAKE_SLOW_MS = "2500";
+  // P1 works long enough for the orchestrator's turn that skips P2 to land before P1 ends: on a busy machine a 2.5 s
+  // step was over before the skip, or before a look caught it running (queue TS1).
+  process.env.FAKE_SLOW_MS = String(WAIT_MS);
   const x = setup();
   process.env.FAKE_LOG = join(x.root, "fake.log");
   try {
     applyDraft(x.store, queueDef("P", ["slow", "done", "done"]));
     approveQueue(x.store, "P");
     x.engine.start("P");
-    await x.until("the first step to run", () => x.state().queues.find((q) => q.id === "P")!.steps[0]!.status === "running");
+    await x.until("the first step to begin", () => x.state().queues.find((q) => q.id === "P")!.steps[0]!.segments.length > 0, LONGER.step);
     x.orchestrator.say(`FAKE-NEXUS: ["queue","set","P","--step","P2","skipped","--reason","done elsewhere: queue M, step M3"]`);
     await x.until("the skip", () => said(x.orchestrator, /step P\/P2 skipped/));
-    await x.until("the run to finish", () => runOf(x, "P")?.state === "finished");
+    await x.until("the run to finish", () => runOf(x, "P")?.state === "finished", LONGER.run);
     assert.deepEqual(await opened("P"), ["P1", "P3"]);
   } finally { x.stop(); delete process.env.FAKE_SLOW_MS; }
 });
@@ -406,7 +405,7 @@ test("the orchestrator closes a halted run of a queue whose steps are all done o
     applyDraft(x.store, queueDef("H", ["done", "fail"]));
     approveQueue(x.store, "H");
     x.engine.start("H");
-    await x.until("the halt", () => runOf(x, "H")?.state === "halted");
+    await x.until("the halt", () => runOf(x, "H")?.state === "halted", LONGER.run);
     x.orchestrator.say(`FAKE-NEXUS: ["queue","set","H","finished","--reason","the queue is done"]`);
     await x.until("the refusal", () => said(x.orchestrator, /not done or skipped: H2 \(failed\)/));
     x.orchestrator.say(`FAKE-NEXUS: ["queue","set","H","--step","H2","skipped","--reason","fixed by hand in the editor"]`);
@@ -446,7 +445,7 @@ test("a proposal to lift a stop is recorded for the user, and a lift clears it",
     x.orchestrator.say(`FAKE-NEXUS: ["queue","set","L","propose-lift","--reason","early"]`);
     await x.until("the refusal", () => said(x.orchestrator, /queue L is not stopped/));
     x.engine.start("L");
-    await x.until("the stop", () => runOf(x, "L")?.state === "halted");
+    await x.until("the stop", () => runOf(x, "L")?.state === "halted", LONGER.run);
     x.orchestrator.say(`FAKE-NEXUS: ["queue","set","L","propose-lift","--reason","the art is in the shared folder now"]`);
     await x.until("the proposal", () => !!x.state().queues.find((q) => q.id === "L")!.lift_proposal);
     assert.equal(x.state().queues.find((q) => q.id === "L")!.lift_proposal!.reason, "the art is in the shared folder now");
@@ -468,11 +467,12 @@ test("the orchestrator is told once that the user lifted a stop with Continue", 
     applyDraft(x.store, queueDef("K", ["stop1", "done"]));
     approveQueue(x.store, "K");
     x.engine.start("K");
-    await x.until("the stop", () => runOf(x, "K")?.state === "halted");
+    await x.until("the stop", () => runOf(x, "K")?.state === "halted", LONGER.run);
     x.engine.continueQueue("K");
-    await x.until("the run to finish", () => runOf(x, "K")?.state === "finished");
+    await x.until("the run to finish", () => runOf(x, "K")?.state === "finished", LONGER.run);
     await x.until("the notice", () => facts(x.orchestrator).some((t) => /lifted the stop of queue K with Continue/.test(t)));
-    await settle();
+    await untilAsync("its delivery", async () => (await delivered()).some((t) => t.startsWith("[Nexus] The user lifted the stop of queue K")), LONGER.step);
+    await settle(); // and nothing more after it
     assert.equal(facts(x.orchestrator).filter((t) => /lifted the stop of queue K with Continue/.test(t)).length, 1, "in the chat once");
     const sent = (await delivered()).filter((t) => t.startsWith("[Nexus] The user lifted the stop of queue K with Continue (the stop was: fake condition: fake stop); its run goes on. Nothing to start"));
     assert.equal(sent.length, 1, "to the orchestrator once");

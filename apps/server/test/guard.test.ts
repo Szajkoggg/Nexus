@@ -10,6 +10,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ProjectStore, loadProjectState, writeRegistry } from "@nexus/protocol";
 import { spawnServer } from "./helpers.ts";
+import { serverUp } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -40,7 +41,7 @@ test("every write without the dashboard's origin is refused; approve and setting
   const send = (method: string, path: string, body: unknown, headers: Record<string, string> = {}) =>
     fetch(url + path, { method, headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
   try {
-    for (let i = 0; i < 100; i++) { try { if ((await fetch(url + "/api/projects")).ok) break; } catch { /* not up yet */ } await sleep(100); }
+    await serverUp(url + "/api/projects");
 
     const routes = writeRoutes();
     assert.ok(routes.some((r) => r.path === "/api/projects/p/queues/x/approve") && routes.some((r) => r.method === "PATCH" && r.path === "/api/projects/p/settings")

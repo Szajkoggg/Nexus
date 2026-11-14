@@ -10,6 +10,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ProjectStore, applyDraft, approveQueue, confirmProvisional, loadProjectState, newId, routeAnswers } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
+import { WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
 
 process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
 const G = ["-c", "user.name=test", "-c", "user.email=test@example.invalid", "-c", "init.defaultBranch=main", "-c", "commit.gpgsign=false"];
@@ -51,16 +52,10 @@ function setup(o: { push?: boolean; remote?: boolean; steps?: number; goal?: str
   const timer = setInterval(() => engine.onChange(loadProjectState(store)), 150);
   const queue = () => loadProjectState(store).queues.find((q) => q.id === "Q")!;
   const step = (id: string) => queue().steps.find((s) => s.id === id)!;
-  const until = async (what: string, pred: () => boolean, ms = 30_000) => {
-    const t = Date.now();
-    while (!pred()) {
-      if (Date.now() - t > ms) assert.fail(`timed out waiting for ${what}; push: ${JSON.stringify(store.readPush("Q"))}; steps: ${queue().steps.map((s) => `${s.id}=${s.status}`).join(" ")}`);
-      await new Promise((r) => setTimeout(r, 100));
-    }
-  };
+  const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms, () => `; push: ${JSON.stringify(store.readPush("Q"))}; steps: ${queue().steps.map((s) => `${s.id}=${s.status}`).join(" ")}`);
   const remoteBranch = () => { try { return git(remote, "rev-parse", "--verify", "--quiet", "refs/heads/nexus/Q"); } catch { return undefined; } };
   /** The step's review, with its HEAD recorded. */
-  const inReview = (id: string) => until(`${id} in review`, () => step(id).status === "review" && !!store.readPush("Q")?.review[id]);
+  const inReview = (id: string) => until(`${id} in review`, () => step(id).status === "review" && !!store.readPush("Q")?.review[id], LONGER.step);
   const stop = () => { clearInterval(timer); engine.shutdown(); };
   /** The orchestrator's decision, as `nexus review provisional|accept` writes it. */
   const orchestrator = (type: "review.provisional" | "review.accepted", stepId: string) => {
@@ -80,7 +75,7 @@ test("an accepted step pushes the commit it was reviewed at, not a later one of 
     assert.equal(x.store.readPush("Q")!.review.Q1!.sha, b, "HEAD when the step entered review");
     const c = x.commit("C"); // the next step's work, before the push
     x.engine.acceptReview("Q", "Q1", "Fine; keep the old names in Q2.", "next"); // a note does not change what is pushed
-    await x.until("the push", () => x.store.readPush("Q")?.steps.Q1?.result === "pushed");
+    await x.until("the push", () => x.store.readPush("Q")?.steps.Q1?.result === "pushed", LONGER.processes);
     assert.equal(x.remoteBranch(), b, "the reviewed commit, created on the remote");
     assert.notEqual(x.remoteBranch(), c);
     const push = x.store.readPush("Q")!;
@@ -98,7 +93,7 @@ test("a rejected push shows and the acceptance stands; the next acceptance pushe
     await x.inReview("Q1");
     writeFileSync(join(x.remote, "reject"), "");
     x.engine.acceptReview("Q", "Q1");
-    await x.until("the failure", () => x.store.readPush("Q")?.steps.Q1?.result === "failed");
+    await x.until("the failure", () => x.store.readPush("Q")?.steps.Q1?.result === "failed", LONGER.processes);
     let push = x.store.readPush("Q")!;
     assert.match(push.error!.text, /the remote rejected it \(pre-receive hook declined\)/);
     assert.equal(push.error!.step, "Q1");
@@ -114,7 +109,7 @@ test("a rejected push shows and the acceptance stands; the next acceptance pushe
     await x.inReview("Q2");
     const d = x.commit("D"); // Q3's work, made before Q2's push: not part of it
     x.engine.acceptReview("Q", "Q2");
-    await x.until("Q2 pushed", () => x.store.readPush("Q")?.steps.Q2?.result === "pushed");
+    await x.until("Q2 pushed", () => x.store.readPush("Q")?.steps.Q2?.result === "pushed", LONGER.processes);
     push = x.store.readPush("Q")!;
     assert.equal(x.remoteBranch(), b);
     assert.equal(push.steps.Q1!.result, "pushed");
@@ -127,10 +122,10 @@ test("a rejected push shows and the acceptance stands; the next acceptance pushe
     assert.equal(x.store.readPush("Q")!.review.Q3!.sha, d);
     writeFileSync(join(x.remote, "reject"), "");
     x.engine.acceptReview("Q", "Q3");
-    await x.until("Q3 refused", () => x.store.readPush("Q")?.steps.Q3?.result === "failed");
+    await x.until("Q3 refused", () => x.store.readPush("Q")?.steps.Q3?.result === "failed", LONGER.processes);
     rmSync(join(x.remote, "reject"));
     x.engine.pushAgain("Q");
-    await x.until("Q3 pushed again", () => x.store.readPush("Q")?.steps.Q3?.result === "pushed");
+    await x.until("Q3 pushed again", () => x.store.readPush("Q")?.steps.Q3?.result === "pushed", LONGER.processes);
     assert.equal(x.remoteBranch(), d);
     assert.equal(x.store.readPush("Q")!.error, undefined);
   } finally { x.stop(); }
@@ -171,7 +166,7 @@ test("after a rejection nothing of the queue is pushed until a newer revision is
     await x.inReview("Q1");
     writeFileSync(join(x.remote, "reject"), "");
     x.engine.acceptReview("Q", "Q1");
-    await x.until("the failure", () => x.store.readPush("Q")?.steps.Q1?.result === "failed");
+    await x.until("the failure", () => x.store.readPush("Q")?.steps.Q1?.result === "failed", LONGER.processes);
     rmSync(join(x.remote, "reject"));
     x.commit("C");
     await x.inReview("Q2");
@@ -187,7 +182,7 @@ test("after a rejection nothing of the queue is pushed until a newer revision is
     ] });
     approveQueue(x.store, "Q");
     x.engine.pushAgain("Q");
-    await x.until("pushed", () => x.store.readPush("Q")?.steps.Q1?.result === "pushed");
+    await x.until("pushed", () => x.store.readPush("Q")?.steps.Q1?.result === "pushed", LONGER.processes);
     assert.equal(x.remoteBranch(), b, "the accepted commit, not the rejected step's");
   } finally { x.stop(); }
 });
@@ -201,12 +196,12 @@ test("provisional work counts (the default): a provisional acceptance pushes lik
     await x.inReview("Q1");
     const q1 = x.store.readPush("Q")!.review.Q1!.sha!;
     x.orchestrator("review.provisional", "Q1");
-    await x.until("Q1 pushed", () => x.store.readPush("Q")?.steps.Q1?.result === "pushed");
+    await x.until("Q1 pushed", () => x.store.readPush("Q")?.steps.Q1?.result === "pushed", LONGER.processes);
     assert.equal(x.remoteBranch(), q1);
     assert.equal(x.step("Q1").provisional?.confirmed, undefined, "pushed though not confirmed");
     await x.inReview("Q2");
     x.engine.acceptReview("Q", "Q2");
-    await x.until("Q2 pushed", () => x.store.readPush("Q")?.steps.Q2?.result === "pushed");
+    await x.until("Q2 pushed", () => x.store.readPush("Q")?.steps.Q2?.result === "pushed", LONGER.processes);
     assert.equal(x.remoteBranch(), x.store.readPush("Q")!.review.Q2!.sha);
   } finally { x.stop(); }
 });
@@ -230,7 +225,7 @@ test("provisional work does not count: neither it nor an accepted step built on 
 
     confirmProvisional(x.store, "Q", "Q1");
     x.engine.onChange(loadProjectState(x.store));
-    await x.until("Q2 pushed", () => x.store.readPush("Q")?.steps.Q2?.result === "pushed");
+    await x.until("Q2 pushed", () => x.store.readPush("Q")?.steps.Q2?.result === "pushed", LONGER.processes);
     assert.equal(x.remoteBranch(), q2, "the newest acceptance, Q1's work in it");
   } finally { x.stop(); }
 });

@@ -12,6 +12,7 @@ import { Orchestrator } from "../src/orchestrator.ts";
 import { Conversations } from "../src/conversations.ts";
 import type { AgentEvents, AgentProcess } from "../src/agent.ts";
 import { longReply } from "./fake-behaviour.ts";
+import { WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -28,10 +29,7 @@ function setup(notes?: string) {
   const orchestrator = new Orchestrator(store, engine, () => {});
   const conversations = new Conversations(store, orchestrator, () => {});
   const args = () => (existsSync(process.env.FAKE_ARGS!) ? readFileSync(process.env.FAKE_ARGS!, "utf8").trim().split("\n").map((l) => JSON.parse(l) as Record<string, any>) : []);
-  const until = async (what: string, pred: () => boolean, ms = 20_000) => {
-    const t = Date.now();
-    while (!pred()) { if (Date.now() - t > ms) assert.fail(`timed out waiting for ${what}`); await new Promise((r) => setTimeout(r, 100)); }
-  };
+  const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms);
   const stop = () => { conversations.shutdown(); orchestrator.shutdown(); engine.shutdown(); };
   return { root, store, orchestrator, conversations, args, until, stop };
 }
@@ -79,7 +77,7 @@ test("handing a conversation to the orchestrator puts the partner's summary into
   try {
     const c = conversations.create({ title: "Mining and defense" });
     conversations.handoff(c.id);
-    await until("the summary in the orchestrator's chat", () => orchestrator.view().chat.some((x) => x.from === "user" && x.text.includes("SUMMARY")));
+    await until("the summary in the orchestrator's chat", () => orchestrator.view().chat.some((x) => x.from === "user" && x.text.includes("SUMMARY")), LONGER.step);
     const sent = orchestrator.view().chat.find((x) => x.from === "user")!.text;
     assert.match(sent, /^\[From the conversation "Mining and defense"\]/);
     await until("the confirmation", () => conversations.view(c.id).chat.some((x) => x.from === "nexus" && /went to the orchestrator/.test(x.text)));
@@ -106,7 +104,7 @@ for (const runtime of ["claude", "codex"] as const) {
       const summary = longReply("SUMMARY");
       assert.ok(summary.length > 600);
       conversations.handoff(c.id);
-      await until("the summary in the orchestrator's chat", () => orchestrator.view().chat.some((x) => x.from === "user"));
+      await until("the summary in the orchestrator's chat", () => orchestrator.view().chat.some((x) => x.from === "user"), LONGER.step);
       const sent = chatFile(store, orchestrator.session()!.id).filter((x) => x.from === "user").map((x) => x.text);
       assert.deepEqual(sent, [`[From the conversation "Long"]\n\n${summary}`], "the orchestrator gets the summary whole");
       assert.ok(chatFile(store, c.id).some((x) => x.from === "partner" && x.text === summary), "the partner's chat shows it whole too");
@@ -121,9 +119,9 @@ for (const runtime of ["claude", "codex"] as const) {
     try {
       const c = conversations.create({ title: "Busy", runtime });
       conversations.say(c.id, "FAKE-SLOW");
-      await until("the partner at work", () => chatFile(store, c.id).some((x) => x.kind === "tool" && x.text.includes("FAKE-SLOW")));
+      await until("the partner at work", () => chatFile(store, c.id).some((x) => x.kind === "tool" && x.text.includes("FAKE-SLOW")), LONGER.step);
       conversations.handoff(c.id);
-      await until("the summary in the orchestrator's chat", () => orchestrator.view().chat.some((x) => x.from === "user"));
+      await until("the summary in the orchestrator's chat", () => orchestrator.view().chat.some((x) => x.from === "user"), LONGER.step);
       const sent = chatFile(store, orchestrator.session()!.id).filter((x) => x.from === "user").map((x) => x.text);
       assert.deepEqual(sent, [`[From the conversation "Busy"]
 
@@ -179,7 +177,7 @@ test("the hand-over instruction keeps to this conversation's topics and asks for
   try {
     const c = conversations.create({ title: "Mining" });
     conversations.handoff(c.id);
-    await until("the summary in the orchestrator's chat", () => orchestrator.view().chat.some((x) => x.from === "user" && x.text.includes("SUMMARY")));
+    await until("the summary in the orchestrator's chat", () => orchestrator.view().chat.some((x) => x.from === "user" && x.text.includes("SUMMARY")), LONGER.step);
     const sent = readFileSync(process.env.FAKE_LOG!, "utf8").trim().split("\n").map((l) => (JSON.parse(l) as { text: string }).text)
       .find((t) => t.startsWith("[Nexus] The user hands this conversation to the orchestrator"))!;
     assert.ok(sent.includes("Summarize only the topics discussed in this conversation, unless the user asked you to include others."), "the scope rule");

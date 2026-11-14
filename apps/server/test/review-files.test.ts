@@ -16,6 +16,7 @@ import { Engine } from "../src/engine.ts";
 import { cleanUp } from "../src/mergeback.ts";
 import { spawnServer } from "./helpers.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
+import { serverUp, WAIT_MS, POLL_MS, LONGER, sleep } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -51,8 +52,8 @@ test("a protected worker's review files are copied into the queue's folder; the 
   try {
     engine.start("Q", { runtime: "claude" });
     for (const t = Date.now(); queue().run?.state !== "finished";) {
-      if (Date.now() - t > 60_000) assert.fail(`timed out; run ${JSON.stringify(queue().run)}`); // as report.test.ts: the work, under load
-      await new Promise((r) => setTimeout(r, 100));
+      if (Date.now() - t > LONGER.processes) assert.fail(`timed out; run ${JSON.stringify(queue().run)}`);
+      await sleep(POLL_MS);
     }
     const argv = readFileSync(process.env.FAKE_ARGS!, "utf8").trim().split("\n").map((l) => JSON.parse(l) as { argv?: string[] })[0]!.argv!;
     assert.ok(argv.some((a) => a.includes("Write(//") && a.includes(".nexus/**")), "the worker's file tools may not write under .nexus");
@@ -68,8 +69,8 @@ test("a protected worker's review files are copied into the queue's folder; the 
 
     // As in report.test.ts: the cleanup comes after the worker's process has exited (Windows keeps its folder).
     for (const t = Date.now(); store.readRuntime(queue().run!.session)?.state !== "exited";) {
-      if (Date.now() - t > 20_000) assert.fail("the worker's process did not exit");
-      await new Promise((r) => setTimeout(r, 100));
+      if (Date.now() - t > WAIT_MS) assert.fail("the worker's process did not exit");
+      await sleep(POLL_MS);
     }
     const wt = store.readQueue("Q").worktree!;
     assert.equal(execFileSync("git", ["status", "--porcelain"], { cwd: wt, encoding: "utf8" }).trim(), "", "a clean worktree");
@@ -108,7 +109,7 @@ test("the dashboard serves a copy in the queue's folder and material added befor
   const child = spawnServer({ NEXUS_PORT: String(port), NEXUS_LOG: "" });
   const url = `http://127.0.0.1:${port}`;
   try {
-    for (let i = 0; i < 100; i++) { try { if ((await fetch(url + "/api/projects")).ok) break; } catch { /* not up yet */ } await new Promise((r) => setTimeout(r, 100)); }
+    await serverUp(url + "/api/projects");
     const file = (path: string) => fetch(`${url}/api/projects/p/file?path=${encodeURIComponent(path)}`);
     for (const [path, text] of [[items[0]!.path!, "# Old material\n"], [items[1]!.path!, "# New material\n"]] as const) {
       const res = await file(path);

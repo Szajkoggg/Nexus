@@ -68,6 +68,16 @@ export interface Fake {
   history?: string[];
 }
 
+/**
+ * A command ("FAKE-NEXUS: [args]") in a message read during a turn (Claude's `next`, Codex's steer) is run before the
+ * turn ends, as an agent acts on what it reads mid-turn; its output joins the reply. Without it, a command sent while
+ * the orchestrator's fake answered a notice was lost, and the test waited in vain (queue TS1).
+ */
+export function actOnRead(read: readonly string[], reply: string): string {
+  const outs = read.map((t) => /FAKE-NEXUS: (\[.*\])/.exec(t)).filter((m): m is RegExpExecArray => !!m).map((m) => nexusOut(JSON.parse(m[1]!) as string[]));
+  return outs.length ? [reply, ...outs].join("\n\n") : reply;
+}
+
 /** Ends the running turn's FAKE-SLOW wait early (a stop: Claude's interrupt control, Codex's turn/interrupt). */
 let interruptWait: (() => void) | undefined;
 export function interrupt(): boolean {

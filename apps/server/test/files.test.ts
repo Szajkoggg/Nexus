@@ -12,6 +12,7 @@ import { ProjectStore, writeRegistry } from "@nexus/protocol";
 import { spawnServer } from "./helpers.ts";
 import { COMMIT_HASH, FILE_CSP, MAX_TEXT, commitDetail, cutText, locate } from "../src/files.ts";
 import { authCookie } from "../src/remote.ts";
+import { serverUp } from "./wait.ts";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const freePort = () => new Promise<number>((resolve) => {
@@ -110,7 +111,7 @@ test("the endpoints: the project's paths, the CSP on every file, a cut large fil
   const url = `http://127.0.0.1:${port}`;
   const file = (path: string) => fetch(`${url}/api/projects/p/file?path=${encodeURIComponent(path)}`);
   try {
-    for (let i = 0; i < 100; i++) { try { if ((await fetch(url + "/api/projects")).ok) break; } catch { /* not up yet */ } await sleep(100); }
+    await serverUp(url + "/api/projects");
 
     // Relative: the project's file, whatever the server's own working folder (the test's: the repository, with an AGENTS.md).
     let res = await file("docs/notes.md");

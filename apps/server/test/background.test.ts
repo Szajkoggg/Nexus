@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { ProjectStore, approveQueue, loadProjectState, routeAnswers, type StepDef } from "@nexus/protocol";
 import { Engine, type EngineOptions } from "../src/engine.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
+import { WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -29,13 +30,7 @@ function setup(behaviour: string, options: EngineOptions) {
   const queue = () => loadProjectState(store).queues.find((q) => q.id === "Q")!;
   const received = () => (existsSync(process.env.FAKE_LOG!) ? readFileSync(process.env.FAKE_LOG!, "utf8").trim().split("\n").map((l) => JSON.parse(l) as { text: string }) : []);
   const activity = () => store.readActivity(queue().run!.session).entries.map((a) => a.text);
-  const until = async (what: string, pred: () => boolean, ms = 20_000) => {
-    const t = Date.now();
-    while (!pred()) {
-      if (Date.now() - t > ms) assert.fail(`timed out waiting for ${what}; run: ${JSON.stringify(queue().run)}`);
-      await new Promise((r) => setTimeout(r, 100));
-    }
-  };
+  const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms, () => `; run: ${JSON.stringify(queue().run)}`);
   return { engine, queue, received, activity, until };
 }
 
@@ -49,7 +44,7 @@ for (const [runtime, behaviour] of cases) {
       // While the work runs, the turn's end is no turn without an outcome: no nudge, no halt.
       assert.equal(queue().run?.state, "running");
       assert.equal(received().filter((m) => m.text.includes("has no outcome yet")).length, 0);
-      await until("the run to finish", () => queue().run?.state === "finished");
+      await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
       assert.equal(queue().steps[0]!.status, "done");
       assert.match(queue().steps[0]!.summary ?? "", /after its background work/);
       const nudges = received().filter((m) => m.text.includes("has no outcome yet")).map((m) => m.text);
@@ -64,7 +59,7 @@ for (const [runtime, behaviour] of cases) {
     try {
       const started = Date.now();
       engine.start("Q", { runtime });
-      await until("the run to halt", () => queue().run?.state === "halted");
+      await until("the run to halt", () => queue().run?.state === "halted", LONGER.run);
       assert.ok(Date.now() - started >= 1500, "the halt comes after the limit");
       assert.match(queue().run!.reason!, /ended twice without an outcome/);
       const nudges = received().filter((m) => m.text.includes("has no outcome yet")).map((m) => m.text);

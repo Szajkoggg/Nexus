@@ -17,6 +17,7 @@ import { Orchestrator } from "../src/orchestrator.ts";
 import { Conversations } from "../src/conversations.ts";
 import { STOPPED } from "../src/chats.ts";
 import { PARTIAL } from "./fake-behaviour.ts";
+import { WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -37,10 +38,7 @@ function setup() {
   const orchestrator = new Orchestrator(store, engine, () => {});
   const conversations = new Conversations(store, orchestrator, () => {});
   const log = () => (existsSync(process.env.FAKE_LOG!) ? readFileSync(process.env.FAKE_LOG!, "utf8").trim().split("\n").map((l) => JSON.parse(l) as { text: string; priority: string | null; busy: boolean }) : []);
-  const until = async (what: string, pred: () => boolean, ms = 20_000) => {
-    const t = Date.now();
-    while (!pred()) { if (Date.now() - t > ms) assert.fail(`timed out waiting for ${what}; fake log: ${JSON.stringify(log().slice(-6))}`); await sleep(50); }
-  };
+  const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms, () => `; fake log: ${JSON.stringify(log().slice(-6))}`);
   const close = () => { conversations.shutdown(); orchestrator.shutdown(); engine.shutdown(); };
   return { store, orchestrator, conversations, log, until, close };
 }
@@ -51,7 +49,7 @@ function setup() {
  */
 async function stopScenario(s: ReturnType<typeof setup>, chat: Chat, agent: "orchestrator" | "partner") {
   chat.say("Work on this: FAKE-SLOW");
-  await s.until("the slow turn to run", () => chat.view().state === "working" && s.log().some((x) => x.text.includes("FAKE-SLOW")));
+  await s.until("the slow turn to run", () => chat.view().state === "working" && s.log().some((x) => x.text.includes("FAKE-SLOW")), LONGER.step);
   await sleep(300);
   chat.say("While you work: remember BANANA");
   await s.until("the message to reach the running turn", () => s.log().some((x) => x.text.includes("remember BANANA")));

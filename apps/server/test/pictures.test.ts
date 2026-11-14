@@ -13,6 +13,7 @@ import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { Conversations } from "../src/conversations.ts";
 import { input, uploadedPictures } from "../src/codex.ts";
+import { WAIT_MS, until as waitUntil } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -34,10 +35,7 @@ function setup() {
   const orchestrator = new Orchestrator(store, engine, () => {});
   const conversations = new Conversations(store, orchestrator, () => {});
   const lines = (file: string) => (existsSync(file) ? readFileSync(file, "utf8").trim().split("\n").map((l) => JSON.parse(l) as Record<string, any>) : []);
-  const until = async (what: string, pred: () => boolean, ms = 20_000) => {
-    const t = Date.now();
-    while (!pred()) { if (Date.now() - t > ms) assert.fail(`timed out waiting for ${what}`); await new Promise((r) => setTimeout(r, 100)); }
-  };
+  const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms);
   const stop = () => { conversations.shutdown(); orchestrator.shutdown(); engine.shutdown(); };
   return {
     root, store, uploads, picture, orchestrator, conversations, until, stop,

@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { ActionError, ProjectStore, approveQueue, loadProjectState, routeAnswers, withdrawApproval, writeRegistry } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { spawnServer } from "./helpers.ts";
+import { serverUp } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -50,7 +51,7 @@ test("the API takes a withdrawal only from the dashboard's page, and refuses a s
   const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>
     fetch(base + path, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
   try {
-    for (let i = 0; i < 100; i++) { try { if ((await fetch(base + "/api/projects")).ok) break; } catch { /* not up yet */ } await sleep(100); }
+    await serverUp(base + "/api/projects");
     const withdraw = "/api/projects/p/queues/Q/withdraw";
 
     // An agent's script or curl on this machine: JSON, but no Origin.

@@ -10,6 +10,7 @@ import { ProjectStore, approveQueue, loadProjectState, newId, routeAnswers, type
 import { Engine, type Clock } from "../src/engine.ts";
 import { Coordinator, DEFAULT_MAX_RUNNING, readLimits, writeLimits } from "../src/coordinator.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
+import { WAIT_MS, until as waitUntil, LONGER, WORK_MS } from "./wait.ts";
 
 process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
 
@@ -73,13 +74,7 @@ function world(opts: { limit?: number; clock?: Clock } = {}) {
   };
 
   const timer = setInterval(() => { for (const t of ticks) t(); }, 150);
-  const until = async (what: string, pred: () => boolean, ms = 30_000) => {
-    const t = Date.now();
-    while (!pred()) {
-      if (Date.now() - t > ms) assert.fail(`timed out waiting for ${what}`);
-      await sleep(100);
-    }
-  };
+  const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms);
   const stop = () => { clearInterval(timer); for (const e of engines) e.shutdown(); delete process.env.FAKE_SLOW_MS; };
   return { coordinator, add, until, stop };
 }
@@ -98,7 +93,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const going = (state: string | undefined) => state === "running" || state === "pausing";
 
 test("two queues chained after the same queue in the project's checkout run one after the other, in plan order", async () => {
-  process.env.FAKE_SLOW_MS = "1200";
+  process.env.FAKE_SLOW_MS = WORK_MS;
   const w = world();
   const p = w.add("p", { A: ["done"], B: ["slow"], C: ["slow"] });
   try {
@@ -107,13 +102,13 @@ test("two queues chained after the same queue in the project's checkout run one 
     await sleep(10);
     p.engine.chain("B", { after: "A", by: "user" });
     p.engine.start("A");
-    await w.until("C to start", () => !!p.queue("C").run);
+    await w.until("C to start", () => !!p.queue("C").run, LONGER.step);
     assert.equal(p.queue("B").run, undefined, "B waits while C works in the checkout");
     await w.until("B to say why it waits", () => !!p.queue("B").start?.held);
     assert.equal(p.queue("B").start!.waiting, "queue A is done; waits for the checkout: queue C runs there");
     assert.equal(p.queue("B").start!.held!.kind, "checkout");
     assert.equal(p.queue("B").start!.blocked, false);
-    await w.until("B to finish", () => p.queue("B").run?.state === "finished", 40_000);
+    await w.until("B to finish", () => p.queue("B").run?.state === "finished", LONGER.processes);
     const b = p.queue("B").run!, c = p.queue("C").run!;
     assert.ok(c.ended_at! <= b.started_at, `B started (${b.started_at}) only after C ended (${c.ended_at})`);
     assert.equal(p.store.readStart("B"), undefined, "the plan is used up");
@@ -127,23 +122,27 @@ test("two queues in worktrees of their own run side by side", async () => {
   try {
     p.engine.start("A");
     p.engine.start("B");
-    await w.until("both at work", () => p.queue("A").steps[0]!.status === "running" && p.queue("B").steps[0]!.status === "running");
-    await w.until("both to finish", () => p.queue("A").run?.state === "finished" && p.queue("B").run?.state === "finished");
+    await w.until("both to finish", () => p.queue("A").run?.state === "finished" && p.queue("B").run?.state === "finished", LONGER.run);
+    // Side by side: each run began before the other's step was over, so neither waited for the other. Read afterwards,
+    // not caught while both steps run: one may start its worktree and worker later than the other's 1.5 s step lasts
+    // on a busy machine (queue TS1).
+    const [a, b] = ["A", "B"].map((q) => ({ began: p.queue(q).run!.started_at, ended: p.queue(q).steps[0]!.segments[0]!.end! }));
+    assert.ok(a!.began < b!.ended && b!.began < a!.ended, `side by side: A began ${a!.began}, its step ended ${a!.ended}; B began ${b!.began}, ended ${b!.ended}`);
   } finally { w.stop(); }
 });
 
 test("a direct start, a resume and a continue in a checkout another queue holds are refused with the reason", async () => {
-  process.env.FAKE_SLOW_MS = "2500";
+  process.env.FAKE_SLOW_MS = WORK_MS;
   const w = world();
   const p = w.add("p", { A: ["slow", "done"], B: ["done"], S: ["stop"], H: ["noop"] });
   try {
     // S meets a stop condition, H ends its step twice without an outcome: their runs halt and hold the checkout no more.
     p.engine.start("S");
-    await w.until("S to halt", () => p.queue("S").run?.state === "halted");
+    await w.until("S to halt", () => p.queue("S").run?.state === "halted", LONGER.run);
     p.engine.start("H");
-    await w.until("H to halt", () => p.queue("H").run?.state === "halted");
+    await w.until("H to halt", () => p.queue("H").run?.state === "halted", LONGER.run);
     p.engine.start("A");
-    await w.until("A at work", () => p.queue("A").steps[0]!.status === "running");
+    await w.until("A at work", () => p.queue("A").steps[0]!.status === "running", LONGER.step);
     assert.throws(() => p.engine.start("B"), /^Error: queue B cannot start: its checkout is in use, queue A runs there$/);
     assert.equal(p.queue("B").run, undefined);
     assert.throws(() => p.engine.continueQueue("S"), /queue S cannot continue: its checkout is in use, queue A runs there/);
@@ -152,12 +151,12 @@ test("a direct start, a resume and a continue in a checkout another queue holds 
     assert.equal(p.queue("H").run?.state, "halted");
     // A paused run holds its checkout too.
     p.engine.pause("A");
-    await w.until("A paused", () => p.queue("A").run?.state === "paused");
+    await w.until("A paused", () => p.queue("A").run?.state === "paused", LONGER.run);
     assert.throws(() => p.engine.start("B"), /queue B cannot start: its checkout is in use, queue A is paused there/);
     p.engine.resume("A");
-    await w.until("A to finish", () => p.queue("A").run?.state === "finished");
+    await w.until("A to finish", () => p.queue("A").run?.state === "finished", LONGER.run);
     p.engine.start("B");
-    await w.until("B to finish", () => p.queue("B").run?.state === "finished");
+    await w.until("B to finish", () => p.queue("B").run?.state === "finished", LONGER.run);
   } finally { w.stop(); }
 });
 
@@ -166,10 +165,10 @@ test("a third queue over the limit waits and starts when one ends, also across t
   const p = w.add("p", { A: { steps: ["slow"], own: true }, B: { steps: ["slow", "slow"], own: true }, D: { steps: ["done"], own: true } });
   const r = w.add("r", { Z0: ["done"], Z: ["done"] });
   try {
-    process.env.FAKE_SLOW_MS = "2000";
+    process.env.FAKE_SLOW_MS = WORK_MS;
     p.engine.start("A");
     p.engine.start("B");
-    await w.until("A and B at work", () => going(p.queue("A").run?.state) && going(p.queue("B").run?.state));
+    await w.until("A and B at work", () => going(p.queue("A").run?.state) && going(p.queue("B").run?.state), LONGER.step);
     assert.throws(() => p.engine.start("D"), /^Error: queue D cannot start: 2 queues run, the limit is 2$/);
     assert.throws(() => r.engine.start("Z"), /queue Z cannot start: 2 queues run, the limit is 2/, "the limit counts every project's queues");
     // A planned start in the other project waits for a place.
@@ -177,10 +176,10 @@ test("a third queue over the limit waits and starts when one ends, also across t
     assert.equal(r.engine.chain("Z", { after: "Z0", by: "user" }), "queue Z0 is done; queue Z waits: 2 queues run, the limit is 2; it starts by itself then");
     assert.equal(r.queue("Z").start!.waiting, "queue Z0 is done; waits: 2 queues run, the limit is 2");
     assert.equal(r.queue("Z").start!.held!.kind, "limit");
-    await w.until("A to finish", () => p.queue("A").run?.state === "finished");
-    await w.until("Z to start once A ended", () => !!r.queue("Z").run);
+    await w.until("A to finish", () => p.queue("A").run?.state === "finished", LONGER.run);
+    await w.until("Z to start once A ended", () => !!r.queue("Z").run, LONGER.step);
     assert.ok(going(p.queue("B").run?.state), "B was still at work: Z took A's place");
-    await w.until("Z to finish", () => r.queue("Z").run?.state === "finished");
+    await w.until("Z to finish", () => r.queue("Z").run?.state === "finished", LONGER.run);
   } finally { w.stop(); }
 });
 
@@ -189,25 +188,25 @@ test("a queue in review holds its checkout but does not count toward the limit",
   const p = w.add("p", { R: { steps: ["done", "done"], level: 1 }, B: ["done"], W: { steps: ["done"], own: true } });
   try {
     p.engine.start("R");
-    await w.until("R1 in review", () => p.queue("R").steps[0]!.status === "review");
+    await w.until("R1 in review", () => p.queue("R").steps[0]!.status === "review", LONGER.step);
     assert.equal(p.queue("R").run?.state, "running");
     assert.throws(() => p.engine.start("B"), /queue B cannot start: its checkout is in use, queue R runs there/);
     // R counts no more: with a limit of 1, a queue in its own worktree may start.
     p.engine.start("W");
-    await w.until("W to finish", () => p.queue("W").run?.state === "finished");
+    await w.until("W to finish", () => p.queue("W").run?.state === "finished", LONGER.run);
     p.engine.acceptReview("R", "R1");
-    await w.until("R2 in review", () => p.queue("R").steps[1]!.status === "review");
+    await w.until("R2 in review", () => p.queue("R").steps[1]!.status === "review", LONGER.step);
   } finally { w.stop(); }
 });
 
 test("a schedule waiting for its checkout is not marked missed, and starts once the checkout is free", async () => {
-  process.env.FAKE_SLOW_MS = "2500";
+  process.env.FAKE_SLOW_MS = WORK_MS;
   const clock = new TestClock();
   const w = world({ clock });
   const p = w.add("p", { A: ["slow"], B: ["done"] });
   try {
     p.engine.start("A");
-    await w.until("A at work", () => p.queue("A").steps[0]!.status === "running");
+    await w.until("A at work", () => p.queue("A").steps[0]!.status === "running", LONGER.step);
     p.engine.scheduleStart("B", { at: new Date(clock.now() + MIN).toISOString(), by: "user" });
     clock.advance(MIN);
     await w.until("B to wait for the checkout", () => !!p.queue("B").start?.held);
@@ -216,7 +215,7 @@ test("a schedule waiting for its checkout is not marked missed, and starts once 
     clock.advance(30 * MIN);
     await sleep(400);
     assert.equal(p.queue("B").start!.failed, undefined, "a waiting schedule is never missed");
-    await w.until("B to finish once A is done", () => p.queue("B").run?.state === "finished");
+    await w.until("B to finish once A is done", () => p.queue("B").run?.state === "finished", LONGER.run);
     assert.equal(p.store.readStart("B"), undefined);
   } finally { w.stop(); }
 });

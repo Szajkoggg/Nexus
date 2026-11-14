@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { ProjectStore, applyDraft, approveQueue, confirmProvisional, loadProjectState, newId, routeAnswers, sendBack } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
+import { WAIT_MS, until as waitUntil, LONGER, WORK_MS } from "./wait.ts";
 
 process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
 
@@ -28,13 +29,7 @@ function setup() {
   const state = () => loadProjectState(store);
   const queue = (q: string) => state().queues.find((x) => x.id === q)!;
   const step = (q: string, s: string) => queue(q).steps.find((x) => x.id === s)!;
-  const until = async (what: string, pred: () => boolean, ms = 30_000) => {
-    const t = Date.now();
-    while (!pred()) {
-      if (Date.now() - t > ms) assert.fail(`timed out waiting for ${what}; chat: ${JSON.stringify(orchestrator.view().chat.slice(-4))}`);
-      await new Promise((r) => setTimeout(r, 100));
-    }
-  };
+  const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms, () => `; chat: ${JSON.stringify(orchestrator.view().chat.slice(-4))}`);
   const facts = () => orchestrator.view().chat.filter((c) => c.from === "nexus").map((c) => c.text);
   const said = (re: RegExp) => orchestrator.view().chat.some((c) => re.test(c.text));
   const delivered = () => existsSync(process.env.FAKE_LOG!)
@@ -50,7 +45,7 @@ function setup() {
     approveQueue(store, id);
     engine.start(id);
   };
-  const inReview = (q: string, s: string) => until(`${s} in the orchestrator's review`, () => step(q, s).status === "review" && step(q, s).review_with === "orchestrator");
+  const inReview = (q: string, s: string) => until(`${s} in the orchestrator's review`, () => step(q, s).status === "review" && step(q, s).review_with === "orchestrator", LONGER.step);
   const say = (...args: string[]) => orchestrator.say(`FAKE-NEXUS: ${JSON.stringify(args)}`);
   const stop = () => { clearInterval(timer); engine.shutdown(); orchestrator.shutdown(); delete process.env.FAKE_SLOW_MS; };
   return { store, engine, orchestrator, state, queue, step, until, facts, said, delivered, run, inReview, say, stop };
@@ -73,7 +68,7 @@ test("level 3: a provisional acceptance lets the queue go on, and the return bat
     x.say("review", "accept", "P", "P2"); // nothing of the user's in it: accepted for good
     await x.inReview("P", "P3");
     x.say("review", "provisional", "P", "P3");
-    await x.until("the run to finish", () => x.queue("P").run?.state === "finished");
+    await x.until("the run to finish", () => x.queue("P").run?.state === "finished", LONGER.run);
     assert.equal(x.queue("P").status, "done");
 
     const batch = x.state().attention.filter((a) => a.kind === "provisional");
@@ -89,9 +84,11 @@ test("level 3: the third send-back hands the step to the user, and its queue wai
   try {
     await x.run("T", ["done", "done"]);
     for (const round of [1, 2, 3]) {
-      await x.until(`round ${round} in review`, () => x.step("T", "T1").review_with === "orchestrator" && x.facts().filter((t) => t.startsWith("Step T1 of queue T is done")).length === round);
+      await x.until(`round ${round} in review`, () => x.step("T", "T1").review_with === "orchestrator" && x.facts().filter((t) => t.startsWith("Step T1 of queue T is done")).length === round, LONGER.step);
       x.say("review", "send-back", "T", "T1", `Not yet ${round}.`);
-      if (round < 3) await x.until(`round ${round + 1} at work`, () => x.step("T", "T1").sent_back.length === round && x.step("T", "T1").status !== "review");
+      // The send-back recorded; the worker's next round may already be over by the next look (its step back in review), so
+      // the wait is for what lasts, and the next "in review" waits for that round's end (queue TS1).
+      if (round < 3) await x.until(`round ${round} sent back`, () => x.step("T", "T1").sent_back.length === round, LONGER.step);
     }
     await x.until("the step with the user", () => x.step("T", "T1").review_with === "user");
     await new Promise((r) => setTimeout(r, 500));
@@ -108,7 +105,7 @@ test("only the user confirms; a provisional acceptance is for level 3 only", asy
     await x.run("C", ["done"]);
     await x.inReview("C", "C1");
     x.say("review", "provisional", "C", "C1");
-    await x.until("the run to finish", () => x.queue("C").run?.state === "finished");
+    await x.until("the run to finish", () => x.queue("C").run?.state === "finished", LONGER.run);
 
     // The orchestrator has no command for it, and its event is ignored.
     x.say("review", "confirm", "C", "C1");
@@ -135,13 +132,13 @@ test("only the user confirms; a provisional acceptance is for level 3 only", asy
 });
 
 test("Fix it on a provisional step of a queue that went on: the orchestrator drafts a fix, and the run waits for its approval", async () => {
-  process.env.FAKE_SLOW_MS = "2500";
+  process.env.FAKE_SLOW_MS = WORK_MS;
   const x = setup();
   try {
     await x.run("G", ["done", "slow"]);
     await x.inReview("G", "G1");
     x.say("review", "provisional", "G", "G1");
-    await x.until("G2 at work", () => x.step("G", "G2").status === "running");
+    await x.until("G2 at work", () => x.step("G", "G2").status === "running", LONGER.step);
 
     assert.match(sendBack(x.store, { queue: "G", step: "G1", from: "user", text: "Make the header blue." }), /the orchestrator drafts a fix of step G\/G1/);
     assert.deepEqual([x.step("G", "G1").status, x.step("G", "G1").provisional?.fix?.text], ["done", "Make the header blue."]);
@@ -174,7 +171,7 @@ test("Fix it on a provisional step of a finished queue: the orchestrator drafts 
     await x.run("D", ["done"]);
     await x.inReview("D", "D1");
     x.say("review", "provisional", "D", "D1");
-    await x.until("the run to finish", () => x.queue("D").run?.state === "finished");
+    await x.until("the run to finish", () => x.queue("D").run?.state === "finished", LONGER.run);
     sendBack(x.store, { queue: "D", step: "D1", from: "user", text: "The text is too small." });
     await x.until("the orchestrator told", () => x.delivered().some((t) => t.includes("The user asked a fix of step D1 of queue D")));
     assert.match(x.delivered().find((t) => t.includes("asked a fix of step D1"))!, /The queue is finished: the user approves the revision, and then it is started/);

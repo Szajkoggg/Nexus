@@ -15,15 +15,12 @@ import { handOver, refuseHandoverDir, takeHandoverEnv, withoutHandover } from ".
 import { agentEnv } from "../src/agent.ts";
 import { MAIN, serverEnv, spawnServer } from "./helpers.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
+import { until, untilAsync, LONGER, WORK_MS } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-async function until(what: string, pred: () => boolean, ms = 30_000, detail = () => ""): Promise<void> {
-  const t = Date.now();
-  while (!pred()) { if (Date.now() - t > ms) assert.fail(`timed out waiting for ${what}${detail()}`); await sleep(100); }
-}
 
 function freePort(): Promise<number> {
   return new Promise((resolve) => { const s = createServer(); s.listen(0, "127.0.0.1", () => { const p = (s.address() as { port: number }).port; s.close(() => resolve(p)); }); });
@@ -37,7 +34,7 @@ async function heldProject() {
   const base = mkdtempSync(join(tmpdir(), "nexus-handover-"));
   const home = join(base, "home");
   process.env.NEXUS_HOME = home;
-  process.env.FAKE_SLOW_MS = "300";
+  process.env.FAKE_SLOW_MS = WORK_MS;
   const root = join(base, "project");
   mkdirSync(root, { recursive: true });
   const store = ProjectStore.init(root, { id: "p", name: "P", root });
@@ -46,9 +43,9 @@ async function heldProject() {
   approveQueue(store, "Q");
   const engine: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store); engine.onChange(loadProjectState(store)); });
   engine.start("Q");
-  await until("the first step to run", () => loadProjectState(store).queues[0]!.steps[0]!.status === "running");
+  await until("the first step to run", () => loadProjectState(store).queues[0]!.steps[0]!.status === "running", LONGER.step);
   engine.drainForUpdate(false);
-  await until("the hold", () => store.readRun("Q")?.state === "paused" && engine.idle(), 30_000,
+  await until("the hold", () => store.readRun("Q")?.state === "paused" && engine.idle(), LONGER.processes,
     () => `; run: ${JSON.stringify(store.readRun("Q"))}; idle: ${engine.idle()}; steps: ${loadProjectState(store).queues[0]!.steps.map((s) => `${s.id}=${s.status}`).join(" ")}`);
   engine.shutdown();
   await until("the agent to exit", () => !engine.alive());
@@ -174,7 +171,7 @@ test("a successor that fails its smoke check sends no ready signal, resumes noth
   const dir = handoverDir(home, process.pid);
   const s = server(home, await freePort(), { NEXUS_HANDOVER: dir });
   try {
-    await until("the successor to exit", () => s.exitCode() !== undefined, 30_000, () => `; output: ${s.out()}`);
+    await until("the successor to exit", () => s.exitCode() !== undefined, LONGER.processes, () => `; output: ${s.out()}`);
     assert.equal(s.exitCode(), 1);
     assert.ok(!existsSync(join(dir, "ready.json")), "no ready signal");
     assert.match(JSON.parse(readFileSync(join(dir, "failed.json"), "utf8")).reason, /project b .* does not load/);
@@ -190,7 +187,7 @@ test("a successor waits, read-only, until the predecessor hands over; then it re
   const port = await freePort();
   const s = server(home, port, { NEXUS_HANDOVER: dir });
   try {
-    await until("the ready signal", () => existsSync(join(dir, "ready.json")), 30_000, () => `; run: ${JSON.stringify(store.readRun("Q"))}; output: ${s.out()}`);
+    await until("the ready signal", () => existsSync(join(dir, "ready.json")), LONGER.processes, () => `; run: ${JSON.stringify(store.readRun("Q"))}; output: ${s.out()}`);
     const ready = JSON.parse(readFileSync(join(dir, "ready.json"), "utf8")) as { pid: number; commit: string };
     assert.equal(ready.pid, s.child.pid);
     const projects = await fetch(`http://127.0.0.1:${port}/api/projects`);
@@ -207,9 +204,10 @@ test("a successor waits, read-only, until the predecessor hands over; then it re
     assert.ok(info.update.log.some((l) => new RegExp(`up: ${info.commit} .*\\(was old1234\\); the predecessor handed over`).test(l)), info.update.log.join("\n"));
     // Then the push on deploy: never from a development checkout (this test runs from one), and here no ref was given.
     let push: { result: string; text: string } | undefined;
-    for (const t = Date.now(); !push && Date.now() - t < 10_000; await sleep(200)) {
+    await untilAsync("the push on deploy's outcome", async () => {
       push = ((await (await fetch(`http://127.0.0.1:${port}/api/server`)).json()) as { update: { push?: { result: string; text: string } } }).update.push;
-    }
+      return !!push;
+    }).catch(() => {});
     assert.equal(push?.result, "skipped", JSON.stringify(push));
   } finally { s.stop(); }
 });
@@ -286,14 +284,14 @@ test("after taking over, the server's own environment and its agents' have no NE
   const port = await freePort();
   const s = server(home, port, { NEXUS_HANDOVER: dir });
   try {
-    await until("the ready signal", () => existsSync(join(dir, "ready.json")), 30_000, () => `; run: ${JSON.stringify(store.readRun("Q"))}; output: ${s.out()}`);
+    await until("the ready signal", () => existsSync(join(dir, "ready.json")), LONGER.processes, () => `; run: ${JSON.stringify(store.readRun("Q"))}; output: ${s.out()}`);
     writeFileSync(join(dir, "released.json"), JSON.stringify({ at: new Date().toISOString(), log: [] }));
     await resumedToFinish(store, s);
     // The model list is asked from a runtime started with the server's own environment, not an agent's.
     const ask = new AbortController();
     void fetch(`http://127.0.0.1:${port}/api/models/claude`, { signal: ask.signal }).catch(() => {});
     const own = () => s.records().find((r) => r.argv && !r.argv.includes("--session-id") && !r.argv.includes("--resume"));
-    await until("the runtime started with the server's environment", () => !!own(), 30_000, () => `; records: ${JSON.stringify(s.records())}`);
+    await until("the runtime started with the server's environment", () => !!own(), LONGER.processes, () => `; records: ${JSON.stringify(s.records())}`);
     ask.abort();
     const agents = s.records().filter((r) => r !== own());
     assert.ok(agents.length > 0, "an agent was started for the resumed queue");
@@ -313,7 +311,7 @@ test("a server given a hand-over folder outside its NEXUS_HOME writes nothing th
   const port = await freePort();
   const s = server(home, port, { NEXUS_HANDOVER: foreign });
   try {
-    await until("the server to exit", () => s.exitCode() !== undefined, 30_000, () => `; output: ${s.out()}`);
+    await until("the server to exit", () => s.exitCode() !== undefined, LONGER.processes, () => `; output: ${s.out()}`);
     assert.notEqual(s.exitCode(), 0);
     assert.match(s.out(), /refusing to take over: the hand-over folder .*01FOREIGN is not under .*handover; exiting without starting/);
     assert.deepEqual(listing(), was, "nothing written in the foreign folder");
@@ -344,9 +342,10 @@ for (const trailing of [false, true]) {
       pid = result.pid;
       assert.equal(result.outcome, "ready", notes.join(" | "));
       let phase = "";
-      for (const t = Date.now(); phase !== "updated" && Date.now() - t < 15_000; await sleep(200)) {
+      await untilAsync("the successor to take over", async () => {
         phase = ((await (await fetch(`http://127.0.0.1:${port}/api/server`)).json()) as { update: { phase: string } }).update.phase;
-      }
+        return phase === "updated";
+      }).catch(() => {});
       assert.equal(phase, "updated", "released, it took over");
     } finally {
       if (pid) try { process.kill(pid); } catch { /* gone */ }

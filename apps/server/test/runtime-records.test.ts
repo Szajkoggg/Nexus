@@ -12,6 +12,7 @@ import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { Conversations } from "../src/conversations.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
+import { WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -26,10 +27,7 @@ function setup() {
   const engine: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store); engine.onChange(loadProjectState(store)); }, { retryBaseMs: 30, usageMarginMs: 100 });
   const orchestrator = new Orchestrator(store, engine, () => {});
   const conversations = new Conversations(store, orchestrator, () => {});
-  const until = async (what: string, pred: () => boolean, ms = 20_000) => {
-    const t = Date.now();
-    while (!pred()) { if (Date.now() - t > ms) assert.fail(`timed out waiting for ${what}`); await new Promise((r) => setTimeout(r, 100)); }
-  };
+  const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms);
   const stop = () => { conversations.shutdown(); orchestrator.shutdown(); engine.shutdown(); };
   return { store, engine, orchestrator, conversations, until, stop };
 }
@@ -55,7 +53,7 @@ for (const runtime of ["claude", "codex"] as const) {
       store.writeQueue({ protocol: 1, id: "Q", title: "Queue", revision: 1, status: "proposed", stop_conditions: [], checks: [], steps: [{ id: "Q1", title: "Step 1", goal: "FAKE: done", acceptance: [] }], approvals: [], history: [] });
       approveQueue(store, "Q");
       const run = engine.start("Q", { runtime });
-      await until("the run to finish and its process to exit", () => store.readRun("Q")?.state === "finished" && store.readRuntime(run.session)?.state === "exited");
+      await until("the run to finish and its process to exit", () => store.readRun("Q")?.state === "finished" && store.readRuntime(run.session)?.state === "exited", LONGER.run);
       assert.deepEqual(shape(store.readRuntime(run.session)), {
         ...CONTEXT[runtime], ...(runtime === "claude" ? { cost_usd: 0 } : {}), state: "exited", turns: 1,
       });
@@ -80,7 +78,7 @@ for (const runtime of ["claude", "codex"] as const) {
     try {
       const c = conversations.create({ title: "Talk", runtime });
       conversations.say(c.id, "FAKE-SLOW");
-      await until("the turn at work", () => conversations.view(c.id).chat.some((x) => x.kind === "tool"));
+      await until("the turn at work", () => conversations.view(c.id).chat.some((x) => x.kind === "tool"), LONGER.step);
       assert.equal(store.readRuntime(c.id)?.state, "working");
       await until("the reply", () => conversations.view(c.id).chat.some((x) => x.from === "partner" && x.kind === "message") && store.readRuntime(c.id)?.state === "idle");
     } finally { stop(); delete process.env.FAKE_CHAT_SLOW_MS; }

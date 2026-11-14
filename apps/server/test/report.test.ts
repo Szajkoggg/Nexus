@@ -13,6 +13,7 @@ import { ProjectStore, approveQueue, loadProjectState, normPath, reportFile, rou
 import { Engine } from "../src/engine.ts";
 import { cleanUp } from "../src/mergeback.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
+import { WAIT_MS, POLL_MS, LONGER, sleep } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -42,11 +43,11 @@ function setup(o: { git?: boolean } = {}) {
   const queue = () => loadProjectState(store).queues.find((q) => q.id === "Q")!;
   // The run takes two steps and a report: about eight node processes (the fake worker, each nexus call), each started
   // in a second here but in two to four under load, where a step took 14 s (scripts/load-tests.mjs, 12 busy cores
-  // and 6 copies, queue FU4). The wait is for that work, not for a hang: 60 s.
+  // and 6 copies, queue FU4). The wait is for that work, not for a hang: a named longer wait (wait.ts).
   const finished = async () => {
     for (const t = Date.now(); queue().run?.state !== "finished";) {
-      if (Date.now() - t > 60_000) assert.fail(`timed out; run ${JSON.stringify(queue().run)}`);
-      await new Promise((r) => setTimeout(r, 100));
+      if (Date.now() - t > LONGER.processes) assert.fail(`timed out; run ${JSON.stringify(queue().run)}`);
+      await sleep(POLL_MS);
     }
   };
   const prompts = () => readFileSync(process.env.FAKE_LOG!, "utf8").trim().split("\n").map((l) => (JSON.parse(l) as { text: string }).text);
@@ -86,8 +87,8 @@ test("a worktree queue ends with a clean worktree, and its cleanup succeeds", as
     // still runs in ("Permission denied"), so the cleanup, as the user's would, comes after the exit (queue FU4).
     const session = x.queue().run!.session;
     for (const t = Date.now(); x.store.readRuntime(session)?.state !== "exited";) {
-      if (Date.now() - t > 20_000) assert.fail("the worker's process did not exit");
-      await new Promise((r) => setTimeout(r, 100));
+      if (Date.now() - t > WAIT_MS) assert.fail("the worker's process did not exit");
+      await sleep(POLL_MS);
     }
     const wt = x.store.readQueue("Q").worktree!;
     assert.ok(existsSync(wt));

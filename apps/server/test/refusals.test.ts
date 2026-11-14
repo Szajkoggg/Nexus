@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ProjectStore, writeRegistry, type Refusal } from "@nexus/protocol";
 import { spawnServer } from "./helpers.ts";
+import { serverUp } from "./wait.ts";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const freePort = () => new Promise<number>((resolve) => {
@@ -37,7 +38,7 @@ test("the API lists refusals per project and step, and takes an allow rule only 
   const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>
     fetch(url + path, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
   try {
-    for (let i = 0; i < 100; i++) { try { if ((await fetch(url + "/api/projects")).ok) break; } catch { /* not up yet */ } await sleep(100); }
+    await serverUp(url + "/api/projects");
     const all = (await (await fetch(url + "/api/projects/p/refusals")).json()) as Refusal[];
     assert.deepEqual(all.map((r) => r.session), ["s2", "s1"], "every session's, oldest first");
     const step = (await (await fetch(url + "/api/projects/p/refusals?queue=Q&step=Q1")).json()) as Refusal[];

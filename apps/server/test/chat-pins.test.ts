@@ -11,6 +11,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ProjectStore, newId, writeRegistry, type NumberedEntry, type SessionFile } from "@nexus/protocol";
 import { spawnServer } from "./helpers.ts";
+import { serverUp } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -48,7 +49,7 @@ test("pins by line, older entries and search over the whole chat; a fresh orches
   const get = async <T,>(path: string): Promise<{ status: number; body: T }> => { const r = await fetch(url + path); return { status: r.status, body: await r.json() as T }; };
   const post = async (path: string, body: unknown) => { const r = await fetch(url + path, { method: "POST", headers: page, body: JSON.stringify(body) }); return { status: r.status, body: await r.json() as { ok?: boolean; error?: string; result?: unknown } }; };
   try {
-    for (let i = 0; i < 100; i++) { try { if ((await fetch(url.replace("/projects/p", "/projects"))).ok) break; } catch { /* not up yet */ } await sleep(100); }
+    await serverUp(url.replace("/projects/p", "/projects"));
 
     // The view: the newest 300 entries, each with its line in chat.jsonl (the first entry is line 0; lines 1 and 2 are
     // the blank and the broken one; so the last of 321 entries is line 322).

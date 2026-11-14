@@ -16,6 +16,7 @@ import { ProjectStore, applyDraft, approveQueue, expireAway, loadProjectState, r
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { spawnServer } from "./helpers.ts";
+import { WAIT_MS, until as waitUntil, serverUp, LONGER } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -40,13 +41,7 @@ function setup() {
   const state = () => loadProjectState(store);
   const queue = (q: string) => state().queues.find((x) => x.id === q)!;
   const step = (q: string, s: string) => queue(q).steps.find((x) => x.id === s)!;
-  const until = async (what: string, pred: () => boolean, ms = 30_000) => {
-    const t = Date.now();
-    while (!pred()) {
-      if (Date.now() - t > ms) assert.fail(`timed out waiting for ${what}; chat: ${JSON.stringify(orchestrator.view().chat.slice(-4))}`);
-      await sleep(100);
-    }
-  };
+  const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms, () => `; chat: ${JSON.stringify(orchestrator.view().chat.slice(-4))}`);
   const said = (re: RegExp) => orchestrator.view().chat.some((c) => re.test(c.text));
   const delivered = () => existsSync(process.env.FAKE_LOG!)
     ? readFileSync(process.env.FAKE_LOG!, "utf8").split("\n").filter(Boolean).map((l) => (JSON.parse(l) as { text: string }).text) : [];
@@ -57,7 +52,7 @@ function setup() {
     applyDraft(store, { id, title: `Queue ${id}`, ...(worktree ? { worktree } : {}), steps: levels.map((level, i) => ({ id: `${id}${i + 1}`, title: `Step ${i + 1}`, goal: "FAKE: done", acceptance: [], review: { level } })) });
     approveQueue(store, id);
   };
-  const inReview = (q: string, s: string, by: "orchestrator" | "user" = "orchestrator") => until(`${s} in review (${by})`, () => step(q, s).status === "review" && step(q, s).review_with === by);
+  const inReview = (q: string, s: string, by: "orchestrator" | "user" = "orchestrator") => until(`${s} in review (${by})`, () => step(q, s).status === "review" && step(q, s).review_with === by, LONGER.step);
   const say = (...args: string[]) => orchestrator.say(`FAKE-NEXUS: ${JSON.stringify(args)}`);
   const stop = () => { clearInterval(timer); engine.shutdown(); orchestrator.shutdown(); };
   return { root, store, engine, orchestrator, state, queue, step, until, said, delivered, hello, queueOf, inReview, say, tick, stop };
@@ -67,7 +62,7 @@ test("away mode: level 2 runs as level 3 and level 1 still waits for the user; w
   const x = setup();
   try {
     await x.hello();
-    away(inMs(8_000));
+    away(inMs(3_600_000));
     await x.until("told that the user is away", () => x.said(/^The user is away until/));
     x.queueOf("A", [2, 1, 2]);
     x.engine.start("A");
@@ -80,8 +75,10 @@ test("away mode: level 2 runs as level 3 and level 1 still waits for the user; w
     assert.equal(x.queue("A").status, "waiting");
     assert.ok(x.state().attention.some((a) => a.kind === "review" && a.step === "A2"));
 
-    // Its time comes (the server records the end; here, as its timer would).
-    await x.until("the end of away mode", () => !x.state().away.on, 15_000);
+    // Its time comes: its end is moved to now rather than waited for (a real 8 s ran out before the run got here on a
+    // busy machine, queue TS1); then the server records the end, here as its timer would.
+    away(new Date().toISOString()); // after everything above: what happened then stays in the period
+    await x.until("the end of away mode", () => !x.state().away.on);
     writeAway(expireAway(readAway()));
     x.tick();
     await x.until("told that it ended", () => x.said(/^Away mode ended at its time\./));
@@ -107,6 +104,8 @@ test("away mode: a queue waiting for the user brings a list of the approved queu
     x.engine.start("S");
     await x.inReview("S", "S1", "user");
     await x.until("the notice", () => x.said(/^Queue S waits for the user at step S1 \(review level 1/));
+    // The chat shows the notice before the orchestrator's process has it: wait for what is checked, its delivery.
+    await x.until("the notice delivered", () => x.delivered().some((t) => t.includes("Queue S waits for the user at step S1")));
     const notice = x.delivered().find((t) => t.includes("Queue S waits for the user at step S1"))!;
     assert.match(notice, /Approved queues that can start now: C "Queue C"/);
     assert.doesNotMatch(notice, /\bB "Queue B"/, "not in the checkout S holds");
@@ -116,6 +115,7 @@ test("away mode: a queue waiting for the user brings a list of the approved queu
     await x.inReview("C", "C1");
     x.say("review", "ask-user", "C", "C1", "I cannot judge this.");
     await x.until("the second notice", () => x.said(/^Queue C waits for the user at step C1 \(you handed it to the user\)/));
+    await x.until("the second notice delivered", () => x.delivered().some((t) => t.includes("Queue C waits for the user at step C1")));
     assert.match(x.delivered().find((t) => t.includes("Queue C waits for the user at step C1"))!, /no other approved queue can start now/);
   } finally { x.stop(); away(null); }
 });
@@ -146,7 +146,7 @@ test("a real server keeps away mode across a restart, and ends it at its time", 
   const url = `http://127.0.0.1:${port}`;
   const start = async (): Promise<ChildProcess> => {
     const child = spawnServer({ NEXUS_HOME: home, NEXUS_PORT: String(port), NEXUS_LOG: "", NEXUS_DIR: "", NEXUS_SESSION: "" });
-    for (let i = 0; i < 150; i++) { try { if ((await fetch(url + "/api/server")).ok) return child; } catch { /* not up yet */ } await sleep(100); }
+    await serverUp(url + "/api/server"); return child;
     child.kill();
     throw new Error("the server did not come up");
   };

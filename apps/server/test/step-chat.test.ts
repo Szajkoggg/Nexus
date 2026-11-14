@@ -12,6 +12,7 @@ import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { Conversations } from "../src/conversations.ts";
 import { stepSeed, sinceThen } from "../src/step-seed.ts";
+import { WAIT_MS, until as waitUntil } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -57,9 +58,7 @@ function setup() {
   const conversations = new Conversations(store, orchestrator, () => {});
   const received = () => (existsSync(process.env.FAKE_LOG!) ? readFileSync(process.env.FAKE_LOG!, "utf8").trim().split("\n") : [])
     .map((l) => JSON.parse(l) as { text: string; session: string | null });
-  const until = async (what: string, pred: () => boolean, ms = 20_000) => {
-    for (const t = Date.now(); !pred();) { if (Date.now() - t > ms) assert.fail(`timed out waiting for ${what}`); await new Promise((r) => setTimeout(r, 100)); }
-  };
+  const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms);
   const stop = () => { conversations.shutdown(); orchestrator.shutdown(); engine.shutdown(); };
   return { root, store, emit, conversations, received, until, stop };
 }

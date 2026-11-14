@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { ActionError, ProjectStore, applyDraft, approveQueue, loadProjectState, routeAnswers, type StepDef } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
+import { WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -35,13 +36,7 @@ function setup(steps: Step[]) {
   const lines = <T>(f: string): T[] => (existsSync(f) ? readFileSync(f, "utf8").trim().split("\n").map((l) => JSON.parse(l) as T) : []);
   const received = () => lines<Received>(process.env.FAKE_LOG!);
   const args = () => lines<Record<string, any>>(process.env.FAKE_ARGS!);
-  const until = async (what: string, pred: () => boolean, ms = 20_000) => {
-    const t = Date.now();
-    while (!pred()) {
-      if (Date.now() - t > ms) assert.fail(`timed out waiting for ${what}; run: ${JSON.stringify(queue().run)}; steps: ${queue().steps.map((s) => `${s.id}=${s.status}`).join(" ")}`);
-      await new Promise((r) => setTimeout(r, 100));
-    }
-  };
+  const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms, () => `; run: ${JSON.stringify(queue().run)}; steps: ${queue().steps.map((s) => `${s.id}=${s.status}`).join(" ")}`);
   const done = () => { engine.shutdown(); delete process.env.FAKE_ARGS; };
   return { store, engine, queue, received, args, until, done };
 }
@@ -57,7 +52,7 @@ test("a codex step after a claude step runs in a codex session seeded with the s
   const { store, engine, queue, received, args, until, done } = setup([{ fake: "summary" }, { fake: "summary", runtime: "codex" }, { fake: "done" }]);
   try {
     engine.start("Q", { runtime: "claude", model: "opus", effort: "high" });
-    await until("the run to finish", () => queue().run?.state === "finished");
+    await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
     const q = queue();
     const sessions = loadProjectState(store).sessions;
     const of = (i: number) => sessions.find((s) => s.id === q.steps[i]!.session)!;
@@ -84,7 +79,7 @@ test("claude: a step on haiku keeps the session (the process resumes on haiku), 
   const { store, engine, queue, args, until, done } = setup([{ fake: "done" }, { fake: "done", model: "haiku", effort: "low" }, { fake: "done" }]);
   try {
     engine.start("Q", { runtime: "claude", model: "opus", effort: "high" });
-    await until("the run to finish", () => queue().run?.state === "finished");
+    await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
     const q = queue();
     assert.equal(new Set(q.steps.map((s) => s.session)).size, 1, "one session throughout");
     assert.equal(q.run!.switches, undefined);
@@ -104,7 +99,7 @@ test("codex: a step on another model keeps the thread and names its model and ef
   const { engine, queue, args, until, done } = setup([{ fake: "done" }, { fake: "done", model: "gpt-6-luna", effort: "low" }, { fake: "done" }]);
   try {
     engine.start("Q", { runtime: "codex", model: "gpt-6-astra", effort: "high" });
-    await until("the run to finish", () => queue().run?.state === "finished");
+    await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
     const q = queue();
     assert.equal(new Set(q.steps.map((s) => s.session)).size, 1);
     assert.equal(args().filter((a) => a.method === "thread/start" || a.method === "thread/resume").length, 1, "one thread, never restarted");
@@ -133,6 +128,6 @@ test("an invalid combination refuses the start with the reason", async () => {
     assert.equal(queue().run, undefined, "nothing started");
     // On a Codex run the same step is fine.
     engine.start("Q", { runtime: "codex" });
-    await until("the run to finish", () => queue().run?.state === "finished");
+    await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
   } finally { done(); }
 });

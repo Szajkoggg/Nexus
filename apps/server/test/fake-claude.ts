@@ -1,6 +1,6 @@
 // A stand-in for `claude -p --input-format stream-json --output-format stream-json`, for testing without a model.
 // What it does is in fake-behaviour.ts.
-import { BACKGROUND_NOTICE, PARTIAL, contextTokens, interrupt, record, recordArgs, respond, type Fake, type FakeFailure } from "./fake-behaviour.ts";
+import { BACKGROUND_NOTICE, PARTIAL, actOnRead, contextTokens, interrupt, record, recordArgs, respond, type Fake, type FakeFailure } from "./fake-behaviour.ts";
 
 recordArgs({ argv: process.argv.slice(2) });
 
@@ -18,11 +18,12 @@ async function turn(text: string): Promise<void> {
   out({ type: "system", subtype: "init", model: "fake-model", session_id: "fake" });
   fake.history!.push(text);
   const denials: unknown[] = [];
-  const reply = await respond(fake, text, (command) =>
+  const first = await respond(fake, text, (command) =>
     out({ type: "assistant", message: { content: [{ type: "tool_use", name: "Bash", input: { command } }] }, parent_tool_use_id: null }), () => refused(denials));
-  if (typeof reply !== "string") return "exit" in reply ? exitOnSignal() : "interrupted" in reply ? interrupted() : fail(reply.fail);
-  // What came in during the turn was read inside it.
+  if (typeof first !== "string") return "exit" in first ? exitOnSignal() : "interrupted" in first ? interrupted() : fail(first.fail);
+  // What came in during the turn was read inside it (and a command in it is acted on).
   fake.history!.push(...unread);
+  const reply = actOnRead(unread, first);
   unread = [];
   out({ type: "assistant", message: { content: [{ type: "text", text: reply }], usage: { input_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: contextTokens(1000, 100) - 10 } }, parent_tool_use_id: null });
   // As Claude Code reports them (checked live): result.usage is this turn's, total_cost_usd runs on. Turn n of the

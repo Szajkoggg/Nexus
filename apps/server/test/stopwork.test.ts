@@ -12,6 +12,7 @@ import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { leftBehind, recordStepEnd, recordStepStart, UNCOMMITTED_NOTE } from "../src/gitinfo.ts";
 import { decideStoppedWork } from "../src/stopwork.ts";
+import { WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
 
 process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
 const G = ["-c", "user.name=test", "-c", "user.email=test@example.invalid", "-c", "init.defaultBranch=main", "-c", "commit.gpgsign=false"];
@@ -38,19 +39,13 @@ function setup(goals: string[]) {
   function tick() { routeAnswers(store); orchestrator.onChange(loadProjectState(store)); engine.onChange(loadProjectState(store)); }
   const timer = setInterval(tick, 150);
   const queue = () => loadProjectState(store).queues[0]!;
-  const until = async (what: string, pred: () => boolean, ms = 30_000) => {
-    const t = Date.now();
-    while (!pred()) {
-      if (Date.now() - t > ms) assert.fail(`timed out waiting for ${what}; queue ${queue().status}, run ${JSON.stringify(queue().run)}`);
-      await new Promise((r) => setTimeout(r, 100));
-    }
-  };
+  const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms, () => `; queue ${queue().status}, run ${JSON.stringify(queue().run)}`);
   const delivered = () => existsSync(process.env.FAKE_LOG!)
     ? readFileSync(process.env.FAKE_LOG!, "utf8").split("\n").filter(Boolean).map((l) => (JSON.parse(l) as { text: string }).text) : [];
   /** Runs the queue until its first step stopped and that turn's end was recorded. */
   const stopped = async () => {
     engine.start("Q");
-    await until("the stop", () => queue().status === "stopped" && store.readGit("Q")?.steps.Q1?.[0]?.end !== undefined && engine.idle());
+    await until("the stop", () => queue().status === "stopped" && store.readGit("Q")?.steps.Q1?.[0]?.end !== undefined && engine.idle(), LONGER.run);
   };
   const stop = () => { clearInterval(timer); engine.shutdown(); orchestrator.shutdown(); delete process.env.FAKE_ARGS; };
   return { base, root, store, engine, orchestrator, queue, until, delivered, stopped, stop };

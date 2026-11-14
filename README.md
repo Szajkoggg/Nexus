@@ -322,6 +322,8 @@ npm run typecheck
 node scripts/load-tests.mjs --burners 12 --copies 4 --rounds 5 apps/server/test/review.test.ts   # tests under load
 ```
 
+The tests that run fake runtimes or servers wait 10 s for what they expect (`NEXUS_TEST_WAIT_MS` sets it, e.g. higher
+on a slow machine; `apps/server/test/wait.ts`), so a change that breaks many of them fails the suite in minutes.
 A test that fails only now and then usually fails on a busy machine: `scripts/load-tests.mjs` runs the files given
 several times at once beside busy-loop processes and reports each run, its failures and its slow tests.
 

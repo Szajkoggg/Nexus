@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { ProjectStore, writeRegistry } from "@nexus/protocol";
 import { spawnServer } from "./helpers.ts";
 import { MAX_UPLOAD_BODY, MAX_UPLOAD_BYTES, imageType, uploadName } from "../src/uploads.ts";
+import { serverUp } from "./wait.ts";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const freePort = () => new Promise<number>((resolve) => {
@@ -58,7 +59,7 @@ test("the upload endpoint saves a picture under .nexus/uploads/ and refuses what
   const uploads = join(store.dir, "uploads");
   const saved = () => (existsSync(uploads) ? readdirSync(uploads) : []);
   try {
-    for (let i = 0; i < 100; i++) { try { if ((await fetch(url + "/api/projects")).ok) break; } catch { /* not up yet */ } await sleep(100); }
+    await serverUp(url + "/api/projects");
 
     // A valid picture, as a data: URL whose declared type the server ignores.
     let res = await upload(JSON.stringify({ data: `data:image/gif;base64,${PNG.toString("base64")}`, name: "..\\..\\evil.exe" }));

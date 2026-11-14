@@ -13,6 +13,7 @@ import {
 } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
+import { WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -38,12 +39,7 @@ function setup(steps: StepDef[]) {
   const running = () => queue().steps.filter((s) => s.status === "running").map((s) => s.id);
   const opened = () => (existsSync(process.env.FAKE_LOG!) ? readFileSync(process.env.FAKE_LOG!, "utf8").trim().split("\n") : [])
     .map((l) => (JSON.parse(l) as { text: string }).text).filter((t) => t.startsWith("[Nexus] Queue")).map((t) => /step (\S+) \(/.exec(t)![1]!);
-  const until = async (what: string, pred: () => boolean, ms = 20_000) => {
-    for (const t = Date.now(); !pred();) {
-      if (Date.now() - t > ms) assert.fail(`timed out waiting for ${what}; run ${JSON.stringify(queue().run)}; ${statuses()}`);
-      await new Promise((r) => setTimeout(r, 50));
-    }
-  };
+  const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms, () => `; run ${JSON.stringify(queue().run)}; ${statuses()}`);
   const revise = (defs: StepDef[]) => applyDraft(store, { id: "W", title: "Cliffs", stop_conditions: [], checks: [], steps: defs });
   const stop = () => { for (const e of engines) e.shutdown(); delete process.env.FAKE_SLOW_MS; };
   return { root, store, engine, queue, statuses, running, opened, until, revise, stop };
@@ -84,7 +80,7 @@ test("an orphaned running step is cleaned at start, and the start begins there",
   try {
     orphaned(x);
     e.start("W");
-    await x.until("the run to finish", () => x.queue().run?.state === "finished");
+    await x.until("the run to finish", () => x.queue().run?.state === "finished", LONGER.run);
     assert.deepEqual(x.opened(), ["W4e", "W4f", "W5"], "W4e first, as the first pending step; then W4f afresh");
     assert.equal(x.statuses(), "W1=done W4e=done W4f=done W5=done");
   } finally { x.stop(); }
