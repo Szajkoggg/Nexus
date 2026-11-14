@@ -3,7 +3,7 @@
 // engine owns the runs; the scheduler decides when a planned start comes due and asks the engine to start the queue. Also the long timers both use (ClockTimers): a retry or usage wait
 // of a run, and a schedule's time, armed on a clock tests can move.
 import {
-  ActionError, HOLDING_RUN_STATES, checkPredecessors, doneForPlan, effortIssue, formatClock, loadProjectState, newPlan, now, readUsage, reorderedFollowers,
+  ActionError, HOLDING_RUN_STATES, checkPredecessors, doneForPlan, effortIssue, formatClock, loadProjectState, newPlan, now, openPlan, openPlanFile, readUsage, reorderedFollowers,
   type PlanBy, type ProjectState, type ProjectStore, type QueueView, type RunFile, type StartFile, type StartView,
 } from "@nexus/protocol";
 import type { StartOptions } from "./engine.ts";
@@ -176,8 +176,8 @@ export class Scheduler {
     if (after) checkPredecessors(state, q.id, [after], { loop: false });
     this.planOptions(state, q, {});
     const plans = new Map(state.queues.flatMap((x) => {
-      const p = x.id === q.id || (x.plan && !x.plan.used) ? this.store.readPlan(x.id) : undefined;
-      return p && !p.started_at ? [[x.id, p] as const] : [];
+      const p = x.id === q.id || openPlan(x) ? openPlanFile(this.store.readPlan(x.id)) : undefined;
+      return p ? [[x.id, p] as const] : [];
     }));
     const followers = reorderedFollowers(plans, q.id, after, now());
     for (const [id, p] of followers) this.store.writePlan(id, p);
@@ -225,8 +225,7 @@ export class Scheduler {
    */
   cancelStart(queueId: string, by: PlanBy = "user"): string {
     const start = this.store.readStart(queueId);
-    const raw = this.store.readPlan(queueId);
-    const plan = raw && !raw.started_at ? raw : undefined;
+    const plan = openPlanFile(this.store.readPlan(queueId));
     if (!start && !plan) throw new ActionError(`queue ${queueId} has no planned start`, 409);
     const mine = plan ? plan.after.filter((e) => e.by === "user").map((e) => e.queue) : [];
     if (by === "orchestrator" && plan && (mine.length || plan.by === "user")) {
@@ -270,9 +269,7 @@ export class Scheduler {
     // Most projects have nothing planned: only one that has is read whole. A used plan, kept for the view, plans nothing.
     const planned = (id: string) => {
       try {
-        if (this.store.readStart(id)) return true;
-        const plan = this.store.readPlan(id);
-        return !!plan && !plan.started_at;
+        return !!this.store.readStart(id) || !!openPlanFile(this.store.readPlan(id));
       } catch { return false; }
     };
     if (!this.store.queueIds().some(planned)) return [];
@@ -280,7 +277,7 @@ export class Scheduler {
     const t = this.timers.clock.now();
     const out: { queue: string; created_at: string }[] = [];
     for (const q of state.queues) {
-      const plan = q.plan && !q.plan.used ? q.plan : undefined;
+      const plan = openPlan(q);
       const start = q.start;
       if ((!plan && !start) || start?.failed) continue;
       const due = (!plan || plan.ready) && (!start?.at || t >= Date.parse(start.at));
@@ -304,7 +301,7 @@ export class Scheduler {
     if (this.deps.stopped() || this.deps.draining()) return false;
     const state = loadProjectState(this.store);
     const q = state.queues.find((x) => x.id === queueId);
-    const plan = q?.plan && !q.plan.used ? q.plan : undefined;
+    const plan = q && openPlan(q);
     const start = q?.start;
     if (!q || (!plan && !start) || start?.failed) return false;
     if (plan && !plan.ready) return false;

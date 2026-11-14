@@ -6,7 +6,7 @@ import { awayAt, awayNow, type AwayNow } from "./away.ts";
 import { ENDED_RUN_STATES, HOLDING_RUN_STATES, formatClock, type Segment } from "./times.ts";
 import { stopPlace } from "./attention.ts";
 import { closingStepId, stepDefs } from "./closing.ts";
-import { planView, proposalText, type PlanView } from "./plan.ts";
+import { openPlan, planView, proposalText, type PlanView } from "./plan.ts";
 
 import type { CheckView } from "./steps.ts";
 export interface AnswerView { id: string; text: string; at: string; escalate?: boolean; continue?: boolean; session: string; by: "orchestrator" | "user" }
@@ -354,7 +354,7 @@ export function loadProjectState(store: ProjectStore): ProjectState {
  * the limit, the session to continue busy.
  */
 function startWait(plan: StartFile, q: QueueView, queues: QueueView[]): { waiting: string; blocked: boolean } {
-  const p = q.plan && !q.plan.used ? q.plan : undefined;
+  const p = openPlan(q);
   if (p && !p.ready) return { waiting: p.waiting, blocked: p.blocked };
   const done = p?.after.length ? `${p.after.map((e) => e.waiting).join("; ")}; ` : "";
   if (plan.held) return { waiting: `${done}${plan.held.reason}`, blocked: false };
@@ -390,13 +390,14 @@ function attentionOf(queues: QueueView[], questions: QuestionView[]): AttentionI
     else if (q.run?.state === "approval_wait" && !q.approved) {
       out.push({ kind: "approval", queue: q.id, text: `The run waits for approval of revision ${q.revision}${q.run.step ? ` after step ${q.run.step}` : ""}; it goes on by itself once you approve`, at: q.run.updated_at });
     }
-    if (q.plan && !q.plan.used && q.status !== "done" && q.status !== "cancelled") {
-      if (q.plan.proposal) {
-        out.push({ kind: "plan", queue: q.id, text: proposalText(q.id, q.plan), at: q.plan.proposal.at,
-          plan: { proposal: { after: q.plan.proposal.after, reason: q.plan.proposal.reason, current: q.plan.after.map((e) => e.queue) } } });
+    const plan = openPlan(q);
+    if (plan && q.status !== "done" && q.status !== "cancelled") {
+      if (plan.proposal) {
+        out.push({ kind: "plan", queue: q.id, text: proposalText(q.id, plan), at: plan.proposal.at,
+          plan: { proposal: { after: plan.proposal.after, reason: plan.proposal.reason, current: plan.after.map((e) => e.queue) } } });
       }
-      for (const e of q.plan.after) {
-        if (e.cause) out.push({ kind: "plan", queue: q.id, text: `Queue ${q.id} waits, but ${e.waiting}`, at: q.plan.updated_at, plan: { predecessor: e.queue, cause: e.cause } });
+      for (const e of plan.after) {
+        if (e.cause) out.push({ kind: "plan", queue: q.id, text: `Queue ${q.id} waits, but ${e.waiting}`, at: plan.updated_at, plan: { predecessor: e.queue, cause: e.cause } });
       }
     }
     if (q.start?.failed) {

@@ -4,7 +4,7 @@
 // drafts under .nexus/drafts/: permission mode dontAsk with a read-only allow list plus the drafts rules.
 import { randomUUID } from "node:crypto";
 import {
-  ActionError, ClaudeEffort, HOLDING_RUN_STATES, ProjectStore, applyDraft, inPlan, loadProjectState, proposePlan, readAway, orchestratorStatusChange, newId, now, sendBack, type ChatEntry, type Event, type ProjectState, type SessionFile,
+  ActionError, ClaudeEffort, HOLDING_RUN_STATES, ProjectStore, applyDraft, inPlan, loadProjectState, openPlan, proposePlan, readAway, orchestratorStatusChange, newId, now, sendBack, type ChatEntry, type Event, type ProjectState, type SessionFile,
 } from "@nexus/protocol";
 import type { AgentProcess } from "./agent.ts";
 import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Launch } from "./agent-host.ts";
@@ -427,8 +427,9 @@ ${n.text}` });
       }
       // The plan: a planned queue whose predecessor is stopped, cancelled or gone waits (the user has it in their list);
       // the user's answers to proposals and the dependencies handed back. Each told once.
-      if (q.plan && !q.plan.used && q.status !== "done" && q.status !== "cancelled") {
-        for (const e of q.plan.after) if (e.cause) items.push({ key: `notify:planheld:${q.id}:${e.queue}:${e.cause}`, ...planHeldNotice(q, e) });
+      const plan = openPlan(q);
+      if (plan && q.status !== "done" && q.status !== "cancelled") {
+        for (const e of plan.after) if (e.cause) items.push({ key: `notify:planheld:${q.id}:${e.queue}:${e.cause}`, ...planHeldNotice(q, e) });
       }
       q.plan?.decisions.forEach((d, i) => {
         if (d.at < since) return;

@@ -9,7 +9,7 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import {
   CHECKOUT_RUN_STATES, ENDED_RUN_STATES, HOLDING_RUN_STATES,
-  ActionError, ProjectStore, USER_SESSION, ensureUserSession, liftByContinue, loadProjectState, releaseOrphanedSteps, stepClosed, reportFile, ensureReportFolder, newId, normPath, now, readUsage,
+  ActionError, ProjectStore, USER_SESSION, ensureUserSession, liftByContinue, loadProjectState, openPlanFile, releaseOrphanedSteps, stepClosed, reportFile, ensureReportFolder, newId, normPath, now, readUsage,
   RETRY_LIMIT, effortIssue, formatClock, type Effort, type ProjectFile, type StepDef, type ProjectState, type QueueView, type RunFile, type SessionFile,
   type SessionView, type StepView, type PlanBy,
   addNote,
@@ -230,8 +230,8 @@ export class Engine implements Member {
     this.store.writeRun(queueId, run);
     this.store.clearStart(queueId); // a planned start is used up by any start
     // The plan stays, used: the queue started since it was planned (a proposal about it is moot).
-    const plan = this.store.readPlan(queueId);
-    if (plan && !plan.started_at) this.store.writePlan(queueId, { ...plan, started_at: now(), proposal: undefined });
+    const plan = openPlanFile(this.store.readPlan(queueId));
+    if (plan) this.store.writePlan(queueId, { ...plan, started_at: now(), proposal: undefined });
     this.scheduler.disarm(queueId);
     this.ensureProcess(session);
     this.advance(queueId);

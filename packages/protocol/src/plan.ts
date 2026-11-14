@@ -74,12 +74,21 @@ export function planView(project: Pick<ProjectFile, "defaults">, q: Pick<QueueVi
   };
 }
 
-/** The queue's plan counts: it is planned and has not started since. */
-export const inPlan = (q: Pick<QueueView, "plan" | "start">): boolean => (!!q.plan && !q.plan.used) || !!q.start;
+/** The queue's plan while it counts: planned and not started since (a used plan stays only for the view). */
+export const openPlan = (q: Pick<QueueView, "plan">): PlanView | undefined => (q.plan && !q.plan.used ? q.plan : undefined);
+
+/** A plan file while it counts: the queue has not started since it was planned. */
+export const openPlanFile = (p: PlanFile | undefined): PlanFile | undefined => (p && !p.started_at ? p : undefined);
+
+/** The queue is in the plan: its plan counts, or it has a planned start. */
+export const inPlan = (q: Pick<QueueView, "plan" | "start">): boolean => !!openPlan(q) || !!q.start;
 
 /** The unused plans' predecessors, by queue: what the loop check follows. */
 export function planEdges(state: Pick<ProjectState, "queues">): Map<string, string[]> {
-  return new Map(state.queues.filter((q) => q.plan && !q.plan.used).map((q) => [q.id, q.plan!.after.map((e) => e.queue)]));
+  return new Map(state.queues.flatMap((q) => {
+    const plan = openPlan(q);
+    return plan ? [[q.id, plan.after.map((e) => e.queue)] as const] : [];
+  }));
 }
 
 /**
@@ -139,7 +148,7 @@ export function droppedUserEntries(plan: Pick<PlanFile, "after" | "started_at"> 
  * is history: a new plan starts afresh.
  */
 export function planEntries(old: PlanFile | undefined, queue: string, after: readonly string[], by: PlanBy, reason: string | undefined, at: string): PlanEntry[] {
-  const live = old && !old.started_at ? old : undefined;
+  const live = openPlanFile(old);
   if (by === "orchestrator") {
     const dropped = droppedUserEntries(live, after);
     if (dropped.length) {
@@ -156,7 +165,7 @@ export function planEntries(old: PlanFile | undefined, queue: string, after: rea
 /** A plan file for `queue` with predecessors `after` set by `by` (planEntries' rule), replacing `old`. */
 export function newPlan(old: PlanFile | undefined, queue: string, after: readonly string[], o: { by: PlanBy; reason?: string; at?: string }): PlanFile {
   const at = o.at ?? now();
-  const live = old && !old.started_at ? old : undefined;
+  const live = openPlanFile(old);
   const entries = planEntries(old, queue, after, o.by, o.reason, at);
   // The user's own plan: put in by the user. The orchestrator's: by whoever put it in first, while it is unused.
   const by: PlanBy = o.by === "user" ? "user" : live?.by ?? "orchestrator";
