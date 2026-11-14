@@ -32,11 +32,11 @@ export async function cancelPlan(): Promise<void> {
 }
 
 /**
- * The plan as a card: the rail and the Waiting tab frame it; the settings show it as it is (`framed` false). `names`:
- * the projects' names by id, where known.
+ * The plan as a card: the rail and the Waiting tab frame it; the settings show it as it is (`framed` false).
+ * `projects`: where known, to show the target project's name rather than its id.
  */
-export function PlannedDeployCard({ plan, onChanged, framed = true, names }: {
-  plan: PlannedDeploy; onChanged: () => void; framed?: boolean; names?: ReadonlyMap<string, string>;
+export function PlannedDeployCard({ plan, onChanged, framed = true, projects }: {
+  plan: PlannedDeploy; onChanged: () => void; framed?: boolean; projects?: readonly { id: string; name: string }[];
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
@@ -58,7 +58,7 @@ export function PlannedDeployCard({ plan, onChanged, framed = true, names }: {
         {a ? (
           <button onClick={() => nav.item(a.project, a.queue, a.step)} className="font-medium hover:underline" title={t("deploy.openTarget")}>{target}</button>
         ) : <span className="font-medium" title={formatDateTime(plan.at!)}>{target}</span>}
-        {a && <span className="text-fg-3"> · {names?.get(a.project) ?? a.project}</span>}
+        {a && <span className="text-fg-3"> · {projects?.find((p) => p.id === a.project)?.name ?? a.project}</span>}
       </div>
       {plan.at && (
         <p className="mt-0.5 text-xs text-fg-2">

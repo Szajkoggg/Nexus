@@ -253,7 +253,7 @@ export function App() {
 
         <main className={scrolls ? "@container scroll-thin min-h-0 flex-1 overflow-y-auto px-4 py-4" : "flex min-h-0 flex-1 flex-col"}>
           {scrolls && banners}
-          {tab === "waiting" && server?.plan && <div className="mb-4"><PlannedDeployCard plan={server.plan} onChanged={() => setTick((n) => n + 1)} names={new Map((projects ?? []).map((p) => [p.id, p.name]))} /></div>}
+          {tab === "waiting" && server?.plan && <div className="mb-4"><PlannedDeployCard plan={server.plan} onChanged={() => setTick((n) => n + 1)} projects={projects} /></div>}
           {tab === "waiting" && <div className="mb-4 empty:hidden">{digest}</div>}
           {tab === "waiting" && <WaitingList projects={projects ?? []} onOpen={openWaiting} onChoose={(w, o) => { if (w.qid) chooseOption(w.qid, o); openWaiting(w); }} />}
           {tab === "queues" && queuesPage}

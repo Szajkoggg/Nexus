@@ -42,7 +42,7 @@ export function Rail({ projects, state, queuesShown, onOpenWaiting, onClose, dig
     <div className="flex h-full min-h-0 flex-col" aria-label={t("rail.label")}>
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-3 pb-4">
         {state?.away.on && <div className="mt-3 rounded-lg border border-review/30 bg-review/5 px-3 py-2"><AwaySign away={state.away} long /></div>}
-        {plan && <div className="mt-3"><PlannedDeployCard plan={plan} onChanged={onChanged ?? (() => {})} names={new Map(projects.map((p) => [p.id, p.name]))} /></div>}
+        {plan && <div className="mt-3"><PlannedDeployCard plan={plan} onChanged={onChanged ?? (() => {})} projects={projects} /></div>}
         {digest && <div className="pt-3 empty:hidden">{digest}</div>}
         <div className="flex items-center gap-2 px-1 pb-2.5 pt-4">
           <Label tone="text-warn">{t("waiting.titleCount", { count: waiting })}</Label>
