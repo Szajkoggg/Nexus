@@ -139,6 +139,7 @@ export function WaitingList({ projects, onOpen, onChoose }: {
                   <button key={o} onClick={() => onChoose(a, o)} title={t("waiting.chooseTitle")}
                     className="min-h-11 min-w-[40%] flex-1 rounded-md border border-line-strong bg-surface-2 px-3 py-2 text-sm font-medium text-fg hover:bg-surface-3">
                     {i + 1} · {o}
+                    {a.recommended === o && <span className="ml-1.5 text-accent" aria-label={t("waiting.recommended")} title={t("waiting.recommended")}>✓</span>}
                   </button>
                 ))}
               </div>

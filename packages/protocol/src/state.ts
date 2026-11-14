@@ -9,6 +9,11 @@ export interface CheckView { name: string; ok: boolean; summary?: string; at: st
 export interface AnswerView { id: string; text: string; at: string; escalate?: boolean; continue?: boolean; session: string; by: "orchestrator" | "user" }
 export interface QuestionView {
   qid: string; session: string; queue?: string; step?: string; text: string; options?: string[];
+  /**
+   * The recommended option: the orchestrator's from its escalation, else the asker's. Only ever one of `options`
+   * (another is dropped with a warning).
+   */
+  recommended?: string;
   can_continue: boolean; asked_at: string;
   state: "open" | "answered" | "escalated" | "withdrawn";
   answers: AnswerView[];
@@ -21,6 +26,8 @@ export interface AttentionItem {
   text: string; at?: string;
   /** A question's options, as the worker gave them (the waiting list shows them as buttons). */
   options?: string[];
+  /** The option recommended to the user (its button is marked). */
+  recommended?: string;
   /**
    * A stopped queue's ways out (kind `stopped` of a queue whose status is stopped, not a halted run): `place` is where
    * the stop is (stopPlace); `continue`: the current revision is approved, so Continue lifts it (else approving the
@@ -316,7 +323,7 @@ function attentionOf(queues: QueueView[], questions: QuestionView[]): AttentionI
   for (const x of questions) {
     if (x.state !== "open" && x.state !== "escalated") continue;
     const by = x.answers.at(-1);
-    out.push({ kind: "question", queue: x.queue, step: x.step, qid: x.qid, text: x.text, at: by?.at ?? x.asked_at, ...(x.options?.length ? { options: x.options } : {}) });
+    out.push({ kind: "question", queue: x.queue, step: x.step, qid: x.qid, text: x.text, at: by?.at ?? x.asked_at, ...(x.options?.length ? { options: x.options } : {}), ...(x.recommended ? { recommended: x.recommended } : {}) });
   }
   for (const q of queues) {
     // A finished queue does not wait for the user, whatever its last run says (a halt after its last step is done,
@@ -478,8 +485,11 @@ function apply(
     }
     case "question.asked": {
       const q = queueOf(e.queue); const st = stepOf(q, e.step);
+      const recommended = e.recommended === undefined ? undefined : e.options?.includes(e.recommended) ? e.recommended : undefined;
+      if (e.recommended !== undefined && !recommended) warnings.push(`question ${e.qid}: the recommendation "${e.recommended}" is not one of its options; ignored`);
       questions.set(e.qid, {
         qid: e.qid, session: e.session, queue: e.queue, step: e.step, text: e.text, options: e.options,
+        ...(recommended ? { recommended } : {}),
         can_continue: e.can_continue, asked_at: e.at, state: "open", answers: [],
       });
       if (!e.can_continue && st && st.status === "running") st.status = "waiting";
@@ -499,6 +509,11 @@ function apply(
         by: s?.role === "user" ? "user" : "orchestrator",
       });
       x.state = e.escalate ? "escalated" : "answered";
+      // The orchestrator's recommendation, passing the question on, replaces the asker's.
+      if (e.escalate && e.recommended !== undefined) {
+        if (x.options?.includes(e.recommended)) x.recommended = e.recommended;
+        else warnings.push(`answer ${e.id}: the recommendation "${e.recommended}" is not one of question ${e.qid}'s options; ignored`);
+      }
       if (!e.escalate) resume(x, queues, e);
       return;
     }

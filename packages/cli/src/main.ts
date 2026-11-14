@@ -7,7 +7,7 @@ import { parseArgs } from "node:util";
 import { execFileSync } from "node:child_process";
 import {
   Event, HOLDING_RUN_STATES, ProjectStore, findNexusDir, inReportFolder, loadProjectState, stepValuesText, stopPlace, newId, normPath, now, readRegistry, writeRegistry,
-  PICTURE_ROLES, REVIEW_HELP, checkPicture, pictureSize,
+  PICTURE_ROLES, REVIEW_HELP, checkPicture, pictureSize, recommendedOption,
   type PictureRole, type ReviewItem, type Role, type Runtime, type SessionFile,
 } from "@nexus/protocol";
 import { importMarkdownQueues } from "./import-md.ts";
@@ -28,12 +28,12 @@ Agent commands (session from NEXUS_SESSION or --session):
                     Read nexus help review before preparing review material.
   nexus check <step> <name> --ok|--fail [--summary <text>]
   nexus stop <step> --condition <text> --reason <text>
-  nexus ask <text> [--step <step>] [--option <text>]... [--can-continue]
+  nexus ask <text> [--step <step>] [--option <text>]... [--recommend <option>] [--can-continue]
   nexus withdraw <qid> --reason <text>
   nexus context <text|-> [--topics a,b] [--files a,b] [--step <step>]
   nexus report <queue> --file <path> --summary <text>
   nexus log <text> [--level info|warn|error]
-  nexus answer <qid> <text> [--escalate] [--continue|--wait]     (orchestrator only)
+  nexus answer <qid> <text> [--escalate [--recommend <option>]] [--continue|--wait]     (orchestrator only)
   nexus queue draft <file.yaml|->                                 (orchestrator only) create or change a queue
   nexus review accept <queue> <step> [--note <text>]             (orchestrator only) a step waiting for your review
   nexus review send-back <queue> <step> <what to fix>             (orchestrator only) back to its worker
@@ -71,7 +71,7 @@ const { values: o, positionals: args } = parseArgs({
     summary: { type: "string" }, commit: { type: "string" }, reason: { type: "string" },
     condition: { type: "string" }, pct: { type: "string" }, label: { type: "string" },
     kind: { type: "string" }, round: { type: "string" }, ok: { type: "boolean" }, fail: { type: "boolean" },
-    option: { type: "string", multiple: true }, "can-continue": { type: "boolean" },
+    option: { type: "string", multiple: true }, "can-continue": { type: "boolean" }, recommend: { type: "string" },
     "use-session": { type: "string" }, model: { type: "string" }, effort: { type: "string" }, after: { type: "string" }, at: { type: "string" },
     topics: { type: "string" }, files: { type: "string" }, file: { type: "string" }, level: { type: "string" },
     escalate: { type: "boolean" }, continue: { type: "boolean" }, wait: { type: "boolean" },
@@ -83,6 +83,10 @@ const { values: o, positionals: args } = parseArgs({
 });
 
 class UsageError extends Error {}
+/** A recommendation checked against the question's options (its text or number), as the option's text. */
+const recommendation = (options: readonly string[] | undefined, given: string): string => {
+  try { return recommendedOption(options, given); } catch (e) { throw new UsageError((e as Error).message); }
+};
 const need = <T>(v: T | undefined, what: string): T => {
   if (v === undefined || v === "") throw new UsageError(`missing ${what}`);
   return v;
@@ -472,8 +476,9 @@ const commands: Record<string, () => void | Promise<void>> = {
     let queue: string | undefined;
     try { queue = queueFor(st, s, step); } catch { queue = undefined; }
     if (queue && step) checkStep(st, queue, step);
+    const recommended = o.recommend === undefined ? undefined : recommendation(o.option, o.recommend);
     const qid = newId();
-    emit(st, s, { type: "question.asked", queue, step, qid, text, options: o.option, can_continue: !!o["can-continue"] });
+    emit(st, s, { type: "question.asked", queue, step, qid, text, options: o.option, recommended, can_continue: !!o["can-continue"] });
     console.log(`ok: question ${qid} sent to the orchestrator.${o["can-continue"] ? " Go on with independent work meanwhile." : " Wait for the answer (nexus status shows it)."}`);
   },
 
@@ -559,9 +564,17 @@ const commands: Record<string, () => void | Promise<void>> = {
     const st = store(); const s = session(st);
     if (s.role !== "orchestrator") throw new UsageError("only an orchestrator session may answer questions");
     if (o.continue && o.wait) throw new UsageError("give at most one of --continue or --wait");
+    const qid = need(args[1], "<qid>");
+    let recommended: string | undefined;
+    if (o.recommend !== undefined) {
+      if (!o.escalate) throw new UsageError("--recommend goes with --escalate: it is your recommendation to the user");
+      const q = loadProjectState(st).questions.find((x) => x.qid === qid);
+      if (!q) throw new UsageError(`no question ${qid} in this project`);
+      recommended = recommendation(q.options, o.recommend);
+    }
     emit(st, s, {
-      type: "answer.given", qid: need(args[1], "<qid>"), text: readText(need(args[2], "<text>")),
-      escalate: o.escalate, continue: o.continue ? true : o.wait ? false : undefined,
+      type: "answer.given", qid, text: readText(need(args[2], "<text>")),
+      escalate: o.escalate, continue: o.continue ? true : o.wait ? false : undefined, recommended,
     });
     console.log(o.escalate ? "ok: escalated to the user" : "ok: answered");
   },

@@ -438,11 +438,15 @@ export const Event = z.discriminatedUnion("type", [
   z.object({
     ...base, type: z.literal("question.asked"), queue: Id.optional(), step: Id.optional(),
     qid: Id, text: z.string(), options: z.array(z.string()).optional(), can_continue: z.boolean(),
+    /** The asker's recommendation: one of `options` (nexus ask --recommend). */
+    recommended: z.string().optional(),
   }),
   z.object({ ...base, type: z.literal("question.withdrawn"), qid: Id, reason: z.string() }),
   z.object({
     ...base, type: z.literal("answer.given"), qid: Id, text: z.string(),
     escalate: z.boolean().optional(), continue: z.boolean().optional(),
+    /** With `escalate`: the orchestrator's recommendation to the user, one of the question's options. */
+    recommended: z.string().optional(),
   }),
   z.object({ ...base, type: z.literal("note.read"), note: Id }),
   z.object({ ...base, type: z.literal("message.read"), message: Id }),

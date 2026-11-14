@@ -14,7 +14,10 @@ test("the step summary's shape: the worker writes it, the orchestrator reads it 
 });
 
 test("the question's shape: the worker asks so, the orchestrator reads and escalates so", () => {
-  has(WORKER_BRIEFING, "A question (nexus ask) has three: what it blocks; the options; your recommendation.", "`nexus help questions`");
+  has(WORKER_BRIEFING, "A question (nexus ask) has three: what it blocks; the options (--option, one each); your recommendation (--recommend names the option, the text says why).", "`nexus help questions`");
+  // The recommendation as a structured value (queue QR): the worker's ask and the orchestrator's escalation name it.
+  has(WORKER_BRIEFING, "[--recommend \"<option>\"]");
+  has(orchestrator, "--escalate [--recommend \"<option>\"]", "the user sees its button marked");
   has(orchestrator, "a question three (what it blocks; the options; the worker's recommendation)", "When you escalate a question, keep the same shape: your framing, the options, your recommendation.", "`nexus help questions`");
 });
 

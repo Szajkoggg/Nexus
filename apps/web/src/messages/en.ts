@@ -121,6 +121,7 @@ export const en = {
   "waiting.kind.start": "Did not start",
   "waiting.liftProposal": "The orchestrator proposes to continue",
   "waiting.chooseTitle": "Opens the question with this option chosen; you confirm there",
+  "waiting.recommended": "recommended",
 
   // ---------------------------------------------------------------- notifications
   "notify.notification": "{project}: {kind}",
@@ -575,6 +576,7 @@ export const en = {
   "details.question.orchestrator": "Orchestrator:",
   "details.question.options": "Options",
   "details.question.chosen": "chosen",
+  "details.question.recommended": "recommended",
   "details.answer.empty": "Choose an option or write your answer.",
   "details.answer.addWords": "Add words to your answer (optional)…",
   "details.answer.ownWords": "Or answer in your own words…",

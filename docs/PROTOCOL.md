@@ -419,9 +419,9 @@ Every line:
 | `step.done` | `queue`, `step`, `summary`, `commit?`, `warning?` | Acceptance met; the step's work is finished. `warning`: what `nexus step done` warned about at the step's end (see the CLI) |
 | `step.failed` | `queue`, `step`, `reason` | The step cannot be finished as written |
 | `queue.stop` | `queue`, `step`, `condition`, `reason` | A stop condition was met; the engine halts the queue |
-| `question.asked` | `queue?`, `step?`, `qid`, `text`, `options?`, `can_continue` | A question; `can_continue` says whether independent work remains |
+| `question.asked` | `queue?`, `step?`, `qid`, `text`, `options?`, `recommended?`, `can_continue` | A question; `can_continue` says whether independent work remains; `recommended`: the asker's recommendation, one of `options` (the CLI refuses another; the state drops it with a warning) |
 | `question.withdrawn` | `qid`, `reason` | No longer needed |
-| `answer.given` | `qid`, `text`, `escalate?` | Orchestrator only: an answer, or an escalation to the user with its framing |
+| `answer.given` | `qid`, `text`, `escalate?`, `recommended?` | Orchestrator only: an answer, or an escalation to the user with its framing. With `escalate`, `recommended` is the orchestrator's recommendation, one of the question's options; it replaces the asker's on the derived question (`QuestionView.recommended`, and the waiting item's `recommended`), whose button the dashboard marks |
 | `note.read` | `note` | A note was received |
 | `message.read` | `message` | An inbox message was received |
 | `context.summary` | `text`, `topics: []`, `files: []` | What a successor or continuation needs to know; written at the end of each step |
@@ -708,13 +708,15 @@ nexus check W3 core-tests --ok --summary "548 passed"
 nexus step done W3 --summary "No floating body on any fixture" [--commit 1a2b3c]   # warns at an unclean end
 nexus step failed W3 --reason "..."
 nexus stop W3 --condition "user decision" --reason "..."
-nexus ask "Canyon joints: vertical only, or also inclined?" [--option ...] [--can-continue]
+nexus ask "Canyon joints: vertical only, or also inclined?" [--option ...] [--recommend <option>] [--can-continue]
+                                               # --recommend: one of the --option values, by text or number (1 = first)
 nexus context --topics rock,support --files Runtime/Core/Rock/* <<< "summary text"
 nexus report W --file <temp>/nexus-reports/<project>/W.md --summary "..."   # copied to .nexus/queues/W/report.md
 nexus propose-change W --file patch.yaml --reason "..."
 # orchestrator only
 nexus queue draft --file queue.yaml
-nexus answer <qid> "..." [--escalate] [--continue|--wait]
+nexus answer <qid> "..." [--escalate [--recommend <option>]] [--continue|--wait]
+                                               # --recommend only with --escalate: one of the question's options
 nexus session start|resume|fork|pause|stop ...
 nexus attach                                   # register a hand-started session as external
 # setup (the user)

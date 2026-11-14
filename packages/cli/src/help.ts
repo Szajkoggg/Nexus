@@ -119,12 +119,13 @@ A question (nexus ask) goes to the orchestrator, which answers what is settled a
 Ask so that either can decide in one go. Three parts:
   1. What it blocks: what you cannot do, or would do differently, until it is answered (the step, the part of it).
   2. The options: the ways you see, each with what it means for the work (also with --option <text>, one each).
-  3. Your recommendation: which option you would take, and why.
+  3. Your recommendation: which option you would take, and why. Name it with --recommend <option> (its text or its
+     number), which must be one of the --option values: the user sees that option's button marked as recommended.
 Ask only what the step, the project's rules and its notes do not settle. Without --can-continue, end your turn
 after asking: the answer arrives as a message. With --can-continue, go on with work the answer does not touch.
 
 Example:
-  nexus ask --step W3 --option "vertical joints only" --option "vertical and inclined" "Blocks: the canyon joints of
+  nexus ask --step W3 --option "vertical joints only" --option "vertical and inclined" --recommend 1 "Blocks: the canyon joints of
   W3's fixture 4. Options: vertical only (simpler, matches the sketches) or also inclined (truer to the geology,
   two more days). I recommend vertical only, since the sketches show no inclined joints."
 `,

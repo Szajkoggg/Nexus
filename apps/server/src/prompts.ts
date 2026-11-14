@@ -48,12 +48,12 @@ Report through the \`nexus\` command (on PATH; your session is set in the enviro
 - nexus step done <step> --summary "..." [--commit <sha>]   when the acceptance criteria are met
 - nexus step failed <step> --reason "..."                   when the step cannot be done as written
 - nexus stop <step> --condition "..." --reason "..."        when a stop condition is met (first commit what is consistent, see below)
-- nexus ask "<question>" --step <step> [--can-continue]     a question for the orchestrator or the user; without --can-continue, end your turn after asking: the answer arrives as a message
+- nexus ask "<question>" --step <step> [--option "..."]... [--recommend "<option>"] [--can-continue]   a question for the orchestrator or the user; give the options with --option (one each) and name the one you recommend with --recommend (its text or number); without --can-continue, end your turn after asking: the answer arrives as a message
 - nexus context "<what a successor needs to know>" --topics a,b --files x,y   at the end of each step
 Review material follows Nexus's standard: read \`nexus help review\` before you prepare it. In short: every picture has a view key naming what it shows, in which state, at which window width (waiting-tab@492), and a role: before (the old state), mockup (the design), after (the new state), variant-a / variant-b (alternatives), result (a new view with nothing to compare). Only pictures with the same key pair, so a before and its after are taken the same way: fixed-viewport captures with the same window size, data and state. Add befores and mockups before their afters. Nexus refuses a wrong pair and says why; the label is only a caption.
 Nexus's standards for the rest (the full texts: \`nexus help summaries\`, \`nexus help questions\`, \`nexus help refusals\`, \`nexus help commits\`):
 - A step summary (nexus step done --summary) has four parts: what changed; how it was verified; what was left out or differs from the plan; what comes next, if anything.
-- A question (nexus ask) has three: what it blocks; the options; your recommendation.
+- A question (nexus ask) has three: what it blocks; the options (--option, one each); your recommendation (--recommend names the option, the text says why).
 - When an action is refused, do not work around it through another tool or command that reaches the same end (PowerShell after Bash, the shell after the edit tool); retry once in a simpler form at most (without chaining, for example), otherwise report what you needed and why.
 - Leave the working tree clean at every step's end, not only at a stop: commit everything the step did (only its own files, by name) and name the commit with nexus step done --commit, so every commit belongs to exactly one step.
 Messages from the user may arrive while you work, marked [Nexus]; follow them.
@@ -192,7 +192,7 @@ Commands (\`nexus\` is on PATH; your session is set in the environment):
 - nexus run <queue> cancel-start --reason "..."   cancel the queue's planned start (a chain or a schedule)
 - nexus run <queue> pause|resume|stop --reason "..."
 - nexus answer <qid> "<answer>" [--continue|--wait]            answer a worker's question whose answer is already settled
-- nexus answer <qid> "<framing, options, recommendation>" --escalate   pass it to the user
+- nexus answer <qid> "<framing, options, recommendation>" --escalate [--recommend "<option>"]   pass it to the user; when the question has options, name the one you recommend with --recommend (one of its options, by text or number): the user sees its button marked
 - nexus review accept <queue> <step> [--note "..."]   accept a step waiting for your review; the run goes on (with the project's push_accepted on, Nexus pushes the commit the step was reviewed at; never push yourself)
 - nexus review send-back <queue> <step> "what to fix"   send it back to its worker, as the step's next round in the same session (beyond the project's limit of send-backs per step, 2 by default, the step goes to the user instead)
 - nexus review ask-user <queue> <step> "why"      hand its review to the user
@@ -357,7 +357,8 @@ export function questionNotice(x: QuestionView): Notice {
   return {
     fact: `A worker asked a question${x.queue ? ` in queue ${x.queue}${x.step ? `, step ${x.step}` : ""}` : ""} (qid ${x.qid}; ${x.can_continue ? "it goes on meanwhile" : "it waits for the answer"}):
 ${x.text}${x.options?.length ? `
-Options: ${x.options.join(" / ")}` : ""}`,
+Options: ${x.options.map((o, i) => `${i + 1}. ${o}`).join(" / ")}${x.recommended ? `
+The worker recommends: ${x.recommended}` : ""}` : ""}`,
     todo: "Answer it if the answer is settled, otherwise escalate it to the user.",
   };
 }

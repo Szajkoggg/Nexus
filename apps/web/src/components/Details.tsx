@@ -467,7 +467,8 @@ function QuestionSheet({ q, project, onChanged, children }: { q: QuestionView; p
                 className={`flex min-h-12 w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left text-[15px] text-fg ${choice === o ? "border-accent bg-accent/10 ring-1 ring-accent" : "border-line-strong bg-surface-2 hover:bg-surface-3"}`}>
                 <span className={`grid h-6 w-6 shrink-0 place-items-center rounded-md text-xs ${choice === o ? "bg-accent-strong text-on-accent" : "bg-surface-3 text-fg-2"}`}>{i + 1}</span>
                 <span className="min-w-0 flex-1">{o}</span>
-                {choice === o && <span className="shrink-0 text-xs text-accent">{t("details.question.chosen")}</span>}
+                {q.recommended === o && <span className="shrink-0 text-xs text-accent">{t("details.question.recommended")}</span>}
+                {choice === o && <span className="shrink-0 text-xs text-accent">{q.recommended === o ? "· " : ""}{t("details.question.chosen")}</span>}
               </button>
             ))}
           </div>
@@ -939,7 +940,11 @@ export function Question({ q, project, onChanged, inBar }: { q: QuestionView; pr
         <span className="ml-auto"><TimeAgo at={q.asked_at} /></span>
       </div>
       <p className="text-fg">{q.text}</p>
-      {q.options && <ul className="mt-1 list-disc pl-5 text-fg-2">{q.options.map((o) => <li key={o}>{o}</li>)}</ul>}
+      {q.options && (
+        <ul className="mt-1 list-disc pl-5 text-fg-2">
+          {q.options.map((o) => <li key={o}>{o}{q.recommended === o && <span className="ml-2 text-xs text-accent">{t("details.question.recommended")}</span>}</li>)}
+        </ul>
+      )}
       {q.answers.map((a) => (
         <div key={a.id} className="mt-2 border-t border-line pt-2 text-fg">
           <span className="text-fg-3">{a.escalate ? t("details.question.passedBy") : t("details.question.answerBy", { by: a.by })} </span>

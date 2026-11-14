@@ -27,7 +27,7 @@ Tell the user the update is done.
 -- to orchestrator 1
 [Nexus] A worker asked a question in queue QA, step A1 (qid q-1; it goes on meanwhile):
 Which layout?
-Options: grid / list Answer it if the answer is settled, otherwise escalate it to the user.
+Options: 1. grid / 2. list Answer it if the answer is settled, otherwise escalate it to the user.
 -- to orchestrator 1
 [Nexus] A worker asked a question (qid q-2; it waits for the answer):
 May I delete the old file? Answer it if the answer is settled, otherwise escalate it to the user.
@@ -155,7 +155,7 @@ Commands (`nexus` is on PATH; your session is set in the environment):
 - nexus run <queue> cancel-start --reason "..."   cancel the queue's planned start (a chain or a schedule)
 - nexus run <queue> pause|resume|stop --reason "..."
 - nexus answer <qid> "<answer>" [--continue|--wait]            answer a worker's question whose answer is already settled
-- nexus answer <qid> "<framing, options, recommendation>" --escalate   pass it to the user
+- nexus answer <qid> "<framing, options, recommendation>" --escalate [--recommend "<option>"]   pass it to the user; when the question has options, name the one you recommend with --recommend (one of its options, by text or number): the user sees its button marked
 - nexus review accept <queue> <step> [--note "..."]   accept a step waiting for your review; the run goes on (with the project's push_accepted on, Nexus pushes the commit the step was reviewed at; never push yourself)
 - nexus review send-back <queue> <step> "what to fix"   send it back to its worker, as the step's next round in the same session (beyond the project's limit of send-backs per step, 2 by default, the step goes to the user instead)
 - nexus review ask-user <queue> <step> "why"      hand its review to the user
