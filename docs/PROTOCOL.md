@@ -314,7 +314,7 @@ Every line:
 |---|---|---|
 | `step.started` | `queue`, `step` | The worker begins the step |
 | `step.progress` | `queue`, `step`, `text`, `pct?` | A short status line for the dashboard |
-| `review.added` | `queue`, `step`, `items: [{path or url, label, kind?, before?}]`, `round?` | Review material, `kind` = image, sheet, doc, data, link; `before`: the path of the picture this one is compared with (see "Review pictures") |
+| `review.added` | `queue`, `step`, `items: [{path or url, label, kind?, before?, key?, role?, size?}]`, `round?` | Review material, `kind` = image, sheet, doc, data, link; `before`: the path of the picture this one is compared with; `key` (a view key), `role` (before, mockup, after, variant-a, variant-b, result) and `size` (`width`, `height` in pixels): a keyed picture, always with its `round` (see "Review pictures") |
 | `review.marked` | `queue`, `step`, `path`, `accepted` | User only: a review picture marked accepted (or the mark taken back). A mark only: it does not accept the step |
 | `review.commented` | `queue`, `step`, `path`, `text`, `to` (`send_back`, `note`, `orchestrator`), `note_step?` | User only: a comment on a review picture, and where it went (see "Review pictures") |
 | `check.result` | `queue`, `step`, `name`, `ok`, `summary` | One check's outcome |
@@ -459,10 +459,34 @@ The server reads git for the dashboard (`apps/server/src/gitinfo.ts`), only loca
 
 ### Review pictures
 
-- **Pairs.** A review picture is compared with its "before": the one its item names (`before`, from
-  `nexus review add <step> <picture> --before <path>`, one picture at a time), else the latest earlier picture with
-  the same label from an earlier round (without round numbers: the latest earlier one with that label). The viewer
-  shows the two beside each other (stacked when the screen is upright) or overlaid with a slider.
+The standard for review material is `nexus help review` (`packages/cli/src/help.ts`): formats, view keys, roles,
+pairing, rounds, fixed-viewport captures, the process. It ships with Nexus, so every project has the current text
+after a deploy; a project's own conventions stay in its AGENTS.md and its steps' `review.prepare`.
+
+- **View keys and roles.** `nexus review add <step> <picture> --key KEY --role ROLE` adds one picture (PNG, JPEG, GIF
+  or WebP; kind image or sheet) with its view key and role. A key is the view's subject and state in lowercase words
+  joined by hyphens (dots allowed), `@`, and the window's width in CSS pixels: `waiting-tab@492`
+  (`VIEW_KEY` in `packages/protocol/src/pictures.ts`). The label is a caption only. Roles: `before` (the old state),
+  `mockup` (the design), `after` (the new state), `variant-a` and `variant-b` (two alternatives), `result` (a new view
+  with nothing to compare). The item records `key`, `role`, `size` (read from the file) and the round: `--round`, else
+  the step's current one (the round its latest delivered send-back opened, else 1). `--key` and `--role` go together,
+  with one picture, and not with `--before`.
+- **Keyed pairs** (`counterpartOf`, the same rule for the check and the viewer), among the items added before it:
+  an `after` pairs with the latest `before` or `mockup` of its key; without one, with the latest `after` or `result`
+  of its key from the latest earlier round (`round N`; a new screen added as a result in round 1 and taken again as an
+  after in round 2); a `variant-b` with the latest `variant-a` of its key. `before`, `mockup`, `variant-a` and
+  `result` have no counterpart of their own.
+- **Checked pairs.** `nexus review add` refuses a keyed picture (exit 2, nothing recorded) whose key is not a view
+  key; an `after` or `variant-b` with no counterpart of its key (naming the step's same view at another width, "another
+  key", or else what the step has); and a picture whose counterpart has other pixel dimensions. Every refusal says
+  why and ends with `See: nexus help review`.
+- **Pairs without a key** (older material): a picture is compared with the one its item names (`before`, from
+  `nexus review add <step> <picture> --before <path>`, one picture at a time), else the latest earlier unkeyed
+  picture with the same label from an earlier round (without round numbers: the latest earlier one with that label).
+  Nothing checks them.
+- **The viewer** shows a picture and its counterpart beside each other (stacked when the screen is upright) or
+  overlaid with a slider; `pairPictures` (`apps/web/src/review.ts`) names the other side: before, mockup, variant A,
+  round N, earlier.
 - **Marks.** The user may mark a picture accepted (`review.marked`, by its path), and take the mark back. It is a
   mark only: the step is not accepted by it. The derived step has `pictures.<path>` (`accepted`: when, while marked;
   `comments`).
@@ -571,7 +595,10 @@ nexus status                                   # the current queue, step, notes 
 nexus step start W3
 nexus step progress W3 "Support graph built; probing fixtures"
 nexus review add W3 tmp/review/w3/sheet.png --label "Sheet, round 1"
-nexus review add W3 tmp/review/w3/lit.png --before tmp/review/w3/unlit.png --label "Lighting"   # one picture and its before
+nexus review add W3 tmp/review/w3/cliff@1280.before.png --key cliff-lit@1280 --role before --label "Cliff, before"
+nexus review add W3 tmp/review/w3/cliff@1280.png --key cliff-lit@1280 --role after --label "Cliff, lit"   # pairs by key
+nexus review add W3 tmp/review/w3/lit.png --before tmp/review/w3/unlit.png --label "Lighting"   # older: no key
+nexus help review                              # the standard for review material (nexus help: the topics)
 nexus check W3 core-tests --ok --summary "548 passed"
 nexus step done W3 --summary "No floating body on any fixture" [--commit 1a2b3c]
 nexus step failed W3 --reason "..."
@@ -611,6 +638,9 @@ the dashboard and the run digest read it there. Workers may not write under `.ne
 prompt asks for the report in the project's **folder for reports**, outside every working tree and repository:
 `<system temporary directory>/nexus-reports/<project>/<queue>.md` (`reportFile`; a Codex worker gets that folder as a
 writable root). Once copied, a source in that folder is removed; a source anywhere else is kept.
+
+`nexus help <topic>` prints one of Nexus's standards (needs no session or project, records nothing); `nexus help`
+alone prints the commands and the topics. The topics live in `packages/cli/src/help.ts`; the first is `review`.
 
 Step states also include `stopped` (the step a `queue.stop` named, when it was not finished).
 

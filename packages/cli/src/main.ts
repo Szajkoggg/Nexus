@@ -7,9 +7,11 @@ import { parseArgs } from "node:util";
 import { execFileSync } from "node:child_process";
 import {
   Event, HOLDING_RUN_STATES, ProjectStore, findNexusDir, inReportFolder, loadProjectState, stepValuesText, stopPlace, newId, normPath, now, readRegistry, writeRegistry,
-  type ReviewItem, type Role, type Runtime, type SessionFile,
+  PICTURE_ROLES, REVIEW_HELP, checkPicture, pictureSize,
+  type PictureRole, type ReviewItem, type Role, type Runtime, type SessionFile,
 } from "@nexus/protocol";
 import { importMarkdownQueues } from "./import-md.ts";
+import { HELP_TOPICS, topicList } from "./help.ts";
 
 const HELP = `nexus — report to and manage Nexus (protocol 1)
 
@@ -21,7 +23,9 @@ Agent commands (session from NEXUS_SESSION or --session):
   nexus step done <step> --summary <text> [--commit <sha>]
   nexus step failed <step> --reason <text>
   nexus review add <step> <path|url>... [--label <text>] [--kind image|sheet|doc|data|link] [--round N]
-                    [--before <path>]   (one picture: the "before" it is compared with; else pictures pair by label across rounds)
+                    [--key <view@width> --role before|mockup|after|variant-a|variant-b|result]   (one picture; pairs by key)
+                    [--before <path>]   (older material without a key: the "before" of one picture)
+                    Read nexus help review before preparing review material.
   nexus check <step> <name> --ok|--fail [--summary <text>]
   nexus stop <step> --condition <text> --reason <text>
   nexus ask <text> [--step <step>] [--option <text>]... [--can-continue]
@@ -41,6 +45,9 @@ Agent commands (session from NEXUS_SESSION or --session):
   nexus run <queue> start|pause|resume|stop --reason <text> [--use-session <id>] [--runtime claude|codex] [--model <m>] [--effort <e>] [--after <queue> | --at "YYYY-MM-DD HH:MM" | --at usage-reset]   (orchestrator only; start --after: when that queue is done; --at: at that local time, or when the runtime's usage window resets)
   nexus run <queue> cancel-start --reason <text>   (orchestrator only: cancels the queue's planned start)
   (--queue <id> picks the queue when the session has none or the step id is ambiguous)
+
+Help:
+  nexus help [<topic>]                 Nexus's standards; topics: ${Object.keys(HELP_TOPICS).join(", ")}
 
 Setup:
   nexus project add <path> [--id <id>] [--name <text>]
@@ -71,7 +78,7 @@ const { values: o, positionals: args } = parseArgs({
     id: { type: "string" }, name: { type: "string" }, prefix: { type: "string" },
     "dry-run": { type: "boolean" }, replace: { type: "boolean" },
     role: { type: "string" }, runtime: { type: "string" }, title: { type: "string" }, from: { type: "string" },
-    help: { type: "boolean", short: "h" }, note: { type: "string" }, before: { type: "string" }, now: { type: "boolean" }, ref: { type: "string" },
+    help: { type: "boolean", short: "h" }, key: { type: "string" }, note: { type: "string" }, before: { type: "string" }, now: { type: "boolean" }, ref: { type: "string" },
   },
 });
 
@@ -380,6 +387,7 @@ const commands: Record<string, () => void | Promise<void>> = {
     checkStep(st, queue, step);
     const targets = args.slice(3);
     if (!targets.length) throw new UsageError("missing <path|url>");
+    if (o.key !== undefined || o.role !== undefined) return reviewAddKeyed(st, s, queue, step, targets);
     let before: string | undefined;
     if (o.before !== undefined) {
       if (targets.length !== 1 || /^https?:\/\//.test(targets[0]!)) throw new UsageError("--before goes with exactly one picture (a file)");
@@ -394,6 +402,14 @@ const commands: Record<string, () => void | Promise<void>> = {
     });
     emit(st, s, { type: "review.added", queue, step, items, round: o.round ? Number(o.round) : undefined });
     console.log(`ok: ${items.length} review item(s) for ${queue}/${step}`);
+  },
+
+  help() {
+    const topic = args[1];
+    if (!topic) { console.log(`${HELP}\n${topicList()}`); return; }
+    const t = HELP_TOPICS[topic];
+    if (!t) throw new UsageError(`no help topic "${topic}" (topics: ${Object.keys(HELP_TOPICS).join(", ")})`);
+    console.log(t.text);
   },
 
   check() {
@@ -566,6 +582,38 @@ const commands: Record<string, () => void | Promise<void>> = {
     console.log(`ok: note ${resolve(file)}`);
   },
 };
+
+/**
+ * `nexus review add <step> <picture> --key KEY --role ROLE`: one picture with its view key and role. Its pixel size is
+ * read from the file; a wrong pair (no counterpart of its key, other pixel dimensions) is refused with the reason and
+ * the pointer to `nexus help review`, and nothing is recorded. Recorded in the given round, else the step's current one.
+ */
+function reviewAddKeyed(st: ProjectStore, s: SessionFile, queue: string, step: string, targets: string[]): void {
+  const key = need(o.key, `--key (it goes with --role). ${REVIEW_HELP}`);
+  const role = need(o.role, `--role (it goes with --key: ${PICTURE_ROLES.join(", ")}). ${REVIEW_HELP}`) as PictureRole;
+  if (!PICTURE_ROLES.includes(role)) throw new UsageError(`--role is one of ${PICTURE_ROLES.join(", ")}, not "${role}". ${REVIEW_HELP}`);
+  if (o.before !== undefined) throw new UsageError(`--before is for pictures without a key; a keyed picture pairs by its key. ${REVIEW_HELP}`);
+  if (targets.length !== 1 || /^https?:\/\//.test(targets[0]!)) throw new UsageError(`--key and --role go with exactly one picture (a file). ${REVIEW_HELP}`);
+  const path = normPath(targets[0]!);
+  if (!existsSync(path)) throw new UsageError(`no such file: ${path}`);
+  const kind = (o.kind as ReviewItem["kind"]) ?? guessKind(path);
+  if (kind !== "image" && kind !== "sheet") throw new UsageError(`a keyed picture is an image or a sheet, not ${kind ?? "this kind of file"}. ${REVIEW_HELP}`);
+  const size = pictureSize(readFileSync(path));
+  if (!size) throw new UsageError(`cannot read the pixel size of ${path}: a keyed picture is a PNG, JPEG, GIF or WebP file. ${REVIEW_HELP}`);
+  const view = loadProjectState(st).queues.find((q) => q.id === queue)?.steps.find((x) => x.id === step);
+  const items = view?.review_items ?? [];
+  // The step's current round: the one its latest delivered send-back opened, else the first.
+  const round = o.round ? Number(o.round) : view?.sent_back.filter((x) => x.delivered).at(-1)?.round ?? 1;
+  const check = checkPicture(items, { path, key, role, round, size }, `${queue}/${step}`);
+  if (!check.ok) throw new UsageError(check.message);
+  const item: ReviewItem = { path, label: o.label ?? basename(path), kind, key, role, size };
+  emit(st, s, { type: "review.added", queue, step, items: [item], round });
+  const c = check.counterpart;
+  const paired = !c ? (role === "after" || role === "variant-b" ? "" : role === "result" ? ", stands alone" : ", waits for its pair")
+    : c.compare === "round" ? `, compared with the ${c.item.role} of round ${c.item.round} (${c.item.path})`
+    : `, compared with ${c.compare === "variant" ? "variant-a" : `its ${c.compare}`} (${c.item.path})`;
+  console.log(`ok: ${key} ${role}, ${size.width}×${size.height} px, round ${round}, for ${queue}/${step}${paired}`);
+}
 
 function guessKind(p: string): ReviewItem["kind"] {
   if (/\.(png|jpe?g|gif|webp|svg)$/i.test(p)) return /sheet/i.test(p) ? "sheet" : "image";

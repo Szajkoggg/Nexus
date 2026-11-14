@@ -39,3 +39,41 @@ test("pictures pair with an explicit before, else by label with an earlier round
   assert.deepEqual(pairPictures([{ path: "/a", label: "X" }, { path: "/b", label: "X" }, { path: "/c", label: "X" }]).map((p) => p.before ?? null), [null, "/a", "/b"]);
   assert.deepEqual(pairPictures([{ path: "/a", label: "X", round: 2 }, { path: "/b", label: "X", round: 2 }]).map((p) => p.before ?? null), [null, null]);
 });
+
+test("keyed pictures pair by key and role, never by label; unkeyed ones keep their pairing", async () => {
+  const { pairPictures } = await import("../src/review.ts");
+  const items = [
+    { path: "/b.png", label: "Tab", key: "waiting-tab@492", role: "before" as const, round: 1 },
+    { path: "/b390.png", label: "Tab", key: "waiting-tab@390", role: "before" as const, round: 1 },
+    { path: "/m.png", label: "Settings", key: "settings@492", role: "mockup" as const, round: 1 },
+    { path: "/a.png", label: "Tab", key: "waiting-tab@492", role: "after" as const, round: 1 },
+    { path: "/s.png", label: "Settings", key: "settings@492", role: "after" as const, round: 1 },
+    { path: "/va.png", label: "Rail", key: "rail@1280", role: "variant-a" as const, round: 1 },
+    { path: "/vb.png", label: "Rail", key: "rail@1280", role: "variant-b" as const, round: 1 },
+    { path: "/new.png", label: "Tab", key: "usage@492", role: "result" as const, round: 1 },
+    { path: "/d1.png", label: "Digest", key: "digest@492", role: "after" as const, round: 1 },
+    { path: "/d2.png", label: "Digest", key: "digest@492", role: "after" as const, round: 2 },
+    { path: "/a2.png", label: "Tab", key: "waiting-tab@492", role: "after" as const, round: 2 },
+    // Unkeyed, with a label keyed pictures have: pairs only with unkeyed pictures.
+    { path: "/old1.png", label: "Digest", round: 1 },
+    { path: "/old2.png", label: "Digest", round: 2 },
+    { path: "/lit.png", label: "Lit", before: "/unlit.png" },
+  ];
+  const pairs = pairPictures(items).map((p) => [p.item.path, p.before ?? null, p.beforeLabel ?? null, p.compare ?? null]);
+  assert.deepEqual(pairs, [
+    ["/b.png", null, null, null],
+    ["/b390.png", null, null, null],
+    ["/m.png", null, null, null],
+    ["/a.png", "/b.png", "before", "before"], // the same key, not the 390 one with the same label
+    ["/s.png", "/m.png", "mockup", "mockup"],
+    ["/va.png", null, null, null],
+    ["/vb.png", "/va.png", "variant A", "variant"],
+    ["/new.png", null, null, null], // a result stands alone
+    ["/d1.png", null, null, null],
+    ["/d2.png", "/d1.png", "round 1", "round"], // no before or mockup: the earlier round's after
+    ["/a2.png", "/b.png", "before", "before"], // a later round still pairs with the before
+    ["/old1.png", null, null, null],
+    ["/old2.png", "/old1.png", "round 1", null],
+    ["/lit.png", "/unlit.png", "before", null],
+  ]);
+});

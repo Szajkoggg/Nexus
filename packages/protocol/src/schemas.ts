@@ -1,5 +1,6 @@
 // The Nexus file protocol, version 1. See docs/PROTOCOL.md.
 import { z } from "zod";
+import { PICTURE_ROLES, VIEW_KEY } from "./pictures.ts";
 
 export const PROTOCOL_VERSION = 1;
 
@@ -294,7 +295,14 @@ export const ReviewItem = z.object({
   kind: z.enum(["image", "sheet", "doc", "data", "link"]).optional(),
   /** The picture this one is the "after" of (`nexus review add … --before PATH`); else it pairs by label across rounds. */
   before: z.string().optional(),
-}).refine((i) => i.path || i.url, { message: "a review item needs a path or a url" });
+  /** A picture's view key (subject and state @ width, e.g. `waiting-tab@492`): only pictures with the same key pair. */
+  key: z.string().regex(VIEW_KEY, "a view key: lowercase words joined by hyphens, @ and the width (e.g. waiting-tab@492)").optional(),
+  /** What a keyed picture is in its comparison (pictures.ts): before, mockup, after, variant-a, variant-b, result. */
+  role: z.enum(PICTURE_ROLES).optional(),
+  /** A keyed picture's pixel size, read from its file when it was added. */
+  size: z.object({ width: z.number().int().positive(), height: z.number().int().positive() }).optional(),
+}).refine((i) => i.path || i.url, { message: "a review item needs a path or a url" })
+  .refine((i) => !i.key === !i.role, { message: "a review item's key and role go together" });
 export type ReviewItem = z.infer<typeof ReviewItem>;
 
 export const Event = z.discriminatedUnion("type", [
