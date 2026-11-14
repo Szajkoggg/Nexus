@@ -375,12 +375,28 @@ halted runs, failed steps). It opens one list of them, newest first, each with i
 
 Every step is reviewed when it is done. Its **review level** says by whom: 1, you review it; 2, the orchestrator
 reviews what can be checked and hands you what is yours (the look, the feel), with why; 3, the orchestrator judges
-everything and the queue goes on (for now it holds the step as at 2). The orchestrator drafts each step's level from
-its acceptance criteria (checkable ones give 2, your judgement gives 1); a step without one takes its queue's, else the
-project's "Review level" (in Settings; 2 unless you change it). A level you set on a step stays when the orchestrator
-revises the queue, and asks for no new approval. A step says whom it waits for ("review: orchestrator" or "review:
-you"); only those for you are in the inbox. Without an orchestrator, or with its notices off, levels 2 and 3 wait for
-you too.
+everything and the queue goes on. The orchestrator drafts each step's level from its acceptance criteria (checkable
+ones give 2, your judgement gives 1); a step without one takes its queue's, else the project's "Review level" (in
+Settings; 2 unless you change it). In the approval view each step has **Review 1 · 2 · 3**: pick another before (or
+after) you approve; it asks for no new approval, stays when the orchestrator revises the queue, and shows "set by
+you" with Reset. A step's line on the queue shows its level when it is not 2 (L1, L3), and the step's panel always
+does. A step says whom it waits for ("review: orchestrator" or "review: you"); only those for you are in the inbox.
+Without an orchestrator, or with its notices off, levels 2 and 3 wait for you too.
+
+At level 3 the orchestrator accepts what has nothing of yours, and **accepts provisionally** what has: the step reads
+"accepted provisionally" and the queue goes on. These wait for you in one item of the waiting list, "N provisional
+acceptances wait for your confirmation", each with what to look at, **Confirm** and **Fix it…** (also in the step's
+panel). Confirm, and it is accepted. Fix it keeps the step done and its work: the orchestrator drafts a step that fixes
+it, as a new revision (a queue that went on waits for your approval at its running step's end; a finished one is
+approved and started). Whether provisional work is pushed like accepted work is "Provisional work" in Settings (on by
+default; off, nothing built on unconfirmed provisional work is pushed until you confirm it).
+
+**Away mode**: "Away…" at the foot of the sidebar (in Settings on a phone) turns it on until a time (08:00 by default,
+the next such time); "Away until 08:00" then shows there and at the top of the right rail (in the header on a phone),
+with Turn off. Meanwhile level-2 steps run as level 3, so the queues go on and what is yours waits in the batch;
+level-1 steps still wait for you. When a queue waits for you, the orchestrator is told which other approved queues can
+start (never two in one checkout). It ends by itself at its time. From a terminal: `nexus server away on --until 8:00`
+or `off` (never from an agent's session).
 
 A step waiting for you can be accepted, with a note if you like (⋯, "Add a note to the acceptance"): the note goes to the next step of
 the queue, which gets it when it starts, or to the orchestrator, for the plan, later queues or the project's rules

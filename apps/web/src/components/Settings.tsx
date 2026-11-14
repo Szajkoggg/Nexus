@@ -8,6 +8,7 @@ import { Button, Section } from "./ui.tsx";
 import { rich, t, type Key } from "../i18n.ts";
 import { CHOICES, readChoice, setChoice, type ThemeChoice } from "../theme.ts";
 import { EDITOR_CHOICES, readEditor, setEditor, type Editor } from "../editor.ts";
+import { levelTitle } from "./Levels.tsx";
 
 const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 
@@ -73,7 +74,7 @@ function nested(values: Values, keys: readonly string[]): Values {
 /** Every setting with a global value, in the order of PROTOCOL.md's list. */
 const SETTING_KEYS = [
   "defaults.stop_conditions", "defaults.review_level", "defaults.review_send_back_limit", "defaults.context_reuse_threshold",
-  "defaults.context_care", "defaults.protect_nexus", "defaults.push_accepted", "defaults.usage_pause_threshold",
+  "defaults.context_care", "defaults.protect_nexus", "defaults.push_accepted", "defaults.provisional_counts", "defaults.usage_pause_threshold",
   "runtimes.default", "runtimes.claude.model", "runtimes.claude.effort", "runtimes.claude.permission_mode",
   "runtimes.codex.model", "runtimes.codex.effort", "runtimes.codex.sandbox", "runtimes.codex.approval_policy", "runtimes.codex.approvals_reviewer",
   "conversations.runtime", "conversations.model", "conversations.effort",
@@ -233,11 +234,14 @@ function SettingRows({ form, project }: { form: Form; project?: { values: Record
       </Section>
 
       <Section title={t("settings.defaults")}>
-        <Setting form={f} keys={["defaults.review_level"]} label={t("details.level.label")} hint={f.get("defaults.review_level") !== "1" ? t("settings.levelHint") : undefined}>
+        <Setting form={f} keys={["defaults.review_level"]} label={t("details.level.label")} hint={<>{levelTitle(Number(f.get("defaults.review_level")) || 2)}{f.get("defaults.review_level") !== "1" ? ` ${t("settings.levelHint")}` : ""}</>}>
           {(d) => <Select value={f.get("defaults.review_level")} onChange={(v) => f.set("defaults.review_level", Number(v))} disabled={d} options={[["1", t("details.level.1")], ["2", t("details.level.2")], ["3", t("details.level.3")]]} />}
         </Setting>
         <Setting form={f} keys={["defaults.push_accepted"]} label={t("settings.push")} hint={t("settings.pushHint")}>
           {(d) => <Check checked={f.bool("defaults.push_accepted")} onChange={(v) => f.set("defaults.push_accepted", v)} disabled={d}>{t("settings.pushCheck")}</Check>}
+        </Setting>
+        <Setting form={f} keys={["defaults.provisional_counts"]} label={t("settings.provisional")} hint={t("settings.provisionalHint")}>
+          {(d) => <Check checked={f.bool("defaults.provisional_counts")} onChange={(v) => f.set("defaults.provisional_counts", v)} disabled={d}>{t("settings.provisionalCheck")}</Check>}
         </Setting>
         <Setting form={f} keys={["defaults.usage_pause_threshold"]} label={t("settings.pauseAt")} hint={t("settings.pauseAtHint")}>
           {(d) => <Percent value={f.get("defaults.usage_pause_threshold")} onChange={(v) => f.set("defaults.usage_pause_threshold", v)} disabled={d} />}
@@ -439,6 +443,8 @@ export interface ServerInfo {
   push_on_deploy: boolean;
   /** How many queues may run at once, across all projects. */
   max_running?: number;
+  /** The user's away mode now (PROTOCOL.md, "Away mode"). */
+  away?: { on: boolean; since?: string; until?: string };
 }
 
 const PUSH_TONE = { pushed: "text-ok", failed: "text-danger", skipped: "text-fg-2" } as const;

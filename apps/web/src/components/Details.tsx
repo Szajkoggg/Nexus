@@ -19,6 +19,7 @@ import { needsApproval, levelWords } from "../approval.ts";
 import { queueStatus } from "../queueStatus.ts";
 import { needsWorkChoice, stopDecision, type LeftState, type LeftView, type WorkChoice } from "../stopDecision.ts";
 import { rich, t, type Key } from "../i18n.ts";
+import { LevelMark, ProvisionalActions, levelShort, levelTitle, pendingProvisional, provisionalWord } from "./Levels.tsx";
 
 interface Props {
   project: ProjectState; queue: QueueView; onChanged: () => void; onClose: () => void;
@@ -382,6 +383,19 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
       {fold.timeline && timeline}
     </>
   );
+  // A provisional acceptance (review level 3): waiting for the user (Confirm, Fix it), confirmed, or a fix asked.
+  const p = step.provisional;
+  const provisionalBox = p && (
+    <div className={`mb-5 rounded-lg border px-4 py-3 text-sm ${pendingProvisional(step) ? "border-review/40 bg-review/5" : "border-line"}`}>
+      <p className="text-xs text-fg-3">{p.fix ? rich("provisional.fixAskedAt", { time: <TimeAgo key="t" at={p.fix.at} /> }) : p.confirmed ? rich("provisional.confirmedAt", { time: <TimeAgo key="t" at={p.confirmed} /> }) : rich("provisional.box", { time: <TimeAgo key="t" at={p.at} /> })}</p>
+      {p.text && <p className="mt-1 text-fg"><span className="text-fg-3">{t("provisional.lookAt")} </span>{p.text}</p>}
+      {p.fix && <p className="mt-1 text-fg">{p.fix.text}</p>}
+      {pendingProvisional(step) && <>
+        <p className="mt-1 text-xs text-fg-2">{t("provisional.boxHint")}</p>
+        <div className="mt-2.5"><ProvisionalActions project={id} queue={queue.id} step={step.id} onDone={onChanged} wide /></div>
+      </>}
+    </div>
+  );
   const body = reviewing ? (
     <>
       {summary}
@@ -391,7 +405,7 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
     </>
   ) : (
     <>
-      {chat}{retry}{summary}{reviewNotes}{push}{rejected}{sentBack}{message}{questionsPart}{statusNote}{goalAcceptance}{material}{viewer}
+      {provisionalBox}{chat}{retry}{summary}{reviewNotes}{push}{rejected}{sentBack}{message}{questionsPart}{statusNote}{goalAcceptance}{material}{viewer}
       {checks}{notes}{messages}{refusals}{changes}{activity}{commits}{timeline}
     </>
   );
@@ -404,7 +418,11 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
         of={of} bare={questionFirst}
         title={<><span className="mr-2 font-mono text-fg-3">{step.id}</span>{step.title}</>}
         status={<>
-          <StatusBadge status={step.status} label={reviewLabel(step)} />
+          <StatusBadge status={pendingProvisional(step) ? "review" : step.status} label={reviewLabel(step) ?? provisionalWord(step)} />
+          <span title={levelTitle(step.level)} className="inline-flex items-center gap-1">
+            <LevelMark step={step} always />
+            <span>{levelShort(step.level)}{step.level_from === "user" ? ` · ${t("level.setByYou")}` : ""}{project.away.on && step.level === 2 ? ` · ${t("level.awayAs3")}` : ""}</span>
+          </span>
           <StepTimes step={step} />
           {step.commit && <span className="font-mono">{step.commit}</span>}
           {session && <span>{t("details.by", { session: session.title ?? session.id.slice(-8), runtime: session.runtime })}</span>}
@@ -928,6 +946,8 @@ function describe(e: Event): string {
     case "review.sent_back": return e.text;
     case "review.asked_user": return e.text;
     case "review.rejected": return e.text ?? "";
+    case "review.provisional": return e.text ?? "";
+    case "review.fix_asked": return e.text;
     default: return "";
   }
 }
@@ -1112,7 +1132,7 @@ export function QueueDetail({ project, queue, onChanged, onClose, of, chat = [],
       {queue.status === "stopped"
         ? <StopBox queue={queue} left={left ?? undefined} work={work} setWork={setWork} needsChoice={needsChoice} pushAccepted={project.project.defaults.push_accepted} />
         : queue.status_reason && <Section title={t("details.state")}><Expandable text={queue.status_reason} /></Section>}
-      {approving && <CompactSteps project={project} queue={queue} chat={chat} onFull={onFull} />}
+      {approving && <CompactSteps project={project} queue={queue} chat={chat} onFull={onFull} onChanged={onChanged} />}
       {queue.report && (
         <Section title={t("details.report")}>
           <p className="text-sm text-fg">{queue.report.summary}</p>

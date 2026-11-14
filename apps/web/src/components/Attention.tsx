@@ -6,6 +6,8 @@ import { TimeAgo } from "./ui.tsx";
 import { t, type Key } from "../i18n.ts";
 import { OPEN_BUTTON, stopVersion, useStopActions } from "./Stop.tsx";
 import { stepThatMatters } from "./QueueRow.tsx";
+import { BatchRows } from "./Levels.tsx";
+import { nav } from "../nav.ts";
 
 const KIND: Record<AttentionItem["kind"], { key: Key; tone: string }> = {
   question: { key: "waiting.kind.question", tone: "text-warn bg-warn/15" },
@@ -20,6 +22,8 @@ const KIND: Record<AttentionItem["kind"], { key: Key; tone: string }> = {
 const label = (kind: AttentionItem["kind"]) => ({ text: t(KIND[kind].key), tone: KIND[kind].tone });
 
 const plain = (s: string) => s.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\*\*|`/g, "");
+/** An item's text: the return batch's in the interface language, the others as the server words them. */
+const textOf = (a: AttentionItem) => (a.kind === "provisional" ? t("waiting.batchText", { count: a.provisional?.length ?? 0 }) : plain(a.text));
 
 /** Where an item leads: a stopped queue's item opens the queue, whose stop box has what the step left; others their step. */
 export const attentionTarget = (a: AttentionItem): string | undefined => (a.lift ? undefined : a.step);
@@ -94,7 +98,7 @@ export function AttentionPanel({ project, items, queues, pushAccepted, onOpen, o
                 <span className={`shrink-0 rounded-md px-2 py-0.5 text-xs font-semibold ${label(a.kind).tone}`}>{label(a.kind).text}</span>
                 <span className="min-w-0 flex-1">
                   <span className="block font-mono text-xs text-fg-3">{whereOf(a)}</span>
-                  <span className="line-clamp-2 text-sm text-fg">{reasonBelow ? q!.title : plain(a.text)}</span>
+                  <span className="line-clamp-2 text-sm text-fg">{reasonBelow ? q!.title : textOf(a)}</span>
                   {a.lift && <LiftProposal lift={a.lift} />}
                 </span>
                 {a.at && <span className="shrink-0 text-xs text-fg-3"><TimeAgo at={a.at} /></span>}
@@ -102,6 +106,7 @@ export function AttentionPanel({ project, items, queues, pushAccepted, onOpen, o
               {a.lift && a.queue && (
                 <StopRow project={project} a={{ ...a, lift: a.lift }} onOpen={() => onOpen(a)} onChanged={onChanged} pushAccepted={pushAccepted} queue={q} />
               )}
+              {a.kind === "provisional" && <BatchRows project={project} item={a} onOpen={(queue, step) => nav.item(project, queue, step)} onChanged={onChanged} />}
             </div>
           );
         })}
@@ -137,10 +142,11 @@ export function WaitingList({ projects, onOpen, onChoose }: {
                 <span className="min-w-0 flex-1 truncate text-fg-3">{a.project_name}{a.queue && <> · <span className="font-mono">{whereOf(a)}</span></>}</span>
                 {a.at && <span className="shrink-0 text-fg-3"><TimeAgo at={a.at} /></span>}
               </span>
-              <span className="mt-1.5 line-clamp-3 text-[15px] leading-snug text-fg">{plain(a.text)}</span>
+              <span className="mt-1.5 line-clamp-3 text-[15px] leading-snug text-fg">{textOf(a)}</span>
               {a.lift && <LiftProposal lift={a.lift} />}
             </button>
             {a.lift && a.queue && <StopRow project={a.project} a={{ ...a, lift: a.lift }} onOpen={() => onOpen(a)} />}
+            {a.kind === "provisional" && <BatchRows project={a.project} item={a} onOpen={(queue, step) => nav.item(a.project, queue, step)} />}
             {onChoose && a.kind === "question" && !!a.options?.length && (
               <div className="flex flex-wrap gap-2 px-3.5 pb-3">
                 {a.options.map((o, i) => (
@@ -177,10 +183,11 @@ export function WaitingCards({ projects, current, onOpen }: { projects: ProjectS
               <span className="min-w-0 flex-1 truncate font-mono text-fg-3">{a.project !== current && <span className="font-sans">{a.project_name} · </span>}{whereOf(a)}</span>
               {a.at && <span className="shrink-0 text-fg-3"><TimeAgo at={a.at} /></span>}
             </span>
-            <span className="mt-1 line-clamp-2 text-sm leading-snug text-fg">{plain(a.text)}</span>
+            <span className="mt-1 line-clamp-2 text-sm leading-snug text-fg">{textOf(a)}</span>
             {a.lift && <LiftProposal lift={a.lift} />}
           </button>
           {a.lift && a.queue && <div className="-mt-1"><StopRow project={a.project} a={{ ...a, lift: a.lift }} onOpen={() => onOpen(a)} /></div>}
+          {a.kind === "provisional" && <div className="-mx-0.5"><BatchRows project={a.project} item={a} onOpen={(queue, step) => nav.item(a.project, queue, step)} /></div>}
         </li>
       ))}
     </ul>
@@ -265,7 +272,7 @@ export function useNotifications(projects: ProjectSummary[] | undefined) {
         if (seen.current.has(key)) continue;
         try {
           const n = new Notification(t("notify.notification", { project: p.name, kind: label(a.kind).text }), {
-            body: `${a.queue ?? ""}${a.step ? `/${a.step}` : ""} ${plain(a.text)}`.trim().slice(0, 200),
+            body: `${a.queue ?? ""}${a.step ? `/${a.step}` : ""} ${textOf(a)}`.trim().slice(0, 200),
             tag: key,
           });
           n.onclick = () => { window.focus(); location.hash = `/${[p.id, a.queue, attentionTarget(a)].filter(Boolean).map((x) => encodeURIComponent(x!)).join("/")}`; };

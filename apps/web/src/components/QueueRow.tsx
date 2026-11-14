@@ -11,6 +11,7 @@ import { queueStatus, type Tone } from "../queueStatus.ts";
 import { currentIndex, foldSteps, twoColumns } from "../steplist.ts";
 import { usePhone } from "../phone.ts";
 import { QueueStopReason, STOP_BUTTON, StopActions, stopVersion } from "./Stop.tsx";
+import { LevelMark, pendingProvisional } from "./Levels.tsx";
 
 /** The honest status's colours: a dot and a word. */
 export const TONE: Record<Tone, [string, string]> = {
@@ -85,7 +86,8 @@ export function QueueRow({ project, queue, pushAccepted, onQueue, onStep, onChan
       {s.tone === "paused" && !current && (queue.status_reason ?? queue.run?.reason) && <p className="line-clamp-1 px-4 pt-1 text-xs text-fg-3">{plain((queue.status_reason ?? queue.run?.reason)!)}</p>}
       {queue.steps.length > 0 && (
         <div className="mt-2.5 flex gap-[3px] px-4" aria-label={t("queue.stepsClosed", { closed: s.closed, total: s.total })}>
-          {queue.steps.map((x) => <i key={x.id} title={`${x.id}: ${statusWord(shownStatus(x, queue))}`} className={`h-[5px] flex-1 rounded-full ${SEGMENT[shownStatus(x, queue)] ?? "bg-surface-3"}`} />)}
+          {queue.steps.map((x) => <i key={x.id} title={`${x.id}: ${pendingProvisional(x) ? t("provisional.word") : statusWord(shownStatus(x, queue))}`}
+            className={`h-[5px] flex-1 rounded-full ${pendingProvisional(x) ? "bg-ok/45" : SEGMENT[shownStatus(x, queue)] ?? "bg-surface-3"}`} />)}
         </div>
       )}
       <div className="px-2 pb-2 pt-1.5 lg:px-3">
@@ -131,10 +133,13 @@ function StepLine({ step, queue, current, phone, onStep, onQueue, stop }: {
 }) {
   const status = shownStatus(step, queue);
   const tone = toneOf(status);
-  const word = reviewLabel(step) ?? statusWord(status);
+  // A provisional acceptance waiting for the user reads so, in the review colour (the step is done, the user still decides).
+  const provisional = pendingProvisional(step);
+  const word = reviewLabel(step) ?? (provisional ? t("provisional.word") : statusWord(status));
   const unread = step.notes.filter((n) => !n.read_at).length;
   const meta = (
     <span className="flex shrink-0 items-center gap-2 text-xs text-fg-3">
+      <LevelMark step={step} />
       {step.review_items.length > 0 && <span title={t("queue.reviewMaterial")}>▣ {step.review_items.length}</span>}
       {unread > 0 && <span className="text-info" title={t("queue.unreadNotes", { count: unread })}>✎ {unread}</span>}
       {stepValuesText(step) && <span className="text-review" title={t("queue.runsOn", { values: stepValuesText(step)! })}>⚙</span>}
@@ -146,7 +151,7 @@ function StepLine({ step, queue, current, phone, onStep, onQueue, stop }: {
         <span className={`h-2 w-2 rounded-full ${tone.dot}`} />
         <span className="truncate font-mono text-xs text-fg-3">{step.id}</span>
         <span className={`truncate ${step.status === "skipped" ? "text-fg-2" : "text-fg"}`}>{step.title}</span>
-        <span className="flex items-center gap-2">{meta}<span className={`whitespace-nowrap text-xs ${step.status === "done" ? "text-fg-3" : tone.text}`}>{word}</span></span>
+        <span className="flex items-center gap-2">{meta}<span className={`whitespace-nowrap text-xs ${provisional ? "text-review" : step.status === "done" ? "text-fg-3" : tone.text}`}>{word}</span></span>
       </button>
     );
   }

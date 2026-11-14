@@ -7,6 +7,7 @@ import { Button, Drawer, Section, TimeAgo, useWide } from "./components/ui.tsx";
 import { Rail, RAIL } from "./components/Rail.tsx";
 import { RefsProvider } from "./components/Refs.tsx";
 import { AttentionPanel, attentionTarget, NotifyToggle, useNotifications, WaitingList } from "./components/Attention.tsx";
+import { AwaySign, AwaySwitch } from "./components/Levels.tsx";
 import { ContextBar, UsageMeter } from "./components/Run.tsx";
 import { ChatPanel, ConversationsPanel, DeskHead, useOrchestrator, type Desk, type Unread } from "./components/Chat.tsx";
 import { hasUnread, placeKey, readPlace, unreadCount, usePlaces } from "./chatPlace.ts";
@@ -207,7 +208,7 @@ export function App() {
   const drawers = <>
     <Drawer open={settingsOpen && !!state} onClose={() => nav.close("settings")}>
       {state && <SettingsPanel key={state.project.id} project={state.project} onChanged={() => { reload(); setTick((t) => t + 1); }} server={server}
-        tools={phone ? <PhoneTools connected={connected} version={tick} server={server} notify={notify} /> : undefined} />}
+        tools={phone ? <PhoneTools connected={connected} version={tick} server={server} notify={notify} onChanged={() => setTick((n) => n + 1)} /> : undefined} />}
     </Drawer>
 
     <Drawer open={remoteOpen} onClose={() => nav.close("remote")}>
@@ -243,6 +244,7 @@ export function App() {
             {projects && <ProjectPicker projects={projects} current={projectId} open={isOpen(route.nav, "projects")} onPick={(id) => nav.project(id)} />}
             {state && <RunningNow queues={state.queues} />}
             <span className="flex-1" />
+            <AwaySign away={server?.away} />
             {!connected && <span className="flex items-center gap-1.5 text-xs text-stop" title={t("common.reconnecting")}><span className="h-2 w-2 rounded-full bg-stop" />{t("common.offline")}</span>}
             {state && <SettingsButton onClick={() => nav.open("settings")} />}
           </div>
@@ -295,6 +297,7 @@ export function App() {
       <ProjectSidebar projects={projects ?? []} current={projectId} connected={connected} onPick={(id) => nav.project(id)} foot={<>
         <UpdatePill info={server} />
         <UsageMeter version={tick} stacked />
+        <div className="-mx-1.5"><AwaySwitch away={server?.away} onChanged={() => setTick((n) => n + 1)} /></div>
         <div className="-mx-1.5 flex items-center gap-0.5">
           <NotifyToggle {...notify} />
           <span className="flex-1" />
@@ -364,8 +367,8 @@ function Banner({ children }: { children: React.ReactNode }) {
  * The phone's Settings, at the top: what the desktop header shows as icons (the update, the usage, notifications,
  * remote access) and whether live updates arrive.
  */
-function PhoneTools({ connected, version, server, notify }: {
-  connected: boolean; version: unknown; server: ReturnType<typeof useServer>; notify: ReturnType<typeof useNotifications>;
+function PhoneTools({ connected, version, server, notify, onChanged }: {
+  connected: boolean; version: unknown; server: ReturnType<typeof useServer>; notify: ReturnType<typeof useNotifications>; onChanged: () => void;
 }) {
   const row = (label: string, value: React.ReactNode) => (
     <div className="grid gap-1 py-1.5 sm:grid-cols-[11rem_1fr] sm:items-center sm:gap-3">
@@ -379,6 +382,7 @@ function PhoneTools({ connected, version, server, notify }: {
       {server?.update && server.update.phase !== "idle" && server.update.phase !== "updated" && row(t("device.update"), <UpdatePill info={server} />)}
       {row(t("device.usage"), <UsageMeter version={version} always />)}
       {row(t("device.notifications"), <NotifyToggle {...notify} labelled />)}
+      {row(t("away.label"), <AwaySwitch away={server?.away} onChanged={onChanged} labelled />)}
       {row(t("device.remoteAccess"), <Button variant="quiet" onClick={() => nav.open("remote")}>{t("device.otherDevices")}</Button>)}
     </Section>
   );

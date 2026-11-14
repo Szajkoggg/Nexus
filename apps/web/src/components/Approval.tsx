@@ -15,6 +15,7 @@ import { needsWorkChoice, stopDecision, type LeftState, type WorkChoice } from "
 import { ActionBar, Button, CloseButton, Markdown, TEXTAREA, TimeAgo, useDraftText, type MenuEntry } from "./ui.tsx";
 import { StopBox, stopVersion, useLeft } from "./Stop.tsx";
 import { rich, t } from "../i18n.ts";
+import { LevelPicker } from "./Levels.tsx";
 
 // ---------------------------------------------------------------- which form
 
@@ -192,7 +193,7 @@ const stopCount = (project: ProjectState, queue: QueueView) => queue.stop_condit
  * open the whole goal and its acceptance in place; then the description, the stop conditions, the checks and the
  * orchestrator's message as folds. `onFull` adds the switch to the full view.
  */
-export function CompactSteps({ project, queue, chat, onFull }: { project: ProjectState; queue: QueueView; chat: readonly ChatEntry[]; onFull?: () => void }) {
+export function CompactSteps({ project, queue, chat, onFull, onChanged }: { project: ProjectState; queue: QueueView; chat: readonly ChatEntry[]; onFull?: () => void; onChanged?: () => void }) {
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const toggle = (k: string) => setOpen({ ...open, [k]: !open[k] });
   const fold = (k: string, label: string) => (
@@ -223,6 +224,11 @@ export function CompactSteps({ project, queue, chat, onFull }: { project: Projec
                 </span>
                 <span className="whitespace-nowrap pt-0.5 text-xs text-fg-3">{n ? t("approval.criteria", { count: n }) : t("approval.noCriteria")} {o ? "▴" : "▾"}</span>
               </button>
+              {onChanged && (
+                <div className="px-3 pb-2.5 pl-[4.25rem]">
+                  <LevelPicker project={project.project.id} queue={queue.id} step={s} onChanged={onChanged} away={project.away} />
+                </div>
+              )}
               {o && (
                 <div className="space-y-2 px-3 pb-3 pl-[4.25rem]">
                   {s.goal && <div className="text-sm text-fg-2"><Markdown>{s.goal}</Markdown></div>}
@@ -361,7 +367,10 @@ export function ApprovalView({ project, queue, chat, sidebar, onClose, onPanel, 
             )}
             {queue.steps.map((s) => (
               <section key={s.id} data-part={`step-${s.id}`} className="space-y-2 border-b border-line pb-4">
-                <h2 className="flex items-baseline gap-2.5 font-semibold text-fg"><span className="font-mono text-xs font-normal text-fg-3">{s.id}</span>{s.title}</h2>
+                <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1.5">
+                  <h2 className="flex items-baseline gap-2.5 font-semibold text-fg"><span className="font-mono text-xs font-normal text-fg-3">{s.id}</span>{s.title}</h2>
+                  <LevelPicker project={id} queue={queue.id} step={s} onChanged={onChanged} away={project.away} />
+                </div>
                 {s.goal ? <div className="text-sm text-fg-2"><Markdown>{s.goal}</Markdown></div> : <p className="text-sm text-fg-3">{t("approval.noGoal")}</p>}
                 <Acceptance step={s} />
               </section>

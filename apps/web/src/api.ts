@@ -11,7 +11,7 @@ export interface ProjectSummary {
 }
 
 /** A write to the server. Resolves when it is done; rejects with the server's reason. */
-export async function act(project: string, method: "POST" | "PATCH" | "DELETE", path: string, body: unknown = {}): Promise<void> {
+export async function act(project: string, method: "POST" | "PATCH" | "PUT" | "DELETE", path: string, body: unknown = {}): Promise<void> {
   const r = await fetch(`/api/projects/${encodeURIComponent(project)}${path}`, {
     method, headers: { "content-type": "application/json" }, body: JSON.stringify(body),
   });
