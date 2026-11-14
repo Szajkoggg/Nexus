@@ -2,6 +2,7 @@
 // uses and sends the notifications Nexus reads. What it does with a message is in fake-behaviour.ts; a turn/steer
 // is recorded with priority "next", like Claude's mid-turn messages.
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { contextTokens, record, recordArgs, respond, type Fake, type FakeFailure } from "./fake-behaviour.ts";
 
 const out = (m: unknown) => process.stdout.write(JSON.stringify(m) + "\n");
@@ -91,6 +92,9 @@ process.stdin.on("data", (d: string) => {
     const reply = (result: unknown) => out({ id: m.id, result });
     const fail = (message: string) => out({ id: m.id, error: { code: -32000, message } });
     const text = () => (m.params?.input ?? []).map((x: { text?: string }) => x.text ?? "").join("\n");
+    // Pictures beside the text (localImage items); a real Codex fails the request when a file cannot be read.
+    const images = (): string[] => (m.params?.input ?? []).filter((x: { type?: string }) => x.type === "localImage").map((x: { path: string }) => x.path);
+    const unreadable = () => images().find((p) => !existsSync(p));
     switch (m.method) {
       case "initialize": reply({ userAgent: "fake-codex" }); break;
       case "thread/start": recordArgs({ method: m.method, model: m.params.model, approvalsReviewer: m.params.approvalsReviewer ?? null, approvalPolicy: m.params.approvalPolicy, sandbox: m.params.sandbox, cwd: m.params.cwd, writableRoots: m.params.config?.["sandbox_workspace_write.writable_roots"] ?? null, instructions: m.params.developerInstructions ?? null }); threadId = randomUUID(); reply({ thread: { id: threadId }, model: "fake-codex-model", reasoningEffort: "medium" }); break;
@@ -99,7 +103,8 @@ process.stdin.on("data", (d: string) => {
         reply({ rateLimits: { primary: { usedPercent: 5, windowDurationMins: 10080, resetsAt: Math.floor(Date.now() / 1000) + 86400 }, secondary: null } });
         break;
       case "turn/start": {
-        recordArgs({ method: m.method, effort: m.params.effort ?? null, model: m.params.model ?? null, writableRoots: m.params.sandboxPolicy?.writableRoots ?? null });
+        recordArgs({ method: m.method, effort: m.params.effort ?? null, model: m.params.model ?? null, writableRoots: m.params.sandboxPolicy?.writableRoots ?? null, images: images() });
+        if (unreadable()) { fail(`cannot read image ${unreadable()}`); break; }
         const t = text();
         record(t, null, !!turnId);
         if (turnId) { fail("a turn is already running"); break; }
@@ -109,6 +114,7 @@ process.stdin.on("data", (d: string) => {
         break;
       }
       case "turn/steer":
+        recordArgs({ method: m.method, images: images() });
         record(text(), "next", !!turnId);
         if (!turnId || m.params.expectedTurnId !== turnId) fail("no active turn");
         else reply({ turnId });

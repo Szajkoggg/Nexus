@@ -866,7 +866,10 @@ say `only PNG, JPEG, WebP or GIF up to 10 MB`. The server names the file: the UT
 `.jpg`, `.webp`, `.gif`); a name the client sends is ignored. The same picture in the same second is the same file.
 The server is the only writer of `.nexus/uploads/` (each file written whole, then renamed into place), changes to it
 do not reload the project's state, and nothing removes the files: they stay until the user deletes them. The
-dashboard puts the returned path into the message, and the file endpoint serves it back.
+dashboard puts the returned path into the message, on its own line, and the file endpoint serves it back. Claude
+Code opens the picture from the path with `Read` (the orchestrator's and a partner's allow lists hold a bare
+`Read`); Codex does not open a path from the text, so the adapter adds the picture as a `localImage` input item (see
+"How the engine runs a Codex session").
 
 **Remote access.** A request is local when it comes from a loopback address without proxy headers
 (`X-Forwarded-For`, `Forwarded`, `X-Forwarded-Host`, `Tailscale-User-Login`). Anything else, pages, API and the
@@ -1192,6 +1195,9 @@ becomes the session's `native_id`.
 - a step turn: `turn/start` with `input: [{type: "text", text, text_elements: []}]`, the session's `effort` (and,
   once a step changed them, `model` and `effort`) and, in `workspace-write`, a `sandboxPolicy` whose writable roots include the project's `.nexus/` when the worktree is elsewhere
 - a message while the agent works: `turn/steer` with the running turn's id
+- a picture uploaded for a chat message: each line of a message (of either request) that is the absolute path of an
+  existing `.png`, `.jpg`, `.jpeg`, `.webp` or `.gif` file in a `.nexus/uploads/` folder also goes in as
+  `{type: "localImage", path}` after the text item; the text keeps the path (see "Uploads" under "Server API")
 - stop now: `turn/interrupt`, then the message as the next turn
 
 It reads `turn/started` and `turn/completed` (the turn's status), `item/started` and `item/completed`

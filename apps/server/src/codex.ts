@@ -405,7 +405,25 @@ export function codexTokens(now: Json, before: Json): TurnTokens {
 }
 const addTokens = (a: TurnTokens, b: TurnTokens): TurnTokens => ({ input: a.input + b.input, output: a.output + b.output, cacheRead: a.cacheRead + b.cacheRead, cacheCreation: a.cacheCreation + b.cacheCreation });
 
-const input = (text: string) => [{ type: "text", text, text_elements: [] }];
+/**
+ * A message's input items: its text, and each picture uploaded for a chat message (a line that is the absolute path of
+ * a file under a `.nexus/uploads/` folder, PROTOCOL.md "Uploads") as a `localImage` item beside it. Codex does not
+ * open a picture from a path in the text (probed live, Codex 0.167.2 with gpt-6-luna, a partner's sandbox: "I can't
+ * access that image path"); given the item, it sees the picture. The path stays in the text, so the chat and Claude
+ * read the same message.
+ */
+export function input(text: string): Json[] {
+  return [{ type: "text", text, text_elements: [] }, ...uploadedPictures(text).map((path) => ({ type: "localImage", path }))];
+}
+
+// \x5c is the backslash: Windows paths come with either separator.
+const UPLOAD_LINE = /^(?:[A-Za-z]:[\x5c/]|\/).*[\x5c/]\.nexus[\x5c/]uploads[\x5c/][^\x5c/]+\.(?:png|jpe?g|webp|gif)$/i;
+
+/** The pictures a message carries: its lines that are an uploaded picture's absolute path, of files that exist, once each. */
+export function uploadedPictures(text: string): string[] {
+  const paths = text.split(/\r?\n/).map((l) => l.trim()).filter((l) => UPLOAD_LINE.test(l) && existsSync(l));
+  return [...new Set(paths)];
+}
 const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
 const duration = (mins?: number | null) => (!mins ? "window" : mins % 1440 === 0 ? `${mins / 1440}d` : mins % 60 === 0 ? `${mins / 60}h` : `${mins}m`);
 

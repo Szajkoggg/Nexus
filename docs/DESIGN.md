@@ -1200,6 +1200,16 @@ a swipe moves in every view: the picture alone, before and after, and the overla
   worktree from its list, deletes what it can and fails with "Directory not empty" on paths beyond 260 characters
   (seen 2026-11-14, the capture tool's base worktree under the temporary folder). The capture tool asks git a few
   times, then deletes the rest with Node's `rmSync` (long paths, retries; junctions not followed) and prunes.
+- **Pictures in chat messages: Claude Code opens a path, Codex needs an image item.** Probed on 2026-11-14 (queue CH2)
+  through Nexus's own adapters, with the chat roles' exact permissions, in a temporary project, with a PNG showing the
+  number 47 at `.nexus/uploads/…png` and the message "What number is shown in this picture? … \n<path>". Claude Code
+  2.1.323 (`haiku`, effort low, `dontAsk`) used `Read` on the path and answered "47", as the orchestrator and as a
+  partner ($0.0044 each). Codex 0.167.2 (`gpt-6-luna`, effort low, a partner's `workspace-write` sandbox in the
+  notes folder, approvals `never`) did not try to open it: "I can't access that image path from here" (about 17k
+  input tokens). Given the same text with a `localImage` item for the path, it answered "47" (about 16k input tokens,
+  mostly cached). So the message keeps the path on its own line for both, and the Codex adapter adds the item for
+  every such line of an uploaded picture. Total cost of the probes: about $0.009 of Claude usage and about 33k
+Codex input tokens.
 
 ## Open questions
 
