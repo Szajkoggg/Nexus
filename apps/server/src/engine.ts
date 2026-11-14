@@ -18,7 +18,7 @@ import type { TurnFailure } from "./agent.ts";
 import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Hosted, type Launch } from "./agent-host.ts";
 import { nexusDenyRules } from "./claude.ts";
 import {
-  RUNTIME_NAME, WORKER_BRIEFING, carriedMessages, formatInbox, freshSessionSeed, noOutcomeNudge, stepOpening, summaryReason,
+  RUNTIME_NAME, carriedMessages, formatInbox, withLanguages, workerBriefing, workerLanguages, freshSessionSeed, noOutcomeNudge, stepOpening, summaryReason,
   summaryRequest, switchReason, userStopNow,
 } from "./prompts.ts";
 import {
@@ -651,7 +651,7 @@ export class Engine implements Member {
     const last = !q.steps.some((s) => s.status === "pending" && s.id !== step.id);
     const opening = stepOpening({
       q, step, mode, why, projectStopConditions: project.defaults.stop_conditions, notes, answers, last,
-      report: reportFile(project.id, q.id),
+      report: reportFile(project.id, q.id), languages: workerLanguages(project.languages),
     });
     live.proc.send([around.before, opening, around.after].filter(Boolean).join("\n\n"));
     for (const n of notes) this.store.appendDelivered(run.session, { at: now(), kind: "note", id: n.id, via: "turn" });
@@ -669,8 +669,10 @@ export class Engine implements Member {
     if (!unread.length) return;
     const run = state.queues.find((q) => q.run?.session === l.session)?.run;
     const idleAllowed = !run || run.state === "running" || run.state === "pausing";
+    // The language line goes with each message, so a changed setting reaches the session with its next message.
+    const languages = workerLanguages(state.project.languages);
     for (const m of unread) {
-      const text = formatInbox(m, state);
+      const text = withLanguages(formatInbox(m, state), languages);
       if (m.type === "stop") l.proc.send(text, "now");
       else if (l.proc.state === "working") l.proc.send(text, "next");
       else if (idleAllowed) l.proc.send(text);
@@ -771,7 +773,7 @@ export class Engine implements Member {
         const codex = project.runtimes.codex;
         const inside = normPath(this.store.dir).toLowerCase().startsWith(normPath(session.cwd).toLowerCase() + "/");
         return { runtime: "codex", options: {
-          cwd: session.cwd, model: session.model ?? codex.model, effort: session.effort ?? codex.effort, instructions: WORKER_BRIEFING, env,
+          cwd: session.cwd, model: session.model ?? codex.model, effort: session.effort ?? codex.effort, instructions: workerBriefing(project.languages), env,
           threadId: session.native_id, sandbox: codex.sandbox, approvalPolicy: codex.approval_policy, approvalsReviewer: codex.approvals_reviewer,
           // The folder for reports: the last step's report is written there (outside the working tree).
           writableRoots: [...(inside ? [] : [this.store.dir]), ...gitWritableRoots(session.cwd), ensureReportFolder(project.id)],
@@ -789,7 +791,7 @@ export class Engine implements Member {
         // The project's .nexus is the server's (and the CLI's) to write, not the worker's file tools'. Its absolute
         // path: the worker's cwd may be a worktree whose own .nexus does not exist.
         disallowedTools: project.defaults.protect_nexus ? nexusDenyRules(this.store.dir) : undefined,
-        appendSystemPrompt: WORKER_BRIEFING,
+        appendSystemPrompt: workerBriefing(project.languages),
         env,
       } };
     };

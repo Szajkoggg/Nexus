@@ -4,10 +4,36 @@
 // (src/conversations.ts). Agents rely on them (a change to one carries an `Agents:` line in its commit), so each is
 // covered by a snapshot test: test/prompts.test.ts compares what the agents' processes receive with golden files.
 import {
-  runIsOlder, type InboxView, type ProjectFile, type ProjectState, type QuestionView, type QueueView, type SessionView, type StepView,
+  languageName, runIsOlder, type InboxView, type LanguageCode, type ProjectFile, type ProjectState, type QuestionView, type QueueView, type SessionView, type StepView,
 } from "@nexus/protocol";
 
 export const RUNTIME_NAME = { claude: "Claude Code", codex: "Codex" } as const;
+
+// ---------------------------------------------------------------- languages
+
+/**
+ * The languages from the project's effective settings (PROTOCOL.md, "Languages"): `reader`, what is written to the user
+ * (none: the language the user writes in); `working`, what the agents work in.
+ */
+export interface Languages { reader?: LanguageCode; working: LanguageCode }
+
+/** The defaults: every text is as it was before the language settings, with no language line. */
+const defaultLanguages = (l: Languages) => !l.reader && l.working === "en";
+
+/**
+ * The worker's language line: in its briefing, each step's opening and each inbox message, so a changed setting reaches
+ * a running session at its next step or message. None with the defaults.
+ */
+export function workerLanguages(l: Languages): string | undefined {
+  if (defaultLanguages(l)) return undefined;
+  const user = l.reader ? languageName(l.reader) : "the language the user writes in";
+  return `Languages (Nexus's settings): write what is meant for the user in ${user}: step summaries, questions, progress lines, stop and failure reasons, labels of review material. Work in ${languageName(l.working)}: files, code, comments, commit messages, context summaries (nexus context). Ids, commands and YAML keys stay as they are.`;
+}
+
+/** A text with the language line after it, if there is one. */
+export function withLanguages(text: string, line: string | undefined): string {
+  return line ? `${text}\n\n${line}` : text;
+}
 
 // ---------------------------------------------------------------- the worker
 
@@ -33,6 +59,12 @@ Nexus's standards for the rest (the full texts: \`nexus help summaries\`, \`nexu
 Messages from the user may arrive while you work, marked [Nexus]; follow them.
 Before you stop (nexus stop, or a stop condition you meet): commit what is in a consistent state, with a message that says so, and leave the working tree clean (no uncommitted changes); what is not consistent, set aside or undo, and say in the reason what you left out. The user then decides whether the stopped step's commits are kept or reverted; changes nobody committed cannot be attributed to the step.`;
 
+/** The worker's briefing: WORKER_BRIEFING, and the language line when the languages are not the defaults. */
+export function workerBriefing(l: Languages): string {
+  const line = workerLanguages(l);
+  return line ? `${WORKER_BRIEFING}\n${line}` : WORKER_BRIEFING;
+}
+
 /**
  * The text that opens a step in the worker's session, or continues it (`why`: what the agent is told it continues
  * after). `last`: no other step of the queue is pending, so the report is asked for; `report` is its file.
@@ -40,8 +72,10 @@ Before you stop (nexus stop, or a stop condition you meet): commit what is in a 
 export function stepOpening(o: {
   q: QueueView; step: StepView; mode: "start" | "continue"; why?: string; projectStopConditions: string[];
   notes: StepView["notes"]; answers: QuestionView[]; last: boolean; report: string;
+  /** The language line (workerLanguages), if any. */
+  languages?: string;
 }): string {
-  const { q, step, mode, why, projectStopConditions, notes, answers, last, report } = o;
+  const { q, step, mode, why, projectStopConditions, notes, answers, last, report, languages } = o;
   const index = q.steps.findIndex((s) => s.id === step.id);
   return [
     `[Nexus] Queue ${q.id} "${q.title}" (revision ${q.revision}, approved), step ${step.id} (${index + 1} of ${q.steps.length}): ${step.title}.`,
@@ -53,6 +87,7 @@ export function stepOpening(o: {
     `\nStop conditions (meeting one ends the queue: report it with \`nexus stop\`):\n${[...q.stop_conditions, ...projectStopConditions].map((c) => `- ${c}`).join("\n") || "- none beyond your judgement"}`,
     notes.length ? `\nNotes from the user for this step:\n${notes.map((n) => `- ${n.body}`).join("\n")}` : "",
     answers.length ? `\nAnswers to your questions about this step:\n${answers.map((x) => `- "${x.text}": ${x.answers.at(-1)?.text}`).join("\n")}` : "",
+    languages ? `\n${languages}` : "",
     `\nBegin with \`nexus step start ${step.id}\`${mode === "continue" ? " (again is fine)" : ""}. End with \`nexus step done ${step.id} --summary "…"\`, \`nexus step failed\` or \`nexus stop\`, then write \`nexus context\` and end your turn. Do not start another step.`,
     last ? `\nThis is the queue's last step. After it is done, write a short report of the whole queue (what each step achieved against its acceptance, checks, review material, open questions, a proposed next step) to ${report} (a folder for reports outside the working tree and any repository: never write it into the working tree, it would block the cleanup of a worktree) and register it with \`nexus report ${q.id} --file ${report} --summary "…"\`, which copies it into the queue's folder and removes it from there.` : "",
   ].filter(Boolean).join("\n");
@@ -135,8 +170,14 @@ export function formatInbox(m: InboxView, state: ProjectState): string {
 
 // ---------------------------------------------------------------- the orchestrator
 
-export function orchestratorBriefing(project: string, threshold: number): string {
-  return `You are the orchestrator of the project "${project}" in Nexus, the user's dashboard for AI-driven work. The user talks with you in the dashboard's chat; reply in the language they write in. Everything you write into files or queues is in English.
+export function orchestratorBriefing(project: string, threshold: number, l: Languages = { working: "en" }): string {
+  const working = languageName(l.working);
+  // Queue text follows the reader's language; with none set, the working language (as before the settings).
+  const queueLanguage = l.reader ? languageName(l.reader) : working;
+  const rule = l.reader
+    ? `write to them in ${queueLanguage} (Nexus's settings, the reader's language): your replies, and the text of the queues you draft (title, description, goals, acceptance, stop conditions, checks, review notes), which the user reads and approves; ids and YAML keys stay English. Everything else you write into files is in ${working}, the project's working language.`
+    : `reply in the language they write in. Everything you write into files or queues is in ${working}.`;
+  return `You are the orchestrator of the project "${project}" in Nexus, the user's dashboard for AI-driven work. The user talks with you in the dashboard's chat; ${rule}
 
 Your job: plan the work with the user as queues of steps, keep the queues and their runs moving, and keep the user informed. You plan and launch; you never do the project's work yourself.
 - You may read the project (its files, documentation, git history) and everything under .nexus/.
@@ -163,7 +204,7 @@ When an action is refused, do not work around it through another tool or command
 
 Workers write by Nexus's standards, and you read them so: a step summary has four parts (what changed; how it was verified; what was left out or differs from the plan; what comes next), and a question three (what it blocks; the options; the worker's recommendation). A missing part is worth naming in your answer or send-back; what was left out or comes next goes into the plan. When you escalate a question, keep the same shape: your framing, the options, your recommendation. The full texts: \`nexus help summaries\`, \`nexus help questions\`, \`nexus help commits\` (every step ends with a clean tree and names its commit).
 
-Queue YAML (all text in English):
+Queue YAML (${l.reader ? `ids and keys in English, the text in ${queueLanguage}` : `all text in ${working}`}):
 id: W                          # short, unique in the project
 title: Variant B made a system
 description: |                 # optional: context the worker needs
@@ -198,7 +239,7 @@ Choosing model and effort for a run: say which and why when you start it. Hard d
 Choosing a session for a run: \`nexus status\` shows each session's context card (topics, files, context fill). Continue a session (--use-session) when it worked on closely related things and its context is below ${threshold} %; otherwise start a fresh one and put what it needs into the queue's description and goals. Never give one session two running queues. With context care on (the project's default), a run whose session gets fuller than that at the end of a step goes on in a fresh session by itself, seeded with the step's context summary; \`nexus status\` shows the run's current session.
 
 Helpers (subagents, through the Agent tool; they read only (you also write queue drafts), and keep long research out of your context):
-- queue-reviewer: before you propose a queue, have it review the draft; fix what it finds, then propose.
+- queue-reviewer: before you propose a queue, have it review the draft${defaultLanguages(l) ? "" : ` (tell it the queue's text is to be in ${queueLanguage})`}; fix what it finds, then propose.
 - question-triage: when a worker asks, have it find whether the answer is settled (with its source) or the user's.
 - run-digest: when a run halts or finishes, have it summarize the run; tell the user from that.
 - The project's own agents (its .claude/agents) are there too. Use the ones that only read and report, such as one that finds what was decided and where; leave those that build, run checks or edit to the workers.
@@ -242,6 +283,7 @@ Read the queue (YAML given to you, or .nexus/queues/<id>/queue.yaml) and the pro
 - Stop conditions: do they cover what the project's rules require, and what this queue specifically risks?
 - Checks and review material: does each step say how it is verified, and what the user gets to see?
 - Scope: does anything reach beyond what the user asked for?
+- Language: is the queue's text (title, description, goals, acceptance, stop conditions, checks, review notes; not ids or YAML keys) in the language the orchestrator names for it (the reader's language from Nexus's settings, since the user reads and approves the queue), or in English if it names none?
 
 Return a short list, most serious first: the problem, where (step id), and the concrete change that fixes it. If the queue is sound, say so in one line. Do not rewrite the queue; the orchestrator does that.`,
   },
@@ -408,7 +450,8 @@ function reviewBrief(q: QueueView, st: StepView): string {
 // ---------------------------------------------------------------- the thinking partner
 
 export function partnerBriefing(p: ProjectFile, notes: string | undefined): string {
-  return `You are a thinking partner for the project "${p.name}", in a conversation the user opened in Nexus to think something through: gameplay design, ideas, the direction of the project. Reply in the language the user writes in; anything you write into files is in English.
+  const l: Languages = p.languages ?? { working: "en" }; // a project from before the language settings
+  return `You are a thinking partner for the project "${p.name}", in a conversation the user opened in Nexus to think something through: gameplay design, ideas, the direction of the project. ${l.reader ? `Reply in ${languageName(l.reader)} (Nexus's settings, the reader's language)` : "Reply in the language the user writes in"}; anything you write into files is in ${languageName(l.working)}.
 
 How to be useful here:
 - Explore, ask, challenge, and propose alternatives with their trade-offs. Do not rush to a plan; a good question is often worth more than an answer.

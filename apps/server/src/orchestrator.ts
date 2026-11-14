@@ -232,7 +232,7 @@ export class Orchestrator {
       permissionMode: "dontAsk",
       allowedTools: [...READ_ONLY_TOOLS, ...DRAFT_TOOLS],
       disallowedTools: NEVER,
-      appendSystemPrompt: orchestratorBriefing(project.name, Math.round(project.defaults.context_reuse_threshold * 100)),
+      appendSystemPrompt: orchestratorBriefing(project.name, Math.round(project.defaults.context_reuse_threshold * 100), project.languages),
       agentsFile: orchestratorAgentsFile(),
       env: this.host.env(s.id),
     } });

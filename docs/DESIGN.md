@@ -177,6 +177,15 @@ change of a text is made in the module and shows as a changed golden file in the
 lines and chat lines for the user, the step chat's seed (`step-seed.ts`) and the hand-over request
 (`conversations.ts`).
 
+**Languages in the texts.** The briefings name the languages of the project's effective settings (PROTOCOL.md,
+"Languages") instead of a fixed rule. A briefing is the process's system prompt, fixed when it starts, so the worker's
+language line also goes with each step's opening and each inbox message; the orchestrator and partners, whose
+messages are the user's own words, get a new process with the new briefing at their next message instead (the
+launch comparison of global settings does that by itself, as the briefing is part of the launch). The defaults keep
+every text as it was: without a reader's language, queue text stays in the working language, so nothing changes for
+a user until they choose a reader's language. The queue-reviewer's prompt is one file for every project, so it does
+not name a language: the orchestrator tells it.
+
 ### Failures
 
 A turn can fail without the worker deciding anything: the service is overloaded, the network drops, a limit is hit,

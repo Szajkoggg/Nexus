@@ -17,7 +17,8 @@ a shell command can take part.
 4. **Ids**: queues and steps have short human ids unique in their scope (`W`, `W2b`); sessions, events, notes,
    messages and questions have ULIDs (sortable by time). Times are ISO 8601 UTC.
 5. **Versioned.** Every YAML file has `protocol: 1`; every event carries `v: 1`. Readers reject a higher major version.
-6. **English** in every file. The dashboard shows the user's words verbatim in whatever language they were written.
+6. **English** in every file Nexus writes itself. The dashboard shows the user's words verbatim in whatever language
+   they were written. What agents write is in the languages of the settings (see "Languages").
 
 ## Layout
 
@@ -145,6 +146,27 @@ Two settings say which language what is written is in. Each is one of the offere
 - **`languages.working`, the working language** (project only, default `en`): what the project's agents work in:
   files, code, comments, commits, context cards, notes. It must agree with the project's own rules (its AGENTS.md):
   the setting is what Nexus tells the agents, the project's rules are the project's.
+
+**How agents are told** (`apps/server/src/prompts.ts`, from the project's effective settings):
+
+- **With the defaults** (no reader's language, working language English) every text is as it was before these
+  settings: the orchestrator and partners reply in the language the user writes in, and what they write into files
+  and queues is in English; the worker's texts name no language.
+- **The worker**: its briefing ends with a language line ("write what is meant for the user in <reader's language>:
+  step summaries, questions, progress lines, stop and failure reasons, labels of review material; work in <working
+  language>: files, code, comments, commit messages, context summaries"). With no reader's language set, the line
+  says "the language the user writes in". A briefing is fixed when its process starts, so the same line also ends
+  each step's opening and each inbox message as delivered: a change reaches a running worker with its next message or
+  step. A changed briefing also counts as a changed launch setting, so the worker is resumed in a new process before
+  its next step ("Running sessions").
+- **The orchestrator**: replies, and the text of the queues it drafts (title, description, goals, acceptance, stop
+  conditions, checks, review notes; ids and YAML keys stay English), are in the reader's language; everything else it
+  writes into files is in the working language. With no reader's language set, queue text is in the working language
+  (as before). It tells its queue-reviewer which language the queue's text is to be in; the reviewer checks it. A
+  change reaches it at its next message: its process is resumed with the new briefing.
+- **A thinking partner** replies in the reader's language (none: the language the user writes in) and writes its notes
+  in the working language; its hand-over summary for the orchestrator is in the working language. A change reaches it
+  at its next message, as for the orchestrator.
 
 ## `queue.yaml`
 

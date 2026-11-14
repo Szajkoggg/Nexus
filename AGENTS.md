@@ -28,8 +28,12 @@ Nexus is developed with Nexus. The agents working on this repository are run by 
 
 ## How work is done
 
-- **Language**: every file (code, comments, docs, commit messages, UI text) in English. The user talks in Hungarian;
-  agents that talk with the user reply in the user's language.
+- **Language**: every file (code, comments, docs, commit messages, UI text) in English, Nexus's working language,
+  with one exception the user decided: the text of queues (title, description, goals, acceptance, stop conditions,
+  checks, review notes) follows the reader's language set in Nexus's settings, because the user reads and approves it;
+  ids and YAML keys stay English. What agents write to the user (chat, step summaries, questions, progress lines)
+  follows the reader's language too. The user talks in Hungarian; with no reader's language set, agents that talk with
+  the user reply in the language the user writes in.
 - **Commits**: on `main` in this checkout, one or more per step, each with a subject line and a body that says why.
   Stage explicit paths (never `git add -A`). Do not push.
 - **Before every commit**: `npm run typecheck` and `npm test` pass. If the dashboard changed: `npm run build -w @nexus/web`.
