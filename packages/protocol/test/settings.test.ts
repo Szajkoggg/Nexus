@@ -157,6 +157,33 @@ test("a changed setting becomes the project's own, an untouched one keeps follow
   assert.deepEqual(stored().orchestrator, { session: "s1" });
 });
 
+test("merging back by itself and resolving conflicts: off by default, global with a project override; the worktree setup command is the project's only", () => {
+  const base = mkdtempSync(join(tmpdir(), "nexus-settings-"));
+  process.env.NEXUS_HOME = join(base, "home");
+  const store = ProjectStore.init(join(base, "p"), { id: "p", name: "P", root: join(base, "p") });
+  const stored = () => store.readStoredProject();
+  const effective = () => store.readProject().defaults;
+  assert.deepEqual([builtInSettings().defaults.merge_back, builtInSettings().defaults.resolve_conflicts], [false, false], "built-in: off");
+  assert.deepEqual([effective().merge_back, effective().resolve_conflicts, effective().worktree_setup], [false, false, undefined], "a new project: off, no setup command");
+  assert.deepEqual([stored().defaults.merge_back, stored().defaults.resolve_conflicts], [undefined, undefined], "it follows the global values");
+
+  // The project turns them on: its own values, whatever the global ones.
+  updateSettings(store, { defaults: { merge_back: true, resolve_conflicts: true, worktree_setup: "npm ci" } });
+  assert.deepEqual([stored().defaults.merge_back, stored().defaults.resolve_conflicts, stored().defaults.worktree_setup], [true, true, "npm ci"]);
+  assert.deepEqual(ownKeys(stored()).filter((k) => /merge_back|resolve_conflicts|worktree_setup/.test(k)), ["defaults.merge_back", "defaults.resolve_conflicts"], "the setup command is not a global setting");
+  writeGlobalSettings(globalWith((x) => { x.defaults.merge_back = false; x.defaults.resolve_conflicts = true; }));
+  assert.deepEqual([effective().merge_back, effective().resolve_conflicts], [true, true]);
+
+  // Following again: the global values.
+  updateSettings(store, { follow: ["defaults.merge_back", "defaults.resolve_conflicts"] });
+  assert.deepEqual([stored().defaults.merge_back, stored().defaults.resolve_conflicts], [undefined, undefined]);
+  assert.deepEqual([effective().merge_back, effective().resolve_conflicts], [false, true]);
+  assert.throws(() => updateSettings(store, { follow: ["defaults.worktree_setup"] }), (e: Error) => e instanceof ActionError && /not a setting with a global value/.test(e.message));
+  // Clearing the setup command: none.
+  updateSettings(store, { defaults: { worktree_setup: null } });
+  assert.equal(effective().worktree_setup, undefined);
+});
+
 for (const [name, shape] of [["Nexus", NEXUS_SHAPE], ["Project Honeycomb", HONEYCOMB_SHAPE]] as const) {
   test(`migrating ${name}'s project.yaml: equal values follow, different ones become its own, effective values unchanged, once`, () => {
     const x = legacy(shape);

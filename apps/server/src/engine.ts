@@ -5,6 +5,7 @@
 import { recordStepEnd, recordStepStart } from "./gitinfo.ts";
 import { AcceptedPusher } from "./accepted.ts";
 import type { GitRunner } from "./deploy.ts";
+import type { ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import {
@@ -24,7 +25,7 @@ import {
 import {
   ClockTimers, REAL_CLOCK, Scheduler, type PlanOptions, type Clock, type ScheduleOptions,
 } from "./scheduler.ts";
-import { gitBranch, worktreeFor } from "./worktree.ts";
+import { gitBranch, recordSetup, runSetup, setupPending, worktreeFor } from "./worktree.ts";
 import { closingContext } from "./closing.ts";
 import { Coordinator, refusalText, type Member } from "./coordinator.ts";
 import { gitWritableRoots } from "./codex.ts";
@@ -140,6 +141,8 @@ export class Engine implements Member {
    * whether the wait is over (`expired`: the usual rule applies until the work ends or the step opens again).
    */
   private readonly backgroundWaits = new Map<string, { step: string; since: number; expired?: boolean }>();
+  /** Worktree setup commands running, by queue (src/worktree.ts, runSetup). */
+  private readonly setups = new Map<string, ChildProcess | null>();
 
   constructor(store: ProjectStore, changed: () => void, options: EngineOptions = {}) {
     this.store = store;
@@ -503,6 +506,7 @@ export class Engine implements Member {
     this.timers.clear();
     this.clockTimers.clearAll();
     for (const l of this.host.all()) l.proc.kill();
+    for (const p of this.setups.values()) p?.kill();
   }
 
   /** A process of this engine's is still running (after shutdown: not yet exited). */
@@ -608,6 +612,7 @@ export class Engine implements Member {
       return;
     }
     if (run.state === "pausing") return this.writeRun(queueId, toPaused(run));
+    if (this.worktreeSetup(queueId, run, q)) return;
     const want = stepValues(this.runValues(state, run), next, state.project);
     const issue = effortIssue(want.runtime, want.effort);
     if (issue) return this.halt(queueId, `step ${next.id}: ${issue}`);
@@ -619,6 +624,30 @@ export class Engine implements Member {
     }
     if (this.prepareStep(queueId, run, state, q, current, next, want, live)) return;
     this.openStep(queueId, next, q, "start");
+  }
+
+  /**
+   * The project's worktree setup command, still to run in the queue's new worktree before a step opens: started here
+   * (once at a time); its success goes on, its failure halts the run with the reason, and it runs again when the run
+   * goes on. True while it runs (no step opens).
+   */
+  private worktreeSetup(queueId: string, run: RunFile, q: QueueView): boolean {
+    if (this.setups.has(queueId)) return true;
+    const command = setupPending(this.store, queueId);
+    if (!command || !q.worktree || q.worktree === "auto") return false;
+    const cwd = q.worktree;
+    this.setups.set(queueId, null);
+    this.store.appendActivity(run.session, { at: now(), kind: "text", text: `Nexus runs the worktree setup command in ${cwd}: ${command}`, queue: queueId });
+    void runSetup(command, cwd, { started: (p) => { if (this.setups.has(queueId)) this.setups.set(queueId, p); } }).then((failure) => {
+      this.setups.delete(queueId);
+      if (this.stopped) return;
+      recordSetup(this.store, queueId, command, failure);
+      const latest = this.store.readRun(queueId);
+      this.store.appendActivity(run.session, { at: now(), kind: failure ? "error" : "text", text: failure ? `The worktree setup command failed: ${failure}` : "The worktree setup command succeeded", queue: queueId });
+      if (!failure) return this.advance(queueId);
+      if (latest && (latest.state === "running" || latest.state === "pausing")) this.halt(queueId, `the worktree setup command (${command}) failed: ${failure}`);
+    });
+    return true;
   }
 
   /**

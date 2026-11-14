@@ -65,6 +65,7 @@ defaults:
   push_accepted: true                  # push the commit an accepted step was reviewed at (see "Pushing what was accepted")
   usage_pause_threshold: 0.85          # share of the 5-hour window at which no new step turn starts
   worktree_dir: C:/Code/GameDev/ProjectHoneycomb.worktrees   # project only
+  worktree_setup: npm ci               # project only: run once in each new worktree Nexus makes (see "Worktree setup")
 runtimes:
   claude: { permission_mode: auto, allowed_tools: [] }       # allowed_tools: project only
   codex:  { model: null, approval_policy: on-request, approvals_reviewer: auto_review }   # null: its own "none"
@@ -87,7 +88,7 @@ for a project then. Same paths as in `project.yaml`:
 protocol: 1
 defaults: { stop_conditions: [], review_level: 2, review_send_back_limit: 2, context_reuse_threshold: 0.6,
             context_care: true, protect_nexus: true, push_accepted: false, provisional_counts: true,
-            usage_pause_threshold: 0.9 }
+            merge_back: false, resolve_conflicts: false, usage_pause_threshold: 0.9 }
 runtimes:
   default: claude
   claude: { permission_mode: acceptEdits }            # model, effort: none (the runtime's default)
@@ -131,8 +132,8 @@ one: `null`). The effective settings do not change. It writes only such a file, 
 
 | Kind | Settings |
 |---|---|
-| Global, with a project override | `defaults`: `stop_conditions`, `review_level`, `review_send_back_limit`, `context_reuse_threshold`, `context_care`, `protect_nexus`, `push_accepted`, `provisional_counts`, `usage_pause_threshold`. `runtimes`: `default`; `claude`: `model`, `effort`, `permission_mode`; `codex`: `model`, `effort`, `sandbox`, `approval_policy`, `approvals_reviewer`. `conversations`: `runtime`, `model`, `effort`. `orchestrator`: `runtime`, `model`, `effort`, `notify`. `languages`: `reader` |
-| Project only | `name`, `defaults.worktree_dir`, `runtimes.claude.allowed_tools` (the project's own allow rules), `conversations.notes_dir`, `languages.working` (`id` and `root` identify the project) |
+| Global, with a project override | `defaults`: `stop_conditions`, `review_level`, `review_send_back_limit`, `context_reuse_threshold`, `context_care`, `protect_nexus`, `push_accepted`, `provisional_counts`, `merge_back`, `resolve_conflicts`, `usage_pause_threshold`. `runtimes`: `default`; `claude`: `model`, `effort`, `permission_mode`; `codex`: `model`, `effort`, `sandbox`, `approval_policy`, `approvals_reviewer`. `conversations`: `runtime`, `model`, `effort`. `orchestrator`: `runtime`, `model`, `effort`, `notify`. `languages`: `reader` |
+| Project only | `name`, `defaults.worktree_dir`, `defaults.worktree_setup`, `runtimes.claude.allowed_tools` (the project's own allow rules), `conversations.notes_dir`, `languages.working` (`id` and `root` identify the project) |
 | Global only | Remote access (`<NEXUS_HOME>/auth.json`, `push.json`), the deploy push (`deploy.json`), the server; each stays in its own file |
 | State, not a setting | `orchestrator.session` |
 
@@ -512,7 +513,7 @@ Written only by the server's queue engine; agents never touch them.
 
 | File | What |
 |---|---|
-| `queues/<id>/git.yaml` | The HEAD of the queue's checkout around each step's work (`src/gitinfo.ts`): `base` (an auto worktree's: `ref`, the branch or commit it was made from, its `sha`, `at`), `base.branch` (whether `ref` names a branch: only a branch can be merged back into), `merged` (`at`, `into`, `path`, `sha`, `fast_forward`), `cleaned` (`at`, `path`, `branch`), `steps.<step>` (rounds, oldest first: `session`, `start` (HEAD when the step opened, or when a send-back reopened it), `started_at`, `end` (HEAD at the end of the turn in which the step got its outcome: done, review, failed or stopped), `ended_at`; a sha is null outside a git repository). A continued step keeps its open round. One writer: the server. See "Git on the dashboard" |
+| `queues/<id>/git.yaml` | The HEAD of the queue's checkout around each step's work (`src/gitinfo.ts`): `base` (an auto worktree's: `ref`, the branch or commit it was made from, its `sha`, `at`), `base.branch` (whether `ref` names a branch: only a branch can be merged back into), `merged` (`at`, `into`, `path`, `sha`, `fast_forward`), `cleaned` (`at`, `path`, `branch`), `setup` (the worktree setup command for the worktree Nexus made: `command` (the last one run), `at` (when the worktree was made), `done_at` (once it succeeded), `failed` (`at`, `reason`: its last failure)), `steps.<step>` (rounds, oldest first: `session`, `start` (HEAD when the step opened, or when a send-back reopened it), `started_at`, `end` (HEAD at the end of the turn in which the step got its outcome: done, review, failed or stopped), `ended_at`; a sha is null outside a git repository). A continued step keeps its open round. One writer: the server. See "Git on the dashboard" |
 | `queues/<id>/push.yaml` | Pushing what was accepted: `review` (per step, the HEAD of the checkout when it entered review: `sha` or null, `finished_at`, `at`), `steps` (per accepted step: `acceptance`, `sha`, `result` (`pushed`, `failed`, `skipped`, `held`), `text`, `at`, `held_by?`), `pushed` (the last success: `sha`, `step`, `at`, `remote`, `branch`), `error` (the last failure until a success). One writer: the server. See "Pushing what was accepted" |
 | `queues/<id>/plan.yaml` | The queue's place in the plan (see "The plan"): `by`, `reason?`, `after` (the queues it waits for, each with `queue`, `by`, `at`, `reason?`), `created_at`, `updated_at`, `started_at?`, `proposal?`, `decisions`. One writer: the server; it stays after the queue starts (marked `started_at`), and taking the queue out of the plan removes it |
 | `queues/<id>/start.yaml` | The queue's next start as planned (see "The plan" and "Schedules"): `at?` (a schedule: the time, ISO 8601; with `usage`, `claude` or `codex`, when that is the usage window's reset plus the margin; without `at`, the options of a start by the plan; `after` only in files from before the plan, moved into `plan.yaml` at the server's start), the start's `runtime?`, `model?`, `effort?`, `session?` (a session to continue), `by` (`user` or `orchestrator`), `reason?`, `revision` (the queue's when planned), `created_at`, `failed?` (`at`, `reason`, `missed?`: it came due and the queue could not start; `missed`: a schedule more than 15 minutes late, the server not running at its time), `held?` (`since`, `kind`: `approval`, `checkout` or `limit`, `reason`: it came due but waits for the approval of the queue's current revision, for its checkout or for a place under the limit, and starts by itself; see "The plan" and "One queue per checkout, and a limit"). One writer: the server; a start of the queue or a cancel removes it |
@@ -536,6 +537,23 @@ Written only by the server's queue engine; agents never touch them.
 A session launched by Nexus has `launched_by: nexus`, `runtime: claude`, `native_id` (Claude's session UUID, chosen
 by Nexus) and the `model` it was started with. A queue may also say `worktree: auto`: Nexus then creates the worktree
 and branch when it starts the queue and writes their paths back into `queue.yaml`.
+
+**Worktree setup.** A project's `defaults.worktree_setup` (project only; none by default; in Nexus `npm ci`) is a
+command run once in each new worktree Nexus makes for a queue (`worktree: auto`), so the worktree can build and test
+(its own `node_modules`, for example). When Nexus makes the worktree it records `setup` in the queue's `git.yaml`; the
+engine runs the command through the shell in the worktree before the run's first step opens (no step opens while it
+runs, at most 30 minutes) and records `done_at`. A failure (an exit code other than 0, or the time limit) halts the run
+with the reason, `the worktree setup command (<command>) failed: exit code <n>; its output ends: <output>`, and records
+it under `failed`; when the run goes on (Continue, resume), the project's command as it is then runs again in the same
+worktree. A worktree the queue names by path, an existing one, and the project's own checkout get no setup.
+
+**Merging back by itself and resolving conflicts** (`defaults.merge_back`, `defaults.resolve_conflicts`; global, with a
+project override; both off by default, so a new project merges back only by the user's hand until the user turns
+them on): with `merge_back`, Nexus merges a queue with a worktree of its own back by itself, when all its steps are
+accepted, the merge has no conflict and its integration step's checks pass; with `resolve_conflicts`, the integration
+step's worker tries to resolve a conflict with the current base, judged by the checks and the step's review, and only
+one it cannot resolve waits for the user. (The integration step and the fast-forward come with queue PW's next steps;
+until then the two settings change nothing.)
 
 The event `review.accepted` (`queue`, `step`, `text?`, `to?`), written by the user or an orchestrator, accepts a step
 held in `review`.

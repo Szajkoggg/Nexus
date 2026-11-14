@@ -132,6 +132,17 @@ const DefaultsShape = z.object({
    * confirms it.
    */
   provisional_counts: z.boolean().default(true),
+  /**
+   * Nexus merges a queue with a worktree of its own back by itself: when all its steps are accepted, the merge has no
+   * conflict and its integration step's checks pass (a fast-forward of the base). Off (the default): merging back is
+   * the user's.
+   */
+  merge_back: z.boolean().default(false),
+  /**
+   * On a conflict while integrating a worktree queue, its integration step's worker tries to resolve it (the checks
+   * and the step's review judge it). Off (the default): a conflict waits for the user.
+   */
+  resolve_conflicts: z.boolean().default(false),
   usage_pause_threshold: Fraction.default(0.9),
 });
 /** `defaults` as read: an old `review_policy` becomes its `review_level`. */
@@ -198,7 +209,14 @@ export const ProjectFile = z.object({
   id: Id,
   name: z.string(),
   root: z.string(),
-  defaults: z.preprocess(legacyDefaults, DefaultsShape.extend({ worktree_dir: z.string().optional() })).prefault({}),
+  defaults: z.preprocess(legacyDefaults, DefaultsShape.extend({
+    worktree_dir: z.string().optional(),
+    /**
+     * The worktree setup command (project only): run once in each new worktree Nexus makes for a queue (`worktree:
+     * auto`), before its first step opens, through the shell (Nexus: `npm ci`). A failure halts the run with the reason.
+     */
+    worktree_setup: z.string().optional(),
+  })).prefault({}),
   runtimes: z.object({
     /** The runtime a run uses when its start does not name one. */
     default: WorkerRuntime.default("claude"),
@@ -259,8 +277,11 @@ export const StoredProject = z.object({
     protect_nexus: own(z.boolean()),
     push_accepted: own(z.boolean()),
     provisional_counts: own(z.boolean()),
+    merge_back: own(z.boolean()),
+    resolve_conflicts: own(z.boolean()),
     usage_pause_threshold: own(Fraction),
     worktree_dir: z.string().optional(),
+    worktree_setup: z.string().optional(),
   })).prefault({}),
   runtimes: z.object({
     default: own(WorkerRuntime),
@@ -627,6 +648,15 @@ export const GitFile = z.object({
   merged: z.object({ at: Time, into: z.string(), path: z.string(), sha: z.string(), fast_forward: z.boolean() }).optional(),
   /** The user cleaned up: the worktree removed and its branch deleted (git branch -d). */
   cleaned: z.object({ at: Time, path: z.string(), branch: z.string() }).optional(),
+  /**
+   * The project's worktree setup command for the worktree Nexus made (`at`): `done_at` once it succeeded; until then
+   * it runs again before the next step opens. `failed`: its last failure (`reason`: the exit code and the output's
+   * end).
+   */
+  setup: z.object({
+    command: z.string(), at: Time, done_at: Time.optional(),
+    failed: z.object({ at: Time, reason: z.string() }).optional(),
+  }).optional(),
   steps: z.record(z.string(), z.array(z.object({
     session: Id,
     start: z.string().nullable(), started_at: Time,
