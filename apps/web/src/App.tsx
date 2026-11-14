@@ -25,12 +25,13 @@ import { FinishedGroup } from "./components/Finished.tsx";
 import { splitFinished } from "./finished.ts";
 import { ApprovalView, useApprovalForm } from "./components/Approval.tsx";
 import { needsApproval } from "./approval.ts";
+import { rich, t, type Key } from "./i18n.ts";
 
 // Finished queues (done, cancelled) fold into one group at the bottom (FinishedGroup); one that still waits for the
 // user stays in progress until nothing waits.
-const GROUPS: { title: string; statuses: QueueStatus[] }[] = [
-  { title: "In progress", statuses: ["running", "waiting", "stopped", "paused", "done", "cancelled"] },
-  { title: "Planned", statuses: ["approved", "proposed", "draft"] },
+const GROUPS: { title: Key; statuses: QueueStatus[] }[] = [
+  { title: "shell.group.inProgress", statuses: ["running", "waiting", "stopped", "paused", "done", "cancelled"] },
+  { title: "shell.group.planned", statuses: ["approved", "proposed", "draft"] },
 ];
 
 /**
@@ -114,7 +115,7 @@ export function App() {
   const digest = <Digest projects={projects ?? []} version={tick} onGoThrough={goThrough} />;
   // On the phone an item that waits for the user says where it stands in the waiting list: "2 of 6".
   const place = phone && projectId && route.queue ? waitingPosition(waiting, { project: projectId, queue: route.queue, step: route.step }) : undefined;
-  const of = place?.at ? `${place.at} of ${place.total} waiting` : undefined;
+  const of = place?.at ? t("shell.placeInWaiting", { at: place.at, total: place.total }) : undefined;
 
   const itemShown = !!(state && queue);
   // From 1280 px the right rail stands beside the chat (UX proposals, 11A).
@@ -133,14 +134,14 @@ export function App() {
   };
 
   const banners = <>
-    {projectsError && <Banner>Cannot reach the Nexus server: {projectsError}</Banner>}
+    {projectsError && <Banner>{t("shell.serverUnreachable", { error: projectsError })}</Banner>}
     {projects?.length === 0 && (
-      <Banner>No projects yet. Register one with <code>nexus project add &lt;path&gt;</code>.</Banner>
+      <Banner>{rich("shell.noProjects", { command: <code key="command">nexus project add &lt;path&gt;</code> })}</Banner>
     )}
     {error && <Banner>{error}</Banner>}
     {state && state.warnings.length > 0 && (
       <details className="mb-4 rounded-lg border border-warn/30 bg-warn/5 px-3 py-2 text-sm text-warn">
-        <summary className="cursor-pointer">{state.warnings.length} warning(s) reading the project files</summary>
+        <summary className="cursor-pointer">{t("shell.warnings", { count: state.warnings.length })}</summary>
         <ul className="mt-2 list-disc pl-5 text-xs text-warn/80">{state.warnings.map((w, i) => <li key={i}>{w}</li>)}</ul>
       </details>
     )}
@@ -151,7 +152,7 @@ export function App() {
     {state && byGroup.map((g) => (
       <section key={g.title} className="mb-8">
         <div className="mb-3 flex items-baseline gap-3">
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-fg-2">{g.title}</h2>
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-fg-2">{t(g.title)}</h2>
           <span className="text-xs text-fg-3">{g.queues.length}</span>
         </div>
         <div className="space-y-3">
@@ -160,7 +161,7 @@ export function App() {
               onQueue={() => projectId && nav.item(projectId, q.id)} onStep={(s) => projectId && nav.item(projectId, q.id, s)} onChanged={reload} />
           ))}
         </div>
-        {g.queues.length === 0 && <p className="text-sm text-fg-3">Nothing here.</p>}
+        {g.queues.length === 0 && <p className="text-sm text-fg-3">{t("common.nothingHere")}</p>}
       </section>
     ))}
 
@@ -170,16 +171,16 @@ export function App() {
 
     {state && state.sessions.some((s) => s.role === "worker" || s.role === "orchestrator") && (
       <section className="mb-8">
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-fg-2">Sessions</h2>
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-fg-2">{t("shell.sessions")}</h2>
         <div className="overflow-x-auto rounded-xl border border-line">
           <table className="w-full text-left text-sm">
-            <thead className="text-xs text-fg-3"><tr>{["Session", "Role", "Runtime", "Queue", "State", "Context", "Last event"].map((h) => <th key={h} className="px-3 py-2 font-medium">{h}</th>)}</tr></thead>
+            <thead className="text-xs text-fg-3"><tr>{SESSION_COLUMNS.map((h) => <th key={h} className="px-3 py-2 font-medium">{t(h)}</th>)}</tr></thead>
             <tbody>
               {state.sessions.filter((s) => s.role === "worker" || s.role === "orchestrator").map((s) => (
                 <tr key={s.id} className="border-t border-line">
                   <td className="px-3 py-2"><span className="text-fg">{s.title ?? s.id.slice(-8)}</span></td>
                   <td className="px-3 py-2 text-fg-2">{s.role}</td>
-                  <td className="px-3 py-2 text-fg-2">{s.runtime}{s.launched_by === "external" ? " (external)" : ""}</td>
+                  <td className="px-3 py-2 text-fg-2">{s.launched_by === "external" ? t("shell.sessions.external", { runtime: s.runtime }) : s.runtime}</td>
                   <td className="px-3 py-2 font-mono text-fg-2">{s.queue ?? "-"}</td>
                   <td className="px-3 py-2 text-fg-2">{s.live ? `${s.live.state}${s.live.model ? ` · ${s.live.model.replace(/^claude-/, "")}` : ""}${s.effort ? ` · ${s.effort}` : ""}` : "-"}</td>
                   <td className="px-3 py-2"><ContextBar s={s} /></td>
@@ -227,7 +228,7 @@ export function App() {
             {projects && <ProjectPicker projects={projects} current={projectId} open={isOpen(route.nav, "projects")} onPick={(id) => nav.project(id)} />}
             {state && <RunningNow queues={state.queues} />}
             <span className="flex-1" />
-            {!connected && <span className="flex items-center gap-1.5 text-xs text-stop" title="Reconnecting"><span className="h-2 w-2 rounded-full bg-stop" />offline</span>}
+            {!connected && <span className="flex items-center gap-1.5 text-xs text-stop" title={t("common.reconnecting")}><span className="h-2 w-2 rounded-full bg-stop" />{t("common.offline")}</span>}
             {state && <SettingsButton onClick={() => nav.open("settings")} />}
           </div>
         </header>
@@ -264,9 +265,9 @@ export function App() {
     ideas: ideas?.filter((c) => !c.archived).length,
     unread,
     tools: wide ? null : (
-      <button onClick={() => (waitingOpen ? nav.close("waiting") : nav.open("waiting"))} aria-pressed={waitingOpen} title="What waits for you in all projects, what runs, what finished today"
+      <button onClick={() => (waitingOpen ? nav.close("waiting") : nav.open("waiting"))} aria-pressed={waitingOpen} title={t("shell.waitingButtonTitle")}
         className={`flex shrink-0 items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm ${waitingOpen ? "bg-surface-3" : "hover:bg-surface"} ${total ? "border-warn/40 text-warn" : "border-line-strong text-fg-2"}`}>
-        Waiting{total > 0 && <span className="grid h-4.5 min-w-4.5 place-items-center rounded-full bg-warn px-1.5 text-[11px] font-semibold text-canvas">{total}</span>}
+        {t("shell.waitingButton")}{total > 0 && <span className="grid h-4.5 min-w-4.5 place-items-center rounded-full bg-warn px-1.5 text-[11px] font-semibold text-canvas">{total}</span>}
       </button>
     ),
   };
@@ -301,7 +302,7 @@ export function App() {
         </>}
         {view === "queues" && <>
           <DeskHead desk={desk}>
-            <h1 className="min-w-0 truncate text-sm font-semibold text-fg">{state?.project.name ?? projectId}<span className="font-normal text-fg-3"> · queues</span></h1>
+            <h1 className="min-w-0 truncate text-sm font-semibold text-fg">{state?.project.name ?? projectId}<span className="font-normal text-fg-3">{t("shell.queuesOf")}</span></h1>
           </DeskHead>
           <div className="@container scroll-thin min-h-0 flex-1 overflow-y-auto px-6 py-6">
             <div className="mx-auto max-w-6xl">
@@ -332,6 +333,11 @@ export function App() {
   );
 }
 
+const SESSION_COLUMNS: Key[] = [
+  "shell.sessions.session", "shell.sessions.role", "shell.sessions.runtime", "shell.sessions.queue", "shell.sessions.state",
+  "shell.sessions.context", "shell.sessions.lastEvent",
+];
+
 /** The width of a desktop's project sidebar (Tailwind's w-58), which the approval's full view leaves in sight. */
 const SIDEBAR = "14.5rem";
 
@@ -353,12 +359,12 @@ function PhoneTools({ connected, version, server, notify }: {
     </div>
   );
   return (
-    <Section title="Nexus on this device">
-      {row("Live updates", connected ? "On" : <span className="text-stop">Reconnecting…</span>)}
-      {server?.update && server.update.phase !== "idle" && server.update.phase !== "updated" && row("Update", <UpdatePill info={server} />)}
-      {row("Usage", <UsageMeter version={version} always />)}
-      {row("Notifications", <NotifyToggle {...notify} labelled />)}
-      {row("Remote access", <Button variant="quiet" onClick={() => nav.open("remote")}>Phone and other devices…</Button>)}
+    <Section title={t("device.title")}>
+      {row(t("device.liveUpdates"), connected ? t("common.on") : <span className="text-stop">{t("common.reconnectingDots")}</span>)}
+      {server?.update && server.update.phase !== "idle" && server.update.phase !== "updated" && row(t("device.update"), <UpdatePill info={server} />)}
+      {row(t("device.usage"), <UsageMeter version={version} always />)}
+      {row(t("device.notifications"), <NotifyToggle {...notify} labelled />)}
+      {row(t("device.remoteAccess"), <Button variant="quiet" onClick={() => nav.open("remote")}>{t("device.otherDevices")}</Button>)}
     </Section>
   );
 }

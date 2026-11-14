@@ -5,10 +5,10 @@
 import { useState } from "react";
 import type { DigestEvent, DigestResponse } from "@nexus/protocol/digest";
 import { mergeAttention } from "@nexus/protocol/attention";
-import { formatClock } from "@nexus/protocol/times";
 import { fileUrl, useFetch, type ProjectSummary } from "../api.ts";
 import { digestTiles, hasNews, outcome, type Tone } from "../digest.ts";
 import { nav } from "../nav.ts";
+import { formatClock, t } from "../i18n.ts";
 import { Clock } from "./ui.tsx";
 
 const KEY = "nexus.digest.seen";
@@ -22,7 +22,7 @@ const TONE: Record<Tone, string> = { ok: "text-ok", stop: "text-stop", danger: "
 const DOT: Record<Tone, string> = { ok: "bg-ok", stop: "bg-stop", danger: "bg-danger", warn: "bg-warn", muted: "bg-fg-3" };
 const SHOWN = 6;
 
-const greeting = (d = new Date()) => (d.getHours() < 12 ? "Good morning" : d.getHours() < 18 ? "Good afternoon" : "Good evening");
+const greeting = (d = new Date()) => t(d.getHours() < 12 ? "digest.morning" : d.getHours() < 18 ? "digest.afternoon" : "digest.evening");
 
 export function Digest({ projects, version, onGoThrough }: { projects: ProjectSummary[]; version: unknown; onGoThrough: () => void }) {
   const [seen, setSeen] = useState(storedSeen);
@@ -44,13 +44,13 @@ export function Digest({ projects, version, onGoThrough }: { projects: ProjectSu
     </div>
   );
   return (
-    <section aria-label="Since you last looked" className="rounded-xl border border-line bg-surface-2 p-3">
+    <section aria-label={t("digest.label")} className="rounded-xl border border-line bg-surface-2 p-3">
       <div className="flex items-center gap-2">
         <h2 className="text-[15px] font-semibold text-fg">{greeting()}</h2>
         <span className="flex-1" />
-        <button onClick={markSeen} className="rounded-md px-2 py-1 text-xs font-medium text-fg-2 hover:bg-surface-3 hover:text-fg max-lg:min-h-11">Mark as seen</button>
+        <button onClick={markSeen} className="rounded-md px-2 py-1 text-xs font-medium text-fg-2 hover:bg-surface-3 hover:text-fg max-lg:min-h-11">{t("digest.markSeen")}</button>
       </div>
-      <p className="text-xs text-fg-3">since you last looked, {formatClock(seen, new Date())} · all projects</p>
+      <p className="text-xs text-fg-3">{t("digest.since", { time: formatClock(seen, new Date()) })}</p>
 
       <div className="mt-2.5 grid grid-cols-2 gap-2">
         {tile(tiles.finished, "text-ok")}
@@ -60,22 +60,22 @@ export function Digest({ projects, version, onGoThrough }: { projects: ProjectSu
       </div>
 
       {d.events.length > 0 && <>
-        <h3 className="mb-1 mt-3.5 text-[11px] font-semibold uppercase tracking-wider text-fg-3">What happened, newest first</h3>
+        <h3 className="mb-1 mt-3.5 text-[11px] font-semibold uppercase tracking-wider text-fg-3">{t("digest.happened")}</h3>
         <ul className="divide-y divide-line overflow-hidden rounded-lg border border-line bg-surface">
           {rows.map((e, i) => <Line key={`${e.project}/${e.kind}/${e.queue}/${e.step}/${e.at}/${i}`} e={e} />)}
         </ul>
         {d.events.length > SHOWN && (
           <button onClick={() => setAll(!all)} className="mt-1 text-xs text-fg-3 hover:text-fg max-lg:min-h-11">
-            {all ? "▾ fewer" : `▸ ${d.events.length - SHOWN} more`}
+            {all ? t("digest.fewer") : t("digest.more", { count: d.events.length - SHOWN })}
           </button>
         )}
       </>}
 
       {waiting.length > 0 && <>
         <button onClick={onGoThrough} className="mt-3 w-full rounded-lg bg-accent-strong px-3 py-2 text-sm font-semibold text-on-accent hover:bg-accent max-lg:min-h-11">
-          Go through them one by one →
+          {t("digest.goThrough")}
         </button>
-        <p className="mt-1 text-xs text-fg-3">Opens the first of the {waiting.length} waiting; each answer or decision moves on to the next.</p>
+        <p className="mt-1 text-xs text-fg-3">{t("digest.goThroughNote", { count: waiting.length })}</p>
       </>}
     </section>
   );
@@ -100,7 +100,7 @@ function Line({ e }: { e: DigestEvent }) {
         </span>
       </button>
       {e.report && (
-        <a href={fileUrl(e.project, e.report)} target="_blank" rel="noreferrer" className="-mt-1 block px-2.5 pb-2 pl-[3.25rem] text-xs text-accent hover:underline">report ▸</a>
+        <a href={fileUrl(e.project, e.report)} target="_blank" rel="noreferrer" className="-mt-1 block px-2.5 pb-2 pl-[3.25rem] text-xs text-accent hover:underline">{t("digest.report")}</a>
       )}
     </li>
   );

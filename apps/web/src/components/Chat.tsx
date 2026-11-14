@@ -12,6 +12,7 @@ import { nav, useNav } from "../nav.ts";
 import { usePhone } from "../phone.ts";
 import { firstUnread, hasUnread, opening, placeKey, readPlace, seenUpTo, unreadCount, usePlaces, writePlace } from "../chatPlace.ts";
 import { EffortSelect, ModelSelect, useEfforts } from "./Settings.tsx";
+import { t } from "../i18n.ts";
 
 interface View { session: SessionFile | null; state: "working" | "idle" | "exited"; runtime: RuntimeFile | null; chat: ChatEntry[]; model: string | null; effort: string | null }
 
@@ -239,9 +240,9 @@ export function DeskHead({ which, desk, children }: { which?: "chat" | "ideas"; 
   );
   return (
     <header className="flex min-h-15 shrink-0 items-center gap-3 border-b border-line px-6 py-2.5">
-      <div className="flex shrink-0 items-center gap-0.5 rounded-lg border border-line bg-surface-2 p-0.5" role="group" aria-label="Chats">
-        {item("chat", <><span className={`h-2 w-2 rounded-full ${o?.state === "working" ? "animate-pulse bg-accent" : o?.session ? "bg-ok" : "bg-fg-3"}`} />Orchestrator<UnreadMark n={desk.unread.chat} /></>)}
-        {item("ideas", <>Ideas{desk.ideas ? <span className="text-fg-3">· {desk.ideas}</span> : null}<UnreadMark n={desk.unread.ideas ? -1 : 0} /></>)}
+      <div className="flex shrink-0 items-center gap-0.5 rounded-lg border border-line bg-surface-2 p-0.5" role="group" aria-label={t("desk.chats")}>
+        {item("chat", <><span className={`h-2 w-2 rounded-full ${o?.state === "working" ? "animate-pulse bg-accent" : o?.session ? "bg-ok" : "bg-fg-3"}`} />{t("desk.orchestrator")}<UnreadMark n={desk.unread.chat} /></>)}
+        {item("ideas", <>{t("desk.ideas")}{desk.ideas ? <span className="text-fg-3">· {desk.ideas}</span> : null}<UnreadMark n={desk.unread.ideas ? -1 : 0} /></>)}
       </div>
       {children}
       <span className="flex-1" />
@@ -257,8 +258,8 @@ export interface Unread { chat: number; ideas: boolean }
 export function UnreadMark({ n }: { n: number }) {
   if (n === 0) return null;
   return n < 0
-    ? <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" title="New messages" aria-label="new messages" />
-    : <span className="grid h-4 min-w-4 shrink-0 place-items-center rounded-full bg-accent-strong px-1 text-[10.5px] font-semibold text-on-accent" title={`${n} new`} aria-label={`${n} new`}>{n}</span>;
+    ? <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" title={t("common.newMessagesTitle")} aria-label={t("common.newMessages")} />
+    : <span className="grid h-4 min-w-4 shrink-0 place-items-center rounded-full bg-accent-strong px-1 text-[10.5px] font-semibold text-on-accent" title={t("common.newCount", { count: n })} aria-label={t("common.newCount", { count: n })}>{n}</span>;
 }
 
 /**

@@ -870,6 +870,41 @@ Rules the components keep:
   pending delivery, a planned start) uses `info`.
 - Opacity modifiers derive tints from tokens (`bg-warn/15`), so a theme defines each colour once.
 
+### The interface texts in one place
+
+Decided on 2026-11-14 (`docs/ideas/languages.md`): the dashboard is prepared for translation, English the source; the
+translations themselves are a later queue. Every text the dashboard shows is a key in one catalogue,
+`apps/web/src/messages/en.ts`, and components ask for it through `apps/web/src/i18n.ts`:
+
+- **`t(key, params)`** returns the text in the interface language. `{name}` in a text is a parameter; a number is
+  formatted for the locale (`1,234`). A text that depends on a number is a plural message, one form per plural
+  category (`{ one, other }`, and `few`, `many`… where a language has them), chosen by the `count` parameter through
+  `Intl.PluralRules`. A placeholder without a value stays as written, so a missing parameter shows.
+- **`rich(key, params)`** is the same with elements as parameters (a `<code>`, a link): it returns the parts for React
+  to render, so a sentence with markup inside stays one text a translator can reorder.
+- **A translation** is a catalogue with any subset of the keys (`addLanguage`, `setLanguage`); a key it lacks falls
+  back to English, with English plural rules. Keys are typed from the English catalogue, so a typo does not compile.
+  A key is named by where its text is used (`rail.…`, `notify.…`, `common.…` for what is shared); a new meaning gets a
+  new key, so a translation never keeps an old sense under a changed English text.
+- **Dates and times** go through `Intl.DateTimeFormat` with the interface language's locale (`formatClock`,
+  `formatDateTime`, `formatDate`, `formatTime`); English uses `en-GB`, the day-month order and 24-hour clock the
+  dashboard already had. They follow the interface language, not the reader's language setting, so until a
+  translation exists nothing changes (decided with the queue). A hover title that used the browser's own locale
+  (`toLocaleString()`) now uses the interface language's too.
+- **Durations and "ago"** (`formatDuration`, `timeAgo`) are composed from catalogue texts (`{h} h {m} min`), with the
+  numbers through `Intl.NumberFormat`. `Intl.DurationFormat` and `Intl.RelativeTimeFormat` would write "1 hr, 12 min"
+  and "5 minutes ago": longer than the dashboard's short forms, and the former is new in browsers; the catalogue keeps
+  each language's short form in the translator's hands.
+
+No library: react-intl or i18next would bring a provider, message syntax and a runtime of their own for what is a
+lookup, a placeholder fill and `Intl.PluralRules`, about a hundred lines that are pure and unit tested
+(`apps/web/test/i18n.test.ts`). The language is a module-level setting, not a React context: how a change of it reaches an
+open page (a reload, a key on the root) is for the translation queue to choose.
+
+Not in the catalogue: texts that come from the server (an action's error message, a run's reason, the stop's place)
+and `packages/protocol/src/times.ts` (`retryLine`, the server's own times), which the server also uses; these stay
+English until a queue decides how the server learns the interface language.
+
 ### One action bar
 
 Every panel that asks something of the user is built the same way (UX proposals, item 13): `PanelHeader` (where it

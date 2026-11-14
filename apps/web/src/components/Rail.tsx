@@ -10,6 +10,7 @@ import { WaitingCards } from "./Attention.tsx";
 import { TONE } from "./QueueRow.tsx";
 import { Clock, CloseButton } from "./ui.tsx";
 import { nav } from "../nav.ts";
+import { t } from "../i18n.ts";
 
 /** The rail's width; a queue or step opened beside the chat takes the same place. */
 export const RAIL = "23.25rem";
@@ -33,20 +34,20 @@ export function Rail({ projects, state, queuesShown, onOpenWaiting, onClose, dig
   const done = state ? finishedToday(state.queues, new Set(state.attention.map((a) => a.queue).filter((x): x is string => !!x))) : [];
   const open = (queue: string) => project && nav.item(project.id, queue);
   return (
-    <div className="flex h-full min-h-0 flex-col" aria-label="What waits and runs">
+    <div className="flex h-full min-h-0 flex-col" aria-label={t("rail.label")}>
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-3 pb-4">
         {digest && <div className="pt-3 empty:hidden">{digest}</div>}
         <div className="flex items-center gap-2 px-1 pb-2.5 pt-4">
-          <Label tone="text-warn">Waiting for you · {waiting}</Label>
+          <Label tone="text-warn">{t("waiting.titleCount", { count: waiting })}</Label>
           <span className="flex-1" />
-          <span className="text-[11px] text-fg-3">all projects</span>
+          <span className="text-[11px] text-fg-3">{t("rail.allProjects")}</span>
           {onClose && <CloseButton onClose={onClose} />}
         </div>
         <WaitingCards projects={projects} current={project?.id} onOpen={onOpenWaiting} />
 
         {project && <>
-          <div className="px-1 pb-1.5 pt-6"><Label>{`Running in ${project.name}`}</Label></div>
-          {work.length === 0 && <p className="px-1 text-sm text-fg-3">Nothing runs.</p>}
+          <div className="px-1 pb-1.5 pt-6"><Label>{t("rail.runningIn", { project: project.name })}</Label></div>
+          {work.length === 0 && <p className="px-1 text-sm text-fg-3">{t("rail.nothingRuns")}</p>}
           <ul>
             {work.map(({ queue: q, status: s }) => {
               const step = s.step ? q.steps.find((x) => x.id === s.step) : undefined;
@@ -66,14 +67,14 @@ export function Rail({ projects, state, queuesShown, onOpenWaiting, onClose, dig
           </ul>
 
           {done.length > 0 && <>
-            <div className="px-1 pb-1.5 pt-6"><Label>Finished today · {done.length}</Label></div>
+            <div className="px-1 pb-1.5 pt-6"><Label>{t("rail.finishedToday", { count: done.length })}</Label></div>
             <ul>
               {done.map(({ queue: q, finished_at }) => (
                 <li key={q.id}>
                   <button onClick={() => open(q.id)} className="flex w-full items-center gap-2 rounded-md px-1 py-1 text-left text-[13px] hover:bg-surface-3/50">
                     <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${q.status === "cancelled" ? "bg-fg-3" : "bg-ok"}`} />
                     <span className={`w-9 shrink-0 truncate font-mono text-xs ${q.status === "cancelled" ? "text-fg-3" : "text-ok"}`}>{q.id}</span>
-                    <span className="min-w-0 flex-1 truncate text-fg-2">{q.title}{q.status === "cancelled" ? " (cancelled)" : ""}</span>
+                    <span className="min-w-0 flex-1 truncate text-fg-2">{q.status === "cancelled" ? t("rail.cancelled", { title: q.title }) : q.title}</span>
                     {finished_at && <span className="shrink-0 text-xs text-fg-3"><Clock at={finished_at} /></span>}
                   </button>
                 </li>
@@ -86,7 +87,7 @@ export function Rail({ projects, state, queuesShown, onOpenWaiting, onClose, dig
         <div className="shrink-0 border-t border-line px-3 py-3">
           <button onClick={() => nav.tab("queues")} aria-pressed={queuesShown}
             className={`w-full truncate rounded-lg border border-line-strong px-3 py-1.5 text-sm font-medium ${queuesShown ? "bg-surface-3 text-fg" : "text-fg hover:bg-surface-3/60"}`}>
-            All queues of {project.name}
+            {t("rail.allQueues", { project: project.name })}
           </button>
         </div>
       )}

@@ -5,6 +5,7 @@ import type { GlobalSettings, ProjectFile } from "@nexus/protocol";
 import { LANGUAGES } from "@nexus/protocol/languages";
 import { act, useFetch } from "../api.ts";
 import { Button, Section } from "./ui.tsx";
+import { t } from "../i18n.ts";
 import { CHOICES, readChoice, setChoice, type ThemeChoice } from "../theme.ts";
 
 const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
@@ -37,7 +38,7 @@ function Select({ value, onChange, options, empty, disabled }: { value: string; 
 
 export function SettingsButton({ onClick }: { onClick: () => void }) {
   return (
-    <button onClick={onClick} title="Project settings" className="rounded-md p-1.5 text-fg-3 hover:bg-surface hover:text-fg">
+    <button onClick={onClick} title={t("sidebar.projectSettings")} className="rounded-md p-1.5 text-fg-3 hover:bg-surface hover:text-fg">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <circle cx="12" cy="12" r="3" />
         <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" />
@@ -444,8 +445,8 @@ export function useServer(version: unknown) {
 export function UpdatePill({ info }: { info: ServerInfo | undefined }) {
   const u = info?.update;
   if (!u || u.phase === "idle" || u.phase === "updated") return null;
-  const text = u.phase === "draining" ? (u.waiting.length ? `updating: waiting for ${u.waiting.length} project${u.waiting.length > 1 ? "s" : ""}` : "updating")
-    : u.phase === "failed" ? "update failed" : u.phase;
+  const text = u.phase === "draining" ? (u.waiting.length ? t("update.waitingFor", { count: u.waiting.length }) : t("update.updating"))
+    : u.phase === "failed" ? t("update.failed") : u.phase;
   return (
     <span className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap text-xs font-medium ${u.phase === "failed" ? "text-danger" : "text-accent"}`}>
       <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${u.phase === "failed" ? "bg-danger" : "animate-pulse bg-accent"}`} />{text}

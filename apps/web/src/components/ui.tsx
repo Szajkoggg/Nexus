@@ -2,7 +2,8 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { DRAFT_EVENT, DRAFT_FOCUS_EVENT, readDraft, writeDraft } from "../drafts.ts";
 import { usePhone } from "../phone.ts";
 import ReactMarkdown from "react-markdown";
-import { formatClock, formatDuration, runTimes, stepTimes } from "@nexus/protocol/times";
+import { formatDuration, runTimes, stepTimes } from "@nexus/protocol/times";
+import { formatClock, formatDateTime, t, timeAgo } from "../i18n.ts";
 import type { QueueView, StepView } from "../api.ts";
 
 // ---------------------------------------------------------------- status colours
@@ -82,15 +83,13 @@ export function useNow(intervalMs = 30_000): number {
 export function TimeAgo({ at }: { at?: string }) {
   const now = useNow();
   if (!at) return null;
-  const d = (now - Date.parse(at)) / 1000;
-  const text = d < 60 ? "just now" : d < 3600 ? `${Math.floor(d / 60)} min ago` : d < 86400 ? `${Math.floor(d / 3600)} h ago` : `${Math.floor(d / 86400)} d ago`;
-  return <time dateTime={at} title={new Date(at).toLocaleString()} className="whitespace-nowrap">{text}</time>;
+  return <time dateTime={at} title={formatDateTime(at)} className="whitespace-nowrap">{timeAgo(at, now)}</time>;
 }
 
 /** An absolute local time: "14:02" today, with the date on another day. The full date and time on hover. */
 export function Clock({ at }: { at: string }) {
   const now = useNow();
-  return <time dateTime={at} title={new Date(at).toLocaleString()} className="whitespace-nowrap">{formatClock(at, new Date(now))}</time>;
+  return <time dateTime={at} title={formatDateTime(at)} className="whitespace-nowrap">{formatClock(at, new Date(now))}</time>;
 }
 
 const sameDay = (a: string, b: string) => new Date(a).toDateString() === new Date(b).toDateString();
@@ -380,7 +379,7 @@ export function ActionBar({ left, hint, menu, secondary, primary, children }: {
 
 export function CloseButton({ onClose, className = "" }: { onClose: () => void; className?: string }) {
   return (
-    <button onClick={onClose} aria-label="Close" className={`grid shrink-0 place-items-center rounded-md p-1.5 text-fg-2 hover:bg-surface-3 hover:text-fg max-lg:h-11 max-lg:w-11 ${className}`}>
+    <button onClick={onClose} aria-label={t("common.close")} className={`grid shrink-0 place-items-center rounded-md p-1.5 text-fg-2 hover:bg-surface-3 hover:text-fg max-lg:h-11 max-lg:w-11 ${className}`}>
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 6l12 12M18 6L6 18" /></svg>
     </button>
   );
@@ -402,7 +401,7 @@ export function PanelHeader({ where, title, status, onClose, of, bare }: {
     return (
       <header className="shrink-0 border-b border-line">
         <div className="flex min-h-13 items-center gap-1 px-1">
-          <button onClick={onClose} aria-label="Back" className="grid h-11 w-11 shrink-0 place-items-center rounded-md text-fg-2 hover:bg-surface-3 hover:text-fg">
+          <button onClick={onClose} aria-label={t("common.back")} className="grid h-11 w-11 shrink-0 place-items-center rounded-md text-fg-2 hover:bg-surface-3 hover:text-fg">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
           </button>
           <div className="min-w-0 flex-1 truncate text-sm text-fg-2">{where}</div>

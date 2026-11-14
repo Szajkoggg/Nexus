@@ -3,17 +3,20 @@ import { createPortal } from "react-dom";
 import { attentionKey, type AttentionItem, type ProjectSummary, type QueueView } from "../api.ts";
 import { mergeAttention, type WaitingItem } from "@nexus/protocol/attention";
 import { TimeAgo } from "./ui.tsx";
+import { t, type Key } from "../i18n.ts";
 import { OPEN_BUTTON, stopVersion, useStopActions } from "./Stop.tsx";
 import { stepThatMatters } from "./QueueRow.tsx";
 
-const LABEL: Record<AttentionItem["kind"], { text: string; tone: string }> = {
-  question: { text: "Question", tone: "text-warn bg-warn/15" },
-  stopped: { text: "Stopped", tone: "text-stop bg-stop/15" },
-  approval: { text: "Needs approval", tone: "text-info bg-info/15" },
-  review: { text: "Review", tone: "text-review bg-review/15" },
-  failed: { text: "Failed", tone: "text-danger bg-danger/15" },
-  start: { text: "Did not start", tone: "text-stop bg-stop/15" },
+const KIND: Record<AttentionItem["kind"], { key: Key; tone: string }> = {
+  question: { key: "waiting.kind.question", tone: "text-warn bg-warn/15" },
+  stopped: { key: "waiting.kind.stopped", tone: "text-stop bg-stop/15" },
+  approval: { key: "waiting.kind.approval", tone: "text-info bg-info/15" },
+  review: { key: "waiting.kind.review", tone: "text-review bg-review/15" },
+  failed: { key: "waiting.kind.failed", tone: "text-danger bg-danger/15" },
+  start: { key: "waiting.kind.start", tone: "text-stop bg-stop/15" },
 };
+/** An item's kind in a word and its colour, in the interface language. */
+const label = (kind: AttentionItem["kind"]) => ({ text: t(KIND[kind].key), tone: KIND[kind].tone });
 
 const plain = (s: string) => s.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\*\*|`/g, "");
 
@@ -28,7 +31,7 @@ function LiftProposal({ lift }: { lift: NonNullable<AttentionItem["lift"]> }) {
   if (!lift.proposal) return null;
   return (
     <span className="mt-1.5 block rounded-md bg-canvas/60 px-2 py-1 text-xs text-fg">
-      <span className="text-fg-3">The orchestrator proposes to continue · <TimeAgo at={lift.proposal.at} /></span>
+      <span className="text-fg-3">{t("waiting.liftProposal")} · <TimeAgo at={lift.proposal.at} /></span>
       <span className="line-clamp-2 block">{plain(lift.proposal.reason)}</span>
     </span>
   );
@@ -52,7 +55,7 @@ function StopRow({ project, a, onOpen, onChanged, pushAccepted, queue }: {
     <div className="px-3.5 pb-3">
       <div className="flex flex-wrap items-center gap-2">
         {buttons}
-        <button onClick={onOpen} className={OPEN_BUTTON}>Open</button>
+        <button onClick={onOpen} className={OPEN_BUTTON}>{t("common.open")}</button>
       </div>
       {panel && <div className="mt-2">{panel}</div>}
     </div>
@@ -71,7 +74,7 @@ export function AttentionPanel({ project, items, queues, pushAccepted, onOpen, o
   return (
     <section className="mb-8">
       <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-warn/90">
-        Waiting for you <span className="ml-1 text-xs text-fg-3">{items.length}</span>
+        {t("waiting.title")} <span className="ml-1 text-xs text-fg-3">{items.length}</span>
       </h2>
       <div className="grid items-start gap-2 @2xl:grid-cols-2">
         {items.map((a) => {
@@ -80,7 +83,7 @@ export function AttentionPanel({ project, items, queues, pushAccepted, onOpen, o
           return (
             <div key={attentionKey(a)} className="rounded-lg border border-line bg-surface hover:border-fg-3/60">
               <button onClick={() => onOpen(a)} className="flex w-full items-start gap-3 p-3 text-left">
-                <span className={`shrink-0 rounded-md px-2 py-0.5 text-xs font-semibold ${LABEL[a.kind].tone}`}>{LABEL[a.kind].text}</span>
+                <span className={`shrink-0 rounded-md px-2 py-0.5 text-xs font-semibold ${label(a.kind).tone}`}>{label(a.kind).text}</span>
                 <span className="min-w-0 flex-1">
                   <span className="block font-mono text-xs text-fg-3">{whereOf(a)}</span>
                   <span className="line-clamp-2 text-sm text-fg">{reasonBelow ? q!.title : plain(a.text)}</span>
@@ -113,16 +116,16 @@ export function WaitingList({ projects, onOpen, onChoose }: {
   return (
     <div>
       <div className="flex items-baseline gap-3 pr-10 lg:pr-8">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-warn">Waiting for you · {items.length}</h2>
-        <span className="ml-auto text-xs text-fg-3">all projects, newest first</span>
+        <h2 className="text-sm font-semibold uppercase tracking-wider text-warn">{t("waiting.titleCount", { count: items.length })}</h2>
+        <span className="ml-auto text-xs text-fg-3">{t("waiting.newestFirst")}</span>
       </div>
-      {items.length === 0 && <p className="mt-6 text-sm text-fg-2">Nothing waits for you.</p>}
+      {items.length === 0 && <p className="mt-6 text-sm text-fg-2">{t("waiting.nothing")}</p>}
       <ul className="mt-3 space-y-2.5">
         {items.map((a) => (
           <li key={`${a.project}/${attentionKey(a)}`} className="rounded-lg border border-line bg-surface hover:border-fg-3/60">
             <button onClick={() => onOpen(a)} className="block w-full px-3.5 pb-3 pt-3 text-left">
               <span className="flex min-w-0 items-center gap-2 text-xs">
-                <span className={`shrink-0 rounded-md px-2 py-0.5 font-semibold ${LABEL[a.kind].tone}`}>{LABEL[a.kind].text}</span>
+                <span className={`shrink-0 rounded-md px-2 py-0.5 font-semibold ${label(a.kind).tone}`}>{label(a.kind).text}</span>
                 <span className="min-w-0 flex-1 truncate text-fg-3">{a.project_name}{a.queue && <> · <span className="font-mono">{whereOf(a)}</span></>}</span>
                 {a.at && <span className="shrink-0 text-fg-3"><TimeAgo at={a.at} /></span>}
               </span>
@@ -133,7 +136,7 @@ export function WaitingList({ projects, onOpen, onChoose }: {
             {onChoose && a.kind === "question" && !!a.options?.length && (
               <div className="flex flex-wrap gap-2 px-3.5 pb-3">
                 {a.options.map((o, i) => (
-                  <button key={o} onClick={() => onChoose(a, o)} title="Opens the question with this option chosen; you confirm there"
+                  <button key={o} onClick={() => onChoose(a, o)} title={t("waiting.chooseTitle")}
                     className="min-h-11 min-w-[40%] flex-1 rounded-md border border-line-strong bg-surface-2 px-3 py-2 text-sm font-medium text-fg hover:bg-surface-3">
                     {i + 1} · {o}
                   </button>
@@ -154,14 +157,14 @@ export function WaitingList({ projects, onOpen, onChoose }: {
  */
 export function WaitingCards({ projects, current, onOpen }: { projects: ProjectSummary[]; current?: string; onOpen: (w: WaitingItem) => void }) {
   const items = mergeAttention(projects);
-  if (!items.length) return <p className="px-1 text-sm text-fg-3">Nothing waits for you.</p>;
+  if (!items.length) return <p className="px-1 text-sm text-fg-3">{t("waiting.nothing")}</p>;
   return (
     <ul className="divide-y divide-line overflow-hidden rounded-xl border border-line bg-surface-2">
       {items.map((a) => (
         <li key={`${a.project}/${attentionKey(a)}`}>
           <button onClick={() => onOpen(a)} className="block w-full px-3 pb-2.5 pt-2.5 text-left hover:bg-surface-3/50">
             <span className="flex min-w-0 items-center gap-1.5 text-xs">
-              <span className={`shrink-0 rounded px-1.5 py-px font-semibold ${LABEL[a.kind].tone}`}>{LABEL[a.kind].text}</span>
+              <span className={`shrink-0 rounded px-1.5 py-px font-semibold ${label(a.kind).tone}`}>{label(a.kind).text}</span>
               <span className="min-w-0 flex-1 truncate font-mono text-fg-3">{a.project !== current && <span className="font-sans">{a.project_name} · </span>}{whereOf(a)}</span>
               {a.at && <span className="shrink-0 text-fg-3"><TimeAgo at={a.at} /></span>}
             </span>
@@ -195,7 +198,7 @@ const withTimeout = <T,>(p: Promise<T>, ms: number, message: string) =>
 /** The service worker that receives pushes: registered (again, if need be) and active. */
 async function worker(): Promise<ServiceWorkerRegistration> {
   await navigator.serviceWorker.register("/sw.js");
-  return withTimeout(navigator.serviceWorker.ready, 10_000, "The service worker did not start. Reload the page and try again.");
+  return withTimeout(navigator.serviceWorker.ready, 10_000, t("notify.workerDidNotStart"));
 }
 
 async function pushSubscription(): Promise<PushSubscription | null> {
@@ -207,13 +210,13 @@ async function pushSubscription(): Promise<PushSubscription | null> {
 export function pushBlocker(): string | undefined {
   if (typeof window === "undefined") return undefined;
   if (!window.isSecureContext) {
-    return `Notifications need the https address. This page is open over ${location.protocol.replace(":", "")}: open Nexus at its https://…ts.net address (see the Remote access panel on the PC).`;
+    return t("notify.blocker.https", { protocol: location.protocol.replace(":", "") });
   }
   if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
-    return "This browser cannot receive push notifications. On an iPhone, add Nexus to the home screen and open it from there.";
+    return t("notify.blocker.browser");
   }
   if (typeof Notification !== "undefined" && Notification.permission === "denied") {
-    return "Notifications are blocked for this site. Allow them in the browser's site settings (the lock icon next to the address, or the app's settings), then try again.";
+    return t("notify.blocker.blocked");
   }
   return undefined;
 }
@@ -252,7 +255,7 @@ export function useNotifications(projects: ProjectSummary[] | undefined) {
       for (const [key, { p, a }] of current) {
         if (seen.current.has(key)) continue;
         try {
-          const n = new Notification(`${p.name}: ${LABEL[a.kind].text}`, {
+          const n = new Notification(t("notify.notification", { project: p.name, kind: label(a.kind).text }), {
             body: `${a.queue ?? ""}${a.step ? `/${a.step}` : ""} ${plain(a.text)}`.trim().slice(0, 200),
             tag: key,
           });
@@ -265,18 +268,18 @@ export function useNotifications(projects: ProjectSummary[] | undefined) {
 
   const turnOnPush = async () => {
     const permission = await Notification.requestPermission();
-    if (permission !== "granted") throw new Error(permission === "denied" ? pushBlocker() ?? "Notifications were refused." : "Notifications were not allowed.");
+    if (permission !== "granted") throw new Error(permission === "denied" ? pushBlocker() ?? t("notify.refused") : t("notify.notAllowed"));
     const reg = await worker();
     const keyRes = await fetch("/api/push/key");
-    if (!keyRes.ok) throw new Error(keyRes.status === 401 ? "Signed out: reload the page and sign in again." : `The server answered ${keyRes.status}.`);
+    if (!keyRes.ok) throw new Error(keyRes.status === 401 ? t("notify.signedOut") : t("common.serverAnswered", { status: String(keyRes.status) }));
     const { key } = (await keyRes.json()) as { key: string };
     const sub = await withTimeout(
       reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(key) }), 20_000,
-      "The browser's push service did not answer. On Android, check that Chrome may use the network and that Google Play services are up to date.",
+      t("notify.pushNoAnswer"),
     );
-    const label = /iPhone|iPad/.test(navigator.userAgent) ? "iPhone / iPad" : /Android/.test(navigator.userAgent) ? "Android" : "Desktop browser";
-    const r = await fetch("/api/push/subscribe", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ subscription: sub.toJSON(), label }) });
-    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? `The server answered ${r.status}.`);
+    const device = /iPhone|iPad/.test(navigator.userAgent) ? "iPhone / iPad" : /Android/.test(navigator.userAgent) ? "Android" : t("notify.desktopBrowser");
+    const r = await fetch("/api/push/subscribe", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ subscription: sub.toJSON(), label: device }) });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? t("common.serverAnswered", { status: String(r.status) }));
     // A first notification right away shows that the whole path works.
     await fetch("/api/push/test", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ endpoint: sub.endpoint }) });
   };
@@ -294,19 +297,19 @@ export function useNotifications(projects: ProjectSummary[] | undefined) {
           await fetch("/api/push/unsubscribe", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ endpoint: existing.endpoint }) });
           await existing.unsubscribe();
           setOn(false);
-          setToast({ kind: "ok", text: "Notifications are off for this device." });
+          setToast({ kind: "ok", text: t("notify.offForDevice") });
           return;
         }
         await turnOnPush();
         setOn(true);
-        setToast({ kind: "ok", text: "Notifications are on for this device. A test notification is on its way." });
+        setToast({ kind: "ok", text: t("notify.onForDevice") });
         return;
       }
       let next = !on;
       if (next && Notification.permission !== "granted") next = (await Notification.requestPermission()) === "granted";
-      if (!next && !on) throw new Error(pushBlocker() ?? "Notifications were not allowed.");
+      if (!next && !on) throw new Error(pushBlocker() ?? t("notify.notAllowed"));
       setOn(next);
-      setToast({ kind: "ok", text: next ? "This tab notifies you while it is open." : "Notifications are off." });
+      setToast({ kind: "ok", text: next ? t("notify.onInTab") : t("notify.off") });
       try { localStorage.setItem(STORAGE, next ? "on" : "off"); } catch { /* private mode */ }
     } catch (e) {
       setToast({ kind: "error", text: (e as Error).message || String(e) });
@@ -320,12 +323,12 @@ export function NotifyToggle({ supported, on, toggle, push, toast, busy, dismiss
   /** In the phone's Settings: says what a tap does, in words. */
   labelled?: boolean;
 }) {
-  if (!supported) return labelled ? <span className="text-sm text-fg-3">Not available in this browser.</span> : null;
+  if (!supported) return labelled ? <span className="text-sm text-fg-3">{t("notify.unavailable")}</span> : null;
   return (
     <>
       <button
         onClick={toggle}
-        title={on ? `${push ? "Push" : "Tab"} notifications on: click to turn off` : push ? "Send notifications to this device, even with Nexus closed" : "Notify me in this tab when something waits for me"}
+        title={t(on ? (push ? "notify.titleOnPush" : "notify.titleOnTab") : push ? "notify.titleOffPush" : "notify.titleOffTab")}
         className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs ${on ? "text-accent" : "text-fg-3 hover:text-fg"} ${busy ? "animate-pulse" : ""}`}
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -333,8 +336,8 @@ export function NotifyToggle({ supported, on, toggle, push, toast, busy, dismiss
           {!on && <path d="M3 3l18 18" />}
         </svg>
         {labelled
-          ? <span className="text-sm">{on ? `On (${push ? "push to this device" : "in this tab"}): tap to turn off` : "Off: tap to turn on"}</span>
-          : <span className="hidden sm:inline">{on ? "notify" : "notify off"}</span>}
+          ? <span className="text-sm">{t(on ? (push ? "notify.labelOnPush" : "notify.labelOnTab") : "notify.labelOff")}</span>
+          : <span className="hidden sm:inline">{t(on ? "notify.short" : "notify.shortOff")}</span>}
       </button>
       {/* Into <body>: the header's backdrop blur would otherwise make it the box `fixed` positions against. */}
       {toast && createPortal(
