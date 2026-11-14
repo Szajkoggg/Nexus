@@ -362,7 +362,8 @@ named base commit, in the project's worktree directory (a project setting; defau
 `<main checkout>/../<repo name>.worktrees/<queue id>`). The queue engine does this, at the orchestrator's request,
 not the orchestrator by editing files. Nexus never switches, resets or deletes a worktree another session is using;
 removing a finished queue's worktree is a user action. Merging back is a step of a queue (or the user's), not
-something Nexus does on its own.
+something Nexus does on its own. The code is `apps/server/src/worktree.ts` (`worktreeFor`, `gitBranch`), beside
+`gitinfo.ts`, which records what the queue's checkout committed.
 
 ### Usage limits
 
@@ -397,6 +398,11 @@ Decisions:
   moved with later data would be harder to read and to trust; making it again takes the new reset.
 - Long timers are armed in pieces of at most a day: Node fires a timer longer than 2^31-1 ms (about 24.8 days) at once,
   which a weekly usage window can exceed. Tests drive these timers with a clock of their own.
+
+The code is `apps/server/src/scheduler.ts`: `Scheduler` keeps the plans (chain, schedule, cancel, and `checkStarts`,
+which starts what came due) and asks the engine to start a queue; `ClockTimers` arms the long timers on the engine's
+clock, for the schedules and for the engine's own retry and usage waits. The engine owns the runs and keeps the public
+`chain`, `scheduleStart` and `cancelStart`, which hand over to the scheduler.
 
 ### Review material
 
