@@ -158,9 +158,9 @@ export class ProjectStore {
    * setting the change gives another value becomes the project's own; one it leaves alone keeps its state; those in
    * `follow` follow the global value again. Every writer of project.yaml goes through this.
    */
-  updateProject(change: (p: ProjectFile) => ProjectFile, follow: readonly string[] = []): ProjectFile {
+  updateProject(change: (p: ProjectFile) => ProjectFile, follow: readonly string[] = [], own: readonly string[] = []): ProjectFile {
     const global = readGlobalSettings();
-    const stored = applyChange(this.readStoredProject(), global, change(this.readProject()), follow);
+    const stored = applyChange(this.readStoredProject(), global, change(this.readProject()), follow, own);
     this.writeStoredProject(stored);
     return effectiveProject(stored, global);
   }

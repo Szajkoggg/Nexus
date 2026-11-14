@@ -113,7 +113,7 @@ or reload, also when a phone's browser drops the tab. Each box keeps its own tex
 keeps it. Drafts live in that browser only (not on the server, not on your other devices) and are dropped after 14
 days untouched.
 
-**Themes.** Settings (the gear icon), "This browser", Theme: **Graphite** (dark, the default), **Paper** (light),
+**Themes.** Settings (the gear icon), Global, "This browser", Theme: **Graphite** (dark, the default), **Paper** (light),
 **Honey** (warm dark), or **Follow the system** (Paper when the system is light, Graphite when it is dark, changing
 with it). It applies at once and is kept in that browser only, for every project; your phone and your PC each keep
 their own.
@@ -167,10 +167,18 @@ proposes a revision whose first step reverts those commits; approving it lifts t
 at once. A worker that stops
 commits what is consistent and leaves no uncommitted changes behind.
 
-Per project, the dashboard's settings panel (the gear icon) sets the default runtime; for Claude Code workers the
-model, effort, permission mode and extra allowed tools (the project's own `.claude/settings.json` applies as well);
-for Codex workers the model, effort, sandbox and what happens when an agent needs to leave the sandbox; the
-orchestrator's model and effort; and the defaults. For unattended runs, Claude Code's `auto` permission mode and
+The settings panel (the gear icon) has two tabs. **Global** holds the settings every project follows: the default
+runtime; for Claude Code workers the model, effort and permission mode; for Codex workers the model, effort, sandbox
+and what happens when an agent needs to leave the sandbox; the orchestrator's model, effort and notices; the thinking
+partners' runtime, model and effort; and the defaults. It also has what belongs to Nexus as a whole: the server
+section (updates, pushing on deploy, queues at once), this browser's theme, and on the phone this device's
+notifications and remote access. **The project's tab** shows the same settings, each with a switch: **Global** (the
+global value, greyed and marked "global") or **Own** (a value for this project only); switching back to Global makes
+it follow the global value again. Only the project's tab has what is the project's alone: its name, its extra allowed
+tools for Claude Code (the project's own `.claude/settings.json` applies as well), its notes folder and where its
+worktrees go. A changed global value reaches every project that follows it at once; running queues pick it up at
+their next step, the orchestrator and thinking partners at their next message. A run keeps the model and effort it
+was started with explicitly; what it took from the defaults follows changes. For unattended runs, Claude Code's `auto` permission mode and
 Codex's auto review are the recommended settings: routine actions run, risky ones are refused, nobody is asked.
 Claude Code workers may not write under the project's `.nexus` folder with their file tools ("Keep out of .nexus",
 on by default; the `nexus` command still records their reports; shell commands are not covered); Codex workers
@@ -186,7 +194,7 @@ form (or the orchestrator's `nexus run B start --after A`, `--at "2026-11-14 22:
 missed while Nexus was not running does not start late; it appears under "Waiting for you". The plan shows on both queues and can be cancelled; if A halts it waits and says why,
 and if B is not approved when A is done, B does not start and the item appears under "Waiting for you".
 Queues run side by side only in worktrees of their own: never two in one checkout, and no more at once, across all
-projects, than "Queues running at once" in the settings panel's Nexus section (2 by default; a queue waiting for your
+projects, than "Queues running at once" in the settings panel's Nexus section (Global tab) (2 by default; a queue waiting for your
 review or an answer does not count). A queue paused or waiting keeps its checkout. Starting a queue whose checkout
 another queue holds, or over the limit, is refused with the reason. A chain or a schedule that comes due then waits
 instead: its row and the rail say "waits for the checkout" or "waits: limit reached", the plan on the queue (and
@@ -247,7 +255,7 @@ forces: if GitHub's `main` has commits the deployed one lacks, the push is refus
 git must already be able to push without a prompt, or the push counts as failed after at most 60 seconds. The settings
 panel shows the result above the update log: "Pushed: <commit> is now origin/main", "Push failed: <reason>", or "Not
 pushed: <why>". A failed push leaves the update in place; fix the cause and push or update again. To stop pushing,
-untick "Push the deployed main to GitHub after an update" in the settings panel. Only you can change it, from the
+untick "Push the deployed main to GitHub after an update" in the settings panel (Global tab). Only you can change it, from the
 dashboard. An update to anything other than `main` is never pushed, and agents never push.
 
 After a deploy, every project's orchestrator is also told what changed for agents. A commit that changes something

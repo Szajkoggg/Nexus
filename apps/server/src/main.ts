@@ -12,7 +12,7 @@ import chokidar, { type FSWatcher } from "chokidar";
 import type { Server } from "node:http";
 import {
   ActionError, Effort, ProjectStore, addNote, updateSettings, answerAsUser, approveQueue, deleteNote, loadProjectState, nexusHome, withdrawApproval, addAllowRule,
-  ensureGlobalSettings, readRegistry, readUsage, commentOnPicture, markPicture, routeAnswers, routeSendBacks, sendBack, sendMessage, setQueueSettings, type ProjectState,
+  ensureGlobalSettings, readGlobalSettings, updateGlobalSettings, ownKeys, OVERRIDABLE, settingKey, readRegistry, readUsage, commentOnPicture, markPicture, routeAnswers, routeSendBacks, sendBack, sendMessage, setQueueSettings, type ProjectState,
 } from "@nexus/protocol";
 import { newestFirst, projectDigest, projectRunning, type DigestEvent, type DigestResponse, type DigestRunning } from "@nexus/protocol/digest";
 import { Engine } from "./engine.ts";
@@ -547,6 +547,26 @@ app.post("/api/projects/:id/conversations/:cid/messages", act((st, b, p) => conv
 app.post("/api/projects/:id/conversations/:cid/handoff", act((st, _b, p) => conversationsOf(st).handoff(p("cid"))));
 app.post("/api/projects/:id/orchestrator/settings", act((st, b) => orchestratorOf(st).settings(b.model, b.effort)));
 app.patch("/api/projects/:id/settings", act((st, b) => updateSettings(st, b)));
+// Which settings the project has its own value of (the others follow the global ones), and the global values.
+app.get("/api/projects/:id/settings", (c) => {
+  const e = projects.get(c.req.param("id"));
+  if (!e) return c.json({ error: "unknown project" }, 404);
+  return c.json({ own: ownKeys(e.store.readStoredProject()), global: readGlobalSettings() });
+});
+// The global settings, which every project follows where it has no value of its own (PROTOCOL.md, "Global settings").
+app.get("/api/settings", (c) => c.json({ global: readGlobalSettings(), keys: OVERRIDABLE.map((x) => settingKey(x.path)) }));
+app.patch("/api/settings", async (c) => {
+  const b = (await c.req.json().catch(() => ({}))) as unknown;
+  try {
+    const global = updateGlobalSettings(b);
+    // Every project that follows a changed value has new effective settings: each one's state is read again.
+    for (const id of projects.keys()) changed(id);
+    return c.json({ global });
+  } catch (err) {
+    if (err instanceof ActionError) return c.json({ error: err.message }, err.status as 400);
+    throw err;
+  }
+});
 
 if (existsSync(WEB_DIST)) {
   app.use("/*", serveStatic({ root: WEB_DIST.replaceAll("\\", "/") }));

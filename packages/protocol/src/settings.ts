@@ -45,6 +45,30 @@ const applies = (o: Tree, path: readonly string[]) => path[0] !== "orchestrator"
 /** The built-in defaults: the global settings before anyone changed them. */
 export const builtInSettings = (): GlobalSettings => GlobalSettings.parse({ protocol: 1 });
 
+/** The keys of the settings the project has its own value of (the others follow the global ones). */
+export function ownKeys(stored: StoredProject): string[] {
+  return OVERRIDABLE.filter(({ path }) => get(stored, path) !== undefined).map(({ path }) => settingKey(path));
+}
+
+/**
+ * The global settings with a change: a value given replaces the one there, null or "" clears an optional one (none:
+ * the runtime's default). Checked against the schema; the caller writes the result.
+ */
+export function changedGlobal(global: GlobalSettings, patch: unknown): GlobalSettings {
+  const out = structuredClone(global) as Tree;
+  const walk = (into: Tree, p: unknown) => {
+    if (!p || typeof p !== "object" || Array.isArray(p)) return;
+    for (const [k, v] of Object.entries(p as Tree)) {
+      if (v === null || v === "") delete into[k];
+      else if (typeof v === "object" && !Array.isArray(v)) walk((into[k] ??= {}) as Tree, v);
+      else into[k] = v;
+    }
+  };
+  walk(out, patch);
+  out.protocol = 1;
+  return GlobalSettings.parse(out);
+}
+
 /** Whether the project has its own value of a setting (else it follows the global one). */
 export function hasOwn(stored: StoredProject, path: readonly string[]): boolean {
   return get(stored, path) !== undefined;
@@ -81,11 +105,14 @@ export function storedFrom(effective: ProjectFile, global: GlobalSettings): Stor
  * Applies a change of effective values to the stored settings, keeping "follows" and "own value" apart: a setting the
  * change gives another effective value becomes the project's own (null for "none"); one it leaves as it is keeps its
  * state, following or own. `follow`: settings (by key, `runtimes.claude.model`) that follow the global value again,
- * whatever the change says about them. Project-only settings and state are taken from `next` as they are.
+ * whatever the change says about them. `own`: settings that become the project's own with the value `next` gives, also
+ * when it equals the global one. Project-only settings and state are taken from `next` as they are.
  */
-export function applyChange(stored: StoredProject, global: GlobalSettings, next: ProjectFile, follow: readonly string[] = []): StoredProject {
-  const unknown = follow.filter((k) => !OVERRIDABLE.some((x) => settingKey(x.path) === k));
+export function applyChange(stored: StoredProject, global: GlobalSettings, next: ProjectFile, follow: readonly string[] = [], own: readonly string[] = []): StoredProject {
+  const unknown = [...follow, ...own].filter((k) => !OVERRIDABLE.some((x) => settingKey(x.path) === k));
   if (unknown.length) throw new Error(`not a setting with a global value: ${unknown.join(", ")}`);
+  const both = follow.filter((k) => own.includes(k));
+  if (both.length) throw new Error(`a setting either follows or is the project's own, not both: ${both.join(", ")}`);
   // A project that gets its orchestrator section now: the section's settings were the global ones until now.
   const before = effectiveProject({ ...stored, orchestrator: stored.orchestrator ?? { session: null } }, global);
   const out = structuredClone(next) as Tree;
@@ -94,7 +121,7 @@ export function applyChange(stored: StoredProject, global: GlobalSettings, next:
     if (!applies(out, path)) continue;
     const value = get(next, path);
     if (follow.includes(settingKey(path))) set(out, path, undefined);
-    else if (!same(value, get(before, path))) set(out, path, value === undefined ? null : value);
+    else if (own.includes(settingKey(path)) || !same(value, get(before, path))) set(out, path, value === undefined ? null : value);
     else set(out, path, get(stored, path)); // unchanged: following stays following, own stays own
   }
   return StoredProject.parse(out);

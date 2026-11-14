@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import YAML from "yaml";
 import {
-  ActionError, ProjectFile, ProjectStore, builtInSettings, effectiveProject, readGlobalSettings, updateSettings, writeGlobalSettings,
+  ActionError, ProjectFile, ProjectStore, builtInSettings, effectiveProject, ownKeys, readGlobalSettings, updateGlobalSettings, updateSettings, writeGlobalSettings,
   type GlobalSettings, type StoredProject,
 } from "../src/index.ts";
 
@@ -206,4 +206,32 @@ test("migrating against global values that differ keeps the effective values: an
   assert.deepEqual(x.store.readProject(), before);
   assert.equal(x.store.migrateProject(), false);
   assert.deepEqual(readGlobalSettings().runtimes.claude.model, "opus");
+});
+
+test("own makes a setting the project's own even with the global value; follow and own together are refused", () => {
+  const base = mkdtempSync(join(tmpdir(), "nexus-settings-"));
+  process.env.NEXUS_HOME = join(base, "home");
+  const store = ProjectStore.init(join(base, "p"), { id: "p", name: "P", root: join(base, "p") });
+  updateSettings(store, { defaults: { review_policy: "continue" }, own: ["defaults.review_policy"] });
+  assert.equal(store.readStoredProject().defaults.review_policy, "continue", "its own, though equal to the global value");
+  writeGlobalSettings(globalWith((g) => { g.defaults.review_policy = "wait"; }));
+  assert.equal(store.readProject().defaults.review_policy, "continue", "so a global change does not move it");
+  assert.throws(() => updateSettings(store, { own: ["defaults.context_care"], follow: ["defaults.context_care"] }), /either follows the global value or is the project's own/);
+  // The orchestrator's model and effort through the same action; its section is made if the project has none.
+  updateSettings(store, { orchestrator: { model: "opus", effort: null }, own: ["orchestrator.model", "orchestrator.effort"] });
+  assert.deepEqual([store.readStoredProject().orchestrator?.model, store.readStoredProject().orchestrator?.effort], ["opus", null]);
+  assert.equal(store.readStoredProject().orchestrator?.notify, undefined, "its notices follow");
+});
+
+test("a change of the global settings: values replaced, null clears an optional one, an invalid one is refused", () => {
+  const base = mkdtempSync(join(tmpdir(), "nexus-settings-"));
+  process.env.NEXUS_HOME = join(base, "home");
+  const store = ProjectStore.init(join(base, "p"), { id: "p", name: "P", root: join(base, "p") });
+  updateGlobalSettings({ runtimes: { claude: { model: "opus", effort: "high" } }, defaults: { usage_pause_threshold: 0.8 } });
+  assert.deepEqual([store.readProject().runtimes.claude.model, store.readProject().defaults.usage_pause_threshold], ["opus", 0.8], "a following project has them at once");
+  updateGlobalSettings({ runtimes: { claude: { model: null } } });
+  assert.deepEqual([readGlobalSettings().runtimes.claude.model, readGlobalSettings().runtimes.claude.effort], [undefined, "high"]);
+  assert.throws(() => updateGlobalSettings({ runtimes: { claude: { effort: "ultra" } } }), (e: Error) => e instanceof ActionError && /runtimes\.claude\.effort/.test(e.message));
+  assert.equal(readGlobalSettings().runtimes.claude.effort, "high", "nothing written");
+  assert.deepEqual(ownKeys(store.readStoredProject()), []);
 });

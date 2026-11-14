@@ -2,9 +2,9 @@
 // writer of queue definitions, notes and inboxes (docs/PROTOCOL.md, "Rules").
 import { existsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import { ProjectFile, QueueFile, USER_SESSION, effortIssue, type StatusChange, type InboxEntry, ReviewPolicy, type RunFile, type SessionFile } from "./schemas.ts";
-import { ProjectStore, newId, now, revisionHash } from "./store.ts";
-import { OVERRIDABLE, settingKey } from "./settings.ts";
+import { ProjectFile, QueueFile, USER_SESSION, type GlobalSettings, effortIssue, type StatusChange, type InboxEntry, ReviewPolicy, type RunFile, type SessionFile } from "./schemas.ts";
+import { ProjectStore, newId, now, readGlobalSettings, revisionHash, writeGlobalSettings } from "./store.ts";
+import { OVERRIDABLE, changedGlobal, settingKey } from "./settings.ts";
 import { HOLDING_RUN_STATES } from "./times.ts";
 import { commentTarget, isApproved, loadProjectState, type ProjectState } from "./state.ts";
 import { validAllowRule } from "./refusals.ts";
@@ -520,10 +520,17 @@ function merged(base: object, patch: unknown): Record<string, unknown> {
 export function updateSettings(store: ProjectStore, patch: unknown): void {
   const p = store.readProject();
   const b = pruned(patch) as Record<string, any>;
-  const follow = b.follow === undefined ? [] : Array.isArray(b.follow) && b.follow.every((x: unknown) => typeof x === "string") ? b.follow as string[] : undefined;
-  if (!follow) throw new ActionError("follow is a list of setting keys, like runtimes.claude.model");
-  const unknown = follow.filter((k) => !OVERRIDABLE.some((x) => settingKey(x.path) === k));
+  const keys = (name: "follow" | "own") => {
+    const v = b[name];
+    if (v === undefined) return [];
+    if (!Array.isArray(v) || !v.every((x: unknown) => typeof x === "string")) throw new ActionError(`${name} is a list of setting keys, like runtimes.claude.model`);
+    return v as string[];
+  };
+  const follow = keys("follow"), own = keys("own");
+  const unknown = [...follow, ...own].filter((k) => !OVERRIDABLE.some((x) => settingKey(x.path) === k));
   if (unknown.length) throw new ActionError(`not a setting with a global value: ${unknown.join(", ")}`);
+  const both = follow.filter((k) => own.includes(k));
+  if (both.length) throw new ActionError(`a setting either follows the global value or is the project's own, not both: ${both.join(", ")}`);
   const next = {
     ...p,
     name: typeof b.name === "string" && b.name.trim() ? b.name.trim() : p.name,
@@ -534,15 +541,32 @@ export function updateSettings(store: ProjectStore, patch: unknown): void {
       codex: merged(p.runtimes.codex, b.runtimes?.codex),
     },
     conversations: merged(p.conversations, b.conversations),
-    orchestrator: b.orchestrator?.notify === undefined
+    // The orchestrator's notices, model and effort (its section is made here if the project has had none yet).
+    orchestrator: b.orchestrator === undefined
       ? p.orchestrator
-      : { runtime: "claude" as const, session: null, ...p.orchestrator, notify: !!b.orchestrator.notify },
+      : merged({ runtime: "claude" as const, session: null, notify: true, ...p.orchestrator }, {
+        ...(b.orchestrator.notify !== undefined ? { notify: !!b.orchestrator.notify } : {}),
+        ...("model" in b.orchestrator ? { model: b.orchestrator.model } : {}),
+        ...("effort" in b.orchestrator ? { effort: b.orchestrator.effort } : {}),
+      }),
   };
   const r = ProjectFile.safeParse(next);
   if (!r.success) throw new ActionError(r.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "));
   const notes = r.data.conversations.notes_dir;
   if (notes !== undefined) r.data.conversations.notes_dir = notesDir(notes);
-  store.updateProject(() => r.data, follow);
+  store.updateProject(() => r.data, follow, own);
+}
+
+/** Changes the global settings (written only by the server: <NEXUS_HOME>/settings.yaml); every following project at once. */
+export function updateGlobalSettings(patch: unknown): GlobalSettings {
+  let next: GlobalSettings;
+  try { next = changedGlobal(readGlobalSettings(), patch); }
+  catch (e) {
+    const issues = (e as { issues?: { path: (string | number)[]; message: string }[] }).issues;
+    throw new ActionError(issues ? issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") : (e as Error).message);
+  }
+  writeGlobalSettings(next);
+  return next;
 }
 
 /**
