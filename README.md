@@ -127,6 +127,15 @@ days untouched.
 with it). It applies at once and is kept in that browser only, for every project; your phone and your PC each keep
 their own.
 
+**Files and commits in the chat.** A file path with a line in a message (`apps/server/src/engine.ts:138`) and a commit
+hash (`13118f1`) are links. A file opens in the dashboard's own read-only viewer at that line: code highlighted,
+Markdown rendered, pictures in the picture viewer; it works on the phone too and starts no program. A commit opens
+its subject, author, date and changed files. Both are checked when you click: "not found" if the file or commit does
+not exist. On the PC Nexus runs on, the viewer has **Open in editor**, which opens the file at the line in your
+editor through its link scheme: Settings, Global, "This browser", Editor: **VS Code** (the default), **Cursor**,
+**JetBrains** (through the JetBrains Toolbox App, for files inside the project), or **None**. Kept in that browser
+only; on another device the link is not shown, since the path would point nowhere there.
+
 **Status: phase 6** (remote access). Nexus can be used from a phone while the PC is on: through Tailscale (your own
 devices only, no open ports), signing in once with an access token (a QR code on the PC does it), installable as an
 app, with push notifications when something waits for you. See "Remote access" below.
@@ -182,7 +191,7 @@ The settings panel (the gear icon) has two tabs. **Global** holds the settings e
 runtime; for Claude Code workers the model, effort and permission mode; for Codex workers the model, effort, sandbox
 and what happens when an agent needs to leave the sandbox; the orchestrator's model, effort and notices; the thinking
 partners' runtime, model and effort; the reader's language; and the defaults. It also has what belongs to Nexus as a whole: the server
-section (updates, pushing on deploy, queues at once), this browser's theme, and on the phone this device's
+section (updates, pushing on deploy, queues at once), this browser's theme and editor, and on the phone this device's
 notifications and remote access. **The project's tab** shows the same settings, each with a switch: **Global** (the
 global value, greyed and marked "global") or **Own** (a value for this project only); switching back to Global makes
 it follow the global value again. Only the project's tab has what is the project's alone: its name, its extra allowed

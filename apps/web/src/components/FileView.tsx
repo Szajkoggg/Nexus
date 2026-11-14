@@ -12,6 +12,7 @@ import { fileUrl } from "../api.ts";
 import { baseName, folderOf, isMarkdown, languageOf, plainLines, relativeTarget, withoutFinalNewline, type Token } from "../fileview.ts";
 import { formatNumber, t } from "../i18n.ts";
 import { nav } from "../nav.ts";
+import { EDITOR_CHOICES, editorLink, readEditor } from "../editor.ts";
 import { ImageViewer } from "./Viewer.tsx";
 
 type Loaded =
@@ -19,7 +20,7 @@ type Loaded =
   | { kind: "error"; status: number; reason: string }
   | { kind: "picture" }
   | { kind: "pdf" | "binary"; size: number }
-  | { kind: "text"; text: string; size: number; cut: boolean };
+  | { kind: "text"; text: string; size: number; cut: boolean; real?: string };
 
 /** Highlighting a very long text would hold the page; past this it is shown plain. */
 const HIGHLIGHT_LIMIT = 512 * 1024;
@@ -42,7 +43,10 @@ function useFile(url: string): Loaded {
       const kind = r.headers.get("x-nexus-kind");
       let next: Loaded;
       if (!r.ok) next = { kind: "error", status: r.status, reason: ((await r.json().catch(() => ({}))) as { error?: string }).error ?? r.statusText };
-      else if (kind === "text") next = { kind: "text", text: await r.text(), size, cut: r.headers.get("x-nexus-truncated") === "1" };
+      else if (kind === "text") {
+        const real = r.headers.get("x-nexus-path");
+        next = { kind: "text", text: await r.text(), size, cut: r.headers.get("x-nexus-truncated") === "1", ...(real ? { real: decodeURIComponent(real) } : {}) };
+      }
       else {
         ctl.abort(); // a picture loads in the picture viewer; a binary is not read here
         next = kind === "picture" ? { kind: "picture" } : { kind: kind === "pdf" ? "pdf" : "binary", size };
@@ -54,7 +58,13 @@ function useFile(url: string): Loaded {
   return loaded;
 }
 
-export function FileView({ project, path, line, onClose }: { project: string; path: string; line?: number; onClose: () => void }) {
+/**
+ * `local`: the page is open on the server machine, on a desktop, so "Open in editor" may show (a path means nothing on
+ * another device); `root`: the project's root, which the JetBrains link needs.
+ */
+export function FileView({ project, root, local, path, line, onClose }: {
+  project: string; root: string; local: boolean; path: string; line?: number; onClose: () => void;
+}) {
   const url = fileUrl(project, path);
   const file = useFile(url);
   const markdown = isMarkdown(path);
@@ -67,6 +77,9 @@ export function FileView({ project, path, line, onClose }: { project: string; pa
   const text = file.kind === "text" ? withoutFinalNewline(file.text) : "";
   const count = file.kind === "text" ? text.split("\n").length : 0;
   const where = line ? (file.kind === "text" && line > count ? t("file.lineBeyond", { line, count }) : t("file.line", { line })) : undefined;
+  const editor = readEditor();
+  const inEditor = local && file.kind === "text" && file.real ? editorLink(editor, file.real, line, root) : undefined;
+  const editorName = t(EDITOR_CHOICES.find((c) => c.value === editor)!.label);
   const meta = [folder, where, file.kind === "text" && !where ? t("file.lines", { count }) : undefined].filter(Boolean).join(" · ");
 
   return createPortal(
@@ -83,6 +96,10 @@ export function FileView({ project, path, line, onClose }: { project: string; pa
                 className={`rounded-md px-3 py-1 text-xs max-lg:min-h-9 ${source === s ? "bg-surface-4 font-semibold text-fg" : "text-fg-2 hover:text-fg"}`}>{label}</button>
             ))}
           </div>
+        )}
+        {inEditor && (
+          <a href={inEditor} title={t("file.openInEditorTitle", { path: file.kind === "text" ? file.real ?? path : path, editor: editorName })}
+            className="shrink-0 rounded-md border border-line-strong px-2.5 py-1 text-xs text-fg hover:bg-surface-3">{t("file.openInEditor")}</a>
         )}
         {file.kind === "text" && (
           <a href={url} target="_blank" rel="noreferrer" title={t("file.rawTitle")} className="shrink-0 rounded-md px-2 py-1.5 text-xs text-accent hover:bg-surface-3">{t("file.raw")}</a>

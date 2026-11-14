@@ -85,13 +85,17 @@ const stream = (path: string) => Readable.toWeb(createReadStream(path)) as Reada
 
 /**
  * The response for a located file. Headers: `x-nexus-size` (the whole file's bytes), `x-nexus-truncated: 1` when the
- * text was cut, `x-nexus-kind` (text, picture, pdf or binary) for the viewer.
+ * text was cut, `x-nexus-kind` (text, picture, pdf or binary) for the viewer, `x-nexus-path` (its absolute path).
  */
 export function fileResponse(real: string): Response {
   const stat = statSync(real);
   if (!stat.isFile()) return Response.json({ error: "not a file" }, { status: 404 });
   const ext = extname(real).toLowerCase();
-  const base = { "cache-control": "no-cache", "x-content-type-options": "nosniff", "x-nexus-size": String(stat.size) };
+  const base = {
+    "cache-control": "no-cache", "x-content-type-options": "nosniff", "x-nexus-size": String(stat.size),
+    // Where the file is, links followed (for "Open in editor"), URI-encoded: a header carries no other characters.
+    "x-nexus-path": encodeURIComponent(real),
+  };
   const sandboxed = { ...base, "content-security-policy": FILE_CSP };
   const picture = PICTURES[ext];
   if (picture) return new Response(stream(real), { headers: { ...sandboxed, "content-type": picture, "x-nexus-kind": "picture" } });

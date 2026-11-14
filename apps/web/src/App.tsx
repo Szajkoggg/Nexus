@@ -216,7 +216,7 @@ export function App() {
       {commit && projectId && <CommitDetails key={commit} project={projectId} hash={commit} />}
     </Drawer>
 
-    {file && projectId && <Suspense fallback={null}><FileView key={`${file.path}:${file.line ?? ""}`} project={projectId} path={file.path} line={file.line} onClose={() => nav.close("file")} /></Suspense>}
+    {file && projectId && <Suspense fallback={null}><FileView key={`${file.path}:${file.line ?? ""}`} project={projectId} root={state?.project.root ?? ""} local={!!server?.local && !phone} path={file.path} line={file.line} onClose={() => nav.close("file")} /></Suspense>}
 
     <Drawer open={itemShown && !fullApproval} onClose={close} beside={phone ? undefined : RAIL} panel>
       {state && queue && (step

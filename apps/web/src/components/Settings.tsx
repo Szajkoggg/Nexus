@@ -7,6 +7,7 @@ import { act, useFetch } from "../api.ts";
 import { Button, Section } from "./ui.tsx";
 import { rich, t, type Key } from "../i18n.ts";
 import { CHOICES, readChoice, setChoice, type ThemeChoice } from "../theme.ts";
+import { EDITOR_CHOICES, readEditor, setEditor, type Editor } from "../editor.ts";
 
 const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 
@@ -405,14 +406,19 @@ async function request(path: string, method: string, body: unknown): Promise<unk
 
 // ---------------------------------------------------------------- this browser
 
-/** What this browser keeps for itself, for every project: the theme. Applies at once; nothing to save. */
+/** What this browser keeps for itself, for every project: the theme and the editor. Applies at once; nothing to save. */
 function BrowserSection() {
   const [choice, setLocal] = useState<ThemeChoice>(readChoice);
+  const [editor, setEditorLocal] = useState<Editor>(readEditor);
   return (
     <Section title={t("settings.browser")}>
       <Row label={t("settings.theme")} hint={t("settings.themeHint")}>
         <Select value={choice} onChange={(v) => { setChoice(v as ThemeChoice); setLocal(v as ThemeChoice); }}
           options={CHOICES.map((c) => [c.value, t(c.label)] as [string, string])} />
+      </Row>
+      <Row label={t("settings.editor")} hint={t("settings.editorHint")}>
+        <Select value={editor} onChange={(v) => { setEditor(v as Editor); setEditorLocal(v as Editor); }}
+          options={EDITOR_CHOICES.map((c) => [c.value, t(c.label)] as [string, string])} />
       </Row>
     </Section>
   );
@@ -422,6 +428,8 @@ function BrowserSection() {
 
 export interface ServerInfo {
   commit: string; subject: string; live: boolean; branch: string | null; root: string;
+  /** Whether this page was opened on the server machine (not relayed from another device). */
+  local?: boolean;
   update: {
     phase: "idle" | "draining" | "updating" | "restarting" | "failed" | "updated"; held: string[]; waiting: string[]; log: string[]; error?: string; now?: boolean;
     /** After a deploy: whether the deployed main was pushed. */

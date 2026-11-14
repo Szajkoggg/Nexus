@@ -878,7 +878,8 @@ file must lie under the project's root, its worktree directory or a session's wo
 with its links followed (a symlink or junction pointing out is refused, 403); a path with a `..` segment, and a UNC
 or device path (`\\server\share`, `\\?\…`, `//…`), are refused (403) before anything touches the disk; a missing file is
 404. Every response carries `X-Content-Type-Options: nosniff`, `Cache-Control: no-cache`, `X-Nexus-Size` (the whole
-file's bytes), `X-Nexus-Kind` (`text`, `picture`, `pdf` or `binary`) and a `Content-Security-Policy`:
+file's bytes), `X-Nexus-Kind` (`text`, `picture`, `pdf` or `binary`), `X-Nexus-Path` (the file's absolute path with
+its links followed, URI-encoded; the dashboard's "Open in editor" uses it) and a `Content-Security-Policy`:
 `default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox` for everything but PDFs, which get
 the same without `sandbox` (a sandboxed document cannot use the browser's PDF viewer; `default-src 'none'` still lets
 nothing in it run). So an SVG or HTML file opened from the dashboard's origin runs no script. Pictures (`.png`,
@@ -906,7 +907,9 @@ receiving push and, to local requests only, the token, a sign-in link and its QR
 `<NEXUS_HOME>/push.json`. Whatever newly appears in a project's "waiting for you" list is pushed to every device; the
 list as found when the server starts is the baseline.
 
-**Nexus itself.** `GET /api/server` gives the version (`commit`, `subject`, `live`, `branch`, `root`) and `update`:
+**Nexus itself.** `GET /api/server` gives the version (`commit`, `subject`, `live`, `branch`, `root`), `local` (whether
+this request came straight from this machine, as remote access judges it: the dashboard shows "Open in editor" only
+then) and `update`:
 `phase` (`idle`, `draining`, `updating`, `restarting`, `failed`, or `updated` on a server that took over from an
 update), `held`, `waiting`, `log`, `error?`, and after a deploy `push?` (`result`: `pushed`, `failed` or `skipped`,
 `text`, `at`), `id` (the update's id), `by?` (`project`, `session`: the orchestrator that asked for it) and, on a

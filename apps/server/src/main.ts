@@ -455,7 +455,9 @@ app.get("/api/digest", (c) => {
 app.get("/api/usage", (c) => c.json(readUsage() ?? null));
 
 // Nexus itself: its version, and updating it without cutting off running work (src/lifecycle.ts).
-app.get("/api/server", async (c) => c.json({ ...(await version()), update: lifecycle.status, push_on_deploy: readDeploySettings().push_on_deploy, max_running: readLimits().max_running, running: runningSteps() }));
+// `local`: whether this request comes straight from this machine (src/remote.ts isLocal), so the dashboard shows what
+// only makes sense on the server machine ("Open in editor": a path on another device points nowhere).
+app.get("/api/server", async (c) => c.json({ ...(await version()), local: isLocal(c.env.incoming), update: lifecycle.status, push_on_deploy: readDeploySettings().push_on_deploy, max_running: readLimits().max_running, running: runningSteps() }));
 
 /** The steps running now, per project: what an update would wait for (nexus server status shows them). */
 function runningSteps() {

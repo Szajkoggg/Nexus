@@ -4,13 +4,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ProjectStore, writeRegistry } from "@nexus/protocol";
 import { spawnServer } from "./helpers.ts";
 import { COMMIT_HASH, FILE_CSP, MAX_TEXT, commitDetail, cutText, locate } from "../src/files.ts";
+import { authCookie } from "../src/remote.ts";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const freePort = () => new Promise<number>((resolve) => {
@@ -173,6 +174,18 @@ test("the endpoints: the project's paths, the CSP on every file, a cut large fil
     assert.equal((await fetch(`${url}/api/projects/nope/commits/${sha}`)).status, 404);
     // Remote access stays closed: from elsewhere, without the token, nothing.
     assert.equal((await fetch(`${url}/api/projects/p/commits/${sha}`, { headers: { "x-forwarded-for": "100.64.0.7" } })).status, 401);
+
+    // Where a file is, for "Open in editor": its absolute path, links followed, URI-encoded.
+    res = await file("docs/notes.md");
+    assert.equal(decodeURIComponent(res.headers.get("x-nexus-path") ?? "").toLowerCase(), realpathSync(join(root, "docs", "notes.md")).toLowerCase());
+
+    // The server tells the dashboard whether it is opened on this machine: from here yes; relayed (another device,
+    // signed in with the token) no.
+    const info = async (headers: Record<string, string> = {}) => (await (await fetch(`${url}/api/server`, { headers })).json()) as { local?: boolean };
+    assert.equal((await info()).local, true, "this machine");
+    const cookie = authCookie(false).split(";")[0]!;
+    assert.equal((await info({ "x-forwarded-for": "100.64.0.7", cookie })).local, false, "another device with the token");
+    assert.equal((await info({ "tailscale-user-login": "someone@example.com", cookie })).local, false, "through Tailscale Serve");
   } finally {
     child.kill();
   }

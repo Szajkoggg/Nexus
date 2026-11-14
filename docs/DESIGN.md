@@ -906,6 +906,19 @@ Opened at a line, a Markdown file stays rendered and the block holding that line
 shows it as code at the line. Smaller choices made while building, not by the user: the Rendered/Source switch, the
 marked block, not loading web pictures, and a "Raw ↗" link to the file itself (sandboxed by the server).
 
+**Open in editor** (decided by the user; `apps/web/src/editor.ts`, pure and unit tested): beside a text file in the
+viewer, a link through the editor's own URL scheme opens the file at the line; the browser hands it to whatever the
+system registered for the scheme, and no server action starts a program. The editor is a setting of this browser,
+like the theme (`nexus.editor` in local storage; VS Code by default, Cursor, JetBrains, none). It shows only when the
+dashboard is opened on the server machine (`local` from `GET /api/server`, the same test remote access uses) and not
+in the phone layout: on another device the path would point nowhere. The path is the server's (`X-Nexus-Path`, links
+followed), so a relative reference opens the right file. VS Code and Cursor take `vscode://file/<path>:<line>` and
+`cursor://file/<path>:<line>`. JetBrains has no scheme of its own that takes an absolute path; the JetBrains Toolbox
+App's `jetbrains://idea/navigate/reference?project=<name>&path=<path>:<line>` names a project, given as the project
+root's folder name with the path within it, so a file outside the project gets no JetBrains link; the tool in it is
+`idea` (IntelliJ IDEA). None of the links was opened while building (that starts a program); on the machine it was
+built on only VS Code's scheme is registered, so the Cursor and JetBrains forms are untested.
+
 ### Colours are theme tokens
 
 Every colour in the dashboard is a theme token: a CSS variable in `apps/web/src/index.css` (Tailwind's `@theme`),
