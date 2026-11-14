@@ -4,6 +4,7 @@
 import type { ChatEntry, ProjectFile, QueueView } from "@nexus/protocol";
 import { stepValuesText } from "@nexus/protocol/steps";
 import { formatClock, t, type Key } from "./i18n.ts";
+import { plannedAfter } from "./queueStatus.ts";
 
 /** A queue whose current revision waits for the user's approval: not approved, and neither finished nor cancelled. */
 export const needsApproval = (q: Pick<QueueView, "approved" | "status">): boolean =>
@@ -29,7 +30,7 @@ export interface RunSettings {
 export function runSettings(q: Pick<QueueView, "steps" | "branch" | "worktree" | "start" | "plan" | "run" | "review_level">, project: Pick<ProjectFile, "defaults" | "runtimes">, now = new Date()): RunSettings {
   const n = q.steps.length;
   const where = q.worktree ? (q.branch ? t("approval.run.worktreeOn", { branch: q.branch }) : t("approval.run.worktree")) : q.branch ? t("approval.run.on", { branch: q.branch }) : undefined;
-  const after = q.plan && !q.plan.used ? q.plan.after.map((e) => e.queue) : q.start?.after ? [q.start.after] : [];
+  const after = plannedAfter(q);
   const when = q.start?.at ? t("approval.run.at", { time: formatClock(q.start.at, now) }) : after.length ? t("approval.run.after", { queue: after.join(", ") }) : undefined;
   const rt = q.run?.runtime ?? q.start?.runtime ?? project.runtimes.default;
   const model = q.run?.model ?? q.start?.model ?? project.runtimes[rt].model;

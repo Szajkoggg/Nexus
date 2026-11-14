@@ -5,6 +5,7 @@ import { act, enc, useFetch, type ActivityEntry, type ProjectState, type QueueVi
 import { Button, RunTimes, Section, TimeAgo } from "./ui.tsx";
 import { formatClock, formatDateTime, formatTime, formatNumber, rich, t, type Key } from "../i18n.ts";
 import { EffortSelect, ModelSelect } from "./Settings.tsx";
+import { openPlan } from "../queueStatus.ts";
 
 // The run's state as a dot and a word: [dot, text].
 const RUN_TONE: Record<string, [string, string]> = {
@@ -89,7 +90,7 @@ function PlannedStart({ queue, busy, onCancel }: { queue: QueueView; busy: boole
   const p = queue.start;
   if (!p) return null;
   // The queues it waits for in the plan (the plan view shows them in full).
-  const ids = queue.plan && !queue.plan.used ? queue.plan.after.map((e) => e.queue) : [];
+  const ids = openPlan(queue)?.after.map((e) => e.queue) ?? [];
   const options = [p.session ? t("run.plan.continues", { session: p.session.slice(-8) }) : p.runtime === "codex" ? "Codex" : p.runtime === "claude" ? "Claude Code" : undefined, p.model, p.effort && t("run.effort", { effort: p.effort })].filter(Boolean);
   const after = ids.length > 0 && <span key="queue" className="font-mono">{ids.join(", ")}</span>;
   const tone = p.failed ? "border-stop/30 bg-stop/10" : p.blocked ? "border-warn/30 bg-warn/10" : "border-info/30 bg-info/10";

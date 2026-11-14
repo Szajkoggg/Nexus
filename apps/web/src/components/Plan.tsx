@@ -212,7 +212,7 @@ function Card({ node: n, onOpen, actions, cardRef, drag, highlight }: {
       {(n.now || !n.planned) && (
         <span className="mt-1 flex items-center gap-1.5 text-xs">
           <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dot}`} />
-          <span className={`min-w-0 truncate ${word}`}>{n.planned || n.now ? n.status.label : `${t("plan.notPlanned")} · ${n.status.label}`}</span>
+          <span className={`min-w-0 truncate ${word}`}>{n.now ? n.status.label : `${t("plan.notPlanned")} · ${n.status.label}`}</span>
         </span>
       )}
       {!n.now && n.planned && n.why.map((w) => (
@@ -251,10 +251,17 @@ function Proposal({ queue, proposal, current, actions }: { queue: string; propos
     <div className="mt-2 rounded-md border border-review/40 bg-review/10 p-2 text-xs" data-plan-proposal={queue}>
       <p className="text-review">{t("plan.proposal", { proposed: listText(proposal.after), current: listText(current) })}</p>
       <p className="mt-0.5 line-clamp-3 text-fg-2">{proposal.reason}</p>
-      <div className="mt-2 flex flex-wrap gap-2">
-        <Button onClick={() => void actions.accept(queue)} disabled={actions.busy}>{t("plan.accept")}</Button>
-        <Button variant="quiet" onClick={() => void actions.decline(queue)} disabled={actions.busy}>{t("plan.decline")}</Button>
-      </div>
+      <ProposalButtons queue={queue} actions={actions} className="mt-2" />
+    </div>
+  );
+}
+
+/** Accept and Decline on the orchestrator's proposal for a queue. */
+function ProposalButtons({ queue, actions, className = "" }: { queue: string; actions: Pick<Actions, "accept" | "decline" | "busy">; className?: string }) {
+  return (
+    <div className={`flex flex-wrap items-center gap-2 ${className}`}>
+      <Button onClick={() => void actions.accept(queue)} disabled={actions.busy}>{t("plan.accept")}</Button>
+      <Button variant="quiet" onClick={() => void actions.decline(queue)} disabled={actions.busy}>{t("plan.decline")}</Button>
     </div>
   );
 }
@@ -297,10 +304,7 @@ export function PlanRow({ project, a, onChanged }: { project: string; a: Attenti
   if (!p || !a.queue) return null;
   return (
     <div className="px-3.5 pb-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <Button onClick={() => void actions.accept(a.queue!)} disabled={actions.busy}>{t("plan.accept")}</Button>
-        <Button variant="quiet" onClick={() => void actions.decline(a.queue!)} disabled={actions.busy}>{t("plan.decline")}</Button>
-      </div>
+      <ProposalButtons queue={a.queue} actions={actions} />
       {actions.error && <p className="mt-2 text-sm text-danger" role="alert">{actions.error}</p>}
     </div>
   );

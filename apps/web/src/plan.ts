@@ -3,7 +3,7 @@
 // draws it (lanes on a desktop, an ordered list on the phone).
 import { HOLDING_RUN_STATES } from "@nexus/protocol/times";
 import { formatClock, type Key, type Params } from "./i18n.ts";
-import { queueStatus, type HonestStatus, type QueueLike } from "./queueStatus.ts";
+import { openPlan, queueStatus, type HonestStatus, type QueueLike } from "./queueStatus.ts";
 
 /** What the plan view reads of a queue (a QueueView fits). */
 export interface PlanQueue extends Omit<QueueLike, "plan" | "start"> {
@@ -70,11 +70,12 @@ export function isNow(q: Pick<PlanQueue, "status" | "run">): boolean {
 
 /** In the plan: a place that is not used yet (planned and not started since), or a schedule. */
 export const isPlanned = (q: Pick<PlanQueue, "plan" | "start" | "status">): boolean =>
-  !ENDED.has(q.status) && ((!!q.plan && !q.plan.used) || !!q.start);
+  !ENDED.has(q.status) && (!!openPlan(q) || !!q.start);
 
 /** The queues it waits for (an unused plan; a start.yaml from before the plan names one). */
 function beforeOf(q: PlanQueue): Before[] {
-  if (q.plan && !q.plan.used) return q.plan.after.map((e) => ({ queue: e.queue, by: e.by, done: e.done }));
+  const plan = openPlan(q);
+  if (plan) return plan.after.map((e) => ({ queue: e.queue, by: e.by, done: e.done }));
   return q.start?.after ? [{ queue: q.start.after, by: "user", done: false }] : [];
 }
 
@@ -83,10 +84,8 @@ export function whyOf(q: PlanQueue, now = new Date()): Why[] {
   const out: Why[] = [];
   if (q.start?.failed) out.push({ key: "plan.why.failed", params: { reason: q.start.failed.reason }, tone: "failed" });
   if (q.approved === false) out.push({ key: "plan.why.approval", params: { revision: q.revision ?? 1 }, tone: "approval" });
-  const entries = q.plan && !q.plan.used ? q.plan.after : [];
-  for (const e of entries) {
-    if (e.done) continue;
-    if (e.cause) out.push({ key: `plan.why.${e.cause}`, params: { queue: e.queue }, tone: "blocked" });
+  for (const e of openPlan(q)?.after ?? []) {
+    if (!e.done && e.cause) out.push({ key: `plan.why.${e.cause}`, params: { queue: e.queue }, tone: "blocked" });
   }
   // The queues it waits for are on the card as they are ("after RN · set by you"); a reason of their own only when
   // nothing else is said.
@@ -144,10 +143,11 @@ export function planLayout(all: readonly PlanQueue[], now = new Date()): PlanLay
   for (const id of shown) {
     const q = byId.get(id)!;
     const n = isNow(q);
+    const proposal = openPlan(q)?.proposal;
     nodes.set(id, {
       id, title: q.title, column: column.get(id)!, now: n, planned: isPlanned(q),
       status: queueStatus(q as QueueLike, now), why: n ? [] : whyOf(q, now), before: n ? [] : beforeOf(q),
-      ...(q.plan && !q.plan.used && q.plan.proposal ? { proposal: q.plan.proposal } : {}), movable: !n,
+      ...(proposal ? { proposal } : {}), movable: !n,
     });
   }
   const width = Math.max(0, ...[...nodes.values()].map((n) => n.column)) + 1;

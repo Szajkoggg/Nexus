@@ -43,9 +43,16 @@ export interface QueueLike {
   revision?: number;
 }
 
+/** The queue's plan while it counts (not started since it was planned); a used plan stays only for the view. */
+export const openPlan = <P extends { used: boolean }>(q: { plan?: P }): P | undefined => (q.plan && !q.plan.used ? q.plan : undefined);
+
+/** The queues a planned queue waits for: its plan's, or the one a start.yaml from before the plan names. */
+export const plannedAfter = (q: Pick<QueueLike, "plan" | "start">): string[] =>
+  openPlan(q)?.after.map((e) => e.queue) ?? (q.start?.after ? [q.start.after] : []);
+
 /** A planned start: "starts after HS", "starts at 14:00", "planned". */
 function startOf(q: QueueLike, now: Date): { key: Key; params?: Params } {
-  const after = q.plan && !q.plan.used ? q.plan.after.map((e) => e.queue) : q.start?.after ? [q.start.after] : [];
+  const after = plannedAfter(q);
   if (q.start?.at) return { key: "status.startsAt", params: { time: formatClock(q.start.at, now) } };
   if (after.length) return { key: "status.startsAfter", params: { queue: after.join(", ") } };
   return { key: "status.planned" };
@@ -77,7 +84,7 @@ export function queueStatus(q: QueueLike, now = new Date()): HonestStatus {
   if (q.approved === false && run?.state === "approval_wait") {
     return run.step ? is("approval", "status.approvalWaitAfter", { revision, step: run.step }) : is("approval", "status.approvalWait", { revision });
   }
-  const planned = !!q.start || (!!q.plan && !q.plan.used);
+  const planned = !!q.start || !!openPlan(q);
   if (q.approved === false && q.status !== "done" && q.status !== "draft" && (revision > 1 || planned || q.status !== "proposed")) {
     if (planned && !q.start?.failed) {
       const st = startOf(q, now);
