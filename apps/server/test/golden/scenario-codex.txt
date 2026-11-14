@@ -1,6 +1,10 @@
 == started: the first step opened
 -- run.yaml
 {
+  "from_defaults": [
+    "model",
+    "effort"
+  ],
   "nudged": false,
   "protocol": 1,
   "revision": 1,
@@ -22,6 +26,10 @@
 == Q1 at work
 -- run.yaml
 {
+  "from_defaults": [
+    "model",
+    "effort"
+  ],
   "nudged": false,
   "protocol": 1,
   "revision": 1,
@@ -44,6 +52,10 @@
 == paused by the user during a turn: pausing
 -- run.yaml
 {
+  "from_defaults": [
+    "model",
+    "effort"
+  ],
   "nudged": false,
   "protocol": 1,
   "reason": "paused by the user",
@@ -68,6 +80,10 @@
 -- run.yaml
 {
   "ended_at": "2026-01-01T09:30:00.000Z",
+  "from_defaults": [
+    "model",
+    "effort"
+  ],
   "nudged": false,
   "protocol": 1,
   "reason": "paused by the user",
@@ -93,6 +109,10 @@
 == resumed by the user: the next step opened
 -- run.yaml
 {
+  "from_defaults": [
+    "model",
+    "effort"
+  ],
   "nudged": false,
   "protocol": 1,
   "revision": 1,
@@ -118,6 +138,10 @@
 -- run.yaml
 {
   "failure": "serverOverloaded",
+  "from_defaults": [
+    "model",
+    "effort"
+  ],
   "nudged": false,
   "protocol": 1,
   "reason": "the turn failed (serverOverloaded: The server is overloaded); retry 1 of 5",
@@ -146,6 +170,10 @@
 -- run.yaml
 {
   "failure": "serverOverloaded",
+  "from_defaults": [
+    "model",
+    "effort"
+  ],
   "nudged": false,
   "protocol": 1,
   "retries": 1,
@@ -171,6 +199,10 @@
 == the step done with the usage window full: usage_wait
 -- run.yaml
 {
+  "from_defaults": [
+    "model",
+    "effort"
+  ],
   "nudged": false,
   "protocol": 1,
   "reason": "the Codex 5h window is at 100 % (limit 90 %)",
@@ -197,6 +229,10 @@
 == the usage window reset: the next step opened
 -- run.yaml
 {
+  "from_defaults": [
+    "model",
+    "effort"
+  ],
   "nudged": false,
   "protocol": 1,
   "revision": 1,
@@ -221,6 +257,10 @@
 == a turn met the runtime's usage limit: usage_wait
 -- run.yaml
 {
+  "from_defaults": [
+    "model",
+    "effort"
+  ],
   "nudged": false,
   "protocol": 1,
   "reason": "the usage limit was reached (usageLimitExceeded: You have hit your usage limit.); goes on when it resets",
@@ -247,6 +287,10 @@
 == resumed by the user during the usage wait: the step continued
 -- run.yaml
 {
+  "from_defaults": [
+    "model",
+    "effort"
+  ],
   "nudged": false,
   "protocol": 1,
   "revision": 1,
@@ -271,6 +315,10 @@
 == the last step at work
 -- run.yaml
 {
+  "from_defaults": [
+    "model",
+    "effort"
+  ],
   "nudged": false,
   "protocol": 1,
   "revision": 1,
@@ -295,6 +343,10 @@
 == the server stopped in the middle of a step
 -- run.yaml
 {
+  "from_defaults": [
+    "model",
+    "effort"
+  ],
   "nudged": false,
   "protocol": 1,
   "revision": 1,
@@ -320,6 +372,10 @@
 -- run.yaml
 {
   "ended_at": "2026-01-01T11:11:00.000Z",
+  "from_defaults": [
+    "model",
+    "effort"
+  ],
   "nudged": false,
   "protocol": 1,
   "reason": "the Nexus server restarted; resume to continue",
@@ -345,6 +401,10 @@
 == resumed by the user after the restart: the step continued
 -- run.yaml
 {
+  "from_defaults": [
+    "model",
+    "effort"
+  ],
   "nudged": false,
   "protocol": 1,
   "revision": 1,
@@ -370,6 +430,10 @@
 -- run.yaml
 {
   "ended_at": "2026-01-01T11:31:00.000Z",
+  "from_defaults": [
+    "model",
+    "effort"
+  ],
   "nudged": false,
   "protocol": 1,
   "revision": 1,

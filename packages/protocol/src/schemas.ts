@@ -589,10 +589,15 @@ export const RunFile = z.object({
    * step (a revision changes only steps that have not started, so a run of an older revision may go on).
    */
   revision: z.number().int().positive().optional(),
-  /** The run's own runtime, model and effort, fixed at its start: what a step without its own values runs on. */
+  /**
+   * The run's own runtime, model and effort as its start resolved them: what a step without its own values runs on.
+   * Those named in `from_defaults` came from the project's (effective) defaults and are resolved again when each step
+   * opens; the others were chosen at the start (or taken from the session it continues) and stay.
+   */
   runtime: z.enum(["claude", "codex"]).optional(),
   model: z.string().optional(),
   effort: Effort.optional(),
+  from_defaults: z.array(z.enum(["runtime", "model", "effort"])).optional(),
   /** The step whose end Nexus asked the session to write its context summary for, before a fresh session (asked once). */
   summary_asked: Id.optional(),
   /**

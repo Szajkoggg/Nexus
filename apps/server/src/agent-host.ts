@@ -56,6 +56,13 @@ export interface AgentHostOptions {
   spawn?: (launch: Launch) => AgentProcess;
 }
 
+/** A launch's settings, without what differs between any two starts of one session (see AgentHost.stale). */
+function launchKey(launch: Launch, ignore: readonly string[] = []): string {
+  const { resume: _r, env: _e, uuid: _u, threadId: _t, ...rest } = launch.options as unknown as Record<string, unknown>;
+  for (const k of ignore) delete rest[k];
+  return JSON.stringify([launch.runtime, rest]);
+}
+
 function spawnRuntime(launch: Launch): AgentProcess {
   return launch.runtime === "codex" ? new CodexSession(launch.options) : new ClaudeSession(launch.options);
 }
@@ -65,6 +72,8 @@ export class AgentHost<E extends object = object> {
   private readonly record: RoleRecord;
   private readonly spawn: (launch: Launch) => AgentProcess;
   private readonly live = new Map<string, Hosted<E>>();
+  /** What each process was started with, to tell when the settings changed since (stale). */
+  private readonly launched = new WeakMap<AgentProcess, Launch>();
   /** Processes ended through AgentHost: their exit is no failure. */
   private readonly ended = new WeakSet<AgentProcess>();
   /** Processes to end when their running turn ends. */
@@ -105,9 +114,11 @@ export class AgentHost<E extends object = object> {
    */
   start(session: SessionFile, launch: (resume: boolean) => Launch, extra: E, handlers: (l: Hosted<E>) => HostHandlers): Hosted<E> {
     const resume = this.store.readRuntime(session.id) !== undefined;
-    const proc = this.spawn(launch(resume));
+    const how = launch(resume);
+    const proc = this.spawn(how);
     const l = { ...extra, session: session.id, proc } as Hosted<E>;
     this.live.set(session.id, l);
+    this.launched.set(proc, how);
     this.write(session.id, { state: "idle", pid: proc.pid });
     const on = handlers(l);
     // The per-turn record (turns.jsonl): a turn begins with the runtime's turn start, or else with the first thing it
@@ -140,6 +151,18 @@ export class AgentHost<E extends object = object> {
       on.exit?.(code, this.ended.has(proc));
     });
     return l;
+  }
+
+  /**
+   * Whether the session's running process was started with other settings than `launch` gives now (the project's
+   * settings changed: a model, a permission mode, an allow rule, a sandbox, a briefing). What differs between any two
+   * starts of one session (resuming, its ids, the environment) does not count, nor what `ignore` names (a role that
+   * changes those by other means). False without a running process.
+   */
+  stale(session: string, launch: (resume: boolean) => Launch, ignore: readonly string[] = []): boolean {
+    const l = this.running(session);
+    const was = l && this.launched.get(l.proc);
+    return !!was && launchKey(was, ignore) !== launchKey(launch(true), ignore);
   }
 
   /**

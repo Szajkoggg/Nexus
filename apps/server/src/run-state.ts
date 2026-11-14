@@ -9,10 +9,12 @@ import { ActionError, HOLDING_RUN_STATES, runIsOlder, stopPlace, type Effort, ty
 /** A new run record, running from `at` (it replaces the earlier one). */
 export function startedRun(o: {
   session: string; revision: number; runtime: "claude" | "codex"; model?: string; effort?: Effort; after?: string; at: string;
+  from_defaults?: ("runtime" | "model" | "effort")[];
 }): RunFile {
   return {
     protocol: 1, session: o.session, state: "running", started_at: o.at, updated_at: o.at, revision: o.revision,
     runtime: o.runtime, model: o.model, effort: o.effort, after: o.after,
+    ...(o.from_defaults?.length ? { from_defaults: o.from_defaults } : {}),
   };
 }
 

@@ -12,7 +12,7 @@ import {
   ActionError, Effort, ProjectStore, effortIssue, loadProjectState, newId, normPath, now, type SessionFile,
 } from "@nexus/protocol";
 import { findStep, sinceThen, stepSeed } from "./step-seed.ts";
-import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Hosted } from "./agent-host.ts";
+import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Hosted, type Launch } from "./agent-host.ts";
 import type { Orchestrator } from "./orchestrator.ts";
 import { partnerBriefing } from "./prompts.ts";
 
@@ -65,15 +65,18 @@ export class Conversations {
     const c = p.conversations;
     const about = this.stepLink(body.queue, body.step);
     const runtime = body.runtime === "codex" || body.runtime === "claude" ? body.runtime : c.runtime;
-    const effort = parseEffort(body.effort) ?? c.effort;
-    const issue = effortIssue(runtime, effort);
+    // A model or effort the start names is the conversation's own; without one it follows the project's (effective)
+    // conversation settings, also when they change later (from its next message on).
+    const effort = parseEffort(body.effort);
+    const model = typeof body.model === "string" && body.model.trim() ? body.model.trim() : undefined;
+    const issue = effortIssue(runtime, effort ?? (runtime === c.runtime ? c.effort : undefined));
     if (issue) throw new ActionError(issue);
     const title = typeof body.title === "string" && body.title.trim() ? body.title.trim().slice(0, 120)
       : about ? `${about.step}: ${about.title}`.slice(0, 120) : "New conversation";
     const s: SessionFile = {
       protocol: 1, id: newId(), project: p.id, role: "conversation", runtime, title,
       native_id: runtime === "claude" ? randomUUID() : null, cwd: normPath(p.root), launched_by: "nexus", created_at: now(),
-      model: typeof body.model === "string" && body.model.trim() ? body.model.trim() : c.model, effort,
+      model, effort,
       ...(about ? { about: { queue: about.queue, step: about.step } } : {}),
     };
     this.store.writeSession(s);
@@ -173,31 +176,56 @@ ${text}`;
     this.host.retire(id);
   }
 
-  private ensure(s: SessionFile): Live {
-    const existing = this.host.running(s.id);
-    if (existing) return existing;
+  /**
+   * The model and effort the conversation runs on: its own, else the project's (effective) conversation settings when
+   * it runs on their runtime. An effort its runtime does not take is refused with the reason.
+   */
+  private values(s: SessionFile): { model?: string; effort?: Effort } {
+    const c = this.store.readProject().conversations;
+    const same = s.runtime === c.runtime;
+    const v = { model: s.model ?? (same ? c.model : undefined), effort: s.effort ?? (same ? c.effort : undefined) };
+    const issue = s.runtime === "external" ? undefined : effortIssue(s.runtime, v.effort);
+    if (issue) throw new ActionError(`this conversation would run at effort ${v.effort}: ${issue}`, 409);
+    return v;
+  }
+
+  /** How the conversation's process is started, from the session and the project's effective settings now. */
+  private launcher(s: SessionFile): (resume: boolean) => Launch {
     const p = this.store.readProject();
     const notes = p.conversations.notes_dir;
     const env = this.host.env(s.id);
     const instructions = partnerBriefing(p, notes);
-    return this.host.start(s, (resume) => {
+    const { model, effort } = this.values(s);
+    return (resume) => {
       if (s.runtime === "codex") {
         // Its working directory is the notes folder: the sandbox writes only there. Without one it is read-only.
         const cwd = notes ? join(p.root, notes) : p.root;
         if (notes) mkdirSync(cwd, { recursive: true });
         return { runtime: "codex", options: {
-          cwd, model: s.model, effort: s.effort, instructions, env, threadId: s.native_id,
+          cwd, model, effort, instructions, env, threadId: s.native_id,
           sandbox: notes ? "workspace-write" : "read-only", approvalPolicy: "never", writableRoots: [],
         } };
       }
       return { runtime: "claude", options: {
         cwd: p.root, uuid: s.native_id!, resume,
-        model: s.model, effort: s.effort, permissionMode: "dontAsk",
+        model, effort, permissionMode: "dontAsk",
         allowedTools: notes ? [...READ, `Edit(${notes}/**)`] : READ,
         disallowedTools: ["NotebookEdit"],
         appendSystemPrompt: instructions, env,
       } };
-    }, {}, (l) => {
+    };
+  }
+
+  private ensure(s: SessionFile): Live {
+    const existing = this.host.running(s.id);
+    // Settings it was started with changed since (the conversation settings it follows, the notes folder): a new
+    // process from this message on (a working one ends after its turn), resuming the conversation.
+    if (existing && !this.host.stale(s.id, this.launcher(s))) return existing;
+    if (existing) {
+      if (existing.proc.state === "working") { this.host.restartAfterTurn(s.id); return existing; }
+      this.retire(s.id);
+    }
+    return this.host.start(s, this.launcher(s), {}, (l) => {
       // The partner's last text of the turn, whole: during a hand-over, the summary.
       let reply = "";
       return {

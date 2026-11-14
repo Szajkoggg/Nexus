@@ -7,7 +7,7 @@ import {
   ActionError, ClaudeEffort, ProjectStore, applyDraft, loadProjectState, orchestratorStatusChange, newId, now, sendBack, type ChatEntry, type Event, type ProjectState, type SessionFile,
 } from "@nexus/protocol";
 import type { AgentProcess } from "./agent.ts";
-import { AgentHost, ROLE_RECORDS, type AgentHostOptions } from "./agent-host.ts";
+import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Launch } from "./agent-host.ts";
 import type { Engine } from "./engine.ts";
 import { orchestratorAgentsFile } from "./helpers.ts";
 import type { UpdateNotice } from "./lifecycle.ts";
@@ -213,21 +213,36 @@ export class Orchestrator {
       const id = s.id;
       this.store.updateProject((p) => ({ ...p, orchestrator: { runtime: "claude", notify: true, ...p.orchestrator, session: id } }));
     }
+    // Settings it was started with changed since (its model or effort, global or the project's own; a threshold its
+    // briefing names): a new process from this message on (a working one ends after its turn, and this message goes
+    // into that turn), resuming the conversation.
+    if (this.proc && this.proc.state !== "exited" && this.host.stale(s.id, this.launcher(s))) {
+      if (this.proc.state === "working") this.host.restartAfterTurn(s.id); else this.host.retire(s.id);
+    }
     if (!this.proc || this.proc.state === "exited") this.spawn(s);
     return s;
   }
 
-  private spawn(s: SessionFile): void {
+  /** How its process is started, from the project's effective settings now (the orchestrator's model and effort). */
+  private launcher(s: SessionFile): (resume: boolean) => Launch {
     const project = this.store.readProject();
-    this.host.start(s, (resume) => ({ runtime: "claude", options: {
-      cwd: s.cwd, uuid: s.native_id!, resume, model: s.model, effort: s.effort,
+    const o = project.orchestrator;
+    return (resume) => ({ runtime: "claude", options: {
+      cwd: s.cwd, uuid: s.native_id!, resume, model: o ? o.model : s.model, effort: o ? o.effort : s.effort,
       permissionMode: "dontAsk",
       allowedTools: [...READ_ONLY_TOOLS, ...DRAFT_TOOLS],
       disallowedTools: NEVER,
       appendSystemPrompt: orchestratorBriefing(project.name, Math.round(project.defaults.context_reuse_threshold * 100)),
       agentsFile: orchestratorAgentsFile(),
       env: this.host.env(s.id),
-    } }), {}, () => ({
+    } });
+  }
+
+  private spawn(s: SessionFile): void {
+    // Its session records the model and effort it runs on (the project's effective ones).
+    const o = this.store.readProject().orchestrator;
+    if (o && (o.model !== s.model || o.effort !== s.effort)) this.store.writeSession({ ...s, model: o.model, effort: o.effort });
+    this.host.start(s, this.launcher(s), {}, () => ({
       // The chat gets the orchestrator's texts whole; the activity log keeps them clipped.
       message: (text) => this.store.appendChat(s.id, { at: now(), from: "orchestrator", text }),
       activity: (a) => {

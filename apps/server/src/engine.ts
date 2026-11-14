@@ -180,7 +180,11 @@ export class Engine implements Member {
     const session = reused
       ? this.reuseSession(state, reused.id, queueId, want.model, want.effort)
       : this.newSession(state, q, want.runtime, want.model, want.effort);
-    const run = startedRun({ session: session.id, revision: q.revision, ...values, after: opts.after, at: now() });
+    // What the start did not choose, nor take from a session it continues, came from the project's defaults: resolved
+    // again at each step (runValues).
+    const from_defaults = reused ? [] : ([["runtime", opts.runtime], ["model", opts.model], ["effort", opts.effort]] as const)
+      .filter(([, v]) => v === undefined).map(([k]) => k);
+    const run = startedRun({ session: session.id, revision: q.revision, ...values, after: opts.after, at: now(), from_defaults: [...from_defaults] });
     this.store.writeRun(queueId, run);
     this.store.clearStart(queueId); // a planned start is used up by any start
     this.scheduler.disarm(queueId);
@@ -559,11 +563,15 @@ export class Engine implements Member {
       this.switchSession(queueId, run, q, old, live, done, next, want, why, fill, fresh ? (asked ? "asked" : "written") : "fallback");
       return true;
     }
-    if (old.model === want.model && old.effort === want.effort) return false;
+    // Settings the process was launched with (permission mode, allow rules, the .nexus protection, sandbox, approvals,
+    // the briefing) changed since: a new process from this step on, resuming the session.
+    // Its model and effort are not compared here: they change below (Codex per turn, Claude Code by a restart).
+    const stale = this.host.stale(old.id, this.launcher(this.store.readSession(old.id)), ["model", "effort"]);
+    if (!stale && old.model === want.model && old.effort === want.effort) return false;
     const file = this.store.readSession(old.id);
     this.store.writeSession({ ...file, model: want.model, effort: want.effort });
-    const what = `${want.model ?? "the runtime's default model"}, ${want.effort ? `${want.effort} effort` : "the default effort"}`;
-    if (live.proc.retune) {
+    const what = stale ? "the project's changed settings" : `${want.model ?? "the runtime's default model"}, ${want.effort ? `${want.effort} effort` : "the default effort"}`;
+    if (live.proc.retune && !stale) {
       live.proc.retune(want.model, want.effort);
       this.store.appendActivity(old.id, { at: now(), kind: "turn_start", text: `Nexus switches the session to ${what} for step ${next.id}`, queue: queueId, step: next.id });
       return false;
@@ -610,8 +618,24 @@ export class Engine implements Member {
   }
 
   /** The run's own runtime, model and effort; an older run file without them: its session's. */
+  /**
+   * The run's runtime, model and effort for the step that opens now: those it took from the project's defaults
+   * (`from_defaults`) as the effective settings say now, the others as its start chose them. A model or effort chosen
+   * at the start belongs to the runtime the run started on: when a runtime taken from the defaults is another one now,
+   * that runtime's defaults apply instead.
+   */
   private runValues(state: ProjectState, run: RunFile): StepValues {
-    if (run.runtime) return { runtime: run.runtime, model: run.model, effort: run.effort };
+    if (run.runtime) {
+      const d = new Set(run.from_defaults ?? []);
+      const runtime = d.has("runtime") ? state.project.runtimes.default : run.runtime;
+      const defaults = state.project.runtimes[runtime];
+      const moved = runtime !== run.runtime;
+      return {
+        runtime,
+        model: d.has("model") || moved ? defaults.model : run.model,
+        effort: d.has("effort") || moved ? defaults.effort : run.effort,
+      };
+    }
     const s = this.sessionFile(state, run.session);
     return { runtime: s.runtime === "codex" ? "codex" : "claude", model: s.model, effort: s.effort };
   }
@@ -735,22 +759,14 @@ export class Engine implements Member {
     return updated;
   }
 
-  private ensureProcess(session: SessionFile): Live {
-    const existing = this.host.running(session.id);
-    if (existing) {
-      // A process Nexus is ending (its run just finished, or its session was switched) cannot take another turn: its
-      // input is closed. Wait for its exit as a restart does (never two processes on one session); the exit handler
-      // then starts the new process and advances the session's runs.
-      if (this.ending.has(session.id) && !this.restarting.has(session.id)) {
-        this.restarting.add(session.id);
-        const proc = existing.proc;
-        this.timers.set(`restart:${session.id}`, setTimeout(() => { this.timers.delete(`restart:${session.id}`); if (proc.state !== "exited") proc.kill(); }, RESTART_KILL_MS));
-      }
-      return existing;
-    }
+  /**
+   * How a worker session's process is started, from the session and the project's effective settings now: also what
+   * a running process is compared with to see whether its settings changed (AgentHost.stale).
+   */
+  private launcher(session: SessionFile): (resume: boolean) => Launch {
     const project = this.store.readProject();
     const env = this.host.env(session.id);
-    const launch = (resume: boolean): Launch => {
+    return (resume: boolean): Launch => {
       if (session.runtime === "codex") {
         const codex = project.runtimes.codex;
         const inside = normPath(this.store.dir).toLowerCase().startsWith(normPath(session.cwd).toLowerCase() + "/");
@@ -777,7 +793,22 @@ export class Engine implements Member {
         env,
       } };
     };
+  }
 
+  private ensureProcess(session: SessionFile): Live {
+    const existing = this.host.running(session.id);
+    if (existing) {
+      // A process Nexus is ending (its run just finished, or its session was switched) cannot take another turn: its
+      // input is closed. Wait for its exit as a restart does (never two processes on one session); the exit handler
+      // then starts the new process and advances the session's runs.
+      if (this.ending.has(session.id) && !this.restarting.has(session.id)) {
+        this.restarting.add(session.id);
+        const proc = existing.proc;
+        this.timers.set(`restart:${session.id}`, setTimeout(() => { this.timers.delete(`restart:${session.id}`); if (proc.state !== "exited") proc.kill(); }, RESTART_KILL_MS));
+      }
+      return existing;
+    }
+    const launch = this.launcher(session);
     const tag = () => {
       // The run that drives the session now; a session continued from an earlier queue still has that one's run too.
       const runs = this.store.queueIds().map((q) => [q, this.store.readRun(q)] as const).filter(([, r]) => r?.session === session.id);
