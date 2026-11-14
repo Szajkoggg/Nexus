@@ -13,6 +13,7 @@ import type { Server } from "node:http";
 import {
   ActionError, Effort, ProjectStore, addNote, updateSettings, answerAsUser, approveQueue, deleteNote, loadProjectState, nexusHome, withdrawApproval, addAllowRule,
   ensureGlobalSettings, readGlobalSettings, updateGlobalSettings, ownKeys, OVERRIDABLE, settingKey, readRegistry, readUsage, readTurns, commentOnPicture, markPicture, routeAnswers, routeSendBacks, sendBack, sendMessage, setQueueSettings, setStepLevel, confirmProvisional, type ProjectState,
+  readAway, writeAway, awayNow, awayUntil, turnAway, expireAway,
 } from "@nexus/protocol";
 import { newestFirst, projectDigest, projectRunning, usageSince, type DigestEvent, type DigestResponse, type DigestRunning, type UsageRun } from "@nexus/protocol/digest";
 import { Engine } from "./engine.ts";
@@ -271,9 +272,10 @@ app.get("/api/projects/:id/commits/:hash", (c) => {
  * Every write is a user action, so it must come from the dashboard's own page: a browser sends its Origin (and
  * Sec-Fetch-Site) with every such request; an agent's script or a curl on this machine does not. Agents change
  * things through the nexus CLI, which writes files. The only exceptions are what `nexus server` itself sends
- * (`update` and `cancel`, which the CLI keeps to the user and to an orchestrator the user asked).
+ * (`update` and `cancel`, which the CLI keeps to the user and to an orchestrator the user asked; `away`, which it keeps
+ * to the user alone).
  */
-const CLI_WRITES = new Set(["/api/server/update", "/api/server/cancel"]);
+const CLI_WRITES = new Set(["/api/server/update", "/api/server/cancel", "/api/server/away"]);
 app.use("/api/*", async (c, next) => {
   if (c.req.method === "GET" || c.req.method === "HEAD") return next();
   const origin = c.req.header("origin");
@@ -494,7 +496,43 @@ app.get("/api/usage", (c) => c.json(readUsage() ?? null));
 // Nexus itself: its version, and updating it without cutting off running work (src/lifecycle.ts).
 // `local`: whether this request comes straight from this machine (src/remote.ts isLocal), so the dashboard shows what
 // only makes sense on the server machine ("Open in editor": a path on another device points nowhere).
-app.get("/api/server", async (c) => c.json({ ...(await version()), local: isLocal(c.env.incoming), update: lifecycle.status, push_on_deploy: readDeploySettings().push_on_deploy, max_running: readLimits().max_running, running: runningSteps() }));
+app.get("/api/server", async (c) => c.json({ ...(await version()), local: isLocal(c.env.incoming), update: lifecycle.status, push_on_deploy: readDeploySettings().push_on_deploy, max_running: readLimits().max_running, running: runningSteps(), away: awayNow(readAway()) }));
+
+// ---------------------------------------------------------------- away mode (PROTOCOL.md, "Away mode")
+
+let awayTimer: NodeJS.Timeout | undefined;
+
+/** Every project looks again (the orchestrators are told), and the dashboards reload the server's state. */
+function awayChanged(): void {
+  for (const id of projects.keys()) changed(id);
+  for (const s of sockets) if (s.readyState === s.OPEN) s.send(JSON.stringify({ type: "server" }));
+}
+
+/** Ends an away mode whose time has come (recorded as expired), and arms a timer for the end of the current one. */
+function armAway(): void {
+  clearTimeout(awayTimer);
+  awayTimer = undefined;
+  if (!active) return;
+  const a = readAway();
+  const ended = expireAway(a);
+  if (ended !== a) { writeAway(ended); awayChanged(); return; }
+  if (!a.current) return;
+  awayTimer = setTimeout(armAway, Math.min(Math.max(0, Date.parse(a.current.until) - Date.now()) + 50, 2 ** 31 - 1));
+  awayTimer.unref();
+}
+
+// The user turns away mode on until a time ({ until: "8:00" or an ISO time }) or off ({ until: null }), from the
+// dashboard or with `nexus server away` (which refuses agent sessions). Never an agent's.
+app.post("/api/server/away", async (c) => {
+  const b = (await c.req.json().catch(() => ({}))) as { until?: unknown };
+  if (!("until" in b)) return c.json({ error: "give until: a local time such as 8:00, an ISO 8601 time, or null to turn it off" }, 400);
+  let until: string | null;
+  try { until = b.until === null ? null : awayUntil(b.until); } catch (err) { return c.json({ error: (err as Error).message }, 400); }
+  writeAway(turnAway(readAway(), until));
+  armAway();
+  awayChanged();
+  return c.json({ ok: true, away: awayNow(readAway()) });
+});
 
 /** The steps running now, per project: what an update would wait for (nexus server status shows them). */
 function runningSteps() {
@@ -643,6 +681,7 @@ function activate(): void {
   // up while the predecessor drained or restarted (a run finished, an approval, a question) would wait for the next
   // write in that project. This tells each orchestrator now, and starts its turn.
   for (const id of projects.keys()) changed(id);
+  armAway(); // an away mode ends at its time also across restarts
 }
 
 /** The successor's side of an update: prove it is up, say so, and take over once the predecessor has let go. */

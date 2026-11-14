@@ -9,7 +9,7 @@ import { monotonicFactory } from "ulid";
 import YAML from "yaml";
 import type { z } from "zod";
 import {
-  Activity, Applied, ChatEntry, PinsFile, Refusal, Delivery, Event, GlobalSettings, InboxEntry, NoteMeta, GitFile, ProjectFile, PushFile, QueueFile, type QueueInput, LegacyReviewPolicy, RegistryFile, RunFile, RuntimeFile, SessionFile, StartFile, StoredProject, TurnRecord, UsageFile,
+  Activity, Applied, AwayFile, ChatEntry, PinsFile, Refusal, Delivery, Event, GlobalSettings, InboxEntry, NoteMeta, GitFile, ProjectFile, PushFile, QueueFile, type QueueInput, LegacyReviewPolicy, RegistryFile, RunFile, RuntimeFile, SessionFile, StartFile, StoredProject, TurnRecord, UsageFile,
   type Note,
 } from "./schemas.ts";
 import { applyChange, builtInSettings, effectiveProject, migrateStored, storedFrom } from "./settings.ts";
@@ -341,6 +341,17 @@ export function ensureGlobalSettings(): GlobalSettings {
   const g = readGlobalSettings();
   if (!existsSync(globalSettingsFile())) writeGlobalSettings(g);
   return g;
+}
+
+const awayFile = () => join(nexusHome(), "away.yaml");
+/** The away mode (missing: never turned on). */
+export function readAway(): AwayFile {
+  try { return existsSync(awayFile()) ? readYaml(awayFile(), AwayFile) : AwayFile.parse({ protocol: 1 }); } catch { return AwayFile.parse({ protocol: 1 }); }
+}
+/** Only the server writes it, from the user's action or at its end (away.ts). */
+export function writeAway(a: AwayFile): void {
+  mkdirSync(nexusHome(), { recursive: true });
+  writeYaml(awayFile(), AwayFile.parse(a));
 }
 
 const usageFile = () => join(nexusHome(), "usage.json");

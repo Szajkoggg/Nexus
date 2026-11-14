@@ -129,7 +129,7 @@ test("only the user confirms; a provisional acceptance is for level 3 only", asy
     x.engine.start("L");
     await x.inReview("L", "L1");
     x.say("review", "provisional", "L", "L1");
-    await x.until("the refusal", () => x.said(/at review level 2: a provisional acceptance is for level 3/));
+    await x.until("the refusal", () => x.said(/at review level 2 and away mode is off: a provisional acceptance is for level 3/));
     assert.equal(x.step("L", "L1").status, "review");
   } finally { x.stop(); }
 });

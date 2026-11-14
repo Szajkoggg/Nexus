@@ -799,6 +799,20 @@ export type Pin = z.infer<typeof Pin>;
 export const PinsFile = z.object({ pins: z.array(Pin).default([]) });
 export type PinsFile = z.infer<typeof PinsFile>;
 
+/**
+ * <NEXUS_HOME>/away.yaml: the user's away mode, global (PROTOCOL.md, "Away mode"). Written only by the server, from
+ * the user's action. `current`: on since `since` until `until` (it ends by itself then, or when the user turns it
+ * off); `past`: earlier periods, oldest first, with when each `ended` and `why` (`expired` at its time, `off` by the
+ * user). The periods are kept because what happened during one (a provisional acceptance of a level-2 step) stays
+ * valid after it.
+ */
+export const AwayFile = z.object({
+  protocol: z.literal(1),
+  current: z.object({ since: Time, until: Time }).optional(),
+  past: z.array(z.object({ since: Time, until: Time, ended: Time, why: z.enum(["expired", "off"]) })).default([]),
+});
+export type AwayFile = z.infer<typeof AwayFile>;
+
 /** <NEXUS_HOME>/usage.json: the subscription's windows, from the last report of any session. */
 export const UsageFile = z.object({
   updated_at: Time,

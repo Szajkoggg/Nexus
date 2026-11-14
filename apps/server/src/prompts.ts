@@ -4,7 +4,7 @@
 // (src/conversations.ts). Agents rely on them (a change to one carries an `Agents:` line in its commit), so each is
 // covered by a snapshot test: test/prompts.test.ts compares what the agents' processes receive with golden files.
 import {
-  languageName, runIsOlder, type InboxView, type LanguageCode, type ProjectFile, type ProjectState, type QuestionView, type QueueView, type SessionView, type StepView,
+  formatClock, languageName, levelNow, runIsOlder, type AwayNow, type InboxView, type LanguageCode, type ProjectFile, type ProjectState, type QuestionView, type QueueView, type SessionView, type StepView,
 } from "@nexus/protocol";
 
 export const RUNTIME_NAME = { claude: "Claude Code", codex: "Codex" } as const;
@@ -244,6 +244,7 @@ Review levels: every step is reviewed when it is done; there is no level without
 - 1: the user reviews; the queue waits for them.
 - 2: you review what can be checked (tests, measurements, numbers); what is the user's goes to them (nexus review ask-user), and the queue waits.
 - 3: you judge everything and the queue goes on: accept what has nothing of the user's; accept provisionally (nexus review provisional) what has, so the user confirms it or asks a fix on their return; or send it back (beyond the limit of send-backs, 2 by default, it goes to the user and its queue waits). Do not accept by default.
+Away mode: the user may mark that they are away until a time (only the user switches it). Meanwhile level-2 steps are reviewed as level 3 (the review notice says so), and level-1 steps still wait for the user. You are told when it starts and when it ends, and, when a queue waits for the user meanwhile, which other approved queues can start now (by the one-queue-per-checkout rule and the limit): start one if the plan allows.
 The default level follows from the step's acceptance criteria: criteria that can be checked give 2; a criterion that is the user's judgement (the look, the feel) gives 1. A step without a level is its queue's, else the project's (2 unless the user set another). At any level you may say you cannot decide and hand the review to the user. A level the user set on a step stays across your later revisions (you do not change it, and changing levels asks for no new approval). Without you (no orchestrator, or your notices off), levels 2 and 3 go to the user as level 1. Older drafts' review_policy and review.policy are read as levels (continue and orchestrator: 2, wait: 1); write levels.
 
 Review material follows Nexus's standard, \`nexus help review\` (read it before you write a review.prepare): every picture has a view key (subject, state, window width: waiting-tab@492) and a role (before, mockup, after, variant-a, variant-b, result); only the same key pairs, and Nexus refuses a wrong pair. In review.prepare name the views with their keys and roles, and what each is compared with (the old screen: before; a design: mockup; a new screen: result). The project's own conventions (its AGENTS.md) come on top.
@@ -421,9 +422,38 @@ export function withdrawalNotice(q: QueueView, w: { revision: number; reason?: s
   };
 }
 
-/** A step waits for the orchestrator's review. */
-export function reviewNotice(q: QueueView, st: StepView): Notice {
-  return { fact: `Step ${st.id} of queue ${q.id} is done and waits for your review: ${st.summary ?? st.title}`, todo: reviewBrief(q, st) };
+/** A step waits for the orchestrator's review (`away`: the user's away mode now, which runs level 2 as 3). */
+export function reviewNotice(q: QueueView, st: StepView, away: AwayNow = { on: false }): Notice {
+  return { fact: `Step ${st.id} of queue ${q.id} is done and waits for your review: ${st.summary ?? st.title}`, todo: reviewBrief(q, st, away) };
+}
+
+/** The user turned away mode on (or moved its end). */
+export function awayOnNotice(a: { until: string }): Notice {
+  return {
+    fact: `The user is away until ${formatClock(a.until, new Date())}.`,
+    todo: "Until then level-2 steps are reviewed as level 3: judge them; accept what has nothing of the user's, accept provisionally (nexus review provisional) what has, or send it back; the queue goes on. Level-1 steps still wait for the user. When a queue waits for the user, you are told which other approved queues can start; start one if the plan allows (never two queues in one checkout).",
+  };
+}
+
+/** Away mode ended: at its time, or the user turned it off. */
+export function awayEndNotice(p: { why: "expired" | "off" }): Notice {
+  return {
+    fact: p.why === "expired" ? "Away mode ended at its time." : "The user turned away mode off.",
+    todo: "Level-2 steps are reviewed as before (what is the user's goes to them, and the queue waits). When the user is back, tell them briefly what ran and what waits in their return batch.",
+  };
+}
+
+/**
+ * While the user is away, a queue waits for the user at a step (`why`): the approved queues that can start now (their
+ * checkout free, under the limit), if any.
+ */
+export function awayStuckNotice(q: QueueView, st: StepView, why: string, startable: { id: string; title: string; paused: boolean }[]): Notice {
+  return {
+    fact: `Queue ${q.id} waits for the user at step ${st.id} (${why}).`,
+    todo: startable.length
+      ? `The user is away. Approved queues that can start now: ${startable.map((x) => `${x.id} "${x.title}"${x.paused ? " (paused: nexus run " + x.id + " resume)" : ""}`).join("; ")}. Start one with nexus run <queue> start --reason "..." if the plan allows; say in the chat what you started.`
+      : "The user is away, and no other approved queue can start now (their checkouts are held, or as many queues run as the limit allows). Nothing to start; it waits for the user.",
+  };
 }
 
 /** A scheduled start was missed: Nexus was not running at its time. */
@@ -450,7 +480,7 @@ export function runEndNotice(q: QueueView, r: { state: string; step?: string; re
 }
 
 /** What the orchestrator needs to review a step: its acceptance, the checks and material of this round, its commits. */
-function reviewBrief(q: QueueView, st: StepView): string {
+function reviewBrief(q: QueueView, st: StepView, away: AwayNow = { on: false }): string {
   const since = st.segments.at(-1)?.start ?? "";
   const round = st.timeline.filter((e) => e.type === "step.done").length;
   const checks = st.checks.filter((c) => c.at >= since);
@@ -467,8 +497,8 @@ function reviewBrief(q: QueueView, st: StepView): string {
     `Review material:\n${list(items.map((i) => `${i.label ?? i.kind ?? "item"}: ${i.path ?? i.url ?? ""}`))}`,
     `Commits: ${commits.join(", ") || "none reported"}`,
     ...(st.sent_back.length ? [`Sent back before:\n${list(st.sent_back.map((b) => `round ${b.round}, by the ${b.by}: ${b.text}`))}`] : []),
-    st.level === 3
-      ? `Review level 3: judge all of it; the queue goes on. Decide with one of: nexus review accept ${q.id} ${st.id} [--note "..."] (nothing in it is the user's); nexus review provisional ${q.id} ${st.id} --note "what the user should look at" (something in it is the user's, such as the look: the run goes on, and the user confirms it or asks a fix on their return); nexus review send-back ${q.id} ${st.id} "what to fix" (beyond the limit of send-backs the step goes to the user and its queue waits); nexus review ask-user ${q.id} ${st.id} "why" (you cannot decide: the queue waits for the user). Do not accept by default: judge it against its acceptance criteria. Tell the user briefly what you decided.`
+    levelNow(st.level, away) === 3
+      ? `Review level 3${st.level === 2 ? " (level 2, reviewed as 3 while the user is away)" : ""}: judge all of it; the queue goes on. Decide with one of: nexus review accept ${q.id} ${st.id} [--note "..."] (nothing in it is the user's); nexus review provisional ${q.id} ${st.id} --note "what the user should look at" (something in it is the user's, such as the look: the run goes on, and the user confirms it or asks a fix on their return); nexus review send-back ${q.id} ${st.id} "what to fix" (beyond the limit of send-backs the step goes to the user and its queue waits); nexus review ask-user ${q.id} ${st.id} "why" (you cannot decide: the queue waits for the user). Do not accept by default: judge it against its acceptance criteria. Tell the user briefly what you decided.`
       : `Decide with one of: nexus review accept ${q.id} ${st.id} [--note "..."] (the run goes on); nexus review send-back ${q.id} ${st.id} "what to fix"; nexus review ask-user ${q.id} ${st.id} "why" (the user decides). Tell the user briefly what you decided.`,
   ].join("\n\n");
 }

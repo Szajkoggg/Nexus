@@ -476,6 +476,7 @@ Written only by the server's queue engine; agents never touch them.
 | `<NEXUS_HOME>/settings.yaml` | The global settings, which projects follow where they have no value of their own (see "Global settings") |
 | `<NEXUS_HOME>/usage.json` | The subscription's windows (5-hour, 7-day: utilization and reset time) from the latest `rate_limit_event` (Codex: `account/rateLimits`) of any session. Every session's turns count toward usage, workers', orchestrators' and thinking partners' alike (one subscription), so the usage display and the usage pause see them all |
 | `<NEXUS_HOME>/turns.jsonl` | One line per agent turn of every project and role, appended by the server (AgentHost, its one writer) when the turn ends, or when its process ends first: `v`, `at` (the end), `started_at` (the runtime's turn start, or the first thing it streamed after the previous turn's end), `duration_ms`, `project`, `session`, `role` (`worker`, `orchestrator`, `conversation`), `runtime`, `model`, `effort`, `queue` and `step` (a worker's run, when any), `outcome` (`ok`; a failure's kind `passing`, `lasting` or `usage`, with `failure`, the runtime's code; `interrupted`: no result, because Nexus interrupted the turn or its process ended: a kill, an update's drain, a crash), `tokens` (the turn's own: `input` not from the cache, `output`, `cache_read`, `cache_creation`), `cost_usd` (the turn's own, where the runtime reports cost and it is known: Claude Code, not the first turn of a resumed process), `windows_start` and `windows_end` (the turn's runtime's usage windows, `utilization` and `resets_at`, as the server knew them when the turn began and ended; left out when none was known). In one file because the windows are the account's, across projects; statistics are computed from it when read |
+| `<NEXUS_HOME>/away.yaml` | The user's away mode: `current` (`since`, `until`) while on, `past` periods (`since`, `until`, `ended`, `why`: `expired` or `off`). One writer: the server, on `POST /api/server/away` and when a period's time comes. See "Away mode" under "Review" |
 | `<NEXUS_HOME>/limits.json` | `{ max_running: number }`: how many queues may run at once across all projects, a whole number from 1 to 20 (default `2` when the file or the value is missing). One writer: the server, on `POST /api/server/settings` from the dashboard |
 | `<NEXUS_HOME>/deploy.json` | `{ push_on_deploy: boolean }` (default `true` when the file is missing). One writer: the server, on `POST /api/server/settings` from the dashboard |
 | `<NEXUS_HOME>/deploy-changes.jsonl` | One line per successful deploy with changes for agents: `key` (`deploy-changes:<new sha>`), `at`, `from`, `to` (full shas), `changes` (`commit`, `text`: the commits' `Agents:` lines, oldest first). One writer: the server that took over (a successor, once per deploy) |
@@ -540,6 +541,26 @@ are the user's only: the orchestrator never confirms, and the CLI has no command
 the step: the step and its work stay, and the orchestrator is told (whatever `notify` says) to draft a revision with a
 step that fixes it. A queue that went on waits for that revision's approval at its running step's end
 (`approval_wait`, see "A new revision of a running queue never stops the running step"); a finished queue gets a revision the user approves and starts.
+
+**Away mode.** The user may mark that they are away until a time. It is global (all projects), the user's only, and
+kept in `<NEXUS_HOME>/away.yaml` (written only by the server): `current` (`since`, `until`) while it is on, and `past`
+periods (`since`, `until`, `ended`, `why`: `expired` or `off`). The user turns it on with `POST /api/server/away`
+(`until`: a local time "8:00", the next such time, or an ISO 8601 time ahead; again with a new `until` moves its end)
+or `nexus server away on --until 8:00`, and off with `{ until: null }` or `nexus server away off`; the CLI refuses
+both from any agent session (`NEXUS_SESSION` set), the orchestrator's included, and there is no event for it.
+`GET /api/server` and the derived state (`away`: `on`, `since?`, `until?`) say whether it is on now. It ends at
+`until` by itself: the server keeps a timer (armed again at its start) that records the end (`expired`); a period
+past its `until` reads as off at once.
+- While it is on, a level-2 step is reviewed as level 3 (`levelNow` in `away.ts`): its review notice gives the level-3
+  choices, and the orchestrator may accept it provisionally (`nexus review provisional`; the CLI checks the level as
+  it is now). A `review.provisional` of a level-2 step is valid when its time lies in an away period, so it stays
+  valid after the period ends. Level-1 steps are not touched. Without an orchestrator, or with its notices off, it
+  changes nothing (those steps go to the user anyway).
+- The orchestrator is told when it comes on or its end moves (key `notify:away:on:<since>:<until>`, "The user is
+  away until HH:MM."), when it ends (`notify:away:end:<since>`, "Away mode ended at its time." or "The user turned
+  away mode off."), and, while it is on, of each queue that waits for the user at a step (level 1, the send-back limit,
+  or handed to the user; key `notify:awaywait:<queue>:<step>:<time>`): the approved queues of the project that can
+  start (or resume) now by the one-queue-per-checkout rule and the limit (`Engine.startable`), or that none can.
 
 A step in review has finished its turn: a pause asked for while it ran (the user's, or an update's drain) takes
 effect then (`pausing` becomes `paused`), and the review goes on meanwhile. A worker's process that ends on its own
@@ -829,6 +850,7 @@ nexus attach                                   # register a hand-started session
 nexus project add <path> [--id] [--name]       # creates .nexus/ (self-ignoring), registers the project, prints the rules files' check
 nexus import <file.md> [--prefix X]            # one-time import of queues written as Markdown tables
 nexus note <queue> <step> <text>               # until the dashboard can add notes
+nexus server away [on --until <8:00|ISO> | off]  # the user's away mode (refused from any agent session); no argument: its state
 ```
 
 `nexus status` prints each step of a queue on a line of its own (id, status, title); a step that names its own
@@ -911,8 +933,8 @@ Live: a WebSocket at `/ws` sends `{"type":"changed","project":id}` and `{"type":
 Writes (JSON bodies only; a request with a foreign `Origin` is refused). Every write is a user action and is taken
 only from the dashboard's own page: the request must carry this server's `Origin` and, if it sends one,
 `Sec-Fetch-Site: same-origin`; anything else is refused (403). Agents change things through the `nexus` CLI, which
-writes files. The only exceptions are `POST /api/server/update` and `POST /api/server/cancel`, which `nexus server`
-sends (see the CLI).
+writes files. The only exceptions are `POST /api/server/update`, `POST /api/server/cancel` and `POST
+/api/server/away`, which `nexus server` sends (see the CLI; it refuses `away` from every agent session).
 
 | Request | Body | Effect |
 |---|---|---|
@@ -1036,11 +1058,14 @@ then) and `update`:
 update), `held`, `waiting`, `log`, `error?`, and after a deploy `push?` (`result`: `pushed`, `failed` or `skipped`,
 `text`, `at`), `id` (the update's id), `by?` (`project`, `session`: the orchestrator that asked for it) and, on a
 successor, `up` (`commit`, `subject`, `previous?`). It also gives `push_on_deploy`, `max_running` (the limit on queues
-running at once) and `running`: the steps running
+running at once), `away` (the away mode now: `on`, `since?`, `until?`) and `running`: the steps running
 now, per project (`project`, `name`, `steps`: `queue`, `step`, `title`, `session`, `run`), which `nexus server status`
 prints. `POST /api/server/update` (`now?`, `ref?`, `by?`) and `POST /api/server/cancel` start and cancel an update.
 `by` is sent by `nexus server update` run in an orchestrator session (from `NEXUS_SESSION` and its project); the
-server keeps it only for an orchestrator session of a registered project. The dashboard sends none. `POST /api/server/settings` (`push_on_deploy?`: boolean, `max_running?`: a whole number
+server keeps it only for an orchestrator session of a registered project. The dashboard sends none. `POST
+/api/server/away` (`until`: a local time "8:00", an ISO 8601 time, or null for off; it answers `away`) switches the
+user's away mode; like update and cancel it is taken from `nexus server away` without an `Origin`, and the CLI refuses
+it from every agent session. `POST /api/server/settings` (`push_on_deploy?`: boolean, `max_running?`: a whole number
 from 1 to 20; at least one of them; it answers both values) is the
 user's only: like withdrawing an approval, it is refused without the dashboard page's own `Origin`. A server waiting
 to take over answers every `/api/projects…` request, and every write under `/api/server/`, with 503.

@@ -157,6 +157,15 @@ export class Engine implements Member {
   /** Pushes what was accepted (src/accepted.ts). */
   readonly pusher: AcceptedPusher;
 
+  /**
+   * The approved queues of this project that could start (or resume, a paused run) now: not at work, their checkout
+   * free and a place under the limit (the coordinator's rule, across projects).
+   */
+  startable(state: ProjectState): QueueView[] {
+    return state.queues.filter((q) => q.approved && (q.status === "approved" || (q.status === "paused" && q.run?.state === "paused"))
+      && !q.steps.every((s) => stepClosed(q, s)) && !this.coordinator.startBlock(state, q));
+  }
+
   /** "Push again" on a queue whose last push of an accepted step failed. */
   pushAgain(queueId: string): string { return this.pusher.pushAgain(queueId); }
 

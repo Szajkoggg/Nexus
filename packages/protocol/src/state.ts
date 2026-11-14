@@ -1,7 +1,8 @@
 // Derives the dashboard's view of a project from its files. Pure apart from reading through the store;
 // nothing here is ever written back (state.json, if kept, is only a cache of this).
-import { ORCHESTRATOR_ONLY, USER_ONLY, type StatusChange, type Event, type InboxEntry, type Note, type GitFile, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type ReviewItem, type ReviewLevel, type LegacyReviewPolicy, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type StepDef, type StepStatus } from "./schemas.ts";
-import { ProjectStore, revisionHash } from "./store.ts";
+import { ORCHESTRATOR_ONLY, USER_ONLY, type StatusChange, type Event, type InboxEntry, type Note, type GitFile, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type ReviewItem, type ReviewLevel, type LegacyReviewPolicy, type AwayFile, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type StepDef, type StepStatus } from "./schemas.ts";
+import { ProjectStore, readAway, revisionHash } from "./store.ts";
+import { awayAt, awayNow, type AwayNow } from "./away.ts";
 import { ENDED_RUN_STATES, HOLDING_RUN_STATES, formatClock, type Segment } from "./times.ts";
 import { stopPlace } from "./attention.ts";
 
@@ -143,6 +144,8 @@ export interface SessionView extends SessionFile {
 }
 export interface ProjectState {
   project: ProjectFile;
+  /** The user's away mode now (global): while on, level-2 steps are reviewed as level 3 (away.ts, levelNow). */
+  away: AwayNow;
   queues: QueueView[];
   sessions: SessionView[];
   questions: QuestionView[];
@@ -166,6 +169,7 @@ export function stepClosed(q: Pick<QueueView, "rejection">, st: { id: string; st
 export function loadProjectState(store: ProjectStore): ProjectState {
   const warnings: string[] = [];
   const project = store.readProject();
+  const away = readAway();
 
   const queues = new Map<string, QueueView>();
   for (const id of store.queueIds()) {
@@ -233,7 +237,7 @@ export function loadProjectState(store: ProjectStore): ProjectState {
   let next = 0;
   for (const e of events) {
     while (next < changes.length && changes[next]!.c.at < e.at) { applyChange(changes[next]!.q, changes[next]!.c); next++; }
-    apply(e, queues, sessions, questions, warnings, project, delivered);
+    apply(e, queues, sessions, questions, warnings, project, delivered, away);
   }
   for (; next < changes.length; next++) applyChange(changes[next]!.q, changes[next]!.c);
   // A rejection holds until an approval of a newer revision; while it holds the queue is paused.
@@ -312,6 +316,7 @@ export function loadProjectState(store: ProjectStore): ProjectState {
     questions: [...questions.values()],
     attention: attentionOf([...queues.values()], [...questions.values()]),
     warnings,
+    away: awayNow(away),
     generated_at: new Date().toISOString(),
   };
 }
@@ -448,6 +453,7 @@ export function reviewLevelOf(st: Pick<StepDef, "id" | "review">, q: Pick<QueueF
 function apply(
   e: Event, queues: Map<string, QueueView>, sessions: Map<string, SessionView>,
   questions: Map<string, QuestionView>, warnings: string[], project: ProjectFile, delivered: ReadonlySet<string>,
+  away: Pick<AwayFile, "current" | "past">,
 ): void {
   const s = sessions.get(e.session);
   if (s) {
@@ -639,7 +645,8 @@ function apply(
       if (!q || !st) return;
       if (s?.role !== "orchestrator") { warnings.push(`event ${e.id}: a provisional acceptance is the orchestrator's; ignored`); return; }
       if (st.status !== "review" || st.review_with !== "orchestrator") { warnings.push(`event ${e.id}: step ${e.queue}/${e.step} is not waiting for the orchestrator's review; the provisional acceptance is ignored`); return; }
-      if (st.level !== 3) { warnings.push(`event ${e.id}: step ${e.queue}/${e.step} is at review level ${st.level}; a provisional acceptance is for level 3, and is ignored`); return; }
+      // Level 3, or level 2 while away mode was on (it runs as level 3 then).
+      if (st.level !== 3 && !(st.level === 2 && awayAt(away, e.at))) { warnings.push(`event ${e.id}: step ${e.queue}/${e.step} is at review level ${st.level}${st.level === 2 ? " and away mode was off" : ""}; a provisional acceptance is for level 3, and is ignored`); return; }
       st.review_with = undefined;
       st.status = "done";
       st.provisional = { at: e.at, event: e.id, ...(e.text ? { text: e.text } : {}) };

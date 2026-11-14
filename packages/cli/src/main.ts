@@ -7,7 +7,7 @@ import { parseArgs } from "node:util";
 import { execFileSync } from "node:child_process";
 import {
   Event, HOLDING_RUN_STATES, ProjectStore, findNexusDir, inReportFolder, loadProjectState, stepValuesText, stopPlace, newId, normPath, now, readRegistry, writeRegistry,
-  PICTURE_ROLES, REVIEW_HELP, checkPicture, pictureSize, recommendedOption,
+  PICTURE_ROLES, REVIEW_HELP, checkPicture, levelNow, pictureSize, recommendedOption,
   type PictureRole, type ReviewItem, type Role, type Runtime, type SessionFile,
 } from "@nexus/protocol";
 import { checkRules, describeRules } from "@nexus/protocol/rules";
@@ -66,13 +66,16 @@ The server (NEXUS_PORT, default 4317):
                                       let running steps finish (or stop them with --now), move the live worktree to
                                       <ref> (default main), build, restart; queues held for it go on by themselves
   nexus server cancel                 give up waiting; the held queues go on
+  nexus server away [on --until <8:00|ISO time> | off]
+                                      the user's away mode (global): level-2 steps are reviewed as level 3 until then;
+                                      only the user switches it (refused from any agent session)
 `;
 
 const { values: o, positionals: args } = parseArgs({
   allowPositionals: true,
   options: {
     session: { type: "string" }, queue: { type: "string" }, step: { type: "string" },
-    summary: { type: "string" }, commit: { type: "string" }, reason: { type: "string" },
+    summary: { type: "string" }, commit: { type: "string" }, reason: { type: "string" }, until: { type: "string" },
     condition: { type: "string" }, pct: { type: "string" }, label: { type: "string" },
     kind: { type: "string" }, round: { type: "string" }, ok: { type: "boolean" }, fail: { type: "boolean" },
     option: { type: "string", multiple: true }, "can-continue": { type: "boolean" }, recommend: { type: "string" },
@@ -246,7 +249,8 @@ function reviewDecision(action: "accept" | "send-back" | "ask-user" | "provision
   const st = store(); const s = orchestrator(st);
   const queue = need(args[2], "<queue>"); const step = need(args[3], "<step>");
   checkStep(st, queue, step);
-  const view = loadProjectState(st).queues.find((q) => q.id === queue)!.steps.find((x) => x.id === step)!;
+  const state = loadProjectState(st);
+  const view = state.queues.find((q) => q.id === queue)!.steps.find((x) => x.id === step)!;
   if (view.status !== "review") throw new UsageError(`step ${queue}/${step} is not waiting for review (it is ${view.status})`);
   if (view.review_with !== "orchestrator") throw new UsageError(`step ${queue}/${step} waits for the user's review, not yours`);
   if (action === "accept") {
@@ -255,7 +259,7 @@ function reviewDecision(action: "accept" | "send-back" | "ask-user" | "provision
     return;
   }
   if (action === "provisional") {
-    if (view.level !== 3) throw new UsageError(`step ${queue}/${step} is at review level ${view.level}: a provisional acceptance is for level 3. Accept it, send it back, or hand it to the user`);
+    if (levelNow(view.level, state.away) !== 3) throw new UsageError(`step ${queue}/${step} is at review level ${view.level}${view.level === 2 ? " and away mode is off" : ""}: a provisional acceptance is for level 3 (or 2 while the user is away). Accept it, send it back, or hand it to the user`);
     emit(st, s, { type: "review.provisional", queue, step, text: o.note?.trim() || undefined });
     console.log(`ok: ${queue}/${step} accepted provisionally; the run goes on, and the step waits in the user's return batch`);
     return;
@@ -337,6 +341,10 @@ async function server(method: "GET" | "POST", path: string, body?: unknown): Pro
   return j;
 }
 
+function printAway(a: { on: boolean; until?: string } | undefined): void {
+  console.log(a?.on ? `away mode: on until ${new Date(a.until!).toLocaleString("sv-SE").slice(0, 16)} (level-2 steps are reviewed as level 3)` : "away mode: off");
+}
+
 function printUpdate(u: Record<string, any>): void {
   console.log(`update: ${u.phase}${u.held?.length ? `; holding ${u.held.join(", ")}` : ""}${u.waiting?.length ? `; waiting for ${u.waiting.join(", ")}` : ""}`);
   for (const l of u.log ?? []) console.log(`  ${l}`);
@@ -375,7 +383,17 @@ const commands: Record<string, () => void | Promise<void>> = {
     }
     if (sub === "update") return printUpdate(await server("POST", "/api/server/update", { now: !!o.now, ref: o.ref, by }));
     if (sub === "cancel") return printUpdate(await server("POST", "/api/server/cancel"));
-    throw new UsageError("nexus server status|update|cancel");
+    if (sub === "away") {
+      const what = args[2];
+      if (what === undefined) return printAway((await server("GET", "/api/server")).away);
+      // Away mode is the user's: no agent switches it, the orchestrator included.
+      const sid = o.session ?? process.env.NEXUS_SESSION;
+      if (sid) throw new UsageError("only the user switches away mode (in the dashboard, or with nexus server away outside an agent session)");
+      if (what === "on") return printAway((await server("POST", "/api/server/away", { until: need(o.until, "--until <8:00|ISO time>") })).away);
+      if (what === "off") return printAway((await server("POST", "/api/server/away", { until: null })).away);
+      throw new UsageError("nexus server away [on --until <8:00|ISO time> | off]");
+    }
+    throw new UsageError("nexus server status|update|cancel|away");
   },
 
   status() {

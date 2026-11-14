@@ -1486,6 +1486,21 @@ busy-loop processes on the user's 16 logical cores and 4 to 6 copies of the test
   provisional step's review commit in its history (and that step made commits of its own), whatever queue it came
   from: the same rule covers a later step of the same queue and another queue in the same checkout.
 
+## Away mode (queue RL3)
+
+- **One global mode, kept with its history.** Away mode is the user's, for all projects, in one file the server writes
+  (`<NEXUS_HOME>/away.yaml`). Its past periods stay on record because derivation needs them: a level-2 step accepted
+  provisionally while the user was away must still read as accepted after the mode ends, so the rule is "the
+  acceptance's time lies in an away period", not "away mode is on now".
+- **It ends by itself, also across restarts.** A period past its `until` reads as off at once; a server timer, armed
+  again at every start, records the end so the orchestrator is told.
+- **Only the user switches it.** The dashboard does, and so does `nexus server away` from the user's own terminal; the
+  CLI refuses it in any agent session, the orchestrator's included, and there is no event an agent could write. As
+  with update and cancel, the server cannot tell the CLI from another local process; the CLI is the gate.
+- **"Which queue can start" is the coordinator's answer.** When a queue waits for the user meanwhile, the orchestrator
+  is told the approved queues that pass the same check a start would (one queue per checkout, the limit), so it never
+  gets a queue in the checkout the waiting one still holds.
+
 ## Open questions
 
 1. **The orchestrator on Codex.** The orchestrator runs on Claude Code only: its read-only guarantee rests on Claude

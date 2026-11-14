@@ -4,7 +4,7 @@
 // drafts under .nexus/drafts/: permission mode dontAsk with a read-only allow list plus the drafts rules.
 import { randomUUID } from "node:crypto";
 import {
-  ActionError, ClaudeEffort, ProjectStore, applyDraft, loadProjectState, orchestratorStatusChange, newId, now, sendBack, type ChatEntry, type Event, type ProjectState, type SessionFile,
+  ActionError, ClaudeEffort, ProjectStore, applyDraft, loadProjectState, readAway, orchestratorStatusChange, newId, now, sendBack, type ChatEntry, type Event, type ProjectState, type SessionFile,
 } from "@nexus/protocol";
 import type { AgentProcess } from "./agent.ts";
 import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Launch } from "./agent-host.ts";
@@ -15,7 +15,7 @@ import type { UpdateNotice } from "./lifecycle.ts";
 import { describeDeployChanges, type DeployChanges } from "./deploy.ts";
 import {
   acceptedNoteNotice, approvalNotice, discardNotice, liftNotice, missedStartNotice, noticeText, orchestratorBriefing, pausedNotice,
-  questionNotice, rejectionNotice, fixAskedNotice, reviewNotice, runEndNotice, stepNoteNotice, userMessage, withdrawalNotice,
+  questionNotice, rejectionNotice, fixAskedNotice, reviewNotice, awayOnNotice, awayEndNotice, awayStuckNotice, runEndNotice, stepNoteNotice, userMessage, withdrawalNotice,
 } from "./prompts.ts";
 
 // Agent (formerly Task) lets it call subagents; they run within these same read-only permissions.
@@ -347,6 +347,13 @@ ${n.text}` });
     const more = changes.length ? { text: describeDeployChanges(changes), keys: changes.map((d) => d.key) } : undefined;
     if (mine) items.push({ key: mine.key, fact: mine.fact, todo: mine.todo, more });
     else if (more && !updateOnly) items.push({ key: more.keys.join(" "), fact: more.text, todo: "", quiet: true, more: { text: "", keys: more.keys } });
+    // The user's away mode: told when it comes on (or its end moves) and when it ends.
+    if (!updateOnly) {
+      const away = readAway();
+      if (state.away.on && state.away.until! >= since) items.push({ key: `notify:away:on:${state.away.since}:${state.away.until}`, ...awayOnNotice({ until: state.away.until! }) });
+      const last = away.past.at(-1);
+      if (!state.away.on && last && last.ended >= since) items.push({ key: `notify:away:end:${last.since}`, ...awayEndNotice(last) });
+    }
     for (const x of updateOnly ? [] : state.questions) {
       const asker = state.sessions.find((y) => y.id === x.session);
       if (x.state !== "open" || asker?.role !== "worker" || x.asked_at < since) continue;
@@ -372,7 +379,18 @@ ${n.text}` });
       // per round.
       for (const st of q.steps) {
         if (st.status !== "review" || st.review_with !== "orchestrator") continue;
-        items.push({ key: `notify:review:${q.id}:${st.id}:${st.finished_at}`, ...reviewNotice(q, st) });
+        items.push({ key: `notify:review:${q.id}:${st.id}:${st.finished_at}`, ...reviewNotice(q, st, state.away) });
+      }
+      // While the user is away, a queue that waits for the user at a step (level 1, the send-back limit, or handed to
+      // the user): which other approved queues can start now, once per such wait.
+      if (state.away.on && q.status !== "done" && q.status !== "cancelled") {
+        for (const st of q.steps) {
+          if (st.status !== "review" || st.review_with !== "user") continue;
+          const why = st.sent_back.some((b) => b.to_user) && st.asked_user ? "your send-backs reached the limit"
+            : st.asked_user ? "you handed it to the user" : st.level === 1 ? "review level 1: the user reviews it" : "the user reviews it";
+          const startable = this.engine.startable(state).filter((x) => x.id !== q.id).map((x) => ({ id: x.id, title: x.title, paused: x.status === "paused" }));
+          items.push({ key: `notify:awaywait:${q.id}:${st.id}:${st.asked_user?.at ?? st.finished_at}`, ...awayStuckNotice(q, st, why, startable) });
+        }
       }
       // A scheduled start missed because the server was not running at its time: the user has it in their list.
       const missed = q.start?.failed?.missed ? q.start : undefined;

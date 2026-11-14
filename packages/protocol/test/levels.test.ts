@@ -259,5 +259,5 @@ test("a provisional acceptance is the orchestrator's, at level 3 only; confirmin
   assert.equal(s.attention.filter((a) => a.kind === "provisional").length, 0, "both resolved: no batch");
   assert.ok(s.warnings.some((w) => /review.confirmed is the user's; ignored/.test(w)));
   assert.ok(s.warnings.some((w) => /a provisional acceptance is the orchestrator's; ignored/.test(w)));
-  assert.ok(s.warnings.some((w) => /at review level 2; a provisional acceptance is for level 3/.test(w)));
+  assert.ok(s.warnings.some((w) => /at review level 2 and away mode was off; a provisional acceptance is for level 3/.test(w)));
 });
