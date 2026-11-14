@@ -330,7 +330,7 @@ window, not the whole page), each with its view key, and the same views as they 
 
 ```sh
 node scripts/capture.ts scripts/capture/examples/dashboard.yaml --step RS/RS3   # befores at the step's base commit
-node scripts/capture.ts views.yaml --base 8800a05 --out tmp/review/X1          # or a commit of your choice
+node scripts/capture.ts views.yaml --base 8800a05 --out $TEMP/review-X1        # or a commit of your choice
 node scripts/capture.ts views.yaml --no-before                                  # afters only (new screens: results)
 ```
 
@@ -342,8 +342,9 @@ seeds a development instance (port 4318 and up, its own data in a temporary fold
 `NEXUS_DIR`, `NEXUS_HANDOVER` and `NEXUS_SESSION` cleared) and takes the afters with headless Edge. For the befores
 it makes a temporary git worktree at the base commit (the step's first start, from `.nexus/queues/<queue>/git.yaml`),
 installs and builds it (a few minutes), runs the same seed and views against it, and removes it. Pictures go to
-`tmp/review/<step>/` as `<key>.png` and `<key>.before.png`. At the end it prints the `nexus review add` commands,
-befores first. It also lists any view it could not take, and why: take those by hand. A seed that does not fit the
+`<temp>/nexus-review/<queue>/<step>/` (the system's temporary folder, outside the working tree; `--out` names another)
+as `<key>.png` and `<key>.before.png`. At the end it prints the `nexus review add` commands, befores first; that
+command copies each picture into `.nexus/queues/<queue>/review/<step>/`. It also lists any view it could not take, and why: take those by hand. A seed that does not fit the
 older code also shows up there. It never stops the step. Views narrower than Edge's 492 px are shown in a frame of
 their width. `NEXUS_CAPTURE_BROWSER` points it to another Edge or Chrome.
 
@@ -417,8 +418,8 @@ export NEXUS_SESSION=<id>                                           # or pass --
 nexus status
 nexus step start W3
 nexus step progress W3 "Support graph built" --pct 40
-nexus review add W3 tmp/review/w3/sheet.png --label "Sheet, round 1"
-nexus review add W3 tmp/review/w3/lit.png --before tmp/review/w3/unlit.png --label "Lighting"
+nexus review add W3 $TEMP/nexus-review/W3/sheet.png --label "Sheet, round 1"   # copied into .nexus/queues/W/review/W3/
+nexus review add W3 $TEMP/nexus-review/W3/lit.png --before $TEMP/nexus-review/W3/unlit.png --label "Lighting"
 nexus step done W3 --summary "No floating body on any fixture"
 ```
 

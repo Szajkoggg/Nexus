@@ -184,6 +184,8 @@ export class ProjectStore {
 
   // queues
   queueDir(id: string): string { return join(this.dir, "queues", id); }
+  /** Where `nexus review add` copies a step's review files (its only writer): queues/<queue>/review/<step>/. */
+  reviewDir(queue: string, step: string): string { return join(this.queueDir(queue), "review", step); }
   queueIds(): string[] { return subdirs(join(this.dir, "queues")).filter((q) => existsSync(join(this.queueDir(q), "queue.yaml"))); }
   readQueue(id: string): QueueFile { return readYaml(join(this.queueDir(id), "queue.yaml"), QueueFile); }
   writeQueue(q: z.input<typeof QueueFile>): void { writeYaml(join(this.queueDir(q.id), "queue.yaml"), QueueFile.parse(q)); }

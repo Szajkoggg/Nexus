@@ -466,9 +466,14 @@ once is the user's setting, not something each project decides alone.
 ### Review material
 
 A step's review spec says what to prepare (e.g. "before/after shots of fixtures X, Y; one phone-width sheet").
-The worker registers what it produced with `nexus review add <path>…`. The files stay where the project's tools put
-them (e.g. Honeycomb's `tmp/review/<step>/`); Nexus serves them read-only and renders images, Markdown, HTML and
-JSON. Artifact links and similar URLs can be registered too.
+The worker registers what it produced with `nexus review add <path>…`, which copies each file into the queue's
+folder (`.nexus/queues/<queue>/review/<step>/`) and records the copy (decided 2026-11-14, queue FU), as `nexus report`
+does with the report: the CLI is the one writer there, so a worker kept out of `.nexus` can still add material; the
+pictures outlast the working tree; and none is left untracked in a worktree, where it blocked the cleanup (as reports
+did, queue WR). The worker writes the files outside the working tree, in the system's temporary folder for example,
+and `scripts/capture.ts` writes there by default. Material added before, where the project's tools put it (e.g.
+Honeycomb's `tmp/review/<step>/`), is shown where it is. Nexus serves both read-only and renders images, Markdown,
+HTML and JSON. Artifact links and similar URLs can be registered too.
 
 Pictures pair by a view key and a named role, checked when they are added (decided 2026-11-14, queue RS; the
 standard is `nexus help review`, the rules in `packages/protocol/src/pictures.ts`). For Nexus's own dashboard,

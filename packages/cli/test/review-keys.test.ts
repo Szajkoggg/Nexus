@@ -34,11 +34,11 @@ function project() {
     });
     assert.equal(items().length, before, "nothing recorded when refused");
   };
-  return { root, nexus, items, refused };
+  return { root, st, nexus, items, refused };
 }
 
 test("keyed pictures are recorded with key, role, size and round, and paired by key", () => {
-  const { root, nexus, items } = project();
+  const { root, st, nexus, items } = project();
   for (const f of ["b", "a", "new", "u1", "u2"]) writeFileSync(join(root, `${f}.png`), png(984, 1600));
   for (const f of ["va", "vb"]) writeFileSync(join(root, `${f}.png`), png(2560, 1600));
 
@@ -55,7 +55,7 @@ test("keyed pictures are recorded with key, role, size and round, and paired by 
 
   const [b, a] = items();
   assert.deepEqual([b!.path, b!.key, b!.role, b!.size, b!.round, b!.label, b!.kind],
-    [normPath(join(root, "b.png")), "waiting-tab@492", "before", { width: 984, height: 1600 }, 1, "Waiting tab, before", "image"]);
+    [normPath(join(st.reviewDir("Q", "Q1"), "b.png")), "waiting-tab@492", "before", { width: 984, height: 1600 }, 1, "Waiting tab, before", "image"]);
   assert.deepEqual([a!.role, a!.label, a!.before], ["after", "a.png", undefined]);
   assert.equal(items().at(-1)!.round, 2);
 });

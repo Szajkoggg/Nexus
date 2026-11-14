@@ -22,7 +22,9 @@ test("--before records the before of one picture; it needs exactly one existing 
 
   assert.match(nexus("review", "add", "Q1", "after.png", "--before", "before.png", "--label", "Cliff"), /1 review item/);
   const item = loadProjectState(st).queues[0]!.steps[0]!.review_items[0]!;
-  assert.deepEqual([item.path, item.before, item.label], [normPath(after), normPath(before), "Cliff"]);
+  // Both are copied into the step's review folder (see review-copy.test.ts), and the item names the copies.
+  const dir = st.reviewDir("Q", "Q1");
+  assert.deepEqual([item.path, item.before, item.label], [normPath(join(dir, "after.png")), normPath(join(dir, "before.png")), "Cliff"]);
 
   assert.throws(() => nexus("review", "add", "Q1", "after.png", "before.png", "--before", "before.png"), /--before goes with exactly one picture/);
   assert.throws(() => nexus("review", "add", "Q1", "after.png", "--before", "missing.png"), /no such file/);

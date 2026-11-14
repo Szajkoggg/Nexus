@@ -14,6 +14,8 @@
 //               as Claude Code does; Codex's does not (Nexus nudges). Told of the end either way, it reports done.
 //   bgagent     the same with a sub-agent in the background
 //   bglong      the same command, running FAKE_BG_LONG_MS (default 600000): past the engine's limit in a test
+//   review      write a picture and a note into <temp>/nexus-review/<step>/ (outside the working tree), add them with
+//               nexus review add (the picture keyed, as a result), then done
 // A failure of the runtime, then done: "<kind><n>" fails the step's first n turns (counted in a file beside
 // FAKE_LOG, so a new process goes on counting), "<kind>" every turn. Kinds: overloaded, network (passing), auth
 // (lasting), limit (a usage limit resetting FAKE_RESET_MS, default 1500, later), crash (the process exits mid-turn),
@@ -34,6 +36,7 @@
 // in so far ("history: a | b"): the turns' messages and those read inside a turn (Claude's `next`, Codex's steer).
 import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -80,6 +83,14 @@ function interruptible(ms: number): Promise<boolean> {
     interruptWait = () => { clearTimeout(t); r(true); };
   });
 }
+
+/** The first bytes of a 984×1600 PNG (a 492 px window at scale 2): all nexus review add reads of a picture. */
+const PNG_492 = (() => {
+  const b = Buffer.alloc(33);
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]).copy(b);
+  b.write("IHDR", 12, "ascii"); b.writeUInt32BE(984, 16); b.writeUInt32BE(1600, 20);
+  return b;
+})();
 
 /** How Claude's fake starts the turn it starts by itself when background work ends (Claude Code: a task notification). */
 export const BACKGROUND_NOTICE = "<task-notification>";
@@ -159,6 +170,16 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
       execFileSync("git", [...g, "commit", "-q", "-m", `${step} work`], { stdio: "ignore" });
       if (behaviour === "commit") nexus("step", "done", step, "--summary", `fake committed ${step}`);
       else nexus("stop", step, "--condition", "fake condition", "--reason", "fake stop after a commit");
+    }
+    if (behaviour === "review") {
+      const dir = join(tmpdir(), "nexus-review", step);
+      mkdirSync(dir, { recursive: true });
+      const shot = join(dir, `${step.toLowerCase()}-shot@492.png`), note = join(dir, "notes.md");
+      writeFileSync(shot, PNG_492); writeFileSync(note, `# Review notes of ${step}
+`);
+      nexus("review", "add", step, shot, "--key", `${step.toLowerCase()}-shot@492`, "--role", "result", "--label", `${step} shot`);
+      nexus("review", "add", step, note, "--label", `${step} notes`);
+      nexus("step", "done", step, "--summary", `fake finished ${step} with review material`);
     }
     if (behaviour === "refused") { refused?.(); nexus("step", "done", step, "--summary", `fake finished ${step} without what was refused`); }
     if (["done", "slow", "summary", "summaryslow"].includes(behaviour)) nexus("step", "done", step, "--summary", `fake finished ${step}`);

@@ -30,6 +30,7 @@ a shell command can take part.
       queue.yaml                        server: definition, revisions, approvals
       notes/<step-id>/<note-id>.md      server: notes for a step (front matter + body)
       report.md                         `nexus report`: the queue's report, copied from where the worker wrote it
+      review/<step-id>/<file>           `nexus review add`: a step's review files, copied from where the worker wrote them
   sessions/
     <session-id>/
       session.yaml                      server: runtime, native id, role, cwd
@@ -40,8 +41,9 @@ a shell command can take part.
   state.json                            server: derived cache
 ```
 
-Review files are not copied here; events point to them by path (relative to the session's working directory, stored
-as absolute) or URL.
+Review files are copied here by `nexus review add` (into `queues/<queue>/review/<step>/`, its only writer) and the
+event points to the copy by its absolute path; a link stays a URL. Material added before this (a path anywhere in the
+project, a worktree or a session's working directory, as the event names it) is shown and served where it is.
 
 ## `project.yaml`
 
@@ -565,6 +567,15 @@ The standard for review material is `nexus help review` (`packages/cli/src/help.
 pairing, rounds, fixed-viewport captures, the process. It ships with Nexus, so every project has the current text
 after a deploy; a project's own conventions stay in its AGENTS.md and its steps' `review.prepare`.
 
+- **Where the files go.** `nexus review add` copies every file it is given (the picture and `--before` alike) into
+  `.nexus/queues/<queue>/review/<step>/` and records the copy's absolute path; URLs are recorded as they are. The
+  source may be anywhere outside the working tree (the worker's file tools may not write under `.nexus`; untracked
+  files in a worktree block its cleanup); the help and the worker's briefing name the system's temporary folder
+  (`<temp>/nexus-review/<step>/`), and `scripts/capture.ts` writes there by default
+  (`<temp>/nexus-review/<queue>/<step>/`). The source is left as it is. A file already in the folder is recorded as
+  it is; one of the same name and the same bytes is not copied again; one of a taken name with other bytes is copied as
+  `<name>-2.<ext>`, `-3`, … (an earlier round's picture is never overwritten). Everything is checked before anything is
+  copied: a refused command (a missing file, a folder, a wrong pair) leaves nothing behind.
 - **View keys and roles.** `nexus review add <step> <picture> --key KEY --role ROLE` adds one picture (PNG, JPEG, GIF
   or WebP; kind image or sheet) with its view key and role. A key is the view's subject and state in lowercase words
   joined by hyphens (dots allowed), `@`, and the window's width in CSS pixels: `waiting-tab@492`
@@ -723,10 +734,10 @@ arguments against the protocol and appends one event.
 nexus status                                   # the current queue, step, notes and unanswered questions, as text
 nexus step start W3
 nexus step progress W3 "Support graph built; probing fixtures"
-nexus review add W3 tmp/review/w3/sheet.png --label "Sheet, round 1"
-nexus review add W3 tmp/review/w3/cliff@1280.before.png --key cliff-lit@1280 --role before --label "Cliff, before"
-nexus review add W3 tmp/review/w3/cliff@1280.png --key cliff-lit@1280 --role after --label "Cliff, lit"   # pairs by key
-nexus review add W3 tmp/review/w3/lit.png --before tmp/review/w3/unlit.png --label "Lighting"   # older: no key
+nexus review add W3 $TEMP/nexus-review/W3/sheet.png --label "Sheet, round 1"   # copied into .nexus/queues/<q>/review/W3/
+nexus review add W3 $TEMP/nexus-review/W3/cliff@1280.before.png --key cliff-lit@1280 --role before --label "Cliff, before"
+nexus review add W3 $TEMP/nexus-review/W3/cliff@1280.png --key cliff-lit@1280 --role after --label "Cliff, lit"   # pairs by key
+nexus review add W3 $TEMP/nexus-review/W3/lit.png --before $TEMP/nexus-review/W3/unlit.png --label "Lighting"   # older: no key
 nexus help review                              # the standard for review material (nexus help: the topics)
 nexus help summaries|questions|refusals|commits   # the other standards
 nexus check W3 core-tests --ok --summary "548 passed"

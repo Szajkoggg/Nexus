@@ -3,6 +3,7 @@
 //
 //   node scripts/capture.ts <views.yaml> [--out <dir>] [--step <queue>/<step> | --base <commit>] [--no-before]
 //
+// The pictures go to --out, else <temp>/nexus-review/<queue>/<step>/ (or .../capture/), outside the working tree.
 // The view list's format is in scripts/capture/views.ts (and `nexus help review`). The afters come from this checkout
 // (its dashboard is built first); the befores from a temporary git worktree at the base commit (the step's first
 // start in .nexus/queues/<queue>/git.yaml, or --base), which gets `npm ci` and a dashboard build and is removed
@@ -54,7 +55,9 @@ if (!base && o.step && !o["no-before"]) {
 }
 if (o["no-before"]) base = undefined;
 if (base) base = git(root, "rev-parse", "--verify", `${base}^{commit}`);
-const out = posix(resolve(o.out ?? join(root, "tmp/review", stepId ?? "capture")));
+// Outside the working tree: nexus review add copies the pictures into the queue's folder, and untracked files in a
+// worktree would block its cleanup.
+const out = posix(resolve(o.out ?? join(tmpdir(), "nexus-review", ...(o.step ? o.step.split("/") : ["capture"]))));
 mkdirSync(out, { recursive: true });
 
 const tmp = posix(mkdtempSync(join(tmpdir(), "nexus-capture-")));

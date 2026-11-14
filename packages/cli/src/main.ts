@@ -1,8 +1,8 @@
 // The `nexus` command. Agents report through it; the user (or Nexus itself) also uses it for setup.
 // Every agent-side command validates its input and appends one event to the session's own log.
-import { readFileSync, existsSync, rmSync, writeFileSync } from "node:fs";
+import { readFileSync, existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import YAML from "yaml";
-import { basename, join, resolve } from "node:path";
+import { basename, extname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { execFileSync } from "node:child_process";
 import {
@@ -26,6 +26,7 @@ Agent commands (session from NEXUS_SESSION or --session):
   nexus review add <step> <path|url>... [--label <text>] [--kind image|sheet|doc|data|link] [--round N]
                     [--key <view@width> --role before|mockup|after|variant-a|variant-b|result]   (one picture; pairs by key)
                     [--before <path>]   (older material without a key: the "before" of one picture)
+                    Files are copied into .nexus/queues/<queue>/review/<step>/ (write them outside the working tree).
                     Read nexus help review before preparing review material.
   nexus check <step> <name> --ok|--fail [--summary <text>]
   nexus stop <step> --condition <text> --reason <text>   the condition met, as the queue words it; the reason, short
@@ -438,20 +439,22 @@ const commands: Record<string, () => void | Promise<void>> = {
     const targets = args.slice(3);
     if (!targets.length) throw new UsageError("missing <path|url>");
     if (o.key !== undefined || o.role !== undefined) return reviewAddKeyed(st, s, queue, step, targets);
-    let before: string | undefined;
+    let beforeFile: string | undefined;
     if (o.before !== undefined) {
       if (targets.length !== 1 || /^https?:\/\//.test(targets[0]!)) throw new UsageError("--before goes with exactly one picture (a file)");
-      before = normPath(o.before);
-      if (!existsSync(before)) throw new UsageError(`no such file: ${before}`);
+      beforeFile = reviewFile(o.before);
     }
-    const items: ReviewItem[] = targets.map((t) => {
-      if (/^https?:\/\//.test(t)) return { url: t, label: o.label, kind: (o.kind as ReviewItem["kind"]) ?? "link" };
-      const p = normPath(t);
-      if (!existsSync(p)) throw new UsageError(`no such file: ${p}`);
-      return { path: p, label: o.label ?? basename(p), kind: (o.kind as ReviewItem["kind"]) ?? guessKind(p), before };
+    // Files first checked, then copied: a missing one refuses the whole command before anything is written.
+    const files = targets.map((t) => (/^https?:\/\//.test(t) ? undefined : reviewFile(t)));
+    const before = beforeFile && reviewCopy(st, queue, step, beforeFile);
+    const items: ReviewItem[] = targets.map((t, i) => {
+      const src = files[i];
+      if (!src) return { url: t, label: o.label, kind: (o.kind as ReviewItem["kind"]) ?? "link" };
+      return { path: reviewCopy(st, queue, step, src), label: o.label ?? basename(src), kind: (o.kind as ReviewItem["kind"]) ?? guessKind(src), before };
     });
     emit(st, s, { type: "review.added", queue, step, items, round: o.round ? Number(o.round) : undefined });
-    console.log(`ok: ${items.length} review item(s) for ${queue}/${step}`);
+    const copied = items.filter((x) => x.path).length;
+    console.log(`ok: ${items.length} review item(s) for ${queue}/${step}${copied ? ` (${copied === 1 ? "the file is" : "the files are"} copied to ${normPath(st.reviewDir(queue, step))})` : ""}`);
   },
 
   help() {
@@ -656,25 +659,56 @@ function reviewAddKeyed(st: ProjectStore, s: SessionFile, queue: string, step: s
   if (!PICTURE_ROLES.includes(role)) throw new UsageError(`--role is one of ${PICTURE_ROLES.join(", ")}, not "${role}". ${REVIEW_HELP}`);
   if (o.before !== undefined) throw new UsageError(`--before is for pictures without a key; a keyed picture pairs by its key. ${REVIEW_HELP}`);
   if (targets.length !== 1 || /^https?:\/\//.test(targets[0]!)) throw new UsageError(`--key and --role go with exactly one picture (a file). ${REVIEW_HELP}`);
-  const path = normPath(targets[0]!);
-  if (!existsSync(path)) throw new UsageError(`no such file: ${path}`);
-  const kind = (o.kind as ReviewItem["kind"]) ?? guessKind(path);
+  const src = reviewFile(targets[0]!);
+  const kind = (o.kind as ReviewItem["kind"]) ?? guessKind(src);
   if (kind !== "image" && kind !== "sheet") throw new UsageError(`a keyed picture is an image or a sheet, not ${kind ?? "this kind of file"}. ${REVIEW_HELP}`);
-  const size = pictureSize(readFileSync(path));
-  if (!size) throw new UsageError(`cannot read the pixel size of ${path}: a keyed picture is a PNG, JPEG, GIF or WebP file. ${REVIEW_HELP}`);
+  const size = pictureSize(readFileSync(src));
+  if (!size) throw new UsageError(`cannot read the pixel size of ${src}: a keyed picture is a PNG, JPEG, GIF or WebP file. ${REVIEW_HELP}`);
   const view = loadProjectState(st).queues.find((q) => q.id === queue)?.steps.find((x) => x.id === step);
   const items = view?.review_items ?? [];
   // The step's current round: the one its latest delivered send-back opened, else the first.
   const round = o.round ? Number(o.round) : view?.sent_back.filter((x) => x.delivered).at(-1)?.round ?? 1;
-  const check = checkPicture(items, { path, key, role, round, size }, `${queue}/${step}`);
+  // Checked against the source, copied only when it is accepted: a refused picture leaves nothing behind.
+  const check = checkPicture(items, { path: src, key, role, round, size }, `${queue}/${step}`);
   if (!check.ok) throw new UsageError(check.message);
-  const item: ReviewItem = { path, label: o.label ?? basename(path), kind, key, role, size };
+  const path = reviewCopy(st, queue, step, src);
+  const item: ReviewItem = { path, label: o.label ?? basename(src), kind, key, role, size };
   emit(st, s, { type: "review.added", queue, step, items: [item], round });
   const c = check.counterpart;
   const paired = !c ? (role === "after" || role === "variant-b" ? "" : role === "result" ? ", stands alone" : ", waits for its pair")
     : c.compare === "round" ? `, compared with the ${c.item.role} of round ${c.item.round} (${c.item.path})`
     : `, compared with ${c.compare === "variant" ? "variant-a" : `its ${c.compare}`} (${c.item.path})`;
   console.log(`ok: ${key} ${role}, ${size.width}×${size.height} px, round ${round}, for ${queue}/${step}${paired}`);
+}
+
+/** A review file as given: it exists and is a file (a folder is not review material). */
+function reviewFile(p: string): string {
+  const file = normPath(p);
+  if (!existsSync(file)) throw new UsageError(`no such file: ${file}`);
+  if (!statSync(file).isFile()) throw new UsageError(`not a file: ${file} (add the files in it one by one)`);
+  return file;
+}
+
+const samePath = (a: string, b: string) => (process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b);
+
+/**
+ * Copies a review file into the step's folder in the queue's folder (ProjectStore.reviewDir), as nexus report copies
+ * the report: this command is the only writer there, so a worker kept out of .nexus can still add material, the
+ * dashboard serves it, and it outlasts the working tree (whose cleanup untracked files would block). Returns the
+ * copy's path. A file already in the folder is taken as it is; the same content under the same name is not copied
+ * twice; another file of the name gets "-2", "-3", … before its extension (an earlier round's picture stays as it was).
+ */
+function reviewCopy(st: ProjectStore, queue: string, step: string, file: string): string {
+  const dir = normPath(st.reviewDir(queue, step));
+  if (file.length > dir.length && samePath(file.slice(0, dir.length + 1), `${dir}/`)) return file;
+  mkdirSync(dir, { recursive: true });
+  const data = readFileSync(file);
+  const ext = extname(file), stem = basename(file, ext);
+  for (let i = 1; ; i++) {
+    const target = `${dir}/${i === 1 ? stem : `${stem}-${i}`}${ext}`;
+    if (!existsSync(target)) { writeFileSync(target, data); return target; }
+    if (statSync(target).isFile() && readFileSync(target).equals(data)) return target;
+  }
 }
 
 function guessKind(p: string): ReviewItem["kind"] {
