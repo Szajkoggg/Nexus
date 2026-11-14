@@ -139,13 +139,14 @@ export class Scheduler {
     const file = newPlan(this.store.readPlan(q.id), q.id, after, { by: o.by, reason: o.reason });
     const done = after.filter((id) => doneForPlan(state.project, state.queues.find((x) => x.id === id)!));
     const ready = done.length === after.length;
-    const busy = o.session ? state.queues.find((x) => x.id !== q.id && !!x.run && x.run.session === o.session && HOLDING_RUN_STATES.includes(x.run.state)) : undefined;
-    const block = ready && q.approved && !this.deps.draining() && !busy ? this.deps.block(state, q) : undefined;
+    const busy = holdingSession(state, o.session, q.id);
+    const free = ready && q.approved && !this.deps.draining() && !busy;
+    const block = free ? this.deps.block(state, q) : undefined;
     this.timers.clear(`start:${q.id}`);
     const at = now();
     this.store.writePlan(q.id, file);
-    const doneText = done.length ? `${done.length === 1 ? "queue" : "queues"} ${done.join(", ")} ${done.length === 1 ? "is" : "are"} done` : "";
-    if (ready && q.approved && !this.deps.draining() && !busy && !block) {
+    const doneText = done.length ? areDone(done) : "";
+    if (free && !block) {
       this.store.writeStart(q.id, { protocol: 1, ...options, by: o.by, reason: o.reason, revision: q.revision, created_at: at });
       const run = this.deps.start(q.id, { ...options, after: after.length ? after : undefined });
       return `${doneText ? `${doneText}: ` : ""}queue ${q.id} started now in session ${run.session}`;
@@ -158,7 +159,7 @@ export class Scheduler {
     const approval = q.approved ? "" : ` (and once revision ${q.revision} is approved)`;
     const kept = file.after.filter((e) => e.by === "user").map((e) => e.queue);
     const yours = o.by === "orchestrator" && kept.length ? `; it waits for ${kept.join(", ")} by the user's decision` : "";
-    if (!ready) return `queue ${q.id} starts when ${after.length === 1 ? "queue" : "queues"} ${after.join(", ")} ${after.length === 1 ? "is" : "are"} done${approval}${yours}`;
+    if (!ready) return `queue ${q.id} starts when ${areDone(after)}${approval}${yours}`;
     const lead = doneText ? `${doneText}; ` : "";
     if (!q.approved) return `${lead}queue ${q.id} starts once revision ${q.revision} is approved${yours}`;
     if (block) return `${lead}queue ${q.id} ${waitingText(block)}; it starts by itself then${yours}`;
@@ -311,7 +312,7 @@ export class Scheduler {
     const hold = (kind: "approval" | "checkout" | "limit", reason: string) => {
       if (held?.reason !== reason) this.store.writeStart(q.id, { ...file, held: { since: held?.since ?? now(), kind, reason } });
     };
-    const busy = file.session ? state.queues.find((x) => x.id !== q.id && !!x.run && x.run.session === file.session && HOLDING_RUN_STATES.includes(x.run.state)) : undefined;
+    const busy = holdingSession(state, file.session, q.id);
     if (file.at) {
       const at = Date.parse(file.at);
       if (t < at) return false;
@@ -325,7 +326,7 @@ export class Scheduler {
     const after = plan?.after.map((e) => e.queue) ?? [];
     try {
       const run = this.deps.start(q.id, { runtime: file.runtime, model: file.model, effort: file.effort, session: file.session, after: after.length ? after : undefined });
-      const why = after.length ? `${after.length === 1 ? "queue" : "queues"} ${after.join(", ")} ${after.length === 1 ? "is" : "are"} done` : file.at ? "its scheduled time came" : "it was planned to start as soon as it may";
+      const why = after.length ? areDone(after) : file.at ? "its scheduled time came" : "it was planned to start as soon as it may";
       this.store.appendActivity(run.session, { at: now(), kind: "turn_start", text: `Nexus started queue ${q.id}: ${why}${held ? ` (it waited since ${formatClock(held.since, new Date(t))}: ${held.reason})` : ""}`, queue: q.id });
       return true;
     } catch (e) { fail((e as Error).message); return false; }
@@ -336,4 +337,13 @@ function queueOf(state: ProjectState, id: string): QueueView {
   const q = state.queues.find((x) => x.id === id);
   if (!q) throw new ActionError(`unknown queue ${id}`, 404);
   return q;
+}
+
+/** "queue A is done", "queues A, B are done". */
+const areDone = (ids: readonly string[]) => `${ids.length === 1 ? "queue" : "queues"} ${ids.join(", ")} ${ids.length === 1 ? "is" : "are"} done`;
+
+/** The queue (other than `except`) whose run holds `session`: one session never runs two queues. */
+function holdingSession(state: ProjectState, session: string | undefined, except: string): QueueView | undefined {
+  if (!session) return undefined;
+  return state.queues.find((x) => x.id !== except && !!x.run && x.run.session === session && HOLDING_RUN_STATES.includes(x.run.state));
 }
