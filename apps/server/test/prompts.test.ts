@@ -344,3 +344,15 @@ test("the thinking partner's briefing, with a notes folder and without, matches 
   }
   golden("partner", tr.text([[root.replaceAll("\\", "/"), "<root>"], [root, "<root>"]]));
 });
+
+test("the briefings carry the review standard's essentials and point to nexus help review", async () => {
+  const { WORKER_BRIEFING, orchestratorBriefing } = await import("../src/prompts.ts");
+  for (const part of ["read `nexus help review` before you prepare it", "--key <view@width> --role <role>", "waiting-tab@492",
+    "before (the old state), mockup (the design), after (the new state), variant-a / variant-b (alternatives), result", "fixed-viewport", "Nexus refuses a wrong pair"]) {
+    assert.ok(WORKER_BRIEFING.includes(part), `the worker's briefing has ${JSON.stringify(part)}`);
+  }
+  const orch = orchestratorBriefing("Pilot", 60);
+  for (const part of ["`nexus help review` (read it before you write a review.prepare)", "In review.prepare name the views with their keys and roles", "waiting-tab@492 before -> after"]) {
+    assert.ok(orch.includes(part), `the orchestrator's briefing has ${JSON.stringify(part)}`);
+  }
+});

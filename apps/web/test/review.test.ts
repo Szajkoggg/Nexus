@@ -77,3 +77,31 @@ test("keyed pictures pair by key and role, never by label; unkeyed ones keep the
     ["/lit.png", "/unlit.png", "before", null],
   ]);
 });
+
+test("the viewer names each comparison: before -> after, mockup -> after, variants, rounds, and a keyed picture alone by its role", async () => {
+  const { pairPictures, comparisonOf } = await import("../src/review.ts");
+  const items = [
+    { path: "/b.png", key: "tab@492", role: "before" as const, round: 1 },
+    { path: "/a.png", key: "tab@492", role: "after" as const, round: 1 },
+    { path: "/m.png", key: "settings@492", role: "mockup" as const, round: 1 },
+    { path: "/s.png", key: "settings@492", role: "after" as const, round: 1 },
+    { path: "/va.png", key: "rail@1440", role: "variant-a" as const, round: 1 },
+    { path: "/vb.png", key: "rail@1440", role: "variant-b" as const, round: 1 },
+    { path: "/r1.png", key: "usage@390", role: "result" as const, round: 1 },
+    { path: "/r2.png", key: "usage@390", role: "after" as const, round: 2 },
+    { path: "/old1.png", label: "Old", round: 1 },
+    { path: "/old2.png", label: "Old", round: 2 },
+  ];
+  assert.deepEqual(pairPictures(items).map(comparisonOf), [
+    { text: "before", left: "Before", right: "After" },
+    { text: "before → after", left: "Before", right: "After" },
+    { text: "mockup", left: "Before", right: "After" },
+    { text: "mockup → after", left: "Mockup", right: "After" },
+    { text: "variant A", left: "Before", right: "After" },
+    { text: "variant A / variant B", left: "Variant A", right: "Variant B" },
+    { text: "result", left: "Before", right: "After" },
+    { text: "round 1 → round 2", left: "Round 1", right: "Round 2" },
+    { text: undefined, left: "Before", right: "After" }, // unkeyed: as before keys
+    { text: undefined, left: "Before", right: "After" },
+  ]);
+});

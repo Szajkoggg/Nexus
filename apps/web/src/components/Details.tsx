@@ -3,7 +3,7 @@ import type { ChatEntry, Event, StatusChange } from "@nexus/protocol";
 import { stopPlace } from "@nexus/protocol/attention";
 import { stepValuesText } from "@nexus/protocol/steps";
 import { act, actResult, enc, fileUrl, useFetch, type ProjectState, type QuestionView, type QueueView, type StepView } from "../api.ts";
-import { noteTargets, pairPictures, showsReviewActions } from "../review.ts";
+import { comparisonOf, noteTargets, pairPictures, showsReviewActions } from "../review.ts";
 import { ActionBar, Button, Composer, Expandable, Markdown, PanelBody, PanelHeader, Section, StatusBadge, StepTimes, TEXTAREA, TimeAgo, reviewLabel, useDraftText, type MenuEntry } from "./ui.tsx";
 import { Activity, RetryNote, RunControls } from "./Run.tsx";
 import { StepRefusals } from "./Refusals.tsx";
@@ -41,14 +41,19 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
   const notesOpen = step.status === "pending" || step.status === "stopped" || forOrchestrator;
   // Review images open in the in-app viewer, a layer above the step (Back closes it); other items as links.
   const isImage = (r: StepView["review_items"][number]) => !!r.path && /\.(png|jpe?g|gif|webp|svg)$/i.test(r.path);
-  // Each picture with its before, if it has one (an explicit --before, else the same label in an earlier round).
+  // Each picture with what it is compared with: by its view key and role, else (older material) an explicit --before
+  // or the same label in an earlier round.
   const pictures = pairPictures(step.review_items.filter(isImage));
-  const images: ViewerImage[] = pictures.map(({ item: r, before, beforeLabel }) => ({
-    src: fileUrl(id, r.path!), label: r.label ?? r.path!.split("/").at(-1)!, round: r.round,
-    // An explicit before by its file name; one paired by label by its round.
-    before: before ? { src: fileUrl(id, before), label: beforeLabel === "before" ? before.split(/[\\/]/).at(-1)! : beforeLabel ?? "before" } : undefined,
-    accepted: !!step.pictures[r.path!]?.accepted, comments: step.pictures[r.path!]?.comments.length ?? 0,
-  }));
+  const fileName = (p: string) => p.split(/[\\/]/).at(-1)!;
+  const images: ViewerImage[] = pictures.map((pair) => {
+    const { item: r, before, beforeLabel, other } = pair;
+    return {
+      src: fileUrl(id, r.path!), label: r.label ?? fileName(r.path!), round: r.round, key: r.key, comparison: comparisonOf(pair),
+      // A keyed counterpart by its label; an explicit before by its file name; one paired by label by its round.
+      before: before ? { src: fileUrl(id, before), label: other?.key ? other.label ?? fileName(before) : beforeLabel === "before" ? fileName(before) : beforeLabel ?? "before" } : undefined,
+      accepted: !!step.pictures[r.path!]?.accepted, comments: step.pictures[r.path!]?.comments.length ?? 0,
+    };
+  });
   const viewing = layerValue(useNav(), "viewer");
   const shown = viewing === undefined ? undefined : Math.min(Math.max(0, Number(viewing) || 0), images.length - 1);
   // The action bar: the user's review when the step waits for it; else the answer to the step's open question (the

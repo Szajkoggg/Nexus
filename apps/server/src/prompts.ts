@@ -16,13 +16,15 @@ Nexus sends you one step of an approved queue at a time. Work on that step only;
 Report through the \`nexus\` command (on PATH; your session is set in the environment as NEXUS_SESSION):
 - nexus step start <step>                                   when you begin a step
 - nexus step progress <step> "<short status>" [--pct N]     at milestones, so the user sees where you are
-- nexus review add <step> <file|url>... --label "..."       review material (pictures, sheets, reports)
+- nexus review add <step> <picture> --key <view@width> --role <role> --label "..."   a review picture, one per command
+- nexus review add <step> <file|url>... --label "..."       other review material (documents, data, links)
 - nexus check <step> <name> --ok|--fail --summary "..."      results of the step's checks
 - nexus step done <step> --summary "..." [--commit <sha>]   when the acceptance criteria are met
 - nexus step failed <step> --reason "..."                   when the step cannot be done as written
 - nexus stop <step> --condition "..." --reason "..."        when a stop condition is met (first commit what is consistent, see below)
 - nexus ask "<question>" --step <step> [--can-continue]     a question for the orchestrator or the user; without --can-continue, end your turn after asking: the answer arrives as a message
 - nexus context "<what a successor needs to know>" --topics a,b --files x,y   at the end of each step
+Review material follows Nexus's standard: read \`nexus help review\` before you prepare it. In short: every picture has a view key naming what it shows, in which state, at which window width (waiting-tab@492), and a role: before (the old state), mockup (the design), after (the new state), variant-a / variant-b (alternatives), result (a new view with nothing to compare). Only pictures with the same key pair, so a before and its after are taken the same way: fixed-viewport captures with the same window size, data and state. Add befores and mockups before their afters. Nexus refuses a wrong pair and says why; the label is only a caption.
 Messages from the user may arrive while you work, marked [Nexus]; follow them.
 Before you stop (nexus stop, or a stop condition you meet): commit what is in a consistent state, with a message that says so, and leave the working tree clean (no uncommitted changes); what is not consistent, set aside or undo, and say in the reason what you left out. The user then decides whether the stopped step's commits are kept or reverted; changes nobody committed cannot be attributed to the step.`;
 
@@ -42,7 +44,7 @@ export function stepOpening(o: {
     step.goal ? `\nGoal:\n${step.goal}` : "",
     step.acceptance.length ? `\nAcceptance:\n${step.acceptance.map((a) => `- ${a}`).join("\n")}` : "",
     q.checks.length ? `\nChecks for every step:\n${q.checks.map((c) => `- ${c}`).join("\n")}` : "",
-    step.review?.prepare ? `\nReview to prepare: ${step.review.prepare}` : "",
+    step.review?.prepare ? `\nReview to prepare: ${step.review.prepare}\nPrepare it by Nexus's standard: read \`nexus help review\` first (view keys, roles, the same conditions on both sides of a pair).` : "",
     `\nStop conditions (meeting one ends the queue: report it with \`nexus stop\`):\n${[...q.stop_conditions, ...projectStopConditions].map((c) => `- ${c}`).join("\n") || "- none beyond your judgement"}`,
     notes.length ? `\nNotes from the user for this step:\n${notes.map((n) => `- ${n.body}`).join("\n")}` : "",
     answers.length ? `\nAnswers to your questions about this step:\n${answers.map((x) => `- "${x.text}": ${x.answers.at(-1)?.text}`).join("\n")}` : "",
@@ -120,7 +122,7 @@ export function formatInbox(m: InboxView, state: ProjectState): string {
     return [
       ...lines,
       step?.acceptance.length ? `\nAcceptance criteria of the step:\n${step.acceptance.map((a) => `- ${a}`).join("\n")}` : "",
-      `\nWork on it in this step: \`nexus step start ${m.step}\`, then the checks, review material for this round (\`nexus review add ${m.step} … --round ${m.round}\`), and \`nexus step done ${m.step} --summary "…"\` (or \`nexus step failed\` / \`nexus stop\`), then \`nexus context\`, and end your turn.`,
+      `\nWork on it in this step: \`nexus step start ${m.step}\`, then the checks, review material for this round (\`nexus review add ${m.step} … --round ${m.round}\`, pictures with the same keys as before: \`nexus help review\`), and \`nexus step done ${m.step} --summary "…"\` (or \`nexus step failed\` / \`nexus stop\`), then \`nexus context\`, and end your turn.`,
     ].filter(Boolean).join("\n");
   }
   return `[Nexus] The ${m.from} asks you to stop now${m.text ? `: ${m.text}` : "."} Leave the work consistent and end your turn.`;
@@ -173,11 +175,13 @@ steps:
     acceptance:
       - ...
     review:                    # optional
-      prepare: Before/after shots of ...
+      prepare: The views to show, each with its key and role, e.g. "waiting-tab@492 before -> after; usage-panel@390 result"
       policy: wait             # optional, this step only: continue, wait or orchestrator
     runtime: codex             # optional: claude or codex, this step only
     model: haiku               # optional, this step only
     effort: low                # optional, this step only (Claude Code: low to max; Codex: the model's levels)
+
+Review material follows Nexus's standard, \`nexus help review\` (read it before you write a review.prepare): every picture has a view key (subject, state, window width: waiting-tab@492) and a role (before, mockup, after, variant-a, variant-b, result); only the same key pairs, and Nexus refuses a wrong pair. In review.prepare name the views with their keys and roles, and what each is compared with (the old screen: before; a design: mockup; a new screen: result). The project's own conventions (its AGENTS.md) come on top.
 
 A revision changes only what has not started: add, change, remove or reorder pending steps freely. A started step (one that has been at work, or whose status is not pending or skipped) keeps its title, goal, acceptance, review, runtime, model and effort, stays in the draft and keeps its order among the started steps; a change to the running step reaches its worker as a message (your answer to its question, or the user's message) or with nexus review send-back when it waits for your review. Once a queue has run, its worktree, branch and base stay as they are. Nexus refuses a draft that breaks this and says why. A new revision of a running queue never stops its running step: the step goes on to its end, through its questions, answers and nudges. Then the run goes on under the new revision in the same session if the user has approved it, or waits for the approval (run state approval_wait, its session kept) and goes on by itself once the user approves: there is nothing to start or resume, and a start or cancel of the queue is refused while it waits.
 

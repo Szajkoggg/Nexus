@@ -438,3 +438,30 @@ test("a note on a pending step still waits for that step, and never goes to the 
     assert.ok(!x.delivered().some((t) => t.startsWith("[Nexus] The user wrote a note")), "not the orchestrator's");
   } finally { x.stop(); }
 });
+
+test("the pointer to nexus help review: in the opening of a step with a review spec, not without one, and in a send-back", async () => {
+  const x = setup();
+  try {
+    applyDraft(x.store, {
+      id: "H", title: "Pointer", review_policy: "wait",
+      steps: [
+        { id: "H1", title: "With a review spec", goal: "FAKE: done", acceptance: ["Shown"], review: { prepare: "waiting-tab@492 before -> after" } },
+        { id: "H2", title: "Without one", goal: "FAKE: done", acceptance: ["Done"] },
+      ],
+    });
+    approveQueue(x.store, "H");
+    x.engine.start("H");
+    const opening = (s: string) => x.delivered().find((t) => t.includes(`step ${s} (`) && t.startsWith("[Nexus] Queue H"));
+    await x.until("H1 in review", () => x.step("H", "H1").status === "review");
+    assert.match(opening("H1")!, /Review to prepare: waiting-tab@492 before -> after\nPrepare it by Nexus's standard: read `nexus help review` first/);
+
+    sendBack(x.store, { queue: "H", step: "H1", from: "user", text: "The after is at another width." });
+    await x.until("round 2 at the worker", () => x.delivered().some(roundTurn("H1", 2)));
+    assert.match(x.delivered().find(roundTurn("H1", 2))!, /--round 2`, pictures with the same keys as before: `nexus help review`\)/);
+
+    await x.until("round 2 in review", () => x.step("H", "H1").summary === "fake finished H1 round 2" && x.step("H", "H1").status === "review");
+    x.engine.acceptReview("H", "H1");
+    await x.until("H2 opened", () => !!opening("H2"));
+    assert.ok(!opening("H2")!.includes("nexus help review"), "no pointer without a review spec");
+  } finally { x.stop(); }
+});

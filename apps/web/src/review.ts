@@ -1,5 +1,5 @@
 // Which review actions a step offers the user, as pure helpers (unit tested); the dashboard draws them.
-import { counterpartOf, type Comparison, type KeyedLike } from "@nexus/protocol/pictures";
+import { counterpartOf, type Comparison, type KeyedLike, type PictureRole } from "@nexus/protocol/pictures";
 
 /** What the helpers read of a step (a StepView has all of it). */
 export interface StepLike { id: string; status: string; review_with?: "orchestrator" | "user" }
@@ -26,11 +26,12 @@ export function noteTargets(steps: StepLike[], step: string): { next?: string; o
 export interface PictureLike extends KeyedLike { path?: string; label?: string; round?: number; before?: string; at?: string }
 
 /**
- * A review picture and the one it is compared with, if any (`before` is a path). `beforeLabel` names the other side:
- * "before" (an explicit --before, or a keyed before), "mockup", "variant A", "round N", or "earlier". `compare` says
- * how a keyed picture is compared (pictures.ts); unkeyed pairs have none.
+ * A review picture and the one it is compared with, if any (`before` is a path; `other` the item, when it is one of
+ * the step's). `beforeLabel` names the other side: "before" (an explicit --before, or a keyed before), "mockup",
+ * "variant A", "round N", or "earlier". `compare` says how a keyed picture is compared (pictures.ts); unkeyed pairs
+ * have none.
  */
-export interface Pair<T extends PictureLike> { item: T; before?: string; beforeLabel?: string; compare?: Comparison }
+export interface Pair<T extends PictureLike> { item: T; before?: string; beforeLabel?: string; compare?: Comparison; other?: T }
 
 /**
  * Pairs each picture with what it is compared with. A picture with a view key pairs only by key and role
@@ -46,13 +47,30 @@ export function pairPictures<T extends PictureLike>(items: T[]): Pair<T>[] {
       const c = counterpartOf(items.slice(0, i), item);
       if (!c) return { item };
       const label = c.compare === "round" ? `round ${c.item.round}` : c.compare === "variant" ? "variant A" : c.compare;
-      return { item, before: c.item.path, beforeLabel: label, compare: c.compare };
+      return { item, before: c.item.path, beforeLabel: label, compare: c.compare, other: c.item };
     }
     if (item.before) return { item, before: item.before, beforeLabel: "before" };
     if (item.label === undefined) return { item };
     const earlier = items.slice(0, i).filter((x) => x.path && !x.key && x.label === item.label
       && (item.round === undefined || x.round === undefined ? item.round === undefined && x.round === undefined : x.round < item.round));
     const best = earlier.sort((a, b) => (a.round ?? 0) - (b.round ?? 0)).at(-1);
-    return best ? { item, before: best.path, beforeLabel: best.round !== undefined ? `round ${best.round}` : "earlier" } : { item };
+    return best ? { item, before: best.path, beforeLabel: best.round !== undefined ? `round ${best.round}` : "earlier", other: best } : { item };
   });
+}
+
+/**
+ * How the viewer names a picture's comparison: `text` for the line under its title (what is compared with what, or
+ * the role of a keyed picture shown alone: "result", "before", …), `left` and `right` for the two sides. Unkeyed
+ * pictures keep "Before" and "After", with no text.
+ */
+export interface ComparisonNames { text?: string; left: string; right: string }
+
+const ALONE: Record<PictureRole, string> = { before: "before", mockup: "mockup", after: "after", "variant-a": "variant A", "variant-b": "variant B", result: "result" };
+
+export function comparisonOf<T extends PictureLike>(p: Pair<T>): ComparisonNames {
+  const { item, compare, other } = p;
+  if (compare === "before" || compare === "mockup") return { text: `${compare} → after`, left: compare === "before" ? "Before" : "Mockup", right: "After" };
+  if (compare === "variant") return { text: "variant A / variant B", left: "Variant A", right: "Variant B" };
+  if (compare === "round") return { text: `round ${other?.round} → round ${item.round}`, left: `Round ${other?.round}`, right: `Round ${item.round}` };
+  return { text: item.key && item.role ? ALONE[item.role] : undefined, left: "Before", right: "After" };
 }

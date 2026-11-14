@@ -485,8 +485,13 @@ after a deploy; a project's own conventions stay in its AGENTS.md and its steps'
   picture with the same label from an earlier round (without round numbers: the latest earlier one with that label).
   Nothing checks them.
 - **The viewer** shows a picture and its counterpart beside each other (stacked when the screen is upright) or
-  overlaid with a slider; `pairPictures` (`apps/web/src/review.ts`) names the other side: before, mockup, variant A,
-  round N, earlier.
+  overlaid with a slider; `pairPictures` (`apps/web/src/review.ts`) finds the other side and `comparisonOf` names the
+  comparison, under the picture's title before its key and round ("before → after", "mockup → after", "variant A /
+  variant B", "round 1 → round 2"; a keyed picture shown alone by its role, e.g. "result"), and the two sides
+  (Before, Mockup, Variant A, Round N; After, Variant B, Round M). Unkeyed pairs keep Before and After.
+- **How agents learn the standard.** The worker's briefing has its essentials (keys, roles, the same conditions, a
+  refused pair) and the pointer to `nexus help review`; the orchestrator's briefing asks for review.prepare with keys
+  and roles. The opening of a step with a `review.prepare` and every send-back repeat the pointer.
 - **Marks.** The user may mark a picture accepted (`review.marked`, by its path), and take the mark back. It is a
   mark only: the step is not accepted by it. The derived step has `pictures.<path>` (`accepted`: when, while marked;
   `comments`).
@@ -656,6 +661,7 @@ The engine opens each step with one message to the worker:
 Goal: ...
 Acceptance: ...
 Checks: ...
+Review to prepare: <review.prepare>               # only with one, followed by the pointer to `nexus help review`
 Stop conditions: <project defaults> + <queue's own>
 Notes for this step (2): ...
 Answers to your earlier questions: ...

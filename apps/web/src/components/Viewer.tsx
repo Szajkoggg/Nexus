@@ -1,14 +1,18 @@
 // Review images in the app: full screen, fitted, two-finger zoom, swipe or buttons to the next and previous image.
 // A picture with a "before" (src/review.ts pairPictures) is shown beside it (stacked when the screen is upright) or
-// overlaid with a slider; the step's view puts its action bar below (`footer`: the picture's mark, comments, and
+// overlaid with a slider, the two sides named by the comparison (before -> after, mockup -> after, variant A / variant
+// B, round N -> round M; a keyed picture shown alone says its role, e.g. result); the step's view puts its action bar below (`footer`: the picture's mark, comments, and
 // the original file under ⋯).
 // The viewer is a layer in the history (nav.ts: "viewer:<index>"), so Back and Escape close it; moving to another
 // image replaces its entry, so one Back always returns to the step.
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import type { ComparisonNames } from "../review.ts";
 
 export interface ViewerImage {
   src: string; label: string; round?: number; before?: { src: string; label: string };
+  /** Its view key, and how its comparison is named (src/review.ts comparisonOf); without one: Before and After. */
+  key?: string; comparison?: ComparisonNames;
   /** The user's mark and comments on it, shown on its thumbnail in the filmstrip. */
   accepted?: boolean; comments?: number;
 }
@@ -34,6 +38,7 @@ export function ImageViewer({ images, index, onIndex, onClose, footer, back, con
   const img = images[index]!;
   const [mode, setMode] = useState<Mode>("both");
   const shown: Mode = img.before ? mode : "after";
+  const names = img.comparison ?? { left: "Before", right: "After" };
   const prev = index > 0 ? () => onIndex(index - 1) : undefined;
   const next = index < images.length - 1 ? () => onIndex(index + 1) : undefined;
   useEffect(() => {
@@ -62,12 +67,16 @@ export function ImageViewer({ images, index, onIndex, onClose, footer, back, con
         <div className="min-w-0 flex-1">
           <div className="truncate font-semibold text-fg">{img.label}</div>
           <div className="truncate text-xs text-fg-3">
-            {images.length > 1 ? `picture ${index + 1} of ${images.length}` : "1 picture"}{img.round ? ` · round ${img.round}` : ""}{context ? ` · ${context}` : ""}
+            {/* The comparison first: on a phone the line is cut at its end. */}
+            {images.length > 1 ? `picture ${index + 1} of ${images.length}` : "1 picture"}
+            {names.text && <> · <span className="font-semibold text-fg-2">{names.text}</span></>}
+            {img.key && <> · <span className="font-mono">{img.key}</span></>}
+            {img.round ? ` · round ${img.round}` : ""}{context ? ` · ${context}` : ""}
           </div>
         </div>
         {img.before && (
-          <div className="flex shrink-0 gap-0.5 rounded-lg border border-line bg-surface-2 p-0.5 max-lg:order-last max-lg:basis-full max-lg:justify-center" role="group" aria-label="Compare with the before">
-            {([["after", "After"], ["both", "Before | After"], ["overlay", "Overlay"]] as const).map(([m, label]) => (
+          <div className="flex shrink-0 gap-0.5 rounded-lg border border-line bg-surface-2 p-0.5 max-lg:order-last max-lg:basis-full max-lg:justify-center" role="group" aria-label={`Compare ${names.left} and ${names.right}`}>
+            {([["after", names.right], ["both", `${names.left} | ${names.right}`], ["overlay", "Overlay"]] as const).map(([m, label]) => (
               <button key={m} onClick={() => setMode(m)} aria-pressed={shown === m}
                 className={`rounded-md px-3 py-1 text-xs max-lg:min-h-9 ${shown === m ? "bg-surface-4 font-semibold text-fg" : "text-fg-2 hover:text-fg"}`}>{label}</button>
             ))}
@@ -82,7 +91,7 @@ export function ImageViewer({ images, index, onIndex, onClose, footer, back, con
         {/* Keyed by the image: zoom and pan start fresh on each. */}
         {shown === "after" || !img.before
           ? <Stage key={index} src={img.src} alt={img.label} onSwipe={(d) => (d > 0 ? next : prev)?.()} />
-          : <Compare key={`${index}-${shown}`} before={img.before} after={{ src: img.src, label: img.label }} mode={shown} onSwipe={(d) => (d > 0 ? next : prev)?.()} />}
+          : <Compare key={`${index}-${shown}`} before={img.before} after={{ src: img.src, label: img.label }} names={names} mode={shown} onSwipe={(d) => (d > 0 ? next : prev)?.()} />}
         {prev && <button onClick={prev} aria-label="Previous image" className={`${arrow} left-2`}><Chevron dir="left" /></button>}
         {next && <button onClick={next} aria-label="Next image" className={`${arrow} right-2`}><Chevron dir="right" /></button>}
       </div>
@@ -175,8 +184,11 @@ function Stage({ src, alt, onSwipe }: { src: string; alt: string; onSwipe: (dir:
   );
 }
 
-/** A picture and its before: both (beside each other, stacked when upright) or overlaid with a slider to wipe between. */
-function Compare({ before, after, mode, onSwipe }: { before: { src: string; label: string }; after: { src: string; label: string }; mode: "both" | "overlay"; onSwipe: (dir: -1 | 1) => void }) {
+/**
+ * A picture and its counterpart: both (beside each other, stacked when upright) or overlaid with a slider to wipe
+ * between, each side tagged with its name (`names`: Before, Mockup, Variant A, Round N; After, Variant B, Round M).
+ */
+function Compare({ before, after, names, mode, onSwipe }: { before: { src: string; label: string }; after: { src: string; label: string }; names: ComparisonNames; mode: "both" | "overlay"; onSwipe: (dir: -1 | 1) => void }) {
   const [split, setSplit] = useState(50);
   const start = useRef<{ x: number; y: number } | undefined>(undefined);
   const swipe = {
@@ -193,7 +205,7 @@ function Compare({ before, after, mode, onSwipe }: { before: { src: string; labe
   if (mode === "both") {
     return (
       <div {...swipe} className="absolute inset-0 flex touch-pan-y flex-col gap-1 p-1 landscape:flex-row">
-        {[["Before", before], ["After", after]].map(([what, x]) => {
+        {[[names.left, before], [names.right, after]].map(([what, x]) => {
           const p = x as { src: string; label: string };
           return (
             <figure key={what as string} className="relative flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-hidden rounded bg-canvas">
@@ -208,13 +220,13 @@ function Compare({ before, after, mode, onSwipe }: { before: { src: string; labe
   return (
     <div className="absolute inset-0 flex flex-col">
       <div {...swipe} className="relative min-h-0 flex-1 touch-pan-y select-none overflow-hidden">
-        <img src={before.src} alt={`Before: ${before.label}`} draggable={false} className="absolute inset-0 m-auto max-h-full max-w-full object-contain" />
-        <img src={after.src} alt={`After: ${after.label}`} draggable={false} className="absolute inset-0 m-auto max-h-full max-w-full object-contain" style={{ clipPath: `inset(0 0 0 ${split}%)` }} />
+        <img src={before.src} alt={`${names.left}: ${before.label}`} draggable={false} className="absolute inset-0 m-auto max-h-full max-w-full object-contain" />
+        <img src={after.src} alt={`${names.right}: ${after.label}`} draggable={false} className="absolute inset-0 m-auto max-h-full max-w-full object-contain" style={{ clipPath: `inset(0 0 0 ${split}%)` }} />
         <div className="pointer-events-none absolute inset-y-0 w-px bg-accent/80" style={{ left: `${split}%` }} />
-        <span className={tag}>Before · {before.label}</span>
-        <span className="absolute right-2 top-2 rounded bg-canvas/70 px-1.5 py-0.5 text-[11px] text-fg">After</span>
+        <span className={tag}>{names.left} · {before.label}</span>
+        <span className="absolute right-2 top-2 rounded bg-canvas/70 px-1.5 py-0.5 text-[11px] text-fg">{names.right}</span>
       </div>
-      <input type="range" min={0} max={100} value={split} onChange={(e) => setSplit(Number(e.target.value))} aria-label="Before and after split" className="mx-4 my-2 accent-accent" />
+      <input type="range" min={0} max={100} value={split} onChange={(e) => setSplit(Number(e.target.value))} aria-label={`${names.left} and ${names.right} split`} className="mx-4 my-2 accent-accent" />
     </div>
   );
 }
