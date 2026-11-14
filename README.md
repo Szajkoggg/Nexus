@@ -244,7 +244,9 @@ the end of a step goes on in a fresh session of the same runtime, model and effo
 context summary; the run's panel lists each such switch.
 A queue can be started when another one is done, at a time, or when the usage window resets: "When" in the start
 form (or the orchestrator's `nexus run B start --after A [--after C]`, `--at "2026-11-14 22:00"`, `--at usage-reset`).
-This is the plan: Nexus starts by itself only the queues in it, each once the queues it waits for are done and it is
+This is the plan, shown at the top of a project's queues: what runs now, then what follows, with a line from each queue
+to those that wait for it (on the phone an ordered list), and on each queue what it waits for. Nexus starts by itself
+only the queues in it, each once the queues it waits for are done and it is
 approved; an approved queue outside the plan waits. A schedule missed while Nexus was not running does not start late;
 it appears under "Waiting for you". The plan shows on both queues and can be cancelled; if A halts it waits and says
 why, and if B is not approved when A is done, B waits for your approval and starts once you give it. If A is stopped

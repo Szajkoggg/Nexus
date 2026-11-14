@@ -1,0 +1,167 @@
+// The plan as the Queues view shows it (PROTOCOL.md, "The plan"): what runs now, then what follows, in columns; lines
+// from each queue to those it waits for; on every queue what it waits for. Pure and unit tested; components/Plan.tsx
+// draws it (lanes on a desktop, an ordered list on the phone).
+import { HOLDING_RUN_STATES } from "@nexus/protocol/times";
+import { formatClock, type Key, type Params } from "./i18n.ts";
+import { queueStatus, type HonestStatus, type QueueLike } from "./queueStatus.ts";
+
+/** What the plan view reads of a queue (a QueueView fits). */
+export interface PlanQueue extends Omit<QueueLike, "plan" | "start"> {
+  id: string;
+  title: string;
+  plan?: {
+    used: boolean;
+    created_at?: string;
+    after: readonly { queue: string; by: "user" | "orchestrator"; done: boolean; cause?: "stopped" | "cancelled" | "missing" }[];
+  };
+  start?: {
+    at?: string; after?: string; usage?: "claude" | "codex"; created_at?: string;
+    failed?: { reason: string }; held?: { kind: "approval" | "checkout" | "limit"; reason: string };
+  };
+}
+
+/**
+ * Why a queue has not started, in a word and its colour (`tone`): its approval, a queue before it stopped or gone, its time, the usage window, its checkout, the limit, a failed start; or that it starts now.
+ */
+export interface Why { key: Key; params?: Params; tone: "approval" | "blocked" | "time" | "usage" | "checkout" | "limit" | "failed" | "ready" }
+
+/** A queue it waits for, as the card names it: who set it ("set by you"), done or not. */
+export interface Before { queue: string; by: "user" | "orchestrator"; done: boolean }
+
+export interface PlanNode {
+  id: string;
+  title: string;
+  /** 0: now (running, waiting, paused or stopped: in progress); 1: next; 2 and on: later. */
+  column: number;
+  /** In progress now: its honest status says where it stands. */
+  now: boolean;
+  /** In the plan (planned, or a schedule). A queue only some planned queue waits for may not be. */
+  planned: boolean;
+  status: HonestStatus;
+  /** Why it has not started (planned queues): first what only the user can do. */
+  why: Why[];
+  /** The queues it waits for, in its plan's order (an unused plan). */
+  before: Before[];
+}
+
+export interface PlanLayout {
+  /** The columns, left to right: now, next, then …; each queue once. */
+  columns: PlanNode[][];
+  /** A line from a queue (`from`) to one that waits for it (`to`), with who set it. */
+  edges: { from: string; to: string; by: "user" | "orchestrator" }[];
+  /** Approved queues outside the plan: they wait until someone puts them in it. */
+  outside: { id: string; title: string }[];
+}
+
+const NOW_STATUS = new Set(["running", "waiting", "paused", "stopped"]);
+const ENDED = new Set(["done", "cancelled"]);
+
+/** In progress now: at work, waiting for a review or an answer, paused, stopped, or its run holds its checkout. */
+export function isNow(q: Pick<PlanQueue, "status" | "run">): boolean {
+  if (ENDED.has(q.status)) return false;
+  return NOW_STATUS.has(q.status) || (!!q.run && HOLDING_RUN_STATES.includes(q.run.state));
+}
+
+/** In the plan: a place that is not used yet (planned and not started since), or a schedule. */
+export const isPlanned = (q: Pick<PlanQueue, "plan" | "start" | "status">): boolean =>
+  !ENDED.has(q.status) && ((!!q.plan && !q.plan.used) || !!q.start);
+
+/** The queues it waits for (an unused plan; a start.yaml from before the plan names one). */
+function beforeOf(q: PlanQueue): Before[] {
+  if (q.plan && !q.plan.used) return q.plan.after.map((e) => ({ queue: e.queue, by: e.by, done: e.done }));
+  return q.start?.after ? [{ queue: q.start.after, by: "user", done: false }] : [];
+}
+
+/** Why a planned queue has not started: what the user can do first, then what it waits for. */
+export function whyOf(q: PlanQueue, now = new Date()): Why[] {
+  const out: Why[] = [];
+  if (q.start?.failed) out.push({ key: "plan.why.failed", params: { reason: q.start.failed.reason }, tone: "failed" });
+  if (q.approved === false) out.push({ key: "plan.why.approval", params: { revision: q.revision ?? 1 }, tone: "approval" });
+  const entries = q.plan && !q.plan.used ? q.plan.after : [];
+  for (const e of entries) {
+    if (e.done) continue;
+    if (e.cause) out.push({ key: `plan.why.${e.cause}`, params: { queue: e.queue }, tone: "blocked" });
+  }
+  // The queues it waits for are on the card as they are ("after RN · set by you"); a reason of their own only when
+  // nothing else is said.
+  const open = beforeOf(q).filter((b) => !b.done);
+  if (q.start?.at && !q.start.held) {
+    out.push(q.start.usage
+      ? { key: "plan.why.usage", params: { time: formatClock(q.start.at, now) }, tone: "usage" }
+      : { key: "plan.why.at", params: { time: formatClock(q.start.at, now) }, tone: "time" });
+  }
+  const held = q.start?.held;
+  if (held && held.kind !== "approval") out.push({ key: held.kind === "checkout" ? "plan.why.checkout" : "plan.why.limit", params: { reason: held.reason }, tone: held.kind });
+  if (!out.length && !open.length) out.push({ key: "plan.why.ready", tone: "ready" });
+  return out;
+}
+
+/**
+ * The plan's layout: the queues in progress in the first column; each planned queue one column right of the latest of
+ * the queues it waits for that are shown (those done are not); a queue only some planned queue waits for (approved
+ * but not planned, say) shows too, where it would stand. Within a column the queues follow those they wait for
+ * (their average row), then the order they were planned in.
+ */
+export function planLayout(all: readonly PlanQueue[], now = new Date()): PlanLayout {
+  const byId = new Map(all.map((q) => [q.id, q]));
+  const shown = new Set<string>();
+  for (const q of all) if (isNow(q) || isPlanned(q)) shown.add(q.id);
+  // The queues planned queues wait for that are neither done nor shown yet: shown too (they hold the plan).
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const id of [...shown]) {
+      for (const b of beforeOf(byId.get(id)!)) {
+        const p = byId.get(b.queue);
+        if (p && !b.done && !ENDED.has(p.status) && !shown.has(p.id)) { shown.add(p.id); grew = true; }
+      }
+    }
+  }
+
+  const column = new Map<string, number>();
+  const columnOf = (id: string, path: Set<string>): number => {
+    const known = column.get(id);
+    if (known !== undefined) return known;
+    const q = byId.get(id)!;
+    let c = 1;
+    if (isNow(q)) c = 0;
+    else if (!path.has(id)) {
+      path.add(id);
+      for (const b of beforeOf(q)) if (shown.has(b.queue)) c = Math.max(c, columnOf(b.queue, path) + 1);
+      path.delete(id);
+    }
+    column.set(id, c);
+    return c;
+  };
+  for (const id of shown) columnOf(id, new Set());
+
+  const nodes = new Map<string, PlanNode>();
+  for (const id of shown) {
+    const q = byId.get(id)!;
+    const n = isNow(q);
+    nodes.set(id, {
+      id, title: q.title, column: column.get(id)!, now: n, planned: isPlanned(q),
+      status: queueStatus(q as QueueLike, now), why: n ? [] : whyOf(q, now), before: n ? [] : beforeOf(q),
+    });
+  }
+  const width = Math.max(0, ...[...nodes.values()].map((n) => n.column)) + 1;
+  const columns: PlanNode[][] = Array.from({ length: shown.size ? width : 0 }, () => []);
+  const madeAt = (id: string) => byId.get(id)?.plan?.created_at ?? byId.get(id)?.start?.created_at ?? "";
+  const row = new Map<string, number>();
+  for (let c = 0; c < columns.length; c++) {
+    const here = [...nodes.values()].filter((n) => n.column === c);
+    const weight = (n: PlanNode) => {
+      const rows = n.before.map((b) => row.get(b.queue)).filter((r): r is number => r !== undefined);
+      return rows.length ? rows.reduce((a, b) => a + b, 0) / rows.length : Number.MAX_SAFE_INTEGER;
+    };
+    here.sort((a, b) => weight(a) - weight(b) || madeAt(a.id).localeCompare(madeAt(b.id)) || a.id.localeCompare(b.id));
+    here.forEach((n, i) => row.set(n.id, i));
+    columns[c] = here;
+  }
+  const edges = [...nodes.values()].flatMap((n) => n.before.filter((b) => nodes.has(b.queue)).map((b) => ({ from: b.queue, to: n.id, by: b.by })));
+  const outside = all.filter((q) => !shown.has(q.id) && q.status === "approved" && q.approved !== false && !q.run)
+    .map((q) => ({ id: q.id, title: q.title }));
+  return { columns, edges, outside };
+}
+
+/** The phone's list: the columns one after another, each in its order. */
+export const planList = (l: PlanLayout): PlanNode[] => l.columns.flat();

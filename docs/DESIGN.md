@@ -454,6 +454,21 @@ and the user's answers) and `apps/server/src/scheduler.ts`: `Scheduler` keeps th
 clock, for the schedules and for the engine's own retry and usage waits. The engine owns the runs and keeps the public
 `plan`, `scheduleStart` and `cancelStart`, which hand over to the scheduler.
 
+The Queues view shows the plan above the queue lists (`apps/web/src/plan.ts`, `components/Plan.tsx`). Decisions:
+
+- Columns, not a timeline: what is in progress now (at work, waiting for a review or an answer, paused, stopped) is
+  the first column, and every planned queue stands one column right of the latest queue it waits for that is still
+  shown. Done predecessors are not drawn (the card still names them, "done"), so the picture is what is left to happen.
+  Times would come only from estimates (PV4); the order is certain, the times are not.
+- A queue that a planned queue waits for is shown even when it is not in the plan itself ("not in the plan"): it is
+  what holds the plan. Approved queues outside the plan are one line under it, since they wait for someone to plan them.
+- A line goes from a queue to the one that waits for it, solid in the accent colour where the user set the
+  dependency, dashed where the orchestrator did; the card says "after A · set by you" too, so the phone's list (no
+  lines) keeps who set what.
+- On each planned queue what it waits for, what only the user can do first: a failed start, its approval, a
+  predecessor stopped or gone; then its time, the usage window, its checkout or the limit. Running ones show their
+  honest status (queueStatus), which already says review, usage window or stop.
+
 ### Never two queues in one checkout
 
 Decided by the user on 2026-11-14: queues run side by side only in worktrees of their own, never two in one checkout,

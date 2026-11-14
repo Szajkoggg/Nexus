@@ -27,6 +27,7 @@ import { SettingsButton, SettingsPanel, UpdatePill, useServer } from "./componen
 import { ProjectRefusals } from "./components/Refusals.tsx";
 import { RulesWarning } from "./components/Rules.tsx";
 import { FinishedGroup } from "./components/Finished.tsx";
+import { PlanView } from "./components/Plan.tsx";
 import { splitFinished } from "./finished.ts";
 import { ApprovalView, useApprovalForm } from "./components/Approval.tsx";
 import { needsApproval } from "./approval.ts";
@@ -160,6 +161,7 @@ export function App() {
   // The project's queues (the desktop's page; the phone's Queues tab, where what waits has a tab of its own).
   const queuesPage = <>
     {state && <RulesWarning key={state.project.id} project={state} />}
+    {state && <PlanView queues={state.queues} onOpen={(id) => projectId && nav.item(projectId, id)} />}
     {state && byGroup.map((g) => (
       <section key={g.title} className="mb-8">
         <div className="mb-3 flex items-baseline gap-3">
