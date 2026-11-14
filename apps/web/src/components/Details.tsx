@@ -4,7 +4,7 @@ import { stopPlace } from "@nexus/protocol/attention";
 import { stepValuesText } from "@nexus/protocol/steps";
 import { act, actResult, enc, fileUrl, useFetch, type ProjectState, type QuestionView, type QueueView, type StepView } from "../api.ts";
 import { comparisonOf, noteTargets, pairPictures, showsReviewActions } from "../review.ts";
-import { ActionBar, Button, Composer, Expandable, Markdown, PanelBody, PanelHeader, Section, StatusBadge, StepTimes, TEXTAREA, TimeAgo, reviewLabel, useDraftText, type MenuEntry } from "./ui.tsx";
+import { ActionBar, Button, Composer, Expandable, Markdown, PanelBody, PanelHeader, Section, StatusBadge, StepTimes, TEXTAREA, TimeAgo, reviewLabel, statusWord, useDraftText, type MenuEntry } from "./ui.tsx";
 import { Activity, RetryNote, RunControls } from "./Run.tsx";
 import { StepRefusals } from "./Refusals.tsx";
 import { draftKey, readDraft } from "../drafts.ts";
@@ -15,9 +15,10 @@ import { ImageViewer, type ViewerImage } from "./Viewer.tsx";
 import { StepChat } from "./Chat.tsx";
 import { StopBox, stopVersion, useContinue, useLeft } from "./Stop.tsx";
 import { AskButton, CompactSteps, SettingsLine, useApprove, useCtrlEnter } from "./Approval.tsx";
-import { needsApproval } from "../approval.ts";
+import { needsApproval, policyWords } from "../approval.ts";
 import { queueStatus } from "../queueStatus.ts";
 import { needsWorkChoice, stopDecision, type LeftState, type LeftView, type WorkChoice } from "../stopDecision.ts";
+import { rich, t, type Key } from "../i18n.ts";
 
 interface Props {
   project: ProjectState; queue: QueueView; onChanged: () => void; onClose: () => void;
@@ -50,7 +51,7 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
     return {
       src: fileUrl(id, r.path!), label: r.label ?? fileName(r.path!), round: r.round, key: r.key, comparison: comparisonOf(pair),
       // A keyed counterpart by its label; an explicit before by its file name; one paired by label by its round.
-      before: before ? { src: fileUrl(id, before), label: other?.key ? other.label ?? fileName(before) : beforeLabel === "before" ? fileName(before) : beforeLabel ?? "before" } : undefined,
+      before: before ? { src: fileUrl(id, before), label: other?.key ? other.label ?? fileName(before) : beforeLabel === t("review.role.before") ? fileName(before) : beforeLabel ?? t("review.role.before") } : undefined,
       accepted: !!step.pictures[r.path!]?.accepted, comments: step.pictures[r.path!]?.comments.length ?? 0,
     };
   });
@@ -87,10 +88,10 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
     <>
       {(step.summary || step.reason || step.progress) && (
         <div className="mt-4 rounded-lg bg-surface-2 p-3 text-sm">
-          {step.summary && <p><span className="text-fg-3">Summary: </span>{step.summary}</p>}
-          {step.reason && step.status !== "rejected" && <p className="text-stop"><span className="text-fg-3">Reason: </span>{step.reason}</p>}
+          {step.summary && <p><span className="text-fg-3">{t("details.summary")} </span>{step.summary}</p>}
+          {step.reason && step.status !== "rejected" && <p className="text-stop"><span className="text-fg-3">{t("details.reason")} </span>{step.reason}</p>}
           {step.progress && step.status === "running" && (
-            <p><span className="text-fg-3">Now: </span>{step.progress.text} <span className="text-xs text-fg-3">(<TimeAgo at={step.progress.at} />)</span></p>
+            <p><span className="text-fg-3">{t("details.now")} </span>{step.progress.text} <span className="text-xs text-fg-3">(<TimeAgo at={step.progress.at} />)</span></p>
           )}
         </div>
       )}
@@ -99,14 +100,14 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
   const reviewNotes = (
     <>
       {step.status === "review" && step.review_with === "orchestrator" && (
-        <Section title="Waiting for the orchestrator's review">
-          <p className="text-sm text-fg-2">The queue holds here until the orchestrator accepts this step, sends it back, or hands it to you.</p>
+        <Section title={t("details.orchestratorReview")}>
+          <p className="text-sm text-fg-2">{t("details.orchestratorReviewText")}</p>
         </Section>
       )}
       {reviewing && (
-        <Section title="Waiting for your review">
-          {step.asked_user?.text && <p className="mb-2 text-sm text-fg"><span className="text-fg-3">The orchestrator asks you: </span>{step.asked_user.text}</p>}
-          <p className="text-sm text-fg-2">The queue holds here until you accept this step or send it back.</p>
+        <Section title={t("details.yourReview")}>
+          {step.asked_user?.text && <p className="mb-2 text-sm text-fg"><span className="text-fg-3">{t("details.orchestratorAsks")} </span>{step.asked_user.text}</p>}
+          <p className="text-sm text-fg-2">{t("details.yourReviewText")}</p>
         </Section>
       )}
     </>
@@ -124,12 +125,12 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
   const sentBack = (
     <>
       {step.sent_back.length > 0 && (
-        <Section title="Sent back">
+        <Section title={t("details.sentBack")}>
           <ul className="space-y-2">
             {step.sent_back.map((b) => (
               <li key={b.id} className="text-sm">
                 <div className="text-xs text-fg-3">
-                  {b.by === "user" ? "You (Fix it)" : "Orchestrator"} · <TimeAgo at={b.at} /> · {b.to_user ? "beyond the limit: handed to you instead" : b.delivered ? `round ${b.round}` : "on its way to the worker"}
+                  {t(b.by === "user" ? "details.sentBack.you" : "details.sentBack.orchestrator")} · <TimeAgo at={b.at} /> · {b.to_user ? t("details.sentBack.toUser") : b.delivered ? t("review.round", { round: b.round }) : t("details.sentBack.onItsWay")}
                 </div>
                 <p className="whitespace-pre-wrap text-fg">{b.text}</p>
               </li>
@@ -142,11 +143,11 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
   const message = (
     <>
       {live && session && (
-        <Section title="Message the running agent" aside={<span className="text-xs text-fg-3">read at its next check-in</span>}>
+        <Section title={t("details.messageAgent")} aside={<span className="text-xs text-fg-3">{t("details.messageAgentAside")}</span>}>
           <Composer
             draft={draftKey(id, "message", queue.id, step.id)}
-            placeholder="Delivered to the agent without stopping it…"
-            button="Send"
+            placeholder={t("details.messagePlaceholder")}
+            button={t("details.send")}
             onSubmit={async (text) => { await act(id, "POST", `/sessions/${enc(session.id)}/messages`, { text, queue: queue.id, step: step.id }); onChanged(); }}
           />
         </Section>
@@ -156,7 +157,7 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
   const questionsPart = (
     <>
       {questions.some((q) => !(questionFirst && q.qid === asking?.qid)) && (
-        <Section title={questionFirst ? "Other questions" : "Questions"}>
+        <Section title={t(questionFirst ? "details.otherQuestions" : "details.questions")}>
           {questions.filter((q) => !(questionFirst && q.qid === asking?.qid)).map((q) => <Question key={q.qid} q={q} project={id} onChanged={onChanged} inBar={q.qid === asking?.qid} />)}
         </Section>
       )}
@@ -165,7 +166,7 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
   const statusNote = (
     <>
       {step.status_note && (
-        <Section title="Recorded state">
+        <Section title={t("details.recordedState")}>
           <Expandable text={step.status_note} />
         </Section>
       )}
@@ -173,9 +174,9 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
   );
   const goalAcceptance = (
     <>
-      {step.goal && <Section title="Goal"><Markdown>{step.goal}</Markdown></Section>}
+      {step.goal && <Section title={t("details.goal")}><Markdown>{step.goal}</Markdown></Section>}
       {step.acceptance.length > 0 && (
-        <Section title="Acceptance">
+        <Section title={t("approval.acceptance")}>
           <ul className="space-y-1.5">
             {step.acceptance.map((a, i) => (
               <li key={i} className="flex gap-2 text-sm text-fg"><span className="text-fg-3">◇</span><Markdown className="[&_p]:m-0">{a}</Markdown></li>
@@ -183,17 +184,17 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
           </ul>
         </Section>
       )}
-      {step.review?.prepare && <Section title="Review to prepare"><Markdown>{step.review.prepare}</Markdown></Section>}
+      {step.review?.prepare && <Section title={t("details.reviewToPrepare")}><Markdown>{step.review.prepare}</Markdown></Section>}
     </>
   );
   const material = (
     <>
       {step.review_items.length > 0 && (
-        <Section title="Review material">
+        <Section title={t("queue.reviewMaterial")}>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             {step.review_items.map((r, i) => {
               const href = r.path ? fileUrl(id, r.path) : r.url!;
-              const caption = <div className="truncate px-2 py-1 text-xs text-fg-2 group-hover:text-fg">{r.label ?? r.path ?? r.url}{r.round ? ` · round ${r.round}` : ""}</div>;
+              const caption = <div className="truncate px-2 py-1 text-xs text-fg-2 group-hover:text-fg">{r.label ?? r.path ?? r.url}{r.round ? ` · ${t("review.round", { round: r.round })}` : ""}</div>;
               const tile = "group overflow-hidden rounded-lg border border-line bg-canvas text-left hover:border-fg-3/60";
               if (isImage(r)) {
                 const n = step.review_items.slice(0, i).filter(isImage).length;
@@ -229,7 +230,7 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
   const checks = (
     <>
       {step.checks.length > 0 && (
-        <Section title="Checks">
+        <Section title={t("details.checks")}>
           <ul className="space-y-1 text-sm">
             {step.checks.map((c, i) => (
               <li key={i} className="flex gap-2">
@@ -245,26 +246,26 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
   );
   const notes = (
     <>
-      <Section title="Notes" aside={<span className="text-xs text-fg-3">{forOrchestrator ? "go to the orchestrator, which weighs them in its review" : "delivered when the step starts"}</span>}>
+      <Section title={t("details.notes")} aside={<span className="text-xs text-fg-3">{t(forOrchestrator ? "details.notesToOrchestrator" : "details.notesDelivered")}</span>}>
         <div className="space-y-2">
           {step.notes.map((n) => (
             <div key={n.id} className="rounded-lg border border-line p-3">
               <div className="mb-1 flex items-center gap-2 text-xs text-fg-3">
-                <span>from {n.from}{n.to === "orchestrator" ? ", to the orchestrator" : ""}</span><TimeAgo at={n.at} />
-                <span className={`ml-auto ${n.read_at ? "text-ok" : "text-info"}`}>{n.read_at ? (n.to === "orchestrator" ? "told the orchestrator" : "delivered") : n.to === "orchestrator" ? "on its way to the orchestrator" : "waiting for the step"}</span>
+                <span>{t(n.to === "orchestrator" ? "details.note.fromTo" : "details.note.from", { from: n.from })}</span><TimeAgo at={n.at} />
+                <span className={`ml-auto ${n.read_at ? "text-ok" : "text-info"}`}>{t(n.read_at ? (n.to === "orchestrator" ? "details.note.told" : "details.note.delivered") : n.to === "orchestrator" ? "details.note.toOrchestrator" : "details.note.waiting")}</span>
                 {!n.read_at && <WithdrawNote project={id} queue={queue.id} step={step.id} note={n.id} onChanged={onChanged} />}
               </div>
               <Markdown>{n.body}</Markdown>
             </div>
           ))}
-          {step.notes.length === 0 && !notesOpen && <p className="text-sm text-fg-3">None.</p>}
+          {step.notes.length === 0 && !notesOpen && <p className="text-sm text-fg-3">{t("approval.none")}</p>}
         </div>
         {notesOpen && (
           <div className="mt-3">
             <Composer
               draft={draftKey(id, "note", queue.id, step.id)}
-              placeholder={forOrchestrator ? `A note for the orchestrator's review of ${step.id}: it weighs it, and sends the step back if you ask for a fix…` : `A note for ${step.id}: the agent reads it when it starts this step…`}
-              button="Add note"
+              placeholder={t(forOrchestrator ? "details.notePlaceholderOrchestrator" : "details.notePlaceholder", { step: step.id })}
+              button={t("details.addNote")}
               onSubmit={async (text) => { await act(id, "POST", `/queues/${enc(queue.id)}/steps/${enc(step.id)}/notes`, { text }); onChanged(); }}
             />
           </div>
@@ -275,13 +276,13 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
   const messages = (
     <>
       {step.messages.length > 0 && (
-        <Section title="Messages sent while it ran">
+        <Section title={t("details.messages")}>
           <div className="space-y-2">
             {step.messages.map((m) => (
               <div key={m.id} className="rounded-lg border border-line p-3 text-sm">
                 <div className="mb-1 flex gap-2 text-xs text-fg-3">
-                  <span>from {m.from}</span><TimeAgo at={m.at} />
-                  <span className={`ml-auto ${m.read_at ? "text-ok" : "text-info"}`}>{m.read_at ? "read" : "not read yet"}</span>
+                  <span>{t("details.note.from", { from: m.from })}</span><TimeAgo at={m.at} />
+                  <span className={`ml-auto ${m.read_at ? "text-ok" : "text-info"}`}>{t(m.read_at ? "details.message.read" : "details.message.unread")}</span>
                 </div>
                 {m.type === "message" && <Markdown>{m.text}</Markdown>}
               </div>
@@ -316,7 +317,7 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
   const timeline = (
     <>
       {step.timeline.length > 0 && (
-        <Section title="Timeline">
+        <Section title={t("details.timeline")}>
           <ol className="relative space-y-2 border-l border-line pl-4">
             {step.timeline.map((e) => (
               <li key={e.id} className="text-sm">
@@ -335,21 +336,21 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
   const others = step.review_items.filter((r) => !isImage(r));
   const reviewPictures = (
     <>
-      {step.asked_user?.text && <p className="mt-4 text-sm text-fg"><span className="text-fg-3">The orchestrator asks you: </span>{step.asked_user.text}</p>}
+      {step.asked_user?.text && <p className="mt-4 text-sm text-fg"><span className="text-fg-3">{t("details.orchestratorAsks")} </span>{step.asked_user.text}</p>}
       {pictures.length > 0 && (
         <section className="mt-5">
           <div className="mb-2 flex items-baseline gap-3">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-3">Pictures · {pictures.length}</h3>
-            <span className="ml-auto text-xs text-fg-3">{marked ? <>{marked} marked <span className="text-ok">✓</span></> : "none marked yet"}</span>
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-3">{t("details.pictures", { count: pictures.length })}</h3>
+            <span className="ml-auto text-xs text-fg-3">{marked ? <>{t("details.marked", { count: marked })} <span className="text-ok">✓</span></> : t("details.noneMarked")}</span>
           </div>
           <div className="grid grid-cols-2 gap-2.5">
             {pictures.map(({ item: r, before }, n) => (
               <button key={r.path} onClick={() => nav.open(`viewer:${n}`)} className="group relative overflow-hidden rounded-lg border border-line bg-surface-2 text-left hover:border-fg-3/60">
                 <img src={fileUrl(id, r.path!)} alt={r.label ?? ""} className="aspect-[16/10] w-full bg-canvas object-cover object-top" loading="lazy" />
                 <span className="flex items-center gap-1.5 px-2 py-1.5 text-xs text-fg">
-                  {step.pictures[r.path!]?.accepted ? <span className="text-ok" title="You marked it">✓</span> : before ? <span className="text-fg-3" title="Has a before to compare with">⇄</span> : null}
-                  <span className="truncate">{r.label ?? r.path!.split("/").at(-1)}{r.round ? ` · round ${r.round}` : ""}</span>
-                  {!!step.pictures[r.path!]?.comments.length && <span className="ml-auto shrink-0 text-info" title="Your comments">💬 {step.pictures[r.path!]!.comments.length}</span>}
+                  {step.pictures[r.path!]?.accepted ? <span className="text-ok" title={t("details.youMarked")}>✓</span> : before ? <span className="text-fg-3" title={t("details.hasBefore")}>⇄</span> : null}
+                  <span className="truncate">{r.label ?? r.path!.split("/").at(-1)}{r.round ? ` · ${t("review.round", { round: r.round })}` : ""}</span>
+                  {!!step.pictures[r.path!]?.comments.length && <span className="ml-auto shrink-0 text-info" title={t("viewer.comments")}>💬 {step.pictures[r.path!]!.comments.length}</span>}
                 </span>
               </button>
             ))}
@@ -367,9 +368,9 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
       )}
       <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
         {step.checks.map((c, i) => <span key={i} title={c.summary} className={c.ok ? "text-ok" : "text-danger"}>{c.ok ? "✓" : "✗"} {c.name}</span>)}
-        {(step.goal || step.acceptance.length > 0 || step.review?.prepare) && <Fold label="Goal and acceptance" open={!!fold.goal} onToggle={() => setFold((f) => ({ ...f, goal: !f.goal }))} />}
+        {(step.goal || step.acceptance.length > 0 || step.review?.prepare) && <Fold label={t("details.goalAcceptance")} open={!!fold.goal} onToggle={() => setFold((f) => ({ ...f, goal: !f.goal }))} />}
         <StepCommits project={id} queue={queue.id} step={step.id} version={project.generated_at} toggle={{ open: !!fold.commits, onToggle: () => setFold((f) => ({ ...f, commits: !f.commits })) }} />
-        {step.timeline.length > 0 && <Fold label="Timeline" open={!!fold.timeline} onToggle={() => setFold((f) => ({ ...f, timeline: !f.timeline }))} />}
+        {step.timeline.length > 0 && <Fold label={t("details.timeline")} open={!!fold.timeline} onToggle={() => setFold((f) => ({ ...f, timeline: !f.timeline }))} />}
       </div>
       {fold.goal && goalAcceptance}
       {fold.commits && commits}
@@ -401,10 +402,10 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
           <StatusBadge status={step.status} label={reviewLabel(step)} />
           <StepTimes step={step} />
           {step.commit && <span className="font-mono">{step.commit}</span>}
-          {session && <span>by {session.title ?? session.id.slice(-8)} ({session.runtime})</span>}
+          {session && <span>{t("details.by", { session: session.title ?? session.id.slice(-8), runtime: session.runtime })}</span>}
           {stepValuesText(step) && (
-            <span className="rounded bg-surface-3 px-1.5 py-0.5 text-fg" title="This step's own runtime, model and effort; what it leaves out is the run's">
-              runs on {stepValuesText(step)}
+            <span className="rounded bg-surface-3 px-1.5 py-0.5 text-fg" title={t("details.ownValuesTitle")}>
+              {t("details.runsOn", { values: stepValuesText(step)! })}
             </span>
           )}
         </>}
@@ -435,55 +436,55 @@ export const chooseOption = (qid: string, option: string) => { chosen.set(qid, o
 function QuestionSheet({ q, project, onChanged, children }: { q: QuestionView; project: string; onChanged: () => void; children: ReactNode }) {
   const [choice, setChoice] = useState<string | undefined>(() => { const c = chosen.get(q.qid); chosen.delete(q.qid); return c; });
   const [goOn, setGoOn] = useState(true);
-  const t = useDraftText({
+  const d = useDraftText({
     draft: draftKey(project, "answer", q.qid), allowEmpty: true,
     onSubmit: async (words) => {
       const text = [choice, words].filter(Boolean).join(PARAGRAPH);
-      if (!text) throw new Error("Choose an option or write your answer.");
+      if (!text) throw new Error(t("details.answer.empty"));
       await act(project, "POST", `/questions/${enc(q.qid)}/answer`, { text, continue: goOn });
       onChanged();
     },
   });
-  const ready = !t.busy && (!!choice || !!t.text.trim());
+  const ready = !d.busy && (!!choice || !!d.text.trim());
   const passed = q.answers.filter((a) => a.escalate);
   return (
     <>
       <PanelBody>
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-          <StatusBadge status={q.state === "escalated" ? "review" : "waiting"} label={q.state === "escalated" ? "passed to you" : "question for you"} className="text-sm" />
-          <span className="text-fg-3">· {q.can_continue ? "the worker goes on meanwhile" : "the worker waits"} · <TimeAgo at={q.asked_at} /></span>
+          <StatusBadge status={q.state === "escalated" ? "review" : "waiting"} label={t(q.state === "escalated" ? "details.question.passed" : "details.question.forYou")} className="text-sm" />
+          <span className="text-fg-3">· {t(q.can_continue ? "details.question.goesOn" : "details.question.waits")} · <TimeAgo at={q.asked_at} /></span>
         </div>
         <h1 className="mt-3 text-[19px] font-semibold leading-snug text-fg">{q.text}</h1>
         {passed.map((a) => (
           <div key={a.id} className="mt-3 border-l-2 border-accent py-1 pl-3 text-sm text-fg">
-            <span className="text-fg-3">Orchestrator: </span><Markdown className="inline [&_p]:inline [&_p]:m-0">{a.text}</Markdown>
+            <span className="text-fg-3">{t("details.question.orchestrator")} </span><Markdown className="inline [&_p]:inline [&_p]:m-0">{a.text}</Markdown>
           </div>
         ))}
         {!!q.options?.length && (
-          <div className="mt-4 space-y-2.5" role="radiogroup" aria-label="Options">
+          <div className="mt-4 space-y-2.5" role="radiogroup" aria-label={t("details.question.options")}>
             {q.options.map((o, i) => (
               <button key={o} role="radio" aria-checked={choice === o} onClick={() => setChoice(choice === o ? undefined : o)}
                 className={`flex min-h-12 w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left text-[15px] text-fg ${choice === o ? "border-accent bg-accent/10 ring-1 ring-accent" : "border-line-strong bg-surface-2 hover:bg-surface-3"}`}>
                 <span className={`grid h-6 w-6 shrink-0 place-items-center rounded-md text-xs ${choice === o ? "bg-accent-strong text-on-accent" : "bg-surface-3 text-fg-2"}`}>{i + 1}</span>
                 <span className="min-w-0 flex-1">{o}</span>
-                {choice === o && <span className="shrink-0 text-xs text-accent">chosen</span>}
+                {choice === o && <span className="shrink-0 text-xs text-accent">{t("details.question.chosen")}</span>}
               </button>
             ))}
           </div>
         )}
-        <textarea value={t.text} rows={2} onChange={(e) => t.change(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); if (ready) void t.submit(); } }}
-          placeholder={q.options?.length ? (choice ? "Add words to your answer (optional)…" : "Or answer in your own words…") : "Your answer…"}
+        <textarea value={d.text} rows={2} onChange={(e) => d.change(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); if (ready) void d.submit(); } }}
+          placeholder={t(q.options?.length ? (choice ? "details.answer.addWords" : "details.answer.ownWords") : "details.answer.placeholder")}
           className={`mt-4 ${TEXTAREA}`} />
         <label className="mt-1 flex min-h-11 items-center gap-2 text-sm text-fg-2">
           <input type="checkbox" checked={goOn} onChange={(e) => setGoOn(e.target.checked)} className="h-4 w-4 accent-accent" />
-          the worker may go on
+          {t("details.answer.mayGoOn")}
         </label>
         <div className="mt-6 border-t border-line pt-4">{children}</div>
       </PanelBody>
       <ActionBar
-        hint={t.error ? <span className="text-danger">{t.error}</span> : choice ? `Answers “${choice}”${t.text.trim() ? " with your words" : ""}` : undefined}
-        primary={<Button onClick={t.submit} disabled={!ready}>{t.busy ? "Sending…" : "Answer"}</Button>}
+        hint={d.error ? <span className="text-danger">{d.error}</span> : choice ? t(d.text.trim() ? "details.answer.answersWithWords" : "details.answer.answers", { option: choice }) : undefined}
+        primary={<Button onClick={d.submit} disabled={!ready}>{d.busy ? t("ui.sending") : t("details.answer.button")}</Button>}
       />
     </>
   );
@@ -505,15 +506,15 @@ function RejectStep({ project, queue, step, onChanged, onCancel }: { project: st
   };
   return (
     <div className="rounded-lg border border-danger/30 bg-danger/10 p-3">
-      <p className="text-sm text-danger">Reject this step</p>
-      <p className="mt-1 text-xs text-fg-2">The run pauses and nothing is reverted. The orchestrator is told and proposes what follows (a revert as a step, changed steps, or a new queue) for your approval; the run goes on only once you approve a new revision, and this step is not run again.</p>
+      <p className="text-sm text-danger">{t("details.reject.title")}</p>
+      <p className="mt-1 text-xs text-fg-2">{t("details.reject.text")}</p>
       <textarea
-        value={why} rows={2} placeholder="Why (optional)…" onChange={(e) => setWhy(e.target.value)}
+        value={why} rows={2} placeholder={t("details.reject.why")} onChange={(e) => setWhy(e.target.value)}
         className="mt-2 w-full resize-y rounded-lg border border-line-strong bg-canvas px-3 py-2 text-sm text-fg placeholder:text-fg-3 focus:border-danger focus:outline-none"
       />
       <div className="mt-2 flex flex-wrap items-center gap-2">
-        <button disabled={busy} onClick={reject} className="rounded-md border border-danger/50 bg-danger/15 px-3 py-1.5 text-sm font-medium text-danger hover:bg-danger/25 disabled:opacity-40">{busy ? "Rejecting…" : "Reject the step"}</button>
-        <Button variant="quiet" onClick={onCancel}>Cancel</Button>
+        <button disabled={busy} onClick={reject} className="rounded-md border border-danger/50 bg-danger/15 px-3 py-1.5 text-sm font-medium text-danger hover:bg-danger/25 disabled:opacity-40">{t(busy ? "details.reject.busy" : "details.reject.button")}</button>
+        <Button variant="quiet" onClick={onCancel}>{t("common.cancel")}</Button>
         {error && <span className="text-xs text-danger">{error}</span>}
       </div>
     </div>
@@ -526,14 +527,12 @@ function Rejected({ step, holding }: { step: StepView; holding: boolean }) {
   return (
     <div className="mt-4 rounded-lg border border-danger/30 bg-danger/10 p-3 text-sm">
       <p>
-        <span className="text-fg-3">Rejected by you{step.reason ? ": " : ""}</span>
+        <span className="text-fg-3">{t(step.reason ? "details.rejected.byYouWhy" : "details.rejected.byYou")}</span>
         {step.reason && <span className="text-danger">{step.reason}</span>}
         {at && <span className="text-xs text-fg-3"> · <TimeAgo at={at} /></span>}
       </p>
       <p className="mt-1 text-xs text-fg-2">
-        {holding
-          ? "Nothing was reverted. The run waits until you approve a new revision of the queue (the orchestrator proposes one); nothing of the queue is pushed until then."
-          : "A newer revision was approved since; this step is not run again."}
+        {t(holding ? "details.rejected.holding" : "details.rejected.newer")}
       </p>
     </div>
   );
@@ -554,9 +553,9 @@ function PictureBadges({ marks, paired }: { marks?: StepView["pictures"][string]
   const chip = "rounded bg-canvas/70 px-1.5 py-0.5 text-[11px]";
   return (
     <span className="absolute right-1.5 top-1.5 flex gap-1">
-      {paired && <span className={`${chip} text-fg`} title="Has a before to compare with">⇄</span>}
-      {marks?.accepted && <span className={`${chip} text-ok`} title="You marked it accepted">✓</span>}
-      {!!marks?.comments.length && <span className={`${chip} text-info`} title="Your comments">💬 {marks.comments.length}</span>}
+      {paired && <span className={`${chip} text-fg`} title={t("details.hasBefore")}>⇄</span>}
+      {marks?.accepted && <span className={`${chip} text-ok`} title={t("details.youMarkedAccepted")}>✓</span>}
+      {!!marks?.comments.length && <span className={`${chip} text-info`} title={t("viewer.comments")}>💬 {marks.comments.length}</span>}
     </span>
   );
 }
@@ -573,16 +572,16 @@ function PictureActions({ project, queue, step, path, src, onChanged }: { projec
   const [error, setError] = useState<string>();
   const next = noteTargets(queue.steps, step.id).next;
   const reviewing = showsReviewActions(step);
-  const where = reviewing ? "goes back to the worker with the step (a Fix it: your words win over its criteria)"
-    : step.status === "review" && step.review_with === "orchestrator" ? "goes to the orchestrator, which weighs it in its review of the step and sends the step back if you ask for a fix"
-    : next ? `becomes a note on step ${next}, delivered when it starts` : undefined;
+  const where = reviewing ? t("details.picture.toWorker")
+    : step.status === "review" && step.review_with === "orchestrator" ? t("details.picture.toOrchestrator")
+    : next ? t("details.picture.toNote", { step: next }) : undefined;
   const base = `/queues/${enc(queue.id)}/steps/${enc(step.id)}/pictures`;
   const comment = useDraftText({
     draft: draftKey(project, "picture", queue.id, step.id, path),
     onSubmit: async (text) => { await act(project, "POST", `${base}/comment`, { path, text }); onChanged(); },
   });
-  const decision = useReviewDecision({ project, queue: queue.id, step: step.id, next, criteria: step.acceptance, onChanged }, "Accept the step");
-  const original = { label: "Open the original ↗", onSelect: () => window.open(src, "_blank", "noreferrer") };
+  const decision = useReviewDecision({ project, queue: queue.id, step: step.id, next, criteria: step.acceptance, onChanged }, t("details.acceptTheStep"));
+  const original = { label: t("details.picture.original"), onSelect: () => window.open(src, "_blank", "noreferrer") };
   const phone = usePhone();
   const fail = error ?? comment.error ?? (reviewing ? decision.error : undefined);
   return (
@@ -591,18 +590,18 @@ function PictureActions({ project, queue, step, path, src, onChanged }: { projec
         <div className="flex min-w-0 flex-1 basis-80 items-center gap-2">
           <button
             onClick={() => act(project, "POST", `${base}/mark`, { path, accepted: !marks?.accepted }).then(onChanged, (e: Error) => setError(e.message))}
-            aria-pressed={!!marks?.accepted} title="A mark for this picture; the step is not accepted by it"
+            aria-pressed={!!marks?.accepted} title={t("details.picture.markTitle")}
             className={`shrink-0 whitespace-nowrap rounded-md border px-3 py-1.5 text-sm font-medium max-lg:min-h-11 ${marks?.accepted ? "border-ok/50 bg-ok/20 text-ok" : "border-line-strong bg-surface-2 text-fg hover:bg-surface-3"}`}
-          >{marks?.accepted ? "✓ Marked" : "✓ Mark this picture"}</button>
+          >{t(marks?.accepted ? "details.picture.marked" : "details.picture.mark")}</button>
           {where && (
-            <input value={comment.text} onChange={(e) => comment.change(e.target.value)} aria-label="A comment on this picture"
+            <input value={comment.text} onChange={(e) => comment.change(e.target.value)} aria-label={t("details.picture.commentLabel")}
               onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void comment.submit(); } }}
-              placeholder="A comment on this picture…" title={`Enter sends it. The comment ${where}.`}
+              placeholder={t("details.picture.commentPlaceholder")} title={t("details.picture.commentTitle", { where })}
               className="min-w-0 flex-1 rounded-md border border-line-strong bg-canvas px-3 py-1.5 text-sm text-fg placeholder:text-fg-3 focus:border-accent focus:outline-none max-lg:min-h-11 lg:max-w-md" />
           )}
         </div>
       }
-      hint={fail ? <span className="text-danger">{fail}</span> : reviewing && !phone ? <span className="block text-right">The step:</span> : undefined}
+      hint={fail ? <span className="text-danger">{fail}</span> : reviewing && !phone ? <span className="block text-right">{t("details.picture.theStep")}</span> : undefined}
       menu={reviewing ? [...decision.menu, original] : [original]}
       secondary={reviewing ? decision.secondary : undefined}
       primary={reviewing ? decision.primary : undefined}
@@ -615,7 +614,7 @@ function PictureActions({ project, queue, step, path, src, onChanged }: { projec
               {marks.comments.map((c, i) => (
                 <div key={i} className="rounded-md bg-surface-3 px-2 py-1.5">
                   <p className="whitespace-pre-wrap text-fg">{c.text}</p>
-                  <p className="text-[11px] text-fg-3">{c.to === "send_back" ? "sent back to the worker" : c.to === "orchestrator" ? "to the orchestrator's review" : `a note on step ${c.note_step}`} · <TimeAgo at={c.at} /></p>
+                  <p className="text-[11px] text-fg-3">{c.to === "send_back" ? t("details.comment.sentBack") : c.to === "orchestrator" ? t("details.comment.toOrchestrator") : t("details.comment.note", { step: c.note_step ?? "" })} · <TimeAgo at={c.at} /></p>
                 </div>
               ))}
             </div>
@@ -639,28 +638,28 @@ function StepCommits({ project, queue, step, version, toggle }: {
   if (!data) return null;
   if (toggle) {
     const n = data.rounds.reduce((k, r) => k + r.commits.length, 0);
-    return <Fold label={`Commits · ${n}`} open={toggle.open} onToggle={toggle.onToggle} />;
+    return <Fold label={t("details.commitsCount", { count: n })} open={toggle.open} onToggle={toggle.onToggle} />;
   }
   const several = data.rounds.length > 1;
   const foreign = data.rounds.some((r) => r.commits.some((c) => c.foreign));
   return (
-    <Section title="Commits" aside={foreign ? <span className="text-xs text-warn/80">◆ not by this step's worker</span> : undefined}>
+    <Section title={t("details.commits")} aside={foreign ? <span className="text-xs text-warn/80">◆ {t("details.commits.foreign")}</span> : undefined}>
       <div className="space-y-3">
         {data.rounds.map((r, i) => (
           <div key={i}>
-            {several && <div className="mb-1 text-xs text-fg-3">Round {i + 1}{r.open ? " (at work)" : ""}</div>}
+            {several && <div className="mb-1 text-xs text-fg-3">{t(r.open ? "details.commits.roundAtWork" : "details.commits.round", { round: i + 1 })}</div>}
             {r.commits.length === 0
-              ? <p className="text-sm text-fg-3">{r.open ? "No commit yet." : "No commit."}</p>
+              ? <p className="text-sm text-fg-3">{t(r.open ? "details.commits.noneYet" : "details.commits.none")}</p>
               : (
                 <ul className="space-y-1.5">
                   {r.commits.map((c) => (
                     <li key={c.sha} className="text-sm">
                       <div className="flex gap-2">
                         <span className="shrink-0 font-mono text-xs leading-5 text-fg-3">{c.sha.slice(0, 7)}</span>
-                        <span className={`min-w-0 ${c.foreign ? "text-warn" : "text-fg"}`}>{c.foreign && <span className="text-warn" title="Not made in a turn of this step's worker">◆ </span>}{c.subject}</span>
+                        <span className={`min-w-0 ${c.foreign ? "text-warn" : "text-fg"}`}>{c.foreign && <span className="text-warn" title={t("details.commits.foreignTitle")}>◆ </span>}{c.subject}</span>
                       </div>
                       <div className="pl-[3.75rem] text-xs text-fg-3">
-                        {c.files} file{c.files === 1 ? "" : "s"} · <span className="text-ok/80">+{c.insertions}</span> <span className="text-danger/80">−{c.deletions}</span> · {c.author} · <TimeAgo at={c.at} />
+                        {t("stop.files", { count: c.files })} · <span className="text-ok/80">+{c.insertions}</span> <span className="text-danger/80">−{c.deletions}</span> · {c.author} · <TimeAgo at={c.at} />
                       </div>
                     </li>
                   ))}
@@ -685,43 +684,49 @@ function WorktreeActions({ project, root, queue, onChanged }: { project: string;
   const norm = (p: string) => p.replaceAll("\\", "/").toLowerCase();
   if (!queue.worktree || queue.worktree === "auto" || norm(queue.worktree) === norm(root)) return null;
   if (queue.status !== "done" && !g?.merged && !g?.cleaned) return null;
-  const branch = queue.branch ?? "its branch";
+  const branch = queue.branch ?? t("details.worktree.itsBranch");
   const base = g?.base?.branch !== false ? g?.base?.ref : undefined;
   const go = (what: "merge" | "cleanup") => {
     setBusy(true); setResult(undefined);
     fetch(`/api/projects/${enc(project)}/queues/${enc(queue.id)}/${what}`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })
-      .then(async (r) => { const b = await r.json().catch(() => ({})) as { result?: { message?: string }; error?: string }; setResult(r.ok ? { ok: true, text: b.result?.message ?? "done" } : { ok: false, text: b.error ?? r.statusText }); if (r.ok) setAsk(undefined); onChanged(); })
+      .then(async (r) => { const b = await r.json().catch(() => ({})) as { result?: { message?: string }; error?: string }; setResult(r.ok ? { ok: true, text: b.result?.message ?? t("details.worktree.done") } : { ok: false, text: b.error ?? r.statusText }); if (r.ok) setAsk(undefined); onChanged(); })
       .catch((e: Error) => setResult({ ok: false, text: e.message }))
       .finally(() => setBusy(false));
   };
   return (
-    <Section title="Worktree">
-      <p className="break-all text-xs text-fg-3"><span className="font-mono">{queue.worktree}</span> on <span className="font-mono">{branch}</span>{g?.base ? <> from <span className="font-mono">{g.base.ref}</span></> : null}</p>
-      {g?.merged && <p className="mt-1.5 text-sm text-ok">Merged into <span className="font-mono">{g.merged.into}</span> ({g.merged.fast_forward ? "fast-forward" : `merge commit ${g.merged.sha.slice(0, 7)}`}) <span className="text-xs text-fg-3">· <TimeAgo at={g.merged.at} /></span></p>}
+    <Section title={t("details.worktree")}>
+      <p className="break-all text-xs text-fg-3">{rich(g?.base ? "details.worktree.onFrom" : "details.worktree.on", {
+        path: <span key="path" className="font-mono">{queue.worktree}</span>, branch: <span key="branch" className="font-mono">{branch}</span>,
+        base: <span key="base" className="font-mono">{g?.base?.ref}</span>,
+      })}</p>
+      {g?.merged && <p className="mt-1.5 text-sm text-ok">{rich("details.worktree.merged", {
+        into: <span key="into" className="font-mono">{g.merged.into}</span>,
+        how: g.merged.fast_forward ? t("details.worktree.fastForward") : t("details.worktree.mergeCommit", { sha: g.merged.sha.slice(0, 7) }),
+      })} <span className="text-xs text-fg-3">· <TimeAgo at={g.merged.at} /></span></p>}
       {g?.cleaned
-        ? <p className="mt-1.5 text-sm text-fg">Cleaned up: the worktree removed, branch <span className="font-mono">{g.cleaned.branch}</span> deleted <span className="text-xs text-fg-3">· <TimeAgo at={g.cleaned.at} /></span></p>
+        ? <p className="mt-1.5 text-sm text-fg">{rich("details.worktree.cleaned", { branch: <span key="branch" className="font-mono">{g.cleaned.branch}</span> })} <span className="text-xs text-fg-3">· <TimeAgo at={g.cleaned.at} /></span></p>
         : (
           <div className="mt-2 flex flex-wrap gap-2">
-            {base && !g?.merged && <Button variant="quiet" onClick={() => { setAsk("merge"); setResult(undefined); }}>Merge into {base}…</Button>}
-            <Button variant="quiet" onClick={() => { setAsk("cleanup"); setResult(undefined); }}>Clean up…</Button>
+            {base && !g?.merged && <Button variant="quiet" onClick={() => { setAsk("merge"); setResult(undefined); }}>{t("details.worktree.mergeInto", { base: base ?? "" })}</Button>}
+            <Button variant="quiet" onClick={() => { setAsk("cleanup"); setResult(undefined); }}>{t("details.worktree.cleanUpAsk")}</Button>
           </div>
         )}
       {ask && !g?.cleaned && (
         <div className="mt-3 rounded-lg border border-warn/30 bg-warn/10 p-3">
           {ask === "merge" ? (
             <>
-              <p className="text-sm text-warn">Merge <span className="font-mono">{branch}</span> into <span className="font-mono">{base}</span>?</p>
-              <p className="mt-1 text-xs text-fg-2">In the worktree where {base} is checked out: a fast-forward when possible, else a merge commit. Refused if that worktree has uncommitted changes or a run is going there; on a conflict the merge is aborted and nothing changes. Nothing is pushed.</p>
+              <p className="text-sm text-warn">{rich("details.worktree.mergeQuestion", { branch: <span key="branch" className="font-mono">{branch}</span>, base: <span key="base" className="font-mono">{base}</span> })}</p>
+              <p className="mt-1 text-xs text-fg-2">{t("details.worktree.mergeText", { base: base ?? "" })}</p>
             </>
           ) : (
             <>
-              <p className="text-sm text-warn">Clean up this queue's worktree?</p>
-              <p className="mt-1 text-xs text-fg-2">Removes the worktree (git worktree remove) and deletes branch <span className="font-mono">{branch}</span> (git branch -d). Refused, with nothing removed, if the worktree has uncommitted changes or the branch is not merged.</p>
+              <p className="text-sm text-warn">{t("details.worktree.cleanUpQuestion")}</p>
+              <p className="mt-1 text-xs text-fg-2">{rich("details.worktree.cleanUpText", { branch: <span key="branch" className="font-mono">{branch}</span> })}</p>
             </>
           )}
           <div className="mt-2 flex flex-wrap gap-2">
-            <Button disabled={busy} onClick={() => go(ask)}>{busy ? "Working…" : ask === "merge" ? "Merge" : "Clean up"}</Button>
-            <Button variant="quiet" onClick={() => setAsk(undefined)}>Cancel</Button>
+            <Button disabled={busy} onClick={() => go(ask)}>{t(busy ? "details.worktree.working" : ask === "merge" ? "details.worktree.merge" : "details.worktree.cleanUp")}</Button>
+            <Button variant="quiet" onClick={() => setAsk(undefined)}>{t("common.cancel")}</Button>
           </div>
         </div>
       )}
@@ -737,15 +742,15 @@ function BranchLine({ project, queue, version }: { project: string; queue: strin
   const b = useFetch<BranchView | null>(`/api/projects/${enc(project)}/queues/${enc(queue)}/git`, version);
   if (!b) return null;
   const counts = (x: { ahead: number; behind: number }) => (
-    <span><span className="text-ok">{x.ahead} ahead</span>, <span className={x.behind ? "text-warn" : "text-fg-2"}>{x.behind} behind</span></span>
+    <span><span className="text-ok">{t("details.branch.ahead", { count: x.ahead })}</span>, <span className={x.behind ? "text-warn" : "text-fg-2"}>{t("details.branch.behind", { count: x.behind })}</span></span>
   );
   return (
     <div className="mt-3 space-y-0.5 rounded-lg bg-surface-2 p-3 text-sm text-fg">
-      <p><span className="text-fg-3">Branch </span><span className="font-mono">{b.branch}</span></p>
-      {b.base && <p className="text-xs">{counts(b.base)} <span className="text-fg-3">of its base</span> <span className="font-mono">{b.base.ref}</span></p>}
+      <p><span className="text-fg-3">{t("details.branch")} </span><span className="font-mono">{b.branch}</span></p>
+      {b.base && <p className="text-xs">{counts(b.base)} <span className="text-fg-3">{t("details.branch.ofBase")}</span> <span className="font-mono">{b.base.ref}</span></p>}
       {b.upstream
-        ? <p className="text-xs">{counts(b.upstream)} <span className="text-fg-3">of</span> <span className="font-mono">{b.upstream.ref}</span> <span className="text-fg-3">as fetched {b.upstream.at ? <TimeAgo at={b.upstream.at} /> : "at an unknown time"}</span></p>
-        : <p className="text-xs text-fg-3">No remote-tracking branch.</p>}
+        ? <p className="text-xs">{counts(b.upstream)} <span className="text-fg-3">{t("details.branch.of")}</span> <span className="font-mono">{b.upstream.ref}</span> <span className="text-fg-3">{b.upstream.at ? rich("details.branch.fetched", { time: <TimeAgo key="time" at={b.upstream.at} /> }) : t("details.branch.fetchedUnknown")}</span></p>
+        : <p className="text-xs text-fg-3">{t("details.branch.noUpstream")}</p>}
     </div>
   );
 }
@@ -761,22 +766,20 @@ function PushLine({ project, queue, step, onChanged }: { project: string; queue:
   return (
     <div className={`mt-4 rounded-lg border p-3 text-sm ${failed ? "border-danger/30 bg-danger/10" : p.result === "pushed" ? "border-ok/30 bg-ok/10" : "border-line-strong bg-surface-2"}`}>
       <p>
-        <span className="text-fg-3">{failed ? "Push failed: " : p.result === "pushed" ? "Pushed: " : "Push: "}</span>
+        <span className="text-fg-3">{t(failed ? "details.push.failed" : p.result === "pushed" ? "details.push.pushed" : "details.push.push")} </span>
         <span className={failed ? "text-danger" : "text-fg"}>{p.text}</span>
         <span className="text-xs text-fg-3"> · <TimeAgo at={p.at} /></span>
       </p>
-      {failed && <p className="mt-1 text-xs text-fg-2">The step stays accepted. The next accepted step pushes again, or push again now.</p>}
+      {failed && <p className="mt-1 text-xs text-fg-2">{t("details.push.failedText")}</p>}
       {latest && (
         <div className="mt-2 flex items-center gap-3">
-          <Button variant="quiet" disabled={busy} onClick={() => { setBusy(true); setError(undefined); act(project, "POST", `/queues/${enc(queue.id)}/push`).then(onChanged, (e: Error) => setError(e.message)).finally(() => setBusy(false)); }}>{busy ? "Pushing…" : "Push again"}</Button>
+          <Button variant="quiet" disabled={busy} onClick={() => { setBusy(true); setError(undefined); act(project, "POST", `/queues/${enc(queue.id)}/push`).then(onChanged, (e: Error) => setError(e.message)).finally(() => setBusy(false)); }}>{t(busy ? "details.push.busy" : "details.push.again")}</Button>
           {error && <span className="text-xs text-danger">{error}</span>}
         </div>
       )}
     </div>
   );
 }
-
-const POLICY_LABEL: Record<string, string> = { continue: "go on", wait: "wait for my review", orchestrator: "the orchestrator reviews" };
 
 interface ReviewArgs { project: string; queue: string; step: string; next?: string; criteria: string[]; onChanged: () => void }
 
@@ -801,43 +804,43 @@ function useReviewDecision({ project, queue, step, next, criteria, onChanged }: 
   const [confirm, setConfirm] = useState<{ resolve: () => void; reject: (e: Error) => void; send: () => Promise<void> }>();
   const send = (text: string) => act(project, "POST", `/queues/${enc(queue)}/steps/${enc(step)}/send-back`, { text }).then(onChanged);
   const menu: MenuEntry[] = [
-    ...(noteOpen ? [] : [{ label: "Add a note to the acceptance…", onSelect: () => setNoteOpen(true) }]),
-    ...(rejectOpen ? [] : [{ label: "Reject…", danger: true, onSelect: () => setRejectOpen(true) }]),
+    ...(noteOpen ? [] : [{ label: t("details.review.addNote"), onSelect: () => setNoteOpen(true) }]),
+    ...(rejectOpen ? [] : [{ label: t("details.review.reject"), danger: true, onSelect: () => setRejectOpen(true) }]),
   ];
   const opened = noteOpen || fixOpen || rejectOpen;
   return {
     error,
     menu,
-    secondary: <Button variant="quiet" pressed={fixOpen} onClick={() => setFixOpen(!fixOpen)}>Fix it…</Button>,
-    primary: <Button onClick={() => void accept()}>{note.trim() ? "Accept with the note" : accept_label}</Button>,
+    secondary: <Button variant="quiet" pressed={fixOpen} onClick={() => setFixOpen(!fixOpen)}>{t("details.review.fixOpen")}</Button>,
+    primary: <Button onClick={() => void accept()}>{note.trim() ? t("details.review.acceptWithNote") : accept_label}</Button>,
     forms: opened && <div className="space-y-4">
       {rejectOpen && <RejectStep project={project} queue={queue} step={step} onChanged={onChanged} onCancel={() => setRejectOpen(false)} />}
       {noteOpen && (
         <div>
           <textarea
-            value={note} rows={2} placeholder="A note with your acceptance (optional)…" onChange={(e) => setNote(e.target.value)}
+            value={note} rows={2} placeholder={t("details.review.notePlaceholder")} onChange={(e) => setNote(e.target.value)}
             className={TEXTAREA}
           />
           {next ? (
             <label className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-fg-2">
-              The note goes to
+              {t("details.review.noteGoesTo")}
               <select value={noteTo} onChange={(e) => setNoteTo(e.target.value as "next" | "orchestrator")} className="rounded-md border border-line-strong bg-canvas px-2 py-1 text-xs text-fg">
-                <option value="next">the next step ({next}), when it starts</option>
-                <option value="orchestrator">the orchestrator (the plan, later queues, the rules)</option>
+                <option value="next">{t("details.review.toNext", { step: next })}</option>
+                <option value="orchestrator">{t("details.review.toOrchestrator")}</option>
               </select>
             </label>
           ) : (
-            <p className="mt-1.5 text-xs text-fg-2">The note goes to the orchestrator: this is the queue's last step.</p>
+            <p className="mt-1.5 text-xs text-fg-2">{t("details.review.lastStep")}</p>
           )}
         </div>
       )}
       {fixOpen && <div>
-        <p className="mb-1.5 text-sm text-fg">Fix it</p>
-        <p className="mb-2 text-xs text-fg-3">Sends the step back to its worker with your words. Where they conflict with the step's acceptance criteria, your words win.</p>
+        <p className="mb-1.5 text-sm text-fg">{t("details.review.fix")}</p>
+        <p className="mb-2 text-xs text-fg-3">{t("details.review.fixText")}</p>
         <Composer
           draft={draftKey(project, "fix", queue, step)}
-          placeholder="What you want instead…"
-          button="Fix it"
+          placeholder={t("details.review.fixPlaceholder")}
+          button={t("details.review.fix")}
           verbatim
           onSubmit={(text) => criteria.length
             ? new Promise<void>((resolve, reject) => setConfirm({ resolve, reject, send: () => send(text) }))
@@ -845,13 +848,13 @@ function useReviewDecision({ project, queue, step, next, criteria, onChanged }: 
         />
         {confirm && (
           <div className="mt-3 rounded-lg border border-warn/30 bg-warn/10 p-3">
-            <p className="text-sm text-warn">Your words override these acceptance criteria where they conflict:</p>
+            <p className="text-sm text-warn">{t("details.review.override")}</p>
             <ul className="mt-1.5 space-y-1">
               {criteria.map((c, i) => <li key={i} className="flex gap-2 text-sm text-fg"><span className="text-fg-3">◇</span><Markdown className="[&_p]:m-0">{c}</Markdown></li>)}
             </ul>
             <div className="mt-3 flex flex-wrap gap-2">
-              <Button onClick={() => { const c = confirm; setConfirm(undefined); c.send().then(c.resolve, c.reject); }}>Send it back</Button>
-              <Button variant="quiet" onClick={() => { const c = confirm; setConfirm(undefined); c.reject(new Error("Not sent; your text is kept.")); }}>Cancel</Button>
+              <Button onClick={() => { const c = confirm; setConfirm(undefined); c.send().then(c.resolve, c.reject); }}>{t("details.review.sendBack")}</Button>
+              <Button variant="quiet" onClick={() => { const c = confirm; setConfirm(undefined); c.reject(new Error(t("details.review.notSent"))); }}>{t("common.cancel")}</Button>
             </div>
           </div>
         )}
@@ -862,7 +865,7 @@ function useReviewDecision({ project, queue, step, next, criteria, onChanged }: 
 
 /** The bar of a step in the user's review: Accept and go on, Fix it… beside it, Reject and a note under ⋯. */
 function ReviewBar(props: ReviewArgs) {
-  const d = useReviewDecision(props, "Accept and go on");
+  const d = useReviewDecision(props, t("details.review.acceptGoOn"));
   return (
     <ActionBar hint={d.error ? <span className="text-danger">{d.error}</span> : undefined} menu={d.menu} secondary={d.secondary} primary={d.primary}>
       {d.forms}
@@ -873,19 +876,19 @@ function ReviewBar(props: ReviewArgs) {
 /** The bar of a step with an open question: the answer box, whether the worker may go on, and Answer. */
 function AnswerBar({ q, project, onChanged }: { q: QuestionView; project: string; onChanged: () => void }) {
   const [goOn, setGoOn] = useState(true);
-  const t = useDraftText({
+  const d = useDraftText({
     draft: draftKey(project, "answer", q.qid),
     onSubmit: async (text) => { await act(project, "POST", `/questions/${enc(q.qid)}/answer`, { text, continue: goOn }); onChanged(); },
   });
   return (
     <ActionBar
-      hint={t.error ? <span className="text-danger">{t.error}</span> : "Ctrl+Enter answers"}
-      primary={<Button onClick={t.submit} disabled={!t.ready}>{t.busy ? "Sending…" : "Answer"}</Button>}
+      hint={d.error ? <span className="text-danger">{d.error}</span> : t("details.answer.ctrlEnter")}
+      primary={<Button onClick={d.submit} disabled={!d.ready}>{d.busy ? t("ui.sending") : t("details.answer.button")}</Button>}
     >
-      <textarea value={t.text} rows={2} placeholder="Your answer…" onChange={(e) => t.change(e.target.value)} onKeyDown={t.onKeyDown} className={TEXTAREA} />
+      <textarea value={d.text} rows={2} placeholder={t("details.answer.placeholder")} onChange={(e) => d.change(e.target.value)} onKeyDown={d.onKeyDown} className={TEXTAREA} />
       <label className="mt-1.5 flex items-center gap-1.5 text-xs text-fg-2">
         <input type="checkbox" checked={goOn} onChange={(e) => setGoOn(e.target.checked)} className="accent-accent" />
-        the worker may go on
+        {t("details.answer.mayGoOn")}
       </label>
     </ActionBar>
   );
@@ -899,7 +902,7 @@ function WithdrawNote({ project, queue, step, note, onChanged }: { project: stri
       <button
         className="text-fg-3 hover:text-danger"
         onClick={() => act(project, "DELETE", `/queues/${enc(queue)}/steps/${enc(step)}/notes/${enc(note)}`).then(onChanged, (e: Error) => setError(e.message))}
-      >withdraw</button>
+      >{t("details.note.withdraw")}</button>
     </>
   );
 }
@@ -930,16 +933,16 @@ export function Question({ q, project, onChanged, inBar }: { q: QuestionView; pr
   return (
     <div className={`mb-2 rounded-lg border p-3 text-sm ${tone}`}>
       <div className="mb-1 flex flex-wrap gap-2 text-xs text-fg-3">
-        <StatusBadge status={q.state === "open" ? "waiting" : q.state === "escalated" ? "review" : "done"} label={q.state === "escalated" ? "for you" : q.state} />
+        <StatusBadge status={q.state === "open" ? "waiting" : q.state === "escalated" ? "review" : "done"} label={q.state === "escalated" ? t("details.question.stateForYou") : questionState(q.state)} />
         {q.queue && <span className="font-mono">{q.queue}{q.step ? `/${q.step}` : ""}</span>}
-        <span>{q.can_continue ? "the worker goes on meanwhile" : "the worker waits"}</span>
+        <span>{t(q.can_continue ? "details.question.goesOn" : "details.question.waits")}</span>
         <span className="ml-auto"><TimeAgo at={q.asked_at} /></span>
       </div>
       <p className="text-fg">{q.text}</p>
       {q.options && <ul className="mt-1 list-disc pl-5 text-fg-2">{q.options.map((o) => <li key={o}>{o}</li>)}</ul>}
       {q.answers.map((a) => (
         <div key={a.id} className="mt-2 border-t border-line pt-2 text-fg">
-          <span className="text-fg-3">{a.escalate ? "Passed to you by the orchestrator: " : `Answer (${a.by}): `}</span>
+          <span className="text-fg-3">{a.escalate ? t("details.question.passedBy") : t("details.question.answerBy", { by: a.by })} </span>
           <Markdown className="inline [&_p]:inline [&_p]:m-0">{a.text}</Markdown>
         </div>
       ))}
@@ -958,12 +961,12 @@ function AnswerBox({ q, project, onChanged }: { q: QuestionView; project: string
     <Composer
       rows={2}
       draft={draftKey(project, "answer", q.qid)}
-      placeholder="Your answer…"
-      button="Answer"
+      placeholder={t("details.answer.placeholder")}
+      button={t("details.answer.button")}
       extra={
         <label className="flex items-center gap-1.5 text-xs text-fg-2">
           <input type="checkbox" checked={goOn} onChange={(e) => setGoOn(e.target.checked)} className="accent-accent" />
-          the worker may go on
+          {t("details.answer.mayGoOn")}
         </label>
       }
       onSubmit={async (text) => { await act(project, "POST", `/questions/${enc(q.qid)}/answer`, { text, continue: goOn }); onChanged(); }}
@@ -973,33 +976,35 @@ function AnswerBox({ q, project, onChanged }: { q: QuestionView; project: string
 
 // ---------------------------------------------------------------- queue
 
-const WHO: Record<StatusChange["by"], string> = { user_approval: "You, approving", user_continue: "You, with Continue", orchestrator: "Orchestrator", nexus: "Nexus" };
+const WHO: Record<StatusChange["by"], Key> = { user_approval: "details.change.byApproval", user_continue: "details.change.byContinue", orchestrator: "details.change.byOrchestrator", nexus: "details.change.byNexus" };
+
+const QUESTION_STATES: Record<string, Key> = { open: "details.question.stateOpen", answered: "details.question.stateAnswered", withdrawn: "details.question.stateWithdrawn" };
+/** A question's state as a word; one the dashboard does not know, as it is. */
+const questionState = (state: string) => (QUESTION_STATES[state] ? t(QUESTION_STATES[state]) : state);
 
 /** Status changes made through Nexus (queue.yaml's changes): who, when, what and why; newest first. */
 function Changes({ entries, queue }: { entries: StatusChange[]; queue: QueueView }) {
   if (!entries.length) return null;
   const what = (c: StatusChange) => {
     switch (c.kind) {
-      case "lift": return `lifted the stop${c.revision ? ` (revision ${c.revision})` : ""}`;
-      case "proposal": return "proposed to lift the stop";
-      case "run": return "closed the halted run as finished";
-      case "work": return c.to === "kept"
-        ? `kept the work of stopped step ${c.step} (${c.commits?.length ?? 0} commit${c.commits?.length === 1 ? "" : "s"})`
-        : `chose to discard the work of stopped step ${c.step} (${c.commits?.length ?? 0} commit${c.commits?.length === 1 ? "" : "s"}): the orchestrator drafts a revision that reverts it`;
-      default: return c.step ? `${c.step}: ${c.from} → ${c.to}` : `queue ${queue.id}: ${c.from} → ${c.to}`;
+      case "lift": return c.revision ? t("details.change.liftedRevision", { revision: c.revision }) : t("details.change.lifted");
+      case "proposal": return t("details.change.proposal");
+      case "run": return t("details.change.run");
+      case "work": return t(c.to === "kept" ? "details.change.kept" : "details.change.discarded", { step: c.step ?? "", count: c.commits?.length ?? 0 });
+      default: return c.step ? t("details.change.step", { step: c.step, from: statusWord(c.from), to: statusWord(c.to) }) : t("details.change.queue", { queue: queue.id, from: statusWord(c.from), to: statusWord(c.to) });
     }
   };
   return (
-    <Section title="Changes">
+    <Section title={t("details.changes")}>
       <ul className="space-y-2">
         {[...entries].reverse().map((c, i) => (
           <li key={i} className="text-sm">
             <div className="flex flex-wrap items-baseline gap-x-2 text-xs text-fg-3">
-              <span className={c.by === "orchestrator" ? "text-review" : "text-info"}>{WHO[c.by]}</span>
+              <span className={c.by === "orchestrator" ? "text-review" : "text-info"}>{t(WHO[c.by])}</span>
               <TimeAgo at={c.at} />
             </div>
             <div className="text-fg">{what(c)}</div>
-            {c.reason && <div className="text-xs text-fg-2">{c.kind === "lift" ? "The stop was: " : "Why: "}{c.reason}</div>}
+            {c.reason && <div className="text-xs text-fg-2">{t(c.kind === "lift" ? "details.change.stopWas" : "details.change.why")} {c.reason}</div>}
           </li>
         ))}
       </ul>
@@ -1015,15 +1020,15 @@ function WithdrawApproval({ project, queue, onChanged, onCancel }: { project: st
   return (
     <div className="rounded-lg border border-stop/30 bg-stop/5 p-3">
       <p className="mb-2 text-sm text-fg">
-        The queue has not started. Withdrawing puts it back to proposed: it waits for your approval again and cannot be started until then. The earlier approval stays on record.
+        {t("details.withdraw.text")}
       </p>
       <Composer
         rows={2}
         allowEmpty
         draft={draftKey(project, "withdraw", queue)}
-        placeholder="Why (optional)…"
-        button="Withdraw approval"
-        extra={<Button variant="quiet" onClick={onCancel}>Cancel</Button>}
+        placeholder={t("details.reject.why")}
+        button={t("details.withdraw.button")}
+        extra={<Button variant="quiet" onClick={onCancel}>{t("common.cancel")}</Button>}
         onSubmit={async (reason) => { await act(project, "POST", `/queues/${enc(queue)}/withdraw`, { reason }); onChanged(); }}
       />
     </div>
@@ -1038,7 +1043,7 @@ function OwnValues({ queue }: { queue: QueueView }) {
   const own = queue.steps.filter((s) => stepValuesText(s));
   if (!own.length) return null;
   return (
-    <Section title="Steps on their own runtime or model">
+    <Section title={t("details.ownValues")}>
       <ul className="space-y-1 text-sm">
         {own.map((s) => (
           <li key={s.id} className="flex flex-wrap gap-x-2">
@@ -1048,7 +1053,7 @@ function OwnValues({ queue }: { queue: QueueView }) {
           </li>
         ))}
       </ul>
-      <p className="mt-1.5 text-xs text-fg-3">The other steps, and what a step leaves out, run on the run's runtime, model and effort.</p>
+      <p className="mt-1.5 text-xs text-fg-3">{t("details.ownValuesText")}</p>
     </Section>
   );
 }
@@ -1074,18 +1079,18 @@ export function QueueDetail({ project, queue, onChanged, onClose, of, chat = [],
   return (
     <>
       <PanelHeader
-        where={<>{project.project.name} · queue</>} of={of}
+        where={t("details.queueWhere", { project: project.project.name })} of={of}
         title={<><span className="mr-2 font-mono text-fg-3">{queue.id}</span>{queue.title}</>}
         status={<>
           {/* A revision waiting for approval says so first, in the approval colour, with the planned start after it. */}
           {waitsApproval && <span className="font-medium text-info">{honest.label}</span>}
           <StatusBadge status={queue.status} />
-          <span>revision {queue.revision}</span>
+          <span>{t("details.revision", { revision: queue.revision })}</span>
           {approving && <SettingsLine project={project} queue={queue} />}
           {queue.branch && !approving && <span className="font-mono">{queue.branch}</span>}
           {queue.worktree && !approving && <span className="font-mono">{queue.worktree}</span>}
           <span className={queue.approved ? "text-ok" : "text-fg-3"}>
-            {queue.approved ? "approved" : queue.withdrawals.length && queue.withdrawals.at(-1)!.approvals >= queue.approvals.length ? "approval withdrawn" : latest ? "approval is for an older revision" : "no approval recorded in Nexus"}
+            {t(queue.approved ? "details.approval.approved" : queue.withdrawals.length && queue.withdrawals.at(-1)!.approvals >= queue.approvals.length ? "details.approval.withdrawn" : latest ? "details.approval.older" : "details.approval.none")}
           </span>
         </>}
         onClose={onClose}
@@ -1096,22 +1101,22 @@ export function QueueDetail({ project, queue, onChanged, onClose, of, chat = [],
 
       {queue.status === "stopped"
         ? <StopBox queue={queue} left={left ?? undefined} work={work} setWork={setWork} needsChoice={needsChoice} pushAccepted={project.project.defaults.push_accepted} />
-        : queue.status_reason && <Section title="State"><Expandable text={queue.status_reason} /></Section>}
+        : queue.status_reason && <Section title={t("details.state")}><Expandable text={queue.status_reason} /></Section>}
       {approving && <CompactSteps project={project} queue={queue} chat={chat} onFull={onFull} />}
       {queue.report && (
-        <Section title="Queue report">
+        <Section title={t("details.report")}>
           <p className="text-sm text-fg">{queue.report.summary}</p>
-          <a className="text-sm text-accent underline" href={fileUrl(id, queue.report.path)} target="_blank" rel="noreferrer">Open the report</a>
+          <a className="text-sm text-accent underline" href={fileUrl(id, queue.report.path)} target="_blank" rel="noreferrer">{t("details.openReport")}</a>
         </Section>
       )}
-      {queue.questions.length > 0 && <Section title="Questions">{queue.questions.map((q) => <Question key={q.qid} q={q} project={id} onChanged={onChanged} />)}</Section>}
+      {queue.questions.length > 0 && <Section title={t("details.questions")}>{queue.questions.map((q) => <Question key={q.qid} q={q} project={id} onChanged={onChanged} />)}</Section>}
 
       {!approving && <OwnValues queue={queue} />}
 
-      {history.length > 0 && <Section title="Approval">
+      {history.length > 0 && <Section title={t("details.approval")}>
         {history.map((a, i) => (
             <p key={i} className={`mb-1 text-sm ${a.withdrawn ? "text-stop/90" : "text-fg"}`}>
-              r{a.revision} · {a.withdrawn ? "withdrawn " : ""}<TimeAgo at={a.at} />
+              {t("details.approval.revision", { revision: a.revision })} · {a.withdrawn ? `${t("details.approval.withdrawnAt")} ` : ""}<TimeAgo at={a.at} />
               {!a.withdrawn && a.words && <> · <q className="italic">{a.words}</q></>}
               {a.withdrawn && a.reason && <> · <q className="italic">{a.reason}</q></>}
             </p>
@@ -1122,22 +1127,22 @@ export function QueueDetail({ project, queue, onChanged, onClose, of, chat = [],
 
       <Changes entries={queue.changes} queue={queue} />
 
-      {!approving && queue.description && <Section title="Description"><Expandable text={queue.description} lines={6} /></Section>}
+      {!approving && queue.description && <Section title={t("approval.description")}><Expandable text={queue.description} lines={6} /></Section>}
 
-      {!approving && <Section title="Stop conditions">
+      {!approving && <Section title={t("approval.stopConditions")}>
         <ul className="space-y-1.5 text-sm text-fg">
           {queue.stop_conditions.map((c, i) => <li key={i} className="flex gap-2"><span className="text-stop/70">■</span><Markdown className="[&_p]:m-0">{c}</Markdown></li>)}
-          {inherited.map((c, i) => <li key={`p${i}`} className="flex gap-2 text-fg-3"><span>□</span><span>{c} <span className="text-xs">(project)</span></span></li>)}
-          {queue.stop_conditions.length + inherited.length === 0 && <li className="text-fg-3">None.</li>}
+          {inherited.map((c, i) => <li key={`p${i}`} className="flex gap-2 text-fg-3"><span>□</span><span>{c} <span className="text-xs">{t("approval.fromProject")}</span></span></li>)}
+          {queue.stop_conditions.length + inherited.length === 0 && <li className="text-fg-3">{t("approval.none")}</li>}
         </ul>
       </Section>}
       {!approving && queue.checks.length > 0 && (
-        <Section title="Checks for every step">
+        <Section title={t("approval.checks")}>
           {queue.checks.map((c, i) => <Markdown key={i}>{c}</Markdown>)}
         </Section>
       )}
       {queue.source && (
-        <p className="mt-6 text-xs text-fg-3">Imported from <span className="font-mono">{queue.source.path}</span> <TimeAgo at={queue.source.imported_at} /></p>
+        <p className="mt-6 text-xs text-fg-3">{rich("details.imported", { path: <span key="path" className="font-mono">{queue.source.path}</span>, time: <TimeAgo key="time" at={queue.source.imported_at} /> })}</p>
       )}
       </PanelBody>
       <QueueBar key={queue.id} project={project} queue={queue} onChanged={onChanged} left={leftState} work={work} needsChoice={needsChoice} />
@@ -1166,12 +1171,13 @@ function QueueBar({ project, queue, onChanged, left, work, needsChoice }: {
   const [policyOpen, setPolicyOpen] = useState(false);
   const setPolicy = (review_policy: string | null) =>
     act(id, "PATCH", `/queues/${enc(queue.id)}`, { review_policy }).then(onChanged, (e: Error) => setError(e.message));
-  const policy = queue.review_policy ? POLICY_LABEL[queue.review_policy] : `project default (${POLICY_LABEL[project.project.defaults.review_policy]})`;
+  const projectDefault = t("details.policy.projectDefault", { policy: policyWords(project.project.defaults.review_policy) });
+  const policy = queue.review_policy ? policyWords(queue.review_policy) : projectDefault;
 
   const menu: MenuEntry[] = [
     ...(!queue.approved ? a.menu : []),
-    ...(canWithdraw && !withdrawOpen ? [{ label: "Withdraw approval…", danger: true, onSelect: () => setWithdrawOpen(true) }] : []),
-    ...(!policyOpen ? [{ label: `After each step: ${policy}…`, onSelect: () => setPolicyOpen(true) }] : []),
+    ...(canWithdraw && !withdrawOpen ? [{ label: t("details.withdraw.menu"), danger: true, onSelect: () => setWithdrawOpen(true) }] : []),
+    ...(!policyOpen ? [{ label: t("details.policy.menu", { policy }), onSelect: () => setPolicyOpen(true) }] : []),
   ];
   const fail = cont.error ?? error ?? a.words.error;
   const said = cont.note ?? a.note;
@@ -1195,19 +1201,19 @@ function QueueBar({ project, queue, onChanged, left, work, needsChoice }: {
           {policyOpen && (
             <div className="flex flex-wrap items-center gap-2 text-sm text-fg">
               <label className="flex flex-wrap items-center gap-2">
-                After each step
+                {t("details.policy.label")}
                 <select
                   value={queue.review_policy ?? ""}
                   onChange={(e) => void setPolicy(e.target.value || null)}
                   className="rounded-md border border-line-strong bg-canvas px-2 py-1 text-sm"
                 >
-                  <option value="">project default ({POLICY_LABEL[project.project.defaults.review_policy]})</option>
-                  <option value="continue">go on to the next step</option>
-                  <option value="wait">wait for my review</option>
-                  <option value="orchestrator">wait for the orchestrator's review</option>
+                  <option value="">{projectDefault}</option>
+                  <option value="continue">{t("details.policy.continue")}</option>
+                  <option value="wait">{t("details.policy.wait")}</option>
+                  <option value="orchestrator">{t("details.policy.orchestrator")}</option>
                 </select>
               </label>
-              <Button variant="quiet" onClick={() => setPolicyOpen(false)}>Done</Button>
+              <Button variant="quiet" onClick={() => setPolicyOpen(false)}>{t("details.policy.done")}</Button>
             </div>
           )}
         </div>
