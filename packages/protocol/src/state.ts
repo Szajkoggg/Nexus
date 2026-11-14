@@ -28,6 +28,8 @@ export interface AttentionItem {
   options?: string[];
   /** The option recommended to the user (its button is marked). */
   recommended?: string;
+  /** A stop's condition (kind `stopped`), apart from its reason (`text`); none for a stop known as one text. */
+  condition?: string;
   /**
    * A stopped queue's ways out (kind `stopped` of a queue whose status is stopped, not a halted run): `place` is where
    * the stop is (stopPlace); `continue`: the current revision is approved, so Continue lifts it (else approving the
@@ -85,6 +87,12 @@ export interface QueueView extends Omit<QueueFile, "steps"> {
    * until a lift. It stays when the orchestrator skips that step: the stop is then the queue's (stopPlace).
    */
   stop_step?: string;
+  /**
+   * The stop's condition and reason kept apart (the latest queue.stop's), until a lift: what the dashboard shows is the
+   * short reason, with the condition behind "more". `status_reason` keeps both as one text ("<condition>: <reason>").
+   * A stop known only as one text (a queue imported as stopped) has neither: it shows `status_reason`.
+   */
+  stop?: { condition: string; reason: string };
   /** The orchestrator's proposal to lift the queue's stop, until a lift, a later stop or an approval. */
   lift_proposal?: { at: string; reason: string };
   /**
@@ -331,7 +339,9 @@ function attentionOf(queues: QueueView[], questions: QuestionView[]): AttentionI
     if (q.run?.state === "halted" && q.status !== "stopped" && q.status !== "done" && q.status !== "cancelled") out.push({ kind: "stopped", queue: q.id, step: q.run.step, text: q.run.reason ?? "The run halted", at: q.run.updated_at });
     if (q.status === "stopped") {
       out.push({
-        kind: "stopped", queue: q.id, step: q.current_step, text: q.status_reason ?? "Stopped",
+        // The short reason; the condition goes with it, for "more" (a single-text stop: its text, as it was).
+        kind: "stopped", queue: q.id, step: q.current_step, text: q.stop?.reason ?? q.status_reason ?? "Stopped",
+        ...(q.stop ? { condition: q.stop.condition } : {}),
         at: [q.updated ?? q.updated_at, q.lift_proposal?.at].filter((x): x is string => !!x).sort().at(-1),
         lift: { place: stopPlace(q), continue: q.approved, revision: q.revision, ...(q.lift_proposal ? { proposal: q.lift_proposal } : {}) },
       });
@@ -478,7 +488,7 @@ function apply(
       if (!q) return;
       q.lift_proposal = undefined;
       // A done or cancelled queue stays so (a cancel by the orchestrator, for one, is not undone by a late stop).
-      if (!TERMINAL_QUEUE.has(q.status)) { q.status = "stopped"; q.status_reason = `${e.condition}: ${e.reason}`; q.stop_step = e.step; }
+      if (!TERMINAL_QUEUE.has(q.status)) { q.status = "stopped"; q.status_reason = `${e.condition}: ${e.reason}`; q.stop_step = e.step; q.stop = { condition: e.condition, reason: e.reason }; }
       for (const x of q.steps) endSegment(x, e.at);
       if (st && !FINISHED_STEP.has(st.status)) { st.status = "stopped"; st.reason = e.reason; }
       return;
@@ -602,7 +612,7 @@ function apply(
 function applyChange(q: QueueView, c: StatusChange): void {
   switch (c.kind) {
     case "lift":
-      q.lift_proposal = undefined; q.stop_step = undefined;
+      q.lift_proposal = undefined; q.stop_step = undefined; q.stop = undefined;
       if (q.status === "stopped") { q.status = "approved"; q.status_reason = undefined; }
       for (const st of q.steps) if (st.status === "stopped") { st.status = "pending"; st.reason = undefined; }
       return;

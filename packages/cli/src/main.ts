@@ -27,7 +27,7 @@ Agent commands (session from NEXUS_SESSION or --session):
                     [--before <path>]   (older material without a key: the "before" of one picture)
                     Read nexus help review before preparing review material.
   nexus check <step> <name> --ok|--fail [--summary <text>]
-  nexus stop <step> --condition <text> --reason <text>
+  nexus stop <step> --condition <text> --reason <text>   the condition met, as the queue words it; the reason, short
   nexus ask <text> [--step <step>] [--option <text>]... [--recommend <option>] [--can-continue]
   nexus withdraw <qid> --reason <text>
   nexus context <text|-> [--topics a,b] [--files a,b] [--step <step>]
@@ -197,7 +197,9 @@ Worker sessions (${workers.length})`);
 Waiting for the user`);
     for (const a of attention) {
       const where = a.lift ? `${a.queue}${a.lift.place}` : `${a.queue ?? ""}${a.step ? `/${a.step}` : ""}`;
-      console.log(`- ${a.kind} ${where}: ${a.text.replace(/\s+/g, " ").slice(0, 160)}`);
+      // A stop's waiting item has its reason as its text and its condition apart: the agent reads both, as before.
+      const text = a.condition ? `${a.condition}: ${a.text}` : a.text;
+      console.log(`- ${a.kind} ${where}: ${text.replace(/\s+/g, " ").slice(0, 160)}`);
       if (!a.lift) continue;
       console.log(`  ${a.lift.continue ? "Continue lifts it" : `approving revision ${a.lift.revision} lifts it`}`);
       const p = a.lift.proposal;

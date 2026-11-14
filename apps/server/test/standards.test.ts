@@ -21,6 +21,11 @@ test("the question's shape: the worker asks so, the orchestrator reads and escal
   has(orchestrator, "a question three (what it blocks; the options; the worker's recommendation)", "When you escalate a question, keep the same shape: your framing, the options, your recommendation.", "`nexus help questions`");
 });
 
+test("a stop names its condition and its reason apart, the reason short", () => {
+  has(WORKER_BRIEFING, "nexus stop <step> --condition \"<the stop condition met>\" --reason \"<what happened, short>\"",
+    "give both: --condition names the condition as the queue words it, --reason says in a sentence or two what happened");
+});
+
 test("a refused action: no workaround, one simpler retry at most, then report; for every agent", () => {
   for (const [who, text] of [["worker", WORKER_BRIEFING], ["orchestrator", orchestrator], ["partner", partner]] as const) {
     assert.match(text, /When an action is refused, do not work around it through another tool or command that reaches the same end/, who);

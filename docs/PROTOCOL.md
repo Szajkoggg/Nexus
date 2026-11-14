@@ -418,7 +418,7 @@ Every line:
 | `check.result` | `queue`, `step`, `name`, `ok`, `summary` | One check's outcome |
 | `step.done` | `queue`, `step`, `summary`, `commit?`, `warning?` | Acceptance met; the step's work is finished. `warning`: what `nexus step done` warned about at the step's end (see the CLI) |
 | `step.failed` | `queue`, `step`, `reason` | The step cannot be finished as written |
-| `queue.stop` | `queue`, `step`, `condition`, `reason` | A stop condition was met; the engine halts the queue |
+| `queue.stop` | `queue`, `step`, `condition`, `reason` | A stop condition was met; the engine halts the queue. `condition`: the condition met, as the queue words it; `reason`: what happened, short. The derived queue keeps them apart in `stop` (`{ condition, reason }`, until a lift) besides `status_reason` ("<condition>: <reason>"); the stopped waiting item's `text` is the reason and its `condition` the condition. A stop known only as one text (a queue imported as stopped) has no `stop`, and shows its `status_reason` |
 | `question.asked` | `queue?`, `step?`, `qid`, `text`, `options?`, `recommended?`, `can_continue` | A question; `can_continue` says whether independent work remains; `recommended`: the asker's recommendation, one of `options` (the CLI refuses another; the state drops it with a warning) |
 | `question.withdrawn` | `qid`, `reason` | No longer needed |
 | `answer.given` | `qid`, `text`, `escalate?`, `recommended?` | Orchestrator only: an answer, or an escalation to the user with its framing. With `escalate`, `recommended` is the orchestrator's recommendation, one of the question's options; it replaces the asker's on the derived question (`QuestionView.recommended`, and the waiting item's `recommended`), whose button the dashboard marks |
@@ -707,7 +707,7 @@ nexus help summaries|questions|refusals|commits   # the other standards
 nexus check W3 core-tests --ok --summary "548 passed"
 nexus step done W3 --summary "No floating body on any fixture" [--commit 1a2b3c]   # warns at an unclean end
 nexus step failed W3 --reason "..."
-nexus stop W3 --condition "user decision" --reason "..."
+nexus stop W3 --condition "user decision" --reason "..."   # the condition as the queue words it; the reason short (shown first)
 nexus ask "Canyon joints: vertical only, or also inclined?" [--option ...] [--recommend <option>] [--can-continue]
                                                # --recommend: one of the --option values, by text or number (1 = first)
 nexus context --topics rock,support --files Runtime/Core/Rock/* <<< "summary text"

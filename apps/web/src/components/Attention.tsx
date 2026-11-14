@@ -51,12 +51,19 @@ function StopRow({ project, a, onOpen, onChanged, pushAccepted, queue }: {
     project, queue: a.queue!, approved: a.lift.continue, revision: a.lift.revision, version: queue ? stopVersion(queue) : a.at,
     onOpen, onChanged, pushAccepted, branch: queue?.branch, discardShownElsewhere: !!queue && !!stepThatMatters(queue),
   });
+  // The card shows the stop's short reason; its condition opens under "more" (not where the step's line below has it).
+  const [more, setMore] = useState(false);
+  const condition = !(queue && stepThatMatters(queue)) ? a.condition : undefined;
   return (
     <div className="px-3.5 pb-3">
       <div className="flex flex-wrap items-center gap-2">
         {buttons}
         <button onClick={onOpen} className={OPEN_BUTTON}>{t("common.open")}</button>
+        {condition && (
+          <button onClick={() => setMore(!more)} aria-expanded={more} className={`${OPEN_BUTTON} ml-auto text-accent`}>{t(more ? "stop.less" : "stop.more")}</button>
+        )}
       </div>
+      {condition && more && <p className="mt-2 text-sm text-fg-2"><span className="text-fg-3">{t("stop.condition")} </span>{plain(condition)}</p>}
       {panel && <div className="mt-2">{panel}</div>}
     </div>
   );

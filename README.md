@@ -150,7 +150,9 @@ goes on by itself once you approve. Pausing it meanwhile wins: Resume then goes 
 "waits for approval of revision N · after S", its run "waiting for approval", and it is in "Waiting for you" (and
 pushed, with notifications on) as Needs approval.
 
-A queue stopped by a stop condition goes on only when you lift the stop. Either approve a new revision the
+A queue stopped by a stop condition shows the worker's short reason for the stop on the stopped step's line, in the
+step, in the stop box and on its waiting card; the stop condition it met is behind "more" (an older stop recorded as
+one text shows that text, as before). It goes on only when you lift the stop. Either approve a new revision the
 orchestrator drafted (a start then begins at the first pending step), or, when the cause was outside the queue,
 press Continue: the stopped step runs again in its session. Continue is right where the stop shows: on the stopped
 step's line in the queue's card (with the stop's reason, shown there once), on the stop's card in the waiting list,

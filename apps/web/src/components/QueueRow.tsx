@@ -10,7 +10,7 @@ import { stepValuesText } from "@nexus/protocol/steps";
 import { queueStatus, type Tone } from "../queueStatus.ts";
 import { currentIndex, foldSteps, twoColumns } from "../steplist.ts";
 import { usePhone } from "../phone.ts";
-import { STOP_BUTTON, StopActions, stopVersion } from "./Stop.tsx";
+import { QueueStopReason, STOP_BUTTON, StopActions, stopVersion } from "./Stop.tsx";
 
 /** The honest status's colours: a dot and a word. */
 export const TONE: Record<Tone, [string, string]> = {
@@ -167,7 +167,8 @@ function StepLine({ step, queue, current, phone, onStep, onQueue, stop }: {
       <span className="truncate pt-px font-mono text-xs leading-5 text-fg-3">{step.id}</span>
       <span className="min-w-0">
         <span className="font-semibold text-fg">{step.title}</span> <span className={`whitespace-nowrap text-xs ${tone.text}`}>{word}</span>
-        {why && <span className="mt-0.5 line-clamp-2 block text-xs text-fg-2">{plain(why)}</span>}
+        {stopHere && queue.stop ? <QueueStopReason queue={queue} clamp className="mt-0.5 text-xs text-fg-2" />
+          : why && <span className="mt-0.5 line-clamp-2 block text-xs text-fg-2">{plain(why)}</span>}
         {status === "running" && step.progress?.pct !== undefined && (
           <span className="mt-1.5 block h-1 overflow-hidden rounded bg-surface-3"><span className="block h-full bg-accent" style={{ width: `${step.progress.pct}%` }} /></span>
         )}

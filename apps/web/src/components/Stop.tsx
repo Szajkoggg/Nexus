@@ -70,6 +70,35 @@ export function StoppedWork({ left, work, setWork, needsChoice, pushAccepted, br
  * A stopped queue's stop: why and where, the orchestrator's proposal, what the step left; Continue is in the
  * bar. Continue (the user's lift) only when the current revision is approved; otherwise approving it lifts the stop.
  */
+/**
+ * A stop's reason, short, with its condition behind "more" (queue QR): the step's line, the stop box, the step's
+ * drawer and the waiting card. A stop known only as one text (no condition apart) shows that text as it was.
+ * `clamp` keeps the reason to a few lines (the step's line, a card); clicks inside stay here.
+ */
+export function StopReason({ reason, condition, className = "", clamp }: { reason: string; condition?: string; className?: string; clamp?: boolean }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span className={`block ${className}`}>
+      <span className={clamp && !open ? "line-clamp-2" : ""}>{plainText(reason)}</span>
+      {condition && (
+        <>
+          {" "}
+          <button onClick={(e) => { e.stopPropagation(); setOpen(!open); }} onKeyDown={(e) => e.stopPropagation()} aria-expanded={open}
+            className="whitespace-nowrap text-xs text-accent hover:underline max-lg:min-h-8">{t(open ? "stop.less" : "stop.more")}</button>
+          {open && <span className="mt-1 block text-fg-2"><span className="text-fg-3">{t("stop.condition")} </span>{plainText(condition)}</span>}
+        </>
+      )}
+    </span>
+  );
+}
+const plainText = (s: string) => s.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\*\*|`/g, "");
+
+/** A stopped queue's reason, as StopReason shows it: the stop's own fields, else its one text. */
+export function QueueStopReason({ queue, className, clamp }: { queue: QueueView; className?: string; clamp?: boolean }) {
+  if (queue.stop) return <StopReason reason={queue.stop.reason} condition={queue.stop.condition} className={className} clamp={clamp} />;
+  return queue.status_reason ? <StopReason reason={queue.status_reason} className={className} clamp={clamp} /> : null;
+}
+
 export function StopBox({ queue, left, work, setWork, needsChoice, pushAccepted }: {
   queue: QueueView; left?: LeftView; work?: WorkChoice; setWork: (w: WorkChoice) => void; needsChoice: boolean; pushAccepted: boolean;
 }) {
@@ -77,7 +106,7 @@ export function StopBox({ queue, left, work, setWork, needsChoice, pushAccepted 
   return (
     <div className="mt-4 rounded-lg border border-stop/30 bg-stop/10 p-3 text-sm">
       <p className="font-medium text-stop">{t("stop.stopped", { place: stopPlace(queue) })}</p>
-      {queue.status_reason && <div className="mt-1 text-fg"><Expandable text={queue.status_reason} /></div>}
+      {queue.stop ? <QueueStopReason queue={queue} className="mt-1 text-fg" /> : queue.status_reason && <div className="mt-1 text-fg"><Expandable text={queue.status_reason} /></div>}
       {p && (
         <div className="mt-3 rounded-md bg-surface/70 p-2.5">
           <p className="text-xs text-fg-3">{t("waiting.liftProposal")} · <TimeAgo at={p.at} /></p>

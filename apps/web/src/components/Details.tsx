@@ -13,7 +13,7 @@ import { nav, useNav } from "../nav.ts";
 import { usePhone } from "../phone.ts";
 import { ImageViewer, type ViewerImage } from "./Viewer.tsx";
 import { StepChat } from "./Chat.tsx";
-import { StopBox, stopVersion, useContinue, useLeft } from "./Stop.tsx";
+import { StopBox, StopReason, stopVersion, useContinue, useLeft } from "./Stop.tsx";
 import { AskButton, CompactSteps, SettingsLine, useApprove, useCtrlEnter } from "./Approval.tsx";
 import { needsApproval, policyWords } from "../approval.ts";
 import { queueStatus } from "../queueStatus.ts";
@@ -89,7 +89,12 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
       {(step.summary || step.reason || step.progress) && (
         <div className="mt-4 rounded-lg bg-surface-2 p-3 text-sm">
           {step.summary && <p><span className="text-fg-3">{t("details.summary")} </span>{step.summary}</p>}
-          {step.reason && step.status !== "rejected" && <p className="text-stop"><span className="text-fg-3">{t("details.reason")} </span>{step.reason}</p>}
+          {step.reason && step.status !== "rejected" && (
+            <div className="text-stop"><span className="text-fg-3">{t("details.reason")} </span>
+              {/* The stop's condition behind "more", when this step's stop has it apart. */}
+              <StopReason reason={step.reason} condition={queue.status === "stopped" && queue.stop_step === step.id ? queue.stop?.condition : undefined} className="inline" />
+            </div>
+          )}
           {step.progress && step.status === "running" && (
             <p><span className="text-fg-3">{t("details.now")} </span>{step.progress.text} <span className="text-xs text-fg-3">(<TimeAgo at={step.progress.at} />)</span></p>
           )}

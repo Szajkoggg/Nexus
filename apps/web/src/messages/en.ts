@@ -257,6 +257,9 @@ export const en = {
   "stop.approve": "Approve revision {revision}",
   "stop.discardWork": "Discard the step's work",
   "stop.continue": "Continue",
+  "stop.more": "more",
+  "stop.less": "less",
+  "stop.condition": "Stop condition:",
   "stop.continueTitle": "Lifts the stop; the stopped step runs again in its session, unless it was skipped",
   /** Continue when the stopped step left commits: the Keep or Discard choice opens first. */
   "stop.continueChoose": "Continue…",
