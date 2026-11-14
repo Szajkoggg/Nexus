@@ -68,7 +68,7 @@ export function draftOf(chat: readonly ChatEntry[], queue: string): { at: string
 export const pinsText = (revision: number, stopped: boolean) => t(stopped ? "approval.pinsLifts" : "approval.pins", { revision });
 
 /** The reference "Ask the orchestrator…" puts at the start of the composer. */
-export const queueReference = (queue: string, revision: number) => `About queue ${queue} (revision ${revision}): `;
+export const queueReference = (queue: string, revision: number) => t("approval.reference", { queue, revision });
 
 /** The composer's text with the reference at its start: once, before what was already typed. */
 export function withReference(text: string, reference: string): string {

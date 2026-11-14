@@ -12,7 +12,7 @@ import { nav, useNav } from "../nav.ts";
 import { usePhone } from "../phone.ts";
 import { firstUnread, hasUnread, opening, placeKey, readPlace, seenUpTo, unreadCount, usePlaces, writePlace } from "../chatPlace.ts";
 import { EffortSelect, ModelSelect, useEfforts } from "./Settings.tsx";
-import { t } from "../i18n.ts";
+import { rich, t } from "../i18n.ts";
 
 interface View { session: SessionFile | null; state: "working" | "idle" | "exited"; runtime: RuntimeFile | null; chat: ChatEntry[]; model: string | null; effort: string | null }
 
@@ -48,14 +48,14 @@ function ChatColumn({ title, over, who, about, view, ready, place, status, showT
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {!bare && (
         <header className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-line px-5 py-3">
-          {onBack && <button onClick={onBack} className={`rounded-md px-1.5 text-lg text-fg-2 hover:text-fg ${side ? "" : "sm:hidden"}`} aria-label="Back">‹</button>}
+          {onBack && <button onClick={onBack} className={`rounded-md px-1.5 text-lg text-fg-2 hover:text-fg ${side ? "" : "sm:hidden"}`} aria-label={t("common.back")}>‹</button>}
           <div className="min-w-0">
             <div className="text-xs text-fg-3">{over}</div>
             <h2 className="truncate font-semibold text-fg">{title}</h2>
             {about}
           </div>
           <span className="text-xs text-fg-3">{statusLine(view, status)}</span>
-          {menu && <span className="ml-auto"><Menu items={menu} down label="Chat actions" /></span>}
+          {menu && <span className="ml-auto"><Menu items={menu} down label={t("chat.actions")} /></span>}
         </header>
       )}
       <QuoteTarget.Provider value={quote}>
@@ -65,19 +65,19 @@ function ChatColumn({ title, over, who, about, view, ready, place, status, showT
           <div className={`${measure} ${phone ? "space-y-3" : "space-y-4"}`}>
             {ready && shown.length === 0 && <div className="mt-10 text-center text-sm text-fg-3">{empty}</div>}
             {shown.map(({ c, i }) => <div key={i} data-i={i}><Entry c={c} flat={!phone} who={who} /></div>)}
-            {ready && view?.state === "working" && <div className="text-xs text-fg-3"><span className="animate-pulse">●</span> working…</div>}
+            {ready && view?.state === "working" && <div className="text-xs text-fg-3"><span className="animate-pulse">●</span> {t("chat.working")}</div>}
           </div>
         </div>
         {p.unread > 0 && (
           <button onClick={p.jump} className="absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-line-strong bg-surface-3 px-3.5 py-1.5 text-xs font-semibold text-fg shadow-lg hover:bg-surface-4 max-lg:min-h-11 max-lg:px-4">
-            {p.unread} new ↓
+            {t("chat.newBelow", { count: p.unread })}
           </button>
         )}
       </div>
       </QuoteTarget.Provider>
       <footer className={phone ? "border-t border-line p-3" : "px-6 pb-5 pt-3"}>
         <div className={measure}>
-          <Composer rows={3} draft={draft} placeholder={placeholder} button="Send" onSubmit={async (t) => { p.follow(); await onSend(t); }} oneLine={phone} card={!phone} />
+          <Composer rows={3} draft={draft} placeholder={placeholder} button={t("details.send")} onSubmit={async (text) => { p.follow(); await onSend(text); }} oneLine={phone} card={!phone} />
         </div>
       </footer>
     </div>
@@ -162,7 +162,7 @@ function statusLine(view: View | undefined, status: string): string {
   const rt = view?.runtime;
   const pct = rt?.context_tokens && rt.context_window ? Math.round((100 * rt.context_tokens) / rt.context_window) : undefined;
   const model = rt?.model ? rt.model.replace(/^claude-/, "") : view?.model;
-  return `${status}${model ? ` · ${model}` : ""}${view?.effort ? ` · ${view.effort} effort` : ""}${pct !== undefined ? ` · ${pct}% context` : ""}`;
+  return `${status}${model ? ` · ${model}` : ""}${view?.effort ? ` · ${t("run.effort", { effort: view.effort })}` : ""}${pct !== undefined ? ` · ${t("chat.context", { pct })}` : ""}`;
 }
 
 /**
@@ -281,7 +281,7 @@ function Panel({ inline, desk, which, head, children }: {
 }
 
 const stateText = (v: View | undefined) =>
-  v?.state === "working" ? "working…" : v?.session ? (v.state === "idle" ? "ready" : "asleep: wakes with your next message") : "starts with your first message";
+  t(v?.state === "working" ? "chat.working" : v?.session ? (v.state === "idle" ? "chat.ready" : "chat.asleep") : "chat.startsFirst");
 
 // ---------------------------------------------------------------- the orchestrator
 
@@ -291,31 +291,31 @@ export function ChatPanel({ project, name, view, onChanged, inline, desk }: {
 }) {
   const [showTools, setShowTools] = useState(false);
   const fresh: MenuEntry[] = view?.session ? [{
-    label: "New conversation…", onSelect: () => {
-      if (confirm("Start a new conversation? The orchestrator forgets this one (its transcript stays on disk).")) {
+    label: t("chat.newConversationMenu"), onSelect: () => {
+      if (confirm(t("chat.newConversationConfirm"))) {
         void act(project, "POST", "/orchestrator/reset").then(onChanged);
       }
     },
   }] : [];
-  const menu: MenuEntry[] = [{ label: "Show tool calls", checked: showTools, onSelect: () => setShowTools(!showTools) }, ...fresh];
+  const menu: MenuEntry[] = [{ label: t("chat.showTools"), checked: showTools, onSelect: () => setShowTools(!showTools) }, ...fresh];
   // On a desktop the chat's state, "Tool calls" and ⋯ (New conversation) are in the column's header.
   const head = desk && <>
     <span className="min-w-0 truncate text-xs text-fg-3">{statusLine(view, stateText(view))}</span>
     <button onClick={() => setShowTools(!showTools)} aria-pressed={showTools}
-      className={`shrink-0 rounded-md px-2.5 py-1 text-xs ${showTools ? "bg-surface-3 text-fg" : "text-fg-2 hover:bg-surface-3 hover:text-fg"}`}>Tool calls</button>
-    {fresh.length > 0 && <Menu items={fresh} down label="Chat actions" />}
+      className={`shrink-0 rounded-md px-2.5 py-1 text-xs ${showTools ? "bg-surface-3 text-fg" : "text-fg-2 hover:bg-surface-3 hover:text-fg"}`}>{t("chat.toolCalls")}</button>
+    {fresh.length > 0 && <Menu items={fresh} down label={t("chat.actions")} />}
   </>;
   return (
     <Panel inline={inline} desk={desk} which="chat" head={head}>
       <ChatColumn
-        over={name} title="Orchestrator" who="Orchestrator" view={view} status={stateText(view)}
+        over={name} title={t("desk.orchestrator")} who={t("desk.orchestrator")} view={view} status={stateText(view)}
         ready={!!view && (!view.session || view.session.project === project)} place={placeKey(project, "orchestrator")} showTools={showTools} menu={inline ? menu : undefined} bare={!!desk}
         empty={<>
-          <p>Plan queues with the orchestrator, ask where things stand, or have it start a run.</p>
-          <p className="mt-1 text-fg-3">It reads the project and works through <code>nexus</code>; it never edits files or approves queues.</p>
+          <p>{t("chat.orchestratorEmpty")}</p>
+          <p className="mt-1 text-fg-3">{rich("chat.orchestratorEmptyNote", { nexus: <code key="nexus">nexus</code> })}</p>
         </>}
         draft={draftKey(project, "orchestrator")}
-        placeholder="Message the orchestrator…"
+        placeholder={t("chat.orchestratorPlaceholder")}
         onSend={async (text) => { await act(project, "POST", "/orchestrator/messages", { text }); onChanged(); }}
       />
     </Panel>
@@ -332,9 +332,9 @@ function AboutStep({ project, c, className = "" }: { project: string; c: Session
   if (!c.about) return null;
   const { queue, step } = c.about;
   return (
-    <button onClick={(e) => { e.stopPropagation(); nav.closeThenItem("ideas", project, queue, step); }} title="Open the step"
+    <button onClick={(e) => { e.stopPropagation(); nav.closeThenItem("ideas", project, queue, step); }} title={t("chat.openStep")}
       className={`inline-flex max-w-full items-center gap-1 truncate rounded bg-surface-3 px-1.5 py-0.5 text-xs text-accent hover:bg-surface-4 ${className}`}>
-      <span className="text-fg-3">about step</span> <span className="font-mono">{queue}/{step}</span>
+      <span className="text-fg-3">{t("chat.aboutStep")}</span> <span className="font-mono">{queue}/{step}</span>
     </button>
   );
 }
@@ -368,14 +368,14 @@ export function StepChat({ project, queue, step, version }: { project: string; q
   return (
     <div>
       <div className="flex flex-wrap items-center gap-2">
-        <button onClick={() => void go(false)} disabled={busy} title="Talk this step through with a thinking partner; nothing changes in the run"
+        <button onClick={() => void go(false)} disabled={busy} title={t("chat.aboutThisTitle")}
           className="flex items-center gap-1.5 rounded-md border border-line-strong px-2.5 py-1 text-sm text-fg hover:border-fg-3/60 hover:bg-surface-3 disabled:opacity-40 max-lg:min-h-11 max-lg:px-3.5">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
-          Chat about this
+          {t("chat.aboutThis")}
         </button>
         {mine.length > 0 && (
           <button onClick={() => void go(true)} disabled={busy} className="rounded-md px-2 py-1 text-xs text-fg-2 hover:bg-surface-3 hover:text-fg disabled:opacity-40 max-lg:min-h-11 max-lg:px-3">
-            New conversation
+            {t("chat.newConversation")}
           </button>
         )}
       </div>
@@ -385,7 +385,7 @@ export function StepChat({ project, queue, step, version }: { project: string; q
             <li key={c.id}>
               <button onClick={() => nav.conversation(c.id)} className="flex max-w-full items-baseline gap-2 text-left text-xs text-fg-2 hover:text-fg">
                 <span className="truncate text-accent">{c.title}</span>
-                <span className="shrink-0 text-fg-3">{c.messages} message{c.messages === 1 ? "" : "s"} · <TimeAgo at={c.last_at} /></span>
+                <span className="shrink-0 text-fg-3">{t("chat.messages", { count: c.messages })} · <TimeAgo at={c.last_at} /></span>
               </button>
             </li>
           ))}
@@ -417,18 +417,18 @@ export function ConversationsPanel({ project, name, version, onChanged, defaultR
   const patch = (body: unknown) => act(project, "PATCH", `/conversations/${enc(open!)}`, body).then(onChanged, (e: Error) => alert(e.message));
   // The menu of an open conversation: what its header had (Hand to orchestrator, More…) and the tool calls.
   const menu: MenuEntry[] | undefined = !creating && open && current ? [
-    { label: "Show tool calls", checked: showTools, onSelect: () => setShowTools(!showTools) },
+    { label: t("chat.showTools"), checked: showTools, onSelect: () => setShowTools(!showTools) },
     {
-      label: "Hand to orchestrator…", onSelect: () => {
-        if (confirm("Hand this conversation to the orchestrator? The partner writes a summary (decisions, open questions, proposed work), which goes into the orchestrator's chat.")) {
+      label: t("chat.handOff"), onSelect: () => {
+        if (confirm(t("chat.handOffConfirm"))) {
           void act(project, "POST", `/conversations/${enc(open)}/handoff`).then(onChanged);
         }
       },
     },
-    { label: "Rename…", onSelect: () => { const t = prompt("Topic", current.title); if (t) void patch({ title: t }); } },
-    { label: current.archived ? "Unarchive" : "Archive", onSelect: () => void patch({ archived: !current.archived }) },
-    { heading: "Effort (from the next message)" },
-    { label: "default", checked: !current.effort, onSelect: () => void patch({ effort: null }) },
+    { label: t("chat.rename"), onSelect: () => { const title = prompt(t("chat.topic"), current.title); if (title) void patch({ title }); } },
+    { label: t(current.archived ? "chat.unarchive" : "chat.archive"), onSelect: () => void patch({ archived: !current.archived }) },
+    { heading: t("chat.effortHeading") },
+    { label: t("run.default"), checked: !current.effort, onSelect: () => void patch({ effort: null }) },
     ...efforts.map((x) => ({ label: x, checked: current.effort === x, onSelect: () => void patch({ effort: x }) })),
   ] : undefined;
 
@@ -441,11 +441,11 @@ export function ConversationsPanel({ project, name, version, onChanged, defaultR
           <div className="flex items-center gap-2 border-b border-line px-4 py-3">
             <div className="min-w-0 flex-1">
               <div className="text-xs text-fg-3">{name}</div>
-              <h2 className="font-semibold text-fg">Ideas</h2>
+              <h2 className="font-semibold text-fg">{t("desk.ideas")}</h2>
             </div>
           </div>
         )}
-        <div className="p-3"><Button onClick={() => nav.open("conversation:new")}>New conversation</Button></div>
+        <div className="p-3"><Button onClick={() => nav.open("conversation:new")}>{t("chat.newConversation")}</Button></div>
         <ul className="scroll-thin flex-1 overflow-y-auto px-2 pb-3">
           {shown.map((c) => (
             <li key={c.id}>
@@ -456,15 +456,15 @@ export function ConversationsPanel({ project, name, version, onChanged, defaultR
                   {c.id !== open && hasUnread(c.last_at, readPlace(placeKey(project, "conversation", c.id))?.seen) && <UnreadMark n={-1} />}
                   <span className="truncate">{c.title}</span>
                 </span>
-                <span className="block text-xs text-fg-3">{c.about && <span className="font-mono text-accent/80">{c.about.queue}/{c.about.step} · </span>}{c.runtime} · {c.messages} messages · <TimeAgo at={c.last_at} /></span>
+                <span className="block text-xs text-fg-3">{c.about && <span className="font-mono text-accent/80">{c.about.queue}/{c.about.step} · </span>}{c.runtime} · {t("chat.messages", { count: c.messages })} · <TimeAgo at={c.last_at} /></span>
               </button>
             </li>
           ))}
-          {list && shown.length === 0 && <li className="px-3 py-2 text-sm text-fg-3">No conversation yet.</li>}
+          {list && shown.length === 0 && <li className="px-3 py-2 text-sm text-fg-3">{t("chat.noConversation")}</li>}
         </ul>
         {(list ?? []).some((c) => c.archived) && (
           <label className="flex items-center gap-2 border-t border-line px-4 py-2 text-xs text-fg-3">
-            <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} className="accent-accent" /> show archived
+            <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} className="accent-accent" /> {t("chat.showArchived")}
           </label>
         )}
       </nav>
@@ -474,23 +474,23 @@ export function ConversationsPanel({ project, name, version, onChanged, defaultR
       {!creating && open && current && (
         <ChatColumn key={open}
           ready={view?.session?.id === open} place={placeKey(project, "conversation", open)}
-          over={`${name} · ideas`} title={current.title ?? "Conversation"} who="Partner" about={<AboutStep project={project} c={current} className="mt-1" />} view={view} status={stateText(view)} onBack={() => nav.close("conversation")}
+          over={t("chat.ideasOf", { project: name })} title={current.title ?? t("chat.conversation")} who={t("chat.partner")} about={<AboutStep project={project} c={current} className="mt-1" />} view={view} status={stateText(view)} onBack={() => nav.close("conversation")}
           showTools={showTools} menu={menu}
           empty={<>
-            <p>Think something through: gameplay, a mechanic, the look, what to build next.</p>
+            <p>{t("chat.ideasEmpty")}</p>
             <p className="mt-1 text-fg-3">
-              The partner reads the project{view?.notes_dir ? <> and writes notes only in <code>{view.notes_dir}</code></> : <>; it writes nothing until a notes folder is set in the project's settings</>}. It starts no work: hand the conversation to the orchestrator for that.
+              {view?.notes_dir ? rich("chat.partnerNotes", { folder: <code key="folder">{view.notes_dir}</code> }) : t("chat.partnerNoNotes")}
             </p>
           </>}
           draft={draftKey(project, "conversation", open)}
-          placeholder="Think out loud…"
+          placeholder={t("chat.ideasPlaceholder")}
           onSend={async (text) => { await act(project, "POST", `/conversations/${enc(open)}/messages`, { text }); onChanged(); }}
         />
       )}
       {!side && !creating && !open && (
         <div className="hidden flex-1 flex-col items-center justify-center p-8 text-center text-sm text-fg-3 sm:flex">
-          <p>Open a conversation, or start a new one.</p>
-          <p className="mt-1 text-fg-3">Each conversation is its own session: topics do not mix, and each can be picked up later.</p>
+          <p>{t("chat.openOrStart")}</p>
+          <p className="mt-1 text-fg-3">{t("chat.ownSession")}</p>
         </div>
       )}
     </Panel>
@@ -519,27 +519,27 @@ function NewConversation({ project, defaultRuntime, onBack, onCreated }: {
   return (
     <div className="flex min-w-0 flex-1 flex-col">
       <header className="flex items-center gap-2 border-b border-line px-5 py-3">
-        <button onClick={onBack} className={`rounded-md px-1.5 text-lg text-fg-2 hover:text-fg ${useContext(Side) ? "" : "sm:hidden"}`} aria-label="Back">‹</button>
-        <h2 className="flex-1 font-semibold text-fg">New conversation</h2>
+        <button onClick={onBack} className={`rounded-md px-1.5 text-lg text-fg-2 hover:text-fg ${useContext(Side) ? "" : "sm:hidden"}`} aria-label={t("common.back")}>‹</button>
+        <h2 className="flex-1 font-semibold text-fg">{t("chat.newConversation")}</h2>
       </header>
       <div className="max-w-lg space-y-3 p-5">
-        <label className="block text-sm text-fg">Topic
-          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Gameplay: mining and defense" autoFocus className={`mt-1 ${field}`} />
+        <label className="block text-sm text-fg">{t("chat.topic")}
+          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t("chat.topicPlaceholder")} autoFocus className={`mt-1 ${field}`} />
         </label>
         <div className="flex flex-wrap gap-3">
-          <label className="text-sm text-fg">Runtime
+          <label className="text-sm text-fg">{t("run.field.runtime")}
             <select value={runtime} onChange={(e) => { setRuntime(e.target.value as "claude" | "codex"); setModel(""); setEffort(""); }} className={`mt-1 ${field}`}>
               <option value="claude">Claude Code</option><option value="codex">Codex</option>
             </select>
           </label>
-          <label className="text-sm text-fg">Model
+          <label className="text-sm text-fg">{t("run.field.model")}
             <span className="mt-1 block"><ModelSelect runtime={runtime} value={model} onChange={setModel} className="py-1.5" /></span>
           </label>
-          <label className="text-sm text-fg">Effort
+          <label className="text-sm text-fg">{t("run.field.effort")}
             <span className="mt-1 block"><EffortSelect runtime={runtime} model={model} value={effort} onChange={setEffort} className="py-1.5" /></span>
           </label>
         </div>
-        <Button onClick={() => void create()}>Start</Button>
+        <Button onClick={() => void create()}>{t("run.start")}</Button>
         {error && <p className="text-sm text-danger">{error}</p>}
       </div>
     </div>

@@ -6,15 +6,18 @@
 // more in a small inline script in index.html, before the stylesheet paints, so a page never shows the wrong theme
 // first; keep the two in step.
 
+import type { Key } from "./i18n.ts";
+
 export const THEMES = ["graphite", "paper", "honey"] as const;
 export type Theme = (typeof THEMES)[number];
 export type ThemeChoice = Theme | "system";
 
-export const CHOICES: { value: ThemeChoice; label: string }[] = [
-  { value: "system", label: "Follow the system (Paper when light, Graphite when dark)" },
-  { value: "graphite", label: "Graphite (dark)" },
-  { value: "paper", label: "Paper (light)" },
-  { value: "honey", label: "Honey (warm dark)" },
+/** The choices offered in the settings, each with its words' key in the catalogue (messages/en.ts). */
+export const CHOICES: { value: ThemeChoice; label: Key }[] = [
+  { value: "system", label: "settings.theme.system" },
+  { value: "graphite", label: "settings.theme.graphite" },
+  { value: "paper", label: "settings.theme.paper" },
+  { value: "honey", label: "settings.theme.honey" },
 ];
 
 /** The localStorage key; index.html's inline script reads it too. */

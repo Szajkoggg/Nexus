@@ -905,6 +905,11 @@ Code never reads a translated text back: a status built from catalogue texts kee
 its words (`HonestStatus.says` in `queueStatus.ts`), and its shorter forms (the rail's few words) are chosen from the
 key, not by matching the English label.
 
+A test keeps it so (`apps/web/test/strings.test.ts`): it parses every component and fails on a literal with words
+in JSX text or in a text prop (`title`, `aria-label`, `placeholder`, `alt`, and our components' `label`, `hint`,
+`button`), naming the file and line. Its exceptions are listed in it with their reasons: product names (Nexus,
+Claude Code, Codex), text inside `<code>` (commands, paths), and two path fragments.
+
 Not in the catalogue: texts that come from the server (an action's error message, a run's reason, the stop's place)
 and `packages/protocol/src/times.ts` (`retryLine`, the server's own times), which the server also uses; these stay
 English until a queue decides how the server learns the interface language.

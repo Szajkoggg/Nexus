@@ -6,6 +6,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { usePhone } from "../phone.ts";
+import { t } from "../i18n.ts";
 
 /** What quoting does in the chat around it: adds the text as a quote to that chat's message box. */
 export const QuoteTarget = createContext<((text: string) => void) | null>(null);
@@ -71,10 +72,10 @@ export function QuoteSelection({ scroller }: { scroller: RefObject<HTMLElement |
   return createPortal(
     <button
       onPointerDown={(e) => e.preventDefault()} onMouseDown={(e) => e.preventDefault()} onClick={go}
-      title="Quote the selection in your message (Alt+Q)" data-quote-button
+      title={t("quote.title")} data-quote-button
       className="fixed z-50 flex h-[34px] items-center gap-1.5 rounded-full border border-line-strong bg-surface-3 px-3 text-xs font-semibold text-fg shadow-lg hover:bg-surface-4 max-lg:h-11 max-lg:px-4"
       style={{ left: at.left, top: at.top }}>
-      <QuoteIcon />Quote
+      <QuoteIcon />{t("quote.button")}
     </button>,
     document.body,
   );
@@ -100,7 +101,7 @@ export function Replyable({ as: Tag, source, children, className = "", ...rest }
   return (
     <Tag className={`reply-item relative [&:hover:not(:has(.reply-item:hover))>.reply-btn]:opacity-100 ${className}`} {...rest}>
       {body}
-      <button onClick={() => quote(source)} title="Reply to this: quotes it in your message" aria-label="Reply to this"
+      <button onClick={() => quote(source)} title={t("quote.replyTitle")} aria-label={t("quote.reply")}
         className="reply-btn absolute -right-7 top-0 grid h-6 w-6 place-items-center rounded-md text-fg-3 opacity-0 hover:bg-surface-4 hover:text-fg focus:opacity-100 max-lg:-right-8 max-lg:h-8 max-lg:w-8">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 14 4 9l5-5" /><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" /></svg>
       </button>

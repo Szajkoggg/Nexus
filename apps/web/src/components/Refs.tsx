@@ -10,6 +10,7 @@ import { nav } from "../nav.ts";
 import { TONE } from "./QueueRow.tsx";
 import { Replyable } from "./Quote.tsx";
 import { sourceAt } from "../quote.ts";
+import { statusWord } from "./ui.tsx";
 
 interface Refs { project: string; queues: readonly QueueView[]; index: RefIndex }
 const RefsContext = createContext<Refs | null>(null);
@@ -33,7 +34,7 @@ function RefLink({ refs, target, children }: { refs: Refs; target: RefTarget; ch
   const step = target.step ? q?.steps.find((s) => s.id === target.step) : undefined;
   const tone = q && !target.step ? queueStatus(q).tone : undefined;
   const dot = step ? STEP_DOT[step.status] : tone && QUEUE_DOT.has(tone) ? TONE[tone][0] : undefined;
-  const title = step ? `${target.queue}/${step.id} ${step.title} · ${step.status}` : q ? `${q.id} ${q.title} · ${queueStatus(q).label}` : target.queue;
+  const title = step ? `${target.queue}/${step.id} ${step.title} · ${statusWord(step.status)}` : q ? `${q.id} ${q.title} · ${queueStatus(q).label}` : target.queue;
   return (
     <a href={hashOf(refs.project, target)} title={title}
       onClick={(e) => { if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey) return; e.preventDefault(); nav.item(refs.project, target.queue, target.step); }}
