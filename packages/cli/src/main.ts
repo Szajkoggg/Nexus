@@ -356,15 +356,17 @@ async function server(method: "GET" | "POST", path: string, body?: unknown): Pro
   return j;
 }
 
+/** A time as the user reads it, on this machine: "2026-11-15 06:00". */
+const shownTime = (iso: string) => new Date(iso).toLocaleString("sv-SE").slice(0, 16);
+
 function printAway(a: { on: boolean; until?: string } | undefined): void {
-  console.log(a?.on ? `away mode: on until ${new Date(a.until!).toLocaleString("sv-SE").slice(0, 16)} (level-2 steps are reviewed as level 3)` : "away mode: off");
+  console.log(a?.on ? `away mode: on until ${shownTime(a.until!)} (level-2 steps are reviewed as level 3)` : "away mode: off");
 }
 
 function printPlan(p: Record<string, any> | null | undefined): void {
   if (!p) { console.log("planned update: none"); return; }
-  const local = (iso: string) => new Date(iso).toLocaleString("sv-SE").slice(0, 16);
   const what = p.after ? `after ${p.after.step ? `step ${p.after.queue}/${p.after.step}` : `queue ${p.after.queue}`} of project ${p.after.project}`
-    : `at ${local(p.at)}${p.deadline ? `, deadline ${local(p.deadline)}` : ""}`;
+    : `at ${shownTime(p.at)}${p.deadline ? `, deadline ${shownTime(p.deadline)}` : ""}`;
   console.log(`planned update: ${what}${p.ref ? ` (ref ${p.ref})` : ""}${p.started ? "; started" : p.waiting ? `; waiting: ${p.waiting}` : ""}`);
   if (p.warning) console.log(`  warning: ${p.warning}`);
 }
@@ -397,10 +399,9 @@ const commands: Record<string, () => void | Promise<void>> = {
       // asked. A worker or a thinking partner never may (they run on the very server they would restart).
       const sid = o.session ?? process.env.NEXUS_SESSION;
       if (sid) {
-        const dir = process.env.NEXUS_DIR ?? findNexusDir();
         let role: string | undefined;
         let project: string | undefined;
-        try { const st = dir ? new ProjectStore(dir) : undefined; role = st?.readSession(sid).role; project = st?.readProject().id; } catch { role = undefined; }
+        try { const st = store(); role = st.readSession(sid).role; project = st.readProject().id; } catch { role = undefined; }
         const what = sub === "cancel-plan" ? "cancel a planned update of" : o.after !== undefined || o.at !== undefined ? "plan an update of" : sub;
         if (role !== "orchestrator") throw new UsageError(`only the user or an orchestrator may ${what} the Nexus server, not a ${role ?? "session"}`);
         // The orchestrator that asks is told the outcome after the restart (or if the update fails).
@@ -419,9 +420,8 @@ const commands: Record<string, () => void | Promise<void>> = {
       const [queue, step, more] = need(o.after, "--after <queue>[/<step>]").split("/");
       if (!queue || more !== undefined || step === "") throw new UsageError("--after <queue>[/<step>], e.g. --after PD or --after PD/PD1");
       // The queue is one of this project's: the orchestrator's own, or the one of the directory this runs in.
-      const dir = process.env.NEXUS_DIR ?? findNexusDir();
       let project: string | undefined;
-      try { project = dir ? new ProjectStore(dir).readProject().id : undefined; } catch { project = undefined; }
+      try { project = store().readProject().id; } catch { project = undefined; }
       if (!project) throw new UsageError("run it in a Nexus project (no .nexus/ found here): --after names a queue of that project");
       const r = await server("POST", "/api/server/plan", { after: { project, queue, step }, ref: o.ref, by });
       console.log(`ok: ${r.text}`);
