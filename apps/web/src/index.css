@@ -91,6 +91,9 @@ body { background: var(--color-canvas); color: var(--color-fg); }
      over a long reply, and flashed for a moment when reached. */
   .md [data-md-line] { scroll-margin-top: 3rem; }
 }
+/* A chat search's matches (components/ChatTools.tsx); the current match's message has them stronger. */
+[data-chat-scroll] mark { background: color-mix(in oklab, var(--color-warn) 30%, transparent); color: inherit; border-radius: 0.2rem; padding: 0 0.05rem; }
+[data-chat-scroll] .search-current mark { background: var(--color-warn); color: var(--color-canvas); }
 .md-flash { animation: md-flash 1.6s ease-out; border-radius: 0.25rem; }
 @keyframes md-flash { from { background: color-mix(in oklab, var(--color-accent) 22%, transparent); } to { background: transparent; } }
 

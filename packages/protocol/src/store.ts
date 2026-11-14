@@ -9,7 +9,7 @@ import { monotonicFactory } from "ulid";
 import YAML from "yaml";
 import type { z } from "zod";
 import {
-  Activity, Applied, ChatEntry, Refusal, Delivery, Event, GlobalSettings, InboxEntry, NoteMeta, GitFile, ProjectFile, PushFile, QueueFile, RegistryFile, RunFile, RuntimeFile, SessionFile, StartFile, StoredProject, TurnRecord, UsageFile,
+  Activity, Applied, ChatEntry, PinsFile, Refusal, Delivery, Event, GlobalSettings, InboxEntry, NoteMeta, GitFile, ProjectFile, PushFile, QueueFile, RegistryFile, RunFile, RuntimeFile, SessionFile, StartFile, StoredProject, TurnRecord, UsageFile,
   type Note,
 } from "./schemas.ts";
 import { applyChange, builtInSettings, effectiveProject, migrateStored, storedFrom } from "./settings.ts";
@@ -62,11 +62,12 @@ export function writeYaml(file: string, data: unknown): void {
   renameRetrying(tmp, file);
 }
 
-export interface JsonlRead<T> { entries: T[]; errors: string[] }
+/** A JSONL file read: its valid entries, and for each the index of its line in the file (from 0); what was wrong. */
+export interface JsonlRead<T> { entries: T[]; lines: number[]; errors: string[] }
 
 /** Reads a JSONL log. A final line without a newline is still being written and is skipped. */
 export function readJsonl<S extends z.ZodType>(file: string, schema: S): JsonlRead<z.infer<S>> {
-  const out: JsonlRead<z.infer<S>> = { entries: [], errors: [] };
+  const out: JsonlRead<z.infer<S>> = { entries: [], lines: [], errors: [] };
   if (!existsSync(file)) return out;
   const text = readFileSync(file, "utf8");
   const complete = text.endsWith("\n") ? text : text.slice(0, text.lastIndexOf("\n") + 1);
@@ -74,7 +75,7 @@ export function readJsonl<S extends z.ZodType>(file: string, schema: S): JsonlRe
     if (!line.trim()) return;
     try {
       const r = schema.safeParse(JSON.parse(line));
-      if (r.success) out.entries.push(r.data);
+      if (r.success) { out.entries.push(r.data); out.lines.push(i); }
       else out.errors.push(`${file}:${i + 1}: ${r.error.issues.map((x) => `${x.path.join(".")} ${x.message}`).join("; ")}`);
     } catch (e) {
       out.errors.push(`${file}:${i + 1}: ${(e as Error).message}`);
@@ -277,6 +278,19 @@ export class ProjectStore {
 
   readChat(sessionId: string): JsonlRead<ChatEntry> { return readJsonl(join(this.sessionDir(sessionId), "chat.jsonl"), ChatEntry); }
   appendChat(sessionId: string, c: z.input<typeof ChatEntry>): void { appendJsonl(join(this.sessionDir(sessionId), "chat.jsonl"), ChatEntry.parse(c)); }
+
+  /** The chat's pinned messages (none when the file is missing or broken). Written only by the server. */
+  readPins(sessionId: string): PinsFile {
+    const f = join(this.sessionDir(sessionId), "pins.json");
+    try { return existsSync(f) ? PinsFile.parse(JSON.parse(readFileSync(f, "utf8"))) : { pins: [] }; } catch { return { pins: [] }; }
+  }
+  writePins(sessionId: string, p: PinsFile): void {
+    const f = join(this.sessionDir(sessionId), "pins.json");
+    mkdirSync(dirname(f), { recursive: true });
+    const tmp = `${f}.${process.pid}.tmp`;
+    writeFileSync(tmp, JSON.stringify(PinsFile.parse(p)), "utf8");
+    renameRetrying(tmp, f);
+  }
 
   readRuntime(sessionId: string): RuntimeFile | undefined {
     const f = join(this.sessionDir(sessionId), "runtime.json");

@@ -70,6 +70,12 @@ questions** goes to them. The line stays in sight while you read the reply. The 
 written (its Markdown); on a desktop it shows when you hover the message. A code block has its own copy icon at its
 top right.
 
+**Search and pins.** The magnifier in a chat's header searches the whole chat, also what is older than what the chat
+shows: the matches are marked, the newest first; ↑ (Enter) goes to older ones, ↓ (Shift+Enter) to newer ones, Esc
+closes. The pin beside a message's copy icon pins it to the top of the chat (on a desktop it shows on hover; a pinned
+message's pin stays, filled): the two most recently pinned show there, the others behind "N more pinned"; a click goes
+to the message, ✕ unpins it. Pins belong to the conversation: a new orchestrator conversation starts without them.
+
 **Pictures.** Paste a screenshot (Ctrl+V), drop a picture on the chat, or use the paperclip beside the box, in the
 orchestrator's chat, in a conversation and on the phone. PNG, JPEG, WebP or GIF up to 10 MB; anything else (an
 iPhone HEIC photo, say) shows "only PNG, JPEG, WebP or GIF up to 10 MB". The picture shows as a thumbnail above the

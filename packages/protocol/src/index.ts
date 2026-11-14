@@ -11,3 +11,4 @@ export * from "./reports.ts";
 export * from "./pictures.ts";
 export * from "./languages.ts";
 export * from "./questions.ts";
+export * from "./chat.ts";

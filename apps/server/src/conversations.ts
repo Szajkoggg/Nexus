@@ -15,6 +15,7 @@ import { findStep, sinceThen, stepSeed } from "./step-seed.ts";
 import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Hosted, type Launch } from "./agent-host.ts";
 import type { Orchestrator } from "./orchestrator.ts";
 import { partnerBriefing } from "./prompts.ts";
+import { chatView } from "./chats.ts";
 
 const READ = ["Read", "Grep", "Glob", "Bash(nexus status:*)", "Bash(git log:*)", "Bash(git status:*)", "Bash(git diff:*)", "Bash(git show:*)"];
 /** What a hand-over covers (decided 2026-11-14): this conversation's topics, and the dates of the decisions it passes on. */
@@ -53,7 +54,7 @@ export class Conversations {
 
   view(id: string) {
     const s = this.session(id);
-    return { session: s, state: this.host.get(id)?.proc.state ?? "exited", runtime: this.store.readRuntime(id) ?? null, chat: this.store.readChat(id).entries.slice(-400), model: s.model ?? null, effort: s.effort ?? null, notes_dir: this.store.readProject().conversations.notes_dir ?? null };
+    return { session: s, state: this.host.get(id)?.proc.state ?? "exited", runtime: this.store.readRuntime(id) ?? null, ...chatView(this.store, id, 400), model: s.model ?? null, effort: s.effort ?? null, notes_dir: this.store.readProject().conversations.notes_dir ?? null };
   }
 
   /**

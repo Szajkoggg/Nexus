@@ -1,6 +1,8 @@
 // Chats: the project's orchestrator, and conversations with a thinking partner.
-import { createContext, useCallback, useContext, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import type { ChatEntry, RuntimeFile, SessionFile } from "@nexus/protocol";
+import type { NumberedEntry } from "@nexus/protocol/chat";
+import { PinButton, PinsBar, SearchBar, SearchButton, type PinView, type SearchState } from "./ChatTools.tsx";
 import { act, enc, useFetch } from "../api.ts";
 import { Button, Clock, Composer, Menu, TimeAgo, type MenuEntry } from "./ui.tsx";
 import { CopyButton, ReplyTools } from "./MessageTools.tsx";
@@ -18,14 +20,18 @@ import { rich, t } from "../i18n.ts";
 import { SentPictures, filesOf, usePictures } from "./Pictures.tsx";
 import { splitPictures, withPictures } from "../pictures.ts";
 
-interface View { session: SessionFile | null; state: "working" | "idle" | "exited"; runtime: RuntimeFile | null; chat: ChatEntry[]; model: string | null; effort: string | null }
+/** A chat view: the newest entries with their lines in chat.jsonl, and the pinned messages (apps/server/src/chats.ts). */
+interface View { session: SessionFile | null; state: "working" | "idle" | "exited"; runtime: RuntimeFile | null; chat: NumberedEntry[]; pins: PinView[]; model: string | null; effort: string | null }
+
+/** A chat's search, open or not: its button is in the chat's header, or in the desktop column's for the orchestrator. */
+interface Search { open: boolean; set: (open: boolean) => void }
 
 export function useOrchestrator(project: string | undefined, version: unknown) {
   return useFetch<View>(project ? `/api/projects/${enc(project)}/orchestrator` : undefined, version);
 }
 
 /** A chat: what it is (its header; on a desktop's orchestrator chat, in the middle column's header), the messages, and the composer. */
-function ChatColumn({ project, title, over, who, about, view, ready, place, status, showTools, menu, empty, draft, placeholder, onSend, onBack, bare }: {
+function ChatColumn({ project, title, over, who, about, view, ready, place, status, showTools, menu, empty, draft, placeholder, onSend, onBack, bare, search }: {
   /** The project: where pictures are uploaded, and served from. */
   project: string;
   title: string; over: string;
@@ -40,12 +46,25 @@ function ChatColumn({ project, title, over, who, about, view, ready, place, stat
   menu?: MenuEntry[];
   /** No header of its own: the desktop's orchestrator chat, whose state is in the middle column's header. */
   bare?: boolean;
+  search: Search;
 }) {
   const side = useContext(Side);
   const phone = usePhone();
-  const full = ready ? view?.chat ?? [] : [];
+  const loaded = useMemo(() => (ready ? view?.chat ?? [] : []), [ready, view?.chat]);
+  const session = ready ? view?.session?.id : undefined;
+  // What the view sent, after what is older and was loaded to reach a match or a pin (useOlder).
+  const older = useOlder(project, session, loaded);
+  const full = older.full;
   const shown = full.map((c, i) => ({ c, i })).filter(({ c }) => showTools || c.kind !== "tool");
   const p = usePlace(place, full, ready, showTools, view?.state);
+  const goTo = useGoTo(p.scroller, full, older.load);
+  const s = useSearch(project, session, showTools, search, goTo);
+  const highlight = s?.query ?? "";
+  const current = s?.hits?.[s.at];
+  const pins = ready ? view?.pins ?? [] : [];
+  const pinned = new Set(pins.map((x) => x.line));
+  const pin = (line: number, on: boolean) => { if (session) void act(project, "POST", `/sessions/${enc(session)}/pins`, { line, pinned: on }).catch((e: Error) => alert(e.message)); };
+  const whoOf = (e: NumberedEntry) => (e.from === "user" ? t("chat.you") : e.from === "nexus" ? "Nexus" : who);
   // Quoting (Quote.tsx): a selection or a "reply to this" goes into this chat's box, after its draft.
   const quote = useCallback((text: string) => putDraftAndFocus(draft, withQuote(readDraft(draft), text)), [draft]);
   // On a desktop the text keeps a chat app's measure: a column of about 780 px in the middle.
@@ -73,18 +92,27 @@ function ChatColumn({ project, title, over, who, about, view, ready, place, stat
             {about}
           </div>
           <span className="text-xs text-fg-3">{statusLine(view, status)}</span>
-          {menu && <span className="ml-auto"><Menu items={menu} down label={t("chat.actions")} /></span>}
+          <span className="ml-auto flex items-center gap-1.5">
+            {ready && view?.session && <SearchButton open={search.open} onToggle={() => search.set(!search.open)} />}
+            {menu && <Menu items={menu} down label={t("chat.actions")} />}
+          </span>
         </header>
       )}
       <QuoteTarget.Provider value={quote}>
       <QuoteSelection scroller={p.scroller} />
       <div className="relative flex min-h-0 flex-1 flex-col">
+        {s && <SearchBar s={s} />}
+        <PinsBar key={session} pins={pins} who={whoOf} onGo={(line) => goTo(line, "pin")} onUnpin={(line) => pin(line, false)} />
         <div ref={p.scroller} onScroll={p.onScroll} data-chat-scroll={place} className={`scroll-thin flex-1 overflow-y-auto ${phone ? "px-5" : "px-6"}`}>
           {/* The space at the ends is the content's, not the scroller's padding: a long reply's sticky line (Reply) then
               sticks at the very edge of the view, with no strip of text scrolling past outside it. */}
           <div className={`${measure} ${phone ? "space-y-3 py-4" : "space-y-4 py-6"}`}>
             {ready && shown.length === 0 && <div className="mt-10 text-center text-sm text-fg-3">{empty}</div>}
-            {shown.map(({ c, i }) => <div key={i} data-i={i}><Entry c={c} flat={!phone} who={who} project={project} /></div>)}
+            {shown.map(({ c, i }) => (
+              <div key={c.line} data-i={i} data-line={c.line} className={c.line === current ? "search-current" : undefined}>
+                <Entry c={c} flat={!phone} who={who} project={project} highlight={highlight} pinned={pinned.has(c.line)} onPin={(on) => pin(c.line, on)} />
+              </div>
+            ))}
             {ready && view?.state === "working" && <div className="text-xs text-fg-3"><span className="animate-pulse">●</span> {t("chat.working")}</div>}
           </div>
         </div>
@@ -103,6 +131,89 @@ function ChatColumn({ project, title, over, who, about, view, ready, place, stat
       </footer>
     </div>
   );
+}
+
+/**
+ * Older entries than the view sent (its newest 300 or 400), loaded when a search's match or a pin is older: lines
+ * `from` up to the view's first. Old entries never change (chat.jsonl is append-only), so they are fetched once; when
+ * the view's window has moved on past them, the gap is filled.
+ */
+function useOlder(project: string, session: string | undefined, loaded: NumberedEntry[]) {
+  const [older, setOlder] = useState<{ session?: string; to: number; chat: NumberedEntry[] }>({ to: 0, chat: [] });
+  const first = loaded[0]?.line;
+  const mine = useMemo(() => (older.session === session ? older.chat : []), [older, session]);
+  const load = useCallback(async (from: number) => {
+    if (!session || first === undefined || from >= first) return;
+    const r = await fetch(`/api/projects/${enc(project)}/sessions/${enc(session)}/chat?from=${from}&to=${first}`);
+    if (!r.ok) return;
+    const j = await r.json() as { chat: NumberedEntry[] };
+    setOlder({ session, to: first, chat: j.chat });
+  }, [project, session, first]);
+  useEffect(() => { if (mine.length && first !== undefined && first > older.to) void load(mine[0]!.line); }, [first, older.to, mine, load]);
+  const full = useMemo(() => (mine.length && first !== undefined ? [...mine.filter((e) => e.line < first), ...loaded] : loaded), [mine, loaded, first]);
+  return { full, load };
+}
+
+/**
+ * Going to an entry by its line: a search's match (its first mark in the middle of the view) or a pinned message (at the
+ * top), flashed. An entry that is not loaded yet is loaded first (useOlder), and gone to once it is drawn.
+ */
+function useGoTo(scroller: RefObject<HTMLDivElement | null>, full: NumberedEntry[], load: (from: number) => Promise<void>) {
+  const pending = useRef<{ line: number; how: "search" | "pin" } | null>(null);
+  const scrollTo = useCallback((line: number, how: "search" | "pin") => {
+    const box = scroller.current;
+    const el = box?.querySelector<HTMLElement>(`[data-line="${line}"]`);
+    if (!box || !el) return false;
+    const target = (how === "search" && el.querySelector<HTMLElement>("mark")) || el;
+    const r = target.getBoundingClientRect(), b = box.getBoundingClientRect();
+    box.scrollTop += how === "search" ? r.top - b.top - box.clientHeight / 2 + Math.min(r.height, box.clientHeight / 2) / 2 : r.top - b.top - 12;
+    el.classList.remove("md-flash");
+    void el.offsetWidth; // restarts the flash
+    el.classList.add("md-flash");
+    return true;
+  }, [scroller]);
+  const goTo = useCallback((line: number, how: "search" | "pin") => {
+    pending.current = null;
+    if (scrollTo(line, how)) return;
+    pending.current = { line, how };
+    void load(line);
+  }, [scrollTo, load]);
+  useLayoutEffect(() => {
+    const p = pending.current;
+    if (p && scrollTo(p.line, p.how)) pending.current = null;
+  }, [full, scrollTo]);
+  return goTo;
+}
+
+/**
+ * The search of a chat (ChatTools.tsx): the server searches the whole chat.jsonl (a moment after the typing stops);
+ * the newest match is the first one shown, and ↑ goes to older ones.
+ */
+function useSearch(project: string, session: string | undefined, showTools: boolean, search: Search, goTo: (line: number, how: "search") => void): SearchState | undefined {
+  const [query, setQuery] = useState("");
+  const [hits, setHits] = useState<number[] | undefined>([]);
+  const [at, setAt] = useState(0);
+  useEffect(() => { if (!search.open) { setQuery(""); setHits([]); } }, [search.open]);
+  useEffect(() => {
+    if (!search.open || !session || !query.trim()) { setHits([]); return; }
+    setHits(undefined);
+    const ctl = new AbortController();
+    const timer = setTimeout(() => {
+      void fetch(`/api/projects/${enc(project)}/sessions/${enc(session)}/chat/search?q=${encodeURIComponent(query)}${showTools ? "&tools=1" : ""}`, { signal: ctl.signal })
+        .then((r) => r.json() as Promise<{ lines?: number[] }>)
+        .then((j) => { const lines = j.lines ?? []; setHits(lines); setAt(Math.max(0, lines.length - 1)); if (lines.length) goTo(lines.at(-1)!, "search"); })
+        .catch(() => { /* a newer query took over */ });
+    }, 250);
+    return () => { clearTimeout(timer); ctl.abort(); };
+  }, [project, session, showTools, search.open, query, goTo]);
+  if (!search.open) return undefined;
+  const go = (step: -1 | 1) => {
+    if (!hits?.length) return;
+    const n = (at + step + hits.length) % hits.length;
+    setAt(n);
+    goTo(hits[n]!, "search");
+  };
+  return { query, setQuery, hits, at, go, close: () => search.set(false) };
 }
 
 /**
@@ -192,7 +303,12 @@ function statusLine(view: View | undefined, status: string): string {
  * shows its time and can be copied as Markdown (MessageTools.tsx): on a desktop Copy shows on hover, on the phone it
  * is always there.
  */
-function Entry({ c, flat, who, project }: { c: ChatEntry; flat?: boolean; who: string; project: string }) {
+function Entry({ c, flat, who, project, highlight, pinned, onPin }: {
+  c: ChatEntry; flat?: boolean; who: string; project: string;
+  /** A search's query, its matches marked. */
+  highlight: string;
+  pinned: boolean; onPin: (pinned: boolean) => void;
+}) {
   if (c.kind === "tool") {
     return <div className="truncate pl-1 font-mono text-[11px] text-fg-3" title={c.text}>{flat ? "$" : "›"} {c.text}</div>;
   }
@@ -201,9 +317,10 @@ function Entry({ c, flat, who, project }: { c: ChatEntry; flat?: boolean; who: s
     const { text, pictures } = splitPictures(c.text);
     return (
       <div className="group/msg flex flex-col items-end">
-        {text && <div className={`whitespace-pre-wrap rounded-2xl rounded-br-sm bg-user-bubble px-4 py-2 text-sm text-fg ${flat ? "max-w-[min(85%,37.5rem)]" : "max-w-[85%]"}`}><RefText text={text} /></div>}
+        {text && <div className={`whitespace-pre-wrap rounded-2xl rounded-br-sm bg-user-bubble px-4 py-2 text-sm text-fg ${flat ? "max-w-[min(85%,37.5rem)]" : "max-w-[85%]"}`}><RefText text={text} highlight={highlight} /></div>}
         {pictures.length > 0 && <div className={flat ? "max-w-[min(85%,37.5rem)]" : "max-w-[85%]"}><SentPictures project={project} paths={pictures} /></div>}
         <div className="mt-0.5 flex items-center gap-0.5 text-[11px] text-fg-3">
+          <PinButton pinned={pinned} onPin={onPin} hoverOnly={flat} />
           <CopyButton text={messageSource(c)} label={t("chat.copy")} className={flat ? "opacity-0 group-hover/msg:opacity-100" : ""} />
           <Clock at={c.at} />
         </div>
@@ -214,18 +331,18 @@ function Entry({ c, flat, who, project }: { c: ChatEntry; flat?: boolean; who: s
     if (flat) {
       return (
         <div className={`border-l-2 px-2.5 py-0.5 text-xs ${c.kind === "error" ? "border-danger/60 text-danger" : "border-line-strong text-fg-2"}`}>
-          <span className="whitespace-pre-wrap">Nexus · <RefText text={c.text} /></span><span className="text-fg-3"> · <Clock at={c.at} /></span>
+          <span className="whitespace-pre-wrap">Nexus · <RefText text={c.text} highlight={highlight} /></span><span className="text-fg-3"> · <Clock at={c.at} /></span>
         </div>
       );
     }
     return (
       <div className={`rounded-lg border px-3 py-2 text-xs ${c.kind === "error" ? "border-danger/30 bg-danger/5 text-danger" : "border-warn/30 bg-warn/5 text-warn/90"}`}>
-        <span className="mr-2 font-semibold">Nexus</span><span className="whitespace-pre-wrap"><RefText text={c.text} /></span>
+        <span className="mr-2 font-semibold">Nexus</span><span className="whitespace-pre-wrap"><RefText text={c.text} highlight={highlight} /></span>
         <span className="ml-2 text-fg-3"><Clock at={c.at} /></span>
       </div>
     );
   }
-  return <Reply c={c} flat={flat} who={who} />;
+  return <Reply c={c} flat={flat} who={who} highlight={highlight} pinned={pinned} onPin={onPin} />;
 }
 
 /**
@@ -233,11 +350,14 @@ function Entry({ c, flat, who, project }: { c: ChatEntry; flat?: boolean; who: s
  * desktop the line over it, which stays at the top while the reply is read; on the phone the line under the bubble,
  * which stays at the bottom.
  */
-function Reply({ c, flat, who }: { c: ChatEntry; flat?: boolean; who: string }) {
+function Reply({ c, flat, who, highlight, pinned, onPin }: { c: ChatEntry; flat?: boolean; who: string; highlight: string; pinned: boolean; onPin: (pinned: boolean) => void }) {
   const message = useRef<HTMLDivElement>(null);
   const tools = useMemo(() => replyTools(c.text), [c.text]);
   const long = tools.contents.length > 0 || tools.questions !== undefined;
-  const copy = <CopyButton text={messageSource(c)} label={t("chat.copy")} className={flat ? "opacity-0 group-hover/msg:opacity-100" : ""} />;
+  const copy = <>
+    <CopyButton text={messageSource(c)} label={t("chat.copy")} className={flat ? "opacity-0 group-hover/msg:opacity-100" : ""} />
+    <PinButton pinned={pinned} onPin={onPin} hoverOnly={flat} />
+  </>;
   if (flat) {
     return (
       <div ref={message} className="group/msg">
@@ -246,14 +366,14 @@ function Reply({ c, flat, who }: { c: ChatEntry; flat?: boolean; who: string }) 
           <ReplyTools message={message} contents={tools.contents} questions={tools.questions} />
           {copy}
         </div>
-        <ChatMarkdown className="leading-relaxed">{c.text}</ChatMarkdown>
+        <ChatMarkdown className="leading-relaxed" highlight={highlight}>{c.text}</ChatMarkdown>
       </div>
     );
   }
   return (
     <div ref={message} className="max-w-[92%]">
       <div className="rounded-2xl rounded-bl-sm bg-surface-3 px-4 py-2">
-        <ChatMarkdown>{c.text}</ChatMarkdown>
+        <ChatMarkdown highlight={highlight}>{c.text}</ChatMarkdown>
       </div>
       <div className={`mt-0.5 flex flex-wrap items-center gap-x-0.5 pl-1 text-[11px] text-fg-3 ${long ? "sticky bottom-0 z-[5] bg-canvas py-1" : ""}`}>
         <span className="mr-1"><Clock at={c.at} /></span>
@@ -344,6 +464,7 @@ export function ChatPanel({ project, name, view, onChanged, inline, desk }: {
   project: string; name: string; view: View | undefined; onChanged: () => void; inline?: boolean; desk?: Desk;
 }) {
   const [showTools, setShowTools] = useState(false);
+  const [searching, setSearching] = useState(false);
   const fresh: MenuEntry[] = view?.session ? [{
     label: t("chat.newConversationMenu"), onSelect: () => {
       if (confirm(t("chat.newConversationConfirm"))) {
@@ -355,6 +476,7 @@ export function ChatPanel({ project, name, view, onChanged, inline, desk }: {
   // On a desktop the chat's state, "Tool calls" and ⋯ (New conversation) are in the column's header.
   const head = desk && <>
     <span className="min-w-0 truncate text-xs text-fg-3">{statusLine(view, stateText(view))}</span>
+    {view?.session && <SearchButton open={searching} onToggle={() => setSearching(!searching)} />}
     <button onClick={() => setShowTools(!showTools)} aria-pressed={showTools}
       className={`shrink-0 rounded-md px-2.5 py-1 text-xs ${showTools ? "bg-surface-3 text-fg" : "text-fg-2 hover:bg-surface-3 hover:text-fg"}`}>{t("chat.toolCalls")}</button>
     {fresh.length > 0 && <Menu items={fresh} down label={t("chat.actions")} />}
@@ -363,7 +485,7 @@ export function ChatPanel({ project, name, view, onChanged, inline, desk }: {
     <Panel inline={inline} desk={desk} which="chat" head={head}>
       <ChatColumn project={project}
         over={name} title={t("desk.orchestrator")} who={t("desk.orchestrator")} view={view} status={stateText(view)}
-        ready={!!view && (!view.session || view.session.project === project)} place={placeKey(project, "orchestrator")} showTools={showTools} menu={inline ? menu : undefined} bare={!!desk}
+        ready={!!view && (!view.session || view.session.project === project)} place={placeKey(project, "orchestrator")} showTools={showTools} search={{ open: searching, set: setSearching }} menu={inline ? menu : undefined} bare={!!desk}
         empty={<>
           <p>{t("chat.orchestratorEmpty")}</p>
           <p className="mt-1 text-fg-3">{rich("chat.orchestratorEmptyNote", { nexus: <code key="nexus">nexus</code> })}</p>
@@ -467,6 +589,8 @@ export function ConversationsPanel({ project, name, version, onChanged, defaultR
   const current = list?.find((c) => c.id === open);
   const shown = (list ?? []).filter((c) => showArchived || !c.archived);
   const [showTools, setShowTools] = useState(false);
+  const [searching, setSearching] = useState(false);
+  useEffect(() => setSearching(false), [open]);
   const efforts = useEfforts(current?.runtime === "codex" ? "codex" : "claude", current?.model ?? "");
   const patch = (body: unknown) => act(project, "PATCH", `/conversations/${enc(open!)}`, body).then(onChanged, (e: Error) => alert(e.message));
   // The menu of an open conversation: what its header had (Hand to orchestrator, More…) and the tool calls.
@@ -529,7 +653,7 @@ export function ConversationsPanel({ project, name, version, onChanged, defaultR
         <ChatColumn key={open} project={project}
           ready={view?.session?.id === open} place={placeKey(project, "conversation", open)}
           over={t("chat.ideasOf", { project: name })} title={current.title ?? t("chat.conversation")} who={t("chat.partner")} about={<AboutStep project={project} c={current} className="mt-1" />} view={view} status={stateText(view)} onBack={() => nav.close("conversation")}
-          showTools={showTools} menu={menu}
+          showTools={showTools} menu={menu} search={{ open: searching, set: setSearching }}
           empty={<>
             <p>{t("chat.ideasEmpty")}</p>
             <p className="mt-1 text-fg-3">

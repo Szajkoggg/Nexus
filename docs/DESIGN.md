@@ -882,6 +882,28 @@ reach wherever the reply is read; Copy shows on hover on a desktop and always on
 notices, which showed "5 min ago" before. Finding from building: a sticky element sticks at the scroller's padding edge, so the chat's space at its ends
 moved from the scroller's padding to its content; otherwise a strip of text scrolled past above the sticky line.
 
+### Search in a chat, and pinned messages
+
+Decided by the user on 2026-11-14 (queue CH4; docs/ideas/chat-improvements.md): search covers the whole chat, not only
+what is loaded; a pin is keyed by the session and the line index in its append-only chat.jsonl, stored by the server in
+`sessions/<id>/pins.json` (one writer), and a fresh orchestrator session starts without pins. The files and the API
+are in PROTOCOL.md.
+
+How it is built: `readJsonl` gives every entry its line (blank and broken lines counted), and the chat views send each
+entry with it, so the dashboard keys entries, pins and matches by line, which never changes. The views still send only
+the newest 300 (orchestrator) or 400 (conversation) entries; when a match or a pin is older, the chat loads the lines
+from it up to the view's first (`GET …/sessions/:session/chat`) and puts them before (`useOlder` in Chat.tsx). Old
+entries never change, so they are fetched once; when the view's window moves past them, the gap is filled. The search
+runs on the server over every line (`searchChat` in `@nexus/protocol/chat`, pure and unit tested, shared with the
+dashboard's `matchRanges`), a quarter of a second after the typing stops. Matching ignores case and accents ("kerdes"
+finds "Kérdés"), on the message's Markdown source; the marks are put into the rendered text (a rehype step in
+ChatMarkdown, and `Marked` for plain text), so a match that runs across formatting is counted but not marked.
+Smaller choices made while building, not by the user, for the orchestrator's review: next and previous go from
+message to message (all of a message's matches are marked, the current message's stronger), starting at the newest,
+with "3 of 12" counted in chat order; tool lines are searched only while the chat shows them; the pins bar shows the
+two most recently pinned and the others behind "N more pinned", each as who, when and the message's first words
+(`excerpt`); the pin button sits beside Copy, and only a message (not a tool line or a notice) has one.
+
 ### Pictures in a chat message
 
 Decided by the user on 2026-11-14 (queue CH2; docs/ideas/chat-improvements.md): pictures go into a chat message by

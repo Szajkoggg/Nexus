@@ -10,6 +10,7 @@ import type { AgentProcess } from "./agent.ts";
 import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Launch } from "./agent-host.ts";
 import type { Engine } from "./engine.ts";
 import { orchestratorAgentsFile } from "./helpers.ts";
+import { chatView } from "./chats.ts";
 import type { UpdateNotice } from "./lifecycle.ts";
 import { describeDeployChanges, type DeployChanges } from "./deploy.ts";
 import {
@@ -73,7 +74,8 @@ export class Orchestrator {
       effort: s?.effort ?? o?.effort ?? null,
       state: this.proc?.state ?? "exited",
       runtime: s ? this.store.readRuntime(s.id) ?? null : null,
-      chat: s ? this.store.readChat(s.id).entries.slice(-300) : [],
+      // The newest 300 entries with their lines, and the session's pins (chats.ts); a fresh session has none.
+      ...(s ? chatView(this.store, s.id, 300) : { chat: [], pins: [] }),
     };
   }
 

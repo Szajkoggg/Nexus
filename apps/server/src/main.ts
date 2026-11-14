@@ -28,6 +28,7 @@ import { Standby, refuseHandoverDir, smokeCheck, takeHandoverEnv } from "./hando
 import { Lifecycle, version } from "./lifecycle.ts";
 import { MAX_UPLOAD_BODY, UploadError, saveUpload } from "./uploads.ts";
 import { COMMIT_HASH, commitDetail, fileResponse, locate } from "./files.ts";
+import { chatRange, pin, searchLines } from "./chats.ts";
 import {
   AttentionWatch, allowed, auth, authCookie, isLocal, loginPage, push, pushDevices, pushKey, qrSvg, rotateToken,
   subscribe, tailscaleInfo, tokenMatches, unsubscribe,
@@ -387,6 +388,21 @@ app.post("/api/projects/:id/uploads", bodyLimit({
     return c.json({ error: (err as Error).message }, 500);
   }
 });
+
+// A chat's older entries, its search over the whole chat.jsonl, and its pins (src/chats.ts).
+app.get("/api/projects/:id/sessions/:session/chat", (c) => {
+  const e = projects.get(c.req.param("id"));
+  if (!e) return c.json({ error: "unknown project" }, 404);
+  const from = Number(c.req.query("from") ?? 0), to = Number(c.req.query("to") ?? Number.MAX_SAFE_INTEGER);
+  if (!Number.isInteger(from) || !Number.isInteger(to)) return c.json({ error: "from and to: whole numbers (lines)" }, 400);
+  try { return c.json({ chat: chatRange(e.store, c.req.param("session"), from, to) }); } catch (err) { return c.json({ error: (err as Error).message }, 404); }
+});
+app.get("/api/projects/:id/sessions/:session/chat/search", (c) => {
+  const e = projects.get(c.req.param("id"));
+  if (!e) return c.json({ error: "unknown project" }, 404);
+  try { return c.json({ lines: searchLines(e.store, c.req.param("session"), c.req.query("q") ?? "", c.req.query("tools") === "1") }); } catch (err) { return c.json({ error: (err as Error).message }, 404); }
+});
+app.post("/api/projects/:id/sessions/:session/pins", act((st, b, p) => ({ pins: pin(st, p("session"), b.line, b.pinned) })));
 
 app.get("/api/projects/:id/sessions/:session/activity", (c) => {
   const e = projects.get(c.req.param("id"));

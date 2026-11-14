@@ -3,7 +3,7 @@
 // phone (nav.item). File paths with a line and commit hashes are links too: a file opens in the file viewer at the line
 // (nav.file), a commit its details (nav.open("commit:<hash>")); either is checked when it opens. A file or commit in
 // inline code (`src/x.ts:12`) is a link when it is the whole span. Which words are refs is refs.ts's job.
-import { createContext, useContext, useMemo, type ReactNode } from "react";
+import { createContext, Fragment, useContext, useMemo, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import type { QueueView } from "../api.ts";
 import { refIndex, splitRefs, wholeRef, type CommitRef, type FileRef, type RefIndex, type RefTarget, type Segment } from "../refs.ts";
@@ -14,6 +14,8 @@ import { Replyable } from "./Quote.tsx";
 import { sourceAt } from "../quote.ts";
 import { codeText } from "../messageTools.ts";
 import { CopyButton } from "./MessageTools.tsx";
+import { Marked } from "./ChatTools.tsx";
+import { matchRanges } from "@nexus/protocol/chat";
 import { statusWord } from "./ui.tsx";
 import { t } from "../i18n.ts";
 
@@ -76,11 +78,12 @@ function SegmentLink({ refs, segment, children }: { refs: Refs; segment: Exclude
   return <RefLink refs={refs} target={segment}>{children}</RefLink>;
 }
 
-/** Plain text (the user's messages, Nexus's notices) with its refs as links. */
-export function RefText({ text }: { text: string }) {
+/** Plain text (the user's messages, Nexus's notices) with its refs as links, and a search's matches marked. */
+export function RefText({ text, highlight = "" }: { text: string; highlight?: string }) {
   const refs = useContext(RefsContext);
-  if (!refs) return <>{text}</>;
-  return <>{splitRefs(text, refs.index).map((x, i) => (typeof x === "string" ? x : <SegmentLink key={i} refs={refs} segment={x}>{x.text}</SegmentLink>))}</>;
+  const mark = (s: string) => <Marked text={s} ranges={matchRanges(s, highlight)} />;
+  if (!refs) return <>{mark(text)}</>;
+  return <>{splitRefs(text, refs.index).map((x, i) => (typeof x === "string" ? <Fragment key={i}>{mark(x)}</Fragment> : <SegmentLink key={i} refs={refs} segment={x}>{mark(x.text)}</SegmentLink>))}</>;
 }
 
 /** How a ref travels through Markdown's tree: data-ref on a link ("Q", "Q/S", "file:<line>:<path>", "commit:<hash>"). */
@@ -122,14 +125,36 @@ const rehypeRefs = (index: RefIndex) => () => (tree: HastNode) => {
   walk(tree);
 };
 
+/** A rehype step: a search's matches in the text (code and links included) wrapped in <mark>. */
+const rehypeMarks = (query: string) => () => (tree: HastNode) => {
+  const walk = (node: HastNode) => {
+    if (!node.children || node.tagName === "mark") return;
+    node.children = node.children.flatMap((c): HastNode[] => {
+      if (c.type !== "text" || !c.value) { walk(c); return [c]; }
+      const ranges = matchRanges(c.value, query);
+      if (!ranges.length) return [c];
+      const out: HastNode[] = [];
+      let at = 0;
+      for (const [a, b] of ranges) {
+        if (a > at) out.push({ type: "text", value: c.value.slice(at, a) });
+        out.push({ type: "element", tagName: "mark", properties: {}, children: [{ type: "text", value: c.value.slice(a, b) }] });
+        at = b;
+      }
+      if (at < c.value.length) out.push({ type: "text", value: c.value.slice(at) });
+      return out;
+    });
+  };
+  walk(tree);
+};
+
 /** Headings marked with their source line (a reply's contents go to them). */
 const HEADINGS = Object.fromEntries((["h1", "h2", "h3", "h4", "h5", "h6"] as const).map((Tag) =>
   [Tag, ({ node, ...p }: { node?: { position?: { start: { line: number } } } } & Record<string, unknown>) => <Tag data-md-line={node?.position?.start.line} {...p} />]));
 
 /** A chat message's Markdown, with its refs as links (outside code and links), its paragraphs and items repliable. */
-export function ChatMarkdown({ children, className = "" }: { children: string; className?: string }) {
+export function ChatMarkdown({ children, className = "", highlight = "" }: { children: string; className?: string; highlight?: string }) {
   const refs = useContext(RefsContext);
-  const plugins = useMemo(() => (refs ? [rehypeRefs(refs.index)] : []), [refs]);
+  const plugins = useMemo(() => [...(refs ? [rehypeRefs(refs.index)] : []), ...(highlight.trim() ? [rehypeMarks(highlight)] : [])], [refs, highlight]);
   return (
     <div className={`md text-sm leading-relaxed text-fg ${className}`}>
       <ReactMarkdown rehypePlugins={plugins} components={{

@@ -704,6 +704,16 @@ export const ChatEntry = z.object({
 });
 export type ChatEntry = z.infer<typeof ChatEntry>;
 
+/**
+ * sessions/<orchestrator or conversation>/pins.json: the chat's pinned messages. A pin names its message by `line`, the
+ * index from 0 of the message's line in the session's append-only chat.jsonl, and says when it was pinned (`at`).
+ * Written only by the server; a fresh session starts without pins.
+ */
+export const Pin = z.object({ line: z.number().int().min(0), at: Time });
+export type Pin = z.infer<typeof Pin>;
+export const PinsFile = z.object({ pins: z.array(Pin).default([]) });
+export type PinsFile = z.infer<typeof PinsFile>;
+
 /** <NEXUS_HOME>/usage.json: the subscription's windows, from the last report of any session. */
 export const UsageFile = z.object({
   updated_at: Time,
