@@ -6,7 +6,7 @@ import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from "node:c
 import { EventEmitter } from "node:events";
 import { existsSync } from "node:fs";
 import { join, relative, resolve, isAbsolute } from "node:path";
-import { EDGE_BLOCK, agentEnv, edgeBlock, shortInput, type AgentEvents, type RefusalItem, type AgentOptions, type AgentProcess, type Priority, type TurnFailure } from "./agent.ts";
+import { EDGE_BLOCK, agentEnv, edgeBlock, shortInput, type AgentEvents, type RefusalItem, type TurnTokens, type AgentOptions, type AgentProcess, type Priority, type TurnFailure } from "./agent.ts";
 
 export interface CodexOptions extends AgentOptions {
   /** The thread to resume; a new thread is started without one. */
@@ -90,6 +90,14 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
   private base: { model?: string; effort?: string } = {};
   /** Set by retune: every turn names its model and effort (Codex keeps a turn's override for later turns). */
   private turnValues?: { model?: string; effort?: string };
+  /**
+   * The thread's running token total (tokenUsage.total) as last reported, and its value when the running turn began:
+   * a turn's tokens are the difference. A resumed thread's total starts with earlier turns this process never saw;
+   * then the turn's `last` figures (one per model request) are summed instead.
+   */
+  private threadTotal: Json | undefined;
+  private turnStartTotal: Json | undefined;
+  private turnLast: Json[] = [];
   /** The last rate-limit windows: when a full one resets. */
   private limits: { usedPercent: number; resetsAt?: string }[] = [];
 
@@ -245,6 +253,8 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
       case "turn/started":
         this.state = "working";
         this.turnId = p.turn?.id;
+        this.turnStartTotal = this.threadTotal ?? (this.options.threadId ? undefined : {});
+        this.turnLast = [];
         this.emit("activity", { kind: "turn_start", text: "turn started (codex)" });
         return;
       case "turn/completed": {
@@ -255,7 +265,12 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
         this.turnId = undefined;
         this.state = "idle";
         this.emit("activity", { kind: "turn_end", text: ok ? "turn ended" : failure ? `turn failed (${failure.kind}, ${failure.code}): ${failure.text}` : `turn ${status}` });
-        this.emit("turnEnd", { ok, text: status, failure });
+        const tokens = this.turnStartTotal !== undefined && this.threadTotal
+          ? codexTokens(this.threadTotal, this.turnStartTotal)
+          : this.turnLast.length ? this.turnLast.map((l) => codexTokens(l, {})).reduce(addTokens) : undefined;
+        this.turnStartTotal = undefined;
+        this.turnLast = [];
+        this.emit("turnEnd", { ok, text: status, failure, tokens });
         const next = this.queue.shift();
         if (next !== undefined && this.state === "idle") this.startTurn(next);
         return;
@@ -286,6 +301,8 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
       }
       case "thread/tokenUsage/updated": {
         const u = p.tokenUsage;
+        if (u?.total) this.threadTotal = u.total;
+        if (u?.last) this.turnLast.push(u.last);
         if (u) this.emit("facts", { contextTokens: u.last?.inputTokens, contextWindow: u.modelContextWindow ?? undefined });
         return;
       }
@@ -377,6 +394,16 @@ function reviewedAction(a: Json): { tool: string; input: string } {
     default: return { tool: String(a.type ?? "action"), input: shortInput(a) };
   }
 }
+
+/**
+ * Codex's token breakdown (TokenUsageBreakdown: inputTokens including cachedInputTokens, cacheWriteInputTokens,
+ * outputTokens including reasoningOutputTokens) as the four figures, less a baseline (an earlier running total).
+ */
+export function codexTokens(now: Json, before: Json): TurnTokens {
+  const d = (k: string) => Math.max(0, (Number(now[k]) || 0) - (Number(before[k]) || 0));
+  return { input: Math.max(0, d("inputTokens") - d("cachedInputTokens")), output: d("outputTokens"), cacheRead: d("cachedInputTokens"), cacheCreation: d("cacheWriteInputTokens") };
+}
+const addTokens = (a: TurnTokens, b: TurnTokens): TurnTokens => ({ input: a.input + b.input, output: a.output + b.output, cacheRead: a.cacheRead + b.cacheRead, cacheCreation: a.cacheCreation + b.cacheCreation });
 
 const input = (text: string) => [{ type: "text", text, text_elements: [] }];
 const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + "…" : s);

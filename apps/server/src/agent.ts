@@ -28,6 +28,14 @@ export interface ActivityItem { kind: "turn_start" | "text" | "tool" | "tool_err
  * rate limit, the network). `lasting`: needs the user (authentication, an invalid request, a refusal, anything
  * unknown). `usage`: a subscription limit with a known reset time (`resetsAt`). See DESIGN.md, "Failures".
  */
+/**
+ * One turn's tokens, the same four for both runtimes. `input` is the input not read from the cache (Claude Code's
+ * input_tokens; Codex's inputTokens less cachedInputTokens); `cacheRead` what was (cache_read_input_tokens;
+ * cachedInputTokens); `cacheCreation` what was written to it (cache_creation_input_tokens; cacheWriteInputTokens);
+ * `output` includes any thinking (output_tokens; outputTokens).
+ */
+export interface TurnTokens { input: number; output: number; cacheRead: number; cacheCreation: number }
+
 export interface TurnFailure { kind: "passing" | "lasting" | "usage"; code: string; text: string; resetsAt?: string }
 
 /**
@@ -65,7 +73,12 @@ export interface AgentEvents {
   /** An action the runtime (or Nexus for it) refused. */
   refusal: [RefusalItem];
   /** `ok` false with no failure: the turn was interrupted (Nexus asked for it). */
-  turnEnd: [{ ok: boolean; text: string; failure?: TurnFailure }];
+  /**
+   * `tokens` and `costUsd`: this turn's alone (never a running total), when the runtime said; `costUsd` only where it
+   * reports one (Claude Code), and not for the first turn of a resumed process (its running total starts with the
+   * earlier turns').
+   */
+  turnEnd: [{ ok: boolean; text: string; failure?: TurnFailure; tokens?: TurnTokens; costUsd?: number }];
   exit: [number | null];
 }
 

@@ -1036,6 +1036,18 @@ a swipe moves in every view: the picture alone, before and after, and the overla
   only when the git directory lies outside the working directory; the roots work both in the thread's config
   (`sandbox_workspace_write.writable_roots`) and in a turn's sandbox policy, and Nexus sends both.
 
+- **A turn's tokens and cost, per runtime** (probes 2026-11-14, two turns in one session each). Claude Code
+  (2.1.323, haiku; $0.0066): `result.usage` is the turn's own (the second turn's output was 172 tokens while the
+  cumulative `modelUsage` said 175), and `total_cost_usd` runs on through the process ($0.00325, then $0.00659), so a
+  turn's cost is the difference from the previous result; a resumed process's total starts with turns this process
+  never saw, so its first turn's cost is left unknown. `result.usage` covers the main agent loop only (subagents'
+  tokens are in `modelUsage`). Codex (0.167.2, `gpt-6-luna`; about 34k tokens, mostly cached): every
+  `thread/tokenUsage/updated` carries the thread's running `total` and `last`, the figures of one model request
+  (a turn with tool calls has several), so a turn's tokens are the difference of `total` between its start and end;
+  when the start is unknown (a resumed thread), the turn's `last` figures are summed. Codex reports no cost. The
+  adapters normalize both to `input` (not from the cache), `output`, `cacheRead` and `cacheCreation`: Codex's
+  `inputTokens` includes `cachedInputTokens`, Claude Code's `input_tokens` does not.
+
 - **Workers cannot write under `.nexus` with their file tools, and only Claude Code workers** (decided 2026-11-13; a
   Honeycomb worker had edited a queue file by hand). Claude Code workers get deny rules for Edit and Write on the
   project's `.nexus` by its absolute path (`Edit(//c/…/.nexus/**)`, `Write(//c/…/.nexus/**)`). A probe (haiku,

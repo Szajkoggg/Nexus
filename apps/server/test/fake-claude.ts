@@ -7,6 +7,9 @@ recordArgs({ argv: process.argv.slice(2) });
 const out = (m: unknown) => process.stdout.write(JSON.stringify(m) + "\n");
 const fake: Fake = {};
 let busy = false;
+/** Turns so far, and the running total_cost_usd the CLI reports (the process's, not the turn's). */
+let turns = 0;
+let totalCost = 0;
 const queue: string[] = [];
 
 async function turn(text: string): Promise<void> {
@@ -16,7 +19,13 @@ async function turn(text: string): Promise<void> {
     out({ type: "assistant", message: { content: [{ type: "tool_use", name: "Bash", input: { command } }] }, parent_tool_use_id: null }), () => refused(denials));
   if (typeof reply !== "string") return "exit" in reply ? exitOnSignal() : fail(reply.fail);
   out({ type: "assistant", message: { content: [{ type: "text", text: reply }], usage: { input_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: contextTokens(1000, 100) - 10 } }, parent_tool_use_id: null });
-  out({ type: "result", subtype: "success", is_error: false, result: reply, num_turns: 1, total_cost_usd: 0, modelUsage: { fake: { contextWindow: 1000 } }, permission_denials: denials });
+  // As Claude Code reports them (checked live): result.usage is this turn's, total_cost_usd runs on. Turn n of the
+  // process: 10n input, 5n output, n cache-creation, 100n cache-read tokens, and, with FAKE_COST set, $0.01·n (other
+  // tests' records expect a cost of 0).
+  const n = ++turns;
+  if (process.env.FAKE_COST) totalCost = Math.round((totalCost + 0.01 * n) * 1e6) / 1e6;
+  const usage = { input_tokens: 10 * n, output_tokens: 5 * n, cache_creation_input_tokens: n, cache_read_input_tokens: 100 * n };
+  out({ type: "result", subtype: "success", is_error: false, result: reply, num_turns: 1, total_cost_usd: totalCost, usage, modelUsage: { fake: { contextWindow: 1000 } }, permission_denials: denials });
 }
 
 /**

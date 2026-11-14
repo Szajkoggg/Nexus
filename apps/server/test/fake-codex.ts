@@ -9,6 +9,15 @@ const notify = (method: string, params: unknown) => out({ method, params });
 const fake: Fake = {};
 let threadId = "";
 let turnId: string | undefined;
+/** The thread's running token total, as codex app-server reports it in every tokenUsage update. */
+const total = { inputTokens: 0, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0, totalTokens: 0 };
+let turns = 0;
+/** One model request's figures (`last`), added to the running total, as thread/tokenUsage/updated. */
+function tokens(turn: string, last: { inputTokens: number; cachedInputTokens: number; outputTokens: number }): void {
+  const l = { cacheWriteInputTokens: 0, reasoningOutputTokens: 0, ...last, totalTokens: last.inputTokens + last.outputTokens };
+  for (const k of Object.keys(total) as (keyof typeof total)[]) total[k] += l[k];
+  notify("thread/tokenUsage/updated", { threadId, turnId: turn, tokenUsage: { last: l, total: { ...total }, modelContextWindow: 2000 } });
+}
 
 async function runTurn(id: string, text: string): Promise<void> {
   notify("turn/started", { threadId, turn: { id, status: "inProgress", items: [] } });
@@ -16,7 +25,11 @@ async function runTurn(id: string, text: string): Promise<void> {
     notify("item/started", { threadId, turnId: id, item: { type: "commandExecution", id: randomUUID(), command: `"powershell.exe" -Command '${command}'`, status: "inProgress" } }), () => refused(id));
   if (typeof reply !== "string") return "exit" in reply ? exitOnSignal() : fail(id, reply.fail);
   notify("item/completed", { threadId, turnId: id, item: { type: "agentMessage", id: randomUUID(), text: reply } });
-  notify("thread/tokenUsage/updated", { threadId, turnId: id, tokenUsage: { last: { inputTokens: contextTokens(2000, 120) }, total: { inputTokens: contextTokens(2000, 120) }, modelContextWindow: 2000 } });
+  // Two model requests per turn, each with its `last` and the thread's running `total` (checked live). Turn n:
+  // 100n input of which 60n cached and 3n output, then the context's fill (120) of which 50 cached and 2n output.
+  const n = ++turns;
+  tokens(id, { inputTokens: 100 * n, cachedInputTokens: 60 * n, outputTokens: 3 * n });
+  tokens(id, { inputTokens: contextTokens(2000, 120), cachedInputTokens: 50, outputTokens: 2 * n });
   turnId = undefined;
   notify("turn/completed", { threadId, turn: { id, status: "completed", items: [] } });
 }

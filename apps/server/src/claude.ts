@@ -2,7 +2,7 @@
 // alive across turns. Signed in with the user's own subscription (no API key, no Agent SDK).
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { EDGE_BLOCK, agentEnv, edgeBlock, shortInput, type ActivityItem, type AgentEvents, type AgentProcess, type Priority, type StreamFacts, type TurnFailure } from "./agent.ts";
+import { EDGE_BLOCK, agentEnv, edgeBlock, shortInput, type ActivityItem, type AgentEvents, type AgentProcess, type Priority, type StreamFacts, type TurnFailure, type TurnTokens } from "./agent.ts";
 
 export type { ActivityItem, Priority, StreamFacts };
 
@@ -39,6 +39,13 @@ export function classifyClaudeResult(m: Record<string, any>, signs: ClaudeTurnSi
   // An edge's 403 page reported as an authentication failure (or another lasting code): no credential is wrong.
   if (edgeBlock(full)) return { kind: "passing", code: EDGE_BLOCK, text };
   return { kind: "lasting", code, text };
+}
+
+/** A result's usage (one turn's, the main agent loop's) as the four figures, or undefined without one. */
+export function claudeTurnTokens(u: Record<string, any> | undefined): TurnTokens | undefined {
+  if (!u || typeof u !== "object") return undefined;
+  const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+  return { input: n(u.input_tokens), output: n(u.output_tokens), cacheRead: n(u.cache_read_input_tokens), cacheCreation: n(u.cache_creation_input_tokens) };
 }
 
 function httpCode(status: unknown): string | undefined {
@@ -78,6 +85,11 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
   readonly pid?: number;
   private lastStderr = "";
   private signs: ClaudeTurnSigns = {};
+  /**
+   * total_cost_usd of the previous result: the CLI reports a running total for the process (a resumed one starts
+   * from the total its transcript saved, unknown here), so a turn's cost is the difference.
+   */
+  private costSoFar: number | undefined;
   /** Tool calls of the running turn, by tool_use_id: a permission_denied message names the call, not its input. */
   private calls = new Map<string, { name: string; input: unknown }>();
   /** Refusals already reported, by tool_use_id: the result's permission_denials repeat the messages. */
@@ -107,6 +119,7 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
       windowsHide: true,
     });
     this.pid = this.proc.pid;
+    this.costSoFar = options.resume ? undefined : 0;
     // A write to a process that is exiting (killed, crashed) fails with EPIPE: its exit is handled, the write is moot.
     this.proc.stdin.on("error", () => {});
     this.proc.stdout.setEncoding("utf8");
@@ -231,7 +244,11 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
         const ok = !failure && !m.is_error && m.subtype === "success";
         const text = typeof m.result === "string" ? m.result : m.subtype ?? "";
         this.emit("activity", { kind: "turn_end", text: ok ? `turn ended (${m.num_turns ?? "?"} model calls)` : failure ? `turn failed (${failure.kind}, ${failure.code}): ${failure.text}` : `turn ended early: ${clip(text, 300)}` });
-        this.emit("turnEnd", { ok, text, failure });
+        // result.usage is this turn's (checked live: it does not grow across turns); total_cost_usd runs on.
+        const total = typeof m.total_cost_usd === "number" ? m.total_cost_usd : undefined;
+        const costUsd = total !== undefined && this.costSoFar !== undefined ? Math.max(0, Math.round((total - this.costSoFar) * 1e9) / 1e9) : undefined; // to a nano-dollar: no float residue
+        if (total !== undefined) this.costSoFar = total;
+        this.emit("turnEnd", { ok, text, failure, tokens: claudeTurnTokens(m.usage), costUsd });
         return;
       }
       default:
