@@ -73,6 +73,15 @@ export function formatDuration(duration: number): string {
   return rh ? `${d} d ${rh} h` : `${d} d`;
 }
 
+/** A check's time in seconds: "0.4 s", "12 s", "3 min 10 s" (whole seconds from 10 s up, rounded). */
+export function formatSeconds(seconds: number): string {
+  if (seconds < 10) return `${Math.round(seconds * 10) / 10} s`;
+  const whole = Math.round(seconds);
+  if (whole < 60) return `${whole} s`;
+  const m = Math.floor(whole / 60), s = whole % 60;
+  return s ? `${m} min ${s} s` : `${m} min`;
+}
+
 /** A turn that failed for a passing reason is tried again at most this many times in a row (the engine's limit). */
 export const RETRY_LIMIT = 5;
 

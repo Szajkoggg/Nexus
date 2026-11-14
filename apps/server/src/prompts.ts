@@ -4,7 +4,7 @@
 // (src/conversations.ts). Agents rely on them (a change to one carries an `Agents:` line in its commit), so each is
 // covered by a snapshot test: test/prompts.test.ts compares what the agents' processes receive with golden files.
 import {
-  formatClock, languageName, levelNow, runIsOlder, type AwayNow, type InboxView, type LanguageCode, type ProjectFile, type ProjectState, type QuestionView, type QueueView, type SessionView, type StepView,
+  formatClock, formatSeconds, languageName, levelNow, runIsOlder, type AwayNow, type InboxView, type LanguageCode, type ProjectFile, type ProjectState, type QuestionView, type QueueView, type SessionView, type StepView,
 } from "@nexus/protocol";
 
 export const RUNTIME_NAME = { claude: "Claude Code", codex: "Codex" } as const;
@@ -45,7 +45,7 @@ Report through the \`nexus\` command (on PATH; your session is set in the enviro
 - nexus step progress <step> "<short status>" [--pct N]     at milestones, so the user sees where you are
 - nexus review add <step> <picture> --key <view@width> --role <role> --label "..."   a review picture, one per command
 - nexus review add <step> <file|url>... --label "..."       other review material (documents, data, links)
-- nexus check <step> <name> --ok|--fail --summary "..."      results of the step's checks
+- nexus check <step> <name> --ok|--fail --summary "..." --duration <seconds>   results of the step's checks, with how long each ran (the times show when a check grows slower)
 - nexus step done <step> --summary "..." [--commit <sha>]   when the acceptance criteria are met
 - nexus step failed <step> --reason "..."                   when the step cannot be done as written
 - nexus stop <step> --condition "<the stop condition met>" --reason "<what happened, short>"   when a stop condition is met (first commit what is consistent, see below); give both: --condition names the condition as the queue words it, --reason says in a sentence or two what happened and what you left out (the user sees the reason first, the condition behind "more")
@@ -493,7 +493,7 @@ function reviewBrief(q: QueueView, st: StepView, away: AwayNow = { on: false }):
     "",
     `Round ${round}. Goal:\n${st.goal.trim() || "(none)"}`,
     `Acceptance:\n${list(st.acceptance)}`,
-    `Checks reported this round:\n${list(checks.map((c) => `${c.name}: ${c.ok ? "ok" : "FAILED"}${c.summary ? ` (${c.summary})` : ""}`))}`,
+    `Checks reported this round:\n${list(checks.map((c) => `${c.name}: ${c.ok ? "ok" : "FAILED"}${c.duration !== undefined ? `, ${formatSeconds(c.duration)}` : ""}${c.summary ? ` (${c.summary})` : ""}`))}`,
     ...(missing.length ? [`Checks of the queue not reported this round: ${missing.join("; ")}`] : []),
     `Review material:\n${list(items.map((i) => `${i.label ?? i.kind ?? "item"}: ${i.path ?? i.url ?? ""}`))}`,
     `Commits: ${commits.join(", ") || "none reported"}`,

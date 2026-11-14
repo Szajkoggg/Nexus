@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import type { ChatEntry, Event, StatusChange } from "@nexus/protocol";
 import { stopPlace } from "@nexus/protocol/attention";
-import { stepValuesText } from "@nexus/protocol/steps";
+import { latestChecks, stepValuesText } from "@nexus/protocol/steps";
 import { act, actResult, enc, fileUrl, useFetch, type ProjectState, type QuestionView, type QueueView, type StepView } from "../api.ts";
 import { comparisonOf, noteTargets, pairPictures, showsReviewActions } from "../review.ts";
 import { ActionBar, Button, Composer, Expandable, Markdown, PanelBody, PanelHeader, Section, StatusBadge, StepTimes, TEXTAREA, TimeAgo, reviewLabel, statusWord, useDraftText, type MenuEntry } from "./ui.tsx";
@@ -18,7 +18,7 @@ import { AskButton, CompactSteps, SettingsLine, useApprove, useCtrlEnter } from 
 import { needsApproval, levelWords } from "../approval.ts";
 import { queueStatus } from "../queueStatus.ts";
 import { needsWorkChoice, stopDecision, type LeftState, type LeftView, type WorkChoice } from "../stopDecision.ts";
-import { rich, t, type Key } from "../i18n.ts";
+import { formatSeconds, rich, t, type Key } from "../i18n.ts";
 import { LevelMark, ProvisionalActions, levelShort, levelTitle, pendingProvisional, provisionalWord } from "./Levels.tsx";
 
 interface Props {
@@ -242,6 +242,7 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
               <li key={i} className="flex gap-2">
                 <span className={c.ok ? "text-ok" : "text-danger"}>{c.ok ? "✓" : "✗"}</span>
                 <span className="text-fg">{c.name}</span>
+                {c.duration !== undefined && <span className="tabular-nums text-fg-2">{formatSeconds(c.duration)}</span>}
                 {c.summary && <span className="text-fg-3">{c.summary}</span>}
               </li>
             ))}
@@ -373,7 +374,7 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
         </div>
       )}
       <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-        {step.checks.map((c, i) => <span key={i} title={c.summary} className={c.ok ? "text-ok" : "text-danger"}>{c.ok ? "✓" : "✗"} {c.name}</span>)}
+        {latestChecks(step.checks).map((c, i) => <span key={i} title={c.summary} className={c.ok ? "text-ok" : "text-danger"}>{c.ok ? "✓" : "✗"} {c.name}{c.duration !== undefined && <span className="tabular-nums text-fg-3"> {formatSeconds(c.duration)}</span>}</span>)}
         {(step.goal || step.acceptance.length > 0 || step.review?.prepare) && <Fold label={t("details.goalAcceptance")} open={!!fold.goal} onToggle={() => setFold((f) => ({ ...f, goal: !f.goal }))} />}
         <StepCommits project={id} queue={queue.id} step={step.id} version={project.generated_at} toggle={{ open: !!fold.commits, onToggle: () => setFold((f) => ({ ...f, commits: !f.commits })) }} />
         {step.timeline.length > 0 && <Fold label={t("details.timeline")} open={!!fold.timeline} onToggle={() => setFold((f) => ({ ...f, timeline: !f.timeline }))} />}
@@ -937,7 +938,7 @@ function describe(e: Event): string {
     case "step.done": return e.summary;
     case "step.failed": return e.reason;
     case "queue.stop": return `${e.condition}: ${e.reason}`;
-    case "check.result": return `${e.ok ? "✓" : "✗"} ${e.name}${e.summary ? ` — ${e.summary}` : ""}`;
+    case "check.result": return `${e.ok ? "✓" : "✗"} ${e.name}${e.duration !== undefined ? ` (${formatSeconds(e.duration)})` : ""}${e.summary ? ` — ${e.summary}` : ""}`;
     case "review.added": return e.items.map((i) => i.label ?? i.path ?? i.url).join(", ");
     case "question.asked": return e.text;
     case "answer.given": return e.text;

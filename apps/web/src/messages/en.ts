@@ -36,6 +36,8 @@ export const en = {
   "duration.hoursMinutes": "{h} h {m} min",
   "duration.days": "{d} d",
   "duration.daysHours": "{d} d {h} h",
+  "duration.seconds": "{s} s",
+  "duration.minutesSeconds": "{m} min {s} s",
 
   // ---------------------------------------------------------------- the shell: App, the project's page
   "shell.group.inProgress": "In progress",

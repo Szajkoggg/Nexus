@@ -424,7 +424,7 @@ Every line:
 | `review.added` | `queue`, `step`, `items: [{path or url, label, kind?, before?, key?, role?, size?}]`, `round?` | Review material, `kind` = image, sheet, doc, data, link; `before`: the path of the picture this one is compared with; `key` (a view key), `role` (before, mockup, after, variant-a, variant-b, result) and `size` (`width`, `height` in pixels): a keyed picture, always with its `round` (see "Review pictures") |
 | `review.marked` | `queue`, `step`, `path`, `accepted` | User only: a review picture marked accepted (or the mark taken back). A mark only: it does not accept the step |
 | `review.commented` | `queue`, `step`, `path`, `text`, `to` (`send_back`, `note`, `orchestrator`), `note_step?` | User only: a comment on a review picture, and where it went (see "Review pictures") |
-| `check.result` | `queue`, `step`, `name`, `ok`, `summary` | One check's outcome |
+| `check.result` | `queue`, `step`, `name`, `ok`, `summary`, `duration` | One check's outcome; `duration`: how long it ran, in seconds (optional, non-negative) |
 | `step.done` | `queue`, `step`, `summary`, `commit?`, `warning?` | Acceptance met; the step's work is finished. `warning`: what `nexus step done` warned about at the step's end (see the CLI) |
 | `step.failed` | `queue`, `step`, `reason` | The step cannot be finished as written |
 | `queue.stop` | `queue`, `step`, `condition`, `reason` | A stop condition was met; the engine halts the queue. `condition`: the condition met, as the queue words it; `reason`: what happened, short. The derived queue keeps them apart in `stop` (`{ condition, reason }`, until a lift) besides `status_reason` ("<condition>: <reason>"); the stopped waiting item's `text` is the reason and its `condition` the condition. A stop known only as one text (a queue imported as stopped) has no `stop`, and shows its `status_reason` |
@@ -832,7 +832,7 @@ nexus review add W3 $TEMP/nexus-review/W3/cliff@1280.png --key cliff-lit@1280 --
 nexus review add W3 $TEMP/nexus-review/W3/lit.png --before $TEMP/nexus-review/W3/unlit.png --label "Lighting"   # older: no key
 nexus help review                              # the standard for review material (nexus help: the topics)
 nexus help summaries|questions|refusals|commits   # the other standards
-nexus check W3 core-tests --ok --summary "548 passed"
+nexus check W3 core-tests --ok --summary "548 passed" --duration 190   # how long it ran, in seconds
 nexus step done W3 --summary "No floating body on any fixture" [--commit 1a2b3c]   # warns at an unclean end
 nexus step failed W3 --reason "..."
 nexus stop W3 --condition "user decision" --reason "..."   # the condition as the queue words it; the reason short (shown first)
@@ -858,6 +858,10 @@ nexus server away [on --until <8:00|ISO> | off]  # the user's away mode (refused
 runtime, model or effort ends with them, `[on Codex · gpt-6-luna · low effort]` (what it leaves out is the run's).
 The orchestrator's overview adds the same after the step in its `steps:` line, where each step also shows its review
 level, `W1 pending (level 2)`, with `, set by the user` for a level the user set.
+A step with checks reported gets a line under it with the latest result of each check (a check run again replaces
+its earlier result) and its time when it was given: `checks: npm test ok (3 min 10 s), npm run typecheck ok (12 s)`.
+The dashboard shows each check's time on the step, and the orchestrator's review notice gives it with the check
+(`npm test: ok, 3 min 10 s (548 passed)`); the statistics will read the times from the `check.result` events.
 A queue with a planned start gets a line `planned start after A; now: <waiting>` (or `at <local time>`), ending in
 `(it starts by itself)` when the plan came due and waits for its checkout or for the limit (`held`); the
 orchestrator's overview shows a held schedule the same way (`its time came, now: <waiting>`).

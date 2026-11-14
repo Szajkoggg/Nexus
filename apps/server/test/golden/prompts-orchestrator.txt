@@ -66,7 +66,7 @@ Acceptance:
 - G1 is done
 
 Checks reported this round:
-- npm test: ok (112 pass)
+- npm test: ok, 1 min 35 s (112 pass)
 - npm run typecheck: FAILED
 
 Checks of the queue not reported this round: lint

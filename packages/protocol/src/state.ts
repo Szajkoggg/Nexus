@@ -6,7 +6,7 @@ import { awayAt, awayNow, type AwayNow } from "./away.ts";
 import { ENDED_RUN_STATES, HOLDING_RUN_STATES, formatClock, type Segment } from "./times.ts";
 import { stopPlace } from "./attention.ts";
 
-export interface CheckView { name: string; ok: boolean; summary?: string; at: string }
+import type { CheckView } from "./steps.ts";
 export interface AnswerView { id: string; text: string; at: string; escalate?: boolean; continue?: boolean; session: string; by: "orchestrator" | "user" }
 export interface QuestionView {
   qid: string; session: string; queue?: string; step?: string; text: string; options?: string[];
@@ -512,7 +512,7 @@ function apply(
     }
     case "check.result": {
       const st = stepOf(queueOf(e.queue), e.step);
-      if (st) st.checks.push({ name: e.name, ok: e.ok, summary: e.summary, at: e.at });
+      if (st) st.checks.push({ name: e.name, ok: e.ok, summary: e.summary, duration: e.duration, at: e.at });
       return;
     }
     case "step.done": {

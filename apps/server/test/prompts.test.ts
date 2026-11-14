@@ -276,7 +276,7 @@ test("the orchestrator's texts: briefing, helpers and notices match the golden f
   event("w-review", { type: "step.done", queue: "QG", step: "G1", summary: "G1 in its first round.", commit: "aaa1111" });
   event(orch, { type: "review.sent_back", queue: "QG", step: "G1", text: "The test for the empty list is missing." });
   event("w-review", { type: "step.started", queue: "QG", step: "G1" });
-  event("w-review", { type: "check.result", queue: "QG", step: "G1", name: "npm test", ok: true, summary: "112 pass" });
+  event("w-review", { type: "check.result", queue: "QG", step: "G1", name: "npm test", ok: true, summary: "112 pass", duration: 95.2 });
   event("w-review", { type: "check.result", queue: "QG", step: "G1", name: "npm run typecheck", ok: false });
   event("w-review", { type: "review.added", queue: "QG", step: "G1", items: [{ path: "shots/list.png", label: "The list", kind: "image" }, { url: "https://example.com/sheet" }] });
   event("w-review", { type: "step.done", queue: "QG", step: "G1", summary: "G1 with the test added.", commit: "bbb2222" });

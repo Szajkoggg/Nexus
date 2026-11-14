@@ -6,7 +6,7 @@ import { basename, extname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { execFileSync } from "node:child_process";
 import {
-  Event, HOLDING_RUN_STATES, ProjectStore, findNexusDir, inReportFolder, loadProjectState, stepValuesText, stopPlace, newId, normPath, now, readRegistry, writeRegistry,
+  Event, HOLDING_RUN_STATES, ProjectStore, checksLine, findNexusDir, inReportFolder, loadProjectState, stepValuesText, stopPlace, newId, normPath, now, readRegistry, writeRegistry,
   PICTURE_ROLES, REVIEW_HELP, checkPicture, levelNow, pictureSize, recommendedOption,
   type PictureRole, type ReviewItem, type Role, type Runtime, type SessionFile,
 } from "@nexus/protocol";
@@ -28,7 +28,7 @@ Agent commands (session from NEXUS_SESSION or --session):
                     [--before <path>]   (older material without a key: the "before" of one picture)
                     Files are copied into .nexus/queues/<queue>/review/<step>/ (write them outside the working tree).
                     Read nexus help review before preparing review material.
-  nexus check <step> <name> --ok|--fail [--summary <text>]
+  nexus check <step> <name> --ok|--fail [--summary <text>] [--duration <seconds>]   (how long the check ran)
   nexus stop <step> --condition <text> --reason <text>   the condition met, as the queue words it; the reason, short
   nexus ask <text> [--step <step>] [--option <text>]... [--recommend <option>] [--can-continue]
   nexus withdraw <qid> --reason <text>
@@ -77,7 +77,7 @@ const { values: o, positionals: args } = parseArgs({
     session: { type: "string" }, queue: { type: "string" }, step: { type: "string" },
     summary: { type: "string" }, commit: { type: "string" }, reason: { type: "string" }, until: { type: "string" },
     condition: { type: "string" }, pct: { type: "string" }, label: { type: "string" },
-    kind: { type: "string" }, round: { type: "string" }, ok: { type: "boolean" }, fail: { type: "boolean" },
+    kind: { type: "string" }, round: { type: "string" }, duration: { type: "string" }, ok: { type: "boolean" }, fail: { type: "boolean" },
     option: { type: "string", multiple: true }, "can-continue": { type: "boolean" }, recommend: { type: "string" },
     "use-session": { type: "string" }, model: { type: "string" }, effort: { type: "string" }, after: { type: "string" }, at: { type: "string" },
     topics: { type: "string" }, files: { type: "string" }, file: { type: "string" }, level: { type: "string" },
@@ -427,6 +427,8 @@ const commands: Record<string, () => void | Promise<void>> = {
         const unread = step.notes.filter((n) => !n.read_at && n.to !== "orchestrator");
         const own = stepValuesText(step);
         console.log(`  ${step.id.padEnd(5)} ${step.status.padEnd(8)} ${step.title}${own ? `  [on ${own}]` : ""}${unread.length ? `  (${unread.length} unread note${unread.length > 1 ? "s" : ""})` : ""}`);
+        const checks = checksLine(step.checks);
+        if (checks) console.log(`        checks: ${checks}`);
       }
       const open = q.questions.filter((x) => x.state === "open" || x.state === "escalated");
       for (const x of open) console.log(`  question ${x.qid} [${x.state}]: ${x.text}`);
@@ -505,7 +507,11 @@ const commands: Record<string, () => void | Promise<void>> = {
   check() {
     if (o.ok === o.fail) throw new UsageError("give exactly one of --ok or --fail");
     const name = need(args[2], "<name>");
-    stepEvent("check.result", args[1], () => ({ name, ok: !!o.ok, summary: o.summary }));
+    const duration = o.duration === undefined ? undefined : Number(o.duration);
+    if (duration !== undefined && (o.duration!.trim() === "" || !Number.isFinite(duration) || duration < 0)) {
+      throw new UsageError(`--duration takes the check's time in seconds (for example 12 or 3.5), not "${o.duration}"`);
+    }
+    stepEvent("check.result", args[1], () => ({ name, ok: !!o.ok, summary: o.summary, duration }));
   },
 
   stop() {

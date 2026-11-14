@@ -176,7 +176,8 @@ commit an accepted step was reviewed at. So:
 
 While you work, run only the tests that cover what you changed, and stop at the first failure: a run of the whole
 suite after a change that breaks many tests takes long and says little. The whole suite runs once, at the step's end,
-as the queue's checks (nexus check), and its result goes into the step summary.
+as the queue's checks (nexus check, with --duration: how long each ran, in seconds, so a check that grows slower
+shows), and its result goes into the step summary.
   - The project's own way is in its AGENTS.md or README (a script that runs given files, a watch mode).
   - Nexus's own repository: npm run test:files -- <test file>... [--pattern TEXT] runs the files one after another
     and stops at the first failing test; npm test runs the whole suite; npm run test:times lists how long each file

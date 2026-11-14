@@ -135,6 +135,15 @@ export function formatDuration(duration: number): string {
   return rh ? t("duration.daysHours", { d, h: rh }) : t("duration.days", { d });
 }
 
+/** A check's time in seconds: "0.4 s", "12 s", "3 min 10 s", "3 min" (whole seconds from 10 s up). */
+export function formatSeconds(seconds: number): string {
+  if (seconds < 10) return t("duration.seconds", { s: Math.round(seconds * 10) / 10 });
+  const whole = Math.round(seconds);
+  if (whole < 60) return t("duration.seconds", { s: whole });
+  const m = Math.floor(whole / 60), s = whole % 60;
+  return s ? t("duration.minutesSeconds", { m, s }) : t("duration.minutes", { m });
+}
+
 /** How long ago: "just now", "5 min ago", "3 h ago", "2 d ago". */
 export function timeAgo(iso: string, now: number): string {
   const s = (now - Date.parse(iso)) / 1000;
