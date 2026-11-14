@@ -12,6 +12,7 @@ import {
   ProjectStore, answerAsUser, applyDraft, approveQueue, loadProjectState, orchestratorStatusChange, routeAnswers, type StepDef,
 } from "@nexus/protocol";
 import { Engine, type EngineOptions } from "../src/engine.ts";
+import { acceptReviews } from "./fake-reviewer.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -30,7 +31,7 @@ function setup(steps: StepDef[]) {
   const engines: Engine[] = [];
   /** An engine as the server makes one: every change it notices calls onChange (a restart is a new one). */
   const engine = (): Engine => {
-    const e: Engine = new Engine(store, () => { routeAnswers(store); e.onChange(loadProjectState(store)); }, FAST);
+    const e: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store); e.onChange(loadProjectState(store)); }, FAST);
     engines.push(e);
     return e;
   };

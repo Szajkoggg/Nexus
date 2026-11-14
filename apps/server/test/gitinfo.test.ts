@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { ProjectStore, approveQueue, loadProjectState, routeAnswers } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { branchState, recordBase, recordStepEnd, recordStepStart, stepCommits } from "../src/gitinfo.ts";
+import { acceptReviews } from "./fake-reviewer.ts";
 
 process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
 const G = ["-c", "user.name=test", "-c", "user.email=test@example.invalid", "-c", "init.defaultBranch=main", "-c", "commit.gpgsign=false"];
@@ -43,7 +44,7 @@ test("the engine records HEAD when a step opens and when its outcome's turn ends
   store.writeQueue({ protocol: 1, id: "Q", title: "Queue", revision: 1, status: "proposed", stop_conditions: [], checks: [], approvals: [], history: [],
     steps: [1, 2].map((i) => ({ id: `Q${i}`, title: `Step ${i}`, goal: "FAKE: commit", acceptance: [] })) });
   approveQueue(store, "Q");
-  const engine: Engine = new Engine(store, () => { routeAnswers(store); engine.onChange(loadProjectState(store)); });
+  const engine: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store); engine.onChange(loadProjectState(store)); });
   const queue = () => loadProjectState(store).queues[0]!;
   try {
     const start = git(root, ["rev-parse", "HEAD"]);

@@ -8,9 +8,10 @@ import { tmpdir } from "node:os";
 import { dirname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  ProjectStore, addNote, answerAsUser, approveQueue, loadProjectState, reportFolder, routeAnswers, runTimes, sendMessage, type StepDef,
+  ProjectStore, addNote, answerAsUser, approveQueue, loadProjectState, reportFolder, routeAnswers, runTimes, sendMessage, setStepLevel, type StepDef,
 } from "@nexus/protocol";
 import { Engine, RETRY_LIMIT, type EngineOptions } from "../src/engine.ts";
+import { acceptReviews } from "./fake-reviewer.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -29,7 +30,7 @@ function setup(behaviours: string[], options: EngineOptions = FAST) {
   store.writeQueue({ protocol: 1, id: "Q", title: "Queue", revision: 1, status: "proposed", stop_conditions: [], checks: [], steps, approvals: [], history: [] });
   approveQueue(store, "Q");
   // The server calls onChange after every file change; here every engine notification does.
-  const engine: Engine = new Engine(store, () => { routeAnswers(store); engine.onChange(loadProjectState(store)); }, options);
+  const engine: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store); engine.onChange(loadProjectState(store)); }, options);
   const queue = () => loadProjectState(store).queues.find((q) => q.id === "Q")!;
   const received = () => (existsSync(process.env.FAKE_LOG!) ? readFileSync(process.env.FAKE_LOG!, "utf8").trim().split("\n").map((l) => JSON.parse(l) as { text: string; priority: string | null; busy: boolean }) : []);
   const until = async (what: string, pred: () => boolean, ms = 20_000) => {
@@ -310,7 +311,7 @@ for (const runtime of ["claude", "codex"] as const) {
 
 /** The next server on the same files, as after a restart. */
 function restart(store: ProjectStore, options: EngineOptions = FAST): Engine {
-  const next: Engine = new Engine(store, () => { routeAnswers(store); next.onChange(loadProjectState(store)); }, options);
+  const next: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store); next.onChange(loadProjectState(store)); }, options);
   return next;
 }
 
@@ -522,7 +523,7 @@ test("an update holds a running queue at its step's end; the next server resumes
     engine.shutdown();
 
     // The restart: a new engine on the same files.
-    next = new Engine(store, () => { routeAnswers(store); next!.onChange(loadProjectState(store)); });
+    next = new Engine(store, () => { routeAnswers(store); acceptReviews(store); next!.onChange(loadProjectState(store)); });
     await until("the resumed run to finish", () => queue().run?.state === "finished");
     assert.equal(store.readRun("R")?.state, "paused", "a queue the user paused stays paused");
     assert.equal(store.readRun("H")?.state, "halted", "a halted queue stays halted");
@@ -582,6 +583,28 @@ for (const runtime of ["claude", "codex"] as const) {
       assert.equal(starts.length, 1, "one process start");
       assert.deepEqual(loadProjectState(store).attention, [], "nothing waits for the user");
       assert.ok(q.run?.ended_at);
+    } finally { clearInterval(watch); engine.shutdown(); delete process.env.FAKE_ARGS; }
+  });
+
+  test(`${runtime}: an agent that exits after a step.done while the step waits for review: no retry; once accepted, a new process resumes the session`, async () => {
+    const { store, engine, queue, until } = setup(["doneexit", "done"]);
+    setStepLevel(store, "Q", "Q1", 1); // the user reviews it: the fake reviewer leaves it to the test
+    process.env.FAKE_ARGS = join(dirname(process.env.FAKE_LOG!), "args.log");
+    const seen = new Set<string>();
+    const watch = setInterval(() => { const s = store.readRun("Q")?.state; if (s) seen.add(s); }, 20);
+    try {
+      engine.start("Q", { runtime });
+      await until("Q1 in review", () => queue().steps[0]!.status === "review");
+      await new Promise((r) => setTimeout(r, 1500)); // time enough for the exit, and for a retry were there one
+      assert.equal(queue().run?.state, "running", "the run waits for the review");
+      engine.acceptReview("Q", "Q1");
+      await until("the run to finish", () => queue().run?.state === "finished");
+      const q = queue();
+      assert.ok(!seen.has("retry_wait") && !seen.has("halted"), `states seen: ${[...seen].join(", ")}`);
+      assert.equal(q.steps[1]!.session, q.steps[0]!.session, "Q2 ran in the same session");
+      const starts = readFileSync(process.env.FAKE_ARGS, "utf8").trim().split("\n").map((l) => JSON.parse(l) as { argv?: string[]; method?: string })
+        .filter((a) => a.argv || a.method === "thread/start" || a.method === "thread/resume");
+      assert.equal(starts.length, 2, "a second process, for Q2");
     } finally { clearInterval(watch); engine.shutdown(); delete process.env.FAKE_ARGS; }
   });
 }

@@ -39,7 +39,7 @@ function setup(o: { push?: boolean; remote?: boolean; steps?: number } = {}) {
   const p = store.readProject();
   store.writeProject({ ...p, defaults: { ...p.defaults, push_accepted: o.push !== false } });
   const steps = Array.from({ length: o.steps ?? 3 }, (_, i) => ({ id: `Q${i + 1}`, title: `Step ${i + 1}`, goal: "FAKE: done", acceptance: [] }));
-  store.writeQueue({ protocol: 1, id: "Q", title: "Queue", revision: 1, status: "proposed", review_policy: "wait", stop_conditions: [], checks: [], steps, approvals: [], history: [] });
+  store.writeQueue({ protocol: 1, id: "Q", title: "Queue", revision: 1, status: "proposed", review_level: 1, stop_conditions: [], checks: [], steps, approvals: [], history: [] });
   approveQueue(store, "Q");
   const engine: Engine = new Engine(store, () => { routeAnswers(store); engine.onChange(loadProjectState(store)); });
   const timer = setInterval(() => engine.onChange(loadProjectState(store)), 150);
@@ -169,7 +169,7 @@ test("after a rejection nothing of the queue is pushed until a newer revision is
     await x.engine.pusher.settled();
     assert.equal(x.remoteBranch(), undefined, "nothing pushed after the rejection");
     // The orchestrator's revision, approved by the user: pushing works again.
-    applyDraft(x.store, { id: "Q", title: "Queue", review_policy: "wait", steps: [
+    applyDraft(x.store, { id: "Q", title: "Queue", review_level: 1, steps: [
       { id: "Q1", title: "Step 1", goal: "FAKE: done" }, { id: "Q2", title: "Step 2", goal: "FAKE: done" },
       { id: "Q3", title: "Step 3", goal: "FAKE: done" }, { id: "Q2b", title: "Revert Q2", goal: "FAKE: done" },
     ] });

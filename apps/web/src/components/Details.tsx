@@ -15,7 +15,7 @@ import { ImageViewer, type ViewerImage } from "./Viewer.tsx";
 import { StepChat } from "./Chat.tsx";
 import { StopBox, StopReason, stopVersion, useContinue, useLeft } from "./Stop.tsx";
 import { AskButton, CompactSteps, SettingsLine, useApprove, useCtrlEnter } from "./Approval.tsx";
-import { needsApproval, policyWords } from "../approval.ts";
+import { needsApproval, levelWords } from "../approval.ts";
 import { queueStatus } from "../queueStatus.ts";
 import { needsWorkChoice, stopDecision, type LeftState, type LeftView, type WorkChoice } from "../stopDecision.ts";
 import { rich, t, type Key } from "../i18n.ts";
@@ -1179,15 +1179,15 @@ function QueueBar({ project, queue, onChanged, left, work, needsChoice }: {
   const canWithdraw = queue.approved && !queue.run && queue.steps.every((s) => s.status === "pending" && s.segments.length === 0);
   const [withdrawOpen, setWithdrawOpen] = useState(false);
   const [policyOpen, setPolicyOpen] = useState(false);
-  const setPolicy = (review_policy: string | null) =>
-    act(id, "PATCH", `/queues/${enc(queue.id)}`, { review_policy }).then(onChanged, (e: Error) => setError(e.message));
-  const projectDefault = t("details.policy.projectDefault", { policy: policyWords(project.project.defaults.review_policy) });
-  const policy = queue.review_policy ? policyWords(queue.review_policy) : projectDefault;
+  const setLevel = (review_level: number | null) =>
+    act(id, "PATCH", `/queues/${enc(queue.id)}`, { review_level }).then(onChanged, (e: Error) => setError(e.message));
+  const projectDefault = t("details.level.projectDefault", { level: levelWords(project.project.defaults.review_level) });
+  const policy = queue.review_level ? levelWords(queue.review_level) : projectDefault;
 
   const menu: MenuEntry[] = [
     ...(!queue.approved ? a.menu : []),
     ...(canWithdraw && !withdrawOpen ? [{ label: t("details.withdraw.menu"), danger: true, onSelect: () => setWithdrawOpen(true) }] : []),
-    ...(!policyOpen ? [{ label: t("details.policy.menu", { policy }), onSelect: () => setPolicyOpen(true) }] : []),
+    ...(!policyOpen ? [{ label: t("details.level.menu", { level: policy }), onSelect: () => setPolicyOpen(true) }] : []),
   ];
   const fail = cont.error ?? error ?? a.words.error;
   const said = cont.note ?? a.note;
@@ -1211,19 +1211,19 @@ function QueueBar({ project, queue, onChanged, left, work, needsChoice }: {
           {policyOpen && (
             <div className="flex flex-wrap items-center gap-2 text-sm text-fg">
               <label className="flex flex-wrap items-center gap-2">
-                {t("details.policy.label")}
+                {t("details.level.label")}
                 <select
-                  value={queue.review_policy ?? ""}
-                  onChange={(e) => void setPolicy(e.target.value || null)}
+                  value={queue.review_level ?? ""}
+                  onChange={(e) => void setLevel(e.target.value ? Number(e.target.value) : null)}
                   className="rounded-md border border-line-strong bg-canvas px-2 py-1 text-sm"
                 >
                   <option value="">{projectDefault}</option>
-                  <option value="continue">{t("details.policy.continue")}</option>
-                  <option value="wait">{t("details.policy.wait")}</option>
-                  <option value="orchestrator">{t("details.policy.orchestrator")}</option>
+                  <option value="1">{t("details.level.1")}</option>
+                  <option value="2">{t("details.level.2")}</option>
+                  <option value="3">{t("details.level.3")}</option>
                 </select>
               </label>
-              <Button variant="quiet" onClick={() => setPolicyOpen(false)}>{t("details.policy.done")}</Button>
+              <Button variant="quiet" onClick={() => setPolicyOpen(false)}>{t("details.level.done")}</Button>
             </div>
           )}
         </div>

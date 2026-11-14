@@ -60,9 +60,9 @@ step:   pending → running → review → done
   that has run keeps its checkout. A change to a started step goes to its worker as a message or a send-back.
 - `stopped` carries the stop condition that was met and the worker's explanation. Resuming a stopped queue
   is an explicit user action (possibly after edits and re-approval).
-- `review`: the step's work is finished and its review material is ready. By default (`review_policy: continue`)
-  the queue goes straight on to the next step and the step counts as `done`; the user reviews whole queues. A queue
-  or a single step can be set to `wait`, which holds the queue in `review` until the user accepts the step.
+- `review`: the step's work is finished and its review material is ready. Every step is reviewed, by the user or
+  the orchestrator, as its review level says (PROTOCOL.md, "Review"); there is no level without review (the user's
+  decision of 2026-11-14). Until RL2 a step in review holds its queue.
 
 ## Architecture
 
@@ -676,7 +676,7 @@ The user's answers, 2026-11-12:
 
 | Question | Decision |
 |---|---|
-| Stop at every step for review? | No. Queues run autonomously (`review_policy: continue`); the user reviews queues, with step detail on demand |
+| Stop at every step for review? | Every step is reviewed, at its review level: by the user (1) or the orchestrator (2, 3); at level 3 the queue goes on (2026-11-14, replacing `review_policy: continue`) |
 | Who creates worktrees? | Nexus, by itself, for queues that ask for one |
 | Watch the usage limits? | Yes; pause before the limit, resume when it resets |
 | Where does `.nexus/` live? | In the project's main checkout, git-ignored |
@@ -1442,6 +1442,27 @@ busy-loop processes on the user's 16 logical cores and 4 to 6 copies of the test
   a folder a process runs in ("Permission denied"). The test now cleans up after the process has exited, as a user's
   cleanup comes. Its other failure was time: two steps and a report start about eight node processes, a step took 14 s
   under that load, and the 20 s wait was shorter than the work: now 60 s, the cost written beside it.
+
+## Findings from review levels (queue RL1)
+
+- **Every step is reviewed now, so the last step of every queue ends in review.** Before, `continue` ended a queue's
+  last step `done`, and an agent whose process ended right after its report (the CLI closing, a crash after it) left
+  nothing to run: the run finished. In review, the same exit read as a failed turn and was retried on a new process,
+  for nothing. Now a process that ends while its run's step waits for its review is no failure: the run waits for the
+  review, and then finishes if nothing is left, or starts a process that resumes the session for what comes next (the
+  next step, a send-back).
+- **A pause takes effect at the review.** A run asked to pause (by the user, or by an update's drain) paused at the
+  step's end, and a step in review never reached it: the run stayed `pausing` until the review, and an update would
+  have waited for an orchestrator that is not told anything during a drain. A step in review has finished its turn,
+  so the pause takes effect there; the review goes on meanwhile.
+- **Tests about something else than review stand in for the reviewer.** Most engine tests ran their queues through
+  under the old default `continue`. With no level without review, a test project without an orchestrator hands each
+  step to the user; `apps/server/test/fake-reviewer.ts` accepts those (levels 2 and 3) where the test stands in for
+  the file watcher, and leaves level 1 to tests that want a step held for the user.
+- **Approvals survive the change of form.** An approval pins a hash of the steps, and a step's old `review.policy` was
+  part of them. Rather than a second hash rule kept forever, reading a queue carries an approval of the old form of the
+  same content over to the new form (`parseQueue`), and the next write stores it so; checked against the 55 queues of
+  this repository's own `.nexus` (read only): none changed its approved state.
 
 ## Open questions
 

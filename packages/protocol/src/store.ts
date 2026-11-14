@@ -9,7 +9,7 @@ import { monotonicFactory } from "ulid";
 import YAML from "yaml";
 import type { z } from "zod";
 import {
-  Activity, Applied, ChatEntry, PinsFile, Refusal, Delivery, Event, GlobalSettings, InboxEntry, NoteMeta, GitFile, ProjectFile, PushFile, QueueFile, RegistryFile, RunFile, RuntimeFile, SessionFile, StartFile, StoredProject, TurnRecord, UsageFile,
+  Activity, Applied, ChatEntry, PinsFile, Refusal, Delivery, Event, GlobalSettings, InboxEntry, NoteMeta, GitFile, ProjectFile, PushFile, QueueFile, type QueueInput, RegistryFile, RunFile, RuntimeFile, SessionFile, StartFile, StoredProject, TurnRecord, UsageFile,
   type Note,
 } from "./schemas.ts";
 import { applyChange, builtInSettings, effectiveProject, migrateStored, storedFrom } from "./settings.ts";
@@ -187,8 +187,9 @@ export class ProjectStore {
   /** Where `nexus review add` copies a step's review files (its only writer): queues/<queue>/review/<step>/. */
   reviewDir(queue: string, step: string): string { return join(this.queueDir(queue), "review", step); }
   queueIds(): string[] { return subdirs(join(this.dir, "queues")).filter((q) => existsSync(join(this.queueDir(q), "queue.yaml"))); }
-  readQueue(id: string): QueueFile { return readYaml(join(this.queueDir(id), "queue.yaml"), QueueFile); }
-  writeQueue(q: z.input<typeof QueueFile>): void { writeYaml(join(this.queueDir(q.id), "queue.yaml"), QueueFile.parse(q)); }
+  /** queue.yaml in the present form (parseQueue: old review policies read as levels, their approvals kept). */
+  readQueue(id: string): QueueFile { return parseQueue(YAML.parse(readFileSync(join(this.queueDir(id), "queue.yaml"), "utf8"))); }
+  writeQueue(q: QueueInput): void { writeYaml(join(this.queueDir(q.id), "queue.yaml"), QueueFile.parse(q)); }
 
   readNotes(queueId: string): { notes: Note[]; errors: string[] } {
     const notes: Note[] = []; const errors: string[] = [];
@@ -354,12 +355,45 @@ export function parseFrontMatter(text: string): { meta: unknown; body: string } 
 
 // ---------------------------------------------------------------- revision hash
 
-/** The hash an approval pins: steps (without baseline state), stop conditions and checks. */
-export function revisionHash(q: QueueFile): string {
-  const content = {
-    steps: q.steps.map(({ status: _s, status_note: _n, ...def }) => def),
-    stop_conditions: q.stop_conditions,
-    checks: q.checks,
+/**
+ * The hash an approval pins: steps (without baseline state), stop conditions and checks. A step's drafted review
+ * level is part of it; the levels the user set (`user_levels`) and the queue's own level are not.
+ */
+export function revisionHash(q: Pick<QueueFile, "steps" | "stop_conditions" | "checks">): string {
+  return hashOf(q.steps.map(({ status: _s, status_note: _n, ...def }) => def), q);
+}
+const hashOf = (steps: unknown[], q: Pick<QueueFile, "stop_conditions" | "checks">) =>
+  "sha256:" + createHash("sha256").update(JSON.stringify({ steps, stop_conditions: q.stop_conditions, checks: q.checks })).digest("hex");
+
+/**
+ * The hash a queue had before review levels, when its steps still carried a review `policy` (continue, wait or
+ * orchestrator): the same content with each step's review written as it was then. Undefined when no step has one.
+ */
+function legacyRevisionHash(raw: unknown, q: QueueFile): string | undefined {
+  const rawSteps = raw && typeof raw === "object" && Array.isArray((raw as { steps?: unknown }).steps) ? (raw as { steps: unknown[] }).steps : [];
+  const policyOf = (i: number) => {
+    const r = (rawSteps[i] as { review?: { policy?: unknown } } | undefined)?.review;
+    return r && typeof r === "object" && typeof r.policy === "string" ? r.policy : undefined;
   };
-  return "sha256:" + createHash("sha256").update(JSON.stringify(content)).digest("hex");
+  if (!rawSteps.some((_, i) => policyOf(i) !== undefined)) return undefined;
+  return hashOf(q.steps.map(({ status: _s, status_note: _n, ...def }, i) => {
+    const policy = policyOf(i);
+    if (policy === undefined || !def.review) return def;
+    const { level: _l, ...review } = def.review;
+    return { ...def, review: { ...review, policy } }; // the old key order: prepare, rounds, policy
+  }), q);
+}
+
+/**
+ * Parses queue.yaml as read. A file from before review levels reads in the present form: old review policies become
+ * levels (schemas.ts, withLevel), and an approval that pinned the old form of the same content pins the new form, so
+ * an approved queue stays approved (`continue` and `orchestrator` became level 2, `wait` level 1). The file is written
+ * in the new form at its next write.
+ */
+export function parseQueue(raw: unknown): QueueFile {
+  const q = QueueFile.parse(raw);
+  const legacy = legacyRevisionHash(raw, q);
+  if (legacy === undefined) return q;
+  const hash = revisionHash(q);
+  return { ...q, approvals: q.approvals.map((a) => (a.revision === q.revision && a.hash === legacy ? { ...a, hash } : a)) };
 }

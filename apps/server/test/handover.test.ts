@@ -14,6 +14,7 @@ import { Engine } from "../src/engine.ts";
 import { handOver, refuseHandoverDir, takeHandoverEnv, withoutHandover } from "../src/handover.ts";
 import { agentEnv } from "../src/agent.ts";
 import { MAIN, serverEnv, spawnServer } from "./helpers.ts";
+import { acceptReviews } from "./fake-reviewer.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -43,7 +44,7 @@ async function heldProject() {
   const steps: StepDef[] = ["slow", "done"].map((b, i) => ({ id: `Q${i + 1}`, title: `Step ${i + 1}`, goal: `FAKE: ${b}`, acceptance: [] }));
   store.writeQueue({ protocol: 1, id: "Q", title: "Queue", revision: 1, status: "proposed", stop_conditions: [], checks: [], steps, approvals: [], history: [] });
   approveQueue(store, "Q");
-  const engine: Engine = new Engine(store, () => { routeAnswers(store); engine.onChange(loadProjectState(store)); });
+  const engine: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store); engine.onChange(loadProjectState(store)); });
   engine.start("Q");
   await until("the first step to run", () => loadProjectState(store).queues[0]!.steps[0]!.status === "running");
   engine.drainForUpdate(false);
@@ -78,9 +79,27 @@ function server(home: string, port: number, env: Record<string, string> = {}) {
   child.on("exit", (c, signal) => { code = c; out += `${at()}exited (${c ?? signal})\n`; });
   const records = () => (existsSync(fakeArgs) ? readFileSync(fakeArgs, "utf8").trim().split("\n").map((l) => JSON.parse(l) as { argv?: string[]; handover: string | null }) : []);
   return {
-    child, out: () => out, exitCode: () => code, startedAgent: () => existsSync(fakeArgs), records,
+    child, port, out: () => out, exitCode: () => code, startedAgent: () => existsSync(fakeArgs), records,
     stop: () => { if (code === undefined) child.kill(); },
   };
+}
+
+/**
+ * Waits for the resumed queue to finish. Every step is reviewed: each one that waits for the user is accepted as the
+ * dashboard does, through the server.
+ */
+async function resumedToFinish(store: ProjectStore, s: ReturnType<typeof server>): Promise<void> {
+  const asked = new Set<string>();
+  await until("the resumed queue to finish", () => {
+    const st = loadProjectState(store).queues[0]!.steps.find((x) => x.status === "review" && x.review_with === "user");
+    if (st && !asked.has(st.id)) {
+      asked.add(st.id);
+      const url = `http://127.0.0.1:${s.port}`;
+      fetch(`${url}/api/projects/p/queues/Q/steps/${st.id}/accept`, { method: "POST", headers: { "content-type": "application/json", origin: url, "sec-fetch-site": "same-origin" }, body: "{}" })
+        .then((r) => { if (!r.ok) asked.delete(st.id); }, () => asked.delete(st.id));
+    }
+    return store.readRun("Q")?.state === "finished";
+  }, 30_000, () => `; run: ${JSON.stringify(store.readRun("Q"))}; output: ${s.out()}`);
 }
 
 function handoverDir(home: string, predecessorPid: number): string {
@@ -181,7 +200,7 @@ test("a successor waits, read-only, until the predecessor hands over; then it re
     assert.ok(!s.startedAgent(), "no session started before the hand-over");
 
     writeFileSync(join(dir, "released.json"), JSON.stringify({ at: new Date().toISOString(), log: ["10:00:00 moving the live worktree"] }));
-    await until("the resumed queue to finish", () => store.readRun("Q")?.state === "finished", 30_000, () => `; run: ${JSON.stringify(store.readRun("Q"))}; output: ${s.out()}`);
+    await resumedToFinish(store, s);
     const info = await (await fetch(`http://127.0.0.1:${port}/api/server`)).json() as { commit: string; update: { phase: string; log: string[] } };
     assert.equal(info.update.phase, "updated");
     assert.equal(info.update.log[0], "10:00:00 moving the live worktree", "the predecessor's lines come first");
@@ -202,7 +221,7 @@ test("a successor whose predecessor exits without handing over takes over all th
   const dir = handoverDir(home, gone.pid!); // a predecessor that is no longer running
   const s = server(home, await freePort(), { NEXUS_HANDOVER: dir });
   try {
-    await until("the resumed queue to finish", () => store.readRun("Q")?.state === "finished", 30_000, () => `; run: ${JSON.stringify(store.readRun("Q"))}; output: ${s.out()}`);
+    await resumedToFinish(store, s);
     assert.match(s.out(), /exited without handing over/);
   } finally { s.stop(); }
 });
@@ -213,7 +232,7 @@ test("a start with no predecessor comes up and resumes the held queue as before"
   const { home, store } = await heldProject();
   const s = server(home, await freePort());
   try {
-    await until("the resumed queue to finish", () => store.readRun("Q")?.state === "finished", 30_000, () => `; run: ${JSON.stringify(store.readRun("Q"))}; output: ${s.out()}`);
+    await resumedToFinish(store, s);
   } finally { s.stop(); }
 });
 
@@ -226,7 +245,7 @@ test("a start by an old-style predecessor (no hand-over, the port freed as it ex
   try {
     await sleep(1500);
     await new Promise<void>((r) => old.close(() => r())); // the old server exits
-    await until("the resumed queue to finish", () => store.readRun("Q")?.state === "finished", 30_000, () => `; run: ${JSON.stringify(store.readRun("Q"))}; output: ${s.out()}`);
+    await resumedToFinish(store, s);
     assert.match(s.out(), new RegExp(`Nexus server on http://127.0.0.1:${port}`));
   } finally { s.stop(); if (old.listening) old.close(); }
 });
@@ -269,7 +288,7 @@ test("after taking over, the server's own environment and its agents' have no NE
   try {
     await until("the ready signal", () => existsSync(join(dir, "ready.json")), 30_000, () => `; run: ${JSON.stringify(store.readRun("Q"))}; output: ${s.out()}`);
     writeFileSync(join(dir, "released.json"), JSON.stringify({ at: new Date().toISOString(), log: [] }));
-    await until("the resumed queue to finish", () => store.readRun("Q")?.state === "finished", 30_000, () => `; run: ${JSON.stringify(store.readRun("Q"))}; output: ${s.out()}`);
+    await resumedToFinish(store, s);
     // The model list is asked from a runtime started with the server's own environment, not an agent's.
     const ask = new AbortController();
     void fetch(`http://127.0.0.1:${port}/api/models/claude`, { signal: ask.signal }).catch(() => {});

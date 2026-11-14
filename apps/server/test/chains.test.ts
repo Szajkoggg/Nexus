@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { ProjectStore, applyDraft, approveQueue, loadProjectState, newId, routeAnswers, type Event, type StepDef } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
+import { acceptReviews } from "./fake-reviewer.ts";
 
 process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
 
@@ -25,7 +26,7 @@ function setup(queues: Record<string, string[]>, opts: { orchestrator?: boolean 
   const engines: Engine[] = [];
   let orchestrator: Orchestrator | undefined;
   // Stands in for the server's file watcher (and for the server's restart, with `restart`).
-  const tick = () => { routeAnswers(store); const s = loadProjectState(store); orchestrator?.onChange(s); engines.at(-1)!.onChange(s); };
+  const tick = () => { routeAnswers(store); acceptReviews(store); const s = loadProjectState(store); orchestrator?.onChange(s); engines.at(-1)!.onChange(s); };
   const newEngine = () => { const e = new Engine(store, tick, { retryBaseMs: 30, usageMarginMs: 100 }); engines.push(e); return e; };
   let engine = newEngine();
   if (opts.orchestrator) orchestrator = new Orchestrator(store, engine, tick);
@@ -43,13 +44,14 @@ function setup(queues: Record<string, string[]>, opts: { orchestrator?: boolean 
   return { store, get engine() { return engine; }, orchestrator, queue, until, restart, stop };
 }
 
-/** Marks a queue's steps done as an external worker would, with no engine involved. */
+/** Marks a queue's steps done as an external worker would, with no engine involved, and accepted. */
 function doneByHand(store: ProjectStore, queue: string, steps: string[]): void {
   const session = newId();
   store.writeSession({ protocol: 1, id: session, project: "p", role: "worker", runtime: "external", cwd: ".", launched_by: "external", created_at: new Date().toISOString() });
   for (const step of steps) for (const type of ["step.started", "step.done"] as const) {
     store.appendEvent({ v: 1, id: newId(), at: new Date().toISOString(), session, type, queue, step, ...(type === "step.done" ? { summary: "by hand" } : {}) } as Event);
   }
+  acceptReviews(store);
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -107,6 +109,11 @@ test("the orchestrator chains B with --use-session of A's session: B starts in t
     const plan = x.queue("B").start!;
     assert.deepEqual([plan.after, plan.session, plan.by, plan.reason], ["A", session, "orchestrator", "B builds on A's context"]);
     assert.equal(x.queue("A").run?.state, "running", "set while A runs");
+    // The orchestrator reviews each step (level 2, the project's default).
+    for (const [q, st] of [["A", "A1"], ["B", "B1"]] as const) {
+      await x.until(`${st} in the orchestrator's review`, () => x.queue(q).steps[0]!.review_with === "orchestrator");
+      x.orchestrator!.say(`FAKE-NEXUS: ["review","accept","${q}","${st}"]`);
+    }
     await x.until("B to finish", () => x.queue("B").run?.state === "finished");
     assert.equal(x.queue("B").run!.session, session, "B ran in A's session");
     assert.equal(x.queue("B").steps[0]!.session, session);

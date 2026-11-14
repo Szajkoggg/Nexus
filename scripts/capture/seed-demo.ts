@@ -7,6 +7,9 @@ import { join } from "node:path";
 import { crc32, deflateSync } from "node:zlib";
 import { ProjectStore, approveQueue, newId, writeRegistry, type Event, type SessionFile } from "@nexus/protocol";
 
+/** The user reviews: written the old way, which code since review levels reads as level 1 and older code as `wait`. */
+const LEVEL_1 = { review_policy: "wait" } as object;
+
 const dir = process.argv[2];
 if (!dir) throw new Error("usage: node seed-demo.ts <data dir>");
 const root = join(dir, "demo");
@@ -49,7 +52,7 @@ const w: SessionFile = { protocol: 1, id: newId(), project: "demo", role: "worke
 st.writeSession(w);
 const emit = (min: number, body: Record<string, unknown>) => st.appendEvent({ v: 1, id: newId(), at: ago(min), session: w.id, ...body } as Event);
 
-st.writeQueue({ protocol: 1, id: "UI", title: "Waiting tab with reasons", revision: 1, status: "proposed", review_policy: "wait", stop_conditions: [], checks: ["npm test"],
+st.writeQueue({ protocol: 1, id: "UI", title: "Waiting tab with reasons", revision: 1, status: "proposed", ...LEVEL_1, stop_conditions: [], checks: ["npm test"],
   steps: [
     { id: "UI1", title: "Reasons on the waiting tab", goal: "Each waiting item says why it waits.", acceptance: ["Every item has its reason"],
       review: { prepare: "waiting-tab@492 before -> after; usage-panel@390 result" } },

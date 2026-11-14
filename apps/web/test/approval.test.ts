@@ -4,7 +4,7 @@ import type { ChatEntry } from "@nexus/protocol";
 import { draftOf, needsApproval, pinsText, queueReference, runSettings, withReference } from "../src/approval.ts";
 
 const project = {
-  defaults: { review_policy: "continue" },
+  defaults: { review_level: 2 },
   runtimes: { default: "claude", claude: { effort: "high" }, codex: { model: "gpt-6-luna" } },
 } as never;
 const step = (id: string, extra: Record<string, unknown> = {}) => ({ id, title: id, goal: "", acceptance: [], ...extra });
@@ -17,20 +17,20 @@ test("a queue waits for approval while its revision is not approved, unless it i
   assert.equal(needsApproval({ approved: false, status: "cancelled" }), false);
 });
 
-test("run settings on one line: steps, where and when, runtime with model and effort, the review policy, own values", () => {
+test("run settings on one line: steps, where and when, runtime with model and effort, the review level, own values", () => {
   const r = runSettings({
     steps: [step("SC1"), step("SC2"), step("SC3", { runtime: "codex", model: "gpt-6-luna" }), step("SC4", { effort: "low" })],
-    branch: "main", start: { after: "SF" }, review_policy: undefined,
+    branch: "main", start: { after: "SF" }, review_level: undefined,
   } as never, project);
-  assert.deepEqual(r.parts, ["4 steps", "on main, after SF", "Claude, high", "after each step: go on"]);
+  assert.deepEqual(r.parts, ["4 steps", "on main, after SF", "Claude, high", "after each step: the orchestrator reviews what it can"]);
   assert.deepEqual(r.own, ["SC3 on Codex · gpt-6-luna", "SC4 on low effort"]);
 });
 
 test("run settings: the run's own values first, then its planned start's, then the project's; a worktree; a time", () => {
-  const ran = runSettings({ steps: [step("A1")], worktree: "auto", branch: "nexus/A", run: { runtime: "codex", model: "gpt-x", effort: "medium" }, review_policy: "wait" } as never, project);
-  assert.deepEqual(ran.parts, ["1 step", "in its own worktree on nexus/A", "Codex, gpt-x, medium", "after each step: wait for my review"]);
+  const ran = runSettings({ steps: [step("A1")], worktree: "auto", branch: "nexus/A", run: { runtime: "codex", model: "gpt-x", effort: "medium" }, review_level: 1 } as never, project);
+  assert.deepEqual(ran.parts, ["1 step", "in its own worktree on nexus/A", "Codex, gpt-x, medium", "after each step: I review"]);
   const planned = runSettings({ steps: [], start: { at: "2026-11-13T14:05:00", runtime: "codex" } } as never, project, new Date("2026-11-13T09:00:00"));
-  assert.deepEqual(planned.parts, ["0 steps", "at 14:05", "Codex, gpt-6-luna", "after each step: go on"]);
+  assert.deepEqual(planned.parts, ["0 steps", "at 14:05", "Codex, gpt-6-luna", "after each step: the orchestrator reviews what it can"]);
 });
 
 const at = (m: number) => `2026-11-13T10:${String(m).padStart(2, "0")}:00Z`;

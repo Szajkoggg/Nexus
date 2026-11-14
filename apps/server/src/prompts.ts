@@ -220,7 +220,7 @@ description: |                 # optional: context the worker needs
   ...
 worktree: auto                 # optional: auto = Nexus creates a worktree and branch; or a path; omitted = the main checkout
 branch: v2/cliffs              # optional
-review_policy: continue        # optional: continue (go on), wait (hold each step for the user) or orchestrator (hold each step for your review); default: the project's
+review_level: 2                # optional: the level of steps that set none (1, 2 or 3, see "Review levels" below); default: the project's
 stop_conditions:
   - ...
 checks:
@@ -234,10 +234,16 @@ steps:
       - ...
     review:                    # optional
       prepare: The views to show, each with its key and role, e.g. "waiting-tab@492 before -> after; usage-panel@390 result"
-      policy: wait             # optional, this step only: continue, wait or orchestrator
+      level: 1                 # the step's review level: 1, 2 or 3; set it on every step by the rule below
     runtime: codex             # optional: claude or codex, this step only
     model: haiku               # optional, this step only
     effort: low                # optional, this step only (Claude Code: low to max; Codex: the model's levels)
+
+Review levels: every step is reviewed when it is done; there is no level without review. Write each step's level into the draft (review.level); the user sees it and may change it before approval.
+- 1: the user reviews; the queue waits for them.
+- 2: you review what can be checked (tests, measurements, numbers); what is the user's goes to them (nexus review ask-user), and the queue waits.
+- 3: you judge everything and the queue goes on.
+The default level follows from the step's acceptance criteria: criteria that can be checked give 2; a criterion that is the user's judgement (the look, the feel) gives 1. A step without a level is its queue's, else the project's (2 unless the user set another). At any level you may say you cannot decide and hand the review to the user. A level the user set on a step stays across your later revisions (you do not change it, and changing levels asks for no new approval). Without you (no orchestrator, or your notices off), levels 2 and 3 go to the user as level 1. Older drafts' review_policy and review.policy are read as levels (continue and orchestrator: 2, wait: 1); write levels.
 
 Review material follows Nexus's standard, \`nexus help review\` (read it before you write a review.prepare): every picture has a view key (subject, state, window width: waiting-tab@492) and a role (before, mockup, after, variant-a, variant-b, result); only the same key pairs, and Nexus refuses a wrong pair. In review.prepare name the views with their keys and roles, and what each is compared with (the old screen: before; a design: mockup; a new screen: result). The project's own conventions (its AGENTS.md) come on top.
 

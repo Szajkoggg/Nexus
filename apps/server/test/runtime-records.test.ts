@@ -11,6 +11,7 @@ import { ProjectStore, approveQueue, loadProjectState, routeAnswers, type Runtim
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { Conversations } from "../src/conversations.ts";
+import { acceptReviews } from "./fake-reviewer.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -22,7 +23,7 @@ function setup() {
   delete process.env.FAKE_LOG;
   delete process.env.FAKE_ARGS;
   const store = ProjectStore.init(root, { id: "p", name: "P", root });
-  const engine: Engine = new Engine(store, () => { routeAnswers(store); engine.onChange(loadProjectState(store)); }, { retryBaseMs: 30, usageMarginMs: 100 });
+  const engine: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store); engine.onChange(loadProjectState(store)); }, { retryBaseMs: 30, usageMarginMs: 100 });
   const orchestrator = new Orchestrator(store, engine, () => {});
   const conversations = new Conversations(store, orchestrator, () => {});
   const until = async (what: string, pred: () => boolean, ms = 20_000) => {

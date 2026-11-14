@@ -30,7 +30,8 @@
 // An answer ("[Nexus] Answer …") makes it report the current step done (also in a new process of the session: the
 // step is kept in a file beside FAKE_LOG). As an orchestrator: "FAKE-DRAFT:" followed by
 // YAML drafts that queue; "FAKE-NEXUS: [args]" runs `nexus` with those arguments; a "[Nexus] A worker asked … (qid X;"
-// notice is answered with "fake answer". "FAKE-LONG" is answered with longReply("Reply"); a hand-over with
+// notice is answered with "fake answer"; with FAKE_REVIEW_ACCEPT set, a notice of a step waiting for its review is
+// answered with `nexus review accept`. "FAKE-LONG" is answered with longReply("Reply"); a hand-over with
 // longReply("SUMMARY"). "FAKE-SLOW" in a chat message: the turn works for FAKE_CHAT_SLOW_MS (default 4000), then
 // replies "slow reply"; a stop (interrupt) ends it early. "FAKE-HISTORY": the reply lists every message the agent took
 // in so far ("history: a | b"): the turns' messages and those read inside a turn (Claude's `next`, Codex's steer).
@@ -247,5 +248,8 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
   if (run) return nexusOut(JSON.parse(run[1]!) as string[]);
   const asked = /A worker asked[\s\S]*?\(qid (\S+);/.exec(text);
   if (asked) return nexusOut(["answer", asked[1]!, "fake answer", "--continue"]);
+  // With FAKE_REVIEW_ACCEPT set, a step waiting for its review is accepted (tests about something other than review).
+  const review = /\bStep (\S+) of queue (\S+) is done and waits for your review/.exec(text);
+  if (review && process.env.FAKE_REVIEW_ACCEPT) return nexusOut(["review", "accept", review[2]!, review[1]!]);
   return "ok"; // a nudge, a message sent while idle, anything else
 }

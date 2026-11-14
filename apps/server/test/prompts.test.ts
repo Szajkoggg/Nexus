@@ -30,6 +30,7 @@ import { Orchestrator } from "../src/orchestrator.ts";
 import { Conversations } from "../src/conversations.ts";
 import type { DeployChanges } from "../src/deploy.ts";
 import type { UpdateNotice } from "../src/lifecycle.ts";
+import { acceptReviews } from "./fake-reviewer.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const T0 = Date.parse("2026-01-01T09:00:00.000Z");
@@ -110,7 +111,7 @@ test("the worker's texts: briefing, step openings, inbox entries, seeds and nudg
   const tr = new Transcript("worker");
   const engine = new Engine(store, () => {}, { spawn: tr.spawn });
   t.after(() => engine.shutdown());
-  const change = () => engine.onChange(loadProjectState(store));
+  const change = () => { acceptReviews(store); engine.onChange(loadProjectState(store)); };
   const worker = () => store.readRun("Q")!.session;
   const stand = () => tr.stands.at(-1)!;
 
@@ -267,7 +268,7 @@ test("the orchestrator's texts: briefing, helpers and notices match the golden f
 
   tr.section("a step waiting for the orchestrator's review (its second round)");
   later();
-  queue({ id: "QG", steps: steps("G", 2), review_policy: "orchestrator", checks: ["npm test", "npm run typecheck", "lint"] });
+  queue({ id: "QG", steps: steps("G", 2), review_level: 2, checks: ["npm test", "npm run typecheck", "lint"] });
   approveQueue(store, "QG");
   worker("w-review", "QG");
   run("QG", { session: "w-review", state: "running", step: "G1" });
@@ -299,7 +300,7 @@ test("the orchestrator's texts: briefing, helpers and notices match the golden f
 
   tr.section("the user's review decisions: accepted with a note (a step and the last), rejected (with a reason and without), a stopped step's work discarded");
   later();
-  queue({ id: "QN", steps: steps("N", 2), review_policy: "wait" }); approveQueue(store, "QN");
+  queue({ id: "QN", steps: steps("N", 2), review_level: 1 }); approveQueue(store, "QN");
   worker("w-user", "QN");
   for (const st of ["N1", "N2"]) {
     event("w-user", { type: "step.started", queue: "QN", step: st });
@@ -308,7 +309,7 @@ test("the orchestrator's texts: briefing, helpers and notices match the golden f
   const user = ensureUserSession(store).id;
   event(user, { type: "review.accepted", queue: "QN", step: "N1", text: "Keep the old names.", to: "orchestrator" });
   event(user, { type: "review.accepted", queue: "QN", step: "N2", text: "Next time smaller steps.", to: "orchestrator" });
-  queue({ id: "QO", steps: steps("O", 2), review_policy: "wait" }); approveQueue(store, "QO");
+  queue({ id: "QO", steps: steps("O", 2), review_level: 1 }); approveQueue(store, "QO");
   worker("w-rej", "QO");
   for (const st of ["O1", "O2"]) {
     event("w-rej", { type: "step.started", queue: "QO", step: st });

@@ -120,6 +120,8 @@ export class Engine implements Member {
   private readonly ending = new Set<string>();
   /** Sessions whose process Nexus ends to start it again with another model or effort (Claude Code). */
   private readonly restarting = new Set<string>();
+  /** Sessions whose process ended on its own while their run's step waited for its review (advance restarts them). */
+  private readonly exitedInReview = new Set<string>();
   private readonly retryBaseMs: number;
   private readonly usageMarginMs: number;
   private readonly backgroundLimitMs: number;
@@ -477,13 +479,22 @@ export class Engine implements Member {
     const state = given ?? loadProjectState(this.store);
     const q = this.queue(state, queueId);
     if (this.restarting.has(run.session)) return; // the process restarts with another model or effort
-    const live = this.host.get(run.session);
+    let live = this.host.get(run.session);
+    const current = run.step ? q.steps.find((s) => s.id === run.step) : undefined;
+    if ((!live || live.proc.state === "exited") && this.exitedInReview.has(run.session)) {
+      // The process ended after the step's report, while the step waited for its review (see the exit handler): the
+      // review decides. Still waiting: nothing to run. Then nothing left: the run is finished. Else (the next step, a
+      // send-back): a new process resumes the session.
+      if (current?.status === "review") return;
+      if (q.steps.every((s) => stepClosed(q, s))) { this.exitedInReview.delete(run.session); return this.finish(queueId); }
+      this.exitedInReview.delete(run.session);
+      live = this.ensureProcess(this.sessionFile(state, run.session));
+    }
     if (!live || live.proc.state === "exited") return this.halt(queueId, "the session's process is not running");
     if (live.proc.state === "working") return;
 
     // A new revision never stops the step at work: its turns, questions, answers and nudges go on as below, and only
     // the step's end looks at the approval.
-    const current = run.step ? q.steps.find((s) => s.id === run.step) : undefined;
     if (q.status === "stopped") return this.halt(queueId, stoppedMessage(q));
     if (current) {
       switch (current.status) {
@@ -508,7 +519,10 @@ export class Engine implements Member {
         case "waiting":
           return; // a blocking question: its answer arrives through the inbox and starts the next turn
         case "review":
-          return; // waits for its review: the user's (policy wait) or the orchestrator's (policy orchestrator)
+          // Waits for its review: the user's (level 1) or the orchestrator's (2 and 3). The step's turn is over, so a
+          // pause asked for (by the user, or an update's drain) takes effect now; the review goes on meanwhile.
+          if (run.state === "pausing") return this.writeRun(queueId, toPaused(run));
+          return;
         case "failed":
         case "stopped":
           return this.halt(queueId, `step ${current.id} ${current.status}${current.reason ? `: ${current.reason}` : ""}`);
@@ -749,6 +763,13 @@ export class Engine implements Member {
   }
 
   /** The queue has no step left: every step is done or skipped, or rejected by the user and released (stepClosed). */
+  /** The run's step has reported its outcome and waits for its review. */
+  private waitsForReview(queueId: string): boolean {
+    const run = this.store.readRun(queueId);
+    const q = loadProjectState(this.store).queues.find((x) => x.id === queueId);
+    return !!run?.step && q?.steps.find((s) => s.id === run.step)?.status === "review";
+  }
+
   private nothingLeft(queueId: string): boolean {
     const q = loadProjectState(this.store).queues.find((x) => x.id === queueId);
     return !!q && q.steps.length > 0 && q.steps.every((s) => stepClosed(q, s));
@@ -868,6 +889,7 @@ export class Engine implements Member {
       }
       return existing;
     }
+    this.exitedInReview.delete(session.id);
     const launch = this.launcher(session);
     const tag = () => {
       // The run that drives the session now; a session continued from an earlier queue still has that one's run too.
@@ -936,6 +958,9 @@ export class Engine implements Member {
           // The agent finished the queue's last step and its process then ended (the CLI closing, killed, or crashing
           // after the report): nothing is left to run, so the run is finished, not a failure to retry.
           if (this.nothingLeft(q)) { this.finish(q); continue; }
+          // Its step reported its outcome and waits for its review (every step is reviewed): no failed turn either.
+          // The run waits for the review, and advance takes it from there.
+          if (this.waitsForReview(q)) { this.exitedInReview.add(session.id); continue; }
           this.turnFailed(q, { kind: "passing", code: "processExited", text: `the runtime's process exited (${code ?? "signal"})` });
         }
         this.changed();

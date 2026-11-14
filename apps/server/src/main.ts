@@ -12,7 +12,7 @@ import chokidar, { type FSWatcher } from "chokidar";
 import type { Server } from "node:http";
 import {
   ActionError, Effort, ProjectStore, addNote, updateSettings, answerAsUser, approveQueue, deleteNote, loadProjectState, nexusHome, withdrawApproval, addAllowRule,
-  ensureGlobalSettings, readGlobalSettings, updateGlobalSettings, ownKeys, OVERRIDABLE, settingKey, readRegistry, readUsage, readTurns, commentOnPicture, markPicture, routeAnswers, routeSendBacks, sendBack, sendMessage, setQueueSettings, type ProjectState,
+  ensureGlobalSettings, readGlobalSettings, updateGlobalSettings, ownKeys, OVERRIDABLE, settingKey, readRegistry, readUsage, readTurns, commentOnPicture, markPicture, routeAnswers, routeSendBacks, sendBack, sendMessage, setQueueSettings, setStepLevel, type ProjectState,
 } from "@nexus/protocol";
 import { newestFirst, projectDigest, projectRunning, usageSince, type DigestEvent, type DigestResponse, type DigestRunning, type UsageRun } from "@nexus/protocol/digest";
 import { Engine } from "./engine.ts";
@@ -329,6 +329,8 @@ app.post("/api/projects/:id/queues/:queue/approve", act((st, b, p) => {
 app.post("/api/projects/:id/queues/:queue/withdraw", act((st, b, p) => withdrawApproval(st, p("queue"), b.reason)));
 app.post("/api/projects/:id/settings/allow-rule", act((st, b) => addAllowRule(st, b.rule)));
 app.patch("/api/projects/:id/queues/:queue", act((st, b, p) => setQueueSettings(st, p("queue"), b)));
+// The user's review level of a step ({ level: 1 | 2 | 3 | null }); asks for no new approval.
+app.put("/api/projects/:id/queues/:queue/steps/:step/level", act((st, b, p) => setStepLevel(st, p("queue"), p("step"), b.level)));
 app.post("/api/projects/:id/questions/:qid/answer", act((st, b, p) => answerAsUser(st, p("qid"), b.text, b.continue)));
 
 // The engine: running queues through Nexus-launched sessions.

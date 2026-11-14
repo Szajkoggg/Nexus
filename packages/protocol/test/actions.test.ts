@@ -88,15 +88,15 @@ test("a message to a running session shows on its step until it is read", () => 
   assert.throws(() => sendMessage(st, "nobody", "x"), (e: ActionError) => e.status === 404);
 });
 
-test("review policy can be set and cleared", () => {
+test("a queue's review level can be set and cleared", () => {
   const { st } = setup();
-  setQueueSettings(st, "Q", { review_policy: "wait" });
-  assert.equal(st.readQueue("Q").review_policy, "wait");
-  setQueueSettings(st, "Q", { review_policy: "orchestrator" });
-  assert.equal(st.readQueue("Q").review_policy, "orchestrator");
-  setQueueSettings(st, "Q", { review_policy: null });
-  assert.equal(st.readQueue("Q").review_policy, undefined);
-  assert.throws(() => setQueueSettings(st, "Q", { review_policy: "sometimes" }));
+  setQueueSettings(st, "Q", { review_level: 1 });
+  assert.equal(st.readQueue("Q").review_level, 1);
+  setQueueSettings(st, "Q", { review_level: 3 });
+  assert.equal(st.readQueue("Q").review_level, 3);
+  setQueueSettings(st, "Q", { review_level: null });
+  assert.equal(st.readQueue("Q").review_level, undefined);
+  for (const bad of [0, 4, "2", "wait", 1.5]) assert.throws(() => setQueueSettings(st, "Q", { review_level: bad }), ActionError);
 });
 
 test("project settings: set, clear with an empty value, and refuse what the schema does not allow", async () => {

@@ -6,8 +6,8 @@ import { t, type Key } from "./i18n.ts";
 export interface StepLike { id: string; status: string; review_with?: "orchestrator" | "user" }
 
 /**
- * Accept, Fix it (and Reject) appear only on a step waiting for the user's review: policy wait, or orchestrator once
- * the step went to the user. Never on a step that went on under continue, nor on one the orchestrator still holds.
+ * Accept, Fix it (and Reject) appear only on a step waiting for the user's review: level 1, or 2 and 3 once
+ * the step went to the user. Never on one the orchestrator still holds.
  */
 export function showsReviewActions(step: StepLike): boolean {
   return step.status === "review" && step.review_with !== "orchestrator";

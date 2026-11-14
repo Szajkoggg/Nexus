@@ -72,7 +72,7 @@ function nested(values: Values, keys: readonly string[]): Values {
 
 /** Every setting with a global value, in the order of PROTOCOL.md's list. */
 const SETTING_KEYS = [
-  "defaults.stop_conditions", "defaults.review_policy", "defaults.review_send_back_limit", "defaults.context_reuse_threshold",
+  "defaults.stop_conditions", "defaults.review_level", "defaults.review_send_back_limit", "defaults.context_reuse_threshold",
   "defaults.context_care", "defaults.protect_nexus", "defaults.push_accepted", "defaults.usage_pause_threshold",
   "runtimes.default", "runtimes.claude.model", "runtimes.claude.effort", "runtimes.claude.permission_mode",
   "runtimes.codex.model", "runtimes.codex.effort", "runtimes.codex.sandbox", "runtimes.codex.approval_policy", "runtimes.codex.approvals_reviewer",
@@ -233,8 +233,8 @@ function SettingRows({ form, project }: { form: Form; project?: { values: Record
       </Section>
 
       <Section title={t("settings.defaults")}>
-        <Setting form={f} keys={["defaults.review_policy"]} label={t("details.policy.label")} hint={f.get("defaults.review_policy") === "orchestrator" ? t("settings.policyOrchestratorHint") : undefined}>
-          {(d) => <Select value={f.get("defaults.review_policy")} onChange={(v) => f.set("defaults.review_policy", v)} disabled={d} options={[["continue", t("details.policy.continue")], ["wait", t("details.policy.wait")], ["orchestrator", t("details.policy.orchestrator")]]} />}
+        <Setting form={f} keys={["defaults.review_level"]} label={t("details.level.label")} hint={f.get("defaults.review_level") !== "1" ? t("settings.levelHint") : undefined}>
+          {(d) => <Select value={f.get("defaults.review_level")} onChange={(v) => f.set("defaults.review_level", Number(v))} disabled={d} options={[["1", t("details.level.1")], ["2", t("details.level.2")], ["3", t("details.level.3")]]} />}
         </Setting>
         <Setting form={f} keys={["defaults.push_accepted"]} label={t("settings.push")} hint={t("settings.pushHint")}>
           {(d) => <Check checked={f.bool("defaults.push_accepted")} onChange={(v) => f.set("defaults.push_accepted", v)} disabled={d}>{t("settings.pushCheck")}</Check>}

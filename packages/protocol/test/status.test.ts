@@ -21,7 +21,7 @@ const step = (id: string): StepDef => ({ id, title: `Step ${id}`, goal: "", acce
 function setup(ids = ["Q1", "Q2", "Q3"]) {
   const root = mkdtempSync(join(tmpdir(), "nexus-status-"));
   const store = ProjectStore.init(root, { id: "p", name: "P", root });
-  for (const [id, role] of [["w", "worker"], ["o", "orchestrator"]] as const) {
+  for (const [id, role] of [["w", "worker"], ["o", "orchestrator"], ["u", "user"]] as const) {
     store.writeSession({ protocol: 1, id, project: "p", role, runtime: "claude", cwd: root, launched_by: "nexus", created_at: at(0) });
   }
   store.writeQueue({ protocol: 1, id: "Q", title: "Queue", revision: 1, status: "proposed", stop_conditions: [], checks: [], steps: ids.map(step) });
@@ -55,6 +55,7 @@ test("refused, with the reason: done, approving, lifting, reopening, a step at w
   const { store, emit, set } = setup();
   emit(1, { type: "step.started", queue: "Q", step: "Q1" });
   emit(2, { type: "step.done", queue: "Q", step: "Q1", summary: "ok" });
+  emit(2.5, { type: "review.accepted", queue: "Q", step: "Q1" }, "u");
   emit(3, { type: "step.started", queue: "Q", step: "Q2" });
   // A live run holds Q2: it is at work.
   store.writeRun("Q", { protocol: 1, session: "w", state: "running", step: "Q2", started_at: at(3), updated_at: at(3), revision: 1 });
@@ -85,6 +86,7 @@ test("skipping the last open step makes the queue done, and a halted run on it c
   const { store, emit, queue, set } = setup(["Q1", "Q2"]);
   emit(1, { type: "step.started", queue: "Q", step: "Q1" });
   emit(2, { type: "step.done", queue: "Q", step: "Q1", summary: "ok" });
+  emit(2.5, { type: "review.accepted", queue: "Q", step: "Q1" }, "u");
   emit(3, { type: "step.started", queue: "Q", step: "Q2" });
   emit(4, { type: "step.failed", queue: "Q", step: "Q2", reason: "broken" });
   store.writeRun("Q", { protocol: 1, session: "w", state: "halted", reason: "step Q2 failed: broken", step: "Q2", started_at: at(1), updated_at: at(4), ended_at: at(4) });
@@ -158,11 +160,12 @@ test("drafts: pending steps may be added, changed, removed and reordered while a
   const { store, emit, queue } = setup(["Q1", "Q2", "Q3", "Q4", "Q5"]);
   emit(1, { type: "step.started", queue: "Q", step: "Q1" });
   emit(2, { type: "step.done", queue: "Q", step: "Q1", summary: "ok" });
+  emit(2.5, { type: "review.accepted", queue: "Q", step: "Q1" }, "u");
   emit(3, { type: "step.started", queue: "Q", step: "Q2" });
   store.writeRun("Q", { protocol: 1, session: "w", state: "running", step: "Q2", started_at: at(1), updated_at: at(3), revision: 1 });
   const draft = (steps: StepDef[]) => applyDraft(store, { id: "Q", title: "Queue", steps });
   assert.match(draft([step("Q1"), step("Q2"), step("Q3"), step("Q4"), step("Q5"), step("Q6")]), /revision 2/, "added");
-  assert.match(draft([step("Q1"), step("Q2"), { ...step("Q3"), title: "Other", goal: "Else", acceptance: ["A"], review: { policy: "wait" }, runtime: "codex", model: "m", effort: "low" }, step("Q4"), step("Q5"), step("Q6")]), /revision 3/, "changed");
+  assert.match(draft([step("Q1"), step("Q2"), { ...step("Q3"), title: "Other", goal: "Else", acceptance: ["A"], review: { level: 1 }, runtime: "codex", model: "m", effort: "low" }, step("Q4"), step("Q5"), step("Q6")]), /revision 3/, "changed");
   assert.match(draft([step("Q1"), step("Q2"), step("Q3"), step("Q5"), step("Q6")]), /revision 4/, "removed");
   assert.match(draft([step("Q1"), step("Q2"), step("Q6"), step("Q5"), step("Q3")]), /revision 5/, "reordered");
   assert.match(draft([step("Q1"), step("Q6"), step("Q2"), step("Q5"), step("Q3")]), /revision 6/, "a pending step may move before the running one");

@@ -7,7 +7,7 @@ import { GlobalSettings, ProjectFile, StoredProject } from "./schemas.ts";
  * `none`: the setting has no default, so a project's own "none" is stored as null.
  */
 export const OVERRIDABLE: readonly { path: readonly string[]; none?: true }[] = [
-  ...["stop_conditions", "review_policy", "review_send_back_limit", "context_reuse_threshold", "context_care",
+  ...["stop_conditions", "review_level", "review_send_back_limit", "context_reuse_threshold", "context_care",
     "protect_nexus", "push_accepted", "usage_pause_threshold"].map((k) => ({ path: ["defaults", k] })),
   { path: ["runtimes", "default"] },
   { path: ["runtimes", "claude", "model"], none: true },

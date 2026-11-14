@@ -13,6 +13,7 @@ import { ProjectStore, approveQueue, loadProjectState, routeAnswers, type StepDe
 import { Engine } from "../src/engine.ts";
 import { isAlive } from "../src/handover.ts";
 import { Lifecycle } from "../src/lifecycle.ts";
+import { acceptReviews } from "./fake-reviewer.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -58,7 +59,7 @@ async function setup(opts: { live: boolean; successor: "crash" | "never"; timeou
   store.writeQueue({ protocol: 1, id: "Q", title: "Queue", revision: 1, status: "proposed", stop_conditions: [], checks: [], steps, approvals: [], history: [] });
   approveQueue(store, "Q");
 
-  const onChange = () => { routeAnswers(store); engine.onChange(loadProjectState(store)); };
+  const onChange = () => { routeAnswers(store); acceptReviews(store); engine.onChange(loadProjectState(store)); };
   let engine = new Engine(store, onChange);
   const npm: string[][] = [];
   const notified: string[] = [];

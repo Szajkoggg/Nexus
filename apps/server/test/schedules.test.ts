@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { ProjectStore, applyDraft, approveQueue, formatClock, loadProjectState, routeAnswers, writeUsage, type StepDef } from "@nexus/protocol";
 import { Engine, MAX_TIMER_MS, type Clock } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
+import { acceptReviews } from "./fake-reviewer.ts";
 
 process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
 
@@ -50,7 +51,7 @@ function setup(queues: Record<string, string[]>, opts: { orchestrator?: boolean 
   const clock = new TestClock();
   const engines: Engine[] = [];
   let orchestrator: Orchestrator | undefined;
-  const tick = () => { routeAnswers(store); const s = loadProjectState(store); orchestrator?.onChange(s); engines.at(-1)!.onChange(s); };
+  const tick = () => { routeAnswers(store); acceptReviews(store); const s = loadProjectState(store); orchestrator?.onChange(s); engines.at(-1)!.onChange(s); };
   const newEngine = () => { const e = new Engine(store, tick, { retryBaseMs: 30, usageMarginMs: 100, clock }); engines.push(e); return e; };
   let engine = newEngine();
   if (opts.orchestrator) orchestrator = new Orchestrator(store, engine, tick);
@@ -155,6 +156,8 @@ test("a schedule missed while the server was down gives an item and the orchestr
     assert.equal(x.queue("B").run, undefined, "a missed schedule does not start");
     const item = loadProjectState(x.store).attention.find((a) => a.kind === "start" && a.queue === "B");
     assert.equal(item?.text, `Did not start at ${formatClock(iso(missed), new Date())}: missed: Nexus was not running at ${formatClock(iso(missed), new Date(x.clock.now()))}`);
+    await x.until("C1 in the orchestrator's review", () => x.queue("C").steps[0]!.review_with === "orchestrator");
+    x.orchestrator!.say(`FAKE-NEXUS: ["review","accept","C","C1"]`);
     await x.until("C, 5 minutes late, to finish", () => x.queue("C").run?.state === "finished");
     await x.until("the orchestrator to be told", () => x.orchestrator!.view().chat.some((c) => c.from === "nexus" && /scheduled start of queue B .* was missed/.test(c.text)));
   } finally { x.stop(); }

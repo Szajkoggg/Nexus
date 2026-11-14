@@ -10,9 +10,9 @@ export const needsApproval = (q: Pick<QueueView, "approved" | "status">): boolea
   !q.approved && q.status !== "done" && q.status !== "cancelled";
 
 const RUNTIME = { claude: "Claude", codex: "Codex" } as const;
-const POLICY_KEYS: Record<string, Key> = { continue: "approval.policy.continue", wait: "approval.policy.wait", orchestrator: "approval.policy.orchestrator" };
-/** What happens after each step, in words: "go on", "wait for my review"; an unknown policy as it is. */
-export const policyWords = (policy: string): string => (POLICY_KEYS[policy] ? t(POLICY_KEYS[policy]) : policy);
+const LEVEL_KEYS: Record<number, Key> = { 1: "approval.level.1", 2: "approval.level.2", 3: "approval.level.3" };
+/** How each step is reviewed, by its review level, in words: "wait for my review"; an unknown level as it is. */
+export const levelWords = (level: number): string => (LEVEL_KEYS[level] ? t(LEVEL_KEYS[level]) : String(level));
 
 export interface RunSettings {
   /** "4 steps · on main, after SF · Claude, high · after each step: go on", in parts. */
@@ -26,20 +26,20 @@ export interface RunSettings {
  * runtime, model and effort (the run's, else its planned start's, else the project's defaults), what happens after
  * each step, and the steps with values of their own.
  */
-export function runSettings(q: Pick<QueueView, "steps" | "branch" | "worktree" | "start" | "run" | "review_policy">, project: Pick<ProjectFile, "defaults" | "runtimes">, now = new Date()): RunSettings {
+export function runSettings(q: Pick<QueueView, "steps" | "branch" | "worktree" | "start" | "run" | "review_level">, project: Pick<ProjectFile, "defaults" | "runtimes">, now = new Date()): RunSettings {
   const n = q.steps.length;
   const where = q.worktree ? (q.branch ? t("approval.run.worktreeOn", { branch: q.branch }) : t("approval.run.worktree")) : q.branch ? t("approval.run.on", { branch: q.branch }) : undefined;
   const when = q.start?.after ? t("approval.run.after", { queue: q.start.after }) : q.start?.at ? t("approval.run.at", { time: formatClock(q.start.at, now) }) : undefined;
   const rt = q.run?.runtime ?? q.start?.runtime ?? project.runtimes.default;
   const model = q.run?.model ?? q.start?.model ?? project.runtimes[rt].model;
   const effort = q.run?.effort ?? q.start?.effort ?? project.runtimes[rt].effort;
-  const policy = q.review_policy ?? project.defaults.review_policy;
+  const level = q.review_level ?? project.defaults.review_level;
   return {
     parts: [
       t("approval.run.steps", { count: n }),
       [where, when].filter(Boolean).join(", ") || undefined,
       [RUNTIME[rt], model, effort].filter(Boolean).join(", "),
-      t("approval.run.afterEach", { policy: policyWords(policy) }),
+      t("approval.run.afterEach", { level: levelWords(level) }),
     ].filter((x): x is string => !!x),
     own: q.steps.flatMap((s) => { const values = stepValuesText(s); return values ? [t("approval.run.stepOn", { step: s.id, values })] : []; }),
   };

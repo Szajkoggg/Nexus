@@ -51,7 +51,7 @@ st.writeStart("CL", { protocol: 1, after: "RN", by: "user", revision: 1, created
 
 // RV: a step waiting for the user's review.
 const rv = session(newId(), "worker", "RV worker", "RV");
-queue("RV", "Waiting tab with reasons", [["RV1", "Reasons", "Each waiting item says why."], ["RV2", "Polish", "Spacing."]], { review_policy: "wait" });
+queue("RV", "Waiting tab with reasons", [["RV1", "Reasons", "Each waiting item says why."], ["RV2", "Polish", "Spacing."]], { review_policy: "wait" }); // level 1; written the old way, which older code reads too
 emit(rv, 95, { type: "step.started", queue: "RV", step: "RV1" });
 emit(rv, 70, { type: "step.done", queue: "RV", step: "RV1", summary: "Every waiting item now says why it waits." });
 
@@ -60,6 +60,7 @@ const dn = session(newId(), "worker", "DN worker", "DN");
 queue("DN", "Export to CSV", [["DN1", "Export", "A CSV export."]]);
 emit(dn, 150, { type: "step.started", queue: "DN", step: "DN1" });
 emit(dn, 120, { type: "step.done", queue: "DN", step: "DN1", summary: "The table exports to CSV with the visible columns." });
+emit(session("user", "user", "You"), 119, { type: "review.accepted", queue: "DN", step: "DN1" }); // every step is reviewed
 
 // The turn records since yesterday: the usage line's numbers.
 const turn = (min: number, s: SessionFile, u5: number, u7: number, over: Partial<TurnRecord> = {}) => appendTurn({

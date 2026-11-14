@@ -11,6 +11,7 @@ import { ProjectStore, approveQueue, loadProjectState, readTurns, readUsage, rou
 import { Conversations } from "../src/conversations.ts";
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
+import { acceptReviews } from "./fake-reviewer.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -27,7 +28,7 @@ function setup(behaviours: string[] = ["done"]) {
   const engine: Engine = new Engine(store, () => tick(), { retryBaseMs: 60_000, usageMarginMs: 100 });
   const orchestrator = new Orchestrator(store, engine, () => tick());
   const conversations = new Conversations(store, orchestrator, () => tick());
-  function tick() { routeAnswers(store); engine.onChange(loadProjectState(store)); }
+  function tick() { routeAnswers(store); acceptReviews(store); engine.onChange(loadProjectState(store)); }
   const queue = () => loadProjectState(store).queues.find((q) => q.id === "Q")!;
   const until = async (what: string, pred: () => boolean, ms = 20_000) => {
     for (const t = Date.now(); !pred();) {

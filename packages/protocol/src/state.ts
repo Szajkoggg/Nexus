@@ -1,6 +1,6 @@
 // Derives the dashboard's view of a project from its files. Pure apart from reading through the store;
 // nothing here is ever written back (state.json, if kept, is only a cache of this).
-import { ORCHESTRATOR_ONLY, USER_ONLY, type StatusChange, type Event, type InboxEntry, type Note, type GitFile, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type ReviewItem, type ReviewPolicy, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type StepDef, type StepStatus } from "./schemas.ts";
+import { ORCHESTRATOR_ONLY, USER_ONLY, type StatusChange, type Event, type InboxEntry, type Note, type GitFile, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type ReviewItem, type ReviewLevel, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type StepDef, type StepStatus } from "./schemas.ts";
 import { ProjectStore, revisionHash } from "./store.ts";
 import { ENDED_RUN_STATES, HOLDING_RUN_STATES, formatClock, type Segment } from "./times.ts";
 import { stopPlace } from "./attention.ts";
@@ -46,10 +46,12 @@ export interface StepView extends StepDef {
   progress?: { text: string; pct?: number; at: string };
   session?: string;
   summary?: string; reason?: string; commit?: string;
+  /** The step's review level (reviewLevelOf) and what set it: the user, the step's draft, its queue or the project. */
+  level: ReviewLevel;
+  level_from: LevelSource;
   /**
-   * In review: whom the step waits for. The orchestrator with review policy `orchestrator`, until it asks the user
-   * (`asked_user`); the user with `wait`, and also with `orchestrator` when the project has no orchestrator or its
-   * notices are off.
+   * In review: whom the step waits for. The orchestrator at level 2 or 3, until it asks the user (`asked_user`); the
+   * user at level 1, and also at 2 and 3 when the project has no orchestrator or its notices are off.
    */
   review_with?: "orchestrator" | "user";
   /** The orchestrator's reason for handing the step's review to the user, in the current round. */
@@ -159,7 +161,7 @@ export function loadProjectState(store: ProjectStore): ProjectState {
       const q = store.readQueue(id);
       const { notes, errors } = store.readNotes(id);
       warnings.push(...errors);
-      const view = initQueue(q, notes);
+      const view = initQueue(q, notes, project);
       try { view.run = store.readRun(id); } catch (e) { warnings.push(`queue ${id} run: ${(e as Error).message}`); }
       try { view.push = store.readPush(id); } catch (e) { warnings.push(`queue ${id} push: ${(e as Error).message}`); }
       try { view.git = store.readGit(id); } catch (e) { warnings.push(`queue ${id} git: ${(e as Error).message}`); }
@@ -373,7 +375,7 @@ export function isApproved(q: QueueFile): boolean {
     && !(withdrawn && withdrawn.approvals >= q.approvals.length);
 }
 
-function initQueue(q: QueueFile, notes: Note[]): QueueView {
+function initQueue(q: QueueFile, notes: Note[], project: Pick<ProjectFile, "defaults">): QueueView {
   const hash = revisionHash(q);
   const latest = q.approvals.at(-1);
   return {
@@ -384,18 +386,29 @@ function initQueue(q: QueueFile, notes: Note[]): QueueView {
     approved: isApproved(q),
     revision_hash: hash,
     questions: [],
-    steps: q.steps.map((s) => ({
-      ...s,
-      status: s.status ?? "pending",
-      review_items: [], checks: [], timeline: [], messages: [], segments: [], sent_back: [], pictures: {},
-      notes: notes.filter((n) => n.step === s.id),
-    })),
+    steps: q.steps.map((s) => {
+      const { level, from } = reviewLevelOf(s, q, project);
+      return {
+        ...s, level, level_from: from,
+        status: s.status ?? "pending",
+        review_items: [], checks: [], timeline: [], messages: [], segments: [], sent_back: [], pictures: {},
+        notes: notes.filter((n) => n.step === s.id),
+      };
+    }),
   };
 }
 
-/** The review policy that applies to a step: its own, else its queue's, else the project's default. */
-export function reviewPolicyOf(st: Pick<StepDef, "review">, q: Pick<QueueFile, "review_policy">, project: Pick<ProjectFile, "defaults">): ReviewPolicy {
-  return st.review?.policy ?? q.review_policy ?? project.defaults.review_policy;
+export type LevelSource = "user" | "step" | "queue" | "project";
+/**
+ * The review level that applies to a step, and what set it: the level the user set on it, else the one it was drafted
+ * with, else its queue's, else the project's (its own value, else the global one: the project's effective settings).
+ */
+export function reviewLevelOf(st: Pick<StepDef, "id" | "review">, q: Pick<QueueFile, "review_level" | "user_levels">, project: Pick<ProjectFile, "defaults">): { level: ReviewLevel; from: LevelSource } {
+  const user = q.user_levels?.[st.id];
+  if (user !== undefined) return { level: user, from: "user" };
+  if (st.review?.level !== undefined) return { level: st.review.level, from: "step" };
+  if (q.review_level !== undefined) return { level: q.review_level, from: "queue" };
+  return { level: project.defaults.review_level, from: "project" };
 }
 
 function apply(
@@ -465,15 +478,14 @@ function apply(
     case "step.done": {
       const q = queueOf(e.queue); const st = stepOf(q, e.step);
       if (!q || !st) return;
+      // Every level is reviewed: level 1 by the user, 2 and 3 by the orchestrator (the user's without one, below).
       // After the user's Fix it, the round's review is the user's.
-      const policy = st.user_fix ? "wait" : reviewPolicyOf(st, q, project);
-      st.status = policy === "continue" ? "done" : "review";
-      st.review_with = policy === "orchestrator" ? "orchestrator" : policy === "wait" ? "user" : undefined;
+      st.status = "review";
+      st.review_with = st.user_fix || st.level === 1 ? "user" : "orchestrator";
       st.asked_user = undefined; st.user_fix = undefined;
       st.finished_at = e.at; st.summary = e.summary; st.commit = e.commit;
       endSegment(st, e.at);
-      if (q.steps.every((x) => FINISHED_STEP.has(x.status))) q.status = "done";
-      else if (policy !== "continue") q.status = "waiting";
+      q.status = "waiting";
       return;
     }
     case "step.failed": {

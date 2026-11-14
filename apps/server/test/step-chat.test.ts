@@ -31,7 +31,7 @@ function setup() {
   delete process.env.FAKE_ARGS;
   const store = ProjectStore.init(root, { id: "p", name: "P", root });
   store.writeSession({ protocol: 1, id: "w", project: "p", role: "worker", runtime: "claude", cwd: root, launched_by: "nexus", created_at: at(0), queue: "Q" });
-  store.writeQueue({ protocol: 1, id: "Q", title: "Queue", revision: 1, status: "proposed", review_policy: "wait", stop_conditions: [], checks: [], steps: IDS.map(step) });
+  store.writeQueue({ protocol: 1, id: "Q", title: "Queue", revision: 1, status: "proposed", review_level: 1, stop_conditions: [], checks: [], steps: IDS.map(step) });
   approveQueue(store, "Q");
   ensureUserSession(store);
   const emit = (min: number, body: Record<string, unknown>, session = "w") => store.appendEvent({ v: 1, id: newId(), at: at(min), session, ...body } as Event);

@@ -17,6 +17,7 @@ import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { Conversations } from "../src/conversations.ts";
 import { WORKER_BRIEFING } from "../src/prompts.ts";
+import { acceptReviews } from "./fake-reviewer.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -55,7 +56,7 @@ function worker(steps: (Partial<StepDef> & { fake: string })[]) {
     steps: steps.map(({ fake, ...s }, i) => ({ id: `Q${i + 1}`, title: `Step ${i + 1}`, goal: `FAKE: ${fake}`, acceptance: [], ...s })),
   });
   approveQueue(b.store, "Q");
-  const engine: Engine = new Engine(b.store, () => { routeAnswers(b.store); engine.onChange(loadProjectState(b.store)); }, { retryBaseMs: 30, usageMarginMs: 100 });
+  const engine: Engine = new Engine(b.store, () => { routeAnswers(b.store); acceptReviews(b.store); engine.onChange(loadProjectState(b.store)); }, { retryBaseMs: 30, usageMarginMs: 100 });
   const queue = () => loadProjectState(b.store).queues.find((q) => q.id === "Q")!;
   const done = () => { engine.shutdown(); delete process.env.FAKE_SLOW_MS; };
   return { ...b, engine, queue, done };

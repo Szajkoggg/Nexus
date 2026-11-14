@@ -96,7 +96,7 @@ finished steps before it and the steps after the next three are folded into one 
 **One action bar.** Every queue and step panel ends with the same bar, always in sight however long the panel is:
 the main action on the right (Accept and go on, Approve revision N, Continue, Answer), the second left of it (Fix
 it…), and everything else under ⋯ (Reject, a note with the acceptance, your words with an approval, Withdraw
-approval, the queue's "After each step"). What an action needs (Fix it's text, a reason) opens just above the bar.
+approval, the queue's review level). What an action needs (Fix it's text, a reason) opens just above the bar.
 The header says where you are, what it is and its status, with ✕ at the top right. A conversation in Ideas has its
 actions under ⋯; the orchestrator's "New conversation" (which makes it start over) is under the chat's ⋯.
 
@@ -373,10 +373,14 @@ switch.
 The rail (or Waiting N on a narrower computer, the Waiting tab on a phone) counts what waits for you in all projects (questions, approvals, steps in review,
 halted runs, failed steps). It opens one list of them, newest first, each with its project; tap an item to open it.
 
-"After each step" (in Settings for the project, under ⋯ in a queue's bar for that queue) can also be "wait for the orchestrator's
-review": the orchestrator then checks each step and accepts it, sends it back, or hands it to you with why. A step
-says whom it waits for ("review: orchestrator" or "review: you"); only those for you are in the inbox. Without an
-orchestrator, or with its notices off, such steps wait for you.
+Every step is reviewed when it is done. Its **review level** says by whom: 1, you review it; 2, the orchestrator
+reviews what can be checked and hands you what is yours (the look, the feel), with why; 3, the orchestrator judges
+everything and the queue goes on (for now it holds the step as at 2). The orchestrator drafts each step's level from
+its acceptance criteria (checkable ones give 2, your judgement gives 1); a step without one takes its queue's, else the
+project's "Review level" (in Settings; 2 unless you change it). A level you set on a step stays when the orchestrator
+revises the queue, and asks for no new approval. A step says whom it waits for ("review: orchestrator" or "review:
+you"); only those for you are in the inbox. Without an orchestrator, or with its notices off, levels 2 and 3 wait for
+you too.
 
 A step waiting for you can be accepted, with a note if you like (⋯, "Add a note to the acceptance"): the note goes to the next step of
 the queue, which gets it when it starts, or to the orchestrator, for the plan, later queues or the project's rules

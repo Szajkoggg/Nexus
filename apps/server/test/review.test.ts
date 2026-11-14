@@ -1,4 +1,4 @@
-// Review by the orchestrator, against the fake `claude`: a step with review policy orchestrator is held, the
+// Review by the orchestrator, against the fake `claude`: a step at review level 2 is held, the
 // orchestrator is told and decides (accept, ask the user); without notices the user reviews; a reset orchestrator is
 // told again; workers can do none of it.
 import { test } from "node:test";
@@ -38,13 +38,13 @@ function setup() {
   const delivered = () => existsSync(process.env.FAKE_LOG!)
     ? readFileSync(process.env.FAKE_LOG!, "utf8").split("\n").filter(Boolean).map((l) => (JSON.parse(l) as { text: string }).text) : [];
   /** A queue whose steps the orchestrator reviews, approved and started. */
-  const run = async (id: string, steps = 2, o: { policy?: "orchestrator" | "wait"; hello?: boolean } = {}) => {
+  const run = async (id: string, steps = 2, o: { level?: 1 | 2; hello?: boolean } = {}) => {
     if (o.hello !== false) {
       orchestrator.say("Hello");
       await until("the session", () => !!orchestrator.session());
     }
     applyDraft(store, {
-      id, title: "Reviewed", review_policy: o.policy ?? "orchestrator", checks: ["npm test"],
+      id, title: "Reviewed", review_level: o.level ?? 2, checks: ["npm test"],
       steps: Array.from({ length: steps }, (_, i) => ({ id: `${id}${i + 1}`, title: `Step ${i + 1}`, goal: "FAKE: done", acceptance: [`Criterion ${i + 1}`] })),
     });
     approveQueue(store, id);
@@ -225,7 +225,7 @@ test("the user's Fix it: verbatim, with the override wording, not counted, and i
 
     await x.until("round 3 in review", () => x.step("F", "F1").summary === "fake finished F1 round 3" && x.step("F", "F1").status === "review");
     const st = x.step("F", "F1");
-    assert.equal(st.review_with, "user", "after a Fix it the round is the user's, though the policy is orchestrator");
+    assert.equal(st.review_with, "user", "after a Fix it the round is the user's, though the level is 2");
     const fix = st.sent_back.find((b) => b.by === "user")!;
     assert.equal(fix.text, words, "recorded verbatim");
     const userSession = loadProjectState(x.store).sessions.find((s) => s.role === "user")!;
@@ -268,7 +268,7 @@ test("a send-back on a halted run waits for the resume", async () => {
 test("a note on Accept for the next step reaches the worker when that step starts", async () => {
   const x = setup();
   try {
-    await x.run("A", 2, { policy: "wait" });
+    await x.run("A", 2, { level: 1 });
     await x.until("the user's review", () => x.step("A", "A1").review_with === "user");
     assert.deepEqual(x.engine.acceptReview("A", "A1", "Keep the old shader names in A2.", "next"), { to: "next", step: "A2" });
     await x.until("A2 opened", () => x.delivered().some((t) => t.includes("step A2 (2 of 2)")));
@@ -285,7 +285,7 @@ test("a note for the orchestrator starts and tells it, with notices off and no s
   const x = setup();
   try {
     updateSettings(x.store, { orchestrator: { notify: false } });
-    await x.run("O", 2, { policy: "wait", hello: false });
+    await x.run("O", 2, { level: 1, hello: false });
     await x.until("the user's review", () => x.step("O", "O1").review_with === "user");
     assert.equal(x.orchestrator.session(), undefined, "no orchestrator session yet");
     assert.deepEqual(x.engine.acceptReview("O", "O1", "Caves before cliffs from now on.", "orchestrator"), { to: "orchestrator", step: undefined });
@@ -304,7 +304,7 @@ test("a note for the orchestrator starts and tells it, with notices off and no s
 test("on the queue's last step the note goes to the orchestrator", async () => {
   const x = setup();
   try {
-    await x.run("L", 1, { policy: "wait" });
+    await x.run("L", 1, { level: 1 });
     await x.until("the user's review", () => x.step("L", "L1").review_with === "user");
     assert.deepEqual(x.engine.acceptReview("L", "L1", "Good; next, the sound pass.", "next"), { to: "orchestrator", step: undefined });
     await x.until("the note told", () => x.delivered().some((t) => t.startsWith("[Nexus] The user accepted step L1 of queue L (its last step) with this note for you:\nGood; next, the sound pass.")));
@@ -318,7 +318,7 @@ test("a rejection pauses the run and tells the orchestrator once; the run goes o
   const x = setup();
   try {
     updateSettings(x.store, { orchestrator: { notify: false } });
-    await x.run("J", 3, { policy: "wait", hello: false });
+    await x.run("J", 3, { level: 1, hello: false });
     await x.until("the user's review", () => x.step("J", "J1").review_with === "user");
     assert.throws(() => x.engine.rejectStep("J", "J2"), /not waiting for your review/);
     assert.match(x.engine.rejectStep("J", "J1", "Wrong approach: no lattice."), /rejected; the run is paused/);
@@ -341,7 +341,7 @@ test("a rejection pauses the run and tells the orchestrator once; the run goes o
     assert.throws(() => x.engine.resume("J"), /J1 of queue J was rejected/);
     assert.throws(() => x.engine.start("J"), /J1 of queue J was rejected/);
     applyDraft(x.store, {
-      id: "J", title: "Reviewed", review_policy: "wait", checks: ["npm test"],
+      id: "J", title: "Reviewed", review_level: 1, checks: ["npm test"],
       steps: [
         { id: "J1", title: "Step 1", goal: "FAKE: done", acceptance: ["Criterion 1"] },
         { id: "J2", title: "Step 2, without the lattice", goal: "FAKE: done", acceptance: ["Criterion 2"] },
@@ -364,9 +364,9 @@ test("after a rejection and a newer approved revision, start runs what is pendin
   try {
     updateSettings(x.store, { orchestrator: { notify: false } });
     const def = (k2: string) => ({
-      id: "K", title: "Rejected then revised", review_policy: "continue" as const, checks: [],
+      id: "K", title: "Rejected then revised", checks: [],
       steps: [
-        { id: "K1", title: "Step 1", goal: "FAKE: done", acceptance: [], review: { policy: "wait" as const } },
+        { id: "K1", title: "Step 1", goal: "FAKE: done", acceptance: [], review: { level: 1 as const } },
         { id: "K2", title: k2, goal: "FAKE: done", acceptance: [] },
       ],
     });
@@ -381,6 +381,8 @@ test("after a rejection and a newer approved revision, start runs what is pendin
     applyDraft(x.store, def("Step 2, done the other way"));
     approveQueue(x.store, "K");
     x.engine.start("K");
+    await x.until("K2 waits for the user", () => x.step("K", "K2").review_with === "user"); // notices off: the user's
+    x.engine.acceptReview("K", "K2");
     await x.until("the run to finish", () => q().run?.state === "finished");
     assert.equal(q().status, "done");
     assert.deepEqual(q().steps.map((s) => s.status), ["rejected", "done"]);
@@ -448,7 +450,7 @@ test("the pointer to nexus help review: in the opening of a step with a review s
   const x = setup();
   try {
     applyDraft(x.store, {
-      id: "H", title: "Pointer", review_policy: "wait",
+      id: "H", title: "Pointer", review_level: 1,
       steps: [
         { id: "H1", title: "With a review spec", goal: "FAKE: done", acceptance: ["Shown"], review: { prepare: "waiting-tab@492 before -> after" } },
         { id: "H2", title: "Without one", goal: "FAKE: done", acceptance: ["Done"] },

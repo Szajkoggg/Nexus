@@ -169,7 +169,7 @@ Queues (${state.queues.length - done.length} open; finished: ${done.map((q) => q
     console.log(`- ${q.id} [${q.status}] ${q.title}: revision ${q.revision}, ${q.approved ? "approved" : "not approved"}${run}`);
     // A revision waiting for approval comes first: nothing runs and no planned start fires until the user approves it.
     if (!q.approved) console.log(`  needs approval (revision ${q.revision})${q.start && !q.start.failed ? ": the planned start below waits for it" : ""}`);
-    console.log(`  steps: ${q.steps.map((x) => `${x.id} ${x.status}${x.review_with ? ` (for ${x.review_with === "user" ? "the user" : "you"})` : ""}${stepValuesText(x) ? ` [on ${stepValuesText(x)}]` : ""}`).join(", ")}`);
+    console.log(`  steps: ${q.steps.map((x) => `${x.id} ${x.status} (level ${x.level}${x.level_from === "user" ? ", set by the user" : ""})${x.review_with ? ` (for ${x.review_with === "user" ? "the user" : "you"})` : ""}${stepValuesText(x) ? ` [on ${stepValuesText(x)}]` : ""}`).join(", ")}`);
     if (q.status_reason && q.status !== "running") console.log(`  why: ${q.status_reason.replace(/\s+/g, " ").slice(0, 300)}`);
     for (const line of stopLines(q)) console.log(line);
     if (q.start) {

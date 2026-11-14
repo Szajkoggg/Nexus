@@ -84,7 +84,7 @@ for a project then. Same paths as in `project.yaml`:
 
 ```yaml
 protocol: 1
-defaults: { stop_conditions: [], review_policy: continue, review_send_back_limit: 2, context_reuse_threshold: 0.6,
+defaults: { stop_conditions: [], review_level: 2, review_send_back_limit: 2, context_reuse_threshold: 0.6,
             context_care: true, protect_nexus: true, push_accepted: false, usage_pause_threshold: 0.9 }
 runtimes:
   default: claude
@@ -129,7 +129,7 @@ one: `null`). The effective settings do not change. It writes only such a file, 
 
 | Kind | Settings |
 |---|---|
-| Global, with a project override | `defaults`: `stop_conditions`, `review_policy`, `review_send_back_limit`, `context_reuse_threshold`, `context_care`, `protect_nexus`, `push_accepted`, `usage_pause_threshold`. `runtimes`: `default`; `claude`: `model`, `effort`, `permission_mode`; `codex`: `model`, `effort`, `sandbox`, `approval_policy`, `approvals_reviewer`. `conversations`: `runtime`, `model`, `effort`. `orchestrator`: `runtime`, `model`, `effort`, `notify`. `languages`: `reader` |
+| Global, with a project override | `defaults`: `stop_conditions`, `review_level`, `review_send_back_limit`, `context_reuse_threshold`, `context_care`, `protect_nexus`, `push_accepted`, `usage_pause_threshold`. `runtimes`: `default`; `claude`: `model`, `effort`, `permission_mode`; `codex`: `model`, `effort`, `sandbox`, `approval_policy`, `approvals_reviewer`. `conversations`: `runtime`, `model`, `effort`. `orchestrator`: `runtime`, `model`, `effort`, `notify`. `languages`: `reader` |
 | Project only | `name`, `defaults.worktree_dir`, `runtimes.claude.allowed_tools` (the project's own allow rules), `conversations.notes_dir`, `languages.working` (`id` and `root` identify the project) |
 | Global only | Remote access (`<NEXUS_HOME>/auth.json`, `push.json`), the deploy push (`deploy.json`), the server; each stays in its own file |
 | State, not a setting | `orchestrator.session` |
@@ -184,7 +184,8 @@ branch: v2/cliffs                      # with `worktree: auto`, the new branch's
 base: null                             # with `worktree: auto`, the commit or branch to start from
 revision: 3                            # increases on every change to steps, criteria or stop conditions
 status: running                        # mirrors the derived state; the event logs are authoritative for progress
-review_policy: continue
+review_level: 2                        # optional: the level of steps that set none (see "Review")
+user_levels: { W3: 1 }                 # levels the user set on steps; written only by the server (see "Review")
 stop_conditions:                       # in addition to the project defaults
   - The climb probe finds a way up a wall of two levels or more that two attempts within the step do not remove.
 checks:                                # run for every step
@@ -199,6 +200,7 @@ steps:
       - Every body closed; the same rock on one thread and many; build time per fixture measured.
     review:
       prepare: Pictures of both characters on the bench, gameplay view first.
+      level: 1                         # optional: the step's review level, as drafted (1, 2 or 3)
   - id: W2
     title: Bodies shaped
     goal: ...
@@ -214,7 +216,7 @@ approvals:
   - revision: 3
     at: 2026-11-12T09:14:00Z
     words: "Rendben, előrehozhatjuk a shadert, illetve a kettes ponttal is egyet tudok érteni."
-    hash: sha256:...                   # of the revision's steps, criteria and stop conditions
+    hash: sha256:...                   # of the revision's steps (with their drafted levels), checks and stop conditions
 withdrawals:                           # approvals the user took back before the queue ever ran
   - revision: 3
     at: 2026-11-12T10:02:00Z
@@ -508,16 +510,45 @@ the reason, `rejected: <step>`). Nothing is reverted.
 
 ### Review
 
-The review policy says what happens when a step is done. It is the step's own (`review.policy`), else its queue's
-(`review_policy`), else the project's default (`defaults.review_policy`):
+Every step is reviewed when it is done; there is no level without review. A step's **review level** says who:
 
-- `continue`: the step is done and the run goes on.
-- `wait`: the step is held in `review` for the user; the queue is `waiting`.
-- `orchestrator`: the step is held in `review` for the project's orchestrator; the queue is `waiting`. The orchestrator
-  accepts it (`review.accepted`), sends it back (`review.sent_back`) or hands it to the user (`review.asked_user`,
-  with why). It goes to the user instead when the project has no orchestrator (`project.yaml` has no `orchestrator`)
-  or its notices are off (`orchestrator.notify: false`); this is derived, so turning notices off hands every step
-  waiting for the orchestrator to the user.
+- `1`: the user reviews. The step is held in `review` for the user; the queue is `waiting`.
+- `2`: the orchestrator reviews what can be checked; what is the user's (the look, the feel, what the project's rules
+  give the user) goes to the user. The step is held in `review` for the project's orchestrator; the queue is
+  `waiting`. The orchestrator accepts it (`review.accepted`), sends it back (`review.sent_back`) or hands it to the
+  user (`review.asked_user`, with why).
+- `3`: the orchestrator judges everything and the queue goes on. For now (until RL2) it is held for the orchestrator
+  as level 2.
+
+A step in review has finished its turn: a pause asked for while it ran (the user's, or an update's drain) takes
+effect then (`pausing` becomes `paused`), and the review goes on meanwhile. A worker's process that ends on its own
+while its run's step is in review is no failed turn: the run waits for the review, then finishes if nothing is left,
+or starts a process that resumes the session for the next step or a send-back.
+
+Levels 2 and 3 go to the user instead when the project has no orchestrator (`project.yaml` has no `orchestrator`) or
+its notices are off (`orchestrator.notify: false`); this is derived, so turning notices off hands every step waiting
+for the orchestrator to the user.
+
+**Where a step's level comes from** (`reviewLevelOf` in `state.ts`; the derived step has `level` and `level_from`):
+the level the user set on it (queue's `user_levels`, `user`), else the one it was drafted with (`review.level`,
+`step`), else its queue's (`review_level`, `queue`), else the project's effective `defaults.review_level` (its own
+value, else the global one, built-in 2; `project`). The orchestrator writes each step's level into its draft: criteria
+that can be checked (tests, measurements, numbers) give 2, a criterion that is the user's judgement (the look, the
+feel) gives 1.
+
+**The user's level** of a step (`PUT …/steps/:s/level`, `setStepLevel`) goes into the queue's `user_levels`, written
+only by the server. It is not part of what an approval pins (the `hash` in `approvals`: steps, checks and stop conditions), so it asks for no new approval; a
+later revision keeps it for the steps it keeps, and a draft cannot bring levels of the user's (its `user_levels` is
+ignored). `null` clears it: the step's drafted level applies again. The queue's own `review_level` (`PATCH
+…/queues/:q`) is not pinned either.
+
+**Before review levels** there were review policies: `review_policy` on the queue, `review.policy` on a step and
+`defaults.review_policy` in the settings, with `continue` (no review), `wait` and `orchestrator`. Every reader takes
+them as levels (`withLevel` in `schemas.ts`): `continue` and `orchestrator` became 2, `wait` 1; a level beside one
+wins. Files keep the old keys until their next write, which writes the level; drafts from an older briefing are read
+the same way. An approval of the old form stays valid: when `queue.yaml` is read (`parseQueue` in `store.ts`), an
+approval of the current revision whose hash is that of the same content in the old form (each step's review with its
+`policy`) is taken as pinning the new form, and written so at the queue's next write.
 
 The derived step has `review_with` (`orchestrator` or `user`) while in `review`, `asked_user` (`text`, `at`) after a
 hand-over in the current round, and `sent_back` (each `id`, `text`, `at`, `by`, `round`, `delivered`, `to_user?`). Only a step waiting for the user is in the
@@ -543,7 +574,7 @@ text verbatim (it must not be empty). Picture comments (N8.3) are a user's Fix i
 - The orchestrator's send-backs of a step beyond `defaults.review_send_back_limit` (default 2) are not delivered: the
   step goes to the user (`review_with: user`, `asked_user` saying so with the text), and the entry is `to_user`. The
   user's Fix it does not count toward the limit.
-- After a Fix it the step's next round waits for the user, whatever the policy (`user_fix` on the derived step).
+- After a Fix it the step's next round waits for the user, whatever the level (`user_fix` on the derived step).
 
 ### Git on the dashboard
 
@@ -763,7 +794,8 @@ nexus note <queue> <step> <text>               # until the dashboard can add not
 
 `nexus status` prints each step of a queue on a line of its own (id, status, title); a step that names its own
 runtime, model or effort ends with them, `[on Codex · gpt-6-luna · low effort]` (what it leaves out is the run's).
-The orchestrator's overview adds the same after the step in its `steps:` line.
+The orchestrator's overview adds the same after the step in its `steps:` line, where each step also shows its review
+level, `W1 pending (level 2)`, with `, set by the user` for a level the user set.
 A queue with a planned start gets a line `planned start after A; now: <waiting>` (or `at <local time>`), ending in
 `(it starts by itself)` when the plan came due and waits for its checkout or for the limit (`held`); the
 orchestrator's overview shows a held schedule the same way (`its time came, now: <waiting>`).
@@ -850,7 +882,8 @@ sends (see the CLI).
 | `POST /api/projects/:id/sessions/:session/messages` | `text`, `queue?`, `step?` | A message to a session's inbox |
 | `POST /api/projects/:id/queues/:q/approve` | `words?`, `work?` (`keep` or `discard`) | Approves the current revision; for a stopped queue it also lifts the stop (see `queue.yaml`). `work` is required when the stopped step left commits of its own and no Discard is recorded; with `discard` nothing is approved (see "The work a stopped step left") |
 | `POST /api/projects/:id/queues/:q/withdraw` | `reason?` | The user takes back the approval of a queue that never ran. There is no CLI command and no event for it |
-| `PATCH /api/projects/:id/queues/:q` | `review_policy` (`continue`, `wait`, `orchestrator` or null) | Queue settings |
+| `PATCH /api/projects/:id/queues/:q` | `review_level` (1, 2, 3 or null: the project's) | Queue settings; not pinned by an approval |
+| `PUT /api/projects/:id/queues/:q/steps/:s/level` | `level` (1, 2, 3 or null: the step's drafted level) | The user's review level of a step (`user_levels`); asks for no new approval, and later revisions keep it |
 | `POST /api/projects/:id/questions/:qid/answer` | `text`, `continue?` | The user's answer, routed to the asker |
 | `POST /api/projects/:id/queues/:q/run` | `action` (`start`, `pause`, `resume`, `stop`, `cancel_start`), `runtime?`, `model?`, `effort?`, `session?`, `after?`, `at?` | Runs the queue through a Nexus-launched session (`session` continues an existing one). `start` with `after`: a chain, the queue starts when that one is done (`{message}`); with `at` (ISO 8601, or `usage-reset`): a schedule (`{message}`); `cancel_start` cancels the planned start (`{message}`) |
 | `POST /api/projects/:id/queues/:q/steps/:s/pictures/mark` | `path`, `accepted` | The user's mark on a review picture (`review.marked`) |

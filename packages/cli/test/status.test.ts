@@ -7,7 +7,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ProjectStore, applyDraft, approveQueue, loadProjectState, newId, orchestratorStatusChange, type Event } from "@nexus/protocol";
+import { ProjectStore, applyDraft, approveQueue, loadProjectState, newId, orchestratorStatusChange, setStepLevel, type Event } from "@nexus/protocol";
 
 const CLI = join(dirname(fileURLToPath(import.meta.url)), "../bin/nexus.js");
 const T0 = Date.now() - 86_400_000;
@@ -24,7 +24,8 @@ function setup() {
     });
     if (approve) approveQueue(store, id);
   };
-  const emit = (min: number, body: Record<string, unknown>) => store.appendEvent({ v: 1, id: newId(), at: at(min), session: "w", ...body } as Event);
+  const emit = (min: number, body: Record<string, unknown>, session = "w") => store.appendEvent({ v: 1, id: newId(), at: at(min), session, ...body } as Event);
+  store.writeSession({ protocol: 1, id: "u", project: "p", role: "user", runtime: "external", cwd: root, launched_by: "nexus", created_at: at(0) });
   queue("D", "draft", false);
   queue("P", "proposed", false);
   queue("A", "proposed");
@@ -41,6 +42,7 @@ function setup() {
   for (const n of [1, 2]) {
     emit(5 + n, { type: "step.started", queue: "X", step: `X${n}` });
     emit(5 + n, { type: "step.done", queue: "X", step: `X${n}`, summary: "ok" });
+    emit(5 + n, { type: "review.accepted", queue: "X", step: `X${n}` }, "u"); // every step is reviewed
   }
   orchestratorStatusChange(store, { queue: "C", to: "cancelled", reason: "no longer needed" });
   return store;
@@ -103,7 +105,10 @@ test("a step's own runtime, model and effort: on its line, and in the orchestrat
   assert.match(plain, /^ {2}P2 {4}pending {2}Step P2 {2}\[on Codex · gpt-6-luna · low effort\]$/m);
   assert.match(plain, /^ {2}P1 {4}pending {2}Step P1$/m, "a step without its own values: nothing");
   store.writeSession({ protocol: 1, id: "o", project: "p", role: "orchestrator", runtime: "claude", cwd: store.dir, launched_by: "nexus", created_at: at(0) });
-  assert.match(status(store, "o"), /^ {2}steps: P1 pending, P2 pending \[on Codex · gpt-6-luna · low effort\]$/m);
+  assert.match(status(store, "o"), /^ {2}steps: P1 pending \(level 2\), P2 pending \(level 2\) \[on Codex · gpt-6-luna · low effort\]$/m);
+  // A level the user set is marked so.
+  setStepLevel(store, "P", "P1", 1);
+  assert.match(status(store, "o"), /^ {2}steps: P1 pending \(level 1, set by the user\), P2 pending \(level 2\)/m);
 });
 
 test("a planned queue whose new revision waits for approval says so first, the planned start after it", () => {

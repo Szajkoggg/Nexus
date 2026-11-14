@@ -162,7 +162,7 @@ function buildQueue(s: Section, table: Table, opts: { source: string; prefix?: s
     revision: 1,
     status,
     status_note: statusPara?.replace(/^\*\*Status:?\s*/i, "").replace(/\*\*/g, ""),
-    review_policy: undefined,
+    review_level: undefined,
     stop_conditions: stops,
     checks,
     steps,

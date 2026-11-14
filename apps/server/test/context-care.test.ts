@@ -9,6 +9,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ProjectStore, approveQueue, loadProjectState, routeAnswers, sendMessage, type StepDef } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
+import { acceptReviews } from "./fake-reviewer.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -29,7 +30,7 @@ function setup(behaviours: string[], opts: { fill: number; care?: boolean; noSum
     stop_conditions: [], checks: [], steps, approvals: [], withdrawals: [], history: [],
   });
   approveQueue(store, "Q");
-  const engine: Engine = new Engine(store, () => { routeAnswers(store); engine.onChange(loadProjectState(store)); }, { retryBaseMs: 30, usageMarginMs: 100 });
+  const engine: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store); engine.onChange(loadProjectState(store)); }, { retryBaseMs: 30, usageMarginMs: 100 });
   const queue = () => loadProjectState(store).queues.find((q) => q.id === "Q")!;
   const received = (): Received[] => (existsSync(process.env.FAKE_LOG!) ? readFileSync(process.env.FAKE_LOG!, "utf8").trim().split("\n").map((l) => JSON.parse(l) as Received) : []);
   const until = async (what: string, pred: () => boolean, ms = 20_000) => {
@@ -125,6 +126,9 @@ for (const runtime of ["claude", "codex"] as const) {
     const { store, engine, queue, received, until, done } = setup(["summaryslow", "done"], { fill: 0.8 });
     try {
       engine.start("Q", { runtime });
+      // Accepted at once, while the step's turn still runs (the summary comes slowly).
+      await until("Q1 in review", () => queue().steps[0]!.status === "review");
+      acceptReviews(store);
       await until("Q1 to be done", () => queue().steps[0]!.status === "done");
       // Written to the old session's inbox while its turn still runs, and not handed over (no onChange) before the
       // turn ends: unread when the switch comes.

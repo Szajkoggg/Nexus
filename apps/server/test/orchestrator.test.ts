@@ -10,6 +10,7 @@ import { ProjectStore, applyDraft, approveQueue, loadProjectState, routeAnswers,
 import { Engine } from "../src/engine.ts";
 import { Orchestrator, type UserNotice } from "../src/orchestrator.ts";
 import { longReply } from "./fake-behaviour.ts";
+import { acceptReviews } from "./fake-reviewer.ts";
 
 process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
 
@@ -32,13 +33,14 @@ steps:
 function setup(again?: string, push?: (n: UserNotice) => void) {
   const root = again ?? mkdtempSync(join(tmpdir(), "nexus-orch-"));
   process.env.NEXUS_HOME = join(root, "home");
+  process.env.FAKE_REVIEW_ACCEPT = "1"; // the fake orchestrator accepts each step waiting for its review
   if (!again) delete process.env.FAKE_LOG;
   const store = again ? ProjectStore.forRoot(root) : ProjectStore.init(root, { id: "p", name: "P", root });
   let orchestrator: Orchestrator;
   const engine: Engine = new Engine(store, () => tick());
   orchestrator = new Orchestrator(store, engine, () => tick(), { push });
   // Stands in for the server's file watcher.
-  function tick() { routeAnswers(store); orchestrator.onChange(loadProjectState(store)); engine.onChange(loadProjectState(store)); }
+  function tick() { routeAnswers(store); acceptReviews(store); orchestrator.onChange(loadProjectState(store)); engine.onChange(loadProjectState(store)); }
   const timer = setInterval(tick, 150);
   const state = () => loadProjectState(store);
   const until = async (what: string, pred: () => boolean, ms = 30_000) => {

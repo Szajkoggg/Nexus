@@ -9,12 +9,41 @@ const Id = z.string().min(1);
 const Time = z.string().min(1); // ISO 8601 UTC
 
 /**
- * What happens when a step is done: `continue` goes on, `wait` holds it for the user, `orchestrator` holds it for the
- * project's orchestrator, who accepts it, sends it back or asks the user (and the user, without one or with its
- * notices off).
+ * How a step's result is reviewed when it is done (PROTOCOL.md, "Review levels"). There is no level without review.
+ * 1. The user reviews; the queue waits for them.
+ * 2. The orchestrator reviews what can be checked; what is the user's goes to the user, and the queue waits for them.
+ * 3. The orchestrator judges everything and the queue goes on.
+ * Without an orchestrator (or with its notices off), level 2 and 3 go to the user, as level 1.
  */
-export const ReviewPolicy = z.enum(["continue", "wait", "orchestrator"]);
-export type ReviewPolicy = z.infer<typeof ReviewPolicy>;
+export const ReviewLevel = z.union([z.literal(1), z.literal(2), z.literal(3)]);
+export type ReviewLevel = z.infer<typeof ReviewLevel>;
+/** The level when nothing sets one. */
+export const DEFAULT_REVIEW_LEVEL: ReviewLevel = 2;
+
+/**
+ * The review modes before review levels, still read from older files and drafts: `continue` (no review) and
+ * `orchestrator` became level 2, `wait` level 1 (legacyLevel). Nothing writes them any more.
+ */
+export const LegacyReviewPolicy = z.enum(["continue", "wait", "orchestrator"]);
+export type LegacyReviewPolicy = z.infer<typeof LegacyReviewPolicy>;
+const LEGACY_LEVELS: Record<LegacyReviewPolicy, ReviewLevel> = { continue: 2, orchestrator: 2, wait: 1 };
+/** The level an old review policy became. */
+export const legacyLevel = (policy: LegacyReviewPolicy): ReviewLevel => LEGACY_LEVELS[policy];
+
+type Loose = Record<string, unknown>;
+const isObject = (x: unknown): x is Loose => !!x && typeof x === "object" && !Array.isArray(x);
+/**
+ * An object as read with an old review policy under `from` turned into a level under `to` (a level already there
+ * wins); the old key is dropped. A value that is no old policy goes under `to` as it is, for the level's check to
+ * refuse. Anything but an object is left as it is.
+ */
+export function withLevel(x: unknown, from: string, to: string): unknown {
+  if (!isObject(x) || !(from in x)) return x;
+  const { [from]: policy, ...rest } = x;
+  if (to in rest && rest[to] !== undefined) return rest;
+  const parsed = LegacyReviewPolicy.safeParse(policy);
+  return { ...rest, [to]: parsed.success ? legacyLevel(parsed.data) : policy }; // neither: the level's check refuses it
+}
 
 export const QueueStatus = z.enum([
   "draft", "proposed", "approved", "running", "paused", "waiting", "stopped", "done", "cancelled",
@@ -72,9 +101,10 @@ const Fraction = z.number().min(0).max(1);
 /** One of the offered languages, by its code (languages.ts). */
 export const Language = z.enum(LANGUAGE_CODES);
 
-const DefaultsSettings = z.object({
+const DefaultsShape = z.object({
   stop_conditions: z.array(z.string()).default([]),
-  review_policy: ReviewPolicy.default("continue"),
+  /** The review level of a step whose step and queue set none. */
+  review_level: ReviewLevel.default(DEFAULT_REVIEW_LEVEL),
   /**
    * How many times the orchestrator may send a step back; its next send-back hands the step to the user instead.
    * The user's Fix it does not count.
@@ -98,6 +128,9 @@ const DefaultsSettings = z.object({
   push_accepted: z.boolean().default(false),
   usage_pause_threshold: Fraction.default(0.9),
 });
+/** `defaults` as read: an old `review_policy` becomes its `review_level`. */
+const legacyDefaults = (x: unknown) => withLevel(x, "review_policy", "review_level");
+const DefaultsSettings = z.preprocess(legacyDefaults, DefaultsShape);
 const ClaudeSettings = z.object({
   model: z.string().optional(),
   effort: ClaudeEffort.optional(),
@@ -159,7 +192,7 @@ export const ProjectFile = z.object({
   id: Id,
   name: z.string(),
   root: z.string(),
-  defaults: DefaultsSettings.extend({ worktree_dir: z.string().optional() }).prefault({}),
+  defaults: z.preprocess(legacyDefaults, DefaultsShape.extend({ worktree_dir: z.string().optional() })).prefault({}),
   runtimes: z.object({
     /** The runtime a run uses when its start does not name one. */
     default: WorkerRuntime.default("claude"),
@@ -198,9 +231,9 @@ export const StoredProject = z.object({
   name: z.string(),
   root: z.string(),
   follows_global: z.literal(true).optional(),
-  defaults: z.object({
+  defaults: z.preprocess(legacyDefaults, z.object({
     stop_conditions: own(z.array(z.string())),
-    review_policy: own(ReviewPolicy),
+    review_level: own(ReviewLevel),
     review_send_back_limit: own(z.number().int().min(0)),
     context_reuse_threshold: own(Fraction),
     context_care: own(z.boolean()),
@@ -208,7 +241,7 @@ export const StoredProject = z.object({
     push_accepted: own(z.boolean()),
     usage_pause_threshold: own(Fraction),
     worktree_dir: z.string().optional(),
-  }).prefault({}),
+  })).prefault({}),
   runtimes: z.object({
     default: own(WorkerRuntime),
     claude: z.object({
@@ -252,11 +285,12 @@ export const StepDef = z.object({
   title: z.string(),
   goal: z.string().default(""),
   acceptance: z.array(z.string()).default([]),
-  review: z.object({
+  review: z.preprocess((x) => withLevel(x, "policy", "level"), z.object({
     prepare: z.string().optional(),
     rounds: z.number().int().positive().optional(),
-    policy: ReviewPolicy.optional(),
-  }).optional(),
+    /** The step's review level, as drafted (an old `policy` is read as its level). */
+    level: ReviewLevel.optional(),
+  })).optional(),
   /**
    * The runtime, model and effort this step runs on. Each one left out is the run's; with another runtime than the
    * run's, a model or effort left out is the project's default for that runtime.
@@ -319,7 +353,7 @@ export const StatusChange = z.object({
 });
 export type StatusChange = z.infer<typeof StatusChange>;
 
-export const QueueFile = z.object({
+const QueueShape = z.object({
   protocol: z.literal(1),
   id: Id,
   title: z.string(),
@@ -332,7 +366,13 @@ export const QueueFile = z.object({
   /** Baseline state before any event. Events take precedence. */
   status: QueueStatus.default("draft"),
   status_note: z.string().optional(),
-  review_policy: ReviewPolicy.optional(),
+  /** The review level of the queue's steps that set none (an old `review_policy` is read as its level). */
+  review_level: ReviewLevel.optional(),
+  /**
+   * Review levels the user set on steps (by step id), over what the steps were drafted with. Written only by the
+   * server, from the user's action; kept across revisions; not part of what an approval pins (revisionHash).
+   */
+  user_levels: z.record(Id, ReviewLevel).optional(),
   stop_conditions: z.array(z.string()).default([]),
   checks: z.array(z.string()).default([]),
   steps: z.array(StepDef).default([]),
@@ -345,7 +385,11 @@ export const QueueFile = z.object({
   created_at: Time.optional(),
   updated_at: Time.optional(),
 });
+/** queue.yaml. An old queue-level `review_policy` is read as its `review_level`. */
+export const QueueFile = z.preprocess((x) => withLevel(x, "review_policy", "review_level"), QueueShape);
 export type QueueFile = z.infer<typeof QueueFile>;
+/** What QueueFile parses into a QueueFile (the defaults filled in). */
+export type QueueInput = z.input<typeof QueueShape>;
 
 // ---------------------------------------------------------------- notes (front matter of notes/<step>/<id>.md)
 

@@ -2,7 +2,7 @@
 // writer of queue definitions, notes and inboxes (docs/PROTOCOL.md, "Rules").
 import { existsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import { ProjectFile, QueueFile, USER_SESSION, type GlobalSettings, effortIssue, type StatusChange, type InboxEntry, ReviewPolicy, type RunFile, type SessionFile } from "./schemas.ts";
+import { ProjectFile, QueueFile, USER_SESSION, type GlobalSettings, effortIssue, type StatusChange, type InboxEntry, ReviewLevel, type RunFile, type SessionFile } from "./schemas.ts";
 import { ProjectStore, newId, now, readGlobalSettings, revisionHash, writeGlobalSettings } from "./store.ts";
 import { OVERRIDABLE, changedGlobal, settingKey } from "./settings.ts";
 import { HOLDING_RUN_STATES } from "./times.ts";
@@ -123,11 +123,33 @@ export function withdrawApproval(store: ProjectStore, queue: string, reason?: un
   });
 }
 
-export function setQueueSettings(store: ProjectStore, queue: string, settings: { review_policy?: unknown }): void {
+/** A review level from a request: 1, 2 or 3; null clears it. */
+function levelOf(x: unknown, what: string): ReviewLevel | undefined {
+  if (x === null) return undefined;
+  const parsed = ReviewLevel.safeParse(x);
+  if (!parsed.success) throw new ActionError(`${what} is 1, 2 or 3 (or null to clear it)`);
+  return parsed.data;
+}
+
+/** The user's settings of a queue: its review level (null: the project's). Not part of what an approval pins. */
+export function setQueueSettings(store: ProjectStore, queue: string, settings: { review_level?: unknown }): void {
   const q = queueOf(store, queue);
-  const rp = settings.review_policy;
-  if (rp !== undefined && rp !== null && !ReviewPolicy.safeParse(rp).success) throw new ActionError("review_policy is continue, wait or orchestrator");
-  store.writeQueue({ ...q, review_policy: (rp ?? undefined) as ReviewPolicy | undefined, updated_at: now() });
+  if (settings.review_level === undefined) return;
+  store.writeQueue({ ...q, review_level: levelOf(settings.review_level, "review_level"), updated_at: now() });
+}
+
+/**
+ * The user sets a step's review level (null: back to what the step was drafted with). Recorded in the queue's
+ * `user_levels`, which an approval does not pin, so it asks for no new approval, and which a later revision keeps.
+ * Only the user: the dashboard calls this; there is no CLI command and no event for agents.
+ */
+export function setStepLevel(store: ProjectStore, queue: string, step: string, level: unknown): void {
+  const q = queueOf(store, queue);
+  if (!q.steps.some((s) => s.id === step)) throw new ActionError(`queue ${q.id} has no step ${step}`, 404);
+  const value = levelOf(level, "a step's level");
+  const { [step]: _old, ...rest } = q.user_levels ?? {};
+  const user_levels = value === undefined ? rest : { ...rest, [step]: value };
+  store.writeQueue({ ...q, user_levels: Object.keys(user_levels).length ? user_levels : undefined, updated_at: now() });
 }
 
 // ---------------------------------------------------------------- questions
@@ -271,6 +293,11 @@ function hasStarted(v: { segments: unknown[]; status: string }): boolean {
   return v.segments.length > 0 || !["pending", "skipped"].includes(v.status);
 }
 
+function keptLevels(levels: QueueFile["user_levels"], steps: { id: string }[]): QueueFile["user_levels"] {
+  const kept = Object.entries(levels ?? {}).filter(([id]) => steps.some((s) => s.id === id));
+  return kept.length ? Object.fromEntries(kept) : undefined;
+}
+
 /**
  * Writes a queue an orchestrator drafted. A new queue becomes `proposed` (or `draft` if it says so). A change to an
  * existing queue's steps, checks or stop conditions makes a new revision, which needs the user's approval again;
@@ -282,7 +309,8 @@ export function applyDraft(store: ProjectStore, definition: unknown): string {
   const input = (definition ?? {}) as Record<string, unknown>;
   const parsed = QueueFile.safeParse({ protocol: 1, status: "proposed", ...input });
   if (!parsed.success) throw new ActionError(parsed.error.issues.map((i) => `${i.path.join(".") || "queue"}: ${i.message}`).join("; "));
-  const draft = parsed.data;
+  // The levels the user set are the user's: a draft does not bring any (an existing queue's stay, below).
+  const draft = { ...parsed.data, user_levels: undefined };
   if (draft.status !== "draft" && draft.status !== "proposed") throw new ActionError("a drafted queue's status is draft or proposed");
   if (!/^[A-Za-z0-9][\w.-]{0,31}$/.test(draft.id)) throw new ActionError("a queue id is 1-32 letters, digits, dots, dashes or underscores");
   const ids = draft.steps.map((s) => s.id);
@@ -338,7 +366,9 @@ export function applyDraft(store: ProjectStore, definition: unknown): string {
     ...old,
     title: draft.title, description: draft.description ?? old.description, track: draft.track ?? old.track,
     worktree: draft.worktree ?? old.worktree, branch: draft.branch ?? old.branch, base: draft.base ?? old.base,
-    review_policy: draft.review_policy ?? old.review_policy,
+    review_level: draft.review_level ?? old.review_level,
+    // The user's levels stay over whatever the revision drafts, for the steps it keeps.
+    user_levels: keptLevels(old.user_levels, steps),
     stop_conditions: draft.stop_conditions, checks: draft.checks, steps, updated_at: at,
   };
   const changed = revisionHash(next) !== revisionHash(old);

@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { ProjectStore, approveQueue, loadProjectState, newId, routeAnswers, type Event, type StepDef } from "@nexus/protocol";
 import { Engine, type Clock } from "../src/engine.ts";
 import { Coordinator, DEFAULT_MAX_RUNNING, readLimits, writeLimits } from "../src/coordinator.ts";
+import { acceptReviews } from "./fake-reviewer.ts";
 
 process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
 
@@ -35,7 +36,7 @@ class TestClock implements Clock {
 }
 
 /** A queue: its steps' fake behaviours; `own`: in a worktree of its own (a folder), else the project's checkout. */
-type Spec = string[] | { steps: string[]; own?: boolean; policy?: "wait" | "continue" | "orchestrator" };
+type Spec = string[] | { steps: string[]; own?: boolean; level?: 1 | 2 | 3 };
 
 /** Projects sharing one coordinator (limit `limit`), each with its engine, under one NEXUS_HOME. */
 function world(opts: { limit?: number; clock?: Clock } = {}) {
@@ -57,13 +58,13 @@ function world(opts: { limit?: number; clock?: Clock } = {}) {
       if (worktree) mkdirSync(worktree, { recursive: true });
       store.writeQueue({
         protocol: 1, id: qid, title: `Queue ${qid}`, revision: 1, status: "proposed", stop_conditions: [], checks: [], steps,
-        approvals: [], withdrawals: [], history: [], ...(worktree ? { worktree } : {}), ...(s.policy ? { review_policy: s.policy } : {}),
+        approvals: [], withdrawals: [], history: [], ...(worktree ? { worktree } : {}), ...(s.level ? { review_level: s.level } : {}),
       });
       approveQueue(store, qid);
     }
     let engine: Engine | undefined;
     // Stands in for the server's file watcher.
-    const tick = () => { routeAnswers(store); engine?.onChange(loadProjectState(store)); };
+    const tick = () => { routeAnswers(store); acceptReviews(store); engine?.onChange(loadProjectState(store)); };
     engine = new Engine(store, tick, { retryBaseMs: 30, usageMarginMs: 100, coordinator, clock: opts.clock });
     ticks.push(tick);
     engines.push(engine);
@@ -83,13 +84,14 @@ function world(opts: { limit?: number; clock?: Clock } = {}) {
   return { coordinator, add, until, stop };
 }
 
-/** Marks a queue's steps done as an external worker would, with no engine involved. */
+/** Marks a queue's steps done as an external worker would, with no engine involved, and accepted. */
 function doneByHand(store: ProjectStore, queue: string, steps: string[]): void {
   const session = newId();
   store.writeSession({ protocol: 1, id: session, project: store.readProject().id, role: "worker", runtime: "external", cwd: ".", launched_by: "external", created_at: new Date().toISOString() });
   for (const step of steps) for (const type of ["step.started", "step.done"] as const) {
     store.appendEvent({ v: 1, id: newId(), at: new Date().toISOString(), session, type, queue, step, ...(type === "step.done" ? { summary: "by hand" } : {}) } as Event);
   }
+  acceptReviews(store);
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -184,7 +186,7 @@ test("a third queue over the limit waits and starts when one ends, also across t
 
 test("a queue in review holds its checkout but does not count toward the limit", async () => {
   const w = world({ limit: 1 });
-  const p = w.add("p", { R: { steps: ["done", "done"], policy: "wait" }, B: ["done"], W: { steps: ["done"], own: true } });
+  const p = w.add("p", { R: { steps: ["done", "done"], level: 1 }, B: ["done"], W: { steps: ["done"], own: true } });
   try {
     p.engine.start("R");
     await w.until("R1 in review", () => p.queue("R").steps[0]!.status === "review");
