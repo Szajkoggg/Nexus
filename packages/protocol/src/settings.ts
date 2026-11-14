@@ -25,6 +25,7 @@ export const OVERRIDABLE: readonly { path: readonly string[]; none?: true }[] = 
   { path: ["orchestrator", "model"], none: true },
   { path: ["orchestrator", "effort"], none: true },
   { path: ["orchestrator", "notify"] },
+  { path: ["languages", "reader"], none: true },
 ] as const;
 
 /** A setting's path as written in PROTOCOL.md and in an update's `follow` list: `runtimes.claude.model`. */

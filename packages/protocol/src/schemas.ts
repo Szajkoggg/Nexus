@@ -1,6 +1,7 @@
 // The Nexus file protocol, version 1. See docs/PROTOCOL.md.
 import { z } from "zod";
 import { PICTURE_ROLES, VIEW_KEY } from "./pictures.ts";
+import { DEFAULT_WORKING_LANGUAGE, LANGUAGE_CODES } from "./languages.ts";
 
 export const PROTOCOL_VERSION = 1;
 
@@ -68,6 +69,8 @@ const ApprovalPolicy = z.enum(["never", "on-request", "untrusted"]);
 const ApprovalsReviewer = z.enum(["user", "auto_review", "guardian_subagent"]);
 const WorkerRuntime = z.enum(["claude", "codex"]);
 const Fraction = z.number().min(0).max(1);
+/** One of the offered languages, by its code (languages.ts). */
+export const Language = z.enum(LANGUAGE_CODES);
 
 const DefaultsSettings = z.object({
   stop_conditions: z.array(z.string()).default([]),
@@ -119,6 +122,13 @@ const OrchestratorSettings = z.object({
   /** Tell the orchestrator when a worker asks, or a run halts or finishes (it starts if needed). */
   notify: z.boolean().default(true),
 });
+const LanguageSettings = z.object({
+  /**
+   * The reader's language: what everything written to the user is in (chat, step summaries, questions, progress lines,
+   * notifications, queue text). None (the default): the language the user writes in.
+   */
+  reader: Language.optional(),
+});
 
 /**
  * <NEXUS_HOME>/settings.yaml: the global settings, which every project follows where it has no value of its own.
@@ -135,6 +145,7 @@ export const GlobalSettings = z.object({
   }).prefault({}),
   conversations: ConversationSettings.prefault({}),
   orchestrator: OrchestratorSettings.prefault({}),
+  languages: LanguageSettings.prefault({}),
 });
 export type GlobalSettings = z.infer<typeof GlobalSettings>;
 
@@ -164,6 +175,10 @@ export const ProjectFile = z.object({
     notes_dir: z.string().optional(),
   }).prefault({}),
   orchestrator: OrchestratorSettings.extend({ session: Id.nullable().default(null) }).optional(),
+  languages: LanguageSettings.extend({
+    /** The working language (project only): files, code, comments, commits, context cards, notes. */
+    working: Language.default(DEFAULT_WORKING_LANGUAGE),
+  }).prefault({}),
 });
 export type ProjectFile = z.infer<typeof ProjectFile>;
 
@@ -223,6 +238,10 @@ export const StoredProject = z.object({
     effort: ownOrNone(ClaudeEffort),
     notify: own(z.boolean()),
   }).optional(),
+  languages: z.object({
+    reader: ownOrNone(Language),
+    working: Language.optional(),
+  }).prefault({}),
 });
 export type StoredProject = z.infer<typeof StoredProject>;
 

@@ -511,7 +511,7 @@ function merged(base: object, patch: unknown): Record<string, unknown> {
 }
 
 /**
- * Changes a project's settings: its name, defaults, runtimes and whether the orchestrator is notified. The
+ * Changes a project's settings: its name, defaults, runtimes, languages and whether the orchestrator is notified. The
  * orchestrator's own model and effort go through the orchestrator (they also restart its process); its session,
  * the project's id and root never change here. A setting this gives another value becomes the project's own; one it
  * leaves as it is keeps following the global value (or keeps its own). `follow`: settings, by key
@@ -541,6 +541,7 @@ export function updateSettings(store: ProjectStore, patch: unknown): void {
       codex: merged(p.runtimes.codex, b.runtimes?.codex),
     },
     conversations: merged(p.conversations, b.conversations),
+    languages: merged(p.languages, b.languages),
     // The orchestrator's notices, model and effort (its section is made here if the project has had none yet).
     orchestrator: b.orchestrator === undefined
       ? p.orchestrator

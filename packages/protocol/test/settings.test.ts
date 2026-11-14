@@ -102,6 +102,7 @@ test("the effective value is the project's own where it has one, else the global
     defaults: { context_reuse_threshold: 0.7, worktree_dir: "C:/w" },
     runtimes: { claude: { effort: "high", allowed_tools: ["WebFetch"] }, codex: { model: null } },
     conversations: { notes_dir: "notes" },
+    languages: {},
   };
   const p = effectiveProject(stored, g);
   assert.equal(p.defaults.review_policy, "wait", "follows the global value");

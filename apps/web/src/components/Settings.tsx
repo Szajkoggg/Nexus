@@ -2,11 +2,15 @@
 // setting with a global value switched between following it and the project's own value (PROTOCOL.md, "Global settings").
 import { useState, type ReactNode } from "react";
 import type { GlobalSettings, ProjectFile } from "@nexus/protocol";
+import { LANGUAGES } from "@nexus/protocol/languages";
 import { act, useFetch } from "../api.ts";
 import { Button, Section } from "./ui.tsx";
 import { CHOICES, readChoice, setChoice, type ThemeChoice } from "../theme.ts";
 
 const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
+
+/** The offered languages as choices: the English name, and the language's own name where it differs. */
+const LANGUAGE_CHOICES: [string, string][] = LANGUAGES.map((l) => [l.code, l.native === l.name ? l.name : `${l.name} (${l.native})`]);
 
 const field = "w-full rounded-md border border-line-strong bg-canvas px-2 py-1 text-sm text-fg placeholder:text-fg-3";
 
@@ -72,6 +76,7 @@ const SETTING_KEYS = [
   "runtimes.codex.model", "runtimes.codex.effort", "runtimes.codex.sandbox", "runtimes.codex.approval_policy", "runtimes.codex.approvals_reviewer",
   "conversations.runtime", "conversations.model", "conversations.effort",
   "orchestrator.runtime", "orchestrator.model", "orchestrator.effort", "orchestrator.notify",
+  "languages.reader",
 ] as const;
 
 /**
@@ -142,6 +147,17 @@ function SettingRows({ form, project }: { form: Form; project?: { values: Record
         <Setting form={f} keys={["runtimes.default"]} label="Default runtime" hint="Used when a run is started without naming one.">
           {(d) => <Select value={f.get("runtimes.default")} onChange={(v) => f.set("runtimes.default", v)} disabled={d} options={[["claude", "Claude Code"], ["codex", "Codex"]]} />}
         </Setting>
+      </Section>
+
+      <Section title="Languages">
+        <Setting form={f} keys={["languages.reader"]} label="Reader's language" hint="What the agents write to you in: chat replies, step summaries, questions, progress lines, notifications, and the text of queues (ids and keys stay English).">
+          {(d) => <Select value={f.get("languages.reader")} onChange={(v) => f.set("languages.reader", v)} disabled={d} empty="the language you write in" options={LANGUAGE_CHOICES} />}
+        </Setting>
+        {p && (
+          <Row label="Working language" hint="What the agents work in: files, code, comments, commits, context cards and notes. Keep it in line with the project's own rules (its AGENTS.md).">
+            <Select value={p.values.working ?? "en"} onChange={(v) => p.set("working", v)} options={LANGUAGE_CHOICES} />
+          </Row>
+        )}
       </Section>
 
       <Section title="Claude Code workers">
@@ -301,6 +317,7 @@ function ProjectSettingsPage({ project, info, onChanged }: { project: ProjectFil
   const [local, setLocal] = useState({
     name: project.name, tools: project.runtimes.claude.allowed_tools.join("\n"),
     notesDir: project.conversations.notes_dir ?? "", worktrees: project.defaults.worktree_dir ?? "",
+    working: project.languages?.working ?? "en",
   });
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string }>();
@@ -317,10 +334,11 @@ function ProjectSettingsPage({ project, info, onChanged }: { project: ProjectFil
     setBusy(true); setMsg(undefined);
     try {
       const mine = SETTING_KEYS.filter((k) => own.has(k));
-      const body = nested(v.values, mine) as { defaults?: Values; runtimes?: { claude?: Values } & Values; conversations?: Values };
+      const body = nested(v.values, mine) as { defaults?: Values; runtimes?: { claude?: Values } & Values; conversations?: Values; languages?: Values };
       body.defaults = { ...body.defaults, worktree_dir: local.worktrees || null };
       body.runtimes = { ...body.runtimes, claude: { ...body.runtimes?.claude, allowed_tools: local.tools.split(/\n|,/).map((x) => x.trim()).filter(Boolean) } };
       body.conversations = { ...body.conversations, notes_dir: local.notesDir || null };
+      body.languages = { ...body.languages, working: local.working };
       await act(project.id, "PATCH", "/settings", { ...body, name: local.name, own: mine, follow: SETTING_KEYS.filter((k) => !own.has(k)) });
       setMsg({ ok: true, text: "Saved. Runs pick the new settings up at their next step; the orchestrator and thinking partners at their next message." });
       onChanged();

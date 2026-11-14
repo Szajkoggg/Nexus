@@ -67,6 +67,8 @@ conversations:
 orchestrator:
   session: 01JD...                     # state: its current session id
   effort: high
+languages:
+  working: en                          # project only (see "Languages")
 ```
 
 ## Global settings
@@ -85,6 +87,7 @@ runtimes:
   codex:  { sandbox: workspace-write, approval_policy: never }   # model, effort, approvals_reviewer: none
 conversations: { runtime: claude }                    # model, effort: none
 orchestrator: { runtime: claude, notify: true }       # model, effort: none
+languages: {}                                         # reader: none (the language the user writes in)
 ```
 
 **The effective value** of a setting in a project is its own value where `project.yaml` has one, else the global
@@ -121,13 +124,27 @@ one: `null`). The effective settings do not change. It writes only such a file, 
 
 | Kind | Settings |
 |---|---|
-| Global, with a project override | `defaults`: `stop_conditions`, `review_policy`, `review_send_back_limit`, `context_reuse_threshold`, `context_care`, `protect_nexus`, `push_accepted`, `usage_pause_threshold`. `runtimes`: `default`; `claude`: `model`, `effort`, `permission_mode`; `codex`: `model`, `effort`, `sandbox`, `approval_policy`, `approvals_reviewer`. `conversations`: `runtime`, `model`, `effort`. `orchestrator`: `runtime`, `model`, `effort`, `notify` |
-| Project only | `name`, `defaults.worktree_dir`, `runtimes.claude.allowed_tools` (the project's own allow rules), `conversations.notes_dir` (`id` and `root` identify the project) |
+| Global, with a project override | `defaults`: `stop_conditions`, `review_policy`, `review_send_back_limit`, `context_reuse_threshold`, `context_care`, `protect_nexus`, `push_accepted`, `usage_pause_threshold`. `runtimes`: `default`; `claude`: `model`, `effort`, `permission_mode`; `codex`: `model`, `effort`, `sandbox`, `approval_policy`, `approvals_reviewer`. `conversations`: `runtime`, `model`, `effort`. `orchestrator`: `runtime`, `model`, `effort`, `notify`. `languages`: `reader` |
+| Project only | `name`, `defaults.worktree_dir`, `runtimes.claude.allowed_tools` (the project's own allow rules), `conversations.notes_dir`, `languages.working` (`id` and `root` identify the project) |
 | Global only | Remote access (`<NEXUS_HOME>/auth.json`, `push.json`), the deploy push (`deploy.json`), the server; each stays in its own file |
 | State, not a setting | `orchestrator.session` |
 
 The orchestrator's settings count only for a project that has an orchestrator section (it has had one); the section
 is made with its first session.
+
+### Languages
+
+Two settings say which language what is written is in. Each is one of the offered languages, stored by its code:
+`hu` Hungarian, `en` English, `da` Danish, `de` German, `es` Spanish, `fr` French, `pl` Polish, `it` Italian
+(`packages/protocol/src/languages.ts`, `LANGUAGES`).
+
+- **`languages.reader`, the reader's language** (global, with a project override): what everything written to the
+  user is in: chat replies, step summaries, questions, progress lines, notifications, and the text of queues (title,
+  description, goals, acceptance; ids and YAML keys stay English). It has no default: none means "the language the
+  user writes in", today's behaviour. A project's own `null` is that too, where the global value names a language.
+- **`languages.working`, the working language** (project only, default `en`): what the project's agents work in:
+  files, code, comments, commits, context cards, notes. It must agree with the project's own rules (its AGENTS.md):
+  the setting is what Nexus tells the agents, the project's rules are the project's.
 
 ## `queue.yaml`
 
@@ -788,7 +805,7 @@ sends (see the CLI).
 | `POST /api/projects/:id/orchestrator/messages` | `text` | A chat message to the orchestrator (starts or wakes it) |
 | `POST /api/projects/:id/orchestrator/reset` | | The next message starts a new orchestrator session |
 | `POST /api/projects/:id/orchestrator/settings` | `model`, `effort` (empty: the default) | The orchestrator's model and effort, from its next message on |
-| `PATCH /api/projects/:id/settings` | `name`, `runtimes`, `defaults`, `conversations`, `orchestrator` (`notify`, `model`, `effort`) (an empty value clears a field), `own?`, `follow?` (lists of setting keys, `runtimes.claude.model`) | Project settings, checked against the schema (see "Global settings"): a setting given another value, or named in `own`, becomes the project's own (in `own` also when it equals the global value); one named in `follow` follows the global value again; naming one in both is refused |
+| `PATCH /api/projects/:id/settings` | `name`, `runtimes`, `defaults`, `conversations`, `languages` (`reader`, `working`), `orchestrator` (`notify`, `model`, `effort`) (an empty value clears a field), `own?`, `follow?` (lists of setting keys, `runtimes.claude.model`) | Project settings, checked against the schema (see "Global settings"): a setting given another value, or named in `own`, becomes the project's own (in `own` also when it equals the global value); one named in `follow` follows the global value again; naming one in both is refused |
 | `GET /api/projects/:id/settings` | | `own` (the keys of the settings the project has its own value of) and `global` (the global settings) |
 | `GET /api/settings`, `PATCH /api/settings` | the global settings, nested as in `settings.yaml` (null or empty clears an optional one) | The global settings (`global`; GET also `keys`, every setting with a global value). PATCH writes `<NEXUS_HOME>/settings.yaml`, checked against the schema; every project that follows a changed value has it at once |
 | `POST /api/projects/:id/settings/allow-rule` | `rule` | Adds an allow rule for Claude Code workers to `runtimes.claude.allowed_tools` in `.nexus/project.yaml` (once; a rule already there is left as it is), typically from a refusal. A tool name, optionally with a specifier in parentheses, on one line. Like every write, only from the dashboard's own page: an agent must not widen its own permissions. Nothing else is written, not the project's `.claude/settings.json` or `AGENTS.md` |

@@ -9,3 +9,4 @@ export * from "./steps.ts";
 export * from "./settings.ts";
 export * from "./reports.ts";
 export * from "./pictures.ts";
+export * from "./languages.ts";

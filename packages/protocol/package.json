@@ -3,6 +3,6 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "exports": { ".": "./src/index.ts", "./times": "./src/times.ts", "./attention": "./src/attention.ts", "./refusals": "./src/refusals.ts", "./steps": "./src/steps.ts", "./digest": "./src/digest.ts", "./pictures": "./src/pictures.ts" },
+  "exports": { ".": "./src/index.ts", "./times": "./src/times.ts", "./attention": "./src/attention.ts", "./refusals": "./src/refusals.ts", "./steps": "./src/steps.ts", "./digest": "./src/digest.ts", "./pictures": "./src/pictures.ts", "./languages": "./src/languages.ts" },
   "dependencies": { "ulid": "^3.0.0", "yaml": "^2.8.0", "zod": "^4.1.0" }
 }

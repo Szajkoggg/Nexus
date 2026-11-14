@@ -170,13 +170,20 @@ commits what is consistent and leaves no uncommitted changes behind.
 The settings panel (the gear icon) has two tabs. **Global** holds the settings every project follows: the default
 runtime; for Claude Code workers the model, effort and permission mode; for Codex workers the model, effort, sandbox
 and what happens when an agent needs to leave the sandbox; the orchestrator's model, effort and notices; the thinking
-partners' runtime, model and effort; and the defaults. It also has what belongs to Nexus as a whole: the server
+partners' runtime, model and effort; the reader's language; and the defaults. It also has what belongs to Nexus as a whole: the server
 section (updates, pushing on deploy, queues at once), this browser's theme, and on the phone this device's
 notifications and remote access. **The project's tab** shows the same settings, each with a switch: **Global** (the
 global value, greyed and marked "global") or **Own** (a value for this project only); switching back to Global makes
 it follow the global value again. Only the project's tab has what is the project's alone: its name, its extra allowed
-tools for Claude Code (the project's own `.claude/settings.json` applies as well), its notes folder and where its
-worktrees go. A changed global value reaches every project that follows it at once; running queues pick it up at
+tools for Claude Code (the project's own `.claude/settings.json` applies as well), its notes folder, its working
+language and where its worktrees go.
+
+**Languages** (a section in both tabs). The **reader's language** is what the agents write to you in: chat replies,
+step summaries, questions, progress lines, notifications, and the text of queues (ids and keys stay English). Choose
+one of Hungarian, English, Danish, German, Spanish, French, Polish and Italian, or leave it at "the language you write
+in" (the default). It is global, and a project may have its own. The **working language** (the project's tab only,
+English by default) is what the agents work in: files, code, comments, commits, context cards and notes; keep it in
+line with the project's own rules (its AGENTS.md). A changed global value reaches every project that follows it at once; running queues pick it up at
 their next step, the orchestrator and thinking partners at their next message. A run keeps the model and effort it
 was started with explicitly; what it took from the defaults follows changes. For unattended runs, Claude Code's `auto` permission mode and
 Codex's auto review are the recommended settings: routine actions run, risky ones are refused, nobody is asked.
