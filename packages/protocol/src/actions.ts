@@ -2,8 +2,9 @@
 // writer of queue definitions, notes and inboxes (docs/PROTOCOL.md, "Rules").
 import { existsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import { HOLDING_RUN_STATES, ProjectFile, QueueFile, USER_SESSION, effortIssue, type StatusChange, type InboxEntry, ReviewPolicy, type RunFile, type SessionFile } from "./schemas.ts";
+import { ProjectFile, QueueFile, USER_SESSION, effortIssue, type StatusChange, type InboxEntry, ReviewPolicy, type RunFile, type SessionFile } from "./schemas.ts";
 import { ProjectStore, newId, now, revisionHash } from "./store.ts";
+import { HOLDING_RUN_STATES } from "./times.ts";
 import { commentTarget, isApproved, loadProjectState, type ProjectState } from "./state.ts";
 import { validAllowRule } from "./refusals.ts";
 

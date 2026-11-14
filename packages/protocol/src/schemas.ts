@@ -440,13 +440,6 @@ export const StartFile = z.object({
 }).refine((s) => !!s.after !== !!s.at, { message: "a planned start has either after or at" });
 export type StartFile = z.infer<typeof StartFile>;
 
-/**
- * Run states in which the run holds its session and its checkout: it goes on by itself (running, pausing, a usage or
- * retry wait) or once the user approves the queue's new revision (approval_wait). Such a queue cannot be started or
- * cancelled, and its session runs no other queue.
- */
-export const HOLDING_RUN_STATES: readonly string[] = ["running", "pausing", "usage_wait", "retry_wait", "approval_wait"];
-
 /** queues/<id>/run.yaml: the engine's intent for a queue. Written only by the server. */
 export const RunFile = z.object({
   protocol: z.literal(1),

@@ -72,3 +72,12 @@ test("a revision waiting for approval comes first, in the approval tone, with th
   // Done and cancelled stay so.
   assert.deepEqual(pick(queueStatus(q({ status: "done", revision: 2, approved: false }))), ["done", "done"]);
 });
+
+test("a run waiting for the approval at a step's end says so, after which step; approved, it is running again", () => {
+  const waiting = { status: "running", revision: 3, steps: st("S1:done S2:pending"), run: { state: "approval_wait", step: "S1" } };
+  assert.deepEqual(pick(queueStatus(q({ ...waiting, approved: false }))), ["approval", "waits for approval of revision 3 · after S1"]);
+  // Every remaining step removed: the queue is waiting, not done, until the approval.
+  assert.deepEqual(pick(queueStatus(q({ ...waiting, status: "waiting", steps: st("S1:done"), approved: false }))), ["approval", "waits for approval of revision 3 · after S1"]);
+  // Mid-step a newer revision waits: the queue needs approval, the step goes on.
+  assert.deepEqual(pick(queueStatus(q({ ...waiting, steps: st("S1:running S2:pending"), run: { state: "running", step: "S1" }, approved: false }))), ["approval", "needs approval (revision 3)"]);
+});

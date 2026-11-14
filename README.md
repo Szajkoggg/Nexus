@@ -144,7 +144,9 @@ cancels a pending retry.
 A new revision of a running queue never stops the step at work: it goes on to its end, questions and answers
 included. A revision may change only steps that have not started. At the step's end the run goes on under the new
 revision in the same session if you have approved it; otherwise it waits for your approval (keeping its session) and
-goes on by itself once you approve. Pausing it meanwhile wins: Resume then goes on.
+goes on by itself once you approve. Pausing it meanwhile wins: Resume then goes on. While it waits, the queue reads
+"waits for approval of revision N · after S", its run "waiting for approval", and it is in "Waiting for you" (and
+pushed, with notifications on) as Needs approval.
 
 A queue stopped by a stop condition goes on only when you lift the stop. Either approve a new revision the
 orchestrator drafted (a start then begins at the first pending step), or, when the cause was outside the queue,

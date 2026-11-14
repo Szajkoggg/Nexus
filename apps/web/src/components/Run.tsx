@@ -1,6 +1,6 @@
 // Running queues through Nexus-launched sessions: controls, live activity, sessions and usage.
 import { useEffect, useState, type ReactNode } from "react";
-import { formatClock, retryLine } from "@nexus/protocol/times";
+import { HOLDING_RUN_STATES, formatClock, retryLine } from "@nexus/protocol/times";
 import { act, enc, useFetch, type ActivityEntry, type ProjectState, type QueueView, type SessionView, type Usage } from "../api.ts";
 import { Button, RunTimes, Section, TimeAgo } from "./ui.tsx";
 import { EffortSelect, ModelSelect } from "./Settings.tsx";
@@ -14,6 +14,7 @@ const RUN_TONE: Record<string, [string, string]> = {
   finished: ["bg-ok", "text-ok"],
   usage_wait: ["bg-warn", "text-warn"],
   retry_wait: ["bg-warn", "text-warn"],
+  approval_wait: ["bg-info", "text-info"],
 };
 const RunState = ({ state, children }: { state: string; children: ReactNode }) => (
   <span className={`inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-medium ${RUN_TONE[state]?.[1] ?? "text-fg-2"}`}>
@@ -23,6 +24,7 @@ const RunState = ({ state, children }: { state: string; children: ReactNode }) =
 const RUN_LABEL: Record<string, string> = {
   running: "running", pausing: "pausing after this step", paused: "paused", halted: "halted",
   finished: "finished", usage_wait: "waiting for the usage window", retry_wait: "waiting to retry",
+  approval_wait: "waiting for approval",
 };
 
 /** A pending retry, "Retry 2 of 5 at 14:05, overloaded", in amber; nothing for a run that is not waiting to retry. */
@@ -125,7 +127,9 @@ export function RunControls({ project, queue, onChanged }: { project: ProjectSta
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const run = queue.run;
-  const active = run && ["running", "pausing", "usage_wait", "retry_wait"].includes(run.state);
+  // A run that holds its session: going on by itself, or waiting for the approval of the queue's new revision.
+  const active = run && HOLDING_RUN_STATES.includes(run.state);
+  const waitsApproval = run?.state === "approval_wait";
   const call = async (body: Record<string, unknown>) => {
     setBusy(true); setError(undefined);
     try { await act(id, "POST", `/queues/${enc(queue.id)}/run`, body); onChanged(); }
@@ -133,7 +137,7 @@ export function RunControls({ project, queue, onChanged }: { project: ProjectSta
     finally { setBusy(false); }
   };
   const reusable = project.sessions.filter((s) => s.role === "worker" && s.runtime !== "external" && s.launched_by === "nexus" && s.native_id
-    && !project.queues.some((q) => q.id !== queue.id && q.run?.session === s.id && ["running", "pausing", "usage_wait", "retry_wait"].includes(q.run.state)));
+    && !project.queues.some((q) => q.id !== queue.id && q.run?.session === s.id && HOLDING_RUN_STATES.includes(q.run.state)));
   const runSession = run ? project.sessions.find((s) => s.id === run.session) : undefined;
   // A stopped queue goes on only through Continue or a newly approved revision (the stop box above).
   const canStart = queue.approved && !active && queue.status !== "done" && queue.status !== "cancelled" && queue.status !== "stopped";
@@ -167,12 +171,13 @@ export function RunControls({ project, queue, onChanged }: { project: ProjectSta
           <SessionSwitches run={run} sessions={project.sessions} />
           {run.summary_asked && run.state === "running" && <p className="mt-1 text-xs text-info">↪ The context is full: the session writes its summary of {run.summary_asked}; the next step runs in a fresh session.</p>}
           {run.state === "usage_wait" && run.resume_at && <p className="mt-1 text-xs text-fg-3">Resumes by itself at {new Date(run.resume_at).toLocaleTimeString()}.</p>}
+          {waitsApproval && <p className="mt-1 text-xs text-info">Its last step ended while revision {queue.revision} waits for your approval: once you approve it, the run goes on by itself, in this session.</p>}
           <RetryNote run={run} />
         </div>
       )}
       <div className="flex flex-wrap items-center gap-2">
-        {active && run?.state !== "pausing" && <Button variant="quiet" disabled={busy} onClick={() => call({ action: "pause" })}>Pause after this step</Button>}
-        {active && <Button variant="danger" disabled={busy} onClick={() => call({ action: "stop" })}>Stop now</Button>}
+        {active && run?.state !== "pausing" && <Button variant="quiet" disabled={busy} onClick={() => call({ action: "pause" })}>{waitsApproval ? "Pause" : "Pause after this step"}</Button>}
+        {active && !waitsApproval && <Button variant="danger" disabled={busy} onClick={() => call({ action: "stop" })}>Stop now</Button>}
         {run && !ended && queue.status !== "stopped" && (run.state === "paused" || run.state === "halted") && <Button disabled={busy || !queue.approved} onClick={() => call({ action: "resume" })}>Resume</Button>}
       </div>
       {canStart && (!run || run.state === "finished" || run.state === "halted" || run.state === "paused") && (

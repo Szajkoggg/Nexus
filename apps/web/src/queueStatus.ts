@@ -2,7 +2,7 @@
 // steps, its questions and its run together, so that "running" shows only while a run really runs, apart from
 // waiting, and a queue whose steps say running while nothing runs reads as paused. Pure and unit tested; QueueRow
 // shows it as a dot and a word, and the later layouts (the desktop rail, the digest) use it too.
-import { formatClock } from "@nexus/protocol/times";
+import { HOLDING_RUN_STATES, formatClock } from "@nexus/protocol/times";
 
 export type Tone = "running" | "waiting" | "review" | "stopped" | "failed" | "approval" | "paused" | "planned" | "done" | "cancelled";
 
@@ -35,7 +35,6 @@ export interface QueueLike {
 const startText = (start: NonNullable<QueueLike["start"]>, now: Date) =>
   start.after ? `starts after ${start.after}` : start.at ? `starts at ${formatClock(start.at, now)}` : "planned";
 
-const GOING = new Set(["running", "pausing", "usage_wait", "retry_wait"]);
 
 export function queueStatus(q: QueueLike, now = new Date()): HonestStatus {
   const questions = q.questions.filter((x) => x.state === "open" || x.state === "escalated");
@@ -46,11 +45,15 @@ export function queueStatus(q: QueueLike, now = new Date()): HonestStatus {
     total: q.steps.length,
   };
   const at = (tone: Tone, label: string, step?: string): HonestStatus => ({ tone, label: step ? `${label} · ${step}` : label, ...(step ? { step } : {}), ...base });
-  const run = q.run && GOING.has(q.run.state) ? q.run : undefined;
+  const run = q.run && HOLDING_RUN_STATES.includes(q.run.state) ? q.run : undefined;
 
   if (q.status === "cancelled") return at("cancelled", "cancelled");
   // A revision waiting for approval comes first: nothing of the queue runs, and no planned start fires, until it is
   // approved ("needs approval (revision 3) · then starts after HS"). A first revision with no plan keeps the plain words.
+  // A run that ended a step and waits for that approval says so ("waits for approval of revision 3 · after SF2").
+  if (q.approved === false && run?.state === "approval_wait") {
+    return { tone: "approval", label: `waits for approval of revision ${q.revision ?? 1}${run.step ? ` · after ${run.step}` : ""}`, ...base };
+  }
   if (q.approved === false && q.status !== "done" && q.status !== "draft" && ((q.revision ?? 1) > 1 || q.start || q.status !== "proposed")) {
     const then = q.start && !q.start.failed ? ` · then ${startText(q.start, now)}` : "";
     return { tone: "approval", label: `needs approval (revision ${q.revision ?? 1})${then}`, ...base };

@@ -1,7 +1,8 @@
 // The morning digest (UX proposals, 16): what happened in the projects since the user last looked, newest first:
 // steps done or failed, queues stopped, done or cancelled (with their report), refused actions and retries. The
 // server serves it across projects (GET /api/digest?since=); this part is pure and unit tested.
-import { HOLDING_RUN_STATES, type Activity, type Event, type Refusal } from "./schemas.ts";
+import type { Activity, Event, Refusal } from "./schemas.ts";
+import { HOLDING_RUN_STATES } from "./times.ts";
 import type { ProjectState } from "./state.ts";
 
 export type DigestKind = "done" | "failed" | "stopped" | "queue_done" | "queue_cancelled" | "refused" | "retried";
@@ -79,10 +80,13 @@ export function projectDigest(input: ProjectDigestInput, since: string): DigestE
 
 export const newestFirst = (events: DigestEvent[]) => events.sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
 
-/** The project's queues at work now: a run that holds its session (HOLDING_RUN_STATES), waiting for an approval too. */
+/**
+ * The project's queues at work now: a run that holds its session (HOLDING_RUN_STATES), except one waiting for an
+ * approval: that one waits for the user (an attention item of kind approval), it is not running.
+ */
 export function projectRunning(state: ProjectState): DigestRunning[] {
   return state.queues
-    .filter((q) => q.run && HOLDING_RUN_STATES.includes(q.run.state))
+    .filter((q) => q.run && HOLDING_RUN_STATES.includes(q.run.state) && q.run.state !== "approval_wait")
     .map((q) => {
       const step = q.run!.step ?? q.current_step;
       const since = step ? q.steps.find((s) => s.id === step)?.segments.at(-1)?.start ?? q.run!.started_at : q.run!.started_at;

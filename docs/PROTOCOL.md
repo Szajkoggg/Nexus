@@ -180,9 +180,14 @@ stopped one, behave as without a revision. At the step's end:
 - not approved: the run becomes `approval_wait` (`reason: waits for approval of revision N`), keeping its session and
   its checkout, and goes on by itself, in that session, once the user approves; the orchestrator's approval notice
   says that the run continues by itself. A run the user asked to pause becomes `paused` instead (the user's pause
-  wins; a resume later goes on, or waits again while the revision still waits). A revision that removed every
-  remaining step: the queue is not `done` while it waits (its status is `waiting`, `waits for approval of revision
-  N`, while its run waits or is paused); on approval the run finishes, and a chain after the queue fires only then.
+  wins; a resume later goes on, or waits again while the revision still waits). While the run waits, the queue's
+  derived status is `waiting` (`status_reason: waits for approval of revision N`), and the user's attention list has an
+  item of kind `approval` ("The run waits for approval of revision N after step S; it goes on by itself once you
+  approve"), which is pushed like any new item. A revision that removed every remaining step: the queue is not `done`
+  while it waits (`waiting` as above, also while its run is paused); on approval the run finishes, and a chain after
+  the queue fires only then. A planned start after the queue says `queue A waits for approval of revision N (after
+  S)` and is `blocked` (it waits on the user). The dashboard shows the queue as "waits for approval of revision N ·
+  after S" (the approval colour) and its run as "waiting for approval", with Pause.
 
 While a run is `approval_wait`, a start of the queue, a start in its session by another queue (a chain's start waits
 for the session) and a cancel of the queue are refused; Pause and Stop now pause it. An update's drain does not hold
@@ -679,7 +684,8 @@ reason), `stopped` (a `queue.stop`, with its reason), `queue_done` and `queue_ca
 or cancelled and whose last step finished, else whose run ended, after the time; `text` its title, `report` the path
 of its report, for the file endpoint), `refused` (refusals, one line per queue and step with `count`, `text` the tool
 and input of the latest) and `retried` (activity entries of kind `retry`, one line per step with `count`, `text` the
-latest). `running` lists the queues whose run is running, pausing or waiting for a retry or the usage window, each
+latest). `running` lists the queues whose run is running, pausing or waiting for a retry or the usage window (not
+one waiting for an approval: that one waits for the user, as an attention item of kind `approval`), each
 `{ project, project_name, queue, step?, since? }` (`since`: when the step's latest stretch at work began). Read-only.
 
 **Remote access.** A request is local when it comes from a loopback address without proxy headers
@@ -855,8 +861,8 @@ loop through other plans, an unknown or cancelled A, a B that is done, cancelled
 not take, a session that is not a worker session Nexus launched. B need not be approved yet.
 
 - It fires when A is done (every step done or skipped; its run finished). If A already is, B starts at once.
-- If A's run halts or pauses, or A is stopped or cancelled, the plan waits; the dashboard shows why (`waiting`,
-  `blocked` in the state).
+- If A's run halts, pauses or waits for the approval of A's new revision, or A is stopped or cancelled, the plan
+  waits; the dashboard shows why (`waiting`, `blocked` in the state).
 - At the moment it fires, B starts as a start does: its current revision must be approved, and it must not be stopped
   or have a rejected step. If it cannot start, the plan stays with `failed` and the user gets an attention item of kind
   `start` ("Did not start after A: …"); it is not tried again by itself. Starting B or cancelling the plan ends it.

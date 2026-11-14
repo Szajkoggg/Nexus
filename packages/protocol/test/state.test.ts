@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ProjectStore, loadProjectState, newId, stepClosed, now, revisionHash, type Event, type QueueFile, type SessionFile } from "../src/index.ts";
+import { ProjectStore, applyDraft, approveQueue, loadProjectState, newId, stepClosed, now, revisionHash, type Event, type QueueFile, type SessionFile } from "../src/index.ts";
 
 function setup() {
   const root = mkdtempSync(join(tmpdir(), "nexus-test-"));
@@ -318,4 +318,35 @@ test("a comment on a review picture goes back with a send-back while the step wa
   // A worker cannot write either.
   emit(w, { type: "review.marked", queue: "Q", step: "Q2", path: pic, accepted: true });
   assert.equal(loadProjectState(st).queues[0]!.steps[1]!.pictures[pic]?.accepted, undefined);
+});
+
+test("a run waiting for approval: an approval item (and so a push), a planned start after it waits on the user, the queue not done", () => {
+  const { st, q, session, emit } = setup();
+  st.writeQueue({ ...q, status: "proposed" });
+  approveQueue(st, "Q");
+  st.writeQueue({ withdrawals: [], changes: [], protocol: 1, id: "R", title: "After", revision: 1, status: "proposed", stop_conditions: [], checks: [], steps: [{ id: "R1", title: "R", goal: "", acceptance: [] }], approvals: [], history: [] });
+  approveQueue(st, "R");
+  st.writeStart("R", { protocol: 1, after: "Q", by: "user", revision: 1, created_at: now() });
+  const w = session("worker");
+  emit(w, { type: "step.started", queue: "Q", step: "Q1" });
+  st.writeRun("Q", { protocol: 1, session: w.id, state: "running", step: "Q1", started_at: now(), updated_at: now(), revision: 1 });
+  // A revision that removes the remaining step Q2, while Q1 runs.
+  applyDraft(st, { id: "Q", title: "Queue", steps: [{ id: "Q1", title: "One", goal: "", acceptance: [] }] });
+  let s = loadProjectState(st);
+  assert.ok(!s.attention.some((a) => a.kind === "approval" && a.queue === "Q"), "mid-step: no item yet, the step goes on");
+  assert.match(s.queues.find((x) => x.id === "R")!.start!.waiting, /^queue Q is running \(at Q1\)$/);
+
+  emit(w, { type: "step.done", queue: "Q", step: "Q1", summary: "ok" });
+  st.writeRun("Q", { protocol: 1, session: w.id, state: "approval_wait", reason: "waits for approval of revision 2", step: "Q1", started_at: now(), updated_at: now(), revision: 1 });
+  s = loadProjectState(st);
+  const item = s.attention.find((a) => a.kind === "approval" && a.queue === "Q");
+  assert.equal(item?.text, "The run waits for approval of revision 2 after step Q1; it goes on by itself once you approve");
+  const r = s.queues.find((x) => x.id === "R")!.start!;
+  assert.deepEqual([r.waiting, r.blocked], ["queue Q waits for approval of revision 2 (after Q1)", true]);
+  const qv = s.queues.find((x) => x.id === "Q")!;
+  assert.deepEqual([qv.status, qv.status_reason], ["waiting", "waits for approval of revision 2"], "not done before the approval");
+
+  approveQueue(st, "Q");
+  s = loadProjectState(st);
+  assert.ok(!s.attention.some((a) => a.kind === "approval"), "approved: nothing waits for the user");
 });

@@ -4,7 +4,7 @@
 import { useState, type ReactNode } from "react";
 import type { QueueView, StepView } from "../api.ts";
 import { TimeAgo, reviewLabel, toneOf } from "./ui.tsx";
-import { retryLine } from "@nexus/protocol/times";
+import { HOLDING_RUN_STATES, retryLine } from "@nexus/protocol/times";
 import { stepValuesText } from "@nexus/protocol/steps";
 import { queueStatus, type Tone } from "../queueStatus.ts";
 import { currentIndex, foldSteps, twoColumns } from "../steplist.ts";
@@ -32,7 +32,7 @@ const TINT: Record<string, string> = {
  * restart, a pause) reads "paused", like its queue, not "running".
  */
 const shownStatus = (step: StepView, queue: QueueView) =>
-  step.status === "running" && !["running", "pausing", "retry_wait", "usage_wait"].includes(queue.run?.state ?? "") ? "paused" : step.status;
+  step.status === "running" && !HOLDING_RUN_STATES.includes(queue.run?.state ?? "") ? "paused" : step.status;
 
 const plain = (s: string) => s.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\*\*|`/g, "");
 

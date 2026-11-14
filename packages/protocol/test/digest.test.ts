@@ -53,6 +53,7 @@ test("across projects the lines merge newest first; what is at work now, with si
     queue("SF", "running", { run: { state: "running", step: "SF3", started_at: T("07:00") }, steps: [{ id: "SF3", status: "running", segments: [{ start: T("07:00") }, { start: T("11:20") }] }] }),
     queue("P", "running", { run: { state: "paused", step: "P1" } }),
     queue("U", "waiting", { run: { state: "usage_wait", started_at: T("06:00") }, current_step: "U2", steps: [] }),
+    queue("AW", "running", { run: { state: "approval_wait", step: "AW1", started_at: T("06:00") }, steps: [] }), // waits for the user
   ]);
   assert.deepEqual(projectRunning(s), [
     { project: "p", project_name: "Proj", queue: "SF", step: "SF3", since: T("11:20") },

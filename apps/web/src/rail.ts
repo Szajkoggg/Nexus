@@ -28,7 +28,7 @@ export function shortStatus(s: HonestStatus): string {
     case "running": return s.label.startsWith("pausing") ? "pausing" : `${s.closed}/${s.total}`;
     case "review": return s.label.startsWith("the orchestrator reviews") ? "orchestrator reviews" : "review";
     case "planned": return s.label.replace(/^starts /, "");
-    case "approval": return s.label.replace(/ \(revision \d+\)/, "").replace(" · then starts ", " · then ");
+    case "approval": return s.label.startsWith("waits for approval") ? "waits for approval" : s.label.replace(/ \(revision \d+\)/, "").replace(" · then starts ", " · then ");
     case "waiting": return s.label.startsWith("waiting for an answer") ? "question" : s.label.includes("usage") ? "usage window" : "retry";
     default: return s.label;
   }

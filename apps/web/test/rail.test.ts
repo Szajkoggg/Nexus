@@ -63,3 +63,10 @@ test("a planned queue whose new revision waits for approval stays in the rail an
   assert.deepEqual(work.map((w) => [w.queue.id, shortStatus(w.status)]), [["HS", "0/1"], ["ST", "needs approval · then after HS"], ["RV", "after HS"]]);
   assert.equal(work[1]!.status.tone, "approval");
 });
+
+test("a run waiting for approval is not at work: it waits for the user (the rail's first section), in short words there", () => {
+  const queues = [q("AW", "running", { approved: false, revision: 2, steps: st("AW1:done AW2:pending"), run: { state: "approval_wait", step: "AW1" } })];
+  assert.deepEqual(atWork(queues), []);
+  const s = queueStatus(queues[0]!);
+  assert.deepEqual([s.tone, shortStatus(s)], ["approval", "waits for approval"]);
+});

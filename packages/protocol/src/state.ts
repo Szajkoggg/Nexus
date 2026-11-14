@@ -1,8 +1,8 @@
 // Derives the dashboard's view of a project from its files. Pure apart from reading through the store;
 // nothing here is ever written back (state.json, if kept, is only a cache of this).
-import { HOLDING_RUN_STATES, ORCHESTRATOR_ONLY, USER_ONLY, type StatusChange, type Event, type InboxEntry, type Note, type GitFile, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type ReviewItem, type ReviewPolicy, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type StepDef, type StepStatus } from "./schemas.ts";
+import { ORCHESTRATOR_ONLY, USER_ONLY, type StatusChange, type Event, type InboxEntry, type Note, type GitFile, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type ReviewItem, type ReviewPolicy, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type StepDef, type StepStatus } from "./schemas.ts";
 import { ProjectStore, revisionHash } from "./store.ts";
-import { ENDED_RUN_STATES, formatClock, type Segment } from "./times.ts";
+import { ENDED_RUN_STATES, HOLDING_RUN_STATES, formatClock, type Segment } from "./times.ts";
 import { stopPlace } from "./attention.ts";
 
 export interface CheckView { name: string; ok: boolean; summary?: string; at: string }
@@ -225,9 +225,12 @@ export function loadProjectState(store: ProjectStore): ProjectState {
   }
 
   // A revision waiting for approval holds a run's queue back from done: a revision that removed every remaining step
-  // finishes the run only once the user approves it (until then the run waits for the approval, or is paused).
+  // finishes the run only once the user approves it (until then the run waits for the approval, or is paused). A run
+  // waiting for the approval makes its queue wait too (it is not running).
   for (const q of queues.values()) {
-    if (q.status === "done" && !q.approved && q.run && (HOLDING_RUN_STATES.includes(q.run.state) || q.run.state === "paused")) {
+    const held = q.status === "done" && !!q.run && (HOLDING_RUN_STATES.includes(q.run.state) || q.run.state === "paused");
+    const waits = q.run?.state === "approval_wait" && !TERMINAL_QUEUE.has(q.status) && q.status !== "stopped";
+    if (!q.approved && (held || waits)) {
       q.status = "waiting"; q.status_reason = `waits for approval of revision ${q.revision}`;
     }
   }
@@ -299,6 +302,7 @@ function startWait(plan: StartFile, a: QueueView | undefined, queues: QueueView[
   const r = a.run;
   if (r?.state === "halted") return { waiting: `the run of ${plan.after} halted${r.reason ? `: ${r.reason}` : ""}`, blocked: true };
   if (r?.state === "paused") return { waiting: `the run of ${plan.after} is paused${r.reason ? `: ${r.reason}` : ""}`, blocked: true };
+  if (r?.state === "approval_wait") return { waiting: `queue ${plan.after} waits for approval of revision ${a.revision}${r.step ? ` (after ${r.step})` : ""}`, blocked: true };
   if (r && HOLDING_RUN_STATES.includes(r.state)) return { waiting: `queue ${plan.after} is running${r.step ? ` (at ${r.step})` : ""}`, blocked: false };
   if (a.status === "running" || a.status === "waiting") return { waiting: `queue ${plan.after} is ${a.status === "waiting" ? "waiting (a question or a review)" : "running"}`, blocked: false };
   return { waiting: `queue ${plan.after} has not started yet`, blocked: false };
@@ -323,6 +327,10 @@ function attentionOf(queues: QueueView[], questions: QuestionView[]): AttentionI
       });
     }
     if (q.status === "proposed") out.push({ kind: "approval", queue: q.id, text: q.title, at: q.updated_at });
+    // A run that ended a step and waits for the new revision's approval: it goes on by itself once approved.
+    else if (q.run?.state === "approval_wait" && !q.approved) {
+      out.push({ kind: "approval", queue: q.id, text: `The run waits for approval of revision ${q.revision}${q.run.step ? ` after step ${q.run.step}` : ""}; it goes on by itself once you approve`, at: q.run.updated_at });
+    }
     if (q.start?.failed) {
       const when = q.start.after ? `after ${q.start.after}` : `at ${formatClock(q.start.at!, new Date())}`;
       out.push({ kind: "start", queue: q.id, text: `Did not start ${when}: ${q.start.failed.reason}`, at: q.start.failed.at });

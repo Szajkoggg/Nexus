@@ -34,6 +34,13 @@ export function stepTimes(segments: readonly Segment[], now: number): StepTimes 
   };
 }
 
+/**
+ * Run states in which the run holds its session and its checkout: it goes on by itself (running, pausing, a usage or
+ * retry wait) or once the user approves the queue's new revision (approval_wait). Such a queue cannot be started or
+ * cancelled, and its session runs no other queue.
+ */
+export const HOLDING_RUN_STATES: readonly string[] = ["running", "pausing", "usage_wait", "retry_wait", "approval_wait"];
+
 /** The run's states that mean it is not going (it may be resumed later). */
 export const ENDED_RUN_STATES: ReadonlySet<string> = new Set(["finished", "halted", "paused"]);
 
