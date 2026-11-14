@@ -3,7 +3,8 @@
 // and the steps after the third folded. The step that matters is highlighted with its action.
 import { useState, type ReactNode } from "react";
 import type { QueueView, StepView } from "../api.ts";
-import { TimeAgo, reviewLabel, toneOf } from "./ui.tsx";
+import { TimeAgo, reviewLabel, statusWord, toneOf } from "./ui.tsx";
+import { t } from "../i18n.ts";
 import { HOLDING_RUN_STATES, retryLine } from "@nexus/protocol/times";
 import { stepValuesText } from "@nexus/protocol/steps";
 import { queueStatus, type Tone } from "../queueStatus.ts";
@@ -73,22 +74,22 @@ export function QueueRow({ project, queue, pushAccepted, onQueue, onStep, onChan
           <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${TONE[s.tone][1]}`}>
             <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${TONE[s.tone][0]}`} />{s.label}
           </span>
-          {s.questions > 0 && <span className="text-xs text-fg-3">· {s.questions} question{s.questions > 1 ? "s" : ""}</span>}
+          {s.questions > 0 && <span className="text-xs text-fg-3">· {t("queue.questions", { count: s.questions })}</span>}
         </span>
         <span className="flex items-center gap-3 text-xs text-fg-3 lg:ml-auto">
           {queue.branch && !phone && <span className="font-mono">{queue.branch}</span>}
-          {s.total > 0 && <span className="whitespace-nowrap">{s.closed} of {s.total}{s.inReview ? ` · ${s.inReview} in review` : ""}</span>}
+          {s.total > 0 && <span className="whitespace-nowrap">{t("queue.closedOf", { closed: s.closed, total: s.total })}{s.inReview ? ` · ${t("queue.inReview", { count: s.inReview })}` : ""}</span>}
           {queue.updated && !phone && <TimeAgo at={queue.updated} />}
         </span>
       </button>
       {s.tone === "paused" && !current && (queue.status_reason ?? queue.run?.reason) && <p className="line-clamp-1 px-4 pt-1 text-xs text-fg-3">{plain((queue.status_reason ?? queue.run?.reason)!)}</p>}
       {queue.steps.length > 0 && (
-        <div className="mt-2.5 flex gap-[3px] px-4" aria-label={`${s.closed} of ${s.total} steps closed`}>
-          {queue.steps.map((x) => <i key={x.id} title={`${x.id}: ${shownStatus(x, queue)}`} className={`h-[5px] flex-1 rounded-full ${SEGMENT[shownStatus(x, queue)] ?? "bg-surface-3"}`} />)}
+        <div className="mt-2.5 flex gap-[3px] px-4" aria-label={t("queue.stepsClosed", { closed: s.closed, total: s.total })}>
+          {queue.steps.map((x) => <i key={x.id} title={`${x.id}: ${statusWord(shownStatus(x, queue))}`} className={`h-[5px] flex-1 rounded-full ${SEGMENT[shownStatus(x, queue)] ?? "bg-surface-3"}`} />)}
         </div>
       )}
       <div className="px-2 pb-2 pt-1.5 lg:px-3">
-        {queue.steps.length === 0 && <p className="px-2 py-2 text-sm text-fg-3">No steps yet.</p>}
+        {queue.steps.length === 0 && <p className="px-2 py-2 text-sm text-fg-3">{t("queue.noSteps")}</p>}
         {fold ? (
           <>
             {fold.before && (
@@ -96,7 +97,7 @@ export function QueueRow({ project, queue, pushAccepted, onQueue, onStep, onChan
                 <span className="h-2 w-2 shrink-0 rounded-full bg-ok" />
                 <span className="font-mono text-ok">{fold.before.from} – {fold.before.to}</span>
                 <span className="text-fg-2">
-                  {[fold.before.done && `${fold.before.done} done`, fold.before.skipped && `${fold.before.skipped} skipped`].filter(Boolean).join(", ")} ▸
+                  {[fold.before.done && t("queue.foldDone", { count: fold.before.done }), fold.before.skipped && t("queue.foldSkipped", { count: fold.before.skipped })].filter(Boolean).join(", ")} ▸
                 </span>
               </button>
             )}
@@ -129,23 +130,23 @@ function StepLine({ step, queue, current, phone, onStep, onQueue, stop }: {
   stop: { project: string; pushAccepted: boolean; onChanged?: () => void };
 }) {
   const status = shownStatus(step, queue);
-  const t = toneOf(status);
-  const word = reviewLabel(step) ?? status;
+  const tone = toneOf(status);
+  const word = reviewLabel(step) ?? statusWord(status);
   const unread = step.notes.filter((n) => !n.read_at).length;
   const meta = (
     <span className="flex shrink-0 items-center gap-2 text-xs text-fg-3">
-      {step.review_items.length > 0 && <span title="Review material">▣ {step.review_items.length}</span>}
-      {unread > 0 && <span className="text-info" title={`${unread} unread note(s)`}>✎ {unread}</span>}
-      {stepValuesText(step) && <span className="text-review" title={`Runs on ${stepValuesText(step)}`}>⚙</span>}
+      {step.review_items.length > 0 && <span title={t("queue.reviewMaterial")}>▣ {step.review_items.length}</span>}
+      {unread > 0 && <span className="text-info" title={t("queue.unreadNotes", { count: unread })}>✎ {unread}</span>}
+      {stepValuesText(step) && <span className="text-review" title={t("queue.runsOn", { values: stepValuesText(step)! })}>⚙</span>}
     </span>
   );
   if (!current) {
     return (
       <button onClick={onStep} className="grid w-full grid-cols-[10px_3.25rem_1fr_auto] items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-sm hover:bg-surface-2 max-lg:min-h-11">
-        <span className={`h-2 w-2 rounded-full ${t.dot}`} />
+        <span className={`h-2 w-2 rounded-full ${tone.dot}`} />
         <span className="truncate font-mono text-xs text-fg-3">{step.id}</span>
         <span className={`truncate ${step.status === "skipped" ? "text-fg-2" : "text-fg"}`}>{step.title}</span>
-        <span className="flex items-center gap-2">{meta}<span className={`whitespace-nowrap text-xs ${step.status === "done" ? "text-fg-3" : t.text}`}>{word}</span></span>
+        <span className="flex items-center gap-2">{meta}<span className={`whitespace-nowrap text-xs ${step.status === "done" ? "text-fg-3" : tone.text}`}>{word}</span></span>
       </button>
     );
   }
@@ -155,17 +156,17 @@ function StepLine({ step, queue, current, phone, onStep, onQueue, stop }: {
   const why = stopHere ? queue.status_reason
     : questions[0]?.text ?? retry ?? (status === "paused" ? queue.status_reason ?? queue.run?.reason : undefined) ?? (status === "running" ? step.progress?.text : undefined) ?? step.reason ?? step.summary ?? step.status_note;
   const action = stopHere ? undefined
-    : step.status === "review" && step.review_with !== "orchestrator" ? { label: "Review…", go: onStep }
-    : questions.length ? { label: `${questions.length} question${questions.length > 1 ? "s" : ""}`, go: onStep }
-    : step.status === "failed" || step.status === "rejected" ? { label: "Open…", go: onStep }
+    : step.status === "review" && step.review_with !== "orchestrator" ? { label: t("queue.reviewAction"), go: onStep }
+    : questions.length ? { label: t("queue.questions", { count: questions.length }), go: onStep }
+    : step.status === "failed" || step.status === "rejected" ? { label: t("queue.openAction"), go: onStep }
     : undefined;
   const render = (button: ReactNode, panel?: ReactNode) => (
     <div role="button" tabIndex={0} onClick={onStep} onKeyDown={(e) => { if (e.key === "Enter") onStep(); }}
       className={`grid cursor-pointer grid-cols-[10px_3.25rem_1fr_auto] gap-x-2.5 rounded-lg px-2 py-2 text-sm ${TINT[status] ?? "bg-surface-3"}`}>
-      <span className={`mt-1.5 h-2 w-2 rounded-full ${t.dot}`} />
+      <span className={`mt-1.5 h-2 w-2 rounded-full ${tone.dot}`} />
       <span className="truncate pt-px font-mono text-xs leading-5 text-fg-3">{step.id}</span>
       <span className="min-w-0">
-        <span className="font-semibold text-fg">{step.title}</span> <span className={`whitespace-nowrap text-xs ${t.text}`}>{word}</span>
+        <span className="font-semibold text-fg">{step.title}</span> <span className={`whitespace-nowrap text-xs ${tone.text}`}>{word}</span>
         {why && <span className="mt-0.5 line-clamp-2 block text-xs text-fg-2">{plain(why)}</span>}
         {status === "running" && step.progress?.pct !== undefined && (
           <span className="mt-1.5 block h-1 overflow-hidden rounded bg-surface-3"><span className="block h-full bg-accent" style={{ width: `${step.progress.pct}%` }} /></span>

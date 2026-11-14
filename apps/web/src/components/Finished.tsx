@@ -2,7 +2,7 @@
 // until the user opens it (the browser remembers that, per project); open, one compact line per queue, the most
 // recently finished on top, a tap opening its details.
 import { useState } from "react";
-import { formatDuration } from "@nexus/protocol/times";
+import { formatDuration, t } from "../i18n.ts";
 import type { QueueView } from "../api.ts";
 import type { FinishedRow } from "../finished.ts";
 import { Clock } from "./ui.tsx";
@@ -24,7 +24,7 @@ export function FinishedGroup({ project, rows, onOpen }: { project: string; rows
       <button onClick={() => setOpen(!open)} aria-expanded={open}
         className="flex w-full items-center gap-2 rounded-lg py-1 text-left text-sm font-semibold uppercase tracking-wider text-fg-2 hover:text-fg">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`shrink-0 transition-transform ${open ? "rotate-90" : ""}`}><path d="m9 18 6-6-6-6" /></svg>
-        Finished <span className="font-normal text-fg-3">({rows.length})</span>
+        {t("finished.title")} <span className="font-normal text-fg-3">({rows.length})</span>
       </button>
       {open && (
         <ul className="mt-2 divide-y divide-line overflow-hidden rounded-xl border border-line bg-surface">
@@ -36,8 +36,8 @@ export function FinishedGroup({ project, rows, onOpen }: { project: string; rows
                 <span className="flex min-w-0 flex-1 flex-col sm:flex-row sm:items-center sm:gap-3">
                   <span className="min-w-0 truncate text-fg sm:flex-1">{q.title}</span>
                   <span className="shrink-0 whitespace-nowrap text-xs text-fg-3">
-                    {q.status === "cancelled" && <>cancelled · </>}
-                    {finished_at ? <Clock at={finished_at} /> : "no finish time"}{ran_ms !== undefined && <> · ran {formatDuration(ran_ms)}</>}
+                    {q.status === "cancelled" && <>{t("state.cancelled")} · </>}
+                    {finished_at ? <Clock at={finished_at} /> : t("finished.noTime")}{ran_ms !== undefined && <> · {t("finished.ran", { duration: formatDuration(ran_ms) })}</>}
                   </span>
                 </span>
               </button>

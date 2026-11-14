@@ -1,5 +1,6 @@
 // Which review actions a step offers the user, as pure helpers (unit tested); the dashboard draws them.
 import { counterpartOf, type Comparison, type KeyedLike, type PictureRole } from "@nexus/protocol/pictures";
+import { t, type Key } from "./i18n.ts";
 
 /** What the helpers read of a step (a StepView has all of it). */
 export interface StepLike { id: string; status: string; review_with?: "orchestrator" | "user" }
@@ -46,15 +47,15 @@ export function pairPictures<T extends PictureLike>(items: T[]): Pair<T>[] {
     if (item.key) {
       const c = counterpartOf(items.slice(0, i), item);
       if (!c) return { item };
-      const label = c.compare === "round" ? `round ${c.item.round}` : c.compare === "variant" ? "variant A" : c.compare;
+      const label = c.compare === "round" ? t("review.round", { round: String(c.item.round) }) : c.compare === "variant" ? t("review.role.variantA") : t(c.compare === "mockup" ? "review.role.mockup" : "review.role.before");
       return { item, before: c.item.path, beforeLabel: label, compare: c.compare, other: c.item };
     }
-    if (item.before) return { item, before: item.before, beforeLabel: "before" };
+    if (item.before) return { item, before: item.before, beforeLabel: t("review.role.before") };
     if (item.label === undefined) return { item };
     const earlier = items.slice(0, i).filter((x) => x.path && !x.key && x.label === item.label
       && (item.round === undefined || x.round === undefined ? item.round === undefined && x.round === undefined : x.round < item.round));
     const best = earlier.sort((a, b) => (a.round ?? 0) - (b.round ?? 0)).at(-1);
-    return best ? { item, before: best.path, beforeLabel: best.round !== undefined ? `round ${best.round}` : "earlier", other: best } : { item };
+    return best ? { item, before: best.path, beforeLabel: best.round !== undefined ? t("review.round", { round: String(best.round) }) : t("review.earlier"), other: best } : { item };
   });
 }
 
@@ -65,12 +66,23 @@ export function pairPictures<T extends PictureLike>(items: T[]): Pair<T>[] {
  */
 export interface ComparisonNames { text?: string; left: string; right: string }
 
-const ALONE: Record<PictureRole, string> = { before: "before", mockup: "mockup", after: "after", "variant-a": "variant A", "variant-b": "variant B", result: "result" };
+const ALONE: Record<PictureRole, Key> = {
+  before: "review.role.before", mockup: "review.role.mockup", after: "review.role.after",
+  "variant-a": "review.role.variantA", "variant-b": "review.role.variantB", result: "review.role.result",
+};
 
 export function comparisonOf<T extends PictureLike>(p: Pair<T>): ComparisonNames {
   const { item, compare, other } = p;
-  if (compare === "before" || compare === "mockup") return { text: `${compare} → after`, left: compare === "before" ? "Before" : "Mockup", right: "After" };
-  if (compare === "variant") return { text: "variant A / variant B", left: "Variant A", right: "Variant B" };
-  if (compare === "round") return { text: `round ${other?.round} → round ${item.round}`, left: `Round ${other?.round}`, right: `Round ${item.round}` };
-  return { text: item.key && item.role ? ALONE[item.role] : undefined, left: "Before", right: "After" };
+  if (compare === "before" || compare === "mockup") {
+    return {
+      text: t(compare === "before" ? "review.compare.beforeAfter" : "review.compare.mockupAfter"),
+      left: t(compare === "before" ? "review.side.before" : "review.side.mockup"), right: t("review.side.after"),
+    };
+  }
+  if (compare === "variant") return { text: t("review.compare.variants"), left: t("review.side.variantA"), right: t("review.side.variantB") };
+  if (compare === "round") {
+    const from = String(other?.round), to = String(item.round);
+    return { text: t("review.compare.rounds", { from, to }), left: t("review.side.round", { round: from }), right: t("review.side.round", { round: to }) };
+  }
+  return { text: item.key && item.role ? t(ALONE[item.role]) : undefined, left: t("review.side.before"), right: t("review.side.after") };
 }

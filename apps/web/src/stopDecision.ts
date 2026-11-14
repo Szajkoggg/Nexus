@@ -2,6 +2,7 @@
 // line, the waiting cards; components/Stop.tsx): from whether the revision is approved, what the stopped step left
 // and the user's Keep or Discard so far, which buttons show, with what words, and the hint beside them. Pure, unit
 // tested (test/stopDecision.test.ts).
+import { t } from "./i18n.ts";
 
 /** What the stopped step left, as `/queues/:queue/left` gives it (null outside git). */
 export interface LeftView {
@@ -42,8 +43,6 @@ export interface StopDecision {
   hint?: string;
 }
 
-const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
-
 /** A stopped queue's buttons and hint, from its approval, what its stopped step left, and the user's choice so far. */
 export function stopDecision({ approved, revision, left, work }: {
   approved: boolean; revision: number; left: LeftState; work?: WorkChoice;
@@ -54,31 +53,31 @@ export function stopDecision({ approved, revision, left, work }: {
   if (!approved) {
     return {
       needsChoice, discarded,
-      opener: { action: "open", label: `Approve revision ${revision}…`, title: `Revision ${revision} is not approved yet: approving it lifts the stop`, disabled: false },
+      opener: { action: "open", label: t("stop.approveOpen", { revision }), title: t("stop.approveOpenTitle", { revision }), disabled: false },
       approve: {
-        label: needsChoice && work === "discard" ? "Discard the step's work" : `Approve revision ${revision}`,
+        label: needsChoice && work === "discard" ? t("stop.discardWork") : t("stop.approve", { revision }),
         disabled: needsChoice && !work,
         hint: needsChoice
-          ? !work ? `First choose Keep or Discard for step ${known!.step}'s commits, in the stop box.`
-            : work === "discard" ? `With Discard nothing is approved now: the orchestrator proposes a revision that reverts step ${known!.step}'s commits.`
-            : `With Keep: step ${known!.step}'s commits stay, and approving revision ${revision} lifts the stop.`
-          : discarded ? `You chose to discard step ${known!.step}'s work: approving revision ${revision} lifts the stop.`
+          ? !work ? t("stop.hint.chooseFirstApprove", { step: known!.step })
+            : work === "discard" ? t("stop.hint.discardApprove", { step: known!.step })
+            : t("stop.hint.keepApprove", { step: known!.step, revision })
+          : discarded ? t("stop.hint.discardedApprove", { step: known!.step, revision })
           : undefined,
       },
     };
   }
   if (discarded) {
-    return { needsChoice, discarded, hint: `You chose to discard step ${known!.step}'s commits: the orchestrator proposes a revision that reverts them, and approving it lifts the stop.` };
+    return { needsChoice, discarded, hint: t("stop.hint.discarded", { step: known!.step }) };
   }
   return {
     needsChoice, discarded,
     opener: needsChoice
-      ? { action: "choose", label: "Continue…", title: `Step ${known!.step} left ${plural(known!.commits.length, "commit")}: keep or discard them first`, disabled: false }
+      ? { action: "choose", label: t("stop.continueChoose"), title: t("stop.continueChooseTitle", { step: known!.step, count: known!.commits.length }), disabled: false }
       // Before what the step left is known (undefined) the choice may be needed: wait for it. Unreadable: try, the server asks.
-      : { action: "continue", label: "Continue", title: "Lifts the stop; the stopped step runs again in its session, unless it was skipped", disabled: left === undefined },
-    confirm: { label: needsChoice && work === "discard" ? "Discard and ask for a revert" : "Continue", disabled: left === undefined || (needsChoice && !work) },
-    hint: needsChoice && !work ? "Choose Keep or Discard first."
-      : needsChoice && work === "discard" ? "The stop stays until you approve the orchestrator's revert."
-      : "Lifts the stop; the stopped step runs again in its session, unless it was skipped.",
+      : { action: "continue", label: t("stop.continue"), title: t("stop.continueTitle"), disabled: left === undefined },
+    confirm: { label: needsChoice && work === "discard" ? t("stop.discardRevert") : t("stop.continue"), disabled: left === undefined || (needsChoice && !work) },
+    hint: needsChoice && !work ? t("stop.hint.chooseFirst")
+      : needsChoice && work === "discard" ? t("stop.hint.staysUntilRevert")
+      : t("stop.hint.lifts"),
   };
 }

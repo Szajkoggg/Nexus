@@ -2,8 +2,8 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { DRAFT_EVENT, DRAFT_FOCUS_EVENT, readDraft, writeDraft } from "../drafts.ts";
 import { usePhone } from "../phone.ts";
 import ReactMarkdown from "react-markdown";
-import { formatDuration, runTimes, stepTimes } from "@nexus/protocol/times";
-import { formatClock, formatDateTime, t, timeAgo } from "../i18n.ts";
+import { runTimes, stepTimes } from "@nexus/protocol/times";
+import { formatClock, formatDateTime, formatDuration, rich, t, timeAgo, type Key } from "../i18n.ts";
 import type { QueueView, StepView } from "../api.ts";
 
 // ---------------------------------------------------------------- status colours
@@ -29,18 +29,26 @@ const TONES: Record<string, Tone> = {
 };
 export const toneOf = (status: string): Tone => TONES[status] ?? TONES.pending!;
 
+const STATE_WORDS: Record<string, Key> = {
+  pending: "state.pending", draft: "state.draft", proposed: "state.proposed", approved: "state.approved", running: "state.running",
+  waiting: "state.waiting", review: "state.review", paused: "state.paused", stopped: "state.stopped", failed: "state.failed",
+  rejected: "state.rejected", done: "state.done", skipped: "state.skipped", cancelled: "state.cancelled",
+};
+/** A queue's or step's status as a word in the interface language; one the dashboard does not know, as it is. */
+export const statusWord = (status: string): string => (STATE_WORDS[status] ? t(STATE_WORDS[status]) : status);
+
 /** A step in review says whom it waits for. */
 export function reviewLabel(step: { status: string; review_with?: "orchestrator" | "user" }): string | undefined {
   if (step.status !== "review") return undefined;
-  return step.review_with === "orchestrator" ? "review: orchestrator" : "review: you";
+  return t(step.review_with === "orchestrator" ? "state.reviewOrchestrator" : "state.reviewYou");
 }
 
 export function StatusBadge({ status, label, className = "" }: { status: string; label?: string; className?: string }) {
-  const t = toneOf(status);
+  const tone = toneOf(status);
   return (
-    <span className={`inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-medium ${t.text} ${className}`}>
-      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${t.dot}`} />
-      {label ?? status}
+    <span className={`inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-medium ${tone.text} ${className}`}>
+      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tone.dot}`} />
+      {label ?? statusWord(status)}
     </span>
   );
 }
@@ -94,43 +102,49 @@ export function Clock({ at }: { at: string }) {
 
 const sameDay = (a: string, b: string) => new Date(a).toDateString() === new Date(b).toDateString();
 
-const STEP_END: Record<string, string> = { done: "finished", review: "finished", rejected: "finished", failed: "failed", stopped: "stopped" };
+const STEP_END: Record<string, Key> = { done: "times.finished", review: "times.finished", rejected: "times.finished", failed: "times.failed", stopped: "times.stopped" };
+
+/** A time in a sentence ("started {time}"): the words around it, the time as a <Clock>. */
+const at = (key: Key, iso: string) => rich(key, { time: <Clock key="time" at={iso} /> });
 
 /** When a step started and ended and how long it took; while it is at work, the elapsed time, updating live. */
 export function StepTimes({ step, compact }: { step: StepView; compact?: boolean }) {
   const now = useNow(15_000);
-  const t = stepTimes(step.segments, now);
-  if (!t.started) return null;
-  const took = formatDuration(t.duration_ms!);
+  const times = stepTimes(step.segments, now);
+  if (!times.started) return null;
+  const took = formatDuration(times.duration_ms!);
   if (compact) {
+    const title = times.ended
+      ? t("times.startedEndedTitle", { started: formatDateTime(times.started), ended: formatDateTime(times.ended) })
+      : t("times.startedTitle", { started: formatDateTime(times.started) });
     return (
-      <span title={`started ${new Date(t.started).toLocaleString()}${t.ended ? `, ended ${new Date(t.ended).toLocaleString()}` : ""}`} className="whitespace-nowrap">
-        {t.running ? "since " : ""}<Clock at={t.started} />{t.ended && sameDay(t.started, t.ended) && <>–{formatClock(t.ended, new Date(t.ended))}</>} · {took}
+      <span title={title} className="whitespace-nowrap">
+        {times.running ? at("times.since", times.started) : <Clock at={times.started} />}{times.ended && sameDay(times.started, times.ended) && <>–{formatClock(times.ended, new Date(times.ended))}</>} · {took}
       </span>
     );
   }
   return (
     <>
-      <span>started <Clock at={t.started} /></span>
-      {t.ended && <span>{STEP_END[step.status] ?? "ended"} <Clock at={t.ended} /></span>}
-      <span>{t.running ? `${took} so far` : `took ${took}`}</span>
-      {t.segments > 1 && <span title="The sum of the stretches it was at work">working {formatDuration(t.working_ms!)}, started {t.segments} times</span>}
+      <span>{at("times.started", times.started)}</span>
+      {times.ended && <span>{at(STEP_END[step.status] ?? "times.ended", times.ended)}</span>}
+      <span>{t(times.running ? "times.soFar" : "times.took", { duration: took })}</span>
+      {times.segments > 1 && <span title={t("times.workingTitle")}>{t("times.working", { duration: formatDuration(times.working_ms!), count: times.segments })}</span>}
     </>
   );
 }
 
-const RUN_END: Record<string, string> = { finished: "finished", halted: "halted", paused: "paused" };
+const RUN_END: Record<string, Key> = { finished: "times.finished", halted: "times.halted", paused: "times.paused" };
 
 /** When the queue's run started and ended (finished, halted or stopped), and its total time. */
 export function RunTimes({ run }: { run: NonNullable<QueueView["run"]> }) {
   const now = useNow(15_000);
-  const t = runTimes(run, now);
-  const end = run.state === "paused" && run.reason === "stopped by the user" ? "stopped" : RUN_END[run.state] ?? "ended";
+  const times = runTimes(run, now);
+  const end: Key = run.state === "paused" && run.reason === "stopped by the user" ? "times.stopped" : RUN_END[run.state] ?? "times.ended";
   return (
     <>
-      <span>started <Clock at={t.started} /></span>
-      {t.ended && <span>{end} <Clock at={t.ended} /></span>}
-      <span>{t.running ? `${formatDuration(t.total_ms)} so far` : `${formatDuration(t.total_ms)} in total`}</span>
+      <span>{at("times.started", times.started)}</span>
+      {times.ended && <span>{at(end, times.ended)}</span>}
+      <span>{t(times.running ? "times.soFar" : "times.inTotal", { duration: formatDuration(times.total_ms) })}</span>
     </>
   );
 }
@@ -155,7 +169,7 @@ export function Expandable({ text, lines = 3 }: { text: string; lines?: number }
       <div className={!open && long ? "line-clamp-3" : ""}><Markdown>{text}</Markdown></div>
       {long && (
         <button onClick={() => setOpen(!open)} className="mt-1 text-xs text-accent hover:underline">
-          {open ? "Show less" : "Show more"}
+          {t(open ? "ui.showLess" : "ui.showMore")}
         </button>
       )}
     </div>
@@ -221,7 +235,7 @@ interface ComposerProps {
 }
 
 function ComposerBox({ draft, placeholder, button, onSubmit, allowEmpty = false, rows = 3, extra, verbatim = false, oneLine = false, card = false }: ComposerProps) {
-  const t = useDraftText({ draft, onSubmit, allowEmpty, verbatim });
+  const d = useDraftText({ draft, onSubmit, allowEmpty, verbatim });
   const box = useRef<HTMLTextAreaElement>(null);
   // A quote put in this draft (putDraftAndFocus): the box takes the focus with the cursor at the end, below the quote.
   useEffect(() => {
@@ -244,18 +258,18 @@ function ComposerBox({ draft, placeholder, button, onSubmit, allowEmpty = false,
     if (!(oneLine || card) || !b) return;
     b.style.height = "auto";
     b.style.height = `${Math.min(b.scrollHeight, (card ? 10 : 6) * 22 + (card ? 12 : 22))}px`;
-  }, [oneLine, card, t.text]);
+  }, [oneLine, card, d.text]);
   if (card) {
     return (
       <div>
         <div className="flex items-end gap-2.5 rounded-2xl border border-line-strong bg-surface py-2 pl-4 pr-2 focus-within:border-accent">
-          <textarea ref={box} value={t.text} rows={2} placeholder={placeholder} aria-label={placeholder}
-            onChange={(e) => t.change(e.target.value)} onKeyDown={t.onKeyDown}
+          <textarea ref={box} value={d.text} rows={2} placeholder={placeholder} aria-label={placeholder}
+            onChange={(e) => d.change(e.target.value)} onKeyDown={d.onKeyDown}
             className="min-h-14 flex-1 resize-none bg-transparent py-1.5 text-sm leading-[22px] text-fg placeholder:text-fg-3 focus:outline-none" />
-          <span className="mb-2 shrink-0 rounded border border-line-strong px-1.5 text-[11px] text-fg-3">Ctrl+Enter</span>
-          <Button onClick={t.submit} disabled={!t.ready}>{t.busy ? "Sending…" : button}</Button>
+          <span className="mb-2 shrink-0 rounded border border-line-strong px-1.5 text-[11px] text-fg-3">{t("ui.ctrlEnter")}</span>
+          <Button onClick={d.submit} disabled={!d.ready}>{d.busy ? t("ui.sending") : button}</Button>
         </div>
-        {t.error && <p className="mt-1 text-xs text-danger">{t.error}</p>}
+        {d.error && <p className="mt-1 text-xs text-danger">{d.error}</p>}
       </div>
     );
   }
@@ -263,26 +277,26 @@ function ComposerBox({ draft, placeholder, button, onSubmit, allowEmpty = false,
     return (
       <div>
         <div className="flex items-end gap-2">
-          <textarea ref={box} value={t.text} rows={1} placeholder={placeholder} aria-label={placeholder}
-            onChange={(e) => t.change(e.target.value)} onKeyDown={t.onKeyDown}
+          <textarea ref={box} value={d.text} rows={1} placeholder={placeholder} aria-label={placeholder}
+            onChange={(e) => d.change(e.target.value)} onKeyDown={d.onKeyDown}
             className="min-h-11 flex-1 resize-none rounded-[22px] border border-line-strong bg-canvas px-4 py-2.5 text-sm leading-[22px] text-fg placeholder:text-fg-3 focus:border-accent focus:outline-none" />
-          <button onClick={t.submit} disabled={!t.ready} aria-label={button} title={`${button} (Ctrl+Enter)`}
+          <button onClick={d.submit} disabled={!d.ready} aria-label={button} title={t("ui.withShortcut", { action: button })}
             className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-accent-strong text-on-accent hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M3.4 20.4 21 12 3.4 3.6l-.1 6.5L15 12 3.3 13.9z" /></svg>
           </button>
         </div>
-        {t.error && <p className="mt-1 text-xs text-danger">{t.error}</p>}
+        {d.error && <p className="mt-1 text-xs text-danger">{d.error}</p>}
       </div>
     );
   }
   return (
     <div>
-      <textarea ref={box} value={t.text} rows={rows} placeholder={placeholder} onChange={(e) => t.change(e.target.value)} onKeyDown={t.onKeyDown} className={TEXTAREA} />
+      <textarea ref={box} value={d.text} rows={rows} placeholder={placeholder} onChange={(e) => d.change(e.target.value)} onKeyDown={d.onKeyDown} className={TEXTAREA} />
       <div className="mt-2 flex flex-wrap items-center gap-3">
-        <Button onClick={t.submit} disabled={!t.ready}>{t.busy ? "Sending…" : button}</Button>
+        <Button onClick={d.submit} disabled={!d.ready}>{d.busy ? t("ui.sending") : button}</Button>
         {extra}
-        <span className="text-xs text-fg-3">Ctrl+Enter</span>
-        {t.error && <span className="text-xs text-danger">{t.error}</span>}
+        <span className="text-xs text-fg-3">{t("ui.ctrlEnter")}</span>
+        {d.error && <span className="text-xs text-danger">{d.error}</span>}
       </div>
     </div>
   );
@@ -316,7 +330,7 @@ export type MenuEntry =
  * ⋯: what a panel can do besides its main actions (Reject, Withdraw, settings…). Opens upward from an action bar,
  * downward from a header. Escape or a click outside closes only the menu.
  */
-export function Menu({ items, down = false, label = "More actions" }: { items: MenuEntry[]; down?: boolean; label?: string }) {
+export function Menu({ items, down = false, label = t("ui.moreActions") }: { items: MenuEntry[]; down?: boolean; label?: string }) {
   const [open, setOpen] = useState(false);
   useEffect(() => {
     if (!open) return;

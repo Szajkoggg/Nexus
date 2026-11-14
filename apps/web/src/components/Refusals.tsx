@@ -6,11 +6,12 @@ import type { Refusal } from "@nexus/protocol";
 import { groupRefusals, refusalKind, suggestAllowRule } from "@nexus/protocol/refusals";
 import { act, enc, useFetch, type ProjectState } from "../api.ts";
 import { Button, Section, TimeAgo } from "./ui.tsx";
+import { rich, t, type Key } from "../i18n.ts";
 
-const BY: Record<Refusal["by"], string> = {
-  permissions: "Claude Code's permissions",
-  nexus: "declined by Nexus (unattended)",
-  auto_review: "Codex's auto reviewer",
+const BY: Record<Refusal["by"], Key> = {
+  permissions: "refusals.by.permissions",
+  nexus: "refusals.by.nexus",
+  auto_review: "refusals.by.autoReview",
 };
 
 /** The refusals of one step. */
@@ -20,7 +21,7 @@ export function StepRefusals({ project, queue, step }: { project: ProjectState; 
   const [open, setOpen] = useState<string>();
   if (!list?.length) return null;
   return (
-    <Section title="Refused actions" aside={<span className="text-xs text-fg-3">{list.length}</span>}>
+    <Section title={t("refusals.title")} aside={<span className="text-xs text-fg-3">{list.length}</span>}>
       <ul className="space-y-2">
         {[...list].reverse().map((r, i) => {
           const key = r.ref ?? `${r.at}/${i}`;
@@ -28,7 +29,7 @@ export function StepRefusals({ project, queue, step }: { project: ProjectState; 
             <li key={key} className="rounded-lg border border-line p-3 text-sm">
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-fg-3">
                 <span className="font-medium text-stop">{refusalKind(r).label}</span>
-                <span>· {BY[r.by]}</span>
+                <span>· {t(BY[r.by])}</span>
                 <span className="ml-auto"><TimeAgo at={r.at} /></span>
               </div>
               {r.input && <div className="mt-1 break-all font-mono text-xs text-fg">{r.input}</div>}
@@ -52,7 +53,7 @@ export function ProjectRefusals({ project }: { project: ProjectState }) {
   return (
     <section className="mb-8">
       <div className="mb-3 flex items-baseline gap-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-fg-2">Refused actions</h2>
+        <h2 className="text-sm font-semibold uppercase tracking-wider text-fg-2">{t("refusals.title")}</h2>
         <span className="text-xs text-fg-3">{list.length}</span>
       </div>
       <ul className="divide-y divide-line rounded-xl border border-line">
@@ -60,9 +61,9 @@ export function ProjectRefusals({ project }: { project: ProjectState }) {
           <li key={g.key} className="px-3 py-2.5 text-sm">
             <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
               <span className="font-medium text-fg">{g.label}</span>
-              <span className="rounded-full bg-surface-3 px-1.5 text-xs text-fg" title="How many times">{g.count}×</span>
+              <span className="rounded-full bg-surface-3 px-1.5 text-xs text-fg" title={t("refusals.howMany")}>{g.count}×</span>
               <span className="text-xs text-fg-3">{g.runtime === "claude" ? "Claude Code" : "Codex"}</span>
-              <span className="ml-auto text-xs text-fg-3">latest <TimeAgo at={g.latest.at} /></span>
+              <span className="ml-auto text-xs text-fg-3">{rich("refusals.latest", { time: <TimeAgo key="time" at={g.latest.at} /> })}</span>
             </div>
             <div className="mt-0.5 flex flex-wrap gap-x-2 text-xs text-fg-3">
               {g.latest.input && <span className="min-w-0 break-all font-mono text-fg-2">{g.latest.input}</span>}
@@ -91,8 +92,8 @@ function AllowRule({ project, refusal, open, onOpen }: { project: ProjectState; 
     return (
       <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
         {allowed.includes(suggested)
-          ? <span className="text-ok">Allowed now: <span className="font-mono">{suggested}</span> (for runs started since)</span>
-          : <button className="text-accent hover:underline" onClick={() => { setRule(suggested); setMsg(undefined); onOpen(true); }}>Allow for this project…</button>}
+          ? <span className="text-ok">{rich("refusals.allowedNow", { rule: <span key="rule" className="font-mono">{suggested}</span> })}</span>
+          : <button className="text-accent hover:underline" onClick={() => { setRule(suggested); setMsg(undefined); onOpen(true); }}>{t("refusals.allow")}</button>}
         {msg && <span className={msg.ok ? "text-ok" : "text-danger"}>{msg.text}</span>}
       </div>
     );
@@ -101,7 +102,7 @@ function AllowRule({ project, refusal, open, onOpen }: { project: ProjectState; 
     setBusy(true); setMsg(undefined);
     try {
       await act(project.project.id, "POST", "/settings/allow-rule", { rule });
-      setMsg({ ok: true, text: `Added ${rule.trim()}.` });
+      setMsg({ ok: true, text: t("refusals.added", { rule: rule.trim() }) });
       onOpen(false);
     } catch (e) { setMsg({ ok: false, text: (e as Error).message }); }
     finally { setBusy(false); }
@@ -109,18 +110,17 @@ function AllowRule({ project, refusal, open, onOpen }: { project: ProjectState; 
   return (
     <div className="mt-2 rounded-lg bg-surface-2 p-3">
       <label className="text-xs text-fg-2">
-        <span className="mb-1 block">Allow rule for Claude Code workers</span>
+        <span className="mb-1 block">{t("refusals.ruleLabel")}</span>
         <input value={rule} onChange={(e) => setRule(e.target.value)} spellCheck={false}
           className="w-full rounded-md border border-line-strong bg-canvas px-2 py-1 font-mono text-sm text-fg" />
       </label>
       <p className="mt-1.5 text-xs text-fg-3">
-        Goes to this project's Nexus settings ("Also allowed"), for runs started from now on. The project's own files
-        (.claude/settings.json, AGENTS.md) are not changed.
+        {t("refusals.ruleNote")}
       </p>
       {msg && !msg.ok && <p className="mt-1.5 text-xs text-danger">{msg.text}</p>}
       <div className="mt-2 flex gap-2">
-        <Button disabled={busy || !rule.trim()} onClick={() => void save()}>Add rule</Button>
-        <Button variant="quiet" disabled={busy} onClick={() => onOpen(false)}>Cancel</Button>
+        <Button disabled={busy || !rule.trim()} onClick={() => void save()}>{t("refusals.addRule")}</Button>
+        <Button variant="quiet" disabled={busy} onClick={() => onOpen(false)}>{t("common.cancel")}</Button>
       </div>
     </div>
   );

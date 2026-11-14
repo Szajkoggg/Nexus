@@ -9,6 +9,7 @@ import { stopDecision, type LeftState, type LeftView, type WorkChoice } from "..
 import { stopPlace } from "@nexus/protocol/attention";
 import type { QueueView } from "../api.ts";
 import { Expandable, TimeAgo } from "./ui.tsx";
+import { rich, t } from "../i18n.ts";
 
 /**
  * What the stopped step left: its own commits, with Keep or Discard when there are any, and the checkout's uncommitted
@@ -19,7 +20,7 @@ export function StoppedWork({ left, work, setWork, needsChoice, pushAccepted, br
   left: LeftView; work?: WorkChoice; setWork: (w: WorkChoice) => void; needsChoice: boolean; pushAccepted?: boolean; branch?: string;
 }) {
   const name = useId();
-  if (!left.commits.length && !left.uncommitted.length) return <p className="mt-3 text-xs text-fg-2">Step {left.step} left no commits and no uncommitted changes.</p>;
+  if (!left.commits.length && !left.uncommitted.length) return <p className="mt-3 text-xs text-fg-2">{t("stop.leftNothing", { step: left.step })}</p>;
   const n = left.commits.length;
   const option = (value: WorkChoice, title: string, text: string) => (
     <label className={`flex cursor-pointer gap-2 rounded-md p-2 ring-1 ${work === value ? "bg-surface ring-accent/60" : "ring-line-strong hover:bg-surface/60"}`}>
@@ -31,12 +32,12 @@ export function StoppedWork({ left, work, setWork, needsChoice, pushAccepted, br
     <div className="mt-3 space-y-3 rounded-md bg-surface/70 p-2.5">
       {n > 0 && (
         <div>
-          <p className="text-xs text-fg-2">Step {left.step} left {n} commit{n === 1 ? "" : "s"} of its own:</p>
+          <p className="text-xs text-fg-2">{t("stop.leftCommits", { step: left.step, count: n })}</p>
           <ul className="mt-1 space-y-1">
             {left.commits.map((c) => (
               <li key={c.sha} className="text-sm">
                 <span className="font-mono text-xs text-fg-3">{c.sha.slice(0, 7)}</span> <span className="text-fg">{c.subject}</span>
-                <span className="block pl-[3.6rem] text-[11px] text-fg-3">{c.files} file{c.files === 1 ? "" : "s"} · <span className="text-ok/80">+{c.insertions}</span> <span className="text-danger/80">−{c.deletions}</span> · <TimeAgo at={c.at} /></span>
+                <span className="block pl-[3.6rem] text-[11px] text-fg-3">{t("stop.files", { count: c.files })} · <span className="text-ok/80">+{c.insertions}</span> <span className="text-danger/80">−{c.deletions}</span> · <TimeAgo at={c.at} /></span>
               </li>
             ))}
           </ul>
@@ -44,21 +45,21 @@ export function StoppedWork({ left, work, setWork, needsChoice, pushAccepted, br
       )}
       {left.uncommitted.length > 0 && (
         <div>
-          <p className="text-xs text-fg-2">Uncommitted changes {left.uncommitted_note}; Nexus never cleans them:</p>
+          <p className="text-xs text-fg-2">{t("stop.uncommitted", { note: left.uncommitted_note })}</p>
           <ul className="mt-1 space-y-0.5 font-mono text-xs text-fg">
             {left.uncommitted.map((u) => <li key={u.path} className="break-all"><span className="inline-block w-6 text-warn/90">{u.status}</span>{u.path}</li>)}
           </ul>
         </div>
       )}
-      {left.discarded && <p className="text-sm text-fg">You chose to discard these commits <TimeAgo at={left.discarded.at} />: the orchestrator proposes a revision that reverts them, and approving it lifts the stop.</p>}
+      {left.discarded && <p className="text-sm text-fg">{rich("stop.discardedAt", { time: <TimeAgo key="time" at={left.discarded.at} /> })}</p>}
       {needsChoice && (
-        <div className="space-y-1.5" role="radiogroup" aria-label="The stopped step's commits">
-          {option("keep", "Keep", pushAccepted === undefined
-            ? `The commits stay${branch ? ` in the branch ${branch}` : ""}.`
+        <div className="space-y-1.5" role="radiogroup" aria-label={t("stop.commitsLabel")}>
+          {option("keep", t("stop.keep"), pushAccepted === undefined
+            ? (branch ? t("stop.keep.staysIn", { branch }) : t("stop.keep.stays"))
             : pushAccepted
-              ? `The commits stay, and go out with the next accepted step's push${branch ? ` to ${branch}` : ""}.`
-              : `The commits stay, local in the branch${branch ? ` ${branch}` : ""}; nothing is pushed.`)}
-          {option("discard", "Discard", "The stop stays. The orchestrator proposes a revision whose first step reverts these commits (and only these); approving it lifts the stop.")}
+              ? (branch ? t("stop.keep.pushedTo", { branch }) : t("stop.keep.pushed"))
+              : (branch ? t("stop.keep.localIn", { branch }) : t("stop.keep.local")))}
+          {option("discard", t("stop.discard"), t("stop.discard.text"))}
         </div>
       )}
     </div>
@@ -75,17 +76,17 @@ export function StopBox({ queue, left, work, setWork, needsChoice, pushAccepted 
   const p = queue.lift_proposal;
   return (
     <div className="mt-4 rounded-lg border border-stop/30 bg-stop/10 p-3 text-sm">
-      <p className="font-medium text-stop">Stopped{stopPlace(queue)}</p>
+      <p className="font-medium text-stop">{t("stop.stopped", { place: stopPlace(queue) })}</p>
       {queue.status_reason && <div className="mt-1 text-fg"><Expandable text={queue.status_reason} /></div>}
       {p && (
         <div className="mt-3 rounded-md bg-surface/70 p-2.5">
-          <p className="text-xs text-fg-3">The orchestrator proposes to continue · <TimeAgo at={p.at} /></p>
+          <p className="text-xs text-fg-3">{t("waiting.liftProposal")} · <TimeAgo at={p.at} /></p>
           <p className="mt-0.5 text-fg">{p.reason}</p>
         </div>
       )}
       {left && <StoppedWork left={left} work={work} setWork={setWork} needsChoice={needsChoice} pushAccepted={pushAccepted} branch={queue.branch} />}
       {!queue.approved && (
-        <p className="mt-3 text-xs text-fg-2">Revision {queue.revision} is not approved yet: approving it lifts the stop{needsChoice ? " (with your choice above)" : ""}.</p>
+        <p className="mt-3 text-xs text-fg-2">{t(needsChoice ? "stop.notApprovedChoice" : "stop.notApproved", { revision: queue.revision })}</p>
       )}
     </div>
   );
@@ -197,7 +198,7 @@ export function useStopActions({ project, queue, approved, revision, version, on
         else void go();
       }}
       className={STOP_BUTTON}>
-      {cont.busy && !choosing ? "Continuing…" : d.opener.label}
+      {cont.busy && !choosing ? t("stop.continuing") : d.opener.label}
     </button>
   );
   const panel = (choosing && known && d.confirm) || message || shownHint ? (
@@ -208,10 +209,10 @@ export function useStopActions({ project, queue, approved, revision, version, on
           <StoppedWork left={known} work={work} setWork={setWork} needsChoice={d.needsChoice} pushAccepted={pushAccepted} branch={branch} />
           <div className="mt-2.5 flex flex-wrap items-center justify-end gap-2">
             <span className="mr-auto min-w-[8rem] flex-1 text-xs text-fg-3">{d.hint}</span>
-            <button onClick={() => { setChoosing(false); setWork(undefined); }} className={OPEN_BUTTON}>Cancel</button>
+            <button onClick={() => { setChoosing(false); setWork(undefined); }} className={OPEN_BUTTON}>{t("common.cancel")}</button>
             <button disabled={cont.busy || d.confirm.disabled} onClick={() => void go()}
               className="rounded-md bg-accent-strong px-3 py-1.5 text-sm font-medium text-on-accent hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40 max-lg:min-h-11 max-lg:px-4">
-              {cont.busy ? "Sending…" : d.confirm.label}
+              {cont.busy ? t("ui.sending") : d.confirm.label}
             </button>
           </div>
         </div>

@@ -3,6 +3,7 @@
 // tested; components/Rail.tsx draws it.
 import { queueStatus, type HonestStatus, type QueueLike as StatusLike, type Tone } from "./queueStatus.ts";
 import { splitFinished, type FinishedRow, type QueueLike as FinishLike } from "./finished.ts";
+import { t } from "./i18n.ts";
 
 type Q = StatusLike & FinishLike & { id: string };
 
@@ -24,12 +25,23 @@ export function atWork<T extends Q>(queues: readonly T[], now = new Date()): { q
 
 /** The status in a few words, for the end of a rail line: "1/3" while it runs, "review", "after SF", "paused"… */
 export function shortStatus(s: HonestStatus): string {
+  const key = s.says?.key;
+  const p = s.says?.params ?? {};
+  /** A planned start in short: "after SF", "at 14:00". */
+  const start = (k: unknown) => k === "status.startsAfter" ? t("rail.short.after", { queue: p.queue ?? "" })
+    : k === "status.startsAt" ? t("rail.short.at", { time: p.time ?? "" }) : t("status.planned");
   switch (s.tone) {
-    case "running": return s.label.startsWith("pausing") ? "pausing" : `${s.closed}/${s.total}`;
-    case "review": return s.label.startsWith("the orchestrator reviews") ? "orchestrator reviews" : "review";
-    case "planned": return s.label === "waits for the checkout" ? "waits: checkout" : s.label === "waits: limit reached" ? "waits: limit" : s.label.replace(/^starts /, "");
-    case "approval": return s.label.startsWith("waits for approval") ? "waits for approval" : s.label.replace(/ \(revision \d+\)/, "").replace(" · then starts ", " · then ");
-    case "waiting": return s.label.startsWith("waiting for an answer") ? "question" : s.label.includes("usage") ? "usage window" : "retry";
+    case "running": return key === "status.pausingAfter" || key === "status.pausingThisStep" ? t("rail.short.pausing") : `${s.closed}/${s.total}`;
+    case "review": return key === "status.orchestratorReviews" ? t("rail.short.orchestratorReviews") : t("rail.short.review");
+    case "planned":
+      return key === "status.heldCheckout" ? t("rail.short.heldCheckout") : key === "status.heldLimit" ? t("rail.short.heldLimit")
+        : key === "status.startsAfter" || key === "status.startsAt" ? start(key) : s.label;
+    case "approval":
+      return key === "status.approvalWait" || key === "status.approvalWaitAfter" ? t("rail.short.waitsApproval")
+        : key === "status.needsApprovalRevision" ? t("rail.short.needsApproval")
+        : key === "status.needsApprovalThen" ? t("rail.short.needsApprovalThen", { start: start(p.startKind) })
+        : s.label;
+    case "waiting": return key === "status.waitingAnswer" ? t("rail.short.question") : key === "status.usage" ? t("rail.short.usage") : t("rail.short.retry");
     default: return s.label;
   }
 }

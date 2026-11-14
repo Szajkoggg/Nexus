@@ -3,14 +3,16 @@
 // reference that "Ask the orchestrator…" puts in the composer. Pure and unit tested (test/approval.test.ts).
 import type { ChatEntry, ProjectFile, QueueView } from "@nexus/protocol";
 import { stepValuesText } from "@nexus/protocol/steps";
-import { formatClock } from "@nexus/protocol/times";
+import { formatClock, t, type Key } from "./i18n.ts";
 
 /** A queue whose current revision waits for the user's approval: not approved, and neither finished nor cancelled. */
 export const needsApproval = (q: Pick<QueueView, "approved" | "status">): boolean =>
   !q.approved && q.status !== "done" && q.status !== "cancelled";
 
 const RUNTIME = { claude: "Claude", codex: "Codex" } as const;
-export const POLICY_WORDS: Record<string, string> = { continue: "go on", wait: "wait for my review", orchestrator: "the orchestrator reviews" };
+const POLICY_KEYS: Record<string, Key> = { continue: "approval.policy.continue", wait: "approval.policy.wait", orchestrator: "approval.policy.orchestrator" };
+/** What happens after each step, in words: "go on", "wait for my review"; an unknown policy as it is. */
+export const policyWords = (policy: string): string => (POLICY_KEYS[policy] ? t(POLICY_KEYS[policy]) : policy);
 
 export interface RunSettings {
   /** "4 steps · on main, after SF · Claude, high · after each step: go on", in parts. */
@@ -26,20 +28,20 @@ export interface RunSettings {
  */
 export function runSettings(q: Pick<QueueView, "steps" | "branch" | "worktree" | "start" | "run" | "review_policy">, project: Pick<ProjectFile, "defaults" | "runtimes">, now = new Date()): RunSettings {
   const n = q.steps.length;
-  const where = q.worktree ? `in its own worktree${q.branch ? ` on ${q.branch}` : ""}` : q.branch ? `on ${q.branch}` : undefined;
-  const when = q.start?.after ? `after ${q.start.after}` : q.start?.at ? `at ${formatClock(q.start.at, now)}` : undefined;
+  const where = q.worktree ? (q.branch ? t("approval.run.worktreeOn", { branch: q.branch }) : t("approval.run.worktree")) : q.branch ? t("approval.run.on", { branch: q.branch }) : undefined;
+  const when = q.start?.after ? t("approval.run.after", { queue: q.start.after }) : q.start?.at ? t("approval.run.at", { time: formatClock(q.start.at, now) }) : undefined;
   const rt = q.run?.runtime ?? q.start?.runtime ?? project.runtimes.default;
   const model = q.run?.model ?? q.start?.model ?? project.runtimes[rt].model;
   const effort = q.run?.effort ?? q.start?.effort ?? project.runtimes[rt].effort;
   const policy = q.review_policy ?? project.defaults.review_policy;
   return {
     parts: [
-      `${n} step${n === 1 ? "" : "s"}`,
+      t("approval.run.steps", { count: n }),
       [where, when].filter(Boolean).join(", ") || undefined,
       [RUNTIME[rt], model, effort].filter(Boolean).join(", "),
-      `after each step: ${POLICY_WORDS[policy] ?? policy}`,
+      t("approval.run.afterEach", { policy: policyWords(policy) }),
     ].filter((x): x is string => !!x),
-    own: q.steps.flatMap((s) => { const t = stepValuesText(s); return t ? [`${s.id} on ${t}`] : []; }),
+    own: q.steps.flatMap((s) => { const values = stepValuesText(s); return values ? [t("approval.run.stepOn", { step: s.id, values })] : []; }),
   };
 }
 
@@ -63,8 +65,7 @@ export function draftOf(chat: readonly ChatEntry[], queue: string): { at: string
 }
 
 /** What approving pins, said beside the button. */
-export const pinsText = (revision: number, stopped: boolean) =>
-  `Approving pins revision ${revision}: these steps, their acceptance, the checks and stop conditions${stopped ? "; it also lifts the stop" : ""}`;
+export const pinsText = (revision: number, stopped: boolean) => t(stopped ? "approval.pinsLifts" : "approval.pins", { revision });
 
 /** The reference "Ask the orchestrator…" puts at the start of the composer. */
 export const queueReference = (queue: string, revision: number) => `About queue ${queue} (revision ${revision}): `;

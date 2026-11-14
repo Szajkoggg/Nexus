@@ -2,14 +2,20 @@
 // steps, its questions and its run together, so that "running" shows only while a run really runs, apart from
 // waiting, and a queue whose steps say running while nothing runs reads as paused. Pure and unit tested; QueueRow
 // shows it as a dot and a word, and the later layouts (the desktop rail, the digest) use it too.
-import { HOLDING_RUN_STATES, formatClock } from "@nexus/protocol/times";
+import { HOLDING_RUN_STATES } from "@nexus/protocol/times";
+import { formatClock, t, type Key, type Params } from "./i18n.ts";
 
 export type Tone = "running" | "waiting" | "review" | "stopped" | "failed" | "approval" | "paused" | "planned" | "done" | "cancelled";
 
 export interface HonestStatus {
   tone: Tone;
-  /** "running · SF3", "stopped at W4c", "waiting for your review · UX2", "needs your approval"… */
+  /** "running · SF3", "stopped at W4c", "waiting for your review · UX2", "needs your approval"… in the interface language. */
   label: string;
+  /**
+   * What the label says apart from its language: its key in the catalogue and the key's parameters, for shorter forms
+   * of the same status (rail.ts shortStatus). Absent for a status word the dashboard does not know (shown as it is).
+   */
+  says?: { key: Key; params?: Params };
   /** The step it is about, when there is one. */
   step?: string;
   /** Open questions (the worker's, open or passed to the user). */
@@ -32,10 +38,12 @@ export interface QueueLike {
   revision?: number;
 }
 
-/** A planned start in words: "starts after HS", "starts at 14:00". */
-const startText = (start: NonNullable<QueueLike["start"]>, now: Date) =>
-  start.after ? `starts after ${start.after}` : start.at ? `starts at ${formatClock(start.at, now)}` : "planned";
-
+/** A planned start: "starts after HS", "starts at 14:00", "planned". */
+function startOf(start: NonNullable<QueueLike["start"]>, now: Date): { key: Key; params?: Params } {
+  if (start.after) return { key: "status.startsAfter", params: { queue: start.after } };
+  if (start.at) return { key: "status.startsAt", params: { time: formatClock(start.at, now) } };
+  return { key: "status.planned" };
+}
 
 export function queueStatus(q: QueueLike, now = new Date()): HonestStatus {
   const questions = q.questions.filter((x) => x.state === "open" || x.state === "escalated");
@@ -45,54 +53,66 @@ export function queueStatus(q: QueueLike, now = new Date()): HonestStatus {
     inReview: q.steps.filter((s) => s.status === "review").length,
     total: q.steps.length,
   };
-  const at = (tone: Tone, label: string, step?: string): HonestStatus => ({ tone, label: step ? `${label} · ${step}` : label, ...(step ? { step } : {}), ...base });
+  /** A status in its words; the step it is about follows them ("running · SF3") unless the words name it (`named`). */
+  const is = (tone: Tone, key: Key, params?: Params, step?: string, named = false): HonestStatus => {
+    const words = t(key, params);
+    return {
+      tone, label: step && !named ? t("status.withStep", { label: words, step }) : words,
+      says: params ? { key, params } : { key }, ...(step ? { step } : {}), ...base,
+    };
+  };
   const run = q.run && HOLDING_RUN_STATES.includes(q.run.state) ? q.run : undefined;
+  const revision = q.revision ?? 1;
 
-  if (q.status === "cancelled") return at("cancelled", "cancelled");
+  if (q.status === "cancelled") return is("cancelled", "status.cancelled");
   // A revision waiting for approval comes first: nothing of the queue runs, and no planned start fires, until it is
   // approved ("needs approval (revision 3) · then starts after HS"). A first revision with no plan keeps the plain words.
   // A run that ended a step and waits for that approval says so ("waits for approval of revision 3 · after SF2").
   if (q.approved === false && run?.state === "approval_wait") {
-    return { tone: "approval", label: `waits for approval of revision ${q.revision ?? 1}${run.step ? ` · after ${run.step}` : ""}`, ...base };
+    return run.step ? is("approval", "status.approvalWaitAfter", { revision, step: run.step }) : is("approval", "status.approvalWait", { revision });
   }
-  if (q.approved === false && q.status !== "done" && q.status !== "draft" && ((q.revision ?? 1) > 1 || q.start || q.status !== "proposed")) {
-    const then = q.start && !q.start.failed ? ` · then ${startText(q.start, now)}` : "";
-    return { tone: "approval", label: `needs approval (revision ${q.revision ?? 1})${then}`, ...base };
+  if (q.approved === false && q.status !== "done" && q.status !== "draft" && (revision > 1 || q.start || q.status !== "proposed")) {
+    if (q.start && !q.start.failed) {
+      const st = startOf(q.start, now);
+      return is("approval", "status.needsApprovalThen", { revision, start: t(st.key, st.params), startKind: st.key, ...st.params });
+    }
+    return is("approval", "status.needsApprovalRevision", { revision });
   }
   if (q.status === "stopped") {
     // Where the stop is, while that step holds it; a stop whose step was skipped since is the queue's.
     const s = q.stop_step ? q.steps.find((x) => x.id === q.stop_step) : undefined;
     const held = s && s.status !== "skipped" && s.status !== "done";
-    return { tone: "stopped", label: held ? `stopped at ${s.id}` : "stopped", ...(held ? { step: s.id } : {}), ...base };
+    return held ? is("stopped", "status.stoppedAt", { step: s.id }, s.id, true) : is("stopped", "status.stopped");
   }
   const failed = q.steps.find((s) => s.status === "failed");
-  if (failed && !run) return { tone: "failed", label: `failed at ${failed.id}`, step: failed.id, ...base };
+  if (failed && !run) return is("failed", "status.failedAt", { step: failed.id }, failed.id, true);
   const mine = q.steps.filter((s) => s.status === "review" && s.review_with !== "orchestrator");
-  if (mine.length === 1) return at("review", "waiting for your review", mine[0]!.id);
-  if (mine.length > 1) return { tone: "review", label: `${mine.length} steps wait for your review`, step: mine[0]!.id, ...base };
+  if (mine.length === 1) return is("review", "status.yourReview", undefined, mine[0]!.id);
+  if (mine.length > 1) return is("review", "status.yourReviews", { count: mine.length }, mine[0]!.id, true);
   const blocking = questions.find((x) => !x.can_continue);
-  if (blocking) return at("waiting", "waiting for an answer", blocking.step);
+  if (blocking) return is("waiting", "status.waitingAnswer", undefined, blocking.step);
   const theirs = q.steps.find((s) => s.status === "review");
-  if (theirs) return at("review", "the orchestrator reviews", theirs.id);
+  if (theirs) return is("review", "status.orchestratorReviews", undefined, theirs.id);
   if (run) {
     switch (run.state) {
-      case "running": return at("running", "running", run.step);
-      case "pausing": return { tone: "running", label: `pausing after ${run.step ?? "this step"}`, ...(run.step ? { step: run.step } : {}), ...base };
-      case "retry_wait": return at("waiting", "waiting to retry", run.step);
-      case "usage_wait": return at("waiting", "waiting for the usage window", run.step);
+      case "running": return is("running", "status.running", undefined, run.step);
+      case "pausing": return run.step ? is("running", "status.pausingAfter", { step: run.step }, run.step, true) : is("running", "status.pausingThisStep");
+      case "retry_wait": return is("waiting", "status.retry", undefined, run.step);
+      case "usage_wait": return is("waiting", "status.usage", undefined, run.step);
     }
   }
-  if (q.status === "done") return at("done", "done");
+  if (q.status === "done") return is("done", "status.done");
   // A planned start that has not come, or could not start.
   if (q.start) {
-    if (q.start.failed) return at("failed", "did not start");
+    if (q.start.failed) return is("failed", "status.didNotStart");
     // Came due, but another queue works in its checkout, or as many run as the limit allows: it starts by itself.
-    if (q.start.held) return at("planned", q.start.held.kind === "checkout" ? "waits for the checkout" : "waits: limit reached");
-    return at("planned", startText(q.start, now));
+    if (q.start.held) return is("planned", q.start.held.kind === "checkout" ? "status.heldCheckout" : "status.heldLimit");
+    const st = startOf(q.start, now);
+    return is("planned", st.key, st.params);
   }
   // The steps say a run is at work, but none runs: honest about it.
-  if (q.status === "running" || q.status === "waiting" || q.status === "paused") return at("paused", "paused", q.current_step ?? q.run?.step);
-  if (q.status === "proposed") return at("approval", "needs your approval");
-  if (q.status === "approved") return at("planned", "approved");
-  return at("planned", q.status);
+  if (q.status === "running" || q.status === "waiting" || q.status === "paused") return is("paused", "status.paused", undefined, q.current_step ?? q.run?.step);
+  if (q.status === "proposed") return is("approval", "status.needsYourApproval");
+  if (q.status === "approved") return is("planned", "status.approved");
+  return { tone: "planned", label: q.status, ...base };
 }
