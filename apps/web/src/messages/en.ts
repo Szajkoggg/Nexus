@@ -379,6 +379,7 @@ export const en = {
   "stop.notApproved": "Revision {revision} is not approved yet: approving it lifts the stop.",
   "stop.notApprovedChoice": "Revision {revision} is not approved yet: approving it lifts the stop (with your choice above).",
   "stop.continuing": "Continuing…",
+  "stop.skipClosing": "Skip the closing refactoring",
 
   // ---------------------------------------------------------------- finished queues (Finished.tsx)
   "finished.title": "Finished",

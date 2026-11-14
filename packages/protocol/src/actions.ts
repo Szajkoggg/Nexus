@@ -6,7 +6,7 @@ import { ProjectFile, QueueFile, USER_SESSION, type GlobalSettings, effortIssue,
 import { ProjectStore, newId, now, readGlobalSettings, revisionHash, writeGlobalSettings } from "./store.ts";
 import { OVERRIDABLE, changedGlobal, settingKey } from "./settings.ts";
 import { HOLDING_RUN_STATES } from "./times.ts";
-import { commentTarget, isApproved, loadProjectState, pendingProvisional, type ProjectState } from "./state.ts";
+import { commentTarget, isApproved, loadProjectState, pendingProvisional, type ProjectState, type QueueView } from "./state.ts";
 import { validAllowRule } from "./refusals.ts";
 import { closingStepId, stepDefs } from "./closing.ts";
 
@@ -439,18 +439,37 @@ export function applyDraft(store: ProjectStore, definition: unknown): string {
  * The user's Continue on a stopped queue whose current revision is approved: a `lift` by `user_continue` with the
  * stop's reason, and the queue approved. The run goes on afterwards (the engine's continueQueue). With the revision
  * not approved the user approves it instead, which lifts the stop too. Only the user: the dashboard calls this.
+ * `skipClosing`: the user's choice to skip the queue's closing refactoring step (see closingToSkip), recorded with the
+ * lift as a `status` change by `user_continue`, with the stop's reason in its own.
  */
-export function liftByContinue(store: ProjectStore, queue: string): StatusChange {
+export function liftByContinue(store: ProjectStore, queue: string, o: { skipClosing?: boolean } = {}): StatusChange {
   const q = queueOf(store, queue);
   const view = loadProjectState(store).queues.find((x) => x.id === q.id)!;
   if (view.status !== "stopped") throw new ActionError(`queue ${q.id} is not stopped (it is ${view.status})`, 409);
   if (!isApproved(q)) throw new ActionError(`revision ${q.revision} of queue ${q.id} is not approved: approve it instead, which lifts the stop`, 409);
   const run = store.readRun(q.id);
   if (run && HOLDING_RUN_STATES.includes(run.state)) throw new ActionError(`queue ${q.id}'s run is still going (${run.state})`, 409);
+  const closing = o.skipClosing ? closingToSkip(view) : undefined;
   const at = now();
   const lift: StatusChange = { at, kind: "lift", by: "user_continue", from: "stopped", to: "approved", reason: view.status_reason, revision: q.revision };
-  store.writeQueue({ ...q, status: "approved", status_note: undefined, changes: [...q.changes, lift], updated_at: at });
+  // After the lift (the same time; changes apply in their order): the closing step, pending again if the stop was its.
+  const skip: StatusChange[] = closing ? [{
+    at, kind: "status", by: "user_continue", step: closing.id, from: "pending", to: "skipped", revision: q.revision,
+    reason: `the user skipped the closing refactoring at Continue${view.status_reason ? `; the stop was: ${view.status_reason}` : ""}`,
+  }] : [];
+  store.writeQueue({ ...q, status: "approved", status_note: undefined, changes: [...q.changes, lift, ...skip], updated_at: at });
   return lift;
+}
+
+/**
+ * The closing refactoring step the user may skip at Continue: the queue's, while it has not run (pending, or stopped
+ * itself). Only the user skips it, there: an agent's `nexus queue set … skipped` on it is refused.
+ */
+export function closingToSkip(q: Pick<QueueView, "id" | "steps">): QueueView["steps"][number] {
+  const c = q.steps.find((s) => s.closing);
+  if (!c) throw new ActionError(`queue ${q.id} has no closing refactoring step`, 409);
+  if (c.status !== "pending" && c.status !== "stopped") throw new ActionError(`the closing refactoring step of queue ${q.id} is ${c.status}: only one that has not run is skipped`, 409);
+  return c;
 }
 
 // ---------------------------------------------------------------- housekeeping by the orchestrator

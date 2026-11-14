@@ -9,7 +9,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  ActionError, CLOSING_ACCEPTANCE, CLOSING_GOAL, CLOSING_TITLE, ProjectStore, applyDraft, approveQueue, closingStepId, isApproved,
+  ActionError, CLOSING_ACCEPTANCE, CLOSING_GOAL, CLOSING_TITLE, ProjectStore, applyDraft, approveQueue, closingStepId, closingToSkip, isApproved, liftByContinue,
   loadProjectState, newId, now, orchestratorStatusChange, revisionHash, setStepLevel, type Event, type QueueFile, type SessionFile,
 } from "../src/index.ts";
 
@@ -168,4 +168,57 @@ test("the user may set the closing step's level, and a revision keeps it", () =>
   assert.equal(x.queue().steps.at(-1)!.level, 1);
   x.draft({ steps: [{ id: "Q1", title: "One" }, { id: "Q2", title: "Two" }, { id: "Q3", title: "Three" }] });
   assert.deepEqual(x.st.readQueue("Q").user_levels, { "Q.refactor": 1 });
+});
+
+test("the user's Continue may skip the closing step: recorded with its reason, it holds when the stopped step goes on", () => {
+  const x = setup(true);
+  approveQueue(x.st, "Q");
+  const w = x.session("worker"), u = x.session("user");
+  x.finish(w, u, "Q1");
+  x.emit(w, { type: "step.started", queue: "Q", step: "Q2" });
+  x.emit(w, { type: "queue.stop", queue: "Q", step: "Q2", condition: "a file outside", reason: "it would change" });
+  assert.equal(x.queue().status, "stopped");
+  liftByContinue(x.st, "Q", { skipClosing: true });
+  const c = x.queue().steps.at(-1)!;
+  assert.equal(c.status, "skipped");
+  assert.equal(c.reason, "the user skipped the closing refactoring at Continue; the stop was: a file outside: it would change");
+  const change = x.st.readQueue("Q").changes.at(-1)!;
+  assert.deepEqual({ kind: change.kind, by: change.by, step: change.step, from: change.from, to: change.to }, { kind: "status", by: "user_continue", step: "Q.refactor", from: "pending", to: "skipped" });
+  // The stopped step goes on and ends: the skip holds, and the queue is done without the closing step.
+  x.finish(w, u, "Q2");
+  assert.equal(x.queue().steps.at(-1)!.status, "skipped");
+  assert.equal(x.queue().status, "done");
+  // Only once: a closing step that is skipped (or has run) is not skipped again.
+  assert.throws(() => closingToSkip(x.queue()), /is skipped: only one that has not run is skipped/);
+});
+
+test("Continue without the skip leaves the closing step to run; a queue without one refuses the skip and records nothing", () => {
+  const x = setup(true);
+  approveQueue(x.st, "Q");
+  const w = x.session("worker");
+  x.emit(w, { type: "step.started", queue: "Q", step: "Q1" });
+  x.emit(w, { type: "queue.stop", queue: "Q", step: "Q1", condition: "c", reason: "r" });
+  liftByContinue(x.st, "Q");
+  assert.equal(x.queue().steps.at(-1)!.status, "pending");
+
+  const y = setup(undefined);
+  approveQueue(y.st, "Q");
+  const v = y.session("worker");
+  y.emit(v, { type: "step.started", queue: "Q", step: "Q1" });
+  y.emit(v, { type: "queue.stop", queue: "Q", step: "Q1", condition: "c", reason: "r" });
+  const before = y.st.readQueue("Q").changes.length;
+  assert.throws(() => liftByContinue(y.st, "Q", { skipClosing: true }), (e: ActionError) => e.status === 409 && /has no closing refactoring step/.test(e.message));
+  assert.equal(y.st.readQueue("Q").changes.length, before, "the refused skip lifts nothing either");
+  assert.equal(y.queue().status, "stopped");
+});
+
+test("an agent cannot skip the closing step, also on a stopped queue", () => {
+  const x = setup(true);
+  approveQueue(x.st, "Q");
+  const w = x.session("worker");
+  x.emit(w, { type: "step.started", queue: "Q", step: "Q1" });
+  x.emit(w, { type: "queue.stop", queue: "Q", step: "Q1", condition: "c", reason: "r" });
+  assert.throws(() => orchestratorStatusChange(x.st, { queue: "Q", step: "Q.refactor", to: "skipped", reason: "the user wants it" }),
+    (e: ActionError) => e.status === 409 && /closing refactoring step: it is not skipped/.test(e.message));
+  assert.equal(x.queue().steps.at(-1)!.status, "pending");
 });

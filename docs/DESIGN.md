@@ -1288,9 +1288,11 @@ Nexus keeps outside the queue's list of steps.
   diff never fills the prompt.
 - **A project's rules** are a "Refactoring" heading in its AGENTS.md; the opening says whether there is one, so the
   worker is told to follow it only where it exists, and no project has to change for the step to work.
-- **Left for later:** the user's choice to skip the closing step at Continue of a stopped or rejected queue (proposed
-  in the queue's text) is not built; until it is, the step runs when such a queue goes on, and only cancelling a queue
-  leaves it out.
+- **Skipping is the user's, at Continue.** A stopped queue may close without the step: Continue carries the user's
+  choice (a checkbox in the queue's bar, while the step has not run), recorded as a `status` change by
+  `user_continue` with the stop's reason, so the record says who skipped it and why. Agents never skip it. A skipped
+  closing step stays skipped when the stopped step goes on: the skip was chosen for that close. A rejected queue goes
+  on by an approved revision, not Continue; it gets the closing step at its end, and the skip is not offered there.
 
 ## Findings from building phase 3
 

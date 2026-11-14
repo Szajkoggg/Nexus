@@ -11,7 +11,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 import chokidar, { type FSWatcher } from "chokidar";
 import type { Server } from "node:http";
 import {
-  ActionError, Effort, ProjectStore, addNote, updateSettings, answerAsUser, approveQueue, deleteNote, loadProjectState, nexusHome, withdrawApproval, addAllowRule,
+  ActionError, Effort, ProjectStore, addNote, closingToSkip, updateSettings, answerAsUser, approveQueue, deleteNote, loadProjectState, nexusHome, withdrawApproval, addAllowRule,
   ensureGlobalSettings, readGlobalSettings, updateGlobalSettings, ownKeys, OVERRIDABLE, settingKey, readRegistry, readUsage, readTurns, commentOnPicture, markPicture, routeAnswers, routeSendBacks, sendBack, sendMessage, setQueueSettings, setStepLevel, confirmProvisional, type ProjectState,
   readAway, writeAway, awayNow, awayUntil, turnAway, expireAway,
 } from "@nexus/protocol";
@@ -363,10 +363,18 @@ app.post("/api/projects/:id/queues/:queue/run", act((st, b, p) => {
   }
 }));
 // Continue on a stopped queue: the user's lift of the stop, then the run goes on (only from the dashboard, as every write).
+// `skip_closing: true`: the user skips the queue's closing refactoring step with it (checked before anything is recorded).
 app.post("/api/projects/:id/queues/:queue/continue", act((st, b, p) => {
+  if (b.skip_closing !== undefined && typeof b.skip_closing !== "boolean") throw new ActionError("skip_closing is true or false");
+  const skipClosing = b.skip_closing === true;
+  if (skipClosing) {
+    const q = loadProjectState(st).queues.find((x) => x.id === p("queue"));
+    if (!q) throw new ActionError(`unknown queue ${p("queue")}`, 404);
+    closingToSkip(q);
+  }
   const d = decideStoppedWork(st, p("queue"), b.work, "user_continue");
   if (!d.proceed) return { message: d.message };
-  return engineOf(st).continueQueue(p("queue"));
+  return engineOf(st).continueQueue(p("queue"), { skipClosing });
 }));
 // Fix it: the user sends a step waiting for their review back to its worker, with what they want (required).
 app.post("/api/projects/:id/queues/:queue/steps/:step/send-back", act((st, b, p) => ({ message: sendBack(st, { queue: p("queue"), step: p("step"), from: "user", text: b.text }) })));

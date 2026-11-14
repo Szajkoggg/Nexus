@@ -494,9 +494,10 @@ function apply(
       if (open && open.end === undefined) open.end = st.timeline.at(-2)?.at ?? e.at;
       st.segments.push({ start: e.at });
       // A step of the queue's own at work after the closing step ran (a revision added it): the closing step runs again
-      // at the end, over the queue's whole work.
+      // at the end, over the queue's whole work. One the user skipped (at Continue) stays skipped: the stopped step
+      // goes on after that choice.
       const closing = st.closing ? undefined : q.steps.find((x) => x.closing);
-      if (closing && closing.status !== "pending") {
+      if (closing && closing.status !== "pending" && closing.status !== "skipped") {
         closing.status = "pending"; closing.review_with = undefined; closing.asked_user = undefined;
         closing.finished_at = undefined; closing.summary = undefined; closing.commit = undefined; closing.reason = undefined;
       }

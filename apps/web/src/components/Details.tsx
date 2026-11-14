@@ -1193,6 +1193,10 @@ function QueueBar({ project, queue, onChanged, left, work, needsChoice }: {
   // A stop's buttons and hint, as everywhere the stop is shown; Continue itself is the one in Stop.tsx.
   const d = stopped ? stopDecision({ approved: queue.approved, revision: queue.revision, left, work }) : undefined;
   const cont = useContinue({ project: id, queue: queue.id, onChanged });
+  // Continue may skip the queue's closing refactoring step while it has not run (the user's choice, not an agent's).
+  const closing = queue.steps.find((s) => s.closing);
+  const canSkipClosing = stopped && queue.approved && !!closing && (closing.status === "pending" || closing.status === "stopped");
+  const [skipClosing, setSkipClosing] = useState(false);
   // The approval (Approval.tsx, the same in the full view): its words, Keep or Discard, what it pins; Ctrl+Enter.
   const a = useApprove({ project: id, queue, left, work, onChanged });
   useCtrlEnter(!queue.approved, a.submit);
@@ -1218,13 +1222,19 @@ function QueueBar({ project, queue, onChanged, left, work, needsChoice }: {
     : !queue.approved ? a.hint
     : undefined;
   const primary = stopped && queue.approved
-    ? d!.confirm && <Button disabled={cont.busy || d!.confirm.disabled} onClick={() => void cont.go(d!.needsChoice, work)}>{d!.confirm.label}</Button>
+    ? d!.confirm && <Button disabled={cont.busy || d!.confirm.disabled} onClick={() => void cont.go(d!.needsChoice, work, canSkipClosing && skipClosing)}>{d!.confirm.label}</Button>
     : !queue.approved
       ? <Button disabled={a.disabled} onClick={a.submit}>{a.label}</Button>
       : undefined;
   const opened = (!queue.approved && a.wordsOpen) || (canWithdraw && withdrawOpen) || policyOpen;
   return (
-    <ActionBar hint={hint} menu={menu} secondary={!queue.approved && <AskButton project={id} queue={queue} />} primary={primary}>
+    <ActionBar hint={hint} menu={menu} secondary={!queue.approved && <AskButton project={id} queue={queue} />} primary={primary}
+      left={canSkipClosing && (
+        <label className="flex items-center gap-2 text-sm text-fg max-lg:min-h-11">
+          <input type="checkbox" checked={skipClosing} onChange={(e) => setSkipClosing(e.target.checked)} className="accent-accent" />
+          {t("stop.skipClosing")}
+        </label>
+      )}>
       {opened && (
         <div className="space-y-4">
           {!queue.approved && a.wordsBox}

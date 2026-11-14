@@ -177,10 +177,11 @@ export function useContinue({ project, queue, onChanged }: { project: string; qu
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [note, setNote] = useState<string>();
-  const go = async (needsChoice: boolean, work?: WorkChoice): Promise<boolean> => {
+  /** `skipClosing`: the user skips the queue's closing refactoring step with it (only the queue's bar offers it). */
+  const go = async (needsChoice: boolean, work?: WorkChoice, skipClosing?: boolean): Promise<boolean> => {
     setBusy(true); setError(undefined); setNote(undefined);
     try {
-      const r = await actResult<{ message?: string } | string>(project, "POST", `/queues/${enc(queue)}/continue`, needsChoice ? { work } : {});
+      const r = await actResult<{ message?: string } | string>(project, "POST", `/queues/${enc(queue)}/continue`, { ...(needsChoice ? { work } : {}), ...(skipClosing ? { skip_closing: true } : {}) });
       if (r && typeof r === "object" && r.message) setNote(r.message);
       const e = lefts.get(`${project}/${queue}`);
       if (e) readLeft(project, queue, e.version ?? "", true);

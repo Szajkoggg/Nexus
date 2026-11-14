@@ -239,9 +239,10 @@ export class Engine implements Member {
    * The user's Continue on a stopped queue: lifts the stop (a `lift` by Continue) and goes on. Its run
    * resumes, reopening the stopped step in its session (unless the orchestrator skipped it: then the next pending
    * one opens). Without a run (an imported stop), or with a finished one, the queue starts afresh at its first
-   * pending step. A run of an older revision resumes too: a revision changes no started step.
+   * pending step. A run of an older revision resumes too: a revision changes no started step. `skipClosing`: the user
+   * skips the queue's closing refactoring step with it (liftByContinue).
    */
-  continueQueue(queueId: string): string {
+  continueQueue(queueId: string, o: { skipClosing?: boolean } = {}): string {
     if (this.draining) throw new ActionError("Nexus is updating; continue the queue after the restart", 409);
     // Checked before the stop is lifted, so a refusal leaves the queue as it was.
     const before = this.store.readRun(queueId);
@@ -250,9 +251,11 @@ export class Engine implements Member {
     const block = !before || before.state === "finished" ? this.coordinator.startBlock(state, q)
       : CHECKOUT_RUN_STATES.includes(before.state) ? undefined : this.coordinator.checkoutBlock(state, q);
     if (block) throw new ActionError(refusalText(queueId, "continue", block), 409);
-    const lift = liftByContinue(this.store, queueId);
+    const lift = liftByContinue(this.store, queueId, o);
     const run = this.store.readRun(queueId);
     if (!run || run.state === "finished") {
+      // Nothing left once the closing step is skipped (its stop was the queue's last step): the queue is done.
+      if (this.nothingLeft(queueId)) return `the stop is lifted; queue ${queueId} has nothing left to run and is done`;
       const started = this.start(queueId);
       return `the stop is lifted; queue ${queueId} starts at its first pending step in session ${started.session}`;
     }

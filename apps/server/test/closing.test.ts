@@ -174,3 +174,49 @@ test("the commit range spans the queue's own rounds; a Refactoring section in AG
   writeFileSync(join(x.root, "AGENTS.md"), "# Rules\n\nRefactoring is welcome.\n");
   assert.equal(hasRefactoringSection(x.root), false, "only a heading counts");
 });
+
+for (const skip of [true, false]) {
+  test(`Continue on a stopped coding queue ${skip ? "with the user's skip of the closing step closes the queue without it" : "without the skip runs the closing step at the end"}`, async () => {
+    const x = setup([step("Q1", "done"), step("Q2", "stop1")]);
+    try {
+      const e = x.engine();
+      e.start("Q", { runtime: "claude" });
+      await x.until("the queue stopped at Q2", () => x.queue().status === "stopped" && x.queue().run?.state === "halted");
+      assert.equal(x.queue().steps.at(-1)!.status, "pending");
+      assert.match(e.continueQueue("Q", { skipClosing: skip }), /the stop is lifted; queue Q goes on/);
+      await x.until("the run finished", () => x.queue().run?.state === "finished" && x.queue().status === "done");
+      const q = x.queue();
+      const closing = q.steps.at(-1)!;
+      if (skip) {
+        assert.deepEqual(x.openings().map((o) => o.step), ["Q1", "Q2", "Q2"], "the closing step is never opened");
+        assert.equal(closing.status, "skipped");
+        assert.match(closing.reason!, /^the user skipped the closing refactoring at Continue; the stop was: fake condition: fake stop$/);
+        const change = q.changes.at(-1)!;
+        assert.deepEqual([change.kind, change.by, change.step, change.to], ["status", "user_continue", "Q.refactor", "skipped"]);
+        // Shown to the orchestrator in nexus status.
+        x.store.writeSession({ protocol: 1, id: "orch", project: "p", role: "orchestrator", runtime: "external", cwd: x.root, launched_by: "external", created_at: now() });
+        const out = execFileSync(process.execPath, [join(here, "../../../packages/cli/bin/nexus.js"), "status"], { env: { ...process.env, NEXUS_DIR: x.store.dir, NEXUS_SESSION: "orch" }, encoding: "utf8" });
+        assert.match(out, /finished: Q \(closing refactoring skipped by the user: the user skipped the closing refactoring at Continue; the stop was: fake condition: fake stop\)/);
+      } else {
+        assert.deepEqual(x.openings().map((o) => o.step), ["Q1", "Q2", "Q2", "Q.refactor"]);
+        assert.equal(closing.status, "done");
+      }
+    } finally { x.stop(); }
+  });
+}
+
+test("Continue with the skip when the stop was the closing step's own: nothing is left, the run finishes", async () => {
+  const x = setup([step("Q1", "done")]);
+  try {
+    const e = x.engine();
+    // The closing step stops (as a worker meeting a stop condition would), through the fake's report.
+    process.env.FAKE_CLOSING = "stop";
+    e.start("Q", { runtime: "claude" });
+    await x.until("the queue stopped at its closing step", () => x.queue().status === "stopped" && x.queue().run?.state === "halted");
+    assert.equal(x.queue().steps.at(-1)!.status, "stopped");
+    e.continueQueue("Q", { skipClosing: true });
+    await x.until("the run finished", () => x.queue().run?.state === "finished" && x.queue().status === "done");
+    assert.equal(x.queue().steps.at(-1)!.status, "skipped");
+    assert.deepEqual(x.openings().map((o) => o.step), ["Q1", "Q.refactor"]);
+  } finally { delete process.env.FAKE_CLOSING; x.stop(); }
+});

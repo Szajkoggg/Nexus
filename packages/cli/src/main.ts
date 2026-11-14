@@ -172,18 +172,24 @@ function provisionalText(x: { provisional?: { confirmed?: string; fix?: { text: 
     : p.confirmed ? " (accepted provisionally, confirmed by the user)" : " (accepted provisionally, waits for the user's confirmation)";
 }
 
+/** The user's skip of the queue's closing refactoring step (at Continue), with its reason; empty without one. */
+function closingSkipped(q: QueueOf): string {
+  const c = q.steps.find((x) => x.closing);
+  return c?.status === "skipped" ? `closing refactoring skipped by the user: ${(c.reason ?? "").replace(/\s+/g, " ").slice(0, 200)}` : "";
+}
+
 /** What an orchestrator needs to see: every queue, run, open question and worker session with its context card. */
 function overview(state: ReturnType<typeof loadProjectState>): void {
   const pct = (t?: number, w?: number) => (t && w ? `${Math.round((100 * t) / w)} % context` : "context unknown");
   const done = state.queues.filter((q) => q.status === "done" || q.status === "cancelled");
   console.log(`
-Queues (${state.queues.length - done.length} open; finished: ${done.map((q) => q.id).join(", ") || "none"})`);
+Queues (${state.queues.length - done.length} open; finished: ${done.map((q) => `${q.id}${closingSkipped(q) ? ` (${closingSkipped(q)})` : ""}`).join(", ") || "none"})`);
   for (const q of state.queues.filter((x) => !done.includes(x))) {
     const run = q.run ? `; run ${q.run.state}${q.run.step ? ` at ${q.run.step}` : ""} in session ${q.run.session}${q.run.reason ? ` (${q.run.reason})` : ""}` : "";
     console.log(`- ${q.id} [${q.status}] ${q.title}: revision ${q.revision}, ${q.approved ? "approved" : "not approved"}${run}`);
     // A revision waiting for approval comes first: nothing runs and no planned start fires until the user approves it.
     if (!q.approved) console.log(`  needs approval (revision ${q.revision})${q.start && !q.start.failed ? ": the planned start below waits for it" : ""}`);
-    console.log(`  steps: ${q.steps.map((x) => `${x.id} ${x.status} (level ${x.level}${x.level_from === "user" ? ", set by the user" : ""})${provisionalText(x)}${x.review_with ? ` (for ${x.review_with === "user" ? "the user" : "you"})` : ""}${stepValuesText(x) ? ` [on ${stepValuesText(x)}]` : ""}`).join(", ")}`);
+    console.log(`  steps: ${q.steps.map((x) => `${x.id} ${x.status} (level ${x.level}${x.level_from === "user" ? ", set by the user" : ""})${provisionalText(x)}${x.closing && x.status === "skipped" ? ` (${closingSkipped(q)})` : ""}${x.review_with ? ` (for ${x.review_with === "user" ? "the user" : "you"})` : ""}${stepValuesText(x) ? ` [on ${stepValuesText(x)}]` : ""}`).join(", ")}`);
     if (q.status_reason && q.status !== "running") console.log(`  why: ${q.status_reason.replace(/\s+/g, " ").slice(0, 300)}`);
     for (const line of stopLines(q)) console.log(line);
     if (q.start) {

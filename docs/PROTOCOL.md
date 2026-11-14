@@ -325,8 +325,9 @@ and only from the dashboard (`POST /api/projects/:id/queues/:q/continue`; no CLI
 appends a `lift` by `user_continue` with the stop's derived reason, writes the queue `approved`, and goes on: its run
 resumes (one of an older revision too), reopening the step it last opened in its session with a turn that says the
 user lifted the stop (when the orchestrator skipped that step, the next pending one opens); with no `run.yaml` (an
-imported stop) or a finished run, the queue starts afresh at its first pending step. The orchestrator is
-told once. The dashboard shows the stop with the orchestrator's proposal (`lift_proposal`) beside Continue, and the
+imported stop) or a finished run, the queue starts afresh at its first pending step (or, with nothing left to run, is
+done). With `skip_closing: true` the user also skips the queue's closing refactoring step (see "The closing
+refactoring step"). The orchestrator is told once. The dashboard shows the stop with the orchestrator's proposal (`lift_proposal`) beside Continue, and the
 queue's and each step's `changes`: who, when, what and why.
 
 **The work a stopped step left.** Where a stop is lifted (Continue, or approving a new revision of a stopped queue),
@@ -410,12 +411,20 @@ the step in the approval view like any other.
   without it keeps the hash it had); setting or clearing it makes a new revision. A draft that leaves it out keeps the
   queue's value; `coding: false` takes it back only before the queue has started (no `run.yaml`, no started step):
   after, the draft is refused.
-- **It cannot be bypassed.** `nexus queue set Q --step Q.refactor skipped` is refused; `nexus queue set Q finished`
-  is refused while it is not done (the refusal names it). A stopped queue gets it when the stop is lifted and the run
-  goes on; a cancelled one never.
+- **It cannot be bypassed by agents.** `nexus queue set Q --step Q.refactor skipped` is refused; `nexus queue set Q
+  finished` is refused while it is not done (the refusal names it). A stopped queue gets it when the stop is lifted
+  and the run goes on; a cancelled one never.
+- **Only the user skips it, at Continue.** Continue on a stopped queue (`skip_closing: true`; the dashboard's
+  checkbox "Skip the closing refactoring" in the queue's bar, shown while the step has not run) records, after the
+  `lift` and at its time, a `changes` entry `kind: status`, `by: user_continue`, `step: Q.refactor`, `from: pending`,
+  `to: skipped`, with the reason "the user skipped the closing refactoring at Continue; the stop was: <the stop's
+  reason>". Only a closing step that has not run (`pending`, or `stopped` itself) is skipped. The skip holds when the
+  stopped step goes on (a skipped closing step is not set back to pending by later work); the queue is `done` without
+  it. `nexus status` shows it on the step (`Q.refactor skipped (… closing refactoring skipped by the user: <reason>)`)
+  and beside a finished queue (`finished: Q (closing refactoring skipped by the user: <reason>)`).
 - **Runs again after new work.** Once it has run, a step of the queue's own that starts afterwards (a revision added
   it) sets it back to `pending` (derivation, at that `step.started`): it runs again at the end, over the queue's
-  whole work. New steps that are only skipped leave it as it was.
+  whole work. New steps that are only skipped leave it as it was, and so does the user's skip.
 - **It is the last step**, so its opening asks for the queue's report (see "The step turn"), the queue is `done` and
   the run `finished` only after it, and the orchestrator's notices that speak of a queue's last step mean it.
 - **A fresh session with the queue's commit range.** When it is next and the run's session has worked before (any
@@ -1005,7 +1014,7 @@ writes files. The only exceptions are `POST /api/server/update`, `POST /api/serv
 | `POST /api/projects/:id/rules/fix` | `version` (the check's) | The fix of the rules files as the check showed it (see "A project's rules files"); answers `{ ok, result: { message } }`. Commits nothing |
 | `POST /api/projects/:id/queues/:q/push` | | Push again: the step of the queue's last failed push; answers `{ ok, result: { message } }` at once, the push runs in the background |
 | `POST /api/projects/:id/queues/:q/steps/:s/send-back` | `text` (required, kept verbatim) | Fix it: sends a step waiting for the user's review back to its worker; on a provisional acceptance it asks the orchestrator for a fix (`review.fix_asked`); answers `{ ok, result: { message } }` |
-| `POST /api/projects/:id/queues/:q/continue` | `work?` (`keep` or `discard`) | Continue: lifts the stop of a stopped queue whose current revision is approved and goes on (see "Continue" under `queue.yaml`); refused (409) otherwise. `work` is required when the stopped step left commits of its own; `discard` records it and does not go on |
+| `POST /api/projects/:id/queues/:q/continue` | `work?` (`keep` or `discard`), `skip_closing?` (boolean) | Continue: lifts the stop of a stopped queue whose current revision is approved and goes on (see "Continue" under `queue.yaml`); refused (409) otherwise. `work` is required when the stopped step left commits of its own; `discard` records it and does not go on. `skip_closing: true` skips the queue's closing refactoring step with the lift; refused (409), before anything is recorded, when the queue has none or it has run (see "The closing refactoring step") |
 | `GET /api/projects/:id/queues/:q/left` | | What a stopped queue's stopped step left (see "The work a stopped step left"); null when not stopped at a step |
 | `GET /api/projects/:id/sessions/:session/chat` | query `from`, `to` (lines) | A chat's entries with lines from `from` up to, not including, `to`: `{ chat: [entry + line] }`; what is older than a chat view's window. Only the orchestrator's or a conversation's session (404 otherwise) |
 | `GET /api/projects/:id/sessions/:session/chat/search` | query `q`, `tools` (`1`: tool lines too) | Search over the whole chat.jsonl, not only a view's window: `{ lines }`, the lines of the entries that contain `q`, oldest first; case and accents ignored, the query's spaces collapsed (`searchChat` in `@nexus/protocol/chat`) |
