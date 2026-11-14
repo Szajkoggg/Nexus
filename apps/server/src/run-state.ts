@@ -2,10 +2,7 @@
 // transitions"). Every write of run.yaml that sets a state goes through one of the transitions here: each returns the
 // next run record and owns which fields it sets and clears. They are pure; the engine writes the result (adding
 // ended_at and updated_at) and keeps the side effects (timers, processes, messages to the agent).
-import { ActionError, runIsOlder, stopPlace, type Effort, type QueueView, type RunFile } from "@nexus/protocol";
-
-/** States in which a run still goes on by itself. */
-export const GOING: readonly string[] = ["running", "pausing", "usage_wait", "retry_wait"];
+import { ActionError, HOLDING_RUN_STATES, runIsOlder, stopPlace, type Effort, type QueueView, type RunFile } from "@nexus/protocol";
 
 // ---------------------------------------------------------------- transitions
 
@@ -60,6 +57,20 @@ export function toPaused(run: RunFile, reason?: string): RunFile {
   return { ...run, state: "paused", ...(reason !== undefined ? { reason } : {}) };
 }
 
+/**
+ * A step ended while a newer revision of the queue waits for the user's approval: the run waits, keeping its session,
+ * and goes on by itself once the revision is approved. A hold for an update is dropped: an approval_wait run is not
+ * held, it stays so across a restart.
+ */
+export function toApprovalWait(run: RunFile, revision: number): RunFile {
+  return { ...run, state: "approval_wait", reason: `waits for approval of revision ${revision}`, nudged: false, resume_after_restart: undefined, resume_at: undefined };
+}
+
+/** At a step's end under a newer approved revision: the run goes on by it. */
+export function toRevision(run: RunFile, revision: number): RunFile {
+  return { ...run, revision };
+}
+
 /** Halted: needs the user. No wait and no hold for an update; `failure` names the runtime's failure that halted it. */
 export function toHalted(run: RunFile, reason: string, failure?: string): RunFile {
   return { ...run, state: "halted", reason, resume_after_restart: undefined, resume_at: undefined, ...(failure !== undefined ? { failure } : {}) };
@@ -100,22 +111,23 @@ function assertApprovedAndNotRejected(q: QueueView): void {
 
 /** A queue may start a new run: approved, not rejected, not going already, not stopped, done or cancelled. */
 export function assertCanStart(q: QueueView): void {
+  if (q.run?.state === "approval_wait" && !q.approved) throw new ActionError(`the queue's run waits for approval of revision ${q.revision}; it goes on by itself once you approve it`, 409);
   assertApprovedAndNotRejected(q);
-  if (q.run && GOING.includes(q.run.state)) throw new ActionError("the queue is already running", 409);
+  if (q.run && HOLDING_RUN_STATES.includes(q.run.state)) throw new ActionError("the queue is already running", 409);
   if (q.status === "stopped") throw new ActionError(stoppedMessage(q), 409);
   if (q.status === "done" || q.status === "cancelled") throw new ActionError(`the queue is ${q.status}`, 409);
 }
 
 /**
- * A queue's run may be resumed: approved, not rejected, not stopped or cancelled, and the run of this revision. A run
- * of an older revision would reopen a step the new revision may have replaced, in the old session; a run paused by a
- * rejection is the exception (the approved revision dealt with it, and the run goes on at its first pending step).
+ * A queue's run may be resumed: not rejected, not stopped or cancelled, and approved, or a run of an older revision
+ * while a newer one waits for approval (the run's own revision was approved when it started). A revision changes no
+ * started step, so a run of an older revision goes on with the step it has open; at the step's end it takes the new
+ * revision, or waits for its approval (approval_wait). A run waiting for an approval goes on once it comes.
  */
 export function assertCanResume(q: QueueView, run: RunFile): void {
-  assertApprovedAndNotRejected(q);
+  if (q.rejection) throw new ActionError(rejectedMessage(q), 409);
+  if (run.state === "approval_wait" && !q.approved) throw new ActionError(`the run waits for approval of revision ${q.revision}; it goes on by itself once you approve it`, 409);
+  if (!q.approved && !runIsOlder(run, q.revision, q.history)) throw new ActionError("approve the queue's current revision first", 409);
   if (q.status === "stopped") throw new ActionError(stoppedMessage(q), 409);
   if (q.status === "cancelled") throw new ActionError(`queue ${q.id} is cancelled`, 409);
-  if (runIsOlder(run, q.revision, q.history) && !run.rejected) {
-    throw new ActionError(`the run belongs to revision ${run.revision ?? "an earlier one"} and the queue is at revision ${q.revision}: start the queue instead of resuming`, 409);
-  }
 }

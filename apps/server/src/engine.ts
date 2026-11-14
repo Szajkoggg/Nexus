@@ -8,11 +8,11 @@ import type { GitRunner } from "./deploy.ts";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import {
-  ENDED_RUN_STATES,
+  ENDED_RUN_STATES, HOLDING_RUN_STATES,
   ActionError, ProjectStore, USER_SESSION, ensureUserSession, liftByContinue, loadProjectState, releaseOrphanedSteps, stepClosed, reportFile, ensureReportFolder, newId, normPath, now, readUsage,
   RETRY_LIMIT, effortIssue, formatClock, type Effort, type ProjectFile, type StepDef, type ProjectState, type QueueView, type RunFile, type SessionFile,
   type SessionView, type StepView,
-  addNote, runIsOlder,
+  addNote,
 } from "@nexus/protocol";
 import type { TurnFailure } from "./agent.ts";
 import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Hosted, type Launch } from "./agent-host.ts";
@@ -27,8 +27,8 @@ import {
 import { gitBranch, worktreeFor } from "./worktree.ts";
 import { gitWritableRoots } from "./codex.ts";
 import {
-  GOING, assertCanResume, assertCanStart, startedRun, stoppedMessage, toFinished, toHalted, toHeldForUpdate,
-  toPaused, toPausedByUser, toResumed, toRetryWait, toUnheld, toUsageWait,
+  assertCanResume, assertCanStart, startedRun, stoppedMessage, toFinished, toHalted, toHeldForUpdate,
+  toApprovalWait, toPaused, toPausedByUser, toResumed, toRetryWait, toRevision, toUnheld, toUsageWait,
 } from "./run-state.ts";
 
 type Live = Hosted;
@@ -178,8 +178,9 @@ export class Engine {
   pause(queueId: string): void {
     const run = this.run(queueId);
     // Also a queue held for an update: the user's pause wins, so the restart does not resume it. A pending retry or
-    // usage wait is cancelled.
-    if (run.state === "running" || run.state === "usage_wait" || run.state === "retry_wait" || run.resume_after_restart) {
+    // usage wait is cancelled. A run waiting for an approval is paused too (a later resume goes on under the approved
+    // revision).
+    if (run.state === "running" || run.state === "usage_wait" || run.state === "retry_wait" || run.state === "approval_wait" || run.resume_after_restart) {
       const working = this.host.get(run.session)?.proc.state === "working";
       this.clearTimer(queueId);
       this.writeRun(queueId, toPausedByUser(run, "paused by the user", { pausing: working }));
@@ -187,17 +188,16 @@ export class Engine {
   }
 
   /**
-   * The user's Continue on a stopped queue: lifts the stop (a `lift` by Continue) and goes on. A run of this revision
+   * The user's Continue on a stopped queue: lifts the stop (a `lift` by Continue) and goes on. Its run
    * resumes, reopening the stopped step in its session (unless the orchestrator skipped it: then the next pending
-   * one opens). Without a run (an imported stop), or with a finished one or one of an older revision, the queue
-   * starts afresh at its first pending step.
+   * one opens). Without a run (an imported stop), or with a finished one, the queue starts afresh at its first
+   * pending step. A run of an older revision resumes too: a revision changes no started step.
    */
   continueQueue(queueId: string): string {
     if (this.draining) throw new ActionError("Nexus is updating; continue the queue after the restart", 409);
     const lift = liftByContinue(this.store, queueId);
     const run = this.store.readRun(queueId);
-    const q = this.queue(loadProjectState(this.store), queueId);
-    if (!run || run.state === "finished" || runIsOlder(run, q.revision, q.history)) {
+    if (!run || run.state === "finished") {
       const started = this.start(queueId);
       return `the stop is lifted; queue ${queueId} starts at its first pending step in session ${started.session}`;
     }
@@ -205,7 +205,11 @@ export class Engine {
     return `the stop is lifted; queue ${queueId} goes on in session ${run.session}`;
   }
 
-  /** `why`: said to the agent when the step is continued (a retry after a failed turn, a lifted stop). */
+  /**
+   * Goes on with a paused, halted or waiting run in its session, ensuring its process. Also the way an approval_wait
+   * run goes on once its revision is approved (onChange, a cancelled drain, the restart). `why`: said to the agent when
+   * the step is continued (a retry after a failed turn, a lifted stop).
+   */
   resume(queueId: string, why?: string): void {
     const run = this.run(queueId);
     if (run.state === "running") return;
@@ -267,6 +271,7 @@ export class Engine {
         if (run.resume_at) this.schedule(id, run.resume_at, run.state === "usage_wait" ? this.usageMarginMs : 0);
         continue;
       }
+      if (run?.state === "approval_wait") { if (this.queue(loadProjectState(this.store), id).approved) this.continueApproved(id); continue; }
       if (!run?.resume_after_restart) continue;
       if (run.state === "pausing") this.writeRun(id, toUnheld(run));
       else if (run.state === "paused") { try { this.resume(id); } catch (e) { this.halt(id, (e as Error).message); } }
@@ -341,7 +346,14 @@ export class Engine {
     if (!this.stopped) this.pusher.onChange(state);
     for (const l of this.host.all()) this.deliverInbox(state, l);
     for (const q of state.queues) if (q.run && (q.run.state === "running" || q.run.state === "pausing")) this.advance(q.id, state);
+    for (const q of state.queues) if (q.run?.state === "approval_wait" && q.approved) this.continueApproved(q.id);
     this.checkStarts();
+  }
+
+  /** A run waiting for an approval that came goes on (not while an update drains: the restart or cancelDrain does it). */
+  private continueApproved(queueId: string): void {
+    if (this.stopped || this.draining) return;
+    try { this.resume(queueId); } catch (e) { this.halt(queueId, `could not go on after the approval: ${(e as Error).message}`); }
   }
 
   // ---------------------------------------------------------------- planned starts: chains and schedules (src/scheduler.ts)
@@ -407,13 +419,9 @@ export class Engine {
     const live = this.host.get(run.session);
     if (!live || live.proc.state === "exited") return this.halt(queueId, "the session's process is not running");
     if (live.proc.state === "working") return;
-    if (!q.approved) {
-      this.halt(queueId, "the queue's revision changed and is not approved");
-      // A newer revision sets the run aside: its open step goes back to pending (a withdrawn approval does not).
-      releaseOrphanedSteps(this.store, queueId);
-      return;
-    }
 
+    // A new revision never stops the step at work: its turns, questions, answers and nudges go on as below, and only
+    // the step's end looks at the approval.
     const current = run.step ? q.steps.find((s) => s.id === run.step) : undefined;
     if (q.status === "stopped") return this.halt(queueId, stoppedMessage(q));
     if (current) {
@@ -444,6 +452,17 @@ export class Engine {
           break; // done or skipped: go on
       }
     }
+
+    // The step's end. A newer revision waiting for approval: the run waits for it, keeping its session (also while an
+    // update drains: it stays so across the restart), and goes on by itself once approved; the user's pause wins.
+    if (!q.approved) {
+      if (run.state === "pausing" && !run.resume_after_restart) return this.writeRun(queueId, toPaused(run));
+      this.writeRun(queueId, toApprovalWait(run, q.revision));
+      this.store.appendActivity(run.session, { at: now(), kind: "turn_end", text: `Nexus waits for the approval of revision ${q.revision} of queue ${queueId} before it goes on`, queue: queueId, step: run.step });
+      return;
+    }
+    // Approved: the run goes on in the same session under the queue's current revision.
+    if (run.revision !== q.revision) { this.writeRun(queueId, toRevision(run, q.revision)); return this.advanceUnlocked(queueId, state); }
 
     const next = q.steps.find((s) => s.status === "pending");
     if (!next) {
@@ -668,7 +687,7 @@ export class Engine {
   private reuseSession(state: ProjectState, id: string, queueId: string, model?: string, effort?: Effort): SessionFile {
     const s = this.sessionFile(state, id);
     if (s.runtime === "external" || s.launched_by !== "nexus" || !s.native_id) throw new ActionError("only a session Nexus launched (and started at least once) can be continued", 409);
-    const busy = state.queues.find((q) => q.id !== queueId && q.run?.session === id && GOING.includes(q.run.state));
+    const busy = state.queues.find((q) => q.id !== queueId && q.run?.session === id && HOLDING_RUN_STATES.includes(q.run.state));
     if (busy) throw new ActionError(`that session is running queue ${busy.id}`, 409);
     const issue = effortIssue(s.runtime, effort);
     if (issue) throw new ActionError(issue);
@@ -723,7 +742,7 @@ export class Engine {
     const tag = () => {
       // The run that drives the session now; a session continued from an earlier queue still has that one's run too.
       const runs = this.store.queueIds().map((q) => [q, this.store.readRun(q)] as const).filter(([, r]) => r?.session === session.id);
-      const run = runs.find(([, r]) => GOING.includes(r!.state)) ?? runs.sort(([, a], [, b]) => b!.updated_at.localeCompare(a!.updated_at))[0];
+      const run = runs.find(([, r]) => HOLDING_RUN_STATES.includes(r!.state)) ?? runs.sort(([, a], [, b]) => b!.updated_at.localeCompare(a!.updated_at))[0];
       return run ? { queue: run[0], step: run[1]?.step } : {};
     };
     const runsOf = () => this.store.queueIds().filter((q) => this.store.readRun(q)?.session === session.id);
@@ -842,6 +861,13 @@ export class Engine {
         }, 1500));
       } else if (run && ["running", "pausing"].includes(run.state)) {
         this.writeRun(q, toPaused(run, "the Nexus server restarted; resume to continue"));
+      } else if (run?.state === "approval_wait" && view?.approved) {
+        // Approved while no server ran (or while an update drained): it goes on shortly, once this server is up.
+        this.timers.set(`recover:${q}`, setTimeout(() => {
+          this.timers.delete(`recover:${q}`);
+          if (this.store.readRun(q)?.state === "approval_wait") this.continueApproved(q);
+          this.changed();
+        }, 1500));
       }
       if (run?.state === "usage_wait" && run.resume_at) this.schedule(q, run.resume_at, this.usageMarginMs);
     }

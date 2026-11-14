@@ -440,6 +440,13 @@ export const StartFile = z.object({
 }).refine((s) => !!s.after !== !!s.at, { message: "a planned start has either after or at" });
 export type StartFile = z.infer<typeof StartFile>;
 
+/**
+ * Run states in which the run holds its session and its checkout: it goes on by itself (running, pausing, a usage or
+ * retry wait) or once the user approves the queue's new revision (approval_wait). Such a queue cannot be started or
+ * cancelled, and its session runs no other queue.
+ */
+export const HOLDING_RUN_STATES: readonly string[] = ["running", "pausing", "usage_wait", "retry_wait", "approval_wait"];
+
 /** queues/<id>/run.yaml: the engine's intent for a queue. Written only by the server. */
 export const RunFile = z.object({
   protocol: z.literal(1),
@@ -448,9 +455,10 @@ export const RunFile = z.object({
    * running: the engine drives the steps. pausing: stop after the current step. paused: user paused or the server
    * restarted. halted: a stop, failure or stall; needs the user. finished: the last step is done.
    * usage_wait: waiting for the subscription window to reset. retry_wait: a turn failed for a passing reason (the
-   * service overloaded, the network, a crashed runtime); the turn is tried again at resume_at.
+   * service overloaded, the network, a crashed runtime); the turn is tried again at resume_at. approval_wait: a step
+   * ended while a newer revision of the queue waits for the user's approval; it goes on by itself once approved.
    */
-  state: z.enum(["running", "pausing", "paused", "halted", "finished", "usage_wait", "retry_wait"]),
+  state: z.enum(["running", "pausing", "paused", "halted", "finished", "usage_wait", "retry_wait", "approval_wait"]),
   /** Started by a chain: when this queue was done. */
   after: Id.optional(),
   reason: z.string().optional(),
@@ -469,7 +477,10 @@ export const RunFile = z.object({
   rejected: Id.optional(),
   /** Stopped only for a Nexus update: the server resumes it by itself when it starts again. */
   resume_after_restart: z.boolean().optional(),
-  /** The queue's revision the run was started on: a run of an older revision is not resumed. */
+  /**
+   * The queue's revision the run goes by: the one it was started on, moved to a newer approved one at the end of a
+   * step (a revision changes only steps that have not started, so a run of an older revision may go on).
+   */
   revision: z.number().int().positive().optional(),
   /** The run's own runtime, model and effort, fixed at its start: what a step without its own values runs on. */
   runtime: z.enum(["claude", "codex"]).optional(),

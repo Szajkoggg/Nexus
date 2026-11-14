@@ -2,7 +2,7 @@
 // writer of queue definitions, notes and inboxes (docs/PROTOCOL.md, "Rules").
 import { existsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import { ProjectFile, QueueFile, USER_SESSION, effortIssue, type StatusChange, type InboxEntry, ReviewPolicy, type RunFile, type SessionFile } from "./schemas.ts";
+import { HOLDING_RUN_STATES, ProjectFile, QueueFile, USER_SESSION, effortIssue, type StatusChange, type InboxEntry, ReviewPolicy, type RunFile, type SessionFile } from "./schemas.ts";
 import { ProjectStore, newId, now, revisionHash } from "./store.ts";
 import { commentTarget, isApproved, loadProjectState, type ProjectState } from "./state.ts";
 import { validAllowRule } from "./refusals.ts";
@@ -362,7 +362,7 @@ export function liftByContinue(store: ProjectStore, queue: string): StatusChange
   if (view.status !== "stopped") throw new ActionError(`queue ${q.id} is not stopped (it is ${view.status})`, 409);
   if (!isApproved(q)) throw new ActionError(`revision ${q.revision} of queue ${q.id} is not approved: approve it instead, which lifts the stop`, 409);
   const run = store.readRun(q.id);
-  if (run && GOING_RUN.includes(run.state)) throw new ActionError(`queue ${q.id}'s run is still going (${run.state})`, 409);
+  if (run && HOLDING_RUN_STATES.includes(run.state)) throw new ActionError(`queue ${q.id}'s run is still going (${run.state})`, 409);
   const at = now();
   const lift: StatusChange = { at, kind: "lift", by: "user_continue", from: "stopped", to: "approved", reason: view.status_reason, revision: q.revision };
   store.writeQueue({ ...q, status: "approved", status_note: undefined, changes: [...q.changes, lift], updated_at: at });
@@ -370,8 +370,6 @@ export function liftByContinue(store: ProjectStore, queue: string): StatusChange
 }
 
 // ---------------------------------------------------------------- housekeeping by the orchestrator
-
-const GOING_RUN = ["running", "pausing", "usage_wait", "retry_wait"];
 
 /**
  * The orchestrator's housekeeping (`nexus queue set`, event `status.set`), recorded as an entry in the queue's
@@ -389,22 +387,24 @@ export function runIsOlder(run: Pick<RunFile, "revision" | "started_at">, revisi
 
 /** A live run (one that is going) has the step open: the step is at work. */
 function heldByLiveRun(run: RunFile | undefined, step: string): boolean {
-  return !!run && GOING_RUN.includes(run.state) && run.step === step;
+  return !!run && HOLDING_RUN_STATES.includes(run.state) && run.step === step;
 }
 
 /**
  * Steps a revision change left open (`running` or `waiting`, opened before the current revision replaced the one
- * before) go back to `pending` unless a run of the current revision has them open (a halted or paused one too: resume
- * continues it), each through a `changes` entry by Nexus ("its run was replaced by revision N"), so a start begins there.
- * A new start (`replacing`) also releases the step the run record it replaces has open ("… by a new start"). Called when a run is set aside by a revision change (a halt because the revision
- * changed, the start of a run, which replaces the run record) and at server start, which also cleans a step left so
- * before. Returns the steps released.
+ * before) go back to `pending` unless the queue's run record has them open (of any revision, halted or paused too:
+ * the run finishes the step or a resume continues it), each through a `changes` entry by Nexus ("its run was replaced
+ * by revision N"), so a start begins there. A new start (`replacing`) also releases the step the run record it
+ * replaces has open ("… by a new start"). Called at the start of a run (which replaces the run record) and at server
+ * start, which cleans a step an earlier server left so (a run record replaced, or a revision change before runs went
+ * on across revisions). Returns the steps released.
  */
 export function releaseOrphanedSteps(store: ProjectStore, queueId: string, o: { replacing?: boolean } = {}): string[] {
   const view = loadProjectState(store).queues.find((x) => x.id === queueId);
   if (!view || view.status === "done" || view.status === "cancelled") return [];
-  const run = store.readRun(queueId);
-  const current = run && !runIsOlder(run, view.revision, view.history) ? run : undefined;
+  // The run record holds the step it has open, whatever its revision: a revision changes no started step, so the run
+  // finishes that step (or resumes it) and takes the new revision at the step's end.
+  const current = store.readRun(queueId);
   // What a revision change set aside: a step opened (its latest stretch at work began) before the current revision
   // replaced the one before. A step opened since (by a run of this revision, or by hand) is left alone, except the one
   // the run record has open when a new start replaces that record (`replacing`).
@@ -478,7 +478,7 @@ export function orchestratorStatusChange(store: ProjectStore, input: { queue: st
       if (step) throw new ActionError("cancelling is for a queue; a step is skipped");
       if (view.status === "done" || view.status === "cancelled") throw new ActionError(`queue ${q.id} is ${view.status} already`, 409);
       const run = store.readRun(q.id);
-      if (run && GOING_RUN.includes(run.state)) throw new ActionError(`queue ${q.id} is ${run.state === "running" ? "running" : `running (${run.state})`}: stop its run first`, 409);
+      if (run && HOLDING_RUN_STATES.includes(run.state)) throw new ActionError(`queue ${q.id} is ${run.state === "running" ? "running" : `running (${run.state})`}: stop its run first`, 409);
       record({ kind: "status", from: view.status, to: "cancelled", reason });
       return `queue ${q.id} cancelled (was ${view.status}); the user is notified`;
     }

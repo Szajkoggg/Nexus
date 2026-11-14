@@ -171,15 +171,32 @@ event at the same time goes first), so a later event can still change the status
 queue `approved` and its `stopped` steps `pending` again (their reason cleared); a stop before the lift, whether a
 `queue.stop` event or a `stopped` status an import wrote into the file, no longer counts. A stop after it does.
 
-**A step a revision change left open** goes back to `pending` through a `status` entry `by: nexus` (`from: running` or
-`waiting`, `to: pending`, `reason: its run was replaced by revision N`; derivation clears the step's reason), so a
-start of the new revision begins at the first pending step, which is that one when it comes first. The server writes it
-when a run halts because the queue's revision changed (not for a withdrawn approval of the same revision), when a run
-starts, and at server start, for every `running` or `waiting` step opened (its latest stretch at work began) before
-the current revision replaced the one before, unless the run record of the current revision has that step open (a
-halted or paused one too: resume continues it). A start also releases the step of the run record it replaces (`reason:
-its run was replaced by a new start`). A step opened since the last revision change (by a run of this revision, or by
-hand with no run) is left alone. So a queue never shows two running steps after a revision change.
+**A new revision of a running queue never stops the running step.** A revision changes only steps that have not
+started (see above), so the step at work goes on to its end through its turns, questions, answers and nudges; only the
+step's end (done or skipped) looks at the approval. A step waiting for an answer or for its review, and a failed or
+stopped one, behave as without a revision. At the step's end:
+- the queue's current revision approved: the run goes on in the same session (no new start) and its `revision` moves
+  to the current one;
+- not approved: the run becomes `approval_wait` (`reason: waits for approval of revision N`), keeping its session and
+  its checkout, and goes on by itself, in that session, once the user approves; the orchestrator's approval notice
+  says that the run continues by itself. A run the user asked to pause becomes `paused` instead (the user's pause
+  wins; a resume later goes on, or waits again while the revision still waits). A revision that removed every
+  remaining step: the queue is not `done` while it waits (its status is `waiting`, `waits for approval of revision
+  N`, while its run waits or is paused); on approval the run finishes, and a chain after the queue fires only then.
+
+While a run is `approval_wait`, a start of the queue, a start in its session by another queue (a chain's start waits
+for the session) and a cancel of the queue are refused; Pause and Stop now pause it. An update's drain does not hold
+it (it is not going) and nothing continues it while the update drains: after the restart, or a cancelled drain, a run
+whose revision was approved meanwhile goes on; one still waiting waits on. A plain restart leaves it waiting too.
+
+**A step a revision change left open** with no run record holding it goes back to `pending` through a `status` entry
+`by: nexus` (`from: running` or `waiting`, `to: pending`, `reason: its run was replaced by revision N`; derivation
+clears the step's reason), so a start begins at the first pending step, which is that one when it comes first. The
+server writes it when a run starts and at server start, for every `running` or `waiting` step opened (its latest
+stretch at work began) before the current revision replaced the one before, unless the queue's run record has that
+step open, whatever its revision (a halted or paused run too: resume continues it). A start also releases the step of
+the run record it replaces (`reason: its run was replaced by a new start`). A step opened since the last revision
+change (by a run, or by hand with no run) is left alone. So a queue never shows two running steps.
 
 Approving a revision of a stopped queue lifts the stop: the server appends the approval and a `lift` by
 `user_approval` with the stop's derived reason (`condition: reason` for an event stop, the file's `status_note` for
@@ -192,10 +209,10 @@ going is refused.
 **Continue** is the user's other way to lift a stop, for when the cause was outside the queue and no new revision is
 needed: only a stopped queue whose current revision is approved (otherwise approving that revision lifts the stop),
 and only from the dashboard (`POST /api/projects/:id/queues/:q/continue`; no CLI command, no event). The server
-appends a `lift` by `user_continue` with the stop's derived reason, writes the queue `approved`, and goes on: a run
-of this revision resumes, reopening the step it last opened in its session with a turn that says the user lifted the
-stop (when the orchestrator skipped that step, the next pending one opens); with no `run.yaml` (an imported stop), a
-finished run or one of an older revision, the queue starts afresh at its first pending step. The orchestrator is
+appends a `lift` by `user_continue` with the stop's derived reason, writes the queue `approved`, and goes on: its run
+resumes (one of an older revision too), reopening the step it last opened in its session with a turn that says the
+user lifted the stop (when the orchestrator skipped that step, the next pending one opens); with no `run.yaml` (an
+imported stop) or a finished run, the queue starts afresh at its first pending step. The orchestrator is
 told once. The dashboard shows the stop with the orchestrator's proposal (`lift_proposal`) beside Continue, and the
 queue's and each step's `changes`: who, when, what and why.
 
@@ -333,7 +350,7 @@ Written only by the server's queue engine; agents never touch them.
 | `queues/<id>/git.yaml` | The HEAD of the queue's checkout around each step's work (`src/gitinfo.ts`): `base` (an auto worktree's: `ref`, the branch or commit it was made from, its `sha`, `at`), `base.branch` (whether `ref` names a branch: only a branch can be merged back into), `merged` (`at`, `into`, `path`, `sha`, `fast_forward`), `cleaned` (`at`, `path`, `branch`), `steps.<step>` (rounds, oldest first: `session`, `start` (HEAD when the step opened, or when a send-back reopened it), `started_at`, `end` (HEAD at the end of the turn in which the step got its outcome: done, review, failed or stopped), `ended_at`; a sha is null outside a git repository). A continued step keeps its open round. One writer: the server. See "Git on the dashboard" |
 | `queues/<id>/push.yaml` | Pushing what was accepted: `review` (per step, the HEAD of the checkout when it entered review: `sha` or null, `finished_at`, `at`), `steps` (per accepted step: `acceptance`, `sha`, `result`, `text`, `at`), `pushed` (the last success: `sha`, `step`, `at`, `remote`, `branch`), `error` (the last failure until a success). One writer: the server. See "Pushing what was accepted" |
 | `queues/<id>/start.yaml` | A planned start of the queue (see "Chains" and "Schedules"): either `after` (the queue it waits for) or `at` (the time, ISO 8601; with `usage`, `claude` or `codex`, when that is the usage window's reset plus the margin), the start's `runtime?`, `model?`, `effort?`, `session?` (a session to continue), `by` (`user` or `orchestrator`), `reason?`, `revision` (the queue's when planned), `created_at`, `failed?` (`at`, `reason`, `missed?`: it came due and the queue could not start; `missed`: a schedule more than 15 minutes late, the server not running at its time). One writer: the server; a start of the queue or a cancel removes it |
-| `queues/<id>/run.yaml` | The engine's intent for a queue: `session`, `after` (started by a chain: the queue that was done), `state` (`running`, `pausing`, `paused`, `halted`, `finished`, `usage_wait`, `retry_wait`: a turn failed for a passing reason and is tried again at `resume_at`), `reason`, the `step` it last opened, `nudged`, `resume_at` (when a usage wait or a retry goes on), `retries` (turns failed in a row for a passing reason; cleared by a turn that ends well or a new step), `failure` (the runtime's code for the failure being retried or that halted the run, e.g. `overloaded`), `resume_after_restart`, `runtime`, `model` and `effort` (the run's own, fixed at its start: the start's choice, else the continued session's, else the project's defaults; a missing model or effort is the runtime's default), `started_at`, `ended_at` (when it last stopped going: set when it becomes `finished`, `halted` or `paused`, kept while it stays so, removed when it goes on; older files without it fall back to `updated_at`), `summary_asked` (context care: the step whose context summary Nexus asked for; asked once), `switches` (each fresh session, oldest first: `at`, `from` and `to` session, `step` the new session began with, `why`: `context` (context care; a record without `why` is this) or `runtime` (the step runs on another runtime), `fill` of the old one from 0 to 1 when known, `summary`: `written` by the worker, `asked` and then written, or `fallback`), `revision` (the queue's revision the run was started on). Start refuses a `stopped` queue, naming the step and the stop's reason, and writes `revision`. Resume refuses a stopped queue too, and a run of an older revision (`revision` below the queue's; a run record without `revision` is older when a revision was replaced, in `history`, after its `started_at`): start the queue instead. Archived records are `run.<time>.yaml` (see "Changes and lifting a stop") |
+| `queues/<id>/run.yaml` | The engine's intent for a queue: `session`, `after` (started by a chain: the queue that was done), `state` (`running`, `pausing`, `paused`, `halted`, `finished`, `usage_wait`, `retry_wait`: a turn failed for a passing reason and is tried again at `resume_at`, `approval_wait`: a step ended while a newer revision waits for the user's approval, and the run goes on by itself once approved, see "A new revision of a running queue never stops the running step"; `running`, `pausing`, `usage_wait`, `retry_wait` and `approval_wait` hold the run's session and checkout: `HOLDING_RUN_STATES` in the protocol), `reason`, the `step` it last opened, `nudged`, `resume_at` (when a usage wait or a retry goes on), `retries` (turns failed in a row for a passing reason; cleared by a turn that ends well or a new step), `failure` (the runtime's code for the failure being retried or that halted the run, e.g. `overloaded`), `resume_after_restart`, `runtime`, `model` and `effort` (the run's own, fixed at its start: the start's choice, else the continued session's, else the project's defaults; a missing model or effort is the runtime's default), `started_at`, `ended_at` (when it last stopped going: set when it becomes `finished`, `halted` or `paused`, kept while it stays so, removed when it goes on; older files without it fall back to `updated_at`), `summary_asked` (context care: the step whose context summary Nexus asked for; asked once), `switches` (each fresh session, oldest first: `at`, `from` and `to` session, `step` the new session began with, `why`: `context` (context care; a record without `why` is this) or `runtime` (the step runs on another runtime), `fill` of the old one from 0 to 1 when known, `summary`: `written` by the worker, `asked` and then written, or `fallback`), `revision` (the queue's revision the run goes by: written at the start, moved to the current approved one at the end of a step). Start refuses a `stopped` queue, naming the step and the stop's reason, and writes `revision`; it also refuses while the run holds its session (`approval_wait` included). Resume refuses a stopped or cancelled queue, an unapproved revision unless the run is of an older one (`revision` below the queue's; a run record without `revision` is older when a revision was replaced, in `history`, after its `started_at`: such a run goes on mid-step while the newer revision waits), and an `approval_wait` run until its revision is approved. A run of an older revision is resumed like any: a revision changes no started step. Archived records are `run.<time>.yaml` (see "Changes and lifting a stop") |
 | `sessions/<id>/runtime.json` | A launched session's live facts: process state and pid, model, context tokens and window, turns, cost |
 | `sessions/<id>/delivered.jsonl` | What the server handed to the session (notes put into a step turn, inbox entries injected or sent as a turn, or `carried` into the first turn of the session `to` that took over); counts as read |
 | `sessions/<id>/refusals.jsonl` | One line per action the agent wanted but was refused: `at`, `session`, `runtime`, `by` (`permissions`: Claude Code's permission mode or rules; `nexus`: Nexus declined a Codex approval request; `auto_review`: Codex's auto reviewer), `tool` (Claude Code's tool name; for Codex `command`, `file_change`, `network`, `mcp`, `permissions`, …), `input` in short (the command, path or host, at most 300 characters), `reason` when the runtime gave one, `ref` (the runtime's id for the call: one record per refusal), `queue`, `step` |
@@ -787,7 +804,7 @@ a prompt. (`Write` and `Edit` are not disallowed: a disallow rule would beat the
   session is refused by the CLI.
 - With `notify` on, the server tells the orchestrator (starting it if needed) when a worker asks a question, when the
   user approves a revision of a queue ("Queue X revision N approved.", with the instruction to start it, or to resume
-  its paused or halted run, if the plan puts it next; a run of an older revision cannot be resumed, so then: start it), when the user withdraws an approval, when the user lifts a stop with Continue ("The user lifted the stop of queue X with Continue (the stop was: …); its run goes on.", told once), when a run reaches a
+  its paused or halted run, also one of an older revision, if the plan puts it next; a running run, or one waiting for the approval, continues by itself: nothing to start), when the user withdraws an approval, when the user lifts a stop with Continue ("The user lifted the stop of queue X with Continue (the stop was: …); its run goes on.", told once), when a run reaches a
   requested pause ("Run of X paused after step S.": a pause asked for by the user or the orchestrator, not a stop now,
   nor the pause of a server restart or of an update), when a step waits for its review ("Step S of queue X is done and
   waits for your review: <summary>", with the step's goal, acceptance, the checks reported this round and those of the

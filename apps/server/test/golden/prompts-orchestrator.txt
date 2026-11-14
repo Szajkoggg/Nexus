@@ -37,15 +37,15 @@ May I delete the old file? Answer it if the answer is settled, otherwise escalat
 -- to orchestrator 1
 [Nexus] Queue QB revision 1 approved. Its run was paused because the user rejected step B1; this revision lifts that. If the plan puts it next, resume it now (it goes on at the first pending step); otherwise tell the user why not.
 -- to orchestrator 1
-[Nexus] Queue QC revision 1 approved. Its run is halted at step C1. If the plan puts it next, resume it now; otherwise tell the user why not.
+[Nexus] Queue QC revision 1 approved. Its run is halted at step C1. If the plan puts it next, resume it now (it goes on under this revision); otherwise tell the user why not.
 -- to orchestrator 1
-[Nexus] Queue QC revision 2 approved. Its earlier run (halted at step C1) was of an older revision and cannot be resumed. If the plan puts it next, start it now (it begins at the first pending step); otherwise tell the user why not.
+[Nexus] Queue QC revision 2 approved. Its run is halted at step C1. If the plan puts it next, resume it now (it goes on under this revision); otherwise tell the user why not.
 -- to orchestrator 1
 [Nexus] The run of queue QC halted at step C1: it stalled. Tell the user briefly, with what you propose.
 -- to orchestrator 1
-[Nexus] Queue QD revision 1 approved. Its run is paused at step D1. If the plan puts it next, resume it now; otherwise tell the user why not.
+[Nexus] Queue QD revision 1 approved. Its run is paused at step D1. If the plan puts it next, resume it now (it goes on under this revision); otherwise tell the user why not.
 -- to orchestrator 1
-[Nexus] Queue QE revision 1 approved. Its run is running; tell the user if anything follows from the approval.
+[Nexus] Queue QE revision 1 approved. Its run continues by itself under this revision from the end of its current step: nothing to start or resume. Tell the user if anything follows from the approval.
 == a stop lifted with Continue; approvals withdrawn, with a reason and without
 -- to orchestrator 1
 [Nexus] The user lifted the stop of queue QE with Continue (the stop was: condition: the disk is full); its run goes on. Nothing to start: the run goes on by itself. Tell the user briefly if anything follows from it for the plan.
@@ -55,7 +55,7 @@ May I delete the old file? Answer it if the answer is settled, otherwise escalat
 [Nexus] The user withdrew the approval of queue QF revision 1. Do not start it. Tell the user briefly what this changes in the plan.
 == a step waiting for the orchestrator's review (its second round)
 -- to orchestrator 1
-[Nexus] Queue QG revision 1 approved. Its run is running; tell the user if anything follows from the approval.
+[Nexus] Queue QG revision 1 approved. Its run continues by itself under this revision from the end of its current step: nothing to start or resume. Tell the user if anything follows from the approval.
 -- to orchestrator 1
 [Nexus] Step G1 of queue QG is done and waits for your review: G1 with the test added. 
 
@@ -92,15 +92,15 @@ Weigh it in your acceptance of the step. If it asks for a fix, send the step bac
 -- to orchestrator 1
 [Nexus] The scheduled start of queue QH at 2026-01-01T08:00:00.000Z was missed: Nexus was not running then. It did not start. Tell the user briefly; propose starting it now or a new time (nexus run <queue> start --at …).
 -- to orchestrator 1
-[Nexus] Queue QI revision 1 approved. Its run is paused at step I1. If the plan puts it next, resume it now; otherwise tell the user why not.
+[Nexus] Queue QI revision 1 approved. Its run is paused at step I1. If the plan puts it next, resume it now (it goes on under this revision); otherwise tell the user why not.
 -- to orchestrator 1
 [Nexus] Run of QI paused after step I1. If you paused it to free the checkout for another queue, start that one now; otherwise tell the user.
 -- to orchestrator 1
-[Nexus] Queue QJ revision 1 approved. Its run is halted at step J1. If the plan puts it next, resume it now; otherwise tell the user why not.
+[Nexus] Queue QJ revision 1 approved. Its run is halted at step J1. If the plan puts it next, resume it now (it goes on under this revision); otherwise tell the user why not.
 -- to orchestrator 1
 [Nexus] The run of queue QJ halted at step J1: step J1 failed: no disk. Tell the user briefly, with what you propose.
 -- to orchestrator 1
-[Nexus] Queue QK revision 1 approved. Its run is halted. If the plan puts it next, resume it now; otherwise tell the user why not.
+[Nexus] Queue QK revision 1 approved. Its run is halted. If the plan puts it next, resume it now (it goes on under this revision); otherwise tell the user why not.
 -- to orchestrator 1
 [Nexus] The run of queue QK halted before it opened a step: no reason given. Tell the user briefly, with what you propose.
 -- to orchestrator 1
@@ -190,7 +190,7 @@ steps:
     model: haiku               # optional, this step only
     effort: low                # optional, this step only (Claude Code: low to max; Codex: the model's levels)
 
-A revision changes only what has not started: add, change, remove or reorder pending steps freely. A started step (one that has been at work, or whose status is not pending or skipped) keeps its title, goal, acceptance, review, runtime, model and effort, stays in the draft and keeps its order among the started steps; a change to the running step reaches its worker as a message (your answer to its question, or the user's message) or with nexus review send-back when it waits for your review. Once a queue has run, its worktree, branch and base stay as they are. Nexus refuses a draft that breaks this and says why.
+A revision changes only what has not started: add, change, remove or reorder pending steps freely. A started step (one that has been at work, or whose status is not pending or skipped) keeps its title, goal, acceptance, review, runtime, model and effort, stays in the draft and keeps its order among the started steps; a change to the running step reaches its worker as a message (your answer to its question, or the user's message) or with nexus review send-back when it waits for your review. Once a queue has run, its worktree, branch and base stay as they are. Nexus refuses a draft that breaks this and says why. A new revision of a running queue never stops its running step: the step goes on to its end, through its questions, answers and nudges. Then the run goes on under the new revision in the same session if the user has approved it, or waits for the approval (run state approval_wait, its session kept) and goes on by itself once the user approves: there is nothing to start or resume, and a start or cancel of the queue is refused while it waits.
 
 Choosing model and effort for a run: say which and why when you start it. Hard design, debugging or open-ended work deserves a strong model at high effort; mechanical steps (renames, measurements, sheets) do well with less. Codex takes effort low to xhigh; Claude Code also max. Without --model and --effort the project's defaults apply. A step may name its own runtime, model and effort in the queue YAML (a mechanical step on a small model, a hard one on a strong one); a step without them runs on the run's, not on the previous step's. Another runtime runs the step in a fresh session given the previous step's context summary; another model or effort keeps the session.
 

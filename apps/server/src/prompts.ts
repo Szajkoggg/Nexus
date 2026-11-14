@@ -179,7 +179,7 @@ steps:
     model: haiku               # optional, this step only
     effort: low                # optional, this step only (Claude Code: low to max; Codex: the model's levels)
 
-A revision changes only what has not started: add, change, remove or reorder pending steps freely. A started step (one that has been at work, or whose status is not pending or skipped) keeps its title, goal, acceptance, review, runtime, model and effort, stays in the draft and keeps its order among the started steps; a change to the running step reaches its worker as a message (your answer to its question, or the user's message) or with nexus review send-back when it waits for your review. Once a queue has run, its worktree, branch and base stay as they are. Nexus refuses a draft that breaks this and says why.
+A revision changes only what has not started: add, change, remove or reorder pending steps freely. A started step (one that has been at work, or whose status is not pending or skipped) keeps its title, goal, acceptance, review, runtime, model and effort, stays in the draft and keeps its order among the started steps; a change to the running step reaches its worker as a message (your answer to its question, or the user's message) or with nexus review send-back when it waits for your review. Once a queue has run, its worktree, branch and base stay as they are. Nexus refuses a draft that breaks this and says why. A new revision of a running queue never stops its running step: the step goes on to its end, through its questions, answers and nudges. Then the run goes on under the new revision in the same session if the user has approved it, or waits for the approval (run state approval_wait, its session kept) and goes on by itself once the user approves: there is nothing to start or resume, and a start or cancel of the queue is refused while it waits.
 
 Choosing model and effort for a run: say which and why when you start it. Hard design, debugging or open-ended work deserves a strong model at high effort; mechanical steps (renames, measurements, sheets) do well with less. Codex takes effort low to xhigh; Claude Code also max. Without --model and --effort the project's defaults apply. A step may name its own runtime, model and effort in the queue YAML (a mechanical step on a small model, a hard one on a strong one); a step without them runs on the run's, not on the previous step's. Another runtime runs the step in a fresh session given the previous step's context summary; another model or effort keeps the session.
 
@@ -311,17 +311,19 @@ Options: ${x.options.join(" / ")}` : ""}`,
 /** The user approved revision `a.revision` of the queue; what to do depends on its run. */
 export function approvalNotice(q: QueueView, a: { revision: number }): Notice {
   const r = q.run;
-  // A run of an older revision is not resumed (the engine refuses it): the new revision starts afresh.
-  const older = r && runIsOlder(r, a.revision, q.history);
+  // A run of an older revision goes on under the new one (a revision changes no started step); a finished one is over:
+  // the new revision's steps need a start.
   const todo = !r
     ? "If the plan puts it next, start it now; otherwise tell the user why not."
     : r.rejected && r.state === "paused" && !q.rejection
       ? `Its run was paused because the user rejected step ${r.rejected}; this revision lifts that. If the plan puts it next, resume it now (it goes on at the first pending step); otherwise tell the user why not.`
-    : older && (r.state === "paused" || r.state === "halted" || r.state === "finished")
-      ? `Its earlier run (${r.state}${r.step ? ` at step ${r.step}` : ""}) was of an older revision and cannot be resumed. If the plan puts it next, start it now (it begins at the first pending step); otherwise tell the user why not.`
+    : r.state === "finished" && runIsOlder(r, a.revision, q.history)
+      ? `Its earlier run is finished. If the plan puts it next, start it now (it begins at the first pending step); otherwise tell the user why not.`
+    : r.state === "finished"
+      ? "Its run is finished; tell the user if anything follows from the approval."
     : r.state === "paused" || r.state === "halted"
-      ? `Its run is ${r.state}${r.step ? ` at step ${r.step}` : ""}. If the plan puts it next, resume it now; otherwise tell the user why not.`
-      : `Its run is ${r.state}; tell the user if anything follows from the approval.`;
+      ? `Its run is ${r.state}${r.step ? ` at step ${r.step}` : ""}. If the plan puts it next, resume it now (it goes on under this revision); otherwise tell the user why not.`
+      : `Its run continues by itself under this revision${r.state === "approval_wait" ? " (it waited for this approval at the end of a step)" : " from the end of its current step"}: nothing to start or resume. Tell the user if anything follows from the approval.`;
   return { fact: `Queue ${q.id} revision ${a.revision} approved.`, todo };
 }
 

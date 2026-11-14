@@ -260,9 +260,9 @@ test("approvals and withdrawals are told once each, by their position, the chat 
   } finally { stop(); }
 });
 
-test("approving a halted queue's new revision says start: the old run is of the older revision; a stopped one's is archived", async () => {
+test("approving a halted queue's new revision says resume: the run goes on under it; a stopped one's is archived: start", async () => {
   for (const [first, told] of [
-    ["fail", /Its earlier run \(halted at step H1\) was of an older revision and cannot be resumed\. If the plan puts it next, start it now/],
+    ["fail", /Its run is halted at step H1\. If the plan puts it next, resume it now \(it goes on under this revision\)/],
     ["stop", /Queue H revision 2 approved\. If the plan puts it next, start it now/],
   ] as const) {
     const x = setup();
@@ -280,7 +280,10 @@ test("approving a halted queue's new revision says start: the old run is of the 
       await settle();
       const sent = (await delivered()).find((t) => t.startsWith("[Nexus] Queue H revision 2 approved."));
       assert.match(sent ?? "", told, first);
-      assert.throws(() => x.engine.resume("H"), first === "fail" ? /older|revision/ : /no run/);
+      if (first === "fail") {
+        x.engine.resume("H"); // the run of revision 1 goes on with its step (which fails again)
+        await x.until("the step again", () => runOf(x, "H")?.state === "halted" && x.state().queues.find((q) => q.id === "H")!.steps[0]!.segments.length === 2);
+      } else assert.throws(() => x.engine.resume("H"), /no run/);
     } finally { x.stop(); }
   }
 });

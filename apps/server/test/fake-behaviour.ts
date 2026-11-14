@@ -5,7 +5,7 @@
 //   fail   report the step failed            slow    work for FAKE_SLOW_MS (default 1500), then done
 //   stop1  report a stop condition the first time, done once the stop is lifted
 //   slownoop  work for FAKE_SLOW_MS, then end the turn without an outcome (the step stays open)
-//   slownoop1  slownoop the first time the step opens, done when it opens again
+//   slowask   work for FAKE_SLOW_MS, then ask a blocking question and end the turn
 //   doneexit  report the step done, then the process exits on a signal before its turn ends
 //   commit    commit a file named after the step in its working directory, then done
 //   commitstop  the same commit, then a stop condition
@@ -20,7 +20,8 @@
 // FAKE_NO_SUMMARY is set. FAKE_CONTEXT_FILL (0 to 1) is the context fill each turn reports (default: claude 10 %,
 // codex 6 %). A step turn may come after a seed (context care's first prompt of a fresh session): it is found at the
 // start of any line.
-// An answer ("[Nexus] Answer …") makes it report the current step done. As an orchestrator: "FAKE-DRAFT:" followed by
+// An answer ("[Nexus] Answer …") makes it report the current step done (also in a new process of the session: the
+// step is kept in a file beside FAKE_LOG). As an orchestrator: "FAKE-DRAFT:" followed by
 // YAML drafts that queue; "FAKE-NEXUS: [args]" runs `nexus` with those arguments; a "[Nexus] A worker asked … (qid X;"
 // notice is answered with "fake answer". "FAKE-LONG" is answered with longReply("Reply"); a hand-over with
 // longReply("SUMMARY").
@@ -104,21 +105,15 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
   const m = /step (\S+) \(\d+ of \d+\)/.exec(text);
   if (/(^|\n)\[Nexus\] Queue/.test(text) && m) {
     const step = (fake.step = m[1]!);
+    // Kept beside FAKE_LOG too, so a new process of the session (after a restart) knows the step an answer is for.
+    if (process.env.FAKE_LOG && process.env.NEXUS_SESSION) writeFileSync(join(dirname(process.env.FAKE_LOG), `fake-step-${process.env.NEXUS_SESSION}`), step);
     const behaviour = /FAKE: (\w+)/.exec(text)?.[1] ?? "done";
     nexus("step", "start", step);
     tool(`nexus step start ${step}`);
     const fail = failure(step, behaviour);
     if (fail) return { fail };
     if (/^(overloaded|network|auth|limit|crash|cloudflare)/.test(behaviour)) nexus("step", "done", step, "--summary", `fake finished ${step} after failures`);
-    const again = (kind: string) => { // whether the step opened with this behaviour before (a file beside FAKE_LOG)
-      const file = join(dirname(process.env.FAKE_LOG ?? "."), `fake-${kind}-${step}`);
-      if (existsSync(file)) return true;
-      writeFileSync(file, "1");
-      return false;
-    };
-    if (behaviour === "slownoop1" && again("slownoop1")) nexus("step", "done", step, "--summary", `fake finished ${step} when it opened again`);
-    else if (behaviour === "slownoop1") await new Promise((r) => setTimeout(r, Number(process.env.FAKE_SLOW_MS ?? 1500)));
-    if (behaviour === "slow" || behaviour === "slownoop") await new Promise((r) => setTimeout(r, Number(process.env.FAKE_SLOW_MS ?? 1500)));
+    if (behaviour === "slow" || behaviour === "slownoop" || behaviour === "slowask") await new Promise((r) => setTimeout(r, Number(process.env.FAKE_SLOW_MS ?? 1500)));
     // "commit": a commit in the working directory (a file named after the step), then done.
     // "commitstop": the same commit, then a stop condition (as the worker briefing asks: commit, then stop).
     if (behaviour === "commit" || behaviour === "commitstop") {
@@ -142,7 +137,7 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
       if (existsSync(file)) nexus("step", "done", step, "--summary", `fake finished ${step} after the stop was lifted`);
       else { writeFileSync(file, "1"); nexus("stop", step, "--condition", "fake condition", "--reason", "fake stop"); }
     }
-    if (behaviour === "ask") nexus("ask", "Which way?", "--step", step);
+    if (behaviour === "ask" || behaviour === "slowask") nexus("ask", "Which way?", "--step", step);
     // The queue's last step done: the report, written where the prompt says (refused under a denied folder, as
     // Claude Code refuses a Write its --disallowedTools rule covers), then registered with nexus report.
     const report = /`nexus report (\S+) --file (\S+) --summary/.exec(text);
@@ -157,6 +152,8 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
     }
     return `step ${step}: ${behaviour}`;
   }
+  const stepFile = process.env.FAKE_LOG && process.env.NEXUS_SESSION ? join(dirname(process.env.FAKE_LOG), `fake-step-${process.env.NEXUS_SESSION}`) : undefined;
+  fake.step ??= stepFile && existsSync(stepFile) ? readFileSync(stepFile, "utf8") : undefined;
   if (text.startsWith("[Nexus] Answer") && fake.step) {
     nexus("step", "done", fake.step, "--summary", `fake finished ${fake.step} after an answer`);
     return "answered";

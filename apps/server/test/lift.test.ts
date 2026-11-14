@@ -66,7 +66,7 @@ for (const runtime of ["claude", "codex"] as const) {
 
       revise();
       assert.equal(queue().status, "stopped", "a draft alone lifts nothing");
-      assert.throws(() => engine.resume("Q"), /approve/);
+      assert.throws(() => engine.resume("Q"), /approving a new revision/);
       const archivesBefore = readdirSync(store.queueDir("Q")).filter((f) => /^run\..+\.yaml$/.test(f)).length;
       approveQueue(store, "Q");
       const s = state();
@@ -108,7 +108,7 @@ test("a queue imported as stopped is lifted the same way, and its stop note is k
   } finally { engine.shutdown(); }
 });
 
-test("resume refuses a run of an older revision, also a run record without its revision; start begins afresh", async () => {
+test("resume goes on with a run of an older revision (also a run record without its revision) in its session; it takes the new revision", async () => {
   process.env.FAKE_SLOW_MS = "800";
   const { store, engine, queue, opened, until, revise } = setup([step("Q1", "slow"), step("Q2", "done"), step("Q3", "done")]);
   try {
@@ -119,16 +119,16 @@ test("resume refuses a run of an older revision, also a run record without its r
     revise();
     approveQueue(store, "Q");
     assert.ok(store.readRun("Q"), "a queue that was not stopped keeps its run record");
-    assert.throws(() => engine.resume("Q"), /run belongs to revision 1 and the queue is at revision 2: start the queue/);
-
     // An older run record, written before runs carried their revision: older when a revision was replaced after it began.
     const { revision: _r, ...legacy } = store.readRun("Q")!;
     store.writeRun("Q", legacy);
-    assert.throws(() => engine.resume("Q"), /run belongs to revision an earlier one/);
+    const session = legacy.session;
 
-    engine.start("Q");
+    engine.resume("Q");
     await until("the run to finish", () => queue().run?.state === "finished");
     assert.deepEqual(opened(), ["Q1", "Q2", "Q2b", "Q3"]);
+    assert.equal(queue().run!.session, session, "the same session");
+    assert.equal(queue().run!.revision, 2, "the run took the new revision");
   } finally { engine.shutdown(); delete process.env.FAKE_SLOW_MS; }
 });
 

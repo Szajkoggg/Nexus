@@ -3,11 +3,10 @@
 // comes due and asks the engine to start the queue. Also the long timers both use (ClockTimers): a retry or usage wait
 // of a run, and a schedule's time, armed on a clock tests can move.
 import {
-  ActionError, effortIssue, formatClock, loadProjectState, now, readUsage, type ProjectState, type ProjectStore, type QueueView, type RunFile,
+  ActionError, HOLDING_RUN_STATES, effortIssue, formatClock, loadProjectState, now, readUsage, type ProjectState, type ProjectStore, type QueueView, type RunFile,
 } from "@nexus/protocol";
 import type { StartOptions } from "./engine.ts";
 import { RUNTIME_NAME } from "./prompts.ts";
-import { GOING } from "./run-state.ts";
 
 /** What the engine's long timers run on: the real clock, or one a test moves. */
 export interface Clock {
@@ -138,7 +137,7 @@ export class Scheduler {
     for (let at: string | undefined = a.id, seen = new Set<string>(); at && !seen.has(at); seen.add(at), at = this.store.readStart(at)?.after) {
       if (at === q.id) throw new ActionError(`queue ${a.id} already waits for ${q.id} (through its planned starts): that would be a loop`, 409);
     }
-    const busy = o.session ? state.queues.find((x) => x.id !== q.id && !!x.run && x.run.session === o.session && GOING.includes(x.run.state)) : undefined;
+    const busy = o.session ? state.queues.find((x) => x.id !== q.id && !!x.run && x.run.session === o.session && HOLDING_RUN_STATES.includes(x.run.state)) : undefined;
     if (a.status === "done" && !this.deps.draining() && !busy) {
       const run = this.deps.start(q.id, { ...options, after: a.id });
       return `queue ${a.id} is already done: queue ${q.id} started now in session ${run.session}`;
@@ -197,7 +196,7 @@ export class Scheduler {
   /** What every planned start checks: the queue can be planned, and the start's options make sense. */
   private planOptions(state: ProjectState, q: QueueView, o: Omit<StartOptions, "after">): Pick<StartOptions, "runtime" | "model" | "effort" | "session"> {
     if (q.status === "done" || q.status === "cancelled") throw new ActionError(`queue ${q.id} is ${q.status}`, 409);
-    if (q.run && GOING.includes(q.run.state)) throw new ActionError(`queue ${q.id} is already running`, 409);
+    if (q.run && HOLDING_RUN_STATES.includes(q.run.state)) throw new ActionError(`queue ${q.id} is already running`, 409);
     const runtime = o.session ? undefined : o.runtime ?? state.project.runtimes.default;
     const issue = runtime ? effortIssue(runtime, o.effort) : undefined;
     if (issue) throw new ActionError(issue);
@@ -232,7 +231,7 @@ export class Scheduler {
         if (!plan || plan.failed) continue;
         const { waiting: _w, blocked: _b, ...file } = plan;
         const fail = (reason: string, missed?: boolean) => this.store.writeStart(q.id, { ...file, failed: { at: now(), reason, missed } });
-        const busy = plan.session ? state.queues.find((x) => x.id !== q.id && !!x.run && x.run.session === plan.session && GOING.includes(x.run.state)) : undefined;
+        const busy = plan.session ? state.queues.find((x) => x.id !== q.id && !!x.run && x.run.session === plan.session && HOLDING_RUN_STATES.includes(x.run.state)) : undefined;
         if (plan.after) {
           if (state.queues.find((x) => x.id === plan.after)?.status !== "done" || busy) continue;
         } else {

@@ -1,6 +1,6 @@
 // Derives the dashboard's view of a project from its files. Pure apart from reading through the store;
 // nothing here is ever written back (state.json, if kept, is only a cache of this).
-import { ORCHESTRATOR_ONLY, USER_ONLY, type StatusChange, type Event, type InboxEntry, type Note, type GitFile, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type ReviewItem, type ReviewPolicy, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type StepDef, type StepStatus } from "./schemas.ts";
+import { HOLDING_RUN_STATES, ORCHESTRATOR_ONLY, USER_ONLY, type StatusChange, type Event, type InboxEntry, type Note, type GitFile, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type ReviewItem, type ReviewPolicy, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type StepDef, type StepStatus } from "./schemas.ts";
 import { ProjectStore, revisionHash } from "./store.ts";
 import { ENDED_RUN_STATES, formatClock, type Segment } from "./times.ts";
 import { stopPlace } from "./attention.ts";
@@ -224,6 +224,14 @@ export function loadProjectState(store: ProjectStore): ProjectState {
     if (q.steps.every((s) => stepClosed(q, s) || FINISHED_STEP.has(s.status))) { q.status = "done"; q.status_reason = undefined; }
   }
 
+  // A revision waiting for approval holds a run's queue back from done: a revision that removed every remaining step
+  // finishes the run only once the user approves it (until then the run waits for the approval, or is paused).
+  for (const q of queues.values()) {
+    if (q.status === "done" && !q.approved && q.run && (HOLDING_RUN_STATES.includes(q.run.state) || q.run.state === "paused")) {
+      q.status = "waiting"; q.status_reason = `waits for approval of revision ${q.revision}`;
+    }
+  }
+
   // An approval after a proposal to lift answers it (approving a stopped queue lifts the stop anyway).
   for (const q of queues.values()) if (q.lift_proposal && q.approvals.some((a) => a.at > q.lift_proposal!.at)) q.lift_proposal = undefined;
 
@@ -276,15 +284,13 @@ export function loadProjectState(store: ProjectStore): ProjectState {
   };
 }
 
-/** GOING run states: a session with such a run is busy. */
-const BUSY_RUN = new Set(["running", "pausing", "usage_wait", "retry_wait"]);
 
 /** Why a planned start has not come yet. */
 function startWait(plan: StartFile, a: QueueView | undefined, queues: QueueView[]): { waiting: string; blocked: boolean } {
   if (plan.at) return { waiting: plan.usage ? `the ${plan.usage === "codex" ? "Codex" : "Claude Code"} usage window resets` : "its time", blocked: false };
   if (!a) return { waiting: `queue ${plan.after} does not exist`, blocked: true };
   if (a.status === "done") {
-    const busy = plan.session ? queues.find((x) => x.id !== plan.after && !!x.run && x.run.session === plan.session && BUSY_RUN.has(x.run.state)) : undefined;
+    const busy = plan.session ? queues.find((x) => x.id !== plan.after && !!x.run && x.run.session === plan.session && HOLDING_RUN_STATES.includes(x.run.state)) : undefined;
     return busy ? { waiting: `queue ${plan.after} is done; the session to continue is running queue ${busy.id}`, blocked: false }
       : { waiting: `queue ${plan.after} is done`, blocked: false };
   }
@@ -293,7 +299,7 @@ function startWait(plan: StartFile, a: QueueView | undefined, queues: QueueView[
   const r = a.run;
   if (r?.state === "halted") return { waiting: `the run of ${plan.after} halted${r.reason ? `: ${r.reason}` : ""}`, blocked: true };
   if (r?.state === "paused") return { waiting: `the run of ${plan.after} is paused${r.reason ? `: ${r.reason}` : ""}`, blocked: true };
-  if (r && BUSY_RUN.has(r.state)) return { waiting: `queue ${plan.after} is running${r.step ? ` (at ${r.step})` : ""}`, blocked: false };
+  if (r && HOLDING_RUN_STATES.includes(r.state)) return { waiting: `queue ${plan.after} is running${r.step ? ` (at ${r.step})` : ""}`, blocked: false };
   if (a.status === "running" || a.status === "waiting") return { waiting: `queue ${plan.after} is ${a.status === "waiting" ? "waiting (a question or a review)" : "running"}`, blocked: false };
   return { waiting: `queue ${plan.after} has not started yet`, blocked: false };
 }

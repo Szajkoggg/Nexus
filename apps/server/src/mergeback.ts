@@ -9,12 +9,11 @@
 // Cleanup: `git worktree remove` (never --force) and `git branch -d` (never -D). Refused, before anything is removed,
 // when the worktree has uncommitted changes or the branch is not merged.
 import { existsSync } from "node:fs";
-import { ActionError, loadProjectState, normPath, now, type ProjectStore } from "@nexus/protocol";
+import { ActionError, HOLDING_RUN_STATES, loadProjectState, normPath, now, type ProjectStore } from "@nexus/protocol";
 import { checkoutOf, git } from "./gitinfo.ts";
 import { ROOT } from "./lifecycle.ts";
 import { execFileSync } from "node:child_process";
 
-const GOING = ["running", "pausing", "usage_wait", "retry_wait"];
 const ENV = { ...process.env, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never", GIT_EDITOR: "true", GIT_MERGE_AUTOEDIT: "no" };
 const same = (a: string, b: string) => normPath(a).toLowerCase() === normPath(b).toLowerCase();
 
@@ -47,7 +46,7 @@ function finishedWorktreeQueue(store: ProjectStore, queueId: string) {
   const path = checkoutOf(store, q);
   if (!path || same(path, root)) throw new ActionError(`queue ${queueId} works in the project's own checkout, not a worktree of its own`, 409);
   if (q.status !== "done") throw new ActionError(`queue ${queueId} is not finished (it is ${q.status})`, 409);
-  if (q.run && GOING.includes(q.run.state)) throw new ActionError(`queue ${queueId}'s run is still going`, 409);
+  if (q.run && HOLDING_RUN_STATES.includes(q.run.state)) throw new ActionError(`queue ${queueId}'s run is still going`, 409);
   if (q.git?.cleaned) throw new ActionError(`queue ${queueId} was cleaned up already`, 409);
   const branch = q.branch ?? (existsSync(path) ? git(path, ["branch", "--show-current"]) : undefined);
   if (!branch) throw new ActionError(`queue ${queueId} has no branch`, 409);
@@ -66,7 +65,7 @@ export function mergeBack(store: ProjectStore, queueId: string, serverRoot = ROO
   const dirty = git(target.path, ["status", "--porcelain", "--untracked-files=no"]);
   if (dirty === undefined) throw new ActionError(`cannot read the state of ${target.path}`, 409);
   if (dirty) throw new ActionError(`${target.path} has uncommitted changes: commit or stash them, then merge`, 409);
-  const busy = state.queues.find((x) => x.run && GOING.includes(x.run.state) && (() => { const p = checkoutOf(store, x); return !!p && same(p, target.path); })());
+  const busy = state.queues.find((x) => x.run && HOLDING_RUN_STATES.includes(x.run.state) && (() => { const p = checkoutOf(store, x); return !!p && same(p, target.path); })());
   if (busy) throw new ActionError(`queue ${busy.id} is running in ${target.path}: merge once it is not`, 409);
 
   const tip = run(root, ["rev-parse", `refs/heads/${branch}`]);

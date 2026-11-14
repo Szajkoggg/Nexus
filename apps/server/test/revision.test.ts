@@ -1,6 +1,7 @@
-// A step a revision change left open (queue RV, the W case of Project Honeycomb): it goes back to pending through a
-// changes entry by Nexus, so a start of the new revision runs it again; an orphan left before (the W4e shape) is
-// cleaned at start and at server start; the orchestrator may skip a running step no live run holds. Fakes only.
+// A step a revision change left open (queue RV, the W case of Project Honeycomb): an orphan an earlier server left
+// (the W4e shape: no run record holds it) goes back to pending through a changes entry by Nexus, at start and at server
+// start, so a start runs it again; the orchestrator may skip a running step no live run holds. A run going on across a
+// revision change is approval-wait.test.ts. Fakes only.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
@@ -45,40 +46,6 @@ function setup(steps: StepDef[]) {
   const revise = (defs: StepDef[]) => applyDraft(store, { id: "W", title: "Cliffs", stop_conditions: [], checks: [], steps: defs });
   const stop = () => { for (const e of engines) e.shutdown(); delete process.env.FAKE_SLOW_MS; };
   return { root, store, engine, queue, statuses, running, opened, until, revise, stop };
-}
-
-for (const runtime of ["claude", "codex"] as const) {
-  test(`${runtime}: a run halted by a revision change mid-step: the step goes back to pending and runs again from the new start`, async () => {
-    process.env.FAKE_SLOW_MS = "1500";
-    const x = setup([step("W1", "done"), step("W4e", "slownoop1"), step("W4f", "done")]);
-    const e = x.engine();
-    try {
-      e.start("W", { runtime });
-      await x.until("W4e at work", () => x.running().includes("W4e"));
-      // A live run holds W4e: the orchestrator may not skip it.
-      assert.throws(() => orchestratorStatusChange(x.store, { queue: "W", step: "W4e", to: "skipped", reason: "replaced" }), /W\/W4e is running: a step at work is not skipped/);
-
-      // Revision 2 while W4e works (its turn then ends without an outcome): a pending step changed.
-      x.revise([step("W1", "done"), step("W4e", "slownoop1"), { ...step("W4f", "done"), title: "Step W4f, revised" }]);
-      await x.until("the halt", () => x.queue().run?.state === "halted");
-      assert.match(x.queue().run!.reason!, /revision changed and is not approved/);
-      const q = x.queue();
-      assert.equal(q.steps.find((s) => s.id === "W4e")!.status, "pending", "the open step goes back to pending");
-      assert.equal(q.steps.find((s) => s.id === "W4e")!.reason, undefined);
-      const c = q.changes.at(-1)!;
-      assert.deepEqual([c.kind, c.by, c.step, c.from, c.to, c.reason, c.revision], ["status", "nexus", "W4e", "running", "pending", "its run was replaced by revision 2", 2]);
-      assert.deepEqual(x.running(), []);
-
-      approveQueue(x.store, "W");
-      e.start("W", { runtime });
-      let most = 0;
-      await x.until("the run to finish", () => { most = Math.max(most, x.running().length); return x.queue().run?.state === "finished"; });
-      assert.ok(most <= 1, "never two steps running");
-      assert.deepEqual(x.opened(), ["W1", "W4e", "W4e", "W4f"], "the new start begins at W4e, the first pending step");
-      assert.equal(x.statuses(), "W1=done W4e=done W4f=done");
-      assert.equal(x.queue().status, "done");
-    } finally { x.stop(); }
-  });
 }
 
 /** The W4e shape: W4e opened under revision 1, revision 2 approved, and a run of revision 2 at W4f. */

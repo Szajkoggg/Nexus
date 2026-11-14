@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { ActionError, runIsOlder, type QueueView, type RunFile } from "@nexus/protocol";
 import {
   assertCanResume, assertCanStart, startedRun, toFinished, toHalted, toHeldForUpdate, toPaused, toPausedByUser, toResumed,
-  toRetryWait, toUnheld, toUsageWait,
+  toApprovalWait, toRetryWait, toRevision, toUnheld, toUsageWait,
 } from "../src/run-state.ts";
 
 /** A run with every field a transition may touch set, so what each one clears shows. */
@@ -85,6 +85,16 @@ test("toHalted: halted with the reason; wait and hold cleared; the failure set o
   });
 });
 
+test("toApprovalWait: waits for approval of the revision, not nudged; the hold and resume_at cleared", () => {
+  assert.deepEqual(delta(toApprovalWait(FULL, 3)), {
+    set: { state: "approval_wait", reason: "waits for approval of revision 3", nudged: false }, cleared: ["resume_after_restart", "resume_at"],
+  });
+});
+
+test("toRevision: only the revision moves", () => {
+  assert.deepEqual(delta(toRevision(FULL, 3)), { set: { revision: 3 }, cleared: [] });
+});
+
 test("toFinished: finished; reason, retries, failure, resume_at and the hold cleared", () => {
   assert.deepEqual(delta(toFinished(FULL)), {
     set: { state: "finished" }, cleared: ["failure", "reason", "resume_after_restart", "resume_at", "retries"],
@@ -130,26 +140,31 @@ test("assertCanStart: the refusals in their order, and a queue that may start", 
   assert.doesNotThrow(() => assertCanStart(view({ run: { ...FULL, state: "halted" } as QueueView["run"] })), "an ended run is replaced");
   refuses(() => assertCanStart(view({ rejection, approved: false })), /^step Q1 of queue Q was rejected: the run goes on once you approve a new revision/);
   refuses(() => assertCanStart(view({ approved: false })), "approve the queue's current revision first");
-  for (const state of ["running", "pausing", "usage_wait", "retry_wait"] as const) {
+  for (const state of ["running", "pausing", "usage_wait", "retry_wait", "approval_wait"] as const) {
     refuses(() => assertCanStart(view({ run: { ...FULL, state } as QueueView["run"], status: "stopped" })), "the queue is already running");
   }
+  refuses(() => assertCanStart(view({ approved: false, revision: 3, run: { ...FULL, state: "approval_wait" } as QueueView["run"] })),
+    "the queue's run waits for approval of revision 3; it goes on by itself once you approve it");
   refuses(() => assertCanStart(view({ status: "stopped", stop_step: "Q1", status_reason: "a fake stop" } as Partial<QueueView>)),
     "queue Q is stopped at step Q1: a fake stop. Only the user lifts a stop: with Continue in the dashboard, or by approving a new revision of the queue");
   refuses(() => assertCanStart(view({ status: "done" })), "the queue is done");
   refuses(() => assertCanStart(view({ status: "cancelled" })), "the queue is cancelled");
 });
 
-test("assertCanResume: the refusals in their order; an older revision's run only when it was rejected", () => {
+test("assertCanResume: the refusals in their order; a run of an older revision goes on, also while a newer one waits", () => {
   const run = { ...FULL, state: "paused", rejected: undefined, revision: 2 } as RunFile;
   assert.doesNotThrow(() => assertCanResume(view(), run));
   refuses(() => assertCanResume(view({ rejection, approved: false }), run), /^step Q1 of queue Q was rejected/);
   refuses(() => assertCanResume(view({ approved: false, status: "stopped" }), run), "approve the queue's current revision first");
   refuses(() => assertCanResume(view({ status: "stopped" }), run), /^queue Q is stopped: a stop condition was met\. Only the user lifts a stop/);
   refuses(() => assertCanResume(view({ status: "cancelled" }), run), "queue Q is cancelled");
-  refuses(() => assertCanResume(view({ revision: 3 }), run),
-    "the run belongs to revision 2 and the queue is at revision 3: start the queue instead of resuming");
-  refuses(() => assertCanResume(view({ history: [{ revision: 1, replaced_at: "2026-01-01T09:05:00.000Z" }] } as Partial<QueueView>), { ...run, revision: undefined }),
-    /^the run belongs to revision an earlier one and the queue is at revision 2/);
+  assert.doesNotThrow(() => assertCanResume(view({ revision: 3 }), run), "an older revision's run, the newer one approved");
+  assert.doesNotThrow(() => assertCanResume(view({ revision: 3, approved: false }), run), "mid-step while a newer revision waits");
+  assert.doesNotThrow(() => assertCanResume(view({ approved: false, history: [{ revision: 1, replaced_at: "2026-01-01T09:05:00.000Z" }] } as Partial<QueueView>), { ...run, revision: undefined }),
+    "a run record without its revision, older by the history");
+  refuses(() => assertCanResume(view({ revision: 3, approved: false }), { ...run, state: "approval_wait" }),
+    "the run waits for approval of revision 3; it goes on by itself once you approve it");
+  assert.doesNotThrow(() => assertCanResume(view({ revision: 3 }), { ...run, state: "approval_wait" }), "approved: it goes on");
   assert.doesNotThrow(() => assertCanResume(view({ revision: 3 }), { ...run, rejected: "Q1" }), "a rejected run goes on after a newer approval");
 });
 

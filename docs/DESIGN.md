@@ -133,14 +133,17 @@ They are pure functions that each own which fields they set and clear. The engin
 | `toFinished` | finished | reason, `retries`, `failure`, `resume_at`, the hold | every finish |
 | `toUsageWait` | usage_wait | the hold | a full usage window, a runtime's usage limit |
 | `toRetryWait` | retry_wait | nothing (keeps the hold) | a turn that failed for a passing reason |
+| `toApprovalWait` | approval_wait | `resume_at`, the hold; `nudged` false | a step's end while a newer revision waits for approval |
+| `toRevision` | (unchanged) | nothing (sets `revision`) | a step's end under a newer approved revision |
 
 There is one finish. It used to be written in three places, each clearing different fields, so a run that finished
 while an update drained could keep `resume_after_restart`. A finished run now keeps none of these fields, because
 nothing reads them on it. Writes that change other fields only stay inline in the engine: the hold of a waiting retry
 and its release, `nudged`, `summary_asked`, a session switch, a step opened, and clearing `retries` and `failure` after
 a turn that ended well. The guards `assertCanStart` and `assertCanResume` live beside the transitions. The test of an
-older revision's run is `runIsOlder(run, revision, history)` (protocol). The engine passes the queue's revision; the
-orchestrator passes the revision just approved. `test/scenario.test.ts` keeps run.yaml and runtime.json at each point
+older revision's run is `runIsOlder(run, revision, history)` (protocol): such a run may resume (a revision changes no
+started step), and while a newer revision waits for approval it may resume mid-step. An `approval_wait` run goes on
+through `resume` once its revision is approved (the engine's `onChange`, a cancelled drain, the restart). `test/scenario.test.ts` keeps run.yaml and runtime.json at each point
 of a run in golden files, as a guard for refactoring the engine.
 
 ### One host for agent processes
@@ -425,8 +428,10 @@ the queue file by hand). Every change is an entry in the queue's `changes`, writ
 and why; derivation applies the entries in time order among the events, so neither a later rebuild nor an older event
 undoes them. Only the user lifts a stop: stop conditions are the user's guard rails. Approving a new revision of a
 stopped queue lifts it (the old stop's reason goes into the entry, the old run record is archived, a start begins at
-the first pending step); `start` and `resume` refuse a stopped queue with the step and the reason, and `resume`
-refuses a run of an older revision, which would reopen a step the new revision may have replaced. Every write to the
+the first pending step); `start` and `resume` refuse a stopped queue with the step and the reason. (`resume` used to
+refuse a run of an older revision, which could reopen a step the new revision had replaced; since a revision changes
+only steps that have not started, decided 2026-11-14, a run goes on across revisions: see "A new revision of a running
+queue never stops the running step" in PROTOCOL.md.) Every write to the
 API is the user's and is taken only from the dashboard's page (the Origin rule), approving among them; agents act
 through the CLI and its events.
 

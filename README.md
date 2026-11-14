@@ -141,6 +141,11 @@ crashed runtime) is tried again by itself after 1, 2, 4, 8 and 16 minutes ("wait
 for its window; anything else, or a sixth failure in a row, halts the run with the reason. Pausing or stopping
 cancels a pending retry.
 
+A new revision of a running queue never stops the step at work: it goes on to its end, questions and answers
+included. A revision may change only steps that have not started. At the step's end the run goes on under the new
+revision in the same session if you have approved it; otherwise it waits for your approval (keeping its session) and
+goes on by itself once you approve. Pausing it meanwhile wins: Resume then goes on.
+
 A queue stopped by a stop condition goes on only when you lift the stop. Either approve a new revision the
 orchestrator drafted (a start then begins at the first pending step), or, when the cause was outside the queue,
 press Continue: the stopped step runs again in its session. Continue is right where the stop shows: on the stopped
