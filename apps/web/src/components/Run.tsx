@@ -1,9 +1,9 @@
 // Running queues through Nexus-launched sessions: controls, live activity, sessions and usage.
 import { useEffect, useState, type ReactNode } from "react";
-import { HOLDING_RUN_STATES, formatClock, retryLine } from "@nexus/protocol/times";
+import { HOLDING_RUN_STATES, retryLine } from "@nexus/protocol/times";
 import { act, enc, useFetch, type ActivityEntry, type ProjectState, type QueueView, type SessionView, type Usage } from "../api.ts";
 import { Button, RunTimes, Section, TimeAgo } from "./ui.tsx";
-import { formatDateTime, t } from "../i18n.ts";
+import { formatClock, formatDateTime, formatTime, formatNumber, rich, t, type Key } from "../i18n.ts";
 import { EffortSelect, ModelSelect } from "./Settings.tsx";
 
 // The run's state as a dot and a word: [dot, text].
@@ -22,10 +22,10 @@ const RunState = ({ state, children }: { state: string; children: ReactNode }) =
     <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${RUN_TONE[state]?.[0] ?? "bg-fg-3"}`} />{children}
   </span>
 );
-const RUN_LABEL: Record<string, string> = {
-  running: "running", pausing: "pausing after this step", paused: "paused", halted: "halted",
-  finished: "finished", usage_wait: "waiting for the usage window", retry_wait: "waiting to retry",
-  approval_wait: "waiting for approval",
+const RUN_LABEL: Record<string, Key> = {
+  running: "run.state.running", pausing: "run.state.pausing", paused: "run.state.paused", halted: "run.state.halted",
+  finished: "run.state.finished", usage_wait: "run.state.usageWait", retry_wait: "run.state.retryWait",
+  approval_wait: "run.state.approvalWait",
 };
 
 /** A pending retry, "Retry 2 of 5 at 14:05, overloaded", in amber; nothing for a run that is not waiting to retry. */
@@ -37,10 +37,10 @@ export function RetryNote({ run, className = "mt-1 text-xs" }: { run: NonNullabl
 
 const RUNTIME_NAME: Record<string, string> = { claude: "Claude Code", codex: "Codex" };
 
-const SEEDED: Record<string, string> = {
-  written: "seeded with its context summary",
-  asked: "seeded with the context summary it wrote when asked",
-  fallback: "no summary came: seeded with the queue's description and its finished steps' summaries",
+const SEEDED: Record<string, Key> = {
+  written: "run.seeded.written",
+  asked: "run.seeded.asked",
+  fallback: "run.seeded.fallback",
 };
 
 /**
@@ -55,9 +55,13 @@ function SessionSwitches({ run, sessions }: { run: NonNullable<QueueView["run"]>
         <li key={s.to} className="flex gap-1.5">
           <span className="text-info">↪</span>
           <span className="min-w-0">
-            Fresh session from <span className="font-mono">{s.step}</span> at {formatClock(s.at, new Date())}: {s.why === "runtime"
-              ? `the step runs on ${RUNTIME_NAME[sessions.find((x) => x.id === s.to)?.runtime ?? ""] ?? "another runtime"}`
-              : `the previous one's context was ${s.fill === undefined ? "full" : `${Math.round(s.fill * 100)}% full`}`}; {SEEDED[s.summary]}.
+            {rich("run.switch", {
+              step: <span key="step" className="font-mono">{s.step}</span>, time: formatClock(s.at, new Date()),
+              why: s.why === "runtime"
+                ? t("run.switch.runtime", { runtime: RUNTIME_NAME[sessions.find((x) => x.id === s.to)?.runtime ?? ""] ?? t("run.switch.anotherRuntime") })
+                : s.fill === undefined ? t("run.switch.full") : t("run.switch.fill", { pct: Math.round(s.fill * 100) }),
+              seeded: SEEDED[s.summary] ? t(SEEDED[s.summary]!) : s.summary,
+            })}
           </span>
         </li>
       ))}
@@ -70,9 +74,10 @@ const AT = "@time", USAGE = "@usage-reset";
 /** How long until a time, in words ("3 h 20 min", "12 days"), updated each minute. */
 function Until({ at }: { at: string }) {
   const [, tick] = useState(0);
-  useEffect(() => { const t = setInterval(() => tick((x) => x + 1), 60_000); return () => clearInterval(t); }, []);
+  useEffect(() => { const timer = setInterval(() => tick((x) => x + 1), 60_000); return () => clearInterval(timer); }, []);
   const min = Math.max(0, Math.round((Date.parse(at) - Date.now()) / 60_000));
-  const text = min < 60 ? `${min} min` : min < 48 * 60 ? `${Math.floor(min / 60)} h${min % 60 ? ` ${min % 60} min` : ""}` : `${Math.round(min / 1440)} days`;
+  const text = min < 60 ? t("duration.minutes", { m: min }) : min < 48 * 60 ? (min % 60 ? t("duration.hoursMinutes", { h: Math.floor(min / 60), m: min % 60 }) : t("duration.hours", { h: Math.floor(min / 60) }))
+    : t("run.days", { count: Math.round(min / 1440) });
   return <>{text}</>;
 }
 
@@ -83,7 +88,8 @@ function Until({ at }: { at: string }) {
 function PlannedStart({ queue, busy, onCancel }: { queue: QueueView; busy: boolean; onCancel: () => void }) {
   const p = queue.start;
   if (!p) return null;
-  const options = [p.session ? `continues session ${p.session.slice(-8)}` : p.runtime === "codex" ? "Codex" : p.runtime === "claude" ? "Claude Code" : undefined, p.model, p.effort && `${p.effort} effort`].filter(Boolean);
+  const options = [p.session ? t("run.plan.continues", { session: p.session.slice(-8) }) : p.runtime === "codex" ? "Codex" : p.runtime === "claude" ? "Claude Code" : undefined, p.model, p.effort && t("run.effort", { effort: p.effort })].filter(Boolean);
+  const after = p.after && <span key="queue" className="font-mono">{p.after}</span>;
   const tone = p.failed ? "border-stop/30 bg-stop/10" : p.blocked ? "border-warn/30 bg-warn/10" : "border-info/30 bg-info/10";
   return (
     <div className={`mb-3 rounded-lg border p-3 text-sm ${tone}`}>
@@ -91,21 +97,23 @@ function PlannedStart({ queue, busy, onCancel }: { queue: QueueView; busy: boole
         <p className="min-w-0 flex-1">
           {p.after
             ? (p.failed
-              ? <span className="text-stop">It was to start when <span className="font-mono">{p.after}</span> was done, but could not: {p.failed.reason}</span>
-              : <span className="text-fg">Starts when <span className="font-mono">{p.after}</span> is done.</span>)
+              ? <span className="text-stop">{rich("run.plan.afterFailed", { queue: after, reason: p.failed.reason })}</span>
+              : <span className="text-fg">{rich("run.plan.after", { queue: after })}</span>)
             : (p.failed
-              ? <span className="text-stop">It was to start at {formatClock(p.at!, new Date())}, but did not: {p.failed.reason}</span>
-              : <span className="text-fg">Starts at <span className="font-medium">{formatClock(p.at!, new Date())}</span>{p.usage ? `, when the ${p.usage === "codex" ? "Codex" : "Claude Code"} usage window resets` : ""}.</span>)}
+              ? <span className="text-stop">{t("run.plan.atFailed", { time: formatClock(p.at!, new Date()), reason: p.failed.reason })}</span>
+              : <span className="text-fg">{rich(p.usage ? "run.plan.atUsage" : "run.plan.at", {
+                time: <span key="time" className="font-medium">{formatClock(p.at!, new Date())}</span>, runtime: p.usage === "codex" ? "Codex" : "Claude Code",
+              })}</span>)}
           <span className="mt-1 block text-xs text-fg-2">
-            {p.failed ? <>Start it yourself, or dismiss the plan. · <TimeAgo at={p.failed.at} /></>
-              : p.held ? <>{p.after ? <><span className="font-mono">{p.after}</span> is done</> : "Its time came"}; it {p.held.reason}. It starts by itself once it may.</>
-              : p.after ? <>Now: {p.waiting}.</> : <>In <Until at={p.at!} />. It must be approved then, and its session free.</>}
+            {p.failed ? <>{t("run.plan.startYourself")} · <TimeAgo at={p.failed.at} /></>
+              : p.held ? rich(p.after ? "run.plan.heldAfter" : "run.plan.heldAt", { queue: after, reason: p.held.reason })
+              : p.after ? t("run.plan.now", { waiting: p.waiting ?? "" }) : rich("run.plan.in", { duration: <Until key="until" at={p.at!} /> })}
           </span>
           <span className="mt-1 block text-xs text-fg-3">
-            Planned by {p.by === "user" ? "you" : "the orchestrator"} · <TimeAgo at={p.created_at} />{options.length ? ` · ${options.join(" · ")}` : ""}{p.reason ? ` · ${p.reason}` : ""}
+            {t(p.by === "user" ? "run.plan.byYou" : "run.plan.byOrchestrator")} · <TimeAgo at={p.created_at} />{options.length ? ` · ${options.join(" · ")}` : ""}{p.reason ? ` · ${p.reason}` : ""}
           </span>
         </p>
-        <Button variant="quiet" disabled={busy} onClick={onCancel}>{p.failed ? "Dismiss" : "Cancel"}</Button>
+        <Button variant="quiet" disabled={busy} onClick={onCancel}>{t(p.failed ? "run.dismiss" : "common.cancel")}</Button>
       </div>
     </div>
   );
@@ -150,80 +158,83 @@ export function RunControls({ project, queue, onChanged }: { project: ProjectSta
   const chainable = project.queues.filter((x) => x.id !== queue.id && x.status !== "cancelled");
 
   return (
-    <Section title="Run with Nexus">
+    <Section title={t("run.title")}>
       <PlannedStart queue={queue} busy={busy} onCancel={() => call({ action: "cancel_start" })} />
       {!!queue.starts_next?.length && (
         <p className="mb-3 text-xs text-fg-2">
-          <span className="text-info">→</span> When this queue is done, {queue.starts_next.map((x, i) => <span key={x}>{i ? ", " : ""}<span className="font-mono text-fg">{x}</span></span>)} start{queue.starts_next.length === 1 ? "s" : ""}.
+          <span className="text-info">→</span> {rich("run.startsNext", {
+            queues: <span key="queues">{queue.starts_next.map((x, i) => <span key={x}>{i ? ", " : ""}<span className="font-mono text-fg">{x}</span></span>)}</span>,
+            count: queue.starts_next.length,
+          })}
         </p>
       )}
       {run && (
         <div className="mb-3 rounded-lg bg-surface-2 p-3 text-sm">
           <div className="flex flex-wrap items-center gap-2">
-            <RunState state={shown!.state}>{ended ? "ended" : RUN_LABEL[run.state]}</RunState>
-            {run.step && <span className="font-mono text-xs text-fg-2">at {run.step}</span>}
-            <span className="text-xs text-fg-3">since <TimeAgo at={run.updated_at} /></span>
+            <RunState state={shown!.state}>{ended ? t("run.state.ended") : RUN_LABEL[run.state] ? t(RUN_LABEL[run.state]!) : run.state}</RunState>
+            {run.step && <span className="font-mono text-xs text-fg-2">{t("run.atStep", { step: run.step })}</span>}
+            <span className="text-xs text-fg-3">{rich("run.since", { time: <TimeAgo key="time" at={run.updated_at} /> })}</span>
           </div>
           <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-fg-2"><RunTimes run={shown!} /></div>
           {run.reason && (ended
-            ? <p className="mt-1 text-xs text-fg-3">The queue is done. The run's last note: {run.reason}</p>
+            ? <p className="mt-1 text-xs text-fg-3">{t("run.lastNote", { reason: run.reason })}</p>
             : <p className="mt-1 text-fg">{run.reason}</p>)}
-          {runSession && <p className="mt-1 text-xs text-fg-3">Session: {runSession.title ?? runSession.id} {runSession.live?.model ? `· ${runSession.live.model}` : ""}{runSession.effort ? ` · ${runSession.effort} effort` : ""} <ContextBar s={runSession} /></p>}
-          {run.after && <p className="mt-1 text-xs text-fg-3">Started by its plan when <span className="font-mono">{run.after}</span> was done.</p>}
+          {runSession && <p className="mt-1 text-xs text-fg-3">{t("run.session", { session: runSession.title ?? runSession.id })} {runSession.live?.model ? `· ${runSession.live.model}` : ""}{runSession.effort ? ` · ${t("run.effort", { effort: runSession.effort })}` : ""} <ContextBar s={runSession} /></p>}
+          {run.after && <p className="mt-1 text-xs text-fg-3">{rich("run.startedByPlan", { queue: <span key="queue" className="font-mono">{run.after}</span> })}</p>}
           <SessionSwitches run={run} sessions={project.sessions} />
-          {run.summary_asked && run.state === "running" && <p className="mt-1 text-xs text-info">↪ The context is full: the session writes its summary of {run.summary_asked}; the next step runs in a fresh session.</p>}
-          {run.state === "usage_wait" && run.resume_at && <p className="mt-1 text-xs text-fg-3">Resumes by itself at {new Date(run.resume_at).toLocaleTimeString()}.</p>}
-          {waitsApproval && <p className="mt-1 text-xs text-info">Its last step ended while revision {queue.revision} waits for your approval: once you approve it, the run goes on by itself, in this session.</p>}
+          {run.summary_asked && run.state === "running" && <p className="mt-1 text-xs text-info">↪ {t("run.summaryAsked", { what: run.summary_asked })}</p>}
+          {run.state === "usage_wait" && run.resume_at && <p className="mt-1 text-xs text-fg-3">{t("run.resumesAt", { time: formatTime(run.resume_at) })}</p>}
+          {waitsApproval && <p className="mt-1 text-xs text-info">{t("run.waitsApproval", { revision: queue.revision })}</p>}
           <RetryNote run={run} />
         </div>
       )}
       <div className="flex flex-wrap items-center gap-2">
-        {active && run?.state !== "pausing" && <Button variant="quiet" disabled={busy} onClick={() => call({ action: "pause" })}>{waitsApproval ? "Pause" : "Pause after this step"}</Button>}
-        {active && !waitsApproval && <Button variant="danger" disabled={busy} onClick={() => call({ action: "stop" })}>Stop now</Button>}
-        {run && !ended && queue.status !== "stopped" && (run.state === "paused" || run.state === "halted") && <Button disabled={busy || !queue.approved} onClick={() => call({ action: "resume" })}>Resume</Button>}
+        {active && run?.state !== "pausing" && <Button variant="quiet" disabled={busy} onClick={() => call({ action: "pause" })}>{t(waitsApproval ? "run.pause" : "run.pauseAfterStep")}</Button>}
+        {active && !waitsApproval && <Button variant="danger" disabled={busy} onClick={() => call({ action: "stop" })}>{t("run.stopNow")}</Button>}
+        {run && !ended && queue.status !== "stopped" && (run.state === "paused" || run.state === "halted") && <Button disabled={busy || !queue.approved} onClick={() => call({ action: "resume" })}>{t("run.resume")}</Button>}
       </div>
       {canStart && (!run || run.state === "finished" || run.state === "halted" || run.state === "paused") && (
         <div className={`${run ? "mt-4 border-t border-line pt-3" : ""} flex flex-wrap items-end gap-3`}>
           <label className="text-xs text-fg-2">
-            <span className="mb-1 block">Session</span>
+            <span className="mb-1 block">{t("run.field.session")}</span>
             <select value={session} onChange={(e) => setSession(e.target.value)} className="max-w-72 rounded-md border border-line-strong bg-canvas px-2 py-1 text-sm text-fg">
-              <option value="">New session</option>
+              <option value="">{t("run.newSession")}</option>
               {reusable.map((s) => (
                 <option key={s.id} value={s.id}>
-                  Continue: {s.title ?? s.id.slice(-8)} ({s.runtime}){s.context ? ` (${s.context.topics.slice(0, 3).join(", ") || "has context"})` : ""}{s.live?.context_tokens && s.live.context_window ? ` · ${Math.round((100 * s.live.context_tokens) / s.live.context_window)}%` : ""}
+                  {t("run.continueSession", { session: s.title ?? s.id.slice(-8), runtime: s.runtime })}{s.context ? ` (${s.context.topics.slice(0, 3).join(", ") || t("run.hasContext")})` : ""}{s.live?.context_tokens && s.live.context_window ? ` · ${Math.round((100 * s.live.context_tokens) / s.live.context_window)}%` : ""}
                 </option>
               ))}
             </select>
           </label>
           <label className="text-xs text-fg-2">
-            <span className="mb-1 block">Runtime</span>
+            <span className="mb-1 block">{t("run.field.runtime")}</span>
             <select value={runtime} onChange={(e) => { setRuntime(e.target.value as "claude" | "codex"); setModel(""); setEffort(""); }} disabled={!!session} className="rounded-md border border-line-strong bg-canvas px-2 py-1 text-sm text-fg disabled:opacity-50">
               <option value="claude">Claude Code</option>
               <option value="codex">Codex</option>
             </select>
           </label>
           <label className="max-w-full text-xs text-fg-2">
-            <span className="mb-1 block">Model</span>
+            <span className="mb-1 block">{t("run.field.model")}</span>
             <ModelSelect runtime={runtime} value={model} onChange={setModel} disabled={!!session} className="max-w-full"
-              defaultLabel={session ? "as before" : defaultModel ? `default: ${defaultModel}` : "runtime default"} />
+              defaultLabel={session ? t("run.asBefore") : defaultModel ? t("run.defaultIs", { value: defaultModel }) : t("run.runtimeDefault")} />
           </label>
           <label className="text-xs text-fg-2">
-            <span className="mb-1 block">Effort</span>
+            <span className="mb-1 block">{t("run.field.effort")}</span>
             <EffortSelect runtime={runtime} model={model || (project.project.runtimes[runtime].model ?? "")} value={effort} onChange={setEffort}
-              defaultLabel={session ? "as before" : defaultEffort ? `default: ${defaultEffort}` : "default"} />
+              defaultLabel={session ? t("run.asBefore") : defaultEffort ? t("run.defaultIs", { value: defaultEffort }) : t("run.default")} />
           </label>
           <label className="text-xs text-fg-2">
-            <span className="mb-1 block">When</span>
+            <span className="mb-1 block">{t("run.field.when")}</span>
             <select value={after} onChange={(e) => setAfter(e.target.value)} className="max-w-60 rounded-md border border-line-strong bg-canvas px-2 py-1 text-sm text-fg">
-              <option value="">Now</option>
-              <option value={AT}>At a time…</option>
-              <option value={USAGE}>When the usage window resets</option>
-              {chainable.map((x) => <option key={x.id} value={x.id}>When {x.id} is done{x.status === "done" ? " (it is: now)" : ""}</option>)}
+              <option value="">{t("run.when.now")}</option>
+              <option value={AT}>{t("run.when.at")}</option>
+              <option value={USAGE}>{t("run.when.usage")}</option>
+              {chainable.map((x) => <option key={x.id} value={x.id}>{t(x.status === "done" ? "run.when.afterDone" : "run.when.after", { queue: x.id })}</option>)}
             </select>
           </label>
           {after === AT && (
             <label className="text-xs text-fg-2">
-              <span className="mb-1 block">Time</span>
+              <span className="mb-1 block">{t("run.field.time")}</span>
               <input type="datetime-local" value={time} onChange={(e) => setTime(e.target.value)} className="rounded-md border border-line-strong bg-canvas px-2 py-1 text-sm text-fg" />
             </label>
           )}
@@ -231,16 +242,17 @@ export function RunControls({ project, queue, onChanged }: { project: ProjectSta
             action: "start", model: model || undefined, effort: effort || undefined, session: session || undefined, runtime: session ? undefined : runtime,
             ...(after === AT ? { at: new Date(time).toISOString() } : after === USAGE ? { at: "usage-reset" } : after ? { after } : {}),
           })}>
-            {after === AT || after === USAGE ? "Schedule" : after ? `Start after ${after}` : run ? "Start a new run" : "Start"}
+            {after === AT || after === USAGE ? t("run.schedule") : after ? t("run.startAfter", { queue: after }) : t(run ? "run.startNew" : "run.start")}
           </Button>
         </div>
       )}
-      {!queue.approved && !active && <p className="text-sm text-fg-3">Approve the queue's current revision to run it.</p>}
+      {!queue.approved && !active && <p className="text-sm text-fg-3">{t("run.approveFirst")}</p>}
       {error && <p className="mt-2 text-xs text-danger">{error}</p>}
       <p className="mt-2 text-xs text-fg-3 wrap-anywhere">
-        {runtime === "codex" ? "Codex" : "Claude Code"} runs in {queue.worktree && queue.worktree !== "auto" ? <span className="font-mono">{queue.worktree}</span> : queue.worktree === "auto" ? "a new worktree" : <span className="font-mono">{project.project.root}</span>}{runtime === "codex"
-          ? ` with sandbox ${project.project.runtimes.codex.sandbox}, approvals ${project.project.runtimes.codex.approval_policy}.`
-          : ` with permission mode ${project.project.runtimes.claude.permission_mode}.`}
+        {rich(runtime === "codex" ? "run.whereCodex" : "run.whereClaude", {
+          place: queue.worktree && queue.worktree !== "auto" ? <span key="place" className="font-mono">{queue.worktree}</span> : queue.worktree === "auto" ? t("run.newWorktree") : <span key="place" className="font-mono">{project.project.root}</span>,
+          sandbox: project.project.runtimes.codex.sandbox, approvals: project.project.runtimes.codex.approval_policy, mode: project.project.runtimes.claude.permission_mode,
+        })}
       </p>
     </Section>
   );
@@ -259,11 +271,11 @@ export function Activity({ project, session, queue, step, version }: { project: 
   if (!items?.length) return null;
   const shown = all ? items : items.slice(-40);
   return (
-    <Section title="Agent activity" aside={items.length > 40 && <button className="text-xs text-accent" onClick={() => setAll(!all)}>{all ? "Latest only" : `All ${items.length}`}</button>}>
+    <Section title={t("run.activity")} aside={items.length > 40 && <button className="text-xs text-accent" onClick={() => setAll(!all)}>{all ? t("run.latestOnly") : t("run.all", { count: items.length })}</button>}>
       <ol className="scroll-thin max-h-96 space-y-1 overflow-y-auto rounded-lg bg-canvas p-3 font-mono text-xs">
         {shown.map((a, i) => (
           <li key={i} className={`flex gap-2 ${KIND_STYLE[a.kind] ?? "text-fg-2"}`}>
-            <span className="w-14 shrink-0 text-fg-3">{new Date(a.at).toLocaleTimeString("en-GB")}</span>
+            <span className="w-14 shrink-0 text-fg-3">{formatTime(a.at)}</span>
             <span className="w-3 shrink-0 text-fg-3">{KIND_ICON[a.kind] ?? "·"}</span>
             <span className={`min-w-0 break-words ${a.kind === "text" ? "whitespace-pre-wrap font-sans" : ""}`}>{a.text}</span>
           </li>
@@ -274,11 +286,11 @@ export function Activity({ project, session, queue, step, version }: { project: 
 }
 
 export function ContextBar({ s }: { s: SessionView }) {
-  const t = s.live?.context_tokens; const w = s.live?.context_window;
-  if (!t || !w) return null;
-  const pct = Math.round((100 * t) / w);
+  const used = s.live?.context_tokens; const w = s.live?.context_window;
+  if (!used || !w) return null;
+  const pct = Math.round((100 * used) / w);
   return (
-    <span className="inline-flex items-center gap-1.5 align-middle" title={`${t.toLocaleString()} of ${w.toLocaleString()} tokens`}>
+    <span className="inline-flex items-center gap-1.5 align-middle" title={t("run.tokens", { used: formatNumber(used), window: formatNumber(w) })}>
       <span className="inline-block h-1.5 w-16 overflow-hidden rounded bg-surface-3">
         <span className={`block h-full ${pct > 60 ? "bg-warn" : "bg-info"}`} style={{ width: `${Math.max(2, pct)}%` }} />
       </span>

@@ -14,6 +14,7 @@ import { queueStatus } from "../queueStatus.ts";
 import { needsWorkChoice, stopDecision, type LeftState, type WorkChoice } from "../stopDecision.ts";
 import { ActionBar, Button, CloseButton, Markdown, TEXTAREA, TimeAgo, useDraftText, type MenuEntry } from "./ui.tsx";
 import { StopBox, stopVersion, useLeft } from "./Stop.tsx";
+import { rich, t } from "../i18n.ts";
 
 // ---------------------------------------------------------------- which form
 
@@ -60,12 +61,12 @@ export function useApprove({ project, queue, left, work, onChanged }: {
   const disabled = !words.ready || !!d?.approve?.disabled;
   return {
     words, wordsOpen, setWordsOpen, note, disabled,
-    label: words.busy ? "Sending…" : d?.approve?.label ?? `Approve revision ${queue.revision}`,
+    label: words.busy ? t("ui.sending") : d?.approve?.label ?? t("stop.approve", { revision: queue.revision }),
     hint: d?.approve?.hint ?? pinsText(queue.revision, stopped),
     submit: () => { if (!disabled) void words.submit(); },
-    menu: (!wordsOpen ? [{ label: "Your words with the approval…", onSelect: () => setWordsOpen(true) }] : []) as MenuEntry[],
+    menu: (!wordsOpen ? [{ label: t("approval.wordsMenu"), onSelect: () => setWordsOpen(true) }] : []) as MenuEntry[],
     wordsBox: wordsOpen && (
-      <textarea value={words.text} rows={2} placeholder="Your words with the approval (optional)…" aria-label="Your words with the approval"
+      <textarea value={words.text} rows={2} placeholder={t("approval.wordsPlaceholder")} aria-label={t("approval.wordsLabel")}
         onChange={(e) => words.change(e.target.value)} onKeyDown={words.onKeyDown} className={TEXTAREA} />
     ),
   };
@@ -79,8 +80,8 @@ export function useCtrlEnter(enabled: boolean, go: () => void) {
     if (!enabled) return;
     const on = (e: KeyboardEvent) => {
       if (e.key !== "Enter" || !(e.ctrlKey || e.metaKey) || e.defaultPrevented) return;
-      const t = e.target as HTMLElement | null;
-      if (t && (t.closest("textarea, input, select, [contenteditable=true]"))) return;
+      const target = e.target as HTMLElement | null;
+      if (target && (target.closest("textarea, input, select, [contenteditable=true]"))) return;
       e.preventDefault();
       latest.current();
     };
@@ -98,7 +99,7 @@ export function askOrchestrator(project: string, queue: QueueView) {
 
 /** "Ask the orchestrator…" as a button of an action bar; `first` runs before it (the full view becomes its panel). */
 export const AskButton = ({ project, queue, first }: { project: string; queue: QueueView; first?: () => void }) => (
-  <Button variant="quiet" onClick={() => { first?.(); askOrchestrator(project, queue); }}>Ask the orchestrator…</Button>
+  <Button variant="quiet" onClick={() => { first?.(); askOrchestrator(project, queue); }}>{t("approval.ask")}</Button>
 );
 
 // ---------------------------------------------------------------- shared parts
@@ -109,12 +110,12 @@ function Proposed({ queue, chat, open, setOpen }: { queue: QueueView; chat: read
   return (
     <span className="inline-flex flex-wrap items-center gap-x-1.5">
       {queue.source
-        ? <span>imported from <span className="font-mono">{queue.source.path}</span> <TimeAgo at={queue.source.imported_at} /></span>
-        : draft ? <span>proposed by the orchestrator <TimeAgo at={draft.at} /></span>
-        : queue.updated_at ? <span>proposed <TimeAgo at={queue.updated_at} /></span> : null}
+        ? <span>{rich("approval.imported", { path: <span key="path" className="font-mono">{queue.source.path}</span>, time: <TimeAgo key="time" at={queue.source.imported_at} /> })}</span>
+        : draft ? <span>{rich("approval.proposedByOrchestrator", { time: <TimeAgo key="time" at={draft.at} /> })}</span>
+        : queue.updated_at ? <span>{rich("approval.proposed", { time: <TimeAgo key="time" at={queue.updated_at} /> })}</span> : null}
       {draft?.message && (
         <button onClick={() => setOpen(!open)} aria-expanded={open} className="rounded px-1 text-accent hover:bg-surface-3 max-lg:min-h-11">
-          {open ? "▾" : "▸"} its message
+          {open ? "▾" : "▸"} {t("approval.itsMessage")}
         </button>
       )}
     </span>
@@ -126,7 +127,7 @@ function MessageBox({ queue, chat }: { queue: QueueView; chat: readonly ChatEntr
   if (!m) return null;
   return (
     <div className="rounded-lg border border-line bg-surface-2 px-4 py-3 text-sm">
-      <p className="mb-1 text-xs text-fg-3">The orchestrator · <TimeAgo at={m.at} /></p>
+      <p className="mb-1 text-xs text-fg-3">{t("approval.orchestrator")} · <TimeAgo at={m.at} /></p>
       <Markdown>{m.text}</Markdown>
     </div>
   );
@@ -137,7 +138,7 @@ function StatusWord({ queue }: { queue: QueueView }) {
   // What the view is for: the approval ("needs approval (revision 3) · then starts after HS" for a revised one); a
   // stopped queue whose revision is approved says where it stopped.
   const honest = queueStatus(queue);
-  const s = honest.tone === "approval" || queue.status === "stopped" ? honest : { tone: "approval", label: "needs your approval" };
+  const s = honest.tone === "approval" || queue.status === "stopped" ? honest : { tone: "approval", label: t("status.needsYourApproval") };
   const [text, dot] = (STATUS_TONE[s.tone] ?? "text-fg-2 bg-fg-2").split(" ");
   return <span className={`inline-flex items-center gap-1.5 font-medium ${text}`}><span className={`h-1.5 w-1.5 rounded-full ${dot}`} />{s.label}</span>;
 }
@@ -148,7 +149,7 @@ export function SettingsLine({ project, queue }: { project: ProjectState; queue:
   return (
     <>
       <span>{r.parts.join(" · ")}</span>
-      {r.own.length > 0 && <span className="text-review" title="Steps with their own runtime, model or effort">⚙ {r.own.join("; ")}</span>}
+      {r.own.length > 0 && <span className="text-review" title={t("approval.ownValues")}>⚙ {r.own.join("; ")}</span>}
     </>
   );
 }
@@ -157,7 +158,7 @@ const Acceptance = ({ step }: { step: StepView }) => (
   <>
     {step.acceptance.length > 0 && (
       <>
-        <p className="mt-1 text-[11px] font-semibold uppercase tracking-wider text-fg-3">Acceptance</p>
+        <p className="mt-1 text-[11px] font-semibold uppercase tracking-wider text-fg-3">{t("approval.acceptance")}</p>
         <ul className="space-y-1.5">
           {step.acceptance.map((a, i) => (
             <li key={i} className="grid grid-cols-[16px_1fr] gap-2 text-sm text-fg-2"><span className="text-fg-3">◇</span><Markdown className="[&_p]:m-0">{a}</Markdown></li>
@@ -165,7 +166,7 @@ const Acceptance = ({ step }: { step: StepView }) => (
         </ul>
       </>
     )}
-    {step.review?.prepare && <p className="text-sm text-fg-2"><span className="text-fg-3">Review to prepare: </span>{step.review.prepare}</p>}
+    {step.review?.prepare && <p className="text-sm text-fg-2"><span className="text-fg-3">{t("approval.reviewToPrepare")} </span>{step.review.prepare}</p>}
   </>
 );
 
@@ -174,8 +175,8 @@ function StopConditions({ project, queue }: { project: ProjectState; queue: Queu
   return (
     <ul className="space-y-1.5 text-sm text-fg">
       {queue.stop_conditions.map((c, i) => <li key={i} className="flex gap-2"><span className="text-stop/70">■</span><Markdown className="[&_p]:m-0">{c}</Markdown></li>)}
-      {inherited.map((c, i) => <li key={`p${i}`} className="flex gap-2 text-fg-3"><span>□</span><span>{c} <span className="text-xs">(project)</span></span></li>)}
-      {queue.stop_conditions.length + inherited.length === 0 && <li className="text-fg-3">None.</li>}
+      {inherited.map((c, i) => <li key={`p${i}`} className="flex gap-2 text-fg-3"><span>□</span><span>{c} <span className="text-xs">{t("approval.fromProject")}</span></span></li>)}
+      {queue.stop_conditions.length + inherited.length === 0 && <li className="text-fg-3">{t("approval.none")}</li>}
     </ul>
   );
 }
@@ -203,9 +204,9 @@ export function CompactSteps({ project, queue, chat, onFull }: { project: Projec
   return (
     <section className="mt-5">
       <div className="mb-2 flex items-center gap-2">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-2">Steps · what you approve</h3>
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-2">{t("approval.stepsHeading")}</h3>
         <span className="flex-1" />
-        {onFull && <button onClick={onFull} className="rounded px-1.5 py-0.5 text-xs text-accent hover:bg-surface-3 max-lg:min-h-11" title="The whole queue in one scroll">Full view ⤢</button>}
+        {onFull && <button onClick={onFull} className="rounded px-1.5 py-0.5 text-xs text-accent hover:bg-surface-3 max-lg:min-h-11" title={t("approval.fullViewTitle")}>{t("approval.fullView")}</button>}
       </div>
       <ul className="overflow-hidden rounded-lg border border-line">
         {queue.steps.map((s) => {
@@ -220,7 +221,7 @@ export function CompactSteps({ project, queue, chat, onFull }: { project: Projec
                   <span className="block font-semibold text-fg">{s.title}</span>
                   {s.goal && !o && <span className="mt-0.5 line-clamp-2 text-sm text-fg-2">{s.goal.replace(/\s+/g, " ")}</span>}
                 </span>
-                <span className="whitespace-nowrap pt-0.5 text-xs text-fg-3">{n ? `${n} criteri${n === 1 ? "on" : "a"}` : "no criteria"} {o ? "▴" : "▾"}</span>
+                <span className="whitespace-nowrap pt-0.5 text-xs text-fg-3">{n ? t("approval.criteria", { count: n }) : t("approval.noCriteria")} {o ? "▴" : "▾"}</span>
               </button>
               {o && (
                 <div className="space-y-2 px-3 pb-3 pl-[4.25rem]">
@@ -233,10 +234,10 @@ export function CompactSteps({ project, queue, chat, onFull }: { project: Projec
         })}
       </ul>
       <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm">
-        {queue.description && fold("description", "Description")}
-        {fold("stops", `Stop conditions · ${stopCount(project, queue)}`)}
-        {queue.checks.length > 0 && fold("checks", `Checks · ${queue.checks.length}`)}
-        {draft?.message && fold("message", "The orchestrator's message")}
+        {queue.description && fold("description", t("approval.description"))}
+        {fold("stops", t("approval.stopConditionsCount", { count: stopCount(project, queue) }))}
+        {queue.checks.length > 0 && fold("checks", t("approval.checksCount", { count: queue.checks.length }))}
+        {draft?.message && fold("message", t("approval.message"))}
       </div>
       {open.description && queue.description && <div className="mt-2 text-sm text-fg-2"><Markdown>{queue.description}</Markdown></div>}
       {open.stops && <div className="mt-2"><StopConditions project={project} queue={queue} /></div>}
@@ -271,11 +272,11 @@ export function ApprovalView({ project, queue, chat, sidebar, onClose, onPanel, 
   // The outline: its entries, the one in view, a click scrolls to it.
   const doc = useRef<HTMLDivElement>(null);
   const entries: { key: string; mark: ReactNode; label: string }[] = [
-    ...(stopped ? [{ key: "stop", mark: <span className="text-stop">■</span>, label: "The stop" }] : []),
-    ...(queue.description ? [{ key: "description", mark: "≡", label: "Description" }] : []),
+    ...(stopped ? [{ key: "stop", mark: <span className="text-stop">■</span>, label: t("approval.theStop") }] : []),
+    ...(queue.description ? [{ key: "description", mark: "≡", label: t("approval.description") }] : []),
     ...queue.steps.map((s) => ({ key: `step-${s.id}`, mark: <span className="font-mono text-[11px]">{s.id}</span>, label: s.title })),
-    { key: "stops", mark: "⚑", label: `Stop conditions · ${stopCount(project, queue)}` },
-    ...(queue.checks.length ? [{ key: "checks", mark: "✓", label: `Checks · ${queue.checks.length}` }] : []),
+    { key: "stops", mark: "⚑", label: t("approval.stopConditionsCount", { count: stopCount(project, queue) }) },
+    ...(queue.checks.length ? [{ key: "checks", mark: "✓", label: t("approval.checksCount", { count: queue.checks.length }) }] : []),
   ];
   const [current, setCurrent] = useState(entries[0]?.key);
   // The part picked in the outline stays marked while it shows (the last ones cannot reach the top), until the user
@@ -288,11 +289,11 @@ export function ApprovalView({ project, queue, chat, sidebar, onClose, onPanel, 
     const on = () => {
       const box = d.getBoundingClientRect();
       if (picked.current) {
-        const t = top(picked.current);
-        if (t !== undefined && t >= box.top - 4 && t < box.bottom - 40) { setCurrent(picked.current); return; }
+        const y = top(picked.current);
+        if (y !== undefined && y >= box.top - 4 && y < box.bottom - 40) { setCurrent(picked.current); return; }
       }
       let at = entries[0]?.key;
-      for (const e of entries) { const t = top(e.key); if (t !== undefined && t <= box.top + 24) at = e.key; }
+      for (const e of entries) { const y = top(e.key); if (y !== undefined && y <= box.top + 24) at = e.key; }
       setCurrent(at);
     };
     const byHand = () => { picked.current = undefined; };
@@ -314,16 +315,16 @@ export function ApprovalView({ project, queue, chat, sidebar, onClose, onPanel, 
     setCurrent(key);
   };
 
-  const menu: MenuEntry[] = [...a.menu, { label: "Show as a panel", onSelect: onPanel }];
+  const menu: MenuEntry[] = [...a.menu, { label: t("approval.showAsPanel"), onSelect: onPanel }];
   const fail = a.words.error;
   const hint = fail ? <span className="text-danger">{fail}</span>
     : a.note ? <span className="text-info">{a.note}</span>
-    : <>{a.hint} · Ctrl+Enter</>;
+    : <>{a.hint} · {t("ui.ctrlEnter")}</>;
   return (
-    <div role="dialog" aria-label={`Approve queue ${queue.id}`} className="fixed inset-y-0 right-0 z-40 flex flex-col bg-canvas pt-[env(safe-area-inset-top)]" style={{ left: sidebar ?? 0 }}>
+    <div role="dialog" aria-label={t("approval.dialog", { queue: queue.id })} className="fixed inset-y-0 right-0 z-40 flex flex-col bg-canvas pt-[env(safe-area-inset-top)]" style={{ left: sidebar ?? 0 }}>
       <header className="shrink-0 border-b border-line bg-surface px-5 pb-3.5 pt-3 sm:px-7 sm:pt-4">
         <div className="flex items-center gap-2 text-xs text-fg-3">
-          <span className="min-w-0 truncate">{project.project.name} · queue · revision {queue.revision}</span>
+          <span className="min-w-0 truncate">{t("approval.where", { project: project.project.name, revision: queue.revision })}</span>
           <span className="flex-1" />
           <CloseButton onClose={onClose} />
         </div>
@@ -336,8 +337,8 @@ export function ApprovalView({ project, queue, chat, sidebar, onClose, onPanel, 
         {messageOpen && <div className="mt-3 max-w-[900px]"><MessageBox queue={queue} chat={chat} /></div>}
       </header>
       <div className="grid min-h-0 flex-1 lg:grid-cols-[300px_1fr]">
-        <nav aria-label="In this queue" className="scroll-thin hidden overflow-y-auto border-r border-line px-3 py-4 lg:block">
-          <p className="px-2.5 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-fg-3">In this queue</p>
+        <nav aria-label={t("approval.outline")} className="scroll-thin hidden overflow-y-auto border-r border-line px-3 py-4 lg:block">
+          <p className="px-2.5 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-fg-3">{t("approval.outline")}</p>
           {entries.map((e) => (
             <button key={e.key} onClick={() => jump(e.key)} aria-current={current === e.key ? "location" : undefined}
               className={`grid w-full grid-cols-[38px_1fr] gap-1.5 rounded-md px-2.5 py-1.5 text-left text-[13px] ${current === e.key ? "bg-surface-3 text-fg" : "text-fg-2 hover:bg-surface-2"}`}>
@@ -354,24 +355,24 @@ export function ApprovalView({ project, queue, chat, sidebar, onClose, onPanel, 
             )}
             {queue.description && (
               <section data-part="description" className="border-b border-line pb-4">
-                <h2 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-fg-3">Description</h2>
+                <h2 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-fg-3">{t("approval.description")}</h2>
                 <div className="text-sm text-fg-2"><Markdown>{queue.description}</Markdown></div>
               </section>
             )}
             {queue.steps.map((s) => (
               <section key={s.id} data-part={`step-${s.id}`} className="space-y-2 border-b border-line pb-4">
                 <h2 className="flex items-baseline gap-2.5 font-semibold text-fg"><span className="font-mono text-xs font-normal text-fg-3">{s.id}</span>{s.title}</h2>
-                {s.goal ? <div className="text-sm text-fg-2"><Markdown>{s.goal}</Markdown></div> : <p className="text-sm text-fg-3">No goal written.</p>}
+                {s.goal ? <div className="text-sm text-fg-2"><Markdown>{s.goal}</Markdown></div> : <p className="text-sm text-fg-3">{t("approval.noGoal")}</p>}
                 <Acceptance step={s} />
               </section>
             ))}
             <section data-part="stops" className="border-b border-line pb-4">
-              <h2 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-fg-3">Stop conditions</h2>
+              <h2 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-fg-3">{t("approval.stopConditions")}</h2>
               <StopConditions project={project} queue={queue} />
             </section>
             {queue.checks.length > 0 && (
               <section data-part="checks">
-                <h2 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-fg-3">Checks for every step</h2>
+                <h2 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-fg-3">{t("approval.checks")}</h2>
                 <Checks queue={queue} />
               </section>
             )}

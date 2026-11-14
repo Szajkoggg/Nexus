@@ -8,6 +8,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { ComparisonNames } from "../review.ts";
+import { t } from "../i18n.ts";
 
 export interface ViewerImage {
   src: string; label: string; round?: number; before?: { src: string; label: string };
@@ -38,13 +39,13 @@ export function ImageViewer({ images, index, onIndex, onClose, footer, back, con
   const img = images[index]!;
   const [mode, setMode] = useState<Mode>("both");
   const shown: Mode = img.before ? mode : "after";
-  const names = img.comparison ?? { left: "Before", right: "After" };
+  const names = img.comparison ?? { left: t("review.side.before"), right: t("review.side.after") };
   const prev = index > 0 ? () => onIndex(index - 1) : undefined;
   const next = index < images.length - 1 ? () => onIndex(index + 1) : undefined;
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement | null;
-      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable)) return;
       if (e.key === "ArrowLeft") prev?.();
       if (e.key === "ArrowRight") next?.();
     };
@@ -57,10 +58,10 @@ export function ImageViewer({ images, index, onIndex, onClose, footer, back, con
   useEffect(() => { strip.current?.querySelector("[aria-current=true]")?.scrollIntoView({ block: "nearest", inline: "nearest" }); }, [index]);
   const marked = images.filter((x) => x.accepted).length;
   return createPortal(
-    <div role="dialog" aria-label="Review image" className="fixed inset-0 z-[60] flex flex-col bg-canvas pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+    <div role="dialog" aria-label={t("viewer.dialog")} className="fixed inset-0 z-[60] flex flex-col bg-canvas pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
       <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-line bg-surface px-3 py-2 text-sm">
         {back && (
-          <button onClick={onClose} aria-label={`Back to ${back}`} className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1.5 text-fg-2 hover:bg-surface-3 hover:text-fg max-lg:min-h-11">
+          <button onClick={onClose} aria-label={t("viewer.backTo", { place: back })} className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1.5 text-fg-2 hover:bg-surface-3 hover:text-fg max-lg:min-h-11">
             <Chevron dir="left" /><span className="font-mono text-xs">{back}</span>
           </button>
         )}
@@ -68,22 +69,22 @@ export function ImageViewer({ images, index, onIndex, onClose, footer, back, con
           <div className="truncate font-semibold text-fg">{img.label}</div>
           <div className="truncate text-xs text-fg-3">
             {/* The comparison first: on a phone the line is cut at its end. */}
-            {images.length > 1 ? `picture ${index + 1} of ${images.length}` : "1 picture"}
+            {images.length > 1 ? t("viewer.pictureOf", { at: index + 1, total: images.length }) : t("viewer.onePicture")}
             {names.text && <> · <span className="font-semibold text-fg-2">{names.text}</span></>}
             {img.key && <> · <span className="font-mono">{img.key}</span></>}
-            {img.round ? ` · round ${img.round}` : ""}{context ? ` · ${context}` : ""}
+            {img.round ? ` · ${t("review.round", { round: img.round })}` : ""}{context ? ` · ${context}` : ""}
           </div>
         </div>
         {img.before && (
-          <div className="flex shrink-0 gap-0.5 rounded-lg border border-line bg-surface-2 p-0.5 max-lg:order-last max-lg:basis-full max-lg:justify-center" role="group" aria-label={`Compare ${names.left} and ${names.right}`}>
-            {([["after", names.right], ["both", `${names.left} | ${names.right}`], ["overlay", "Overlay"]] as const).map(([m, label]) => (
+          <div className="flex shrink-0 gap-0.5 rounded-lg border border-line bg-surface-2 p-0.5 max-lg:order-last max-lg:basis-full max-lg:justify-center" role="group" aria-label={t("viewer.compare", { left: names.left, right: names.right })}>
+            {([["after", names.right], ["both", `${names.left} | ${names.right}`], ["overlay", t("viewer.overlay")]] as const).map(([m, label]) => (
               <button key={m} onClick={() => setMode(m)} aria-pressed={shown === m}
                 className={`rounded-md px-3 py-1 text-xs max-lg:min-h-9 ${shown === m ? "bg-surface-4 font-semibold text-fg" : "text-fg-2 hover:text-fg"}`}>{label}</button>
             ))}
           </div>
         )}
-        {!footer && <a href={img.src} target="_blank" rel="noreferrer" className="shrink-0 rounded-md px-2 py-1.5 text-xs text-accent hover:bg-surface-3" title="Open the original file in a new tab">Original ↗</a>}
-        <button onClick={onClose} aria-label="Close" className="grid shrink-0 place-items-center rounded-md p-1.5 text-fg-2 hover:bg-surface-3 hover:text-fg max-lg:h-11 max-lg:w-11">
+        {!footer && <a href={img.src} target="_blank" rel="noreferrer" className="shrink-0 rounded-md px-2 py-1.5 text-xs text-accent hover:bg-surface-3" title={t("viewer.originalTitle")}>{t("viewer.original")}</a>}
+        <button onClick={onClose} aria-label={t("common.close")} className="grid shrink-0 place-items-center rounded-md p-1.5 text-fg-2 hover:bg-surface-3 hover:text-fg max-lg:h-11 max-lg:w-11">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 6l12 12M18 6L6 18" /></svg>
         </button>
       </header>
@@ -92,22 +93,22 @@ export function ImageViewer({ images, index, onIndex, onClose, footer, back, con
         {shown === "after" || !img.before
           ? <Stage key={index} src={img.src} alt={img.label} onSwipe={(d) => (d > 0 ? next : prev)?.()} />
           : <Compare key={`${index}-${shown}`} before={img.before} after={{ src: img.src, label: img.label }} names={names} mode={shown} onSwipe={(d) => (d > 0 ? next : prev)?.()} />}
-        {prev && <button onClick={prev} aria-label="Previous image" className={`${arrow} left-2`}><Chevron dir="left" /></button>}
-        {next && <button onClick={next} aria-label="Next image" className={`${arrow} right-2`}><Chevron dir="right" /></button>}
+        {prev && <button onClick={prev} aria-label={t("viewer.previous")} className={`${arrow} left-2`}><Chevron dir="left" /></button>}
+        {next && <button onClick={next} aria-label={t("viewer.next")} className={`${arrow} right-2`}><Chevron dir="right" /></button>}
       </div>
       {images.length > 1 && (
         <div className="flex items-center gap-3 border-t border-line bg-surface px-3 py-2">
-          <div ref={strip} className="scroll-thin flex min-w-0 gap-2 overflow-x-auto" role="list" aria-label="The step's pictures">
+          <div ref={strip} className="scroll-thin flex min-w-0 gap-2 overflow-x-auto" role="list" aria-label={t("viewer.strip")}>
             {images.map((x, i) => (
               <button key={i} role="listitem" onClick={() => onIndex(i)} aria-current={i === index} title={x.label}
                 className={`relative h-12 w-20 shrink-0 overflow-hidden rounded-md border-2 bg-canvas lg:h-16 lg:w-28 ${i === index ? "border-accent" : "border-transparent opacity-80 hover:opacity-100"}`}>
                 <img src={x.src} alt={x.label} draggable={false} className="h-full w-full object-cover object-left-top" loading="lazy" />
-                {x.accepted && <span className="absolute right-1 top-1 rounded bg-ok px-1 text-[11px] font-bold leading-4 text-canvas" title="Marked">✓</span>}
-                {!!x.comments && <span className="absolute bottom-1 right-1 rounded bg-canvas/80 px-1 text-[10px] leading-4 text-info" title="Your comments">💬 {x.comments}</span>}
+                {x.accepted && <span className="absolute right-1 top-1 rounded bg-ok px-1 text-[11px] font-bold leading-4 text-canvas" title={t("viewer.marked")}>✓</span>}
+                {!!x.comments && <span className="absolute bottom-1 right-1 rounded bg-canvas/80 px-1 text-[10px] leading-4 text-info" title={t("viewer.comments")}>💬 {x.comments}</span>}
               </button>
             ))}
           </div>
-          <span className="ml-auto shrink-0 whitespace-nowrap text-xs text-fg-3">{marked} of {images.length} marked<span className="max-lg:hidden"> · ← → to move</span></span>
+          <span className="ml-auto shrink-0 whitespace-nowrap text-xs text-fg-3">{t("viewer.markedOf", { marked, total: images.length })}<span className="max-lg:hidden"> · {t("viewer.keys")}</span></span>
         </div>
       )}
       {footer?.(index)}
@@ -226,7 +227,7 @@ function Compare({ before, after, names, mode, onSwipe }: { before: { src: strin
         <span className={tag}>{names.left} · {before.label}</span>
         <span className="absolute right-2 top-2 rounded bg-canvas/70 px-1.5 py-0.5 text-[11px] text-fg">{names.right}</span>
       </div>
-      <input type="range" min={0} max={100} value={split} onChange={(e) => setSplit(Number(e.target.value))} aria-label={`${names.left} and ${names.right} split`} className="mx-4 my-2 accent-accent" />
+      <input type="range" min={0} max={100} value={split} onChange={(e) => setSplit(Number(e.target.value))} aria-label={t("viewer.split", { left: names.left, right: names.right })} className="mx-4 my-2 accent-accent" />
     </div>
   );
 }
