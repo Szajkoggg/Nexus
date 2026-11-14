@@ -1,7 +1,7 @@
 // The morning digest on the dashboard: whether there is something new since a time, the four numbers, the outcome words.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { digestTiles, hasNews, outcome } from "../src/digest.ts";
+import { digestTiles, hasNews, outcome, usageLine } from "../src/digest.ts";
 import type { DigestEvent } from "@nexus/protocol/digest";
 
 const T = (hhmm: string) => `2026-11-13T${hhmm}:00.000Z`;
@@ -41,4 +41,11 @@ test("outcome words", () => {
   assert.equal(outcome({ kind: "retried", count: 2 }).word, "retried twice");
   assert.equal(outcome({ kind: "retried", count: 5 }).word, "retried 5 times");
   assert.equal(outcome({ kind: "queue_done" }).word, "queue done");
+});
+
+test("the usage line: the 5-hour peak, the 7-day window now, the waits; what is unknown is left out", () => {
+  assert.equal(usageLine({ turns: 12, peak_5h: 0.824, now_7d: 0.41, waits: 0, wait_ms: 0 }), "Usage: 5-hour window peak 82%, 7-day window now 41%, no waits");
+  assert.match(usageLine({ turns: 3, peak_5h: 1, now_7d: 0.5, waits: 2, wait_ms: 65 * 60_000 }), /^Usage: 5-hour window peak 100%, 7-day window now 50%, 2 waits \(1 ?h 5 ?min in all\)$/);
+  assert.match(usageLine({ turns: 3, now_7d: 0.07, waits: 1, wait_ms: 20 * 60_000 }), /^Usage: 7-day window now 7%, 1 wait \(20 ?min\)$/);
+  assert.equal(usageLine({ turns: 0, waits: 0, wait_ms: 0 }), "Usage: no agent turns");
 });

@@ -1,11 +1,12 @@
 // Where the user is in each chat (decided 2026-11-14; docs/ideas/side-panels-and-waiting-list.md): every chat, the
 // orchestrator's and each conversation, opens where the user left it; messages that came meanwhile do not move the
 // view, a "N new" button jumps to them; a chat opened for the first time opens at its newest message. Kept per chat
-// for the browser session (sessionStorage), keyed by project and chat. The same state gives the unread markers on the
-// chat switch ("Orchestrator (2)", "Ideas •").
+// in the browser's localStorage (decided 2026-11-14, queue FU: it outlasts a reload and a closed tab), keyed by project
+// and chat; another tab's change is heard too. The same state gives the unread markers on the chat switch
+// ("Orchestrator (2)", "Ideas •").
 //
 // The pure part (what to open at, what is unread, what was seen) has no DOM in it and is unit tested; the store below
-// it is a thin wrapper around sessionStorage with listeners, so the markers follow.
+// it is a thin wrapper around localStorage with listeners, so the markers follow.
 import { useSyncExternalStore } from "react";
 
 /** A chat's place: the entry at the top of the view (its index in the whole chat) and how far it was scrolled past it. */
@@ -32,7 +33,7 @@ const fromOthers = (e: EntryLike) => e.from !== "user" && e.kind !== "tool";
 const after = (at: string, seen: string) => Date.parse(at) > Date.parse(seen);
 
 /**
- * How many messages came after the time seen. A chat never seen in this session has no count: the first time it opens
+ * How many messages came after the time seen. A chat never seen in this browser has no count: the first time it opens
  * at its newest message, so nothing in it is unread.
  */
 export function unreadCount(chat: readonly EntryLike[], seen: string | undefined): number {
@@ -82,7 +83,7 @@ export function parsePlace(raw: string | null): Place | undefined {
   } catch { return undefined; }
 }
 
-// ---------------------------------------------------------------- sessionStorage
+// ---------------------------------------------------------------- localStorage
 
 const PREFIX = "nexus.place:";
 const listeners = new Set<() => void>();
@@ -90,17 +91,30 @@ const listeners = new Set<() => void>();
 let version = 0;
 
 export function readPlace(key: string): Place | undefined {
-  try { return parsePlace(sessionStorage.getItem(PREFIX + key)); } catch { return undefined; }
+  try { return parsePlace(localStorage.getItem(PREFIX + key)); } catch { return undefined; }
 }
 
 /** Stores a place; listeners hear of it when its time seen changed (the anchor alone moves on every scroll). */
 export function writePlace(key: string, place: Place): void {
   const before = readPlace(key);
-  try { sessionStorage.setItem(PREFIX + key, JSON.stringify(place)); } catch { /* storage blocked: the place lives as long as the view */ }
+  try { localStorage.setItem(PREFIX + key, JSON.stringify(place)); } catch { /* storage blocked: the place lives as long as the view */ }
   if (before?.seen !== place.seen) { version++; for (const l of listeners) l(); }
 }
 
 /** Re-renders when any chat's time seen changes; read the places with readPlace inside. */
 export function usePlaces(): number {
-  return useSyncExternalStore((l) => { listeners.add(l); return () => listeners.delete(l); }, () => version);
+  return useSyncExternalStore(subscribe, () => version);
+}
+
+/** Listens for changes here and, through the storage event, for another tab's change of a place. */
+function subscribe(l: () => void): () => void {
+  listeners.add(l);
+  if (listeners.size === 1 && typeof window !== "undefined") window.addEventListener("storage", fromOtherTab);
+  return () => { listeners.delete(l); if (!listeners.size && typeof window !== "undefined") window.removeEventListener("storage", fromOtherTab); };
+}
+
+function fromOtherTab(e: StorageEvent): void {
+  if (e.key !== null && !e.key.startsWith(PREFIX)) return;
+  version++;
+  for (const l of listeners) l();
 }

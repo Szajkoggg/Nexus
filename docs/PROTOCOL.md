@@ -887,7 +887,7 @@ wherever in the chat it is; a fresh session has none), `GET /api/digest?since=` 
 name, description and effort levels; the dashboard offers only these.
 
 `GET /api/digest?since=<ISO 8601>` is the morning digest across every registered project (`packages/protocol/src/digest.ts`):
-`{ since, events, running }`. `since` is the time asked for (an unreadable or missing one means the last 24 hours).
+`{ since, events, running, usage }`. `since` is the time asked for (an unreadable or missing one means the last 24 hours).
 `events`, newest first and at most 200, is what happened after it, each `{ at, project, project_name, kind, queue?,
 step?, text, count?, report? }`: `done` and `failed` (a `step.done` or `step.failed` event, with its summary or
 reason), `stopped` (a `queue.stop`, with its reason), `queue_done` and `queue_cancelled` (a queue whose status is done
@@ -896,7 +896,13 @@ of its report, for the file endpoint), `refused` (refusals, one line per queue a
 and input of the latest) and `retried` (activity entries of kind `retry`, one line per step with `count`, `text` the
 latest). `running` lists the queues whose run is running, pausing or waiting for a retry or the usage window (not
 one waiting for an approval: that one waits for the user, as an attention item of kind `approval`), each
-`{ project, project_name, queue, step?, since? }` (`since`: when the step's latest stretch at work began). Read-only.
+`{ project, project_name, queue, step?, since? }` (`since`: when the step's latest stretch at work began). `usage` is
+the usage line's numbers since the time (`usageSince`), from `<NEXUS_HOME>/turns.jsonl` and the runs now:
+`{ turns, peak_5h?, now_7d?, waits, wait_ms }`: how many turns ended in the period; the highest 5-hour utilization
+(0 to 1) a turn ended with (`five_hour`, `codex_5h`); each 7-day window's latest value, the higher of them
+(`seven_day`, `codex_7d`); and the waits for a usage window with their time in all: a turn with outcome `usage`, until
+its session's next turn (or now while that session's run is in `usage_wait`), and a run in `usage_wait` now that no
+such turn explains, from its file's last write (not before `since`). Read-only.
 
 **Uploads.** A browser does not reveal a file's path, so a picture added to a chat message travels in the request,
 base64 in a JSON body like every other write (and behind the same rules: the dashboard's own `Origin`, the token for

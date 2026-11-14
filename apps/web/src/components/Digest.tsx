@@ -1,12 +1,12 @@
 // The morning digest (UX proposals, 16; mockup 16): since the user last looked on this device, across projects: four
-// numbers, what happened newest first, and "Go through them one by one" for what waits. It shows when something is
+// numbers, what happened newest first, "Go through them one by one" for what waits, and at its foot the usage line. It shows when something is
 // new since the stored time; "Mark as seen" stores now and folds it. On a desktop at the top of the right rail, on the
 // phone at the top of the Waiting tab; the waiting list itself is the one below it there.
 import { useState } from "react";
 import type { DigestEvent, DigestResponse } from "@nexus/protocol/digest";
 import { mergeAttention } from "@nexus/protocol/attention";
 import { fileUrl, useFetch, type ProjectSummary } from "../api.ts";
-import { digestTiles, hasNews, outcome, type Tone } from "../digest.ts";
+import { digestTiles, hasNews, outcome, usageLine, type Tone } from "../digest.ts";
 import { nav } from "../nav.ts";
 import { formatClock, t } from "../i18n.ts";
 import { Clock } from "./ui.tsx";
@@ -77,6 +77,8 @@ export function Digest({ projects, version, onGoThrough }: { projects: ProjectSu
         </button>
         <p className="mt-1 text-xs text-fg-3">{t("digest.goThroughNote", { count: waiting.length })}</p>
       </>}
+
+      {d.usage && <p className="mt-3 border-t border-line pt-2 text-xs text-fg-2">{usageLine(d.usage)}</p>}
     </section>
   );
 }

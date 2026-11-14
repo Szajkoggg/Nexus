@@ -749,11 +749,12 @@ From 1280 px (`WIDE`) a rail stands at the right of the chat, 372 px wide as in 
 - **Waiting for you · N, all projects**: one card, an item a row (`WaitingCards` in Attention.tsx): its kind, where
   it is (with its project's name when it is not the current project) and when, the text in two lines; a stopped
   queue has Continue and Open, as on the waiting list. A tap opens the item in its project.
-- **Running in <project>**: the project's queues at work (`atWork` in `apps/web/src/rail.ts`, pure, unit tested),
-  each with its honest status from `queueStatus` as a dot and a few words (`shortStatus`): running ("1/3", steps
-  closed of all), waiting (a question, a retry, the usage window), in review, paused, or with a planned start ("after
-  SF"). Running and waiting stay apart (quick fix 3): a stopped or failed queue and one that needs approval are not
-  here but under Waiting for you; an approved queue with no start is not at work.
+- **Running in <project>**: the project's queues whose run goes now, running or pausing after its step (`atWork` in
+  `apps/web/src/rail.ts`, pure, unit tested; decided 2026-11-14, queue FU, after a planned queue showed here as
+  "after CL"), each with its honest status from `queueStatus` as a dot and a few words (`shortStatus`: "1/3", steps
+  closed of all, or "pausing"). Everything else is where it belongs: what waits for the user (a question, a review,
+  an approval, a stop or failure) under Waiting for you; what waits on its own (a retry, the usage window), what is
+  paused and what is planned in the project's queues (All queues).
 - **Finished today · N**: the project's queues done or cancelled today, most recent first, with their time
   (`finishedToday`, built on `splitFinished`, so one that still waits for the user is not finished).
 - **All queues of <project>** at its foot shows the queues in the middle (pressed while they show).
@@ -830,6 +831,14 @@ session's refusals and activity, and taken a request per project. It has, in a 3
   the rest one click away; a tap opens the item, a finished queue's report has "report ▸";
 - **Go through them one by one**, when something waits. The waiting list is the one under the digest (the rail's, the
   Waiting tab's), not a copy.
+- **the usage line** at its foot (decided 2026-11-14, queue FU; `usageLine` in `apps/web/src/digest.ts`, the numbers
+  from `usageSince` in `packages/protocol/src/digest.ts`, both unit tested): "Usage: 5-hour window peak 82%, 7-day
+  window now 41%, no waits" (or "2 waits (1 h 5 min in all)"). Its sources are the turn records (`turns.jsonl`) since
+  the time: the peak is the highest 5-hour utilization a turn ended with, the 7-day value the latest one (the higher
+  of Claude's and Codex's when both reported one); a wait is a turn that ended on a usage limit (until its session's
+  next turn, or now while its run still waits) or a run in `usage_wait` now that no such turn explains (from when it
+  began). A threshold wait that is already over leaves no record and is not counted. With no turn in the period the
+  line says "no agent turns".
 
 **One by one.** The button opens the first waiting item (newest first, as the list) and starts a round in App: once
 the item open no longer waits (an answer, an acceptance, an approval, Continue), the next one opens in its place
@@ -851,8 +860,9 @@ the text across. Drafts untouched for 14 days are pruned when the page loads.
 
 Decided by the user on 2026-11-14 (queue CH1). The chats are views (the desktop's middle column, the phone's tabs), so
 switching unmounts one and mounts the other; each chat, the orchestrator's and every conversation, now keeps its place
-for the browser session in `sessionStorage` (`nexus.place:<project>/orchestrator`, `…/conversation/<id>`, like the
-drafts' keys): the entry at the top of the view (its index in the whole chat, tool lines included, so showing or
+in the browser's `localStorage` (`nexus.place:<project>/orchestrator`, `…/conversation/<id>`, like the drafts' keys;
+`sessionStorage` until queue FU, which the user moved so the place outlasts a reload and a closed tab; another tab's
+change reaches the unread markers through the storage event): the entry at the top of the view (its index in the whole chat, tool lines included, so showing or
 hiding them keeps it) and how far past it, whether the view was at the end, and `seen`, the time of the latest entry
 that has been in view. The rules are pure (`apps/web/src/chatPlace.ts`, unit tested); `usePlace` in Chat.tsx applies
 them:

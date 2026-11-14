@@ -1,8 +1,8 @@
 // The morning digest: what happened in a project after a time, newest first, and what is at work now.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { newestFirst, projectDigest, projectRunning, type DigestEvent } from "../src/digest.ts";
-import type { Activity, Event, ProjectState, Refusal } from "../src/index.ts";
+import { newestFirst, projectDigest, projectRunning, usageSince, type DigestEvent } from "../src/digest.ts";
+import type { Activity, Event, ProjectState, Refusal, TurnRecord } from "../src/index.ts";
 
 const T = (hhmm: string, day = 13) => `2026-11-${day}T${hhmm}:00.000Z`;
 const ev = (at: string, body: Record<string, unknown>) => ({ v: 1, id: `e${at}`, at, session: "S1", ...body }) as unknown as Event;
@@ -59,4 +59,44 @@ test("across projects the lines merge newest first; what is at work now, with si
     { project: "p", project_name: "Proj", queue: "SF", step: "SF3", since: T("11:20") },
     { project: "p", project_name: "Proj", queue: "U", step: "U2", since: T("06:00") },
   ]);
+});
+
+// ---------------------------------------------------------------- the usage line (queue FU)
+
+const turn = (at: string, over: Partial<TurnRecord> = {}): TurnRecord =>
+  ({ v: 1, at, started_at: at, project: "p", session: "S1", role: "worker", runtime: "claude", outcome: "ok", ...over });
+const win = (u5: number | undefined, u7: number | undefined) =>
+  ({ ...(u5 !== undefined ? { five_hour: { utilization: u5 } } : {}), ...(u7 !== undefined ? { seven_day: { utilization: u7 } } : {}) });
+
+test("usage since a time: the 5-hour peak, the 7-day window's latest value, no waits", () => {
+  const turns = [
+    turn(T("07:00"), { windows_end: win(0.95, 0.3) }), // before the time: not counted
+    turn(T("08:10"), { windows_end: win(0.4, 0.35) }),
+    turn(T("09:30"), { windows_end: win(0.82, 0.41) }),
+    turn(T("10:00"), { windows_end: win(0.2, 0.44), session: "S2" }),
+    turn(T("10:30"), { runtime: "codex", windows_end: { codex_7d: { utilization: 0.12 } } }),
+  ];
+  assert.deepEqual(usageSince(turns, [], T("08:00"), new Date(T("11:00"))), { turns: 4, peak_5h: 0.82, now_7d: 0.44, waits: 0, wait_ms: 0 });
+  // Codex's weekly window counts as a 7-day one; the higher of the two runtimes' is shown.
+  assert.equal(usageSince([turn(T("10:30"), { runtime: "codex", windows_end: { codex_7d: { utilization: 0.6 } } })], [], T("08:00")).now_7d, 0.6);
+  // No turn in the period: nothing about the windows.
+  assert.deepEqual(usageSince(turns, [], T("10:45"), new Date(T("11:00"))), { turns: 0, waits: 0, wait_ms: 0 });
+});
+
+test("usage waits: a turn that hit a limit until its session's next turn, or now while its run waits; a threshold wait from its start", () => {
+  const now = new Date(T("12:00"));
+  const turns = [
+    turn(T("08:30"), { outcome: "usage", failure: "rate_limit" }),
+    turn(T("09:45", 13), { started_at: T("09:40") }), // S1 goes on after 70 min
+    turn(T("11:00"), { session: "S2", outcome: "usage" }), // S2 still waits: until now, 60 min
+  ];
+  const runs = [
+    { session: "S2", state: "usage_wait", updated_at: T("11:00") }, // explained by S2's turn: not counted twice
+    { session: "S3", state: "usage_wait", updated_at: T("11:30") }, // a threshold wait: 30 min so far
+    { session: "S4", state: "usage_wait", updated_at: T("06:00") }, // began before the time: counted from it, 4 h
+    { session: "S5", state: "running", updated_at: T("11:50") },
+  ];
+  const u = usageSince(turns, runs, T("08:00"), now);
+  assert.equal(u.waits, 4);
+  assert.equal(u.wait_ms, (70 + 60 + 30 + 240) * 60_000);
 });

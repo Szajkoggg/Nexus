@@ -1,7 +1,7 @@
 // The morning digest on the dashboard (UX proposals, 16): whether it shows, its four numbers, and what each line says.
 // The lines come from the server (GET /api/digest; packages/protocol/src/digest.ts); this part is pure and unit tested,
 // components/Digest.tsx draws it.
-import type { DigestEvent, DigestRunning } from "@nexus/protocol/digest";
+import type { DigestEvent, DigestRunning, DigestUsage } from "@nexus/protocol/digest";
 import type { WaitingItem } from "@nexus/protocol/attention";
 import { formatDuration, t, type Key } from "./i18n.ts";
 
@@ -42,6 +42,21 @@ export function digestTiles(events: readonly DigestEvent[], waiting: readonly Pi
     waiting: { n: waiting.length, text: `${t("digest.tile.waiting")}${kinds.length ? ` · ${kinds.join(", ")}` : ""}` },
     running: { n: running.length, text: `${t("digest.tile.running")}${runText ? ` · ${runText}` : ""}` },
   };
+}
+
+/**
+ * The usage line (decided 2026-11-14, queue FU): "Usage: 5-hour window peak 82%, 7-day window now 41%, no waits", or
+ * "2 waits (1 h 5 min in all)"; a window no turn reported is left out; with no turn in the period, "no agent turns".
+ */
+export function usageLine(u: DigestUsage): string {
+  if (!u.turns) return t("digest.usage", { parts: t("digest.usage.none") });
+  const pct = (x: number) => Math.round(x * 100);
+  const parts = [
+    ...(u.peak_5h !== undefined ? [t("digest.usage.peak", { pct: pct(u.peak_5h) })] : []),
+    ...(u.now_7d !== undefined ? [t("digest.usage.week", { pct: pct(u.now_7d) })] : []),
+    u.waits ? t("digest.usage.waits", { count: u.waits, duration: formatDuration(u.wait_ms) }) : t("digest.usage.noWaits"),
+  ];
+  return t("digest.usage", { parts: parts.join(", ") });
 }
 
 export type Tone = "ok" | "stop" | "danger" | "warn" | "muted";

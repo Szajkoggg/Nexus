@@ -167,6 +167,13 @@ export const en = {
   "digest.tile.stopped": { one: "queue stopped", other: "queues stopped" },
   "digest.tile.waiting": "waiting for you",
   "digest.tile.running": "running now",
+  /** The usage line at the digest's foot: the windows since the time, and the waits for one. */
+  "digest.usage": "Usage: {parts}",
+  "digest.usage.none": "no agent turns",
+  "digest.usage.peak": "5-hour window peak {pct}%",
+  "digest.usage.week": "7-day window now {pct}%",
+  "digest.usage.noWaits": "no waits",
+  "digest.usage.waits": { one: "{count} wait ({duration})", other: "{count} waits ({duration} in all)" },
   /** Where a queue stopped: the project and queue, and the step when there is one. */
   "digest.tile.where": "{project} {queue}",
   "digest.tile.whereStep": "{project} {queue} at {step}",

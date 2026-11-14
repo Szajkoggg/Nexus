@@ -12,9 +12,9 @@ import chokidar, { type FSWatcher } from "chokidar";
 import type { Server } from "node:http";
 import {
   ActionError, Effort, ProjectStore, addNote, updateSettings, answerAsUser, approveQueue, deleteNote, loadProjectState, nexusHome, withdrawApproval, addAllowRule,
-  ensureGlobalSettings, readGlobalSettings, updateGlobalSettings, ownKeys, OVERRIDABLE, settingKey, readRegistry, readUsage, commentOnPicture, markPicture, routeAnswers, routeSendBacks, sendBack, sendMessage, setQueueSettings, type ProjectState,
+  ensureGlobalSettings, readGlobalSettings, updateGlobalSettings, ownKeys, OVERRIDABLE, settingKey, readRegistry, readUsage, readTurns, commentOnPicture, markPicture, routeAnswers, routeSendBacks, sendBack, sendMessage, setQueueSettings, type ProjectState,
 } from "@nexus/protocol";
-import { newestFirst, projectDigest, projectRunning, type DigestEvent, type DigestResponse, type DigestRunning } from "@nexus/protocol/digest";
+import { newestFirst, projectDigest, projectRunning, usageSince, type DigestEvent, type DigestResponse, type DigestRunning, type UsageRun } from "@nexus/protocol/digest";
 import { Engine } from "./engine.ts";
 import { Coordinator, readLimits, validLimit, writeLimits } from "./coordinator.ts";
 import { branchState, leftBehind, stepCommits } from "./gitinfo.ts";
@@ -462,9 +462,11 @@ app.get("/api/digest", (c) => {
   const since = q && !Number.isNaN(Date.parse(q)) ? new Date(q).toISOString() : new Date(Date.now() - 86_400_000).toISOString();
   const events: DigestEvent[] = [];
   const running: DigestRunning[] = [];
+  const runs: UsageRun[] = [];
   for (const e of projects.values()) {
     const state = stateOf(e);
     if (!state) continue;
+    for (const q of state.queues) if (q.run) runs.push({ session: q.run.session, state: q.run.state, updated_at: q.run.updated_at });
     const ids = e.store.sessionIds();
     const recent = <T extends { at: string }>(xs: T[]) => xs.filter((x) => x.at > since);
     events.push(...projectDigest({
@@ -475,7 +477,9 @@ app.get("/api/digest", (c) => {
     }, since));
     running.push(...projectRunning(state));
   }
-  return c.json({ since, events: newestFirst(events).slice(0, 200), running } satisfies DigestResponse);
+  // The usage line: the account's windows are server-wide, so its turns are every project's (turns.jsonl).
+  const usage = usageSince(readTurns().entries, runs, since);
+  return c.json({ since, events: newestFirst(events).slice(0, 200), running, usage } satisfies DigestResponse);
 });
 
 app.get("/api/usage", (c) => c.json(readUsage() ?? null));

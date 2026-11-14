@@ -1,7 +1,7 @@
 // The morning digest (UX proposals, 16): what happened in the projects since the user last looked, newest first:
 // steps done or failed, queues stopped, done or cancelled (with their report), refused actions and retries. The
 // server serves it across projects (GET /api/digest?since=); this part is pure and unit tested.
-import type { Activity, Event, Refusal } from "./schemas.ts";
+import type { Activity, Event, Refusal, TurnRecord } from "./schemas.ts";
 import { HOLDING_RUN_STATES } from "./times.ts";
 import type { ProjectState } from "./state.ts";
 
@@ -25,7 +25,14 @@ export interface DigestEvent {
 /** A queue at work now, for "running now · SF3, 40 min in". */
 export interface DigestRunning { project: string; project_name: string; queue: string; step?: string; since?: string }
 
-export interface DigestResponse { since: string; events: DigestEvent[]; running: DigestRunning[] }
+/**
+ * The usage line (decided 2026-11-14, queue FU): since the time, the 5-hour window's peak and the 7-day window now
+ * (each 0 to 1, absent without a turn that reported it), and the waits for a usage window: how many, and how long in
+ * all (ms). `turns`: the agent turns in the period (none: nothing to say about usage).
+ */
+export interface DigestUsage { turns: number; peak_5h?: number; now_7d?: number; waits: number; wait_ms: number }
+
+export interface DigestResponse { since: string; events: DigestEvent[]; running: DigestRunning[]; usage?: DigestUsage }
 
 export interface ProjectDigestInput {
   state: ProjectState;
@@ -92,4 +99,59 @@ export function projectRunning(state: ProjectState): DigestRunning[] {
       const since = step ? q.steps.find((s) => s.id === step)?.segments.at(-1)?.start ?? q.run!.started_at : q.run!.started_at;
       return { project: state.project.id, project_name: state.project.name, queue: q.id, ...(step ? { step } : {}), ...(since ? { since } : {}) };
     });
+}
+
+/** A run as the usage line reads it: its session and state, and when its file was last written. */
+export interface UsageRun { session: string; state: string; updated_at: string }
+
+/** Which window a usage window's name is: Claude's five_hour and seven_day, Codex's codex_<n>h / codex_<n>d. */
+function windowKind(name: string): "5h" | "7d" | undefined {
+  if (name === "five_hour" || /^codex_5h$/.test(name)) return "5h";
+  if (name === "seven_day" || /^codex_(7d|weekly|week)$/.test(name)) return "7d";
+  return undefined;
+}
+
+/**
+ * The usage line's numbers since `since`, from the turn records (<NEXUS_HOME>/turns.jsonl) and the runs now:
+ * - the 5-hour peak: the highest 5-hour utilization any turn ended with;
+ * - the 7-day window now: each 7-day window's latest value in the period (the higher, when both runtimes have one);
+ * - the waits: each turn that ended on a usage limit (outcome `usage`), from its end to the next turn of its session
+ *   (or now, while that session's run still waits; else no time); and each run in usage_wait now that no such turn
+ *   explains (a wait Nexus chose before a step, at the project's threshold), from when it began (its file's last
+ *   write, not before `since`) to now. A threshold wait that is already over leaves no record and is not counted.
+ */
+export function usageSince(turns: readonly TurnRecord[], runs: readonly UsageRun[], since: string, now = new Date()): DigestUsage {
+  const t0 = Date.parse(since), t1 = now.getTime();
+  const period = turns.filter((r) => Date.parse(r.at) > t0).sort((a, b) => a.at.localeCompare(b.at));
+  let peak: number | undefined;
+  const latest7 = new Map<string, number>();
+  for (const r of period) {
+    for (const [name, w] of Object.entries(r.windows_end ?? {})) {
+      const kind = windowKind(name);
+      if (kind === "5h") peak = Math.max(peak ?? 0, w.utilization);
+      if (kind === "7d") latest7.set(name, w.utilization);
+    }
+  }
+  const waiting = new Set(runs.filter((r) => r.state === "usage_wait").map((r) => r.session));
+  let waits = 0, wait_ms = 0;
+  const explained = new Set<string>();
+  for (const r of period) {
+    if (r.outcome !== "usage") continue;
+    waits++;
+    const next = period.find((x) => x.session === r.session && Date.parse(x.started_at ?? x.at) > Date.parse(r.at));
+    const end = next ? Date.parse(next.started_at ?? next.at) : waiting.has(r.session) ? t1 : Date.parse(r.at);
+    if (!next && waiting.has(r.session)) explained.add(r.session);
+    wait_ms += Math.max(0, end - Date.parse(r.at));
+  }
+  for (const r of runs) {
+    if (r.state !== "usage_wait" || explained.has(r.session)) continue;
+    waits++;
+    wait_ms += Math.max(0, t1 - Math.max(t0, Date.parse(r.updated_at)));
+  }
+  return {
+    turns: period.length,
+    ...(peak !== undefined ? { peak_5h: peak } : {}),
+    ...(latest7.size ? { now_7d: Math.max(...latest7.values()) } : {}),
+    waits, wait_ms,
+  };
 }

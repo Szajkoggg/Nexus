@@ -9,7 +9,7 @@ const q = (id: string, status: string, over: Record<string, unknown> = {}) =>
   ({ id, status, steps: [] as Step[], questions: [] as { state: string; can_continue: boolean; step?: string }[], ...over });
 const st = (spec: string) => spec.split(" ").map((x) => { const [id, status] = x.split(":"); return { id: id!, status: status! }; });
 
-test("at work: running first, then waiting, review, paused and planned starts; what waits for the user is not here", () => {
+test("running in the project: only runs that go (running, pausing); waiting, review, paused, planned and stopped are elsewhere", () => {
   const queues = [
     q("CH", "approved", { start: { after: "SF" } }),
     q("PA", "running", { steps: st("PA1:running"), current_step: "PA1" }),
@@ -21,8 +21,12 @@ test("at work: running first, then waiting, review, paused and planned starts; w
     q("OK", "approved"),
     q("DN", "done", { steps: st("DN1:done") }),
     q("BAD", "approved", { start: { after: "X", failed: { at: "2026-11-13T10:00:00Z" } } }),
+    q("PS", "running", { steps: st("PS1:running PS2:pending"), run: { state: "pausing", step: "PS1" } }),
+    q("UW", "running", { steps: st("UW1:running"), run: { state: "usage_wait", step: "UW1" } }),
+    q("RT", "running", { steps: st("RT1:running"), run: { state: "retry_wait", step: "RT1" } }),
+    q("OR", "running", { steps: [{ id: "OR1", status: "review", review_with: "orchestrator" }], run: { state: "running", step: "OR1" } }),
   ];
-  assert.deepEqual(atWork(queues).map((x) => x.queue.id), ["SF", "QU", "RV", "PA", "CH"]);
+  assert.deepEqual(atWork(queues).map((x) => [x.queue.id, shortStatus(x.status)]), [["SF", "1/3"], ["PS", "pausing"]]);
 });
 
 test("the status in a few words", () => {
@@ -52,16 +56,16 @@ test("finished today: done or cancelled today, most recent first; yesterday's an
   assert.deepEqual(finishedToday(queues, new Set(["F"]), now).map((r) => r.queue.id), ["B", "D", "A"]);
 });
 
-test("a planned queue whose new revision waits for approval stays in the rail and says so first", () => {
+test("planned queues are not running, whatever their approval; a run that goes is", () => {
   const queues = [
     q("HS", "running", { steps: st("HS1:running"), run: { state: "running", step: "HS1" } }),
     q("ST", "proposed", { approved: false, revision: 2, start: { after: "HS" } }),
     q("RV", "approved", { approved: true, revision: 1, start: { after: "HS" } }),
     q("NW", "proposed", { approved: false, revision: 2 }), // no plan: it waits for the user, not here
   ];
-  const work = atWork(queues);
-  assert.deepEqual(work.map((w) => [w.queue.id, shortStatus(w.status)]), [["HS", "0/1"], ["ST", "needs approval · then after HS"], ["RV", "after HS"]]);
-  assert.equal(work[1]!.status.tone, "approval");
+  assert.deepEqual(atWork(queues).map((w) => [w.queue.id, shortStatus(w.status)]), [["HS", "0/1"]]);
+  // Their status in short words stays for where they are shown (the queues list).
+  assert.equal(shortStatus(queueStatus(queues[1]!)), "needs approval · then after HS");
 });
 
 test("a run waiting for approval is not at work: it waits for the user (the rail's first section), in short words there", () => {
