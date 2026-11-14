@@ -17,6 +17,7 @@ class Stand extends EventEmitter<AgentEvents> implements AgentProcess {
   readonly launch: Launch;
   constructor(launch: Launch) { super(); this.launch = launch; }
   send(): void { this.calls.push("send"); this.state = "working"; }
+  stop(): boolean { this.calls.push("stop"); return true; }
   close(): void { this.calls.push("close"); }
   kill(): void { this.calls.push("kill"); this.exit(null); }
   exit(code: number | null): void { if (this.state === "exited") return; this.state = "exited"; this.emit("exit", code); }

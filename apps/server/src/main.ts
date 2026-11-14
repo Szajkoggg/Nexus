@@ -559,6 +559,7 @@ app.get("/api/projects/:id/orchestrator", (c) => {
 });
 app.post("/api/projects/:id/orchestrator/messages", act((st, b) => orchestratorOf(st).say(b.text)));
 app.post("/api/projects/:id/orchestrator/reset", act((st) => orchestratorOf(st).reset()));
+app.post("/api/projects/:id/orchestrator/stop", act((st) => orchestratorOf(st).stop()));
 // Conversations: thinking partners for the project.
 const conversationsOf = (st: ProjectStore) => [...projects.values()].find((e) => e.store === st)!.conversations;
 app.get("/api/projects/:id/conversations", (c) => {
@@ -579,6 +580,7 @@ app.get("/api/projects/:id/queues/:q/steps/:s/conversation", (c) => {
 });
 app.patch("/api/projects/:id/conversations/:cid", act((st, b, p) => conversationsOf(st).update(p("cid"), b)));
 app.post("/api/projects/:id/conversations/:cid/messages", act((st, b, p) => conversationsOf(st).say(p("cid"), b.text)));
+app.post("/api/projects/:id/conversations/:cid/stop", act((st, _b, p) => conversationsOf(st).stop(p("cid"))));
 app.post("/api/projects/:id/conversations/:cid/handoff", act((st, _b, p) => conversationsOf(st).handoff(p("cid"))));
 app.post("/api/projects/:id/orchestrator/settings", act((st, b) => orchestratorOf(st).settings(b.model, b.effort)));
 app.patch("/api/projects/:id/settings", act((st, b) => updateSettings(st, b)));

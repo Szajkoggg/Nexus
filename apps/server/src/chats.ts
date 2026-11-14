@@ -3,6 +3,9 @@
 // (`searchLines`, decided: not only what is loaded) and pin a message by its line. pins.json has one writer: here.
 import { ActionError, ProjectStore, searchChat, setPin, type NumberedEntry, type SessionFile } from "@nexus/protocol";
 
+/** What a chat shows where the user stopped its agent's turn (a Nexus notice; the stop button, queue CH4). */
+export const STOPPED = "Stopped.";
+
 /** Every entry of a session's chat, with its line. */
 export function numberedChat(store: ProjectStore, sessionId: string): NumberedEntry[] {
   const r = store.readChat(sessionId);

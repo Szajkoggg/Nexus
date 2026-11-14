@@ -2,11 +2,13 @@
 // uses and sends the notifications Nexus reads. What it does with a message is in fake-behaviour.ts; a turn/steer
 // is recorded with priority "next", like Claude's mid-turn messages.
 import { randomUUID } from "node:crypto";
-import { contextTokens, record, recordArgs, respond, type Fake, type FakeFailure } from "./fake-behaviour.ts";
+import { PARTIAL, contextTokens, interrupt, record, recordArgs, respond, type Fake, type FakeFailure } from "./fake-behaviour.ts";
 
 const out = (m: unknown) => process.stdout.write(JSON.stringify(m) + "\n");
 const notify = (method: string, params: unknown) => out({ method, params });
-const fake: Fake = {};
+const fake: Fake = { history: [] };
+/** Messages steered into the running turn, not taken in yet: taken in at its end, dropped by an interrupt (as Codex does). */
+let steered: string[] = [];
 let threadId = "";
 let turnId: string | undefined;
 /** The thread's running token total, as codex app-server reports it in every tokenUsage update. */
@@ -19,11 +21,22 @@ function tokens(turn: string, last: { inputTokens: number; cachedInputTokens: nu
   notify("thread/tokenUsage/updated", { threadId, turnId: turn, tokenUsage: { last: l, total: { ...total }, modelContextWindow: 2000 } });
 }
 
+/** A message taken into the thread, reported as Codex does (item/started and item/completed of a userMessage). */
+function takeIn(turn: string, text: string): void {
+  const item = { type: "userMessage", id: randomUUID(), content: [{ type: "text", text, text_elements: [] }] };
+  notify("item/started", { threadId, turnId: turn, item });
+  notify("item/completed", { threadId, turnId: turn, item });
+  fake.history!.push(text);
+}
+
 async function runTurn(id: string, text: string): Promise<void> {
   notify("turn/started", { threadId, turn: { id, status: "inProgress", items: [] } });
+  takeIn(id, text);
   const reply = await respond(fake, text, (command) =>
     notify("item/started", { threadId, turnId: id, item: { type: "commandExecution", id: randomUUID(), command: `"powershell.exe" -Command '${command}'`, status: "inProgress" } }), () => refused(id));
-  if (typeof reply !== "string") return "exit" in reply ? exitOnSignal() : fail(id, reply.fail);
+  if (typeof reply !== "string") return "exit" in reply ? exitOnSignal() : "interrupted" in reply ? interrupted(id) : fail(id, reply.fail);
+  for (const s of steered) takeIn(id, s);
+  steered = [];
   notify("item/completed", { threadId, turnId: id, item: { type: "agentMessage", id: randomUUID(), text: reply } });
   // Two model requests per turn, each with its `last` and the thread's running `total` (checked live). Turn n:
   // 100n input of which 60n cached and 3n output, then the context's fill (120) of which 50 cached and 2n output.
@@ -39,6 +52,18 @@ async function runTurn(id: string, text: string): Promise<void> {
  * TurnCompletedNotification whose turn has status "failed" and a TurnError with codexErrorInfo; a usage limit comes
  * after account/rateLimits/updated shows a full window).
  */
+/**
+ * An interrupted turn (turn/interrupt): what was steered in and not taken in is dropped, as Codex 0.167.2 does (probed
+ * 2026-11-14); a text the model had begun is written (Codex was not seen doing so; Nexus must not show it either way);
+ * the turn completes as "interrupted".
+ */
+function interrupted(id: string): void {
+  steered = [];
+  notify("item/completed", { threadId, turnId: id, item: { type: "agentMessage", id: randomUUID(), text: PARTIAL } });
+  turnId = undefined;
+  notify("turn/completed", { threadId, turn: { id, status: "interrupted", items: [] } });
+}
+
 /** Ends the process as a signal would, before turn/completed: the app-server killed, or closing by itself. */
 function exitOnSignal(): void { process.kill(process.pid, "SIGTERM"); }
 
@@ -114,9 +139,9 @@ process.stdin.on("data", (d: string) => {
         recordArgs({ method: m.method, images: images() });
         record(text(), "next", !!turnId);
         if (!turnId || m.params.expectedTurnId !== turnId) fail("no active turn");
-        else reply({ turnId });
+        else { steered.push(text()); reply({ turnId }); }
         break;
-      case "turn/interrupt": reply({}); break;
+      case "turn/interrupt": record("[interrupt]", null, !!turnId); interrupt(); reply({}); break;
       default: fail(`fake-codex does not implement ${m.method}`);
     }
   }

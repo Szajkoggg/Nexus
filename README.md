@@ -76,6 +76,10 @@ closes. The pin beside a message's copy icon pins it to the top of the chat (on 
 message's pin stays, filled): the two most recently pinned show there, the others behind "N more pinned"; a click goes
 to the message, ✕ unpins it. Pins belong to the conversation: a new orchestrator conversation starts without them.
 
+**Stop.** While the orchestrator or a thinking partner is in a turn, **Stop** shows above the message box. It
+interrupts the turn at once: the chat says "Stopped.", nothing more of that turn appears, and the agent waits. What
+you sent during the turn goes in with your next message.
+
 **Pictures.** Paste a screenshot (Ctrl+V), drop a picture on the chat, or use the paperclip beside the box, in the
 orchestrator's chat, in a conversation and on the phone. PNG, JPEG, WebP or GIF up to 10 MB; anything else (an
 iPhone HEIC photo, say) shows "only PNG, JPEG, WebP or GIF up to 10 MB". The picture shows as a thumbnail above the

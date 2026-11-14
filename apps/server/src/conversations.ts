@@ -15,7 +15,7 @@ import { findStep, sinceThen, stepSeed } from "./step-seed.ts";
 import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Hosted, type Launch } from "./agent-host.ts";
 import type { Orchestrator } from "./orchestrator.ts";
 import { partnerBriefing } from "./prompts.ts";
-import { chatView } from "./chats.ts";
+import { STOPPED, chatView } from "./chats.ts";
 
 const READ = ["Read", "Grep", "Glob", "Bash(nexus status:*)", "Bash(git log:*)", "Bash(git status:*)", "Bash(git diff:*)", "Bash(git show:*)"];
 /** What a hand-over covers (decided 2026-11-14): this conversation's topics, and the dates of the decisions it passes on. */
@@ -139,6 +139,15 @@ export class Conversations {
 ${text}`;
   }
 
+  /** The user's stop button: interrupts the partner's running turn, as the orchestrator's stop does (Orchestrator.stop). */
+  stop(id: string): void {
+    const s = this.session(id);
+    const l = this.host.running(s.id);
+    if (!l || !l.proc.stop()) throw new ActionError("the partner is not working", 409);
+    this.store.appendChat(id, { at: now(), from: "nexus", text: STOPPED });
+    this.changed();
+  }
+
   /** The partner summarizes the conversation; the summary then goes to the orchestrator's chat. */
   handoff(id: string): void {
     if (this.draining) throw new ActionError("Nexus is updating; try after the restart", 409);
@@ -236,10 +245,11 @@ ${text}`;
           else if (a.kind === "error") this.store.appendChat(s.id, { at: now(), from: "nexus", kind: "error", text: a.text });
           else if (a.kind === "turn_start") reply = "";
         },
-        turnEnd: () => {
+        turnEnd: (end) => {
           if (l.handoff) {
             l.handoff = false;
-            const summary = reply.trim();
+            // A stopped hand-over hands nothing over.
+            const summary = end.text === "stopped" ? "" : reply.trim();
             if (summary) {
               this.store.appendChat(s.id, { at: now(), from: "partner", text: summary });
               try {

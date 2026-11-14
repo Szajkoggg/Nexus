@@ -92,8 +92,18 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
   private costSoFar: number | undefined;
   /** Tool calls of the running turn, by tool_use_id: a permission_denied message names the call, not its input. */
   private calls = new Map<string, { name: string; input: unknown }>();
-  /** Refusals already reported, by tool_use_id: the result's permission_denials repeat the messages. */
+  /** Refused tool calls already reported, by tool_use_id: the result's permission_denials repeat the messages. */
   private refused = new Set<string>();
+  /**
+   * A stop in progress (stop()): the turn's texts and tool calls are not emitted; a turn the CLI starts by itself
+   * meanwhile is interrupted too; the user's messages wait in `held` until it settles.
+   */
+  private stopping = false;
+  private held: string[] = [];
+  private settle?: NodeJS.Timeout;
+  private stops = 0;
+  /** Messages sent into the running turn (`next`) since its start. */
+  private nextInTurn = 0;
 
   constructor(options: ClaudeOptions) {
     super();
@@ -131,6 +141,7 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
     });
     this.proc.on("exit", (code) => {
       this.state = "exited";
+      clearTimeout(this.settle);
       this.exitCode = code;
       if (code && this.lastStderr.trim()) this.emit("activity", { kind: "error", text: this.lastStderr.trim().slice(-500) });
       this.emit("exit", code);
@@ -143,9 +154,45 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
    */
   send(text: string, priority?: Priority): void {
     if (this.state === "exited") throw new Error("the session's process has exited");
+    if (this.stopping) { this.held.push(text); return; }
+    if (priority === "next" && this.state === "working") this.nextInTurn++;
     const msg = { type: "user", message: { role: "user", content: text }, parent_tool_use_id: null, ...(priority ? { priority } : {}) };
     this.proc.stdin.write(JSON.stringify(msg) + "\n");
     if (priority !== "next" || this.state === "idle") this.state = "working";
+  }
+
+  /**
+   * Stops the running turn with the CLI's interrupt control request. The CLI still writes what the model had begun
+   * (seen with Claude Code 2.1.323: a partial assistant text after the control response), and it runs the `next`
+   * messages it had not read as a turn of its own right after the interrupted one; that turn is interrupted as it
+   * starts, so its messages are in the conversation and go in with the next turn, and nothing of either is emitted.
+   */
+  stop(): boolean {
+    if (this.state !== "working") return false;
+    if (!this.stopping) { this.stopping = true; this.interrupt(); }
+    return true;
+  }
+
+  private interrupt(): void {
+    this.proc.stdin.write(JSON.stringify({ type: "control_request", request_id: `nexus-stop-${++this.stops}`, request: { subtype: "interrupt" } }) + "\n");
+  }
+
+  /**
+   * After a stopped turn's result: a turn the CLI starts by itself for unread `next` messages follows within
+   * milliseconds (seen live), so with such messages the stop waits a moment (and for that turn's own result) before it
+   * lets the held messages go as new turns.
+   */
+  private settleStop(): void {
+    clearTimeout(this.settle);
+    const wait = this.nextInTurn ? 1500 : 0;
+    this.nextInTurn = 0;
+    this.settle = setTimeout(() => {
+      if (this.state !== "idle") return; // a turn of the CLI's own runs (it is being interrupted): its result settles
+      this.stopping = false;
+      const held = this.held;
+      this.held = [];
+      for (const t of held) this.send(t);
+    }, wait);
   }
 
   /** Ends the session after the running turn: closing stdin lets the CLI finish and exit. */
@@ -188,6 +235,8 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
         if (m.subtype === "init") {
           this.signs = {};
           this.state = "working";
+          // A turn the CLI starts by itself while a stop settles (unread messages of the stopped turn): stopped too.
+          if (this.stopping) { clearTimeout(this.settle); this.interrupt(); }
           this.emit("facts", { model: m.model });
           this.emit("activity", { kind: "turn_start", text: `turn started (${m.model})` });
         }
@@ -198,6 +247,7 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
         const u = m.message?.usage;
         if (u) this.emit("facts", { contextTokens: (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) });
         if (m.parent_tool_use_id) return; // a subagent's message: its parent's tool call is what we show
+        if (this.stopping) return; // what a stopped turn still writes is not shown
         for (const c of m.message?.content ?? []) {
           if (c.type === "text" && c.text?.trim()) {
             this.emit("activity", { kind: "text", text: clip(c.text, 600) });
@@ -243,12 +293,14 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
         this.signs = {};
         const ok = !failure && !m.is_error && m.subtype === "success";
         const text = typeof m.result === "string" ? m.result : m.subtype ?? "";
-        this.emit("activity", { kind: "turn_end", text: ok ? `turn ended (${m.num_turns ?? "?"} model calls)` : failure ? `turn failed (${failure.kind}, ${failure.code}): ${failure.text}` : `turn ended early: ${clip(text, 300)}` });
+        this.emit("activity", { kind: "turn_end", text: this.stopping ? "turn stopped by the user" : ok ? `turn ended (${m.num_turns ?? "?"} model calls)` : failure ? `turn failed (${failure.kind}, ${failure.code}): ${failure.text}` : `turn ended early: ${clip(text, 300)}` });
         // result.usage is this turn's (checked live: it does not grow across turns); total_cost_usd runs on.
         const total = typeof m.total_cost_usd === "number" ? m.total_cost_usd : undefined;
         const costUsd = total !== undefined && this.costSoFar !== undefined ? Math.max(0, Math.round((total - this.costSoFar) * 1e9) / 1e9) : undefined; // to a nano-dollar: no float residue
         if (total !== undefined) this.costSoFar = total;
-        this.emit("turnEnd", { ok, text, failure, tokens: claudeTurnTokens(m.usage), costUsd });
+        const stopped = this.stopping;
+        this.emit("turnEnd", stopped ? { ok: false, text: "stopped", tokens: claudeTurnTokens(m.usage), costUsd } : { ok, text, failure, tokens: claudeTurnTokens(m.usage), costUsd });
+        if (stopped) this.settleStop(); else this.nextInTurn = 0;
         return;
       }
       default:

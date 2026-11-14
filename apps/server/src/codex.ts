@@ -80,7 +80,17 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
   private threadId?: string;
   private turnId?: string;
   /** Messages waiting for the running turn to end (or for the thread to be ready). */
-  private readonly queue: string[] = [];
+  private queue: string[] = [];
+  /**
+   * Messages steered into the running turn that Codex has not recorded yet (no userMessage item for them): an
+   * interrupt drops them (seen with Codex 0.167.2), so a stop carries them into the next turn.
+   */
+  private steered: string[] = [];
+  /** A stop in progress (stop()): the turn's texts are not emitted; messages sent meanwhile wait in `afterStop`. */
+  private stopping = false;
+  private afterStop: string[] = [];
+  /** Messages of a stopped turn it never took in: they go in with the next turn. */
+  private carry: string[] = [];
   private lastStderr = "";
   /** What started items were about (their command or files), by item id: a declined item's request does not say. */
   private items = new Map<string, { tool: string; input: string }>();
@@ -129,11 +139,13 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
 
   send(text: string, priority?: Priority): void {
     if (this.state === "exited") throw new Error("the session's process has exited");
+    if (this.stopping) { this.afterStop.push(text); return; }
     if (!this.threadId) { this.queue.push(text); this.state = "working"; return; } // the thread is still starting
-    if (this.state === "idle") { this.startTurn(text); return; }
+    if (this.state === "idle") { this.startTurn(this.withCarry(text)); return; }
     if (priority === "next" && this.turnId) {
+      this.steered.push(text);
       void this.request("turn/steer", { threadId: this.threadId, expectedTurnId: this.turnId, input: input(text) })
-        .catch(() => this.queue.push(text));                     // the turn ended meanwhile: it becomes the next turn
+        .catch(() => { this.unsteer(text); this.queue.push(text); }); // the turn ended meanwhile: it becomes the next turn
       return;
     }
     if (priority === "now" && this.turnId) {
@@ -142,6 +154,30 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
       return;
     }
     this.queue.push(text);
+  }
+
+  /**
+   * Stops the running turn with turn/interrupt. Messages steered into it that Codex had not recorded, and those
+   * waiting for it to end, go in with the next turn (`carry`); one sent during the stop starts that turn at once.
+   */
+  stop(): boolean {
+    if (this.state !== "working") return false;
+    if (this.stopping) return true;
+    this.stopping = true;
+    if (this.turnId) void this.request("turn/interrupt", { threadId: this.threadId, turnId: this.turnId }).catch(() => {});
+    return true;
+  }
+
+  /** A message with what a stopped turn left behind before it, as one input. */
+  private withCarry(text: string): string {
+    const all = [...this.carry, text];
+    this.carry = [];
+    return all.join("\n\n");
+  }
+
+  private unsteer(text: string): void {
+    const i = this.steered.indexOf(text);
+    if (i >= 0) this.steered.splice(i, 1);
   }
 
   /**
@@ -199,7 +235,11 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
     void this.request("turn/start", {
       threadId: this.threadId, input: input(text), ...(sandboxPolicy ? { sandboxPolicy } : {}), ...(effort ? { effort } : {}), ...(model ? { model } : {}),
     })
-      .then((r) => { this.turnId = r.turn?.id ?? this.turnId; })
+      .then((r) => {
+        this.turnId = r.turn?.id ?? this.turnId;
+        // Stopped before the turn had an id: interrupted as soon as it has one.
+        if (this.stopping && this.turnId && this.state === "working") void this.request("turn/interrupt", { threadId: this.threadId, turnId: this.turnId }).catch(() => {});
+      })
       .catch((err) => {
         this.emit("activity", { kind: "error", text: `turn/start: ${(err as Error).message}` });
         this.state = "idle";
@@ -264,12 +304,26 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
         const failure = ok || status === "interrupted" ? undefined : classifyCodexError(p.turn?.error, this.fullWindowResets());
         this.turnId = undefined;
         this.state = "idle";
-        this.emit("activity", { kind: "turn_end", text: ok ? "turn ended" : failure ? `turn failed (${failure.kind}, ${failure.code}): ${failure.text}` : `turn ${status}` });
+        const stopped = this.stopping;
+        this.emit("activity", { kind: "turn_end", text: stopped ? "turn stopped by the user" : ok ? "turn ended" : failure ? `turn failed (${failure.kind}, ${failure.code}): ${failure.text}` : `turn ${status}` });
         const tokens = this.turnStartTotal !== undefined && this.threadTotal
           ? codexTokens(this.threadTotal, this.turnStartTotal)
           : this.turnLast.length ? this.turnLast.map((l) => codexTokens(l, {})).reduce(addTokens) : undefined;
         this.turnStartTotal = undefined;
         this.turnLast = [];
+        if (stopped) {
+          // What the stopped turn never took in goes in with the next turn; a message sent during the stop starts it.
+          this.stopping = false;
+          this.carry.push(...this.steered, ...this.queue);
+          this.steered = [];
+          this.queue = [];
+          this.emit("turnEnd", { ok: false, text: "stopped", tokens });
+          const after = this.afterStop;
+          this.afterStop = [];
+          if (after.length && this.state === "idle") this.startTurn(this.withCarry(after.join("\n\n")));
+          return;
+        }
+        this.steered = [];
         this.emit("turnEnd", { ok, text: status, failure, tokens });
         const next = this.queue.shift();
         if (next !== undefined && this.state === "idle") this.startTurn(next);
@@ -289,6 +343,9 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
         // Declined without a request Nexus saw or a review it heard of (a refusal by Codex itself).
         if (it.status === "declined") this.refuse({ by: "auto_review", ...(itemAction(it) ?? { tool: it.type ?? "item", input: "" }), ref: it.id });
         if (it.id) this.items.delete(it.id);
+        // A steered message Codex took into the turn: it is in the thread now, whatever happens to the turn.
+        if (it.type === "userMessage") { const text = (it.content ?? []).find((c: Json) => c.type === "text")?.text; if (typeof text === "string") this.unsteer(text); }
+        if (this.stopping) return; // what a stopped turn still writes is not shown
         if (it.type === "agentMessage" && it.text?.trim()) {
           this.emit("activity", { kind: "text", text: clip(it.text, 600) });
           this.emit("message", it.text);

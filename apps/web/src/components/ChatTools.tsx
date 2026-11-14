@@ -122,6 +122,27 @@ export function PinsBar({ pins, who, onGo, onUnpin }: { pins: PinView[]; who: (e
   );
 }
 
+/**
+ * Stop, over the message box while the chat's agent is in a turn (decided 2026-11-14, queue CH4): a pure interrupt.
+ * The chat then says "Stopped."; what the turn had not written yet is dropped, and messages sent during the turn go in
+ * with the next one. Disabled once pressed, until the chat changes.
+ */
+export function StopButton({ who, onStop }: { who: string; onStop: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+  return (
+    <div className="mb-2 flex items-center justify-end gap-2">
+      {error && <span className="min-w-0 truncate text-xs text-danger">{error}</span>}
+      <button type="button" disabled={busy} title={t("chat.stopTitle", { who })}
+        onClick={() => { setBusy(true); setError(undefined); onStop().catch((e: Error) => { setError(e.message); setBusy(false); }); }}
+        className="flex items-center gap-1.5 rounded-full border border-line-strong bg-surface-2 px-3 py-1 text-xs font-semibold text-fg shadow-sm hover:border-fg-3 hover:bg-surface-3 disabled:opacity-50 max-lg:min-h-10 max-lg:px-4">
+        <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><rect width="10" height="10" rx="2" fill="currentColor" /></svg>
+        {busy ? t("chat.stopping") : t("chat.stop")}
+      </button>
+    </div>
+  );
+}
+
 /** Text with the query's matches marked (the user's messages and Nexus's notices; Markdown has its own, Refs.tsx). */
 export function Marked({ text, ranges }: { text: string; ranges: [number, number][] }): ReactNode {
   if (!ranges.length) return text;

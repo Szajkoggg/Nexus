@@ -24,7 +24,9 @@
 // step is kept in a file beside FAKE_LOG). As an orchestrator: "FAKE-DRAFT:" followed by
 // YAML drafts that queue; "FAKE-NEXUS: [args]" runs `nexus` with those arguments; a "[Nexus] A worker asked … (qid X;"
 // notice is answered with "fake answer". "FAKE-LONG" is answered with longReply("Reply"); a hand-over with
-// longReply("SUMMARY").
+// longReply("SUMMARY"). "FAKE-SLOW" in a chat message: the turn works for FAKE_CHAT_SLOW_MS (default 4000), then
+// replies "slow reply"; a stop (interrupt) ends it early. "FAKE-HISTORY": the reply lists every message the agent took
+// in so far ("history: a | b"): the turns' messages and those read inside a turn (Claude's `next`, Codex's steer).
 import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -49,7 +51,31 @@ export function contextTokens(window: number, fallback: number): number {
   return fill ? Math.round(Number(fill) * window) : fallback;
 }
 
-export interface Fake { step?: string }
+export interface Fake {
+  step?: string;
+  /** Every message the agent took in, in order (FAKE-HISTORY shows them). */
+  history?: string[];
+}
+
+/** Ends the running turn's FAKE-SLOW wait early (a stop: Claude's interrupt control, Codex's turn/interrupt). */
+let interruptWait: (() => void) | undefined;
+export function interrupt(): boolean {
+  const f = interruptWait;
+  interruptWait = undefined;
+  f?.();
+  return !!f;
+}
+
+/** Waits `ms`, or less when interrupted: true if it was. */
+function interruptible(ms: number): Promise<boolean> {
+  return new Promise((r) => {
+    const t = setTimeout(() => { interruptWait = undefined; r(false); }, ms);
+    interruptWait = () => { clearTimeout(t); r(true); };
+  });
+}
+
+/** The text a stopped turn still writes after the interrupt (Claude Code does: a partial assistant message). */
+export const PARTIAL = "partial text of the stopped turn";
 
 export type FakeFailure = "overloaded" | "network" | "auth" | "limit" | "crash" | "cloudflare";
 
@@ -101,7 +127,7 @@ function writeDenied(path: string): boolean {
  * Does what the message asks and returns the agent's reply, or the failure the runtime should show for this turn.
  * `tool` reports a shell command it ran.
  */
-export async function respond(fake: Fake, text: string, tool: (command: string) => void, refused?: () => void): Promise<string | { fail: FakeFailure } | { exit: true }> {
+export async function respond(fake: Fake, text: string, tool: (command: string) => void, refused?: () => void): Promise<string | { fail: FakeFailure } | { exit: true } | { interrupted: true }> {
   const m = /step (\S+) \(\d+ of \d+\)/.exec(text);
   if (/(^|\n)\[Nexus\] Queue/.test(text) && m) {
     const step = (fake.step = m[1]!);
@@ -171,6 +197,11 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
   }
   if (text.includes("hands this conversation to the orchestrator")) return longReply("SUMMARY");
   if (text.includes("FAKE-LONG")) return longReply("Reply");
+  if (text.includes("FAKE-SLOW")) {
+    tool("sleep (FAKE-SLOW)");
+    return (await interruptible(Number(process.env.FAKE_CHAT_SLOW_MS ?? 4000))) ? { interrupted: true } : "slow reply";
+  }
+  if (text.includes("FAKE-HISTORY")) return `history: ${(fake.history ?? []).join(" | ")}`;
   const draft = /FAKE-DRAFT:\s*\n([\s\S]*)$/.exec(text);
   if (draft) return nexusOut(["queue", "draft", "-"], draft[1]);
   const run = /FAKE-NEXUS: (\[.*\])/.exec(text);

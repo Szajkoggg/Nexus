@@ -10,7 +10,7 @@ import type { AgentProcess } from "./agent.ts";
 import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Launch } from "./agent-host.ts";
 import type { Engine } from "./engine.ts";
 import { orchestratorAgentsFile } from "./helpers.ts";
-import { chatView } from "./chats.ts";
+import { STOPPED, chatView } from "./chats.ts";
 import type { UpdateNotice } from "./lifecycle.ts";
 import { describeDeployChanges, type DeployChanges } from "./deploy.ts";
 import {
@@ -114,6 +114,18 @@ export class Orchestrator {
     // New settings wait for a running turn to end; the next message starts a process with them.
     const l = this.host.all()[0];
     if (l) this.host.restartAfterTurn(l.session);
+  }
+
+  /**
+   * The user's stop button (decided 2026-11-14, queue CH4): interrupts the running turn, a pure interrupt (the
+   * runtime's control, not a message). The chat says "Stopped."; nothing the turn writes after that reaches it; the
+   * process stays, idle; messages sent during the turn that it had not taken in go in with the next one.
+   */
+  stop(): void {
+    const s = this.session();
+    if (!s || !this.proc || !this.proc.stop()) throw new ActionError("the orchestrator is not working", 409);
+    this.store.appendChat(s.id, { at: now(), from: "nexus", text: STOPPED });
+    this.changed();
   }
 
   /** Ends the current orchestrator session and starts the next message in a new one (the old transcript stays). */

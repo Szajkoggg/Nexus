@@ -904,6 +904,24 @@ with "3 of 12" counted in chat order; tool lines are searched only while the cha
 two most recently pinned and the others behind "N more pinned", each as who, when and the message's first words
 (`excerpt`); the pin button sits beside Copy, and only a message (not a tool line or a notice) has one.
 
+### Stopping a chat agent's turn
+
+Decided by the user on 2026-11-14 (queue CH4; docs/ideas/chat-improvements.md): a stop button while a chat's agent is
+working; a pure interrupt (Claude's interrupt control, Codex's turn/interrupt), not a message asking to stop; no text
+from the stopped turn is added after it, the chat shows "stopped", the process goes idle, and user messages sent during
+the turn and not yet delivered go in with the next turn. The protocol details are in PROTOCOL.md ("Stopping a chat
+agent's turn").
+
+Findings from building (probed live with haiku and gpt-6-luna, a few cents): Claude Code still writes the partial text
+after its interrupt, and runs the `next` messages it had not read as a new turn right away, so on its own the process
+would not go idle; Codex drops a steered message it had not taken in. So the stop lives in the adapters
+(`AgentProcess.stop`): while it settles they emit no text, the Claude adapter interrupts the CLI's own follow-up turn and
+holds new messages, and the Codex adapter carries what the turn never took in (it reports what it took in as
+`userMessage` items). The roles only check that a turn runs and add the notice. Smaller choices made while building,
+not by the user, for the orchestrator's review: the button sits above the message box on the right, shown only while
+the agent works ("Stop", "Stopping…" once pressed); "Stopped." is a Nexus notice like the others; there is no
+confirmation (a stop loses nothing that was written); a stopped hand-over of a conversation hands nothing over.
+
 ### Pictures in a chat message
 
 Decided by the user on 2026-11-14 (queue CH2; docs/ideas/chat-improvements.md): pictures go into a chat message by

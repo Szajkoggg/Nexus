@@ -88,6 +88,13 @@ export interface AgentProcess extends EventEmitter<AgentEvents> {
   readonly pid?: number;
   /** No priority: a new turn (after the running one). `next`: into the running turn. `now`: interrupt it. */
   send(text: string, priority?: Priority): void;
+  /**
+   * Stop the running turn (the user's stop button; decided 2026-11-14, queue CH4): a pure interrupt through the
+   * runtime's own control, not a message. Nothing the turn writes after this is emitted (no `message`, no tool
+   * activity), the process stays and goes idle, and messages sent into the turn that the runtime had not taken in go in
+   * with the next turn. False when no turn runs.
+   */
+  stop(): boolean;
   /** End the session after the running turn. */
   close(): void;
   /** Another model or effort from the next turn on, where the runtime takes them per turn (Codex). */

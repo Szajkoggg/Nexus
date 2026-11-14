@@ -835,6 +835,7 @@ sends (see the CLI).
 | `POST /api/projects/:id/sessions/:session/pins` | `line`, `pinned` (true or false) | Pins or unpins a message of the orchestrator's or a conversation's chat (sessions/<id>/pins.json); answers `{ ok, result: { pins } }`. Refused (400): a line that holds no entry or a tool line (when pinning), a line that is not a whole number |
 | `POST /api/projects/:id/orchestrator/messages` | `text` | A chat message to the orchestrator (starts or wakes it) |
 | `POST /api/projects/:id/orchestrator/reset` | | The next message starts a new orchestrator session |
+| `POST /api/projects/:id/orchestrator/stop` | | Stops the orchestrator's running turn (see "Stopping a chat agent's turn" under "The orchestrator"); refused (409) when it is not in a turn |
 | `POST /api/projects/:id/orchestrator/settings` | `model`, `effort` (empty: the default) | The orchestrator's model and effort, from its next message on |
 | `PATCH /api/projects/:id/settings` | `name`, `runtimes`, `defaults`, `conversations`, `languages` (`reader`, `working`), `orchestrator` (`notify`, `model`, `effort`) (an empty value clears a field), `own?`, `follow?` (lists of setting keys, `runtimes.claude.model`) | Project settings, checked against the schema (see "Global settings"): a setting given another value, or named in `own`, becomes the project's own (in `own` also when it equals the global value); one named in `follow` follows the global value again; naming one in both is refused |
 | `GET /api/projects/:id/settings` | | `own` (the keys of the settings the project has its own value of) and `global` (the global settings) |
@@ -973,7 +974,9 @@ work. An idle partner's process ends after 15 minutes; the next message resumes 
 API: `GET /api/projects/:id/conversations`, `POST …/conversations` (`title`, `runtime?`, `model?`, `effort?`,
 `queue?` and `step?`, both or neither), `GET …/conversations/:cid` (session, state, chat: the newest 400 entries,
 each with its `line`, and `pins`: each pin's `line`, `at` and `entry`), `PATCH …/conversations/:cid`
-(`title`, `model`, `effort`, `archived`), `POST …/conversations/:cid/messages` (`text`), `POST
+(`title`, `model`, `effort`, `archived`), `POST …/conversations/:cid/messages` (`text`), `POST …/conversations/:cid/stop`
+(stops the partner's running turn as the orchestrator's stop does; 409 when it is not in a turn; a stopped hand-over
+hands nothing over), `POST
 …/conversations/:cid/handoff`: the partner writes a summary (decisions, open questions, proposed work), which goes
 whole into the orchestrator's chat. The summary covers only the topics discussed in that conversation, unless the
 user asked in it to include others: from a notes file, what this conversation decided or recorded; another topic in
@@ -1063,6 +1066,28 @@ a prompt. (`Write` and `Edit` are not disallowed: a disallow rule would beat the
   - **How:** the orchestrator that ran the update gets them in the same message as its outcome. The user's chat
     never shows them.
 
+
+### Stopping a chat agent's turn
+
+The stop button of a chat (`POST …/orchestrator/stop`, `POST …/conversations/:cid/stop`; decided by the user on
+2026-11-14, queue CH4) is a pure interrupt through the runtime's own control, not a message asking the agent to stop.
+The chat gets a Nexus notice "Stopped." at that point; nothing the turn writes after it reaches the chat (texts, tool
+calls); the process stays and goes idle; the turn's record in `turns.jsonl` says `interrupted`. Messages the user sent
+during the turn that the agent had not taken in go in with the next turn:
+
+- **Claude Code**: the `control_request` `{ subtype: "interrupt" }` on its stream-json input. Claude Code 2.1.323
+  answers at once, still writes the text the model had begun, ends the turn with a result `error_during_execution`
+  (`terminal_reason: aborted_streaming`), and then runs the `next` messages it had not read as a turn of its own. Nexus
+  shows none of it and interrupts that turn as it starts, so those messages are in the conversation before the next
+  one. Messages sent while a stop settles wait and go as new turns after it (a stop with unread messages settles 1.5 s
+  after the stopped turn's result, or after the result of the turn the CLI started).
+- **Codex**: `turn/interrupt`. Codex 0.167.2 drops a message steered into the turn (`turn/steer`) that it had not
+  taken in yet (taken in: an `item/completed` of type `userMessage` with its text); Nexus carries such messages, and
+  those waiting for the turn to end, into the next turn's message, before its text. A message sent during the stop
+  starts that turn at once.
+
+Both were probed live with small models (haiku, gpt-6-luna) on 2026-11-14; the fakes behave so (fake-claude.ts,
+fake-codex.ts).
 ## The `nexus` command inside agents
 
 The server writes `<NEXUS_HOME>/bin/nexus.cmd` (for cmd and PowerShell, where npm's `.ps1` shim is blocked when

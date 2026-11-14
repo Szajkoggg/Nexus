@@ -41,6 +41,7 @@ class Stand extends EventEmitter<AgentEvents> implements AgentProcess {
   private readonly heard: (p: Stand, text: string, priority?: Priority) => void;
   constructor(launch: Launch, heard: (p: Stand, text: string, priority?: Priority) => void) { super(); this.launch = launch; this.heard = heard; }
   send(text: string, priority?: Priority): void { this.heard(this, text, priority); }
+  stop(): boolean { return false; }
   close(): void { this.state = "exited"; }
   kill(): void { this.state = "exited"; }
 }

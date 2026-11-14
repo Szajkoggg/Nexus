@@ -2,7 +2,7 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import type { ChatEntry, RuntimeFile, SessionFile } from "@nexus/protocol";
 import type { NumberedEntry } from "@nexus/protocol/chat";
-import { PinButton, PinsBar, SearchBar, SearchButton, type PinView, type SearchState } from "./ChatTools.tsx";
+import { PinButton, PinsBar, SearchBar, SearchButton, StopButton, type PinView, type SearchState } from "./ChatTools.tsx";
 import { act, enc, useFetch } from "../api.ts";
 import { Button, Clock, Composer, Menu, TimeAgo, type MenuEntry } from "./ui.tsx";
 import { CopyButton, ReplyTools } from "./MessageTools.tsx";
@@ -31,7 +31,7 @@ export function useOrchestrator(project: string | undefined, version: unknown) {
 }
 
 /** A chat: what it is (its header; on a desktop's orchestrator chat, in the middle column's header), the messages, and the composer. */
-function ChatColumn({ project, title, over, who, about, view, ready, place, status, showTools, menu, empty, draft, placeholder, onSend, onBack, bare, search }: {
+function ChatColumn({ project, title, over, who, about, view, ready, place, status, showTools, menu, empty, draft, placeholder, onSend, onStop, onBack, bare, search }: {
   /** The project: where pictures are uploaded, and served from. */
   project: string;
   title: string; over: string;
@@ -47,6 +47,8 @@ function ChatColumn({ project, title, over, who, about, view, ready, place, stat
   /** No header of its own: the desktop's orchestrator chat, whose state is in the middle column's header. */
   bare?: boolean;
   search: Search;
+  /** The stop button's action, shown while the agent is in a turn (ChatTools.tsx, StopButton). */
+  onStop: () => Promise<void>;
 }) {
   const side = useContext(Side);
   const phone = usePhone();
@@ -125,6 +127,7 @@ function ChatColumn({ project, title, over, who, about, view, ready, place, stat
       </QuoteTarget.Provider>
       <footer className={phone ? "border-t border-line p-3" : "px-6 pb-5 pt-3"}>
         <div className={measure}>
+          {ready && view?.state === "working" && <StopButton key={view.chat.length} who={who} onStop={onStop} />}
           <Composer rows={3} draft={draft} placeholder={placeholder} button={t("details.send")} oneLine={phone} card={!phone} pictures={pictures}
             onSubmit={async (text) => { p.follow(); await onSend(withPictures(text, pictures.paths)); pictures.clear(); }} />
         </div>
@@ -493,6 +496,7 @@ export function ChatPanel({ project, name, view, onChanged, inline, desk }: {
         draft={draftKey(project, "orchestrator")}
         placeholder={t("chat.orchestratorPlaceholder")}
         onSend={async (text) => { await act(project, "POST", "/orchestrator/messages", { text }); onChanged(); }}
+        onStop={async () => { await act(project, "POST", "/orchestrator/stop"); onChanged(); }}
       />
     </Panel>
   );
@@ -663,6 +667,7 @@ export function ConversationsPanel({ project, name, version, onChanged, defaultR
           draft={draftKey(project, "conversation", open)}
           placeholder={t("chat.ideasPlaceholder")}
           onSend={async (text) => { await act(project, "POST", `/conversations/${enc(open)}/messages`, { text }); onChanged(); }}
+          onStop={async () => { await act(project, "POST", `/conversations/${enc(open)}/stop`); onChanged(); }}
         />
       )}
       {!side && !creating && !open && (
