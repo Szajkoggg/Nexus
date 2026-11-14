@@ -604,6 +604,7 @@ nexus review add W3 tmp/review/w3/cliff@1280.before.png --key cliff-lit@1280 --r
 nexus review add W3 tmp/review/w3/cliff@1280.png --key cliff-lit@1280 --role after --label "Cliff, lit"   # pairs by key
 nexus review add W3 tmp/review/w3/lit.png --before tmp/review/w3/unlit.png --label "Lighting"   # older: no key
 nexus help review                              # the standard for review material (nexus help: the topics)
+nexus help summaries|questions|refusals|commits   # the other standards
 nexus check W3 core-tests --ok --summary "548 passed"
 nexus step done W3 --summary "No floating body on any fixture" [--commit 1a2b3c]
 nexus step failed W3 --reason "..."
@@ -645,7 +646,19 @@ prompt asks for the report in the project's **folder for reports**, outside ever
 writable root). Once copied, a source in that folder is removed; a source anywhere else is kept.
 
 `nexus help <topic>` prints one of Nexus's standards (needs no session or project, records nothing); `nexus help`
-alone prints the commands and the topics. The topics live in `packages/cli/src/help.ts`; the first is `review`.
+alone prints the commands and the topics. The topics live in `packages/cli/src/help.ts`:
+
+| Topic | The standard |
+|---|---|
+| `review` | Review material: formats, view keys, roles, pairing, rounds, captures, the process |
+| `summaries` | A step summary (`nexus step done --summary`) in four parts: what changed; how it was verified; what was left out or differs from the plan; what comes next, if anything |
+| `questions` | A question (`nexus ask`) in three parts: what it blocks; the options; the asker's recommendation |
+| `refusals` | A refused action: no workaround through another tool or command that reaches the same end; one retry in a simpler form at most; then report what was needed and why |
+| `commits` | A clean working tree at every step's end: everything the step did committed (its own files only) and named with `nexus step done --commit`, so every commit belongs to one step |
+
+The briefings carry these in a few lines each with the pointer: the worker's all four; the orchestrator's the refusal
+rule and the summary and question shapes as it reads them (and escalates in); the thinking partner's the refusal
+rule.
 
 Step states also include `stopped` (the step a `queue.stop` named, when it was not finished).
 

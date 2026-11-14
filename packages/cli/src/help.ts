@@ -90,6 +90,78 @@ THE CAPTURE TOOL
   It prints the nexus review add commands for what it took, befores first, and what it could not take, with why.
 `,
   },
+  summaries: {
+    summary: "the shape of a step summary (nexus step done --summary)",
+    text: `nexus help summaries: the shape of a step summary
+
+The summary of nexus step done is what the user reads in review and what the orchestrator's review works from.
+Write it in four parts, in this order, each a sentence or a few:
+  1. What changed: what the step built or changed, as the user sees it, and where (files, commands, screens).
+  2. How it was verified: the checks run and their results, the tests added, the review material and what it shows.
+  3. What was left out or differs from the plan: anything of the goal or acceptance not done, done differently, or
+     decided on the way, and why. "Nothing" when nothing.
+  4. What comes next, if anything: a follow-up the step found, an open question, what the next step should know.
+Name the commit with --commit (see nexus help commits). Keep it short: the details are in the commits and the
+review material; the summary says what to look at and what to watch for.
+
+Example:
+  nexus step done W3 --commit 1a2b3c4 --summary "Changed: a contact graph supports every body; floating ones are
+  pinned to their neighbours (Runtime/Core/Rock/Support.cs). Verified: core tests 548 passed; 3 new tests; the
+  fixture sheet shows no floating body. Left out: the overhang fixture (it needs W4's bevels). Next: W4 can use
+  Support.Graph for its anchors."
+`,
+  },
+  questions: {
+    summary: "the shape of a worker's question (nexus ask)",
+    text: `nexus help questions: the shape of a question
+
+A question (nexus ask) goes to the orchestrator, which answers what is settled and passes the rest to the user.
+Ask so that either can decide in one go. Three parts:
+  1. What it blocks: what you cannot do, or would do differently, until it is answered (the step, the part of it).
+  2. The options: the ways you see, each with what it means for the work (also with --option <text>, one each).
+  3. Your recommendation: which option you would take, and why.
+Ask only what the step, the project's rules and its notes do not settle. Without --can-continue, end your turn
+after asking: the answer arrives as a message. With --can-continue, go on with work the answer does not touch.
+
+Example:
+  nexus ask --step W3 --option "vertical joints only" --option "vertical and inclined" "Blocks: the canyon joints of
+  W3's fixture 4. Options: vertical only (simpler, matches the sketches) or also inclined (truer to the geology,
+  two more days). I recommend vertical only, since the sketches show no inclined joints."
+`,
+  },
+  refusals: {
+    summary: "what to do when an action is refused",
+    text: `nexus help refusals: when an action is refused
+
+Nexus runs every agent with permissions set so that nothing waits for a human prompt: an action outside them is
+refused, and Nexus records the refusal for the user to see.
+When an action is refused:
+  - Do not work around it through another tool or a different command that reaches the same end (for example a
+    PowerShell command after a Bash command was refused, or writing a file through the shell after the edit tool
+    was refused). The refusal is the user's setting, not an obstacle to get past.
+  - You may retry once in a simpler form when the refusal may be about the form (for example a command without
+    chaining, cd, && or pipes; one file instead of a glob).
+  - Otherwise report what you needed and why: in the step summary, as a question when the step cannot go on without
+    it, or with nexus stop when a stop condition says so. The user can allow it for later sessions.
+`,
+  },
+  commits: {
+    summary: "a clean working tree at every step's end; the commit nexus step done reports",
+    text: `nexus help commits: a clean working tree at every step's end
+
+Every commit belongs to exactly one step: the user keeps or discards a stopped step's commits, and Nexus pushes the
+commit an accepted step was reviewed at. So:
+  - Commit what the step did before nexus step done, and name it: nexus step done <step> --commit <sha>
+    (the last commit, when the step made several).
+  - Leave the working tree clean at the step's end, as at a stop: no uncommitted changes to tracked files. What is
+    not part of the step (scratch files, review material) stays untracked, outside version control (for example
+    under tmp/), or is removed.
+  - Commit only the files the step changed, by name; never commit changes you did not make (ask instead).
+  - A step that changed nothing commits nothing, and says so in its summary.
+  - Before nexus stop: commit what is in a consistent state, with a message that says so; set aside or undo the rest,
+    and say in the reason what you left out.
+`,
+  },
 };
 
 /** `nexus help` without a topic: the commands, then the topics. */

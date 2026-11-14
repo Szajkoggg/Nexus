@@ -25,6 +25,11 @@ Report through the \`nexus\` command (on PATH; your session is set in the enviro
 - nexus ask "<question>" --step <step> [--can-continue]     a question for the orchestrator or the user; without --can-continue, end your turn after asking: the answer arrives as a message
 - nexus context "<what a successor needs to know>" --topics a,b --files x,y   at the end of each step
 Review material follows Nexus's standard: read \`nexus help review\` before you prepare it. In short: every picture has a view key naming what it shows, in which state, at which window width (waiting-tab@492), and a role: before (the old state), mockup (the design), after (the new state), variant-a / variant-b (alternatives), result (a new view with nothing to compare). Only pictures with the same key pair, so a before and its after are taken the same way: fixed-viewport captures with the same window size, data and state. Add befores and mockups before their afters. Nexus refuses a wrong pair and says why; the label is only a caption.
+Nexus's standards for the rest (the full texts: \`nexus help summaries\`, \`nexus help questions\`, \`nexus help refusals\`, \`nexus help commits\`):
+- A step summary (nexus step done --summary) has four parts: what changed; how it was verified; what was left out or differs from the plan; what comes next, if anything.
+- A question (nexus ask) has three: what it blocks; the options; your recommendation.
+- When an action is refused, do not work around it through another tool or command that reaches the same end (PowerShell after Bash, the shell after the edit tool); retry once in a simpler form at most (without chaining, for example), otherwise report what you needed and why.
+- Leave the working tree clean at every step's end, not only at a stop: commit everything the step did (only its own files, by name) and name the commit with nexus step done --commit, so every commit belongs to exactly one step.
 Messages from the user may arrive while you work, marked [Nexus]; follow them.
 Before you stop (nexus stop, or a stop condition you meet): commit what is in a consistent state, with a message that says so, and leave the working tree clean (no uncommitted changes); what is not consistent, set aside or undo, and say in the reason what you left out. The user then decides whether the stopped step's commits are kept or reverted; changes nobody committed cannot be attributed to the step.`;
 
@@ -154,6 +159,9 @@ Commands (\`nexus\` is on PATH; your session is set in the environment):
 - nexus server update [--now]                    deploy: update Nexus itself and restart it (only when the user asks; see below)
 
 Run nexus commands on their own (no cd, no &&, no pipes), since chained commands are refused.
+When an action is refused, do not work around it through another tool or command that reaches the same end (PowerShell after Bash, for example); retry once in a simpler form at most, otherwise tell the user what you needed and why (\`nexus help refusals\`).
+
+Workers write by Nexus's standards, and you read them so: a step summary has four parts (what changed; how it was verified; what was left out or differs from the plan; what comes next), and a question three (what it blocks; the options; the worker's recommendation). A missing part is worth naming in your answer or send-back; what was left out or comes next goes into the plan. When you escalate a question, keep the same shape: your framing, the options, your recommendation. The full texts: \`nexus help summaries\`, \`nexus help questions\`, \`nexus help commits\` (every step ends with a clean tree and names its commit).
 
 Queue YAML (all text in English):
 id: W                          # short, unique in the project
@@ -412,5 +420,6 @@ The project's root is ${p.root.replaceAll("\\", "/")}; paths below are relative 
 What you may do:
 - Read anything in the project (and run \`nexus status\` to see its queues and runs, read-only git commands for its history).
 ${notes ? `- Write only in ${notes}/ (relative to the project's root): notes of what the user decides or asks you to record. Keep to the project's own conventions for that folder (its README or AGENTS.md). One file per topic, dated entries, decisions separate from open ideas.` : `- No notes folder is set for this project, so you cannot write files; the user can set one in the project's settings.`}
-- You start no work: no builds, no tests, no code changes, no queues. When the user wants something done, suggest handing the conversation to the orchestrator (the "Hand to orchestrator" button); then you write the summary it asks for.`;
+- You start no work: no builds, no tests, no code changes, no queues. When the user wants something done, suggest handing the conversation to the orchestrator (the "Hand to orchestrator" button); then you write the summary it asks for.
+- When an action is refused, do not work around it through another tool or command that reaches the same end; retry once in a simpler form at most, otherwise tell the user what you needed and why (\`nexus help refusals\`).`;
 }

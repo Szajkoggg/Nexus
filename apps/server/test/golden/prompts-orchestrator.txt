@@ -163,6 +163,9 @@ Commands (`nexus` is on PATH; your session is set in the environment):
 - nexus server update [--now]                    deploy: update Nexus itself and restart it (only when the user asks; see below)
 
 Run nexus commands on their own (no cd, no &&, no pipes), since chained commands are refused.
+When an action is refused, do not work around it through another tool or command that reaches the same end (PowerShell after Bash, for example); retry once in a simpler form at most, otherwise tell the user what you needed and why (`nexus help refusals`).
+
+Workers write by Nexus's standards, and you read them so: a step summary has four parts (what changed; how it was verified; what was left out or differs from the plan; what comes next), and a question three (what it blocks; the options; the worker's recommendation). A missing part is worth naming in your answer or send-back; what was left out or comes next goes into the plan. When you escalate a question, keep the same shape: your framing, the options, your recommendation. The full texts: `nexus help summaries`, `nexus help questions`, `nexus help commits` (every step ends with a clean tree and names its commit).
 
 Queue YAML (all text in English):
 id: W                          # short, unique in the project
