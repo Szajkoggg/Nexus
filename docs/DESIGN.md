@@ -1468,9 +1468,9 @@ minutes, almost all of them "timed out waiting for the run to finish").
     sent the worker its step and then read HEAD (git), which took one to two seconds on a busy machine; the fake worker
     had started and committed meanwhile. The engine now records the rounds (the step before ends its round, this one
     begins) before the worker hears of the step.
-- **Failing fast.** With the engine deliberately broken (a done step never moves the run on), the suite failed 147 of
-  625 tests in 9 minutes (561 s), where it had taken over an hour; the longest file is the one with the most waits for
-  whole runs, at 15 s each.
+- **Failing fast.** With the engine deliberately broken (a done step never moves the run on), the suite failed 148 of
+  626 tests in 18 minutes (1101 s) at 10 s, and 147 of 625 in 9 minutes (561 s) while it was 5 s; it had taken over an
+  hour before. The longest file is the one with the most waits for whole runs. A green full run takes 270 to 285 s.
 
 ## Findings from the flaky tests (queue FU4)
 
