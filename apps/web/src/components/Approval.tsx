@@ -14,6 +14,7 @@ import { queueStatus } from "../queueStatus.ts";
 import { needsWorkChoice, stopDecision, type LeftState, type WorkChoice } from "../stopDecision.ts";
 import { ActionBar, Button, CloseButton, Markdown, TEXTAREA, TimeAgo, useDraftText, type MenuEntry } from "./ui.tsx";
 import { StopBox, stopVersion, useLeft } from "./Stop.tsx";
+import { CLOSING_MARK, ClosingTag, stepMark } from "./Closing.tsx";
 import { rich, t } from "../i18n.ts";
 import { LevelPicker } from "./Levels.tsx";
 
@@ -214,12 +215,12 @@ export function CompactSteps({ project, queue, chat, onFull, onChanged }: { proj
           const n = s.acceptance.length;
           const o = !!open[s.id];
           return (
-            <li key={s.id} className="border-b border-line last:border-b-0">
+            <li key={s.id} className={`border-b border-line last:border-b-0 ${s.closing ? "bg-surface-2/60" : ""}`}>
               <button onClick={() => toggle(s.id)} aria-expanded={o}
                 className="grid w-full grid-cols-[3rem_1fr_auto] gap-x-2 px-3 py-2.5 text-left hover:bg-surface-2">
-                <span className="pt-px font-mono text-xs leading-5 text-fg-3">{s.id}</span>
+                <span className="pt-px font-mono text-xs leading-5 text-fg-3" title={s.id}>{stepMark(s)}</span>
                 <span className="min-w-0">
-                  <span className="block font-semibold text-fg">{s.title}</span>
+                  <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 font-semibold text-fg">{s.title}{s.closing && <ClosingTag />}</span>
                   {s.goal && !o && <span className="mt-0.5 line-clamp-2 text-sm text-fg-2">{s.goal.replace(/\s+/g, " ")}</span>}
                 </span>
                 <span className="whitespace-nowrap pt-0.5 text-xs text-fg-3">{n ? t("approval.criteria", { count: n }) : t("approval.noCriteria")} {o ? "▴" : "▾"}</span>
@@ -231,6 +232,7 @@ export function CompactSteps({ project, queue, chat, onFull, onChanged }: { proj
               )}
               {o && (
                 <div className="space-y-2 px-3 pb-3 pl-[4.25rem]">
+                  {s.closing && <p className="text-xs text-fg-3">{t("closing.note")}</p>}
                   {s.goal && <div className="text-sm text-fg-2"><Markdown>{s.goal}</Markdown></div>}
                   <Acceptance step={s} />
                 </div>
@@ -280,7 +282,7 @@ export function ApprovalView({ project, queue, chat, sidebar, onClose, onPanel, 
   const entries: { key: string; mark: ReactNode; label: string }[] = [
     ...(stopped ? [{ key: "stop", mark: <span className="text-stop">■</span>, label: t("approval.theStop") }] : []),
     ...(queue.description ? [{ key: "description", mark: "≡", label: t("approval.description") }] : []),
-    ...queue.steps.map((s) => ({ key: `step-${s.id}`, mark: <span className="font-mono text-[11px]">{s.id}</span>, label: s.title })),
+    ...queue.steps.map((s) => ({ key: `step-${s.id}`, mark: <span className="font-mono text-[11px]" title={s.id}>{s.closing ? CLOSING_MARK : s.id}</span>, label: s.title })),
     { key: "stops", mark: "⚑", label: t("approval.stopConditionsCount", { count: stopCount(project, queue) }) },
     ...(queue.checks.length ? [{ key: "checks", mark: "✓", label: t("approval.checksCount", { count: queue.checks.length }) }] : []),
   ];
@@ -366,11 +368,12 @@ export function ApprovalView({ project, queue, chat, sidebar, onClose, onPanel, 
               </section>
             )}
             {queue.steps.map((s) => (
-              <section key={s.id} data-part={`step-${s.id}`} className="space-y-2 border-b border-line pb-4">
+              <section key={s.id} data-part={`step-${s.id}`} className={`space-y-2 border-b border-line pb-4 ${s.closing ? "rounded-lg border border-dashed border-line-strong bg-surface-2/50 p-4" : ""}`}>
                 <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1.5">
-                  <h2 className="flex items-baseline gap-2.5 font-semibold text-fg"><span className="font-mono text-xs font-normal text-fg-3">{s.id}</span>{s.title}</h2>
+                  <h2 className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 font-semibold text-fg"><span className="font-mono text-xs font-normal text-fg-3">{s.id}</span>{s.title}{s.closing && <ClosingTag className="self-center" />}</h2>
                   <LevelPicker project={id} queue={queue.id} step={s} onChanged={onChanged} away={project.away} />
                 </div>
+                {s.closing && <p className="text-xs text-fg-3">{t("closing.note")}</p>}
                 {s.goal ? <div className="text-sm text-fg-2"><Markdown>{s.goal}</Markdown></div> : <p className="text-sm text-fg-3">{t("approval.noGoal")}</p>}
                 <Acceptance step={s} />
               </section>

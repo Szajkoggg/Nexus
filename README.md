@@ -128,6 +128,16 @@ acceptance in place, and the description, stop conditions, checks and the orches
 view ⤢" and "Show as a panel" (under ⋯) switch between the two. A stopped queue's new revision shows its stop box with
 Keep or Discard first: Approve waits for the choice.
 
+**The closing refactoring step.** A queue that contains coding (the orchestrator marks it) ends with a step Nexus adds
+and keeps: **Closing refactoring**, tagged "⟲ by Nexus" (hover the tag for what it is). It shows after the queue's
+steps wherever they are listed: in the approval (its own framed section in the full view, with a line on what it is),
+in the queue's card and in the step list, where the ⟲ mark stands in for its id (`<queue>.refactor`). You approve it
+with the queue, and may set its review level (2 by default). It runs last, in a fresh session over the queue's
+commits, also again after steps a later revision adds, and it writes the queue's report; it may find that nothing is
+worth refactoring. Agents cannot skip it. You can: when you Continue a stopped queue whose closing step has not run,
+the queue's bar has a checkbox **Skip the closing refactoring** beside Continue; the skip is recorded with the stop's
+reason.
+
 **Withdrawing an approval.** A queue approved but not started yet has "Withdraw approval…" under ⋯ in its bar (with
 an optional reason): it goes back to proposed and waits for your approval again; the earlier approval stays on record.
 Once a queue has started, pause or stop it instead. Only you can do this, from the dashboard.

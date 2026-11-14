@@ -5,6 +5,7 @@ import { useState, type ReactNode } from "react";
 import type { QueueView, StepView } from "../api.ts";
 import { TimeAgo, reviewLabel, statusWord, toneOf } from "./ui.tsx";
 import { t } from "../i18n.ts";
+import { ClosingTag, stepMark } from "./Closing.tsx";
 import { HOLDING_RUN_STATES, retryLine } from "@nexus/protocol/times";
 import { stepValuesText } from "@nexus/protocol/steps";
 import { queueStatus, type Tone } from "../queueStatus.ts";
@@ -87,7 +88,7 @@ export function QueueRow({ project, queue, pushAccepted, onQueue, onStep, onChan
       {queue.steps.length > 0 && (
         <div className="mt-2.5 flex gap-[3px] px-4" aria-label={t("queue.stepsClosed", { closed: s.closed, total: s.total })}>
           {queue.steps.map((x) => <i key={x.id} title={`${x.id}: ${pendingProvisional(x) ? t("provisional.word") : statusWord(shownStatus(x, queue))}`}
-            className={`h-[5px] flex-1 rounded-full ${pendingProvisional(x) ? "bg-ok/45" : SEGMENT[shownStatus(x, queue)] ?? "bg-surface-3"}`} />)}
+            className={`h-[5px] flex-1 rounded-full ${x.closing ? "ml-1.5" : ""} ${pendingProvisional(x) ? "bg-ok/45" : SEGMENT[shownStatus(x, queue)] ?? "bg-surface-3"}`} />)}
         </div>
       )}
       <div className="px-2 pb-2 pt-1.5 lg:px-3">
@@ -149,8 +150,11 @@ function StepLine({ step, queue, current, phone, onStep, onQueue, stop }: {
     return (
       <button onClick={onStep} className="grid w-full grid-cols-[10px_3.25rem_1fr_auto] items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-sm hover:bg-surface-2 max-lg:min-h-11">
         <span className={`h-2 w-2 rounded-full ${tone.dot}`} />
-        <span className="truncate font-mono text-xs text-fg-3">{step.id}</span>
-        <span className={`truncate ${step.status === "skipped" ? "text-fg-2" : "text-fg"}`}>{step.title}</span>
+        <span className="truncate font-mono text-xs text-fg-3" title={step.id}>{stepMark(step)}</span>
+        <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
+          <span className={`truncate ${step.status === "skipped" ? "text-fg-2" : "text-fg"}`}>{step.title}</span>
+          {step.closing && <ClosingTag />}
+        </span>
         <span className="flex items-center gap-2">{meta}<span className={`whitespace-nowrap text-xs ${provisional ? "text-review" : step.status === "done" ? "text-fg-3" : tone.text}`}>{word}</span></span>
       </button>
     );
@@ -169,9 +173,9 @@ function StepLine({ step, queue, current, phone, onStep, onQueue, stop }: {
     <div role="button" tabIndex={0} onClick={onStep} onKeyDown={(e) => { if (e.key === "Enter") onStep(); }}
       className={`grid cursor-pointer grid-cols-[10px_3.25rem_1fr_auto] gap-x-2.5 rounded-lg px-2 py-2 text-sm ${TINT[status] ?? "bg-surface-3"}`}>
       <span className={`mt-1.5 h-2 w-2 rounded-full ${tone.dot}`} />
-      <span className="truncate pt-px font-mono text-xs leading-5 text-fg-3">{step.id}</span>
+      <span className="truncate pt-px font-mono text-xs leading-5 text-fg-3" title={step.id}>{stepMark(step)}</span>
       <span className="min-w-0">
-        <span className="font-semibold text-fg">{step.title}</span> <span className={`whitespace-nowrap text-xs ${tone.text}`}>{word}</span>
+        <span className="font-semibold text-fg">{step.title}</span>{step.closing && <> <ClosingTag className="align-[1px]" /></>} <span className={`whitespace-nowrap text-xs ${tone.text}`}>{word}</span>
         {stopHere && queue.stop ? <QueueStopReason queue={queue} clamp className="mt-0.5 text-xs text-fg-2" />
           : why && <span className="mt-0.5 line-clamp-2 block text-xs text-fg-2">{plain(why)}</span>}
         {status === "running" && step.progress?.pct !== undefined && (
