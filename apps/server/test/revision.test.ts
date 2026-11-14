@@ -50,7 +50,7 @@ function setup(steps: StepDef[]) {
 for (const runtime of ["claude", "codex"] as const) {
   test(`${runtime}: a run halted by a revision change mid-step: the step goes back to pending and runs again from the new start`, async () => {
     process.env.FAKE_SLOW_MS = "1500";
-    const x = setup([step("W1", "done"), step("W4e", "slownoop"), step("W4f", "done")]);
+    const x = setup([step("W1", "done"), step("W4e", "slownoop1"), step("W4f", "done")]);
     const e = x.engine();
     try {
       e.start("W", { runtime });
@@ -58,8 +58,8 @@ for (const runtime of ["claude", "codex"] as const) {
       // A live run holds W4e: the orchestrator may not skip it.
       assert.throws(() => orchestratorStatusChange(x.store, { queue: "W", step: "W4e", to: "skipped", reason: "replaced" }), /W\/W4e is running: a step at work is not skipped/);
 
-      // Revision 2 while W4e works (its turn then ends without an outcome).
-      x.revise([step("W1", "done"), { ...step("W4e", "done"), title: "Step W4e, revised" }, step("W4f", "done")]);
+      // Revision 2 while W4e works (its turn then ends without an outcome): a pending step changed.
+      x.revise([step("W1", "done"), step("W4e", "slownoop1"), { ...step("W4f", "done"), title: "Step W4f, revised" }]);
       await x.until("the halt", () => x.queue().run?.state === "halted");
       assert.match(x.queue().run!.reason!, /revision changed and is not approved/);
       const q = x.queue();

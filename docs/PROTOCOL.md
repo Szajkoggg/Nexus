@@ -150,6 +150,16 @@ A step's `runtime`, `model` and `effort` are part of what is approved. Each one 
 (see "Runtime, model and effort per step"). A draft is refused when a step names Claude Code with an effort it does
 not take (`ultra`); an effort without a runtime is checked when a run starts.
 
+**A revision changes only what has not started.** A draft may add, change, remove or reorder pending steps (a skipped
+step that never ran counts as pending here). A *started* step is one that has segments (it has been at work) or whose
+status is neither `pending` nor `skipped`, an imported `done` included. A draft is refused when it changes a started
+step's `title`, `goal`, `acceptance`, `review`, `runtime`, `model` or `effort`, drops it (keep it and skip it), or
+changes the relative order of the started steps (pending steps may move anywhere between them); the refusal names
+each step and what changed, and says that a change to a started step goes to its worker as a message or with
+`nexus review send-back`. Once the queue has a run (a `run.yaml`, or any started step) a draft that changes its
+`worktree`, `branch` or `base` is refused too, naming the field, the queue's value and the draft's (left out, they
+stay). A draft never changes an existing step's `status` either: that is `nexus queue set`'s.
+
 A queue is runnable only when its latest approval's hash matches its current revision and no withdrawal came
 after that approval (a withdrawal's `approvals` is not below the number of approvals). Withdrawing sets the queue
 back to `proposed`; the approvals stay as they were, and a later approval makes it runnable again. Only a queue
@@ -760,7 +770,8 @@ a prompt. (`Write` and `Edit` are not disallowed: a disallow rule would beat the
 
 - `nexus queue draft <file|->` sends a queue definition (YAML) as `queue.drafted`. The server writes it: a new queue
   becomes `proposed` (or `draft`); a change to an existing queue's steps, checks or stop conditions makes a new
-  revision, which needs the user's approval again.
+  revision, which needs the user's approval again. A revision changes only what has not started (see "A revision
+  changes only what has not started" under `queue.yaml`); a refused draft prints the reason.
 - `nexus run <queue> start|pause|resume|stop --reason … [--use-session <id>] [--runtime claude|codex] [--model <m>] [--effort <e>] [--after <queue> | --at <time>]`
   sends `session.request`; `start --after A` plans the start for when queue A is done (a chain); `start --at
   "YYYY-MM-DD HH:MM"` (this machine's local time; sent as ISO 8601 in `start_at`) or `--at usage-reset` plans it for

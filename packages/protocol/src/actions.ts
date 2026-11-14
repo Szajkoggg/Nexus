@@ -259,10 +259,22 @@ export function sendBack(store: ProjectStore, req: { queue: string; step: string
 
 // ---------------------------------------------------------------- queue drafts (from an orchestrator)
 
+/** What a draft may not change of a started step (besides removing it or moving it among the started steps). */
+const STEP_FIELDS = ["title", "goal", "acceptance", "review", "runtime", "model", "effort"] as const;
+/** What a draft may not change of a queue once a run exists. */
+const CHECKOUT_FIELDS = ["worktree", "branch", "base"] as const;
+
+/** A started step: one that has been at work (segments), or whose status is neither pending nor skipped. */
+function hasStarted(v: { segments: unknown[]; status: string }): boolean {
+  return v.segments.length > 0 || !["pending", "skipped"].includes(v.status);
+}
+
 /**
  * Writes a queue an orchestrator drafted. A new queue becomes `proposed` (or `draft` if it says so). A change to an
  * existing queue's steps, checks or stop conditions makes a new revision, which needs the user's approval again;
- * the approvals, history, run and the steps' recorded states are kept.
+ * the approvals, history, run and the steps' recorded states are kept. A revision changes only what has not started:
+ * pending steps may be added, changed, removed or reordered; a started step's definition, presence and order among
+ * the started steps stay, and once the queue has run its worktree, branch and base stay too.
  */
 export function applyDraft(store: ProjectStore, definition: unknown): string {
   const input = (definition ?? {}) as Record<string, unknown>;
@@ -297,11 +309,25 @@ export function applyDraft(store: ProjectStore, definition: unknown): string {
   });
   if (statusChanged.length) throw new ActionError(`a draft does not change the status of an existing step: ${statusChanged.join(", ")}. Leave the status out, or as it is; housekeeping is nexus queue set QUEUE --step STEP skipped --reason "..."`);
   const view = loadProjectState(store).queues.find((x) => x.id === old!.id);
-  const dropped = old.steps.filter((o) => !draft.steps.some((s) => s.id === o.id)).flatMap((o) => {
-    const v = view?.steps.find((x) => x.id === o.id);
-    return v && (v.segments.length > 0 || !["pending", "skipped"].includes(v.status)) ? [`${o.id} (${v.status})`] : [];
-  });
+  const started = new Map((view?.steps ?? []).filter(hasStarted).map((v) => [v.id, v.status] as const));
+  const dropped = old.steps.filter((o) => started.has(o.id) && !draft.steps.some((s) => s.id === o.id)).map((o) => `${o.id} (${started.get(o.id)})`);
   if (dropped.length) throw new ActionError(`a draft does not drop a step that has started or stopped: ${dropped.join(", ")}. Keep it in the draft and skip it with nexus queue set QUEUE --step STEP skipped --reason "replaced by ..."`);
+  // A revision changes only what has not started: a started step keeps what it was approved as, and its place among
+  // the other started steps; a change to it goes to its worker.
+  const touched = draft.steps.flatMap((s) => {
+    const before = old!.steps.find((o) => o.id === s.id);
+    if (!before || !started.has(s.id)) return [];
+    const fields = STEP_FIELDS.filter((f) => JSON.stringify(s[f]) !== JSON.stringify(before[f]));
+    return fields.length ? [`${s.id} (${started.get(s.id)}): its ${fields.join(", ")}`] : [];
+  });
+  const order = (steps: { id: string }[]) => steps.filter((s) => started.has(s.id)).map((s) => s.id).join(", ");
+  if (order(draft.steps) !== order(old.steps)) touched.push(`the order of the started steps (${order(old.steps)} in the queue, ${order(draft.steps)} in the draft)`);
+  if (touched.length) throw new ActionError(`a revision changes only steps that have not started; this draft changes ${touched.join("; ")}. Leave started steps as they are: a change to one goes to its worker as a message, or with nexus review send-back when it waits for your review`);
+  // Once a run exists, its work is in its checkout: the queue keeps it.
+  if (store.readRun(old.id) || started.size) {
+    const moved = CHECKOUT_FIELDS.filter((f) => draft[f] !== undefined && draft[f] !== old![f]).map((f) => `${f} (${old![f] ?? "none"} in the queue, ${draft[f]} in the draft)`);
+    if (moved.length) throw new ActionError(`queue ${old.id} has run: a draft does not change its ${moved.join(", ")}, since its work is in that checkout. Leave them out or as they are; work for another checkout is a new queue`);
+  }
   const steps = draft.steps.map((s) => {
     const before = old!.steps.find((o) => o.id === s.id);
     return { ...s, status: s.status ?? before?.status, status_note: s.status_note ?? before?.status_note };

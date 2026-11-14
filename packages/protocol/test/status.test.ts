@@ -154,6 +154,65 @@ test("drafts: an existing step's status only as in the file; a new step without 
   assert.equal(store.readQueue("Q").steps.length, 3);
 });
 
+test("drafts: pending steps may be added, changed, removed and reordered while a step runs", () => {
+  const { store, emit, queue } = setup(["Q1", "Q2", "Q3", "Q4", "Q5"]);
+  emit(1, { type: "step.started", queue: "Q", step: "Q1" });
+  emit(2, { type: "step.done", queue: "Q", step: "Q1", summary: "ok" });
+  emit(3, { type: "step.started", queue: "Q", step: "Q2" });
+  store.writeRun("Q", { protocol: 1, session: "w", state: "running", step: "Q2", started_at: at(1), updated_at: at(3), revision: 1 });
+  const draft = (steps: StepDef[]) => applyDraft(store, { id: "Q", title: "Queue", steps });
+  assert.match(draft([step("Q1"), step("Q2"), step("Q3"), step("Q4"), step("Q5"), step("Q6")]), /revision 2/, "added");
+  assert.match(draft([step("Q1"), step("Q2"), { ...step("Q3"), title: "Other", goal: "Else", acceptance: ["A"], review: { policy: "wait" }, runtime: "codex", model: "m", effort: "low" }, step("Q4"), step("Q5"), step("Q6")]), /revision 3/, "changed");
+  assert.match(draft([step("Q1"), step("Q2"), step("Q3"), step("Q5"), step("Q6")]), /revision 4/, "removed");
+  assert.match(draft([step("Q1"), step("Q2"), step("Q6"), step("Q5"), step("Q3")]), /revision 5/, "reordered");
+  assert.match(draft([step("Q1"), step("Q6"), step("Q2"), step("Q5"), step("Q3")]), /revision 6/, "a pending step may move before the running one");
+  assert.match(draft([step("Q1"), step("Q6"), step("Q2"), step("Q5"), step("Q3")]), /no change/, "the started steps as they were: no change");
+  assert.deepEqual(queue().steps.map((s) => `${s.id}=${s.status}`), ["Q1=done", "Q6=pending", "Q2=running", "Q5=pending", "Q3=pending"]);
+});
+
+test("drafts: every kind of change to a started step is refused, with the reason and where the change goes instead", () => {
+  const { store, emit } = setup(["Q1", "Q2", "Q3", "Q4"]);
+  const f = store.readQueue("Q");
+  // Q1 done by an import (status in the file, no segments): started too. Q2 runs. Q4 was skipped before it ran: not started.
+  store.writeQueue({ ...f, steps: f.steps.map((s) => (s.id === "Q1" ? { ...s, status: "done" as const } : s.id === "Q4" ? { ...s, status: "skipped" as const } : s)) });
+  emit(3, { type: "step.started", queue: "Q", step: "Q2" });
+  const base = () => [step("Q1"), step("Q2"), step("Q3"), step("Q4")];
+  const draft = (steps: StepDef[]) => applyDraft(store, { id: "Q", title: "Queue", steps });
+  const change = (id: string, patch: Partial<StepDef>) => draft(base().map((s) => (s.id === id ? { ...s, ...patch } : s)));
+  const pointer = /Leave started steps as they are: a change to one goes to its worker as a message, or with nexus review send-back when it waits for your review/;
+  const cases: [Partial<StepDef>, string][] = [
+    [{ title: "Renamed" }, "title"], [{ goal: "Another goal" }, "goal"], [{ acceptance: ["More"] }, "acceptance"],
+    [{ review: { prepare: "Shots" } }, "review"], [{ runtime: "codex" }, "runtime"], [{ model: "haiku" }, "model"], [{ effort: "low" }, "effort"],
+  ];
+  for (const [patch, field] of cases) {
+    assert.throws(() => change("Q2", patch), (e: Error) => {
+      assert.ok(e instanceof ActionError);
+      assert.match(e.message, new RegExp(`a revision changes only steps that have not started; this draft changes Q2 \\(running\\): its ${field}\\.`));
+      assert.match(e.message, pointer);
+      return true;
+    }, field);
+  }
+  assert.throws(() => change("Q1", { title: "Renamed", goal: "Redone" }), /changes Q1 \(done\): its title, goal\./, "a step done by an import");
+  assert.throws(() => draft([step("Q2"), step("Q1"), step("Q3"), step("Q4")]), /the order of the started steps \(Q1, Q2 in the queue, Q2, Q1 in the draft\)/);
+  assert.throws(() => draft([step("Q1"), step("Q3"), step("Q4")]), /does not drop a step that has started or stopped: Q2 \(running\)/);
+  assert.equal(store.readQueue("Q").revision, 1, "nothing refused was written");
+  assert.match(change("Q4", { goal: "A skipped step that never ran" }), /revision 2/, "a skipped step that never started is not started");
+});
+
+test("drafts: once a run exists, the worktree, branch and base stay", () => {
+  const { store } = setup();
+  const draft = (extra: Record<string, unknown>) => applyDraft(store, { id: "Q", title: "Queue", steps: [step("Q1"), step("Q2"), step("Q3")], ...extra });
+  assert.match(draft({ worktree: "auto", branch: "v2/cliffs", base: "main" }), /no change/, "before a run they may change");
+  assert.equal(store.readQueue("Q").branch, "v2/cliffs");
+  store.writeRun("Q", { protocol: 1, session: "w", state: "paused", step: "Q1", started_at: at(1), updated_at: at(2), revision: 1 });
+  assert.throws(() => draft({ worktree: "../elsewhere" }), /queue Q has run: a draft does not change its worktree \(auto in the queue, \.\.\/elsewhere in the draft\), since its work is in that checkout/);
+  assert.throws(() => draft({ branch: "v3/cliffs" }), /does not change its branch \(v2\/cliffs in the queue, v3\/cliffs in the draft\)/);
+  assert.throws(() => draft({ base: "dev" }), /does not change its base \(main in the queue, dev in the draft\)/);
+  assert.match(draft({}), /no change/, "left out, they stay");
+  assert.match(draft({ worktree: "auto", branch: "v2/cliffs", base: "main" }), /no change/, "as they are");
+  assert.equal(store.readQueue("Q").worktree, "auto");
+});
+
 test("a worker can use neither the command nor the event", () => {
   const { store, root, emit, queue } = setup();
   // The CLI refuses a worker.

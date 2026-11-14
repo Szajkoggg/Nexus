@@ -34,10 +34,10 @@ function setup(steps: StepDef[]) {
       await new Promise((r) => setTimeout(r, 100));
     }
   };
-  /** Revision 2: the stopped step Q2 revised (it runs again), a new step Q2b after it. */
+  /** Revision 2: a new step Q2b after Q2; the steps there are kept as they are (a revision changes no started step). */
   const revise = () => applyDraft(store, {
     id: "Q", title: "Queue", stop_conditions: ["the art is missing"], checks: [],
-    steps: [step("Q1", "done"), { ...step("Q2", "done"), title: "Step Q2, with the art" }, step("Q2b", "done"), step("Q3", "done")],
+    steps: store.readQueue("Q").steps.flatMap(({ status: _s, status_note: _n, ...s }) => (s.id === "Q2" ? [s, step("Q2b", "done")] : [s])),
   });
   return { store, engine, state, queue, opened, until, revise };
 }
@@ -56,7 +56,7 @@ function assertLifted(store: ProjectStore, q: ReturnType<ReturnType<typeof setup
 
 for (const runtime of ["claude", "codex"] as const) {
   test(`${runtime}: a queue stopped by nexus stop is lifted by approving a new revision; start runs the stopped step again`, async () => {
-    const { store, engine, state, queue, opened, until, revise } = setup([step("Q1", "done"), step("Q2", "stop"), step("Q3", "done")]);
+    const { store, engine, state, queue, opened, until, revise } = setup([step("Q1", "done"), step("Q2", "stop1"), step("Q3", "done")]);
     try {
       engine.start("Q", { runtime });
       await until("the halt", () => queue().run?.state === "halted");

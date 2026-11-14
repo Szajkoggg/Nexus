@@ -436,7 +436,7 @@ test("a proposal to lift a stop is recorded for the user, and a lift clears it",
   const x = setup();
   process.env.FAKE_LOG = join(x.root, "fake.log");
   try {
-    applyDraft(x.store, queueDef("L", ["stop", "done"]));
+    applyDraft(x.store, queueDef("L", ["stop1", "done"]));
     approveQueue(x.store, "L");
     x.orchestrator.say(`FAKE-NEXUS: ["queue","set","L","propose-lift","--reason","early"]`);
     await x.until("the refusal", () => said(x.orchestrator, /queue L is not stopped/));
@@ -445,8 +445,8 @@ test("a proposal to lift a stop is recorded for the user, and a lift clears it",
     x.orchestrator.say(`FAKE-NEXUS: ["queue","set","L","propose-lift","--reason","the art is in the shared folder now"]`);
     await x.until("the proposal", () => !!x.state().queues.find((q) => q.id === "L")!.lift_proposal);
     assert.equal(x.state().queues.find((q) => q.id === "L")!.lift_proposal!.reason, "the art is in the shared folder now");
-    const def = queueDef("L", ["stop", "done"]);
-    applyDraft(x.store, { ...def, steps: [{ ...def.steps[0]!, goal: "FAKE: done" }, def.steps[1]] });
+    const def = queueDef("L", ["stop1", "done"]);
+    applyDraft(x.store, { ...def, steps: [def.steps[0], { ...def.steps[1]!, title: "Then the rest" }] });
     approveQueue(x.store, "L");
     const q = x.state().queues.find((y) => y.id === "L")!;
     assert.equal(q.lift_proposal, undefined);

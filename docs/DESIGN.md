@@ -55,7 +55,9 @@ step:   pending → running → review → done
 
 - `draft`: the orchestrator and user are still shaping it. `proposed`: waiting for the user's approval.
 - Any change to an approved queue's steps, criteria or stop conditions makes a new revision that needs approval
-  again. Notes and messages do not.
+  again. Notes and messages do not. A revision changes only what has not started (decided 2026-11-14): pending
+  steps may be added, changed, removed or reordered; started steps keep their definition and order, and a queue
+  that has run keeps its checkout. A change to a started step goes to its worker as a message or a send-back.
 - `stopped` carries the stop condition that was met and the worker's explanation. Resuming a stopped queue
   is an explicit user action (possibly after edits and re-approval).
 - `review`: the step's work is finished and its review material is ready. By default (`review_policy: continue`)
