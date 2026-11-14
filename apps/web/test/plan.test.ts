@@ -2,7 +2,7 @@
 // queue waits, the queues shown because a planned one waits for them, and the approved ones outside the plan.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isNow, isPlanned, moveTargets, planLayout, planList, whyOf, type PlanQueue } from "../src/plan.ts";
+import { estimateWords, isNow, isPlanned, moveTargets, planLayout, planList, whyOf, type PlanQueue } from "../src/plan.ts";
 import { t } from "../src/i18n.ts";
 
 const q = (id: string, over: Partial<PlanQueue> = {}): PlanQueue => ({ id, title: `Queue ${id}`, status: "approved", steps: [], questions: [], approved: true, revision: 1, ...over });
@@ -78,4 +78,14 @@ test("moving: the targets are the other queues not ended, the plan's order first
   const cl = l.columns[1]!.find((n) => n.id === "CL")!;
   assert.deepEqual([cl.movable, cl.proposal], [true, { after: ["UW"], reason: "why" }]);
   assert.equal(l.columns[0]![0]!.movable, false, "what runs now is not moved");
+});
+
+test("the estimate on a card: minutes to five, hours to a half under ten, whole hours above; none, or nothing left", () => {
+  const w = (ms?: number, steps = 2) => { const x = estimateWords({ steps, ms }); return x && t(x.key, x.params); };
+  assert.equal(w(undefined), "no estimate");
+  assert.equal(w(1 * 60_000), "about 5 min (estimate)");
+  assert.equal(w(38 * 60_000), "about 40 min (estimate)");
+  assert.equal(w(150 * 60_000), "about 2.5 h (estimate)");
+  assert.equal(w(13.4 * 3_600_000), "about 13 h (estimate)");
+  assert.equal(w(10 * 60_000, 0), undefined, "no step left");
 });

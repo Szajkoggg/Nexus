@@ -474,6 +474,12 @@ The Queues view shows the plan above the queue lists (`apps/web/src/plan.ts`, `c
   dropping onto "Next" means first. Every entry a move writes is the user's, since the user made it.
 - Proposals and hand-backs act where the dependency shows (the card) and where the user looks for decisions (the
   waiting list), with the same two buttons.
+- Expected times are estimates, and say so ("about 2 h (estimate)"; "no estimate" below five finished steps): a step's
+  time is its worker turns' time, so the wait for a review (the user's, often hours) does not make the next queue look
+  slow; the average is by model and effort, falling back to the model, then to all, rather than a precise-looking
+  number from one or two steps. The samples come from every project on the server: the same models behave alike
+  across projects, and one project alone rarely has enough. A step already running counts whole: the view does not
+  pretend to know how far it got.
 
 ### Never two queues in one checkout
 

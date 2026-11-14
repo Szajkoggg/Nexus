@@ -183,3 +183,17 @@ export function moveTargets(l: PlanLayout, all: readonly PlanQueue[], queue: str
 
 /** The phone's list: the columns one after another, each in its order. */
 export const planList = (l: PlanLayout): PlanNode[] => l.columns.flat();
+
+/**
+ * A queue's expected time as the card says it (GET /api/projects/:id/estimates): "about 40 min (estimate)" (to 5
+ * minutes), "about 2.5 h (estimate)" (to half an hour under 10 h, whole hours above), "no estimate" while too few steps
+ * are finished; nothing when no step is left.
+ */
+export function estimateWords(e: { steps: number; ms?: number } | undefined): { key: Key; params?: Params } | undefined {
+  if (!e || !e.steps) return undefined;
+  if (e.ms === undefined) return { key: "plan.estimate.none" };
+  const minutes = e.ms / 60_000;
+  if (minutes < 55) return { key: "plan.estimate.minutes", params: { minutes: Math.max(5, Math.round(minutes / 5) * 5) } };
+  const hours = minutes / 60;
+  return { key: "plan.estimate.hours", params: { hours: hours < 9.75 ? Math.max(1, Math.round(hours * 2) / 2) : Math.round(hours) } };
+}

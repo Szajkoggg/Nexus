@@ -7,9 +7,10 @@
 // dragging it onto another (onto "Next": to the front). The orchestrator's proposals have Accept and Decline on the
 // queue (and in the waiting list, PlanRow); a dependency the user set can be handed back to the orchestrator (↩).
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { act, enc, type AttentionItem, type QueueView } from "../api.ts";
+import { act, enc, useFetch, type AttentionItem, type QueueView } from "../api.ts";
+import type { EstimatesResponse } from "@nexus/protocol";
 import { t } from "../i18n.ts";
-import { moveTargets, planLayout, planList, type PlanLayout, type PlanNode, type Why } from "../plan.ts";
+import { estimateWords, moveTargets, planLayout, planList, type PlanLayout, type PlanNode, type Why } from "../plan.ts";
 import { Button } from "./ui.tsx";
 import { TONE } from "./QueueRow.tsx";
 
@@ -40,12 +41,21 @@ function usePlanActions(project: string, onChanged: () => void) {
     handBack: (queue: string, after: string) => post(queue, { action: "hand_back", after }),
   };
 }
-type Actions = ReturnType<typeof usePlanActions> & { targets: (queue: string) => { id: string; title: string }[] };
+type Actions = ReturnType<typeof usePlanActions> & {
+  targets: (queue: string) => { id: string; title: string }[];
+  /** The queues' expected times (estimates), once loaded. */
+  estimates?: EstimatesResponse;
+};
 
-export function PlanView({ project, queues, onOpen, onChanged }: { project: string; queues: readonly QueueView[]; onOpen: (queue: string) => void; onChanged: () => void }) {
+export function PlanView({ project, queues, version, onOpen, onChanged }: {
+  project: string; queues: readonly QueueView[]; onOpen: (queue: string) => void; onChanged: () => void;
+  /** Changes when the project's files do: the estimates are fetched again. */
+  version?: unknown;
+}) {
   const layout = useMemo(() => planLayout(queues), [queues]);
   const base = usePlanActions(project, onChanged);
-  const actions: Actions = { ...base, targets: (q) => moveTargets(layout, queues, q) };
+  const estimates = useFetch<EstimatesResponse>(`/api/projects/${enc(project)}/estimates`, version);
+  const actions: Actions = { ...base, targets: (q) => moveTargets(layout, queues, q), estimates };
   // Nothing planned: the view says nothing (the queue lists below say what there is).
   if (!layout.columns.some((c, i) => i > 0 && c.length) && !layout.outside.length) return null;
   return (
@@ -221,9 +231,18 @@ function Card({ node: n, onOpen, actions, cardRef, drag, highlight }: {
           ))}
         </span>
       )}
+      <Estimate queue={n.id} estimates={actions.estimates} />
       {n.proposal && <Proposal queue={n.id} proposal={n.proposal} current={n.before.map((b) => b.queue)} actions={actions} />}
     </div>
   );
+}
+
+/** What the queue's steps left are expected to take, marked as an estimate (or that there is none yet). */
+function Estimate({ queue, estimates }: { queue: string; estimates?: EstimatesResponse }) {
+  const words = estimateWords(estimates?.queues[queue]);
+  if (!words || !estimates) return null;
+  const title = estimates.samples < estimates.min ? t("plan.estimate.tooFew", { min: estimates.min }) : t("plan.estimate.title", { samples: estimates.samples });
+  return <span className="mt-1 block text-[11px] italic text-fg-3" title={title} data-plan-estimate={queue}>{t(words.key, words.params)}</span>;
 }
 
 /** The orchestrator's proposal for a queue, with Accept and Decline. */

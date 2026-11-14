@@ -12,7 +12,7 @@
 // then on.
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { ProjectStore, applyDraft, approveQueue, newId, writeRegistry, type Event, type PlanFile, type SessionFile } from "@nexus/protocol";
+import { ProjectStore, appendTurn, applyDraft, approveQueue, newId, writeRegistry, type Event, type PlanFile, type SessionFile } from "@nexus/protocol";
 
 const dir = process.argv[2];
 if (!dir) throw new Error("usage: node seed-plan.ts <data dir>");
@@ -89,4 +89,16 @@ plan("WT", [["DN", "user"]], 25);
 queue("XB", "Backups", [["XB1", "Snapshots"]], { worktree: "auto" });
 plan("XB", [["ST", "user"]], 60);
 queue("NP", "Dark mode", [["NP1", "Colours"]]);
+// Finished work for the estimates (queue PV4): OL's six steps, done yesterday, each with its worker turns' time in
+// turns.jsonl (one sent back once: two turns); the project's default model and effort (none named), like the plan's.
+const ol = session(newId(), "worker", "OL worker", "OL");
+queue("OL", "Onboarding tour", [["OL1", "Welcome"], ["OL2", "Tour"], ["OL3", "Hints"], ["OL4", "Skip"], ["OL5", "Progress"], ["OL6", "Polish"]]);
+[35, 50, 70, 90, 45, 60].forEach((minutes, i) => {
+  const step = `OL${i + 1}`, end = 1500 - i * 100;
+  emit(ol, end + minutes, { type: "step.started", queue: "OL", step });
+  emit(ol, end, { type: "step.done", queue: "OL", step, summary: "Done." });
+  emit(user, end - 5, { type: "review.accepted", queue: "OL", step });
+  const parts = i === 3 ? [60, 30] : [minutes];
+  parts.forEach((m, j) => appendTurn({ v: 1, at: ago(end - j * 20), started_at: ago(end - j * 20 + m), duration_ms: m * 60_000, project: "demo", session: ol.id, role: "worker", runtime: "claude", queue: "OL", step, outcome: "ok" }));
+});
 console.log(`seeded ${root}`);

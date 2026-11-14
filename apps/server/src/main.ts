@@ -14,6 +14,7 @@ import {
   ActionError, Effort, ProjectStore, addNote, closingToSkip, updateSettings, answerAsUser, approveQueue, deleteNote, loadProjectState, nexusHome, withdrawApproval, addAllowRule,
   ensureGlobalSettings, readGlobalSettings, updateGlobalSettings, ownKeys, OVERRIDABLE, settingKey, readRegistry, readUsage, readTurns, commentOnPicture, markPicture, routeAnswers, routeSendBacks, sendBack, sendMessage, setQueueSettings, setStepLevel, confirmProvisional, type ProjectState,
   readAway, writeAway, awayNow, awayUntil, turnAway, expireAway, acceptPlanProposal, declinePlanProposal, handBackPlan,
+  MIN_SAMPLES, queueEstimate, stepSamples, type EstimatesResponse,
 } from "@nexus/protocol";
 import { newestFirst, projectDigest, projectRunning, usageSince, type DigestEvent, type DigestResponse, type DigestRunning, type UsageRun } from "@nexus/protocol/digest";
 import { Engine } from "./engine.ts";
@@ -258,6 +259,19 @@ app.get("/api/projects/:id/state", (c) => {
   if (!e) return c.json({ error: "unknown project" }, 404);
   const s = stateOf(e);
   return s ? c.json(s) : c.json({ error: e.error }, 500);
+});
+
+// Expected times of a project's queues, as estimates (@nexus/protocol estimates.ts): the samples are the finished
+// steps of every project this server has, from the worker turns' durations in turns.jsonl.
+app.get("/api/projects/:id/estimates", (c) => {
+  const e = projects.get(c.req.param("id"));
+  if (!e) return c.json({ error: "unknown project" }, 404);
+  const s = stateOf(e);
+  if (!s) return c.json({ error: e.error }, 500);
+  const states = new Map([...projects.values()].map(stateOf).filter((x): x is ProjectState => !!x).map((x) => [x.project.id, x]));
+  const samples = stepSamples(readTurns().entries, (p, q, st) => states.get(p)?.queues.find((x) => x.id === q)?.steps.find((x) => x.id === st)?.status === "done");
+  const queues = Object.fromEntries(s.queues.filter((q) => q.status !== "done" && q.status !== "cancelled").map((q) => [q.id, queueEstimate(q, s.project, samples)]));
+  return c.json({ samples: samples.length, min: MIN_SAMPLES, queues } satisfies EstimatesResponse);
 });
 
 app.get("/api/projects/:id/file", (c) => {
