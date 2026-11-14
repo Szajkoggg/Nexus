@@ -4,6 +4,7 @@ import { existsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { ProjectFile, QueueFile, USER_SESSION, effortIssue, type StatusChange, type InboxEntry, ReviewPolicy, type RunFile, type SessionFile } from "./schemas.ts";
 import { ProjectStore, newId, now, revisionHash } from "./store.ts";
+import { OVERRIDABLE, settingKey } from "./settings.ts";
 import { HOLDING_RUN_STATES } from "./times.ts";
 import { commentTarget, isApproved, loadProjectState, type ProjectState } from "./state.ts";
 import { validAllowRule } from "./refusals.ts";
@@ -512,11 +513,17 @@ function merged(base: object, patch: unknown): Record<string, unknown> {
 /**
  * Changes a project's settings: its name, defaults, runtimes and whether the orchestrator is notified. The
  * orchestrator's own model and effort go through the orchestrator (they also restart its process); its session,
- * the project's id and root never change here.
+ * the project's id and root never change here. A setting this gives another value becomes the project's own; one it
+ * leaves as it is keeps following the global value (or keeps its own). `follow`: settings, by key
+ * (`runtimes.claude.model`), that follow the global value again (store.updateProject).
  */
 export function updateSettings(store: ProjectStore, patch: unknown): void {
   const p = store.readProject();
   const b = pruned(patch) as Record<string, any>;
+  const follow = b.follow === undefined ? [] : Array.isArray(b.follow) && b.follow.every((x: unknown) => typeof x === "string") ? b.follow as string[] : undefined;
+  if (!follow) throw new ActionError("follow is a list of setting keys, like runtimes.claude.model");
+  const unknown = follow.filter((k) => !OVERRIDABLE.some((x) => settingKey(x.path) === k));
+  if (unknown.length) throw new ActionError(`not a setting with a global value: ${unknown.join(", ")}`);
   const next = {
     ...p,
     name: typeof b.name === "string" && b.name.trim() ? b.name.trim() : p.name,
@@ -535,7 +542,7 @@ export function updateSettings(store: ProjectStore, patch: unknown): void {
   if (!r.success) throw new ActionError(r.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "));
   const notes = r.data.conversations.notes_dir;
   if (notes !== undefined) r.data.conversations.notes_dir = notesDir(notes);
-  store.writeProject(r.data);
+  store.updateProject(() => r.data, follow);
 }
 
 /**
@@ -548,7 +555,7 @@ export function addAllowRule(store: ProjectStore, rule: unknown): { added: boole
   if (!validAllowRule(r)) throw new ActionError("an allow rule is a tool name, optionally with a specifier in parentheses: Bash(git push:*), WebFetch(domain:example.com)");
   const p = store.readProject();
   if (p.runtimes.claude.allowed_tools.includes(r)) return { added: false, rule: r };
-  store.writeProject({ ...p, runtimes: { ...p.runtimes, claude: { ...p.runtimes.claude, allowed_tools: [...p.runtimes.claude.allowed_tools, r] } } });
+  store.updateProject((x) => ({ ...x, runtimes: { ...x.runtimes, claude: { ...x.runtimes.claude, allowed_tools: [...x.runtimes.claude.allowed_tools, r] } } }));
   return { added: true, rule: r };
 }
 

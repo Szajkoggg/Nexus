@@ -106,8 +106,7 @@ export class Orchestrator {
     const m = typeof model === "string" && model.trim() ? model.trim() : undefined;
     const e = effort === undefined || effort === null || effort === "" ? undefined : ClaudeEffort.safeParse(effort);
     if (e && !e.success) throw new ActionError(`effort is one of ${ClaudeEffort.options.join(", ")}`);
-    const p = this.store.readProject();
-    this.store.writeProject({ ...p, orchestrator: { runtime: "claude", notify: true, session: null, ...p.orchestrator, model: m, effort: e?.data } });
+    this.store.updateProject((p) => ({ ...p, orchestrator: { runtime: "claude", notify: true, session: null, ...p.orchestrator, model: m, effort: e?.data } }));
     const s = this.session();
     if (s) this.store.writeSession({ ...s, model: m, effort: e?.data });
     // New settings wait for a running turn to end; the next message starts a process with them.
@@ -119,8 +118,7 @@ export class Orchestrator {
   reset(): void {
     const l = this.host.all()[0];
     if (l) this.host.close(l.session);
-    const p = this.store.readProject();
-    this.store.writeProject({ ...p, orchestrator: { runtime: "claude", notify: true, ...p.orchestrator, session: null } });
+    this.store.updateProject((p) => ({ ...p, orchestrator: { runtime: "claude", notify: true, ...p.orchestrator, session: null } }));
   }
 
   /** After every change: carry out the orchestrator's requests and tell it what it should know. */
@@ -212,7 +210,8 @@ export class Orchestrator {
         model: project.orchestrator?.model, effort: project.orchestrator?.effort,
       };
       this.store.writeSession(s);
-      this.store.writeProject({ ...project, orchestrator: { runtime: "claude", notify: true, ...project.orchestrator, session: s.id } });
+      const id = s.id;
+      this.store.updateProject((p) => ({ ...p, orchestrator: { runtime: "claude", notify: true, ...p.orchestrator, session: id } }));
     }
     if (!this.proc || this.proc.state === "exited") this.spawn(s);
     return s;

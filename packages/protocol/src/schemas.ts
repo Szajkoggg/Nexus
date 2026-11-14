@@ -56,76 +56,175 @@ export type RegistryFile = z.infer<typeof RegistryFile>;
 
 // ---------------------------------------------------------------- project.yaml
 
+// The settings that are global with a project override (see "Global settings" in PROTOCOL.md): each field with its
+// built-in default. The global settings file holds them all; a project's effective settings are its own values
+// (overrides) where it has any, else the global ones.
+
+const PermissionMode = z.enum(["acceptEdits", "auto", "bypassPermissions", "dontAsk", "manual", "plan"]);
+const CodexSandbox = z.enum(["read-only", "workspace-write", "danger-full-access"]);
+/** `never`: anything outside the sandbox is refused. `on-request` with an `auto_review` reviewer: Codex's own reviewer
+ *  decides each request by its risk, like Claude Code's auto mode. */
+const ApprovalPolicy = z.enum(["never", "on-request", "untrusted"]);
+const ApprovalsReviewer = z.enum(["user", "auto_review", "guardian_subagent"]);
+const WorkerRuntime = z.enum(["claude", "codex"]);
+const Fraction = z.number().min(0).max(1);
+
+const DefaultsSettings = z.object({
+  stop_conditions: z.array(z.string()).default([]),
+  review_policy: ReviewPolicy.default("continue"),
+  /**
+   * How many times the orchestrator may send a step back; its next send-back hands the step to the user instead.
+   * The user's Fix it does not count.
+   */
+  review_send_back_limit: z.number().int().min(0).default(2),
+  context_reuse_threshold: Fraction.default(0.6),
+  /**
+   * Context care: when a worker's context is fuller than context_reuse_threshold at the end of a step, the next step
+   * runs in a fresh session seeded with the context summary, instead of the runtime compacting mid-step.
+   */
+  context_care: z.boolean().default(true),
+  /**
+   * Workers may not write under the project's .nexus folder with their file tools (Claude Code: deny rules for Edit
+   * and Write on its absolute path). The nexus CLI, which writes their events, is a process and keeps working.
+   */
+  protect_nexus: z.boolean().default(true),
+  /**
+   * Push what was accepted: when a step is accepted (by the orchestrator or the user), the server pushes the commit
+   * that was HEAD when it entered review to the branch the queue runs on (its upstream remote, else origin).
+   */
+  push_accepted: z.boolean().default(false),
+  usage_pause_threshold: Fraction.default(0.9),
+});
+const ClaudeSettings = z.object({
+  model: z.string().optional(),
+  effort: ClaudeEffort.optional(),
+  permission_mode: PermissionMode.default("acceptEdits"),
+});
+const CodexSettings = z.object({
+  model: z.string().optional(),
+  effort: Effort.optional(),
+  sandbox: CodexSandbox.default("workspace-write"),
+  approval_policy: ApprovalPolicy.default("never"),
+  approvals_reviewer: ApprovalsReviewer.optional(),
+});
+const ConversationSettings = z.object({
+  runtime: WorkerRuntime.default("claude"),
+  model: z.string().optional(),
+  effort: Effort.optional(),
+});
+const OrchestratorSettings = z.object({
+  runtime: Runtime.default("claude"),
+  model: z.string().optional(),
+  effort: ClaudeEffort.optional(),
+  /** Tell the orchestrator when a worker asks, or a run halts or finishes (it starts if needed). */
+  notify: z.boolean().default(true),
+});
+
+/**
+ * <NEXUS_HOME>/settings.yaml: the global settings, which every project follows where it has no value of its own.
+ * Written only by the server. Missing: the built-in defaults.
+ */
+export const GlobalSettings = z.object({
+  protocol: z.literal(1),
+  defaults: DefaultsSettings.prefault({}),
+  runtimes: z.object({
+    /** The runtime a run uses when its start does not name one. */
+    default: WorkerRuntime.default("claude"),
+    claude: ClaudeSettings.prefault({}),
+    codex: CodexSettings.prefault({}),
+  }).prefault({}),
+  conversations: ConversationSettings.prefault({}),
+  orchestrator: OrchestratorSettings.prefault({}),
+});
+export type GlobalSettings = z.infer<typeof GlobalSettings>;
+
+/**
+ * A project's effective settings: its own values where it has them, else the global ones (`ProjectStore.readProject`).
+ * This is also the shape a project.yaml had before global settings (every value its own, missing ones the built-in
+ * defaults), which the migration reads.
+ */
 export const ProjectFile = z.object({
   protocol: z.literal(1),
   id: Id,
   name: z.string(),
   root: z.string(),
-  defaults: z.object({
-    stop_conditions: z.array(z.string()).default([]),
-    review_policy: ReviewPolicy.default("continue"),
-    /**
-     * How many times the orchestrator may send a step back; its next send-back hands the step to the user instead.
-     * The user's Fix it does not count.
-     */
-    review_send_back_limit: z.number().int().min(0).default(2),
-    context_reuse_threshold: z.number().min(0).max(1).default(0.6),
-    /**
-     * Context care: when a worker's context is fuller than context_reuse_threshold at the end of a step, the next step
-     * runs in a fresh session seeded with the context summary, instead of the runtime compacting mid-step.
-     */
-    context_care: z.boolean().default(true),
-    /**
-     * Workers may not write under the project's .nexus folder with their file tools (Claude Code: deny rules for Edit
-     * and Write on its absolute path). The nexus CLI, which writes their events, is a process and keeps working.
-     */
-    protect_nexus: z.boolean().default(true),
-    /**
-     * Push what was accepted: when a step is accepted (by the orchestrator or the user), the server pushes the commit
-     * that was HEAD when it entered review to the branch the queue runs on (its upstream remote, else origin).
-     */
-    push_accepted: z.boolean().default(false),
-    usage_pause_threshold: z.number().min(0).max(1).default(0.9),
-    worktree_dir: z.string().optional(),
-  }).prefault({}),
+  defaults: DefaultsSettings.extend({ worktree_dir: z.string().optional() }).prefault({}),
   runtimes: z.object({
     /** The runtime a run uses when its start does not name one. */
-    default: z.enum(["claude", "codex"]).default("claude"),
-    claude: z.object({
-      model: z.string().optional(),
-      effort: ClaudeEffort.optional(),
-      permission_mode: z.enum(["acceptEdits", "auto", "bypassPermissions", "dontAsk", "manual", "plan"]).default("acceptEdits"),
+    default: WorkerRuntime.default("claude"),
+    claude: ClaudeSettings.extend({
       /** Added to every Nexus-launched session; `Bash(nexus:*)` is always allowed. */
       allowed_tools: z.array(z.string()).default([]),
     }).prefault({}),
-    codex: z.object({
-      model: z.string().optional(),
-      effort: Effort.optional(),
-      sandbox: z.enum(["read-only", "workspace-write", "danger-full-access"]).default("workspace-write"),
-      /** `never`: anything outside the sandbox is refused. `on-request` with an `auto_review` reviewer: Codex's own
-       *  reviewer decides each request by its risk, like Claude Code's auto mode. */
-      approval_policy: z.enum(["never", "on-request", "untrusted"]).default("never"),
-      approvals_reviewer: z.enum(["user", "auto_review", "guardian_subagent"]).optional(),
-    }).prefault({}),
+    codex: CodexSettings.prefault({}),
   }).prefault({}),
   /** Conversations: thinking partners for the project. */
-  conversations: z.object({
+  conversations: ConversationSettings.extend({
     /** The one folder they may write in (their notes), relative to the project's root. */
     notes_dir: z.string().optional(),
-    runtime: z.enum(["claude", "codex"]).default("claude"),
-    model: z.string().optional(),
-    effort: Effort.optional(),
   }).prefault({}),
-  orchestrator: z.object({
-    runtime: Runtime.default("claude"),
-    session: Id.nullable().default(null),
-    model: z.string().optional(),
-    effort: ClaudeEffort.optional(),
-    /** Tell the orchestrator when a worker asks, or a run halts or finishes (it starts if needed). */
-    notify: z.boolean().default(true),
-  }).optional(),
+  orchestrator: OrchestratorSettings.extend({ session: Id.nullable().default(null) }).optional(),
 });
 export type ProjectFile = z.infer<typeof ProjectFile>;
+
+/** A setting the project may have its own value of: absent, it follows the global value. */
+const own = <T extends z.ZodType>(t: T) => t.optional();
+/** The same for a setting without a default: `null` is the project's own "none" (the runtime's default). */
+const ownOrNone = <T extends z.ZodType>(t: T) => t.nullable().optional();
+
+/**
+ * .nexus/project.yaml as stored: the project-only settings, the state, and the project's own values of the global
+ * settings (overrides). `follows_global: true` marks a file in this form; a file without it is from before global
+ * settings, and the migration (src/settings.ts, migrateProject) turns it into this form once.
+ */
+export const StoredProject = z.object({
+  protocol: z.literal(1),
+  id: Id,
+  name: z.string(),
+  root: z.string(),
+  follows_global: z.literal(true).optional(),
+  defaults: z.object({
+    stop_conditions: own(z.array(z.string())),
+    review_policy: own(ReviewPolicy),
+    review_send_back_limit: own(z.number().int().min(0)),
+    context_reuse_threshold: own(Fraction),
+    context_care: own(z.boolean()),
+    protect_nexus: own(z.boolean()),
+    push_accepted: own(z.boolean()),
+    usage_pause_threshold: own(Fraction),
+    worktree_dir: z.string().optional(),
+  }).prefault({}),
+  runtimes: z.object({
+    default: own(WorkerRuntime),
+    claude: z.object({
+      model: ownOrNone(z.string()),
+      effort: ownOrNone(ClaudeEffort),
+      permission_mode: own(PermissionMode),
+      allowed_tools: z.array(z.string()).default([]),
+    }).prefault({}),
+    codex: z.object({
+      model: ownOrNone(z.string()),
+      effort: ownOrNone(Effort),
+      sandbox: own(CodexSandbox),
+      approval_policy: own(ApprovalPolicy),
+      approvals_reviewer: ownOrNone(ApprovalsReviewer),
+    }).prefault({}),
+  }).prefault({}),
+  conversations: z.object({
+    notes_dir: z.string().optional(),
+    runtime: own(WorkerRuntime),
+    model: ownOrNone(z.string()),
+    effort: ownOrNone(Effort),
+  }).prefault({}),
+  orchestrator: z.object({
+    session: Id.nullable().default(null),
+    runtime: own(Runtime),
+    model: ownOrNone(z.string()),
+    effort: ownOrNone(ClaudeEffort),
+    notify: own(z.boolean()),
+  }).optional(),
+});
+export type StoredProject = z.infer<typeof StoredProject>;
 
 // ---------------------------------------------------------------- queue.yaml
 

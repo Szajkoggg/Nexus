@@ -597,7 +597,7 @@ const commands: Record<string, () => void | Promise<void>> = {
       const p = st.readProject();
       if (!p.defaults.stop_conditions.length) {
         console.log(`${o["dry-run"] ? "would set" : "set"} ${result.defaultStopConditions.length} project-wide stop conditions`);
-        if (!o["dry-run"]) st.writeProject({ ...p, defaults: { ...p.defaults, stop_conditions: result.defaultStopConditions } });
+        if (!o["dry-run"]) st.updateProject((x) => ({ ...x, defaults: { ...x.defaults, stop_conditions: result.defaultStopConditions } }));
       }
     }
   },

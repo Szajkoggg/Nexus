@@ -9,9 +9,10 @@ import { monotonicFactory } from "ulid";
 import YAML from "yaml";
 import type { z } from "zod";
 import {
-  Activity, Applied, ChatEntry, Refusal, Delivery, Event, InboxEntry, NoteMeta, GitFile, ProjectFile, PushFile, QueueFile, RegistryFile, RunFile, RuntimeFile, SessionFile, StartFile, TurnRecord, UsageFile,
+  Activity, Applied, ChatEntry, Refusal, Delivery, Event, GlobalSettings, InboxEntry, NoteMeta, GitFile, ProjectFile, PushFile, QueueFile, RegistryFile, RunFile, RuntimeFile, SessionFile, StartFile, StoredProject, TurnRecord, UsageFile,
   type Note,
 } from "./schemas.ts";
+import { applyChange, builtInSettings, effectiveProject, migrateStored, storedFrom } from "./settings.ts";
 
 export const NEXUS_DIRNAME = ".nexus";
 
@@ -133,18 +134,52 @@ export class ProjectStore {
   static forRoot(root: string): ProjectStore { return new ProjectStore(join(root, NEXUS_DIRNAME)); }
 
   /** Creates .nexus/ with a .gitignore that ignores the directory itself, so the project's own .gitignore is untouched. */
-  static init(root: string, project: Omit<z.input<typeof ProjectFile>, "protocol">): ProjectStore {
+  /**
+   * Creates .nexus/ with a .gitignore that ignores the directory itself, so the project's own .gitignore is untouched.
+   * The settings given are the project's own values; every other setting follows the global one.
+   */
+  static init(root: string, project: Omit<z.input<typeof StoredProject>, "protocol" | "follows_global">): ProjectStore {
     const store = ProjectStore.forRoot(root);
     mkdirSync(join(store.dir, "queues"), { recursive: true });
     mkdirSync(join(store.dir, "sessions"), { recursive: true });
     writeFileSync(join(store.dir, ".gitignore"), "*\n", "utf8");
-    if (!existsSync(store.projectFile)) store.writeProject(ProjectFile.parse({ protocol: 1, ...project }));
+    if (!existsSync(store.projectFile)) store.writeStoredProject(StoredProject.parse({ protocol: 1, follows_global: true, ...project }));
     return store;
   }
 
   get projectFile(): string { return join(this.dir, "project.yaml"); }
-  readProject(): ProjectFile { return readYaml(this.projectFile, ProjectFile); }
-  writeProject(p: ProjectFile): void { writeYaml(this.projectFile, p); }
+  /** The project's effective settings: its own values where it has them, else the global ones (src/settings.ts). */
+  readProject(): ProjectFile { return effectiveProject(this.readStoredProject(), readGlobalSettings()); }
+  /** project.yaml as stored: project-only settings, state and the project's own values (overrides). */
+  readStoredProject(): StoredProject { return readYaml(this.projectFile, StoredProject); }
+  writeStoredProject(p: StoredProject): void { writeYaml(this.projectFile, StoredProject.parse(p)); }
+  /**
+   * Changes the project's effective settings, keeping "follows" and "own value" apart (settings.ts, applyChange): a
+   * setting the change gives another value becomes the project's own; one it leaves alone keeps its state; those in
+   * `follow` follow the global value again. Every writer of project.yaml goes through this.
+   */
+  updateProject(change: (p: ProjectFile) => ProjectFile, follow: readonly string[] = []): ProjectFile {
+    const global = readGlobalSettings();
+    const stored = applyChange(this.readStoredProject(), global, change(this.readProject()), follow);
+    this.writeStoredProject(stored);
+    return effectiveProject(stored, global);
+  }
+  /**
+   * Stores whole effective settings by the migration's rule: a value equal to the global one follows it, a different
+   * one becomes the project's own (settings.ts, storedFrom). For setting up a project or a test; a change of some
+   * settings goes through updateProject, which keeps an own value that happens to equal the global one.
+   */
+  writeProject(p: ProjectFile): void { this.writeStoredProject(storedFrom(p, readGlobalSettings())); }
+  /**
+   * Turns a project.yaml from before global settings into the stored form, once (settings.ts, migrateStored): values
+   * equal to the global ones follow them, different ones become the project's own; effective settings do not change.
+   * Writes only when the file is not migrated yet; returns whether it wrote.
+   */
+  migrateProject(): boolean {
+    const migrated = migrateStored(YAML.parse(readFileSync(this.projectFile, "utf8")), readGlobalSettings());
+    if (migrated) this.writeStoredProject(migrated);
+    return !!migrated;
+  }
 
   // queues
   queueDir(id: string): string { return join(this.dir, "queues", id); }
@@ -261,6 +296,23 @@ const turnsFile = () => join(nexusHome(), "turns.jsonl");
 /** One line per agent turn of every project (TurnRecord). Written only by the server (AgentHost). */
 export function appendTurn(r: TurnRecord): void { mkdirSync(nexusHome(), { recursive: true }); appendJsonl(turnsFile(), TurnRecord.parse(r)); }
 export function readTurns(): JsonlRead<TurnRecord> { return readJsonl(turnsFile(), TurnRecord); }
+
+// ---------------------------------------------------------------- global settings
+
+const globalSettingsFile = () => join(nexusHome(), "settings.yaml");
+/** The global settings (<NEXUS_HOME>/settings.yaml); the built-in defaults while the file does not exist. */
+export function readGlobalSettings(): GlobalSettings {
+  const f = globalSettingsFile();
+  return existsSync(f) ? readYaml(f, GlobalSettings) : builtInSettings();
+}
+/** Written only by the server. */
+export function writeGlobalSettings(g: GlobalSettings): void { writeYaml(globalSettingsFile(), GlobalSettings.parse(g)); }
+/** At the server's start: the global settings file exists, the first time with the built-in defaults. */
+export function ensureGlobalSettings(): GlobalSettings {
+  const g = readGlobalSettings();
+  if (!existsSync(globalSettingsFile())) writeGlobalSettings(g);
+  return g;
+}
 
 const usageFile = () => join(nexusHome(), "usage.json");
 export function readUsage(): UsageFile | undefined {

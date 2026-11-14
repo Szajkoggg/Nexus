@@ -42,33 +42,78 @@ as absolute) or URL.
 
 ## `project.yaml`
 
+The project's own settings and state. A setting that is global with a project override (see "Global settings"
+below) is in the file only when the project has its own value of it; absent, it follows the global value. The example
+is a project with its own stop conditions, push, threshold, permission mode and Codex approvals:
+
 ```yaml
 protocol: 1
 id: honeycomb
 name: Project Honeycomb
 root: C:/Code/GameDev/ProjectHoneycomb
+follows_global: true                   # this file is in the form below (absent: from before global settings, migrated once)
 defaults:
   stop_conditions:                     # every queue inherits these
     - A decision that is the user's comes up (the look, gameplay, a final number).
     - A required asset is missing.
-    - A step would grow beyond what is written in it.
-    - A check that passed before the queue fails and is not fixed within the step.
-  review_policy: continue              # continue | wait | orchestrator (see "Review" below)
-  review_send_back_limit: 2            # the orchestrator's send-backs of a step before the next goes to the user
-  context_reuse_threshold: 0.6         # max context fill to continue a session
-  context_care: true                   # above that fill at a step's end, the next step runs in a fresh session
-  protect_nexus: true                  # Claude Code workers' file tools may not write under the project's .nexus
-  push_accepted: false                 # push the commit an accepted step was reviewed at (see "Pushing what was accepted")
-  usage_pause_threshold: 0.9           # share of the 5-hour window at which no new step turn starts
-  worktree_dir: C:/Code/GameDev/ProjectHoneycomb.worktrees
+  push_accepted: true                  # push the commit an accepted step was reviewed at (see "Pushing what was accepted")
+  usage_pause_threshold: 0.85          # share of the 5-hour window at which no new step turn starts
+  worktree_dir: C:/Code/GameDev/ProjectHoneycomb.worktrees   # project only
 runtimes:
-  default: claude                      # the runtime a run uses when its start names none
-  claude: { model: opus, effort: high, permission_mode: auto, allowed_tools: [] }
-  codex:  { model: gpt-6-astra, effort: high, sandbox: workspace-write, approval_policy: on-request, approvals_reviewer: auto_review }
+  claude: { permission_mode: auto, allowed_tools: [] }       # allowed_tools: project only
+  codex:  { model: null, approval_policy: on-request, approvals_reviewer: auto_review }   # null: its own "none"
+conversations:
+  notes_dir: Dev/Concepts/Gameplay     # project only
 orchestrator:
-  runtime: claude
-  session: 01JD...                     # its current session id
+  session: 01JD...                     # state: its current session id
+  effort: high
 ```
+
+## Global settings
+
+`<NEXUS_HOME>/settings.yaml` holds the global settings, which every project follows where it has no value of its
+own. Written only by the server; created at its first start with the built-in defaults (below), so nothing changes
+for a project then. Same paths as in `project.yaml`:
+
+```yaml
+protocol: 1
+defaults: { stop_conditions: [], review_policy: continue, review_send_back_limit: 2, context_reuse_threshold: 0.6,
+            context_care: true, protect_nexus: true, push_accepted: false, usage_pause_threshold: 0.9 }
+runtimes:
+  default: claude
+  claude: { permission_mode: acceptEdits }            # model, effort: none (the runtime's default)
+  codex:  { sandbox: workspace-write, approval_policy: never }   # model, effort, approvals_reviewer: none
+conversations: { runtime: claude }                    # model, effort: none
+orchestrator: { runtime: claude, notify: true }       # model, effort: none
+```
+
+**The effective value** of a setting in a project is its own value where `project.yaml` has one, else the global
+value. A setting without a default (a model, an effort, `approvals_reviewer`) may have the project's own `null`: "none,
+the runtime's default", even where the global value names one. `ProjectStore.readProject` gives the effective
+settings, the form every reader uses; `readStoredProject` gives the file as it is.
+
+**Writing.** Every writer of `project.yaml` (the settings action, the allow rule from a refusal, the orchestrator's
+model, effort and session, `nexus import`) goes through `ProjectStore.updateProject`: a setting the change gives
+another effective value becomes the project's own; one it leaves alone keeps its state, following or own. The settings
+action's `follow` (a list of keys, `runtimes.claude.model`) makes those settings follow the global value again. A
+change of a global value reaches every project that follows it at once.
+
+**The migration** turns a `project.yaml` without `follows_global` into this form once, when the server starts (before
+anything reads the project): the file's values meant what the built-in defaults made of them; each that equals the
+global value then follows it, each that differs becomes the project's own (a missing model or effort against a global
+one: `null`). The effective settings do not change. It writes only such a file, and a second run writes nothing.
+
+**Which kind each setting is:**
+
+| Kind | Settings |
+|---|---|
+| Global, with a project override | `defaults`: `stop_conditions`, `review_policy`, `review_send_back_limit`, `context_reuse_threshold`, `context_care`, `protect_nexus`, `push_accepted`, `usage_pause_threshold`. `runtimes`: `default`; `claude`: `model`, `effort`, `permission_mode`; `codex`: `model`, `effort`, `sandbox`, `approval_policy`, `approvals_reviewer`. `conversations`: `runtime`, `model`, `effort`. `orchestrator`: `runtime`, `model`, `effort`, `notify` |
+| Project only | `name`, `defaults.worktree_dir`, `runtimes.claude.allowed_tools` (the project's own allow rules), `conversations.notes_dir` (`id` and `root` identify the project) |
+| Global only | Remote access (`<NEXUS_HOME>/auth.json`, `push.json`), the deploy push (`deploy.json`), the server; each stays in its own file |
+| State, not a setting | `orchestrator.session` |
+
+The orchestrator's settings count only for a project that has an orchestrator section (it has had one); the section
+is made with its first session.
 
 ## `queue.yaml`
 
@@ -362,6 +407,7 @@ Written only by the server's queue engine; agents never touch them.
 | `sessions/<id>/activity.jsonl` | A condensed record of the agent's stream: turns, tool calls, texts (clipped to 600 characters), tool errors, exits, and retries (`retry`: the runtime's own and the engine's), tagged with queue and step |
 | `sessions/<orchestrator>/applied.jsonl` | The server's result for each orchestrator request (`queue.drafted`, `session.request`, `status.set`), and the notices it has sent the orchestrator; the CLI waits for the result and prints it |
 | `sessions/<orchestrator>/chat.jsonl` | The chat shown in the dashboard: the user's messages, the orchestrator's texts (whole, however long) and tool calls, Nexus notices |
+| `<NEXUS_HOME>/settings.yaml` | The global settings, which projects follow where they have no value of their own (see "Global settings") |
 | `<NEXUS_HOME>/usage.json` | The subscription's windows (5-hour, 7-day: utilization and reset time) from the latest `rate_limit_event` (Codex: `account/rateLimits`) of any session. Every session's turns count toward usage, workers', orchestrators' and thinking partners' alike (one subscription), so the usage display and the usage pause see them all |
 | `<NEXUS_HOME>/turns.jsonl` | One line per agent turn of every project and role, appended by the server (AgentHost, its one writer) when the turn ends, or when its process ends first: `v`, `at` (the end), `started_at` (the runtime's turn start, or the first thing it streamed after the previous turn's end), `duration_ms`, `project`, `session`, `role` (`worker`, `orchestrator`, `conversation`), `runtime`, `model`, `effort`, `queue` and `step` (a worker's run, when any), `outcome` (`ok`; a failure's kind `passing`, `lasting` or `usage`, with `failure`, the runtime's code; `interrupted`: no result, because Nexus interrupted the turn or its process ended: a kill, an update's drain, a crash), `tokens` (the turn's own: `input` not from the cache, `output`, `cache_read`, `cache_creation`), `cost_usd` (the turn's own, where the runtime reports cost and it is known: Claude Code, not the first turn of a resumed process), `windows_start` and `windows_end` (the turn's runtime's usage windows, `utilization` and `resets_at`, as the server knew them when the turn began and ended; left out when none was known). In one file because the windows are the account's, across projects; statistics are computed from it when read |
 | `<NEXUS_HOME>/limits.json` | `{ max_running: number }`: how many queues may run at once across all projects, a whole number from 1 to 20 (default `2` when the file or the value is missing). One writer: the server, on `POST /api/server/settings` from the dashboard |

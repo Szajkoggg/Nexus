@@ -12,7 +12,7 @@ import chokidar, { type FSWatcher } from "chokidar";
 import type { Server } from "node:http";
 import {
   ActionError, Effort, ProjectStore, addNote, updateSettings, answerAsUser, approveQueue, deleteNote, loadProjectState, nexusHome, withdrawApproval, addAllowRule,
-  readRegistry, readUsage, commentOnPicture, markPicture, routeAnswers, routeSendBacks, sendBack, sendMessage, setQueueSettings, type ProjectState,
+  ensureGlobalSettings, readRegistry, readUsage, commentOnPicture, markPicture, routeAnswers, routeSendBacks, sendBack, sendMessage, setQueueSettings, type ProjectState,
 } from "@nexus/protocol";
 import { newestFirst, projectDigest, projectRunning, type DigestEvent, type DigestResponse, type DigestRunning } from "@nexus/protocol/digest";
 import { Engine } from "./engine.ts";
@@ -80,10 +80,15 @@ const coordinator = new Coordinator();
 
 function refreshRegistry(): void {
   if (!active) return;
+  // Global settings (PROTOCOL.md): the file exists from the first start on, with the built-in defaults; each project's
+  // project.yaml from before them is migrated once, before anything reads it (effective values unchanged).
+  ensureGlobalSettings();
   const reg = readRegistry();
   for (const p of reg.projects) {
     if (projects.has(p.id)) continue;
     const store = ProjectStore.forRoot(p.root);
+    try { if (store.migrateProject()) console.log(`settings of project ${p.id}: migrated to follow the global settings where equal`); }
+    catch (err) { console.error(`settings of project ${p.id}: not migrated: ${(err as Error).message}`); }
     const engine = new Engine(store, () => changed(p.id), { coordinator });
     // Through its usual notices it is told the outcome of an update it asked for (lifecycle.notice), and what changed
     // for agents in each deploy since its session began (deploy-changes.jsonl).

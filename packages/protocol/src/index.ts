@@ -6,5 +6,6 @@ export * from "./times.ts";
 export * from "./attention.ts";
 export * from "./refusals.ts";
 export * from "./steps.ts";
+export * from "./settings.ts";
 export * from "./reports.ts";
 export * from "./pictures.ts";
