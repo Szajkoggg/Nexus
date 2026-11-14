@@ -65,7 +65,12 @@ The server (NEXUS_PORT, default 4317):
   nexus server update [--now] [--ref <commit|branch>]
                                       let running steps finish (or stop them with --now), move the live worktree to
                                       <ref> (default main), build, restart; queues held for it go on by themselves
+  nexus server update --after <queue>[/<step>] [--ref <commit|branch>]
+                                      plan the update for when the step is in (done, or accepted after its review;
+                                      its queue opens no next step until after the restart) or the queue is done (a
+                                      queue of this project); one plan at a time
   nexus server cancel                 give up waiting; the held queues go on
+  nexus server cancel-plan            cancel the planned update (and the drain it started, if any)
   nexus server away [on --until <8:00|ISO time> | off]
                                       the user's away mode (global): level-2 steps are reviewed as level 3 until then;
                                       only the user switches it (refused from any agent session)
@@ -352,6 +357,13 @@ function printAway(a: { on: boolean; until?: string } | undefined): void {
   console.log(a?.on ? `away mode: on until ${new Date(a.until!).toLocaleString("sv-SE").slice(0, 16)} (level-2 steps are reviewed as level 3)` : "away mode: off");
 }
 
+function printPlan(p: Record<string, any> | null | undefined): void {
+  if (!p) { console.log("planned update: none"); return; }
+  const what = p.after.step ? `step ${p.after.queue}/${p.after.step}` : `queue ${p.after.queue}`;
+  console.log(`planned update: after ${what} of project ${p.after.project}${p.ref ? ` (ref ${p.ref})` : ""}${p.started ? "; started" : p.waiting ? `; waiting: ${p.waiting}` : ""}`);
+  if (p.warning) console.log(`  warning: ${p.warning}`);
+}
+
 function printUpdate(u: Record<string, any>): void {
   console.log(`update: ${u.phase}${u.held?.length ? `; holding ${u.held.join(", ")}` : ""}${u.waiting?.length ? `; waiting for ${u.waiting.join(", ")}` : ""}`);
   for (const l of u.log ?? []) console.log(`  ${l}`);
@@ -371,10 +383,11 @@ const commands: Record<string, () => void | Promise<void>> = {
         console.log(`running steps in ${p.name} (${p.project}):`);
         for (const x of p.steps) console.log(`  ${x.queue}/${x.step} ${x.title}${x.session ? `  (session ${x.session})` : ""}`);
       }
+      printPlan(s.plan);
       return printUpdate(s.update);
     }
     let by: { project: string; session: string } | undefined;
-    if (sub === "update" || sub === "cancel") {
+    if (sub === "update" || sub === "cancel" || sub === "cancel-plan") {
       // Restarting Nexus restarts every agent's runtime: the user's call, which an orchestrator may carry out when
       // asked. A worker or a thinking partner never may (they run on the very server they would restart).
       const sid = o.session ?? process.env.NEXUS_SESSION;
@@ -383,12 +396,29 @@ const commands: Record<string, () => void | Promise<void>> = {
         let role: string | undefined;
         let project: string | undefined;
         try { const st = dir ? new ProjectStore(dir) : undefined; role = st?.readSession(sid).role; project = st?.readProject().id; } catch { role = undefined; }
-        if (role !== "orchestrator") throw new UsageError(`only the user or an orchestrator may ${sub} the Nexus server, not a ${role ?? "session"}`);
+        const what = sub === "cancel-plan" ? "cancel a planned update of" : o.after !== undefined ? "plan an update of" : sub;
+        if (role !== "orchestrator") throw new UsageError(`only the user or an orchestrator may ${what} the Nexus server, not a ${role ?? "session"}`);
         // The orchestrator that asks is told the outcome after the restart (or if the update fails).
         if (project) by = { project, session: sid };
       }
     }
+    if (sub === "update" && o.after !== undefined) {
+      if (o.now) throw new UsageError("--now goes with an update at once, not with --after");
+      const [queue, step, more] = need(o.after, "--after <queue>[/<step>]").split("/");
+      if (!queue || more !== undefined || step === "") throw new UsageError("--after <queue>[/<step>], e.g. --after PD or --after PD/PD1");
+      // The queue is one of this project's: the orchestrator's own, or the one of the directory this runs in.
+      const dir = process.env.NEXUS_DIR ?? findNexusDir();
+      let project: string | undefined;
+      try { project = dir ? new ProjectStore(dir).readProject().id : undefined; } catch { project = undefined; }
+      if (!project) throw new UsageError("run it in a Nexus project (no .nexus/ found here): --after names a queue of that project");
+      const r = await server("POST", "/api/server/plan", { after: { project, queue, step }, ref: o.ref, by });
+      console.log(`ok: ${r.text}`);
+      if (r.plan?.warning) console.log(`warning: ${r.plan.warning}`);
+      if (r.plan?.started) printUpdate(r.update);
+      return;
+    }
     if (sub === "update") return printUpdate(await server("POST", "/api/server/update", { now: !!o.now, ref: o.ref, by }));
+    if (sub === "cancel-plan") { console.log(`ok: ${(await server("POST", "/api/server/cancel-plan", { by })).text}`); return; }
     if (sub === "cancel") return printUpdate(await server("POST", "/api/server/cancel"));
     if (sub === "away") {
       const what = args[2];
@@ -400,7 +430,7 @@ const commands: Record<string, () => void | Promise<void>> = {
       if (what === "off") return printAway((await server("POST", "/api/server/away", { until: null })).away);
       throw new UsageError("nexus server away [on --until <8:00|ISO time> | off]");
     }
-    throw new UsageError("nexus server status|update|cancel|away");
+    throw new UsageError("nexus server status|update|cancel|cancel-plan|away");
   },
 
   status() {

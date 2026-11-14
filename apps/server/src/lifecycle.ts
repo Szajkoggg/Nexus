@@ -74,6 +74,11 @@ export interface LifecycleOptions {
   git?: GitRunner;
   /** An update has settled (it is up and its push done, it failed, or it was cancelled): notices may go out now. */
   settled?: () => void;
+  /**
+   * The update `id` is about to hand over, failed, or was cancelled (src/deploy-plan.ts: a planned deploy it carries
+   * ends; at the hand-over before the successor starts, so the successor finds no plan to carry out again).
+   */
+  ended?: (id: string | undefined, how: "handover" | "failed" | "cancelled", reason?: string) => void;
 }
 
 async function git(root: string, ...args: string[]): Promise<string> {
@@ -128,6 +133,7 @@ export class Lifecycle {
       exit: options.exit ?? (() => setTimeout(() => process.exit(0), 300)),
       git: options.git,
       settled: options.settled ?? (() => {}),
+      ended: options.ended ?? (() => {}),
     };
   }
 
@@ -221,6 +227,7 @@ export class Lifecycle {
     clearInterval(this.timer);
     for (const p of this.parts()) p.cancel();
     this.status = { ...this.status, phase: "idle", waiting: [] };
+    this.o.ended(this.status.id, "cancelled");
     this.note("cancelled; the held queues go on");
     this.o.settled();
   }
@@ -280,6 +287,7 @@ export class Lifecycle {
     try {
       const v = await version(this.root);
       const to = await git(this.root, "rev-parse", "HEAD").catch(() => undefined);
+      this.o.ended(this.status.id, "handover");
       result = await handOver({
         command: this.o.successor, cwd: this.root,
         // The successor writes its own log (NEXUS_LOG): see main.ts.
@@ -344,6 +352,7 @@ export class Lifecycle {
 
   private fail(summary: string, error = summary): void {
     this.status = { ...this.status, phase: "failed", error };
+    this.o.ended(this.status.id, "failed", summary);
     this.note(`update failed: ${summary}; the held queues go on`);
     this.o.notify(`Update failed: ${summary}.`);
     this.o.settled();

@@ -193,18 +193,22 @@ test("the orchestrator drafts and then revises a queue from one file under .nexu
   } finally { stop(); }
 });
 
-test("only the user or an orchestrator may update or stop updating the Nexus server", async () => {
+test("only the user or an orchestrator may update, plan an update of, or stop updating the Nexus server", async () => {
   const { store, stop } = setup();
   try {
     const { execFileSync } = await import("node:child_process");
     const cli = join(dirname(fileURLToPath(import.meta.url)), "../../../packages/cli/bin/nexus.js");
+    const commands: [string[], string][] = [
+      [["update"], "update"], [["cancel"], "cancel"],
+      [["update", "--after", "Q/Q1"], "plan an update of"], [["cancel-plan"], "cancel a planned update of"],
+    ];
     for (const role of ["worker", "conversation"] as const) {
       store.writeSession({ protocol: 1, id: `s-${role}`, project: "p", role, runtime: "external", cwd: store.dir, launched_by: "external", created_at: new Date().toISOString() });
-      for (const sub of ["update", "cancel"]) {
+      for (const [args, what] of commands) {
         assert.throws(
-          () => execFileSync(process.execPath, [cli, "server", sub], { env: { ...process.env, NEXUS_SESSION: `s-${role}`, NEXUS_DIR: store.dir, NEXUS_PORT: "1" }, stdio: "pipe" }),
-          (e: { stderr: Buffer }) => new RegExp(`only the user or an orchestrator may ${sub}`).test(e.stderr.toString()),
-          `${role} ${sub}`,
+          () => execFileSync(process.execPath, [cli, "server", ...args], { env: { ...process.env, NEXUS_SESSION: `s-${role}`, NEXUS_DIR: store.dir, NEXUS_PORT: "1" }, stdio: "pipe" }),
+          (e: { stderr: Buffer }) => new RegExp(`only the user or an orchestrator may ${what} the Nexus server, not a ${role}`).test(e.stderr.toString()),
+          `${role} ${args.join(" ")}`,
         );
       }
     }

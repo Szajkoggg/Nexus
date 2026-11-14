@@ -632,6 +632,15 @@ keeps its old briefing and its habits. The `Agents:` lines in commit messages ar
   not when they are recorded.
 - They never reach the user's chat; the user asked for no "what changed" view.
 
+**Planned deploys** (the user's decision of 2026-11-14, queue PD; `src/deploy-plan.ts`). A deploy can wait for a step
+or a queue instead of starting at once. The plan does not hold anything itself: when its target is in, it starts an
+ordinary update, whose drain holds every running queue at its step's end. The target's step has just ended, so its
+queue stops right there. Watching the files alone was not enough: an agent's `nexus step done` and the end of its turn
+can come within the file watcher's debounce, and the engine opens the next step at the turn's end. So the engine also
+asks the planner at every step boundary, before it goes on (Engine option `boundary`). The hand-over ends the plan
+before the successor starts, so that a successor reading the same file never deploys a second time; a plain restart
+keeps it.
+
 ## Tech stack
 
 | Part | Choice |

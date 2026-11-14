@@ -28,6 +28,7 @@ import { listModels } from "./models.ts";
 import { readDeployChanges, readDeploySettings, writeDeploySettings } from "./deploy.ts";
 import { Standby, refuseHandoverDir, smokeCheck, takeHandoverEnv } from "./handover.ts";
 import { Lifecycle, version } from "./lifecycle.ts";
+import { DeployPlanner, PlanError } from "./deploy-plan.ts";
 import { MAX_UPLOAD_BODY, UploadError, saveUpload } from "./uploads.ts";
 import { COMMIT_HASH, commitDetail, fileResponse, locate } from "./files.ts";
 import { chatRange, pin, searchLines } from "./chats.ts";
@@ -97,10 +98,11 @@ function refreshRegistry(): void {
     // Steps done before review levels keep the meaning they had (PROTOCOL.md, "Before review levels").
     try { if (store.markReviewLevels()) console.log(`project ${p.id}: steps done from now on are reviewed by level`); }
     catch (err) { console.error(`project ${p.id}: review levels not marked: ${(err as Error).message}`); }
-    const engine = new Engine(store, () => changed(p.id), { coordinator });
+    // A deploy planned after a step or queue of this project holds the run at that step's end (src/deploy-plan.ts).
+    const engine = new Engine(store, () => changed(p.id), { coordinator, boundary: (q, step, state) => planner.atBoundary(p.id, q, step, state) });
     // Through its usual notices it is told the outcome of an update it asked for (lifecycle.notice), and what changed
     // for agents in each deploy since its session began (deploy-changes.jsonl).
-    const orchestrator = new Orchestrator(store, engine, () => changed(p.id), { update: () => lifecycle.notice(), changes: readDeployChanges, push: (n) => void push(n) });
+    const orchestrator = new Orchestrator(store, engine, () => changed(p.id), { update: () => lifecycle.notice(), plan: () => planner.notice(), changes: readDeployChanges, push: (n) => void push(n) });
     projects.set(p.id, { id: p.id, root: p.root, store, engine, orchestrator, conversations: new Conversations(store, orchestrator, () => changed(p.id)) });
     watchProject(p.id, store.dir);
   }
@@ -136,6 +138,10 @@ function changed(id: string): void {
         // Send-backs not delivered yet (the action delivers its own at once; this is the backstop).
         try { const fresh = stateOf(e); if (fresh && routeSendBacks(e.store, fresh) > 0) e.state = undefined; }
         catch (err) { console.error(`routing send-backs in ${id}: ${(err as Error).message}`); }
+        // A planned deploy whose target is in starts its update (or is dropped): before the engine goes on.
+        try { const fresh = stateOf(e); if (fresh) planner.check(id, fresh); }
+        catch (err) { console.error(`deploy plan in ${id}: ${(err as Error).message}`); }
+        e.state = undefined;
         try { const fresh = stateOf(e); if (fresh) e.orchestrator.onChange(fresh); }
         catch (err) { console.error(`orchestrator in ${id}: ${(err as Error).message}`); }
         e.state = undefined;
@@ -187,6 +193,19 @@ const lifecycle = new Lifecycle(() => [...projects.values()].map((e) => ({
   notify: (text) => void push({ title: "Nexus: update failed", body: text.slice(0, 180), url: "/?settings", tag: "nexus-update" }),
   // Settled (up and pushed, failed, cancelled): what was held while it drained, and its outcome, go out now.
   settled: () => { for (const id of projects.keys()) changed(id); },
+  // A planned deploy it carries ends with it (before the hand-over: the successor must not deploy again).
+  ended: (id, how, reason) => planner.updateEnded(id, how, reason),
+});
+// Planned deploys: after a step or a queue (src/deploy-plan.ts).
+const planner = new DeployPlanner({
+  lifecycle,
+  state: (id) => { const e = projects.get(id); return e ? stateOf(e) : undefined; },
+  push: (n) => void push(n),
+  changed: () => {
+    if (!active) return;
+    for (const s of sockets) if (s.readyState === s.OPEN) s.send(JSON.stringify({ type: "server" }));
+    for (const id of projects.keys()) changed(id); // its orchestrator is told when a plan is dropped
+  },
 });
 const watch = new AttentionWatch();
 
@@ -275,7 +294,7 @@ app.get("/api/projects/:id/commits/:hash", (c) => {
  * (`update` and `cancel`, which the CLI keeps to the user and to an orchestrator the user asked; `away`, which it keeps
  * to the user alone).
  */
-const CLI_WRITES = new Set(["/api/server/update", "/api/server/cancel", "/api/server/away"]);
+const CLI_WRITES = new Set(["/api/server/update", "/api/server/cancel", "/api/server/plan", "/api/server/cancel-plan", "/api/server/away"]);
 app.use("/api/*", async (c, next) => {
   if (c.req.method === "GET" || c.req.method === "HEAD") return next();
   const origin = c.req.header("origin");
@@ -504,7 +523,7 @@ app.get("/api/usage", (c) => c.json(readUsage() ?? null));
 // Nexus itself: its version, and updating it without cutting off running work (src/lifecycle.ts).
 // `local`: whether this request comes straight from this machine (src/remote.ts isLocal), so the dashboard shows what
 // only makes sense on the server machine ("Open in editor": a path on another device points nowhere).
-app.get("/api/server", async (c) => c.json({ ...(await version()), local: isLocal(c.env.incoming), update: lifecycle.status, push_on_deploy: readDeploySettings().push_on_deploy, max_running: readLimits().max_running, running: runningSteps(), away: awayNow(readAway()) }));
+app.get("/api/server", async (c) => c.json({ ...(await version()), local: isLocal(c.env.incoming), update: lifecycle.status, plan: planner.view(), push_on_deploy: readDeploySettings().push_on_deploy, max_running: readLimits().max_running, running: runningSteps(), away: awayNow(readAway()) }));
 
 // ---------------------------------------------------------------- away mode (PROTOCOL.md, "Away mode")
 
@@ -566,17 +585,36 @@ app.post("/api/server/settings", async (c) => {
   for (const s of sockets) if (s.readyState === s.OPEN) s.send(JSON.stringify({ type: "server" }));
   return c.json({ ok: true, push_on_deploy: readDeploySettings().push_on_deploy, max_running: readLimits().max_running });
 });
+/** An orchestrator session of a registered project, as the CLI sends it (`by`); anything else counts as the user. */
+function askerOf(b: { project?: unknown; session?: unknown } | undefined): { project: string; session: string } | undefined {
+  const e = typeof b?.project === "string" ? projects.get(b.project) : undefined;
+  if (!e || typeof b?.session !== "string") return undefined;
+  try { return e.store.readSession(b.session).role === "orchestrator" ? { project: e.id, session: b.session } : undefined; } catch { return undefined; }
+}
 app.post("/api/server/update", async (c) => {
   const b = (await c.req.json().catch(() => ({}))) as { now?: unknown; ref?: unknown; by?: { project?: unknown; session?: unknown } };
   // `by`: the orchestrator session that ran `nexus server update` (the CLI sends it); it is told the outcome. Only an
   // orchestrator session of a registered project counts; the dashboard sends none.
-  let by: { project: string; session: string } | undefined;
-  const e = typeof b.by?.project === "string" ? projects.get(b.by.project) : undefined;
-  if (e && typeof b.by?.session === "string") {
-    try { if (e.store.readSession(b.by.session).role === "orchestrator") by = { project: e.id, session: b.by.session }; } catch { /* no such session */ }
-  }
-  try { return c.json(lifecycle.start({ now: b.now === true, ref: typeof b.ref === "string" ? b.ref : undefined, by })); }
+  try { return c.json(lifecycle.start({ now: b.now === true, ref: typeof b.ref === "string" ? b.ref : undefined, by: askerOf(b.by) })); }
   catch (e) { return c.json({ error: (e as Error).message }, 409); }
+});
+// A planned deploy (src/deploy-plan.ts): `after` { project, queue, step? }, `ref?`, `by?` (as for update). One at a
+// time; `nexus server update --after` sends it, `nexus server cancel-plan` cancels it.
+app.post("/api/server/plan", async (c) => {
+  const b = (await c.req.json().catch(() => ({}))) as { after?: { project?: unknown; queue?: unknown; step?: unknown }; ref?: unknown; by?: { project?: unknown; session?: unknown } };
+  const a = b.after;
+  if (typeof a?.project !== "string" || typeof a.queue !== "string" || (a.step !== undefined && typeof a.step !== "string")) {
+    return c.json({ error: "give after: { project, queue, step? }" }, 400);
+  }
+  try {
+    const r = planner.set({ after: { project: a.project, queue: a.queue, step: a.step || undefined }, ref: typeof b.ref === "string" ? b.ref : undefined, by: askerOf(b.by) });
+    return c.json({ text: r.text, plan: planner.view(), update: lifecycle.status });
+  } catch (e) { return c.json({ error: (e as Error).message }, e instanceof PlanError ? 409 : 500); }
+});
+app.post("/api/server/cancel-plan", async (c) => {
+  const b = (await c.req.json().catch(() => ({}))) as { by?: { project?: unknown; session?: unknown } };
+  try { return c.json({ text: planner.cancel(askerOf(b.by)), update: lifecycle.status }); }
+  catch (e) { return c.json({ error: (e as Error).message }, e instanceof PlanError ? 409 : 500); }
 });
 app.post("/api/server/cancel", (c) => {
   try { lifecycle.cancel(); return c.json(lifecycle.status); } catch (e) { return c.json({ error: (e as Error).message }, 409); }
@@ -690,6 +728,7 @@ function activate(): void {
   // write in that project. This tells each orchestrator now, and starts its turn.
   for (const id of projects.keys()) changed(id);
   armAway(); // an away mode ends at its time also across restarts
+  planner.recover(); // a planned deploy stays across restarts
 }
 
 /** The successor's side of an update: prove it is up, say so, and take over once the predecessor has let go. */

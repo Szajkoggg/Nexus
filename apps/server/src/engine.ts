@@ -80,6 +80,12 @@ export interface EngineOptions {
    * without one, the engine has one of its own, with the limit of <NEXUS_HOME>/limits.json.
    */
   coordinator?: Coordinator;
+  /**
+   * Asked at the end of a step (done or skipped) before the run goes on (the next step, or its end): whether to stop
+   * here, because a deploy planned after this step or queue just started its update (src/deploy-plan.ts), whose drain
+   * held the run. The engine then looks at the run again.
+   */
+  boundary?: (queueId: string, step: string, state: ProjectState) => boolean;
 }
 
 /** A process asked to end for a restart (another model or effort) is killed if it has not exited by then. */
@@ -126,6 +132,7 @@ export class Engine implements Member {
   private readonly retryBaseMs: number;
   private readonly usageMarginMs: number;
   private readonly backgroundLimitMs: number;
+  private readonly boundary?: EngineOptions["boundary"];
   /**
    * A run whose step's turn ended while background work ran, by queue: since when Nexus waits (on the clock), and
    * whether the wait is over (`expired`: the usual rule applies until the work ends or the step opens again).
@@ -139,6 +146,7 @@ export class Engine implements Member {
     this.retryBaseMs = options.retryBaseMs ?? RETRY_BASE_MS;
     this.usageMarginMs = options.usageMarginMs ?? USAGE_MARGIN_MS;
     this.backgroundLimitMs = options.backgroundLimitMs ?? BACKGROUND_LIMIT_MS;
+    this.boundary = options.boundary;
     this.clock = options.clock ?? REAL_CLOCK;
     this.clockTimers = new ClockTimers(this.clock, () => this.stopped);
     this.coordinator = options.coordinator ?? new Coordinator();
@@ -542,6 +550,9 @@ export class Engine implements Member {
         default:
           break; // done or skipped: go on
       }
+      // A deploy planned after this step (or queue) starts now: its drain holds the run here, so nothing of the next
+      // step slips in. Looked at again: held, the run waits for the restart; paused by the user, the pause is reached.
+      if (this.boundary?.(queueId, current.id, state)) return this.advanceUnlocked(queueId);
     }
 
     // The step's end. A newer revision waiting for approval: the run waits for it, keeping its session (also while an

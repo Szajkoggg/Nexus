@@ -528,6 +528,7 @@ Written only by the server's queue engine; agents never touch them.
 | `<NEXUS_HOME>/away.yaml` | The user's away mode: `current` (`since`, `until`) while on, `past` periods (`since`, `until`, `ended`, `why`: `expired` or `off`). One writer: the server, on `POST /api/server/away` and when a period's time comes. See "Away mode" under "Review" |
 | `<NEXUS_HOME>/limits.json` | `{ max_running: number }`: how many queues may run at once across all projects, a whole number from 1 to 20 (default `2` when the file or the value is missing). One writer: the server, on `POST /api/server/settings` from the dashboard |
 | `<NEXUS_HOME>/deploy.json` | `{ push_on_deploy: boolean }` (default `true` when the file is missing). One writer: the server, on `POST /api/server/settings` from the dashboard |
+| `<NEXUS_HOME>/deploy-plan.json` | The planned deploy, if any: `plan?` (`id`, `after`: `project`, `queue`, `step?` (none: the whole queue), `ref?`, `by?` (`project`, `session`: the orchestrator that planned it), `created_at`, `warning?`, `started?` (`at`, `update`: the id of the update it started)), and the last plan that ended, `ended?` (`plan`, `at`, `why`: `carried-out`, `dropped`, `update-failed` or `cancelled`, `reason`, `by?`). One writer: the server. See "Planned deploys" |
 | `<NEXUS_HOME>/deploy-changes.jsonl` | One line per successful deploy with changes for agents: `key` (`deploy-changes:<new sha>`), `at`, `from`, `to` (full shas), `changes` (`commit`, `text`: the commits' `Agents:` lines, oldest first). One writer: the server that took over (a successor, once per deploy) |
 
 A session launched by Nexus has `launched_by: nexus`, `runtime: claude`, `native_id` (Claude's session UUID, chosen
@@ -901,6 +902,8 @@ nexus project add <path> [--id] [--name]       # creates .nexus/ (self-ignoring)
 nexus import <file.md> [--prefix X]            # one-time import of queues written as Markdown tables
 nexus note <queue> <step> <text>               # until the dashboard can add notes
 nexus server away [on --until <8:00|ISO> | off]  # the user's away mode (refused from any agent session); no argument: its state
+nexus server update --after <queue>[/<step>] [--ref <ref>]   # plan a deploy for after a step or queue of this project (the user, or an orchestrator the user asked)
+nexus server cancel-plan                       # cancel the planned deploy (and the drain it started)
 ```
 
 `nexus status` prints each step of a queue on a line of its own (id, status, title); a step that names its own
@@ -988,8 +991,9 @@ Live: a WebSocket at `/ws` sends `{"type":"changed","project":id}` and `{"type":
 Writes (JSON bodies only; a request with a foreign `Origin` is refused). Every write is a user action and is taken
 only from the dashboard's own page: the request must carry this server's `Origin` and, if it sends one,
 `Sec-Fetch-Site: same-origin`; anything else is refused (403). Agents change things through the `nexus` CLI, which
-writes files. The only exceptions are `POST /api/server/update`, `POST /api/server/cancel` and `POST
-/api/server/away`, which `nexus server` sends (see the CLI; it refuses `away` from every agent session).
+writes files. The only exceptions are `POST /api/server/update`, `POST /api/server/cancel`, `POST /api/server/plan`,
+`POST /api/server/cancel-plan` and `POST /api/server/away`, which `nexus server` sends (see the CLI; it refuses `away`
+from every agent session, and the others from every session but an orchestrator's).
 
 | Request | Body | Effect |
 |---|---|---|
@@ -1113,17 +1117,54 @@ then) and `update`:
 update), `held`, `waiting`, `log`, `error?`, and after a deploy `push?` (`result`: `pushed`, `failed` or `skipped`,
 `text`, `at`), `id` (the update's id), `by?` (`project`, `session`: the orchestrator that asked for it) and, on a
 successor, `up` (`commit`, `subject`, `previous?`). It also gives `push_on_deploy`, `max_running` (the limit on queues
-running at once), `away` (the away mode now: `on`, `since?`, `until?`) and `running`: the steps running
+running at once), `away` (the away mode now: `on`, `since?`, `until?`), `plan` (the planned deploy, as in
+`deploy-plan.json`, with `waiting?`: what it waits for, in a sentence; null when none) and `running`: the steps running
 now, per project (`project`, `name`, `steps`: `queue`, `step`, `title`, `session`, `run`), which `nexus server status`
 prints. `POST /api/server/update` (`now?`, `ref?`, `by?`) and `POST /api/server/cancel` start and cancel an update.
 `by` is sent by `nexus server update` run in an orchestrator session (from `NEXUS_SESSION` and its project); the
 server keeps it only for an orchestrator session of a registered project. The dashboard sends none. `POST
+/api/server/plan` (`after`: `project`, `queue`, `step?`; `ref?`, `by?` as for update) plans a deploy, answering
+`text`, `plan` and `update`; `POST /api/server/cancel-plan` (`by?`) cancels it, answering `text` (409 with the reason
+when refused; see "Planned deploys"). `POST
 /api/server/away` (`until`: a local time "8:00", an ISO 8601 time, or null for off; it answers `away`) switches the
 user's away mode; like update and cancel it is taken from `nexus server away` without an `Origin`, and the CLI refuses
 it from every agent session. `POST /api/server/settings` (`push_on_deploy?`: boolean, `max_running?`: a whole number
 from 1 to 20; at least one of them; it answers both values) is the
 user's only: like withdrawing an approval, it is refused without the dashboard page's own `Origin`. A server waiting
 to take over answers every `/api/projects…` request, and every write under `/api/server/`, with 503.
+
+**Planned deploys.** Instead of at once, a deploy can wait for a step or a queue of a project (decided by the user on
+2026-11-14, docs/ideas/deploy-timing.md). `nexus server update --after <queue>[/<step>]` plans it for a queue of the
+project the CLI runs in (an orchestrator's own); like `update`, the CLI refuses it, and `cancel-plan`, from every
+session but an orchestrator's, and the orchestrator does it only when the user asks. One plan at a time: a second is
+refused until the first is cancelled, and so is a plan while an update is under way.
+
+- **When it is in.** A step is in when it is `done` (one waiting for its review, once accepted; one accepted
+  provisionally is `done`) or `skipped`. A queue is in when it is done: every step closed (done, skipped, or rejected
+  and released by a revision), its closing step included.
+- **After a step.** The moment the step is in, the update starts (with the plan's `ref` and `by`). The engine asks at
+  every step's end, before it opens the next step or finishes the run, so the update's drain holds the step's queue
+  right there, even when the turn ends before the file watcher looks: nothing of the next step slips in. Steps running
+  elsewhere are waited for as with any update, and the held queue goes on after the restart.
+- **After a queue.** The update starts once the queue is done; a stopped or failed step means it is not.
+- **Dropped.** The plan is dropped, without a deploy, when its step fails, stops or is rejected, or (after a queue) a
+  step fails or stops, or the queue is stopped, cancelled or gone. A plan whose target will not be in is refused when it
+  is set; one whose target is already in starts the update at once.
+- **The update it started.** The plan records the update's id (`started`). The hand-over ends the plan
+  (`carried-out`) before the successor starts, so the successor never deploys again. A failed update (before the
+  hand-over, or by a rollback) ends it as `update-failed`; cancelling the update (`nexus server cancel`) ends it as
+  `cancelled`; `cancel-plan` of a plan whose update still drains cancels the drain too (the held queues go on); once
+  the update is past its drain, the plan can no longer be cancelled.
+- **Across a restart.** The plan file stays: a plain restart finds the plan and waits on. A plan marked `started`
+  whose update never handed over (the server stopped mid-drain) waits again, and starts its update once its target is
+  in.
+- **A worktree branch.** When the step's queue runs on a worktree of its own and its branch is not merged back
+  (`git.yaml` `merged`), setting the plan warns that its work is in the deploy only once merged into main.
+- **Told.** A dropped plan pushes a notification to the user's devices ("Nexus: planned deploy dropped"). The
+  orchestrator that planned it, else the target project's orchestrator, is told once, key
+  `notify:deploy-plan:<plan id>:<why>`: when it is dropped ("The deploy planned after … will not happen: …"), when its
+  update failed (only for a plan the user set: the orchestrator that planned it is told the update's own outcome), and
+  when the user cancelled an orchestrator's plan. The planning session is told even with `notify` off.
 
 **Push on deploy.** A successor that took over a live instance (`live: true`) pushes what it runs once it is up, if
 `push_on_deploy` is on and the update's ref was `main`. It runs

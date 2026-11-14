@@ -47,7 +47,7 @@ test("every write without the dashboard's origin is refused; approve and setting
     assert.ok(routes.some((r) => r.path === "/api/projects/p/queues/x/approve") && routes.some((r) => r.method === "PATCH" && r.path === "/api/projects/p/settings")
       && routes.some((r) => r.path === "/api/projects/p/queues/x/continue"), "the list holds approve, settings and Continue");
     assert.ok(routes.some((r) => r.path === "/api/projects/p/queues/x/merge") && routes.some((r) => r.path === "/api/projects/p/queues/x/cleanup"), "and merge back and cleanup");
-    const open = new Set(["/api/server/update", "/api/server/cancel", "/api/server/away"]); // the CLI's own: not sent here, they would act
+    const open = new Set(["/api/server/update", "/api/server/cancel", "/api/server/plan", "/api/server/cancel-plan", "/api/server/away"]); // the CLI's own: not sent here, they would act
     for (const r of routes.filter((x) => !open.has(x.path))) {
       const res = await send(r.method, r.path, {});
       assert.equal(res.status, 403, `${r.method} ${r.path} without an Origin: ${res.status} ${await res.text()}`);
