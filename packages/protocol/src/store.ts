@@ -9,7 +9,7 @@ import { monotonicFactory } from "ulid";
 import YAML from "yaml";
 import type { z } from "zod";
 import {
-  Activity, Applied, ChatEntry, Refusal, Delivery, Event, InboxEntry, NoteMeta, GitFile, ProjectFile, PushFile, QueueFile, RegistryFile, RunFile, RuntimeFile, SessionFile, StartFile, UsageFile,
+  Activity, Applied, ChatEntry, Refusal, Delivery, Event, InboxEntry, NoteMeta, GitFile, ProjectFile, PushFile, QueueFile, RegistryFile, RunFile, RuntimeFile, SessionFile, StartFile, TurnRecord, UsageFile,
   type Note,
 } from "./schemas.ts";
 
@@ -256,6 +256,11 @@ export class ProjectStore {
 }
 
 // ---------------------------------------------------------------- account-wide usage
+
+const turnsFile = () => join(nexusHome(), "turns.jsonl");
+/** One line per agent turn of every project (TurnRecord). Written only by the server (AgentHost). */
+export function appendTurn(r: TurnRecord): void { mkdirSync(nexusHome(), { recursive: true }); appendJsonl(turnsFile(), TurnRecord.parse(r)); }
+export function readTurns(): JsonlRead<TurnRecord> { return readJsonl(turnsFile(), TurnRecord); }
 
 const usageFile = () => join(nexusHome(), "usage.json");
 export function readUsage(): UsageFile | undefined {

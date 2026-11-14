@@ -788,6 +788,7 @@ export class Engine implements Member {
     // AgentHost keeps the runtime record (a turn's end counts in `turns`), the facts and the usage windows; these
     // handlers run after it.
     return this.host.start(session, launch, {}, () => ({
+      tag,
       activity: (a) => this.store.appendActivity(session.id, { at: now(), ...a, ...tag() }),
       refusal: (r) => {
         // One record per refusal, also across processes of the session (a resumed runtime may repeat its list).

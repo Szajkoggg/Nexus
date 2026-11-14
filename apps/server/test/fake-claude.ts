@@ -25,6 +25,11 @@ async function turn(text: string): Promise<void> {
   const n = ++turns;
   if (process.env.FAKE_COST) totalCost = Math.round((totalCost + 0.01 * n) * 1e6) / 1e6;
   const usage = { input_tokens: 10 * n, output_tokens: 5 * n, cache_creation_input_tokens: n, cache_read_input_tokens: 100 * n };
+  // FAKE_USAGE: the 5-hour window's utilization (0 to 1) this turn reports, as Claude Code's rate_limit_event does.
+  if (process.env.FAKE_USAGE) {
+    const resetsAt = Math.ceil(Date.now() / 1000) + 3600;
+    out({ type: "rate_limit_event", rate_limit_info: { status: "allowed", unifiedWindows: { five_hour: { utilization: Number(process.env.FAKE_USAGE), resetsAt, status: "allowed" }, seven_day: { utilization: 0.2, resetsAt: resetsAt + 86400, status: "allowed" } } }, uuid: "u", session_id: "fake" });
+  }
   out({ type: "result", subtype: "success", is_error: false, result: reply, num_turns: 1, total_cost_usd: totalCost, usage, modelUsage: { fake: { contextWindow: 1000 } }, permission_denials: denials });
 }
 

@@ -572,6 +572,41 @@ export const UsageFile = z.object({
 });
 export type UsageFile = z.infer<typeof UsageFile>;
 
+const UsageWindow = z.object({ utilization: z.number(), resets_at: Time.optional() });
+
+/**
+ * <NEXUS_HOME>/turns.jsonl: one line per agent turn of every project and role (workers, orchestrators, thinking
+ * partners), appended by the server when the turn ends (or its process ends without one). The record statistics are
+ * computed from later; the account's usage windows are server-wide, so every project's turns are in one file.
+ */
+export const TurnRecord = z.object({
+  v: z.literal(1),
+  /** When the turn ended (or was found interrupted). */
+  at: Time,
+  started_at: Time.optional(),
+  duration_ms: z.number().int().nonnegative().optional(),
+  project: Id,
+  session: Id,
+  role: z.enum(["worker", "orchestrator", "conversation"]),
+  runtime: z.enum(["claude", "codex"]),
+  model: z.string().optional(),
+  effort: z.string().optional(),
+  queue: Id.optional(),
+  step: Id.optional(),
+  /** `ok`; a failure's kind (`passing`, `lasting`, `usage`, with `failure`, the runtime's code); `interrupted`: ended
+   *  without a result (Nexus interrupted it, or its process ended: a kill, an update's drain, a crash). */
+  outcome: z.enum(["ok", "passing", "lasting", "usage", "interrupted"]),
+  failure: z.string().optional(),
+  /** The turn's own tokens, as the runtime reported them: input not from the cache, output, cache read and written. */
+  tokens: z.object({ input: z.number(), output: z.number(), cache_read: z.number(), cache_creation: z.number() }).optional(),
+  /** The turn's own cost, where the runtime reports one (Claude Code) and it is known. */
+  cost_usd: z.number().optional(),
+  /** The account's usage windows of the turn's runtime as the server knew them when the turn began and ended. */
+  windows_start: z.record(z.string(), UsageWindow).optional(),
+  windows_end: z.record(z.string(), UsageWindow).optional(),
+});
+export type TurnRecord = z.infer<typeof TurnRecord>;
+
 // ---------------------------------------------------------------- inbox (sessions/<id>/inbox.jsonl)
 
 const ibase = { v: z.literal(1), id: Id, at: Time, from: z.enum(["user", "orchestrator", "nexus"]) };
