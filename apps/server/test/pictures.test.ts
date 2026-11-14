@@ -76,7 +76,7 @@ test("a Codex partner gets an uploaded picture as a localImage item, with its pa
     await until("the reply", () => conversations.view(c.id).chat.some((x) => x.from === "partner"));
     assert.deepEqual(args().filter((a) => a.method === "turn/start").map((a) => a.images), [[picture]]);
     assert.ok(received().some((r) => String(r.text).split("\n").includes(picture)), "the path stays in the text");
-    // A path whose file is gone adds no item (Codex would fail the whole turn on it): the message goes as text.
+    // A path whose file is gone adds no item (Codex would only tell the model it is missing): the message goes as text.
     const gone = join(uploads, "20261114-120001-0000000000.png").replaceAll("\\", "/");
     conversations.say(c.id, `And this one?\n${gone}`);
     await until("the second reply", () => conversations.view(c.id).chat.filter((x) => x.from === "partner").length === 2);

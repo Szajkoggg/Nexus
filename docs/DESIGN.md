@@ -1208,8 +1208,10 @@ a swipe moves in every view: the picture alone, before and after, and the overla
   notes folder, approvals `never`) did not try to open it: "I can't access that image path from here" (about 17k
   input tokens). Given the same text with a `localImage` item for the path, it answered "47" (about 16k input tokens,
   mostly cached). So the message keeps the path on its own line for both, and the Codex adapter adds the item for
-  every such line of an uploaded picture. Total cost of the probes: about $0.009 of Claude usage and about 33k
-Codex input tokens.
+  every such line of an uploaded picture. An item whose file is missing does not fail the turn: the model is told the
+file is missing ("I can't read the image because the file is missing"); the adapter leaves such a line as text only.
+Total cost of the probes: about $0.009 of Claude usage (two turns) and, for Codex (gpt-6-luna, seven one-turn
+threads), about 117k input tokens, about 90k of them cached, and under 100 output tokens.
 
 ## Open questions
 
