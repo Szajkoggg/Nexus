@@ -1,6 +1,6 @@
 // A stand-in for `claude -p --input-format stream-json --output-format stream-json`, for testing without a model.
 // What it does is in fake-behaviour.ts.
-import { PARTIAL, contextTokens, interrupt, record, recordArgs, respond, type Fake, type FakeFailure } from "./fake-behaviour.ts";
+import { BACKGROUND_NOTICE, PARTIAL, contextTokens, interrupt, record, recordArgs, respond, type Fake, type FakeFailure } from "./fake-behaviour.ts";
 
 recordArgs({ argv: process.argv.slice(2) });
 
@@ -36,7 +36,31 @@ async function turn(text: string): Promise<void> {
     const resetsAt = Math.ceil(Date.now() / 1000) + 3600;
     out({ type: "rate_limit_event", rate_limit_info: { status: "allowed", unifiedWindows: { five_hour: { utilization: Number(process.env.FAKE_USAGE), resetsAt, status: "allowed" }, seven_day: { utilization: 0.2, resetsAt: resetsAt + 86400, status: "allowed" } } }, uuid: "u", session_id: "fake" });
   }
+  const bg = fake.background;
+  fake.background = undefined;
+  if (bg) startBackground(bg);
   out({ type: "result", subtype: "success", is_error: false, result: reply, num_turns: 1, total_cost_usd: totalCost, usage, modelUsage: { fake: { contextWindow: 1000 } }, permission_denials: denials });
+}
+
+/**
+ * Background work as Claude Code 2.1.323 reports it (probed 2026-11-14): background_tasks_changed with the whole list
+ * and task_started when it starts; at its end task_updated, task_notification, background_tasks_changed with what is
+ * left, and a turn the CLI starts by itself (system init) with the notification.
+ */
+let tasks: { task_id: string; task_type: string; description: string }[] = [];
+function startBackground(bg: { kind: "command" | "agent"; ms: number }): void {
+  const task = { task_id: `task-${tasks.length + 1}`, task_type: bg.kind === "agent" ? "local_agent" : "local_bash", description: bg.kind === "agent" ? "fake sub-agent" : "fake background command" };
+  tasks = [...tasks, task];
+  out({ type: "system", subtype: "background_tasks_changed", tasks, uuid: "u", session_id: "fake" });
+  out({ type: "system", subtype: "task_started", task_id: task.task_id, description: task.description, is_backgrounded: true, task_type: task.task_type, uuid: "u", session_id: "fake" });
+  setTimeout(() => {
+    tasks = tasks.filter((t) => t !== task);
+    out({ type: "system", subtype: "task_updated", task_id: task.task_id, patch: { status: "completed" }, uuid: "u", session_id: "fake" });
+    out({ type: "system", subtype: "task_notification", task_id: task.task_id, status: "completed", summary: `${task.description} completed`, uuid: "u", session_id: "fake" });
+    out({ type: "system", subtype: "background_tasks_changed", tasks, uuid: "u", session_id: "fake" });
+    queue.push(`${BACKGROUND_NOTICE} ${task.description} completed`);
+    void pump();
+  }, bg.ms);
 }
 
 /**

@@ -39,6 +39,7 @@ export function withLanguages(text: string, line: string | undefined): string {
 
 export const WORKER_BRIEFING = `You are a worker session run by Nexus, the dashboard through which the user follows and steers your work.
 Nexus sends you one step of an approved queue at a time. Work on that step only; when its outcome is reported, end your turn: Nexus opens the next step.
+Do not end your turn while work you started still runs (a background command, a sub-agent): run a sub-agent in the foreground and take its result within the same turn, or do the work yourself. Nexus waits for background work only for a limited time, and a turn that ends without the step's outcome otherwise counts as one without an outcome.
 Report through the \`nexus\` command (on PATH; your session is set in the environment as NEXUS_SESSION):
 - nexus step start <step>                                   when you begin a step
 - nexus step progress <step> "<short status>" [--pct N]     at milestones, so the user sees where you are
@@ -93,9 +94,16 @@ export function stepOpening(o: {
   ].filter(Boolean).join("\n");
 }
 
-/** The turn ended and the step has no outcome: asked once. */
-export function noOutcomeNudge(step: string): string {
-  return `[Nexus] Your turn ended, but step ${step} has no outcome yet. Continue the step if work remains; otherwise report it with \`nexus step done ${step} --summary "…"\`, \`nexus step failed\`, \`nexus stop\`, or ask with \`nexus ask\` and end your turn.`;
+/**
+ * The turn ended and the step has no outcome: asked once. `background`: the turn had left work running in the
+ * background and Nexus waited for it (DESIGN.md, "Background work"): it has `finished`, or it still runs after
+ * `minutes` and Nexus waits no longer.
+ */
+export function noOutcomeNudge(step: string, background?: { finished: true } | { finished: false; minutes: number; work: readonly string[] }): string {
+  const report = `report it with \`nexus step done ${step} --summary "…"\`, \`nexus step failed\`, \`nexus stop\`, or ask with \`nexus ask\` and end your turn.`;
+  if (background?.finished) return `[Nexus] The background work you started has finished, and step ${step} has no outcome yet. Take its result and continue the step if work remains; otherwise ${report}`;
+  if (background) return `[Nexus] Your turn ended ${background.minutes} minutes ago with work still running in the background (${background.work.join("; ")}), and step ${step} has no outcome yet. Nexus waits for it no longer: finish the step within this turn (wait for that work here, or do it yourself), then ${report}`;
+  return `[Nexus] Your turn ended, but step ${step} has no outcome yet. Continue the step if work remains; otherwise ${report} Do not end your turn while work you started still runs: run a sub-agent in the foreground and take its result within the turn, or do the work yourself.`;
 }
 
 /** Why the next step runs in a fresh session, as the request for the context summary says it. */

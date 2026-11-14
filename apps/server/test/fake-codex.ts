@@ -32,8 +32,11 @@ function takeIn(turn: string, text: string): void {
 async function runTurn(id: string, text: string): Promise<void> {
   notify("turn/started", { threadId, turn: { id, status: "inProgress", items: [] } });
   takeIn(id, text);
-  const reply = await respond(fake, text, (command) =>
-    notify("item/started", { threadId, turnId: id, item: { type: "commandExecution", id: randomUUID(), command: `"powershell.exe" -Command '${command}'`, status: "inProgress" } }), () => refused(id));
+  const reply = await respond(fake, text, (command) => {
+    const item = { type: "commandExecution", id: randomUUID(), command: `"powershell.exe" -Command '${command}'`, status: "inProgress" };
+    notify("item/started", { threadId, turnId: id, item });
+    notify("item/completed", { threadId, turnId: id, item: { ...item, status: "completed", exitCode: 0 } });
+  }, () => refused(id));
   if (typeof reply !== "string") return "exit" in reply ? exitOnSignal() : "interrupted" in reply ? interrupted(id) : fail(id, reply.fail);
   for (const s of steered) takeIn(id, s);
   steered = [];
@@ -43,8 +46,38 @@ async function runTurn(id: string, text: string): Promise<void> {
   const n = ++turns;
   tokens(id, { inputTokens: 100 * n, cachedInputTokens: 60 * n, outputTokens: 3 * n });
   tokens(id, { inputTokens: contextTokens(2000, 120), cachedInputTokens: 50, outputTokens: 2 * n });
+  const bg = fake.background;
+  fake.background = undefined;
+  if (bg) startBackground(id, bg);
   turnId = undefined;
   notify("turn/completed", { threadId, turn: { id, status: "completed", items: [] } });
+}
+
+/**
+ * Background work as Codex 0.167.2 reports it (probed 2026-11-14), started in the turn `turn`: a command item that
+ * completes after its turn did; or a sub-agent (subAgentActivity "started"), whose own thread's turn reaches this
+ * connection too, then its "completed" activity in the parent's thread. Codex starts no turn by itself after either.
+ */
+function startBackground(turn: string, bg: { kind: "command" | "agent"; ms: number }): void {
+  if (bg.kind === "command") {
+    const item = { type: "commandExecution", id: randomUUID(), command: `"powershell.exe" -Command 'Start-Sleep 25'`, status: "inProgress", source: "unifiedExecStartup" };
+    notify("item/started", { threadId, turnId: turn, item });
+    setTimeout(() => notify("item/completed", { threadId, turnId: turn, item: { ...item, status: "completed", exitCode: 0 } }), bg.ms);
+    return;
+  }
+  const child = randomUUID(), childTurn = randomUUID();
+  const activity = (kind: string) => ({ type: "subAgentActivity", id: randomUUID(), kind, agentThreadId: child, agentPath: "/root/fake" });
+  const a = activity("started");
+  notify("item/started", { threadId, turnId: turn, item: a });
+  notify("item/completed", { threadId, turnId: turn, item: a });
+  notify("turn/started", { threadId: child, turn: { id: childTurn, status: "inProgress", items: [] } });
+  setTimeout(() => {
+    notify("item/completed", { threadId: child, turnId: childTurn, item: { type: "agentMessage", id: randomUUID(), text: "sub-agent reply" } });
+    notify("turn/completed", { threadId: child, turn: { id: childTurn, status: "completed", items: [] } });
+    const c = activity("completed");
+    notify("item/started", { threadId, turnId: turn, item: c });
+    notify("item/completed", { threadId, turnId: turn, item: c });
+  }, bg.ms);
 }
 
 /**

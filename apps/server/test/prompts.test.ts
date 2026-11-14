@@ -25,6 +25,7 @@ import {
 import type { AgentEvents, AgentProcess, Priority } from "../src/agent.ts";
 import type { Launch } from "../src/agent-host.ts";
 import { Engine } from "../src/engine.ts";
+import { noOutcomeNudge } from "../src/prompts.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { Conversations } from "../src/conversations.ts";
 import type { DeployChanges } from "../src/deploy.ts";
@@ -181,6 +182,10 @@ test("the worker's texts: briefing, step openings, inbox entries, seeds and nudg
   event(worker(), { type: "step.failed", queue: "Q", step: "A4", reason: "The build tool is missing." });
   change();
   later(); engine.resume("Q");
+
+  tr.section("the nudges after background work (DESIGN.md, \"Background work\"; noOutcomeNudge): it has finished; it still runs after the limit");
+  tr.add(noOutcomeNudge("A1", { finished: true }));
+  tr.add(noOutcomeNudge("A1", { finished: false, minutes: 30, work: ["Run the e2e suite", "sub-agent /root/review"] }));
 
   tr.section("the worker's briefing (Claude Code: appended to the system prompt)");
   tr.add(briefing);

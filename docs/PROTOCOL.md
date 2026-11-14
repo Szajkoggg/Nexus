@@ -1283,9 +1283,13 @@ becomes the session's `native_id`.
 - stop now: `turn/interrupt`, then the message as the next turn
 
 It reads `turn/started` and `turn/completed` (the turn's status), `item/started` and `item/completed`
-(`commandExecution`, `fileChange`, `agentMessage`, `mcpToolCall`, `webSearch`), `thread/tokenUsage/updated` (the last
-request's input tokens are the context in use; `modelContextWindow`) and `account/rateLimits/updated` (stored as
-`codex_<window>` in `usage.json`, e.g. `codex_7d`). Checked against Codex CLI 0.167.2.
+(`commandExecution`, `fileChange`, `agentMessage`, `mcpToolCall`, `webSearch`, `subAgentActivity`),
+`thread/tokenUsage/updated` (the last request's input tokens are the context in use; `modelContextWindow`) and
+`account/rateLimits/updated` (stored as `codex_<window>` in `usage.json`, e.g. `codex_7d`). Only notifications of the
+session's own thread count: a sub-agent's thread sends its own turns and items over the same connection, and they are
+ignored. Background work (DESIGN.md, "Background work"): a `commandExecution` item still open when its turn has
+completed, and a sub-agent from its `subAgentActivity` `started` (or `interacted`) until its `completed` (or
+`interrupted`). Checked against Codex CLI 0.167.2.
 
 ## How the engine runs a Claude Code session
 
@@ -1304,6 +1308,8 @@ and thinking partners keep their own rules. Codex workers are not restricted (se
 - stop now: `"priority":"now"` (interrupts the turn)
 
 From stdout it reads `system/init` (a turn starts), `assistant` (tool calls, text, context usage),
-`user` tool results (errors), `rate_limit_event` (usage windows) and `result` (the turn ended; the context window
-from `modelUsage`). After a turn ends it decides the next move from the step's state: next step, wait (question,
-review), nudge once if the step has no outcome, or halt.
+`user` tool results (errors), `rate_limit_event` (usage windows), `system/background_tasks_changed` (the whole list
+of background tasks: a Bash command or a sub-agent started with `run_in_background`; when one ends, the CLI starts a
+turn by itself with its notification) and `result` (the turn ended; the context window from `modelUsage`). After a
+turn ends it decides the next move from the step's state: next step, wait (question, review, background work: see
+DESIGN.md, "Background work"), nudge once if the step has no outcome, or halt.

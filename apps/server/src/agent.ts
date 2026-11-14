@@ -79,6 +79,8 @@ export interface AgentEvents {
    * earlier turns').
    */
   turnEnd: [{ ok: boolean; text: string; failure?: TurnFailure; tokens?: TurnTokens; costUsd?: number }];
+  /** The work the agent left running in the background changed (see AgentProcess.background); emitted on every change. */
+  background: [readonly string[]];
   exit: [number | null];
 }
 
@@ -86,6 +88,13 @@ export interface AgentProcess extends EventEmitter<AgentEvents> {
   /** `working` from a sent turn (or one the runtime starts by itself) until it ends. */
   state: "working" | "idle" | "exited";
   readonly pid?: number;
+  /**
+   * What the agent started that runs on outside its turns (a background command, a sub-agent), one short description
+   * each; empty when nothing does. Read live from the runtime's stream (DESIGN.md, "Background work"): Claude Code's
+   * background_tasks_changed; Codex's command items still open after their turn and its sub-agents not yet completed.
+   * Optional: a stand-in without it has none.
+   */
+  readonly background?: readonly string[];
   /** No priority: a new turn (after the running one). `next`: into the running turn. `now`: interrupt it. */
   send(text: string, priority?: Priority): void;
   /**

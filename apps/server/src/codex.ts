@@ -108,6 +108,14 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
   private threadTotal: Json | undefined;
   private turnStartTotal: Json | undefined;
   private turnLast: Json[] = [];
+  /**
+   * Commands started and not completed, by item id, and sub-agents started and not completed or interrupted, by their
+   * thread id. Within a turn that is the work at hand; what is still open when the turn has completed runs on in the
+   * background (probed with Codex 0.167.2: a unified-exec command completed 14 s after its turn did, a sub-agent's
+   * subAgentActivity "completed" came after its parent's turn). Codex starts no turn by itself when either ends.
+   */
+  private openCommands = new Map<string, string>();
+  private openAgents = new Map<string, string>();
   /** The last rate-limit windows: when a full one resets. */
   private limits: { usedPercent: number; resetsAt?: string }[] = [];
 
@@ -130,6 +138,8 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
     this.proc.on("error", (err) => this.emit("activity", { kind: "error", text: `could not start codex: ${err.message}` }));
     this.proc.on("exit", (code) => {
       this.state = "exited";
+      this.openCommands.clear();
+      this.openAgents.clear();
       for (const p of this.pending.values()) p.reject(new Error("codex exited"));
       if (code && this.lastStderr.trim()) this.emit("activity", { kind: "error", text: this.lastStderr.trim().slice(-500) });
       this.emit("exit", code);
@@ -288,7 +298,21 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
     this.proc.stdin.write(JSON.stringify({ id: m.id, ...decision }) + "\n");
   }
 
+  /** The work still open while no turn runs (see openCommands): what this thread left running in the background. */
+  get background(): readonly string[] {
+    if (this.state === "working") return [];
+    return [...[...this.openCommands.values()].map((c) => `command: ${c}`), ...[...this.openAgents.values()].map((a) => `sub-agent ${a}`)];
+  }
+
+  /** Emits the background work after a change outside a turn (inside one, the turn's end is when it counts). */
+  private backgroundChanged(): void {
+    if (this.state === "idle") this.emit("background", this.background);
+  }
+
   private notification(method: string, p: Json): void {
+    // A sub-agent runs in a thread of its own, whose turns and items reach this connection too (probed with Codex
+    // 0.167.2): only this session's thread is the agent's; its sub-agents count through subAgentActivity items.
+    if (this.threadId && typeof p.threadId === "string" && p.threadId !== this.threadId) return;
     switch (method) {
       case "turn/started":
         this.state = "working";
@@ -333,6 +357,8 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
         const it = p.item ?? {};
         const what = itemAction(it);
         if (what && it.id) this.items.set(it.id, what);
+        if (it.type === "commandExecution" && it.id) this.openCommands.set(it.id, clip(unwrap(it.command ?? ""), 120));
+        if (it.type === "subAgentActivity") this.subAgent(it);
         if (it.type === "commandExecution") this.emit("activity", { kind: "tool", text: `Shell: ${clip(unwrap(it.command), 300)}` });
         if (it.type === "mcpToolCall") this.emit("activity", { kind: "tool", text: `MCP ${it.server}.${it.tool}` });
         if (it.type === "webSearch") this.emit("activity", { kind: "tool", text: `Web search: ${it.query ?? ""}` });
@@ -343,6 +369,8 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
         // Declined without a request Nexus saw or a review it heard of (a refusal by Codex itself).
         if (it.status === "declined") this.refuse({ by: "auto_review", ...(itemAction(it) ?? { tool: it.type ?? "item", input: "" }), ref: it.id });
         if (it.id) this.items.delete(it.id);
+        if (it.type === "subAgentActivity") this.subAgent(it);
+        if (it.id && this.openCommands.delete(it.id)) this.backgroundChanged();
         // A steered message Codex took into the turn: it is in the thread now, whatever happens to the turn.
         if (it.type === "userMessage") { const text = (it.content ?? []).find((c: Json) => c.type === "text")?.text; if (typeof text === "string") this.unsteer(text); }
         if (this.stopping) return; // what a stopped turn still writes is not shown
@@ -403,6 +431,14 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
   private refuse(r: RefusalItem): void {
     if (r.ref) { if (this.refused.has(r.ref)) return; this.refused.add(r.ref); }
     this.emit("refusal", r);
+  }
+
+  /** A sub-agent's activity (subAgentActivity, as item/started and item/completed alike): open from its start until it ends. */
+  private subAgent(it: Json): void {
+    const id = typeof it.agentThreadId === "string" ? it.agentThreadId : undefined;
+    if (!id) return;
+    if (it.kind === "started" || it.kind === "interacted") this.openAgents.set(id, clip(String(it.agentPath ?? id), 120));
+    else if ((it.kind === "completed" || it.kind === "interrupted") && this.openAgents.delete(id)) this.backgroundChanged();
   }
 
   /** When the latest full window (100 % used) resets, if the rate limits said so. */

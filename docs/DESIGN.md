@@ -113,7 +113,29 @@ Nexus the **queue engine drives the steps**:
 This makes note delivery certain (it is part of the step's opening turn), gives natural pause points between steps,
 and works the same for both runtimes. If a turn ends without a step outcome, the engine asks the worker once for
 its status, then marks the step `waiting` and tells the orchestrator. A turn that failed is not such a turn: see
-"Failures" below.
+"Failures" below; nor is one that ended while work the agent started still runs: see "Background work".
+
+### Background work
+
+An agent can start work that runs on after its turn: a command in the background, a sub-agent it does not wait for.
+Its turn then ends without the step's outcome, though the step is still at work; counted as a turn without an outcome,
+it was nudged at once and halted at the next such end (queue TR, 2026-11-14). Two things answer it:
+
+- **The texts.** The worker's briefing and the nudge say: do not end the turn while work you started still runs; run
+  a sub-agent in the foreground and take its result within the turn, or do the work yourself.
+- **The engine waits.** Both runtimes report the work (probed 2026-11-14: Claude Code with `haiku`, $0.01;
+  Codex with `gpt-6-luna`, about 87,000 tokens, mostly cached, of the subscription): Claude Code 2.1.323 writes `system/background_tasks_changed` with the whole list of its
+  background tasks (a Bash command or a sub-agent, each with `run_in_background`), and when one ends, starts a turn
+  by itself with the task's notification. Codex 0.167.2 has no such list, but its items say it: a unified-exec
+  `commandExecution` completed 14 s after its turn did, and a sub-agent is open from its `subAgentActivity` `started`
+  to its `completed`; the sub-agent's own thread sends its turns over the same connection (the adapter keeps only the
+  session's thread). Codex starts no turn by itself when the work ends. A turn that ends without the step's outcome
+  while such work runs is therefore not counted: the engine waits for the work's end, at most `BACKGROUND_LIMIT_MS`
+  (30 minutes) from that turn's end. When the work ends with the session idle, the engine looks again 2 s later (Claude
+  Code's own turn comes first, and its end is decided as any); with no outcome by then the usual rule applies, and its
+  nudge says the background work has finished. After the limit the usual rule applies as well, with a nudge that names
+  the work still running and says Nexus waits no longer; the next end without an outcome halts the run. The wait is
+  kept in the engine's memory only: a restarted server has no process with the work anyway (its runs come back paused).
 
 ### The run's state transitions
 

@@ -27,7 +27,7 @@ Notes from the user for this step:
 Begin with `nexus step start A1`. End with `nexus step done A1 --summary "…"`, `nexus step failed` or `nexus stop`, then write `nexus context` and end your turn. Do not start another step.
 == the turn ends without an outcome: the nudge
 -- to worker 1
-[Nexus] Your turn ended, but step A1 has no outcome yet. Continue the step if work remains; otherwise report it with `nexus step done A1 --summary "…"`, `nexus step failed`, `nexus stop`, or ask with `nexus ask` and end your turn.
+[Nexus] Your turn ended, but step A1 has no outcome yet. Continue the step if work remains; otherwise report it with `nexus step done A1 --summary "…"`, `nexus step failed`, `nexus stop`, or ask with `nexus ask` and end your turn. Do not end your turn while work you started still runs: run a sub-agent in the foreground and take its result within the turn, or do the work yourself.
 == a blocking question answered by the user, to wait for further word
 -- to worker 1
 [Nexus] Answer from the user to your question "Which page first?":
@@ -210,9 +210,13 @@ Stop conditions (meeting one ends the queue: report it with `nexus stop`):
 Begin with `nexus step start A4` (again is fine). End with `nexus step done A4 --summary "…"`, `nexus step failed` or `nexus stop`, then write `nexus context` and end your turn. Do not start another step.
 
 This is the queue's last step. After it is done, write a short report of the whole queue (what each step achieved against its acceptance, checks, review material, open questions, a proposed next step) to <report file> (a folder for reports outside the working tree and any repository: never write it into the working tree, it would block the cleanup of a worktree) and register it with `nexus report Q --file <report file> --summary "…"`, which copies it into the queue's folder and removes it from there.
+== the nudges after background work (DESIGN.md, "Background work"; noOutcomeNudge): it has finished; it still runs after the limit
+[Nexus] The background work you started has finished, and step A1 has no outcome yet. Take its result and continue the step if work remains; otherwise report it with `nexus step done A1 --summary "…"`, `nexus step failed`, `nexus stop`, or ask with `nexus ask` and end your turn.
+[Nexus] Your turn ended 30 minutes ago with work still running in the background (Run the e2e suite; sub-agent /root/review), and step A1 has no outcome yet. Nexus waits for it no longer: finish the step within this turn (wait for that work here, or do it yourself), then report it with `nexus step done A1 --summary "…"`, `nexus step failed`, `nexus stop`, or ask with `nexus ask` and end your turn.
 == the worker's briefing (Claude Code: appended to the system prompt)
 You are a worker session run by Nexus, the dashboard through which the user follows and steers your work.
 Nexus sends you one step of an approved queue at a time. Work on that step only; when its outcome is reported, end your turn: Nexus opens the next step.
+Do not end your turn while work you started still runs (a background command, a sub-agent): run a sub-agent in the foreground and take its result within the same turn, or do the work yourself. Nexus waits for background work only for a limited time, and a turn that ends without the step's outcome otherwise counts as one without an outcome.
 Report through the `nexus` command (on PATH; your session is set in the environment as NEXUS_SESSION):
 - nexus step start <step>                                   when you begin a step
 - nexus step progress <step> "<short status>" [--pct N]     at milestones, so the user sees where you are

@@ -104,6 +104,12 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
   private stops = 0;
   /** Messages sent into the running turn (`next`) since its start. */
   private nextInTurn = 0;
+  /**
+   * The background work the CLI reports running (system background_tasks_changed: its whole list each time, seen with
+   * Claude Code 2.1.323: a Bash command or a sub-agent started with run_in_background). When it ends, the CLI starts a
+   * turn by itself with the task's notification.
+   */
+  background: readonly string[] = [];
 
   constructor(options: ClaudeOptions) {
     super();
@@ -141,6 +147,7 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
     });
     this.proc.on("exit", (code) => {
       this.state = "exited";
+      this.background = [];
       clearTimeout(this.settle);
       this.exitCode = code;
       if (code && this.lastStderr.trim()) this.emit("activity", { kind: "error", text: this.lastStderr.trim().slice(-500) });
@@ -231,6 +238,11 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
         if (m.subtype === "permission_denied") {
           const call = this.calls.get(m.tool_use_id);
           this.refuse(m.tool_use_id, m.tool_name ?? call?.name ?? "tool", call?.input, m.decision_reason || m.message || m.decision_reason_type);
+        }
+        if (m.subtype === "background_tasks_changed" && Array.isArray(m.tasks)) {
+          this.background = (m.tasks as { description?: string; task_type?: string; task_id?: string }[])
+            .map((t) => clip(String(t.description || t.task_type || t.task_id || "background task"), 120));
+          this.emit("background", this.background);
         }
         if (m.subtype === "init") {
           this.signs = {};

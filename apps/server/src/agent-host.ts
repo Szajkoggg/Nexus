@@ -39,6 +39,8 @@ export interface HostHandlers {
   refusal?(r: RefusalItem): void;
   facts?(f: StreamFacts): void;
   turnEnd?(end: AgentEvents["turnEnd"][0]): void;
+  /** The work the agent left running in the background changed (AgentProcess.background). */
+  background?(work: readonly string[]): void;
   /** `byNexus`: the process was ended through AgentHost (retire, close, restartAfterTurn, shutdown). */
   exit?(code: number | null, byNexus: boolean): void;
   /** The queue and step a turn works on, for its record (a worker's run); asked when the turn begins. */
@@ -130,6 +132,7 @@ export class AgentHost<E extends object = object> {
     // Not an error line: a process that exits writes one after its last turn, and that is no new turn.
     proc.on("activity", (a) => { if (a.kind !== "error") begin(); on.activity?.(a); });
     proc.on("refusal", (r) => on.refusal?.(r));
+    proc.on("background", (w) => on.background?.(w));
     proc.on("facts", (f) => {
       if (f.model) model = f.model;
       if (f.contextTokens !== undefined) begin();

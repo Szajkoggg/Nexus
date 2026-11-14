@@ -49,6 +49,15 @@ export const RETRY_BASE_MS = 60_000;
 /** A run waiting for the usage window goes on this long after the window's reset. */
 export const USAGE_MARGIN_MS = 60_000;
 
+/**
+ * How long a turn's end without the step's outcome waits for the work the agent left running in the background (a
+ * command, a sub-agent) before the usual rule (one nudge, then a halt) applies. DESIGN.md, "Background work".
+ */
+export const BACKGROUND_LIMIT_MS = 30 * 60_000;
+
+/** After background work ends with the session idle, Nexus looks again this much later: Claude Code starts a turn by itself first. */
+const BACKGROUND_SETTLE_MS = 2000;
+
 /** A step with one of these has its outcome: its round of commits ends with the turn that gave it. */
 const OUTCOME: ReadonlySet<string> = new Set(["done", "review", "failed", "stopped"]);
 
@@ -56,6 +65,8 @@ export interface EngineOptions {
   /** The first retry's delay; each further one doubles it. Tests make it short. */
   retryBaseMs?: number;
   usageMarginMs?: number;
+  /** How long a turn's end waits for background work (BACKGROUND_LIMIT_MS); tests make it short. */
+  backgroundLimitMs?: number;
   /** How the push of accepted steps runs git, and its time limit (tests). */
   git?: GitRunner;
   pushTimeoutMs?: number;
@@ -111,6 +122,12 @@ export class Engine implements Member {
   private readonly restarting = new Set<string>();
   private readonly retryBaseMs: number;
   private readonly usageMarginMs: number;
+  private readonly backgroundLimitMs: number;
+  /**
+   * A run whose step's turn ended while background work ran, by queue: since when Nexus waits (on the clock), and
+   * whether the wait is over (`expired`: the usual rule applies until the work ends or the step opens again).
+   */
+  private readonly backgroundWaits = new Map<string, { step: string; since: number; expired?: boolean }>();
 
   constructor(store: ProjectStore, changed: () => void, options: EngineOptions = {}) {
     this.store = store;
@@ -118,6 +135,7 @@ export class Engine implements Member {
     this.host = new AgentHost(store, ROLE_RECORDS.worker, { spawn: options.spawn });
     this.retryBaseMs = options.retryBaseMs ?? RETRY_BASE_MS;
     this.usageMarginMs = options.usageMarginMs ?? USAGE_MARGIN_MS;
+    this.backgroundLimitMs = options.backgroundLimitMs ?? BACKGROUND_LIMIT_MS;
     this.clock = options.clock ?? REAL_CLOCK;
     this.clockTimers = new ClockTimers(this.clock, () => this.stopped);
     this.coordinator = options.coordinator ?? new Coordinator();
@@ -478,10 +496,13 @@ export class Engine implements Member {
           const unrouted = state.questions.some((x) => x.session === run.session && x.state === "answered"
             && !s?.inbox.some((m) => m.type === "answer" && m.qid === x.qid));
           if (unread || unrouted) return;
+          // Work the agent left running in the background: its end brings the next move, up to a limit.
+          const background = this.backgroundWait(queueId, run.session, current.id, live.proc.background ?? []);
+          if (background === "wait") return;
           // The turn ended and the step has no outcome: ask once, then hand it to the user.
           if (run.nudged) return this.halt(queueId, `step ${current.id} ended twice without an outcome`);
           this.writeRun(queueId, { ...run, nudged: true });
-          live.proc.send(noOutcomeNudge(current.id));
+          live.proc.send(noOutcomeNudge(current.id, background));
           return;
         }
         case "waiting":
@@ -527,6 +548,42 @@ export class Engine implements Member {
     }
     if (this.prepareStep(queueId, run, state, q, current, next, want, live)) return;
     this.openStep(queueId, next, q, "start");
+  }
+
+  /**
+   * A turn of `step` ended without its outcome while `work` runs in the background (DESIGN.md, "Background work").
+   * `wait`: Nexus waits for it (the end of the work, or the limit, looks again); else the usual rule applies, with what
+   * the nudge says about the background work: it has finished (Codex starts no turn of its own then), or it still runs
+   * after the limit. Undefined: there was none.
+   */
+  private backgroundWait(queueId: string, session: string, step: string, work: readonly string[]): "wait" | Parameters<typeof noOutcomeNudge>[1] {
+    const w = this.backgroundWaits.get(queueId);
+    const ours = w?.step === step ? w : undefined;
+    if (!work.length) {
+      this.endBackgroundWait(queueId);
+      return ours ? { finished: true } : undefined;
+    }
+    if (ours?.expired) return { finished: false, minutes: Math.round((this.clock.now() - ours.since) / 60_000), work };
+    const since = ours?.since ?? this.clock.now();
+    const due = since + this.backgroundLimitMs;
+    if (this.clock.now() >= due) {
+      this.backgroundWaits.set(queueId, { step, since, expired: true });
+      this.clockTimers.clear(`background:${queueId}`);
+      this.store.appendActivity(session, { at: now(), kind: "turn_end", text: `background work still runs after ${Math.round(this.backgroundLimitMs / 60_000)} min (${work.join("; ")}): Nexus waits no longer`, queue: queueId, step });
+      return { finished: false, minutes: Math.round((this.clock.now() - since) / 60_000), work };
+    }
+    if (!ours) {
+      this.backgroundWaits.set(queueId, { step, since });
+      this.store.appendActivity(session, { at: now(), kind: "turn_end", text: `the turn ended with work running in the background (${work.join("; ")}): Nexus waits for it, up to ${Math.round(this.backgroundLimitMs / 60_000)} min`, queue: queueId, step });
+      this.clockTimers.wakeAt(`background:${queueId}`, due, () => { this.advance(queueId); this.changed(); });
+    }
+    return "wait";
+  }
+
+  /** Forgets a run's wait for background work (its step opened again, or the work ended). */
+  private endBackgroundWait(queueId: string): void {
+    this.backgroundWaits.delete(queueId);
+    this.clockTimers.clear(`background:${queueId}`);
   }
 
   /**
@@ -656,6 +713,7 @@ export class Engine implements Member {
     live.proc.send([around.before, opening, around.after].filter(Boolean).join("\n\n"));
     for (const n of notes) this.store.appendDelivered(run.session, { at: now(), kind: "note", id: n.id, via: "turn" });
     recordStepStart(this.store, queueId, step.id, run.session);
+    this.endBackgroundWait(queueId);
     this.writeRun(queueId, { ...run, step: step.id, nudged: false, ...(mode === "start" ? { retries: undefined, failure: undefined, summary_asked: undefined } : {}) });
     this.store.appendActivity(run.session, { at: now(), kind: "turn_start", text: `Nexus opened step ${step.id}${mode === "continue" ? " (continue)" : ""}${around.before ? " in a fresh session, with what the previous one handed over" : ""}`, queue: queueId, step: step.id });
   }
@@ -828,6 +886,18 @@ export class Engine implements Member {
         if (r.ref && this.store.readRefusals(session.id).entries.some((x) => x.ref === r.ref)) return;
         this.store.appendRefusal({ at: now(), session: session.id, runtime: session.runtime === "codex" ? "codex" : "claude", ...r, ...tag() });
         this.changed();
+      },
+      background: (work) => {
+        // The work a run waits for has ended with the session idle: look again a little later (Claude Code starts a
+        // turn by itself first; Codex does not, and the usual rule applies).
+        if (work.length) return;
+        const key = `background-ended:${session.id}`;
+        clearTimeout(this.timers.get(key));
+        this.timers.set(key, setTimeout(() => {
+          this.timers.delete(key);
+          for (const q of runsOf()) if (this.backgroundWaits.has(q)) this.advance(q);
+          this.changed();
+        }, BACKGROUND_SETTLE_MS));
       },
       turnEnd: (end) => {
         // A failed turn is decided at once and is not a turn without an outcome.

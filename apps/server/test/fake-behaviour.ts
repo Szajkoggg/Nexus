@@ -9,6 +9,11 @@
 //   doneexit  report the step done, then the process exits on a signal before its turn ends
 //   commit    commit a file named after the step in its working directory, then done
 //   commitstop  the same commit, then a stop condition
+//   background  start work in the background (a command) and end the turn without an outcome; the work ends after
+//               FAKE_BG_MS (default 1500). Claude's fake then starts a turn by itself with the task's notification,
+//               as Claude Code does; Codex's does not (Nexus nudges). Told of the end either way, it reports done.
+//   bgagent     the same with a sub-agent in the background
+//   bglong      the same command, running FAKE_BG_LONG_MS (default 600000): past the engine's limit in a test
 // A failure of the runtime, then done: "<kind><n>" fails the step's first n turns (counted in a file beside
 // FAKE_LOG, so a new process goes on counting), "<kind>" every turn. Kinds: overloaded, network (passing), auth
 // (lasting), limit (a usage limit resetting FAKE_RESET_MS, default 1500, later), crash (the process exits mid-turn),
@@ -53,6 +58,8 @@ export function contextTokens(window: number, fallback: number): number {
 
 export interface Fake {
   step?: string;
+  /** Work this turn leaves running in the background, for the runtime's fake to report after the turn (see the header). */
+  background?: { kind: "command" | "agent"; ms: number };
   /** Every message the agent took in, in order (FAKE-HISTORY shows them). */
   history?: string[];
 }
@@ -73,6 +80,9 @@ function interruptible(ms: number): Promise<boolean> {
     interruptWait = () => { clearTimeout(t); r(true); };
   });
 }
+
+/** How Claude's fake starts the turn it starts by itself when background work ends (Claude Code: a task notification). */
+export const BACKGROUND_NOTICE = "<task-notification>";
 
 /** The text a stopped turn still writes after the interrupt (Claude Code does: a partial assistant message). */
 export const PARTIAL = "partial text of the stopped turn";
@@ -164,6 +174,9 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
       else { writeFileSync(file, "1"); nexus("stop", step, "--condition", "fake condition", "--reason", "fake stop"); }
     }
     if (behaviour === "ask" || behaviour === "slowask") nexus("ask", "Which way?", "--step", step);
+    if (behaviour === "background" || behaviour === "bgagent" || behaviour === "bglong") {
+      fake.background = { kind: behaviour === "bgagent" ? "agent" : "command", ms: Number(behaviour === "bglong" ? process.env.FAKE_BG_LONG_MS ?? 600_000 : process.env.FAKE_BG_MS ?? 1500) };
+    }
     // The queue's last step done: the report, written where the prompt says (refused under a denied folder, as
     // Claude Code refuses a Write its --disallowedTools rule covers), then registered with nexus report.
     const report = /`nexus report (\S+) --file (\S+) --summary/.exec(text);
@@ -180,6 +193,11 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
   }
   const stepFile = process.env.FAKE_LOG && process.env.NEXUS_SESSION ? join(dirname(process.env.FAKE_LOG), `fake-step-${process.env.NEXUS_SESSION}`) : undefined;
   fake.step ??= stepFile && existsSync(stepFile) ? readFileSync(stepFile, "utf8") : undefined;
+  // Background work ended: Claude Code's own turn with the task's notification, or Nexus's nudge after it (Codex).
+  if ((text.startsWith(BACKGROUND_NOTICE) || text.startsWith("[Nexus] The background work you started has finished")) && fake.step) {
+    nexus("step", "done", fake.step, "--summary", `fake finished ${fake.step} after its background work`);
+    return "background done";
+  }
   if (text.startsWith("[Nexus] Answer") && fake.step) {
     nexus("step", "done", fake.step, "--summary", `fake finished ${fake.step} after an answer`);
     return "answered";
