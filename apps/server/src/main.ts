@@ -5,6 +5,7 @@ import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Readable } from "node:stream";
 import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { serve, type HttpBindings } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { WebSocketServer, type WebSocket } from "ws";
@@ -26,6 +27,7 @@ import { listModels } from "./models.ts";
 import { readDeployChanges, readDeploySettings, writeDeploySettings } from "./deploy.ts";
 import { Standby, refuseHandoverDir, smokeCheck, takeHandoverEnv } from "./handover.ts";
 import { Lifecycle, version } from "./lifecycle.ts";
+import { MAX_UPLOAD_BODY, UploadError, saveUpload } from "./uploads.ts";
 import {
   AttentionWatch, allowed, auth, authCookie, isLocal, loginPage, push, pushDevices, pushKey, qrSvg, rotateToken,
   subscribe, tailscaleInfo, tokenMatches, unsubscribe,
@@ -145,7 +147,8 @@ function changed(id: string): void {
 const watchers: FSWatcher[] = [];
 function watchProject(id: string, dir: string): void {
   watchers.push(chokidar
-    .watch(dir, { ignoreInitial: true, ignored: (p) => p.endsWith(".tmp") })
+    // Uploaded pictures change no state: a 10 MB write need not reload the project.
+    .watch(dir, { ignoreInitial: true, ignored: (p) => p.endsWith(".tmp") || /^[\\/]uploads([\\/]|$)/.test(p.slice(dir.length)) })
     .on("all", () => changed(id))
     .on("error", (err) => console.error(`watch ${id}: ${(err as Error).message}`)));
 }
@@ -370,6 +373,27 @@ app.post("/api/projects/:id/queues/:queue/steps/:step/pictures/comment", act((st
 // Reject: the user's, on a step waiting for their review; the run pauses until a new revision is approved.
 app.post("/api/projects/:id/queues/:queue/steps/:step/reject", act((st, b, p) => ({ message: engineOf(st).rejectStep(p("queue"), p("step"), b.text) })));
 app.post("/api/projects/:id/queues/:queue/steps/:step/accept", act((st, b, p) => engineOf(st).acceptReview(p("queue"), p("step"), b.text, b.note_to)));
+
+// A picture for a chat message (src/uploads.ts): the body's size is checked before it is read or parsed (also when it
+// comes without a Content-Length), and the guard above has already taken it as the user's, from the dashboard.
+app.post("/api/projects/:id/uploads", bodyLimit({
+  maxSize: MAX_UPLOAD_BODY,
+  // The rest of the body is not read, so the connection is not reused: a client would send its next request on a
+  // socket the server is about to close.
+  onError: (c) => c.json({ error: "only PNG, JPEG, WebP or GIF up to 10 MB" }, 413, { connection: "close" }),
+}), async (c) => {
+  const e = projects.get(c.req.param("id"));
+  if (!e) return c.json({ error: "unknown project" }, 404);
+  const body = (await c.req.json().catch(() => undefined)) as Body | undefined;
+  if (!body || typeof body !== "object") return c.json({ error: "not a JSON object" }, 400);
+  try {
+    return c.json({ ok: true, result: saveUpload(e.store.dir, body.data) });
+  } catch (err) {
+    if (err instanceof UploadError) return c.json({ error: err.message }, err.status);
+    console.error(err);
+    return c.json({ error: (err as Error).message }, 500);
+  }
+});
 
 app.get("/api/projects/:id/sessions/:session/activity", (c) => {
   const e = projects.get(c.req.param("id"));

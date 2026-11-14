@@ -237,6 +237,8 @@ nexus import Dev/Workflow/QUEUE.md --prefix D       # a second file whose queue 
 
 `project add` creates `.nexus/` in the project with its own `.gitignore`, so the project's files are untouched. The
 list of registered projects is in `%APPDATA%/Nexus/projects.yaml` (`NEXUS_HOME` overrides the directory).
+Pictures added to chat messages are kept in the project's `.nexus/uploads/`, named by the time and a short hash. Nexus
+never deletes them: clear the folder by hand when you no longer need them.
 
 ## Running: a live instance, and development beside it
 

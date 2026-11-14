@@ -35,6 +35,8 @@ a shell command can take part.
       session.yaml                      server: runtime, native id, role, cwd
       events.jsonl                      that session only (through `nexus`)
       inbox.jsonl                       server: messages, answers, notes delivered to it
+  uploads/
+    <yyyymmdd>-<hhmmss>-<hash>.<ext>    server: pictures added to chat messages (see "Uploads" under "Server API")
   state.json                            server: derived cache
 ```
 
@@ -832,6 +834,7 @@ sends (see the CLI).
 | `PATCH /api/projects/:id/settings` | `name`, `runtimes`, `defaults`, `conversations`, `languages` (`reader`, `working`), `orchestrator` (`notify`, `model`, `effort`) (an empty value clears a field), `own?`, `follow?` (lists of setting keys, `runtimes.claude.model`) | Project settings, checked against the schema (see "Global settings"): a setting given another value, or named in `own`, becomes the project's own (in `own` also when it equals the global value); one named in `follow` follows the global value again; naming one in both is refused |
 | `GET /api/projects/:id/settings` | | `own` (the keys of the settings the project has its own value of) and `global` (the global settings) |
 | `GET /api/settings`, `PATCH /api/settings` | the global settings, nested as in `settings.yaml` (null or empty clears an optional one) | The global settings (`global`; GET also `keys`, every setting with a global value). PATCH writes `<NEXUS_HOME>/settings.yaml`, checked against the schema; every project that follows a changed value has it at once |
+| `POST /api/projects/:id/uploads` | `data` (the picture, base64, optionally as a `data:` URL) | Saves a picture for a chat message under `.nexus/uploads/` and answers `{ ok, result: { path, type, bytes } }`: `path` absolute (forward slashes), `type` `png`, `jpeg`, `webp` or `gif`. See "Uploads" below |
 | `POST /api/projects/:id/settings/allow-rule` | `rule` | Adds an allow rule for Claude Code workers to `runtimes.claude.allowed_tools` in `.nexus/project.yaml` (once; a rule already there is left as it is), typically from a refusal. A tool name, optionally with a specifier in parentheses, on one line. Like every write, only from the dashboard's own page: an agent must not widen its own permissions. Nothing else is written, not the project's `.claude/settings.json` or `AGENTS.md` |
 
 Also `GET /api/projects/:id/sessions/:session/activity?queue=&step=&limit=`, `GET /api/projects/:id/refusals?queue=&step=`
@@ -851,6 +854,19 @@ and input of the latest) and `retried` (activity entries of kind `retry`, one li
 latest). `running` lists the queues whose run is running, pausing or waiting for a retry or the usage window (not
 one waiting for an approval: that one waits for the user, as an attention item of kind `approval`), each
 `{ project, project_name, queue, step?, since? }` (`since`: when the step's latest stretch at work began). Read-only.
+
+**Uploads.** A browser does not reveal a file's path, so a picture added to a chat message travels in the request,
+base64 in a JSON body like every other write (and behind the same rules: the dashboard's own `Origin`, the token for
+a request not from this machine). The body may be at most 14 MiB, checked before anything is read or parsed (from
+`Content-Length`, or while a body without one streams in); a larger one gets 413 and the connection is closed. The
+picture itself may be at most 10 MiB once decoded (413). Its type is judged from its first bytes, never from a name
+or a declared type: PNG, JPEG, WebP and GIF only; anything else (an iPhone HEIC photo, SVG) gets 415. Both refusals
+say `only PNG, JPEG, WebP or GIF up to 10 MB`. The server names the file: the UTC time it was taken
+(`yyyymmdd-hhmmss`), the first 10 hex digits of the SHA-256 of its bytes, and the detected type's extension (`.png`,
+`.jpg`, `.webp`, `.gif`); a name the client sends is ignored. The same picture in the same second is the same file.
+The server is the only writer of `.nexus/uploads/` (each file written whole, then renamed into place), changes to it
+do not reload the project's state, and nothing removes the files: they stay until the user deletes them. The
+dashboard puts the returned path into the message, and the file endpoint serves it back.
 
 **Remote access.** A request is local when it comes from a loopback address without proxy headers
 (`X-Forwarded-For`, `Forwarded`, `X-Forwarded-Host`, `Tailscale-User-Login`). Anything else, pages, API and the
