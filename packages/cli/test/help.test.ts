@@ -16,7 +16,7 @@ const nexus = (...args: string[]) => execFileSync(process.execPath, [CLI, ...arg
 
 test("nexus help lists the standards' topics", () => {
   const list = nexus("help");
-  for (const t of ["review", "summaries", "questions", "refusals", "commits"]) assert.match(list, new RegExp(`^  ${t} +[a-z]`, "m"), t);
+  for (const t of ["review", "summaries", "questions", "refusals", "commits", "tests"]) assert.match(list, new RegExp(`^  ${t} +[a-z]`, "m"), t);
 });
 
 test("summaries: the four parts, in order, with an example", () => {
@@ -47,4 +47,12 @@ test("commits: a clean tree at every step's end, the commit named, only the step
   assert.match(t, /nexus step done <step> --commit <sha>/);
   assert.match(t, /Leave the working tree clean at the step's end/);
   assert.match(t, /never commit changes you did not make/);
+});
+
+test("tests: only the affected files while working, stopping at the first failure; the whole suite at the end", () => {
+  const t = nexus("help", "tests");
+  assert.match(t, /run only the tests that cover what you changed, and stop at the first failure/);
+  assert.match(t, /The whole suite runs once, at the step's end,\nas the queue's checks/);
+  assert.match(t, /npm run test:files -- <test file>\.\.\./);
+  assert.match(t, /A test that fails only now and then is not run again until it passes/);
 });

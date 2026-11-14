@@ -10,7 +10,9 @@
     "dev": "node scripts/dev.ts",
     "start": "npm run build -w @nexus/web && node apps/server/src/main.ts",
     "typecheck": "tsc -p packages/protocol && tsc -p packages/cli && tsc -p apps/server && tsc -p apps/web && tsc -p apps/web/test && tsc -p scripts",
-    "test": "node --test packages/*/test/*.test.ts apps/*/test/*.test.ts scripts/test/*.test.ts"
+    "test": "node --test packages/*/test/*.test.ts apps/*/test/*.test.ts scripts/test/*.test.ts",
+    "test:files": "node scripts/test-files.mjs",
+    "test:times": "node --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./scripts/test-times.mjs --test-reporter-destination=stdout packages/*/test/*.test.ts apps/*/test/*.test.ts scripts/test/*.test.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

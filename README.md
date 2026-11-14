@@ -318,6 +318,8 @@ npm start        # builds the dashboard, serves it and the API on http://127.0.0
 npm run dev      # development, apart from the live instance: API on :4318 with data in %APPDATA%\Nexus-dev,
                  # dashboard with hot reload on http://localhost:5173
 npm test         # protocol, importer, engine and orchestrator tests (the last two run a fake `claude`)
+npm run test:files -- apps/server/test/engine.test.ts   # while working: only these files, stops at the first failure
+npm run test:times   # the whole suite, then how long each file took, slowest first
 npm run typecheck
 node scripts/load-tests.mjs --burners 12 --copies 4 --rounds 5 apps/server/test/review.test.ts   # tests under load
 ```

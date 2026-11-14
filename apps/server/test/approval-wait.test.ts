@@ -13,7 +13,7 @@ import {
 } from "@nexus/protocol";
 import { Engine, type EngineOptions } from "../src/engine.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
-import { WAIT_MS, until as waitUntil, LONGER, WORK_MS } from "./wait.ts";
+import { WAIT_MS, until as waitUntil, LONGER, holdWork } from "./wait.ts";
 
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -59,13 +59,13 @@ function setup(steps: StepDef[]) {
   };
   /** What the server's file watcher does after the user approves in the dashboard. */
   const approve = (e: Engine) => { approveQueue(store, "W"); e.onChange(loadProjectState(store)); };
-  const stop = () => { for (const e of engines) e.shutdown(); delete process.env.FAKE_SLOW_MS; };
+  const stop = () => { for (const e of engines) e.shutdown(); delete process.env.FAKE_SLOW_MS; delete process.env.FAKE_RELEASE; };
   return { root, store, engine, queue, statuses, opened, until, revise, answer, approve, stop };
 }
 
 for (const runtime of ["claude", "codex"] as const) {
   test(`${runtime}: a draft during a step's turn, a question answered mid-step, approved by the step's end: the next step opens in the same session`, async () => {
-    process.env.FAKE_SLOW_MS = WORK_MS;
+    const work = holdWork();
     const x = setup([step("W1", "slowask"), step("W2", "done")]);
     const e = x.engine();
     try {
@@ -73,6 +73,7 @@ for (const runtime of ["claude", "codex"] as const) {
       await x.until("W1 at work", () => x.queue().steps[0]!.segments.length > 0, LONGER.step);
       const session = x.queue().run!.session;
       x.revise({ change: { W2: { title: "Step W2, revised" } }, more: [step("W3", "done")] });
+      work.release(); // W1 may end now: the revision came while it worked
       await x.until("the question", () => x.queue().steps[0]!.status === "waiting", LONGER.step);
       await new Promise((r) => setTimeout(r, 400));
       assert.equal(x.queue().run!.state, "running", "the draft stopped nothing");
@@ -89,7 +90,7 @@ for (const runtime of ["claude", "codex"] as const) {
   });
 
   test(`${runtime}: a step that ends before the approval: the run waits, keeps its session, and goes on by itself once approved`, async () => {
-    process.env.FAKE_SLOW_MS = WORK_MS;
+    const work = holdWork();
     const x = setup([step("W1", "slowask"), step("W2", "done")]);
     const e = x.engine();
     try {
@@ -97,6 +98,7 @@ for (const runtime of ["claude", "codex"] as const) {
       await x.until("W1 at work", () => x.queue().steps[0]!.segments.length > 0, LONGER.step);
       const session = x.queue().run!.session;
       x.revise({ more: [step("W3", "done")] });
+      work.release(); // W1 may end now: the revision came while it worked
       await x.until("the question", () => x.queue().steps[0]!.status === "waiting", LONGER.step);
       x.answer(e);
       await x.until("the wait", () => x.queue().run?.state === "approval_wait");
@@ -120,7 +122,7 @@ for (const runtime of ["claude", "codex"] as const) {
 }
 
 test("a revision that removes every remaining step: the queue is done only once approved, and a chain after it fires then", async () => {
-  process.env.FAKE_SLOW_MS = WORK_MS;
+  const work = holdWork();
   const x = setup([step("W1", "slow"), step("W2", "done")]);
   x.store.writeQueue({ protocol: 1, id: "C", title: "After", revision: 1, status: "proposed", stop_conditions: [], checks: [], steps: [step("C1", "done")] });
   approveQueue(x.store, "C");
@@ -130,6 +132,7 @@ test("a revision that removes every remaining step: the queue is done only once 
     assert.match(e.chain("C", { after: "W", by: "user" }), /starts when queue W is done/);
     await x.until("W1 at work", () => x.queue().steps[0]!.segments.length > 0, LONGER.step);
     x.revise({ drop: ["W2"] });
+    work.release(); // W1 may end now: the revision came while it worked
     await x.until("the wait", () => x.queue().run?.state === "approval_wait");
     await new Promise((r) => setTimeout(r, 1700)); // past the first look at the planned starts
     assert.equal(x.statuses(), "W1=done");
@@ -146,7 +149,7 @@ test("a revision that removes every remaining step: the queue is done only once 
 
 test("an approval while an update drains: the run goes on after the restart, or once the drain is cancelled", async () => {
   for (const how of ["restart", "cancel"] as const) {
-    process.env.FAKE_SLOW_MS = WORK_MS;
+    const work = holdWork();
     const x = setup([step("W1", "slow"), step("W2", "done")]);
     const e = x.engine();
     try {
@@ -154,6 +157,7 @@ test("an approval while an update drains: the run goes on after the restart, or 
       await x.until("W1 at work", () => x.queue().steps[0]!.segments.length > 0, LONGER.step);
       const session = x.queue().run!.session;
       x.revise({ change: { W2: { title: "Step W2, revised" } } });
+      work.release(); // W1 may end now: the revision came while it worked
       await x.until("the wait", () => x.queue().run?.state === "approval_wait");
       assert.deepEqual(e.drainForUpdate(false), [], "a run waiting for approval is not held");
       x.approve(e);
@@ -252,7 +256,7 @@ test("a deploy and a plain restart in approval_wait: it still waits, in its sess
 });
 
 test("while a run waits for approval: a start, a session chain onto its session and a cancel are refused", async () => {
-  process.env.FAKE_SLOW_MS = WORK_MS;
+  const work = holdWork();
   const x = setup([step("W1", "slow"), step("W2", "done")]);
   // O and A work in checkouts of their own: W's run, waiting for approval, holds the project's.
   const own = (id: string) => { const d = join(x.store.dir, "..", `wt-${id}`); mkdirSync(d, { recursive: true }); return d; };
@@ -267,6 +271,7 @@ test("while a run waits for approval: a start, a session chain onto its session 
     await x.until("W1 at work", () => x.queue().steps[0]!.segments.length > 0, LONGER.step);
     const session = x.queue().run!.session;
     x.revise({ change: { W2: { title: "Step W2, revised" } } });
+    work.release(); // W1 may end now: the revision came while it worked
     await x.until("the wait", () => x.queue().run?.state === "approval_wait");
 
     assert.throws(() => e.start("W"), /the queue's run waits for approval of revision 2; it goes on by itself once you approve it/);

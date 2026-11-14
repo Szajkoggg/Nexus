@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { ProjectStore, applyDraft, approveQueue, loadProjectState, orchestratorStatusChange, routeAnswers, type StepDef } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
-import { WAIT_MS, until as waitUntil, LONGER, WORK_MS } from "./wait.ts";
+import { WAIT_MS, until as waitUntil, LONGER, holdWork } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -106,12 +106,13 @@ test("a queue imported as stopped is lifted the same way, and its stop note is k
 });
 
 test("resume goes on with a run of an older revision (also a run record without its revision) in its session; it takes the new revision", async () => {
-  process.env.FAKE_SLOW_MS = WORK_MS;
+  const work = holdWork();
   const { store, engine, queue, opened, until, revise } = setup([step("Q1", "slow"), step("Q2", "done"), step("Q3", "done")]);
   try {
     engine.start("Q");
     await until("the step to run", () => queue().steps[0]!.status === "running", LONGER.step);
     engine.pause("Q");
+    work.release();
     await until("the pause", () => queue().run?.state === "paused", LONGER.run);
     revise();
     approveQueue(store, "Q");
@@ -126,7 +127,7 @@ test("resume goes on with a run of an older revision (also a run record without 
     assert.deepEqual(opened(), ["Q1", "Q2", "Q2b", "Q3"]);
     assert.equal(queue().run!.session, session, "the same session");
     assert.equal(queue().run!.revision, 2, "the run took the new revision");
-  } finally { engine.shutdown(); delete process.env.FAKE_SLOW_MS; }
+  } finally { work.done(); engine.shutdown(); delete process.env.FAKE_SLOW_MS; }
 });
 
 // ---------------------------------------------------------------- Continue (the user's lift without a new revision)

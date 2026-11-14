@@ -1472,6 +1472,29 @@ minutes, almost all of them "timed out waiting for the run to finish").
   626 tests in 18 minutes (1101 s) at 10 s, and 147 of 625 in 9 minutes (561 s) while it was 5 s; it had taken over an
   hour before. The longest file is the one with the most waits for whole runs. A green full run takes 270 to 285 s.
 
+## Tests while working, and the slowest files (queue TS2)
+
+Decided by the user on 2026-11-14 (docs/ideas/test-speed.md): while working, only the affected test files run, and the
+run stops at the first failure; the whole suite runs at the step's end, as the queue's check. `npm run test:files --
+<files>` (`scripts/test-files.mjs`) runs the files one after another with the spec reporter and stops the run (its own
+process tree) at the first failing test. Workers learn it from their briefing and `nexus help tests`, which keeps it
+general (the project's own way is in its AGENTS.md) and names Nexus's script as the example.
+
+`npm run test:times` (`scripts/test-times.mjs`, a test reporter) lists each file's time, the sum of its top-level
+tests, which run one after another within a file while the files run side by side. The suite's time is that of its
+slowest file under the load of all the others: 277 s before, all but one second of it engine.test.ts (276 s; 148 s
+alone). Two changes, neither touching what is tested:
+
+- **Steps held, not timed.** A test that acts while a step works used to let the fake work `WORK_MS` (5 s) and wait it
+  out. `holdWork()` (wait.ts) now holds the fakes' "slow" steps until the test calls `release()` (FAKE_RELEASE), right
+  after it has acted: no fixed wait, and a late look still finds the step at work. Used in engine, approval-wait,
+  lift and handover tests (approval-wait alone: 106 s to 70 s).
+- **engine.test.ts in four files** (engine, engine-runtimes, engine-failures, engine-updates; their setup in
+  engine-setup.ts), so its 48 tests run side by side: together 69 s alone.
+
+The whole suite went from 277 s to 189 s; its slowest files now are accepted.test.ts (git pushes to bare repositories)
+and approval-wait.test.ts, each about 170 s under the full load.
+
 ## Findings from the flaky tests (queue FU4)
 
 Four server tests failed now and then on a busy machine. `scripts/load-tests.mjs` brings such failures out (12

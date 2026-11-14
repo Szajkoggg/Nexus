@@ -893,6 +893,7 @@ alone prints the commands and the topics. The topics live in `packages/cli/src/h
 | `questions` | A question (`nexus ask`) in three parts: what it blocks; the options; the asker's recommendation |
 | `refusals` | A refused action: no workaround through another tool or command that reaches the same end; one retry in a simpler form at most; then report what was needed and why |
 | `commits` | A clean working tree at every step's end: everything the step did committed (its own files only) and named with `nexus step done --commit`, so every commit belongs to one step |
+| `tests` | Running tests while working: only the affected test files, stopping at the first failure (in Nexus's repository `npm run test:files -- <files>`); the whole suite once at the step's end, as the queue's checks; a test that fails now and then is fixed at its cause, not run again until it passes |
 
 The briefings carry these in a few lines each with the pointer: the worker's all four; the orchestrator's the refusal
 rule and the summary and question shapes as it reads them (and escalates in); the thinking partner's the refusal

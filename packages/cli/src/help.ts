@@ -170,6 +170,21 @@ commit an accepted step was reviewed at. So:
     and say in the reason what you left out.
 `,
   },
+  tests: {
+    summary: "running tests while working: only the affected files, stopping at the first failure; the whole suite at the end",
+    text: `nexus help tests: running tests while working on a step
+
+While you work, run only the tests that cover what you changed, and stop at the first failure: a run of the whole
+suite after a change that breaks many tests takes long and says little. The whole suite runs once, at the step's end,
+as the queue's checks (nexus check), and its result goes into the step summary.
+  - The project's own way is in its AGENTS.md or README (a script that runs given files, a watch mode).
+  - Nexus's own repository: npm run test:files -- <test file>... [--pattern TEXT] runs the files one after another
+    and stops at the first failing test; npm test runs the whole suite; npm run test:times lists how long each file
+    took, slowest first.
+  - A test that fails only now and then is not run again until it passes: find why (a wait for a state that passes,
+    a read before what it reads has landed, a fixed sleep), fix that, or report it with what you found.
+`,
+  },
 };
 
 /** `nexus help` without a topic: the commands, then the topics. */

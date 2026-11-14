@@ -2,7 +2,7 @@
 // "FAKE: <behaviour>":
 //   done   report the step done              ask     ask a blocking question, then end the turn
 //   noop   end the turn without an outcome   stop    report a stop condition
-//   fail   report the step failed            slow    work for FAKE_SLOW_MS (default 1500), then done
+//   fail   report the step failed            slow    work for FAKE_SLOW_MS (default 1500), or until FAKE_RELEASE's file exists; then done
 //   stop1  report a stop condition the first time, done once the stop is lifted
 //   slownoop  work for FAKE_SLOW_MS, then end the turn without an outcome (the step stays open)
 //   slowask   work for FAKE_SLOW_MS, then ask a blocking question and end the turn
@@ -76,6 +76,17 @@ export interface Fake {
 export function actOnRead(read: readonly string[], reply: string): string {
   const outs = read.map((t) => /FAKE-NEXUS: (\[.*\])/.exec(t)).filter((m): m is RegExpExecArray => !!m).map((m) => nexusOut(JSON.parse(m[1]!) as string[]));
   return outs.length ? [reply, ...outs].join("\n\n") : reply;
+}
+
+/**
+ * A "slow" step's work: FAKE_SLOW_MS; or, with FAKE_RELEASE set, until the file it names exists: the test holds the
+ * step at work while it acts, and then lets it go (holdWork in wait.ts; queue TS2), so it neither waits a fixed time
+ * nor misses the step at work.
+ */
+async function work(): Promise<void> {
+  const release = process.env.FAKE_RELEASE;
+  if (!release) return new Promise((r) => setTimeout(r, Number(process.env.FAKE_SLOW_MS ?? 1500)));
+  for (const t = Date.now(); !existsSync(release) && Date.now() - t < 300_000;) await new Promise((r) => setTimeout(r, 20));
 }
 
 /** Ends the running turn's FAKE-SLOW wait early (a stop: Claude's interrupt control, Codex's turn/interrupt). */
@@ -171,7 +182,7 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
     const fail = failure(step, behaviour);
     if (fail) return { fail };
     if (/^(overloaded|network|auth|limit|crash|cloudflare)/.test(behaviour)) nexus("step", "done", step, "--summary", `fake finished ${step} after failures`);
-    if (behaviour === "slow" || behaviour === "slownoop" || behaviour === "slowask") await new Promise((r) => setTimeout(r, Number(process.env.FAKE_SLOW_MS ?? 1500)));
+    if (behaviour === "slow" || behaviour === "slownoop" || behaviour === "slowask") await work();
     // "commit": a commit in the working directory (a file named after the step), then done.
     // "commitstop": the same commit, then a stop condition (as the worker briefing asks: commit, then stop).
     if (behaviour === "commit" || behaviour === "commitstop") {

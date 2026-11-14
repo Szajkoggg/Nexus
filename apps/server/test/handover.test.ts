@@ -15,7 +15,7 @@ import { handOver, refuseHandoverDir, takeHandoverEnv, withoutHandover } from ".
 import { agentEnv } from "../src/agent.ts";
 import { MAIN, serverEnv, spawnServer } from "./helpers.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
-import { until, untilAsync, LONGER, WORK_MS } from "./wait.ts";
+import { until, untilAsync, LONGER, holdWork } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -34,7 +34,7 @@ async function heldProject() {
   const base = mkdtempSync(join(tmpdir(), "nexus-handover-"));
   const home = join(base, "home");
   process.env.NEXUS_HOME = home;
-  process.env.FAKE_SLOW_MS = WORK_MS;
+  const work = holdWork();
   const root = join(base, "project");
   mkdirSync(root, { recursive: true });
   const store = ProjectStore.init(root, { id: "p", name: "P", root });
@@ -45,11 +45,12 @@ async function heldProject() {
   engine.start("Q");
   await until("the first step to run", () => loadProjectState(store).queues[0]!.steps[0]!.status === "running", LONGER.step);
   engine.drainForUpdate(false);
+  work.release(); // the step may end now: the drain came while it worked
   await until("the hold", () => store.readRun("Q")?.state === "paused" && engine.idle(), LONGER.processes,
     () => `; run: ${JSON.stringify(store.readRun("Q"))}; idle: ${engine.idle()}; steps: ${loadProjectState(store).queues[0]!.steps.map((s) => `${s.id}=${s.status}`).join(" ")}`);
   engine.shutdown();
   await until("the agent to exit", () => !engine.alive());
-  delete process.env.FAKE_SLOW_MS;
+  work.done();
   writeRegistry({ protocol: 1, projects: [{ id: "p", root }] });
   const run = store.readRun("Q")!;
   assert.equal(run.resume_after_restart, true);

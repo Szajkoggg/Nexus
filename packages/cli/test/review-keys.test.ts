@@ -88,5 +88,5 @@ test("nexus help review prints the standard; nexus help lists the topics; an unk
   }
   assert.match(nexus("help"), /Topics \(nexus help <topic>\):\r?\n  review /);
   assert.match(nexus("--help"), /nexus help \[<topic>\]/);
-  assert.throws(() => nexus("help", "nope"), /no help topic "nope" \(topics: review, summaries, questions, refusals, commits\)/);
+  assert.throws(() => nexus("help", "nope"), /no help topic "nope" \(topics: review, summaries, questions, refusals, commits, tests\)/);
 });

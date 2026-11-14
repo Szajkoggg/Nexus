@@ -330,7 +330,7 @@ test("a requested pause reached is told once with its step; a stop, a restart's 
     s2.engine.drainForUpdate(false);
     applyDraft(s2.store, queueDef("D", ["done"]));
     approveQueue(s2.store, "D");
-    await s2.until("the hold", () => runOf(s2, "P")?.state === "paused" && s2.engine.idle());
+    await s2.until("the hold", () => runOf(s2, "P")?.state === "paused" && s2.engine.idle(), LONGER.run);
     await settle();
     assert.ok(!facts(s2.orchestrator).includes("Queue D revision 1 approved."), "not during the drain");
     s2.stop();

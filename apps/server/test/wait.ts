@@ -8,8 +8,9 @@
 // - POLL_MS: how often a condition is looked at.
 
 import assert from "node:assert/strict";
-import { appendFileSync } from "node:fs";
-import { basename } from "node:path";
+import { appendFileSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, join } from "node:path";
 
 /**
  * How long a test waits for a condition before it fails (NEXUS_TEST_WAIT_MS, default 10000). Decided as 10 s (queue
@@ -52,6 +53,18 @@ export const LONGER = {
  * to 2.5 s were sometimes over before the test could act (queue TS1).
  */
 export const WORK_MS = String(WAIT_MS / 2);
+
+/**
+ * Holds the fake runtimes' "slow" steps at work until `release()` (FAKE_RELEASE, read by fake-behaviour.ts): for a
+ * test that acts while a step works (sends a message, pauses, drains, revises) and then lets it end. Faster than a
+ * fixed WORK_MS, and a late look still finds the step at work (queue TS2). Call before the step's process starts;
+ * `done()` clears it for the next test.
+ */
+export function holdWork(): { release: () => void; done: () => void } {
+  const file = join(mkdtempSync(join(tmpdir(), "nexus-hold-")), "release");
+  process.env.FAKE_RELEASE = file;
+  return { release: () => writeFileSync(file, ""), done: () => { delete process.env.FAKE_RELEASE; } };
+}
 
 export const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
