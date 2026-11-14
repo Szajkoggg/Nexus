@@ -8,7 +8,9 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ProjectStore, approveQueue, loadProjectState, routeAnswers } from "@nexus/protocol";
+import { EventEmitter } from "node:events";
+import { ProjectStore, approveQueue, loadProjectState, newId, routeAnswers, type Event } from "@nexus/protocol";
+import type { AgentEvents, AgentProcess } from "../src/agent.ts";
 import { Engine } from "../src/engine.ts";
 import { branchState, recordBase, recordStepEnd, recordStepStart, stepCommits } from "../src/gitinfo.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
@@ -63,6 +65,47 @@ test("the engine records HEAD when a step opens and when its outcome's turn ends
     assert.deepEqual(c1.rounds[0]!.commits.map((c) => [c.subject, c.files, c.insertions, c.deletions, c.foreign]), [["Q1 work", 1, 1, 0, false]]);
     assert.equal(c1.rounds[0]!.open, false);
     assert.deepEqual(stepCommits(store, queue(), "Q2")!.rounds[0]!.commits.map((c) => c.subject), ["Q2 work"]);
+  } finally { engine.shutdown(); }
+});
+
+test("a step's round of commits begins before its worker hears of the step, and the step before has ended its round", async () => {
+  const { root, store, commit } = repo();
+  store.writeQueue({ protocol: 1, id: "Q", title: "Queue", revision: 1, status: "proposed", stop_conditions: [], checks: [], approvals: [], history: [],
+    steps: [1, 2].map((i) => ({ id: `Q${i}`, title: `Step ${i}`, goal: "", acceptance: [] })) });
+  approveQueue(store, "Q");
+  /** A stand-in worker: for each text it is sent, what git.yaml held at that moment. */
+  const told: { text: string; steps: Record<string, { start?: string | null; end?: string | null }[]> }[] = [];
+  class Stand extends EventEmitter<AgentEvents> implements AgentProcess {
+    state: AgentProcess["state"] = "idle";
+    readonly pid = 4242;
+    send(text: string): void { told.push({ text, steps: structuredClone(store.readGit("Q")?.steps ?? {}) }); this.state = "working"; }
+    stop(): boolean { return false; }
+    close(): void { this.state = "exited"; }
+    kill(): void { this.state = "exited"; }
+  }
+  let stand: Stand | undefined;
+  const engine: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store); engine.onChange(loadProjectState(store)); },
+    { spawn: () => (stand = new Stand()) });
+  const event = (body: Record<string, unknown>) => store.appendEvent({ v: 1, id: newId(), at: new Date().toISOString(), session: store.readRun("Q")!.session, queue: "Q", ...body } as Event);
+  try {
+    const start = git(root, ["rev-parse", "HEAD"]);
+    engine.start("Q");
+    // When Q1's opening reaches the worker, its round has begun at the HEAD of then (before: it was read afterwards,
+    // and a quick worker's commit could land first, queue TS1).
+    assert.match(told[0]!.text, /step Q1 \(1 of 2\)/);
+    assert.equal(told[0]!.steps.Q1?.[0]?.start, start);
+    // The worker commits and reports Q1 done; its turn ends.
+    event({ type: "step.started", step: "Q1" });
+    commit(root, "q1");
+    event({ type: "step.done", step: "Q1", summary: "done" });
+    stand!.state = "idle";
+    stand!.emit("turnEnd", { ok: true, text: "done" });
+    engine.onChange(loadProjectState(store));
+    await until("Q2's opening", () => told.some((t) => /step Q2 \(2 of 2\)/.test(t.text)), LONGER.step);
+    const q1End = git(root, ["rev-parse", "HEAD"]);
+    const atQ2 = told.find((t) => /step Q2 \(2 of 2\)/.test(t.text))!.steps;
+    assert.equal(atQ2.Q1?.[0]?.end, q1End, "Q1's round ended when Q2's worker heard of Q2");
+    assert.equal(atQ2.Q2?.[0]?.start, q1End, "Q2's round began there, before its worker could commit");
   } finally { engine.shutdown(); }
 });
 

@@ -634,7 +634,8 @@ The server reads git for the dashboard (`apps/server/src/gitinfo.ts`), only loca
 `reflog`. It never fetches, so remote-tracking refs are as old as the last fetch anyone made.
 
 - **Commits per step.** `git.yaml` records the HEAD of the queue's checkout when a step opens (or a send-back reopens
-  it) and at the end of the turn in which it got its outcome; the step's commits are those between (`start..end`), with
+  it), before its worker is told of it, and at the end of the turn in which it got its outcome (at the latest when the
+  next step opens); the step's commits are those between (`start..end`), with
   their subject, author, time, and files and lines changed. A round still at work runs to the present HEAD.
 - **Foreign commits.** In the project's main checkout others may commit too. A commit whose time lies outside every
   turn of the worker's session on that step (its runtime's `turn_start` .. `turn_end` in `activity.jsonl`, with two

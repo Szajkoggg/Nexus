@@ -733,9 +733,14 @@ export class Engine implements Member {
       q, step, mode, why, projectStopConditions: project.defaults.stop_conditions, notes, answers, last,
       report: reportFile(project.id, q.id), languages: workerLanguages(project.languages),
     });
+    // The rounds of commits are recorded before the worker hears of the step: reading HEAD (git) may take a second or
+    // two on a busy machine, and a worker told first had committed meanwhile (seen in a full test run, queue TS1). The
+    // step before ends its round here at the latest (its turn's end records it a moment later, after the CLI's last
+    // events).
+    if (run.step && run.step !== step.id) recordStepEnd(this.store, queueId, run.step);
+    recordStepStart(this.store, queueId, step.id, run.session);
     live.proc.send([around.before, opening, around.after].filter(Boolean).join("\n\n"));
     for (const n of notes) this.store.appendDelivered(run.session, { at: now(), kind: "note", id: n.id, via: "turn" });
-    recordStepStart(this.store, queueId, step.id, run.session);
     this.endBackgroundWait(queueId);
     this.writeRun(queueId, { ...run, step: step.id, nudged: false, ...(mode === "start" ? { retries: undefined, failure: undefined, summary_asked: undefined } : {}) });
     this.store.appendActivity(run.session, { at: now(), kind: "turn_start", text: `Nexus opened step ${step.id}${mode === "continue" ? " (continue)" : ""}${around.before ? " in a fresh session, with what the previous one handed over" : ""}`, queue: queueId, step: step.id });
