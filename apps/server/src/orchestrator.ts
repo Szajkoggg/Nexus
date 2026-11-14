@@ -45,14 +45,14 @@ export class Orchestrator {
    * changes for agents of each deploy, for every session older than it (src/deploy.ts).
    */
   private stopped = false;
-  private readonly news: { update: () => UpdateNotice | undefined; plan: () => PlanNotice | undefined; changes: () => DeployChanges[]; push?: (n: UserNotice) => void };
+  private readonly news: { update: () => UpdateNotice | undefined; plan: () => PlanNotice[]; changes: () => DeployChanges[]; push?: (n: UserNotice) => void };
 
   /** `host`: how its process is made (tests give a stand-in). */
-  constructor(store: ProjectStore, engine: Engine, changed: () => void, news: { update?: () => UpdateNotice | undefined; plan?: () => PlanNotice | undefined; changes?: () => DeployChanges[]; push?: (n: UserNotice) => void } = {}, host: AgentHostOptions = {}) {
+  constructor(store: ProjectStore, engine: Engine, changed: () => void, news: { update?: () => UpdateNotice | undefined; plan?: () => PlanNotice[]; changes?: () => DeployChanges[]; push?: (n: UserNotice) => void } = {}, host: AgentHostOptions = {}) {
     this.store = store;
     this.engine = engine;
     this.changed = changed;
-    this.news = { update: news.update ?? (() => undefined), plan: news.plan ?? (() => undefined), changes: news.changes ?? (() => []), push: news.push };
+    this.news = { update: news.update ?? (() => undefined), plan: news.plan ?? (() => []), changes: news.changes ?? (() => []), push: news.push };
     this.host = new AgentHost(store, ROLE_RECORDS.orchestrator, host);
   }
 
@@ -348,11 +348,13 @@ ${n.text}` });
     const more = changes.length ? { text: describeDeployChanges(changes), keys: changes.map((d) => d.key) } : undefined;
     if (mine) items.push({ key: mine.key, fact: mine.fact, todo: mine.todo, more });
     else if (more && !updateOnly) items.push({ key: more.keys.join(" "), fact: more.text, todo: "", quiet: true, more: { text: "", keys: more.keys } });
-    // A planned deploy that ended without its deploy (src/deploy-plan.ts): told to the session that planned it (also
-    // with notices off: it answers its own command), else to this project's orchestrator.
-    const plan = this.news.plan();
-    if (plan && plan.project === state.project.id && plan.at >= since && (plan.session ? plan.session === s.id : !updateOnly)) {
-      items.push({ key: plan.key, fact: plan.fact, todo: plan.todo });
+    // A planned deploy that waits for the user's confirmation, or ended without its deploy (src/deploy-plan.ts): told
+    // to the session that planned it (also with notices off: it answers its own command), else to this project's
+    // orchestrator.
+    for (const plan of this.news.plan()) {
+      if (plan.project === state.project.id && plan.at >= since && (plan.session ? plan.session === s.id : !updateOnly)) {
+        items.push({ key: plan.key, fact: plan.fact, todo: plan.todo });
+      }
     }
     // The user's away mode: told when it comes on (or its end moves) and when it ends.
     if (!updateOnly) {

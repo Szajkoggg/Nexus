@@ -528,7 +528,7 @@ Written only by the server's queue engine; agents never touch them.
 | `<NEXUS_HOME>/away.yaml` | The user's away mode: `current` (`since`, `until`) while on, `past` periods (`since`, `until`, `ended`, `why`: `expired` or `off`). One writer: the server, on `POST /api/server/away` and when a period's time comes. See "Away mode" under "Review" |
 | `<NEXUS_HOME>/limits.json` | `{ max_running: number }`: how many queues may run at once across all projects, a whole number from 1 to 20 (default `2` when the file or the value is missing). One writer: the server, on `POST /api/server/settings` from the dashboard |
 | `<NEXUS_HOME>/deploy.json` | `{ push_on_deploy: boolean }` (default `true` when the file is missing). One writer: the server, on `POST /api/server/settings` from the dashboard |
-| `<NEXUS_HOME>/deploy-plan.json` | The planned deploy, if any: `plan?` (`id`, `after`: `project`, `queue`, `step?` (none: the whole queue), `ref?`, `by?` (`project`, `session`: the orchestrator that planned it), `created_at`, `warning?`, `started?` (`at`, `update`: the id of the update it started)), and the last plan that ended, `ended?` (`plan`, `at`, `why`: `carried-out`, `dropped`, `update-failed` or `cancelled`, `reason`, `by?`). One writer: the server. See "Planned deploys" |
+| `<NEXUS_HOME>/deploy-plan.json` | The planned deploy, if any: `plan?` (`id`, either `after` (`project`, `queue`, `step?`: none, the whole queue) or `at` (ISO 8601) with `deadline?`, `ref?`, `by?` (`project`, `session`: the orchestrator that planned it), `created_at`, `warning?`, `waiting_for?` (`queue/step`: the unconfirmed provisional work it waits for), `held?` (`project`, `queue`: the run it holds while it waits), `started?` (`at`, `update`: the id of the update it started)), and the last plan that ended, `ended?` (`plan`, `at`, `why`: `carried-out`, `dropped`, `update-failed` or `cancelled`, `reason`, `by?`). One writer: the server. See "Planned deploys" |
 | `<NEXUS_HOME>/deploy-changes.jsonl` | One line per successful deploy with changes for agents: `key` (`deploy-changes:<new sha>`), `at`, `from`, `to` (full shas), `changes` (`commit`, `text`: the commits' `Agents:` lines, oldest first). One writer: the server that took over (a successor, once per deploy) |
 
 A session launched by Nexus has `launched_by: nexus`, `runtime: claude`, `native_id` (Claude's session UUID, chosen
@@ -903,6 +903,7 @@ nexus import <file.md> [--prefix X]            # one-time import of queues writt
 nexus note <queue> <step> <text>               # until the dashboard can add notes
 nexus server away [on --until <8:00|ISO> | off]  # the user's away mode (refused from any agent session); no argument: its state
 nexus server update --after <queue>[/<step>] [--ref <ref>]   # plan a deploy for after a step or queue of this project (the user, or an orchestrator the user asked)
+nexus server update --at <HH:MM|"YYYY-MM-DD HH:MM"> [--deadline <time>] [--ref <ref>]   # plan a deploy for a time, with an optional deadline
 nexus server cancel-plan                       # cancel the planned deploy (and the drain it started)
 ```
 
@@ -1123,7 +1124,9 @@ now, per project (`project`, `name`, `steps`: `queue`, `step`, `title`, `session
 prints. `POST /api/server/update` (`now?`, `ref?`, `by?`) and `POST /api/server/cancel` start and cancel an update.
 `by` is sent by `nexus server update` run in an orchestrator session (from `NEXUS_SESSION` and its project); the
 server keeps it only for an orchestrator session of a registered project. The dashboard sends none. `POST
-/api/server/plan` (`after`: `project`, `queue`, `step?`; `ref?`, `by?` as for update) plans a deploy, answering
+/api/server/plan` (`after`: `project`, `queue`, `step?`; or `at` and `deadline?`: "HH:MM" (its next occurrence; a
+deadline's next one after `at`), "YYYY-MM-DD HH:MM" in the server machine's time, or ISO 8601; `ref?`, `by?` as for
+update) plans a deploy, answering
 `text`, `plan` and `update`; `POST /api/server/cancel-plan` (`by?`) cancels it, answering `text` (409 with the reason
 when refused; see "Planned deploys"). `POST
 /api/server/away` (`until`: a local time "8:00", an ISO 8601 time, or null for off; it answers `away`) switches the
@@ -1133,11 +1136,12 @@ from 1 to 20; at least one of them; it answers both values) is the
 user's only: like withdrawing an approval, it is refused without the dashboard page's own `Origin`. A server waiting
 to take over answers every `/api/projects…` request, and every write under `/api/server/`, with 503.
 
-**Planned deploys.** Instead of at once, a deploy can wait for a step or a queue of a project (decided by the user on
-2026-11-14, docs/ideas/deploy-timing.md). `nexus server update --after <queue>[/<step>]` plans it for a queue of the
-project the CLI runs in (an orchestrator's own); like `update`, the CLI refuses it, and `cancel-plan`, from every
-session but an orchestrator's, and the orchestrator does it only when the user asks. One plan at a time: a second is
-refused until the first is cancelled, and so is a plan while an update is under way.
+**Planned deploys.** Instead of at once, a deploy can wait for a step or a queue of a project, or for a time (decided
+by the user on 2026-11-14, docs/ideas/deploy-timing.md). `nexus server update --after <queue>[/<step>]` plans it for a
+queue of the project the CLI runs in (an orchestrator's own); `--at <time> [--deadline <time>]` for a time. Like
+`update`, the CLI refuses these, and `cancel-plan`, from every session but an orchestrator's, and the orchestrator does
+it only when the user asks. One plan at a time: a second is refused until the first is cancelled, and so is a plan
+while an update is under way.
 
 - **When it is in.** A step is in when it is `done` (one waiting for its review, once accepted; one accepted
   provisionally is `done`) or `skipped`. A queue is in when it is done: every step closed (done, skipped, or rejected
@@ -1147,6 +1151,22 @@ refused until the first is cancelled, and so is a plan while an update is under 
   right there, even when the turn ends before the file watcher looks: nothing of the next step slips in. Steps running
   elsewhere are waited for as with any update, and the held queue goes on after the restart.
 - **After a queue.** The update starts once the queue is done; a stopped or failed step means it is not.
+- **At a time.** At `at` the update starts: from then no new step starts, and it waits for the running ones (without
+  a deadline, as long as they take). At `deadline`, a drain still waiting goes on as with `--now`: the running steps
+  are interrupted, held, and continue after the restart (the update log says "the deadline came"). A time that has
+  passed, or a deadline not after the time, is refused. Across a restart the timers are armed again; a time passed
+  while no server ran starts the update at once.
+- **Provisional work.** With a project's `provisional_counts` on (the default), a step the orchestrator accepted
+  provisionally is in like any. Off (the global value or the project's own), the plan's own step counts only once the
+  user confirmed it, and the deploy waits while the commit it would deploy (`ref`, default `main`, in the server's
+  checkout) holds provisional work of that project the user has not confirmed: a step with a provisional acceptance
+  waiting for the user whose recorded review commit is in it and that made commits of its own, as for the push of
+  accepted work, so also under a step accepted for good that builds on it. It is then due but waits: `waiting_for`
+  lists that work, and only the plan's own queue is held, at the step's end (its run `paused` with
+  `resume_after_restart`, `held` in the plan); everything else goes on, and no drain starts. Once the user confirms it
+  (or sends it to a fix), the update starts; the held queue goes on after the restart, or at once when the plan ends
+  without its deploy. A plan at a time that waits so starts its drain only then; a deadline already passed interrupts
+  the running steps at once.
 - **Dropped.** The plan is dropped, without a deploy, when its step fails, stops or is rejected, or (after a queue) a
   step fails or stops, or the queue is stopped, cancelled or gone. A plan whose target will not be in is refused when it
   is set; one whose target is already in starts the update at once.
@@ -1160,11 +1180,15 @@ refused until the first is cancelled, and so is a plan while an update is under 
   in.
 - **A worktree branch.** When the step's queue runs on a worktree of its own and its branch is not merged back
   (`git.yaml` `merged`), setting the plan warns that its work is in the deploy only once merged into main.
-- **Told.** A dropped plan pushes a notification to the user's devices ("Nexus: planned deploy dropped"). The
-  orchestrator that planned it, else the target project's orchestrator, is told once, key
-  `notify:deploy-plan:<plan id>:<why>`: when it is dropped ("The deploy planned after … will not happen: …"), when its
-  update failed (only for a plan the user set: the orchestrator that planned it is told the update's own outcome), and
-  when the user cancelled an orchestrator's plan. The planning session is told even with `notify` off.
+- **Told.** A dropped plan pushes a notification to the user's devices ("Nexus: planned deploy dropped"), and so does
+  a plan that starts to wait for provisional work ("Nexus: planned deploy waits", once for each set of work). The
+  orchestrator that planned it, else the target project's orchestrator (a plan at a time the user set tells none), is
+  told once, key `notify:deploy-plan:<plan id>:<why>`: when it is dropped ("The deploy planned after … will not
+  happen: …"), when its update failed (only for a plan the user set: the orchestrator that planned it is told the
+  update's own outcome), and when the user cancelled an orchestrator's plan; and with key
+  `notify:deploy-plan:<plan id>:waits:<work>` when it waits for the user's confirmation ("The deploy planned … waits:
+  it would include provisional work the user has not confirmed (…)"). The planning session is told even with `notify`
+  off.
 
 **Push on deploy.** A successor that took over a live instance (`live: true`) pushes what it runs once it is up, if
 `push_on_deploy` is on and the update's ref was `main`. It runs

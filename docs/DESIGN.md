@@ -641,6 +641,12 @@ asks the planner at every step boundary, before it goes on (Engine option `bound
 before the successor starts, so that a successor reading the same file never deploys a second time; a plain restart
 keeps it.
 
+A plan that waits for the user's confirmation of provisional work (`provisional_counts` off, queue PD2) holds only its
+own queue, at the step's end, not every queue through an early drain: the setting is the user's own choice for when they
+are away, and a drain held open until they come back would stop every project. A plan at a time does not start its
+drain while it waits, for the same reason. The deadline turns a waiting drain into one with `now` (Lifecycle.hurry)
+rather than starting a second update.
+
 ## Tech stack
 
 | Part | Choice |

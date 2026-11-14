@@ -8,123 +8,23 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, type ChildProcess } from "node:child_process";
-import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ProjectStore, approveQueue, loadProjectState, newId, now, routeAnswers, setStepLevel, writeRegistry, type StepDef } from "@nexus/protocol";
-import { Engine } from "../src/engine.ts";
-import { Lifecycle } from "../src/lifecycle.ts";
-import { DeployPlanner, deployPlanFile, judgePlan, readPlanFile } from "../src/deploy-plan.ts";
-import { Orchestrator } from "../src/orchestrator.ts";
-import { acceptReviews } from "./fake-reviewer.ts";
+import { ProjectStore, approveQueue, loadProjectState, now, writeRegistry } from "@nexus/protocol";
+import { deployPlanFile, judgePlan, readPlanFile } from "../src/deploy-plan.ts";
 import { serverEnv, spawnServer } from "./helpers.ts";
 import { until, LONGER, sleep } from "./wait.ts";
+import { handedOver, here, setup, successor } from "./deploy-plan-setup.ts";
 
-const here = dirname(fileURLToPath(import.meta.url));
 const CLI = join(here, "..", "..", "..", "packages", "cli", "bin", "nexus.js");
 const freePort = () => new Promise<number>((resolve) => {
   const s = createServer();
   s.listen(0, "127.0.0.1", () => { const p = (s.address() as { port: number }).port; s.close(() => resolve(p)); });
 });
-process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
 
-/** A git repository standing in for this server's checkout: a development checkout on branch `dev`. */
-function repo(base: string) {
-  const root = join(base, "checkout");
-  mkdirSync(root, { recursive: true });
-  const git = (...args: string[]) => execFileSync("git", ["-c", "user.name=test", "-c", "user.email=test@example.invalid", ...args], { cwd: root, encoding: "utf8" }).trim();
-  git("init", "-q", "-b", "dev");
-  writeFileSync(join(root, "package-lock.json"), '{ "lock": 1 }\n');
-  git("add", "-A"); git("commit", "-q", "-m", "A: where it runs");
-  return root;
-}
-
-interface Options { successor?: "ready" | "crash"; busyElsewhere?: () => boolean; orchestrator?: boolean; levels?: Record<string, number> }
-
-/**
- * Project p with queue Q (`behaviours`, one step each), its engine wired to a planner as main.ts does, and a Lifecycle
- * around it. Everything the server would do outside (push notifications, the process's exit) is recorded.
- */
-function setup(behaviours: string[], o: Options = {}) {
-  const base = mkdtempSync(join(tmpdir(), "nexus-plan-"));
-  process.env.NEXUS_HOME = join(base, "home");
-  process.env.FAKE_LOG = join(base, "fake.log");
-  process.env.FAKE_SUCCESSOR = o.successor ?? "ready";
-  process.env.FAKE_READY_MS = "200";
-  const checkout = repo(base);
-  const root = join(base, "project");
-  mkdirSync(root, { recursive: true });
-  const store = ProjectStore.init(root, { id: "p", name: "P", root });
-  const steps: StepDef[] = behaviours.map((b, i) => ({ id: `Q${i + 1}`, title: `Step ${i + 1}`, goal: `FAKE: ${b}`, acceptance: [] }));
-  store.writeQueue({ protocol: 1, id: "Q", title: "Queue", revision: 1, status: "proposed", stop_conditions: [], checks: [], steps, approvals: [], history: [] });
-  approveQueue(store, "Q");
-  for (const [step, level] of Object.entries(o.levels ?? {})) setStepLevel(store, "Q", step, level as 1 | 2 | 3);
-
-  const pushed: { title: string; body: string }[] = [];
-  const drains: string[][] = []; // the step statuses of Q at each drain: when the update started
-  let exited = false;
-  let orchestrator: Orchestrator | undefined;
-  const tick = () => {
-    routeAnswers(store); acceptReviews(store);
-    planner.check("p", loadProjectState(store)); // as main.ts: before the engine goes on
-    orchestrator?.onChange(loadProjectState(store));
-    engine.onChange(loadProjectState(store));
-  };
-  let engine: Engine = new Engine(store, tick, { boundary: (q, step, state) => planner.atBoundary("p", q, step, state) });
-  const parts = () => [
-    { id: "p", idle: () => engine.idle(), drain: (n: boolean) => { drains.push(queue().steps.map((s) => s.status)); return engine.drainForUpdate(n); }, cancel: () => engine.cancelDrain(), shutdown: () => engine.shutdown() },
-    // Another project whose step still runs: the drain waits for it.
-    ...(o.busyElsewhere ? [{ id: "other", idle: () => !o.busyElsewhere!(), drain: () => [], cancel: () => {}, shutdown: () => {} }] : []),
-  ];
-  const lifecycle = new Lifecycle(parts, () => {}, {
-    root: checkout,
-    successor: [process.execPath, join(here, "fake-successor.ts")],
-    timeoutMs: 15_000,
-    npm: async () => {},
-    release: async () => { engine.shutdown(); await until("the agent to exit", () => !engine.alive()); },
-    // As main.ts: new engines (and orchestrators) recover the held runs, and the planner reads its file again.
-    reacquire: async () => {
-      engine = new Engine(store, tick, { boundary: (q, step, state) => planner.atBoundary("p", q, step, state) });
-      if (orchestrator) { orchestrator.shutdown(); orchestrator = newOrchestrator(); }
-      planner.recover();
-    },
-    settled: () => tick(),
-    notify: (text) => pushed.push({ title: "update failed", body: text }),
-    exit: () => { exited = true; },
-    ended: (id, how, reason) => planner.updateEnded(id, how, reason),
-  });
-  const newOrchestrator = () => new Orchestrator(store, engine, tick, { plan: () => planner.notice(), update: () => lifecycle.notice() });
-  const planner = new DeployPlanner({ lifecycle, state: (id) => (id === "p" ? loadProjectState(store) : undefined), push: (n) => pushed.push(n) });
-  if (o.orchestrator) {
-    process.env.FAKE_REVIEW_ACCEPT = "1"; // the fake orchestrator accepts each step waiting for its review
-    const p = store.readProject();
-    const session = { protocol: 1 as const, id: newId(), project: "p", role: "orchestrator" as const, runtime: "claude" as const, native_id: randomUUID(), title: "Orchestrator", cwd: root, launched_by: "nexus" as const, created_at: now() };
-    store.writeSession(session);
-    store.writeProject({ ...p, orchestrator: { runtime: "claude", notify: true, session: session.id } });
-    orchestrator = newOrchestrator();
-  }
-  const queue = () => loadProjectState(store).queues.find((q) => q.id === "Q")!;
-  const statuses = () => queue().steps.map((s) => s.status);
-  const stop = () => { engine.shutdown(); orchestrator?.shutdown(); for (const k of ["FAKE_SUCCESSOR", "FAKE_READY_MS", "FAKE_REVIEW_ACCEPT"]) delete process.env[k]; };
-  const show = () => `; run: ${JSON.stringify(queue().run)}; steps: ${statuses().join(" ")}; update: ${JSON.stringify(lifecycle.status)}; plan: ${JSON.stringify(readPlanFile())}`;
-  return { store, engine: () => engine, lifecycle, planner, queue, statuses, pushed, drains, exited: () => exited, orchestrator: () => orchestrator, stop, show, tick };
-}
-
-/** The successor's side, on the same files: a new engine, planner and lifecycle, as main.ts builds them at its start. */
-function successor(t: ReturnType<typeof setup>) {
-  let engine: Engine;
-  const lifecycle = new Lifecycle(() => [{ id: "p", idle: () => engine.idle(), drain: (n) => engine.drainForUpdate(n), cancel: () => engine.cancelDrain(), shutdown: () => engine.shutdown() }], () => {}, { npm: async () => {}, exit: () => {} });
-  const planner = new DeployPlanner({ lifecycle, state: () => loadProjectState(t.store) });
-  const tick = () => { routeAnswers(t.store); acceptReviews(t.store); planner.check("p", loadProjectState(t.store)); engine.onChange(loadProjectState(t.store)); };
-  engine = new Engine(t.store, tick, { boundary: (q, step, state) => planner.atBoundary("p", q, step, state) });
-  planner.recover();
-  return { engine, lifecycle, planner, tick };
-}
-
-const handedOver = (t: ReturnType<typeof setup>) => () => t.exited();
 
 // ---------------------------------------------------------------- after a step
 
@@ -134,7 +34,7 @@ test("a deploy after a step starts at that step's end, the queue opens no next s
   try {
     const r = t.planner.set({ after: { project: "p", queue: "Q", step: "Q1" } });
     assert.match(r.text, /a deploy is planned after step Q\/Q1 \(step Q\/Q1 is pending\)/);
-    assert.equal(readPlanFile().plan?.after.step, "Q1", "written to the plan file");
+    assert.equal(readPlanFile().plan?.after?.step, "Q1", "written to the plan file");
     t.engine().start("Q");
     await until("the hand-over", handedOver(t), LONGER.processes, t.show);
     assert.deepEqual(t.drains, [["done", "pending", "pending"]], "the update started right at Q1's end");
@@ -143,7 +43,7 @@ test("a deploy after a step starts at that step's end, the queue opens no next s
     const f = readPlanFile();
     assert.equal(f.plan, undefined, "the hand-over ended the plan");
     assert.equal(f.ended?.why, "carried-out");
-    assert.equal(t.planner.notice(), undefined, "a plan carried out tells nothing of its own");
+    assert.deepEqual(t.planner.notices(), [], "a plan carried out tells nothing of its own");
     t.engine().shutdown();
 
     next = successor(t);
@@ -151,7 +51,7 @@ test("a deploy after a step starts at that step's end, the queue opens no next s
     await until("the queue to go on and finish", () => t.queue().run?.state === "finished", LONGER.run, t.show);
     assert.deepEqual(t.statuses(), ["done", "done", "done"]);
     assert.equal(next.lifecycle.status.phase, "idle", "the successor does not deploy again");
-  } finally { t.stop(); next?.engine.shutdown(); }
+  } finally { t.stop(); next?.stop(); }
 });
 
 test("a step waiting for its review counts only once accepted; its queue then holds at that step", async () => {
@@ -289,7 +189,7 @@ test("a plan stays across a plain restart; one whose update never handed over wa
     const again = successor(t);
     assert.equal(again.planner.plan?.id, id, "read from the file by the next server");
     assert.match(again.planner.view()?.waiting ?? "", /step Q\/Q2 is pending/);
-    again.engine.shutdown();
+    again.stop();
 
     // The server stopped mid-drain: the plan file says started, but no successor took over.
     const f = readPlanFile();
@@ -297,7 +197,7 @@ test("a plan stays across a plain restart; one whose update never handed over wa
     const third = successor(t);
     assert.equal(third.planner.plan?.id, id);
     assert.equal(third.planner.plan?.started, undefined, "it waits again");
-    third.engine.shutdown();
+    third.stop();
   } finally { t.stop(); }
 });
 
@@ -368,5 +268,12 @@ test("nexus server update --after plans through the server, status shows the pla
     assert.match(cli("cancel-plan"), /^ok: the deploy planned after step Q\/Q1 is cancelled/);
     assert.match(cli("status"), /planned update: none/);
     assert.match(fails("cancel-plan"), /no deploy is planned/);
+
+    // At a time, with a deadline (this machine's local time).
+    assert.match(cli("update", "--at", "2099-01-01 05:00", "--deadline", "2099-01-01 06:00"), /^ok: a deploy is planned at 2099-01-01 05:00 \(until 2099-01-01 05:00\); at 2099-01-01 06:00 the running steps are interrupted/);
+    assert.match(cli("status"), /planned update: at 2099-01-01 05:00, deadline 2099-01-01 06:00; waiting: until 2099-01-01 05:00/);
+    assert.match(fails("update", "--deadline", "6:00"), /--deadline goes with --at/);
+    assert.match(fails("update", "--at", "5:00", "--after", "Q"), /--at goes alone/);
+    assert.match(cli("cancel-plan"), /^ok: the deploy planned at 2099-01-01 05:00 is cancelled/);
   } finally { await stopServer(s); }
 });

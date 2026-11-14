@@ -25,7 +25,11 @@ import { collectAgentChanges, pushDeployed, recordDeployChanges, type GitRunner,
 const run = promisify(execFile);
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 
-export interface Drainable { id: string; idle(): boolean; drain(now: boolean): string[]; cancel(): void; shutdown(): void }
+export interface Drainable {
+  id: string; idle(): boolean; drain(now: boolean): string[]; cancel(): void; shutdown(): void;
+  /** The drain goes on as with `now`: running steps are interrupted (Lifecycle.hurry). */
+  hurry?(): void;
+}
 
 export interface UpdateStatus {
   /** `updated`: this server is the successor of an update; the log says which version is up. */
@@ -219,6 +223,18 @@ export class Lifecycle {
     this.timer = setInterval(() => void this.tick(), 2000);
     void this.tick();
     return this.status;
+  }
+
+  /**
+   * A drain that lets the running steps finish goes on as with `now` (a planned deploy's deadline came,
+   * src/deploy-plan.ts): they are interrupted, held, and continue after the restart.
+   */
+  hurry(): void {
+    if (this.status.phase !== "draining" || this.status.now) return;
+    this.status = { ...this.status, now: true };
+    for (const p of this.parts()) p.hurry?.();
+    this.note("the deadline came: the running steps are interrupted and continue after the restart");
+    void this.tick();
   }
 
   /** Gives up waiting: the held queues go on. */

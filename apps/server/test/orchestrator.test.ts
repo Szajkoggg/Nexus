@@ -200,7 +200,7 @@ test("only the user or an orchestrator may update, plan an update of, or stop up
     const cli = join(dirname(fileURLToPath(import.meta.url)), "../../../packages/cli/bin/nexus.js");
     const commands: [string[], string][] = [
       [["update"], "update"], [["cancel"], "cancel"],
-      [["update", "--after", "Q/Q1"], "plan an update of"], [["cancel-plan"], "cancel a planned update of"],
+      [["update", "--after", "Q/Q1"], "plan an update of"], [["update", "--at", "6:00"], "plan an update of"], [["cancel-plan"], "cancel a planned update of"],
     ];
     for (const role of ["worker", "conversation"] as const) {
       store.writeSession({ protocol: 1, id: `s-${role}`, project: "p", role, runtime: "external", cwd: store.dir, launched_by: "external", created_at: new Date().toISOString() });

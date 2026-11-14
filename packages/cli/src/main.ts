@@ -69,6 +69,9 @@ The server (NEXUS_PORT, default 4317):
                                       plan the update for when the step is in (done, or accepted after its review;
                                       its queue opens no next step until after the restart) or the queue is done (a
                                       queue of this project); one plan at a time
+  nexus server update --at <HH:MM|"YYYY-MM-DD HH:MM"> [--deadline <time>] [--ref <commit|branch>]
+                                      plan the update for a time: from then no new step starts and it waits for the
+                                      running ones; at the deadline it interrupts them (they continue after the restart)
   nexus server cancel                 give up waiting; the held queues go on
   nexus server cancel-plan            cancel the planned update (and the drain it started, if any)
   nexus server away [on --until <8:00|ISO time> | off]
@@ -84,7 +87,7 @@ const { values: o, positionals: args } = parseArgs({
     condition: { type: "string" }, pct: { type: "string" }, label: { type: "string" },
     kind: { type: "string" }, round: { type: "string" }, duration: { type: "string" }, ok: { type: "boolean" }, fail: { type: "boolean" },
     option: { type: "string", multiple: true }, "can-continue": { type: "boolean" }, recommend: { type: "string" },
-    "use-session": { type: "string" }, model: { type: "string" }, effort: { type: "string" }, after: { type: "string" }, at: { type: "string" },
+    "use-session": { type: "string" }, model: { type: "string" }, effort: { type: "string" }, after: { type: "string" }, at: { type: "string" }, deadline: { type: "string" },
     topics: { type: "string" }, files: { type: "string" }, file: { type: "string" }, level: { type: "string" },
     escalate: { type: "boolean" }, continue: { type: "boolean" }, wait: { type: "boolean" },
     id: { type: "string" }, name: { type: "string" }, prefix: { type: "string" },
@@ -359,8 +362,10 @@ function printAway(a: { on: boolean; until?: string } | undefined): void {
 
 function printPlan(p: Record<string, any> | null | undefined): void {
   if (!p) { console.log("planned update: none"); return; }
-  const what = p.after.step ? `step ${p.after.queue}/${p.after.step}` : `queue ${p.after.queue}`;
-  console.log(`planned update: after ${what} of project ${p.after.project}${p.ref ? ` (ref ${p.ref})` : ""}${p.started ? "; started" : p.waiting ? `; waiting: ${p.waiting}` : ""}`);
+  const local = (iso: string) => new Date(iso).toLocaleString("sv-SE").slice(0, 16);
+  const what = p.after ? `after ${p.after.step ? `step ${p.after.queue}/${p.after.step}` : `queue ${p.after.queue}`} of project ${p.after.project}`
+    : `at ${local(p.at)}${p.deadline ? `, deadline ${local(p.deadline)}` : ""}`;
+  console.log(`planned update: ${what}${p.ref ? ` (ref ${p.ref})` : ""}${p.started ? "; started" : p.waiting ? `; waiting: ${p.waiting}` : ""}`);
   if (p.warning) console.log(`  warning: ${p.warning}`);
 }
 
@@ -396,12 +401,19 @@ const commands: Record<string, () => void | Promise<void>> = {
         let role: string | undefined;
         let project: string | undefined;
         try { const st = dir ? new ProjectStore(dir) : undefined; role = st?.readSession(sid).role; project = st?.readProject().id; } catch { role = undefined; }
-        const what = sub === "cancel-plan" ? "cancel a planned update of" : o.after !== undefined ? "plan an update of" : sub;
+        const what = sub === "cancel-plan" ? "cancel a planned update of" : o.after !== undefined || o.at !== undefined ? "plan an update of" : sub;
         if (role !== "orchestrator") throw new UsageError(`only the user or an orchestrator may ${what} the Nexus server, not a ${role ?? "session"}`);
         // The orchestrator that asks is told the outcome after the restart (or if the update fails).
         if (project) by = { project, session: sid };
       }
     }
+    if (sub === "update" && o.at !== undefined) {
+      if (o.now || o.after !== undefined) throw new UsageError("--at goes alone: not with --now or --after");
+      const r = await server("POST", "/api/server/plan", { at: need(o.at, "--at <HH:MM|\"YYYY-MM-DD HH:MM\">"), deadline: o.deadline, ref: o.ref, by });
+      console.log(`ok: ${r.text}`);
+      return;
+    }
+    if (o.deadline !== undefined) throw new UsageError("--deadline goes with --at");
     if (sub === "update" && o.after !== undefined) {
       if (o.now) throw new UsageError("--now goes with an update at once, not with --after");
       const [queue, step, more] = need(o.after, "--after <queue>[/<step>]").split("/");

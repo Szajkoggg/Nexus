@@ -27,8 +27,8 @@ import { Conversations } from "./conversations.ts";
 import { listModels } from "./models.ts";
 import { readDeployChanges, readDeploySettings, writeDeploySettings } from "./deploy.ts";
 import { Standby, refuseHandoverDir, smokeCheck, takeHandoverEnv } from "./handover.ts";
-import { Lifecycle, version } from "./lifecycle.ts";
-import { DeployPlanner, PlanError } from "./deploy-plan.ts";
+import { Lifecycle, ROOT, version } from "./lifecycle.ts";
+import { DeployPlanner, PlanError, planTime } from "./deploy-plan.ts";
 import { MAX_UPLOAD_BODY, UploadError, saveUpload } from "./uploads.ts";
 import { COMMIT_HASH, commitDetail, fileResponse, locate } from "./files.ts";
 import { chatRange, pin, searchLines } from "./chats.ts";
@@ -102,7 +102,7 @@ function refreshRegistry(): void {
     const engine = new Engine(store, () => changed(p.id), { coordinator, boundary: (q, step, state) => planner.atBoundary(p.id, q, step, state) });
     // Through its usual notices it is told the outcome of an update it asked for (lifecycle.notice), and what changed
     // for agents in each deploy since its session began (deploy-changes.jsonl).
-    const orchestrator = new Orchestrator(store, engine, () => changed(p.id), { update: () => lifecycle.notice(), plan: () => planner.notice(), changes: readDeployChanges, push: (n) => void push(n) });
+    const orchestrator = new Orchestrator(store, engine, () => changed(p.id), { update: () => lifecycle.notice(), plan: () => planner.notices(), changes: readDeployChanges, push: (n) => void push(n) });
     projects.set(p.id, { id: p.id, root: p.root, store, engine, orchestrator, conversations: new Conversations(store, orchestrator, () => changed(p.id)) });
     watchProject(p.id, store.dir);
   }
@@ -187,6 +187,7 @@ const lifecycle = new Lifecycle(() => [...projects.values()].map((e) => ({
   idle: () => e.engine.idle() && e.orchestrator.idle() && e.conversations.idle(),
   drain: (now: boolean) => { e.conversations.draining = true; return e.engine.drainForUpdate(now); },
   cancel: () => { e.conversations.draining = false; e.engine.cancelDrain(); },
+  hurry: () => e.engine.hurryDrain(),
   shutdown: () => { e.engine.shutdown(); e.orchestrator.shutdown(); e.conversations.shutdown(); },
 })), () => { for (const s of sockets) if (s.readyState === s.OPEN) s.send(JSON.stringify({ type: "server" })); }, {
   release, reacquire,
@@ -200,6 +201,9 @@ const lifecycle = new Lifecycle(() => [...projects.values()].map((e) => ({
 const planner = new DeployPlanner({
   lifecycle,
   state: (id) => { const e = projects.get(id); return e ? stateOf(e) : undefined; },
+  projects: () => [...projects.keys()],
+  root: ROOT,
+  release: (id, queue, reason) => projects.get(id)?.engine.releaseHold(queue, reason),
   push: (n) => void push(n),
   changed: () => {
     if (!active) return;
@@ -598,16 +602,22 @@ app.post("/api/server/update", async (c) => {
   try { return c.json(lifecycle.start({ now: b.now === true, ref: typeof b.ref === "string" ? b.ref : undefined, by: askerOf(b.by) })); }
   catch (e) { return c.json({ error: (e as Error).message }, 409); }
 });
-// A planned deploy (src/deploy-plan.ts): `after` { project, queue, step? }, `ref?`, `by?` (as for update). One at a
-// time; `nexus server update --after` sends it, `nexus server cancel-plan` cancels it.
+// A planned deploy (src/deploy-plan.ts): `after` { project, queue, step? }, or `at` and `deadline?` (HH:MM,
+// "YYYY-MM-DD HH:MM" in this machine's time, or ISO 8601); `ref?`, `by?` (as for update). One at a time; `nexus
+// server update --after|--at` sends it, `nexus server cancel-plan` cancels it.
 app.post("/api/server/plan", async (c) => {
-  const b = (await c.req.json().catch(() => ({}))) as { after?: { project?: unknown; queue?: unknown; step?: unknown }; ref?: unknown; by?: { project?: unknown; session?: unknown } };
+  const b = (await c.req.json().catch(() => ({}))) as { after?: { project?: unknown; queue?: unknown; step?: unknown }; at?: unknown; deadline?: unknown; ref?: unknown; by?: { project?: unknown; session?: unknown } };
   const a = b.after;
-  if (typeof a?.project !== "string" || typeof a.queue !== "string" || (a.step !== undefined && typeof a.step !== "string")) {
+  if (a !== undefined && (typeof a?.project !== "string" || typeof a.queue !== "string" || (a.step !== undefined && typeof a.step !== "string"))) {
     return c.json({ error: "give after: { project, queue, step? }" }, 400);
   }
+  if ((b.at !== undefined && typeof b.at !== "string") || (b.deadline !== undefined && typeof b.deadline !== "string")) return c.json({ error: "at and deadline are times (text)" }, 400);
   try {
-    const r = planner.set({ after: { project: a.project, queue: a.queue, step: a.step || undefined }, ref: typeof b.ref === "string" ? b.ref : undefined, by: askerOf(b.by) });
+    const at = typeof b.at === "string" ? planTime(b.at) : undefined;
+    // A deadline as a bare time of day is its next occurrence after the plan's time.
+    const deadline = typeof b.deadline === "string" ? planTime(b.deadline, at ? new Date(at) : undefined) : undefined;
+    const after = a ? { project: a.project as string, queue: a.queue as string, step: (a.step as string | undefined) || undefined } : undefined;
+    const r = planner.set({ after, at, deadline, ref: typeof b.ref === "string" ? b.ref : undefined, by: askerOf(b.by) });
     return c.json({ text: r.text, plan: planner.view(), update: lifecycle.status });
   } catch (e) { return c.json({ error: (e as Error).message }, e instanceof PlanError ? 409 : 500); }
 });
@@ -756,6 +766,7 @@ async function release(): Promise<void> {
   for (const t of pending.values()) clearTimeout(t);
   pending.clear();
   await Promise.all(watchers.splice(0).map((w) => w.close()));
+  planner.shutdown(); // its timers write the plan file: no longer this server's
   for (const e of projects.values()) { e.engine.shutdown(); e.orchestrator.shutdown(); e.conversations.shutdown(); }
   // An agent's exit is written to its runtime file: wait for those last writes.
   const alive = () => [...projects.values()].some((e) => e.engine.alive() || e.orchestrator.alive() || e.conversations.alive());

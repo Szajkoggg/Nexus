@@ -82,10 +82,12 @@ export interface EngineOptions {
   coordinator?: Coordinator;
   /**
    * Asked at the end of a step (done or skipped) before the run goes on (the next step, or its end): whether to stop
-   * here, because a deploy planned after this step or queue just started its update (src/deploy-plan.ts), whose drain
-   * held the run. The engine then looks at the run again.
+   * here (src/deploy-plan.ts). `true`: a deploy planned after this step or queue just started its update, whose drain
+   * held the run. `{ hold }`: the planned deploy waits (for the user's confirmation of provisional work): the engine
+   * holds the run here, to be resumed by the restart of that deploy (or when the plan ends without it). The engine then
+   * looks at the run again.
    */
-  boundary?: (queueId: string, step: string, state: ProjectState) => boolean;
+  boundary?: (queueId: string, step: string, state: ProjectState) => boolean | { hold: string };
 }
 
 /** A process asked to end for a restart (another model or effort) is killed if it has not exited by then. */
@@ -326,6 +328,26 @@ export class Engine implements Member {
     return held;
   }
 
+  /**
+   * The drain goes on as with `now` (an update's deadline came, src/deploy-plan.ts): queues still finishing their step
+   * for the update are interrupted, held, and continue that step after the restart.
+   */
+  hurryDrain(): void {
+    if (!this.draining) return;
+    for (const id of this.store.queueIds()) {
+      const run = this.store.readRun(id);
+      if (run?.state === "pausing" && run.resume_after_restart) this.writeRun(id, toHeldForUpdate(run, run.reason ?? "the Nexus server is updating; it goes on by itself afterwards"));
+    }
+    for (const l of this.host.all()) if (l.proc.state === "working") { this.ending.add(l.session); l.proc.kill(); }
+  }
+
+  /** A run the planned deploy held at its step's end (boundary `hold`) goes on: the plan ended without its deploy. */
+  releaseHold(queueId: string, reason: string): void {
+    const run = this.store.readRun(queueId);
+    if (run?.state !== "paused" || !run.resume_after_restart || this.draining) return;
+    try { this.resume(queueId); } catch (e) { this.halt(queueId, `could not go on after ${reason}: ${(e as Error).message}`); }
+  }
+
   /** No agent of this project is in the middle of a turn. */
   idle(): boolean {
     return this.host.idle();
@@ -552,7 +574,9 @@ export class Engine implements Member {
       }
       // A deploy planned after this step (or queue) starts now: its drain holds the run here, so nothing of the next
       // step slips in. Looked at again: held, the run waits for the restart; paused by the user, the pause is reached.
-      if (this.boundary?.(queueId, current.id, state)) return this.advanceUnlocked(queueId);
+      const stop = this.boundary?.(queueId, current.id, state);
+      if (stop === true) return this.advanceUnlocked(queueId);
+      if (stop) return this.writeRun(queueId, run.state === "running" ? toHeldForUpdate(run, stop.hold) : toPaused(run));
     }
 
     // The step's end. A newer revision waiting for approval: the run waits for it, keeping its session (also while an
