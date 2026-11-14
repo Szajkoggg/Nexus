@@ -901,6 +901,10 @@ lookup, a placeholder fill and `Intl.PluralRules`, about a hundred lines that ar
 (`apps/web/test/i18n.test.ts`). The language is a module-level setting, not a React context: how a change of it reaches an
 open page (a reload, a key on the root) is for the translation queue to choose.
 
+Code never reads a translated text back: a status built from catalogue texts keeps its key and parameters beside
+its words (`HonestStatus.says` in `queueStatus.ts`), and its shorter forms (the rail's few words) are chosen from the
+key, not by matching the English label.
+
 Not in the catalogue: texts that come from the server (an action's error message, a run's reason, the stop's place)
 and `packages/protocol/src/times.ts` (`retryLine`, the server's own times), which the server also uses; these stay
 English until a queue decides how the server learns the interface language.
