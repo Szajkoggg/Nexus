@@ -25,7 +25,7 @@ import {
 import type { AgentEvents, AgentProcess, Priority } from "../src/agent.ts";
 import type { Launch } from "../src/agent-host.ts";
 import { Engine } from "../src/engine.ts";
-import { noOutcomeNudge } from "../src/prompts.ts";
+import { freshSessionSeed, noOutcomeNudge, stepOpening, switchReason } from "../src/prompts.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { Conversations } from "../src/conversations.ts";
 import type { DeployChanges } from "../src/deploy.ts";
@@ -187,6 +187,21 @@ test("the worker's texts: briefing, step openings, inbox entries, seeds and nudg
   tr.section("the nudges after background work (DESIGN.md, \"Background work\"; noOutcomeNudge): it has finished; it still runs after the limit");
   tr.add(noOutcomeNudge("A1", { finished: true }));
   tr.add(noOutcomeNudge("A1", { finished: false, minutes: 30, work: ["Run the e2e suite", "sub-agent /root/review"] }));
+
+  tr.section("the closing refactoring step of a queue with coding: true, in its fresh session: the seed, then its opening with the commit range and a Refactoring section in AGENTS.md");
+  queue({ id: "C", title: "Coding queue", coding: true, checks: ["npm test"], steps: [{ id: "C1", title: "The code", goal: "Write it.", acceptance: [] }] });
+  later(); approveQueue(store, "C");
+  event(worker(), { type: "step.started", queue: "C", step: "C1" });
+  event(worker(), { type: "step.done", queue: "C", step: "C1", summary: "The code is written." });
+  const cq = loadProjectState(store).queues.find((x) => x.id === "C")!;
+  const closing = cq.steps.at(-1)!;
+  tr.add(freshSessionSeed(cq, switchReason("refactor", closing.id, "claude", "claude", undefined), cq.steps[0], closing, undefined));
+  const open = (c: Parameters<typeof stepOpening>[0]["closing"]) => stepOpening({
+    q: cq, step: closing, mode: "start", projectStopConditions: [], notes: [], answers: [], last: true, report: "<report file>", closing: c,
+  });
+  tr.add(open({ range: { from: "1111111111111111111111111111111111111111", to: "2222222222222222222222222222222222222222" }, stat: [" src/code.ts | 12 +++++++-----", " 1 file changed, 7 insertions(+), 5 deletions(-)"].join("\n"), rules: true }));
+  tr.section("the closing refactoring step without git records, and without a Refactoring section");
+  tr.add(open({ rules: false }));
 
   tr.section("the worker's briefing (Claude Code: appended to the system prompt)");
   tr.add(briefing);

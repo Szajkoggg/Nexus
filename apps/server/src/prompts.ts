@@ -6,6 +6,7 @@
 import {
   formatClock, formatSeconds, languageName, levelNow, runIsOlder, type AwayNow, type InboxView, type LanguageCode, type ProjectFile, type ProjectState, type QuestionView, type QueueView, type SessionView, type StepView,
 } from "@nexus/protocol";
+import type { ClosingContext } from "./closing.ts";
 
 export const RUNTIME_NAME = { claude: "Claude Code", codex: "Codex" } as const;
 
@@ -69,21 +70,24 @@ export function workerBriefing(l: Languages): string {
 
 /**
  * The text that opens a step in the worker's session, or continues it (`why`: what the agent is told it continues
- * after). `last`: no other step of the queue is pending, so the report is asked for; `report` is its file.
+ * after). `last`: no other step of the queue is pending, so the report is asked for; `report` is its file. `closing`:
+ * the step is the queue's closing refactoring step, and this is what it is given (src/closing.ts).
  */
 export function stepOpening(o: {
   q: QueueView; step: StepView; mode: "start" | "continue"; why?: string; projectStopConditions: string[];
   notes: StepView["notes"]; answers: QuestionView[]; last: boolean; report: string;
   /** The language line (workerLanguages), if any. */
   languages?: string;
+  closing?: ClosingContext;
 }): string {
-  const { q, step, mode, why, projectStopConditions, notes, answers, last, report, languages } = o;
+  const { q, step, mode, why, projectStopConditions, notes, answers, last, report, languages, closing } = o;
   const index = q.steps.findIndex((s) => s.id === step.id);
   return [
     `[Nexus] Queue ${q.id} "${q.title}" (revision ${q.revision}, approved), step ${step.id} (${index + 1} of ${q.steps.length}): ${step.title}.`,
     mode === "continue" ? `Continue this step where it was left${why ? ` (${why})` : step.reason ? ` (it was left: ${step.reason})` : ""}.` : "",
     step.goal ? `\nGoal:\n${step.goal}` : "",
     step.acceptance.length ? `\nAcceptance:\n${step.acceptance.map((a) => `- ${a}`).join("\n")}` : "",
+    closing ? closingText(closing) : "",
     q.checks.length ? `\nChecks for every step:\n${q.checks.map((c) => `- ${c}`).join("\n")}` : "",
     step.review?.prepare ? `\nReview to prepare: ${step.review.prepare}\nPrepare it by Nexus's standard: read \`nexus help review\` first (view keys, roles, the same conditions on both sides of a pair).` : "",
     `\nStop conditions (meeting one ends the queue: report it with \`nexus stop\`):\n${[...q.stop_conditions, ...projectStopConditions].map((c) => `- ${c}`).join("\n") || "- none beyond your judgement"}`,
@@ -93,6 +97,20 @@ export function stepOpening(o: {
     `\nBegin with \`nexus step start ${step.id}\`${mode === "continue" ? " (again is fine)" : ""}. End with \`nexus step done ${step.id} --summary "…"\`, \`nexus step failed\` or \`nexus stop\`, then write \`nexus context\` and end your turn. Do not start another step.`,
     last ? `\nThis is the queue's last step. After it is done, write a short report of the whole queue (what each step achieved against its acceptance, checks, review material, open questions, a proposed next step) to ${report} (a folder for reports outside the working tree and any repository: never write it into the working tree, it would block the cleanup of a worktree) and register it with \`nexus report ${q.id} --file ${report} --summary "…"\`, which copies it into the queue's folder and removes it from there.` : "",
   ].filter(Boolean).join("\n");
+}
+
+/** What the closing refactoring step is told of the queue's work and of the project's rules for refactoring. */
+function closingText(c: ClosingContext): string {
+  return [
+    `\nThis is the queue's closing refactoring step, kept by Nexus: it runs after the queue's own steps, in a fresh session, so that their work is read with fresh eyes.`,
+    c.range
+      ? `The queue's work: commits ${c.range.from}..${c.range.to} in this checkout (git log ${c.range.from}..${c.range.to}, git diff ${c.range.from}..${c.range.to}).${c.stat ? `\nWhat they changed (git diff --stat):\n${c.stat}` : " They change no file."}`
+      : `Nexus has no commit range of the queue's work (no git records of its steps): find its commits from the steps' summaries and git log.`,
+    c.rules
+      ? `The project's AGENTS.md has a "Refactoring" section: follow it too; it adds the project's own rules to this text.`
+      : `The project's AGENTS.md has no "Refactoring" section: this text alone applies.`,
+    `Run the checks before you change anything, and again after. If nothing is worth refactoring, make no commit and report the step done with your reasons in the summary: that is a valid outcome.`,
+  ].join("\n");
 }
 
 /**
@@ -118,7 +136,8 @@ export function summaryRequest(done: string, because: string): string {
 }
 
 /** Why the queue goes on in a fresh session, as the fresh session's seed says it. */
-export function switchReason(why: "context" | "runtime", next: string, runtime: keyof typeof RUNTIME_NAME, old: keyof typeof RUNTIME_NAME, fill: number | undefined): string {
+export function switchReason(why: "context" | "runtime" | "refactor", next: string, runtime: keyof typeof RUNTIME_NAME, old: keyof typeof RUNTIME_NAME, fill: number | undefined): string {
+  if (why === "refactor") return `step ${next} is the queue's closing refactoring step, which reads the queue's work with fresh eyes`;
   return why === "runtime"
     ? `step ${next} runs on ${RUNTIME_NAME[runtime]}, and the session that ran the queue so far is a ${RUNTIME_NAME[old]} session`
     : `the session that ran the queue so far had its context ${Math.round(fill! * 100)}% full`;
@@ -126,12 +145,15 @@ export function switchReason(why: "context" | "runtime", next: string, runtime: 
 
 /**
  * The first text of a fresh session that takes over a queue (`because`, from switchReason): the ended step's context
- * summary, or without one the queue's description and its finished steps' summaries.
+ * summary, or without one the queue's description and its finished steps' summaries. The closing refactoring step gets
+ * no summary: it reads the queue's work itself.
  */
 export function freshSessionSeed(q: QueueView, because: string, done: StepView | undefined, next: StepView, summary: SessionView["context"] | undefined): string {
   return [
     `[Nexus] You take over queue ${q.id} "${q.title}" in a fresh session: ${because}. You have not seen its work, only what follows.`,
-    summary && done
+    next.closing
+      ? `\nRead its work from its commits (the step below names their range) and its steps' summaries.`
+      : summary && done
       ? `\nIts context summary at the end of ${done.id}:\n${summary.text}${summary.topics.length ? `\nTopics: ${summary.topics.join(", ")}` : ""}${summary.files.length ? `\nFiles: ${summary.files.join(", ")}` : ""}`
       : `\nIt left no context summary${done ? ` of ${done.id}` : ""}; the queue's description and its finished steps' summaries below are what there is.`,
     `\nThe queue${q.description ? `:\n${q.description.trim()}` : ` has no description.`}`,
@@ -223,6 +245,7 @@ description: |                 # optional: context the worker needs
 worktree: auto                 # optional: auto = Nexus creates a worktree and branch; or a path; omitted = the main checkout
 branch: v2/cliffs              # optional
 review_level: 2                # optional: the level of steps that set none (1, 2 or 3, see "Review levels" below); default: the project's
+coding: true                   # set it when the queue contains coding: Nexus then ends it with a closing refactoring step (see below)
 stop_conditions:
   - ...
 checks:
@@ -247,6 +270,8 @@ Review levels: every step is reviewed when it is done; there is no level without
 - 3: you judge everything and the queue goes on: accept what has nothing of the user's; accept provisionally (nexus review provisional) what has, so the user confirms it or asks a fix on their return; or send it back (beyond the limit of send-backs, 2 by default, it goes to the user and its queue waits). Do not accept by default.
 Away mode: the user may mark that they are away until a time (only the user switches it). Meanwhile level-2 steps are reviewed as level 3 (the review notice says so), and level-1 steps still wait for the user. You are told when it starts and when it ends, and, when a queue waits for the user meanwhile, which other approved queues can start now (by the one-queue-per-checkout rule and the limit): start one if the plan allows.
 The default level follows from the step's acceptance criteria: criteria that can be checked give 2; a criterion that is the user's judgement (the look, the feel) gives 1. A step without a level is its queue's, else the project's (2 unless the user set another). At any level you may say you cannot decide and hand the review to the user. A level the user set on a step stays across your later revisions (you do not change it, and changing levels asks for no new approval). Without you (no orchestrator, or your notices off), levels 2 and 3 go to the user as level 1. Older drafts' review_policy and review.policy are read as levels (continue and orchestrator: 2, wait: 1); write levels.
+
+The closing refactoring step: set coding: true on every queue that contains coding, that is, a step that writes or changes code (tests and scripts count; a queue that only plans, measures, documents or reviews does not). Nexus then ends the queue with a step of its own, outside your list of steps: id <queue>.refactor, review level 2, its goal and acceptance Nexus's standard text (refactor what the queue changed and the code closely tied to it; behaviour unchanged, the checks pass before and after; small commits; the project's AGENTS.md "Refactoring" section applies if there is one). It always runs last, also after steps a later revision adds (once it has run, it runs again after them), in a fresh session given the queue's commit range; it writes the queue's report. Do not draft such a step yourself, and do not use its id. Review it as any level-2 step; a "nothing worth refactoring" with its reasons is a valid outcome. It cannot be skipped, nexus queue set finished waits for it, and once the queue has started, coding: true stays (a draft cannot take it back).
 
 Review material follows Nexus's standard, \`nexus help review\` (read it before you write a review.prepare): every picture has a view key (subject, state, window width: waiting-tab@492) and a role (before, mockup, after, variant-a, variant-b, result); only the same key pairs, and Nexus refuses a wrong pair. In review.prepare name the views with their keys and roles, and what each is compared with (the old screen: before; a design: mockup; a new screen: result). The project's own conventions (its AGENTS.md) come on top.
 

@@ -399,6 +399,11 @@ const QueueShape = z.object({
    * review_levels_since is derived by it. Written only by the server; not part of what an approval pins.
    */
   legacy_policies: z.record(Id, LegacyReviewPolicy).optional(),
+  /**
+   * The queue contains coding: Nexus runs a closing refactoring step after its steps (closing.ts). Set by the
+   * orchestrator in the draft; part of what an approval pins when true; once the queue has started, it stays.
+   */
+  coding: z.boolean().optional(),
   stop_conditions: z.array(z.string()).default([]),
   checks: z.array(z.string()).default([]),
   steps: z.array(StepDef).default([]),
@@ -710,13 +715,14 @@ export const RunFile = z.object({
   summary_asked: Id.optional(),
   /**
    * Each time the run went on in a fresh session, oldest first. `why`: `context` (context care: the old session's
-   * context was full; older records without `why` are this) or `runtime` (the step runs on another runtime). `step` is
+   * context was full; older records without `why` are this), `runtime` (the step runs on another runtime) or
+   * `refactor` (the closing refactoring step, which reads the queue's work with fresh eyes). `step` is
    * the first step of the new session, `fill` the old session's context fill (0 to 1) when known, `summary` where the
    * seed came from: `written` (the worker's own summary of the step), `asked` (written when Nexus asked for it),
    * `fallback` (none: the queue's description and the finished steps' summaries).
    */
   switches: z.array(z.object({
-    at: Time, from: Id, to: Id, step: Id, why: z.enum(["context", "runtime"]).optional(), fill: z.number().optional(),
+    at: Time, from: Id, to: Id, step: Id, why: z.enum(["context", "runtime", "refactor"]).optional(), fill: z.number().optional(),
     summary: z.enum(["written", "asked", "fallback"]),
   })).optional(),
 });

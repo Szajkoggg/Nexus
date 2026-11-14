@@ -213,6 +213,68 @@ This is the queue's last step. After it is done, write a short report of the who
 == the nudges after background work (DESIGN.md, "Background work"; noOutcomeNudge): it has finished; it still runs after the limit
 [Nexus] The background work you started has finished, and step A1 has no outcome yet. Take its result and continue the step if work remains; otherwise report it with `nexus step done A1 --summary "…"`, `nexus step failed`, `nexus stop`, or ask with `nexus ask` and end your turn.
 [Nexus] Your turn ended 30 minutes ago with work still running in the background (Run the e2e suite; sub-agent /root/review), and step A1 has no outcome yet. Nexus waits for it no longer: finish the step within this turn (wait for that work here, or do it yourself), then report it with `nexus step done A1 --summary "…"`, `nexus step failed`, `nexus stop`, or ask with `nexus ask` and end your turn.
+== the closing refactoring step of a queue with coding: true, in its fresh session: the seed, then its opening with the commit range and a Refactoring section in AGENTS.md
+[Nexus] You take over queue C "Coding queue" in a fresh session: step C.refactor is the queue's closing refactoring step, which reads the queue's work with fresh eyes. You have not seen its work, only what follows.
+
+Read its work from its commits (the step below names their range) and its steps' summaries.
+
+The queue has no description.
+
+Its steps:
+- C1 The code: review. The code is written.
+- C.refactor Closing refactoring: yours now
+[Nexus] Queue C "Coding queue" (revision 1, approved), step C.refactor (2 of 2): Closing refactoring.
+
+Goal:
+Refactor what this queue changed, and the code closely tied to it, so that it reads simpler and clearer, with the same behaviour. Scope: the queue's commits (the range Nexus gives when the step opens) and the code right around them, never the codebase at large. If the project's AGENTS.md has a "Refactoring" section, follow it; without one, this text alone applies. A change too small to be worth refactoring is a valid outcome: say so, with your reasons, in the step's summary.
+
+Acceptance:
+- Behaviour stays the same: no new features; the queue's checks pass before and after.
+- Small commits, each saying in its message what it simplified; or none, with the reasons in the summary why nothing was worth refactoring.
+- Only what the queue changed, or code closely tied to it.
+
+This is the queue's closing refactoring step, kept by Nexus: it runs after the queue's own steps, in a fresh session, so that their work is read with fresh eyes.
+The queue's work: commits 1111111111111111111111111111111111111111..2222222222222222222222222222222222222222 in this checkout (git log 1111111111111111111111111111111111111111..2222222222222222222222222222222222222222, git diff 1111111111111111111111111111111111111111..2222222222222222222222222222222222222222).
+What they changed (git diff --stat):
+ src/code.ts | 12 +++++++-----
+ 1 file changed, 7 insertions(+), 5 deletions(-)
+The project's AGENTS.md has a "Refactoring" section: follow it too; it adds the project's own rules to this text.
+Run the checks before you change anything, and again after. If nothing is worth refactoring, make no commit and report the step done with your reasons in the summary: that is a valid outcome.
+
+Checks for every step:
+- npm test
+
+Stop conditions (meeting one ends the queue: report it with `nexus stop`):
+- none beyond your judgement
+
+Begin with `nexus step start C.refactor`. End with `nexus step done C.refactor --summary "…"`, `nexus step failed` or `nexus stop`, then write `nexus context` and end your turn. Do not start another step.
+
+This is the queue's last step. After it is done, write a short report of the whole queue (what each step achieved against its acceptance, checks, review material, open questions, a proposed next step) to <report file> (a folder for reports outside the working tree and any repository: never write it into the working tree, it would block the cleanup of a worktree) and register it with `nexus report C --file <report file> --summary "…"`, which copies it into the queue's folder and removes it from there.
+== the closing refactoring step without git records, and without a Refactoring section
+[Nexus] Queue C "Coding queue" (revision 1, approved), step C.refactor (2 of 2): Closing refactoring.
+
+Goal:
+Refactor what this queue changed, and the code closely tied to it, so that it reads simpler and clearer, with the same behaviour. Scope: the queue's commits (the range Nexus gives when the step opens) and the code right around them, never the codebase at large. If the project's AGENTS.md has a "Refactoring" section, follow it; without one, this text alone applies. A change too small to be worth refactoring is a valid outcome: say so, with your reasons, in the step's summary.
+
+Acceptance:
+- Behaviour stays the same: no new features; the queue's checks pass before and after.
+- Small commits, each saying in its message what it simplified; or none, with the reasons in the summary why nothing was worth refactoring.
+- Only what the queue changed, or code closely tied to it.
+
+This is the queue's closing refactoring step, kept by Nexus: it runs after the queue's own steps, in a fresh session, so that their work is read with fresh eyes.
+Nexus has no commit range of the queue's work (no git records of its steps): find its commits from the steps' summaries and git log.
+The project's AGENTS.md has no "Refactoring" section: this text alone applies.
+Run the checks before you change anything, and again after. If nothing is worth refactoring, make no commit and report the step done with your reasons in the summary: that is a valid outcome.
+
+Checks for every step:
+- npm test
+
+Stop conditions (meeting one ends the queue: report it with `nexus stop`):
+- none beyond your judgement
+
+Begin with `nexus step start C.refactor`. End with `nexus step done C.refactor --summary "…"`, `nexus step failed` or `nexus stop`, then write `nexus context` and end your turn. Do not start another step.
+
+This is the queue's last step. After it is done, write a short report of the whole queue (what each step achieved against its acceptance, checks, review material, open questions, a proposed next step) to <report file> (a folder for reports outside the working tree and any repository: never write it into the working tree, it would block the cleanup of a worktree) and register it with `nexus report C --file <report file> --summary "…"`, which copies it into the queue's folder and removes it from there.
 == the worker's briefing (Claude Code: appended to the system prompt)
 You are a worker session run by Nexus, the dashboard through which the user follows and steers your work.
 Nexus sends you one step of an approved queue at a time. Work on that step only; when its outcome is reported, end your turn: Nexus opens the next step.

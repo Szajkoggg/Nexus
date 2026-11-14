@@ -1270,6 +1270,28 @@ both runtimes seeing that file.
 - **Moving `CLAUDE.md` into `AGENTS.md`** leaves the link lines out of the moved text (they would import the file
   itself), and lists the @imports it holds: Codex does not follow them, so the confirmation says so.
 
+### A closing refactoring step kept by Nexus
+
+Decided by the user on 2026-11-14 (docs/ideas/refactor-step.md, queue RF); the protocol is in PROTOCOL.md, "The
+closing refactoring step". Every queue that contains coding (`coding: true`, set by the orchestrator) ends with a step
+Nexus keeps outside the queue's list of steps.
+
+- **Derived, not stored.** The step is added by derivation after the queue's own steps (`stepDefs`), so everything
+  that already walks a queue's steps (the engine's next pending step, "done", the report of the last step, the
+  orchestrator's "last step", `queue set finished`) treats it as the last without a rule of its own. A revision cannot
+  put anything after it, since it is not in the file a draft writes.
+- **Running again** is derived too: a step of the queue's own that starts after it ran sets it back to pending. The
+  rule looks at work, not at revisions: a revision that only rewords or skips adds nothing to refactor.
+- **Fresh eyes through the existing switch.** Context care's switch to a fresh session is reused with a reason of its
+  own (`refactor`); the seed gives no context summary, the step reads the queue's work itself from the commit range
+  that `git.yaml` already records (first start to last end of the queue's own rounds) and git's `--stat`, so a large
+  diff never fills the prompt.
+- **A project's rules** are a "Refactoring" heading in its AGENTS.md; the opening says whether there is one, so the
+  worker is told to follow it only where it exists, and no project has to change for the step to work.
+- **Left for later:** the user's choice to skip the closing step at Continue of a stopped or rejected queue (proposed
+  in the queue's text) is not built; until it is, the step runs when such a queue goes on, and only cancelling a queue
+  leaves it out.
+
 ## Findings from building phase 3
 
 - **Context fill and usage limits are in the stream.** Every `assistant` message carries its usage (input, cache

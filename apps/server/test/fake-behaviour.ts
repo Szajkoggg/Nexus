@@ -16,6 +16,8 @@
 //   bglong      the same command, running FAKE_BG_LONG_MS (default 600000): past the engine's limit in a test
 //   review      write a picture and a note into <temp>/nexus-review/<step>/ (outside the working tree), add them with
 //               nexus review add (the picture keyed, as a result), then done
+// The closing refactoring step's standard goal has no "FAKE:": it is done, with a summary that finds nothing worth
+// refactoring (the valid outcome of a small change).
 // A failure of the runtime, then done: "<kind><n>" fails the step's first n turns (counted in a file beside
 // FAKE_LOG, so a new process goes on counting), "<kind>" every turn. Kinds: overloaded, network (passing), auth
 // (lasting), limit (a usage limit resetting FAKE_RESET_MS, default 1500, later), crash (the process exits mid-turn),
@@ -204,7 +206,9 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
       nexus("step", "done", step, "--summary", `fake finished ${step} with review material`);
     }
     if (behaviour === "refused") { refused?.(); nexus("step", "done", step, "--summary", `fake finished ${step} without what was refused`); }
-    if (["done", "slow", "summary", "summaryslow"].includes(behaviour)) nexus("step", "done", step, "--summary", `fake finished ${step}`);
+    // The closing refactoring step (no FAKE: in its standard goal: done) finds nothing worth refactoring.
+    const closing = text.includes("This is the queue's closing refactoring step");
+    if (["done", "slow", "summary", "summaryslow"].includes(behaviour)) nexus("step", "done", step, "--summary", closing ? `fake: nothing in ${step} is worth refactoring, the change is too small` : `fake finished ${step}`);
     if (behaviour.startsWith("summary")) nexus("context", `fake summary of ${step}`, "--topics", "fake,context");
     if (behaviour === "summaryslow") await new Promise((r) => setTimeout(r, Number(process.env.FAKE_SLOW_MS ?? 1500)));
     if (behaviour === "fail") nexus("step", "failed", step, "--reason", "fake failure");

@@ -7,7 +7,7 @@ import { parseArgs } from "node:util";
 import { execFileSync } from "node:child_process";
 import {
   Event, HOLDING_RUN_STATES, ProjectStore, checksLine, findNexusDir, inReportFolder, loadProjectState, stepValuesText, stopPlace, newId, normPath, now, readRegistry, writeRegistry,
-  PICTURE_ROLES, REVIEW_HELP, checkPicture, levelNow, pictureSize, recommendedOption,
+  PICTURE_ROLES, REVIEW_HELP, checkPicture, levelNow, pictureSize, recommendedOption, stepDefs,
   type PictureRole, type ReviewItem, type Role, type Runtime, type SessionFile,
 } from "@nexus/protocol";
 import { checkRules, describeRules } from "@nexus/protocol/rules";
@@ -115,7 +115,7 @@ function queueFor(st: ProjectStore, s: SessionFile, step?: string): string {
   if (o.queue) return o.queue;
   if (s.queue) return s.queue;
   if (step) {
-    const owners = st.queueIds().filter((q) => st.readQueue(q).steps.some((x) => x.id === step));
+    const owners = st.queueIds().filter((q) => stepDefs(st.readQueue(q)).some((x) => x.id === step));
     if (owners.length === 1) return owners[0]!;
     if (owners.length > 1) throw new UsageError(`step ${step} is in several queues (${owners.join(", ")}): add --queue`);
   }
@@ -125,7 +125,8 @@ function queueFor(st: ProjectStore, s: SessionFile, step?: string): string {
 function checkStep(st: ProjectStore, queue: string, step: string): void {
   let q;
   try { q = st.readQueue(queue); } catch { throw new UsageError(`unknown queue ${queue}`); }
-  if (!q.steps.some((x) => x.id === step)) throw new UsageError(`queue ${queue} has no step ${step} (has ${q.steps.map((x) => x.id).join(", ")})`);
+  const steps = stepDefs(q); // with the closing refactoring step, when the queue has one
+  if (!steps.some((x) => x.id === step)) throw new UsageError(`queue ${queue} has no step ${step} (has ${steps.map((x) => x.id).join(", ")})`);
 }
 
 function emit(st: ProjectStore, s: SessionFile, body: Record<string, unknown>): Event {

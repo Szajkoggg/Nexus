@@ -382,11 +382,12 @@ export function parseFrontMatter(text: string): { meta: unknown; body: string } 
  * The hash an approval pins: steps (without baseline state), stop conditions and checks. A step's drafted review
  * level is part of it; the levels the user set (`user_levels`) and the queue's own level are not.
  */
-export function revisionHash(q: Pick<QueueFile, "steps" | "stop_conditions" | "checks">): string {
+export function revisionHash(q: Pick<QueueFile, "steps" | "stop_conditions" | "checks" | "coding">): string {
   return hashOf(q.steps.map(({ status: _s, status_note: _n, ...def }) => def), q);
 }
-const hashOf = (steps: unknown[], q: Pick<QueueFile, "stop_conditions" | "checks">) =>
-  "sha256:" + createHash("sha256").update(JSON.stringify({ steps, stop_conditions: q.stop_conditions, checks: q.checks })).digest("hex");
+// `coding` counts only when true, so the hash of a queue without it is what it was before the field.
+const hashOf = (steps: unknown[], q: Pick<QueueFile, "stop_conditions" | "checks" | "coding">) =>
+  "sha256:" + createHash("sha256").update(JSON.stringify({ steps, stop_conditions: q.stop_conditions, checks: q.checks, ...(q.coding ? { coding: true } : {}) })).digest("hex");
 
 /**
  * The hash a queue had before review levels, when its steps still carried a review `policy` (continue, wait or

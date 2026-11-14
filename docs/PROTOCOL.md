@@ -187,6 +187,7 @@ base: null                             # with `worktree: auto`, the commit or br
 revision: 3                            # increases on every change to steps, criteria or stop conditions
 status: running                        # mirrors the derived state; the event logs are authoritative for progress
 review_level: 2                        # optional: the level of steps that set none (see "Review")
+coding: true                           # optional: the queue contains coding; Nexus adds a closing refactoring step (below)
 user_levels: { W3: 1 }                 # levels the user set on steps; written only by the server (see "Review")
 legacy_policies: { W1: continue }      # each step's review policy from before review levels; written only by the server
 stop_conditions:                       # in addition to the project defaults
@@ -370,8 +371,8 @@ the derived state and records it as an entry `by: orchestrator` with the request
 
 | Request | Allowed when | Entry, and what derivation does |
 |---|---|---|
-| `--step S skipped` | S is `pending`, `stopped` or `failed`, or `running` while no live run (`running`, `pausing`, `usage_wait`, `retry_wait`) has it open, and the queue is not done or cancelled | `kind: status`, `step`, `from` (S's status), `to: skipped`: S becomes `skipped` with the reason; when every step is then done, skipped or failed the queue is `done`. A stop is not lifted by it |
-| `finished` | the queue's run is `halted` and every step is done or skipped | `kind: run`, `from: halted`, `to: finished`; the server also writes `run.yaml` `finished` |
+| `--step S skipped` | S is not the closing refactoring step; S is `pending`, `stopped` or `failed`, or `running` while no live run (`running`, `pausing`, `usage_wait`, `retry_wait`) has it open, and the queue is not done or cancelled | `kind: status`, `step`, `from` (S's status), `to: skipped`: S becomes `skipped` with the reason; when every step is then done, skipped or failed the queue is `done`. A stop is not lifted by it |
+| `finished` | the queue's run is `halted` and every step is done or skipped (the closing refactoring step too) | `kind: run`, `from: halted`, `to: finished`; the server also writes `run.yaml` `finished` |
 | `cancelled` | the queue is not done or cancelled and its run is not `running`, `pausing`, `usage_wait` or `retry_wait` | `kind: status`, `from` (the queue's status), `to: cancelled`: the queue is `cancelled` with the reason; a later stop leaves it so. The user gets a push notification; nothing goes into the waiting list |
 | `propose-lift` | the queue is `stopped` | `kind: proposal`, `from: stopped`, `to: lift proposed`: the queue's view carries `lift_proposal` (`at`, `reason`) until a lift, a later `queue.stop` or a later approval |
 
@@ -385,6 +386,45 @@ started nor resumed.
 the file; any other value refuses the whole draft, listing the steps. A new step has no status or `skipped`. A draft
 that leaves out a step that has started or stopped (one with a stretch at work, or a status other than `pending` or
 `skipped`) is refused: keep the step and skip it with `nexus queue set`.
+
+### The closing refactoring step
+
+A queue with `coding: true` contains coding, and ends with a step Nexus keeps (`packages/protocol/src/closing.ts`).
+The orchestrator sets the field in the draft (its briefing says when: a step writes or changes code); the user sees
+the step in the approval view like any other.
+
+- **Outside the list of steps.** It is not in `queue.yaml`'s `steps`: derivation adds it after them (`stepDefs`), so
+  it is always the last, also when a revision adds steps. Its id is reserved: `<queue>.refactor` (e.g. `W.refactor`);
+  a draft with a step of that id is refused. Its events (`nexus step start W.refactor`, …), its rounds in `git.yaml`
+  and its notes use that id like any step's; the state marks it with `closing: true`.
+- **Its text is Nexus's standard** (`CLOSING_TITLE` "Closing refactoring", `CLOSING_GOAL`, `CLOSING_ACCEPTANCE`):
+  refactor what the queue changed and the code closely tied to it, never the codebase at large; behaviour unchanged
+  (no new features, the queue's checks pass before and after); small commits, each saying what it simplified; a
+  change too small to be worth refactoring is a valid outcome, reported done with the reasons in the summary. A
+  project's own rules go in a "Refactoring" section of its AGENTS.md: the step's opening says whether the queue's
+  checkout has one (a Markdown heading `Refactoring` of any level) and to follow it too; without one, the standard
+  text alone applies.
+- **Review level 2** (its criteria can be checked), as if drafted with `review.level: 2`; the user may set another
+  (`user_levels`), and a revision keeps it.
+- **Part of what an approval pins.** `coding: true` is in the revision hash (`coding` counts only when true, so a queue
+  without it keeps the hash it had); setting or clearing it makes a new revision. A draft that leaves it out keeps the
+  queue's value; `coding: false` takes it back only before the queue has started (no `run.yaml`, no started step):
+  after, the draft is refused.
+- **It cannot be bypassed.** `nexus queue set Q --step Q.refactor skipped` is refused; `nexus queue set Q finished`
+  is refused while it is not done (the refusal names it). A stopped queue gets it when the stop is lifted and the run
+  goes on; a cancelled one never.
+- **Runs again after new work.** Once it has run, a step of the queue's own that starts afterwards (a revision added
+  it) sets it back to `pending` (derivation, at that `step.started`): it runs again at the end, over the queue's
+  whole work. New steps that are only skipped leave it as it was.
+- **It is the last step**, so its opening asks for the queue's report (see "The step turn"), the queue is `done` and
+  the run `finished` only after it, and the orchestrator's notices that speak of a queue's last step mean it.
+- **A fresh session with the queue's commit range.** When it is next and the run's session has worked before (any
+  event of its own), the engine goes on in a fresh session the way context care does (see "Context care"), with
+  `switches[].why: refactor`, no summary asked for, and a seed that gives the queue's description and its steps'
+  summaries. Its opening names the queue's work as a commit range, from the first `start` of a round of the queue's
+  own steps in `git.yaml` to the last `end` (the closing step's own rounds left out), with `git diff --stat` of it (at
+  most 60 files and the summary line); the diff itself is not in the text, the worker reads it with git. Without git
+  records it says so.
 
 ## Notes: `notes/<step-id>/<note-id>.md`
 
@@ -465,7 +505,7 @@ Written only by the server's queue engine; agents never touch them.
 | `queues/<id>/git.yaml` | The HEAD of the queue's checkout around each step's work (`src/gitinfo.ts`): `base` (an auto worktree's: `ref`, the branch or commit it was made from, its `sha`, `at`), `base.branch` (whether `ref` names a branch: only a branch can be merged back into), `merged` (`at`, `into`, `path`, `sha`, `fast_forward`), `cleaned` (`at`, `path`, `branch`), `steps.<step>` (rounds, oldest first: `session`, `start` (HEAD when the step opened, or when a send-back reopened it), `started_at`, `end` (HEAD at the end of the turn in which the step got its outcome: done, review, failed or stopped), `ended_at`; a sha is null outside a git repository). A continued step keeps its open round. One writer: the server. See "Git on the dashboard" |
 | `queues/<id>/push.yaml` | Pushing what was accepted: `review` (per step, the HEAD of the checkout when it entered review: `sha` or null, `finished_at`, `at`), `steps` (per accepted step: `acceptance`, `sha`, `result` (`pushed`, `failed`, `skipped`, `held`), `text`, `at`, `held_by?`), `pushed` (the last success: `sha`, `step`, `at`, `remote`, `branch`), `error` (the last failure until a success). One writer: the server. See "Pushing what was accepted" |
 | `queues/<id>/start.yaml` | A planned start of the queue (see "Chains" and "Schedules"): either `after` (the queue it waits for) or `at` (the time, ISO 8601; with `usage`, `claude` or `codex`, when that is the usage window's reset plus the margin), the start's `runtime?`, `model?`, `effort?`, `session?` (a session to continue), `by` (`user` or `orchestrator`), `reason?`, `revision` (the queue's when planned), `created_at`, `failed?` (`at`, `reason`, `missed?`: it came due and the queue could not start; `missed`: a schedule more than 15 minutes late, the server not running at its time), `held?` (`since`, `kind`: `checkout` or `limit`, `reason`: it came due but waits for its checkout or for a place under the limit, and starts by itself; see "One queue per checkout, and a limit"). One writer: the server; a start of the queue or a cancel removes it |
-| `queues/<id>/run.yaml` | The engine's intent for a queue: `session`, `after` (started by a chain: the queue that was done), `state` (`running`, `pausing`, `paused`, `halted`, `finished`, `usage_wait`, `retry_wait`: a turn failed for a passing reason and is tried again at `resume_at`, `approval_wait`: a step ended while a newer revision waits for the user's approval, and the run goes on by itself once approved, see "A new revision of a running queue never stops the running step"; `running`, `pausing`, `usage_wait`, `retry_wait` and `approval_wait` hold the run's session and checkout: `HOLDING_RUN_STATES` in the protocol), `reason`, the `step` it last opened, `nudged`, `resume_at` (when a usage wait or a retry goes on), `retries` (turns failed in a row for a passing reason; cleared by a turn that ends well or a new step), `failure` (the runtime's code for the failure being retried or that halted the run, e.g. `overloaded`), `resume_after_restart`, `runtime`, `model` and `effort` (the run's own as its start resolved them: the start's choice, else the continued session's, else the project's effective defaults; a missing model or effort is the runtime's default), `from_defaults` (which of the three came from the project's defaults: resolved again when each step opens; see "Runtime, model and effort per step"), `started_at`, `ended_at` (when it last stopped going: set when it becomes `finished`, `halted` or `paused`, kept while it stays so, removed when it goes on; older files without it fall back to `updated_at`), `summary_asked` (context care: the step whose context summary Nexus asked for; asked once), `switches` (each fresh session, oldest first: `at`, `from` and `to` session, `step` the new session began with, `why`: `context` (context care; a record without `why` is this) or `runtime` (the step runs on another runtime), `fill` of the old one from 0 to 1 when known, `summary`: `written` by the worker, `asked` and then written, or `fallback`), `revision` (the queue's revision the run goes by: written at the start, moved to the current approved one at the end of a step). Start refuses a `stopped` queue, naming the step and the stop's reason, and writes `revision`; it also refuses while the run holds its session (`approval_wait` included). Resume refuses a stopped or cancelled queue, an unapproved revision unless the run is of an older one (`revision` below the queue's; a run record without `revision` is older when a revision was replaced, in `history`, after its `started_at`: such a run goes on mid-step while the newer revision waits), and an `approval_wait` run until its revision is approved. A run of an older revision is resumed like any: a revision changes no started step. Archived records are `run.<time>.yaml` (see "Changes and lifting a stop") |
+| `queues/<id>/run.yaml` | The engine's intent for a queue: `session`, `after` (started by a chain: the queue that was done), `state` (`running`, `pausing`, `paused`, `halted`, `finished`, `usage_wait`, `retry_wait`: a turn failed for a passing reason and is tried again at `resume_at`, `approval_wait`: a step ended while a newer revision waits for the user's approval, and the run goes on by itself once approved, see "A new revision of a running queue never stops the running step"; `running`, `pausing`, `usage_wait`, `retry_wait` and `approval_wait` hold the run's session and checkout: `HOLDING_RUN_STATES` in the protocol), `reason`, the `step` it last opened, `nudged`, `resume_at` (when a usage wait or a retry goes on), `retries` (turns failed in a row for a passing reason; cleared by a turn that ends well or a new step), `failure` (the runtime's code for the failure being retried or that halted the run, e.g. `overloaded`), `resume_after_restart`, `runtime`, `model` and `effort` (the run's own as its start resolved them: the start's choice, else the continued session's, else the project's effective defaults; a missing model or effort is the runtime's default), `from_defaults` (which of the three came from the project's defaults: resolved again when each step opens; see "Runtime, model and effort per step"), `started_at`, `ended_at` (when it last stopped going: set when it becomes `finished`, `halted` or `paused`, kept while it stays so, removed when it goes on; older files without it fall back to `updated_at`), `summary_asked` (context care: the step whose context summary Nexus asked for; asked once), `switches` (each fresh session, oldest first: `at`, `from` and `to` session, `step` the new session began with, `why`: `context` (context care; a record without `why` is this), `runtime` (the step runs on another runtime) or `refactor` (the closing refactoring step, see "The closing refactoring step"), `fill` of the old one from 0 to 1 when known, `summary`: `written` by the worker, `asked` and then written, or `fallback`), `revision` (the queue's revision the run goes by: written at the start, moved to the current approved one at the end of a step). Start refuses a `stopped` queue, naming the step and the stop's reason, and writes `revision`; it also refuses while the run holds its session (`approval_wait` included). Resume refuses a stopped or cancelled queue, an unapproved revision unless the run is of an older one (`revision` below the queue's; a run record without `revision` is older when a revision was replaced, in `history`, after its `started_at`: such a run goes on mid-step while the newer revision waits), and an `approval_wait` run until its revision is approved. A run of an older revision is resumed like any: a revision changes no started step. Archived records are `run.<time>.yaml` (see "Changes and lifting a stop") |
 | `sessions/<id>/runtime.json` | A launched session's live facts: process state (`working` from a turn's start to its end, `idle` between turns, `exited`) and pid, model, context tokens and window, turns, cost |
 | `sessions/<id>/delivered.jsonl` | What the server handed to the session (notes put into a step turn, inbox entries injected or sent as a turn, or `carried` into the first turn of the session `to` that took over); counts as read |
 | `sessions/<id>/refusals.jsonl` | One line per action the agent wanted but was refused: `at`, `session`, `runtime`, `by` (`permissions`: Claude Code's permission mode or rules; `nexus`: Nexus declined a Codex approval request; `auto_review`: Codex's auto reviewer), `tool` (Claude Code's tool name; for Codex `command`, `file_change`, `network`, `mcp`, `permissions`, …), `input` in short (the command, path or host, at most 300 characters), `reason` when the runtime gave one, `ref` (the runtime's id for the call: one record per refusal), `queue`, `step` |
@@ -1361,7 +1401,8 @@ fit it:
 With `defaults.context_care` on (the default), at the end of a step whose session's context fill (`context_tokens`
 / `context_window` in `runtime.json`) is above `context_reuse_threshold`, and when a next step remains, the engine
 goes on in a fresh session. Without a known context window it goes on in the same session. A fresh session for another
-runtime is made the same way.
+runtime is made the same way, and so is one for the closing refactoring step (`why: refactor`: no summary is asked
+for, and the seed gives none; see "The closing refactoring step").
 
 1. It looks for a fresh summary: a `context.summary` from that session at or after its latest `step.started` of the
    step that ended. If there is none, it asks once with a turn ("… write your context summary with `nexus context`

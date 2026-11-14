@@ -5,6 +5,7 @@ import { ProjectStore, readAway, revisionHash } from "./store.ts";
 import { awayAt, awayNow, type AwayNow } from "./away.ts";
 import { ENDED_RUN_STATES, HOLDING_RUN_STATES, formatClock, type Segment } from "./times.ts";
 import { stopPlace } from "./attention.ts";
+import { closingStepId, stepDefs } from "./closing.ts";
 
 import type { CheckView } from "./steps.ts";
 export interface AnswerView { id: string; text: string; at: string; escalate?: boolean; continue?: boolean; session: string; by: "orchestrator" | "user" }
@@ -46,6 +47,11 @@ export interface AttentionItem {
 }
 export interface StepView extends StepDef {
   status: StepStatus;
+  /**
+   * The queue's closing refactoring step (closing.ts): Nexus keeps it after the queue's own steps, with a reserved id
+   * and the standard text; it is not in queue.yaml.
+   */
+  closing?: true;
   /** started_at: the first step.started (a resumed step keeps it); finished_at: its latest done or failed. */
   started_at?: string; finished_at?: string;
   /** Its stretches at work, one per step.started; see times.ts for durations. */
@@ -416,10 +422,11 @@ function initQueue(q: QueueFile, notes: Note[], project: Pick<ProjectFile, "defa
     approved: isApproved(q),
     revision_hash: hash,
     questions: [],
-    steps: q.steps.map((s) => {
+    steps: stepDefs(q).map((s) => {
       const { level, from } = reviewLevelOf(s, q, project);
       return {
         ...s, level, level_from: from,
+        ...(s.id === closingStepId(q.id) && q.coding ? { closing: true as const } : {}),
         status: s.status ?? "pending",
         review_items: [], checks: [], timeline: [], messages: [], segments: [], sent_back: [], pictures: {},
         notes: notes.filter((n) => n.step === s.id),
@@ -486,6 +493,13 @@ function apply(
       const open = st.segments.at(-1);
       if (open && open.end === undefined) open.end = st.timeline.at(-2)?.at ?? e.at;
       st.segments.push({ start: e.at });
+      // A step of the queue's own at work after the closing step ran (a revision added it): the closing step runs again
+      // at the end, over the queue's whole work.
+      const closing = st.closing ? undefined : q.steps.find((x) => x.closing);
+      if (closing && closing.status !== "pending") {
+        closing.status = "pending"; closing.review_with = undefined; closing.asked_user = undefined;
+        closing.finished_at = undefined; closing.summary = undefined; closing.commit = undefined; closing.reason = undefined;
+      }
       st.status = "running"; st.started_at ??= e.at; st.session = e.session;
       st.finished_at = undefined; st.reason = undefined;
       if (!TERMINAL_QUEUE.has(q.status)) { q.status = "running"; q.status_reason = undefined; }

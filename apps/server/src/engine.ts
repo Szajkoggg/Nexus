@@ -25,6 +25,7 @@ import {
   ClockTimers, REAL_CLOCK, Scheduler, type ChainOptions, type Clock, type ScheduleOptions,
 } from "./scheduler.ts";
 import { gitBranch, worktreeFor } from "./worktree.ts";
+import { closingContext } from "./closing.ts";
 import { Coordinator, refusalText, type Member } from "./coordinator.ts";
 import { gitWritableRoots } from "./codex.ts";
 import {
@@ -617,6 +618,8 @@ export class Engine implements Member {
    *   seeded with the ended step's context summary and the queue's text. A missing summary is asked for once; if it is
    *   still missing, the seed is the queue's description and its finished steps' summaries. Without a known context
    *   window the fill does not count.
+   * - The queue's closing refactoring step, in a session that has worked before: it runs in a fresh session, seeded
+   *   with the queue's description and its steps' summaries (no summary is asked for).
    * - The same runtime with another model or effort: Claude Code's process is restarted with `--resume` and the new
    *   values (the step opens when the new process is up); Codex takes them with the next turn.
    */
@@ -626,6 +629,12 @@ export class Engine implements Member {
     if (!old || old.runtime === "external") return false;
     const tokens = old.live?.context_tokens, window = old.live?.context_window;
     const fill = tokens && window ? tokens / window : undefined;
+    // The closing refactoring step reads the queue's work with fresh eyes: a session that has worked already (on the
+    // queue's steps, or on another queue's) gives way to a fresh one, seeded with the queue's text and no summary.
+    if (next.closing && old.event_count > 0) {
+      this.switchSession(queueId, run, q, old, live, done, next, want, "refactor", fill, "fallback");
+      return true;
+    }
     const why = old.runtime !== want.runtime ? "runtime"
       : defaults.context_care && fill !== undefined && fill > defaults.context_reuse_threshold ? "context" : undefined;
     if (why) {
@@ -668,7 +677,7 @@ export class Engine implements Member {
   }
 
   /** Goes on with `next` in a fresh session (with `want`'s runtime, model and effort) that continues `old`. */
-  private switchSession(queueId: string, run: RunFile, q: QueueView, old: SessionView, live: Live, done: StepView | undefined, next: StepView, want: StepValues, why: "context" | "runtime", fill: number | undefined, source: "written" | "asked" | "fallback"): void {
+  private switchSession(queueId: string, run: RunFile, q: QueueView, old: SessionView, live: Live, done: StepView | undefined, next: StepView, want: StepValues, why: "context" | "runtime" | "refactor", fill: number | undefined, source: "written" | "asked" | "fallback"): void {
     const oldFile = this.store.readSession(old.id);
     const part = (run.switches?.length ?? 0) + 2;
     const fresh: SessionFile = {
@@ -729,16 +738,18 @@ export class Engine implements Member {
     const notes = step.notes.filter((n) => !n.read_at && n.to !== "orchestrator"); // the orchestrator's are not the worker's
     const answers = state.questions.filter((x) => x.session === run.session && x.step === step.id && x.state === "answered");
     const last = !q.steps.some((s) => s.status === "pending" && s.id !== step.id);
-    const opening = stepOpening({
-      q, step, mode, why, projectStopConditions: project.defaults.stop_conditions, notes, answers, last,
-      report: reportFile(project.id, q.id), languages: workerLanguages(project.languages),
-    });
     // The rounds of commits are recorded before the worker hears of the step: reading HEAD (git) may take a second or
     // two on a busy machine, and a worker told first had committed meanwhile (seen in a full test run, queue TS1). The
     // step before ends its round here at the latest (its turn's end records it a moment later, after the CLI's last
     // events).
     if (run.step && run.step !== step.id) recordStepEnd(this.store, queueId, run.step);
+    // The closing refactoring step is given the queue's commit range, read once the step before has ended its round.
+    const closing = step.closing ? closingContext(this.store, q) : undefined;
     recordStepStart(this.store, queueId, step.id, run.session);
+    const opening = stepOpening({
+      q, step, mode, why, projectStopConditions: project.defaults.stop_conditions, notes, answers, last,
+      report: reportFile(project.id, q.id), languages: workerLanguages(project.languages), closing,
+    });
     live.proc.send([around.before, opening, around.after].filter(Boolean).join("\n\n"));
     for (const n of notes) this.store.appendDelivered(run.session, { at: now(), kind: "note", id: n.id, via: "turn" });
     this.endBackgroundWait(queueId);
