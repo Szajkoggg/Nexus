@@ -839,6 +839,26 @@ which the open `Composer` hears).
   "  - two steps\n    - SC1" quotes as "- two steps\n  - SC1". The test parses with mdast-util-from-markdown, the
   parser react-markdown uses, so the positions are the real ones.
 
+### Pictures in a chat message
+
+Decided by the user on 2026-11-14 (queue CH2; docs/ideas/chat-improvements.md): pictures go into a chat message by
+pasting, by dropping them on the chat, or with an attach button, in every chat composer (the orchestrator, each
+conversation, the phone); PNG, JPEG, WebP or GIF up to 10 MB, judged from the bytes; a refused file shows "only PNG,
+JPEG, WebP or GIF up to 10 MB" in the composer; the message gets the picture's absolute path on its own line; uploads
+are kept. The upload and the runtimes are in PROTOCOL.md ("Uploads", and how Codex gets an image item).
+
+How it is built (`apps/web/src/pictures.ts`, pure and unit tested; `components/Pictures.tsx`): `ChatColumn` holds the
+pictures of its draft (`usePictures`) and hands them to the `Composer`. A picture is checked in the browser first (its
+first bytes and its size, the server's rules), so a HEIC photo is refused without uploading it, and uploaded at once;
+its thumbnail sits above the box, dimmed while the upload runs, with ✕ to remove it, and Send waits for running
+uploads. A picture alone is a message (no text needed). The paths are kept beside the draft's text (the drafts'
+store, key `<draft>/pictures`), so they survive a reload like the text. A paste that carries plain text stays a text
+paste even when the clipboard holds an image too, since Word and Excel put a picture of copied text beside it. The
+message is the text, an empty line and the paths, one per line (`withPictures`); a sent message shows its path lines
+as the pictures below its bubble (`splitPictures`), served by the file endpoint, and a click opens the picture in a
+new tab. Smaller choices made while building, not by the user: the paths surviving a reload, the click opening a new
+tab rather than the review viewer, and the plain-text rule for pastes.
+
 ### Colours are theme tokens
 
 Every colour in the dashboard is a theme token: a CSS variable in `apps/web/src/index.css` (Tailwind's `@theme`),

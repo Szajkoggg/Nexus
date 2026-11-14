@@ -13,6 +13,8 @@ import { usePhone } from "../phone.ts";
 import { firstUnread, hasUnread, opening, placeKey, readPlace, seenUpTo, unreadCount, usePlaces, writePlace } from "../chatPlace.ts";
 import { EffortSelect, ModelSelect, useEfforts } from "./Settings.tsx";
 import { rich, t } from "../i18n.ts";
+import { SentPictures, filesOf, usePictures } from "./Pictures.tsx";
+import { splitPictures, withPictures } from "../pictures.ts";
 
 interface View { session: SessionFile | null; state: "working" | "idle" | "exited"; runtime: RuntimeFile | null; chat: ChatEntry[]; model: string | null; effort: string | null }
 
@@ -21,7 +23,9 @@ export function useOrchestrator(project: string | undefined, version: unknown) {
 }
 
 /** A chat: what it is (its header; on a desktop's orchestrator chat, in the middle column's header), the messages, and the composer. */
-function ChatColumn({ title, over, who, about, view, ready, place, status, showTools, menu, empty, draft, placeholder, onSend, onBack, bare }: {
+function ChatColumn({ project, title, over, who, about, view, ready, place, status, showTools, menu, empty, draft, placeholder, onSend, onBack, bare }: {
+  /** The project: where pictures are uploaded, and served from. */
+  project: string;
   title: string; over: string;
   /** The view holds this chat (not the one shown before it, still there while this one loads). */
   ready: boolean;
@@ -44,8 +48,20 @@ function ChatColumn({ title, over, who, about, view, ready, place, status, showT
   const quote = useCallback((text: string) => putDraftAndFocus(draft, withQuote(readDraft(draft), text)), [draft]);
   // On a desktop the text keeps a chat app's measure: a column of about 780 px in the middle.
   const measure = phone ? "" : "mx-auto w-full max-w-[48.75rem]";
+  // Pictures for the next message: pasted or chosen in the composer, or dropped anywhere on the chat.
+  const pictures = usePictures(project, draft);
+  const [dragging, setDragging] = useState(false);
+  const carriesFiles = (e: React.DragEvent) => [...e.dataTransfer.types].includes("Files");
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+    <div className="relative flex min-h-0 min-w-0 flex-1 flex-col"
+      onDragOver={(e) => { if (!carriesFiles(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = "copy"; setDragging(true); }}
+      onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false); }}
+      onDrop={(e) => { if (!carriesFiles(e)) return; e.preventDefault(); setDragging(false); pictures.add(filesOf(e.dataTransfer)); }}>
+      {dragging && (
+        <div className="pointer-events-none absolute inset-2 z-20 grid place-items-center rounded-2xl border-2 border-dashed border-accent bg-canvas/80 text-sm font-semibold text-fg">
+          {t("chat.dropHere")}
+        </div>
+      )}
       {!bare && (
         <header className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-line px-5 py-3">
           {onBack && <button onClick={onBack} className={`rounded-md px-1.5 text-lg text-fg-2 hover:text-fg ${side ? "" : "sm:hidden"}`} aria-label={t("common.back")}>‹</button>}
@@ -64,7 +80,7 @@ function ChatColumn({ title, over, who, about, view, ready, place, status, showT
         <div ref={p.scroller} onScroll={p.onScroll} data-chat-scroll={place} className={`scroll-thin flex-1 overflow-y-auto ${phone ? "px-5 py-4" : "px-6 py-6"}`}>
           <div className={`${measure} ${phone ? "space-y-3" : "space-y-4"}`}>
             {ready && shown.length === 0 && <div className="mt-10 text-center text-sm text-fg-3">{empty}</div>}
-            {shown.map(({ c, i }) => <div key={i} data-i={i}><Entry c={c} flat={!phone} who={who} /></div>)}
+            {shown.map(({ c, i }) => <div key={i} data-i={i}><Entry c={c} flat={!phone} who={who} project={project} /></div>)}
             {ready && view?.state === "working" && <div className="text-xs text-fg-3"><span className="animate-pulse">●</span> {t("chat.working")}</div>}
           </div>
         </div>
@@ -77,7 +93,8 @@ function ChatColumn({ title, over, who, about, view, ready, place, status, showT
       </QuoteTarget.Provider>
       <footer className={phone ? "border-t border-line p-3" : "px-6 pb-5 pt-3"}>
         <div className={measure}>
-          <Composer rows={3} draft={draft} placeholder={placeholder} button={t("details.send")} onSubmit={async (text) => { p.follow(); await onSend(text); }} oneLine={phone} card={!phone} />
+          <Composer rows={3} draft={draft} placeholder={placeholder} button={t("details.send")} oneLine={phone} card={!phone} pictures={pictures}
+            onSubmit={async (text) => { p.follow(); await onSend(withPictures(text, pictures.paths)); pictures.clear(); }} />
         </div>
       </footer>
     </div>
@@ -169,14 +186,17 @@ function statusLine(view: View | undefined, status: string): string {
  * One entry of a chat. On the phone the other side's messages are bubbles; on a desktop (`flat`, mockup 11A) they are
  * text in the column under a line saying who and when, Nexus's notices a line with a rule at the left.
  */
-function Entry({ c, flat, who }: { c: ChatEntry; flat?: boolean; who: string }) {
+function Entry({ c, flat, who, project }: { c: ChatEntry; flat?: boolean; who: string; project: string }) {
   if (c.kind === "tool") {
     return <div className="truncate pl-1 font-mono text-[11px] text-fg-3" title={c.text}>{flat ? "$" : "›"} {c.text}</div>;
   }
   if (c.from === "user") {
+    // Its pictures' paths show as the pictures, below its text (a message of pictures alone has no bubble).
+    const { text, pictures } = splitPictures(c.text);
     return (
-      <div className="flex justify-end">
-        <div className={`whitespace-pre-wrap rounded-2xl rounded-br-sm bg-user-bubble px-4 py-2 text-sm text-fg ${flat ? "max-w-[min(85%,37.5rem)]" : "max-w-[85%]"}`}><RefText text={c.text} /></div>
+      <div className="flex flex-col items-end">
+        {text && <div className={`whitespace-pre-wrap rounded-2xl rounded-br-sm bg-user-bubble px-4 py-2 text-sm text-fg ${flat ? "max-w-[min(85%,37.5rem)]" : "max-w-[85%]"}`}><RefText text={text} /></div>}
+        {pictures.length > 0 && <div className={flat ? "max-w-[min(85%,37.5rem)]" : "max-w-[85%]"}><SentPictures project={project} paths={pictures} /></div>}
       </div>
     );
   }
@@ -307,7 +327,7 @@ export function ChatPanel({ project, name, view, onChanged, inline, desk }: {
   </>;
   return (
     <Panel inline={inline} desk={desk} which="chat" head={head}>
-      <ChatColumn
+      <ChatColumn project={project}
         over={name} title={t("desk.orchestrator")} who={t("desk.orchestrator")} view={view} status={stateText(view)}
         ready={!!view && (!view.session || view.session.project === project)} place={placeKey(project, "orchestrator")} showTools={showTools} menu={inline ? menu : undefined} bare={!!desk}
         empty={<>
@@ -472,7 +492,7 @@ export function ConversationsPanel({ project, name, version, onChanged, defaultR
       {creating && <NewConversation project={project} defaultRuntime={defaultRuntime} onBack={() => nav.close("conversation")}
         onCreated={(id) => { nav.open(`conversation:${id}`); onChanged(); }} />}
       {!creating && open && current && (
-        <ChatColumn key={open}
+        <ChatColumn key={open} project={project}
           ready={view?.session?.id === open} place={placeKey(project, "conversation", open)}
           over={t("chat.ideasOf", { project: name })} title={current.title ?? t("chat.conversation")} who={t("chat.partner")} about={<AboutStep project={project} c={current} className="mt-1" />} view={view} status={stateText(view)} onBack={() => nav.close("conversation")}
           showTools={showTools} menu={menu}

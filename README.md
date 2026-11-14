@@ -64,6 +64,13 @@ phone the bottom bar) shows what you have not read: "Orchestrator 2", a dot on I
 paragraph or a list item of a message shows a **reply** icon at its right edge: one click quotes that item as it was
 written (its Markdown).
 
+**Pictures.** Paste a screenshot (Ctrl+V), drop a picture on the chat, or use the paperclip beside the box, in the
+orchestrator's chat, in a conversation and on the phone. PNG, JPEG, WebP or GIF up to 10 MB; anything else (an
+iPhone HEIC photo, say) shows "only PNG, JPEG, WebP or GIF up to 10 MB". The picture shows as a thumbnail above the
+box (✕ removes it) and goes with your message; a picture alone is a message too. The agent gets its path and opens
+it; the chat shows the picture, and a click opens it full size. Pictures are kept in the project's
+`.nexus/uploads/`.
+
 **A queue** on the project page shows one status ("running · SF3", "paused · B2", "stopped at W4c", "waiting for
 your review · UX2"…), a progress line with a segment per step, and its steps one line each, in two columns on a
 computer. "Running" means a run is really at work; a queue whose run is paused says so. The step that matters is

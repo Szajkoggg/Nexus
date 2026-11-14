@@ -30,6 +30,22 @@ export async function actResult<T>(project: string, method: "POST" | "PATCH" | "
   return b.result ?? null;
 }
 
+/** A write the server refused, with its HTTP status (the reason's text is the server's, in English). */
+export class HttpError extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) { super(message); this.status = status; }
+}
+
+/** Uploads a picture for a chat message (base64, as a data: URL); resolves with the saved file's absolute path. */
+export async function uploadPicture(project: string, data: string): Promise<string> {
+  const r = await fetch(`/api/projects/${encodeURIComponent(project)}/uploads`, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ data }),
+  });
+  const b = await r.json().catch(() => ({})) as { result?: { path: string }; error?: string };
+  if (!r.ok || !b.result) throw new HttpError(b.error ?? r.statusText, r.status);
+  return b.result.path;
+}
+
 export interface Usage { updated_at: string; windows: Record<string, { utilization: number; resets_at?: string; status?: string }> }
 export interface ActivityEntry { at: string; kind: string; text: string; queue?: string; step?: string }
 

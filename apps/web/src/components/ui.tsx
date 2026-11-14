@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import { runTimes, stepTimes } from "@nexus/protocol/times";
 import { formatClock, formatDateTime, formatDuration, rich, t, timeAgo, type Key } from "../i18n.ts";
 import type { QueueView, StepView } from "../api.ts";
+import { AttachButton, PictureStrip, filesOf, type Pictures } from "./Pictures.tsx";
 
 // ---------------------------------------------------------------- status colours
 
@@ -184,8 +185,10 @@ export function Expandable({ text, lines = 3 }: { text: string; lines?: number }
  * whatever was typed while it was sending. Ctrl+Enter in the box submits (`onKeyDown`). Shared by Composer and the
  * action bars, whose box and button are apart. The caller keys its component by the draft.
  */
-export function useDraftText({ draft, onSubmit, allowEmpty = false, verbatim = false }: {
+export function useDraftText({ draft, onSubmit, allowEmpty = false, verbatim = false, attached = 0, waiting = false }: {
   draft: string; onSubmit: (text: string) => Promise<void>; allowEmpty?: boolean; verbatim?: boolean;
+  /** Pictures attached to the message: with one, the text may be empty. `waiting`: an upload still runs. */
+  attached?: number; waiting?: boolean;
 }) {
   const [text, setText] = useState(() => readDraft(draft));
   const [busy, setBusy] = useState(false);
@@ -198,7 +201,7 @@ export function useDraftText({ draft, onSubmit, allowEmpty = false, verbatim = f
     window.addEventListener(DRAFT_EVENT, on);
     return () => window.removeEventListener(DRAFT_EVENT, on);
   }, [draft]);
-  const ready = !busy && (allowEmpty || !!text.trim());
+  const ready = !busy && !waiting && (allowEmpty || !!text.trim() || attached > 0);
   const submit = async () => {
     if (!ready) return;
     const sent = text;
@@ -232,10 +235,22 @@ interface ComposerProps {
   oneLine?: boolean;
   /** A card holding a box that grows with the text (up to ten lines), Ctrl+Enter and Send at its right: a desktop's chat. */
   card?: boolean;
+  /** Pictures for the message (a chat's composer): paste, the attach button and thumbnails above the box. */
+  pictures?: Pictures;
 }
 
-function ComposerBox({ draft, placeholder, button, onSubmit, allowEmpty = false, rows = 3, extra, verbatim = false, oneLine = false, card = false }: ComposerProps) {
-  const d = useDraftText({ draft, onSubmit, allowEmpty, verbatim });
+function ComposerBox({ draft, placeholder, button, onSubmit, allowEmpty = false, rows = 3, extra, verbatim = false, oneLine = false, card = false, pictures }: ComposerProps) {
+  const d = useDraftText({ draft, onSubmit, allowEmpty, verbatim, attached: pictures?.paths.length, waiting: pictures?.busy });
+  // A pasted picture (a screenshot, a copied image) is attached; pasted text goes into the box as always, also when
+  // the clipboard holds a picture of it beside (Word and Excel put one there).
+  const onPaste = pictures && ((e: React.ClipboardEvent) => {
+    if (e.clipboardData.getData("text/plain")) return;
+    const files = filesOf(e.clipboardData);
+    if (!files.length) return;
+    e.preventDefault();
+    pictures.add(files);
+  });
+  const error = d.error ?? pictures?.error;
   const box = useRef<HTMLTextAreaElement>(null);
   // A quote put in this draft (putDraftAndFocus): the box takes the focus with the cursor at the end, below the quote.
   useEffect(() => {
@@ -262,30 +277,36 @@ function ComposerBox({ draft, placeholder, button, onSubmit, allowEmpty = false,
   if (card) {
     return (
       <div>
-        <div className="flex items-end gap-2.5 rounded-2xl border border-line-strong bg-surface py-2 pl-4 pr-2 focus-within:border-accent">
+        <div className={`rounded-2xl border border-line-strong bg-surface py-2 pr-2 focus-within:border-accent ${pictures ? "pl-2" : "pl-4"}`}>
+          {pictures && <div className="pl-2 pt-1"><PictureStrip pictures={pictures} /></div>}
+          <div className="flex items-end gap-2.5">
+          {pictures && <AttachButton pictures={pictures} />}
           <textarea ref={box} value={d.text} rows={2} placeholder={placeholder} aria-label={placeholder}
-            onChange={(e) => d.change(e.target.value)} onKeyDown={d.onKeyDown}
+            onChange={(e) => d.change(e.target.value)} onKeyDown={d.onKeyDown} onPaste={onPaste}
             className="min-h-14 flex-1 resize-none bg-transparent py-1.5 text-sm leading-[22px] text-fg placeholder:text-fg-3 focus:outline-none" />
           <span className="mb-2 shrink-0 rounded border border-line-strong px-1.5 text-[11px] text-fg-3">{t("ui.ctrlEnter")}</span>
           <Button onClick={d.submit} disabled={!d.ready}>{d.busy ? t("ui.sending") : button}</Button>
+          </div>
         </div>
-        {d.error && <p className="mt-1 text-xs text-danger">{d.error}</p>}
+        {error && <p className="mt-1 text-xs text-danger">{error}</p>}
       </div>
     );
   }
   if (oneLine) {
     return (
       <div>
+        {pictures && <PictureStrip pictures={pictures} />}
         <div className="flex items-end gap-2">
+          {pictures && <AttachButton pictures={pictures} round />}
           <textarea ref={box} value={d.text} rows={1} placeholder={placeholder} aria-label={placeholder}
-            onChange={(e) => d.change(e.target.value)} onKeyDown={d.onKeyDown}
+            onChange={(e) => d.change(e.target.value)} onKeyDown={d.onKeyDown} onPaste={onPaste}
             className="min-h-11 flex-1 resize-none rounded-[22px] border border-line-strong bg-canvas px-4 py-2.5 text-sm leading-[22px] text-fg placeholder:text-fg-3 focus:border-accent focus:outline-none" />
           <button onClick={d.submit} disabled={!d.ready} aria-label={button} title={t("ui.withShortcut", { action: button })}
             className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-accent-strong text-on-accent hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M3.4 20.4 21 12 3.4 3.6l-.1 6.5L15 12 3.3 13.9z" /></svg>
           </button>
         </div>
-        {d.error && <p className="mt-1 text-xs text-danger">{d.error}</p>}
+        {error && <p className="mt-1 text-xs text-danger">{error}</p>}
       </div>
     );
   }
