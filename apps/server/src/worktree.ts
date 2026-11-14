@@ -24,7 +24,13 @@ export function checkoutPath(state: Pick<ProjectState, "project">, q: Pick<Queue
 
 /** A queue's working directory: its worktree (created when it says `auto`), else the project's checkout. */
 export function worktreeFor(store: ProjectStore, state: ProjectState, q: QueueView): string {
-  if (q.worktree !== "auto") return checkoutPath(state, q);
+  if (q.worktree !== "auto") {
+    const path = checkoutPath(state, q);
+    // A worktree the queue names by path is its own too (unless it is the project's checkout): it ends with the
+    // integration step.
+    if (q.worktree && !q.integration && !samePath(path, state.project.root)) store.writeQueue({ ...store.readQueue(q.id), integration: true, updated_at: now() });
+    return path;
+  }
   const root = state.project.root;
   const path = checkoutPath(state, q);
   const branch = q.branch ?? `nexus/${q.id}`;
@@ -39,7 +45,8 @@ export function worktreeFor(store: ProjectStore, state: ProjectState, q: QueueVi
     const command = state.project.defaults.worktree_setup?.trim();
     if (command) store.writeGit(q.id, { ...(store.readGit(q.id) ?? { protocol: 1, steps: {} }), setup: { command, at: now() } });
   }
-  store.writeQueue({ ...store.readQueue(q.id), worktree: path, branch, updated_at: now() });
+  // Marked as a queue with a worktree of its own, so it keeps its integration step once `worktree` names the path.
+  store.writeQueue({ ...store.readQueue(q.id), worktree: path, branch, integration: true, updated_at: now() });
   return path;
 }
 

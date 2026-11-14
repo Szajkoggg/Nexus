@@ -8,7 +8,7 @@ import { OVERRIDABLE, changedGlobal, settingKey } from "./settings.ts";
 import { HOLDING_RUN_STATES } from "./times.ts";
 import { commentTarget, isApproved, loadProjectState, pendingProvisional, type ProjectState, type QueueView } from "./state.ts";
 import { validAllowRule } from "./refusals.ts";
-import { closingStepId, stepDefs } from "./closing.ts";
+import { closingStepId, integrationStepId, stepDefs } from "./closing.ts";
 
 export class ActionError extends Error {
   readonly status: number;
@@ -354,13 +354,14 @@ export function applyDraft(store: ProjectStore, definition: unknown): string {
   if (!parsed.success) throw new ActionError(parsed.error.issues.map((i) => `${i.path.join(".") || "queue"}: ${i.message}`).join("; "));
   // The levels the user set are the user's, and old policies are the server's: a draft brings neither (an existing
   // queue's stay, below).
-  const draft = { ...parsed.data, user_levels: undefined, legacy_policies: undefined };
+  const draft = { ...parsed.data, user_levels: undefined, legacy_policies: undefined, integration: undefined };
   if (draft.status !== "draft" && draft.status !== "proposed") throw new ActionError("a drafted queue's status is draft or proposed");
   if (!/^[A-Za-z0-9][\w.-]{0,31}$/.test(draft.id)) throw new ActionError("a queue id is 1-32 letters, digits, dots, dashes or underscores");
   const ids = draft.steps.map((s) => s.id);
   if (new Set(ids).size !== ids.length) throw new ActionError("step ids must be unique");
   if (!draft.steps.length) throw new ActionError("a queue needs at least one step");
   if (ids.includes(closingStepId(draft.id))) throw new ActionError(`step id ${closingStepId(draft.id)} is reserved for the queue's closing refactoring step, which Nexus adds with coding: true`);
+  if (ids.includes(integrationStepId(draft.id))) throw new ActionError(`step id ${integrationStepId(draft.id)} is reserved for the queue's integration step, which Nexus adds to a queue with a worktree of its own`);
   for (const st of draft.steps) {
     const issue = st.runtime ? effortIssue(st.runtime, st.effort) : undefined;
     if (issue) throw new ActionError(`step ${st.id}: ${issue}`);
@@ -418,7 +419,7 @@ export function applyDraft(store: ProjectStore, definition: unknown): string {
     // Left out, it stays as it was; `coding: false` takes it back before the queue has started.
     coding: draft.coding ?? old.coding,
     // The user's levels stay over whatever the revision drafts, for the steps it keeps (the closing step's too).
-    user_levels: keptLevels(old.user_levels, stepDefs({ id: old.id, coding: draft.coding ?? old.coding, steps })),
+    user_levels: keptLevels(old.user_levels, stepDefs({ ...old, coding: draft.coding ?? old.coding, steps })),
     // What the steps done before review levels meant stays with them.
     legacy_policies: keptLevels(old.legacy_policies, steps),
     stop_conditions: draft.stop_conditions, checks: draft.checks, steps, updated_at: at,
@@ -557,6 +558,7 @@ export function orchestratorStatusChange(store: ProjectStore, input: { queue: st
     case "skipped": {
       if (!step) throw new ActionError("skipping is for a step: nexus queue set QUEUE --step STEP skipped --reason \"...\"");
       if (step.closing) throw new ActionError(`${where} is the queue's closing refactoring step: it is not skipped; the step itself may find that nothing is worth refactoring, and says why`, 409);
+      if (step.integration) throw new ActionError(`${where} is the queue's integration step: it is not skipped; it merges the base into the queue's branch and runs the checks, so the queue's work can go back into the base`, 409);
       if (view.status === "done" || view.status === "cancelled") throw new ActionError(`queue ${q.id} is ${view.status}`, 409);
       // A running step no live run holds (one a revision change left behind) is not at work: it may be skipped.
       const orphaned = step.status === "running" && !heldByLiveRun(store.readRun(q.id), step.id);
@@ -574,7 +576,7 @@ export function orchestratorStatusChange(store: ProjectStore, input: { queue: st
       if (run?.state !== "halted") throw new ActionError(`queue ${q.id} has no halted run${run ? ` (its run is ${run.state})` : ""}`, 409);
       // The closing refactoring step counts as a step here: a run is not closed as finished before it has run.
       const open = view.steps.filter((s) => s.status !== "done" && s.status !== "skipped");
-      if (open.length) throw new ActionError(`queue ${q.id} still has steps that are not done or skipped: ${open.map((s) => `${s.id} (${s.status}${s.closing ? ", the closing refactoring step: resume the run so that it runs" : ""})`).join(", ")}`, 409);
+      if (open.length) throw new ActionError(`queue ${q.id} still has steps that are not done or skipped: ${open.map((s) => `${s.id} (${s.status}${s.closing ? ", the closing refactoring step: resume the run so that it runs" : s.integration ? ", the integration step: resume the run so that it runs" : ""})`).join(", ")}`, 409);
       store.writeRun(q.id, { ...run, state: "finished", reason: undefined, resume_after_restart: undefined, resume_at: undefined, updated_at: at });
       record({ kind: "run", from: "halted", to: "finished", reason });
       return `the halted run of queue ${q.id} is closed as finished`;

@@ -107,7 +107,8 @@ test("Codex in a queue's own worktree may write the worktree's git paths, and no
     const start = calls.filter((c) => c.method === "thread/start"), turns = calls.filter((c) => c.method === "turn/start");
     assert.equal(mine(start[0]!.cwd!), mine(wt));
     assert.deepEqual(start.map((c) => c.writableRoots?.map(mine)), [want], "the thread's sandbox config carries the roots");
-    assert.deepEqual(turns.map((c) => c.writableRoots?.map(mine)), [want, want], "every turn's sandbox policy carries them");
+    // Two steps of its own and the integration step a queue with a worktree of its own ends with.
+    assert.deepEqual(turns.map((c) => c.writableRoots?.map(mine)), [want, want, want], "every turn's sandbox policy carries them");
   } finally { engine.shutdown(); delete process.env.FAKE_ARGS; }
 });
 

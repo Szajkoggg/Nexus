@@ -18,6 +18,10 @@
 //               nexus review add (the picture keyed, as a result), then done
 // The closing refactoring step's standard goal has no "FAKE:": it does FAKE_CLOSING's behaviour, by default done, with a
 // summary that finds nothing worth refactoring (the valid outcome of a small change).
+// The integration step's has none either: it does FAKE_INTEGRATE's behaviour, by default "merge": it runs the merge its
+// opening names (git merge --no-edit <base>); on a conflict it resolves it (each conflicting file as the queue's branch
+// has it) only when the opening allows it and the file FAKE_INTEGRATE_GIVE_UP names does not exist (a file, so a test
+// changes it under a running process), else it aborts the merge and stops with the condition the opening gives. Done, it reports the resulting HEAD (and writes the report, as the last step).
 // A failure of the runtime, then done: "<kind><n>" fails the step's first n turns (counted in a file beside
 // FAKE_LOG, so a new process goes on counting), "<kind>" every turn. Kinds: overloaded, network (passing), auth
 // (lasting), limit (a usage limit resetting FAKE_RESET_MS, default 1500, later), crash (the process exits mid-turn),
@@ -159,6 +163,34 @@ export function recordArgs(what: Record<string, unknown>): void {
   if (process.env.FAKE_ARGS) appendFileSync(process.env.FAKE_ARGS, JSON.stringify({ ...what, handover: process.env.NEXUS_HANDOVER ?? null }) + "\n");
 }
 
+/** The integration step stopped on a conflict (this turn): it writes no report. */
+let stoppedIntegration = false;
+
+/** The integration step's merge, as its opening asks (see the header). */
+function integrate(step: string, text: string): void {
+  stoppedIntegration = false;
+  const g = ["-c", "user.name=worker", "-c", "user.email=worker@example.invalid", "-c", "commit.gpgsign=false"];
+  const git = (...a: string[]) => execFileSync("git", [...g, ...a], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  const stop = /nexus stop \S+ --condition "([^"]+)"/.exec(text)?.[1] ?? "integration conflict";
+  const base = /git merge --no-edit (\S+)/.exec(text)?.[1];
+  if (!base) { stoppedIntegration = true; nexus("stop", step, "--condition", stop, "--reason", "fake: no base branch to merge"); return; }
+  try { git("merge", "--no-edit", base); }
+  catch {
+    const files = git("diff", "--name-only", "--diff-filter=U").split(/\r?\n/).filter(Boolean);
+    if (/- A conflict: resolve it/.test(text) && !(process.env.FAKE_INTEGRATE_GIVE_UP && existsSync(process.env.FAKE_INTEGRATE_GIVE_UP))) {
+      for (const f of files) { git("checkout", "--ours", "--", f); git("add", "--", f); }
+      git("commit", "--no-edit", "-q");
+      nexus("step", "done", step, "--summary", `fake merged ${base}, resolved ${files.join(", ")}`, "--commit", git("rev-parse", "HEAD"));
+      return;
+    }
+    git("merge", "--abort");
+    stoppedIntegration = true;
+    nexus("stop", step, "--condition", stop, "--reason", `fake: conflict in ${files.join(", ")} not resolved`);
+    return;
+  }
+  nexus("step", "done", step, "--summary", `fake merged ${base}`, "--commit", git("rev-parse", "HEAD"));
+}
+
 /** A Write the runtime's --disallowedTools rules refuse (Claude's form for an absolute path: Write(//C:/x/**)). */
 function writeDenied(path: string): boolean {
   const p = path.replaceAll("\\", "/").toLowerCase();
@@ -180,7 +212,8 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
     if (process.env.FAKE_LOG && process.env.NEXUS_SESSION) writeFileSync(join(dirname(process.env.FAKE_LOG), `fake-step-${process.env.NEXUS_SESSION}`), step);
     // The closing refactoring step (no FAKE: in its standard goal): FAKE_CLOSING, else done.
     const closing = text.includes("This is the queue's closing refactoring step");
-    const behaviour = /FAKE: (\w+)/.exec(text)?.[1] ?? (closing ? process.env.FAKE_CLOSING : undefined) ?? "done";
+    const integration = text.includes("This is the queue's integration step");
+    const behaviour = /FAKE: (\w+)/.exec(text)?.[1] ?? (closing ? process.env.FAKE_CLOSING : undefined) ?? (integration ? process.env.FAKE_INTEGRATE ?? "merge" : undefined) ?? "done";
     nexus("step", "start", step);
     tool(`nexus step start ${step}`);
     const fail = failure(step, behaviour);
@@ -197,6 +230,7 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
       if (behaviour === "commit") nexus("step", "done", step, "--summary", `fake committed ${step}`);
       else nexus("stop", step, "--condition", "fake condition", "--reason", "fake stop after a commit");
     }
+    if (behaviour === "merge") integrate(step, text);
     if (behaviour === "review") {
       const dir = join(tmpdir(), "nexus-review", step);
       mkdirSync(dir, { recursive: true });
@@ -228,7 +262,7 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
     // The queue's last step done: the report, written where the prompt says (refused under a denied folder, as
     // Claude Code refuses a Write its --disallowedTools rule covers), then registered with nexus report.
     const report = /`nexus report (\S+) --file (\S+) --summary/.exec(text);
-    if (report && behaviour === "done") {
+    if (report && (behaviour === "done" || (behaviour === "merge" && !stoppedIntegration))) {
       const path = resolve(report[2]!);
       if (!writeDenied(path)) {
         mkdirSync(dirname(path), { recursive: true });

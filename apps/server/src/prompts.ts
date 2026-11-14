@@ -4,9 +4,10 @@
 // (src/conversations.ts). Agents rely on them (a change to one carries an `Agents:` line in its commit), so each is
 // covered by a snapshot test: test/prompts.test.ts compares what the agents' processes receive with golden files.
 import {
-  formatClock, formatSeconds, languageName, levelNow, runIsOlder, type AwayNow, type InboxView, type LanguageCode, type ProjectFile, type ProjectState, type QuestionView, type QueueView, type SessionView, type StepView,
+  INTEGRATION_CONDITION, formatClock, formatSeconds, languageName, levelNow, runIsOlder, type AwayNow, type InboxView, type LanguageCode, type ProjectFile, type ProjectState, type QuestionView, type QueueView, type SessionView, type StepView,
 } from "@nexus/protocol";
 import type { ClosingContext } from "./closing.ts";
+import type { IntegrationContext } from "./integration.ts";
 
 export const RUNTIME_NAME = { claude: "Claude Code", codex: "Codex" } as const;
 
@@ -71,7 +72,8 @@ export function workerBriefing(l: Languages): string {
 /**
  * The text that opens a step in the worker's session, or continues it (`why`: what the agent is told it continues
  * after). `last`: no other step of the queue is pending, so the report is asked for; `report` is its file. `closing`:
- * the step is the queue's closing refactoring step, and this is what it is given (src/closing.ts).
+ * the step is the queue's closing refactoring step, and this is what it is given (src/closing.ts). `integration`: the
+ * step is the queue's integration step, and this is what it is given (src/integration.ts).
  */
 export function stepOpening(o: {
   q: QueueView; step: StepView; mode: "start" | "continue"; why?: string; projectStopConditions: string[];
@@ -79,8 +81,9 @@ export function stepOpening(o: {
   /** The language line (workerLanguages), if any. */
   languages?: string;
   closing?: ClosingContext;
+  integration?: IntegrationContext;
 }): string {
-  const { q, step, mode, why, projectStopConditions, notes, answers, last, report, languages, closing } = o;
+  const { q, step, mode, why, projectStopConditions, notes, answers, last, report, languages, closing, integration } = o;
   const index = q.steps.findIndex((s) => s.id === step.id);
   return [
     `[Nexus] Queue ${q.id} "${q.title}" (revision ${q.revision}, approved), step ${step.id} (${index + 1} of ${q.steps.length}): ${step.title}.`,
@@ -88,6 +91,7 @@ export function stepOpening(o: {
     step.goal ? `\nGoal:\n${step.goal}` : "",
     step.acceptance.length ? `\nAcceptance:\n${step.acceptance.map((a) => `- ${a}`).join("\n")}` : "",
     closing ? closingText(closing) : "",
+    integration ? integrationText(step.id, integration) : "",
     q.checks.length ? `\nChecks for every step:\n${q.checks.map((c) => `- ${c}`).join("\n")}` : "",
     step.review?.prepare ? `\nReview to prepare: ${step.review.prepare}\nPrepare it by Nexus's standard: read \`nexus help review\` first (view keys, roles, the same conditions on both sides of a pair).` : "",
     `\nStop conditions (meeting one ends the queue: report it with \`nexus stop\`):\n${[...q.stop_conditions, ...projectStopConditions].map((c) => `- ${c}`).join("\n") || "- none beyond your judgement"}`,
@@ -110,6 +114,27 @@ function closingText(c: ClosingContext): string {
       ? `The project's AGENTS.md has a "Refactoring" section: follow it too; it adds the project's own rules to this text.`
       : `The project's AGENTS.md has no "Refactoring" section: this text alone applies.`,
     `Run the checks before you change anything, and again after. If nothing is worth refactoring, make no commit and report the step done with your reasons in the summary: that is a valid outcome.`,
+  ].join("\n");
+}
+
+/** What the integration step is told: the base to merge, what to do on a conflict, and how to stop for the user. */
+function integrationText(step: string, c: IntegrationContext): string {
+  const stop = `nexus stop ${step} --condition "${INTEGRATION_CONDITION}" --reason "<the conflicting files, and why they are not resolved>"`;
+  const branch = c.branch ? `the queue's branch ${c.branch}` : "the queue's branch";
+  if (!c.base) {
+    return [
+      `\nThis is the queue's integration step, kept by Nexus: it runs last, in the queue's worktree, on ${branch}.`,
+      `Nexus found no base branch to merge (the queue's base is no branch, and the project's checkout is on none). Merge nothing, and stop: nexus stop ${step} --condition "${INTEGRATION_CONDITION}" --reason "no base branch to merge"`,
+    ].join("\n");
+  }
+  return [
+    `\nThis is the queue's integration step, kept by Nexus: it runs last, in the queue's worktree, on ${branch}.`,
+    `Merge the base into it: git merge --no-edit ${c.base} (the base branch ${c.base} is at ${c.sha} now). Never rebase, never push, and change neither the base branch nor any other checkout: the base moves forward to this step's result later, by Nexus or the user.`,
+    `- No conflict (or the branch already contains the base): run the checks on the result. If a check fails because of what the two sides do together, fix it on this branch in small commits that say why, and run the checks again. Report the step done with the resulting HEAD as its commit, and say in the summary what the merge brought in.`,
+    c.resolve
+      ? `- A conflict: resolve it (the project lets you: its resolve_conflicts setting is on). Keep what both sides meant, commit the merge, run the checks, and say in the summary which files conflicted and how you resolved each; the step's review judges it. If you cannot resolve one with confidence (the two sides want different things, and choosing is the user's), abort the merge (git merge --abort) and stop: ${stop}`
+      : `- A conflict: do not resolve it (the project's resolve_conflicts setting is off). Abort the merge (git merge --abort), so the branch is as it was, and stop: ${stop}`,
+    `After such a stop the queue waits for the user, who resolves the conflict (in this worktree, or with a new revision) and goes on with Continue; this step then runs again.`,
   ].join("\n");
 }
 

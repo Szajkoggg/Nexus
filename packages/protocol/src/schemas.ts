@@ -425,6 +425,11 @@ const QueueShape = z.object({
    * orchestrator in the draft; part of what an approval pins when true; once the queue has started, it stays.
    */
   coding: z.boolean().optional(),
+  /**
+   * The queue works in a worktree of its own, so it ends with the integration step (closing.ts). Written only by the
+   * server, when it first gives the queue its worktree; kept across revisions; not part of what an approval pins.
+   */
+  integration: z.literal(true).optional(),
   stop_conditions: z.array(z.string()).default([]),
   checks: z.array(z.string()).default([]),
   steps: z.array(StepDef).default([]),

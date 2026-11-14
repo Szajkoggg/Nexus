@@ -5,7 +5,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { closingStepId, type ProjectStore, type QueueView } from "@nexus/protocol";
+import { isKeptStep, type ProjectStore, type QueueView } from "@nexus/protocol";
 import { checkoutOf } from "./gitinfo.ts";
 
 /** How many lines of git's --stat the opening shows at most (the summary line is always kept). */
@@ -20,10 +20,11 @@ export interface ClosingContext {
   rules: boolean;
 }
 
-/** The range of the queue's own steps' rounds of work, from git.yaml; the closing step's own rounds are left out. */
+/** The range of the queue's own steps' rounds of work, from git.yaml; the rounds of the steps Nexus keeps (the closing
+ * and the integration step) are left out. */
 export function queueRange(store: ProjectStore, q: Pick<QueueView, "id">): { from: string; to: string } | undefined {
   const g = store.readGit(q.id);
-  const own = Object.entries(g?.steps ?? {}).filter(([step]) => step !== closingStepId(q.id)).flatMap(([, rounds]) => rounds);
+  const own = Object.entries(g?.steps ?? {}).filter(([step]) => !isKeptStep(q.id, step)).flatMap(([, rounds]) => rounds);
   const from = own.filter((r) => r.start).sort((a, b) => a.started_at.localeCompare(b.started_at))[0]?.start;
   const to = own.filter((r) => r.end && r.ended_at).sort((a, b) => a.ended_at!.localeCompare(b.ended_at!)).at(-1)?.end;
   return from && to ? { from, to } : undefined;

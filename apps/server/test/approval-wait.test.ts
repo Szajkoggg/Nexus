@@ -18,6 +18,9 @@ import { WAIT_MS, until as waitUntil, LONGER, holdWork } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
+// Queues in checkouts of their own (plain folders here, no git) end with the integration step, which is not this
+// file's subject: its fake reports it done.
+process.env.FAKE_INTEGRATE = "done";
 process.env.NEXUS_CODEX = join(here, "fake-codex.ts");
 const FAST: EngineOptions = { retryBaseMs: 30, usageMarginMs: 100 };
 

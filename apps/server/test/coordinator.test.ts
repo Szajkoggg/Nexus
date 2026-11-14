@@ -13,6 +13,9 @@ import { acceptReviews } from "./fake-reviewer.ts";
 import { WAIT_MS, until as waitUntil, LONGER, WORK_MS } from "./wait.ts";
 
 process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
+// Queues in checkouts of their own (plain folders here, no git) end with the integration step, which is not this
+// file's subject: its fake reports it done.
+process.env.FAKE_INTEGRATE = "done";
 
 const MIN = 60_000;
 

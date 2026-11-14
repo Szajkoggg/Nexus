@@ -1,0 +1,113 @@
+// The integration step (PROTOCOL.md, "The integration step"): a queue with a worktree of its own (`worktree: auto`, or
+// the server's mark `integration`) ends with a step Nexus keeps, after the closing step, whatever `coding` says. Its
+// id is reserved, a draft cannot set the mark, agents cannot skip it, and any other step at work after it ran (the
+// closing step's run again included) makes it run again at the end. A queue that worked in a worktree before the step
+// existed (a path, no mark) gets none.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  ActionError, INTEGRATION_ACCEPTANCE, INTEGRATION_GOAL, INTEGRATION_TITLE, ProjectStore, applyDraft, approveQueue, integrationStepId, loadProjectState, newId, now,
+  isApproved, orchestratorStatusChange, type Event, type QueueFile, type SessionFile,
+} from "../src/index.ts";
+
+function setup(q: Partial<QueueFile> = { worktree: "auto" }) {
+  const root = mkdtempSync(join(tmpdir(), "nexus-integration-"));
+  const st = ProjectStore.init(root, { id: "p", name: "P", root });
+  st.writeQueue({
+    protocol: 1, id: "Q", title: "Queue", revision: 1, status: "proposed", stop_conditions: [], checks: [],
+    steps: [{ id: "Q1", title: "One", goal: "", acceptance: [] }], approvals: [], history: [], ...q,
+  });
+  const session = (role: SessionFile["role"]): SessionFile => {
+    const s: SessionFile = { protocol: 1, id: newId(), project: "p", role, runtime: "external", cwd: root, launched_by: "external", created_at: now(), queue: "Q" };
+    st.writeSession(s);
+    return s;
+  };
+  let t = Date.now();
+  const emit = (s: SessionFile, body: Record<string, unknown>) =>
+    st.appendEvent({ v: 1, id: newId(), at: new Date(++t).toISOString(), session: s.id, ...body } as Event);
+  const queue = () => loadProjectState(st).queues.find((x) => x.id === "Q")!;
+  const finish = (w: SessionFile, u: SessionFile, step: string) => {
+    emit(w, { type: "step.started", queue: "Q", step });
+    emit(w, { type: "step.done", queue: "Q", step, summary: `did ${step}` });
+    emit(u, { type: "review.accepted", queue: "Q", step });
+  };
+  const draft = (def: Omit<Partial<QueueFile>, "steps"> & { steps: { id: string; title: string }[] }) =>
+    applyDraft(st, { id: "Q", title: "Queue", stop_conditions: [], checks: [], ...def });
+  return { st, session, emit, queue, finish, draft };
+}
+
+test("a queue with a worktree of its own ends with the integration step, after the closing step, with the standard text and level 2", () => {
+  const x = setup({ worktree: "auto", coding: true });
+  const q = x.queue();
+  assert.deepEqual(q.steps.map((s) => s.id), ["Q1", "Q.refactor", "Q.integrate"]);
+  const i = q.steps.at(-1)!;
+  assert.equal(i.id, integrationStepId("Q"));
+  assert.equal(i.integration, true);
+  assert.equal(i.closing, undefined);
+  assert.deepEqual([i.title, i.goal, i.acceptance], [INTEGRATION_TITLE, INTEGRATION_GOAL, [...INTEGRATION_ACCEPTANCE]]);
+  assert.equal(i.level, 2);
+  assert.deepEqual(x.st.readQueue("Q").steps.map((s) => s.id), ["Q1"], "not in the file");
+
+  // Without coding too; with the server's mark once `worktree` names the path.
+  assert.deepEqual(setup({ worktree: "auto" }).queue().steps.map((s) => s.id), ["Q1", "Q.integrate"]);
+  assert.deepEqual(setup({ worktree: "C:/w/Q", integration: true }).queue().steps.map((s) => s.id), ["Q1", "Q.integrate"]);
+});
+
+test("no integration step in the project's checkout, nor for a queue that worked in a worktree before the step existed", () => {
+  assert.deepEqual(setup({}).queue().steps.map((s) => s.id), ["Q1"]);
+  // Like queue UX of Nexus: a path, finished and merged back by the user, from before the mark.
+  assert.deepEqual(setup({ worktree: "C:/w/UX", branch: "nexus/UX" }).queue().steps.map((s) => s.id), ["Q1"]);
+});
+
+test("the mark is the server's: a draft does not set it, a revision keeps it, and it is not part of what an approval pins", () => {
+  // The server marks an approved queue when it gives it its worktree: the approval still holds.
+  const x = setup({ worktree: "auto" });
+  approveQueue(x.st, "Q");
+  x.st.writeQueue({ ...x.st.readQueue("Q"), worktree: "C:/w/Q", integration: true });
+  assert.equal(isApproved(x.st.readQueue("Q")), true);
+  x.draft({ steps: [{ id: "Q1", title: "One" }, { id: "Q2", title: "Two" }] });
+  assert.equal(x.st.readQueue("Q").integration, true);
+  assert.deepEqual(x.queue().steps.map((s) => s.id), ["Q1", "Q2", "Q.integrate"]);
+
+  const root = mkdtempSync(join(tmpdir(), "nexus-integration-"));
+  const st = ProjectStore.init(root, { id: "p", name: "P", root });
+  applyDraft(st, { id: "N", title: "New", stop_conditions: [], checks: [], integration: true, steps: [{ id: "N1", title: "One", goal: "", acceptance: [] }] });
+  assert.equal(st.readQueue("N").integration, undefined, "an orchestrator's draft cannot set it");
+});
+
+test("the integration step's id is reserved, it cannot be skipped, and queue set finished waits for it", () => {
+  const x = setup();
+  assert.throws(() => x.draft({ steps: [{ id: "Q1", title: "One" }, { id: "Q.integrate", title: "Mine" }] }), /reserved for the queue's integration step/);
+  approveQueue(x.st, "Q");
+  const w = x.session("worker"), u = x.session("user");
+  x.finish(w, u, "Q1");
+  x.st.writeRun("Q", { protocol: 1, session: w.id, state: "halted", reason: "x", step: "Q1", started_at: now(), updated_at: now() });
+  assert.throws(() => orchestratorStatusChange(x.st, { queue: "Q", step: "Q.integrate", to: "skipped", reason: "nothing to merge" }),
+    (e: ActionError) => e.status === 409 && /integration step: it is not skipped/.test(e.message));
+  assert.throws(() => orchestratorStatusChange(x.st, { queue: "Q", to: "finished", reason: "all done" }),
+    (e: ActionError) => e.status === 409 && /Q\.integrate \(pending, the integration step/.test(e.message));
+  x.finish(w, u, "Q.integrate");
+  assert.equal(x.queue().status, "done");
+});
+
+test("any other step at work after the integration step ran makes it run again at the end; its own run does not reset the closing step", () => {
+  const x = setup({ worktree: "auto", coding: true });
+  approveQueue(x.st, "Q");
+  const w = x.session("worker"), u = x.session("user");
+  x.finish(w, u, "Q1"); x.finish(w, u, "Q.refactor"); x.finish(w, u, "Q.integrate");
+  assert.equal(x.queue().status, "done");
+  assert.equal(x.queue().steps.find((s) => s.closing)!.status, "done", "the integration step at work left the closing step done");
+
+  x.draft({ steps: [{ id: "Q1", title: "One" }, { id: "Q2", title: "Two" }] });
+  approveQueue(x.st, "Q");
+  x.emit(w, { type: "step.started", queue: "Q", step: "Q2" });
+  assert.deepEqual(x.queue().steps.slice(-2).map((s) => s.status), ["pending", "pending"], "both run again");
+  x.finish(w, u, "Q2"); x.finish(w, u, "Q.refactor");
+  assert.equal(x.queue().status, "running", "not done while the integration step has to run again");
+  x.finish(w, u, "Q.integrate");
+  assert.equal(x.queue().status, "done");
+  assert.equal(x.queue().steps.at(-1)!.segments.length, 2);
+});

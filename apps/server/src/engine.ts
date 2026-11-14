@@ -27,6 +27,7 @@ import {
 } from "./scheduler.ts";
 import { gitBranch, recordSetup, runSetup, setupPending, worktreeFor } from "./worktree.ts";
 import { closingContext } from "./closing.ts";
+import { integrationContext } from "./integration.ts";
 import { Coordinator, refusalText, type Member } from "./coordinator.ts";
 import { gitWritableRoots } from "./codex.ts";
 import {
@@ -821,10 +822,12 @@ export class Engine implements Member {
     if (run.step && run.step !== step.id) recordStepEnd(this.store, queueId, run.step);
     // The closing refactoring step is given the queue's commit range, read once the step before has ended its round.
     const closing = step.closing ? closingContext(this.store, q) : undefined;
+    // The integration step is given the base to merge, where it is now, and whether it may resolve a conflict.
+    const integration = step.integration ? integrationContext(this.store, state, q) : undefined;
     recordStepStart(this.store, queueId, step.id, run.session);
     const opening = stepOpening({
       q, step, mode, why, projectStopConditions: project.defaults.stop_conditions, notes, answers, last,
-      report: reportFile(project.id, q.id), languages: workerLanguages(project.languages), closing,
+      report: reportFile(project.id, q.id), languages: workerLanguages(project.languages), closing, integration,
     });
     live.proc.send([around.before, opening, around.after].filter(Boolean).join("\n\n"));
     for (const n of notes) this.store.appendDelivered(run.session, { at: now(), kind: "note", id: n.id, via: "turn" });

@@ -189,6 +189,7 @@ revision: 3                            # increases on every change to steps, cri
 status: running                        # mirrors the derived state; the event logs are authoritative for progress
 review_level: 2                        # optional: the level of steps that set none (see "Review")
 coding: true                           # optional: the queue contains coding; Nexus adds a closing refactoring step (below)
+integration: true                      # written only by the server: the queue works in a worktree of its own, so it ends with the integration step (below)
 user_levels: { W3: 1 }                 # levels the user set on steps; written only by the server (see "Review")
 legacy_policies: { W1: continue }      # each step's review policy from before review levels; written only by the server
 stop_conditions:                       # in addition to the project defaults
@@ -436,6 +437,41 @@ the step in the approval view like any other.
   most 60 files and the summary line); the diff itself is not in the text, the worker reads it with git. Without git
   records it says so.
 
+### The integration step
+
+A queue with a worktree of its own ends with a second step Nexus keeps, after the closing refactoring step and
+whatever `coding` says (`packages/protocol/src/closing.ts`, `integrationStep`): in the queue's worktree a worker merges
+the current base into the queue's branch and runs the queue's checks there, so that the queue's work and what reached
+the base meanwhile are tested together. The base then only moves forward to that result (a fast-forward), so nothing
+new arises on the base itself.
+
+- **Which queues.** One with `worktree: auto`, or one the server marked `integration: true` in `queue.yaml` when it
+  first gave the queue its worktree (an auto worktree it made, or a path the queue names that is not the project's
+  checkout). The mark is the server's: a draft cannot set it (it is dropped), a revision keeps it, and it is not part
+  of what an approval pins. A queue that worked in a worktree before the step existed (a path, no mark) has none.
+- **Kept like the closing step.** Not in `queue.yaml`'s `steps`; derivation adds it last (`stepDefs`), so it stays last
+  when a revision adds steps. Its id is reserved: `<queue>.integrate` (a draft with a step of that id is refused); the
+  state marks it with `integration: true`. Its text is Nexus's standard (`INTEGRATION_TITLE` "Integration",
+  `INTEGRATION_GOAL`, `INTEGRATION_ACCEPTANCE`). Review level 2, as if drafted so; the user may set another.
+- **It cannot be bypassed by agents.** `nexus queue set Q --step Q.integrate skipped` is refused; `nexus queue set Q
+  finished` is refused while it is not done.
+- **It is the last step**: its opening asks for the queue's report, the queue is `done` and the run `finished` only
+  after it, and the orchestrator's notices that speak of a queue's last step mean it.
+- **Runs again after new work.** Once it has run, any other step that starts afterwards (a revision's new step, or the
+  closing step running again) sets it back to `pending`: the base is merged again into what the branch has become. Its
+  own start leaves the closing step as it is.
+- **Its opening** (`apps/server/src/integration.ts`, `prompts.ts`) names the queue's branch and the base to merge: the
+  branch the worktree was made from (`git.yaml` `base`, when it is a branch), else the branch the project's checkout is
+  on, with that branch's commit now. The worker runs `git merge --no-edit <base>`, never rebases or pushes, and changes
+  neither the base nor another checkout. Without a conflict (or when the branch contains the base already) it runs the
+  checks, fixes on the branch what the two sides break together, and reports done with the resulting HEAD. On a
+  conflict, with the project's `resolve_conflicts` on, it resolves it, commits the merge, runs the checks and names the
+  conflicting files and how it resolved each (the step's review judges it); with it off, or when it cannot resolve one
+  with confidence, it aborts the merge (`git merge --abort`) and stops: `nexus stop Q.integrate --condition "The
+  integration found a conflict that it does not resolve" --reason "<files, why>"` (`INTEGRATION_CONDITION`). The queue
+  then waits for the user, who resolves it (in the worktree, or with a new revision) and goes on with Continue; the
+  step runs again. Without a base branch to name, the opening says so and the worker stops the same way.
+
 ## Notes: `notes/<step-id>/<note-id>.md`
 
 ```markdown
@@ -552,8 +588,8 @@ project override; both off by default, so a new project merges back only by the 
 them on): with `merge_back`, Nexus merges a queue with a worktree of its own back by itself, when all its steps are
 accepted, the merge has no conflict and its integration step's checks pass; with `resolve_conflicts`, the integration
 step's worker tries to resolve a conflict with the current base, judged by the checks and the step's review, and only
-one it cannot resolve waits for the user. (The integration step and the fast-forward come with queue PW's next steps;
-until then the two settings change nothing.)
+one it cannot resolve waits for the user (see "The integration step"). (The fast-forward comes with queue PW's next
+step; until then `merge_back` changes nothing.)
 
 The event `review.accepted` (`queue`, `step`, `text?`, `to?`), written by the user or an orchestrator, accepts a step
 held in `review`.

@@ -5,7 +5,7 @@ import { ProjectStore, chainPlan, readAway, revisionHash } from "./store.ts";
 import { awayAt, awayNow, type AwayNow } from "./away.ts";
 import { ENDED_RUN_STATES, HOLDING_RUN_STATES, formatClock, type Segment } from "./times.ts";
 import { stopPlace } from "./attention.ts";
-import { closingStepId, stepDefs } from "./closing.ts";
+import { closingStepId, integrationStepId, stepDefs } from "./closing.ts";
 import { openPlan, planView, proposalText, type PlanView } from "./plan.ts";
 
 import type { CheckView } from "./steps.ts";
@@ -57,6 +57,11 @@ export interface StepView extends StepDef {
    * and the standard text; it is not in queue.yaml.
    */
   closing?: true;
+  /**
+   * The queue's integration step (closing.ts): Nexus keeps it last in a queue with a worktree of its own, after the
+   * closing step, with a reserved id and the standard text; it is not in queue.yaml.
+   */
+  integration?: true;
   /** started_at: the first step.started (a resumed step keeps it); finished_at: its latest done or failed. */
   started_at?: string; finished_at?: string;
   /** Its stretches at work, one per step.started; see times.ts for durations. */
@@ -452,6 +457,7 @@ function initQueue(q: QueueFile, notes: Note[], project: Pick<ProjectFile, "defa
       return {
         ...s, level, level_from: from,
         ...(s.id === closingStepId(q.id) && q.coding ? { closing: true as const } : {}),
+        ...(s.id === integrationStepId(q.id) ? { integration: true as const } : {}),
         status: s.status ?? "pending",
         review_items: [], checks: [], timeline: [], messages: [], segments: [], sent_back: [], pictures: {},
         notes: notes.filter((n) => n.step === s.id),
@@ -521,10 +527,16 @@ function apply(
       // A step of the queue's own at work after the closing step ran (a revision added it): the closing step runs again
       // at the end, over the queue's whole work. One the user skipped (at Continue) stays skipped: the stopped step
       // goes on after that choice.
-      const closing = st.closing ? undefined : q.steps.find((x) => x.closing);
-      if (closing && closing.status !== "pending" && closing.status !== "skipped") {
-        closing.status = "pending"; closing.review_with = undefined; closing.asked_user = undefined;
-        closing.finished_at = undefined; closing.summary = undefined; closing.commit = undefined; closing.reason = undefined;
+      // Likewise the integration step, after any other step at work (the closing step's run again included): the base
+      // is merged again into what the queue's branch has become.
+      const again = [
+        st.closing || st.integration ? undefined : q.steps.find((x) => x.closing),
+        st.integration ? undefined : q.steps.find((x) => x.integration),
+      ];
+      for (const kept of again) {
+        if (!kept || kept.status === "pending" || kept.status === "skipped") continue;
+        kept.status = "pending"; kept.review_with = undefined; kept.asked_user = undefined;
+        kept.finished_at = undefined; kept.summary = undefined; kept.commit = undefined; kept.reason = undefined;
       }
       st.status = "running"; st.started_at ??= e.at; st.session = e.session;
       st.finished_at = undefined; st.reason = undefined;
