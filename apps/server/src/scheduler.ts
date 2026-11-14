@@ -6,6 +6,7 @@ import {
   ActionError, HOLDING_RUN_STATES, effortIssue, formatClock, loadProjectState, now, readUsage, type ProjectState, type ProjectStore, type QueueView, type RunFile,
 } from "@nexus/protocol";
 import type { StartOptions } from "./engine.ts";
+import { waitingText, type Block } from "./coordinator.ts";
 import { RUNTIME_NAME } from "./prompts.ts";
 
 /** What the engine's long timers run on: the real clock, or one a test moves. */
@@ -93,6 +94,10 @@ export interface SchedulerDeps {
   /** The engine was shut down: nothing more is written. */
   stopped(): boolean;
   changed(): void;
+  /** Why the queue may not start now (its checkout held, the limit reached): the coordinator's startBlock. */
+  block(state: ProjectState, q: QueueView): Block | undefined;
+  /** A look at the planned starts of every project (the coordinator's pass). */
+  checkStarts(): void;
   /** A start at "usage-reset" comes this long after the reset. */
   usageMarginMs: number;
 }
@@ -101,8 +106,6 @@ export class Scheduler {
   private readonly store: ProjectStore;
   private readonly timers: ClockTimers;
   private readonly deps: SchedulerDeps;
-  /** Set while checkStarts runs: a start inside it notifies changes, which must not look again meanwhile. */
-  private checkingStarts = false;
 
   constructor(store: ProjectStore, timers: ClockTimers, deps: SchedulerDeps) {
     this.store = store;
@@ -138,16 +141,20 @@ export class Scheduler {
       if (at === q.id) throw new ActionError(`queue ${a.id} already waits for ${q.id} (through its planned starts): that would be a loop`, 409);
     }
     const busy = o.session ? state.queues.find((x) => x.id !== q.id && !!x.run && x.run.session === o.session && HOLDING_RUN_STATES.includes(x.run.state)) : undefined;
-    if (a.status === "done" && !this.deps.draining() && !busy) {
+    const block = a.status === "done" && !this.deps.draining() && !busy ? this.deps.block(state, q) : undefined;
+    if (a.status === "done" && !this.deps.draining() && !busy && !block) {
       const run = this.deps.start(q.id, { ...options, after: a.id });
       return `queue ${a.id} is already done: queue ${q.id} started now in session ${run.session}`;
     }
     this.timers.clear(`start:${q.id}`);
+    const at = now();
     this.store.writeStart(q.id, {
-      protocol: 1, after: a.id, ...options, by: o.by, reason: o.reason, revision: q.revision, created_at: now(),
+      protocol: 1, after: a.id, ...options, by: o.by, reason: o.reason, revision: q.revision, created_at: at,
+      held: block ? { since: at, kind: block.kind, reason: waitingText(block) } : undefined,
     });
     this.deps.changed();
     if (a.status !== "done") return `queue ${q.id} starts when queue ${a.id} is done`;
+    if (block) return `queue ${a.id} is done; queue ${q.id} ${waitingText(block)}; it starts by itself then`;
     return busy ? `queue ${q.id} starts when session ${o.session} is free (it runs queue ${busy.id}; queue ${a.id} is done)`
       : `queue ${q.id} starts after the Nexus update (queue ${a.id} is done)`;
   }
@@ -209,43 +216,72 @@ export class Scheduler {
 
   /** Arms the timer of a scheduled start (in pieces of at most a day); when it comes, the plans are looked at. */
   private armStart(queueId: string, at: number): void {
-    this.timers.wakeAt(`start:${queueId}`, at, () => { this.checkStarts(); this.deps.changed(); });
+    this.timers.wakeAt(`start:${queueId}`, at, () => { this.deps.checkStarts(); this.deps.changed(); });
   }
 
   /**
-   * Starts each queue whose planned start is due: a chain's queue is done, or a schedule's time has come. Not while an
-   * update drains (the plans stay, and the next server or cancelDrain looks again). A chain whose session to continue
-   * is busy waits for it to free (one session never runs two queues); a schedule does not wait: its session busy, it
-   * fails. A schedule more than MISSED_MS late (the server was not running) does not start: it is `missed`. A start
-   * that fails (the queue not approved, stopped, …) is recorded on the plan as `failed`, an item waiting for the user
-   * (a missed one is told to the orchestrator too); it is not tried again by itself.
+   * The planned starts that came due: a chain whose queue is done, a schedule whose time came (the coordinator's
+   * pass looks at each, across projects, in the order the plans were made). None while an update drains (the plans
+   * stay, and the next server or cancelDrain looks again). A plan that waited for its checkout or the limit but is no
+   * longer due (the queue it follows was opened again) stops saying so.
    */
-  checkStarts(): void {
-    if (this.deps.stopped() || this.deps.draining() || this.checkingStarts) return;
-    this.checkingStarts = true;
+  duePlans(): { queue: string; created_at: string }[] {
+    if (this.deps.stopped() || this.deps.draining()) return [];
+    // Most projects have no plan: only one that has is read whole.
+    if (!this.store.queueIds().some((id) => { try { return !!this.store.readStart(id); } catch { return false; } })) return [];
+    const state = loadProjectState(this.store);
+    const t = this.timers.clock.now();
+    const out: { queue: string; created_at: string }[] = [];
+    for (const q of state.queues) {
+      const plan = q.start;
+      if (!plan || plan.failed) continue;
+      const due = plan.after ? state.queues.find((x) => x.id === plan.after)?.status === "done" : t >= Date.parse(plan.at!);
+      if (due) out.push({ queue: q.id, created_at: plan.created_at });
+      else if (plan.held) { const { waiting: _w, blocked: _b, held: _h, ...file } = plan; this.store.writeStart(q.id, file); }
+    }
+    return out;
+  }
+
+  /**
+   * Starts the queue whose planned start is due (a chain's queue is done, or a schedule's time has come); returns
+   * whether it started. A chain whose session to continue is busy waits for it to free (one session never runs two
+   * queues); a schedule does not wait: its session busy, it fails. A queue whose checkout another queue holds, or
+   * that would pass the limit on queues running at once, waits and records why on its plan (`held`); a held schedule
+   * is never missed. A schedule more than MISSED_MS late (the server was not running) that was not held does not
+   * start: it is `missed`. A start that fails (the queue not approved, stopped, …) is recorded on the plan as
+   * `failed`, an item waiting for the user (a missed one is told to the orchestrator too); it is not tried again by
+   * itself.
+   */
+  startDue(queueId: string): boolean {
+    if (this.deps.stopped() || this.deps.draining()) return false;
+    const state = loadProjectState(this.store);
+    const q = state.queues.find((x) => x.id === queueId);
+    const plan = q?.start;
+    if (!q || !plan || plan.failed) return false;
+    const t = this.timers.clock.now();
+    const { waiting: _w, blocked: _b, held, ...file } = plan;
+    const fail = (reason: string, missed?: boolean) => this.store.writeStart(q.id, { ...file, failed: { at: now(), reason, missed } });
+    const busy = plan.session ? state.queues.find((x) => x.id !== q.id && !!x.run && x.run.session === plan.session && HOLDING_RUN_STATES.includes(x.run.state)) : undefined;
+    if (plan.after) {
+      if (state.queues.find((x) => x.id === plan.after)?.status !== "done" || busy) return false;
+    } else {
+      const at = Date.parse(plan.at!);
+      if (t < at) return false;
+      if (!held && t - at > MISSED_MS) { fail(`missed: Nexus was not running at ${formatClock(plan.at!, new Date(t))}`, true); return false; }
+      if (busy) { fail(`session ${plan.session} was running queue ${busy.id}`); return false; }
+    }
+    const block = this.deps.block(state, q);
+    if (block) {
+      const reason = waitingText(block);
+      if (held?.reason !== reason) this.store.writeStart(q.id, { ...file, held: { since: held?.since ?? now(), kind: block.kind, reason } });
+      return false;
+    }
     try {
-      const state = loadProjectState(this.store);
-      const t = this.timers.clock.now();
-      for (const q of state.queues) {
-        const plan = q.start;
-        if (!plan || plan.failed) continue;
-        const { waiting: _w, blocked: _b, ...file } = plan;
-        const fail = (reason: string, missed?: boolean) => this.store.writeStart(q.id, { ...file, failed: { at: now(), reason, missed } });
-        const busy = plan.session ? state.queues.find((x) => x.id !== q.id && !!x.run && x.run.session === plan.session && HOLDING_RUN_STATES.includes(x.run.state)) : undefined;
-        if (plan.after) {
-          if (state.queues.find((x) => x.id === plan.after)?.status !== "done" || busy) continue;
-        } else {
-          const at = Date.parse(plan.at!);
-          if (t < at) continue;
-          if (t - at > MISSED_MS) { fail(`missed: Nexus was not running at ${formatClock(plan.at!, new Date(t))}`, true); continue; }
-          if (busy) { fail(`session ${plan.session} was running queue ${busy.id}`); continue; }
-        }
-        try {
-          const run = this.deps.start(q.id, { runtime: plan.runtime, model: plan.model, effort: plan.effort, session: plan.session, after: plan.after });
-          this.store.appendActivity(run.session, { at: now(), kind: "turn_start", text: `Nexus started queue ${q.id}: ${plan.after ? `queue ${plan.after} is done` : "its scheduled time came"}`, queue: q.id });
-        } catch (e) { fail((e as Error).message); }
-      }
-    } finally { this.checkingStarts = false; }
+      const run = this.deps.start(q.id, { runtime: plan.runtime, model: plan.model, effort: plan.effort, session: plan.session, after: plan.after });
+      const why = plan.after ? `queue ${plan.after} is done` : "its scheduled time came";
+      this.store.appendActivity(run.session, { at: now(), kind: "turn_start", text: `Nexus started queue ${q.id}: ${why}${held ? ` (it waited since ${formatClock(held.since, new Date(t))}: ${held.reason})` : ""}`, queue: q.id });
+      return true;
+    } catch (e) { fail((e as Error).message); return false; }
   }
 }
 

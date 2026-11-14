@@ -4,7 +4,7 @@
 // waits. Against the fake runtimes; no model.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -256,9 +256,11 @@ test("a deploy and a plain restart in approval_wait: it still waits, in its sess
 test("while a run waits for approval: a start, a session chain onto its session and a cancel are refused", async () => {
   process.env.FAKE_SLOW_MS = "800";
   const x = setup([step("W1", "slow"), step("W2", "done")]);
-  x.store.writeQueue({ protocol: 1, id: "O", title: "Other", revision: 1, status: "proposed", stop_conditions: [], checks: [], steps: [step("O1", "done")] });
+  // O and A work in checkouts of their own: W's run, waiting for approval, holds the project's.
+  const own = (id: string) => { const d = join(x.store.dir, "..", `wt-${id}`); mkdirSync(d, { recursive: true }); return d; };
+  x.store.writeQueue({ protocol: 1, id: "O", title: "Other", revision: 1, status: "proposed", stop_conditions: [], checks: [], steps: [step("O1", "done")], worktree: own("O") });
   approveQueue(x.store, "O");
-  x.store.writeQueue({ protocol: 1, id: "A", title: "Before", revision: 1, status: "proposed", stop_conditions: [], checks: [], steps: [step("A1", "done")] });
+  x.store.writeQueue({ protocol: 1, id: "A", title: "Before", revision: 1, status: "proposed", stop_conditions: [], checks: [], steps: [step("A1", "done")], worktree: own("A") });
   approveQueue(x.store, "A");
   const e = x.engine();
   try {

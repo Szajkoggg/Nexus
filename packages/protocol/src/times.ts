@@ -41,6 +41,16 @@ export function stepTimes(segments: readonly Segment[], now: number): StepTimes 
  */
 export const HOLDING_RUN_STATES: readonly string[] = ["running", "pausing", "usage_wait", "retry_wait", "approval_wait"];
 
+/**
+ * Run states in which the run holds its checkout (the project's own, or its worktree): those holding its session, and
+ * paused (it will go on there). No other queue starts, resumes or continues in that checkout meanwhile. A halted or
+ * finished run holds none.
+ */
+export const CHECKOUT_RUN_STATES: readonly string[] = [...HOLDING_RUN_STATES, "paused"];
+
+/** Run states that count toward the limit on queues running at once (a queue waiting for a review or an answer does not). */
+export const COUNTED_RUN_STATES: readonly string[] = ["running", "pausing"];
+
 /** The run's states that mean it is not going (it may be resumed later). */
 export const ENDED_RUN_STATES: ReadonlySet<string> = new Set(["finished", "halted", "paused"]);
 

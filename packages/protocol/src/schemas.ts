@@ -420,7 +420,9 @@ export type PushFile = z.infer<typeof PushFile>;
  * runtime's usage window, plus a margin). `runtime`, `model`, `effort`, `session` are the start's options, as a start
  * takes them. `failed`: it came due but the queue could not start (not approved, its session busy, or `missed`: the
  * server was not running then); it stays, as an item waiting for the user, until the queue is started or the plan
- * cancelled or replaced. Starting the queue or cancelling removes the file.
+ * cancelled or replaced. `held`: it came due but waits, and starts by itself once it may: its checkout is held by
+ * another queue (`checkout`), or as many queues run as the limit allows (`limit`); `reason` says which. A held schedule
+ * is never missed. Starting the queue or cancelling removes the file.
  */
 export const StartFile = z.object({
   protocol: z.literal(1),
@@ -437,6 +439,7 @@ export const StartFile = z.object({
   revision: z.number().int().positive(),
   created_at: Time,
   failed: z.object({ at: Time, reason: z.string(), missed: z.boolean().optional() }).optional(),
+  held: z.object({ since: Time, kind: z.enum(["checkout", "limit"]), reason: z.string() }).optional(),
 }).refine((s) => !!s.after !== !!s.at, { message: "a planned start has either after or at" });
 export type StartFile = z.infer<typeof StartFile>;
 

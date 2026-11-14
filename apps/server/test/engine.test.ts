@@ -496,8 +496,9 @@ test("an unapproved revision cannot start", () => {
 // ---------------------------------------------------------------- updates of Nexus itself
 
 /** A queue's run, written as a test fixture. */
+/** A run left paused or halted, in a worktree of its own (a paused run holds its checkout). */
 function fixtureRun(store: ProjectStore, id: string, state: "paused" | "halted", reason: string) {
-  store.writeQueue({ protocol: 1, id, title: id, revision: 1, status: "approved", stop_conditions: [], checks: [], steps: [{ id: `${id}1`, title: "x", goal: "FAKE: done", acceptance: [] }], approvals: [], history: [] });
+  store.writeQueue({ protocol: 1, id, title: id, revision: 1, status: "approved", stop_conditions: [], checks: [], steps: [{ id: `${id}1`, title: "x", goal: "FAKE: done", acceptance: [] }], approvals: [], history: [], worktree: join(store.dir, "..", `wt-${id}`) });
   approveQueue(store, id);
   store.writeSession({ protocol: 1, id: `s-${id}`, project: "p", role: "worker", runtime: "claude", native_id: "00000000-0000-4000-8000-000000000000", cwd: store.dir, launched_by: "nexus", created_at: new Date().toISOString() });
   const t = new Date().toISOString();

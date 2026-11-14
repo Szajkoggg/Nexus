@@ -8,7 +8,7 @@ import type { GitRunner } from "./deploy.ts";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import {
-  ENDED_RUN_STATES, HOLDING_RUN_STATES,
+  CHECKOUT_RUN_STATES, ENDED_RUN_STATES, HOLDING_RUN_STATES,
   ActionError, ProjectStore, USER_SESSION, ensureUserSession, liftByContinue, loadProjectState, releaseOrphanedSteps, stepClosed, reportFile, ensureReportFolder, newId, normPath, now, readUsage,
   RETRY_LIMIT, effortIssue, formatClock, type Effort, type ProjectFile, type StepDef, type ProjectState, type QueueView, type RunFile, type SessionFile,
   type SessionView, type StepView,
@@ -25,6 +25,7 @@ import {
   ClockTimers, REAL_CLOCK, Scheduler, type ChainOptions, type Clock, type ScheduleOptions,
 } from "./scheduler.ts";
 import { gitBranch, worktreeFor } from "./worktree.ts";
+import { Coordinator, refusalText, type Member } from "./coordinator.ts";
 import { gitWritableRoots } from "./codex.ts";
 import {
   assertCanResume, assertCanStart, startedRun, stoppedMessage, toFinished, toHalted, toHeldForUpdate,
@@ -62,6 +63,11 @@ export interface EngineOptions {
   clock?: Clock;
   /** Makes the workers' processes; tests give a stand-in (AgentHostOptions.spawn). */
   spawn?: AgentHostOptions["spawn"];
+  /**
+   * The server's coordinator over all projects' engines (the checkout rule and the limit on queues running at once);
+   * without one, the engine has one of its own, with the limit of <NEXUS_HOME>/limits.json.
+   */
+  coordinator?: Coordinator;
 }
 
 /** A process asked to end for a restart (another model or effort) is killed if it has not exited by then. */
@@ -81,10 +87,12 @@ export function stepValues(run: StepValues, step: Pick<StepDef, "runtime" | "mod
   return { runtime, model: step.model ?? (same ? run.model : d.model), effort: step.effort ?? (same ? run.effort : d.effort) };
 }
 
-export class Engine {
+export class Engine implements Member {
   /** The workers' processes, by Nexus session id. */
   private readonly host: AgentHost;
-  private readonly store: ProjectStore;
+  readonly store: ProjectStore;
+  /** Over all projects' engines: one queue per checkout, and the limit on queues running at once. */
+  private readonly coordinator: Coordinator;
   private readonly changed: () => void;
   private timers = new Map<string, NodeJS.Timeout>();
   /** The long timers (by queue for a retry or usage wait, `start:<queue>` for a schedule), on `clock`. */
@@ -112,10 +120,13 @@ export class Engine {
     this.usageMarginMs = options.usageMarginMs ?? USAGE_MARGIN_MS;
     this.clock = options.clock ?? REAL_CLOCK;
     this.clockTimers = new ClockTimers(this.clock, () => this.stopped);
+    this.coordinator = options.coordinator ?? new Coordinator();
     this.scheduler = new Scheduler(store, this.clockTimers, {
       start: (queueId, opts) => this.start(queueId, opts), draining: () => this.draining, stopped: () => this.stopped,
       changed: () => this.changed(), usageMarginMs: this.usageMarginMs,
+      block: (state, q) => this.coordinator.startBlock(state, q), checkStarts: () => this.checkStarts(),
     });
+    this.coordinator.add(this);
     this.pusher = new AcceptedPusher(store, changed, { run: options.git, timeout: options.pushTimeoutMs });
     this.recoverAfterRestart();
     // Schedules are armed again; what came due while no server ran is looked at once this one is up.
@@ -136,6 +147,9 @@ export class Engine {
     let state = loadProjectState(this.store);
     let q = this.queue(state, queueId);
     assertCanStart(q);
+    // Never two queues in one checkout, and no more queues at once than the limit (a planned start waits instead).
+    const block = this.coordinator.startBlock(state, q);
+    if (block) throw new ActionError(refusalText(queueId, "start", block), 409);
     // The new run replaces the run record: a step an earlier run left open goes back to pending, so it runs again
     // when it comes first (and no two steps show running).
     if (releaseOrphanedSteps(this.store, queueId, { replacing: true }).length) { state = loadProjectState(this.store); q = this.queue(state, queueId); }
@@ -195,6 +209,13 @@ export class Engine {
    */
   continueQueue(queueId: string): string {
     if (this.draining) throw new ActionError("Nexus is updating; continue the queue after the restart", 409);
+    // Checked before the stop is lifted, so a refusal leaves the queue as it was.
+    const before = this.store.readRun(queueId);
+    const state = loadProjectState(this.store);
+    const q = this.queue(state, queueId);
+    const block = !before || before.state === "finished" ? this.coordinator.startBlock(state, q)
+      : CHECKOUT_RUN_STATES.includes(before.state) ? undefined : this.coordinator.checkoutBlock(state, q);
+    if (block) throw new ActionError(refusalText(queueId, "continue", block), 409);
     const lift = liftByContinue(this.store, queueId);
     const run = this.store.readRun(queueId);
     if (!run || run.state === "finished") {
@@ -217,6 +238,11 @@ export class Engine {
     const state = loadProjectState(this.store);
     const q = this.queue(state, queueId);
     assertCanResume(q, run);
+    // A halted run holds no checkout: another queue may have started there meanwhile.
+    if (!CHECKOUT_RUN_STATES.includes(run.state)) {
+      const block = this.coordinator.checkoutBlock(state, q);
+      if (block) throw new ActionError(refusalText(queueId, "go on", block), 409);
+    }
     const session = this.sessionFile(state, run.session);
     this.ensureProcess(session);
     this.clearTimer(queueId);
@@ -331,6 +357,12 @@ export class Engine {
     const st = q.steps[index];
     if (!st) throw new ActionError(`no step ${step}`, 404);
     if (st.status !== "review") throw new ActionError("the step is not waiting for review", 409);
+    // A halted run holds no checkout: accepting goes on only where no other queue works now.
+    const own = q.run;
+    if (own && own.state !== "finished" && !CHECKOUT_RUN_STATES.includes(own.state)) {
+      const block = this.coordinator.checkoutBlock(state, q);
+      if (block) throw new ActionError(refusalText(queueId, "go on", block), 409);
+    }
     const note = typeof text === "string" && text.trim() ? text.trim() : undefined;
     const next = q.steps.slice(index + 1).find((s) => s.status === "pending");
     const dest = !note ? undefined : to === "orchestrator" || !next ? "orchestrator" as const : "next" as const;
@@ -373,8 +405,14 @@ export class Engine {
   /** Cancels the planned start of a queue. */
   cancelStart(queueId: string): string { return this.scheduler.cancelStart(queueId); }
 
-  /** Starts each queue whose planned start is due (Scheduler.checkStarts). */
-  private checkStarts(): void { this.scheduler.checkStarts(); }
+  /** Starts the queues whose planned starts are due, in every project (the coordinator's pass). */
+  private checkStarts(): void { this.coordinator.checkStarts(); }
+
+  // Member (src/coordinator.ts): what the coordinator asks of this project's engine.
+  isStopped(): boolean { return this.stopped; }
+  accepting(): boolean { return !this.stopped && !this.draining; }
+  duePlans(): { queue: string; created_at: string }[] { return this.scheduler.duePlans(); }
+  startDue(queueId: string): boolean { return this.scheduler.startDue(queueId); }
 
   /** Activity of a session, optionally only what was tagged with a step. */
   activity(session: string, queue?: string, step?: string, limit = 300) {
@@ -384,6 +422,7 @@ export class Engine {
 
   shutdown(): void {
     this.stopped = true;
+    this.coordinator.remove(this);
     for (const t of this.timers.values()) clearTimeout(t);
     this.timers.clear();
     this.clockTimers.clearAll();
@@ -895,6 +934,8 @@ export class Engine {
       ? (old && ENDED_RUN_STATES.has(old.state) && old.ended_at ? old.ended_at : now())
       : undefined;
     this.store.writeRun(queueId, { ...run, ended_at: ended, updated_at: now() });
+    // A run that stopped going may free its checkout or a place under the limit, for a waiting start in any project.
+    if (old?.state !== run.state && !this.stopped) this.coordinator.wake();
   }
 
   private queue(state: ProjectState, id: string): QueueView {

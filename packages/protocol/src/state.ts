@@ -290,8 +290,11 @@ export function loadProjectState(store: ProjectStore): ProjectState {
 
 /** Why a planned start has not come yet. */
 function startWait(plan: StartFile, a: QueueView | undefined, queues: QueueView[]): { waiting: string; blocked: boolean } {
+  if (plan.at && plan.held) return { waiting: plan.held.reason, blocked: false };
   if (plan.at) return { waiting: plan.usage ? `the ${plan.usage === "codex" ? "Codex" : "Claude Code"} usage window resets` : "its time", blocked: false };
   if (!a) return { waiting: `queue ${plan.after} does not exist`, blocked: true };
+  // Came due, but its checkout is held or the limit is reached (the server says which): it starts by itself.
+  if (plan.held && a.status === "done") return { waiting: `queue ${plan.after} is done; ${plan.held.reason}`, blocked: false };
   if (a.status === "done") {
     const busy = plan.session ? queues.find((x) => x.id !== plan.after && !!x.run && x.run.session === plan.session && HOLDING_RUN_STATES.includes(x.run.state)) : undefined;
     return busy ? { waiting: `queue ${plan.after} is done; the session to continue is running queue ${busy.id}`, blocked: false }

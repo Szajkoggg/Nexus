@@ -12,10 +12,11 @@ import { existsSync } from "node:fs";
 import { ActionError, HOLDING_RUN_STATES, loadProjectState, normPath, now, type ProjectStore } from "@nexus/protocol";
 import { checkoutOf, git } from "./gitinfo.ts";
 import { ROOT } from "./lifecycle.ts";
+import { samePath } from "./worktree.ts";
 import { execFileSync } from "node:child_process";
 
 const ENV = { ...process.env, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never", GIT_EDITOR: "true", GIT_MERGE_AUTOEDIT: "no" };
-const same = (a: string, b: string) => normPath(a).toLowerCase() === normPath(b).toLowerCase();
+const same = samePath;
 
 /** Runs git, returning its output or throwing with what git said. */
 function run(cwd: string, args: string[]): string {

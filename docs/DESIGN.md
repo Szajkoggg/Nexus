@@ -395,8 +395,10 @@ nothing fires while an update drains. Decisions:
 A schedule ("at 22:00", "when the usage window resets") is the same kind of plan with a time instead of a queue.
 Decisions:
 
-- A schedule does not wait: at its time the queue starts, or the plan fails and the user is told. A schedule says
-  when, and starting hours later than asked (after a busy session freed) would be a different plan than the one made.
+- A schedule does not wait for a busy session: at its time the queue starts, or the plan fails and the user is told.
+  A schedule says when, and starting hours later than asked (after a busy session freed) would be a different plan
+  than the one made. It does wait for its checkout and for a place under the limit on queues running at once (next
+  section): that wait is Nexus keeping its own rule, not a plan gone wrong, so it is never marked missed.
 - A schedule more than 15 minutes late, because the server was not running, does not start. Work set for the night
   must not begin by surprise in the morning; the user and the orchestrator are told, and decide.
 - The usage reset is fixed when the plan is made, from the usage data then known, and shown as a time. A plan that
@@ -404,10 +406,31 @@ Decisions:
 - Long timers are armed in pieces of at most a day: Node fires a timer longer than 2^31-1 ms (about 24.8 days) at once,
   which a weekly usage window can exceed. Tests drive these timers with a clock of their own.
 
-The code is `apps/server/src/scheduler.ts`: `Scheduler` keeps the plans (chain, schedule, cancel, and `checkStarts`,
-which starts what came due) and asks the engine to start a queue; `ClockTimers` arms the long timers on the engine's
+The code is `apps/server/src/scheduler.ts`: `Scheduler` keeps the plans (chain, schedule, cancel; `duePlans` and
+`startDue`, which the coordinator's pass calls to start what came due) and asks the engine to start a queue; `ClockTimers` arms the long timers on the engine's
 clock, for the schedules and for the engine's own retry and usage waits. The engine owns the runs and keeps the public
 `chain`, `scheduleStart` and `cancelStart`, which hand over to the scheduler.
+
+### Never two queues in one checkout
+
+Decided by the user on 2026-11-14: queues run side by side only in worktrees of their own, never two in one checkout,
+and no more at once than a server-wide limit (default 2). Two agents committing in one working tree mix each other's
+changes into their commits and their checks; and every running queue spends the same subscription, so how many run at
+once is the user's setting, not something each project decides alone.
+
+- A checkout is held by a run that will go on there, also while paused or waiting (a usage wait, a retry, an
+  approval, a review); a halted run holds none, and going on with it checks the checkout like a start. A paused run
+  holding its checkout means a forgotten pause keeps others out: better than a resume that finds its tree changed
+  under it.
+- The limit counts only runs at work (running or pausing, not waiting for a review or an answer): a queue waiting for
+  the user costs nothing, and counting it would let one unanswered review stop every project.
+- A direct start is refused with the reason (the user or the orchestrator asked now, and should know at once); a
+  planned start waits and says why on its plan, and starts by itself. Waiting starts go in the order the plans were
+  made, across projects.
+- One coordinator over the projects' engines (`apps/server/src/coordinator.ts`), because the limit and a queue ending
+  in one project concern the others: the engines stay per project and ask it, and it runs the pass over every
+  project's due plans, looking again after each start. The waiting reason is written into the plan's file (`held`),
+  since the project's state alone cannot know what other projects run.
 
 ### Review material
 

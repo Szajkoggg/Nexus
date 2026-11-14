@@ -354,7 +354,7 @@ Written only by the server's queue engine; agents never touch them.
 |---|---|
 | `queues/<id>/git.yaml` | The HEAD of the queue's checkout around each step's work (`src/gitinfo.ts`): `base` (an auto worktree's: `ref`, the branch or commit it was made from, its `sha`, `at`), `base.branch` (whether `ref` names a branch: only a branch can be merged back into), `merged` (`at`, `into`, `path`, `sha`, `fast_forward`), `cleaned` (`at`, `path`, `branch`), `steps.<step>` (rounds, oldest first: `session`, `start` (HEAD when the step opened, or when a send-back reopened it), `started_at`, `end` (HEAD at the end of the turn in which the step got its outcome: done, review, failed or stopped), `ended_at`; a sha is null outside a git repository). A continued step keeps its open round. One writer: the server. See "Git on the dashboard" |
 | `queues/<id>/push.yaml` | Pushing what was accepted: `review` (per step, the HEAD of the checkout when it entered review: `sha` or null, `finished_at`, `at`), `steps` (per accepted step: `acceptance`, `sha`, `result`, `text`, `at`), `pushed` (the last success: `sha`, `step`, `at`, `remote`, `branch`), `error` (the last failure until a success). One writer: the server. See "Pushing what was accepted" |
-| `queues/<id>/start.yaml` | A planned start of the queue (see "Chains" and "Schedules"): either `after` (the queue it waits for) or `at` (the time, ISO 8601; with `usage`, `claude` or `codex`, when that is the usage window's reset plus the margin), the start's `runtime?`, `model?`, `effort?`, `session?` (a session to continue), `by` (`user` or `orchestrator`), `reason?`, `revision` (the queue's when planned), `created_at`, `failed?` (`at`, `reason`, `missed?`: it came due and the queue could not start; `missed`: a schedule more than 15 minutes late, the server not running at its time). One writer: the server; a start of the queue or a cancel removes it |
+| `queues/<id>/start.yaml` | A planned start of the queue (see "Chains" and "Schedules"): either `after` (the queue it waits for) or `at` (the time, ISO 8601; with `usage`, `claude` or `codex`, when that is the usage window's reset plus the margin), the start's `runtime?`, `model?`, `effort?`, `session?` (a session to continue), `by` (`user` or `orchestrator`), `reason?`, `revision` (the queue's when planned), `created_at`, `failed?` (`at`, `reason`, `missed?`: it came due and the queue could not start; `missed`: a schedule more than 15 minutes late, the server not running at its time), `held?` (`since`, `kind`: `checkout` or `limit`, `reason`: it came due but waits for its checkout or for a place under the limit, and starts by itself; see "One queue per checkout, and a limit"). One writer: the server; a start of the queue or a cancel removes it |
 | `queues/<id>/run.yaml` | The engine's intent for a queue: `session`, `after` (started by a chain: the queue that was done), `state` (`running`, `pausing`, `paused`, `halted`, `finished`, `usage_wait`, `retry_wait`: a turn failed for a passing reason and is tried again at `resume_at`, `approval_wait`: a step ended while a newer revision waits for the user's approval, and the run goes on by itself once approved, see "A new revision of a running queue never stops the running step"; `running`, `pausing`, `usage_wait`, `retry_wait` and `approval_wait` hold the run's session and checkout: `HOLDING_RUN_STATES` in the protocol), `reason`, the `step` it last opened, `nudged`, `resume_at` (when a usage wait or a retry goes on), `retries` (turns failed in a row for a passing reason; cleared by a turn that ends well or a new step), `failure` (the runtime's code for the failure being retried or that halted the run, e.g. `overloaded`), `resume_after_restart`, `runtime`, `model` and `effort` (the run's own, fixed at its start: the start's choice, else the continued session's, else the project's defaults; a missing model or effort is the runtime's default), `started_at`, `ended_at` (when it last stopped going: set when it becomes `finished`, `halted` or `paused`, kept while it stays so, removed when it goes on; older files without it fall back to `updated_at`), `summary_asked` (context care: the step whose context summary Nexus asked for; asked once), `switches` (each fresh session, oldest first: `at`, `from` and `to` session, `step` the new session began with, `why`: `context` (context care; a record without `why` is this) or `runtime` (the step runs on another runtime), `fill` of the old one from 0 to 1 when known, `summary`: `written` by the worker, `asked` and then written, or `fallback`), `revision` (the queue's revision the run goes by: written at the start, moved to the current approved one at the end of a step). Start refuses a `stopped` queue, naming the step and the stop's reason, and writes `revision`; it also refuses while the run holds its session (`approval_wait` included). Resume refuses a stopped or cancelled queue, an unapproved revision unless the run is of an older one (`revision` below the queue's; a run record without `revision` is older when a revision was replaced, in `history`, after its `started_at`: such a run goes on mid-step while the newer revision waits), and an `approval_wait` run until its revision is approved. A run of an older revision is resumed like any: a revision changes no started step. Archived records are `run.<time>.yaml` (see "Changes and lifting a stop") |
 | `sessions/<id>/runtime.json` | A launched session's live facts: process state and pid, model, context tokens and window, turns, cost |
 | `sessions/<id>/delivered.jsonl` | What the server handed to the session (notes put into a step turn, inbox entries injected or sent as a turn, or `carried` into the first turn of the session `to` that took over); counts as read |
@@ -363,6 +363,7 @@ Written only by the server's queue engine; agents never touch them.
 | `sessions/<orchestrator>/applied.jsonl` | The server's result for each orchestrator request (`queue.drafted`, `session.request`, `status.set`), and the notices it has sent the orchestrator; the CLI waits for the result and prints it |
 | `sessions/<orchestrator>/chat.jsonl` | The chat shown in the dashboard: the user's messages, the orchestrator's texts (whole, however long) and tool calls, Nexus notices |
 | `<NEXUS_HOME>/usage.json` | The subscription's windows (5-hour, 7-day: utilization and reset time) from the latest `rate_limit_event` |
+| `<NEXUS_HOME>/limits.json` | `{ max_running: number }`: how many queues may run at once across all projects, a whole number from 1 to 20 (default `2` when the file or the value is missing). One writer: the server, on `POST /api/server/settings` from the dashboard |
 | `<NEXUS_HOME>/deploy.json` | `{ push_on_deploy: boolean }` (default `true` when the file is missing). One writer: the server, on `POST /api/server/settings` from the dashboard |
 | `<NEXUS_HOME>/deploy-changes.jsonl` | One line per successful deploy with changes for agents: `key` (`deploy-changes:<new sha>`), `at`, `from`, `to` (full shas), `changes` (`commit`, `text`: the commits' `Agents:` lines, oldest first). One writer: the server that took over (a successor, once per deploy) |
 
@@ -704,11 +705,13 @@ list as found when the server starts is the baseline.
 `phase` (`idle`, `draining`, `updating`, `restarting`, `failed`, or `updated` on a server that took over from an
 update), `held`, `waiting`, `log`, `error?`, and after a deploy `push?` (`result`: `pushed`, `failed` or `skipped`,
 `text`, `at`), `id` (the update's id), `by?` (`project`, `session`: the orchestrator that asked for it) and, on a
-successor, `up` (`commit`, `subject`, `previous?`). It also gives `push_on_deploy` and `running`: the steps running
+successor, `up` (`commit`, `subject`, `previous?`). It also gives `push_on_deploy`, `max_running` (the limit on queues
+running at once) and `running`: the steps running
 now, per project (`project`, `name`, `steps`: `queue`, `step`, `title`, `session`, `run`), which `nexus server status`
 prints. `POST /api/server/update` (`now?`, `ref?`, `by?`) and `POST /api/server/cancel` start and cancel an update.
 `by` is sent by `nexus server update` run in an orchestrator session (from `NEXUS_SESSION` and its project); the
-server keeps it only for an orchestrator session of a registered project. The dashboard sends none. `POST /api/server/settings` (`push_on_deploy`: boolean) is the
+server keeps it only for an orchestrator session of a registered project. The dashboard sends none. `POST /api/server/settings` (`push_on_deploy?`: boolean, `max_running?`: a whole number
+from 1 to 20; at least one of them; it answers both values) is the
 user's only: like withdrawing an approval, it is refused without the dashboard page's own `Origin`. A server waiting
 to take over answers every `/api/projects…` request, and every write under `/api/server/`, with 503.
 
@@ -871,6 +874,10 @@ not take, a session that is not a worker session Nexus launched. B need not be a
 - Nothing fires while an update drains: the plans stay in their files, and the next server (or a cancelled update)
   looks at them once it is up. The server looks at the plans after every change to the project's files and 1.5 s
   after it starts.
+- When A is done but B's checkout is held by another queue, or as many queues run as the limit allows, B waits and
+  starts by itself once it may (see "One queue per checkout, and a limit"); `waiting` then says why, e.g. "queue A is
+  done; waits for the checkout: queue C runs there". Two queues chained after the same A in one checkout so run one
+  after the other, the plan made first first.
 - The run B gets records `after: A`. The dashboard shows the plan on B (with Cancel) and on A ("When this queue is
   done, B starts"), and a chip on B's row.
 
@@ -892,6 +899,38 @@ or when the usage window resets) or with `nexus run B start --at …`.
 - More than 15 minutes late (the server was not running at the time; it looks at the plans 1.5 s after it starts), the
   queue does not start: `failed` with `missed: true`, an item for the user, and the orchestrator is told once. Less late,
   it starts.
+- At its time, a queue whose checkout is held by another queue, or that would pass the limit on queues running at
+  once, waits (`held`) and starts by itself once it may; a waiting schedule is never missed, however long it waits.
+
+## One queue per checkout, and a limit
+
+Queues run side by side only in worktrees of their own, never two in one checkout, and no more at once than a limit.
+
+- A queue's checkout is its worktree (`worktree`: a path; with `auto`, the folder Nexus creates for it, under
+  `defaults.worktree_dir`), else the project's own checkout (`root`). Paths are compared without regard to case or
+  the kind of slash.
+- A checkout is held by a queue whose run is `running` (also with a step waiting for a review or an answer),
+  `pausing`, `paused`, `usage_wait`, `retry_wait` or `approval_wait`: it will go on there. A halted or finished run
+  holds none.
+- The limit (`max_running` in `<NEXUS_HOME>/limits.json`, default 2) counts the queues whose run is `running` or
+  `pausing` across all projects, except a queue waiting for a review or an answer (its status `waiting`). Runs
+  waiting for the usage window, a retry or an approval do not count.
+- A start from the dashboard or the CLI (`nexus run Q start`, also a Continue that starts afresh) is refused with
+  409 and the reason: "queue B cannot start: its checkout is in use, queue A runs there" ("… queue A is paused there";
+  "… queue A of <project> runs there" for another project's queue), or "queue B cannot start: 2 queues run, the limit
+  is 2".
+- Resuming a halted run, continuing a stopped queue whose run halted and accepting a review of a step whose run halted
+  check the checkout the same way ("cannot go on", "cannot continue"); the limit does not apply to them. A paused or
+  waiting run already holds its checkout and goes on as before.
+- A planned start (a chain or a schedule) that came due but may not start waits instead: its `start.yaml` gets
+  `held` (`since`, `kind`: `checkout` or `limit`, `reason`: "waits for the checkout: queue A runs there", "waits: 2
+  queues run, the limit is 2"), shown in the plan's `waiting`. It starts by itself once it may; a held schedule is
+  never missed. A plan that is no longer due (A opened again) loses `held`.
+- The server has one coordinator over all projects' engines. It looks at the planned starts of every project after
+  any change to a project's files, after a run stops going (finished, halted, paused, waiting) and after the limit
+  changes. It takes the due plans of all projects in the order they were made (`created_at`) and looks again after
+  each start, so one pass never starts two queues into one checkout or past the limit.
+- Runs that were going before this rule came are left alone.
 - The engine's long timers (schedules, usage waits, retries) are armed in pieces of at most a day, each looking at the
   clock again, so a time weeks ahead neither fires at once (Node's `setTimeout` does beyond 2^31-1 ms) nor early. A
   restart arms them again from the files; nothing fires while an update drains.

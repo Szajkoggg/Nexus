@@ -16,6 +16,7 @@ import {
 } from "@nexus/protocol";
 import { newestFirst, projectDigest, projectRunning, type DigestEvent, type DigestResponse, type DigestRunning } from "@nexus/protocol/digest";
 import { Engine } from "./engine.ts";
+import { Coordinator, readLimits, validLimit, writeLimits } from "./coordinator.ts";
 import { branchState, leftBehind, stepCommits } from "./gitinfo.ts";
 import { cleanUp, mergeBack } from "./mergeback.ts";
 import { decideStoppedWork, discardRecorded } from "./stopwork.ts";
@@ -74,6 +75,8 @@ let standingBy = !!HANDOVER;
 
 interface Entry { id: string; root: string; store: ProjectStore; engine: Engine; orchestrator: Orchestrator; conversations: Conversations; state?: ProjectState; error?: string }
 const projects = new Map<string, Entry>();
+/** Over every project's engine: one queue per checkout, and the limit on queues running at once (src/coordinator.ts). */
+const coordinator = new Coordinator();
 
 function refreshRegistry(): void {
   if (!active) return;
@@ -81,14 +84,14 @@ function refreshRegistry(): void {
   for (const p of reg.projects) {
     if (projects.has(p.id)) continue;
     const store = ProjectStore.forRoot(p.root);
-    const engine = new Engine(store, () => changed(p.id));
+    const engine = new Engine(store, () => changed(p.id), { coordinator });
     // Through its usual notices it is told the outcome of an update it asked for (lifecycle.notice), and what changed
     // for agents in each deploy since its session began (deploy-changes.jsonl).
     const orchestrator = new Orchestrator(store, engine, () => changed(p.id), { update: () => lifecycle.notice(), changes: readDeployChanges, push: (n) => void push(n) });
     projects.set(p.id, { id: p.id, root: p.root, store, engine, orchestrator, conversations: new Conversations(store, orchestrator, () => changed(p.id)) });
     watchProject(p.id, store.dir);
   }
-  for (const id of projects.keys()) if (!reg.projects.some((p) => p.id === id)) projects.delete(id);
+  for (const [id, e] of projects) if (!reg.projects.some((p) => p.id === id)) { coordinator.remove(e.engine); projects.delete(id); }
 }
 
 function stateOf(e: Entry): ProjectState | undefined {
@@ -430,7 +433,7 @@ app.get("/api/digest", (c) => {
 app.get("/api/usage", (c) => c.json(readUsage() ?? null));
 
 // Nexus itself: its version, and updating it without cutting off running work (src/lifecycle.ts).
-app.get("/api/server", async (c) => c.json({ ...(await version()), update: lifecycle.status, push_on_deploy: readDeploySettings().push_on_deploy, running: runningSteps() }));
+app.get("/api/server", async (c) => c.json({ ...(await version()), update: lifecycle.status, push_on_deploy: readDeploySettings().push_on_deploy, max_running: readLimits().max_running, running: runningSteps() }));
 
 /** The steps running now, per project: what an update would wait for (nexus server status shows them). */
 function runningSteps() {
@@ -441,13 +444,20 @@ function runningSteps() {
     return steps.length ? [{ project: e.id, name: s?.project.name ?? e.id, steps }] : [];
   });
 }
-// Whether a deploy pushes the deployed main (src/deploy.ts): the user's to switch, from the dashboard only.
+// The server's settings, the user's to change, from the dashboard only: whether a deploy pushes the deployed main
+// (src/deploy.ts), and how many queues may run at once (src/coordinator.ts).
 app.post("/api/server/settings", async (c) => {
-  const b = (await c.req.json().catch(() => ({}))) as { push_on_deploy?: unknown };
-  if (typeof b.push_on_deploy !== "boolean") return c.json({ error: "push_on_deploy is true or false" }, 400);
-  writeDeploySettings({ ...readDeploySettings(), push_on_deploy: b.push_on_deploy });
+  const b = (await c.req.json().catch(() => ({}))) as { push_on_deploy?: unknown; max_running?: unknown };
+  if (b.push_on_deploy === undefined && b.max_running === undefined) return c.json({ error: "give push_on_deploy or max_running" }, 400);
+  if (b.push_on_deploy !== undefined && typeof b.push_on_deploy !== "boolean") return c.json({ error: "push_on_deploy is true or false" }, 400);
+  if (b.max_running !== undefined && !validLimit(b.max_running)) return c.json({ error: "max_running is a whole number from 1 to 20" }, 400);
+  if (typeof b.push_on_deploy === "boolean") writeDeploySettings({ ...readDeploySettings(), push_on_deploy: b.push_on_deploy });
+  if (validLimit(b.max_running)) {
+    writeLimits({ ...readLimits(), max_running: b.max_running });
+    coordinator.wake(); // a higher limit lets waiting starts go
+  }
   for (const s of sockets) if (s.readyState === s.OPEN) s.send(JSON.stringify({ type: "server" }));
-  return c.json({ ok: true, push_on_deploy: b.push_on_deploy });
+  return c.json({ ok: true, push_on_deploy: readDeploySettings().push_on_deploy, max_running: readLimits().max_running });
 });
 app.post("/api/server/update", async (c) => {
   const b = (await c.req.json().catch(() => ({}))) as { now?: unknown; ref?: unknown; by?: { project?: unknown; session?: unknown } };
