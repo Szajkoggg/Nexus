@@ -1,8 +1,10 @@
 // Chats: the project's orchestrator, and conversations with a thinking partner.
-import { createContext, useCallback, useContext, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { ChatEntry, RuntimeFile, SessionFile } from "@nexus/protocol";
 import { act, enc, useFetch } from "../api.ts";
-import { Button, Composer, Menu, TimeAgo, type MenuEntry } from "./ui.tsx";
+import { Button, Clock, Composer, Menu, TimeAgo, type MenuEntry } from "./ui.tsx";
+import { CopyButton, ReplyTools } from "./MessageTools.tsx";
+import { messageSource, replyTools } from "../messageTools.ts";
 import { ChatMarkdown, RefText } from "./Refs.tsx";
 import { draftKey, putDraftAndFocus, readDraft } from "../drafts.ts";
 import { withQuote } from "../quote.ts";
@@ -77,8 +79,10 @@ function ChatColumn({ project, title, over, who, about, view, ready, place, stat
       <QuoteTarget.Provider value={quote}>
       <QuoteSelection scroller={p.scroller} />
       <div className="relative flex min-h-0 flex-1 flex-col">
-        <div ref={p.scroller} onScroll={p.onScroll} data-chat-scroll={place} className={`scroll-thin flex-1 overflow-y-auto ${phone ? "px-5 py-4" : "px-6 py-6"}`}>
-          <div className={`${measure} ${phone ? "space-y-3" : "space-y-4"}`}>
+        <div ref={p.scroller} onScroll={p.onScroll} data-chat-scroll={place} className={`scroll-thin flex-1 overflow-y-auto ${phone ? "px-5" : "px-6"}`}>
+          {/* The space at the ends is the content's, not the scroller's padding: a long reply's sticky line (Reply) then
+              sticks at the very edge of the view, with no strip of text scrolling past outside it. */}
+          <div className={`${measure} ${phone ? "space-y-3 py-4" : "space-y-4 py-6"}`}>
             {ready && shown.length === 0 && <div className="mt-10 text-center text-sm text-fg-3">{empty}</div>}
             {shown.map(({ c, i }) => <div key={i} data-i={i}><Entry c={c} flat={!phone} who={who} project={project} /></div>)}
             {ready && view?.state === "working" && <div className="text-xs text-fg-3"><span className="animate-pulse">●</span> {t("chat.working")}</div>}
@@ -184,7 +188,9 @@ function statusLine(view: View | undefined, status: string): string {
 
 /**
  * One entry of a chat. On the phone the other side's messages are bubbles; on a desktop (`flat`, mockup 11A) they are
- * text in the column under a line saying who and when, Nexus's notices a line with a rule at the left.
+ * text in the column under a line saying who and when, Nexus's notices a line with a rule at the left. Every message
+ * shows its time and can be copied as Markdown (MessageTools.tsx): on a desktop Copy shows on hover, on the phone it
+ * is always there.
  */
 function Entry({ c, flat, who, project }: { c: ChatEntry; flat?: boolean; who: string; project: string }) {
   if (c.kind === "tool") {
@@ -194,9 +200,13 @@ function Entry({ c, flat, who, project }: { c: ChatEntry; flat?: boolean; who: s
     // Its pictures' paths show as the pictures, below its text (a message of pictures alone has no bubble).
     const { text, pictures } = splitPictures(c.text);
     return (
-      <div className="flex flex-col items-end">
+      <div className="group/msg flex flex-col items-end">
         {text && <div className={`whitespace-pre-wrap rounded-2xl rounded-br-sm bg-user-bubble px-4 py-2 text-sm text-fg ${flat ? "max-w-[min(85%,37.5rem)]" : "max-w-[85%]"}`}><RefText text={text} /></div>}
         {pictures.length > 0 && <div className={flat ? "max-w-[min(85%,37.5rem)]" : "max-w-[85%]"}><SentPictures project={project} paths={pictures} /></div>}
+        <div className="mt-0.5 flex items-center gap-0.5 text-[11px] text-fg-3">
+          <CopyButton text={messageSource(c)} label={t("chat.copy")} className={flat ? "opacity-0 group-hover/msg:opacity-100" : ""} />
+          <Clock at={c.at} />
+        </div>
       </div>
     );
   }
@@ -204,28 +214,52 @@ function Entry({ c, flat, who, project }: { c: ChatEntry; flat?: boolean; who: s
     if (flat) {
       return (
         <div className={`border-l-2 px-2.5 py-0.5 text-xs ${c.kind === "error" ? "border-danger/60 text-danger" : "border-line-strong text-fg-2"}`}>
-          <span className="whitespace-pre-wrap">Nexus · <RefText text={c.text} /></span><span className="text-fg-3"> · <TimeAgo at={c.at} /></span>
+          <span className="whitespace-pre-wrap">Nexus · <RefText text={c.text} /></span><span className="text-fg-3"> · <Clock at={c.at} /></span>
         </div>
       );
     }
     return (
       <div className={`rounded-lg border px-3 py-2 text-xs ${c.kind === "error" ? "border-danger/30 bg-danger/5 text-danger" : "border-warn/30 bg-warn/5 text-warn/90"}`}>
         <span className="mr-2 font-semibold">Nexus</span><span className="whitespace-pre-wrap"><RefText text={c.text} /></span>
-        <span className="ml-2 text-fg-3"><TimeAgo at={c.at} /></span>
+        <span className="ml-2 text-fg-3"><Clock at={c.at} /></span>
       </div>
     );
   }
+  return <Reply c={c} flat={flat} who={who} />;
+}
+
+/**
+ * A reply of the agent. A long one (messageTools.ts) has its Contents and "Jump to the questions" on its line: on a
+ * desktop the line over it, which stays at the top while the reply is read; on the phone the line under the bubble,
+ * which stays at the bottom.
+ */
+function Reply({ c, flat, who }: { c: ChatEntry; flat?: boolean; who: string }) {
+  const message = useRef<HTMLDivElement>(null);
+  const tools = useMemo(() => replyTools(c.text), [c.text]);
+  const long = tools.contents.length > 0 || tools.questions !== undefined;
+  const copy = <CopyButton text={messageSource(c)} label={t("chat.copy")} className={flat ? "opacity-0 group-hover/msg:opacity-100" : ""} />;
   if (flat) {
     return (
-      <div>
-        <div className="mb-1 text-xs text-fg-3">{who} · <TimeAgo at={c.at} /></div>
+      <div ref={message} className="group/msg">
+        <div className={`mb-1 flex min-h-6 flex-wrap items-center gap-x-1 text-xs text-fg-3 ${long ? "sticky top-0 z-[5] -mx-2 border-b border-line bg-canvas px-2 py-1" : ""}`}>
+          <span className="mr-1">{who} · <Clock at={c.at} /></span>
+          <ReplyTools message={message} contents={tools.contents} questions={tools.questions} />
+          {copy}
+        </div>
         <ChatMarkdown className="leading-relaxed">{c.text}</ChatMarkdown>
       </div>
     );
   }
   return (
-    <div className="max-w-[92%] rounded-2xl rounded-bl-sm bg-surface-3 px-4 py-2">
-      <ChatMarkdown>{c.text}</ChatMarkdown>
+    <div ref={message} className="max-w-[92%]">
+      <div className="rounded-2xl rounded-bl-sm bg-surface-3 px-4 py-2">
+        <ChatMarkdown>{c.text}</ChatMarkdown>
+      </div>
+      <div className={`mt-0.5 flex flex-wrap items-center gap-x-0.5 pl-1 text-[11px] text-fg-3 ${long ? "sticky bottom-0 z-[5] bg-canvas py-1" : ""}`}>
+        <span className="mr-1"><Clock at={c.at} /></span>
+        <ReplyTools message={message} contents={tools.contents} questions={tools.questions} up />
+        {copy}
+      </div>
     </div>
   );
 }

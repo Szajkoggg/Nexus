@@ -87,7 +87,12 @@ body { background: var(--color-canvas); color: var(--color-fg); }
   .md :where(strong) { color: var(--color-fg); font-weight: 600; }
   .md :where(table) { border-collapse: collapse; font-size: 0.85em; display: block; overflow-x: auto; }
   .md :where(th, td) { border: 1px solid var(--color-line); padding: 0.25rem 0.5rem; vertical-align: top; }
+  /* Where a reply's contents and "Jump to the questions" go (components/MessageTools.tsx): clear of the sticky line
+     over a long reply, and flashed for a moment when reached. */
+  .md [data-md-line] { scroll-margin-top: 3rem; }
 }
+.md-flash { animation: md-flash 1.6s ease-out; border-radius: 0.25rem; }
+@keyframes md-flash { from { background: color-mix(in oklab, var(--color-accent) 22%, transparent); } to { background: transparent; } }
 
 /* Code in the file viewer (components/FileView.tsx): highlight.js's classes in the theme's own colours, so every theme
    has its highlighting without a stylesheet of its own. */

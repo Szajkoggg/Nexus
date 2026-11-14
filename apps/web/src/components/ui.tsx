@@ -351,7 +351,13 @@ export type MenuEntry =
  * ⋯: what a panel can do besides its main actions (Reject, Withdraw, settings…). Opens upward from an action bar,
  * downward from a header. Escape or a click outside closes only the menu.
  */
-export function Menu({ items, down = false, label = t("ui.moreActions") }: { items: MenuEntry[]; down?: boolean; label?: string }) {
+export function Menu({ items, down = false, label = t("ui.moreActions"), trigger, left = false }: {
+  items: MenuEntry[]; down?: boolean; label?: string;
+  /** Another button than ⋯ (a chat reply's "Contents"): what it shows and its classes. */
+  trigger?: { content: ReactNode; className: string };
+  /** The menu lines up with the button's left edge (a button at the start of a line), not its right. */
+  left?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   useEffect(() => {
     if (!open) return;
@@ -364,13 +370,13 @@ export function Menu({ items, down = false, label = t("ui.moreActions") }: { ite
   return (
     <div className="relative">
       <button onClick={() => setOpen(!open)} aria-label={label} title={label} aria-haspopup="menu" aria-expanded={open}
-        className="grid h-8 w-8 place-items-center rounded-md border border-line-strong bg-surface-2 text-fg-2 hover:bg-surface-3 hover:text-fg max-lg:h-11 max-lg:w-11">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" /></svg>
+        className={trigger?.className ?? "grid h-8 w-8 place-items-center rounded-md border border-line-strong bg-surface-2 text-fg-2 hover:bg-surface-3 hover:text-fg max-lg:h-11 max-lg:w-11"}>
+        {trigger?.content ?? <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" /></svg>}
       </button>
       {open && (
         <>
           <div className="fixed inset-0 z-[70]" onClick={() => setOpen(false)} />
-          <div role="menu" className={`scroll-thin absolute right-0 z-[71] max-h-[60vh] w-max min-w-52 max-w-[min(20rem,85vw)] overflow-y-auto rounded-lg border border-line-strong bg-surface-2 py-1 shadow-xl ${down ? "top-full mt-1.5" : "bottom-full mb-1.5"}`}>
+          <div role="menu" className={`scroll-thin absolute ${left ? "left-0" : "right-0"} z-[71] max-h-[60vh] w-max min-w-52 max-w-[min(20rem,85vw)] overflow-y-auto rounded-lg border border-line-strong bg-surface-2 py-1 shadow-xl ${down ? "top-full mt-1.5" : "bottom-full mb-1.5"}`}>
             {items.map((m, i) => "heading" in m
               ? <div key={i} className="px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wider text-fg-3">{m.heading}</div>
               : (

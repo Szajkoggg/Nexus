@@ -860,6 +860,28 @@ which the open `Composer` hears).
   "  - two steps\n    - SC1" quotes as "- two steps\n  - SC1". The test parses with mdast-util-from-markdown, the
   parser react-markdown uses, so the positions are the real ones.
 
+### Long replies and message actions
+
+Decided by the user on 2026-11-14 (queue CH4; docs/ideas/chat-improvements.md): a long reply gets a small table of
+contents from its headings, and a "jump to the questions" button when it asks the user to decide; every message can be
+copied as Markdown, every code block has a copy button, and every message shows its time. "Asks the user to decide" is
+recognized from the text, with no new protocol: a heading with "Kérdés" or "Question" in it or ending in "?".
+
+How it is built (`apps/web/src/messageTools.ts`, pure and unit tested; `components/MessageTools.tsx`): the reply is
+parsed with mdast-util-from-markdown, the parser react-markdown uses, so the source lines it finds are the ones the
+rendered elements carry (`data-md-line` on headings, paragraphs and list items, set in ChatMarkdown); Contents and the
+jump scroll to that element (below the sticky line, `scroll-margin-top`) and flash it. Without a question heading, the
+first paragraph or list item that asks ("…?", "Question: …") is where the questions start; code and quotes never are.
+Copy puts the message's text on the clipboard as it is in chat.jsonl; over plain http (remote access on the home
+network), where the Clipboard API is missing, a hidden text area and the copy command do it. Smaller choices made while
+building, not by the user, for the orchestrator's review: a reply is long from 1500 characters, Contents needs two
+headings or more, and both live on the reply's line, which is sticky (on a desktop the line over the reply sticks to
+the top of the chat; on the phone the line under the bubble, with the time, sticks to the bottom), so they are in
+reach wherever the reply is read; Copy shows on hover on a desktop and always on the phone; the time is the clock time
+("14:02", with the date on another day; the full date on hover), also over the agent's replies and on Nexus's
+notices, which showed "5 min ago" before. Finding from building: a sticky element sticks at the scroller's padding edge, so the chat's space at its ends
+moved from the scroller's padding to its content; otherwise a strip of text scrolled past above the sticky line.
+
 ### Pictures in a chat message
 
 Decided by the user on 2026-11-14 (queue CH2; docs/ideas/chat-improvements.md): pictures go into a chat message by

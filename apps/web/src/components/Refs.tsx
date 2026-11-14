@@ -12,6 +12,8 @@ import { nav } from "../nav.ts";
 import { TONE } from "./QueueRow.tsx";
 import { Replyable } from "./Quote.tsx";
 import { sourceAt } from "../quote.ts";
+import { codeText } from "../messageTools.ts";
+import { CopyButton } from "./MessageTools.tsx";
 import { statusWord } from "./ui.tsx";
 import { t } from "../i18n.ts";
 
@@ -120,6 +122,10 @@ const rehypeRefs = (index: RefIndex) => () => (tree: HastNode) => {
   walk(tree);
 };
 
+/** Headings marked with their source line (a reply's contents go to them). */
+const HEADINGS = Object.fromEntries((["h1", "h2", "h3", "h4", "h5", "h6"] as const).map((Tag) =>
+  [Tag, ({ node, ...p }: { node?: { position?: { start: { line: number } } } } & Record<string, unknown>) => <Tag data-md-line={node?.position?.start.line} {...p} />]));
+
 /** A chat message's Markdown, with its refs as links (outside code and links), its paragraphs and items repliable. */
 export function ChatMarkdown({ children, className = "" }: { children: string; className?: string }) {
   const refs = useContext(RefsContext);
@@ -132,9 +138,19 @@ export function ChatMarkdown({ children, className = "" }: { children: string; c
           if (refs && typeof ref === "string") return <SegmentLink refs={refs} segment={segmentOf(ref)}>{p.children}</SegmentLink>;
           return <a {...p} target="_blank" rel="noreferrer" />;
         },
-        // "Reply to this" on paragraphs and list items (Quote.tsx): quotes the item's Markdown source.
-        p: ({ node, ...p }) => <Replyable as="p" source={sourceAt(children, node?.position)} {...p} />,
-        li: ({ node, ...p }) => <Replyable as="li" source={sourceAt(children, node?.position)} {...p} />,
+        // "Reply to this" on paragraphs and list items (Quote.tsx): quotes the item's Markdown source. They and the
+        // headings carry their source line, where a reply's contents and "Jump to the questions" go (MessageTools.tsx).
+        p: ({ node, ...p }) => <Replyable as="p" source={sourceAt(children, node?.position)} data-md-line={node?.position?.start.line} {...p} />,
+        li: ({ node, ...p }) => <Replyable as="li" source={sourceAt(children, node?.position)} data-md-line={node?.position?.start.line} {...p} />,
+        ...HEADINGS,
+        // A code block has its own copy button, at its top right: on hover on a desktop, always on a phone.
+        pre: ({ node, ...p }) => (
+          <div className="group/code relative">
+            <pre {...p} />
+            <CopyButton text={() => codeText(node as never)} label={t("chat.copyCode")}
+              className="absolute right-1 top-1 bg-surface-2 opacity-0 group-hover/code:opacity-100 max-lg:opacity-100" />
+          </div>
+        ),
       }}>
         {children}
       </ReactMarkdown>

@@ -64,6 +64,12 @@ phone the bottom bar) shows what you have not read: "Orchestrator 2", a dot on I
 paragraph or a list item of a message shows a **reply** icon at its right edge: one click quotes that item as it was
 written (its Markdown).
 
+**Long replies and copying.** Every message shows its time. A long reply with headings has **Contents** on its line
+(over it on a desktop, under it on a phone), a menu of its sections; when it asks you to decide, **Jump to the
+questions** goes to them. The line stays in sight while you read the reply. The copy icon copies a message as it was
+written (its Markdown); on a desktop it shows when you hover the message. A code block has its own copy icon at its
+top right.
+
 **Pictures.** Paste a screenshot (Ctrl+V), drop a picture on the chat, or use the paperclip beside the box, in the
 orchestrator's chat, in a conversation and on the phone. PNG, JPEG, WebP or GIF up to 10 MB; anything else (an
 iPhone HEIC photo, say) shows "only PNG, JPEG, WebP or GIF up to 10 MB". The picture shows as a thumbnail above the
