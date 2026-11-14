@@ -1426,6 +1426,11 @@ busy-loop processes on the user's 16 logical cores and 4 to 6 copies of the test
   running turn (`next`, or Codex's steer) with the hand-over flag already set, so that turn's end took its reply, the
   answer to the earlier message, as the summary. Real, not only a test's: a user who hands over while the partner
   still writes. Now the instruction waits for the turn's end and runs as its own turn.
+- **A stopped partner's idle timer kept the process alive for 15 minutes** (conversations.test.ts: a run that took
+  906 s instead of about 100). A turn's end that the stopped process still delivered after the shutdown armed the
+  idle timer again. Now none is armed after the shutdown, it is cleared when the process exits, and it never keeps
+  Node up (`unref`). The load script reports tests and files over a minute, so such a hang shows even when the run
+  passes.
 - **A runtime record was `idle` during a turn** (runtime-records.test.ts, Codex). The record went `working` only with
   the context tokens, and a Codex reply's text comes before them, so a record still `idle` from the process start read
   as a finished turn. `AgentHost` now marks it `working` when a turn begins; `idle` means between turns.
