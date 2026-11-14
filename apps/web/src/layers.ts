@@ -11,7 +11,7 @@ import { fileLayer } from "./fileview.ts";
 
 /**
  * A layer is a kind, optionally with a value: "settings", "item" (the queue or step drawer), "conversation:<id>",
- * "file:<line>:<path>" (the file viewer, fileview.ts).
+ * "file:<line>:<path>" (the file viewer, fileview.ts), "commit:<hash>" (a commit's details).
  */
 export type Layer = string;
 /**
@@ -136,6 +136,9 @@ export function navOf(state: unknown, hash: string, query: string): Nav {
   // ?file=<path>&line=<n> opens a file in the viewer (components/FileView.tsx) over the rest.
   const file = q.get("file");
   if (file) layers.push(fileLayer(file, Number(q.get("line")) || undefined));
+  // ?commit=<hash> opens a commit's details (components/Commit.tsx).
+  const commit = q.get("commit");
+  if (commit) layers.push(`commit:${commit}`);
   return { hash, layers, depth: 0 };
 }
 

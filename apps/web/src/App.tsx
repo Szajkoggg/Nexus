@@ -14,6 +14,7 @@ import { RemoteButton, RemotePanel } from "./components/Remote.tsx";
 import { ProjectPicker, ProjectSidebar } from "./components/Projects.tsx";
 import { isOpen, layerValue, phoneView, viewOf } from "./layers.ts";
 import { fileOf } from "./fileview.ts";
+import { CommitDetails } from "./components/Commit.tsx";
 import { usePhone } from "./phone.ts";
 import { BottomBar, RunningNow } from "./components/Phone.tsx";
 import { moveOn, placeOf, waitingPosition, type Place } from "./waiting.ts";
@@ -70,6 +71,7 @@ export function App() {
   const remoteOpen = isOpen(route.nav, "remote");
   const waitingOpen = isOpen(route.nav, "waiting");
   const file = fileOf(layerValue(route.nav, "file"));
+  const commit = layerValue(route.nav, "commit");
 
   const { byGroup, finished } = useMemo(() => {
     const order = (q: QueueView) => q.updated ?? q.updated_at ?? "";
@@ -208,6 +210,10 @@ export function App() {
 
     <Drawer open={remoteOpen} onClose={() => nav.close("remote")}>
       <RemotePanel version={tick} />
+    </Drawer>
+
+    <Drawer open={!!commit && !!projectId} onClose={() => nav.close("commit")}>
+      {commit && projectId && <CommitDetails key={commit} project={projectId} hash={commit} />}
     </Drawer>
 
     {file && projectId && <Suspense fallback={null}><FileView key={`${file.path}:${file.line ?? ""}`} project={projectId} path={file.path} line={file.line} onClose={() => nav.close("file")} /></Suspense>}

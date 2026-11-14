@@ -23,6 +23,7 @@ test("?file=…&line=… opens the viewer at load, over the drawer", () => {
   assert.deepEqual(n.layers, ["item", "file:42:apps/web/src/App.tsx"]);
   assert.deepEqual(fileOf(layerValue(n, "file")), { path: "apps/web/src/App.tsx", line: 42 });
   assert.deepEqual(navOf(null, "#/p", "?file=README.md&line=x").layers, ["file::README.md"]);
+  assert.deepEqual(navOf(null, "#/p", "?commit=13118f1").layers, ["commit:13118f1"], "a commit's details at load");
 });
 
 test("names, folders and languages", () => {

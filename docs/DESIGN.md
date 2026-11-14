@@ -761,6 +761,27 @@ queues and steps (`refIndex`); nothing else counts, so a word that looks like an
 
 Refs link only within the project whose chat it is; another project's ids ("Honeycomb · W/W4c") stay text.
 
+**Files and commits** (decided by the user on 2026-11-14, queue CH3): a file path with a line
+(`apps/server/src/engine.ts:138`, `C:\Code\Nexus\README.md:5`) opens the file viewer at the line (`nav.file`; "The
+file viewer"), a commit hash opens the commit's details in a drawer (layer `commit:<hash>`, `?commit=<hash>` at load,
+`components/Commit.tsx`). They are not checked against the repository while the message is drawn but when clicked: the
+viewer and the drawer say "not found". So only their shape counts (`findFileRefs` in `refs.ts`, unit tested), and it is
+kept strict:
+
+- A path ends in a file name with an extension (one letter first), then `:line`, optionally `:column` or `-line` (the
+  first line is taken). It may start with a drive (`C:\`, `C:/`), `/`, `./`, `../` or `~/`. A bare file name without
+  a folder counts only with a known source or text extension, so `example.com:8080` stays text; times (`12:30`),
+  versions, `localhost:4317` and `127.0.0.1:4318` have none. A path without a line stays text, as decided.
+- A hash is 7 to 40 lowercase hex digits with at least one digit and one letter ("defaced", "1234567" stay text), not
+  after `#`, `0x`, `/`, `.`, `-` or a letter, and not the first part of a UUID.
+- Nothing inside a URL (`scheme://…`, `www.…`) counts, and both may take a Hungarian suffix after a hyphen
+  (`engine.ts:138-ban`, `13118f1-ben`).
+- In Markdown, an inline code span that is wholly one file or one commit (`` `src/files.ts:40` ``) is a link too, since
+  agents write paths that way; code blocks and links keep their text.
+
+They are drawn as plain links (accent colour, dotted underline), not chips: they carry no status. Relative paths are
+the project root's (the endpoint's rule), so a worker's path relative to its own worktree may say "not found".
+
 ### The morning digest
 
 "Since you last looked" (UX proposals 16, quick fixes 5 and 9; `Digest.tsx`) sits at the top of the right rail on a

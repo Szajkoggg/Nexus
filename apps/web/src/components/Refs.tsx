@@ -1,16 +1,19 @@
 // Refs in a chat drawn as links (UX proposals: "refs in the chat (UX2, W4c) that open the item"): a chip with the
 // item's status dot; a click opens the queue or step, as a drawer over the rail on a desktop and as a sheet on the
-// phone (nav.item). Which words are refs is refs.ts's job.
+// phone (nav.item). File paths with a line and commit hashes are links too: a file opens in the file viewer at the line
+// (nav.file), a commit its details (nav.open("commit:<hash>")); either is checked when it opens. A file or commit in
+// inline code (`src/x.ts:12`) is a link when it is the whole span. Which words are refs is refs.ts's job.
 import { createContext, useContext, useMemo, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import type { QueueView } from "../api.ts";
-import { refIndex, splitRefs, type RefIndex, type RefTarget } from "../refs.ts";
+import { refIndex, splitRefs, wholeRef, type CommitRef, type FileRef, type RefIndex, type RefTarget, type Segment } from "../refs.ts";
 import { queueStatus } from "../queueStatus.ts";
 import { nav } from "../nav.ts";
 import { TONE } from "./QueueRow.tsx";
 import { Replyable } from "./Quote.tsx";
 import { sourceAt } from "../quote.ts";
 import { statusWord } from "./ui.tsx";
+import { t } from "../i18n.ts";
 
 interface Refs { project: string; queues: readonly QueueView[]; index: RefIndex }
 const RefsContext = createContext<Refs | null>(null);
@@ -44,11 +47,49 @@ function RefLink({ refs, target, children }: { refs: Refs; target: RefTarget; ch
   );
 }
 
+const plainClick = (e: React.MouseEvent) => e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey;
+const LINK = "text-accent underline decoration-dotted underline-offset-2 hover:decoration-solid";
+
+/** A file at a line: opens the file viewer there; a new tab (Ctrl+click) opens the dashboard with it. */
+function FileLink({ project, target, children }: { project: string; target: FileRef; children: ReactNode }) {
+  const href = `?file=${encodeURIComponent(target.path)}&line=${target.line}#/${encodeURIComponent(project)}`;
+  return (
+    <a href={href} title={t("refs.openFile", { path: target.path, line: target.line })} className={LINK}
+      onClick={(e) => { if (!plainClick(e)) return; e.preventDefault(); nav.file(target.path, target.line); }}>{children}</a>
+  );
+}
+
+/** A commit: opens its details. */
+function CommitLink({ project, target, children }: { project: string; target: CommitRef; children: ReactNode }) {
+  const href = `?commit=${target.hash}#/${encodeURIComponent(project)}`;
+  return (
+    <a href={href} title={t("refs.openCommit", { hash: target.hash })} className={LINK}
+      onClick={(e) => { if (!plainClick(e)) return; e.preventDefault(); nav.open(`commit:${target.hash}`); }}>{children}</a>
+  );
+}
+
+function SegmentLink({ refs, segment, children }: { refs: Refs; segment: Exclude<Segment, string>; children: ReactNode }) {
+  if (segment.kind === "file") return <FileLink project={refs.project} target={segment}>{children}</FileLink>;
+  if (segment.kind === "commit") return <CommitLink project={refs.project} target={segment}>{children}</CommitLink>;
+  return <RefLink refs={refs} target={segment}>{children}</RefLink>;
+}
+
 /** Plain text (the user's messages, Nexus's notices) with its refs as links. */
 export function RefText({ text }: { text: string }) {
   const refs = useContext(RefsContext);
   if (!refs) return <>{text}</>;
-  return <>{splitRefs(text, refs.index).map((x, i) => (typeof x === "string" ? x : <RefLink key={i} refs={refs} target={x}>{x.text}</RefLink>))}</>;
+  return <>{splitRefs(text, refs.index).map((x, i) => (typeof x === "string" ? x : <SegmentLink key={i} refs={refs} segment={x}>{x.text}</SegmentLink>))}</>;
+}
+
+/** How a ref travels through Markdown's tree: data-ref on a link ("Q", "Q/S", "file:<line>:<path>", "commit:<hash>"). */
+const dataRefOf = (p: Exclude<Segment, string> | FileRef | CommitRef): string =>
+  p.kind === "file" ? `file:${p.line}:${p.path}` : p.kind === "commit" ? `commit:${p.hash}` : p.step ? `${p.queue}/${p.step}` : p.queue;
+function segmentOf(ref: string): Exclude<Segment, string> {
+  const file = /^file:(\d+):([\s\S]+)$/.exec(ref);
+  if (file) return { kind: "file", line: Number(file[1]), path: file[2]!, text: "" };
+  if (ref.startsWith("commit:")) return { kind: "commit", hash: ref.slice(7), text: "" };
+  const [queue, step] = ref.split("/");
+  return { queue: queue!, ...(step ? { step } : {}), text: "" };
 }
 
 // ---------------------------------------------------------------- in Markdown
@@ -57,16 +98,23 @@ interface HastNode { type: string; tagName?: string; value?: string; properties?
 /** Text in these stays text: code, and what is a link already. */
 const SKIP = new Set(["code", "pre", "a"]);
 
-/** A rehype step: the text nodes' refs become links marked data-ref ("<queue>" or "<queue>/<step>"). */
+/**
+ * A rehype step: the text nodes' refs become links marked data-ref (dataRefOf); an inline code span that is wholly a
+ * file or a commit is wrapped in one.
+ */
 const rehypeRefs = (index: RefIndex) => () => (tree: HastNode) => {
+  const link = (ref: string, children: HastNode[]): HastNode => ({ type: "element", tagName: "a", properties: { href: "#", dataRef: ref }, children });
   const walk = (node: HastNode) => {
     if (!node.children || (node.tagName && SKIP.has(node.tagName))) return;
     node.children = node.children.flatMap((c): HastNode[] => {
+      if (c.type === "element" && c.tagName === "code" && c.children?.length === 1 && c.children[0]!.type === "text") {
+        const ref = wholeRef(c.children[0]!.value ?? "");
+        return ref ? [link(dataRefOf(ref), [c])] : [c];
+      }
       if (c.type !== "text" || !c.value) { walk(c); return [c]; }
       const parts = splitRefs(c.value, index);
       if (parts.length === 1 && typeof parts[0] === "string") return [c];
-      return parts.map((p) => typeof p === "string" ? { type: "text", value: p }
-        : { type: "element", tagName: "a", properties: { href: "#", dataRef: p.step ? `${p.queue}/${p.step}` : p.queue }, children: [{ type: "text", value: p.text }] });
+      return parts.map((p) => typeof p === "string" ? { type: "text", value: p } : link(dataRefOf(p), [{ type: "text", value: p.text }]));
     });
   };
   walk(tree);
@@ -81,10 +129,7 @@ export function ChatMarkdown({ children, className = "" }: { children: string; c
       <ReactMarkdown rehypePlugins={plugins} components={{
         a: ({ node: _n, ...p }) => {
           const ref = (p as Record<string, unknown>)["data-ref"];
-          if (refs && typeof ref === "string") {
-            const [queue, step] = ref.split("/");
-            return <RefLink refs={refs} target={{ queue: queue!, ...(step ? { step } : {}) }}>{p.children}</RefLink>;
-          }
+          if (refs && typeof ref === "string") return <SegmentLink refs={refs} segment={segmentOf(ref)}>{p.children}</SegmentLink>;
           return <a {...p} target="_blank" rel="noreferrer" />;
         },
         // "Reply to this" on paragraphs and list items (Quote.tsx): quotes the item's Markdown source.
