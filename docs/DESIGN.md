@@ -1448,8 +1448,10 @@ minutes, almost all of them "timed out waiting for the run to finish").
   - away.test.ts waited for a chat line and then read the orchestrator process's log, which the delivery reaches a
     little later; polled every 100 ms the gap was hidden, every 25 ms it showed. It now waits for the delivery it
     checks, as do three waits of orchestrator.test.ts that slept 700 ms or not at all before such a read.
-  - away.test.ts turned away mode on for a real 8 s that the run had to fit in; under load the run outlasted it. Its
-    end is now set to "now" when the test gets there, as the server's own timer would end it.
+  - away.test.ts turned away mode on for a real 8 s that the run had to fit in, and for 6 s that a server's restart
+    had to fit in; on a busy machine both outlasted it. The first's end is now set to "now" when the test gets there,
+    as the server's own timer would end it; the second keeps an hour across the restart and then sets a few seconds
+    on the running server to see it end.
   - deploy-notices.test.ts started a request to the server on every look without awaiting it; at 25 ms they piled up
     (40 a second) and the update did not settle in time. It now asks once at a time (`untilAsync`).
   - Tests that waited for a passing state (a step "running" for 0.3 to 2.5 s, two steps running at the same moment)

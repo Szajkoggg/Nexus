@@ -158,15 +158,19 @@ test("a real server keeps away mode across a restart, and ends it at its time", 
     assert.deepEqual(await status(), { on: false });
     const r = await set("25:00");
     assert.equal(r.status, 400, "not a time of day");
-    const until = inMs(6_000);
-    assert.equal((await set(until)).status, 200);
-    assert.deepEqual(await status(), { on: true, since: readAway().current!.since, until });
+    // Kept across a restart: an hour ahead, so a restart that is slow on a busy machine does not outlast it (6 s did,
+    // queue TS1). Ended at its time: set again, a few seconds ahead, on the server that runs now.
+    const later = inMs(3_600_000);
+    assert.equal((await set(later)).status, 200);
+    assert.deepEqual(await status(), { on: true, since: readAway().current!.since, until: later });
 
     child.kill();
     await gone(child);
     child = await start();
-    assert.deepEqual((await status()).until, until, "kept across the restart");
+    assert.deepEqual((await status()).until, later, "kept across the restart");
 
+    const until = inMs(3_000);
+    assert.equal((await set(until)).status, 200);
     await sleep(Date.parse(until) - Date.now() + 1500);
     assert.deepEqual(await status(), { on: false }, "ended at its time");
     const file = YAML.parse(readFileSync(join(home, "away.yaml"), "utf8")) as { current?: unknown; past: { why: string; ended: string }[] };
