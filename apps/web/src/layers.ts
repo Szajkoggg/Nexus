@@ -7,8 +7,12 @@
 // conversation) replaces the entry. With nothing open, Back leaves the app.
 //
 // This part is pure (no window, no history) and unit tested; nav.ts applies its steps to the browser.
+import { fileLayer } from "./fileview.ts";
 
-/** A layer is a kind, optionally with a value: "settings", "item" (the queue or step drawer), "conversation:<id>". */
+/**
+ * A layer is a kind, optionally with a value: "settings", "item" (the queue or step drawer), "conversation:<id>",
+ * "file:<line>:<path>" (the file viewer, fileview.ts).
+ */
 export type Layer = string;
 /**
  * The view: the phone's tab (below 1024 px; "The phone" in DESIGN.md), or what a desktop's middle column shows (the
@@ -129,6 +133,9 @@ export function navOf(state: unknown, hash: string, query: string): Nav {
   const q = new URLSearchParams(query);
   const layers: Layer[] = hasItem(hash) ? ["item"] : [];
   for (const k of ["ideas", "chat", "settings", "remote", "waiting", "projects"]) if (q.has(k)) layers.push(k);
+  // ?file=<path>&line=<n> opens a file in the viewer (components/FileView.tsx) over the rest.
+  const file = q.get("file");
+  if (file) layers.push(fileLayer(file, Number(q.get("line")) || undefined));
   return { hash, layers, depth: 0 };
 }
 

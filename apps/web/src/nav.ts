@@ -2,6 +2,7 @@
 import { useSyncExternalStore } from "react";
 import { close, closeThen, closeTop, navOf, open, openConversation, switchProject, switchTab, viewFor, type Layer, type Layout, type Nav, type Step, type Tab } from "./layers.ts";
 import { PHONE } from "./phone.ts";
+import { fileLayer } from "./fileview.ts";
 
 const write = (n: Nav, how: "push" | "replace") =>
   history[how === "push" ? "pushState" : "replaceState"]({ ...(history.state ?? {}), nexus: n }, "", n.hash || location.pathname + location.search);
@@ -84,6 +85,8 @@ export const nav = {
   close: (kind: string) => apply(close(current, kind, kind === "item" ? projectHash() : current.hash)),
   /** Opens a queue or step in its drawer; from one already open, it switches in place. */
   item: (project: string, queue: string, step?: string) => apply(open(current, "item", hashOf(project, queue, step))),
+  /** Opens a file of the current project in the viewer, at a line; from a file already open, it switches in place. */
+  file: (path: string, line?: number) => apply(open(current, fileLayer(path, line))),
   /** Shows a project, in place: switching projects is not a layer, so Back does not walk through them. */
   project: (project: string) => apply(switchProject(current, hashOf(project), layout())),
   /** Closes a layer, then opens a queue or step in another project (the waiting list). */

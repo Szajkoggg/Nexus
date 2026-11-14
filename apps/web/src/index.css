@@ -89,4 +89,20 @@ body { background: var(--color-canvas); color: var(--color-fg); }
   .md :where(th, td) { border: 1px solid var(--color-line); padding: 0.25rem 0.5rem; vertical-align: top; }
 }
 
+/* Code in the file viewer (components/FileView.tsx): highlight.js's classes in the theme's own colours, so every theme
+   has its highlighting without a stylesheet of its own. */
+.hl :where(.hljs-comment, .hljs-quote) { color: var(--color-fg-3); font-style: italic; }
+.hl :where(.hljs-keyword, .hljs-selector-tag, .hljs-doctag, .hljs-meta .hljs-keyword) { color: var(--color-review); }
+.hl :where(.hljs-string, .hljs-regexp, .hljs-addition, .hljs-template-tag, .hljs-symbol) { color: var(--color-ok); }
+.hl :where(.hljs-number, .hljs-literal, .hljs-bullet, .hljs-link) { color: var(--color-warn); }
+.hl :where(.hljs-title, .hljs-section, .hljs-selector-id, .hljs-selector-class) { color: var(--color-info); }
+.hl :where(.hljs-type, .hljs-built_in, .hljs-class .hljs-title, .hljs-title.class_) { color: var(--color-stop); }
+.hl :where(.hljs-attr, .hljs-attribute, .hljs-property, .hljs-variable, .hljs-template-variable, .hljs-name) { color: var(--color-accent); }
+.hl :where(.hljs-meta, .hljs-subst, .hljs-params) { color: var(--color-fg-2); }
+.hl :where(.hljs-deletion) { color: var(--color-danger); }
+.hl :where(.hljs-section, .hljs-strong) { font-weight: 600; }
+.hl :where(.hljs-emphasis) { font-style: italic; }
+/* The Markdown block a file was opened at. */
+.md .md-line { background: color-mix(in oklab, var(--color-accent) 12%, transparent); box-shadow: -0.75rem 0 0 color-mix(in oklab, var(--color-accent) 12%, transparent), -0.875rem 0 0 var(--color-accent); border-radius: 0 0.25rem 0.25rem 0; }
+
 .scroll-thin { scrollbar-width: thin; scrollbar-color: var(--color-line-strong) transparent; }

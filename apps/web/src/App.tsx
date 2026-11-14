@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import type { QueueStatus } from "@nexus/protocol";
 import { enc, useFetch, useLive, useProjectState, useProjects, type AttentionItem, type QueueView } from "./api.ts";
 import { QueueRow } from "./components/QueueRow.tsx";
@@ -12,7 +12,8 @@ import { ChatPanel, ConversationsPanel, DeskHead, useOrchestrator, type Desk, ty
 import { hasUnread, placeKey, readPlace, unreadCount, usePlaces } from "./chatPlace.ts";
 import { RemoteButton, RemotePanel } from "./components/Remote.tsx";
 import { ProjectPicker, ProjectSidebar } from "./components/Projects.tsx";
-import { isOpen, phoneView, viewOf } from "./layers.ts";
+import { isOpen, layerValue, phoneView, viewOf } from "./layers.ts";
+import { fileOf } from "./fileview.ts";
 import { usePhone } from "./phone.ts";
 import { BottomBar, RunningNow } from "./components/Phone.tsx";
 import { moveOn, placeOf, waitingPosition, type Place } from "./waiting.ts";
@@ -26,6 +27,9 @@ import { splitFinished } from "./finished.ts";
 import { ApprovalView, useApprovalForm } from "./components/Approval.tsx";
 import { needsApproval } from "./approval.ts";
 import { rich, t, type Key } from "./i18n.ts";
+
+/** The file viewer and its Markdown and highlighting load when a file is first opened. */
+const FileView = lazy(() => import("./components/FileView.tsx").then((m) => ({ default: m.FileView })));
 
 // Finished queues (done, cancelled) fold into one group at the bottom (FinishedGroup); one that still waits for the
 // user stays in progress until nothing waits.
@@ -65,6 +69,7 @@ export function App() {
   const settingsOpen = isOpen(route.nav, "settings");
   const remoteOpen = isOpen(route.nav, "remote");
   const waitingOpen = isOpen(route.nav, "waiting");
+  const file = fileOf(layerValue(route.nav, "file"));
 
   const { byGroup, finished } = useMemo(() => {
     const order = (q: QueueView) => q.updated ?? q.updated_at ?? "";
@@ -204,6 +209,8 @@ export function App() {
     <Drawer open={remoteOpen} onClose={() => nav.close("remote")}>
       <RemotePanel version={tick} />
     </Drawer>
+
+    {file && projectId && <Suspense fallback={null}><FileView key={`${file.path}:${file.line ?? ""}`} project={projectId} path={file.path} line={file.line} onClose={() => nav.close("file")} /></Suspense>}
 
     <Drawer open={itemShown && !fullApproval} onClose={close} beside={phone ? undefined : RAIL} panel>
       {state && queue && (step

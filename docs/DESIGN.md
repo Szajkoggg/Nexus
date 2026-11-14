@@ -859,6 +859,32 @@ as the pictures below its bubble (`splitPictures`), served by the file endpoint,
 new tab. Smaller choices made while building, not by the user: the paths surviving a reload, the click opening a new
 tab rather than the review viewer, and the plain-text rule for pastes.
 
+### The file viewer
+
+Decided by the user on 2026-11-14 (queue CH3; docs/ideas/chat-improvements.md): a referenced file opens in the
+dashboard's own read-only viewer, at the line: code highlighted, Markdown rendered, pictures in the picture viewer; it
+works on the phone and starts no program. Files over 1 MB are cut with a note; binary files other than pictures are
+not shown.
+
+How it is built (`apps/web/src/fileview.ts`, pure and unit tested; `components/FileView.tsx`; the endpoint in
+PROTOCOL.md, "Files and commits"): the viewer is a layer in the history, `file:<line>:<path>` (`nav.file`), so Back
+and Escape close it; `?file=<path>&line=<n>` opens it at load. It fetches the file once, and the server's
+`X-Nexus-Kind` decides what it shows: a picture goes to the review's picture viewer (alone, "Original ↗" beside it),
+a PDF or another binary gets a line with a link instead. Code is shown with line numbers, the line asked for marked
+and scrolled to the middle. The highlighter is **lowlight** (highlight.js's grammars, returning a syntax tree rather
+than an HTML string): the tree is flattened into lines of tokens and rendered as React text, so file content is
+never injected as HTML; its classes take the theme's tokens (`.hl` in `index.css`), so every theme highlights
+without a stylesheet of its own. Shiki was the alternative: TextMate grammars, nicer for some languages, but several
+times the size and with fixed colour themes; Prism and plain highlight.js produce HTML strings. The highlighter is a
+chunk of its own, loaded with the first code file, and so is the viewer; text over 512 KB is shown plain. The
+language comes from the extension (unknown ones are plain text, never guessed). Markdown is rendered with
+react-markdown and GitHub's extensions (remark-gfm: tables, task lists); raw HTML in it stays text. Its links to
+other files of the project open them in the viewer (`..` is resolved in the browser, since the server follows none),
+web links open a new tab, its own pictures come through the file endpoint and pictures from the web are not loaded.
+Opened at a line, a Markdown file stays rendered and the block holding that line is marked and scrolled to; "Source"
+shows it as code at the line. Smaller choices made while building, not by the user: the Rendered/Source switch, the
+marked block, not loading web pictures, and a "Raw ↗" link to the file itself (sandboxed by the server).
+
 ### Colours are theme tokens
 
 Every colour in the dashboard is a theme token: a CSS variable in `apps/web/src/index.css` (Tailwind's `@theme`),
