@@ -47,8 +47,10 @@ Nexus is developed with Nexus. The agents working on this repository are run by 
 - **Agents: lines**: a commit that changes something agents rely on (a CLI command, a briefing, the protocol, or a
   file an agent reads or writes) carries a line `Agents: <what changed>` in its message, one per change, written for
   an orchestrator whose briefing is older. At a deploy, every project's orchestrator is told these lines.
-- **Screenshots** of the dashboard: headless Edge against a development instance. Its narrowest window is 492 px; for
-  a phone's width, put the page in a 390 px iframe.
+- **Screenshots** of the dashboard: `node scripts/capture.ts <views.yaml>` takes the listed views, the afters and
+  (from the step's base commit) the befores, each on its own development instance with the fake runtimes; headless
+  Edge by hand only for a view it cannot take. Widths: 492 px (the narrowest window), 390 px in an iframe for a
+  phone, 1440 px for a desktop. Register them as `nexus help review` says (keys and roles).
 
 ## Rules the code keeps
 
