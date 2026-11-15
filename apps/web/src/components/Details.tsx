@@ -44,6 +44,8 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
   // A note on a step the orchestrator holds in review goes to the orchestrator, not the worker.
   const forOrchestrator = step.status === "review" && step.review_with === "orchestrator";
   const notesOpen = step.status === "pending" || step.status === "stopped" || forOrchestrator;
+  // The orchestrator's reason for handing the review over; none when the user took it by setting the level to 1.
+  const orchestratorAsks = step.asked_user?.by !== "user" ? step.asked_user?.text : undefined;
   // Review images open in the in-app viewer, a layer above the step (Back closes it); other items as links.
   const isImage = (r: StepView["review_items"][number]) => !!r.path && /\.(png|jpe?g|gif|webp|svg)$/i.test(r.path);
   // Each picture with what it is compared with: by its view key and role, else (older material) an explicit --before
@@ -115,7 +117,7 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
       )}
       {reviewing && (
         <Section title={t("details.yourReview")}>
-          {step.asked_user?.text && step.asked_user.by !== "user" && <p className="mb-2 text-sm text-fg"><span className="text-fg-3">{t("details.orchestratorAsks")} </span>{step.asked_user.text}</p>}
+          {orchestratorAsks && <p className="mb-2 text-sm text-fg"><span className="text-fg-3">{t("details.orchestratorAsks")} </span>{orchestratorAsks}</p>}
           <p className="text-sm text-fg-2">{t("details.yourReviewText")}</p>
         </Section>
       )}
@@ -349,7 +351,7 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
   const others = step.review_items.filter((r) => !isImage(r));
   const reviewPictures = (
     <>
-      {step.asked_user?.text && step.asked_user.by !== "user" && <p className="mt-4 text-sm text-fg"><span className="text-fg-3">{t("details.orchestratorAsks")} </span>{step.asked_user.text}</p>}
+      {orchestratorAsks && <p className="mt-4 text-sm text-fg"><span className="text-fg-3">{t("details.orchestratorAsks")} </span>{orchestratorAsks}</p>}
       {pictures.length > 0 && (
         <section className="mt-5">
           <div className="mb-2 flex items-baseline gap-3">
@@ -1131,10 +1133,6 @@ function WithdrawApproval({ project, queue, onChanged, onCancel }: { project: st
 }
 
 /**
- * The steps that name their own runtime, model or effort, each with its values, so they are seen before approving;
- * nothing when every step runs on the run's.
- */
-/**
  * An approved queue's steps whose review is still to come, each with its level picker: the user may decide later that
  * they review a step themselves (or leave it to the orchestrator). Setting a level asks for no new approval.
  */
@@ -1157,6 +1155,10 @@ function StepLevels({ project, queue, onChanged }: { project: ProjectState; queu
   );
 }
 
+/**
+ * The steps that name their own runtime, model or effort, each with its values, so they are seen before approving;
+ * nothing when every step runs on the run's.
+ */
 function OwnValues({ queue }: { queue: QueueView }) {
   const own = queue.steps.filter((s) => stepValuesText(s));
   if (!own.length) return null;
