@@ -10,7 +10,7 @@ import { closingStepId, integrationStepId, stepDefs } from "./closing.ts";
 import { openPlan, planView, proposalText, type PlanView } from "./plan.ts";
 import { stepTags, tagProposalText, type StepTags } from "./tags.ts";
 import { CHECK_UNIT, checkMetric, metricDef, metricWarning, type MetricValue } from "./metrics.ts";
-import { recurringViews, type RecurringView } from "./recurring.ts";
+import { recurringViews, scheduleText, type RecurringView } from "./recurring.ts";
 import { readTemplates } from "./templates.ts";
 
 import type { CheckView } from "./steps.ts";
@@ -146,7 +146,7 @@ export interface QueueView extends Omit<QueueFile, "steps"> {
   approved: boolean;   // the latest approval pins the current revision
   revision_hash: string;
   steps: StepView[];
-  report?: { path: string; summary: string; at: string };
+  report?: { path: string; summary: string; at: string; findings?: number };
   /**
    * The step the queue's stop came from (the latest queue.stop's, or the stopped step of a queue imported as stopped),
    * until a lift. It stays when the orchestrator skips that step: the stop is then the queue's (stopPlace).
@@ -450,23 +450,22 @@ function recurringOf(store: ProjectStore, project: ProjectFile, warnings: string
     try { const r = store.readRecurring(id); if (r) files.push(r); } catch (e) { warnings.push(`recurring ${id}: ${(e as Error).message}`); }
   }
   if (!files.length) return [];
-  const open = (id: string) => { const q = queues.get(id); return !!q && q.status !== "done" && q.status !== "cancelled"; };
-  return recurringViews(files, readTemplates(project.root), open, Date.now());
+  return recurringViews(files, readTemplates(project.root), [...queues.values()], Date.now());
 }
 
 /** What the recurring queues ask of the user: a standing approval, or a time that passed without a run. */
 function recurringAttention(recurring: RecurringView[], queues: Map<string, QueueView>): AttentionItem[] {
   return recurring.flatMap((r): AttentionItem[] => {
-    const when = r.skipped ? formatClock(r.skipped.due, new Date()) : "";
+    const when = r.skipped ? (r.every !== undefined ? `at ${formatClock(r.skipped.due, new Date())}` : `after ${r.after_queues} queues`) : "";
     if (r.status === "broken") return [{ kind: "recurring", recurring: r.id, text: `Recurring ${r.id} cannot run: ${r.problem}`, at: r.skipped?.at ?? r.updated_at }];
     if (r.status === "needs_approval") {
-      const again = r.skipped?.kind === "approval" ? `; its run at ${when} did not start` : "";
-      return [{ kind: "recurring", recurring: r.id, text: `Recurring ${r.id} (${r.template_title}, ${r.every}) waits for your approval${again}`, at: r.updated_at }];
+      const again = r.skipped?.kind === "approval" ? `; its run ${when} did not start` : "";
+      return [{ kind: "recurring", recurring: r.id, text: `Recurring ${r.id} (${r.template_title}, ${scheduleText(r)}) waits for your approval${again}`, at: r.updated_at }];
     }
     if (r.paused || !r.skipped || r.skipped.kind === "approval") return [];
     if (r.skipped.kind === "previous" && r.status !== "waiting_previous") return [];
     const q = r.skipped.kind === "previous" && r.last ? queues.get(r.last.queue) : undefined;
-    return [{ kind: "recurring", recurring: r.id, queue: q?.id, text: `Recurring ${r.id} did not start at ${when}: ${r.skipped.reason}`, at: r.skipped.at }];
+    return [{ kind: "recurring", recurring: r.id, queue: q?.id, text: `Recurring ${r.id} did not start ${when}: ${r.skipped.reason}`, at: r.skipped.at }];
   });
 }
 
@@ -851,7 +850,7 @@ function apply(
     }
     case "queue.report": {
       const q = queueOf(e.queue);
-      if (q) q.report = { path: e.path, summary: e.summary, at: e.at };
+      if (q) q.report = { path: e.path, summary: e.summary, at: e.at, ...(e.findings !== undefined ? { findings: e.findings } : {}) };
       return;
     }
     case "context.summary": {

@@ -321,7 +321,9 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
         mkdirSync(dirname(path), { recursive: true });
         writeFileSync(path, `# Queue ${report[1]} report\n\nfake report of the whole queue\n`);
         // Tests running side by side may share a project id and so a report file: a refusal here is not the test's subject.
-        try { nexus("report", report[1]!, "--file", path, "--summary", `fake report of ${report[1]}`); } catch { /* another test took it */ }
+        // "FAKE-FINDINGS: <n>" in the goal: the number of findings, given as a maintenance queue's report gives it.
+        const findings = /FAKE-FINDINGS: (\d+)/.exec(text)?.[1];
+        try { nexus("report", report[1]!, "--file", path, "--summary", `fake report of ${report[1]}`, ...(findings ? ["--findings", findings] : [])); } catch { /* another test took it */ }
       }
     }
     return `step ${step}: ${behaviour}`;

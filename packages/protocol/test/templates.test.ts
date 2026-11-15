@@ -140,3 +140,32 @@ test("Nexus's five shipped templates, each filled, are valid queues the draft pa
   }
   assert.equal(loadProjectState(store).queues.length, templates.length);
 });
+
+test("a maintenance template: survey leaves out the steps for fix_small and the closing refactoring; fix_small keeps them", () => {
+  const text = `template:
+  id: care
+  title: Care
+maintenance: survey
+coding: true
+title: Care
+steps:
+  - id: "{{id}}1"
+    title: Survey
+    goal: Look.
+  - id: "{{id}}2"
+    maintenance: fix_small
+    title: Fix
+    goal: Fix the small things.
+`;
+  const t = parse(text);
+  assert.equal(t.maintenance, "survey");
+  const survey = fillTemplate(t, {}, "C");
+  assert.deepEqual([(survey.steps as { id: string }[]).map((s) => s.id), survey.maintenance, survey.coding], [["C1"], "survey", false]);
+  const fix = fillTemplate(t, {}, "C", { maintenance: "fix_small" });
+  assert.deepEqual([(fix.steps as { id: string }[]).map((s) => s.id), fix.maintenance, fix.coding], [["C1", "C2"], "fix_small", true]);
+  assert.equal(JSON.stringify(fix.steps).includes("maintenance"), false, "the steps' marks are gone");
+  assert.throws(() => fillTemplate(parse(), { issue: "x" }, "F", { maintenance: "survey" }), /not a maintenance template/);
+  assert.throws(() => parse(text.replace("maintenance: survey\n", "maintenance: always\n")), /survey or fix_small/);
+  assert.throws(() => parse(text.replace("maintenance: survey\n", "")), /needs the template's maintenance/);
+  assert.throws(() => parse(text.replace(/ {2}- id: "\{\{id\}\}1"\n {4}title: Survey\n {4}goal: Look.\n/, "")), /keeps at least one step/);
+});

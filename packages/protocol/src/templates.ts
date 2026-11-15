@@ -41,12 +41,21 @@ export interface Template {
   params: TemplateParam[];
   /** The queue's fields as written, placeholders unfilled (no `id`: the queue's id is given when it is filled). */
   queue: Record<string, unknown>;
+  /** A maintenance template's default mode (`maintenance:` in the file); absent: not a maintenance template. */
+  maintenance?: MaintenanceMode;
   layer: TemplateLayer;
   /** The file it was read from. */
   path: string;
 }
 
 export class TemplateError extends Error {}
+
+/** A maintenance queue's modes: only survey and report, or also fix the small findings the template names. */
+export const MAINTENANCE_MODES = ["survey", "fix_small"] as const;
+export type MaintenanceMode = (typeof MAINTENANCE_MODES)[number];
+const isMode = (x: unknown): x is MaintenanceMode => MAINTENANCE_MODES.includes(x as MaintenanceMode);
+/** A step of a maintenance template marked `maintenance: fix_small` is there only in that mode. */
+const fixOnly = (step: unknown) => !!step && typeof step === "object" && (step as Record<string, unknown>).maintenance === "fix_small";
 
 /** Every placeholder name used in the string values of a tree (keys are not filled). */
 function placeholders(x: unknown, out = new Set<string>()): Set<string> {
@@ -58,14 +67,15 @@ function placeholders(x: unknown, out = new Set<string>()): Set<string> {
 
 /**
  * A template from its file's text. Refused (TemplateError, saying why): not YAML, no valid `template:` header, a
- * malformed or repeated parameter, one named `id` (it is the queue's), or a placeholder that names no parameter (it
- * would stay unfilled).
+ * malformed or repeated parameter, one named `id` (it is the queue's), a placeholder that names no parameter (it
+ * would stay unfilled), a `maintenance:` other than survey or fix_small, a step marked for fix_small in a template
+ * that is not a maintenance one, or no step left in survey mode.
  */
 export function parseTemplate(text: string, layer: TemplateLayer, path: string): Template {
   let doc: unknown;
   try { doc = YAML.parse(text); } catch (e) { throw new TemplateError(`not valid YAML: ${(e as Error).message}`); }
   if (!doc || typeof doc !== "object" || Array.isArray(doc)) throw new TemplateError("a template is a YAML mapping");
-  const { template, params, id: _id, ...queue } = doc as Record<string, unknown>;
+  const { template, params, id: _id, maintenance, ...queue } = doc as Record<string, unknown>;
   const header = TemplateHeader.safeParse(template);
   if (!header.success) throw new TemplateError(`template: ${header.error.issues.map((i) => `${i.path.join(".") || "header"}: ${i.message}`).join("; ")}`);
   const list = z.array(TemplateParam).safeParse(params ?? []);
@@ -77,7 +87,12 @@ export function parseTemplate(text: string, layer: TemplateLayer, path: string):
   const unknown = [...placeholders(queue)].filter((n) => n !== ID_PARAM && !names.includes(n));
   if (unknown.length) throw new TemplateError(`placeholders that name no parameter, so they would stay unfilled: ${unknown.map((n) => `{{${n}}}`).join(", ")}`);
   if (!Array.isArray(queue.steps) || !queue.steps.length) throw new TemplateError("a template has at least one step");
-  return { ...header.data, params: list.data, queue, layer, path };
+  if (maintenance !== undefined && !isMode(maintenance)) throw new TemplateError(`maintenance: survey or fix_small, not ${JSON.stringify(maintenance)}`);
+  const marked = queue.steps.filter((x) => x && typeof x === "object" && "maintenance" in x);
+  if (marked.some((x) => !fixOnly(x))) throw new TemplateError("a step's maintenance: is fix_small (the step is there only in that mode)");
+  if (marked.length && !maintenance) throw new TemplateError("a step marked maintenance: fix_small needs the template's maintenance: (survey or fix_small)");
+  if (maintenance && queue.steps.every(fixOnly)) throw new TemplateError("in survey mode a maintenance template keeps at least one step (one not marked fix_small)");
+  return { ...header.data, params: list.data, queue, layer, path, ...(maintenance ? { maintenance } : {}) };
 }
 
 /** A template that is not used: its file could not be read as one, or a stronger layer has the same id. */
@@ -130,18 +145,32 @@ function fill(x: unknown, values: Readonly<Record<string, string>>): unknown {
 }
 
 /**
- * The queue a template gives with these values: its fields with every placeholder filled, the id first. Refused
- * (TemplateError): an unknown or missing parameter, a placeholder left unfilled, or a result that is not a valid queue
- * definition. What the draft path checks besides (tags against the project's lists, an existing queue) it checks when
- * the draft is uploaded.
+ * The queue a template gives with these values: its fields with every placeholder filled, the id first. A
+ * maintenance template's queue carries its mode (`o.maintenance`, else the template's): in survey mode without the
+ * steps marked fix_small and with `coding: false` (no closing refactoring); in fix_small mode with all of them. Refused
+ * (TemplateError): an unknown or missing parameter, a placeholder left unfilled, a mode for a template that is not a
+ * maintenance one, or a result that is not a valid queue definition. What the draft path checks besides (tags against
+ * the project's lists, an existing queue) it checks when the draft is uploaded.
  */
-export function fillTemplate(t: Template, given: Readonly<Record<string, string>>, queueId: string): Record<string, unknown> {
+export function fillTemplate(t: Template, given: Readonly<Record<string, string>>, queueId: string, o: { maintenance?: MaintenanceMode } = {}): Record<string, unknown> {
   if (!/^[A-Za-z0-9][\w.-]{0,31}$/.test(queueId)) throw new TemplateError("a queue id is 1-32 letters, digits, dots, dashes or underscores");
   const values = templateValues(t, given, queueId);
   // parseTemplate refuses a placeholder without a parameter; this holds for a template made any other way too.
   const left = [...placeholders(t.queue)].filter((n) => values[n] === undefined);
   if (left.length) throw new TemplateError(`placeholders left unfilled: ${left.map((n) => `{{${n}}}`).join(", ")}`);
-  const queue = { id: queueId, ...(fill(t.queue, values) as Record<string, unknown>) };
+  if (o.maintenance && !t.maintenance) throw new TemplateError(`template ${t.id} is not a maintenance template: it has no mode to set`);
+  const queue: Record<string, unknown> = { id: queueId, ...(fill(t.queue, values) as Record<string, unknown>) };
+  const mode = o.maintenance ?? t.maintenance;
+  if (mode) {
+    const steps = (queue.steps as unknown[]).filter((x) => mode === "fix_small" || !fixOnly(x));
+    queue.steps = steps.map((x) => {
+      if (!x || typeof x !== "object") return x;
+      const { maintenance: _m, ...rest } = x as Record<string, unknown>;
+      return rest;
+    });
+    queue.maintenance = mode;
+    if (mode === "survey") queue.coding = false;
+  }
   const parsed = QueueFile.safeParse({ protocol: 1, ...queue });
   if (!parsed.success) throw new TemplateError(`the filled template is not a valid queue: ${parsed.error.issues.map((i) => `${i.path.join(".") || "queue"}: ${i.message}`).join("; ")}`);
   return queue;

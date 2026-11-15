@@ -200,6 +200,7 @@ revision: 3                            # increases on every change to steps, cri
 status: running                        # mirrors the derived state; the event logs are authoritative for progress
 review_level: 2                        # optional: the level of steps that set none (see "Review")
 coding: true                           # optional: the queue contains coding; Nexus adds a closing refactoring step (below)
+maintenance: survey                    # optional: a maintenance queue's mode, survey or fix_small (see "Recurring queues"); pinned by the approval
 kind: code                             # optional tags, the defaults of its steps (see "Tags"): kind, activities, area, size, origin
 origin: user
 runtime: claude                        # optional: the runtime, model, effort and fallback of its steps that name none
@@ -546,13 +547,13 @@ Every line:
 | `note.read` | `note` | A note was received |
 | `message.read` | `message` | An inbox message was received |
 | `context.summary` | `text`, `topics: []`, `files: []` | What a successor or continuation needs to know; written at the end of each step |
-| `queue.report` | `queue`, `path`, `summary` | The worker's report of the whole queue, written when it ends (done or stopped). `path` is the copy in the queue's folder (`.nexus/queues/<queue>/report.md`), which `nexus report` writes |
+| `queue.report` | `queue`, `path`, `summary`, `findings?` | The worker's report of the whole queue, written when it ends (done or stopped). `path` is the copy in the queue's folder (`.nexus/queues/<queue>/report.md`), which `nexus report` writes. `findings`: a maintenance queue's number of findings (`--findings`, a whole number from 0; see "Recurring queues") |
 | `change.proposed` | `queue`, `patch`, `reason` | A proposed change to a queue definition (needs a new approval) |
 | `queue.drafted` | `queue`, `definition` | Orchestrator only: a new or changed draft queue |
 | `session.request` | `action` (start, resume, pause, stop, cancel_start), `queue`, `use_session?`, `runtime?`, `model?`, `effort?`, `after?`, `next?`, `start_at?`, `reason` | Orchestrator only: asks the engine to act on a queue's run (`use_session` continues an existing session). `start` with `after` (a list of queue ids; one id from an older CLI): put the queue into the plan, it starts when those are done (see "The plan"); with `next: true`: into the plan with none before it; with `start_at` (ISO 8601, or `usage-reset`): start at that time (a schedule, see "Schedules"); `cancel_start`: take the queue out of the plan (its predecessors and its schedule) |
 | `plan.proposed` | `queue`, `after` (ids), `reason` | Orchestrator only: proposes to the user a new list of predecessors for the queue that changes dependencies the user set (see "The plan") |
 | `tags.proposed` | one of `area`, `activity`, `rename` (`from`, `to`); `reason?` | Orchestrator only: proposes a change to the project's tag lists; the server records it in `tags.yaml`'s proposals and answers in `applied.jsonl` (see "Tags") |
-| `recurring.set` | `recurring`, `template`, `params`, `every`, `reason?` | Orchestrator only: sets a recurring queue (`nexus recurring set`); the server checks it, writes `recurring/<id>.yaml` (taking the standing approval away) and answers in `applied.jsonl`. It carries no approval (see "Recurring queues") |
+| `recurring.set` | `recurring`, `template`, `params`, `every?` or `after_queues?`, `maintenance?`, `reason?` | Orchestrator only: sets a recurring queue (`nexus recurring set`); the server checks it, writes `recurring/<id>.yaml` (taking the standing approval away) and answers in `applied.jsonl`. It carries no approval (see "Recurring queues") |
 | `metric.defined` | `name`, `unit?`, `show?`, `target?`, `warn_above?`, `warn_below?` | Orchestrator only: defines one of the project's metrics, or changes it (the whole definition); the server checks it, writes `metrics.yaml` and answers in `applied.jsonl` (see "Project metrics") |
 | `metric.recorded` | `queue`, `step`, `name`, `value`, `unit`, `commit?` | Worker only (the loader ignores it from any other session): a value of one of the project's metrics for the step, with the metric's unit then and the HEAD of the worker's checkout (see "Project metrics") |
 | `review.sent_back` | `queue`, `step`, `text` | Orchestrator or user only: a step in review goes back to its worker with what to fix (see "Sending a step back") |
@@ -1077,14 +1078,14 @@ nexus stop W3 --condition "user decision" --reason "..."   # the condition as th
 nexus ask "Canyon joints: vertical only, or also inclined?" [--option ...] [--recommend <option>] [--can-continue]
                                                # --recommend: one of the --option values, by text or number (1 = first)
 nexus context --topics rock,support --files Runtime/Core/Rock/* <<< "summary text"
-nexus report W --file <temp>/nexus-reports/<project>/W.md --summary "..."   # copied to .nexus/queues/W/report.md
+nexus report W --file <temp>/nexus-reports/<project>/W.md --summary "..." [--findings 3]   # copied to .nexus/queues/W/report.md; --findings: a maintenance queue's
 nexus propose-change W --file patch.yaml --reason "..."
 nexus template list | show <id>                # the queue templates in effect (see "Queue templates")
 nexus recurring list                           # the recurring queues and their state (see "Recurring queues")
 # orchestrator only
 nexus queue draft --file queue.yaml
 nexus queue draft --template bugfix --set issue="..." --set area=engine [--id BF]   # writes .nexus/drafts/BF.yaml to complete and upload
-nexus recurring set weekly --template maintenance [--set scope=...] --every "mon 03:00" [--reason ...]   # through the server; the user approves it
+nexus recurring set weekly --template maintenance [--set scope=...] (--every "mon 03:00" | --after-queues 5) [--maintenance survey|fix_small] [--reason ...]   # through the server; the user approves it
 nexus answer <qid> "..." [--escalate [--recommend <option>]] [--continue|--wait]
                                                # --recommend only with --escalate: one of the question's options
 nexus session start|resume|fork|pause|stop ...
@@ -1772,6 +1773,15 @@ steps:
   that is not given (named with its description), a parameter the template does not have, a placeholder left unfilled,
   and a result that is not a valid queue definition. The rest of the draft path's checks (tags against the project's
   lists, a queue of that id) apply when the draft is uploaded.
+- **A maintenance template** has a top-level `maintenance: survey|fix_small`, its default mode. A step marked
+  `maintenance: fix_small` is there only in that mode. Filled in survey mode, the queue leaves those steps out and gets
+  `coding: false` (no closing refactoring step); in fix_small mode it keeps them (the marks dropped); either way the
+  queue carries `maintenance: <mode>` (queue.yaml; part of what an approval pins when set). The mode is given with
+  `--maintenance` (`nexus queue draft --template`, `nexus recurring set`: the project's mode over the template's);
+  refused for a template that is not a maintenance one, and a template is refused that marks a step without the
+  top-level key, or keeps no step in survey mode. The shipped `maintenance` template surveys `{{scope}}` and, in
+  fix_small mode, fixes `{{small_fixes}}` (by default patch-level dependency updates whose checks pass, and typos in
+  documentation).
 
 **Three layers**, weakest first; for the same template id the stronger replaces the weaker:
 
@@ -1813,6 +1823,9 @@ id: weekly                     # 1-16 letters, digits, dashes or underscores
 template: maintenance
 params: { scope: dependencies }
 every: mon 03:00               # daily HH:MM | <mon..sun> HH:MM | monthly <1-31> HH:MM, the server machine's local time
+after_queues: 5                # or this instead of every: after every 5 queues of the project that are done
+baseline: [A, B]               # after N queues: the queues done when the count began
+maintenance: fix_small         # the project's mode for a maintenance template, over the template's
 set_by: orchestrator           # or user; with reason
 approval: { hash: sha256:..., at: 2026-11-15T10:00:00Z }   # the user's standing approval
 paused: true                   # the user paused it
@@ -1823,15 +1836,18 @@ created_at: ...
 updated_at: ...
 ```
 
-- **Setting it**: `nexus recurring set <id> --template <t> [--set name=value]... --every "<when>" [--reason]`
-  (orchestrator only) records `recurring.set`; the server checks the id, the schedule (refused: another form) and
-  that the template fills with the values (refused: a missing or unknown parameter, an unknown template), writes the
+- **Setting it**: `nexus recurring set <id> --template <t> [--set name=value]... (--every "<when>" | --after-queues
+  <n>) [--maintenance survey|fix_small] [--reason]` (orchestrator only) records `recurring.set`; the server checks the
+  id, the schedule (exactly one of the two; refused: another form, a number outside 1-1000) and that the template fills
+  with the values and the mode (refused: a missing or unknown parameter, an unknown template, a mode for a template
+  that is not a maintenance one), writes the
   file with the schedule in its one written form (`Mon 3:00` becomes `mon 03:00`) and answers. **Any set takes the
   standing approval away**, whatever it changes: the recurring waits for the user's approval again. A set counts the
   times from then on (`handled` is the set's time), so it never starts a time that has passed.
 - **The standing approval's hash** (`recurringHash`) covers the resolved, filled template (after the three layers,
-  filled with the recurring's id as the queue id), the values, the schedule and `coding`, hashed as JSON with sorted
-  keys. A project template that replaces the shipped one with other content, a deploy that changes the shipped one,
+  filled with the recurring's id as the queue id), the values, the schedule, the effective maintenance mode and
+  `coding`, hashed as JSON with sorted keys. Switching survey to fix_small (or back) thus asks for the approval again.
+  A project template that replaces the shipped one with other content, a deploy that changes the shipped one,
   an edited project or global template, another value or schedule: each gives another hash, and the approval no
   longer holds (the state shows `needs_approval`) until the user approves again. The approval is the user's action
   (`POST /api/projects/:id/recurring/:rid`, `approve`); no CLI command or event approves, pauses or removes one, and
@@ -1848,6 +1864,21 @@ updated_at: ...
   recurring), so it starts at once or waits for its checkout, the limit or an update as any planned queue.
 - **The previous run**: while the last queue it made is not done or cancelled (running, waiting, stopped), a time
   passes without a run (`skipped.kind: previous`), and the user gets an item. A removed queue counts as closed.
+- **After N queues** (`after_queues`): it counts the project's queues that are done (removed queues are gone, so they
+  do not count) and were not done when the count began (`baseline`), leaving out every recurring's own runs (a queue
+  whose approval is marked `standing`), so two such recurrings never start each other. The count begins at the set,
+  at the approval, and whenever its N-th queue comes and is looked at (whether a run starts or the time passes for
+  one of the reasons above). The server counts at every change of the project. `ProjectState.recurring` shows
+  `counted` for it, and no `next_at`.
+- **Maintenance runs** (a queue with `maintenance`): the worker's prompt asks for the number of findings with the
+  report (`nexus report ... --findings <n>`, 0 when there were none). When the run finishes, the orchestrator is told
+  once when the report has findings, with the report's path ("Maintenance queue weekly-20261116-0300 (survey) finished
+  with 3 findings. Report: <path>"), to propose a queue to the user from it; without findings the run closes quietly,
+  without the usual notice of its end (a halted run is told as any). A survey run is told to change nothing; when one of
+  its steps reports its end (done, or waiting for its review), the engine checks once that the step left no commit
+  since its round began and no changed tracked file in the queue's checkout (untracked files do not count), and
+  otherwise stops the queue with the condition "Nexus: a survey run leaves no commit and no changed tracked file" and
+  what it left (a `queue.stop` in the user's session, which the server writes), before the step's review.
 - **Missed times**: once the server is up (with the planned starts) it looks at each recurring's times since
   `handled`: one more than 15 minutes ago (`MISSED_MS`, as for schedules) passes (`missed`, when it would have run),
   and the next time comes; one less late comes now.

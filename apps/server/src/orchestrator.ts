@@ -16,7 +16,7 @@ import { describeDeployChanges, type DeployChanges } from "./deploy.ts";
 import type { PlanNotice } from "./deploy-plan.ts";
 import {
   acceptedNoteNotice, approvalNotice, discardNotice, liftNotice, mergedNotice, mergeWaitNotice, missedStartNotice, noticeText, orchestratorBriefing, pausedNotice,
-  carriedMessages, formatInbox, orchestratorFreshSeed, orchestratorSummaryRequest, summaryLists, questionNotice, rejectionNotice, restartedNotice, fixAskedNotice, levelToUserNotice, reviewNotice, awayOnNotice, awayEndNotice, awayStuckNotice, planDecisionNotice, planHeldNotice, runEndNotice, stepNoteNotice, tagDecisionNotice, fallbackNotice, metricNotice, userMessage, withdrawalNotice,
+  carriedMessages, formatInbox, orchestratorFreshSeed, orchestratorSummaryRequest, summaryLists, questionNotice, rejectionNotice, restartedNotice, fixAskedNotice, levelToUserNotice, reviewNotice, awayOnNotice, awayEndNotice, awayStuckNotice, planDecisionNotice, planHeldNotice, runEndNotice, maintenanceFindingsNotice, stepNoteNotice, tagDecisionNotice, fallbackNotice, metricNotice, userMessage, withdrawalNotice,
 } from "./prompts.ts";
 
 // Agent (formerly Task) lets it call subagents; they run within these same read-only permissions.
@@ -518,7 +518,9 @@ ${n.text}` });
     if (e.type === "plan.proposed") return proposePlan(this.store, e.queue, e.after, e.reason);
     if (e.type === "tags.proposed") return proposeTags(this.store, { area: e.area, activity: e.activity, rename: e.rename, reason: e.reason }, e.session);
     if (e.type === "metric.defined") return defineMetric(this.store, { name: e.name, unit: e.unit, show: e.show, target: e.target, warn_above: e.warn_above, warn_below: e.warn_below }, e.session);
-    if (e.type === "recurring.set") return this.engine.setRecurring({ id: e.recurring, template: e.template, params: e.params, every: e.every, by: "orchestrator", reason: e.reason });
+    if (e.type === "recurring.set") {
+      return this.engine.setRecurring({ id: e.recurring, template: e.template, params: e.params, every: e.every, after_queues: e.after_queues, maintenance: e.maintenance, by: "orchestrator", reason: e.reason });
+    }
     if (e.type === "status.set") {
       const message = orchestratorStatusChange(this.store, { queue: e.queue, step: e.step, to: e.to, reason: e.reason });
       // A cancel reaches the user as a push notification, like other notifications; nothing waits in their list.
@@ -699,6 +701,11 @@ ${n.text}` });
         items.push({ key: `notify:paused:${q.id}:${r.ended_at}`, ...pausedNotice(q, r) });
       }
       if ((r.state !== "halted" && r.state !== "finished") || r.updated_at < since) continue;
+      // A maintenance run that finished: told once when its report has findings, else it closes quietly.
+      if (q.maintenance && r.state === "finished") {
+        if ((q.report?.findings ?? 0) > 0) items.push({ key: `notify:findings:${q.id}`, ...maintenanceFindingsNotice(q) });
+        continue;
+      }
       items.push({ key: `notify:run:${q.id}:${r.state}:${r.updated_at}`, ...runEndNotice(q, r) });
     }
     const fresh = items.filter((i) => !told.has(i.key));

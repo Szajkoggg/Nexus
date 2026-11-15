@@ -69,3 +69,23 @@ test("the orchestrator's recurring.set event carries no approval", () => {
   const e = Event.parse({ v: 1, id: "e", at: "2026-11-15T10:00:00Z", session: "o", type: "recurring.set", recurring: "R", template: "t", every: "daily 03:00", approval: { hash: "sha256:a", at: "x" } });
   assert.equal("approval" in e, false);
 });
+
+test("after N queues: the schedule's text, its place in the hash, and what it counts", async () => {
+  const { scheduleText, countedQueues } = await import("../src/recurring.ts");
+  assert.equal(scheduleText({ after_queues: 5 }), "after 5 queues");
+  assert.equal(scheduleText({ after_queues: 1 }), "after 1 queue");
+  assert.throws(() => scheduleText({}), /one of them/);
+  assert.throws(() => scheduleText({ every: "daily 03:00", after_queues: 5 }), /one of them/);
+  const queue = { id: "R", title: "T", steps: [] };
+  assert.notEqual(recurringHash(queue, { params: {}, after_queues: 5 }), recurringHash(queue, { params: {}, after_queues: 6 }));
+  assert.notEqual(recurringHash({ ...queue, maintenance: "survey" }, { params: {}, after_queues: 5 }), recurringHash({ ...queue, maintenance: "fix_small" }, { params: {}, after_queues: 5 }));
+  const standing = [{ standing: { id: "X" } }];
+  const queues = [
+    { id: "A", status: "done", approvals: [{}] },
+    { id: "B", status: "done", approvals: [{}] },
+    { id: "C", status: "approved", approvals: [{}] },
+    { id: "X-20261116-0300", status: "done", approvals: standing },
+  ];
+  assert.equal(countedQueues({ baseline: [] }, queues), 2, "not the open one, not a recurring's run");
+  assert.equal(countedQueues({ baseline: ["A"] }, queues), 1, "not one done before the count began");
+});

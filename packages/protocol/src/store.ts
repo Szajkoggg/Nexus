@@ -514,12 +514,13 @@ export function revisionHash(q: HashedQueue): string {
 }
 /** The queue's defaults for its steps: its tags, and its runtime, model, effort and fallback. */
 const STEP_DEFAULTS = ["kind", "activities", "area", "size", "origin", "runtime", "model", "effort", "fallback"] as const;
-type HashedQueue = Pick<QueueFile, "steps" | "stop_conditions" | "checks" | "coding"> & Partial<Pick<QueueFile, (typeof STEP_DEFAULTS)[number]>>;
+type HashedQueue = Pick<QueueFile, "steps" | "stop_conditions" | "checks" | "coding"> & Partial<Pick<QueueFile, (typeof STEP_DEFAULTS)[number] | "maintenance">>;
 // `coding` counts only when true, and a queue's tags and its runtime, model, effort and fallback only when set, so the
 // hash of a queue without them is what it was before those fields (a step's left out is not in its JSON either).
 const hashOf = (steps: unknown[], q: Omit<HashedQueue, "steps">) =>
   "sha256:" + createHash("sha256").update(JSON.stringify({
     steps, stop_conditions: q.stop_conditions, checks: q.checks, ...(q.coding ? { coding: true } : {}),
+    ...(q.maintenance ? { maintenance: q.maintenance } : {}),
     ...Object.fromEntries(STEP_DEFAULTS.filter((k) => q[k] !== undefined).map((k) => [k, q[k]])),
   })).digest("hex");
 

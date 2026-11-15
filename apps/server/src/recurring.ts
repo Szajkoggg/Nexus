@@ -3,8 +3,8 @@
 // plan, as an approved queue (its approval marked `standing`). The only writer of .nexus/recurring/<id>.yaml: the
 // orchestrator's `nexus recurring set` arrives here through the server, and so do the user's actions.
 import {
-  ActionError, RECURRING_ID, applyDraft, everyText, fillTemplate, formatClock, loadProjectState, nextOccurrence, parseEvery, readTemplates, resolveRecurring,
-  revisionHash, runQueueId, type ProjectStore, type RecurringFile, type Resolved,
+  ActionError, RECURRING_ID, applyDraft, countable, countedQueues, everyText, fillTemplate, formatClock, loadProjectState, nextOccurrence, parseEvery, readTemplates,
+  resolveRecurring, revisionHash, runQueueId, scheduleText, type MaintenanceMode, type ProjectState, type ProjectStore, type RecurringFile, type Resolved,
 } from "@nexus/protocol";
 import { MISSED_MS, type ClockTimers, type PlanOptions } from "./scheduler.ts";
 
@@ -21,7 +21,11 @@ export interface RecurringSet {
   id: string;
   template: string;
   params: Record<string, string>;
-  every: string;
+  /** At a time, or after N queues: exactly one. */
+  every?: string;
+  after_queues?: number;
+  /** The maintenance mode for this project, over the template's. */
+  maintenance?: MaintenanceMode;
   by: "orchestrator" | "user";
   reason?: string;
 }
@@ -49,7 +53,7 @@ export class Recurrer {
     }
   }
 
-  private resolve(r: Pick<RecurringFile, "id" | "template" | "params" | "every">): Resolved {
+  private resolve(r: Pick<RecurringFile, "id" | "template" | "params" | "every" | "after_queues" | "maintenance">): Resolved {
     return resolveRecurring(r, readTemplates(this.store.readProject().root));
   }
 
@@ -60,27 +64,32 @@ export class Recurrer {
   }
 
   /**
-   * Sets a recurring queue (new, or a change): checks the id, the schedule and that the template fills with these
-   * values. A set takes the standing approval away, whatever it changes: the recurring waits for the user's approval
-   * again. Returns what happened, in a sentence.
+   * Sets a recurring queue (new, or a change): checks the id, the schedule (at a time, or after N queues) and that the
+   * template fills with these values (and the maintenance mode, for a maintenance template). A set takes the standing
+   * approval away, whatever it changes: the recurring waits for the user's approval again. Returns what happened.
    */
   set(o: RecurringSet): string {
     if (!RECURRING_ID.test(o.id)) throw new ActionError("a recurring queue's id is 1-16 letters, digits, dashes or underscores, starting with a letter or digit");
-    let every: string;
-    try { every = everyText(parseEvery(o.every)); } catch (e) { throw new ActionError((e as Error).message); }
+    let every: string | undefined;
+    let schedule: string;
+    try {
+      every = o.every === undefined ? undefined : everyText(parseEvery(o.every));
+      schedule = scheduleText({ every, after_queues: o.after_queues });
+    } catch (e) { throw new ActionError((e as Error).message); }
     const resolved = this.resolve({ ...o, every });
     if ("problem" in resolved) throw new ActionError(resolved.problem);
     const old = this.store.readRecurring(o.id);
     const at = iso(this.now);
     this.store.writeRecurring({
-      protocol: 1, id: o.id, template: o.template, params: o.params, every, set_by: o.by, reason: o.reason,
-      paused: old?.paused, last: old?.last, created_at: old?.created_at ?? at, updated_at: at,
-      // Times from now on count; a set never starts a time that has passed.
-      handled: at,
+      protocol: 1, id: o.id, template: o.template, params: o.params, every, after_queues: o.after_queues, maintenance: o.maintenance,
+      set_by: o.by, reason: o.reason, paused: old?.paused, last: old?.last, created_at: old?.created_at ?? at, updated_at: at,
+      // Times from now on count, and queues done from now on: a set never starts what came before it.
+      handled: at, baseline: o.after_queues !== undefined ? this.doneNow() : undefined,
     });
     this.arm(o.id);
     this.deps.changed();
-    const what = `template ${resolved.template.id} (${resolved.template.layer}), ${every}`;
+    const mode = resolved.queue.maintenance ? `, maintenance ${String(resolved.queue.maintenance)}` : "";
+    const what = `template ${resolved.template.id} (${resolved.template.layer}), ${schedule}${mode}`;
     const wait = old?.approval ? "the user's standing approval is taken away: it waits for their approval again" : "it waits for the user's approval";
     return `recurring ${o.id} ${old ? "changed" : "set"}: ${what}; ${wait}, and runs only once approved`;
   }
@@ -96,10 +105,12 @@ export class Recurrer {
       ...r, approval: { hash: resolved.hash, at }, updated_at: at,
       skipped: r.skipped?.kind === "approval" ? undefined : r.skipped,
       handled: [r.handled, at].filter((x): x is string => !!x).sort().at(-1),
+      // After N queues: the count starts at the approval.
+      ...(r.after_queues !== undefined ? { baseline: this.doneNow() } : {}),
     });
     this.arm(id);
     this.deps.changed();
-    return `recurring ${id} approved: it runs by itself at its times (${r.every}) while it stays as it is`;
+    return `recurring ${id} approved: it runs by itself (${scheduleText(r)}) while it stays as it is`;
   }
 
   /** The user pauses it (its times pass without a run) or lets it go on. */
@@ -110,7 +121,7 @@ export class Recurrer {
     this.store.writeRecurring({ ...r, paused: paused || undefined, updated_at: at, handled: [r.handled, at].filter((x): x is string => !!x).sort().at(-1) });
     this.arm(id);
     this.deps.changed();
-    return paused ? `recurring ${id} paused` : `recurring ${id} goes on at its times (${r.every})`;
+    return paused ? `recurring ${id} paused` : `recurring ${id} goes on (${scheduleText(r)})`;
   }
 
   /** The user removes it; the queues it made stay. */
@@ -129,7 +140,7 @@ export class Recurrer {
   private arm(id: string): void {
     this.timers.clear(`recurring:${id}`);
     let r = this.store.readRecurring(id);
-    if (!r || this.deps.stopped()) return;
+    if (!r || this.deps.stopped() || r.every === undefined) return; // after N queues: counted at each change (check)
     const every = parseEvery(r.every);
     let next = nextOccurrence(every, Date.parse(r.handled ?? r.created_at));
     while (next <= this.now - MISSED_MS) {
@@ -140,6 +151,26 @@ export class Recurrer {
     const due = next;
     if (due <= this.now) { this.fire(id, due); return; }
     this.timers.wakeAt(`recurring:${id}`, due, () => this.fire(id, due));
+  }
+
+  /** The project's queues an "after N queues" schedule counts, done now (a new count starts from them). */
+  private doneNow(): string[] {
+    return countable(loadProjectState(this.store).queues);
+  }
+
+  /**
+   * At each change: the "after N queues" recurrings whose count reached N come due now (decide); whatever comes of it,
+   * a new count starts. `state`: the project's state now.
+   */
+  check(state: ProjectState): void {
+    if (this.deps.stopped() || !state.recurring.some((r) => r.after_queues !== undefined)) return;
+    for (const view of state.recurring) {
+      if (view.after_queues === undefined || (view.counted ?? 0) < view.after_queues) continue;
+      const r = this.store.readRecurring(view.id);
+      if (!r || r.after_queues === undefined || countedQueues(r, state.queues) < r.after_queues) continue;
+      this.decide(r, this.now, false);
+      this.deps.changed();
+    }
   }
 
   private fire(id: string, due: number): void {
@@ -158,7 +189,8 @@ export class Recurrer {
    */
   private decide(r: RecurringFile, due: number, late: boolean): void {
     const at = iso(this.now);
-    const base: RecurringFile = { ...r, handled: iso(due) };
+    // After N queues the count starts again from what is done now (the queue made here is a recurring run: not counted).
+    const base: RecurringFile = { ...r, handled: iso(due), ...(r.after_queues !== undefined ? { baseline: this.doneNow() } : {}) };
     const pass = (kind: NonNullable<RecurringFile["skipped"]>["kind"], reason: string) => this.store.writeRecurring({ ...base, skipped: { due: iso(due), at, kind, reason } });
     if (r.paused) { this.store.writeRecurring(base); return; }
     const resolved = this.resolve(r);
@@ -166,6 +198,7 @@ export class Recurrer {
     if (!r.approval) { pass("approval", "it has no standing approval"); return; }
     if (r.approval.hash !== resolved.hash) { pass("approval", "it changed since your approval (its template, values or schedule)"); return; }
     if (late) { pass("missed", `missed: Nexus was not running at ${formatClock(iso(due), new Date(this.now))}`); return; }
+    const when = r.every !== undefined ? `its time ${formatClock(iso(due), new Date(this.now))} came` : `${r.after_queues} queues were done`;
     const state = loadProjectState(this.store);
     const previous = r.last && state.queues.find((q) => q.id === r.last!.queue);
     if (previous && !TERMINAL.has(previous.status)) { pass("previous", `its previous run ${previous.id} is still ${previous.status}`); return; }
@@ -174,7 +207,7 @@ export class Recurrer {
       queue = runQueueId(r.id, due, (x) => state.queues.some((q) => q.id.toLowerCase() === x.toLowerCase()));
       // The queue is the template filled for this run: the same content the standing approval's hash pinned (it was
       // resolved just now), with this run's id. The draft path checks it as any queue (its tags, its step ids).
-      const { status: _status, ...filled } = fillTemplate(resolved.template, r.params, queue);
+      const { status: _status, ...filled } = fillTemplate(resolved.template, r.params, queue, { maintenance: r.maintenance });
       applyDraft(this.store, { ...filled, status: "proposed" });
       const q = this.store.readQueue(queue);
       this.store.writeQueue({
@@ -182,7 +215,7 @@ export class Recurrer {
         approvals: [{ revision: q.revision, at, hash: revisionHash(q), standing: { id: r.id, approved_at: r.approval.at, hash: r.approval.hash } }],
       });
       this.store.writeRecurring({ ...base, last: { queue, at, due: iso(due) }, skipped: undefined });
-      this.deps.plan(queue, { after: [], by: "user", reason: `recurring ${r.id}: its time ${formatClock(iso(due), new Date(this.now))} came (standing approval of ${r.approval.at})` });
+      this.deps.plan(queue, { after: [], by: "user", reason: `recurring ${r.id}: ${when} (standing approval of ${r.approval.at})` });
     } catch (e) {
       const made = queue && this.store.queueIds().includes(queue);
       this.store.writeRecurring({ ...base, ...(made ? { last: { queue: queue!, at, due: iso(due) } } : {}), skipped: { due: iso(due), at, kind: "failed", reason: (e as Error).message } });

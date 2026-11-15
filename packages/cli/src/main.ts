@@ -11,7 +11,7 @@ import {
   NEXUS_ACTIVITIES, TAG_KINDS, TAG_ORIGINS, TAG_SIZES, tagIssues, tagProposalText, tagsText,
   STAT_DIMENSIONS, readTurns, sinceTime, statDimension, statsReport, statsText, stepStats,
   CHECK_METRIC, isCheckMetric, metricDef, metricDefText, metricRequestIssues, metricValueText,
-  TemplateError, fillTemplate, filledTemplateYaml, parseEvery, readTemplates, templateQueueId, type MergedTemplates,
+  TemplateError, fillTemplate, filledTemplateYaml, parseEvery, MAINTENANCE_MODES, type MaintenanceMode, readTemplates, templateQueueId, type MergedTemplates,
   type PictureRole, type ReviewItem, type Role, type Runtime, type SessionFile,
 } from "@nexus/protocol";
 import { checkRules, describeRules } from "@nexus/protocol/rules";
@@ -45,19 +45,22 @@ Agent commands (session from NEXUS_SESSION or --session):
   nexus ask <text> [--step <step>] [--option <text>]... [--recommend <option>] [--can-continue]
   nexus withdraw <qid> --reason <text>
   nexus context <text|-> [--topics a,b] [--files a,b] [--step <step>]
-  nexus report <queue> --file <path> --summary <text>
+  nexus report <queue> --file <path> --summary <text> [--findings <n>]   (a maintenance queue: how many findings)
   nexus log <text> [--level info|warn|error]
   nexus answer <qid> <text> [--escalate [--recommend <option>]] [--continue|--wait]     (orchestrator only)
   nexus queue draft <file.yaml|->                                 (orchestrator only) create or change a queue
-  nexus queue draft --template <id> [--set name=value]... [--id <queue-id>]
+  nexus queue draft --template <id> [--set name=value]... [--id <queue-id>] [--maintenance survey|fix_small]
                                       write a draft from a template into .nexus/drafts/<queue-id>.yaml (refused when a
                                       parameter without a default is missing); complete it, then upload it as above
-  nexus recurring set <id> --template <id> [--set name=value]... --every "<when>" [--reason <text>]
+  nexus recurring set <id> --template <id> [--set name=value]... (--every "<when>" | --after-queues <n>)
+                    [--maintenance survey|fix_small] [--reason <text>]
                                       (orchestrator only) a recurring queue: the template made into a queue and started
                                       at each time, while the user's standing approval holds; <when> is "daily HH:MM",
-                                      "<mon..sun> HH:MM" or "monthly <day> HH:MM" (local time). Any set takes the
-                                      standing approval away: the user approves it again (only the user approves,
-                                      pauses or removes one, in the dashboard)
+                                      "<mon..sun> HH:MM" or "monthly <day> HH:MM" (local time); --after-queues: after
+                                      every n queues of the project done (recurring runs not counted); --maintenance:
+                                      this project's mode for a maintenance template. Any set takes the standing
+                                      approval away: the user approves it again (only the user approves, pauses or
+                                      removes one, in the dashboard)
   nexus recurring list                the recurring queues: template, schedule, state, next and last run
   nexus template list                 the templates in effect: Nexus's, the user's global ones (<NEXUS_HOME>/templates/)
                                       and the project's (nexus-templates/ in its repository); a project's replaces a
@@ -136,7 +139,8 @@ const { values: o, positionals: args } = parseArgs({
     area: { type: "string" }, activity: { type: "string" }, activities: { type: "string" },
     project: { type: "string" }, since: { type: "string" }, by: { type: "string" },
     unit: { type: "string" }, show: { type: "string" }, target: { type: "string" }, "warn-above": { type: "string" }, "warn-below": { type: "string" },
-    set: { type: "string", multiple: true }, template: { type: "string" }, every: { type: "string" },
+    set: { type: "string", multiple: true }, template: { type: "string" }, every: { type: "string" }, "after-queues": { type: "string" },
+    maintenance: { type: "string" }, findings: { type: "string" },
     help: { type: "boolean", short: "h" }, key: { type: "string" }, note: { type: "string" }, before: { type: "string" }, now: { type: "boolean" }, ref: { type: "string" },
   },
 });
@@ -628,13 +632,15 @@ const commands: Record<string, () => void | Promise<void>> = {
     const file = normPath(need(o.file, "--file"));
     if (!existsSync(file)) throw new UsageError(`no such file: ${file}`);
     const summary = need(o.summary, "--summary");
+    const findings = o.findings === undefined ? undefined : Number(o.findings);
+    if (findings !== undefined && (!Number.isInteger(findings) || findings < 0)) throw new UsageError(`--findings takes a whole number of findings (0 or more), not ${o.findings}`);
     try { st.readQueue(queue); } catch { throw new UsageError(`unknown queue ${queue}`); }
     // The report lives in the queue's folder, where the dashboard and the run digest read it. Workers may not write
     // under .nexus with their file tools, so they write it anywhere and this command (its only writer) copies it in.
     const target = normPath(join(st.queueDir(queue), "report.md"));
     const same = process.platform === "win32" ? target.toLowerCase() === file.toLowerCase() : target === file;
     if (!same) writeFileSync(target, readFileSync(file));
-    emit(st, s, { type: "queue.report", queue, path: target, summary });
+    emit(st, s, { type: "queue.report", queue, path: target, summary, findings });
     // A source in the project's folder for reports (outside every working tree) is removed once copied; one anywhere
     // else is the worker's or the user's, and stays.
     const removed = !same && inReportFolder(st.readProject().id, file);
@@ -688,15 +694,22 @@ const commands: Record<string, () => void | Promise<void>> = {
         const next = r.next_at && r.status !== "broken" && r.status !== "paused" ? `; next ${r.next_at}` : "";
         const last = r.last ? `; last ${r.last.queue}` : "";
         const skipped = r.skipped ? `; at ${r.skipped.due} no run: ${r.skipped.reason}` : "";
-        console.log(`${r.id}: template ${r.template}${Object.keys(r.params).length ? ` (${Object.entries(r.params).map(([k, v]) => `${k}=${v}`).join(", ")})` : ""}, ${r.every}; ${status}${next}${last}${skipped}`);
+        const schedule = r.every ?? `after ${r.after_queues} queues (${r.counted ?? 0} counted)`;
+        const mode = r.maintenance ? `, maintenance ${r.maintenance}` : "";
+        console.log(`${r.id}: template ${r.template}${Object.keys(r.params).length ? ` (${Object.entries(r.params).map(([k, v]) => `${k}=${v}`).join(", ")})` : ""}, ${schedule}${mode}; ${status}${next}${last}${skipped}`);
       }
       return;
     }
-    if (sub !== "set") throw new UsageError("nexus recurring set <id> --template <id> [--set name=value]... --every \"<when>\" [--reason <text>] | nexus recurring list");
+    if (sub !== "set") throw new UsageError("nexus recurring set <id> --template <id> [--set name=value]... (--every \"<when>\" | --after-queues <n>) [--maintenance survey|fix_small] [--reason <text>] | nexus recurring list");
     const st = store(); const s = orchestrator(st);
-    const every = need(o.every, "--every \"daily HH:MM\" | \"<mon..sun> HH:MM\" | \"monthly <day> HH:MM\"");
-    try { parseEvery(every); } catch (e) { throw new UsageError((e as Error).message); }
-    const e = emit(st, s, { type: "recurring.set", recurring: need(args[2], "<id>"), template: need(o.template, "--template <id>"), params: setValues(), every, reason: o.reason?.trim() || undefined });
+    if ((o.every === undefined) === (o["after-queues"] === undefined)) throw new UsageError("give --every \"daily HH:MM\" | \"<mon..sun> HH:MM\" | \"monthly <day> HH:MM\", or --after-queues <n>: one of them");
+    if (o.every !== undefined) { try { parseEvery(o.every); } catch (e) { throw new UsageError((e as Error).message); } }
+    const afterQueues = o["after-queues"] === undefined ? undefined : Number(o["after-queues"]);
+    if (afterQueues !== undefined && (!Number.isInteger(afterQueues) || afterQueues < 1 || afterQueues > 1000)) throw new UsageError(`--after-queues takes a whole number from 1 to 1000, not ${o["after-queues"]}`);
+    const e = emit(st, s, {
+      type: "recurring.set", recurring: need(args[2], "<id>"), template: need(o.template, "--template <id>"), params: setValues(),
+      every: o.every, after_queues: afterQueues, maintenance: maintenanceMode(), reason: o.reason?.trim() || undefined,
+    });
     report(waitApplied(st, s.id, e.id));
   },
 
@@ -966,6 +979,13 @@ function template(templates: MergedTemplates["templates"], problems: MergedTempl
   throw new UsageError(bad.length ? `template ${id} cannot be used: ${bad.map((p) => `${p.path}: ${p.problem}`).join("; ")}` : `no template ${id} (nexus template list)`);
 }
 
+/** --maintenance survey|fix_small, checked. */
+function maintenanceMode(): MaintenanceMode | undefined {
+  if (o.maintenance === undefined) return undefined;
+  if (!MAINTENANCE_MODES.includes(o.maintenance as MaintenanceMode)) throw new UsageError(`--maintenance is survey or fix_small, not ${o.maintenance}`);
+  return o.maintenance as MaintenanceMode;
+}
+
 /** The --set name=value pairs, by name; refused: one without a name or "=", or a name given twice. */
 function setValues(): Record<string, string> {
   const given: Record<string, string> = {};
@@ -997,7 +1017,7 @@ function draftFromTemplate(): void {
   const file = draftFile(id);
   if (existsSync(file)) throw new UsageError(`${normPath(file)} exists already: give another --id, or remove that draft first`);
   let queue: Record<string, unknown>;
-  try { queue = fillTemplate(t, given, id); } catch (e) {
+  try { queue = fillTemplate(t, given, id, { maintenance: maintenanceMode() }); } catch (e) {
     if (e instanceof TemplateError) throw new UsageError(e.message);
     throw e;
   }

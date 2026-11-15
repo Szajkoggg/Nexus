@@ -48,12 +48,18 @@ test("the orchestrator's set goes to the server as an event with the template, t
   assert.deepEqual(e && { recurring: e.recurring, template: e.template, params: e.params, every: e.every, reason: e.reason },
     { recurring: "weekly", template: "maintenance", params: { scope: "dependencies" }, every: "mon 03:00", reason: "the user asked" });
   assert.equal(JSON.stringify(e).includes("approv"), false, "no approval in it");
+  assert.match(await x.set("every5", "--template", "maintenance", "--after-queues", "5", "--maintenance", "fix_small"), /^ok: recurring every5 set/);
+  const e5 = x.store.readEvents("o").entries.findLast((y) => y.type === "recurring.set");
+  assert.deepEqual(e5 && { every: e5.every, after_queues: e5.after_queues, maintenance: e5.maintenance }, { every: undefined, after_queues: 5, maintenance: "fix_small" });
 });
 
 test("a bad schedule, a worker's set, and approving, pausing or removing from any session are refused", () => {
   const x = setup();
   assert.match(x.run("o", "recurring", "set", "R", "--template", "spike", "--every", "weekly 03:00").err, /the schedule is "daily HH:MM"/);
-  assert.match(x.run("o", "recurring", "set", "R", "--template", "spike").err, /missing --every/);
+  assert.match(x.run("o", "recurring", "set", "R", "--template", "spike").err, /give --every .* or --after-queues <n>: one of them/);
+  assert.match(x.run("o", "recurring", "set", "R", "--template", "spike", "--every", "daily 03:00", "--after-queues", "5").err, /one of them/);
+  assert.match(x.run("o", "recurring", "set", "R", "--template", "spike", "--after-queues", "0").err, /--after-queues takes a whole number from 1 to 1000/);
+  assert.match(x.run("o", "recurring", "set", "R", "--template", "maintenance", "--after-queues", "5", "--maintenance", "all").err, /--maintenance is survey or fix_small/);
   assert.match(x.run("w", "recurring", "set", "R", "--template", "spike", "--every", "daily 03:00").err, /only an orchestrator session may do this/);
   for (const [sub, word] of [["approve", "approving"], ["pause", "pausing or resuming"], ["resume", "pausing or resuming"], ["remove", "removing"]]) {
     for (const session of ["o", "w"]) assert.match(x.run(session, "recurring", sub!, "R").err, new RegExp(`${word} a recurring queue is the user's, in the dashboard`));

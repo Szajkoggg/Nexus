@@ -548,6 +548,12 @@ const QueueShape = z.object({
    * orchestrator in the draft; part of what an approval pins when true; once the queue has started, it stays.
    */
   coding: z.boolean().optional(),
+  /**
+   * A maintenance queue's mode (from its template, PROTOCOL.md "Recurring queues"): `survey` only looks and reports
+   * (Nexus stops a run that leaves a commit or a changed tracked file), `fix_small` also fixes the small findings its
+   * template names. Part of what an approval pins when set.
+   */
+  maintenance: z.enum(["survey", "fix_small"]).optional(),
   /** The tags of the queue's steps that set none of their own (TagFields); part of what an approval pins when set. */
   ...TagFields,
   /**
@@ -694,7 +700,11 @@ export const Event = z.discriminatedUnion("type", [
     ...base, type: z.literal("context.summary"), queue: Id.optional(), step: Id.optional(),
     text: z.string(), topics: z.array(z.string()).default([]), files: z.array(z.string()).default([]),
   }),
-  z.object({ ...base, type: z.literal("queue.report"), queue: Id, path: z.string(), summary: z.string() }),
+  /**
+   * The queue's report (`nexus report`), copied into the queue's folder (`path`). `findings`: how many findings a
+   * maintenance run's report has (`--findings`); the server tells the orchestrator once when there are any.
+   */
+  z.object({ ...base, type: z.literal("queue.report"), queue: Id, path: z.string(), summary: z.string(), findings: z.number().int().nonnegative().optional() }),
   z.object({ ...base, type: z.literal("change.proposed"), queue: Id, patch: z.unknown(), reason: z.string() }),
   z.object({ ...base, type: z.literal("queue.drafted"), queue: Id, definition: z.unknown() }),
   /**
@@ -752,7 +762,8 @@ export const Event = z.discriminatedUnion("type", [
    */
   z.object({
     ...base, type: z.literal("recurring.set"), recurring: Id, template: Id, params: z.record(z.string(), z.string()).default({}),
-    every: z.string().min(1), reason: z.string().optional(),
+    every: z.string().min(1).optional(), after_queues: z.number().int().min(1).max(1000).optional(),
+    maintenance: z.enum(["survey", "fix_small"]).optional(), reason: z.string().optional(),
   }),
   z.object({ ...base, type: z.literal("metric.recorded"), ...qs, name: z.string().min(1), value: z.number(), unit: z.string(), commit: z.string().optional() }),
   z.object({ ...base, type: z.literal("log"), level: z.enum(["info", "warn", "error"]), text: z.string() }),
@@ -1234,8 +1245,20 @@ export const RecurringFile = z.object({
   /** The template's id, resolved through the three layers at each use. */
   template: Id,
   params: z.record(z.string(), z.string()).default({}),
-  /** When: `daily HH:MM`, `<mon..sun> HH:MM` or `monthly <day> HH:MM`, in the server machine's local time. */
-  every: z.string().min(1),
+  /**
+   * When: `every` at a time (`daily HH:MM`, `<mon..sun> HH:MM` or `monthly <day> HH:MM`, in the server machine's local
+   * time), or `after_queues`: after every N queues of the project that are done (the recurring queues' own runs and
+   * removed queues not counted). Exactly one of them.
+   */
+  every: z.string().min(1).optional(),
+  after_queues: z.number().int().min(1).max(1000).optional(),
+  /**
+   * After N queues: the project's queues that were done at the last count's start (a run made, the approval, a set, a
+   * count that passed without a run); those done since are counted.
+   */
+  baseline: z.array(Id).optional(),
+  /** The maintenance mode for this project, over the template's own (`maintenance:` in the template). */
+  maintenance: z.enum(["survey", "fix_small"]).optional(),
   /** Who set it last (the orchestrator, or the user), and why. */
   set_by: z.enum(["orchestrator", "user"]),
   reason: z.string().optional(),

@@ -67,30 +67,42 @@ function stable(x: unknown): string {
   return JSON.stringify(x);
 }
 
+/** A recurring's schedule: at a time (`every`) or after N queues (`after_queues`). */
+type Schedule = Pick<RecurringFile, "every" | "after_queues">;
+
+/**
+ * The schedule in its one written form: "mon 03:00", or "after 5 queues". Throws when it is neither, or both, or the
+ * time's form is wrong.
+ */
+export function scheduleText(r: Schedule): string {
+  if ((r.every === undefined) === (r.after_queues === undefined)) throw new Error("a recurring queue runs at a time (every) or after N queues (after_queues): one of them");
+  return r.every !== undefined ? everyText(parseEvery(r.every)) : `after ${r.after_queues} queue${r.after_queues === 1 ? "" : "s"}`;
+}
+
 /**
  * The standing approval's hash: the resolved, filled template (after the three layers, filled with the recurring's
- * id as the queue id), the parameters' values, the schedule and `coding`. A change of any of them (a project template
- * that replaces a shipped one, a deploy that changes the shipped one) gives another hash, and the approval no longer
- * holds.
+ * id as the queue id), the parameters' values, the schedule, the effective maintenance mode and `coding`. A change of
+ * any of them (a project template that replaces a shipped one, a deploy that changes the shipped one, survey to
+ * fix_small) gives another hash, and the approval no longer holds.
  */
-export function recurringHash(queue: Record<string, unknown>, r: Pick<RecurringFile, "params" | "every">): string {
+export function recurringHash(queue: Record<string, unknown>, r: Pick<RecurringFile, "params"> & Schedule): string {
   return "sha256:" + createHash("sha256").update(stable({
-    queue, params: r.params, every: everyText(parseEvery(r.every)), coding: queue.coding === true,
+    queue, params: r.params, schedule: scheduleText(r), maintenance: queue.maintenance ?? null, coding: queue.coding === true,
   })).digest("hex");
 }
 
 /** What a recurring resolves to now: its template and filled queue with the hash, or why it cannot be used. */
 export type Resolved = { template: Template; queue: Record<string, unknown>; hash: string } | { problem: string };
 
-export function resolveRecurring(r: Pick<RecurringFile, "id" | "template" | "params" | "every">, merged: MergedTemplates): Resolved {
+export function resolveRecurring(r: Pick<RecurringFile, "id" | "template" | "params" | "maintenance"> & Schedule, merged: MergedTemplates): Resolved {
   const t = merged.templates.find((x) => x.id === r.template);
   if (!t) {
     const bad = merged.problems.find((p) => p.path.replace(/\\/g, "/").split("/").at(-1)!.replace(/\.ya?ml$/i, "") === r.template);
     return { problem: bad ? `template ${r.template} cannot be used: ${bad.problem}` : `no template ${r.template}` };
   }
   try {
-    parseEvery(r.every);
-    const queue = fillTemplate(t, r.params, r.id);
+    scheduleText(r);
+    const queue = fillTemplate(t, r.params, r.id, { maintenance: r.maintenance });
     return { template: t, queue, hash: recurringHash(queue, r) };
   } catch (e) { return { problem: (e as Error).message }; }
 }
@@ -120,12 +132,31 @@ export function recurringStatus(r: RecurringFile, resolved: Resolved, lastOpen: 
   return lastOpen ? "waiting_previous" : "approved";
 }
 
-/** The time the next run is due after `nowMs` (ms), by the schedule; undefined when the schedule cannot be read. */
+/** The time the next run is due after `nowMs` (ms), by a schedule at a time; undefined for another or a bad one. */
 function nextRun(r: Pick<RecurringFile, "every" | "handled" | "created_at">, nowMs: number): number | undefined {
+  if (r.every === undefined) return undefined;
   try {
     const base = Math.max(nowMs, Date.parse(r.handled ?? r.created_at));
     return nextOccurrence(parseEvery(r.every), base);
   } catch { return undefined; }
+}
+
+/** What counting needs of a queue: its id, its status, and its approvals (a recurring's run has one marked standing). */
+export interface CountedQueue { id: string; status: string; approvals: readonly { standing?: unknown }[] }
+
+/** A queue a recurring made: its approval came from a standing approval. */
+const recurringRun = (q: Pick<CountedQueue, "approvals">): boolean => q.approvals.some((a) => !!a.standing);
+
+/** The project's queues done now that are not recurring runs: the ones an "after N queues" schedule counts. */
+export const countable = (queues: readonly CountedQueue[]): string[] => queues.filter((q) => q.status === "done" && !recurringRun(q)).map((q) => q.id);
+
+/**
+ * How many queues an "after N queues" recurring has counted: the project's queues done now, not made by any recurring
+ * and not done at the count's start (its `baseline`). A removed queue is not there, so it does not count.
+ */
+export function countedQueues(r: Pick<RecurringFile, "baseline">, queues: readonly CountedQueue[]): number {
+  const before = new Set(r.baseline ?? []);
+  return countable(queues).filter((id) => !before.has(id)).length;
 }
 
 /** A recurring queue as the state shows it: its file, its state now, its hash, the template's title and the next time. */
@@ -138,21 +169,26 @@ export interface RecurringView extends RecurringFile {
   template_title?: string;
   /** The layer its template comes from now. */
   template_layer?: Template["layer"];
-  /** When the next run is due (ISO), by its schedule. */
+  /** When the next run is due (ISO), by a schedule at a time. */
   next_at?: string;
+  /** After N queues: how many it has counted so far. */
+  counted?: number;
 }
 
 /**
  * The project's recurring queues as the state shows them (`files`: read from .nexus/recurring/), resolved through the
- * templates in effect; `open(queueId)` says whether a queue is still open (not done or cancelled, and there).
+ * templates in effect, with the project's `queues` (a recurring's last run is open while it is there and neither done
+ * nor cancelled).
  */
-export function recurringViews(files: readonly RecurringFile[], merged: MergedTemplates, open: (queueId: string) => boolean, nowMs: number): RecurringView[] {
+export function recurringViews(files: readonly RecurringFile[], merged: MergedTemplates, queues: readonly CountedQueue[], nowMs: number): RecurringView[] {
+  const open = (id: string) => queues.some((q) => q.id === id && q.status !== "done" && q.status !== "cancelled");
   return files.map((r) => {
     const resolved = resolveRecurring(r, merged);
     const next = nextRun(r, nowMs);
     return {
       ...r,
       status: recurringStatus(r, resolved, !!r.last && open(r.last.queue)),
+      ...(r.after_queues !== undefined ? { counted: countedQueues(r, queues) } : {}),
       ...("problem" in resolved ? { problem: resolved.problem } : { hash: resolved.hash, template_title: resolved.template.title, template_layer: resolved.template.layer }),
       ...(next !== undefined ? { next_at: new Date(next).toISOString() } : {}),
     };

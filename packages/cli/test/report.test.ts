@@ -73,3 +73,12 @@ test("a report already in the queue's folder still works; an unknown queue or a 
   assert.throws(() => report("Q", "--file", "missing.md", "--summary", "s"), /no such file/);
   assert.ok(!existsSync(join(store.dir, "queues", "X")));
 });
+
+test("a maintenance queue's report gives its number of findings; a number that is not a whole one is refused", () => {
+  const { root, store, report } = setup();
+  mkdirSync(join(root, "tmp/reports"), { recursive: true });
+  writeFileSync(join(root, "tmp/reports/Q.md"), "# Findings\n");
+  report("Q", "--file", "tmp/reports/Q.md", "--summary", "two findings", "--findings", "2");
+  assert.equal(loadProjectState(store).queues[0]!.report?.findings, 2);
+  for (const bad of ["-1", "1.5", "some"]) assert.throws(() => report("Q", "--file", "tmp/reports/Q.md", "--summary", "x", `--findings=${bad}`), /--findings takes a whole number of findings/);
+});

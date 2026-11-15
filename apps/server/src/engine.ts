@@ -2,7 +2,7 @@
 // messages and answers to live sessions, and records what the agent does. See docs/DESIGN.md, "Nexus drives the
 // queue, step by step". All of its state is in files (run.yaml, runtime.json, delivered.jsonl, activity.jsonl);
 // the processes are the only thing a restart loses, and a restart pauses the runs that had one.
-import { git as gitRead, recordStepEnd, recordStepStart } from "./gitinfo.ts";
+import { checkoutOf, git as gitRead, recordStepEnd, recordStepStart } from "./gitinfo.ts";
 import { AcceptedPusher } from "./accepted.ts";
 import type { GitRunner } from "./deploy.ts";
 import type { ChildProcess } from "node:child_process";
@@ -67,6 +67,9 @@ const TURN_SETTLE_MS = 300;
 
 /** After the engine starts, how long before it resumes what an update held, and looks at the planned starts. */
 const STARTUP_MS = 1500;
+
+/** The condition under which Nexus stops a survey run that left work (Engine.surveyLeftWork). */
+export const SURVEY_CONDITION = "Nexus: a survey run leaves no commit and no changed tracked file";
 
 /** A step with one of these has its outcome: its round of commits ends with the turn that gave it. */
 const OUTCOME: ReadonlySet<string> = new Set(["done", "review", "failed", "stopped"]);
@@ -159,6 +162,8 @@ export class Engine implements Member {
    * whether the wait is over (`expired`: the usual rule applies until the work ends or the step opens again).
    */
   private readonly backgroundWaits = new Map<string, { step: string; since: number; expired?: boolean }>();
+  /** The steps of survey runs checked for left work (surveyLeftWork), by queue, step and the time it ended. */
+  private readonly surveyChecked = new Set<string>();
   /** Worktree setup commands running, by queue (src/worktree.ts, runSetup). */
   private readonly setups = new Map<string, ChildProcess | null>();
 
@@ -510,6 +515,8 @@ export class Engine implements Member {
     for (const l of this.host.all()) this.deliverInbox(state, l);
     for (const q of state.queues) if (runCounted(q.run)) this.advance(q.id, state);
     for (const q of state.queues) if (q.run?.state === "approval_wait" && q.approved) this.continueApproved(q.id);
+    // Recurring queues after N queues: a queue that got done may complete a count.
+    if (!this.stopped && !this.draining) this.recurrer.check(state);
     this.checkStarts();
   }
 
@@ -600,6 +607,8 @@ export class Engine implements Member {
     if (this.restarting.has(run.session)) return; // the process restarts with another model or effort
     let live = this.host.get(run.session);
     const current = run.step ? q.steps.find((s) => s.id === run.step) : undefined;
+    // A survey step that reported its end is checked at once, while its turn may still be going and before its review.
+    if (current && this.surveyLeftWork(queueId, q, current)) return;
     if ((!live || live.proc.state === "exited") && this.exitedInReview.has(run.session)) {
       // The process ended after the step's report, while the step waited for its review (see the exit handler): the
       // review decides. Still waiting: nothing to run. Then nothing left: the run is finished. Else (the next step, a
@@ -1016,6 +1025,35 @@ export class Engine implements Member {
     if (!run || run.state === "halted") return;
     this.clearTimer(queueId);
     this.writeRun(queueId, toHalted(run, reason, failure));
+  }
+
+  /**
+   * A survey run (a maintenance queue in survey mode) only looks and reports: when one of its steps reports its end
+   * (done, or waiting for its review), Nexus checks once that the step left no commit since its round began and no
+   * changed tracked file in the queue's checkout (untracked files do not count, as at nexus step done). Otherwise it
+   * stops the queue, under its own condition (recorded in the user's session, which the server writes), before the
+   * step's review; the run halts as at any stop. True when it stopped it.
+   */
+  private surveyLeftWork(queueId: string, q: QueueView, step: StepView): boolean {
+    if (q.maintenance !== "survey" || (step.status !== "done" && step.status !== "review")) return false;
+    const key = `${queueId}:${step.id}:${step.finished_at ?? ""}`;
+    if (this.surveyChecked.has(key)) return false;
+    this.surveyChecked.add(key);
+    const cwd = checkoutOf(this.store, q);
+    const head = cwd ? gitRead(cwd, ["rev-parse", "HEAD"]) : undefined;
+    if (!cwd || head === undefined) return false; // not a git repository: nothing to check
+    const start = this.store.readGit(queueId)?.steps[step.id]?.at(-1)?.start;
+    const commits = start && start !== head ? Number(gitRead(cwd, ["rev-list", "--count", `${start}..HEAD`]) ?? 1) : 0;
+    const changed = (gitRead(cwd, ["diff", "--name-only", "HEAD"]) ?? "").split(/\r?\n/).filter((l) => l.trim());
+    if (!commits && !changed.length) return false;
+    const left = [
+      commits ? `${commits} commit${commits === 1 ? "" : "s"} since step ${step.id} began` : "",
+      changed.length ? `changed tracked files (${changed.slice(0, 5).join(", ")}${changed.length > 5 ? ", ..." : ""})` : "",
+    ].filter(Boolean).join(" and ");
+    const user = ensureUserSession(this.store);
+    // The stopped queue halts its run as any stop does, once the step's turn is over.
+    this.store.appendEvent({ v: 1, id: newId(), at: now(), session: user.id, type: "queue.stop", queue: queueId, step: step.id, condition: SURVEY_CONDITION, reason: `the survey run left ${left}` });
+    return true;
   }
 
   /** The queue has no step left: every step is done or skipped, or rejected by the user and released (stepClosed). */

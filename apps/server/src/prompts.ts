@@ -104,7 +104,8 @@ export function stepOpening(o: {
     answers.length ? `\nAnswers to your questions about this step:\n${answers.map((x) => `- "${x.text}": ${x.answers.at(-1)?.text}`).join("\n")}` : "",
     languages ? `\n${languages}` : "",
     `\nBegin with \`nexus step start ${step.id}\`${mode === "continue" ? " (again is fine)" : ""}. End with \`nexus step done ${step.id} --summary "…"\`, \`nexus step failed\` or \`nexus stop\`, then write \`nexus context\` and end your turn. Do not start another step.`,
-    last ? `\nThis is the queue's last step. After it is done, write a short report of the whole queue (what each step achieved against its acceptance, checks, review material, open questions, a proposed next step) to ${report} (a folder for reports outside the working tree and any repository: never write it into the working tree, it would block the cleanup of a worktree) and register it with \`nexus report ${q.id} --file ${report} --summary "…"\`, which copies it into the queue's folder and removes it from there.` : "",
+    last ? `\nThis is the queue's last step. After it is done, write a short report of the whole queue (what each step achieved against its acceptance, checks, review material, open questions, a proposed next step) to ${report} (a folder for reports outside the working tree and any repository: never write it into the working tree, it would block the cleanup of a worktree) and register it with \`nexus report ${q.id} --file ${report} --summary "…"${q.maintenance ? " --findings <the number of findings>" : ""}\`, which copies it into the queue's folder and removes it from there.${q.maintenance ? ` This is a maintenance queue (${q.maintenance}): give the number of findings with --findings (0 when there were none); Nexus tells the orchestrator only when there are some.` : ""}` : "",
+    q.maintenance === "survey" ? "\nThis is a survey: change nothing and commit nothing. When a step ends, Nexus checks that it left no commit and no changed tracked file, and stops the queue otherwise." : "",
   ].filter(Boolean).join("\n");
 }
 
@@ -703,6 +704,18 @@ export function runEndNotice(q: QueueView, r: { state: string; step?: string; re
   return r.state === "halted"
     ? { fact: `The run of queue ${q.id} halted ${r.step ? `at step ${r.step}` : "before it opened a step"}: ${r.reason ?? "no reason given"}.`, todo: "Tell the user briefly, with what you propose." }
     : { fact: `Queue ${q.id} finished.${q.report ? ` Report: ${q.report.summary}` : ""}`, todo: "Tell the user briefly, with what you propose next." };
+}
+
+/**
+ * A maintenance run (a recurring's survey or fix_small queue) finished with findings: told once, with the report's path,
+ * so that the orchestrator proposes a queue from it. A run without findings closes quietly (no notice at all).
+ */
+export function maintenanceFindingsNotice(q: QueueView): Notice {
+  const n = q.report?.findings ?? 0;
+  return {
+    fact: `Maintenance queue ${q.id} (${q.maintenance}) finished with ${n} finding${n === 1 ? "" : "s"}. Report: ${q.report?.path ?? "none"}`,
+    todo: `Read the report and propose to the user a queue that deals with the findings${q.maintenance === "fix_small" ? " it did not fix itself" : ""} (a draft they approve), or say why none is needed.`,
+  };
 }
 
 /** What the orchestrator needs to review a step: its acceptance, the checks and material of this round, its commits. */
