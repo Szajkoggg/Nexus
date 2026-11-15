@@ -36,8 +36,9 @@ Nexus is developed with Nexus. The agents working on this repository are run by 
   the user reply in the language the user writes in.
 - **Commits**: on `main` in this checkout, one or more per step, each with a subject line and a body that says why.
   Stage explicit paths (never `git add -A`). Do not push.
-- **Before every commit**: `npm run typecheck`, `npm run lint` and `npm test` pass. If the dashboard changed:
-  `npm run build -w @nexus/web`. Fix a lint finding rather than silence it (docs/DESIGN.md, "Static analysis").
+- **Before every commit**: `npm run typecheck`, `npm run lint` and the tests of the files you changed pass; the whole
+  suite (`npm test`) runs at the end of a step, as the queue's checks, not before each commit. If the dashboard
+  changed: `npm run build -w @nexus/web`. Fix a lint finding rather than silence it (docs/DESIGN.md, "Static analysis").
 - **Tests**: behaviour in the engine, orchestrator, conversations or lifecycle gets a test against the fake runtimes
   (`apps/server/test/fake-claude.ts`, `fake-codex.ts`, steered by `fake-behaviour.ts`); protocol logic gets a unit
   test. Tests never call a model.
