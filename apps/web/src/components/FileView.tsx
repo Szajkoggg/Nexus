@@ -87,10 +87,10 @@ export function FileView({ project, root, local, path, line, onClose }: {
   // JSON that does not parse (or is indented already) has no other view than its source.
   const pretty = formatted === "json" && file.kind === "text" ? formatJson(text) : undefined;
   const switchable = file.kind === "text" && (formatted === "markdown" || formatted === "table" || (pretty !== undefined && pretty !== text));
+  const showFormatted = switchable && !source;
   // The line count of what is shown: the indented JSON's when that is what shows.
-  const shownLines = switchable && !source && pretty !== undefined ? pretty.split(LINE_END).length : count;
+  const shownLines = showFormatted && pretty !== undefined ? pretty.split("\n").length : count;
   const meta = [folder, where, file.kind === "text" && !where ? t("file.lines", { count: shownLines }) : undefined].filter(Boolean).join(" · ");
-  const shownAs = FORMATTED_LABEL[formatted ?? "markdown"];
 
   return createPortal(
     <div role="dialog" aria-label={t("file.dialog")} className="fixed inset-0 z-[60] flex flex-col bg-canvas pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
@@ -101,7 +101,7 @@ export function FileView({ project, root, local, path, line, onClose }: {
         </div>
         {switchable && (
           <div className="flex shrink-0 gap-0.5 rounded-lg border border-line bg-surface-2 p-0.5" role="group" aria-label={t("file.show")}>
-            {([[false, t(shownAs)], [true, t("file.source")]] as const).map(([s, label]) => (
+            {([[false, t(FORMATTED_LABEL[formatted!])], [true, t("file.source")]] as const).map(([s, label]) => (
               <button key={label} onClick={() => setSource(s)} aria-pressed={source === s}
                 className={`rounded-md px-3 py-1 text-xs max-lg:min-h-9 ${source === s ? "bg-surface-4 font-semibold text-fg" : "text-fg-2 hover:text-fg"}`}>{label}</button>
             ))}
@@ -127,7 +127,7 @@ export function FileView({ project, root, local, path, line, onClose }: {
       )}
       {file.kind === "pdf" && <Note>{t("file.pdf", { size: sizeText(file.size) })} <a href={url} target="_blank" rel="noreferrer" className="text-accent hover:underline">{t("file.openPdf")}</a></Note>}
       {file.kind === "binary" && <Note>{t("file.binary", { size: sizeText(file.size) })} <a href={url} download className="text-accent hover:underline">{t("file.download")}</a></Note>}
-      {file.kind === "text" && (!switchable || source ? <Code path={path} text={text} line={line} />
+      {file.kind === "text" && (!showFormatted ? <Code path={path} text={text} line={line} />
         : formatted === "markdown" ? <MarkdownFile project={project} path={path} text={text} line={line} />
         : formatted === "table" ? <TableFile path={path} text={text} raw={url} />
         : <Code path={path} text={pretty!} />)}
@@ -135,8 +135,6 @@ export function FileView({ project, root, local, path, line, onClose }: {
     document.body,
   );
 }
-
-const LINE_END = String.fromCharCode(10);
 
 /** What the formatted view of a file is called beside "Source". */
 const FORMATTED_LABEL = { markdown: "file.rendered", json: "file.formatted", table: "file.table" } as const;
