@@ -31,7 +31,8 @@ export function StepDetail({ project, queue, step, onClose, of }: PanelProps & {
   const id = project.project.id;
   const questions = queue.questions.filter((q) => q.step === step.id);
   const phone = usePhone();
-  const { live, forOrchestrator, notesOpen, orchestratorAsks, reviewing, asking, questionFirst } = stepLayout(step, questions, phone);
+  // A step of a finished or cancelled queue is only read: no level, note, message, review or answer (details.ts).
+  const { readOnly, live, forOrchestrator, notesOpen, orchestratorAsks, reviewing, asking, questionFirst } = stepLayout(step, questions, phone, queue);
   const session = live ? project.sessions.find((s) => s.id === step.session) : undefined;
   // Review images open in the in-app viewer, a layer above the step (Back closes it); other items as links.
   const { pairs, images } = stepPictures(step, (path) => fileUrl(id, path));
@@ -56,9 +57,9 @@ export function StepDetail({ project, queue, step, onClose, of }: PanelProps & {
   const viewer = shown !== undefined && images.length > 0 && (
     <ImageViewer images={images} index={shown} onIndex={(i) => nav.open(`viewer:${i}`)} onClose={() => nav.close("viewer")}
       back={step.id} context={`${project.project.name} · ${queue.id} · ${step.id} ${step.title}`}
-      footer={(i) => <PictureActions key={pairs[i]!.item.path} project={id} queue={queue} step={step} path={pairs[i]!.item.path!} src={images[i]!.src} />} />
+      footer={readOnly ? undefined : (i) => <PictureActions key={pairs[i]!.item.path} project={id} queue={queue} step={step} path={pairs[i]!.item.path!} src={images[i]!.src} />} />
   );
-  const notes = <Notes {...writes} forOrchestrator={forOrchestrator} notesOpen={notesOpen} />;
+  const notes = (!readOnly || step.notes.length > 0) && <Notes {...writes} forOrchestrator={forOrchestrator} notesOpen={notesOpen} readOnly={readOnly} />;
   const refusals = <StepRefusals project={project} queue={queue.id} step={step.id} />;
   const changes = <Changes entries={queue.changes.filter((c) => c.step === step.id)} queue={queue} />;
   // Its own session, or the run's while the run is at this step.
@@ -95,7 +96,7 @@ export function StepDetail({ project, queue, step, onClose, of }: PanelProps & {
         status={<>
           <StatusBadge status={pendingProvisional(step) ? "review" : step.status} label={reviewLabel(step) ?? provisionalWord(step)} />
           {/* Until its review is over the user may change the step's level, also after approval (no new approval). */}
-          {levelChangeable(step)
+          {levelChangeable(step) && !readOnly
             ? <LevelPicker project={id} queue={queue.id} step={step} away={project.away} />
             : (
               <span title={levelTitle(step.level)} className="inline-flex items-center gap-1">

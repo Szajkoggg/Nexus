@@ -5,7 +5,7 @@ import type { StatusChange } from "@nexus/protocol";
 import { stepValuesText } from "@nexus/protocol/steps";
 import { act, enc, fileUrl, projectUrl, type ProjectState, type QueueView } from "../../api.ts";
 import { needsApproval, levelWords, queueChecks } from "../../approval.ts";
-import { approvalHistory, approvalWord, canWithdrawApproval } from "../../details.ts";
+import { approvalHistory, approvalWord, canWithdrawApproval, queueOver } from "../../details.ts";
 import { draftKey } from "../../drafts.ts";
 import { rich, t, type Key } from "../../i18n.ts";
 import { queueStatus } from "../../queueStatus.ts";
@@ -13,6 +13,8 @@ import { needsWorkChoice, stopDecision, type LeftState, type WorkChoice } from "
 import { AskButton, Checks, CompactSteps, SettingsLine, useApprove, useCtrlEnter } from "../Approval.tsx";
 import { SkipClosingBox, closingNotRun, stepMark } from "../Closing.tsx";
 import { LevelPicker, levelChangeable } from "../Levels.tsx";
+import { nav } from "../../nav.ts";
+import { StepRow } from "../QueueRow.tsx";
 import { RunControls } from "../Run.tsx";
 import { StopBox, stopVersion, useContinue, useLeft } from "../Stop.tsx";
 import { ActionBar, Button, Composer, Expandable, Markdown, PanelBody, PanelHeader, Section, StatusBadge, TimeAgo, statusWord, type MenuEntry } from "../ui.tsx";
@@ -74,10 +76,16 @@ export function QueueDetail({ project, queue, onClose, of, chat = [], onFull }: 
           <a className="text-sm text-accent underline" href={fileUrl(id, queue.report.path)} target="_blank" rel="noreferrer">{t("details.openReport")}</a>
         </Section>
       )}
+      {/* A finished or cancelled queue is no longer in the queue list: its steps are here, each opening read-only. */}
+      {queueOver(queue) && (
+        <Section title={t("details.steps")}>
+          <div className="-mx-2">{queue.steps.map((s) => <StepRow key={s.id} step={s} queue={queue} onStep={() => nav.item(id, queue.id, s.id)} />)}</div>
+        </Section>
+      )}
       {queue.questions.length > 0 && <Section title={t("details.questions")}>{queue.questions.map((q) => <Question key={q.qid} q={q} project={id} />)}</Section>}
 
       {!approving && <OwnValues queue={queue} />}
-      {!approving && <StepLevels project={project} queue={queue} />}
+      {!approving && !queueOver(queue) && <StepLevels project={project} queue={queue} />}
 
       {history.length > 0 && <Section title={t("details.approval")}>
         {history.map((a, i) => (
@@ -132,7 +140,9 @@ function QueueBar({ project, queue, left, work, needsChoice }: {
   const [skipClosing, setSkipClosing] = useState(false);
   // The approval (Approval.tsx, the same in the full view): its words, Keep or Discard, what it pins; Ctrl+Enter.
   const a = useApprove({ project: id, queue, left, work, reloaded });
-  useCtrlEnter(!queue.approved, a.submit);
+  // A finished or cancelled queue is only read: no approval, no review policy.
+  const over = queueOver(queue);
+  useCtrlEnter(!queue.approved && !over, a.submit);
   const [error, setError] = useState<string>();
   const canWithdraw = canWithdrawApproval(queue);
   const [withdrawOpen, setWithdrawOpen] = useState(false);
@@ -148,26 +158,28 @@ function QueueBar({ project, queue, left, work, needsChoice }: {
   const policy = queue.review_level ? levelWords(queue.review_level) : projectDefault;
 
   const menu: MenuEntry[] = [
-    ...(!queue.approved ? a.menu : []),
+    ...(!queue.approved && !over ? a.menu : []),
     ...(canWithdraw && !withdrawOpen ? [{ label: t("details.withdraw.menu"), danger: true, onSelect: () => setWithdrawOpen(true) }] : []),
-    ...(!policyOpen ? [{ label: t("details.level.menu", { level: policy }), onSelect: () => setPolicyOpen(true) }] : []),
+    ...(!policyOpen && !over ? [{ label: t("details.level.menu", { level: policy }), onSelect: () => setPolicyOpen(true) }] : []),
   ];
   const fail = cont.error ?? error ?? a.words.error;
   const said = cont.note ?? a.note;
   const hint = fail ? <span className="text-danger">{fail}</span>
     : said ? <span className="text-info">{said}</span>
     : stopped && queue.approved ? d!.hint
-    : !queue.approved ? a.hint
+    : !queue.approved && !over ? a.hint
     : undefined;
   const primary = stopped && queue.approved
     ? d!.confirm && <Button disabled={cont.busy || d!.confirm.disabled} onClick={() => void cont.go(d!.needsChoice, work, canSkipClosing && skipClosing)}>{d!.confirm.label}</Button>
-    : !queue.approved
+    : !queue.approved && !over
       ? <Button disabled={a.disabled} onClick={a.submit}>{a.label}</Button>
       : undefined;
   const opened = (!queue.approved && a.wordsOpen) || (canWithdraw && withdrawOpen) || policyOpen;
+  // A finished or cancelled queue's panel has no bar: nothing is left to do in it.
+  if (over && !hint && !menu.length && !opened) return null;
   return (
-    <ActionBar hint={hint} menu={menu} secondary={!queue.approved && <AskButton project={id} queue={queue} />} primary={primary}
-      left={canSkipClosing ? <SkipClosingBox checked={skipClosing} onChange={setSkipClosing} /> : !queue.approved && a.skipBox}>
+    <ActionBar hint={hint} menu={menu.length ? menu : undefined} secondary={!queue.approved && !over && <AskButton project={id} queue={queue} />} primary={primary}
+      left={canSkipClosing ? <SkipClosingBox checked={skipClosing} onChange={setSkipClosing} /> : !queue.approved && !over && a.skipBox}>
       {opened && (
         <div className="space-y-4">
           {!queue.approved && a.wordsBox}

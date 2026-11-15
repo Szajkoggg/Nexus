@@ -126,16 +126,8 @@ export function QueueRow({ project, queue, pushAccepted, onQueue, onStep, onChan
   );
 }
 
-/**
- * One step, one line: its dot, its id, its title and its status. The step that matters gets two lines more: why it
- * is where it is (the stop's reason, the question, its summary, its progress), and its action. A stop's is Continue
- * right here (Stop.tsx: Keep or Discard first, in place, when the step left commits; "Approve revision N…" opens the
- * queue when its revision is not approved); the others open the step, where the review and the answer are.
- */
-function StepLine({ step, queue, current, phone, onStep, onQueue, stop }: {
-  step: StepView; queue: QueueView; current: boolean; phone: boolean; onStep: () => void; onQueue: () => void;
-  stop: { project: string; pushAccepted: boolean; onChanged?: () => void };
-}) {
+/** What a step's line shows besides its title: its status, tone and word, its latest runtime switch, its marks. */
+function stepLook(step: StepView, queue: QueueView, current: boolean) {
   const status = shownStatus(step, queue);
   const tone = toneOf(status);
   // A provisional acceptance waiting for the user reads so, in the review colour (the step is done, the user still decides).
@@ -153,19 +145,40 @@ function StepLine({ step, queue, current, phone, onStep, onQueue, stop }: {
       {switched && !current && <span className="text-info" title={switchText(switched)}>⇄</span>}
     </span>
   );
-  if (!current) {
-    return (
-      <button onClick={onStep} className="grid w-full grid-cols-[10px_3.25rem_1fr_auto] items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-sm hover:bg-surface-2 max-lg:min-h-11">
-        <span className={`h-2 w-2 rounded-full ${tone.dot}`} />
-        <span className="truncate font-mono text-xs text-fg-3" title={step.id}>{stepMark(step)}</span>
-        <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
-          <span className={`truncate ${step.status === "skipped" ? "text-fg-2" : "text-fg"}`}>{step.title}</span>
-          <KeptTag step={step} />
-        </span>
-        <span className="flex items-center gap-2">{meta}<span className={`whitespace-nowrap text-xs ${provisional ? "text-review" : step.status === "done" ? "text-fg-3" : tone.text}`}>{word}</span></span>
-      </button>
-    );
-  }
+  return { status, tone, provisional, word, switched, meta };
+}
+
+/**
+ * A step on one line, a tap opening it: its dot, its id, its title, its marks and its status. The queue list's steps
+ * other than the one that matters, and a finished or cancelled queue's steps in its panel.
+ */
+export function StepRow({ step, queue, onStep }: { step: StepView; queue: QueueView; onStep: () => void }) {
+  const { tone, provisional, word, meta } = stepLook(step, queue, false);
+  return (
+    <button onClick={onStep} className="grid w-full grid-cols-[10px_3.25rem_1fr_auto] items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-sm hover:bg-surface-2 max-lg:min-h-11">
+      <span className={`h-2 w-2 rounded-full ${tone.dot}`} />
+      <span className="truncate font-mono text-xs text-fg-3" title={step.id}>{stepMark(step)}</span>
+      <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
+        <span className={`truncate ${step.status === "skipped" ? "text-fg-2" : "text-fg"}`}>{step.title}</span>
+        <KeptTag step={step} />
+      </span>
+      <span className="flex items-center gap-2">{meta}<span className={`whitespace-nowrap text-xs ${provisional ? "text-review" : step.status === "done" ? "text-fg-3" : tone.text}`}>{word}</span></span>
+    </button>
+  );
+}
+
+/**
+ * One step, one line: its dot, its id, its title and its status. The step that matters gets two lines more: why it
+ * is where it is (the stop's reason, the question, its summary, its progress), and its action. A stop's is Continue
+ * right here (Stop.tsx: Keep or Discard first, in place, when the step left commits; "Approve revision N…" opens the
+ * queue when its revision is not approved); the others open the step, where the review and the answer are.
+ */
+function StepLine({ step, queue, current, phone, onStep, onQueue, stop }: {
+  step: StepView; queue: QueueView; current: boolean; phone: boolean; onStep: () => void; onQueue: () => void;
+  stop: { project: string; pushAccepted: boolean; onChanged?: () => void };
+}) {
+  if (!current) return <StepRow step={step} queue={queue} onStep={onStep} />;
+  const { status, tone, word, switched, meta } = stepLook(step, queue, current);
   const questions = queue.questions.filter((q) => q.step === step.id && isOpenQuestion(q));
   const stopHere = queue.status === "stopped";
   const retry = queue.run?.step === step.id ? retryLine(queue.run, new Date()) : undefined;

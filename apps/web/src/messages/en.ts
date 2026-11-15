@@ -656,6 +656,7 @@ export const en = {
   "details.messagePlaceholder": "Delivered to the agent without stopping it…",
   "details.send": "Send",
   "details.questions": "Questions",
+  "details.steps": "Steps",
   "details.otherQuestions": "Other questions",
   "details.recordedState": "Recorded state",
   "details.goal": "Goal",

@@ -187,7 +187,7 @@ export function StepChecks({ step }: StepProps) {
 }
 
 /** The notes on the step (to the worker, or to the orchestrator while it holds the review), and a new one while open. */
-export function Notes({ project, queue, step, forOrchestrator, notesOpen }: Writes & { forOrchestrator: boolean; notesOpen: boolean }) {
+export function Notes({ project, queue, step, forOrchestrator, notesOpen, readOnly = false }: Writes & { forOrchestrator: boolean; notesOpen: boolean; readOnly?: boolean }) {
   const { reload: onChanged } = usePage();
   return (
     <Section title={t("details.notes")} aside={<span className="text-xs text-fg-3">{t(forOrchestrator ? "details.notesToOrchestrator" : "details.notesDelivered")}</span>}>
@@ -197,7 +197,7 @@ export function Notes({ project, queue, step, forOrchestrator, notesOpen }: Writ
             <div className="mb-1 flex items-center gap-2 text-xs text-fg-3">
               <span>{t(n.to === "orchestrator" ? "details.note.fromTo" : "details.note.from", { from: n.from })}</span><TimeAgo at={n.at} />
               <span className={`ml-auto ${n.read_at ? "text-ok" : "text-info"}`}>{t(n.read_at ? (n.to === "orchestrator" ? "details.note.told" : "details.note.delivered") : n.to === "orchestrator" ? "details.note.toOrchestrator" : "details.note.waiting")}</span>
-              {!n.read_at && <WithdrawNote project={project} queue={queue.id} step={step.id} note={n.id} />}
+              {!n.read_at && !readOnly && <WithdrawNote project={project} queue={queue.id} step={step.id} note={n.id} />}
             </div>
             <Markdown>{n.body}</Markdown>
           </div>

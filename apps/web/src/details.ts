@@ -13,8 +13,16 @@ type ReviewItem = StepView["review_items"][number];
 /** A review item shown as a picture (in the viewer); any other opens as a link. */
 export const isImage = (r: ReviewItem): boolean => !!r.path && /\.(png|jpe?g|gif|webp|svg)$/i.test(r.path);
 
+/**
+ * A finished or cancelled queue: its panel lists its steps, and they open read-only (nothing more happens in it: no
+ * level, note, message, review or answer; a provisional acceptance still waits for the user's confirmation).
+ */
+export const queueOver = (q: Pick<QueueView, "status">): boolean => q.status === "done" || q.status === "cancelled";
+
 /** What a step's panel shows, from the step, its queue's questions and the window. */
 export interface StepLayout {
+  /** Its queue is over (queueOver): the step is only read. */
+  readOnly: boolean;
   /** At work: its session can be messaged. */
   live: boolean;
   /** A note goes to the orchestrator, which holds the step in review, not to the worker. */
@@ -31,14 +39,16 @@ export interface StepLayout {
   questionFirst: boolean;
 }
 
-export function stepLayout(step: StepView, questions: QueueView["questions"], phone: boolean): StepLayout {
+export function stepLayout(step: StepView, questions: QueueView["questions"], phone: boolean, queue?: Pick<QueueView, "status">): StepLayout {
+  const readOnly = !!queue && queueOver(queue);
   const forOrchestrator = reviewedByOrchestrator(step);
-  const reviewing = showsReviewActions(step);
-  const asking = reviewing ? undefined : questions.find(isOpenQuestion);
+  const reviewing = !readOnly && showsReviewActions(step);
+  const asking = reviewing || readOnly ? undefined : questions.find(isOpenQuestion);
   return {
-    live: stepAtWork(step) && !!step.session,
+    readOnly,
+    live: !readOnly && stepAtWork(step) && !!step.session,
     forOrchestrator,
-    notesOpen: step.status === "pending" || step.status === "stopped" || forOrchestrator,
+    notesOpen: !readOnly && (step.status === "pending" || step.status === "stopped" || forOrchestrator),
     orchestratorAsks: step.asked_user?.by !== "user" ? step.asked_user?.text : undefined,
     reviewing,
     asking,

@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Event, QueueView, StepView } from "@nexus/protocol";
 import {
-  answerText, approvalHistory, approvalWord, canWithdrawApproval, describe, integrationState, isImage, questionState, shownPicture, showsWorktreeActions,
+  answerText, approvalHistory, approvalWord, canWithdrawApproval, describe, integrationState, isImage, queueOver, questionState, shownPicture, showsWorktreeActions,
   stepLayout, stepPictures,
 } from "../src/details.ts";
 
@@ -114,4 +114,19 @@ test("an integration step's merge back: merged only since the step finished, els
   const before = integrationState(q, { finished_at: "2026-11-15T11:00:00Z" });
   assert.deepEqual([before.merged, before.base, before.waiting?.reason, before.again], [undefined, "develop", "dirty", 2]);
   assert.deepEqual(integrationState({ git: undefined } as unknown as QueueView, {}), { base: "main", merged: undefined, waiting: undefined, again: 0 });
+});
+
+test("a finished or cancelled queue is over; its steps open read-only: no level, note, message, review or answer", () => {
+  assert.equal(queueOver({ status: "done" }), true);
+  assert.equal(queueOver({ status: "cancelled" }), true);
+  for (const status of ["proposed", "approved", "running", "paused", "waiting", "stopped"] as const) assert.equal(queueOver({ status }), false, status);
+  const open = [question("q1", "open")];
+  // A pending step of a cancelled queue would take notes; one waiting for the user's review would show Accept.
+  const pending = stepLayout(step({ status: "pending", session: undefined }), [], false, { status: "cancelled" });
+  assert.deepEqual([pending.readOnly, pending.notesOpen], [true, false]);
+  const review = stepLayout(step({ status: "review", level: 1 } as Partial<StepView>), open, true, { status: "cancelled" });
+  assert.deepEqual([review.reviewing, review.asking, review.questionFirst, review.live], [false, undefined, false, false]);
+  // The same steps in a queue that goes on are not read-only.
+  assert.equal(stepLayout(step({ status: "pending", session: undefined }), [], false, { status: "approved" }).notesOpen, true);
+  assert.equal(stepLayout(step(), [], false, { status: "running" }).readOnly, false);
 });
