@@ -21,7 +21,8 @@ import { needsWorkChoice, stopDecision, type LeftState, type LeftView, type Work
 import { formatSeconds, rich, t, type Key } from "../i18n.ts";
 import { StepTags } from "./Tags.tsx";
 import { StepSwitches } from "./Fallback.tsx";
-import { LevelMark, ProvisionalActions, levelShort, levelTitle, pendingProvisional, provisionalWord } from "./Levels.tsx";
+import { stepMark } from "./Closing.tsx";
+import { LevelMark, LevelPicker, ProvisionalActions, levelChangeable, levelShort, levelTitle, pendingProvisional, provisionalWord } from "./Levels.tsx";
 
 interface Props {
   project: ProjectState; queue: QueueView; onChanged: () => void; onClose: () => void;
@@ -114,7 +115,7 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
       )}
       {reviewing && (
         <Section title={t("details.yourReview")}>
-          {step.asked_user?.text && <p className="mb-2 text-sm text-fg"><span className="text-fg-3">{t("details.orchestratorAsks")} </span>{step.asked_user.text}</p>}
+          {step.asked_user?.text && step.asked_user.by !== "user" && <p className="mb-2 text-sm text-fg"><span className="text-fg-3">{t("details.orchestratorAsks")} </span>{step.asked_user.text}</p>}
           <p className="text-sm text-fg-2">{t("details.yourReviewText")}</p>
         </Section>
       )}
@@ -348,7 +349,7 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
   const others = step.review_items.filter((r) => !isImage(r));
   const reviewPictures = (
     <>
-      {step.asked_user?.text && <p className="mt-4 text-sm text-fg"><span className="text-fg-3">{t("details.orchestratorAsks")} </span>{step.asked_user.text}</p>}
+      {step.asked_user?.text && step.asked_user.by !== "user" && <p className="mt-4 text-sm text-fg"><span className="text-fg-3">{t("details.orchestratorAsks")} </span>{step.asked_user.text}</p>}
       {pictures.length > 0 && (
         <section className="mt-5">
           <div className="mb-2 flex items-baseline gap-3">
@@ -428,10 +429,15 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
         title={<><span className="mr-2 font-mono text-fg-3">{step.id}</span>{step.title}</>}
         status={<>
           <StatusBadge status={pendingProvisional(step) ? "review" : step.status} label={reviewLabel(step) ?? provisionalWord(step)} />
-          <span title={levelTitle(step.level)} className="inline-flex items-center gap-1">
-            <LevelMark step={step} always />
-            <span>{levelShort(step.level)}{step.level_from === "user" ? ` · ${t("level.setByYou")}` : ""}{project.away.on && step.level === 2 ? ` · ${t("level.awayAs3")}` : ""}</span>
-          </span>
+          {/* Until its review is over the user may change the step's level, also after approval (no new approval). */}
+          {levelChangeable(step)
+            ? <LevelPicker project={id} queue={queue.id} step={step} onChanged={onChanged} away={project.away} />
+            : (
+              <span title={levelTitle(step.level)} className="inline-flex items-center gap-1">
+                <LevelMark step={step} always />
+                <span>{levelShort(step.level)}{step.level_from === "user" ? ` · ${t("level.setByYou")}` : ""}{project.away.on && step.level === 2 ? ` · ${t("level.awayAs3")}` : ""}</span>
+              </span>
+            )}
           <StepTimes step={step} />
           {step.commit && <span className="font-mono">{step.commit}</span>}
           {session && <span>{t("details.by", { session: session.title ?? session.id.slice(-8), runtime: session.runtime })}</span>}
@@ -1128,6 +1134,29 @@ function WithdrawApproval({ project, queue, onChanged, onCancel }: { project: st
  * The steps that name their own runtime, model or effort, each with its values, so they are seen before approving;
  * nothing when every step runs on the run's.
  */
+/**
+ * An approved queue's steps whose review is still to come, each with its level picker: the user may decide later that
+ * they review a step themselves (or leave it to the orchestrator). Setting a level asks for no new approval.
+ */
+function StepLevels({ project, queue, onChanged }: { project: ProjectState; queue: QueueView; onChanged: () => void }) {
+  const open = queue.steps.filter(levelChangeable);
+  if (!open.length) return null;
+  return (
+    <Section title={t("details.stepLevels")}>
+      <ul className="space-y-1.5">
+        {open.map((s) => (
+          <li key={s.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+            <span className="w-16 shrink-0 font-mono text-xs text-fg-3" title={s.id}>{stepMark(s)}</span>
+            <span className="min-w-0 flex-1 text-fg">{s.title}</span>
+            <LevelPicker project={project.project.id} queue={queue.id} step={s} onChanged={onChanged} away={project.away} />
+          </li>
+        ))}
+      </ul>
+      <p className="mt-1.5 text-xs text-fg-3">{t("details.stepLevelsText")}</p>
+    </Section>
+  );
+}
+
 function OwnValues({ queue }: { queue: QueueView }) {
   const own = queue.steps.filter((s) => stepValuesText(s));
   if (!own.length) return null;
@@ -1202,6 +1231,7 @@ export function QueueDetail({ project, queue, onChanged, onClose, of, chat = [],
       {queue.questions.length > 0 && <Section title={t("details.questions")}>{queue.questions.map((q) => <Question key={q.qid} q={q} project={id} onChanged={onChanged} />)}</Section>}
 
       {!approving && <OwnValues queue={queue} />}
+      {!approving && <StepLevels project={project} queue={queue} onChanged={onChanged} />}
 
       {history.length > 0 && <Section title={t("details.approval")}>
         {history.map((a, i) => (

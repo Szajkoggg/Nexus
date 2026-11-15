@@ -131,6 +131,46 @@ test("the user's level of a step: recorded apart, asks for no new approval, and 
   for (const bad of [0, 4, "1", "wait"]) assert.throws(() => setStepLevel(store, "Q", "Q1", bad), ActionError);
 });
 
+test("a step's level changes after approval until its review is over; a closed step's is refused; the user's switch to 1 hands an orchestrator's review over", () => {
+  const root = mkdtempSync(join(tmpdir(), "nexus-levels-"));
+  process.env.NEXUS_HOME = join(root, "home");
+  const store = ProjectStore.init(root, { id: "p", name: "P", root, orchestrator: { session: null } });
+  for (const [id, role] of [["w", "worker"], ["o", "orchestrator"]] as const) {
+    store.writeSession({ protocol: 1, id, project: "p", role, runtime: "claude", cwd: ".", launched_by: "nexus", created_at: "2026-11-13T09:00:00.000Z" });
+  }
+  let t = Date.now() - 60_000; // before the user's own events, which carry the time now
+  const emit = (session: string, body: Record<string, unknown>) => store.appendEvent({ v: 1, id: newId(), at: new Date(++t).toISOString(), session, ...body } as Event);
+  applyDraft(store, { id: "Q", title: "Queue", steps: [step("Q1"), step("Q2"), step("Q3"), step("Q4")] });
+  approveQueue(store, "Q");
+  const st = (id: string) => loadProjectState(store).queues.find((q) => q.id === "Q")!.steps.find((s) => s.id === id)!;
+  const handed = () => store.readEvents("user").entries.filter((e) => e.type === "review.asked_user");
+  // Q1 accepted (closed), Q2 failed (closed), Q3 waiting for the orchestrator's review, Q4 pending.
+  emit("w", { type: "step.started", queue: "Q", step: "Q1" }); emit("w", { type: "step.done", queue: "Q", step: "Q1", summary: "one" });
+  emit("o", { type: "review.accepted", queue: "Q", step: "Q1" });
+  emit("w", { type: "step.started", queue: "Q", step: "Q2" }); emit("w", { type: "step.failed", queue: "Q", step: "Q2", reason: "broke" });
+  emit("w", { type: "step.started", queue: "Q", step: "Q3" }); emit("w", { type: "step.done", queue: "Q", step: "Q3", summary: "three" });
+  assert.deepEqual([st("Q1").status, st("Q2").status, st("Q3").review_with, st("Q4").status], ["done", "failed", "orchestrator", "pending"]);
+
+  for (const [id, status] of [["Q1", "done"], ["Q2", "failed"]] as const) {
+    assert.throws(() => setStepLevel(store, "Q", id, 1), (e: ActionError) => e.status === 409 && e.message === `step Q/${id} is ${status}: its review level no longer changes`);
+  }
+  assert.equal(store.readQueue("Q").user_levels, undefined, "nothing recorded");
+
+  setStepLevel(store, "Q", "Q4", 3);
+  assert.deepEqual([st("Q4").level, st("Q4").level_from], [3, "user"], "a pending step's level, after approval");
+  assert.ok(isApproved(store.readQueue("Q")), "asks for no new approval");
+  setStepLevel(store, "Q", "Q3", 3);
+  assert.deepEqual([st("Q3").status, st("Q3").review_with], ["review", "orchestrator"], "to 3: still the orchestrator's, not accepted");
+  assert.equal(handed().length, 0);
+  setStepLevel(store, "Q", "Q3", 1);
+  assert.deepEqual([st("Q3").review_with, st("Q3").asked_user?.by], ["user", "user"], "to 1: the user's");
+  assert.deepEqual(handed().map((e) => e.step), ["Q3"], "recorded once, from the user's session");
+  // Back to 2: the review stays the user's (nothing new recorded).
+  setStepLevel(store, "Q", "Q3", 2);
+  assert.equal(st("Q3").review_with, "user");
+  assert.equal(handed().length, 1);
+});
+
 test("a draft with the old review fields is read as levels, so the orchestrator's older drafts keep working", () => {
   const { store } = setup();
   applyDraft(store, { id: "Q", title: "Queue", review_policy: "wait", steps: [{ ...step("Q1"), review: { policy: "orchestrator" } }, step("Q2")] });

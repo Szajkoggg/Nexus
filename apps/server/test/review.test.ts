@@ -8,7 +8,7 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ProjectStore, addNote, applyDraft, approveQueue, commentOnPicture, loadProjectState, newId, now, routeAnswers, sendBack, updateSettings } from "@nexus/protocol";
+import { ProjectStore, addNote, applyDraft, approveQueue, commentOnPicture, loadProjectState, newId, now, routeAnswers, sendBack, setQueueSettings, setStepLevel, updateSettings } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
@@ -46,7 +46,7 @@ function setup() {
     engine.start(id);
   };
   const stop = () => { clearInterval(timer); engine.shutdown(); orchestrator.shutdown(); };
-  return { store, engine, orchestrator, state, step, until, facts, delivered, run, stop };
+  return { store, engine, orchestrator, state, step, until, facts, delivered, run, tick, stop };
 }
 
 const reviewFact = (q: string, s: string) => (t: string) => t.startsWith(`Step ${s} of queue ${q} is done and waits for your review`);
@@ -94,6 +94,58 @@ test("ask-user hands the review to the user, and the run waits for them", async 
     assert.equal(x.step("U", "U2").status, "pending");
     x.engine.acceptReview("U", "U1");
     await x.until("U2 in review", () => x.step("U", "U2").status === "review", LONGER.step);
+  } finally { x.stop(); }
+});
+
+test("a step's level changed after approval: the engine reviews it by the new one, with no new approval", async () => {
+  const x = setup();
+  try {
+    await x.run("L", 2);
+    // L2 pending: the user decides to review it themselves.
+    setStepLevel(x.store, "L", "L2", 1);
+    assert.ok(x.state().queues[0]!.approved, "no new approval");
+    await x.until("the review notice", () => x.facts().some(reviewFact("L", "L1")));
+    x.orchestrator.say(`FAKE-NEXUS: ["review","accept","L","L1"]`);
+    await x.until("L2 waiting for review", () => x.step("L", "L2").status === "review", LONGER.step);
+    assert.equal(x.step("L", "L2").review_with, "user", "level 1 now: the user's review");
+    assert.ok(x.state().attention.some((a) => a.kind === "review" && a.step === "L2"));
+  } finally { x.stop(); }
+});
+
+test("a step waiting for the orchestrator's review set to 1 goes to the user, and the orchestrator is told; set to 3 it keeps waiting", async () => {
+  const x = setup();
+  try {
+    await x.run("H", 2);
+    await x.until("the review notice", () => x.facts().some(reviewFact("H", "H1")));
+    // Level 3: still the orchestrator's, nothing accepted by itself.
+    setStepLevel(x.store, "H", "H1", 3);
+    x.tick();
+    assert.deepEqual([x.step("H", "H1").status, x.step("H", "H1").review_with], ["review", "orchestrator"]);
+    assert.equal(x.step("H", "H2").status, "pending");
+    // Level 1: the user's, as an ask-user would make it; the orchestrator gets a [Nexus] message.
+    setStepLevel(x.store, "H", "H1", 1);
+    assert.deepEqual([x.step("H", "H1").review_with, x.step("H", "H1").asked_user?.by], ["user", "user"]);
+    assert.equal(x.state().attention.find((a) => a.kind === "review" && a.step === "H1")?.text, "fake finished H1", "the user's item shows the summary");
+    await x.until("the orchestrator told", () => x.facts().some((t) => t.startsWith("The user set the review level of step H1 of queue H to 1 while it waited for your review")));
+    await x.until("the delivery", () => x.delivered().some((t) => t.startsWith("[Nexus] The user set the review level of step H1")));
+    // The orchestrator may no longer accept it; the user does.
+    x.orchestrator.say(`FAKE-NEXUS: ["review","accept","H","H1"]`);
+    await x.until("the refusal", () => x.orchestrator.view().chat.some((c) => /waits for the user's review, not yours/.test(c.text)));
+    assert.equal(x.step("H", "H1").status, "review");
+    x.engine.acceptReview("H", "H1");
+    await x.until("H2 in review", () => x.step("H", "H2").status === "review", LONGER.step);
+    assert.equal(x.facts().filter((t) => t.startsWith("The user set the review level of step H1")).length, 1, "told once");
+  } finally { x.stop(); }
+});
+
+test("the queue's level set to 1 hands its steps waiting for the orchestrator to the user too", async () => {
+  const x = setup();
+  try {
+    await x.run("G", 1);
+    await x.until("the review notice", () => x.facts().some(reviewFact("G", "G1")));
+    setQueueSettings(x.store, "G", { review_level: 1 });
+    assert.equal(x.step("G", "G1").review_with, "user");
+    await x.until("the orchestrator told", () => x.facts().some((t) => t.startsWith("The user set the review level of step G1 of queue G to 1")));
   } finally { x.stop(); }
 });
 

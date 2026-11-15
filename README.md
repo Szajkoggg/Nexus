@@ -467,10 +467,15 @@ Every step is reviewed when it is done. Its **review level** says by whom: 1, yo
 reviews what can be checked and hands you what is yours (the look, the feel), with why; 3, the orchestrator judges
 everything and the queue goes on. The orchestrator drafts each step's level from its acceptance criteria (checkable
 ones give 2, your judgement gives 1); a step without one takes its queue's, else the project's "Review level" (in
-Settings; 2 unless you change it). In the approval view each step has **Review 1 · 2 · 3**: pick another before (or
-after) you approve; it asks for no new approval, stays when the orchestrator revises the queue, and shows "set by
-you" with Reset. A step's line on the queue shows its level when it is not 2 (L1, L3), and the step's panel always
-does. A step says whom it waits for ("review: orchestrator" or "review: you"); only those for you are in the inbox.
+Settings; 2 unless you change it). In the approval view each step has **Review 1 · 2 · 3**: pick another before you
+approve; after approval the same control stays in the step's panel and in the queue's panel ("Review levels", the steps
+whose review is still to come: pending, running, waiting for review, stopped), so you can decide later that you review
+a step yourself. A new level asks for no new approval, stays when the orchestrator revises the queue, and shows "set by
+you" with Reset; a step whose review is over (accepted, skipped, failed, rejected) keeps its level. A step waiting for
+the orchestrator's review that you set to 1 comes to you at once, as if the orchestrator had handed it over, and the
+orchestrator is told; set to 3, it keeps waiting for the orchestrator (nothing is accepted by itself). The queue's own
+level (⋯ in its bar) works the same way. A step's line on the queue shows its level when it is not 2 (L1, L3), and the
+step's panel always does. A step says whom it waits for ("review: orchestrator" or "review: you"); only those for you are in the inbox.
 Without an orchestrator, or with its notices off, levels 2 and 3 wait for you too.
 
 At level 3 the orchestrator accepts what has nothing of yours, and **accepts provisionally** what has: the step reads
