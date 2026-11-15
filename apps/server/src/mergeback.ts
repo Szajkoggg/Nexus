@@ -18,7 +18,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, rmSync } from "node:fs";
 import {
-  ActionError, HOLDING_RUN_STATES, loadProjectState, normPath, now, pendingProvisional, type GitFile, type ProjectState, type ProjectStore, type QueueView,
+  ActionError, runGoing, stepAtWork, loadProjectState, normPath, now, pendingProvisional, type GitFile, type ProjectState, type ProjectStore, type QueueView,
 } from "@nexus/protocol";
 import { checkoutOf, git, patchGit } from "./gitinfo.ts";
 import { ROOT } from "./lifecycle.ts";
@@ -79,7 +79,7 @@ function baseCheckout(root: string, base: string, serverRoot = ROOT): { path: st
 /** Queues whose run holds checkout `path` (the user's old merge refuses all of them). */
 function runningIn(store: ProjectStore, state: ProjectState, path: string): QueueView[] {
   return state.queues.filter((x) => {
-    const p = x.run && HOLDING_RUN_STATES.includes(x.run.state) ? checkoutOf(store, x) : undefined;
+    const p = runGoing(x.run) ? checkoutOf(store, x) : undefined;
     return !!p && samePath(p, path);
   });
 }
@@ -92,7 +92,7 @@ function atWorkIn(store: ProjectStore, state: ProjectState, path: string): Queue
   return runningIn(store, state, path).filter((x) => {
     if (x.run!.state === "pausing") return true;
     const st = x.run!.step ? x.steps.find((s) => s.id === x.run!.step) : undefined;
-    return st?.status === "running" || st?.status === "waiting";
+    return !!st && stepAtWork(st);
   });
 }
 
@@ -135,7 +135,7 @@ export function judgeMerge(store: ProjectStore, state: ProjectState, q: QueueVie
   const integ = q.steps.find((s) => s.integration);
   if (!integ) return { kind: "none", why: `queue ${q.id} has no integration step` };
   if (q.status !== "done") return { kind: "none", why: `queue ${q.id} is not finished (it is ${q.status})` };
-  if (q.run && HOLDING_RUN_STATES.includes(q.run.state)) return { kind: "none", why: `queue ${q.id}'s run is still going` };
+  if (runGoing(q.run)) return { kind: "none", why: `queue ${q.id}'s run is still going` };
   if (q.git?.cleaned) return { kind: "none", why: `queue ${q.id} was cleaned up already` };
   const root = normPath(state.project.root);
   const base = q.git?.base;
@@ -204,7 +204,7 @@ function finishedWorktreeQueue(store: ProjectStore, queueId: string) {
   const path = checkoutOf(store, q);
   if (!path || samePath(path, root)) throw new ActionError(`queue ${queueId} works in the project's own checkout, not a worktree of its own`, 409);
   if (q.status !== "done") throw new ActionError(`queue ${queueId} is not finished (it is ${q.status})`, 409);
-  if (q.run && HOLDING_RUN_STATES.includes(q.run.state)) throw new ActionError(`queue ${queueId}'s run is still going`, 409);
+  if (runGoing(q.run)) throw new ActionError(`queue ${queueId}'s run is still going`, 409);
   if (q.git?.cleaned) throw new ActionError(`queue ${queueId} was cleaned up already`, 409);
   const branch = q.branch ?? (existsSync(path) ? git(path, ["branch", "--show-current"]) : undefined);
   if (!branch) throw new ActionError(`queue ${queueId} has no branch`, 409);

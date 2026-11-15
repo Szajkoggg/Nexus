@@ -11,6 +11,7 @@
 import { closeSync, createReadStream, openSync, readSync, realpathSync, statSync } from "node:fs";
 import { extname, isAbsolute, resolve } from "node:path";
 import { Readable } from "node:stream";
+import type { CommitDetail } from "@nexus/protocol";
 import { git } from "./gitinfo.ts";
 
 /** Text longer than this is cut (DESIGN.md, the file viewer: files over 1 MB are cut with a note). */
@@ -120,11 +121,6 @@ export function fileResponse(real: string): Response {
 /** A commit hash as the dashboard may ask for it: 7 to 40 lowercase hex digits, nothing else reaches git. */
 export const COMMIT_HASH = /^[0-9a-f]{7,40}$/;
 
-interface CommitFile { path: string; insertions: number | null; deletions: number | null }
-export interface CommitDetail {
-  sha: string; subject: string; author: string; at: string;
-  files: CommitFile[]; insertions: number; deletions: number;
-}
 
 const SEP = "\x1f";
 /**

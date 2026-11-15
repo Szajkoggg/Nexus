@@ -2,8 +2,8 @@
 // offers a typo). Claude Code answers an `initialize` control request on its stream-json input with its models;
 // Codex answers `model/list` on the app-server. Kept for an hour; a fixed list stands in if a runtime does not answer.
 import { spawn } from "node:child_process";
+import type { ModelInfo } from "@nexus/protocol";
 
-export interface ModelInfo { value: string; label: string; description?: string; efforts?: string[] }
 
 const cache = new Map<string, { at: number; models: ModelInfo[] }>();
 const FALLBACK: Record<"claude" | "codex", ModelInfo[]> = {

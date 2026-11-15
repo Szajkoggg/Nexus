@@ -6,11 +6,8 @@ import { useEffect, useState } from "react";
 import { enc, HttpError, projectUrl, request } from "../api.ts";
 import { formatDateTime, t } from "../i18n.ts";
 import { TimeAgo } from "./ui.tsx";
+import type { CommitDetail } from "@nexus/protocol/api";
 
-interface CommitDetail {
-  sha: string; subject: string; author: string; at: string;
-  files: { path: string; insertions: number | null; deletions: number | null }[]; insertions: number; deletions: number;
-}
 /** GET a commit's details. */
 const readCommit = (project: string, hash: string) => request<CommitDetail>(projectUrl(project, `/commits/${enc(hash)}`));
 

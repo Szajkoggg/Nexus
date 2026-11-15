@@ -1,5 +1,6 @@
 // Finished queues fold into one group at the bottom of the project page. Which queues go there, in which order, and
 // what each compact line says, as a pure helper (unit tested); the dashboard draws the group.
+import { isOpenQuestion } from "@nexus/protocol/status-rules";
 
 /** "Finished" is the queue status done or cancelled. */
 const FINISHED_STATUSES: readonly string[] = ["done", "cancelled"];
@@ -18,7 +19,7 @@ export interface FinishedRow<Q> { queue: Q; finished_at?: string; ran_ms?: numbe
 
 /** Something in the queue still waits for the user: a step in review, an open or escalated question. */
 function waitsForUser(q: QueueLike): boolean {
-  return q.steps.some((s) => s.status === "review") || (q.questions ?? []).some((x) => x.state === "open" || x.state === "escalated");
+  return q.steps.some((s) => s.status === "review") || (q.questions ?? []).some(isOpenQuestion);
 }
 
 const ms = (iso?: string) => (iso ? Date.parse(iso) : NaN);

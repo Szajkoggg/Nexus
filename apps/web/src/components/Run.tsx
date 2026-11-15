@@ -1,6 +1,7 @@
 // Running queues through Nexus-launched sessions: controls, live activity, sessions and usage.
 import { useEffect, useState, type ReactNode } from "react";
-import { HOLDING_RUN_STATES, retryLine } from "@nexus/protocol/times";
+import { retryLine } from "@nexus/protocol/times";
+import { runGoing } from "@nexus/protocol/status-rules";
 import { act, enc, useAction, useQuery, type ActivityEntry, type ProjectState, type QueueView, type SessionView, type Usage, type Version } from "../api.ts";
 import { Button, RunTimes, Section, TimeAgo } from "./ui.tsx";
 import { formatClock, formatDateTime, formatTime, formatNumber, rich, t, type Key } from "../i18n.ts";
@@ -140,11 +141,11 @@ export function RunControls({ project, queue, onChanged }: { project: ProjectSta
   const { busy, error, run: perform } = useAction();
   const run = queue.run;
   // A run that holds its session: going on by itself, or waiting for the approval of the queue's new revision.
-  const active = run && HOLDING_RUN_STATES.includes(run.state);
+  const active = runGoing(run);
   const waitsApproval = run?.state === "approval_wait";
   const call = (body: Record<string, unknown>) => perform(() => act(id, "POST", `/queues/${enc(queue.id)}/run`, body), onChanged);
   const reusable = project.sessions.filter((s) => s.role === "worker" && s.runtime !== "external" && s.launched_by === "nexus" && s.native_id
-    && !project.queues.some((q) => q.id !== queue.id && q.run?.session === s.id && HOLDING_RUN_STATES.includes(q.run.state)));
+    && !project.queues.some((q) => q.id !== queue.id && q.run?.session === s.id && runGoing(q.run)));
   const runSession = run ? project.sessions.find((s) => s.id === run.session) : undefined;
   // A stopped queue goes on only through Continue or a newly approved revision (the stop box above).
   const canStart = queue.approved && !active && queue.status !== "done" && queue.status !== "cancelled" && queue.status !== "stopped";

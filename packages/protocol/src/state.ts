@@ -3,7 +3,8 @@
 import { ORCHESTRATOR_ONLY, USER_ONLY, type StatusChange, type Event, type InboxEntry, type Note, type GitFile, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type ReviewItem, type ReviewLevel, type LegacyReviewPolicy, type AwayFile, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type PlanFile, type StepDef, type StepStatus, type TagProposal, type TagsFile } from "./schemas.ts";
 import { ProjectStore, chainPlan, readAway, revisionHash } from "./store.ts";
 import { awayAt, awayNow, type AwayNow } from "./away.ts";
-import { ENDED_RUN_STATES, HOLDING_RUN_STATES, formatClock, type Segment } from "./times.ts";
+import { formatClock, type Segment } from "./times.ts";
+import { isOpenQuestion, reviewedByOrchestrator, runEnded, runGoing, runHoldsCheckout, stepWaits, waitsForUserReview } from "./status-rules.ts";
 import { stopPlace } from "./attention.ts";
 import { closingStepId, integrationStepId, stepDefs } from "./closing.ts";
 import { openPlan, planView, proposalText, type PlanView } from "./plan.ts";
@@ -316,7 +317,7 @@ export function loadProjectState(store: ProjectStore): ProjectState {
   // finishes the run only once the user approves it (until then the run waits for the approval, or is paused). A run
   // waiting for the approval makes its queue wait too (it is not running).
   for (const q of queues.values()) {
-    const held = q.status === "done" && !!q.run && (HOLDING_RUN_STATES.includes(q.run.state) || q.run.state === "paused");
+    const held = q.status === "done" && runHoldsCheckout(q.run);
     const waits = q.run?.state === "approval_wait" && !TERMINAL_QUEUE.has(q.status) && q.status !== "stopped";
     if (!q.approved && (held || waits)) {
       q.status = "waiting"; q.status_reason = `waits for approval of revision ${q.revision}`;
@@ -336,7 +337,7 @@ export function loadProjectState(store: ProjectStore): ProjectState {
   for (const q of queues.values()) {
     q.questions = [...questions.values()].filter((x) => x.queue === q.id);
     // A run that halted, finished or was stopped ends the stretch of the step it left without an outcome.
-    if (q.run && ENDED_RUN_STATES.has(q.run.state)) {
+    if (q.run && runEnded(q.run)) {
       const ended = q.run.ended_at ?? q.run.updated_at;
       for (const st of q.steps) {
         const open = st.segments.at(-1);
@@ -344,7 +345,7 @@ export function loadProjectState(store: ProjectStore): ProjectState {
       }
     }
     // A step at work comes first; otherwise the latest stop (an older stop may have been taken up again since).
-    q.current_step = (q.steps.find((s) => s.status === "running" || s.status === "waiting" || s.status === "review")
+    q.current_step = (q.steps.find((s) => s.status === "running" || stepWaits(s))
       ?? q.steps.findLast((s) => s.status === "stopped"))?.id;
   }
 
@@ -397,7 +398,7 @@ function startWait(plan: StartFile, q: QueueView, queues: QueueView[]): { waitin
   if (plan.held) return { waiting: `${done}${plan.held.reason}`, blocked: false };
   if (plan.at) return { waiting: plan.usage ? `the ${plan.usage === "codex" ? "Codex" : "Claude Code"} usage window resets` : "its time", blocked: false };
   if (p?.approval) return { waiting: `${done}${p.waiting}`, blocked: false };
-  const busy = plan.session ? queues.find((x) => x.id !== q.id && !!x.run && x.run.session === plan.session && HOLDING_RUN_STATES.includes(x.run.state)) : undefined;
+  const busy = plan.session ? queues.find((x) => x.id !== q.id && !!x.run && x.run.session === plan.session && runGoing(x.run)) : undefined;
   if (busy) return { waiting: `${done}the session to continue is running queue ${busy.id}`, blocked: false };
   return { waiting: done ? done.slice(0, -2) : "it may start", blocked: false };
 }
@@ -407,7 +408,7 @@ function attentionOf(queues: QueueView[], questions: QuestionView[], tags: TagsF
   // The orchestrator's proposals for the project's tag lists: the user's to accept or decline, one by one.
   for (const p of tags.proposals) out.push({ kind: "tags", text: `${tagProposalText(p, tags)}${p.reason ? `: ${p.reason}` : ""}`, at: p.at, tags: p });
   for (const x of questions) {
-    if (x.state !== "open" && x.state !== "escalated") continue;
+    if (!isOpenQuestion(x)) continue;
     const by = x.answers.at(-1);
     out.push({ kind: "question", queue: x.queue, step: x.step, qid: x.qid, text: x.text, at: by?.at ?? x.asked_at, ...(x.options?.length ? { options: x.options } : {}), ...(x.recommended ? { recommended: x.recommended } : {}) });
   }
@@ -449,7 +450,7 @@ function attentionOf(queues: QueueView[], questions: QuestionView[], tags: TagsF
     if (q.status === "cancelled" || q.status === "done") continue;
     for (const s of q.steps) {
       // A review the orchestrator does is not the user's (the queue still shows it waiting).
-      if (s.status === "review" && s.review_with !== "orchestrator") out.push({ kind: "review", queue: q.id, step: s.id, text: (s.asked_user?.by !== "user" ? s.asked_user?.text : undefined) ?? s.summary ?? s.title, at: s.asked_user?.at ?? s.finished_at });
+      if (waitsForUserReview(s)) out.push({ kind: "review", queue: q.id, step: s.id, text: (s.asked_user?.by !== "user" ? s.asked_user?.text : undefined) ?? s.summary ?? s.title, at: s.asked_user?.at ?? s.finished_at });
       if (s.status === "failed") out.push({ kind: "failed", queue: q.id, step: s.id, text: s.reason ?? s.title, at: s.finished_at });
     }
   }
@@ -679,7 +680,7 @@ function apply(
       // The user's own (their level 1 on a step the orchestrator held) also where the step's level, read now, already
       // gives its review to the user: it keeps the review the user's whatever the level becomes.
       const own = s?.role === "user" && st?.status === "review";
-      if (!st || (!own && (st.status !== "review" || st.review_with !== "orchestrator"))) { warnings.push(`event ${e.id}: step ${e.queue}/${e.step} is not waiting for the orchestrator's review; ignored`); return; }
+      if (!st || (!own && !reviewedByOrchestrator(st))) { warnings.push(`event ${e.id}: step ${e.queue}/${e.step} is not waiting for the orchestrator's review; ignored`); return; }
       st.review_with = "user"; st.asked_user = { text: e.text, at: e.at, ...(s?.role === "user" ? { by: "user" as const } : {}) };
       return;
     }
@@ -715,7 +716,7 @@ function apply(
       st.status = "running"; st.review_with = undefined; st.asked_user = undefined;
       st.user_fix = by === "user" ? true : undefined;
       st.finished_at = undefined;
-      if (q.status === "waiting" && !q.steps.some((x) => x.status === "waiting" || x.status === "review")) q.status = "running";
+      if (q.status === "waiting" && !q.steps.some(stepWaits)) q.status = "running";
       return;
     }
     case "review.accepted": {
@@ -726,7 +727,7 @@ function apply(
       st.review_with = undefined;
       st.status = "done";
       if (q.steps.every((x) => FINISHED_STEP.has(x.status))) q.status = "done";
-      else if (q.status === "waiting" && !q.steps.some((x) => x.status === "waiting" || x.status === "review")) q.status = "running";
+      else if (q.status === "waiting" && !q.steps.some(stepWaits)) q.status = "running";
       return;
     }
     case "review.provisional": {
@@ -734,14 +735,14 @@ function apply(
       const q = queueOf(e.queue); const st = stepOf(q, e.step);
       if (!q || !st) return;
       if (s?.role !== "orchestrator") { warnings.push(`event ${e.id}: a provisional acceptance is the orchestrator's; ignored`); return; }
-      if (st.status !== "review" || st.review_with !== "orchestrator") { warnings.push(`event ${e.id}: step ${e.queue}/${e.step} is not waiting for the orchestrator's review; the provisional acceptance is ignored`); return; }
+      if (!reviewedByOrchestrator(st)) { warnings.push(`event ${e.id}: step ${e.queue}/${e.step} is not waiting for the orchestrator's review; the provisional acceptance is ignored`); return; }
       // Level 3, or level 2 while away mode was on (it runs as level 3 then).
       if (st.level !== 3 && !(st.level === 2 && awayAt(away, e.at))) { warnings.push(`event ${e.id}: step ${e.queue}/${e.step} is at review level ${st.level}${st.level === 2 ? " and away mode was off" : ""}; a provisional acceptance is for level 3, and is ignored`); return; }
       st.review_with = undefined;
       st.status = "done";
       st.provisional = { at: e.at, event: e.id, ...(e.text ? { text: e.text } : {}) };
       if (q.steps.every((x) => FINISHED_STEP.has(x.status))) q.status = "done";
-      else if (q.status === "waiting" && !q.steps.some((x) => x.status === "waiting" || x.status === "review")) q.status = "running";
+      else if (q.status === "waiting" && !q.steps.some(stepWaits)) q.status = "running";
       return;
     }
     case "review.confirmed":
@@ -844,7 +845,7 @@ function resume(x: QuestionView, queues: Map<string, QueueView>, e: Event): void
   const q = x.queue ? queues.get(x.queue) : undefined;
   const st = q?.steps.find((s) => s.id === x.step);
   if (st?.status === "waiting") { st.status = "running"; st.timeline.push(e); }
-  if (q?.status === "waiting" && !q.steps.some((s) => s.status === "waiting" || s.status === "review")) q.status = "running";
+  if (q?.status === "waiting" && !q.steps.some(stepWaits)) q.status = "running";
 }
 
 

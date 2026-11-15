@@ -1,0 +1,53 @@
+// The status rules every part reads the same way: when a run is going, when a step waits for the user's review (or the
+// orchestrator's), and when a question is open. Pure and free of Node: the dashboard imports this module directly
+// (`@nexus/protocol/status-rules`), so it imports nothing at run time; the server, the CLI and the state derivation use
+// it too, so a rule changes in one place.
+import type { RunFile, StepStatus } from "./schemas.ts";
+
+type RunState = RunFile["state"];
+/** A run, as the state derivation, the server and the dashboard each hold it (the dashboard as plain text). */
+type RunLike = { state: RunState | (string & {}) } | null | undefined;
+
+/**
+ * Run states in which the run holds its session and its checkout: it goes on by itself (running, pausing, a usage or
+ * retry wait) or once the user approves the queue's new revision (approval_wait). Such a queue cannot be started or
+ * cancelled, and its session runs no other queue.
+ */
+const HOLDING_RUN_STATES: readonly RunState[] = ["running", "pausing", "usage_wait", "retry_wait", "approval_wait"];
+
+/**
+ * Run states in which the run holds its checkout (the project's own, or its worktree): those holding its session, and
+ * paused (it will go on there). No other queue starts, resumes or continues in that checkout meanwhile. A halted or
+ * finished run holds none.
+ */
+const CHECKOUT_RUN_STATES: readonly RunState[] = [...HOLDING_RUN_STATES, "paused"];
+
+/** Run states that count toward the limit on queues running at once (a queue waiting for a review or an answer does not). */
+const COUNTED_RUN_STATES: readonly RunState[] = ["running", "pausing"];
+
+/** The run's states that mean it is not going (it may be resumed later). */
+const ENDED_RUN_STATES: readonly RunState[] = ["finished", "halted", "paused"];
+
+/** The run is going: it holds its session and its checkout (HOLDING_RUN_STATES). */
+export const runGoing = (run: RunLike): boolean => !!run && HOLDING_RUN_STATES.includes(run.state as RunState);
+/** The run holds its checkout: going, or paused there (CHECKOUT_RUN_STATES). */
+export const runHoldsCheckout = (run: RunLike): boolean => !!run && CHECKOUT_RUN_STATES.includes(run.state as RunState);
+/** The run is at work now and counts toward the limit on queues running at once (COUNTED_RUN_STATES). */
+export const runCounted = (run: RunLike): boolean => !!run && COUNTED_RUN_STATES.includes(run.state as RunState);
+/** The run is not going: finished, halted or paused (ENDED_RUN_STATES). */
+export const runEnded = (run: RunLike): boolean => !!run && ENDED_RUN_STATES.includes(run.state as RunState);
+
+/** A step (its status one of StepStatus), as each part holds it; the dashboard's helpers hold the status as plain text. */
+type StepLike = { status: StepStatus | (string & {}); review_with?: string };
+
+/** The step waits for the user's review (Accept, Send back). */
+export const waitsForUserReview = (s: StepLike): boolean => s.status === "review" && s.review_with !== "orchestrator";
+/** The step's review is the orchestrator's (review levels 2 and 3). */
+export const reviewedByOrchestrator = (s: StepLike): boolean => s.status === "review" && s.review_with === "orchestrator";
+/** The step is at work: running, or waiting for an answer within its turn. */
+export const stepAtWork = (s: Pick<StepLike, "status">): boolean => s.status === "running" || s.status === "waiting";
+/** The step holds its queue in `waiting`: a question or a review is open on it. */
+export const stepWaits = (s: Pick<StepLike, "status">): boolean => s.status === "waiting" || s.status === "review";
+
+/** The question waits for an answer: asked, or passed on to the user by the orchestrator. */
+export const isOpenQuestion = (q: { state: "open" | "answered" | "escalated" | "withdrawn" | (string & {}) }): boolean => q.state === "open" || q.state === "escalated";

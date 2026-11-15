@@ -23,6 +23,8 @@ import { StepTags } from "./Tags.tsx";
 import { StepSwitches } from "./Fallback.tsx";
 import { SkipClosingBox, closingNotRun, stepMark } from "./Closing.tsx";
 import { LevelMark, LevelPicker, ProvisionalActions, levelChangeable, levelShort, levelTitle, pendingProvisional, provisionalWord } from "./Levels.tsx";
+import { isOpenQuestion, reviewedByOrchestrator, stepAtWork } from "@nexus/protocol/status-rules";
+import type { BranchView, StepCommitsView } from "@nexus/protocol/api";
 
 interface Props {
   project: ProjectState; queue: QueueView; onChanged: () => void; onClose: () => void;
@@ -39,10 +41,10 @@ interface Props {
 export function StepDetail({ project, queue, step, onChanged, onClose, of }: Props & { step: StepView }) {
   const id = project.project.id;
   const questions = queue.questions.filter((q) => q.step === step.id);
-  const live = (step.status === "running" || step.status === "waiting") && step.session;
+  const live = stepAtWork(step) && step.session;
   const session = live ? project.sessions.find((s) => s.id === step.session) : undefined;
   // A note on a step the orchestrator holds in review goes to the orchestrator, not the worker.
-  const forOrchestrator = step.status === "review" && step.review_with === "orchestrator";
+  const forOrchestrator = reviewedByOrchestrator(step);
   const notesOpen = step.status === "pending" || step.status === "stopped" || forOrchestrator;
   // The orchestrator's reason for handing the review over; none when the user took it by setting the level to 1.
   const orchestratorAsks = step.asked_user?.by !== "user" ? step.asked_user?.text : undefined;
@@ -66,7 +68,7 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
   // The action bar: the user's review when the step waits for it; else the answer to the step's open question (the
   // first, if there are several; the others keep their answer box in their card).
   const reviewing = showsReviewActions(step);
-  const asking = reviewing ? undefined : questions.find((q) => q.state === "open" || q.state === "escalated");
+  const asking = reviewing ? undefined : questions.find(isOpenQuestion);
   // On the phone a step with an open question is the question's sheet: the question first, its options as buttons,
   // the answer in the body and Answer in the bar; the step's details follow below it.
   const phone = usePhone();
@@ -110,7 +112,7 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
   );
   const reviewNotes = (
     <>
-      {step.status === "review" && step.review_with === "orchestrator" && (
+      {reviewedByOrchestrator(step) && (
         <Section title={t("details.orchestratorReview")}>
           <p className="text-sm text-fg-2">{t("details.orchestratorReviewText")}</p>
         </Section>
@@ -611,7 +613,7 @@ function PictureActions({ project, queue, step, path, src, onChanged }: { projec
   const next = noteTargets(queue.steps, step.id).next;
   const reviewing = showsReviewActions(step);
   const where = reviewing ? t("details.picture.toWorker")
-    : step.status === "review" && step.review_with === "orchestrator" ? t("details.picture.toOrchestrator")
+    : reviewedByOrchestrator(step) ? t("details.picture.toOrchestrator")
     : next ? t("details.picture.toNote", { step: next }) : undefined;
   const base = `/queues/${enc(queue.id)}/steps/${enc(step.id)}/pictures`;
   const comment = useDraftText({
@@ -663,8 +665,6 @@ function PictureActions({ project, queue, step, path, src, onChanged }: { projec
   );
 }
 
-interface CommitView { sha: string; subject: string; author: string; at: string; files: number; insertions: number; deletions: number; foreign: boolean }
-interface RoundView { session: string; start: string | null; end: string | null; open: boolean; commits: CommitView[] }
 
 /** The commits of each round of the step (server: src/gitinfo.ts); nothing outside a git repository. */
 function StepCommits({ project, queue, step, version, toggle }: {
@@ -672,7 +672,7 @@ function StepCommits({ project, queue, step, version, toggle }: {
   /** The review's one line: "Commits · 3", which opens and closes the list. */
   toggle?: { open: boolean; onToggle: () => void };
 }) {
-  const data = useQuery<{ rounds: RoundView[] } | null>(`/api/projects/${enc(project)}/queues/${enc(queue)}/steps/${enc(step)}/commits`, version).data;
+  const data = useQuery<StepCommitsView | null>(`/api/projects/${enc(project)}/queues/${enc(queue)}/steps/${enc(step)}/commits`, version).data;
   if (!data) return null;
   if (toggle) {
     const n = data.rounds.reduce((k, r) => k + r.commits.length, 0);
@@ -806,7 +806,6 @@ function WorktreeActions({ project, root, queue, onChanged }: { project: string;
   );
 }
 
-interface BranchView { branch: string; base?: { ref: string; ahead: number; behind: number }; upstream?: { ref: string; ahead: number; behind: number; at?: string } }
 
 /** The queue's branch: ahead and behind of its base and of its remote-tracking ref (as last fetched: never fetched here). */
 function BranchLine({ project, queue, version }: { project: string; queue: string; version: Version }) {
@@ -1016,7 +1015,7 @@ function describe(e: Event): string {
 
 /** A question and its answers; open, with its answer box, unless the panel's action bar answers it (`inBar`). */
 function Question({ q, project, onChanged, inBar }: { q: QuestionView; project: string; onChanged: () => void; inBar?: boolean }) {
-  const open = q.state === "open" || q.state === "escalated";
+  const open = isOpenQuestion(q);
   const tone = q.state === "escalated" ? "border-review/40 bg-review/5" : open ? "border-warn/30 bg-warn/5" : "border-line";
   return (
     <div className={`mb-2 rounded-lg border p-3 text-sm ${tone}`}>

@@ -14,7 +14,7 @@ import {
   ActionError, Effort, ProjectStore, addNote, closingToSkip, closingToSkipAtApproval, updateSettings, answerAsUser, approveQueue, deleteNote, loadProjectState, nexusHome, withdrawApproval, addAllowRule,
   ensureGlobalSettings, readGlobalSettings, updateGlobalSettings, ownKeys, OVERRIDABLE, settingKey, readRegistry, readUsage, readTurns, commentOnPicture, markPicture, routeAnswers, routeSendBacks, sendBack, sendMessage, setQueueSettings, setStepLevel, confirmProvisional, type ProjectState,
   readAway, writeAway, awayNow, awayUntil, turnAway, expireAway, acceptPlanProposal, declinePlanProposal, handBackPlan, acceptTagProposal, declineTagProposal,
-  MIN_SAMPLES, queueEstimate, stepSamples, type EstimatesResponse,
+  MIN_SAMPLES, queueEstimate, stepSamples, isOpenQuestion, type EstimatesResponse, type LeftView, type ProjectSummary,
 } from "@nexus/protocol";
 import { newestFirst, projectDigest, projectRunning, usageSince, type DigestEvent, type DigestResponse, type DigestRunning, type UsageRun } from "@nexus/protocol/digest";
 import { Engine } from "./engine.ts";
@@ -250,16 +250,17 @@ app.post("/login", async (c) => {
 
 app.get("/api/projects", (c) => {
   refreshRegistry();
-  return c.json([...projects.values()].map((e) => {
+  const list: ProjectSummary[] = [...projects.values()].map((e) => {
     const s = stateOf(e);
     const count = (st: string) => s?.queues.filter((q) => q.status === st).length ?? 0;
     return {
       id: e.id, root: e.root, name: s?.project.name ?? e.id, error: e.error,
       running: count("running"), waiting: count("waiting"), stopped: count("stopped"),
-      open_questions: s?.questions.filter((q) => q.state === "open" || q.state === "escalated").length ?? 0,
+      open_questions: s?.questions.filter(isOpenQuestion).length ?? 0,
       attention: s?.attention ?? [],
     };
-  }));
+  });
+  return c.json(list);
 });
 
 app.get("/api/projects/:id/state", (c) => {
@@ -533,7 +534,8 @@ app.get("/api/projects/:id/queues/:queue/left", (c) => {
   const q = e ? stateOf(e)?.queues.find((x) => x.id === c.req.param("queue")) : undefined;
   if (!e || !q) return c.json({ error: "unknown project or queue" }, 404);
   const left = leftBehind(e.store, q);
-  return c.json(left ? { ...left, discarded: discardRecorded(q) ?? null } : null);
+  const view: LeftView | null = left ? { ...left, discarded: discardRecorded(q) ?? null } : null;
+  return c.json(view);
 });
 app.get("/api/projects/:id/queues/:queue/git", (c) => {
   const e = projects.get(c.req.param("id"));

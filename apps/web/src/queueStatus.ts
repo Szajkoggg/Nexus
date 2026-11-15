@@ -2,7 +2,7 @@
 // steps, its questions and its run together, so that "running" shows only while a run really runs, apart from
 // waiting, and a queue whose steps say running while nothing runs reads as paused. Pure and unit tested; QueueRow
 // shows it as a dot and a word, and the later layouts (the desktop rail, the digest) use it too.
-import { HOLDING_RUN_STATES } from "@nexus/protocol/times";
+import { isOpenQuestion, runGoing, waitsForUserReview } from "@nexus/protocol/status-rules";
 import { formatClock, t, type Key, type Params } from "./i18n.ts";
 
 export type Tone = "running" | "waiting" | "review" | "stopped" | "failed" | "approval" | "paused" | "planned" | "done" | "cancelled";
@@ -59,7 +59,7 @@ function startOf(q: QueueLike, now: Date): { key: Key; params?: Params } {
 }
 
 export function queueStatus(q: QueueLike, now = new Date()): HonestStatus {
-  const questions = q.questions.filter((x) => x.state === "open" || x.state === "escalated");
+  const questions = q.questions.filter(isOpenQuestion);
   const base = {
     questions: questions.length,
     closed: q.steps.filter((s) => s.status === "done" || s.status === "skipped").length,
@@ -74,7 +74,7 @@ export function queueStatus(q: QueueLike, now = new Date()): HonestStatus {
       says: params ? { key, params } : { key }, ...(step ? { step } : {}), ...base,
     };
   };
-  const run = q.run && HOLDING_RUN_STATES.includes(q.run.state) ? q.run : undefined;
+  const run = runGoing(q.run) ? q.run : undefined;
   const revision = q.revision ?? 1;
 
   if (q.status === "cancelled") return is("cancelled", "status.cancelled");
@@ -100,7 +100,7 @@ export function queueStatus(q: QueueLike, now = new Date()): HonestStatus {
   }
   const failed = q.steps.find((s) => s.status === "failed");
   if (failed && !run) return is("failed", "status.failedAt", { step: failed.id }, failed.id, true);
-  const mine = q.steps.filter((s) => s.status === "review" && s.review_with !== "orchestrator");
+  const mine = q.steps.filter(waitsForUserReview);
   if (mine.length === 1) return is("review", "status.yourReview", undefined, mine[0]!.id);
   if (mine.length > 1) return is("review", "status.yourReviews", { count: mine.length }, mine[0]!.id, true);
   const blocking = questions.find((x) => !x.can_continue);

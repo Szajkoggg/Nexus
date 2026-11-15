@@ -2,6 +2,7 @@
 // setting with a global value switched between following it and the project's own value (PROTOCOL.md, "Global settings").
 import { useState, type ReactNode } from "react";
 import type { GlobalSettings, ProjectFile, TagsFile } from "@nexus/protocol";
+import type { ModelInfo } from "@nexus/protocol/api";
 import { LANGUAGES } from "@nexus/protocol/languages";
 import { TAG_KINDS } from "@nexus/protocol/tags";
 import { fallbackLine, parseFallback } from "../fallback.ts";
@@ -662,7 +663,6 @@ function ServerSection({ info, onChanged }: { info: ServerInfo | undefined; onCh
 // ---------------------------------------------------------------- choosing a model
 
 
-interface ModelInfo { value: string; label: string; description?: string; efforts?: string[] }
 
 /**
  * A model, chosen from the list the runtime itself gives (Claude Code's and Codex's own model lists). "Other…" takes

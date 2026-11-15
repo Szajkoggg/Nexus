@@ -2,9 +2,8 @@
 // pending and skipped: goal, acceptance and notes; running and waiting: also the progress so far; review, done,
 // failed, stopped and rejected: also the summary, checks, review material, commits and the reason. When the step
 // changed state since the partner got it, a short "since then" addition goes with the user's next message.
-import type { ProjectState, QueueView, StepStatus, StepView } from "@nexus/protocol";
+import { isOpenQuestion, stepAtWork, type ProjectState, type QueueView, type StepStatus, type StepView } from "@nexus/protocol";
 
-const AT_WORK: ReadonlySet<StepStatus> = new Set(["running", "waiting"]);
 const PLAIN: ReadonlySet<StepStatus> = new Set(["pending", "skipped"]);
 
 /** The step a conversation is about, or why it cannot be found. */
@@ -68,14 +67,14 @@ export function stepSeed(state: ProjectState, queue: string, step: string): stri
   if (!PLAIN.has(st.status)) {
     const progress = progressLines(st);
     if (progress.length) lines.push("", ...progress);
-    if (!AT_WORK.has(st.status)) {
+    if (!stepAtWork(st)) {
       const more = [...outcomeLines(st), ...checkLines(st), ...reviewLines(st)];
       if (more.length) lines.push("", ...more);
     }
   } else if (st.status === "skipped" && st.reason) {
     lines.push("", `Skipped: ${oneLine(st.reason, 1000)}`);
   }
-  const questions = q.questions.filter((x) => x.step === st.id && (x.state === "open" || x.state === "escalated"));
+  const questions = q.questions.filter((x) => x.step === st.id && isOpenQuestion(x));
   if (questions.length) lines.push("", "Open questions of the step:", ...questions.map((x) => `- ${oneLine(x.text, 500)}`));
   lines.push("", "The user's message follows.");
   return lines.join("\n");
@@ -88,7 +87,7 @@ export function sinceThen(state: ProjectState, queue: string, step: string, seed
   const { st } = found;
   if (st.status === seeded.status) return undefined;
   const lines = [`[Nexus] Since you got its context (${seeded.at}), step ${st.id} went from ${seeded.status} to ${st.status}.`];
-  if (AT_WORK.has(st.status)) lines.push(...progressLines(st));
+  if (stepAtWork(st)) lines.push(...progressLines(st));
   else if (!PLAIN.has(st.status)) {
     lines.push(...outcomeLines(st));
     const failed = st.checks.filter((c) => !c.ok);

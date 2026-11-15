@@ -1,6 +1,7 @@
 // Which review actions a step offers the user, as pure helpers (unit tested); the dashboard draws them.
 import { counterpartOf, type Comparison, type KeyedLike, type PictureRole } from "@nexus/protocol/pictures";
 import { t, type Key } from "./i18n.ts";
+import { waitsForUserReview } from "@nexus/protocol/status-rules";
 
 /** What the helpers read of a step (a StepView has all of it). */
 export interface StepLike { id: string; status: string; review_with?: "orchestrator" | "user" }
@@ -10,7 +11,7 @@ export interface StepLike { id: string; status: string; review_with?: "orchestra
  * the step went to the user. Never on one the orchestrator still holds.
  */
 export function showsReviewActions(step: StepLike): boolean {
-  return step.status === "review" && step.review_with !== "orchestrator";
+  return waitsForUserReview(step);
 }
 
 /**

@@ -1383,7 +1383,7 @@ both runtimes seeing that file.
   under `.nexus/`): a dashboard action only, shown as the change to each file before it is made, written by the server
   and not committed. It keeps the files' bytes (BOM, line endings) and refuses a file that is not UTF-8 rather than
   re-encode it. "A run in the root checkout is not finished" is read as a run that holds that checkout
-  (`CHECKOUT_RUN_STATES`, paused included): a halted run holds nothing and does not block the fix; a worker that comes
+  (`runHoldsCheckout`, paused included): a halted run holds nothing and does not block the fix; a worker that comes
   back to a changed file reads it again at its next turn. The fix carries the check's `version` (a hash of both files),
   so a file changed after the user looked is never overwritten by a change the user did not see.
 - **Moving `CLAUDE.md` into `AGENTS.md`** leaves the link lines out of the moved text (they would import the file
@@ -1864,6 +1864,18 @@ settled, the last error cleared when a run starts. Places whose state is a resul
 The browser check of the fix (a script, not a test: a development instance, a project whose two steps have their own
 commits, every commits reply held back 700 ms, switching between the steps five times and sampling the page at every
 frame): at the base commit 556 of 1101 samples showed the other step's commits; with the keyed query none did.
+
+## One place for the status rules (queue RX3)
+
+When a run is going (holds its session), holds its checkout, counts toward the limit or has ended; when a step waits for
+the user's review or the orchestrator's, is at work, or holds its queue in `waiting`; when a question is open: each is
+one function in `@nexus/protocol/status-rules`, a module free of Node that the dashboard imports directly, the way it
+imports `times`. Before, the run-state lists lived in `times.ts` and were also spelled out by hand in the engine, and
+"open question" was written out in ten places (server, CLI, dashboard, the state derivation). A check of one status
+(`status === "review"`) stays as it is: a rule is what combines several. The rules take a status as plain text too,
+since the dashboard's pure helpers hold it so. The server's replies the dashboard reads are typed once in
+`@nexus/protocol/api` (types only); the first typecheck with it found the dashboard's copy of "what a stopped step left"
+missing the commits' `foreign` flag.
 
 ## Open questions
 

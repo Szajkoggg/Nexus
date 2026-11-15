@@ -7,7 +7,7 @@
 import { ActionError } from "./actions.ts";
 import { now, type ProjectStore } from "./store.ts";
 import { loadProjectState, pendingProvisional, stepClosed, type ProjectState, type QueueView } from "./state.ts";
-import { HOLDING_RUN_STATES } from "./times.ts";
+import { runGoing } from "./status-rules.ts";
 import type { PlanBy, PlanEntry, PlanFile, ProjectFile } from "./schemas.ts";
 
 /**
@@ -54,7 +54,7 @@ function predecessorWait(project: Pick<ProjectFile, "defaults">, id: string, a: 
   if (r?.state === "halted") return { done: false, waiting: `the run of ${id} halted${r.reason ? `: ${r.reason}` : ""}`, blocked: true };
   if (r?.state === "paused") return { done: false, waiting: `the run of ${id} is paused${r.reason ? `: ${r.reason}` : ""}`, blocked: true };
   if (r?.state === "approval_wait") return { done: false, waiting: `queue ${id} waits for approval of revision ${a.revision}${r.step ? ` (after ${r.step})` : ""}`, blocked: true };
-  if (r && HOLDING_RUN_STATES.includes(r.state)) return { done: false, waiting: `queue ${id} is running${r.step ? ` (at ${r.step})` : ""}`, blocked: false };
+  if (r && runGoing(r)) return { done: false, waiting: `queue ${id} is running${r.step ? ` (at ${r.step})` : ""}`, blocked: false };
   if (a.status === "running" || a.status === "waiting") return { done: false, waiting: `queue ${id} is ${a.status === "waiting" ? "waiting (a question or a review)" : "running"}`, blocked: false };
   if (!a.approved) return { done: false, waiting: `queue ${id} has not started yet; it needs approval`, blocked: false };
   return { done: false, waiting: `queue ${id} has not started yet`, blocked: false };

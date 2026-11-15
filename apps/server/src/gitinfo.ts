@@ -7,7 +7,7 @@
 // The commits of a step are those between. In the project's main checkout others may commit too (the user, another
 // queue): a commit whose time falls outside every turn of the worker's session on that step is marked foreign.
 import { execFileSync } from "node:child_process";
-import { normPath, now, type GitFile, type ProjectStore, type QueueView } from "@nexus/protocol";
+import { normPath, now, type BranchView, type CommitView, type GitFile, type LeftBehind, type ProjectStore, type QueueView, type RoundView, type StepCommitsView } from "@nexus/protocol";
 
 const TIMEOUT = 10_000;
 
@@ -73,16 +73,9 @@ export function recordBase(store: ProjectStore, q: Pick<QueueView, "id" | "base"
 
 // ---------------------------------------------------------------- a step's commits
 
-interface CommitView {
-  sha: string; subject: string; author: string; at: string;
-  files: number; insertions: number; deletions: number;
-  /** Not made in a turn of the worker's session on this step (the main checkout only). */
-  foreign: boolean;
-}
-export interface RoundView { session: string; start: string | null; end: string | null; open: boolean; commits: CommitView[] }
 
 /** The commits of each round of a step; undefined when the checkout is not a git repository or nothing was recorded. */
-export function stepCommits(store: ProjectStore, q: QueueView, step: string): { rounds: RoundView[] } | undefined {
+export function stepCommits(store: ProjectStore, q: QueueView, step: string): StepCommitsView | undefined {
   const dir = checkoutOf(store, q);
   const rounds = store.readGit(q.id)?.steps[step];
   if (!dir || !rounds?.length || git(dir, ["rev-parse", "--git-dir"]) === undefined) return undefined;
@@ -135,14 +128,6 @@ function turnWindows(store: ProjectStore, session: string, queue: string, step: 
 
 // ---------------------------------------------------------------- the branch
 
-export interface BranchView {
-  branch: string;
-  /** Ahead of and behind its base (an auto worktree's, or the queue's named base). */
-  base?: { ref: string; ahead: number; behind: number };
-  /** Ahead of and behind the local remote-tracking ref (no fetch): `at` is when that ref last changed, if known. */
-  upstream?: { ref: string; ahead: number; behind: number; at?: string };
-}
-
 /** The queue's branch against its base and its remote-tracking ref; undefined outside a git repository or detached. */
 export function branchState(store: ProjectStore, q: QueueView): BranchView | undefined {
   const dir = checkoutOf(store, q);
@@ -177,15 +162,6 @@ export function branchState(store: ProjectStore, q: QueueView): BranchView | und
 
 /** Uncommitted changes in a checkout are not necessarily the stopped step's: said wherever they are shown. */
 export const UNCOMMITTED_NOTE = "in the checkout, not necessarily this step's";
-
-export interface LeftBehind {
-  step: string;
-  /** The step's own commits, every round, newest first; those marked foreign are left out. */
-  commits: CommitView[];
-  /** `git status` of the queue's checkout (read only): `status` is its two-letter code, `path` the file. */
-  uncommitted: { status: string; path: string }[];
-  uncommitted_note: string;
-}
 
 /** What a stopped queue's stopped step left behind; undefined when the queue is not stopped at a step. */
 export function leftBehind(store: ProjectStore, q: QueueView): LeftBehind | undefined {

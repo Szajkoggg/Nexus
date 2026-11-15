@@ -6,7 +6,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { ActionError, CHECKOUT_RUN_STATES, checkRules, loadProjectState, type ProjectStore, type RulesCheck } from "@nexus/protocol";
+import { ActionError, runHoldsCheckout, checkRules, loadProjectState, type ProjectStore, type RulesCheck } from "@nexus/protocol";
 import { checkoutPath, samePath } from "./worktree.ts";
 
 const FILES = { agents: "AGENTS.md", claude: "CLAUDE.md" } as const;
@@ -42,7 +42,7 @@ export function projectRules(root: string): ProjectRules {
 export function fixProjectRules(store: ProjectStore, version: unknown): string {
   const state = loadProjectState(store);
   const root = state.project.root;
-  const busy = state.queues.find((q) => q.run && CHECKOUT_RUN_STATES.includes(q.run.state) && samePath(checkoutPath(state, q), root));
+  const busy = state.queues.find((q) => runHoldsCheckout(q.run) && samePath(checkoutPath(state, q), root));
   if (busy) {
     throw new ActionError(`queue ${busy.id}'s run is not finished in the project's checkout (${busy.run!.state}): change its rules files once it is, so that its worker does not find them changed under it`, 409);
   }

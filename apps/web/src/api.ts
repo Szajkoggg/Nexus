@@ -8,13 +8,8 @@ import { Query, Requests, fetchJson, type LiveMessage, type QueryView, type Vers
 export { HttpError, open, request } from "./http.ts";
 
 export type { QueryView, Version } from "./query.ts";
+export type { ProjectSummary } from "@nexus/protocol/api";
 export type { AttentionItem, ProjectState, QueueView, StepView, QuestionView, SessionView } from "@nexus/protocol";
-
-export interface ProjectSummary {
-  id: string; name: string; root: string; error?: string;
-  running: number; waiting: number; stopped: number; open_questions: number;
-  attention: AttentionItem[];
-}
 
 export const enc = encodeURIComponent;
 
