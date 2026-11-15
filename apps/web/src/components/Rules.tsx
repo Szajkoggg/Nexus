@@ -3,7 +3,7 @@
 // before the user makes it. The server writes the files and commits nothing (apps/server/src/rulesfix.ts).
 import { useState } from "react";
 import type { RulesCheck, RulesFileChange } from "@nexus/protocol/rules";
-import { actResult, enc, useFetch, type ProjectState } from "../api.ts";
+import { actResult, enc, useQuery, type ProjectState } from "../api.ts";
 import { Button } from "./ui.tsx";
 import { rich, t, type Key } from "../i18n.ts";
 
@@ -27,7 +27,7 @@ const code = (text: string, key = text) => <code key={key} className="font-mono 
 export function RulesWarning({ project }: { project: ProjectState }) {
   const id = project.project.id;
   const [tick, setTick] = useState(0);
-  const rules = useFetch<ProjectRules>(`/api/projects/${enc(id)}/rules`, `${project.generated_at}/${tick}`);
+  const rules = useQuery<ProjectRules>(`/api/projects/${enc(id)}/rules`, `${project.generated_at}/${tick}`).data;
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string }>();

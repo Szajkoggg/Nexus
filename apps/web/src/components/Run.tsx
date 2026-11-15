@@ -1,7 +1,7 @@
 // Running queues through Nexus-launched sessions: controls, live activity, sessions and usage.
 import { useEffect, useState, type ReactNode } from "react";
 import { HOLDING_RUN_STATES, retryLine } from "@nexus/protocol/times";
-import { act, enc, useFetch, type ActivityEntry, type ProjectState, type QueueView, type SessionView, type Usage } from "../api.ts";
+import { act, enc, useQuery, type ActivityEntry, type ProjectState, type QueueView, type SessionView, type Usage, type Version } from "../api.ts";
 import { Button, RunTimes, Section, TimeAgo } from "./ui.tsx";
 import { formatClock, formatDateTime, formatTime, formatNumber, rich, t, type Key } from "../i18n.ts";
 import { EffortSelect, ModelSelect } from "./Settings.tsx";
@@ -268,8 +268,8 @@ const KIND_STYLE: Record<string, string> = {
 const KIND_ICON: Record<string, string> = { tool: "›", text: "¶", tool_error: "✗", error: "!", turn_start: "▸", turn_end: "■", exit: "■", retry: "↻" };
 
 /** What the agent did during a step, from the runtime's stream. */
-export function Activity({ project, session, queue, step, version }: { project: string; session: string; queue: string; step: string; version: unknown }) {
-  const items = useFetch<ActivityEntry[]>(`/api/projects/${enc(project)}/sessions/${enc(session)}/activity?queue=${enc(queue)}&step=${enc(step)}`, version);
+export function Activity({ project, session, queue, step, version }: { project: string; session: string; queue: string; step: string; version: Version }) {
+  const items = useQuery<ActivityEntry[]>(`/api/projects/${enc(project)}/sessions/${enc(session)}/activity?queue=${enc(queue)}&step=${enc(step)}`, version).data;
   const [all, setAll] = useState(false);
   if (!items?.length) return null;
   const shown = all ? items : items.slice(-40);
@@ -304,11 +304,11 @@ export function ContextBar({ s }: { s: SessionView }) {
 
 /** The subscription's windows, from the latest report of any session. */
 export function UsageMeter({ version, always, stacked }: {
-  version: unknown; always?: boolean;
+  version: Version; always?: boolean;
   /** At a desktop sidebar's foot: one row per window, its name, a bar and the percentage. */
   stacked?: boolean;
 }) {
-  const u = useFetch<Usage | null>("/api/usage", version);
+  const u = useQuery<Usage | null>("/api/usage", version).data;
   const none = always ? <span className="text-xs text-fg-3">{t("usage.none")}</span> : null;
   if (!u) return none;
   const windows = Object.entries(u.windows).filter(([, w]) => !w.resets_at || Date.parse(w.resets_at) > Date.now());

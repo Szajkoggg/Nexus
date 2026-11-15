@@ -3,7 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useLayoutEffect, use
 import type { ChatEntry, RuntimeFile, SessionFile } from "@nexus/protocol";
 import type { NumberedEntry } from "@nexus/protocol/chat";
 import { PinButton, PinsBar, SearchBar, SearchButton, StopButton, type PinView, type SearchState } from "./ChatTools.tsx";
-import { act, enc, useFetch } from "../api.ts";
+import { act, enc, useQuery, type Version } from "../api.ts";
 import { Button, Clock, Composer, Menu, TimeAgo, type MenuEntry } from "./ui.tsx";
 import { CopyButton, ReplyTools } from "./MessageTools.tsx";
 import { messageSource, replyTools } from "../messageTools.ts";
@@ -26,8 +26,8 @@ interface View { session: SessionFile | null; state: "working" | "idle" | "exite
 /** A chat's search, open or not: its button is in the chat's header, or in the desktop column's for the orchestrator. */
 interface Search { open: boolean; set: (open: boolean) => void }
 
-export function useOrchestrator(project: string | undefined, version: unknown) {
-  return useFetch<View>(project ? `/api/projects/${enc(project)}/orchestrator` : undefined, version);
+export function useOrchestrator(project: string | undefined, version: Version) {
+  return useQuery<View>(project ? `/api/projects/${enc(project)}/orchestrator` : undefined, version).data;
 }
 
 /** A chat: what it is (its header; on a desktop's orchestrator chat, in the middle column's header), the messages, and the composer. */
@@ -524,8 +524,8 @@ function AboutStep({ project, c, className = "" }: { project: string; c: Session
  * seeds it with the step's context at the first message); "New conversation" starts another. Below, the step's
  * conversations, each a link into it.
  */
-export function StepChat({ project, queue, step, version }: { project: string; queue: string; step: string; version: unknown }) {
-  const list = useFetch<ConversationItem[]>(`/api/projects/${enc(project)}/conversations`, version);
+export function StepChat({ project, queue, step, version }: { project: string; queue: string; step: string; version: Version }) {
+  const list = useQuery<ConversationItem[]>(`/api/projects/${enc(project)}/conversations`, version).data;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const mine = (list ?? []).filter((c) => !c.archived && c.about?.queue === queue && c.about.step === step);
@@ -578,16 +578,16 @@ export function StepChat({ project, queue, step, version }: { project: string; q
 
 /** The conversations with a thinking partner: the phone's Ideas tab (`inline`), a desktop's middle column (`desk`). */
 export function ConversationsPanel({ project, name, version, onChanged, defaultRuntime, inline, desk }: {
-  project: string; name: string; version: unknown; onChanged: () => void; defaultRuntime: "claude" | "codex"; inline?: boolean; desk?: Desk;
+  project: string; name: string; version: Version; onChanged: () => void; defaultRuntime: "claude" | "codex"; inline?: boolean; desk?: Desk;
 }) {
-  const list = useFetch<ConversationItem[]>(`/api/projects/${enc(project)}/conversations`, version);
+  const list = useQuery<ConversationItem[]>(`/api/projects/${enc(project)}/conversations`, version).data;
   usePlaces(); // the list's unread dots follow each conversation's place
   // The open conversation (or the new-conversation form) is a layer above the panel: Back returns to the list.
   const layer = layerValue(useNav(), "conversation");
   const creating = layer === "new";
   const open = creating ? undefined : layer;
   const [showArchived, setShowArchived] = useState(false);
-  const view = useFetch<ConversationView>(open ? `/api/projects/${enc(project)}/conversations/${enc(open)}` : undefined, version);
+  const view = useQuery<ConversationView>(open ? `/api/projects/${enc(project)}/conversations/${enc(open)}` : undefined, version).data;
   // On the phone's tab the list or one conversation at a time; on a desktop both, side by side.
   const side = !desk;
   const current = list?.find((c) => c.id === open);

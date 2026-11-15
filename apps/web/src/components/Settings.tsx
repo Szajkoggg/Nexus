@@ -5,7 +5,7 @@ import type { GlobalSettings, ProjectFile, TagsFile } from "@nexus/protocol";
 import { LANGUAGES } from "@nexus/protocol/languages";
 import { TAG_KINDS } from "@nexus/protocol/tags";
 import { fallbackLine, parseFallback } from "../fallback.ts";
-import { act, useFetch } from "../api.ts";
+import { act, useQuery, type Version } from "../api.ts";
 import { Button, Section } from "./ui.tsx";
 import { rich, t, type Key } from "../i18n.ts";
 import { CHOICES, readChoice, setChoice, type ThemeChoice } from "../theme.ts";
@@ -413,15 +413,17 @@ function useValues(initial: Values) {
   };
 }
 
-export function SettingsPanel({ project, tags, onChanged, server, tools }: {
+export function SettingsPanel({ project, version, tags, onChanged, server, tools }: {
   project: ProjectFile; onChanged: () => void; server?: ServerInfo;
+  /** The project's state's version (its generated_at): its settings are read again with every change of it. */
+  version: Version;
   /** The project's tag lists (ProjectState.tags), shown under its settings. */
   tags?: TagsFile;
   /** On the phone, where the header has no icon row: the update, the usage, notifications and remote access. */
   tools?: ReactNode;
 }) {
   const [tab, setTab] = useState<"project" | "global">("project");
-  const info = useFetch<ProjectSettingsInfo>(`/api/projects/${encodeURIComponent(project.id)}/settings`, project);
+  const info = useQuery<ProjectSettingsInfo>(`/api/projects/${encodeURIComponent(project.id)}/settings`, version).data;
   return (
     <div>
       <div className="break-all pr-8 text-xs text-fg-3">{tab === "project" ? project.root : t("settings.globalNote")}</div>
@@ -503,7 +505,7 @@ function ProjectSettingsPage({ project, info, onChanged }: { project: ProjectFil
 /** The global settings, which every project follows where it has no value of its own, and the global-only ones. */
 function GlobalSettingsPage({ onChanged, server }: { onChanged: () => void; server?: ServerInfo }) {
   const [version, setVersion] = useState(0);
-  const data = useFetch<{ global: GlobalSettings }>("/api/settings", version);
+  const data = useQuery<{ global: GlobalSettings }>("/api/settings", version).data;
   if (!data) return <p className="text-sm text-fg-3">{t("common.loading")}</p>;
   return <GlobalForm key={version} global={data.global} server={server} onSaved={() => { setVersion((x) => x + 1); onChanged(); }} onChanged={onChanged} />;
 }
@@ -584,8 +586,8 @@ export interface ServerInfo {
 const PUSH_TONE = { pushed: "text-ok", failed: "text-danger", skipped: "text-fg-2" } as const;
 const PUSH_LABEL: Record<"pushed" | "failed" | "skipped", Key> = { pushed: "settings.server.pushed", failed: "settings.server.pushFailed", skipped: "settings.server.notPushed" };
 
-export function useServer(version: unknown) {
-  return useFetch<ServerInfo>("/api/server", version);
+export function useServer(version: Version) {
+  return useQuery<ServerInfo>("/api/server", version).data;
 }
 
 /** A pill in the header while Nexus updates itself. */
@@ -676,7 +678,7 @@ interface ModelInfo { value: string; label: string; description?: string; effort
 export function ModelSelect({ runtime, value, onChange, defaultLabel = t("run.default"), className = "", disabled }: {
   runtime: "claude" | "codex"; value: string; onChange: (v: string) => void; defaultLabel?: string; className?: string; disabled?: boolean;
 }) {
-  const models = useFetch<ModelInfo[]>(`/api/models/${runtime}`, runtime);
+  const models = useQuery<ModelInfo[]>(`/api/models/${runtime}`, runtime).data;
   const [typing, setTyping] = useState(false);
   const options: [string, string, string?][] = (models ?? []).map((m) => [m.value, m.label, m.description]);
   if (value && !options.some(([v]) => v === value)) options.push([value, value]);
@@ -705,7 +707,7 @@ export function ModelSelect({ runtime, value, onChange, defaultLabel = t("run.de
  * default model, every level some model takes.
  */
 export function useEfforts(runtime: "claude" | "codex", model: string): string[] {
-  const models = useFetch<ModelInfo[]>(`/api/models/${runtime}`, runtime);
+  const models = useQuery<ModelInfo[]>(`/api/models/${runtime}`, runtime).data;
   const fallback = runtime === "claude" ? [...CLAUDE_EFFORTS] : ["low", "medium", "high", "xhigh"];
   if (!models?.length) return fallback;
   const chosen = models.find((m) => m.value === model)?.efforts;

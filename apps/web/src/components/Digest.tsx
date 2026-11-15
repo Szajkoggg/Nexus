@@ -5,7 +5,7 @@
 import { useState } from "react";
 import type { DigestEvent, DigestResponse } from "@nexus/protocol/digest";
 import { mergeAttention } from "@nexus/protocol/attention";
-import { fileUrl, useFetch, type ProjectSummary } from "../api.ts";
+import { fileUrl, useQuery, type ProjectSummary, type Version } from "../api.ts";
 import { digestTiles, hasNews, outcome, usageLine, type Tone } from "../digest.ts";
 import { nav } from "../nav.ts";
 import { formatClock, t } from "../i18n.ts";
@@ -24,10 +24,10 @@ const SHOWN = 6;
 
 const greeting = (d = new Date()) => t(d.getHours() < 12 ? "digest.morning" : d.getHours() < 18 ? "digest.afternoon" : "digest.evening");
 
-export function Digest({ projects, version, onGoThrough }: { projects: ProjectSummary[]; version: unknown; onGoThrough: () => void }) {
+export function Digest({ projects, version, onGoThrough }: { projects: ProjectSummary[]; version: Version; onGoThrough: () => void }) {
   const [seen, setSeen] = useState(storedSeen);
   const [all, setAll] = useState(false);
-  const d = useFetch<DigestResponse>(`/api/digest?since=${encodeURIComponent(seen)}`, version);
+  const d = useQuery<DigestResponse>(`/api/digest?since=${encodeURIComponent(seen)}`, version).data;
   const waiting = mergeAttention(projects);
   if (!d || !hasNews(d.events, waiting, seen)) return null;
   const tiles = digestTiles(d.events, waiting, d.running);

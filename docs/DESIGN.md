@@ -1836,6 +1836,27 @@ the same checks and its reviews judge them by the same list; the change comes wi
 both lists name runs once (the queue need not drop its own `npm run lint`). Shown in the approval view, marked as the
 project's, the way the project's stop conditions are.
 
+## The dashboard's reads (queue RX1)
+
+Every GET of the dashboard goes through one keyed query (`apps/web/src/query.ts`, used as `useQuery` from `api.ts`).
+An answer belongs to the URL it was asked for: a new URL shows nothing until its own answer lands, never the previous
+URL's, and a late answer for a URL no longer asked is dropped. Before, `useFetch` kept the previous URL's data, so
+switching steps showed the first step's commits under the second until the reply landed (for good if it failed), and
+the project's state had no guard against a late reply for the previously selected project. A failure is the query's
+`error` (the data it had for the same URL stays), not swallowed. Queries asking the same URL at the same version share
+one request; nothing is cached beyond that.
+
+What is asked again comes from the live notifications, counted per scope (`Versions`): every message bumps `all`
+(read at it: what spans projects, the digest, the usage, the server's state, remote access), a project's `changed` its
+own counter (its state, orchestrator chat, conversations), and `changed` or `projects` the project list. A reconnect
+may have missed anything: it bumps an epoch that is part of every project's version. Before, one global tick refetched
+every read on any message from any project. Reads inside a step or queue still key on the project state's
+`generated_at`, which moves only with that project.
+
+The browser check of the fix (a script, not a test: a development instance, a project whose two steps have their own
+commits, every commits reply held back 700 ms, switching between the steps five times and sampling the page at every
+frame): at the base commit 556 of 1101 samples showed the other step's commits; with the keyed query none did.
+
 ## Open questions
 
 1. **The orchestrator on Codex.** The orchestrator runs on Claude Code only: its read-only guarantee rests on Claude

@@ -7,7 +7,7 @@
 // dragging it onto another (onto "Next": to the front). The orchestrator's proposals have Accept and Decline on the
 // queue (and in the waiting list, PlanRow); a dependency the user set can be handed back to the orchestrator (↩).
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { act, enc, useFetch, type AttentionItem, type QueueView } from "../api.ts";
+import { act, enc, useQuery, type AttentionItem, type QueueView, type Version } from "../api.ts";
 import type { EstimatesResponse } from "@nexus/protocol";
 import { t } from "../i18n.ts";
 import { estimateWords, moveTargets, planLayout, planList, type PlanLayout, type PlanNode, type Why } from "../plan.ts";
@@ -50,11 +50,11 @@ type Actions = ReturnType<typeof usePlanActions> & {
 export function PlanView({ project, queues, version, onOpen, onChanged }: {
   project: string; queues: readonly QueueView[]; onOpen: (queue: string) => void; onChanged: () => void;
   /** Changes when the project's files do: the estimates are fetched again. */
-  version?: unknown;
+  version?: Version;
 }) {
   const layout = useMemo(() => planLayout(queues), [queues]);
   const base = usePlanActions(project, onChanged);
-  const estimates = useFetch<EstimatesResponse>(`/api/projects/${enc(project)}/estimates`, version);
+  const estimates = useQuery<EstimatesResponse>(`/api/projects/${enc(project)}/estimates`, version).data;
   const actions: Actions = { ...base, targets: (q) => moveTargets(layout, queues, q), estimates };
   // Nothing planned: the view says nothing (the queue lists below say what there is).
   if (!layout.columns.some((c, i) => i > 0 && c.length) && !layout.outside.length) return null;

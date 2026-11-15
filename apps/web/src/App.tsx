@@ -1,6 +1,7 @@
-import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
-import type { QueueStatus } from "@nexus/protocol";
-import { enc, useFetch, useLive, useProjectState, useProjects, type AttentionItem, type QueueView } from "./api.ts";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ProjectState, QueueStatus } from "@nexus/protocol";
+import { enc, useLive, useQuery, type AttentionItem, type ProjectSummary, type QueueView, type Version } from "./api.ts";
+import { bump, noVersions, projectVersion } from "./query.ts";
 import { QueueRow } from "./components/QueueRow.tsx";
 import { chooseOption, QueueDetail, StepDetail } from "./components/Details.tsx";
 import { Button, Drawer, Section, TimeAgo, useWide } from "./components/ui.tsx";
@@ -55,21 +56,23 @@ function useRoute() {
 
 export function App() {
   const route = useRoute();
-  const { projects, error: projectsError, reload: reloadProjects } = useProjects();
+  // What the live notifications changed (query.ts): each read is asked again only when its own version moves, so a
+  // change in another project refetches nothing of this one's.
+  const [versions, setVersions] = useState(noVersions);
+  const connected = useLive((m) => setVersions((v) => bump(v, m)));
+  const { data: projects, error: projectsError } = useQuery<ProjectSummary[]>("/api/projects", versions.list);
   const projectId = route.project ?? projects?.[0]?.id;
-  const { state, error, reload } = useProjectState(projectId);
-
-  const [tick, setTick] = useState(0);
-  const connected = useLive((m) => {
-    setTick((t) => t + 1);
-    if (m.type === "projects" || m.type === "reconnected") reloadProjects();
-    if ((m.type === "changed" && m.project === projectId) || m.type === "reconnected") reload();
-    if (m.type === "changed") reloadProjects();
-  });
+  const version = projectVersion(versions, projectId);
+  const { data: state, error } = useQuery<ProjectState>(projectId ? `/api/projects/${enc(projectId)}/state` : undefined, version);
+  /**
+   * After the user's own write: the project's reads and what spans projects are asked again (the live notification
+   * may come later).
+   */
+  const reload = useCallback(() => setVersions((v) => bump(v, { type: "changed", project: projectId })), [projectId]);
 
   const notify = useNotifications(projects);
-  const orchestrator = useOrchestrator(projectId, tick);
-  const server = useServer(tick);
+  const orchestrator = useOrchestrator(projectId, version);
+  const server = useServer(versions.all);
   // Each panel is a layer in the browser history: opening pushes an entry, closing (or Back) pops it.
   const settingsOpen = isOpen(route.nav, "settings");
   const remoteOpen = isOpen(route.nav, "remote");
@@ -123,7 +126,7 @@ export function App() {
       nav.item(next.project, next.queue, attentionTarget(next));
     } else if (!waiting.length) round.current = null;
   }, [waiting, projectId, route.queue, route.step]);
-  const digest = <Digest projects={projects ?? []} version={tick} onGoThrough={goThrough} />;
+  const digest = <Digest projects={projects ?? []} version={versions.all} onGoThrough={goThrough} />;
   // On the phone an item that waits for the user says where it stands in the waiting list: "2 of 6".
   const place = phone && projectId && route.queue ? waitingPosition(waiting, { project: projectId, queue: route.queue, step: route.step }) : undefined;
   const of = place?.at ? t("shell.placeInWaiting", { at: place.at, total: place.total }) : undefined;
@@ -136,7 +139,7 @@ export function App() {
   const [form, setForm] = useApprovalForm(projectId, queue?.id, queue?.revision);
   const fullApproval = !!(queue && !step && needsApproval(queue) && (form ?? (phone ? "panel" : "full")) === "full");
   // "Ideas · N" in a desktop's switch: the conversations that are not archived.
-  const ideas = useFetch<{ id: string; archived?: boolean; last_at?: string }[]>(projectId ? `/api/projects/${enc(projectId)}/conversations` : undefined, tick);
+  const ideas = useQuery<{ id: string; archived?: boolean; last_at?: string }[]>(projectId ? `/api/projects/${enc(projectId)}/conversations` : undefined, version).data;
   // Unread markers on the chat switch and the phone's tabs, from each chat's place (chatPlace.ts).
   usePlaces();
   const unread: Unread = {
@@ -210,12 +213,12 @@ export function App() {
   // The sheets and drawers over either layout: settings, remote access, a queue or step.
   const drawers = <>
     <Drawer open={settingsOpen && !!state} onClose={() => nav.close("settings")}>
-      {state && <SettingsPanel key={state.project.id} project={state.project} tags={state.tags} onChanged={() => { reload(); setTick((t) => t + 1); }} server={server}
-        tools={phone ? <PhoneTools connected={connected} version={tick} server={server} notify={notify} onChanged={() => setTick((n) => n + 1)} /> : undefined} />}
+      {state && <SettingsPanel key={state.project.id} project={state.project} version={state.generated_at} tags={state.tags} onChanged={reload} server={server}
+        tools={phone ? <PhoneTools connected={connected} version={versions.all} server={server} notify={notify} onChanged={reload} /> : undefined} />}
     </Drawer>
 
     <Drawer open={remoteOpen} onClose={() => nav.close("remote")}>
-      <RemotePanel version={tick} />
+      <RemotePanel version={versions.all} />
     </Drawer>
 
     <Drawer open={!!commit && !!projectId} onClose={() => nav.close("commit")}>
@@ -255,16 +258,16 @@ export function App() {
 
         <main className={scrolls ? "@container scroll-thin min-h-0 flex-1 overflow-y-auto px-4 py-4" : "flex min-h-0 flex-1 flex-col"}>
           {scrolls && banners}
-          {tab === "waiting" && server?.plan && <div className="mb-4"><PlannedDeployCard plan={server.plan} onChanged={() => setTick((n) => n + 1)} projects={projects} /></div>}
+          {tab === "waiting" && server?.plan && <div className="mb-4"><PlannedDeployCard plan={server.plan} onChanged={reload} projects={projects} /></div>}
           {tab === "waiting" && <div className="mb-4 empty:hidden">{digest}</div>}
           {tab === "waiting" && <WaitingList projects={projects ?? []} onOpen={openWaiting} onChoose={(w, o) => { if (w.qid) chooseOption(w.qid, o); openWaiting(w); }} />}
           {tab === "queues" && queuesPage}
           {tab === "chat" && projectId && (
-            <ChatPanel key={`chat-${projectId}`} inline project={projectId} name={state?.project.name ?? projectId} view={orchestrator} onChanged={() => setTick((t) => t + 1)} />
+            <ChatPanel key={`chat-${projectId}`} inline project={projectId} name={state?.project.name ?? projectId} view={orchestrator} onChanged={reload} />
           )}
           {tab === "ideas" && projectId && state && (
-            <ConversationsPanel key={`ideas-${projectId}`} inline project={projectId} name={state.project.name} version={tick} defaultRuntime={state.project.conversations.runtime}
-              onChanged={() => setTick((t) => t + 1)} />
+            <ConversationsPanel key={`ideas-${projectId}`} inline project={projectId} name={state.project.name} version={version} defaultRuntime={state.project.conversations.runtime}
+              onChanged={reload} />
           )}
         </main>
 
@@ -292,7 +295,7 @@ export function App() {
       </button>
     ),
   };
-  const railProps = { projects: projects ?? [], state, queuesShown: view === "queues", onOpenWaiting: openWaiting, digest, plan: server?.plan, onChanged: () => setTick((n) => n + 1) };
+  const railProps = { projects: projects ?? [], state, queuesShown: view === "queues", onOpenWaiting: openWaiting, digest, plan: server?.plan, onChanged: reload };
   const besideShown = !wide && ((itemShown && !fullApproval) || waitingOpen);
   const alerts = (projectsError || projects?.length === 0 || error) && <div className="px-6 pt-4">{banners}</div>;
   return (
@@ -300,8 +303,8 @@ export function App() {
     <div className="flex h-dvh">
       <ProjectSidebar projects={projects ?? []} current={projectId} connected={connected} onPick={(id) => nav.project(id)} foot={<>
         <UpdatePill info={server} />
-        <UsageMeter version={tick} stacked />
-        <div className="-mx-1.5"><AwaySwitch away={server?.away} onChanged={() => setTick((n) => n + 1)} /></div>
+        <UsageMeter version={versions.all} stacked />
+        <div className="-mx-1.5"><AwaySwitch away={server?.away} onChanged={reload} /></div>
         <div className="-mx-1.5 flex items-center gap-0.5">
           <NotifyToggle {...notify} />
           <span className="flex-1" />
@@ -313,13 +316,13 @@ export function App() {
       <main className="flex min-w-0 flex-1 flex-col" style={besideShown ? { marginRight: RAIL } : undefined}>
         {view === "chat" && <>
           {alerts}
-          {projectId && <ChatPanel key={`chat-${projectId}`} desk={desk} project={projectId} name={state?.project.name ?? projectId} view={orchestrator} onChanged={() => setTick((t) => t + 1)} />}
+          {projectId && <ChatPanel key={`chat-${projectId}`} desk={desk} project={projectId} name={state?.project.name ?? projectId} view={orchestrator} onChanged={reload} />}
         </>}
         {view === "ideas" && <>
           {alerts}
           {projectId && state && (
-            <ConversationsPanel key={`ideas-${projectId}`} desk={desk} project={projectId} name={state.project.name} version={tick} defaultRuntime={state.project.conversations.runtime}
-              onChanged={() => setTick((t) => t + 1)} />
+            <ConversationsPanel key={`ideas-${projectId}`} desk={desk} project={projectId} name={state.project.name} version={version} defaultRuntime={state.project.conversations.runtime}
+              onChanged={reload} />
           )}
         </>}
         {view === "queues" && <>
@@ -376,7 +379,7 @@ function Banner({ children }: { children: React.ReactNode }) {
  * remote access) and whether live updates arrive.
  */
 function PhoneTools({ connected, version, server, notify, onChanged }: {
-  connected: boolean; version: unknown; server: ReturnType<typeof useServer>; notify: ReturnType<typeof useNotifications>; onChanged: () => void;
+  connected: boolean; version: Version; server: ReturnType<typeof useServer>; notify: ReturnType<typeof useNotifications>; onChanged: () => void;
 }) {
   const row = (label: string, value: React.ReactNode) => (
     <div className="grid gap-1 py-1.5 sm:grid-cols-[11rem_1fr] sm:items-center sm:gap-3">

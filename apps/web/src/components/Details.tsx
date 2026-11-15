@@ -2,7 +2,7 @@ import { useState, type ReactNode } from "react";
 import type { ChatEntry, Event, StatusChange } from "@nexus/protocol";
 import { stopPlace } from "@nexus/protocol/attention";
 import { latestChecks, stepValuesText } from "@nexus/protocol/steps";
-import { act, actResult, enc, fileUrl, useFetch, type ProjectState, type QuestionView, type QueueView, type StepView } from "../api.ts";
+import { act, actResult, enc, fileUrl, useQuery, type ProjectState, type QuestionView, type QueueView, type StepView, type Version } from "../api.ts";
 import { comparisonOf, noteTargets, pairPictures, showsReviewActions } from "../review.ts";
 import { ActionBar, Button, Composer, Expandable, Markdown, PanelBody, PanelHeader, Section, StatusBadge, StepTimes, TEXTAREA, TimeAgo, reviewLabel, statusWord, useDraftText, type MenuEntry } from "./ui.tsx";
 import { Activity, RetryNote, RunControls } from "./Run.tsx";
@@ -671,11 +671,11 @@ interface RoundView { session: string; start: string | null; end: string | null;
 
 /** The commits of each round of the step (server: src/gitinfo.ts); nothing outside a git repository. */
 function StepCommits({ project, queue, step, version, toggle }: {
-  project: string; queue: string; step: string; version: unknown;
+  project: string; queue: string; step: string; version: Version;
   /** The review's one line: "Commits · 3", which opens and closes the list. */
   toggle?: { open: boolean; onToggle: () => void };
 }) {
-  const data = useFetch<{ rounds: RoundView[] } | null>(`/api/projects/${enc(project)}/queues/${enc(queue)}/steps/${enc(step)}/commits`, version);
+  const data = useQuery<{ rounds: RoundView[] } | null>(`/api/projects/${enc(project)}/queues/${enc(queue)}/steps/${enc(step)}/commits`, version).data;
   if (!data) return null;
   if (toggle) {
     const n = data.rounds.reduce((k, r) => k + r.commits.length, 0);
@@ -812,8 +812,8 @@ function WorktreeActions({ project, root, queue, onChanged }: { project: string;
 interface BranchView { branch: string; base?: { ref: string; ahead: number; behind: number }; upstream?: { ref: string; ahead: number; behind: number; at?: string } }
 
 /** The queue's branch: ahead and behind of its base and of its remote-tracking ref (as last fetched: never fetched here). */
-function BranchLine({ project, queue, version }: { project: string; queue: string; version: unknown }) {
-  const b = useFetch<BranchView | null>(`/api/projects/${enc(project)}/queues/${enc(queue)}/git`, version);
+function BranchLine({ project, queue, version }: { project: string; queue: string; version: Version }) {
+  const b = useQuery<BranchView | null>(`/api/projects/${enc(project)}/queues/${enc(queue)}/git`, version).data;
   if (!b) return null;
   const counts = (x: { ahead: number; behind: number }) => (
     <span><span className="text-ok">{t("details.branch.ahead", { count: x.ahead })}</span>, <span className={x.behind ? "text-warn" : "text-fg-2"}>{t("details.branch.behind", { count: x.behind })}</span></span>
