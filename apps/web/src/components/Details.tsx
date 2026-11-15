@@ -21,7 +21,7 @@ import { needsWorkChoice, stopDecision, type LeftState, type LeftView, type Work
 import { formatSeconds, rich, t, type Key } from "../i18n.ts";
 import { StepTags } from "./Tags.tsx";
 import { StepSwitches } from "./Fallback.tsx";
-import { stepMark } from "./Closing.tsx";
+import { SkipClosingBox, closingNotRun, stepMark } from "./Closing.tsx";
 import { LevelMark, LevelPicker, ProvisionalActions, levelChangeable, levelShort, levelTitle, pendingProvisional, provisionalWord } from "./Levels.tsx";
 
 interface Props {
@@ -1281,8 +1281,7 @@ function QueueBar({ project, queue, onChanged, left, work, needsChoice }: {
   const d = stopped ? stopDecision({ approved: queue.approved, revision: queue.revision, left, work }) : undefined;
   const cont = useContinue({ project: id, queue: queue.id, onChanged });
   // Continue may skip the queue's closing refactoring step while it has not run (the user's choice, not an agent's).
-  const closing = queue.steps.find((s) => s.closing);
-  const canSkipClosing = stopped && queue.approved && !!closing && (closing.status === "pending" || closing.status === "stopped");
+  const canSkipClosing = stopped && queue.approved && closingNotRun(queue);
   const [skipClosing, setSkipClosing] = useState(false);
   // The approval (Approval.tsx, the same in the full view): its words, Keep or Discard, what it pins; Ctrl+Enter.
   const a = useApprove({ project: id, queue, left, work, onChanged });
@@ -1316,12 +1315,7 @@ function QueueBar({ project, queue, onChanged, left, work, needsChoice }: {
   const opened = (!queue.approved && a.wordsOpen) || (canWithdraw && withdrawOpen) || policyOpen;
   return (
     <ActionBar hint={hint} menu={menu} secondary={!queue.approved && <AskButton project={id} queue={queue} />} primary={primary}
-      left={canSkipClosing ? (
-        <label className="flex items-center gap-2 text-sm text-fg max-lg:min-h-11">
-          <input type="checkbox" checked={skipClosing} onChange={(e) => setSkipClosing(e.target.checked)} className="accent-accent" />
-          {t("stop.skipClosing")}
-        </label>
-      ) : !queue.approved && a.skipBox}>
+      left={canSkipClosing ? <SkipClosingBox checked={skipClosing} onChange={setSkipClosing} /> : !queue.approved && a.skipBox}>
       {opened && (
         <div className="space-y-4">
           {!queue.approved && a.wordsBox}
