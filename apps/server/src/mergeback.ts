@@ -25,7 +25,6 @@ import { ROOT } from "./lifecycle.ts";
 import { samePath } from "./worktree.ts";
 
 const ENV = { ...process.env, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never", GIT_EDITOR: "true", GIT_MERGE_AUTOEDIT: "no" };
-const same = samePath;
 
 /** How many times Nexus runs the integration step again by itself when the base moved on, before it waits for the user. */
 export const REINTEGRATION_LIMIT = 2;
@@ -70,7 +69,7 @@ export function baseCheckout(root: string, base: string, serverRoot = ROOT): { p
   const target = worktrees(root).find((w) => w.branch === base);
   if (!target) return { blocked: `branch ${base} is not checked out in any worktree (or only detached): check it out, then merge` };
   // This server's own checkout when it runs as the live instance: never touched by a merge.
-  if (same(target.path, serverRoot) && git(serverRoot, ["branch", "--show-current"]) === "") return { blocked: "the base is checked out in the live worktree: Nexus does not merge there" };
+  if (samePath(target.path, serverRoot) && git(serverRoot, ["branch", "--show-current"]) === "") return { blocked: "the base is checked out in the live worktree: Nexus does not merge there" };
   const dirty = git(target.path, ["status", "--porcelain", "--untracked-files=no"]);
   if (dirty === undefined) return { blocked: `cannot read the state of ${target.path}` };
   if (dirty) return { blocked: `${target.path} has uncommitted changes: commit or stash them, then merge` };
@@ -79,7 +78,10 @@ export function baseCheckout(root: string, base: string, serverRoot = ROOT): { p
 
 /** Queues whose run holds checkout `path` (the user's old merge refuses all of them). */
 function runningIn(store: ProjectStore, state: ProjectState, path: string): QueueView[] {
-  return state.queues.filter((x) => x.run && HOLDING_RUN_STATES.includes(x.run.state) && (() => { const p = checkoutOf(store, x); return !!p && same(p, path); })());
+  return state.queues.filter((x) => {
+    const p = x.run && HOLDING_RUN_STATES.includes(x.run.state) ? checkoutOf(store, x) : undefined;
+    return !!p && samePath(p, path);
+  });
 }
 
 /**
@@ -200,7 +202,7 @@ function finishedWorktreeQueue(store: ProjectStore, queueId: string) {
   if (!q) throw new ActionError(`unknown queue ${queueId}`, 404);
   const root = normPath(state.project.root);
   const path = checkoutOf(store, q);
-  if (!path || same(path, root)) throw new ActionError(`queue ${queueId} works in the project's own checkout, not a worktree of its own`, 409);
+  if (!path || samePath(path, root)) throw new ActionError(`queue ${queueId} works in the project's own checkout, not a worktree of its own`, 409);
   if (q.status !== "done") throw new ActionError(`queue ${queueId} is not finished (it is ${q.status})`, 409);
   if (q.run && HOLDING_RUN_STATES.includes(q.run.state)) throw new ActionError(`queue ${queueId}'s run is still going`, 409);
   if (q.git?.cleaned) throw new ActionError(`queue ${queueId} was cleaned up already`, 409);
@@ -256,9 +258,9 @@ export function mergeBack(store: ProjectStore, queueId: string, serverRoot = ROO
     throw new ActionError(`the merge of ${branch} into ${base.ref} ${conflicts ? `conflicts in ${conflicts.split(/\r?\n/).join(", ")}` : `failed: ${(e as Error).message.split("\n")[0]}`}; ${clean ? "it was aborted, nothing changed" : "it was aborted, but the worktree is not as it was: look at it"}`, 409);
   }
   const sha = run(target.path, ["rev-parse", "HEAD"]);
-  const fastForward_ = sha === tip;
-  patchGit(store, q.id, { merged: { at: now(), into: base.ref, path: target.path, sha, fast_forward: fastForward_, by: "user" } });
-  return `${branch} merged into ${base.ref} in ${target.path} (${fastForward_ ? "fast-forward" : `merge commit ${sha.slice(0, 7)}`})`;
+  const ff = sha === tip;
+  patchGit(store, q.id, { merged: { at: now(), into: base.ref, path: target.path, sha, fast_forward: ff, by: "user" } });
+  return `${branch} merged into ${base.ref} in ${target.path} (${ff ? "fast-forward" : `merge commit ${sha.slice(0, 7)}`})`;
 }
 
 // ---------------------------------------------------------------- cleanup
@@ -277,7 +279,7 @@ export function removeWorktree(root: string, path: string, o: { tries?: number }
     try { rmSync(path, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 }); } catch (e) { why += ` / ${(e as Error).message}`; }
   }
   git(root, ["worktree", "prune"]);
-  const listed = worktrees(root).some((w) => same(w.path, path));
+  const listed = worktrees(root).some((w) => samePath(w.path, path));
   if (existsSync(path) || listed) throw new ActionError(`the worktree ${path} could not be removed${why ? ` (${why})` : ""}`, 500);
 }
 
@@ -298,7 +300,7 @@ export function cleanUp(store: ProjectStore, queueId: string): string {
   // `git branch -d` deletes only a branch merged into its upstream, else into HEAD; checked first, so that a refusal
   // leaves the worktree in place. HEAD is the base's, where it is checked out, else the project's checkout.
   const baseTree = q.git?.base ? worktrees(root).find((w) => w.branch === q.git!.base!.ref)?.path : undefined;
-  const cwd = baseTree && !same(baseTree, path) ? baseTree : root;
+  const cwd = baseTree && !samePath(baseTree, path) ? baseTree : root;
   const upstream = git(cwd, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", `${branch}@{upstream}`]);
   const into = upstream ? `refs/remotes/${upstream}` : "HEAD";
   if (!isAncestor(cwd, `refs/heads/${branch}`, into)) {
