@@ -3,7 +3,7 @@
 // .nexus/static-analysis.yaml, and the orchestrator is told to recommend the shipped "static-analysis" template to the
 // user in a sentence. The user's no (the orchestrator's `nexus static-analysis decline`, arriving here through the
 // server) rests it for 90 days. The only writer of .nexus/static-analysis.yaml.
-import { lacksStaticAnalysis, projectStaticAnalysis, staticReminderDue, STATIC_REMIND_EVERY_MS, type ProjectStore, type StaticAnalysis } from "@nexus/protocol";
+import { lacksStaticAnalysis, projectStaticAnalysis, staticReminderDue, STATIC_REMIND_EVERY_MS, type ProjectStore, type StaticAnalysis, type StaticAnalysisNote } from "@nexus/protocol";
 import type { ClockTimers } from "./scheduler.ts";
 
 const KEY = "static-analysis";
@@ -43,10 +43,11 @@ export class StaticReminder {
 
   /** The user's no, told by the orchestrator: no reminder for 90 days. Returns what happened. */
   decline(reason: string, session?: string): string {
-    const note = this.store.readStaticAnalysisNote();
-    this.store.writeStaticAnalysisNote({ ...note, declined: { at: iso(this.now), reason, ...(session ? { session } : {}) } });
-    this.timers.wakeAt(KEY, staticReminderDue(this.store.readStaticAnalysisNote()), () => this.arm());
+    const note: StaticAnalysisNote = { ...this.store.readStaticAnalysisNote(), declined: { at: iso(this.now), reason, ...(session ? { session } : {}) } };
+    this.store.writeStaticAnalysisNote(note);
+    const due = staticReminderDue(note);
+    this.timers.wakeAt(KEY, due, () => this.arm());
     this.changed();
-    return `noted: the user declined setting up static analysis; no reminder until ${iso(staticReminderDue(this.store.readStaticAnalysisNote()))}`;
+    return `noted: the user declined setting up static analysis; no reminder until ${iso(due)}`;
   }
 }

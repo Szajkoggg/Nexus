@@ -11,7 +11,7 @@ import {
   NEXUS_ACTIVITIES, TAG_KINDS, TAG_ORIGINS, TAG_SIZES, tagIssues, tagProposalText, tagsText,
   STAT_DIMENSIONS, readTurns, sinceTime, statDimension, statsReport, statsText, stepStats,
   CHECK_METRIC, isCheckMetric, metricDef, metricDefText, metricRequestIssues, metricValueText,
-  projectStaticAnalysis, staticReminderDue,
+  lacksStaticAnalysis, projectStaticAnalysis, staticReminderDue,
   TemplateError, fillTemplate, filledTemplateYaml, parseEvery, MaintenanceMode, readTemplates, templateQueueId, unusableTemplate, type MergedTemplates,
   type PictureRole, type ReviewItem, type Role, type Runtime, type SessionFile,
 } from "@nexus/protocol";
@@ -732,7 +732,8 @@ const commands: Record<string, () => void | Promise<void>> = {
       console.log(a.found.length ? `static analysis: ${a.found.join("; ")}` : "static analysis: none found");
       if (note.reminded_at) console.log(`last reminder: ${note.reminded_at}`);
       if (note.declined) console.log(`declined: ${note.declined.at} (${note.declined.reason})`);
-      if (a.stacks.length && !a.found.length) console.log(`next reminder: ${staticReminderDue(note) ? new Date(staticReminderDue(note)).toISOString() : "when the server next looks"}`);
+      const due = staticReminderDue(note); // 0: neither a reminder nor a no noted yet
+      if (lacksStaticAnalysis(a)) console.log(`next reminder: ${due ? new Date(due).toISOString() : "when the server next looks"}`);
       return;
     }
     if (sub !== "decline") throw new UsageError("nexus static-analysis [status] | nexus static-analysis decline --reason <text>");
