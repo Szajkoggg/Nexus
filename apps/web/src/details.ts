@@ -130,6 +130,8 @@ export function describe(e: Event): string {
     // A step's metrics are shown by the statistics' views (queue ST3).
     case "metric.defined":
     case "metric.recorded":
+    // Recurring queues are shown in their own part of the Queues view (queue TQ4).
+    case "recurring.set":
     case "note.read":
     case "plan.proposed":
     case "question.withdrawn":

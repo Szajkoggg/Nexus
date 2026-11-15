@@ -25,6 +25,7 @@ import {
 import {
   ClockTimers, REAL_CLOCK, Scheduler, type PlanOptions, type Clock, type ScheduleOptions,
 } from "./scheduler.ts";
+import { Recurrer, type RecurringSet } from "./recurring.ts";
 import { gitBranch, recordSetup, runSetup, setupPending, worktreeFor } from "./worktree.ts";
 import { closingContext } from "./closing.ts";
 import { integrationContext } from "./integration.ts";
@@ -131,6 +132,8 @@ export class Engine implements Member {
   private readonly clockTimers: ClockTimers;
   /** Planned starts: chains and schedules. */
   private readonly scheduler: Scheduler;
+  /** Recurring queues: made from their template and started at their times (src/recurring.ts). */
+  private readonly recurrer: Recurrer;
   private readonly clock: Clock;
   private busy = new Set<string>();
   /** Set while Nexus drains for an update: nothing new starts. */
@@ -184,7 +187,9 @@ export class Engine implements Member {
     try { this.store.migrateChains(); } catch { /* an unreadable start.yaml shows as a warning in the state */ }
     // Schedules are armed again; what came due while no server ran is looked at once this one is up.
     this.scheduler.armAll();
-    this.timers.set("starts", setTimeout(() => { this.timers.delete("starts"); this.checkStarts(); }, this.startupMs));
+    this.recurrer = new Recurrer(store, this.clockTimers, { plan: (queueId, o) => this.scheduler.plan(queueId, o), stopped: () => this.stopped, changed: () => this.changed() });
+    // The recurring queues' times too, once the engine is up: one that came while no server ran comes now, or is missed.
+    this.timers.set("starts", setTimeout(() => { this.timers.delete("starts"); this.checkStarts(); this.recurrer.armAll(); }, this.startupMs));
   }
 
   /** Pushes what was accepted (src/accepted.ts). */
@@ -522,6 +527,13 @@ export class Engine implements Member {
    * earlier predecessors by `o.by`'s rule (plan.ts). Returns what happened, in a sentence.
    */
   plan(queueId: string, o: PlanOptions): string { return this.scheduler.plan(queueId, o); }
+
+  /** Sets a recurring queue (the orchestrator's `nexus recurring set`): its standing approval goes (Recurrer.set). */
+  setRecurring(o: RecurringSet): string { return this.recurrer.set(o); }
+  /** The user's standing approval of a recurring queue, its pause and its removal. */
+  approveRecurring(id: string): string { return this.recurrer.approve(id); }
+  pauseRecurring(id: string, paused: boolean): string { return this.recurrer.pause(id, paused); }
+  removeRecurring(id: string): string { return this.recurrer.remove(id); }
 
   /** The user's reorder: `queueId` after `after` (null: none before it), as in a list (Scheduler.move). */
   move(queueId: string, after: string | null): string { return this.scheduler.move(queueId, after); }

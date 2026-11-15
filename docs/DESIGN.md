@@ -717,6 +717,18 @@ marking work done (the orchestrator skips with the reason saying where), approvi
 finished step. A draft cannot change a step's status or drop a step that has started or stopped, so a new revision
 of a stopped queue keeps the replaced step and the orchestrator skips it: the record shows what became of it.
 
+**Standing approvals of recurring queues** (queue TQ, decided 2026-11-14): the user approves a recurring queue once,
+and its runs start by themselves while it stays as approved. "As approved" is one hash over what a run would be: the
+template as resolved through the three layers and filled with the values (so a project template that replaces a
+shipped one, an edited global one, or a deploy that changes the shipped one all count), the values, the schedule and
+`coding`, hashed as JSON with sorted keys so the order things are written in does not count. The server checks it at
+each time, just before it makes the queue from the same resolved template, so no run can start with content other
+than what was approved: if the hash differs the time passes without a run and the user is asked again. Any
+`nexus recurring set` by the orchestrator takes the approval away, even one that changes nothing, so that the
+orchestrator cannot keep an approval alive across its own edits; only the user's action approves. Each queue it makes
+carries a normal approval of its own revision hash, marked `standing` with the recurring and the approval it came
+from, so the queue's record shows where its consent came from.
+
 ### Runtimes and authentication
 
 - **Claude Code**: Nexus spawns the unmodified `claude` binary in print mode with stream-json input and output and

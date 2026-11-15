@@ -19,6 +19,7 @@ const KIND_WORDS: Record<WaitingItem["kind"], Key> = {
   question: "digest.kind.question", review: "digest.kind.review", approval: "digest.kind.approval",
   stopped: "digest.kind.stopped", failed: "digest.kind.failed", start: "digest.kind.start",
   provisional: "digest.kind.provisional", plan: "digest.kind.plan", merge: "digest.kind.merge", tags: "digest.kind.tags",
+  recurring: "digest.kind.recurring",
 };
 
 /**

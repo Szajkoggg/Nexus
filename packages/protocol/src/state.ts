@@ -1,6 +1,6 @@
 // Derives the dashboard's view of a project from its files. Pure apart from reading through the store;
 // nothing here is ever written back (state.json, if kept, is only a cache of this).
-import { ORCHESTRATOR_ONLY, USER_ONLY, WORKER_ONLY, type MetricsFile, type StatusChange, type Event, type InboxEntry, type Note, type GitFile, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type ReviewItem, type ReviewLevel, type LegacyReviewPolicy, type AwayFile, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type PlanFile, type StepDef, type StepStatus, type TagProposal, type TagsFile } from "./schemas.ts";
+import { ORCHESTRATOR_ONLY, USER_ONLY, WORKER_ONLY, type MetricsFile, type StatusChange, type Event, type InboxEntry, type Note, type GitFile, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type RecurringFile, type ReviewItem, type ReviewLevel, type LegacyReviewPolicy, type AwayFile, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type PlanFile, type StepDef, type StepStatus, type TagProposal, type TagsFile } from "./schemas.ts";
 import { ProjectStore, chainPlan, readAway, revisionHash } from "./store.ts";
 import { awayAt, awayNow, type AwayNow } from "./away.ts";
 import { formatClock, type Segment } from "./times.ts";
@@ -10,6 +10,8 @@ import { closingStepId, integrationStepId, stepDefs } from "./closing.ts";
 import { openPlan, planView, proposalText, type PlanView } from "./plan.ts";
 import { stepTags, tagProposalText, type StepTags } from "./tags.ts";
 import { CHECK_UNIT, checkMetric, metricDef, metricWarning, type MetricValue } from "./metrics.ts";
+import { recurringViews, type RecurringView } from "./recurring.ts";
+import { readTemplates } from "./templates.ts";
 
 import type { CheckView } from "./steps.ts";
 interface AnswerView { id: string; text: string; at: string; escalate?: boolean; continue?: boolean; session: string; by: "orchestrator" | "user" }
@@ -34,10 +36,14 @@ export interface AttentionItem {
    * cancelled or does not exist (`plan.predecessor`). `merge`: Nexus cannot merge a worktree queue back by itself
    * now (git.yaml `merge.waiting`: a dirty checkout, failed checks, the base moving on too often, and the like).
    * `tags`: the orchestrator proposes a change to the project's tag lists (.nexus/tags.yaml), one item per proposal
-   * (`tags`); only the user accepts or declines it.
+   * (`tags`); only the user accepts or declines it. `recurring`: a recurring queue needs the user: it waits for their
+   * standing approval, or a time passed without a run (its previous run had not closed, its template cannot be used,
+   * making the queue failed); one item per recurring.
    */
-  kind: "question" | "stopped" | "approval" | "review" | "failed" | "start" | "provisional" | "plan" | "merge" | "tags";
-  queue?: string; step?: string; qid?: string;
+  kind: "question" | "stopped" | "approval" | "review" | "failed" | "start" | "provisional" | "plan" | "merge" | "tags" | "recurring";
+  queue?: string;
+  /** Kind `recurring`: the recurring queue it is about (its standing approval waits, or a time passed without a run). */
+  recurring?: string; step?: string; qid?: string;
   text: string; at?: string;
   /** A question's options, as the worker gave them (the waiting list shows them as buttons). */
   options?: string[];
@@ -199,6 +205,8 @@ export interface ProjectState {
   tags: TagsFile;
   /** The project's metrics (.nexus/metrics.yaml), as the orchestrator defined them. */
   metrics: MetricsFile;
+  /** The project's recurring queues (.nexus/recurring/), each with its state now. */
+  recurring: RecurringView[];
   /** What waits for the user, newest first. */
   attention: AttentionItem[];
   warnings: string[];
@@ -391,14 +399,17 @@ export function loadProjectState(store: ProjectStore): ProjectState {
     }
   }
 
+  const recurring = recurringOf(store, project, warnings, queues);
   return {
     project,
+    recurring,
     queues: [...queues.values()],
     sessions: [...sessions.values()],
     questions: [...questions.values()],
     tags,
     metrics,
-    attention: attentionOf([...queues.values()], [...questions.values()], tags),
+    attention: [...recurringAttention(recurring, queues), ...attentionOf([...queues.values()], [...questions.values()], tags)]
+      .sort((a, b) => (b.at ?? "").localeCompare(a.at ?? "")),
     warnings,
     away: awayNow(away),
     generated_at: new Date().toISOString(),
@@ -430,6 +441,33 @@ export function releasedText(released: readonly string[] | undefined): string {
   if (!released?.length) return "";
   const many = released.length > 1;
   return `; the run${many ? "s" : ""} of queue${many ? "s" : ""} ${released.join(", ")}, held at ${many ? "their" : "its"} step's end for this merge back, ${many ? "go" : "goes"} on`;
+}
+
+/** The recurring queues, read and resolved; none (and no template read) while the project has none. */
+function recurringOf(store: ProjectStore, project: ProjectFile, warnings: string[], queues: Map<string, QueueView>): RecurringView[] {
+  const files: RecurringFile[] = [];
+  for (const id of store.recurringIds()) {
+    try { const r = store.readRecurring(id); if (r) files.push(r); } catch (e) { warnings.push(`recurring ${id}: ${(e as Error).message}`); }
+  }
+  if (!files.length) return [];
+  const open = (id: string) => { const q = queues.get(id); return !!q && q.status !== "done" && q.status !== "cancelled"; };
+  return recurringViews(files, readTemplates(project.root), open, Date.now());
+}
+
+/** What the recurring queues ask of the user: a standing approval, or a time that passed without a run. */
+function recurringAttention(recurring: RecurringView[], queues: Map<string, QueueView>): AttentionItem[] {
+  return recurring.flatMap((r): AttentionItem[] => {
+    const when = r.skipped ? formatClock(r.skipped.due, new Date()) : "";
+    if (r.status === "broken") return [{ kind: "recurring", recurring: r.id, text: `Recurring ${r.id} cannot run: ${r.problem}`, at: r.skipped?.at ?? r.updated_at }];
+    if (r.status === "needs_approval") {
+      const again = r.skipped?.kind === "approval" ? `; its run at ${when} did not start` : "";
+      return [{ kind: "recurring", recurring: r.id, text: `Recurring ${r.id} (${r.template_title}, ${r.every}) waits for your approval${again}`, at: r.updated_at }];
+    }
+    if (r.paused || !r.skipped || r.skipped.kind === "approval") return [];
+    if (r.skipped.kind === "previous" && r.status !== "waiting_previous") return [];
+    const q = r.skipped.kind === "previous" && r.last ? queues.get(r.last.queue) : undefined;
+    return [{ kind: "recurring", recurring: r.id, queue: q?.id, text: `Recurring ${r.id} did not start at ${when}: ${r.skipped.reason}`, at: r.skipped.at }];
+  });
 }
 
 function attentionOf(queues: QueueView[], questions: QuestionView[], tags: TagsFile): AttentionItem[] {
@@ -829,6 +867,7 @@ function apply(
     case "status.set":
     case "tags.proposed":
     case "metric.defined":
+    case "recurring.set":
     default:
       return;
   }

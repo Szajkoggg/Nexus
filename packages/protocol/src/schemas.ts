@@ -471,6 +471,11 @@ const Approval = z.object({
   at: Time,
   words: z.string().optional(),
   hash: z.string(),
+  /**
+   * The approval came from a recurring queue's standing approval (RecurringFile): the recurring's id, when the user
+   * approved it, and the hash approved then. Nexus wrote this approval when it made the queue at its time.
+   */
+  standing: z.object({ id: Id, approved_at: Time, hash: z.string() }).optional(),
 });
 
 /**
@@ -741,6 +746,14 @@ export const Event = z.discriminatedUnion("type", [
    * A worker records a value of one of the project's metrics (`nexus metric record`), for its step at work, with the
    * metric's unit as it was then and the HEAD of its checkout (`commit`; absent outside a git repository).
    */
+  /**
+   * The orchestrator sets a recurring queue (`nexus recurring set`): the server checks it and writes
+   * .nexus/recurring/<id>.yaml; the user's standing approval of it, if any, is taken away. It carries no approval.
+   */
+  z.object({
+    ...base, type: z.literal("recurring.set"), recurring: Id, template: Id, params: z.record(z.string(), z.string()).default({}),
+    every: z.string().min(1), reason: z.string().optional(),
+  }),
   z.object({ ...base, type: z.literal("metric.recorded"), ...qs, name: z.string().min(1), value: z.number(), unit: z.string(), commit: z.string().optional() }),
   z.object({ ...base, type: z.literal("log"), level: z.enum(["info", "warn", "error"]), text: z.string() }),
   /**
@@ -783,7 +796,7 @@ export type EventType = Event["type"];
 /** Event types a worker session may not write (orchestrators and the user may). */
 export const ORCHESTRATOR_ONLY: ReadonlySet<EventType> = new Set([
   "answer.given", "queue.drafted", "session.request", "review.accepted", "review.sent_back", "review.asked_user", "status.set",
-  "review.provisional", "plan.proposed", "tags.proposed", "metric.defined",
+  "review.provisional", "plan.proposed", "tags.proposed", "metric.defined", "recurring.set",
 ]);
 
 /** Event types only a worker session may write: a metric's value belongs to a step's work (metrics.ts). */
@@ -1209,6 +1222,44 @@ export const MetricDef = z.object({
   session: Id.optional(),
 });
 export type MetricDef = z.infer<typeof MetricDef>;
+
+/**
+ * .nexus/recurring/<id>.yaml: a recurring queue (PROTOCOL.md, "Recurring queues"): a template with its parameters and a
+ * schedule, which Nexus makes into a queue and starts at each time while the user's standing approval holds. Written
+ * only by the server: `nexus recurring set` (the orchestrator) through the server, and the user's actions.
+ */
+export const RecurringFile = z.object({
+  protocol: z.literal(1),
+  id: Id,
+  /** The template's id, resolved through the three layers at each use. */
+  template: Id,
+  params: z.record(z.string(), z.string()).default({}),
+  /** When: `daily HH:MM`, `<mon..sun> HH:MM` or `monthly <day> HH:MM`, in the server machine's local time. */
+  every: z.string().min(1),
+  /** Who set it last (the orchestrator, or the user), and why. */
+  set_by: z.enum(["orchestrator", "user"]),
+  reason: z.string().optional(),
+  /**
+   * The user's standing approval: the hash of what was approved (recurringHash) and when. It holds while the
+   * recurring's hash is the same; a `nexus recurring set` takes it away. Only the user's action writes it.
+   */
+  approval: z.object({ hash: z.string(), at: Time }).optional(),
+  /** The user paused it: its times pass without a run. */
+  paused: z.boolean().optional(),
+  /** The last time (an occurrence of the schedule) Nexus looked at, started or not: the next comes after it. */
+  handled: Time.optional(),
+  /** The last queue it made: its id, when, and for which time. */
+  last: z.object({ queue: Id, at: Time, due: Time }).optional(),
+  /**
+   * The last time that passed without a run, and why: `approval` (no standing approval, or its hash differs),
+   * `previous` (the previous run had not closed), `missed` (Nexus was not running then), `template` (the template is
+   * gone or cannot be filled), `failed` (making or starting the queue failed). Cleared by the next run.
+   */
+  skipped: z.object({ due: Time, at: Time, kind: z.enum(["approval", "previous", "missed", "template", "failed"]), reason: z.string() }).optional(),
+  created_at: Time,
+  updated_at: Time,
+});
+export type RecurringFile = z.infer<typeof RecurringFile>;
 
 /** .nexus/metrics.yaml: the project's metrics, in the order they were first defined. Written only by the server. */
 export const MetricsFile = z.object({

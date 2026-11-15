@@ -21,6 +21,7 @@ const KIND: Record<AttentionItem["kind"], { key: Key; tone: string }> = {
   plan: { key: "waiting.kind.plan", tone: "text-warn bg-warn/15" },
   merge: { key: "waiting.kind.merge", tone: "text-warn bg-warn/15" },
   tags: { key: "waiting.kind.tags", tone: "text-info bg-info/15" },
+  recurring: { key: "waiting.kind.recurring", tone: "text-info bg-info/15" },
 };
 /** An item's kind in a word and its colour, in the interface language. */
 /** A waiting item's kind as a word, with its colour. */

@@ -9,7 +9,7 @@ import { monotonicFactory } from "ulid";
 import YAML from "yaml";
 import type { z } from "zod";
 import {
-  Activity, Applied, AwayFile, ChatEntry, PinsFile, Refusal, Delivery, Event, GlobalSettings, InboxEntry, MaxRunning, MetricsFile, NoteMeta, GitFile, ProjectFile, PushFile, QueueFile, type QueueInput, LegacyReviewPolicy, RegistryFile, RunFile, RuntimeFile, SessionFile, StartFile, PlanFile, StoredProject, TagsFile, TurnRecord, UsageFile,
+  Activity, Applied, AwayFile, ChatEntry, PinsFile, RecurringFile, Refusal, Delivery, Event, GlobalSettings, InboxEntry, MaxRunning, MetricsFile, NoteMeta, GitFile, ProjectFile, PushFile, QueueFile, type QueueInput, LegacyReviewPolicy, RegistryFile, RunFile, RuntimeFile, SessionFile, StartFile, PlanFile, StoredProject, TagsFile, TurnRecord, UsageFile,
   type Note,
 } from "./schemas.ts";
 import { applyChange, builtInSettings, effectiveProject, migrateStored, storedFrom } from "./settings.ts";
@@ -334,6 +334,23 @@ export class ProjectStore {
   }
   /** Written only by the server (tags.ts). */
   writeTags(t: TagsFile): void { writeYaml(join(this.dir, "tags.yaml"), TagsFile.parse(t)); }
+  /** The recurring queues' ids (.nexus/recurring/<id>.yaml). */
+  recurringIds(): string[] {
+    const d = join(this.dir, "recurring");
+    return existsSync(d) ? readdirSync(d).filter((f) => f.endsWith(".yaml")).map((f) => f.slice(0, -5)).sort() : [];
+  }
+  readRecurring(id: string): RecurringFile | undefined {
+    const f = join(this.dir, "recurring", `${id}.yaml`);
+    return existsSync(f) ? readYaml(f, RecurringFile) : undefined;
+  }
+  /** Written only by the server (apps/server/src/recurring.ts). */
+  writeRecurring(r: RecurringFile): void {
+    writeYaml(join(this.dir, "recurring", `${r.id}.yaml`), RecurringFile.parse(r));
+  }
+  clearRecurring(id: string): void {
+    const f = join(this.dir, "recurring", `${id}.yaml`);
+    if (existsSync(f)) { unlinkSync(f); writes++; }
+  }
   /** The project's metrics (.nexus/metrics.yaml); none while the file does not exist. */
   readMetrics(): MetricsFile {
     const f = join(this.dir, "metrics.yaml");

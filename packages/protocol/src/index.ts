@@ -28,3 +28,4 @@ export * from "./stats.ts";
 export * from "./routing.ts";
 export * from "./overview.ts";
 export * from "./templates.ts";
+export * from "./recurring.ts";

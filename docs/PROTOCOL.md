@@ -29,6 +29,7 @@ a shell command can take part.
   metrics.yaml                          server: the project's metrics (unit, how shown, target, warning threshold)
   orchestrator/summary.md               server: the orchestrator's latest summary for a fresh session (its context care)
   drafts/<queue-id>.yaml                the orchestrator: its queue drafts (also `nexus queue draft --template`)
+  recurring/<id>.yaml                   server: a recurring queue (template, values, schedule, standing approval)
   queues/
     <queue-id>/
       queue.yaml                        server: definition, revisions, approvals
@@ -551,6 +552,7 @@ Every line:
 | `session.request` | `action` (start, resume, pause, stop, cancel_start), `queue`, `use_session?`, `runtime?`, `model?`, `effort?`, `after?`, `next?`, `start_at?`, `reason` | Orchestrator only: asks the engine to act on a queue's run (`use_session` continues an existing session). `start` with `after` (a list of queue ids; one id from an older CLI): put the queue into the plan, it starts when those are done (see "The plan"); with `next: true`: into the plan with none before it; with `start_at` (ISO 8601, or `usage-reset`): start at that time (a schedule, see "Schedules"); `cancel_start`: take the queue out of the plan (its predecessors and its schedule) |
 | `plan.proposed` | `queue`, `after` (ids), `reason` | Orchestrator only: proposes to the user a new list of predecessors for the queue that changes dependencies the user set (see "The plan") |
 | `tags.proposed` | one of `area`, `activity`, `rename` (`from`, `to`); `reason?` | Orchestrator only: proposes a change to the project's tag lists; the server records it in `tags.yaml`'s proposals and answers in `applied.jsonl` (see "Tags") |
+| `recurring.set` | `recurring`, `template`, `params`, `every`, `reason?` | Orchestrator only: sets a recurring queue (`nexus recurring set`); the server checks it, writes `recurring/<id>.yaml` (taking the standing approval away) and answers in `applied.jsonl`. It carries no approval (see "Recurring queues") |
 | `metric.defined` | `name`, `unit?`, `show?`, `target?`, `warn_above?`, `warn_below?` | Orchestrator only: defines one of the project's metrics, or changes it (the whole definition); the server checks it, writes `metrics.yaml` and answers in `applied.jsonl` (see "Project metrics") |
 | `metric.recorded` | `queue`, `step`, `name`, `value`, `unit`, `commit?` | Worker only (the loader ignores it from any other session): a value of one of the project's metrics for the step, with the metric's unit then and the HEAD of the worker's checkout (see "Project metrics") |
 | `review.sent_back` | `queue`, `step`, `text` | Orchestrator or user only: a step in review goes back to its worker with what to fix (see "Sending a step back") |
@@ -1078,9 +1080,11 @@ nexus context --topics rock,support --files Runtime/Core/Rock/* <<< "summary tex
 nexus report W --file <temp>/nexus-reports/<project>/W.md --summary "..."   # copied to .nexus/queues/W/report.md
 nexus propose-change W --file patch.yaml --reason "..."
 nexus template list | show <id>                # the queue templates in effect (see "Queue templates")
+nexus recurring list                           # the recurring queues and their state (see "Recurring queues")
 # orchestrator only
 nexus queue draft --file queue.yaml
 nexus queue draft --template bugfix --set issue="..." --set area=engine [--id BF]   # writes .nexus/drafts/BF.yaml to complete and upload
+nexus recurring set weekly --template maintenance [--set scope=...] --every "mon 03:00" [--reason ...]   # through the server; the user approves it
 nexus answer <qid> "..." [--escalate [--recommend <option>]] [--continue|--wait]
                                                # --recommend only with --escalate: one of the question's options
 nexus session start|resume|fork|pause|stop ...
@@ -1209,6 +1213,8 @@ from every agent session, and the others from every session but an orchestrator'
 | `GET /api/stats?by=&project=&since=&kind=&activity=&area=&size=&origin=` | | The statistics (`StatsReport`, see "Statistics"): every registered project, or one (`project`; unknown: 404), grouped by `by` (`model`, `effort`, `kind`, `activity`, `area`, `size`, `origin`; default `model`; another: 400), the steps whose last outcome is at or after `since` (a date or a time; unreadable: 400), narrowed to the steps under each tag value given (`kind=code`, `area=p/engine` across projects; the value as the groups name it) |
 | `GET /api/usage/days?since=` | | The usage windows day by day for the global Stats view (`UsageDays`, see "Statistics") from `since` (a date or a time; default 30 days ago; unreadable: 400) to today, with `threshold`, the global `defaults.usage_pause_threshold` |
 | `POST /api/projects/:id/tags/:proposal` | `action` (`accept`, `decline`) | The user's decision on the orchestrator's proposal for the project's tag lists (see "Tags"); only the user: no CLI command or event does it (`{message}`) |
+| `POST /api/projects/:id/recurring/:rid` | `action` (`approve`, `pause`, `resume`) | The user's standing approval of a recurring queue as it is now (its hash), a pause or its end (see "Recurring queues"); only the user: no CLI command or event does it. Already approved, already paused or not, or a recurring that cannot run (its template gone or not filling): 409; unknown: 404 (`{message}`) |
+| `DELETE /api/projects/:id/recurring/:rid` | | The user removes a recurring queue; the queues it made stay (`{message}`) |
 | `POST /api/projects/:id/queues/:q/plan` | `action` (`move`, `accept`, `decline`, `hand_back`), `after?` | The user's plan: `move` the queue after `after` (a queue id; `null`: with no queue before it), as in a list (see "The plan"); accept or decline the orchestrator's proposal; hand a dependency the user set (`after`; without it, all of them) back to the orchestrator (`{message}`) |
 | `POST /api/projects/:id/queues/:q/steps/:s/pictures/mark` | `path`, `accepted` | The user's mark on a review picture (`review.marked`) |
 | `POST /api/projects/:id/queues/:q/steps/:s/pictures/comment` | `path`, `text` | The user's comment on a review picture: a send-back or a note (see "Review pictures"); answers `{ ok, result: { message } }` |
@@ -1792,6 +1798,67 @@ layer with an id already taken there (the first by path is used), is listed as n
   Refused before anything is written: a missing or unknown parameter, `--set` without `name=value` or given twice, an
   unknown template (or one whose file is not used, with the reason), a queue of that id that exists already, and a
   draft file of that name.
+
+## Recurring queues
+
+A recurring queue is a template (see "Queue templates") with its parameters' values and a schedule. At each time of
+the schedule Nexus makes the queue from the template and starts it, while the user's **standing approval** holds: the
+user approves a recurring once, and its runs start by themselves as long as it stays as approved.
+
+`.nexus/recurring/<id>.yaml`, written only by the server (`RecurringFile`):
+
+```yaml
+protocol: 1
+id: weekly                     # 1-16 letters, digits, dashes or underscores
+template: maintenance
+params: { scope: dependencies }
+every: mon 03:00               # daily HH:MM | <mon..sun> HH:MM | monthly <1-31> HH:MM, the server machine's local time
+set_by: orchestrator           # or user; with reason
+approval: { hash: sha256:..., at: 2026-11-15T10:00:00Z }   # the user's standing approval
+paused: true                   # the user paused it
+handled: 2026-11-16T02:00:00Z  # the times up to this one have been looked at; the next comes after it
+last: { queue: weekly-20261116-0300, at: ..., due: ... }  # the last queue it made
+skipped: { due: ..., at: ..., kind: previous, reason: its previous run weekly-20261109-0300 is still stopped }
+created_at: ...
+updated_at: ...
+```
+
+- **Setting it**: `nexus recurring set <id> --template <t> [--set name=value]... --every "<when>" [--reason]`
+  (orchestrator only) records `recurring.set`; the server checks the id, the schedule (refused: another form) and
+  that the template fills with the values (refused: a missing or unknown parameter, an unknown template), writes the
+  file with the schedule in its one written form (`Mon 3:00` becomes `mon 03:00`) and answers. **Any set takes the
+  standing approval away**, whatever it changes: the recurring waits for the user's approval again. A set counts the
+  times from then on (`handled` is the set's time), so it never starts a time that has passed.
+- **The standing approval's hash** (`recurringHash`) covers the resolved, filled template (after the three layers,
+  filled with the recurring's id as the queue id), the values, the schedule and `coding`, hashed as JSON with sorted
+  keys. A project template that replaces the shipped one with other content, a deploy that changes the shipped one,
+  an edited project or global template, another value or schedule: each gives another hash, and the approval no
+  longer holds (the state shows `needs_approval`) until the user approves again. The approval is the user's action
+  (`POST /api/projects/:id/recurring/:rid`, `approve`); no CLI command or event approves, pauses or removes one, and
+  `nexus recurring approve|pause|resume|remove` are refused from every session.
+- **At each time** the server looks again, and makes and starts the queue only when the recurring is not paused, its
+  template resolves and fills, its standing approval's hash is the hash it has at that moment, the time is not missed,
+  and its previous run has closed. Otherwise the time passes without a run and `skipped` says why: `approval`,
+  `template`, `missed`, `previous` or `failed`. A paused recurring's times pass without a record. A monthly day past
+  the month's end (31 in November) is the month's last day.
+- **The queue** gets the id `<id>-<yyyymmdd>-<hhmm>` (the time, local; `-2`, `-3`, ... when taken), the template filled
+  with that id, and goes through the draft path's checks (tags, step ids). It is written approved, with one approval
+  of its own revision hash marked `standing: { id, approved_at, hash }` (the recurring, when the user approved it,
+  and the hash approved). Then it is put into the plan with no queue before it (`by: user`, the reason naming the
+  recurring), so it starts at once or waits for its checkout, the limit or an update as any planned queue.
+- **The previous run**: while the last queue it made is not done or cancelled (running, waiting, stopped), a time
+  passes without a run (`skipped.kind: previous`), and the user gets an item. A removed queue counts as closed.
+- **Missed times**: once the server is up (with the planned starts) it looks at each recurring's times since
+  `handled`: one more than 15 minutes ago (`MISSED_MS`, as for schedules) passes (`missed`, when it would have run),
+  and the next time comes; one less late comes now.
+- **The state** (`ProjectState.recurring`, `RecurringView`) adds `status` (`approved`, `needs_approval`, `paused`,
+  `waiting_previous`, `broken`), the current `hash`, the template's title and layer, `problem` when broken, and
+  `next_at`. Attention items of kind `recurring` (`recurring`: its id): one waits for the user's approval ("Recurring
+  weekly (Maintenance, mon 03:00) waits for your approval"), cannot run (its template), or a time passed without a run
+  while its previous run is still open (with `queue`: that run), after a failure, or missed.
+- `nexus recurring list` (any session) prints each with its template, values, schedule, state, next and last run, and
+  the last time that passed without one.
+- The user pauses it and lets it go on (`pause`, `resume`) and removes it (`DELETE`); the queues it made stay.
 
 ## One queue per checkout, and a limit
 

@@ -178,11 +178,12 @@ export async function push(payload: { title: string; body: string; url: string; 
 
 const LABEL: Record<AttentionItem["kind"], string> = {
   question: "Question", stopped: "Stopped", approval: "Needs approval", review: "Review", failed: "Failed", start: "Did not start",
-  provisional: "To confirm", plan: "The plan", merge: "Merging back", tags: "Tags",
+  provisional: "To confirm", plan: "The plan", merge: "Merging back", tags: "Tags", recurring: "Recurring",
 };
 // A stopped queue is one item whatever happens to its step (a skip by the orchestrator is no news for the user). A
 // plan's items: one per proposal (by its time) and one per predecessor that holds the queue. A tag proposal: by its id.
-const key = (a: AttentionItem) => [a.kind, a.queue, a.lift ? undefined : a.step, a.qid, a.plan?.predecessor ?? (a.plan?.proposal ? a.at : undefined), a.tags?.id].join("/");
+// A recurring queue's: by its id and time (a new approval to give, or another time without a run, is news again).
+const key = (a: AttentionItem) => [a.kind, a.queue, a.lift ? undefined : a.step, a.qid, a.plan?.predecessor ?? (a.plan?.proposal ? a.at : undefined), a.tags?.id, a.recurring, a.recurring ? a.at : undefined].join("/");
 
 /**
  * Pushes what newly appears in a project's "waiting for you" list. The first look at a project is the baseline,

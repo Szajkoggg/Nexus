@@ -11,7 +11,7 @@ import {
   NEXUS_ACTIVITIES, TAG_KINDS, TAG_ORIGINS, TAG_SIZES, tagIssues, tagProposalText, tagsText,
   STAT_DIMENSIONS, readTurns, sinceTime, statDimension, statsReport, statsText, stepStats,
   CHECK_METRIC, isCheckMetric, metricDef, metricDefText, metricRequestIssues, metricValueText,
-  TemplateError, fillTemplate, filledTemplateYaml, readTemplates, templateQueueId, type MergedTemplates,
+  TemplateError, fillTemplate, filledTemplateYaml, parseEvery, readTemplates, templateQueueId, type MergedTemplates,
   type PictureRole, type ReviewItem, type Role, type Runtime, type SessionFile,
 } from "@nexus/protocol";
 import { checkRules, describeRules } from "@nexus/protocol/rules";
@@ -52,6 +52,13 @@ Agent commands (session from NEXUS_SESSION or --session):
   nexus queue draft --template <id> [--set name=value]... [--id <queue-id>]
                                       write a draft from a template into .nexus/drafts/<queue-id>.yaml (refused when a
                                       parameter without a default is missing); complete it, then upload it as above
+  nexus recurring set <id> --template <id> [--set name=value]... --every "<when>" [--reason <text>]
+                                      (orchestrator only) a recurring queue: the template made into a queue and started
+                                      at each time, while the user's standing approval holds; <when> is "daily HH:MM",
+                                      "<mon..sun> HH:MM" or "monthly <day> HH:MM" (local time). Any set takes the
+                                      standing approval away: the user approves it again (only the user approves,
+                                      pauses or removes one, in the dashboard)
+  nexus recurring list                the recurring queues: template, schedule, state, next and last run
   nexus template list                 the templates in effect: Nexus's, the user's global ones (<NEXUS_HOME>/templates/)
                                       and the project's (nexus-templates/ in its repository); a project's replaces a
                                       global one of the same id, a global one Nexus's
@@ -129,7 +136,7 @@ const { values: o, positionals: args } = parseArgs({
     area: { type: "string" }, activity: { type: "string" }, activities: { type: "string" },
     project: { type: "string" }, since: { type: "string" }, by: { type: "string" },
     unit: { type: "string" }, show: { type: "string" }, target: { type: "string" }, "warn-above": { type: "string" }, "warn-below": { type: "string" },
-    set: { type: "string", multiple: true }, template: { type: "string" },
+    set: { type: "string", multiple: true }, template: { type: "string" }, every: { type: "string" },
     help: { type: "boolean", short: "h" }, key: { type: "string" }, note: { type: "string" }, before: { type: "string" }, now: { type: "boolean" }, ref: { type: "string" },
   },
 });
@@ -665,6 +672,34 @@ const commands: Record<string, () => void | Promise<void>> = {
     report(waitApplied(st, s.id, e.id));
   },
 
+  /**
+   * `nexus recurring set` (the orchestrator; the server checks and writes .nexus/recurring/<id>.yaml) and `nexus
+   * recurring list`. Approving, pausing and removing are the user's, in the dashboard.
+   */
+  recurring() {
+    const sub = args[1] ?? "list";
+    if (["approve", "pause", "resume", "remove"].includes(sub)) throw new UsageError(`${sub === "approve" ? "approving" : sub === "remove" ? "removing" : "pausing or resuming"} a recurring queue is the user's, in the dashboard`);
+    if (sub === "list") {
+      const st = store();
+      const list = loadProjectState(st).recurring;
+      if (!list.length) console.log("no recurring queues");
+      for (const r of list) {
+        const status = r.status === "needs_approval" ? "waits for the user's approval" : r.status === "waiting_previous" ? `waits for its previous run ${r.last?.queue} to close` : r.status === "broken" ? `cannot run: ${r.problem}` : r.status;
+        const next = r.next_at && r.status !== "broken" && r.status !== "paused" ? `; next ${r.next_at}` : "";
+        const last = r.last ? `; last ${r.last.queue}` : "";
+        const skipped = r.skipped ? `; at ${r.skipped.due} no run: ${r.skipped.reason}` : "";
+        console.log(`${r.id}: template ${r.template}${Object.keys(r.params).length ? ` (${Object.entries(r.params).map(([k, v]) => `${k}=${v}`).join(", ")})` : ""}, ${r.every}; ${status}${next}${last}${skipped}`);
+      }
+      return;
+    }
+    if (sub !== "set") throw new UsageError("nexus recurring set <id> --template <id> [--set name=value]... --every \"<when>\" [--reason <text>] | nexus recurring list");
+    const st = store(); const s = orchestrator(st);
+    const every = need(o.every, "--every \"daily HH:MM\" | \"<mon..sun> HH:MM\" | \"monthly <day> HH:MM\"");
+    try { parseEvery(every); } catch (e) { throw new UsageError((e as Error).message); }
+    const e = emit(st, s, { type: "recurring.set", recurring: need(args[2], "<id>"), template: need(o.template, "--template <id>"), params: setValues(), every, reason: o.reason?.trim() || undefined });
+    report(waitApplied(st, s.id, e.id));
+  },
+
   /** `nexus template list|show`: the templates of the three layers (@nexus/protocol templates.ts). Reads only. */
   template() {
     const sub = args[1] ?? "list";
@@ -931,6 +966,19 @@ function template(templates: MergedTemplates["templates"], problems: MergedTempl
   throw new UsageError(bad.length ? `template ${id} cannot be used: ${bad.map((p) => `${p.path}: ${p.problem}`).join("; ")}` : `no template ${id} (nexus template list)`);
 }
 
+/** The --set name=value pairs, by name; refused: one without a name or "=", or a name given twice. */
+function setValues(): Record<string, string> {
+  const given: Record<string, string> = {};
+  for (const pair of o.set ?? []) {
+    const eq = pair.indexOf("=");
+    if (eq < 1) throw new UsageError(`--set takes name=value, not "${pair}"`);
+    const name = pair.slice(0, eq).trim();
+    if (name in given) throw new UsageError(`--set ${name} given twice`);
+    given[name] = pair.slice(eq + 1);
+  }
+  return given;
+}
+
 /**
  * `nexus queue draft --template`: fills the template and writes the result into .nexus/drafts/<queue>.yaml, the file
  * the orchestrator completes and uploads with `nexus queue draft`. It writes no event: the draft path checks the rest.
@@ -941,14 +989,7 @@ function draftFromTemplate(): void {
   const st = store();
   const { templates, problems } = templatesHere();
   const t = template(templates, problems, need(o.template, "--template <id>"));
-  const given: Record<string, string> = {};
-  for (const pair of o.set ?? []) {
-    const eq = pair.indexOf("=");
-    if (eq < 1) throw new UsageError(`--set takes name=value, not "${pair}"`);
-    const name = pair.slice(0, eq).trim();
-    if (name in given) throw new UsageError(`--set ${name} given twice`);
-    given[name] = pair.slice(eq + 1);
-  }
+  const given = setValues();
   const ids = new Set(st.queueIds().map((x) => x.toLowerCase()));
   const draftFile = (id: string) => join(st.dir, "drafts", `${id}.yaml`);
   const id = o.id ?? templateQueueId(t, (x) => ids.has(x.toLowerCase()) || existsSync(draftFile(x)));

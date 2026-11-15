@@ -32,7 +32,7 @@ const DRAFT_TOOLS = [`Write(${DRAFTS}/**)`, `Edit(${DRAFTS}/**)`];
 const NEVER = ["NotebookEdit", "MultiEdit"];
 
 /** The orchestrator's events the server carries out (applyRequests), each once, its outcome in applied.jsonl. */
-const REQUESTS: ReadonlySet<EventType> = new Set(["queue.drafted", "session.request", "status.set", "review.sent_back", "plan.proposed", "tags.proposed", "metric.defined"]);
+const REQUESTS: ReadonlySet<EventType> = new Set(["queue.drafted", "session.request", "status.set", "review.sent_back", "plan.proposed", "tags.proposed", "metric.defined", "recurring.set"]);
 
 /**
  * The orchestrator's context care (contextCare), recorded in its session's applied.jsonl: the request for its summary
@@ -518,6 +518,7 @@ ${n.text}` });
     if (e.type === "plan.proposed") return proposePlan(this.store, e.queue, e.after, e.reason);
     if (e.type === "tags.proposed") return proposeTags(this.store, { area: e.area, activity: e.activity, rename: e.rename, reason: e.reason }, e.session);
     if (e.type === "metric.defined") return defineMetric(this.store, { name: e.name, unit: e.unit, show: e.show, target: e.target, warn_above: e.warn_above, warn_below: e.warn_below }, e.session);
+    if (e.type === "recurring.set") return this.engine.setRecurring({ id: e.recurring, template: e.template, params: e.params, every: e.every, by: "orchestrator", reason: e.reason });
     if (e.type === "status.set") {
       const message = orchestratorStatusChange(this.store, { queue: e.queue, step: e.step, to: e.to, reason: e.reason });
       // A cancel reaches the user as a push notification, like other notifications; nothing waits in their list.

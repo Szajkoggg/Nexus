@@ -479,6 +479,17 @@ app.post("/api/projects/:id/tags/:proposal", act((st, b, p) => {
     default: throw new ActionError("action is accept or decline");
   }
 }));
+// The user's decisions on a recurring queue (PROTOCOL.md, "Recurring queues"): the standing approval, a pause and its
+// end, the removal. Only the user: there is no CLI command and no event for them.
+app.post("/api/projects/:id/recurring/:rid", act((_st, b, p, e) => {
+  switch (b.action) {
+    case "approve": return { message: e.engine.approveRecurring(p("rid")) };
+    case "pause": return { message: e.engine.pauseRecurring(p("rid"), true) };
+    case "resume": return { message: e.engine.pauseRecurring(p("rid"), false) };
+    default: throw new ActionError("action is approve, pause or resume");
+  }
+}));
+app.delete("/api/projects/:id/recurring/:rid", act((_st, _b, p, e) => ({ message: e.engine.removeRecurring(p("rid")) })));
 // Continue on a stopped queue: the user's lift of the stop, then the run goes on (only from the dashboard, as every write).
 // `skip_closing: true`: the user skips the queue's closing refactoring step with it (checked before anything is recorded).
 app.post("/api/projects/:id/queues/:queue/continue", act((st, b, p, e) => {
