@@ -13,7 +13,7 @@ import {
 } from "@nexus/protocol";
 import { Engine, type EngineOptions } from "../src/engine.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
-import { WAIT_MS, until as waitUntil, LONGER, holdWork } from "./wait.ts";
+import { QUICK_ENGINE, WAIT_MS, until as waitUntil, LONGER, holdWork } from "./wait.ts";
 
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -22,7 +22,7 @@ process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
 // file's subject: its fake reports it done.
 process.env.FAKE_INTEGRATE = "done";
 process.env.NEXUS_CODEX = join(here, "fake-codex.ts");
-const FAST: EngineOptions = { retryBaseMs: 30, usageMarginMs: 100 };
+const FAST: EngineOptions = { retryBaseMs: 30, usageMarginMs: 100, ...QUICK_ENGINE };
 
 const step = (id: string, behaviour: string): StepDef => ({ id, title: `Step ${id}`, goal: `FAKE: ${behaviour}`, acceptance: [] });
 
@@ -78,7 +78,7 @@ for (const runtime of ["claude", "codex"] as const) {
       x.revise({ change: { W2: { title: "Step W2, revised" } }, more: [step("W3", "done")] });
       work.release(); // W1 may end now: the revision came while it worked
       await x.until("the question", () => x.queue().steps[0]!.status === "waiting", LONGER.step);
-      await new Promise((r) => setTimeout(r, 400));
+      await new Promise((r) => setTimeout(r, 200));
       assert.equal(x.queue().run!.state, "running", "the draft stopped nothing");
       assert.equal(x.queue().approved, false);
       x.approve(e);
@@ -111,7 +111,7 @@ for (const runtime of ["claude", "codex"] as const) {
       assert.equal(q.run!.revision, 1, "the run's revision moves only when it goes on");
       assert.equal(x.statuses(), "W1=done W2=pending W3=pending");
       assert.notEqual(q.status, "done");
-      await new Promise((r) => setTimeout(r, 400));
+      await new Promise((r) => setTimeout(r, 200));
       assert.equal(x.queue().run!.state, "approval_wait", "it waits, not halted");
       assert.throws(() => e.resume("W"), /waits for approval of revision 2; it goes on by itself once you approve it/);
 
@@ -137,7 +137,7 @@ test("a revision that removes every remaining step: the queue is done only once 
     x.revise({ drop: ["W2"] });
     work.release(); // W1 may end now: the revision came while it worked
     await x.until("the wait", () => x.queue().run?.state === "approval_wait");
-    await new Promise((r) => setTimeout(r, 1700)); // past the first look at the planned starts
+    await new Promise((r) => setTimeout(r, 500)); // past the first look at the planned starts (startupMs)
     assert.equal(x.statuses(), "W1=done");
     assert.equal(x.queue().status, "waiting", "not done while the revision waits");
     assert.equal(x.queue().status_reason, "waits for approval of revision 2");
@@ -164,7 +164,7 @@ test("an approval while an update drains: the run goes on after the restart, or 
       await x.until("the wait", () => x.queue().run?.state === "approval_wait");
       assert.deepEqual(e.drainForUpdate(false), [], "a run waiting for approval is not held");
       x.approve(e);
-      await new Promise((r) => setTimeout(r, 300));
+      await new Promise((r) => setTimeout(r, 200));
       assert.equal(x.queue().run!.state, "approval_wait", `${how}: no continuation while the update drains`);
       if (how === "cancel") e.cancelDrain();
       else { e.shutdown(); x.engine(); }
@@ -192,7 +192,7 @@ test("the user's pause wins over approval_wait; a resume before the approval wai
     await x.until("the wait again", () => x.queue().run?.state === "approval_wait");
     e.pause("W");
     x.approve(e);
-    await new Promise((r) => setTimeout(r, 400));
+    await new Promise((r) => setTimeout(r, 200));
     assert.equal(x.queue().run!.state, "paused", "the approval does not undo the user's pause");
     e.resume("W");
     await x.until("the run to finish", () => x.queue().run?.state === "finished", LONGER.run);
@@ -247,7 +247,7 @@ test("a deploy and a plain restart in approval_wait: it still waits, in its sess
       if (how === "deploy") assert.deepEqual(e.drainForUpdate(false), []);
       e.shutdown();
       e = x.engine();
-      await new Promise((r) => setTimeout(r, 1800)); // past the restart's own resumes
+      await new Promise((r) => setTimeout(r, 500)); // past the restart's own resumes (startupMs)
       const q = x.queue();
       assert.deepEqual([q.run!.state, q.run!.session, q.run!.reason], ["approval_wait", session, "waits for approval of revision 2"], how);
       assert.equal(x.statuses(), "W1=done W2=pending W3=pending", how);
@@ -283,7 +283,7 @@ test("while a run waits for approval: a start, a session chain onto its session 
     e.start("A");
     await x.until("A to finish", () => x.queue("A").run?.state === "finished", LONGER.run);
     assert.match(e.plan("O", { after: ["A"], by: "user", session }), /starts when session \S+ is free \(it runs queue W; queue A is done\)/);
-    await new Promise((r) => setTimeout(r, 1700));
+    await new Promise((r) => setTimeout(r, 500)); // past the planned starts' look (startupMs)
     assert.equal(x.queue("O").run, undefined, "the chain waits for the session");
     assert.throws(() => orchestratorStatusChange(x.store, { queue: "W", to: "cancelled", reason: "no longer needed" }), /queue W is running \(approval_wait\): stop its run first/);
 

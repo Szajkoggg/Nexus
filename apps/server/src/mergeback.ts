@@ -3,10 +3,11 @@
 // A queue with an integration step (PROTOCOL.md, "The integration step") goes back one way only: its base moves
 // forward to the integrated commit (`git merge --ff-only`), never with a merge commit on the base. Nexus does it by
 // itself when the project's merge_back is on (src/merger.ts), the user with Merge back in the dashboard; both go
-// through judgeMerge and fastForward here, one at a time (a lock per queue). When the base moved on since the
-// integration, the integration step runs again instead (reintegrate). Before it moves the base, it checks what the
-// user's merge checked: the base is checked out somewhere (not only detached), not in this server's live worktree,
-// with no uncommitted changes to tracked files, and no step at work there.
+// through judgeMerge and fastForward here, one at a time (a lock per queue). It judges in this order (queue FX): what
+// keeps it whatever the base's checkout is like (its checks, the limit of runs again); where the base is checked out
+// (somewhere, not only detached, not in this server's live worktree); a step at work there, which is held at its end
+// first ("hold"); then that checkout's uncommitted changes to tracked files; then, when the base moved on since the
+// integration, the integration step runs again (reintegrate) while that checkout stays held; then the fast-forward.
 //
 // A queue from before the integration step (no `integration` mark) keeps the user's old merge: `git merge` of its
 // branch in the worktree where the base is checked out, a fast-forward when possible, else a merge commit; on a
@@ -28,6 +29,13 @@ const ENV = { ...process.env, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never"
 
 /** How many times Nexus runs the integration step again by itself when the base moved on, before it waits for the user. */
 const REINTEGRATION_LIMIT = 2;
+
+/**
+ * How long after the integration step finished its round may still be open (the turn's end, which closes it, comes
+ * a moment after the step's outcome). A round open longer than that (a process that died before its turn ended) is
+ * judged as it is.
+ */
+const ROUND_SETTLE_MS = 60_000;
 
 /** Runs git, returning its output or throwing with what git said. */
 function run(cwd: string, args: string[]): string {
@@ -64,8 +72,12 @@ export function withMergeLock<T>(store: ProjectStore, queueId: string, f: () => 
 
 // ---------------------------------------------------------------- the base's checkout
 
-/** Where the base branch is checked out, or what keeps it from being moved there now. */
-function baseCheckout(root: string, base: string, serverRoot = ROOT): { path: string } | { blocked: string } {
+/**
+ * Where the base branch is checked out, or what keeps it from being moved there whatever runs there. `dirty`: what
+ * its uncommitted changes to tracked files say (untracked files never keep a fast-forward: git refuses one that would
+ * overwrite them, and nothing is lost), judged by the caller after the runs at work there.
+ */
+function baseCheckout(root: string, base: string, serverRoot = ROOT): { path: string; dirty?: string } | { blocked: string } {
   const target = worktrees(root).find((w) => w.branch === base);
   if (!target) return { blocked: `branch ${base} is not checked out in any worktree (or only detached): check it out, then merge` };
   // This server's own checkout when it runs as the live instance: never touched by a merge.
@@ -73,8 +85,7 @@ function baseCheckout(root: string, base: string, serverRoot = ROOT): { path: st
   const dirty = git(target.path, ["status", "--porcelain", "--untracked-files=no"]);
   // The reason first, the checkout's path (long) last: the dashboard's waiting item shows the start of the text.
   if (dirty === undefined) return { blocked: `the state of the checkout of ${base} cannot be read (${target.path})` };
-  if (dirty) return { blocked: `the checkout of ${base} has uncommitted changes: commit or stash them, then merge (${target.path})` };
-  return { path: target.path };
+  return { path: target.path, ...(dirty ? { dirty: `the checkout of ${base} has uncommitted changes: commit or stash them, then merge (${target.path})` } : {}) };
 }
 
 /** Queues whose run holds checkout `path` (the user's old merge refuses all of them). */
@@ -101,14 +112,20 @@ function atWorkIn(store: ProjectStore, state: ProjectState, path: string): Queue
 
 /** What merging a queue with an integration step back would do now. */
 export type MergeDecision =
-  /** Nothing to do (not finished, not Nexus's to do, or waiting for something the user already sees). */
-  | { kind: "none"; why: string }
+  /**
+   * Nothing to do (not finished, not Nexus's to do, or waiting for something the user already sees). `ending`: not
+   * yet, the integration step is still ending (a hold for it stays).
+   */
+  | { kind: "none"; why: string; ending?: true }
   /** It waits for something the user (and the orchestrator) should know of. */
   | { kind: "wait"; reason: string }
   /** Its work is in the base already. */
   | { kind: "merged"; sha: string }
-  /** The base moved on since the integration: the integration step runs again. */
-  | { kind: "reintegrate"; base: string; sha: string; count: number }
+  /**
+   * The base moved on since the integration: the integration step runs again. `path`: the base's checkout, held
+   * meanwhile (src/merger.ts), so that the base does not move on again under it.
+   */
+  | { kind: "reintegrate"; base: string; sha: string; count: number; path: string }
   /** Ready, but a step is at work in the base's checkout: wait for its end (the engine holds that run there). */
   | { kind: "hold"; path: string; busy: string[] }
   /** Ready: move the base forward to the integrated commit. */
@@ -144,29 +161,39 @@ export function judgeMerge(store: ProjectStore, state: ProjectState, q: QueueVie
   const branch = q.branch;
   const tip = branch ? git(root, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`]) : undefined;
   if (!branch || !tip) return { kind: "wait", reason: `queue ${q.id}'s branch${branch ? ` ${branch}` : ""} does not exist` };
+  // The run can finish (its review accepted) before the turn in which the step got its outcome ends and closes its
+  // round in git.yaml: until then the last closed round is an older one, so nothing is judged yet.
+  const last = q.git?.steps[integ.id]?.at(-1);
+  if (last && !last.end && Date.parse(integ.finished_at ?? "") > Date.now() - ROUND_SETTLE_MS) {
+    return { kind: "none", why: `queue ${q.id}'s integration step is still ending (its round is not closed yet)`, ending: true };
+  }
   const sha = integratedSha(q.git, integ.id);
   if (!sha) return { kind: "wait", reason: `queue ${q.id}'s integration step has no recorded commit` };
   if (tip !== sha) return { kind: "wait", reason: `queue ${q.id}'s branch ${branch} moved on after its integration step (it ended at ${sha.slice(0, 7)}, the branch is at ${tip.slice(0, 7)}): its work is not merged back` };
   const baseSha = git(root, ["rev-parse", "--verify", "--quiet", `refs/heads/${base.ref}`]);
   if (!baseSha) return { kind: "wait", reason: `queue ${q.id}'s base branch ${base.ref} does not exist` };
   if (isAncestor(root, sha, baseSha)) return { kind: "merged", sha };
+  // What keeps it whatever the base's checkout is like comes first: nothing is held for a merge back that cannot go.
+  const behind = !isAncestor(root, baseSha, sha);
+  const count = q.git?.merge?.reintegrations ?? 0;
   if (by === "nexus") {
     if (!state.project.defaults.merge_back) return { kind: "none", why: "merging back by itself is off (merge_back): the user merges back" };
     if (!state.project.defaults.provisional_counts && q.steps.some(pendingProvisional)) return { kind: "none", why: `queue ${q.id} has provisional work the user has not confirmed` };
     const failed = failedChecks(integ);
     if (failed.length) return { kind: "wait", reason: `the checks of queue ${q.id}'s integration step failed (${failed.join(", ")}): Nexus does not merge it back` };
-  }
-  if (!isAncestor(root, baseSha, sha)) {
-    const count = q.git?.merge?.reintegrations ?? 0;
-    if (by === "nexus" && count >= REINTEGRATION_LIMIT) {
+    if (behind && count >= REINTEGRATION_LIMIT) {
       return { kind: "wait", reason: `${base.ref} moved on again after queue ${q.id}'s integration step ran ${count} more times: merge back runs it once more when you ask` };
     }
-    return { kind: "reintegrate", base: base.ref, sha: baseSha, count };
   }
   const target = baseCheckout(root, base.ref, serverRoot);
   if ("blocked" in target) return { kind: "wait", reason: `queue ${q.id}: ${target.blocked}` };
+  // A step at work in the base's checkout is held at its end before anything else is judged there: its uncommitted
+  // work is not a dirty checkout yet, and while its run is held the base stays where it is (also during a run of the
+  // integration step again).
   const busy = atWorkIn(store, state, target.path).filter((x) => x.id !== q.id);
   if (busy.length) return { kind: "hold", path: target.path, busy: busy.map((x) => x.id) };
+  if (target.dirty) return { kind: "wait", reason: `queue ${q.id}: ${target.dirty}` };
+  if (behind) return { kind: "reintegrate", base: base.ref, sha: baseSha, count, path: target.path };
   return { kind: "ff", path: target.path, base: base.ref, sha, branch };
 }
 
@@ -243,6 +270,7 @@ export function mergeBack(store: ProjectStore, queueId: string, serverRoot = ROO
   if (!base || base.branch === false) throw new ActionError(`queue ${queueId}'s base is not known as a branch${base ? ` (${base.ref})` : ""}: merge it by hand`, 409);
   const target = baseCheckout(root, base.ref, serverRoot);
   if ("blocked" in target) throw new ActionError(target.blocked, 409);
+  if (target.dirty) throw new ActionError(target.dirty, 409);
   const busy = runningIn(store, state, target.path)[0];
   if (busy) throw new ActionError(`queue ${busy.id} is running in ${target.path}: merge once it is not`, 409);
 

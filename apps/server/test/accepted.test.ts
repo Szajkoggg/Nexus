@@ -10,7 +10,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ProjectStore, applyDraft, approveQueue, confirmProvisional, loadProjectState, newId, routeAnswers } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
-import { WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
+import { QUICK_ENGINE, WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
 
 process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
 const G = ["-c", "user.name=test", "-c", "user.email=test@example.invalid", "-c", "init.defaultBranch=main", "-c", "commit.gpgsign=false"];
@@ -48,7 +48,7 @@ function setup(o: { push?: boolean; remote?: boolean; steps?: number; goal?: str
   }));
   store.writeQueue({ protocol: 1, id: "Q", title: "Queue", revision: 1, status: "proposed", review_level: 1, stop_conditions: [], checks: [], steps, approvals: [], history: [] });
   approveQueue(store, "Q");
-  const engine: Engine = new Engine(store, () => { routeAnswers(store); engine.onChange(loadProjectState(store)); });
+  const engine: Engine = new Engine(store, () => { routeAnswers(store); engine.onChange(loadProjectState(store)); }, QUICK_ENGINE);
   const timer = setInterval(() => engine.onChange(loadProjectState(store)), 150);
   const queue = () => loadProjectState(store).queues.find((q) => q.id === "Q")!;
   const step = (id: string) => queue().steps.find((s) => s.id === id)!;
@@ -139,7 +139,7 @@ test("with push_accepted off nothing is pushed; without a remote the step says s
     await off.inReview("Q1");
     off.engine.acceptReview("Q", "Q1");
     await off.until("done", () => off.step("Q1").status === "done");
-    await new Promise((r) => setTimeout(r, 600));
+    await new Promise((r) => setTimeout(r, 300)); // a push would have started by now (the 150 ms look, onChange)
     await off.engine.pusher.settled();
     assert.equal(off.remoteBranch(), undefined);
     assert.deepEqual(off.store.readPush("Q")!.steps, {});
@@ -172,7 +172,7 @@ test("after a rejection nothing of the queue is pushed until a newer revision is
     await x.inReview("Q2");
     x.engine.rejectStep("Q", "Q2", "Not this way.");
     assert.throws(() => x.engine.pushAgain("Q"), /was rejected: nothing of it is pushed/);
-    await new Promise((r) => setTimeout(r, 600));
+    await new Promise((r) => setTimeout(r, 300));
     await x.engine.pusher.settled();
     assert.equal(x.remoteBranch(), undefined, "nothing pushed after the rejection");
     // The orchestrator's revision, approved by the user: pushing works again.
@@ -220,7 +220,8 @@ test("provisional work does not count: neither it nor an accepted step built on 
     x.engine.acceptReview("Q", "Q2"); // accepted by the user, but built on Q1's provisional work
     await x.until("Q2 held", () => x.store.readPush("Q")?.steps.Q2?.result === "held");
     assert.match(x.store.readPush("Q")!.steps.Q2!.text, /provisional work the user has not confirmed \(Q\/Q1\)/);
-    await new Promise((r) => setTimeout(r, 500));
+    await new Promise((r) => setTimeout(r, 200));
+    await x.engine.pusher.settled();
     assert.equal(x.remoteBranch(), undefined, "nothing pushed before the confirmation");
 
     confirmProvisional(x.store, "Q", "Q1");

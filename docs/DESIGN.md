@@ -424,13 +424,24 @@ back by itself) and `resolve_conflicts` (the integration step's worker resolves 
   (at its review level; provisional acceptances count as `provisional_counts` says), the integration step's checks to
   pass, and the base to still be an ancestor of the integrated commit. When the base moved on meanwhile (another queue
   merged, the user committed), the integration step runs again, at most twice by itself; then it waits for the user,
-  whose Merge back runs it once more.
+  whose Merge back runs it once more. The user's Merge back also starts the count of runs again anew (to zero), so
+  after it Nexus may again run the step twice by itself.
 - **It never moves files under someone.** It uses the protections of the user's merge (the base checked out somewhere,
-  not detached, not in the live worktree, no uncommitted changes to tracked files) and waits, telling the user and the
-  orchestrator, when one fails. A step at work in the base's checkout (running, or waiting for an answer) is held at its
-  end, the way a planned deploy holds a run, and goes on right after the fast-forward. Nothing moves during an update,
-  a deploy or a hand-over. Git can change what holds it without any file of the project changing (a commit in the
-  checkout), so while something waits it is looked at again every 30 seconds.
+  not detached, not in the live worktree, no uncommitted changes to tracked files; untracked files never count) and
+  waits, telling the user and the orchestrator, when one fails. Nothing moves during an update, a deploy or a
+  hand-over. Git can change what holds it without any file of the project changing (a commit in the checkout), so
+  while something waits it is looked at again every 30 seconds.
+- **First hold, then decide** (queue FX, 2026-11-15). The judgement goes in this order: (1) what keeps it whatever the
+  base's checkout is like (the integration step's checks, the limit of runs again, the base checked out nowhere or
+  only in the live worktree): it waits, and nothing is held; (2) a step at work in the base's checkout (running,
+  waiting for an answer, or a pause waiting for the step's end) is held at its end, the way a planned deploy's drain
+  holds a run; (3) only then the checkout's cleanliness (tracked files only); (4) when the base moved on, the
+  integration step runs again, and the run stays held meanwhile, so the base does not move on again under it; (5) the
+  fast-forward; (6) the held run goes on. A hold lasts at most one integration step (its checks and its review
+  included, a few minutes). Whenever the merge back cannot go once a run is held (a dirty checkout, failed checks, the
+  limit, a run again that halts, waits or cannot start), the held run goes on at once, and the wait names it
+  (`merge.waiting.released`), so the user and the orchestrator are told; nothing stays held. A server restart lets
+  it go too: a held run is marked to go on after a restart.
 - **One way for both.** The dashboard's Merge back uses the same judgement and the same fast-forward, under one lock
   per queue, so the button and the server never race; `git.yaml` `merged.by` says who did it.
 - **Cleanup** comes after the merge, once every provisional acceptance of the queue is confirmed: a Fix it until then
@@ -443,6 +454,15 @@ back by itself) and `resolve_conflicts` (the integration step's worker resolves 
   orchestrator section has its level-2 reviews done by the user; and a commit in the base's checkout changes nothing
   under `.nexus`, so without the 30-second look a merge that waited for a clean checkout would wait until some other
   change came.
+- Found on 2026-11-15 (queue FX): the order used to be cleanliness first, then the runs at work. A worktree queue's
+  fast-forward then waited on the uncommitted work of a step running in the main checkout instead of holding that
+  run; each of that queue's next steps moved main on, so the integration step ran six times (the user's Merge back
+  reset the count twice). Holding first, and keeping the hold through the run again, makes it one run again at most.
+- Found while building it: a run can finish (its integration step's review accepted) a moment before the turn in
+  which the step got its outcome ends and closes its round in `git.yaml`. Judged in that moment, the last closed round
+  was the older one, so the merge back waited ("the branch moved on after its integration step") and told the user
+  for nothing; with a hold, it let the held run go. A round that is still open within a minute of the step's end
+  now counts as still ending, and is judged once it closes.
 
 ### Usage limits
 
@@ -1736,6 +1756,50 @@ is gone. Three things the move needed:
 Measured back to back on a quiet machine, the eight files went from 606 s to 503 s together; the suite (240 s against
 246 s) is set by its slowest files, which this did not touch.
 
+## One full test run on the machine (queue FX)
+
+Decided on 2026-11-15: with queues in worktrees side by side, two checkouts often ran `npm test` at once; each run
+then took 480 to 510 s instead of 240 s, and unrelated tests failed on their time limits (MX2, ST2.3, ST2.integrate).
+The suite runs every file side by side on every core already, so two at once only compete. `npm test` (and
+`npm run test:times`, whose times mean nothing under such load) run through `scripts/test-lock.ts`:
+
+- **A file, created exclusively**, in the system's temporary folder, with the pid and the checkout of its run (the
+  wrapper's process, which lives as long as the run). Of two runs starting at once, one creates it.
+- **The other waits**, saying once a minute on stderr what for (the checkout, the pid, since when), so a worker's
+  check does not look stuck. A lock whose process is not alive is taken over at once (a run killed with its tree,
+  a crash); one that cannot be read is being written while it is young, and is taken over once it is not.
+- **At most 15 minutes**, then the run goes on without the lock: a run stuck for longer, or a pid that Windows gave to
+  another process, never blocks the suite for good. Two runs taking over the same dead lock in the same moment could
+  both run; that is today's behaviour, not worse.
+- **`npm run test:files` never waits**: a few files while working, short, and run often.
+- Only branches that contain the lock take it: an older branch's run neither waits nor is waited for.
+
+Measured with two temporary clones started 5 s apart (a busy machine, other work running): the first took 268 s,
+the second waited about 263 s and then took 181 s; both green.
+
+## The engine's own waits in tests, and what sets the slowest files (queue FX)
+
+Measured first (`npm run test:times`, `NEXUS_TEST_WAIT_LOG`): the slowest files (approval-wait, engine-failures,
+lift, merger; accepted further down) spend almost nothing in the tests' own fixed waits (approval-wait about 10 s of
+its 57 s alone, 117 s in the full suite). Their time is work: every step's turn starts or wakes a fake runtime process
+and calls the nexus CLI at least twice (`step start`, `step done`), each a node process of about 270 ms alone (loading
+zod about 85 ms, the schemas 55 ms, yaml 55 ms; Node's compile cache does not change it), and the merger's cases run
+git dozens of times. In the full suite every core is busy, so each file takes about twice its time alone.
+
+- **The engine's fixed waits are options** (`EngineOptions.turnSettleMs`, default 300 ms, the settle after a turn's end
+  before the engine decides; `startupMs`, default 1500 ms, before a new engine resumes held runs and looks at planned
+  starts). The server keeps the defaults; tests spread `QUICK_ENGINE` (wait.ts: 50 and 200 ms) into their options,
+  `FAST` (engine-setup.ts) included. The fakes write their last events before the turn ends, so the shorter settle
+  changes nothing they test.
+- **"Nothing happens" waits are kept, shorter, sized to what would have happened**: twice the timer that would have
+  acted (500 ms past `startupMs`, 200 ms past a retry or a nudge), and a push that would have started is waited for
+  with `pusher.settled()` after twice the test's 150 ms look.
+- Measured back to back on the user's machine (another session's test file running beside them): the four slowest
+  files and accepted went from 443 s to 386 s together (13 %), the slowest file from 118 s to 92 s, the suite from
+  156 s to 147 s. The 25 % the queue asked for is out of reach by waits: what is left is the processes' own CPU work.
+  A faster CLI start (loading zod and yaml only for the commands that need them) would help every test and every
+  agent's call; that is a change to the CLI, for a queue of its own.
+
 ## Findings from the flaky tests (queue FU4)
 
 Four server tests failed now and then on a busy machine. `scripts/load-tests.mjs` brings such failures out (12
@@ -1844,10 +1908,32 @@ each) and seven short Codex turns on the ChatGPT subscription (20k to 40k tokens
   turn them off: `features.apps: false`, `features.plugins: false` (the plugins' servers: computer use, Blender) and
   `mcp_servers.<name>.enabled: false` for each top-level server (`config/read` names them; an override for a name
   that does not exist fails the thread start: "invalid transport"). The user decided that partners run so at every
-  level; workers and the orchestrator still get the user's tools, a matter for a later queue.
+  level; workers and the orchestrator still got the user's tools then (see below, queue FX).
 - **Codex's search modes**: `cached` searches; `live` also opens pages (an `openPage` action). Both run at OpenAI, so
   no local address is reachable through them. A webSearch item's query is empty when it starts; the chat line is
   written at its completion, from its action.
+
+## The user's Codex tools for workers (queue FX)
+
+Decided on 2026-11-15 with the queue's approval, after WB's probe: a Codex worker got the user's MCP servers,
+plugins and apps from `~/.codex/config.toml`, and an MCP server runs outside the sandbox (WB saw `node_repl` fetch a
+local port without an approval), so a Codex worker could reach this machine's Nexus API on port 4317.
+
+- **Off by default, kept by name.** A Codex worker's thread starts as a partner's does (`withoutUserTools`):
+  plugins and apps off, every MCP server `config/read` names off, except those the project lists in
+  `runtimes.codex.mcp_servers` (project only, empty by default: a project whose Codex workers need one, Blender in
+  Honeycomb, names it in its settings). Plugins and apps are never kept: a plugin's servers (computer use, Blender)
+  come and go with the plugin, and the apps' connectors searched even with web search off.
+- **The orchestrator runs on Claude Code** whatever `orchestrator.runtime` says (it only chooses the usage window the
+  orchestrator's notices wait for); a test guards that, and says that a Codex orchestrator would keep no server.
+- **Probed on 2026-11-15** with Codex 0.167.2 and `gpt-6-luna` (effort low, read-only sandbox, approval `never`), in
+  a temporary project, through `CodexSession` with the worker's options. The probe's own MCP server (one tool,
+  `fx_probe_echo`, noting its start) came in by `-c mcp_servers.fxprobe...` on a wrapper around `codex app-server`,
+  so the user's `~/.codex/config.toml` was not touched; the user's own servers were turned off as above. Off by
+  default: the server never started, and the model had no such tool ("NONE"). Kept by name: the server started and
+  the model called `fxprobe.fx_probe_echo` (the call did not complete under the read-only sandbox with approval
+  `never`, which is the probe's setting, not the subject). Cost: two short turns on the ChatGPT subscription,
+  1910 + 8368 input tokens (24704 + 31872 cached) and 31 + 75 output tokens; no model call otherwise.
 
 ## Static analysis (queue SA)
 

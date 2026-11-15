@@ -422,6 +422,16 @@ function startWait(plan: StartFile, q: QueueView, queues: QueueView[]): { waitin
   return { waiting: done ? done.slice(0, -2) : "it may start", blocked: false };
 }
 
+/**
+ * What a merge back that waits adds about the runs Nexus held for it and let go on (git.yaml `merge.waiting.released`),
+ * empty without any: for the user's waiting list and the orchestrator's notice.
+ */
+export function releasedText(released: readonly string[] | undefined): string {
+  if (!released?.length) return "";
+  const many = released.length > 1;
+  return `; the run${many ? "s" : ""} of queue${many ? "s" : ""} ${released.join(", ")}, held at ${many ? "their" : "its"} step's end for this merge back, ${many ? "go" : "goes"} on`;
+}
+
 function attentionOf(queues: QueueView[], questions: QuestionView[], tags: TagsFile): AttentionItem[] {
   const out: AttentionItem[] = [];
   // The orchestrator's proposals for the project's tag lists: the user's to accept or decline, one by one.
@@ -465,7 +475,10 @@ function attentionOf(queues: QueueView[], questions: QuestionView[], tags: TagsF
       out.push({ kind: "start", queue: q.id, text: `Did not start ${when}: ${q.start.failed.reason}`, at: q.start.failed.at });
     }
     // On the integration step, whose page says how the merge back stands.
-    if (q.git?.merge?.waiting && q.status !== "cancelled") out.push({ kind: "merge", queue: q.id, step: q.steps.find((s) => s.integration)?.id, text: q.git.merge.waiting.reason, at: q.git.merge.waiting.since });
+    if (q.git?.merge?.waiting && q.status !== "cancelled") {
+      const w = q.git.merge.waiting;
+      out.push({ kind: "merge", queue: q.id, step: q.steps.find((s) => s.integration)?.id, text: w.reason + releasedText(w.released), at: w.since });
+    }
     if (q.status === "cancelled" || q.status === "done") continue;
     for (const s of q.steps) {
       // A review the orchestrator does is not the user's (the queue still shows it waiting).

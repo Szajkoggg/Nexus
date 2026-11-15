@@ -479,7 +479,7 @@ ${n.text}` });
       }
       // Merging back (src/merger.ts): what keeps Nexus from it, once per reason; a merge back Nexus did by itself.
       const waiting = q.git?.merge?.waiting;
-      if (waiting && waiting.since >= since) items.push({ key: `notify:mergewait:${q.id}:${waiting.since}`, ...mergeWaitNotice(q, waiting.reason) });
+      if (waiting && waiting.since >= since) items.push({ key: `notify:mergewait:${q.id}:${waiting.since}`, ...mergeWaitNotice(q, waiting.reason, waiting.released) });
       // A step that opened on its fallback because its runtime's usage ran out, or on its own runtime again: told once.
       for (const f of r?.fallbacks ?? []) {
         if (f.at >= since) items.push({ key: `notify:fallback:${q.id}:${f.step}:${f.at}`, ...fallbackNotice(q, f) });

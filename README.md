@@ -241,7 +241,8 @@ also has what belongs to Nexus as a whole: the server section (updates, pushing 
 notifications and remote access. **The project's tab** shows the same settings, each with a switch: **Global** (the
 global value, greyed and marked "global") or **Own** (a value for this project only); switching back to Global makes
 it follow the global value again. Only the project's tab has what is the project's alone: its name, its extra allowed
-tools for Claude Code (the project's own `.claude/settings.json` applies as well), its notes folder, its working
+tools for Claude Code (the project's own `.claude/settings.json` applies as well), the MCP servers its Codex workers
+keep, its notes folder, its working
 language and where its worktrees go.
 
 **Languages** (a section in both tabs). The **reader's language** is what the agents write to you in: chat replies,
@@ -256,6 +257,10 @@ Codex's auto review are the recommended settings: routine actions run, risky one
 Claude Code workers may not write under the project's `.nexus` folder with their file tools ("Keep out of .nexus",
 on by default; the `nexus` command still records their reports; shell commands are not covered); Codex workers
 cannot be kept out, as its Windows sandbox refuses it.
+Codex workers start without your own Codex MCP servers, plugins and apps (from your `~/.codex/config.toml`): an
+MCP server runs outside the sandbox, with your rights, and could reach Nexus on this machine. A project whose Codex
+workers need one (Blender, say) names it under **MCP servers kept** in the project's tab (Codex workers section; one
+per line, as your Codex config names it). Plugins and apps stay off; thinking partners keep no server.
 What was refused shows in each step's detail and, grouped by kind with counts, under "Refused actions" on the project
 page; from a Claude Code refusal, "Allow for this project…" adds a rule (prefilled, editable) to these settings.
 A run can override model and effort when it starts, and the orchestrator chooses them when it starts runs.
@@ -442,6 +447,11 @@ npm run lint     # ESLint (correctness rules, with types) and dependency-cruiser
 npm run knip     # unused files, exports and dependencies (closing refactoring steps and maintenance)
 node scripts/load-tests.mjs --burners 12 --copies 4 --rounds 5 apps/server/test/review.test.ts   # tests under load
 ```
+
+One full run at a time on the machine: `npm test` and `npm run test:times` take a lock in the system's temporary
+folder first (`scripts/test-lock.ts`). When another checkout's full run holds it, they wait, saying once a minute
+what for, and after 15 minutes run anyway; a lock left by a run that died is taken over at once. `npm run test:files`
+never waits. `NEXUS_TEST_LOCK` names another lock file, `NEXUS_TEST_LOCK_MAX_MS` another longest wait.
 
 The tests that run fake runtimes or servers wait 10 s for what they expect (`NEXUS_TEST_WAIT_MS` sets it, e.g. higher
 on a slow machine; `apps/server/test/wait.ts`), so a change that breaks many of them fails the suite in minutes.

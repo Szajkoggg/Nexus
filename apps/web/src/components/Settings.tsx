@@ -66,6 +66,8 @@ type Values = Record<string, unknown>;
 const at = (o: unknown, key: string): unknown => key.split(".").reduce<unknown>((x, k) => (x && typeof x === "object" ? (x as Values)[k] : undefined), o);
 /** A kind's fallback chain: edited as one line of text (fallback.ts). */
 const isChain = (k: string) => k.startsWith("kinds.") && k.endsWith(".fallback");
+/** A list edited as text: its entries, trimmed, without empty ones. */
+const entries = (text: string, separator: string | RegExp = "\n") => text.split(separator).map((x) => x.trim()).filter(Boolean);
 /** The settings that are global with a project override, by key, from a project's (effective) or the global settings. */
 const valuesOf = (o: unknown): Values => Object.fromEntries(SETTING_KEYS.map((k) => [k, isChain(k) ? fallbackLine(at(o, k) as never) : at(o, k)]));
 /**
@@ -228,6 +230,11 @@ function SettingRows({ form, project }: { form: Form; project?: { values: Record
             else { f.set("runtimes.codex.approval_policy", v); f.set("runtimes.codex.approvals_reviewer", ""); }
           }} options={[["auto", t("settings.leaving.auto")], ["never", t("settings.leaving.never")], ["on-request", t("settings.leaving.request")]]} />}
         </Setting>
+        {p && (
+          <Row label={t("settings.codexMcp")} hint={<>{t("settings.codexMcpHint")} <span className="text-warn">{t("settings.codexMcpWarning")}</span></>}>
+            <textarea value={p.values.mcp} onChange={(e) => p.set("mcp", e.target.value)} rows={2} placeholder={t("settings.codexMcpEmpty")} className={`${field} font-mono text-xs`} />
+          </Row>
+        )}
       </Section>
 
       <Section title={t("settings.kinds")}>
@@ -462,7 +469,7 @@ function ProjectSettingsPage({ project, info }: { project: ProjectFile; info: Pr
   const v = useValues(Object.fromEntries(SETTING_KEYS.map((k) => [k, info.own.includes(k) ? effective[k] : global[k]])));
   const [own, setOwn] = useState<Set<string>>(() => new Set(info.own));
   const [local, setLocal] = useState({
-    name: project.name, tools: project.runtimes.claude.allowed_tools.join("\n"),
+    name: project.name, tools: project.runtimes.claude.allowed_tools.join("\n"), mcp: project.runtimes.codex.mcp_servers.join("\n"),
     notesDir: project.conversations.notes_dir ?? "", worktrees: project.defaults.worktree_dir ?? "", worktreeSetup: project.defaults.worktree_setup ?? "",
     checks: project.defaults.checks.join("\n"),
     working: project.languages?.working ?? "en",
@@ -483,10 +490,11 @@ function ProjectSettingsPage({ project, info }: { project: ProjectFile; info: Pr
     setBusy(true); setMsg(undefined);
     try {
       const mine = SETTING_KEYS.filter((k) => own.has(k));
-      const body = nested(v.values, mine) as { defaults?: Values; runtimes?: { claude?: Values } & Values; conversations?: Values; languages?: Values };
+      const body = nested(v.values, mine) as { defaults?: Values; runtimes?: { claude?: Values; codex?: Values } & Values; conversations?: Values; languages?: Values };
       body.defaults = { ...body.defaults, worktree_dir: local.worktrees || null, worktree_setup: local.worktreeSetup.trim() || null,
-        checks: local.checks.split("\n").map((x) => x.trim()).filter(Boolean) };
-      body.runtimes = { ...body.runtimes, claude: { ...body.runtimes?.claude, allowed_tools: local.tools.split(/\n|,/).map((x) => x.trim()).filter(Boolean) } };
+        checks: entries(local.checks) };
+      body.runtimes = { ...body.runtimes, claude: { ...body.runtimes?.claude, allowed_tools: entries(local.tools, /\n|,/) },
+        codex: { ...body.runtimes?.codex, mcp_servers: entries(local.mcp, /\n|,/) } };
       body.conversations = { ...body.conversations, notes_dir: local.notesDir || null };
       body.languages = { ...body.languages, working: local.working };
       await act(project.id, "PATCH", "/settings", { ...body, name: local.name, own: mine, follow: SETTING_KEYS.filter((k) => !own.has(k)) });

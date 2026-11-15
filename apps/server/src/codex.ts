@@ -26,15 +26,18 @@ export interface CodexOptions extends AgentOptions {
    * Without the user's own Codex tools: the thread starts with its MCP servers (each one the effective config names,
    * read with config/read), plugins and apps turned off. A thinking partner's (decided by the user 2026-11-15: probed,
    * the user's node_repl MCP server ran outside the sandbox and fetched a local port, and the apps' search connector
-   * searched with web_search disabled). When the config cannot be read, the thread does not start.
+   * searched with web_search disabled). When the config cannot be read, the thread does not start. Workers' too
+   * (queue FX), with the MCP servers the project names kept (keepMcpServers).
    */
   withoutUserTools?: boolean;
+  /** With withoutUserTools: the user's MCP servers (by name) left as the config has them (a worker's runtimes.codex.mcp_servers). */
+  keepMcpServers?: readonly string[];
 }
 
-/** The overrides that turn off the MCP servers a config/read result names, the plugins and the apps. */
-function userToolsOff(config: Json | undefined): Record<string, unknown> {
+/** The overrides that turn off the MCP servers a config/read result names (but those kept), the plugins and the apps. */
+function userToolsOff(config: Json | undefined, keep: readonly string[] = []): Record<string, unknown> {
   const key = (name: string) => (/^[A-Za-z0-9_-]+$/.test(name) ? name : JSON.stringify(name));
-  const servers = Object.keys((config?.mcp_servers ?? {}) as Json);
+  const servers = Object.keys((config?.mcp_servers ?? {}) as Json).filter((n) => !keep.includes(n));
   return { "features.apps": false, "features.plugins": false, ...Object.fromEntries(servers.map((n) => [`mcp_servers.${key(n)}.enabled`, false])) };
 }
 
@@ -237,7 +240,7 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
       const config = {
         ...(o.sandbox === "workspace-write" && o.writableRoots.length ? { "sandbox_workspace_write.writable_roots": o.writableRoots } : {}),
         ...o.config,
-        ...(o.withoutUserTools ? userToolsOff((await this.request("config/read", { cwd: o.cwd })).config) : {}),
+        ...(o.withoutUserTools ? userToolsOff((await this.request("config/read", { cwd: o.cwd })).config, o.keepMcpServers) : {}),
       };
       if (Object.keys(config).length) Object.assign(common, { config });
       const r = o.threadId

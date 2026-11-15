@@ -284,7 +284,13 @@ export const ProjectFile = z.object({
       /** Added to every Nexus-launched session; `Bash(nexus:*)` is always allowed. */
       allowed_tools: z.array(z.string()).default([]),
     }).prefault({}),
-    codex: CodexSettings.prefault({}),
+    codex: CodexSettings.extend({
+      /**
+       * The user's own Codex MCP servers (by name, as Codex's config names them) that Codex workers keep (project only).
+       * Every other one, and every plugin and app, is off in a Codex worker's thread; empty (the default): none.
+       */
+      mcp_servers: z.array(z.string()).default([]),
+    }).prefault({}),
   }).prefault({}),
   /** Conversations: thinking partners for the project. */
   conversations: ConversationSettings.extend({
@@ -367,6 +373,7 @@ export const StoredProject = z.object({
       sandbox: own(CodexSandbox),
       approval_policy: own(ApprovalPolicy),
       approvals_reviewer: ownOrNone(ApprovalsReviewer),
+      mcp_servers: z.array(z.string()).default([]),
     }).prefault({}),
   }).prefault({}),
   conversations: z.object({
@@ -788,12 +795,13 @@ export const GitFile = z.object({
   merged: z.object({ at: Time, into: z.string(), path: z.string(), sha: z.string(), fast_forward: z.boolean(), by: z.enum(["nexus", "user"]).optional() }).optional(),
   /**
    * Nexus merging back by itself (src/merger.ts). `waiting`: what keeps the fast-forward (or the cleanup) waiting that
-   * the user should know of, since when; told to the user and the orchestrator. `reintegrations`: how many times the
-   * integration step was run again because the base moved on, since the user's last Merge back (at most two).
-   * `reintegrating`: when the last such run was asked for, until its integration step opens.
+   * the user should know of, since when; told to the user and the orchestrator; `released`: the queues whose runs Nexus
+   * held at a step's end for this merge back and let go on when it could not go after all. `reintegrations`: how many
+   * times the integration step was run again because the base moved on, since the user's last Merge back (at most
+   * two). `reintegrating`: when the last such run was asked for, until its integration step opens.
    */
   merge: z.object({
-    waiting: z.object({ reason: z.string(), since: Time }).optional(),
+    waiting: z.object({ reason: z.string(), since: Time, released: z.array(z.string()).optional() }).optional(),
     reintegrations: z.number().int().min(0).optional(),
     reintegrating: Time.optional(),
   }).optional(),

@@ -4,7 +4,7 @@
 // (src/conversations.ts). Agents rely on them (a change to one carries an `Agents:` line in its commit), so each is
 // covered by a snapshot test: test/prompts.test.ts compares what the agents' processes receive with golden files.
 import {
-  INTEGRATION_CONDITION, formatClock, formatSeconds, isCheckMetric, languageName, levelNow, metricValueText, runIsOlder, stepChecks, type MetricValue, type AwayNow, type ConversationWeb, type InboxView, type LanguageCode, type ProjectFile, type ProjectState, type QuestionView, type QueueView, type SessionView, type StepView, type TagProposal, tagsText,
+  INTEGRATION_CONDITION, formatClock, formatSeconds, isCheckMetric, languageName, levelNow, metricValueText, releasedText, runIsOlder, stepChecks, type MetricValue, type AwayNow, type ConversationWeb, type InboxView, type LanguageCode, type ProjectFile, type ProjectState, type QuestionView, type QueueView, type SessionView, type StepView, type TagProposal, tagsText,
 } from "@nexus/protocol";
 import type { ClosingContext } from "./closing.ts";
 import type { IntegrationContext } from "./integration.ts";
@@ -631,9 +631,9 @@ export function missedStartNotice(q: QueueView, missed: { at?: string }): Notice
 }
 
 /** Nexus cannot merge a worktree queue back by itself now (git.yaml `merge.waiting`, src/merger.ts). */
-export function mergeWaitNotice(q: QueueView, reason: string): Notice {
+export function mergeWaitNotice(q: QueueView, reason: string, released?: readonly string[]): Notice {
   return {
-    fact: `Queue ${q.id} is not merged back yet: ${reason}`,
+    fact: `Queue ${q.id} is not merged back yet: ${reason}${releasedText(released)}`,
     todo: "Tell the user briefly what keeps it and what they can do (the user's Merge back in the dashboard goes the same way once it is cleared). Do not touch the base's checkout yourself.",
   };
 }

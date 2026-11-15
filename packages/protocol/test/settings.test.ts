@@ -100,7 +100,7 @@ test("the effective value is the project's own where it has one, else the global
   const stored: StoredProject = {
     protocol: 1, id: "p", name: "P", root: "C:/p", follows_global: true,
     defaults: { context_reuse_threshold: 0.7, worktree_dir: "C:/w" },
-    runtimes: { claude: { effort: "high", allowed_tools: ["WebFetch"] }, codex: { model: null } },
+    runtimes: { claude: { effort: "high", allowed_tools: ["WebFetch"] }, codex: { model: null, mcp_servers: [] } },
     conversations: { notes_dir: "notes" },
     languages: {},
   };
@@ -155,6 +155,22 @@ test("a changed setting becomes the project's own, an untouched one keeps follow
   // The orchestrator's section made later (its session) follows the global settings too.
   store.updateProject((p) => ({ ...p, orchestrator: { runtime: "claude", notify: true, session: "s1" } }));
   assert.deepEqual(stored().orchestrator, { session: "s1" });
+});
+
+test("the MCP servers Codex workers keep: none by default, the project's only, kept when other settings change", () => {
+  const base = mkdtempSync(join(tmpdir(), "nexus-settings-"));
+  process.env.NEXUS_HOME = join(base, "home");
+  const store = ProjectStore.init(join(base, "p"), { id: "p", name: "P", root: join(base, "p") });
+  assert.deepEqual(store.readProject().runtimes.codex.mcp_servers, []);
+  // As the dashboard's project page sends it: the list beside the Codex settings.
+  updateSettings(store, { runtimes: { codex: { mcp_servers: ["blender"] } } });
+  assert.deepEqual(store.readStoredProject().runtimes.codex.mcp_servers, ["blender"]);
+  updateSettings(store, { runtimes: { codex: { sandbox: "read-only" } } });
+  assert.deepEqual(store.readProject().runtimes.codex.mcp_servers, ["blender"], "another Codex setting leaves it");
+  assert.throws(() => updateSettings(store, { follow: ["runtimes.codex.mcp_servers"] }), /not a setting with a global value/);
+  updateSettings(store, { runtimes: { codex: { mcp_servers: [] } } });
+  assert.deepEqual(store.readProject().runtimes.codex.mcp_servers, []);
+  assert.throws(() => updateSettings(store, { runtimes: { codex: { mcp_servers: "blender" } } }), /mcp_servers/);
 });
 
 test("merging back by itself and resolving conflicts: off by default, global with a project override; the worktree setup command is the project's only", () => {
