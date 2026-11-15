@@ -77,3 +77,16 @@ export interface RemovalView {
   /** Why that folder may not be deleted (a link or junction, not Nexus's data, a worktree inside it); absent: it may. */
   delete_refused?: string;
 }
+
+/** GET /api/projects/:id/templates: the queue templates in effect for the project (templates.ts), and files not used. */
+export interface TemplatesResponse {
+  templates: {
+    id: string; title: string; description?: string;
+    /** The layer it comes from, and the weaker layers it replaces. */
+    layer: "nexus" | "global" | "project"; replaces: ("nexus" | "global" | "project")[];
+    params: { name: string; description: string; default?: string }[];
+    /** A maintenance template's default mode. */
+    maintenance?: "survey" | "fix_small";
+  }[];
+  problems: { layer: "nexus" | "global" | "project"; path: string; problem: string }[];
+}

@@ -2146,6 +2146,16 @@ change notification, which the watcher sends for it anyway. The rest of a rebuil
 the next step if 120 ms starts to hurt. The engine's own 15 rebuilds are in actions (a start, a resume, a review), not
 on every change, and were left.
 
+## The orchestrator's briefing and the command line (queue TQ4)
+
+Claude Code gets the orchestrator's briefing as one argument (`--append-system-prompt`), and Windows limits a whole
+command line to 32,767 characters. Adding the templates and recurring queues to the briefing first took it from about
+29,700 to 32,700 characters, and every orchestrator start failed with `spawn ENAMETOOLONG` (89 tests at once). The
+sentences were cut to about 1,100 characters; the orchestrator's command line is now about 31,300 characters in the
+tests (whose temporary paths are longer than a real project's), so some 1,400 characters are left. The next addition
+to the briefing should move it out of the command line (a file, if the CLI takes one: a small probe decides) rather than
+shorten other sentences again.
+
 ## Compacting a conversation (queue CC3)
 
 Decided by the user on 2026-11-15 (docs/ideas/chat-context.md): the Ideas conversations get a **Compact** action; the

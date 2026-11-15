@@ -9,6 +9,7 @@ import { BatchRows } from "./Levels.tsx";
 import { nav } from "../nav.ts";
 import { PlanRow } from "./Plan.tsx";
 import { TagProposalRow } from "./Tags.tsx";
+import { RecurringRow } from "./Recurring.tsx";
 
 const KIND: Record<AttentionItem["kind"], { key: Key; tone: string }> = {
   question: { key: "waiting.kind.question", tone: "text-warn bg-warn/15" },
@@ -116,6 +117,7 @@ export function AttentionPanel({ project, items, queues, pushAccepted, onOpen, o
               {a.kind === "provisional" && <BatchRows project={project} item={a} onOpen={(queue, step) => nav.item(project, queue, step)} onChanged={onChanged} />}
               {a.kind === "plan" && <PlanRow project={project} a={a} onChanged={onChanged} />}
               {a.kind === "tags" && <TagProposalRow project={project} a={a} onChanged={onChanged} />}
+              {a.kind === "recurring" && <RecurringRow project={project} a={a} onChanged={onChanged} />}
             </div>
           );
         })}
@@ -158,6 +160,7 @@ export function WaitingList({ projects, onOpen, onChoose }: {
             {a.kind === "provisional" && <BatchRows project={a.project} item={a} onOpen={(queue, step) => nav.item(a.project, queue, step)} />}
             {a.kind === "plan" && <PlanRow project={a.project} a={a} />}
             {a.kind === "tags" && <TagProposalRow project={a.project} a={a} />}
+            {a.kind === "recurring" && <RecurringRow project={a.project} a={a} />}
             {onChoose && a.kind === "question" && !!a.options?.length && (
               <div className="flex flex-wrap gap-2 px-3.5 pb-3">
                 {a.options.map((o, i) => (
@@ -201,6 +204,7 @@ export function WaitingCards({ projects, current, onOpen }: { projects: ProjectS
           {a.kind === "provisional" && <div className="-mx-0.5"><BatchRows project={a.project} item={a} onOpen={(queue, step) => nav.item(a.project, queue, step)} /></div>}
           {a.kind === "plan" && <div className="-mx-3.5 -mb-3"><PlanRow project={a.project} a={a} /></div>}
           {a.kind === "tags" && <TagProposalRow project={a.project} a={a} className="px-3 pb-2.5" />}
+          {a.kind === "recurring" && <RecurringRow project={a.project} a={a} className="px-3 pb-2.5" />}
         </li>
       ))}
     </ul>

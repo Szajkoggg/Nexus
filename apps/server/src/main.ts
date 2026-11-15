@@ -15,7 +15,7 @@ import {
   ensureGlobalSettings, readGlobalSettings, updateGlobalSettings, MaxRunning, ownKeys, OVERRIDABLE, settingKey, readRegistry, readUsage, readTurns, commentOnPicture, markPicture, routeAnswers, routeSendBacks, sendBack, sendMessage, setQueueSettings, setStepLevel, confirmProvisional, type ProjectState,
   readAway, writeAway, awayNow, awayUntil, turnAway, expireAway, acceptPlanProposal, declinePlanProposal, handBackPlan, acceptTagProposal, declineTagProposal,
   STAT_DIMENSIONS, STAT_FILTERS, projectMetrics, sinceTime, statDimension, statsReport, stepStats, usageDays, type ProjectMetrics, type StatsReport, type UsageDays,
-  MIN_SAMPLES, queueEstimate, stepSamples, isOpenQuestion, writeCount, type EstimatesResponse, type LeftView, type ProjectSummary, type RemovalView,
+  MIN_SAMPLES, queueEstimate, stepSamples, isOpenQuestion, writeCount, type EstimatesResponse, type LeftView, type TemplatesResponse, readTemplates, type ProjectSummary, type RemovalView,
 } from "@nexus/protocol";
 import { newestFirst, projectDigest, projectRunning, usageSince, type DigestEvent, type DigestResponse, type DigestRunning, type UsageRun } from "@nexus/protocol/digest";
 import { Engine } from "./engine.ts";
@@ -343,6 +343,16 @@ app.get("/api/projects/:id/metrics", (c) => {
   const s = stateOf(e);
   if (!s) return c.json({ error: e.error }, 500);
   return c.json(projectMetrics(s) satisfies ProjectMetrics);
+});
+
+// The queue templates in effect for the project (PROTOCOL.md, "Queue templates"), for "New queue from template".
+app.get("/api/projects/:id/templates", (c) => {
+  const e = c.get("entry");
+  const { templates, problems } = readTemplates(e.root);
+  return c.json({
+    templates: templates.map((t) => ({ id: t.id, title: t.title, description: t.description, layer: t.layer, replaces: t.replaces, params: t.params, maintenance: t.maintenance })),
+    problems,
+  } satisfies TemplatesResponse);
 });
 
 app.get("/api/projects/:id/file", (c) => {

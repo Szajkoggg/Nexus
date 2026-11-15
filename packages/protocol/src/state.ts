@@ -43,7 +43,9 @@ export interface AttentionItem {
   kind: "question" | "stopped" | "approval" | "review" | "failed" | "start" | "provisional" | "plan" | "merge" | "tags" | "recurring";
   queue?: string;
   /** Kind `recurring`: the recurring queue it is about (its standing approval waits, or a time passed without a run). */
-  recurring?: string; step?: string; qid?: string;
+  recurring?: string;
+  /** Kind `recurring`: it waits for the user's standing approval (the waiting list offers Approve). */
+  approvable?: true; step?: string; qid?: string;
   text: string; at?: string;
   /** A question's options, as the worker gave them (the waiting list shows them as buttons). */
   options?: string[];
@@ -460,7 +462,7 @@ function recurringAttention(recurring: RecurringView[], queues: Map<string, Queu
     if (r.status === "broken") return [{ kind: "recurring", recurring: r.id, text: `Recurring ${r.id} cannot run: ${r.problem}`, at: r.skipped?.at ?? r.updated_at }];
     if (r.status === "needs_approval") {
       const again = r.skipped?.kind === "approval" ? `; its run ${when} did not start` : "";
-      return [{ kind: "recurring", recurring: r.id, text: `Recurring ${r.id} (${r.template_title}, ${scheduleText(r)}) waits for your approval${again}`, at: r.updated_at }];
+      return [{ kind: "recurring", recurring: r.id, approvable: true, text: `Recurring ${r.id} (${r.template_title}, ${scheduleText(r)}) waits for your approval${again}`, at: r.updated_at }];
     }
     if (r.paused || !r.skipped || r.skipped.kind === "approval") return [];
     if (r.skipped.kind === "previous" && r.status !== "waiting_previous") return [];

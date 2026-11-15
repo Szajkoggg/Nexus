@@ -323,6 +323,14 @@ test("the orchestrator's texts: briefing, helpers and notices match the golden f
   queue({ id: "QM", steps: steps("M") }); approveQueue(store, "QM"); run("QM", { state: "finished", step: "M1", ended_at: now() });
   change();
 
+  tr.section("maintenance runs finished: with findings (told once, with the report's path) and without (nothing)");
+  later();
+  queue({ id: "MF", steps: steps("MF"), maintenance: "survey" }); approveQueue(store, "MF"); run("MF", { state: "finished", step: "MF1", ended_at: now() });
+  event(orch, { type: "queue.report", queue: "MF", path: "<root>/.nexus/queues/MF/report.md", summary: "Two outdated packages.", findings: 2 });
+  queue({ id: "MZ", steps: steps("MZ"), maintenance: "fix_small" }); approveQueue(store, "MZ"); run("MZ", { state: "finished", step: "MZ1", ended_at: now() });
+  event(orch, { type: "queue.report", queue: "MZ", path: "<root>/.nexus/queues/MZ/report.md", summary: "Nothing found.", findings: 0 });
+  change();
+
   tr.section("the user's review decisions: accepted with a note (a step and the last), rejected (with a reason and without), a stopped step's work discarded");
   later();
   queue({ id: "QN", steps: steps("N", 2), review_level: 1 }); approveQueue(store, "QN");

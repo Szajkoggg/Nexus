@@ -1214,6 +1214,7 @@ from every agent session, and the others from every session but an orchestrator'
 | `GET /api/stats?by=&project=&since=&kind=&activity=&area=&size=&origin=` | | The statistics (`StatsReport`, see "Statistics"): every registered project, or one (`project`; unknown: 404), grouped by `by` (`model`, `effort`, `kind`, `activity`, `area`, `size`, `origin`; default `model`; another: 400), the steps whose last outcome is at or after `since` (a date or a time; unreadable: 400), narrowed to the steps under each tag value given (`kind=code`, `area=p/engine` across projects; the value as the groups name it) |
 | `GET /api/usage/days?since=` | | The usage windows day by day for the global Stats view (`UsageDays`, see "Statistics") from `since` (a date or a time; default 30 days ago; unreadable: 400) to today, with `threshold`, the global `defaults.usage_pause_threshold` |
 | `POST /api/projects/:id/tags/:proposal` | `action` (`accept`, `decline`) | The user's decision on the orchestrator's proposal for the project's tag lists (see "Tags"); only the user: no CLI command or event does it (`{message}`) |
+| `GET /api/projects/:id/templates` | | The queue templates in effect for the project (`TemplatesResponse`: `templates`, each with `id`, `title`, `description?`, `layer`, `replaces`, `params` and a maintenance template's `maintenance`; `problems`, the files not used with why), for "New queue from template" (see "Queue templates") |
 | `POST /api/projects/:id/recurring/:rid` | `action` (`approve`, `pause`, `resume`) | The user's standing approval of a recurring queue as it is now (its hash), a pause or its end (see "Recurring queues"); only the user: no CLI command or event does it. Already approved, already paused or not, or a recurring that cannot run (its template gone or not filling): 409; unknown: 404 (`{message}`) |
 | `DELETE /api/projects/:id/recurring/:rid` | | The user removes a recurring queue; the queues it made stay (`{message}`) |
 | `POST /api/projects/:id/queues/:q/plan` | `action` (`move`, `accept`, `decline`, `hand_back`), `after?` | The user's plan: `move` the queue after `after` (a queue id; `null`: with no queue before it), as in a list (see "The plan"); accept or decline the orchestrator's proposal; hand a dependency the user set (`after`; without it, all of them) back to the orchestrator (`{message}`) |
@@ -1885,11 +1886,18 @@ updated_at: ...
 - **The state** (`ProjectState.recurring`, `RecurringView`) adds `status` (`approved`, `needs_approval`, `paused`,
   `waiting_previous`, `broken`), the current `hash`, the template's title and layer, `problem` when broken, and
   `next_at`. Attention items of kind `recurring` (`recurring`: its id): one waits for the user's approval ("Recurring
-  weekly (Maintenance, mon 03:00) waits for your approval"), cannot run (its template), or a time passed without a run
+  weekly (Maintenance, mon 03:00) waits for your approval", with `approvable: true`: the waiting list offers Approve),
+  cannot run (its template), or a time passed without a run
   while its previous run is still open (with `queue`: that run), after a failure, or missed.
 - `nexus recurring list` (any session) prints each with its template, values, schedule, state, next and last run, and
   the last time that passed without one.
 - The user pauses it and lets it go on (`pause`, `resume`) and removes it (`DELETE`); the queues it made stay.
+- **The dashboard**: "Recurring" on the project's queues lists each with its state, schedule, values, mode, next and
+  last run, and the user's Approve (while it waits for that), Pause or Resume, and Remove. "New queue from template"
+  (above it) picks a template (`GET /api/projects/:id/templates`), takes its parameters (the required ones before it can
+  be sent), a maintenance template's mode and the user's own words, and sends them as the user's message to the
+  orchestrator (`POST /api/projects/:id/orchestrator/messages`), with the `nexus queue draft --template` command that
+  writes the draft; the orchestrator drafts the queue, which waits for the user's approval as any.
 
 ## One queue per checkout, and a limit
 

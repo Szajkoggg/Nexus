@@ -3,6 +3,7 @@ import type { ProjectState, QueueStatus } from "@nexus/protocol";
 import { projectUrl, reloads, useLive, useQuery, type AttentionItem, type ProjectSummary, type QueueView } from "./api.ts";
 import { bump, noVersions, projectVersion } from "./query.ts";
 import { QueueRow } from "./components/QueueRow.tsx";
+import { NewFromTemplate, RecurringList } from "./components/Recurring.tsx";
 import { QueueDetail } from "./components/details/QueueDetail.tsx";
 import { chooseOption } from "./components/details/questions.tsx";
 import { StepDetail } from "./components/details/StepDetail.tsx";
@@ -179,6 +180,8 @@ export function App() {
   // The project's queues (the desktop's page; the phone's Queues tab, where what waits has a tab of its own).
   const queuesPage = <>
     {state && <RulesWarning key={state.project.id} project={state} />}
+    {state && <NewFromTemplate key={state.project.id} project={state.project.id} />}
+    {state && <RecurringList project={state.project.id} recurring={state.recurring} onOpen={(id) => projectId && nav.item(projectId, id)} />}
     {state && <PlanView project={state.project.id} queues={state.queues} onOpen={(id) => projectId && nav.item(projectId, id)} />}
     {state && byGroup.map((g) => (
       <section key={g.title} className="mb-8">
