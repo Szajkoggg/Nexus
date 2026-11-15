@@ -157,6 +157,22 @@ test("a changed setting becomes the project's own, an untouched one keeps follow
   assert.deepEqual(stored().orchestrator, { session: "s1" });
 });
 
+test("the MCP servers Codex workers keep: none by default, the project's only, kept when other settings change", () => {
+  const base = mkdtempSync(join(tmpdir(), "nexus-settings-"));
+  process.env.NEXUS_HOME = join(base, "home");
+  const store = ProjectStore.init(join(base, "p"), { id: "p", name: "P", root: join(base, "p") });
+  assert.deepEqual(store.readProject().runtimes.codex.mcp_servers, []);
+  // As the dashboard's project page sends it: the list beside the Codex settings.
+  updateSettings(store, { runtimes: { codex: { mcp_servers: ["blender"] } } });
+  assert.deepEqual(store.readStoredProject().runtimes.codex.mcp_servers, ["blender"]);
+  updateSettings(store, { runtimes: { codex: { sandbox: "read-only" } } });
+  assert.deepEqual(store.readProject().runtimes.codex.mcp_servers, ["blender"], "another Codex setting leaves it");
+  assert.throws(() => updateSettings(store, { follow: ["runtimes.codex.mcp_servers"] }), /not a setting with a global value/);
+  updateSettings(store, { runtimes: { codex: { mcp_servers: [] } } });
+  assert.deepEqual(store.readProject().runtimes.codex.mcp_servers, []);
+  assert.throws(() => updateSettings(store, { runtimes: { codex: { mcp_servers: "blender" } } }), /mcp_servers/);
+});
+
 test("merging back by itself and resolving conflicts: off by default, global with a project override; the worktree setup command is the project's only", () => {
   const base = mkdtempSync(join(tmpdir(), "nexus-settings-"));
   process.env.NEXUS_HOME = join(base, "home");
