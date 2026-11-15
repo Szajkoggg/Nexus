@@ -561,8 +561,8 @@ function apply(
       if (open && open.end === undefined) open.end = st.timeline.at(-2)?.at ?? e.at;
       st.segments.push({ start: e.at });
       // A step of the queue's own at work after the closing step ran (a revision added it): the closing step runs again
-      // at the end, over the queue's whole work. One the user skipped (at Continue or with an approval) stays skipped: the stopped step
-      // goes on after that choice.
+      // at the end, over the queue's whole work. One the user skipped (at Continue or with an approval) stays skipped:
+      // the stopped step goes on after that choice.
       // Likewise the integration step, after any other step at work (the closing step's run again included): the base
       // is merged again into what the queue's branch has become.
       const again = [

@@ -2,7 +2,7 @@
 // "FAKE: <behaviour>":
 //   done   report the step done              ask     ask a blocking question, then end the turn
 //   noop   end the turn without an outcome   stop    report a stop condition
-//   fail   report the step failed            slow    work (see work() below: FAKE_SLOW_MS or held by the test); then done
+//   fail   report the step failed            slow    work (work() below: FAKE_SLOW_MS or held by the test), then done
 //   stop1  report a stop condition the first time, done once the stop is lifted
 //   ask1   ask a blocking question the first time (a step turn of this step in any session counts), done after
 //   partial  the first time: a progress line, a commit of <step>-a.txt, then <step>-a.txt changed and <step>-b.txt
@@ -35,8 +35,8 @@
 // cloudflare (an HTTP 403 page from Cloudflare, which the runtimes report as an authentication failure: passing).
 // Each fake writes the failure the way its runtime does (fake-claude.ts, fake-codex.ts).
 // "refused": the agent tries actions that are refused (each fake writes them as its runtime does), then done.
-// "summary": done, then the step's context summary (`nexus context`); "summaryslow": the same, then it works (as "slow") before
-// the turn ends. Nexus asking for the summary ("[Nexus] … write your context summary") gets one, unless
+// "summary": done, then the step's context summary (`nexus context`); "summaryslow": the same, then it works (as
+// "slow") before the turn ends. Nexus asking for the summary ("[Nexus] … write your context summary") gets one, unless
 // FAKE_NO_SUMMARY is set. FAKE_CONTEXT_FILL (0 to 1) is the context fill each turn reports (default: claude 10 %,
 // codex 6 %). A step turn may come after a seed (context care's first prompt of a fresh session): it is found at the
 // start of any line.
