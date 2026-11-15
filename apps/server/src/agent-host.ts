@@ -298,6 +298,7 @@ export class AgentHost<E extends object = object> {
     if (this.record.cost && f.costUsd !== undefined) patch.cost_usd = f.costUsd;
     if (f.contextTokens !== undefined || (this.record.workingFromModel && f.model)) patch.state = "working";
     if (f.saved !== undefined && this.store.readRuntime(session)?.conversation_saved !== f.saved) patch.conversation_saved = f.saved;
+    if (f.pid !== undefined) patch.pid = f.pid;
     if (Object.keys(patch).length) this.write(session, patch);
     // Every session's usage windows count (one subscription; decided with ST1 on 2026-11-14).
     if (f.usage) writeUsage({ updated_at: now(), windows: { ...readUsage()?.windows, ...f.usage } });

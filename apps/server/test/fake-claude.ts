@@ -19,8 +19,10 @@ const out = (m: unknown) => process.stdout.write(JSON.stringify(m) + "\n");
 // is read (save, below).
 const resumeId = argv.includes("--resume") ? argv[argv.indexOf("--resume") + 1] : undefined;
 const newId = argv.includes("--session-id") ? argv[argv.indexOf("--session-id") + 1] : undefined;
-const refusal = resumeId && !fakeSaved(resumeId) ? `No conversation found with session ID: ${resumeId}`
-  : newId && fakeSaved(newId) ? `Error: Session ID ${newId} is already in use.` : undefined;
+// FAKE_REFUSE: every start is refused so, whatever was saved (a test of a second refusal).
+const always = !!process.env.FAKE_REFUSE;
+const refusal = resumeId && (always || !fakeSaved(resumeId)) ? `No conversation found with session ID: ${resumeId}`
+  : newId && (always || fakeSaved(newId)) ? `Error: Session ID ${newId} is already in use.` : undefined;
 if (refusal) {
   if (resumeId) out({ type: "result", subtype: "error_during_execution", is_error: true, num_turns: 0, total_cost_usd: 0, usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }, modelUsage: {}, permission_denials: [] });
   process.stderr.write(`${refusal}\n`, () => process.exit(1));

@@ -249,10 +249,15 @@ the run with "No conversation found" after a deploy. Now `runtime.json` keeps `c
 Claude start, true once the process shows it read a message (its first turn's `system init`; Claude Code writes
 nothing to stdout before); only a session whose record does not say false resumes, the others start afresh with the
 same id, and the step or the cut-off message goes to the new process as before. A record without the field (written
-before RN) counts as saved, so the deploy that brought this dropped no conversation. The CLI's own refusal corrects
-the record both ways (`savedFromRefusal` in `src/claude.ts`): "No conversation found" marks it unsaved, "already in
-use" saved, so the next start is right also for a record from before RN whose process never saved anything, and for
-a process ended in the moment between its read and its first output. Why the stream's sign and not the transcript
+before RN) counts as saved, so the deploy that brought this dropped no conversation. Where the record is still wrong
+(one from before RN whose process never saved anything, or a process ended in the moment between its read and its
+first output), the CLI refuses the start, and its words correct the record both ways (`savedFromRefusal` in
+`src/claude.ts`): "No conversation found" marks it unsaved, "already in use" saved. `ClaudeSession` then starts the
+process once more the other way, with what it had written to the refused one (the step's turn, a message, a stop),
+and the role never sees the refusal: the run goes on, the message arrives. The refused `--resume`'s error result,
+its first output, is held until the exit decides. Only once per ClaudeSession, only while the process wrote nothing
+else and Nexus did not end it: a second refusal exits as any process does (the engine's usual failure handling), so
+nothing retries without end. Why the stream's sign and not the transcript
 file: the file's place (`~/.claude/projects/<folder from the path>/<id>.jsonl`) is Claude Code's internal layout,
 the stream is its interface. The fake runtime keeps what it saved across its processes and refuses in both directions
 as Claude Code does (`test/fake-claude.ts`; FAKE_START_MS holds its first read).
