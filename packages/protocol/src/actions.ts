@@ -10,6 +10,7 @@ import { commentTarget, isApproved, loadProjectState, pendingProvisional, type P
 import { validAllowRule } from "./refusals.ts";
 import { closingStepId, integrationStepId, stepDefs } from "./closing.ts";
 import { stepChecks } from "./steps.ts";
+import { inheritedTags, kindListIssue, tagIssues, type StepTags } from "./tags.ts";
 
 export class ActionError extends Error {
   readonly status: number;
@@ -351,6 +352,8 @@ function keptLevels<T>(byStep: Record<string, T> | undefined, steps: { id: strin
  */
 export function applyDraft(store: ProjectStore, definition: unknown): string {
   const input = (definition ?? {}) as Record<string, unknown>;
+  const lists = [input, ...(Array.isArray(input.steps) ? input.steps as unknown[] : [])].flatMap((x) => kindListIssue(x) ?? []);
+  if (lists.length) throw new ActionError(lists[0]!);
   const parsed = QueueFile.safeParse({ protocol: 1, status: "proposed", ...input });
   if (!parsed.success) throw new ActionError(parsed.error.issues.map((i) => `${i.path.join(".") || "queue"}: ${i.message}`).join("; "));
   // The levels the user set are the user's, and old policies are the server's: a draft brings neither (an existing
@@ -370,6 +373,8 @@ export function applyDraft(store: ProjectStore, definition: unknown): string {
 
   let old: QueueFile | undefined;
   try { old = store.readQueue(draft.id); } catch { old = undefined; }
+  const tagged = draftTagIssues(store, draft, old);
+  if (tagged.length) throw new ActionError(tagged.join("; "));
   const at = now();
   // A new step starts pending, or skipped (kept for the record); statuses change through nexus queue set only.
   const fresh = draft.steps.filter((s) => !old?.steps.some((o) => o.id === s.id) && s.status && s.status !== "skipped");
@@ -394,7 +399,9 @@ export function applyDraft(store: ProjectStore, definition: unknown): string {
   const touched = draft.steps.flatMap((s) => {
     const before = old!.steps.find((o) => o.id === s.id);
     if (!before || !started.has(s.id)) return [];
-    const fields = STEP_FIELDS.filter((f) => JSON.stringify(s[f]) !== JSON.stringify(before[f]));
+    const fields: string[] = STEP_FIELDS.filter((f) => JSON.stringify(s[f]) !== JSON.stringify(before[f]));
+    // Its tags as it inherits them: a change of the queue's tags would change a started step's too.
+    if (JSON.stringify(inheritedTags(s, draft)) !== JSON.stringify(inheritedTags(before, old!))) fields.push("tags");
     return fields.length ? [`${s.id} (${started.get(s.id)}): its ${fields.join(", ")}`] : [];
   });
   const order = (steps: { id: string }[]) => steps.filter((s) => started.has(s.id)).map((s) => s.id).join(", ");
@@ -419,6 +426,8 @@ export function applyDraft(store: ProjectStore, definition: unknown): string {
     review_level: draft.review_level ?? old.review_level,
     // Left out, it stays as it was; `coding: false` takes it back before the queue has started.
     coding: draft.coding ?? old.coding,
+    // The queue's tags are its steps' defaults, as drafted (left out: none), like the steps' own.
+    ...queueTags(draft),
     // The user's levels stay over whatever the revision drafts, for the steps it keeps (the closing step's too).
     user_levels: keptLevels(old.user_levels, stepDefs({ ...old, coding: draft.coding ?? old.coding, steps })),
     // What the steps done before review levels meant stays with them.
@@ -435,6 +444,29 @@ export function applyDraft(store: ProjectStore, definition: unknown): string {
   return changed
     ? `queue ${draft.id} updated to revision ${next.revision}; it needs the user's approval again`
     : `queue ${draft.id} updated (no change to steps, checks or stop conditions: the approval stands)`;
+}
+
+/** A queue's own tags, each key present (undefined when the queue sets none), so that they replace the old ones. */
+function queueTags(q: StepTags) {
+  return { kind: q.kind, activities: q.activities, area: q.area, size: q.size, origin: q.origin };
+}
+
+/**
+ * What is wrong with a draft's tags (tags.ts, tagIssues), each with the step it is on. Checked: the queue's own tags,
+ * and every step's as it inherits them, against Nexus's lists and the project's as they are now. Not checked again:
+ * tags the queue already had, unchanged (a name renamed since, or a step that has run, stays as it was approved).
+ */
+function draftTagIssues(store: ProjectStore, draft: QueueFile, old: QueueFile | undefined): string[] {
+  const list = store.readTags();
+  const same = (a: StepTags, b: StepTags | undefined) => !!b && JSON.stringify(inheritedTags(a, {})) === JSON.stringify(inheritedTags(b, {}));
+  const out = same(draft, old) ? [] : tagIssues(draft, list).map((x) => `queue ${draft.id}: ${x}`);
+  for (const st of draft.steps) {
+    const before = old?.steps.find((o) => o.id === st.id);
+    const tags = inheritedTags(st, draft);
+    if (before && same(tags, inheritedTags(before, old!))) continue;
+    out.push(...tagIssues(inheritedTags(st, {}), list).map((x) => `step ${st.id}: ${x}`));
+  }
+  return [...new Set(out)];
 }
 
 /**

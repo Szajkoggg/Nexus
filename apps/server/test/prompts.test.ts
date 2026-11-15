@@ -341,6 +341,19 @@ test("the orchestrator's texts: briefing, helpers and notices match the golden f
   ] });
   change();
 
+  tr.section("the user's decisions on tag proposals: an area accepted, an activity declined, a rename accepted");
+  later();
+  const proposal = (id: string, kind: "area" | "activity" | "rename", name: string, from?: string) => ({ id, at: now(), kind, name, ...(from ? { from } : {}), reason: "Why." });
+  store.writeTags({
+    protocol: 1, prefix: "p", areas: [{ name: "core", at: now() }], activities: [], renames: [{ from: "engine", to: "core", at: now() }], proposals: [],
+    decisions: [
+      { at: now(), accepted: true, proposal: proposal("t-1", "area", "engine") },
+      { at: now(), accepted: false, proposal: proposal("t-2", "activity", "p:terrain") },
+      { at: now(), accepted: true, proposal: proposal("t-3", "rename", "core", "engine") },
+    ],
+  });
+  change();
+
   tr.section("the orchestrator's briefing (appended to the system prompt)");
   const options = tr.stands[0]!.launch.options as { appendSystemPrompt: string; agentsFile: string };
   tr.add(options.appendSystemPrompt);

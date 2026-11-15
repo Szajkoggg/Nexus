@@ -114,3 +114,19 @@ test("an orchestrator's turn's usage windows reach usage.json, the usage pause s
     assert.equal(turnsOf("orchestrator")[1]!.windows_start?.five_hour?.utilization, 0.95);
   } finally { stop(); delete process.env.FAKE_USAGE; }
 });
+
+test("a worker's turn carries its step's tags as planned: inherited from the queue, a renamed area read as the new one", async () => {
+  const { store, engine, queue, until, stop } = setup(["done"]);
+  try {
+    const at = new Date().toISOString();
+    store.writeTags({ ...store.readTags(), areas: [{ name: "core", at }], renames: [{ from: "engine", to: "core", at }] });
+    const q = store.readQueue("Q");
+    store.writeQueue({ ...q, kind: "code", area: "engine", steps: q.steps.map((s) => ({ ...s, activities: ["feature"], size: "S" as const })) });
+    approveQueue(store, "Q");
+    engine.start("Q", { runtime: "claude" });
+    await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
+    const [w] = turnsOf("worker");
+    assert.deepEqual(w!.tags, { kind: "code", activities: ["feature"], area: "core", size: "S" });
+    assert.equal(turnsOf("orchestrator").length, 0);
+  } finally { stop(); }
+});

@@ -336,6 +336,21 @@ export type StoredProject = z.infer<typeof StoredProject>;
 
 // ---------------------------------------------------------------- queue.yaml
 
+/**
+ * A step's tags (tags.ts; PROTOCOL.md, "Tags"), each optional so that older queues stay valid: `kind`, exactly one, the
+ * dominant kind of work; `activities`, what the step does; `area`, the part of the project; `size`, S, M or L as
+ * planned; `origin`, where the work came from. On a queue they are its steps' defaults: a step inherits each one it
+ * does not set. The names are checked when a queue is drafted (Nexus's lists and the project's, .nexus/tags.yaml), not
+ * when a file is read, so a file with an unknown or renamed name still reads.
+ */
+const TagFields = {
+  kind: z.string().min(1).optional(),
+  activities: z.array(z.string().min(1)).optional(),
+  area: z.string().min(1).optional(),
+  size: z.enum(["S", "M", "L"]).optional(),
+  origin: z.string().min(1).optional(),
+};
+
 export const StepDef = z.object({
   id: Id,
   title: z.string(),
@@ -354,6 +369,7 @@ export const StepDef = z.object({
   runtime: z.enum(["claude", "codex"]).optional(),
   model: z.string().min(1).optional(),
   effort: Effort.optional(),
+  ...TagFields,
   /** Baseline state before any event: set by imports and manual corrections. Events take precedence. */
   status: StepStatus.optional(),
   /** Free text recorded with the baseline, e.g. what an import found next to the step. */
@@ -438,6 +454,8 @@ const QueueShape = z.object({
    * orchestrator in the draft; part of what an approval pins when true; once the queue has started, it stays.
    */
   coding: z.boolean().optional(),
+  /** The tags of the queue's steps that set none of their own (TagFields); part of what an approval pins when set. */
+  ...TagFields,
   /**
    * The queue works in a worktree of its own, so it ends with the integration step (closing.ts). Written only by the
    * server, when it first gives the queue its worktree; kept across revisions; not part of what an approval pins.
@@ -597,6 +615,16 @@ export const Event = z.discriminatedUnion("type", [
    * the user set, which it may not change itself; the user accepts or declines (queues/<queue>/plan.yaml `proposal`).
    */
   z.object({ ...base, type: z.literal("plan.proposed"), queue: Id, after: z.array(Id), reason: z.string().min(1) }),
+  /**
+   * The orchestrator proposes a change to the project's tag lists (.nexus/tags.yaml): a new `area`, a new project
+   * `activity` (with the project's prefix, `hc:terrain`), or a `rename` of one of them. The server puts it into the
+   * file's proposals, where it waits for the user's acceptance (tags.ts).
+   */
+  z.object({
+    ...base, type: z.literal("tags.proposed"),
+    area: z.string().optional(), activity: z.string().optional(), rename: z.object({ from: z.string(), to: z.string() }).optional(),
+    reason: z.string().optional(),
+  }),
   z.object({ ...base, type: z.literal("log"), level: z.enum(["info", "warn", "error"]), text: z.string() }),
   /**
    * The user (or orchestrator) accepts a step waiting in review. The user's note (`text`) goes `to` the next step (as
@@ -638,7 +666,7 @@ export type EventType = Event["type"];
 /** Event types a worker session may not write (orchestrators and the user may). */
 export const ORCHESTRATOR_ONLY: ReadonlySet<EventType> = new Set([
   "answer.given", "queue.drafted", "session.request", "review.accepted", "review.sent_back", "review.asked_user", "status.set",
-  "review.provisional", "plan.proposed",
+  "review.provisional", "plan.proposed", "tags.proposed",
 ]);
 
 /** Event types only the user's session may write (the server writes them for the dashboard). */
@@ -963,6 +991,8 @@ export const TurnRecord = z.object({
   effort: z.string().optional(),
   queue: Id.optional(),
   step: Id.optional(),
+  /** A worker's turn: the step's tags as planned when the turn ended (inherited from the queue, renames read through). */
+  tags: z.object(TagFields).optional(),
   /** `ok`; a failure's kind (`passing`, `lasting`, `usage`, with `failure`, the runtime's code); `interrupted`: ended
    *  without a result (Nexus interrupted it, or its process ended: a kill, an update's drain, a crash). */
   outcome: z.enum(["ok", "passing", "lasting", "usage", "interrupted"]),
@@ -976,6 +1006,40 @@ export const TurnRecord = z.object({
   windows_end: z.record(z.string(), UsageWindow).optional(),
 });
 export type TurnRecord = z.infer<typeof TurnRecord>;
+
+// ---------------------------------------------------------------- tags.yaml (the project's tag lists)
+
+const TagEntry = z.object({ name: z.string().min(1), at: Time, reason: z.string().optional() });
+/** A change to the project's lists the orchestrator proposed (`nexus tags propose`, `nexus tags rename`). */
+export const TagProposal = z.object({
+  id: Id, at: Time,
+  /** `area` or `activity`: `name` is the new one; `rename`: `from` becomes `name` (an area or a project activity). */
+  kind: z.enum(["area", "activity", "rename"]),
+  name: z.string().min(1),
+  from: z.string().optional(),
+  reason: z.string().optional(),
+  /** The orchestrator session that proposed it. */
+  session: Id.optional(),
+});
+export type TagProposal = z.infer<typeof TagProposal>;
+
+/**
+ * .nexus/tags.yaml: the project's own tag lists (tags.ts; PROTOCOL.md, "Tags"). Written only by the server: a proposal
+ * from the orchestrator's event, and the user's decision on it. `prefix`: what the project's own activities begin with
+ * (`hc` for `hc:terrain`), fixed by the first one accepted. `renames`: accepted renames, oldest first; every reader
+ * reads the old name as the new one (files that carry the old name are never rewritten). `proposals`: waiting for the
+ * user. `decisions`: the user's answers, oldest first, each told to the orchestrator once. Missing: empty lists.
+ */
+export const TagsFile = z.object({
+  protocol: z.literal(1),
+  prefix: z.string().optional(),
+  areas: z.array(TagEntry).default([]),
+  activities: z.array(TagEntry).default([]),
+  renames: z.array(z.object({ from: z.string().min(1), to: z.string().min(1), at: Time })).default([]),
+  proposals: z.array(TagProposal).default([]),
+  decisions: z.array(z.object({ at: Time, accepted: z.boolean(), proposal: TagProposal })).default([]),
+});
+export type TagsFile = z.infer<typeof TagsFile>;
 
 // ---------------------------------------------------------------- inbox (sessions/<id>/inbox.jsonl)
 

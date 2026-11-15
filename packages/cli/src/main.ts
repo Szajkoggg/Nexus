@@ -8,6 +8,7 @@ import { execFileSync } from "node:child_process";
 import {
   Event, HOLDING_RUN_STATES, ProjectStore, checksLine, findNexusDir, inReportFolder, loadProjectState, openPlan, stepValuesText, stopPlace, newId, normPath, now, readRegistry, writeRegistry,
   PICTURE_ROLES, REVIEW_HELP, checkPicture, levelNow, pictureSize, recommendedOption, stepDefs,
+  NEXUS_ACTIVITIES, TAG_KINDS, TAG_ORIGINS, TAG_SIZES, tagProposalText, tagsText,
   type PictureRole, type ReviewItem, type Role, type Runtime, type SessionFile,
 } from "@nexus/protocol";
 import { checkRules, describeRules } from "@nexus/protocol/rules";
@@ -50,6 +51,12 @@ Agent commands (session from NEXUS_SESSION or --session):
   nexus run <queue> cancel-start --reason <text>   (orchestrator only: takes the queue out of the plan; not one the user put in)
   nexus plan propose <queue> [--after <queue>]... --reason <text>   (orchestrator only) propose to the user a new list of
                                       predecessors that changes dependencies the user set; the user accepts or declines
+  nexus tags                          the tags a step may carry: Nexus's kinds, activities, origins and sizes, the
+                                      project's areas and own activities, renames, and proposals waiting for the user
+  nexus tags propose --area <name> | --activity <prefix:name> [--reason <text>]   (orchestrator only) propose a new
+                                      area or project activity; the user accepts it, and only then may a draft use it
+  nexus tags rename <old> <new> [--reason <text>]   (orchestrator only) propose renaming an area or a project
+                                      activity; once the user accepts, the old name reads as the new one everywhere
   (--queue <id> picks the queue when the session has none or the step id is ambiguous)
 
 Help:
@@ -95,6 +102,7 @@ const { values: o, positionals: args } = parseArgs({
     id: { type: "string" }, name: { type: "string" }, prefix: { type: "string" },
     "dry-run": { type: "boolean" }, replace: { type: "boolean" },
     role: { type: "string" }, runtime: { type: "string" }, title: { type: "string" }, from: { type: "string" },
+    area: { type: "string" }, activity: { type: "string" },
     help: { type: "boolean", short: "h" }, key: { type: "string" }, note: { type: "string" }, before: { type: "string" }, now: { type: "boolean" }, ref: { type: "string" },
   },
 });
@@ -218,7 +226,7 @@ Queues (${state.queues.length - done.length} open; finished: ${done.map((q) => `
     console.log(`- ${q.id} [${q.status}] ${q.title}: revision ${q.revision}, ${q.approved ? "approved" : "not approved"}${run}`);
     // A revision waiting for approval comes first: nothing runs and no planned start fires until the user approves it.
     if (!q.approved) console.log(`  needs approval (revision ${q.revision})${(q.start && !q.start.failed) || openPlan(q) ? ": its planned start below waits for it" : ""}`);
-    console.log(`  steps: ${q.steps.map((x) => `${x.id} ${x.status} (level ${x.level}${x.level_from === "user" ? ", set by the user" : ""})${provisionalText(x)}${x.closing && x.status === "skipped" ? ` (${closingSkipped(q)})` : ""}${x.review_with ? ` (for ${x.review_with === "user" ? "the user" : "you"})` : ""}${stepValuesText(x) ? ` [on ${stepValuesText(x)}]` : ""}`).join(", ")}`);
+    console.log(`  steps: ${q.steps.map((x) => `${x.id} ${x.status} (level ${x.level}${x.level_from === "user" ? ", set by the user" : ""})${provisionalText(x)}${x.closing && x.status === "skipped" ? ` (${closingSkipped(q)})` : ""}${x.review_with ? ` (for ${x.review_with === "user" ? "the user" : "you"})` : ""}${stepValuesText(x) ? ` [on ${stepValuesText(x)}]` : ""}${x.tags.kind || x.tags.size ? ` {${[x.tags.kind, x.tags.size].filter(Boolean).join(" ")}}` : ""}`).join(", ")}`);
     if (q.status_reason && q.status !== "running") console.log(`  why: ${q.status_reason.replace(/\s+/g, " ").slice(0, 300)}`);
     for (const line of stopLines(q)) console.log(line);
     for (const line of planLines(q)) console.log(line);
@@ -487,6 +495,8 @@ const commands: Record<string, () => void | Promise<void>> = {
         const unread = step.notes.filter((n) => !n.read_at && n.to !== "orchestrator");
         const own = stepValuesText(step);
         console.log(`  ${step.id.padEnd(5)} ${step.status.padEnd(8)} ${step.title}${own ? `  [on ${own}]` : ""}${unread.length ? `  (${unread.length} unread note${unread.length > 1 ? "s" : ""})` : ""}`);
+        const tags = tagsText(step.tags);
+        if (tags) console.log(`        tags: ${tags}`);
         const checks = checksLine(step.checks);
         if (checks) console.log(`        checks: ${checks}`);
       }
@@ -676,6 +686,34 @@ const commands: Record<string, () => void | Promise<void>> = {
     const st = store(); const s = orchestrator(st);
     const queue = need(args[2], "<queue>");
     const e = emit(st, s, { type: "plan.proposed", queue, after: o.after ?? [], reason: need(o.reason, "--reason") });
+    report(waitApplied(st, s.id, e.id));
+  },
+
+  tags() {
+    const sub = args[1] ?? "list";
+    if (sub === "accept" || sub === "decline") throw new UsageError("accepting or declining a tag proposal is the user's, in the dashboard");
+    if (sub === "list") {
+      const st = store();
+      const t = st.readTags();
+      console.log(`Nexus's kinds (exactly one per step, the dominant one): ${TAG_KINDS.join(", ")}`);
+      console.log(`Nexus's activities: ${NEXUS_ACTIVITIES.join(", ")}`);
+      console.log(`origins: ${TAG_ORIGINS.join(", ")}; sizes: ${TAG_SIZES.join(", ")}`);
+      console.log(`the project's areas: ${t.areas.map((x) => x.name).join(", ") || "none yet"}`);
+      console.log(`the project's own activities${t.prefix ? ` (prefix ${t.prefix})` : ""}: ${t.activities.map((x) => x.name).join(", ") || "none yet"}`);
+      for (const r of t.renames) console.log(`renamed: ${r.from} reads as ${r.to} (${r.at})`);
+      for (const p of t.proposals) console.log(`waiting for the user: ${tagProposalText(p, t)}${p.reason ? ` (${p.reason.replace(/\s+/g, " ").slice(0, 200)})` : ""}`);
+      return;
+    }
+    const st = store(); const s = orchestrator(st);
+    const reason = o.reason?.trim() || undefined;
+    let body: Record<string, unknown>;
+    if (sub === "propose") {
+      if ((o.area === undefined) === (o.activity === undefined)) throw new UsageError("nexus tags propose --area <name> | --activity <prefix:name> [--reason <text>]: one of them");
+      body = o.area !== undefined ? { area: need(o.area, "--area") } : { activity: need(o.activity, "--activity") };
+    } else if (sub === "rename") {
+      body = { rename: { from: need(args[2], "<old>"), to: need(args[3], "<new>") } };
+    } else throw new UsageError("nexus tags [list] | nexus tags propose --area <name> | --activity <prefix:name> [--reason <text>] | nexus tags rename <old> <new> [--reason <text>]");
+    const e = emit(st, s, { type: "tags.proposed", ...body, reason });
     report(waitApplied(st, s.id, e.id));
   },
 

@@ -25,6 +25,7 @@ a shell command can take part.
 ```
 <main checkout>/.nexus/                 git-ignored
   project.yaml                          server
+  tags.yaml                             server: the project's tag lists (areas, own activities, renames, proposals)
   queues/
     <queue-id>/
       queue.yaml                        server: definition, revisions, approvals
@@ -190,6 +191,8 @@ revision: 3                            # increases on every change to steps, cri
 status: running                        # mirrors the derived state; the event logs are authoritative for progress
 review_level: 2                        # optional: the level of steps that set none (see "Review")
 coding: true                           # optional: the queue contains coding; Nexus adds a closing refactoring step (below)
+kind: code                             # optional tags, the defaults of its steps (see "Tags"): kind, activities, area, size, origin
+origin: user
 integration: true                      # written only by the server: the queue works in a worktree of its own, so it ends with the integration step (below)
 user_levels: { W3: 1 }                 # levels the user set on steps; written only by the server (see "Review")
 legacy_policies: { W1: continue }      # each step's review policy from before review levels; written only by the server
@@ -208,6 +211,10 @@ steps:
     review:
       prepare: Pictures of both characters on the bench, gameplay view first.
       level: 1                         # optional: the step's review level, as drafted (1, 2 or 3)
+    kind: design                       # optional tags (see "Tags"): exactly one kind; each left out is the queue's
+    activities: [feature, hc:terrain]  # Nexus's activities, or the project's own (with its prefix)
+    area: terrain                      # from the project's list (tags.yaml)
+    size: L                            # S, M or L, as planned
   - id: W2
     title: Bodies shaped
     goal: ...
@@ -526,6 +533,7 @@ Every line:
 | `queue.drafted` | `queue`, `definition` | Orchestrator only: a new or changed draft queue |
 | `session.request` | `action` (start, resume, pause, stop, cancel_start), `queue`, `use_session?`, `runtime?`, `model?`, `effort?`, `after?`, `next?`, `start_at?`, `reason` | Orchestrator only: asks the engine to act on a queue's run (`use_session` continues an existing session). `start` with `after` (a list of queue ids; one id from an older CLI): put the queue into the plan, it starts when those are done (see "The plan"); with `next: true`: into the plan with none before it; with `start_at` (ISO 8601, or `usage-reset`): start at that time (a schedule, see "Schedules"); `cancel_start`: take the queue out of the plan (its predecessors and its schedule) |
 | `plan.proposed` | `queue`, `after` (ids), `reason` | Orchestrator only: proposes to the user a new list of predecessors for the queue that changes dependencies the user set (see "The plan") |
+| `tags.proposed` | one of `area`, `activity`, `rename` (`from`, `to`); `reason?` | Orchestrator only: proposes a change to the project's tag lists; the server records it in `tags.yaml`'s proposals and answers in `applied.jsonl` (see "Tags") |
 | `review.sent_back` | `queue`, `step`, `text` | Orchestrator or user only: a step in review goes back to its worker with what to fix (see "Sending a step back") |
 | `review.rejected` | `queue`, `step`, `text?` | User only (the loader ignores it from any other session, the orchestrator's included): rejects a step waiting for the user's review (see "Reject") |
 | `review.asked_user` | `queue`, `step`, `text` | Orchestrator only in practice (the loader takes it from an orchestrator or the user): a step waiting for the orchestrator's review goes to the user, with why |
@@ -564,7 +572,7 @@ Written only by the server's queue engine; agents never touch them.
 | `sessions/<orchestrator or conversation>/pins.json` | The chat's pinned messages: `{ pins: [{ line, at }] }`, `line` the message's line in that session's chat.jsonl, `at` when it was pinned; in chat order. A tool line cannot be pinned. A fresh session (a new orchestrator conversation) starts without pins; the old session's file stays with it. One writer: the server, on `POST …/sessions/:session/pins` from the dashboard |
 | `<NEXUS_HOME>/settings.yaml` | The global settings, which projects follow where they have no value of their own (see "Global settings") |
 | `<NEXUS_HOME>/usage.json` | The subscription's windows (5-hour, 7-day: utilization and reset time) from the latest `rate_limit_event` (Codex: `account/rateLimits`) of any session. Every session's turns count toward usage, workers', orchestrators' and thinking partners' alike (one subscription), so the usage display and the usage pause see them all |
-| `<NEXUS_HOME>/turns.jsonl` | One line per agent turn of every project and role, appended by the server (AgentHost, its one writer) when the turn ends, or when its process ends first: `v`, `at` (the end), `started_at` (the runtime's turn start, or the first thing it streamed after the previous turn's end), `duration_ms`, `project`, `session`, `role` (`worker`, `orchestrator`, `conversation`), `runtime`, `model`, `effort`, `queue` and `step` (a worker's run, when any), `outcome` (`ok`; a failure's kind `passing`, `lasting` or `usage`, with `failure`, the runtime's code; `interrupted`: no result, because Nexus interrupted the turn or its process ended: a kill, an update's drain, a crash), `tokens` (the turn's own: `input` not from the cache, `output`, `cache_read`, `cache_creation`), `cost_usd` (the turn's own, where the runtime reports cost and it is known: Claude Code, not the first turn of a resumed process), `windows_start` and `windows_end` (the turn's runtime's usage windows, `utilization` and `resets_at`, as the server knew them when the turn began and ended; left out when none was known). In one file because the windows are the account's, across projects; statistics are computed from it when read |
+| `<NEXUS_HOME>/turns.jsonl` | One line per agent turn of every project and role, appended by the server (AgentHost, its one writer) when the turn ends, or when its process ends first: `v`, `at` (the end), `started_at` (the runtime's turn start, or the first thing it streamed after the previous turn's end), `duration_ms`, `project`, `session`, `role` (`worker`, `orchestrator`, `conversation`), `runtime`, `model`, `effort`, `queue` and `step` (a worker's run, when any), `tags` (that step's tags as planned when the turn ended: its own over its queue's, renamed names read as the new ones; absent when it has none, see "Tags"), `outcome` (`ok`; a failure's kind `passing`, `lasting` or `usage`, with `failure`, the runtime's code; `interrupted`: no result, because Nexus interrupted the turn or its process ended: a kill, an update's drain, a crash), `tokens` (the turn's own: `input` not from the cache, `output`, `cache_read`, `cache_creation`), `cost_usd` (the turn's own, where the runtime reports cost and it is known: Claude Code, not the first turn of a resumed process), `windows_start` and `windows_end` (the turn's runtime's usage windows, `utilization` and `resets_at`, as the server knew them when the turn began and ended; left out when none was known). In one file because the windows are the account's, across projects; statistics are computed from it when read |
 | `<NEXUS_HOME>/away.yaml` | The user's away mode: `current` (`since`, `until`) while on, `past` periods (`since`, `until`, `ended`, `why`: `expired` or `off`). One writer: the server, on `POST /api/server/away` and when a period's time comes. See "Away mode" under "Review" |
 | `<NEXUS_HOME>/limits.json` | `{ max_running: number }`: how many queues may run at once across all projects, a whole number from 1 to 20 (default `2` when the file or the value is missing). One writer: the server, on `POST /api/server/settings` from the dashboard |
 | `<NEXUS_HOME>/deploy.json` | `{ push_on_deploy: boolean }` (default `true` when the file is missing). One writer: the server, on `POST /api/server/settings` from the dashboard |
@@ -994,6 +1002,8 @@ nexus queue draft --file queue.yaml
 nexus answer <qid> "..." [--escalate [--recommend <option>]] [--continue|--wait]
                                                # --recommend only with --escalate: one of the question's options
 nexus session start|resume|fork|pause|stop ...
+nexus tags propose --area <name> | --activity <prefix:name> [--reason ...]   # a proposal for the project's tag lists
+nexus tags rename <old> <new> [--reason ...]    # the user accepts it (see "Tags"); `nexus tags` lists them (any session)
 nexus attach                                   # register a hand-started session as external
 # setup (the user)
 nexus project add <path> [--id] [--name]       # creates .nexus/ (self-ignoring), registers the project, prints the rules files' check
@@ -1106,6 +1116,7 @@ from every agent session, and the others from every session but an orchestrator'
 | `POST /api/projects/:id/questions/:qid/answer` | `text`, `continue?` | The user's answer, routed to the asker |
 | `POST /api/projects/:id/queues/:q/run` | `action` (`start`, `pause`, `resume`, `stop`, `cancel_start`), `runtime?`, `model?`, `effort?`, `session?`, `after?`, `next?`, `at?` | Runs the queue through a Nexus-launched session (`session` continues an existing one). `start` with `after` (a queue id or a list): the user's place for the queue in the plan, it starts when those are done; with `next: true`: in the plan with none before it (`{message}`; see "The plan"); with `at` (ISO 8601, or `usage-reset`): a schedule (`{message}`); `cancel_start` takes the queue out of the plan (`{message}`) |
 | `GET /api/projects/:id/estimates` | | Expected times of the project's open queues, as estimates (`{ samples, min, queues: { <id>: { steps, ms? } } }`): `steps` the steps left (not closed), `ms` their expected time, absent while fewer than `min` (5) steps are finished. A finished (done) step's time is the sum of its worker turns' `duration_ms` in `turns.jsonl` (send-back rounds included, the wait for its review not), over every project the server has; a step to come takes the average of those on its model and effort, else its model, else all, each from at least 5 steps |
+| `POST /api/projects/:id/tags/:proposal` | `action` (`accept`, `decline`) | The user's decision on the orchestrator's proposal for the project's tag lists (see "Tags"); only the user: no CLI command or event does it (`{message}`) |
 | `POST /api/projects/:id/queues/:q/plan` | `action` (`move`, `accept`, `decline`, `hand_back`), `after?` | The user's plan: `move` the queue after `after` (a queue id; `null`: with no queue before it), as in a list (see "The plan"); accept or decline the orchestrator's proposal; hand a dependency the user set (`after`; without it, all of them) back to the orchestrator (`{message}`) |
 | `POST /api/projects/:id/queues/:q/steps/:s/pictures/mark` | `path`, `accepted` | The user's mark on a review picture (`review.marked`) |
 | `POST /api/projects/:id/queues/:q/steps/:s/pictures/comment` | `path`, `text` | The user's comment on a review picture: a send-back or a note (see "Review pictures"); answers `{ ok, result: { message } }` |
@@ -1416,6 +1427,10 @@ a prompt. (`Write` and `Edit` are not disallowed: a disallow rule would beat the
   `nexus run <queue> cancel-start --reason …` takes it out of the plan (not a queue the user put in).
 - `nexus plan propose <queue> [--after <queue>]... --reason …` sends `plan.proposed`: a proposal to the user that
   changes dependencies the user set (see "The plan").
+- `nexus tags propose --area <name> | --activity <prefix:name> [--reason …]` and `nexus tags rename <old> <new>
+  [--reason …]` send `tags.proposed` and wait for the server's result; `nexus tags` (any session) prints Nexus's lists
+  and the project's, with the renames and the proposals waiting. `nexus tags accept|decline` is refused: the
+  decision is the user's (see "Tags").
   Starting an unapproved revision is refused.
 - `nexus review accept <queue> <step> [--note <text>]`, `nexus review send-back <queue> <step> <what to fix>` and
   `nexus review ask-user <queue> <step> <why>` write `review.accepted` (the note as its `text`), `review.sent_back`
@@ -1626,6 +1641,59 @@ Queues run side by side only in worktrees of their own, never two in one checkou
   restart arms them again from the files; nothing fires while an update drains.
 - The dashboard shows the plan with its time and how long until it, and a chip "starts at 22:00" on the row; Cancel
   ends it.
+
+## Tags
+
+A step's tags are facets, each answering one question (decided 2026-11-14, docs/ideas/tags.md;
+`packages/protocol/src/tags.ts`). They are what statistics count by, and the kind will choose the runtime, model,
+effort and fallback.
+
+- `kind`: exactly one per step, the dominant kind of thinking: `mechanical`, `code`, `debugging`, `design`,
+  `research`, `docs`. What else the step does goes into its activities. A list (or `code, docs`) is refused.
+- `activities` (a list): what the step does. Nexus's own: `feature`, `bugfix`, `refactor`, `test`, `performance`,
+  `security`, `migration` (data, schema, protocol), `dependency`, `ui`, `i18n`, `capture` (pictures and review
+  material), `integration` (merging), `cleanup`, `build` (build and configuration); for games `assets`, `tuning`,
+  `content`. A project's own carry its prefix (`hc:terrain`); statistics across projects compare Nexus's only.
+- `area`: the part of the project, from the project's list.
+- `size`: `S`, `M` or `L`, as planned; the time and use are measured, so estimate and outcome can be compared.
+- `origin`: `user`, `maintenance` (a recurring or housekeeping queue; Nexus's own closing and integration steps),
+  `orchestrator`, `fix` (a revision after a send-back or the user's Fix it), `ci` (a failing check or a bug found by a
+  failure).
+
+Each is optional in `queue.yaml`, so older queues stay valid; the orchestrator's briefing has new drafts always give
+kind, size and origin. On the queue they are its steps' defaults: a step inherits each one it does not set (its own
+`activities` replace the queue's). The steps Nexus keeps have their own: the closing step `code`, `[refactor]`,
+`maintenance`; the integration step `code`, `[integration]`, `maintenance` (area and size: the queue's). Part of what
+an approval pins: a step's tags are in its definition, and a queue's are in the revision hash only when set, so a
+queue without them hashes as before. A started step keeps its tags (also those it inherits): a draft that would change
+them is refused.
+
+No free text: when a queue is drafted, every name must be on Nexus's lists or the project's as they are now; an unknown
+one is refused with what to do (`nexus tags propose`), so is one proposed and not yet accepted, and one renamed since
+("use the new name"). Tags a revision leaves as they were are not checked again. Files are never checked when read: a
+queue with an unknown or renamed name still reads.
+
+The project's lists, `.nexus/tags.yaml` (`TagsFile`), written only by the server: `prefix` (fixed by the first project
+activity accepted), `areas` and `activities` (`name`, `at`, `reason?`), `renames` (`from`, `to`, `at`, oldest first),
+`proposals` (`id`, `at`, `kind`: `area`, `activity` or `rename`, `name` (the new name), `from?` (a rename's old
+name), `reason?`, `session?`) and `decisions` (`at`, `accepted`, `proposal`). Missing: empty lists.
+
+- The orchestrator proposes with `nexus tags propose` or `nexus tags rename` (event `tags.proposed`); the server checks
+  it (an area is lowercase words joined by hyphens; a project activity is `<prefix>:<name>` with the project's prefix;
+  a new name is on no list, not proposed, not renamed away; only the project's own names are renamed) and adds it to
+  `proposals`. Its first list is proposed the same way, and its briefing has it ask the user in the chat once whether
+  the list is right, and again when it would extend it.
+- Each proposal is an item of kind `tags` in the user's waiting list (`tags`: the proposal; text "New area terrain:
+  <reason>", "Rename area engine to core"). Only the user decides (`POST /api/projects/:id/tags/:proposal`, `accept` or
+  `decline`): accepting puts the name on its list (or renames the entry and records the rename); either way the
+  decision goes into `decisions` and the orchestrator is told once (`notify:tagdecision:<id>`).
+- A rename: every reader reads the old name as the new one (`renamedTag`, followed through a chain), in the step views,
+  `nexus status` and the turn records; the files that carry the old name are never rewritten, so the history does not
+  split. The old name is not used again.
+
+Where they show: `StepView.tags` (the step's as they read now), `ProjectState.tags` (the lists), the worker's `nexus
+status` (a `tags:` line under each step), the orchestrator's overview (`{kind size}` after each step), and each worker
+turn's record in `turns.jsonl`.
 
 ## Runtime, model and effort per step
 

@@ -999,6 +999,7 @@ function describe(e: Event): string {
     case "session.request":
     case "status.set":
     case "step.started":
+    case "tags.proposed":
     default: return "";
   }
 }

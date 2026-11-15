@@ -128,3 +128,23 @@ test("a planned queue whose new revision waits for approval says so first, the p
   // Without a session: listed with its approval, when its status puts it in the list.
   if (loadProjectState(store).queues.find((q) => q.id === "ST")!.status !== "proposed") assert.match(status(store), /^queue ST \[\w+\] Queue ST \(needs approval: revision 2\)$/m);
 });
+
+test("a step's tags: a line under the step for its worker, kind and size in the orchestrator's overview; nexus tags lists them", () => {
+  const store = setup();
+  const at0 = at(0);
+  store.writeTags({ ...store.readTags(), prefix: "hc", areas: [{ name: "core", at: at0 }], activities: [{ name: "hc:ground", at: at0 }], renames: [{ from: "engine", to: "core", at: at0 }] });
+  const p = store.readQueue("P");
+  store.writeQueue({ ...p, kind: "code", origin: "user", area: "engine", steps: [{ ...p.steps[0]!, activities: ["feature", "hc:ground"], size: "M" }, p.steps[1]!] });
+  approveQueue(store, "P");
+  const plain = status(store);
+  assert.match(plain, /^ {2}P1 {4}pending {2}Step P1\n {8}tags: code; feature, hc:ground; area core; size M; from user$/m, "inherited, the old area read as the new one");
+  assert.match(plain, /^ {2}P2 {4}pending {2}Step P2\n {8}tags: code; area core; from user$/m);
+  store.writeSession({ protocol: 1, id: "o", project: "p", role: "orchestrator", runtime: "claude", cwd: store.dir, launched_by: "nexus", created_at: at(0) });
+  assert.match(status(store, "o"), /^ {2}steps: P1 pending \(level 2\) \{code M\}, P2 pending \(level 2\) \{code\}$/m);
+  const env: NodeJS.ProcessEnv = { ...process.env, NEXUS_DIR: store.dir };
+  delete env.NEXUS_SESSION;
+  const list = execFileSync(process.execPath, [CLI, "tags"], { env, encoding: "utf8" });
+  assert.match(list, /^the project's areas: core$/m);
+  assert.match(list, /^the project's own activities \(prefix hc\): hc:ground$/m);
+  assert.match(list, /^renamed: engine reads as core/m);
+});

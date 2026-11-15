@@ -4,7 +4,7 @@
 // process so that the session's next message starts a new one. What a role does with its agent's texts, turns and
 // exits stays with the role: it gives its handlers when it starts a process.
 import {
-  appendTurn, now, readUsage, writeUsage, type ProjectStore, type SessionFile, type TurnRecord,
+  appendTurn, now, readUsage, stepDefs, stepTags, writeUsage, type ProjectStore, type SessionFile, type TurnRecord,
 } from "@nexus/protocol";
 import type { ActivityItem, AgentEvents, AgentProcess, RefusalItem, StreamFacts } from "./agent.ts";
 import { ClaudeSession, type ClaudeOptions } from "./claude.ts";
@@ -248,7 +248,7 @@ export class AgentHost<E extends object = object> {
       appendTurn({
         v: 1, at, started_at: turn.started, duration_ms: Math.max(0, Date.parse(at) - Date.parse(turn.started)),
         project: s.project, session: s.id, role: s.role as TurnRecord["role"], runtime: s.runtime as TurnRecord["runtime"],
-        model: model ?? s.model ?? undefined, effort: s.effort ?? undefined, ...turn.tag,
+        model: model ?? s.model ?? undefined, effort: s.effort ?? undefined, ...turn.tag, tags: this.tagsOf(turn.tag),
         outcome: !end ? "interrupted" : end.ok ? "ok" : end.failure ? end.failure.kind : "interrupted",
         failure: end?.failure?.code,
         tokens: end?.tokens ? { input: end.tokens.input, output: end.tokens.output, cache_read: end.tokens.cacheRead, cache_creation: end.tokens.cacheCreation } : undefined,
@@ -256,6 +256,18 @@ export class AgentHost<E extends object = object> {
         windows_start: turn.windows, windows_end: this.windows(s.runtime),
       });
     } catch (e) { console.error(`turns.jsonl: ${(e as Error).message}`); }
+  }
+
+  /** The tags of the step a turn works on, as planned now (tags.ts, stepTags); none for a turn without a step. */
+  private tagsOf(at: OpenTurn["tag"]): TurnRecord["tags"] {
+    if (!at.queue || !at.step) return undefined;
+    try {
+      const q = this.store.readQueue(at.queue);
+      const step = stepDefs(q).find((x) => x.id === at.step);
+      if (!step) return undefined;
+      const tags = stepTags(step, q, this.store.readTags());
+      return Object.keys(tags).length ? tags : undefined;
+    } catch { return undefined; }
   }
 
   /** Changes the session's runtime record (one writer: the server). */

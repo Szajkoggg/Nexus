@@ -1,12 +1,13 @@
 // Derives the dashboard's view of a project from its files. Pure apart from reading through the store;
 // nothing here is ever written back (state.json, if kept, is only a cache of this).
-import { ORCHESTRATOR_ONLY, USER_ONLY, type StatusChange, type Event, type InboxEntry, type Note, type GitFile, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type ReviewItem, type ReviewLevel, type LegacyReviewPolicy, type AwayFile, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type PlanFile, type StepDef, type StepStatus } from "./schemas.ts";
+import { ORCHESTRATOR_ONLY, USER_ONLY, type StatusChange, type Event, type InboxEntry, type Note, type GitFile, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type ReviewItem, type ReviewLevel, type LegacyReviewPolicy, type AwayFile, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type PlanFile, type StepDef, type StepStatus, type TagProposal, type TagsFile } from "./schemas.ts";
 import { ProjectStore, chainPlan, readAway, revisionHash } from "./store.ts";
 import { awayAt, awayNow, type AwayNow } from "./away.ts";
 import { ENDED_RUN_STATES, HOLDING_RUN_STATES, formatClock, type Segment } from "./times.ts";
 import { stopPlace } from "./attention.ts";
 import { closingStepId, integrationStepId, stepDefs } from "./closing.ts";
 import { openPlan, planView, proposalText, type PlanView } from "./plan.ts";
+import { stepTags, tagProposalText, type StepTags } from "./tags.ts";
 
 import type { CheckView } from "./steps.ts";
 interface AnswerView { id: string; text: string; at: string; escalate?: boolean; continue?: boolean; session: string; by: "orchestrator" | "user" }
@@ -30,8 +31,10 @@ export interface AttentionItem {
    * proposes to change a dependency the user set (`plan.proposal`), or a planned queue waits for one that is stopped,
    * cancelled or does not exist (`plan.predecessor`). `merge`: Nexus cannot merge a worktree queue back by itself
    * now (git.yaml `merge.waiting`: a dirty checkout, failed checks, the base moving on too often, and the like).
+   * `tags`: the orchestrator proposes a change to the project's tag lists (.nexus/tags.yaml), one item per proposal
+   * (`tags`); only the user accepts or declines it.
    */
-  kind: "question" | "stopped" | "approval" | "review" | "failed" | "start" | "provisional" | "plan" | "merge";
+  kind: "question" | "stopped" | "approval" | "review" | "failed" | "start" | "provisional" | "plan" | "merge" | "tags";
   queue?: string; step?: string; qid?: string;
   text: string; at?: string;
   /** A question's options, as the worker gave them (the waiting list shows them as buttons). */
@@ -50,9 +53,13 @@ export interface AttentionItem {
   lift?: { place: string; continue: boolean; revision: number; proposal?: { at: string; reason: string } };
   /** Kind `plan`: the orchestrator's proposal (the new predecessors, why, and the current ones), or the predecessor that holds the plan. */
   plan?: { proposal?: { after: string[]; reason: string; current: string[] }; predecessor?: string; cause?: "stopped" | "cancelled" | "missing" };
+  /** Kind `tags`: the proposal waiting for the user's decision. */
+  tags?: TagProposal;
 }
 export interface StepView extends StepDef {
   status: StepStatus;
+  /** The step's tags as planned: its own over its queue's, renamed names read as the new ones (tags.ts, stepTags). */
+  tags: StepTags;
   /**
    * The queue's closing refactoring step (closing.ts): Nexus keeps it after the queue's own steps, with a reserved id
    * and the standard text; it is not in queue.yaml.
@@ -168,6 +175,8 @@ export interface ProjectState {
   queues: QueueView[];
   sessions: SessionView[];
   questions: QuestionView[];
+  /** The project's tag lists (.nexus/tags.yaml): its areas, its own activities, renames, proposals waiting. */
+  tags: TagsFile;
   /** What waits for the user, newest first. */
   attention: AttentionItem[];
   warnings: string[];
@@ -189,6 +198,8 @@ export function loadProjectState(store: ProjectStore): ProjectState {
   const warnings: string[] = [];
   const project = store.readProject();
   const away = readAway();
+  let tags: TagsFile;
+  try { tags = store.readTags(); } catch (e) { warnings.push(`tags.yaml: ${(e as Error).message}`); tags = { protocol: 1, areas: [], activities: [], renames: [], proposals: [], decisions: [] }; }
 
   const queues = new Map<string, QueueView>();
   const plans = new Map<string, PlanFile>();
@@ -197,7 +208,7 @@ export function loadProjectState(store: ProjectStore): ProjectState {
       const q = store.readQueue(id);
       const { notes, errors } = store.readNotes(id);
       warnings.push(...errors);
-      const view = initQueue(q, notes, project);
+      const view = initQueue(q, notes, project, tags);
       try { view.run = store.readRun(id); } catch (e) { warnings.push(`queue ${id} run: ${(e as Error).message}`); }
       try { view.push = store.readPush(id); } catch (e) { warnings.push(`queue ${id} push: ${(e as Error).message}`); }
       try { view.git = store.readGit(id); } catch (e) { warnings.push(`queue ${id} git: ${(e as Error).message}`); }
@@ -347,7 +358,8 @@ export function loadProjectState(store: ProjectStore): ProjectState {
     queues: [...queues.values()],
     sessions: [...sessions.values()],
     questions: [...questions.values()],
-    attention: attentionOf([...queues.values()], [...questions.values()]),
+    tags,
+    attention: attentionOf([...queues.values()], [...questions.values()], tags),
     warnings,
     away: awayNow(away),
     generated_at: new Date().toISOString(),
@@ -371,8 +383,10 @@ function startWait(plan: StartFile, q: QueueView, queues: QueueView[]): { waitin
   return { waiting: done ? done.slice(0, -2) : "it may start", blocked: false };
 }
 
-function attentionOf(queues: QueueView[], questions: QuestionView[]): AttentionItem[] {
+function attentionOf(queues: QueueView[], questions: QuestionView[], tags: TagsFile): AttentionItem[] {
   const out: AttentionItem[] = [];
+  // The orchestrator's proposals for the project's tag lists: the user's to accept or decline, one by one.
+  for (const p of tags.proposals) out.push({ kind: "tags", text: `${tagProposalText(p, tags)}${p.reason ? `: ${p.reason}` : ""}`, at: p.at, tags: p });
   for (const x of questions) {
     if (x.state !== "open" && x.state !== "escalated") continue;
     const by = x.answers.at(-1);
@@ -444,7 +458,7 @@ export function isApproved(q: QueueFile): boolean {
     && !(withdrawn && withdrawn.approvals >= q.approvals.length);
 }
 
-function initQueue(q: QueueFile, notes: Note[], project: Pick<ProjectFile, "defaults">): QueueView {
+function initQueue(q: QueueFile, notes: Note[], project: Pick<ProjectFile, "defaults">, tags: Pick<TagsFile, "renames">): QueueView {
   const hash = revisionHash(q);
   const latest = q.approvals.at(-1);
   return {
@@ -458,7 +472,7 @@ function initQueue(q: QueueFile, notes: Note[], project: Pick<ProjectFile, "defa
     steps: stepDefs(q).map((s) => {
       const { level, from } = reviewLevelOf(s, q, project);
       return {
-        ...s, level, level_from: from,
+        ...s, level, level_from: from, tags: stepTags(s, q, tags),
         ...(s.id === closingStepId(q.id) && q.coding ? { closing: true as const } : {}),
         ...(s.id === integrationStepId(q.id) ? { integration: true as const } : {}),
         status: s.status ?? "pending",
@@ -744,6 +758,7 @@ function apply(
     case "queue.drafted":
     case "session.request":
     case "status.set":
+    case "tags.proposed":
     default:
       return;
   }

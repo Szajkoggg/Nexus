@@ -9,7 +9,7 @@ import { monotonicFactory } from "ulid";
 import YAML from "yaml";
 import type { z } from "zod";
 import {
-  Activity, Applied, AwayFile, ChatEntry, PinsFile, Refusal, Delivery, Event, GlobalSettings, InboxEntry, NoteMeta, GitFile, ProjectFile, PushFile, QueueFile, type QueueInput, LegacyReviewPolicy, RegistryFile, RunFile, RuntimeFile, SessionFile, StartFile, PlanFile, StoredProject, TurnRecord, UsageFile,
+  Activity, Applied, AwayFile, ChatEntry, PinsFile, Refusal, Delivery, Event, GlobalSettings, InboxEntry, NoteMeta, GitFile, ProjectFile, PushFile, QueueFile, type QueueInput, LegacyReviewPolicy, RegistryFile, RunFile, RuntimeFile, SessionFile, StartFile, PlanFile, StoredProject, TagsFile, TurnRecord, UsageFile,
   type Note,
 } from "./schemas.ts";
 import { applyChange, builtInSettings, effectiveProject, migrateStored, storedFrom } from "./settings.ts";
@@ -300,6 +300,13 @@ export class ProjectStore {
     }
     return moved;
   }
+  /** The project's tag lists (.nexus/tags.yaml); empty lists while the file does not exist. */
+  readTags(): TagsFile {
+    const f = join(this.dir, "tags.yaml");
+    return existsSync(f) ? readYaml(f, TagsFile) : TagsFile.parse({ protocol: 1 });
+  }
+  /** Written only by the server (tags.ts). */
+  writeTags(t: TagsFile): void { writeYaml(join(this.dir, "tags.yaml"), TagsFile.parse(t)); }
   readRun(queueId: string): RunFile | undefined {
     const f = join(this.queueDir(queueId), "run.yaml");
     return existsSync(f) ? readYaml(f, RunFile) : undefined;
@@ -420,15 +427,22 @@ function parseFrontMatter(text: string): { meta: unknown; body: string } {
 // ---------------------------------------------------------------- revision hash
 
 /**
- * The hash an approval pins: steps (without baseline state), stop conditions and checks. A step's drafted review
- * level is part of it; the levels the user set (`user_levels`) and the queue's own level are not.
+ * The hash an approval pins: steps (without baseline state), stop conditions and checks, `coding`, and the queue's
+ * tags. A step's drafted review level and tags are part of it; the levels the user set (`user_levels`) and the queue's
+ * own level are not.
  */
-export function revisionHash(q: Pick<QueueFile, "steps" | "stop_conditions" | "checks" | "coding">): string {
+export function revisionHash(q: HashedQueue): string {
   return hashOf(q.steps.map(({ status: _s, status_note: _n, ...def }) => def), q);
 }
-// `coding` counts only when true, so the hash of a queue without it is what it was before the field.
-const hashOf = (steps: unknown[], q: Pick<QueueFile, "stop_conditions" | "checks" | "coding">) =>
-  "sha256:" + createHash("sha256").update(JSON.stringify({ steps, stop_conditions: q.stop_conditions, checks: q.checks, ...(q.coding ? { coding: true } : {}) })).digest("hex");
+const QUEUE_TAGS = ["kind", "activities", "area", "size", "origin"] as const;
+type HashedQueue = Pick<QueueFile, "steps" | "stop_conditions" | "checks" | "coding"> & Partial<Pick<QueueFile, (typeof QUEUE_TAGS)[number]>>;
+// `coding` counts only when true, and a queue's tag only when set, so the hash of a queue without them is what it was
+// before those fields (a step's tag left out is not in its JSON either).
+const hashOf = (steps: unknown[], q: Omit<HashedQueue, "steps">) =>
+  "sha256:" + createHash("sha256").update(JSON.stringify({
+    steps, stop_conditions: q.stop_conditions, checks: q.checks, ...(q.coding ? { coding: true } : {}),
+    ...Object.fromEntries(QUEUE_TAGS.filter((k) => q[k] !== undefined).map((k) => [k, q[k]])),
+  })).digest("hex");
 
 /**
  * The hash a queue had before review levels, when its steps still carried a review `policy` (continue, wait or

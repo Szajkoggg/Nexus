@@ -4,7 +4,7 @@
 // drafts under .nexus/drafts/: permission mode dontAsk with a read-only allow list plus the drafts rules.
 import { randomUUID } from "node:crypto";
 import {
-  ActionError, ClaudeEffort, HOLDING_RUN_STATES, ProjectStore, applyDraft, inPlan, loadProjectState, openPlan, proposePlan, readAway, orchestratorStatusChange, newId, now, sendBack, type Event, type ProjectState, type SessionFile,
+  ActionError, ClaudeEffort, HOLDING_RUN_STATES, ProjectStore, applyDraft, inPlan, loadProjectState, openPlan, proposePlan, proposeTags, readAway, orchestratorStatusChange, newId, now, sendBack, type Event, type ProjectState, type SessionFile,
 } from "@nexus/protocol";
 import type { AgentProcess } from "./agent.ts";
 import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Launch } from "./agent-host.ts";
@@ -16,7 +16,7 @@ import { describeDeployChanges, type DeployChanges } from "./deploy.ts";
 import type { PlanNotice } from "./deploy-plan.ts";
 import {
   acceptedNoteNotice, approvalNotice, discardNotice, liftNotice, mergedNotice, mergeWaitNotice, missedStartNotice, noticeText, orchestratorBriefing, pausedNotice,
-  questionNotice, rejectionNotice, fixAskedNotice, reviewNotice, awayOnNotice, awayEndNotice, awayStuckNotice, planDecisionNotice, planHeldNotice, runEndNotice, stepNoteNotice, userMessage, withdrawalNotice,
+  questionNotice, rejectionNotice, fixAskedNotice, reviewNotice, awayOnNotice, awayEndNotice, awayStuckNotice, planDecisionNotice, planHeldNotice, runEndNotice, stepNoteNotice, tagDecisionNotice, userMessage, withdrawalNotice,
 } from "./prompts.ts";
 
 // Agent (formerly Task) lets it call subagents; they run within these same read-only permissions.
@@ -294,7 +294,7 @@ ${n.text}` });
     this.applying = true;
     try {
       const done = new Set(this.store.readApplied(s.id).entries.map((a) => a.event));
-      const pending = this.store.readEvents(s.id).entries.filter((e) => (e.type === "queue.drafted" || e.type === "session.request" || e.type === "status.set" || e.type === "review.sent_back" || e.type === "plan.proposed") && !done.has(e.id));
+      const pending = this.store.readEvents(s.id).entries.filter((e) => (e.type === "queue.drafted" || e.type === "session.request" || e.type === "status.set" || e.type === "review.sent_back" || e.type === "plan.proposed" || e.type === "tags.proposed") && !done.has(e.id));
       for (const e of pending) {
         let ok = true; let message: string;
         try { message = this.apply(e); }
@@ -308,6 +308,7 @@ ${n.text}` });
     if (e.type === "queue.drafted") return applyDraft(this.store, e.definition);
     if (e.type === "review.sent_back") return sendBack(this.store, { queue: e.queue, step: e.step, from: "orchestrator", text: e.text, event: e.id });
     if (e.type === "plan.proposed") return proposePlan(this.store, e.queue, e.after, e.reason);
+    if (e.type === "tags.proposed") return proposeTags(this.store, { area: e.area, activity: e.activity, rename: e.rename, reason: e.reason }, e.session);
     if (e.type === "status.set") {
       const message = orchestratorStatusChange(this.store, { queue: e.queue, step: e.step, to: e.to, reason: e.reason });
       // A cancel reaches the user as a push notification, like other notifications; nothing waits in their list.
@@ -384,6 +385,11 @@ ${n.text}` });
       if (state.away.on && state.away.until! >= since) items.push({ key: `notify:away:on:${state.away.since}:${state.away.until}`, ...awayOnNotice({ until: state.away.until! }) });
       const last = away.past.at(-1);
       if (!state.away.on && last && last.ended >= since) items.push({ key: `notify:away:end:${last.since}`, ...awayEndNotice(last) });
+    }
+    // The user's decisions on its proposals for the project's tag lists: each told once.
+    for (const d of updateOnly ? [] : state.tags.decisions) {
+      if (d.at < since) continue;
+      items.push({ key: `notify:tagdecision:${d.proposal.id}`, ...tagDecisionNotice(d) });
     }
     for (const x of updateOnly ? [] : state.questions) {
       const asker = state.sessions.find((y) => y.id === x.session);

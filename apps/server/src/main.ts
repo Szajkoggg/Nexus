@@ -13,7 +13,7 @@ import type { Server } from "node:http";
 import {
   ActionError, Effort, ProjectStore, addNote, closingToSkip, updateSettings, answerAsUser, approveQueue, deleteNote, loadProjectState, nexusHome, withdrawApproval, addAllowRule,
   ensureGlobalSettings, readGlobalSettings, updateGlobalSettings, ownKeys, OVERRIDABLE, settingKey, readRegistry, readUsage, readTurns, commentOnPicture, markPicture, routeAnswers, routeSendBacks, sendBack, sendMessage, setQueueSettings, setStepLevel, confirmProvisional, type ProjectState,
-  readAway, writeAway, awayNow, awayUntil, turnAway, expireAway, acceptPlanProposal, declinePlanProposal, handBackPlan,
+  readAway, writeAway, awayNow, awayUntil, turnAway, expireAway, acceptPlanProposal, declinePlanProposal, handBackPlan, acceptTagProposal, declineTagProposal,
   MIN_SAMPLES, queueEstimate, stepSamples, type EstimatesResponse,
 } from "@nexus/protocol";
 import { newestFirst, projectDigest, projectRunning, usageSince, type DigestEvent, type DigestResponse, type DigestRunning, type UsageRun } from "@nexus/protocol/digest";
@@ -427,6 +427,15 @@ app.post("/api/projects/:id/queues/:queue/plan", act((st, b, p) => {
       return { message: handBackPlan(st, p("queue"), b.after as string | undefined) };
     }
     default: throw new ActionError("action is move, accept, decline or hand_back");
+  }
+}));
+// The user's decision on the orchestrator's proposal for the project's tag lists (PROTOCOL.md, "Tags"): accept or
+// decline. Only the user: there is no CLI command and no event for it.
+app.post("/api/projects/:id/tags/:proposal", act((st, b, p) => {
+  switch (b.action) {
+    case "accept": return { message: acceptTagProposal(st, p("proposal")) };
+    case "decline": return { message: declineTagProposal(st, p("proposal")) };
+    default: throw new ActionError("action is accept or decline");
   }
 }));
 // Continue on a stopped queue: the user's lift of the stop, then the run goes on (only from the dashboard, as every write).

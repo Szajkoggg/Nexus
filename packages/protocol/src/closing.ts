@@ -6,6 +6,12 @@
 // goal and acceptance are Nexus's standard text, and its review level is 2 (its criteria can be checked).
 import type { QueueFile, ReviewLevel, StepDef } from "./schemas.ts";
 
+/**
+ * The tags of the steps Nexus keeps (tags.ts): code work that Nexus adds to every such queue (maintenance); their area
+ * and size are the queue's.
+ */
+const KEPT_TAGS = { kind: "code", origin: "maintenance" } as const;
+
 /** The closing step's review level: its criteria can be checked (tests, the diff), so the orchestrator reviews it. */
 const CLOSING_LEVEL: ReviewLevel = 2;
 
@@ -31,7 +37,7 @@ function closingStep(q: Pick<QueueFile, "id" | "coding">): StepDef | undefined {
   if (!q.coding) return undefined;
   return {
     id: closingStepId(q.id), title: CLOSING_TITLE, goal: CLOSING_GOAL, acceptance: [...CLOSING_ACCEPTANCE],
-    review: { level: CLOSING_LEVEL },
+    review: { level: CLOSING_LEVEL }, ...KEPT_TAGS, activities: ["refactor"],
   };
 }
 
@@ -78,7 +84,7 @@ function integrationStep(q: Pick<QueueFile, "id" | "worktree" | "integration">):
   if (!hasOwnWorktree(q)) return undefined;
   return {
     id: integrationStepId(q.id), title: INTEGRATION_TITLE, goal: INTEGRATION_GOAL, acceptance: [...INTEGRATION_ACCEPTANCE],
-    review: { level: INTEGRATION_LEVEL },
+    review: { level: INTEGRATION_LEVEL }, ...KEPT_TAGS, activities: ["integration"],
   };
 }
 

@@ -4,7 +4,7 @@
 // (src/conversations.ts). Agents rely on them (a change to one carries an `Agents:` line in its commit), so each is
 // covered by a snapshot test: test/prompts.test.ts compares what the agents' processes receive with golden files.
 import {
-  INTEGRATION_CONDITION, formatClock, formatSeconds, languageName, levelNow, runIsOlder, stepChecks, type AwayNow, type ConversationWeb, type InboxView, type LanguageCode, type ProjectFile, type ProjectState, type QuestionView, type QueueView, type SessionView, type StepView,
+  INTEGRATION_CONDITION, formatClock, formatSeconds, languageName, levelNow, runIsOlder, stepChecks, type AwayNow, type ConversationWeb, type InboxView, type LanguageCode, type ProjectFile, type ProjectState, type QuestionView, type QueueView, type SessionView, type StepView, type TagProposal,
 } from "@nexus/protocol";
 import type { ClosingContext } from "./closing.ts";
 import type { IntegrationContext } from "./integration.ts";
@@ -251,6 +251,9 @@ Commands (\`nexus\` is on PATH; your session is set in the environment):
 - nexus run <queue> start --after <other> [--after <another>]... --reason "..." [same options]   put it into the plan: Nexus starts it once every queue named is done and its current revision is approved (at once if that is so already, and its checkout is free and the limit allows; else it waits and starts by itself). This sets the queue's whole list of predecessors; those the user set must stay in it. With --use-session it waits while that session runs another queue; --use-session of <other>'s session continues its context
 - nexus run <queue> start --next --reason "..." [same options]   put it into the plan with no queue before it: it starts as soon as it is approved, its checkout is free and the limit allows
 - nexus plan propose <queue> [--after <other>]... --reason "..."   propose to the user a new list of predecessors that changes dependencies the user set (which you may not change yourself); the user accepts or declines it with one action, and you are told
+- nexus tags                                     the tags a step may carry: Nexus's kinds, activities, origins and sizes, the project's areas and own activities, renames, and your proposals waiting for the user
+- nexus tags propose --area <name> | --activity <prefix:name> --reason "..."   propose a new area or project activity; it waits in the user's list, and a draft may use it only once the user accepts it (you are told)
+- nexus tags rename <old> <new> --reason "..."   propose renaming an area or a project activity; once accepted, the old name reads as the new one everywhere (use the new one)
 - nexus run <queue> start --at "YYYY-MM-DD HH:MM" --reason "..." [same options]   start it at that local time; --at usage-reset: when the usage window of its runtime resets (refused while Nexus knows no usage data of that runtime). At the time its session must be free, or it does not start and the user is told; not approved yet, it waits for the approval and starts then; if Nexus was down then (more than 15 minutes late) it does not start, and you are told
 - nexus run <queue> cancel-start --reason "..."   take the queue out of the plan (its predecessors and its schedule); not one the user put into it
 - nexus run <queue> pause|resume|stop --reason "..."
@@ -280,6 +283,8 @@ worktree: auto                 # optional: auto = Nexus creates a worktree and b
 branch: v2/cliffs              # optional
 review_level: 2                # optional: the level of steps that set none (1, 2 or 3, see "Review levels" below); default: the project's
 coding: true                   # set it when the queue contains coding: Nexus then ends it with a closing refactoring step (see below)
+kind: code                     # optional here: the tags below on the queue are its steps' defaults (a step inherits each one it does not set)
+origin: user
 stop_conditions:
   - ...
 checks:
@@ -297,7 +302,19 @@ steps:
     runtime: codex             # optional: claude or codex, this step only
     model: haiku               # optional, this step only
     effort: low                # optional, this step only (Claude Code: low to max; Codex: the model's levels)
+    kind: code                 # exactly one: mechanical, code, debugging, design, research or docs (see "Tags" below)
+    activities: [feature, test]   # what the step does: Nexus's activities, or the project's own (prefix:name)
+    area: engine               # the part of the project, from the project's list
+    size: M                    # S, M or L, as you plan it
+    origin: user               # user, maintenance, orchestrator, fix or ci
 
+Tags: every step you draft carries a kind, a size and an origin (on the step, or on the queue for all its steps); give activities and an area too whenever they apply. The statistics and, later, the choice of runtime, model and effort are counted by them, so keep to the lists (nexus tags shows them): Nexus refuses a draft with a name that is on no list.
+- kind: exactly one, the dominant kind of thinking the step needs: mechanical (renames, measurements, sheets, routine edits), code (building or changing code), debugging (finding why something fails), design (deciding how something should work or look), research (finding out, comparing options), docs (writing documentation). What else the step does goes into its activities, never into a second kind.
+- activities: Nexus's own first (feature, bugfix, refactor, test, performance, security, migration, dependency, ui, i18n, capture, integration, cleanup, build; for games assets, tuning, content). Only when none fits, the project's own, which carry its prefix (hc:terrain).
+- area: from the project's list of areas.
+- size: S, M or L, your estimate when you plan; the time and use are measured, so estimate honestly.
+- origin: user (the user asked for it), maintenance (a recurring or housekeeping queue), orchestrator (your own initiative), fix (a revision after the user's Fix it or a send-back), ci (a failing check or a bug found by a failure).
+The project's areas and own activities are its own lists, which only the user accepts. When the project has no areas yet, propose the list once (one nexus tags propose --area per area, with your reason) and ask the user in the chat whether it is right; ask again whenever you would extend it, and propose renames the same way. A proposal waits in the user's list; until the user accepts it, a draft that uses it is refused, and you are told the decision. Never invent a name in a draft.
 Review levels: every step is reviewed when it is done; there is no level without review. Write each step's level into the draft (review.level); the user sees it and may change it before approval.
 - 1: the user reviews; the queue waits for them.
 - 2: you review what can be checked (tests, measurements, numbers); what is the user's goes to them (nexus review ask-user), and the queue waits.
@@ -312,7 +329,7 @@ Parallel work and merging back: give a queue a worktree of its own (worktree: au
 
 Review material follows Nexus's standard, \`nexus help review\` (read it before you write a review.prepare): every picture has a view key (subject, state, window width: waiting-tab@492) and a role (before, mockup, after, variant-a, variant-b, result); only the same key pairs, and Nexus refuses a wrong pair. In review.prepare name the views with their keys and roles, and what each is compared with (the old screen: before; a design: mockup; a new screen: result). The project's own conventions (its AGENTS.md) come on top.
 
-A revision changes only what has not started: add, change, remove or reorder pending steps freely. A started step (one that has been at work, or whose status is not pending or skipped) keeps its title, goal, acceptance, review, runtime, model and effort, stays in the draft and keeps its order among the started steps; a change to the running step reaches its worker as a message (your answer to its question, or the user's message) or with nexus review send-back when it waits for your review. Once a queue has run, its worktree, branch and base stay as they are. Nexus refuses a draft that breaks this and says why. A new revision of a running queue never stops its running step: the step goes on to its end, through its questions, answers and nudges. Then the run goes on under the new revision in the same session if the user has approved it, or waits for the approval (run state approval_wait, its session kept) and goes on by itself once the user approves: there is nothing to start or resume, and a start or cancel of the queue is refused while it waits.
+A revision changes only what has not started: add, change, remove or reorder pending steps freely. A started step (one that has been at work, or whose status is not pending or skipped) keeps its title, goal, acceptance, review, runtime, model, effort and tags (also those it inherits from the queue), stays in the draft and keeps its order among the started steps; a change to the running step reaches its worker as a message (your answer to its question, or the user's message) or with nexus review send-back when it waits for your review. Once a queue has run, its worktree, branch and base stay as they are. Nexus refuses a draft that breaks this and says why. A new revision of a running queue never stops its running step: the step goes on to its end, through its questions, answers and nudges. Then the run goes on under the new revision in the same session if the user has approved it, or waits for the approval (run state approval_wait, its session kept) and goes on by itself once the user approves: there is nothing to start or resume, and a start or cancel of the queue is refused while it waits.
 
 Choosing model and effort for a run: say which and why when you start it. Hard design, debugging or open-ended work deserves a strong model at high effort; mechanical steps (renames, measurements, sheets) do well with less. Codex takes effort low to xhigh; Claude Code also max. Without --model and --effort the project's defaults apply. A step may name its own runtime, model and effort in the queue YAML (a mechanical step on a small model, a hard one on a strong one); a step without them runs on the run's, not on the previous step's. Another runtime runs the step in a fresh session given the previous step's context summary; another model or effort keeps the session.
 
@@ -544,6 +561,16 @@ export function planDecisionNotice(q: QueueView, d: { kind: "accepted" | "declin
   return d.kind === "accepted"
     ? { fact: `The user accepted your proposal: queue ${q.id} starts ${list(d.after)}.`, todo: "The plan is changed; go on from it." }
     : { fact: `The user declined your proposal for queue ${q.id} (${list(d.after)}).`, todo: "The plan stays as the user set it; build around it." };
+}
+
+/** The user accepted or declined the orchestrator's proposal for the project's tag lists (.nexus/tags.yaml). */
+export function tagDecisionNotice(d: { accepted: boolean; proposal: Pick<TagProposal, "kind" | "name" | "from"> }): Notice {
+  const p = d.proposal;
+  const what = p.kind === "rename" ? `renaming ${p.from} to ${p.name}` : `${p.kind} ${p.name}`;
+  if (!d.accepted) return { fact: `The user declined your tag proposal (${what}).`, todo: "Do not use it; tag the steps with what the lists have, or ask the user what they would have instead." };
+  return p.kind === "rename"
+    ? { fact: `The user accepted your tag proposal: ${p.from} is renamed to ${p.name}.`, todo: `Use ${p.name} from now on; what was tagged ${p.from} reads as ${p.name}.` }
+    : { fact: `The user accepted your tag proposal: ${p.kind} ${p.name} is on the project's list.`, todo: "Drafts may use it now." };
 }
 
 /** A scheduled start was missed: Nexus was not running at its time. */
