@@ -417,13 +417,24 @@ back by itself) and `resolve_conflicts` (the integration step's worker resolves 
   (at its review level; provisional acceptances count as `provisional_counts` says), the integration step's checks to
   pass, and the base to still be an ancestor of the integrated commit. When the base moved on meanwhile (another queue
   merged, the user committed), the integration step runs again, at most twice by itself; then it waits for the user,
-  whose Merge back runs it once more.
+  whose Merge back runs it once more. The user's Merge back also starts the count of runs again anew (to zero), so
+  after it Nexus may again run the step twice by itself.
 - **It never moves files under someone.** It uses the protections of the user's merge (the base checked out somewhere,
-  not detached, not in the live worktree, no uncommitted changes to tracked files) and waits, telling the user and the
-  orchestrator, when one fails. A step at work in the base's checkout (running, or waiting for an answer) is held at its
-  end, the way a planned deploy holds a run, and goes on right after the fast-forward. Nothing moves during an update,
-  a deploy or a hand-over. Git can change what holds it without any file of the project changing (a commit in the
-  checkout), so while something waits it is looked at again every 30 seconds.
+  not detached, not in the live worktree, no uncommitted changes to tracked files; untracked files never count) and
+  waits, telling the user and the orchestrator, when one fails. Nothing moves during an update, a deploy or a
+  hand-over. Git can change what holds it without any file of the project changing (a commit in the checkout), so
+  while something waits it is looked at again every 30 seconds.
+- **First hold, then decide** (queue FX, 2026-11-15). The judgement goes in this order: (1) what keeps it whatever the
+  base's checkout is like (the integration step's checks, the limit of runs again, the base checked out nowhere or
+  only in the live worktree): it waits, and nothing is held; (2) a step at work in the base's checkout (running,
+  waiting for an answer, or a pause waiting for the step's end) is held at its end, the way a planned deploy's drain
+  holds a run; (3) only then the checkout's cleanliness (tracked files only); (4) when the base moved on, the
+  integration step runs again, and the run stays held meanwhile, so the base does not move on again under it; (5) the
+  fast-forward; (6) the held run goes on. A hold lasts at most one integration step (its checks and its review
+  included, a few minutes). Whenever the merge back cannot go once a run is held (a dirty checkout, failed checks, the
+  limit, a run again that halts, waits or cannot start), the held run goes on at once, and the wait names it
+  (`merge.waiting.released`), so the user and the orchestrator are told; nothing stays held. A server restart lets
+  it go too: a held run is marked to go on after a restart.
 - **One way for both.** The dashboard's Merge back uses the same judgement and the same fast-forward, under one lock
   per queue, so the button and the server never race; `git.yaml` `merged.by` says who did it.
 - **Cleanup** comes after the merge, once every provisional acceptance of the queue is confirmed: a Fix it until then
@@ -436,6 +447,15 @@ back by itself) and `resolve_conflicts` (the integration step's worker resolves 
   orchestrator section has its level-2 reviews done by the user; and a commit in the base's checkout changes nothing
   under `.nexus`, so without the 30-second look a merge that waited for a clean checkout would wait until some other
   change came.
+- Found on 2026-11-15 (queue FX): the order used to be cleanliness first, then the runs at work. A worktree queue's
+  fast-forward then waited on the uncommitted work of a step running in the main checkout instead of holding that
+  run; each of that queue's next steps moved main on, so the integration step ran six times (the user's Merge back
+  reset the count twice). Holding first, and keeping the hold through the run again, makes it one run again at most.
+- Found while building it: a run can finish (its integration step's review accepted) a moment before the turn in
+  which the step got its outcome ends and closes its round in `git.yaml`. Judged in that moment, the last closed round
+  was the older one, so the merge back waited ("the branch moved on after its integration step") and told the user
+  for nothing; with a hold, it let the held run go. A round that is still open within a minute of the step's end
+  now counts as still ending, and is judged once it closes.
 
 ### Usage limits
 

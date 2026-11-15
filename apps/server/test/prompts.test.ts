@@ -421,6 +421,9 @@ test("the orchestrator's briefing and notices on parallel worktrees and merging 
   const wait = mergeWaitNotice(q, "C:/p has uncommitted changes: commit or stash them, then merge");
   assert.equal(wait.fact, "Queue W is not merged back yet: C:/p has uncommitted changes: commit or stash them, then merge");
   assert.match(wait.todo, /Do not touch the base's checkout yourself/);
+  // A run Nexus held for the merge back and let go on when it could not go (queue FX).
+  assert.equal(mergeWaitNotice(q, "C:/p has uncommitted changes", ["M"]).fact, "Queue W is not merged back yet: C:/p has uncommitted changes; the run of queue M, held at its step's end for this merge back, goes on");
+  assert.match(mergeWaitNotice(q, "x", ["M", "N"]).fact, /; the runs of queues M, N, held at their step's end for this merge back, go on$/);
   const done = mergedNotice(q, { into: "main", sha: "0123456789abcdef" });
   assert.equal(done.fact, "Queue W is merged back: main moved forward to its integrated work (0123456), by a fast-forward. Nothing was pushed.");
 });

@@ -1,14 +1,21 @@
 // Nexus merging worktree queues back by itself (PROTOCOL.md, "Merging back by itself"; docs/ideas/
 // parallel-worktrees-and-merge-back.md). One per project, looking after every change: a finished queue with an
-// integration step, with the project's merge_back on, is judged (src/mergeback.ts, judgeMerge) and
+// integration step, with the project's merge_back on, is judged (src/mergeback.ts, judgeMerge), in this order:
 //
-// - moved into its base by a fast-forward to the integrated commit, when nothing keeps it;
+// - left waiting, recorded in git.yaml `merge.waiting` (the user's waiting list, the orchestrator's notices), when its
+//   checks failed, the base moved on after REINTEGRATION_LIMIT runs again, the base is checked out nowhere or only in
+//   the live worktree, and the like;
+// - held first while a step is at work in the base's checkout: that run is held at its step's end (the engine's
+//   boundary asks atBoundary), and only then is the rest judged, so a step's uncommitted work does not count as a
+//   dirty checkout;
+// - left waiting when the checkout has uncommitted changes to tracked files (untracked files never keep it);
 // - integrated again when the base moved on since its integration step (the step back to pending, the queue's run
-//   started), at most REINTEGRATION_LIMIT times; then it waits for the user;
-// - held while a step is at work in the base's checkout: that run is held at its step's end (the engine's boundary
-//   asks atBoundary), the fast-forward goes, and the run goes on (Engine.releaseHold);
-// - left waiting, recorded in git.yaml `merge.waiting` (the user's waiting list, the orchestrator's notices), when the
-//   checkout is dirty, the base is checked out nowhere or only in the live worktree, its checks failed, and the like.
+//   started) while the checkout stays held, so the base does not move on again meanwhile;
+// - moved into its base by a fast-forward to the integrated commit; then the held runs go on (Engine.releaseHold).
+//
+// A hold lasts at most until the merge back's next decision: whenever it cannot go after all (a dirty checkout, failed
+// checks, the limit, a run again that does not get through), the held runs go on at once, and the wait names them
+// (`merge.waiting.released`), so the user and the orchestrator are told. Nothing stays held.
 //
 // Nothing happens while Nexus updates, deploys or hands over (`busy`). After a merge back the worktree and branch are
 // cleaned up once every provisional acceptance of the queue is confirmed; a Fix it until then runs in the worktree and
@@ -39,11 +46,16 @@ export interface MergerOptions {
 /** How often a merge back that waits is looked at again. */
 const POLL_MS = 30_000;
 
+/** A run that is at work now (not waiting for a slot, the usage window, a retry or an approval). */
+const going = (q: QueueView) => q.run?.state === "running" || q.run?.state === "pausing";
+
 export class Merger {
-  /** Checkouts (normalised, lower case) a fast-forward waits on, with the queue it is for. */
-  private readonly waitingOn = new Map<string, string>();
-  /** Runs held at a step's end for a fast-forward, by queue. */
-  private readonly held = new Set<string>();
+  /** Checkouts (normalised, lower case) Nexus holds for a merge back, with the queue it is for. */
+  private holding = new Map<string, string>();
+  /** Runs held at a step's end for a merge back, by queue, with the checkout (key) they are held in. */
+  private readonly held = new Map<string, string>();
+  /** The waits this look found, recorded at its end, once it knows which held runs go on. */
+  private found: { q: QueueView; reason: string }[] = [];
   /** The next look, while something waits. */
   private timer: NodeJS.Timeout | undefined;
   /** This look left something waiting (or held). */
@@ -56,15 +68,28 @@ export class Merger {
   onChange(state: ProjectState): void {
     if (this.o.busy()) return;
     this.waits = false;
-    const wanted = new Set<string>();
+    this.found = [];
+    const wanted = new Map<string, string>();
     for (const q of state.queues) {
       if (!q.steps.some((s) => s.integration)) continue;
       try { this.look(state, q, wanted); }
       catch (e) { this.wait(q, `merging back failed: ${(e as Error).message.split("\n")[0]}`); }
     }
-    for (const path of [...this.waitingOn.keys()]) if (!wanted.has(path)) this.waitingOn.delete(path);
-    if (!this.waitingOn.size) this.releaseAll("nothing is merged back into its checkout now");
-    if ((this.waits || this.waitingOn.size) && this.o.poke && !this.timer) {
+    // The checkouts no longer held: the runs held there go on, named in the wait of the queue they were held for.
+    const letGo = new Map<string, string[]>();
+    for (const [run, path] of this.held) {
+      if (wanted.has(path)) continue;
+      const by = this.holding.get(path) ?? "";
+      letGo.set(by, [...(letGo.get(by) ?? []), run]);
+    }
+    this.holding = wanted;
+    for (const w of this.found) this.record(w.q, w.reason, letGo.get(w.q.id));
+    for (const [run, path] of [...this.held]) {
+      if (wanted.has(path)) continue;
+      this.held.delete(run);
+      try { this.o.release(run, "the merge back it was held for"); } catch { /* it was resumed or paused meanwhile */ }
+    }
+    if ((this.waits || this.holding.size) && this.o.poke && !this.timer) {
       this.timer = setTimeout(() => { this.timer = undefined; this.o.poke!(); }, this.o.pollMs ?? POLL_MS);
       this.timer.unref?.();
     }
@@ -74,52 +99,73 @@ export class Merger {
   shutdown(): void { clearTimeout(this.timer); this.timer = undefined; }
 
   /**
-   * The engine at a step's end of `queue`: held when a fast-forward waits on its checkout (it goes on after it).
-   * False otherwise.
+   * The engine at a step's end of `queue`: held when Nexus holds its checkout for a merge back (it goes on after the
+   * fast-forward, or as soon as the merge back cannot go). False otherwise.
    */
   atBoundary(queue: string, step: string, state: ProjectState): false | { hold: string } {
-    if (!this.waitingOn.size || this.o.busy()) return false;
+    if (!this.holding.size || this.o.busy()) return false;
     const q = state.queues.find((x) => x.id === queue);
     if (!q) return false;
     const path = key(checkoutOf(this.store, q) ?? state.project.root);
-    const merging = this.waitingOn.get(path);
+    const merging = this.holding.get(path);
     if (!merging || merging === queue) return false;
-    this.held.add(queue);
+    this.held.set(queue, path);
     return { hold: `held at the end of step ${step} while Nexus merges queue ${merging} back into this checkout (a fast-forward); it goes on right after` };
   }
 
-  private look(state: ProjectState, q: QueueView, wanted: Set<string>): void {
+  private look(state: ProjectState, q: QueueView, wanted: Map<string, string>): void {
     const integ = q.steps.find((s) => s.integration)!;
-    const merge = q.git?.merge;
+    let merge = q.git?.merge;
+    // The checkout this queue held for its merge back at the last look, if any; a queue already holding one keeps it.
+    const mine = [...this.holding].find(([, id]) => id === q.id)?.[0];
+    const claim = (path: string) => { if (!wanted.has(path) || this.holding.get(path) === q.id) wanted.set(path, q.id); };
+    const cannotStart = (e: unknown) => {
+      this.waits = true; // not now: looked at again (merge.reintegrating)
+      if (mine) this.wait(q, `queue ${q.id}'s integration step cannot run again now (${(e as Error).message.split("\n")[0]}): it runs when it can`);
+    };
+    // The run again of its integration step goes on: the checkout stays held, for that step only (its checks and its
+    // review included). A run that halted, waits (a question, the usage window, a retry) or ended lets it go, told.
+    const whileGoing = () => {
+      if (!mine) return;
+      if (going(q) && integ.status !== "waiting") return claim(mine);
+      this.wait(q, `queue ${q.id}'s integration step did not get through its run again (it is ${integ.status}${q.run ? `, its run ${q.run.state}` : ""}): Nexus merges it back once it has`);
+    };
     // A run of the integration step again that could not start yet (the checkout busy, the limit): started when it can.
     if (merge?.reintegrating) {
       const opened = (integ.segments.at(-1)?.start ?? "") > merge.reintegrating;
-      if (opened) { this.writeMerge(q, { ...merge, reintegrating: undefined }); return; }
-      if (integ.status === "pending" && q.steps.every((s) => s === integ || stepClosed(q, s)) && !(q.run && HOLDING_RUN_STATES.includes(q.run.state))) {
-        try { this.o.start(q.id); } catch { this.waits = true; /* not now: looked at again */ }
+      if (!opened) {
+        if (integ.status === "pending" && q.steps.every((s) => s === integ || stepClosed(q, s)) && !(q.run && HOLDING_RUN_STATES.includes(q.run.state))) {
+          try { this.o.start(q.id); } catch (e) { return cannotStart(e); }
+          if (mine) claim(mine);
+          return;
+        }
+        return whileGoing();
       }
-      return;
+      // Its round opened: the request is used up; it may even be finished already, then it is judged at once.
+      merge = { ...merge, reintegrating: undefined };
+      this.writeMerge(q, merge);
     }
-    if (q.status !== "done" || q.git?.cleaned) return;
+    if (q.git?.cleaned) return;
+    if (q.status !== "done") return whileGoing();
     const d = judgeMerge(this.store, state, q, "nexus", this.o.serverRoot ?? ROOT);
     switch (d.kind) {
       case "none":
+        // Its own run or integration step still ending keeps the hold; anything else lets it go (the user's own
+        // doing, as merge_back off).
+        if (mine && (going(q) || d.ending)) claim(mine);
         if (merge?.waiting) this.writeMerge(q, { ...merge, waiting: undefined });
         return;
       case "wait":
         return this.wait(q, d.reason);
       case "hold":
-        wanted.add(key(d.path));
-        this.waitingOn.set(key(d.path), q.id);
-        return;
+        return claim(key(d.path));
       case "reintegrate":
         withMergeLock(this.store, q.id, () => reintegrate(this.store, q, d, "nexus"));
-        try { this.o.start(q.id); } catch { this.waits = true; /* looked at again (merge.reintegrating) */ }
-        return;
+        try { this.o.start(q.id); } catch (e) { return cannotStart(e); }
+        return claim(key(d.path));
       case "ff":
         withMergeLock(this.store, q.id, () => fastForward(this.store, q, d, "nexus"));
-        this.waitingOn.delete(key(d.path));
-        return;
+        return; // its checkout is no longer held: the runs held there go on
       case "merged":
         return this.cleanup(state, q);
     }
@@ -136,24 +182,25 @@ export class Merger {
     catch (e) { this.wait(q, `queue ${q.id} is merged back, but its cleanup waits: ${(e as Error).message}`); }
   }
 
-  /** Records what it waits for (once per reason: told to the user and the orchestrator). */
+  /** Something keeps it waiting: recorded at the look's end (record). */
   private wait(q: QueueView, reason: string): void {
     this.waits = true;
+    this.found.push({ q, reason });
+  }
+
+  /**
+   * Records what it waits for, told to the user and the orchestrator once per reason, and again when runs held for
+   * it go on (`released`).
+   */
+  private record(q: QueueView, reason: string, released: string[] | undefined): void {
     const merge = this.store.readGit(q.id)?.merge;
-    if (merge?.waiting?.reason === reason) return;
-    this.writeMerge(q, { ...merge, waiting: { reason, since: now() } });
+    if (merge?.waiting?.reason === reason && !released?.length) return;
+    this.writeMerge(q, { ...merge, waiting: { reason, since: now(), ...(released?.length ? { released } : {}) } });
   }
 
   private writeMerge(q: QueueView, merge: NonNullable<NonNullable<QueueView["git"]>["merge"]>): void {
     const empty = !merge.waiting && merge.reintegrations === undefined && !merge.reintegrating;
     patchGit(this.store, q.id, { merge: empty ? undefined : merge });
-  }
-
-  private releaseAll(reason: string): void {
-    for (const id of this.held) {
-      this.held.delete(id);
-      try { this.o.release(id, reason); } catch { /* it was resumed or paused meanwhile */ }
-    }
   }
 }
 

@@ -18,7 +18,7 @@ import { judgeMerge, mergeBack, removeWorktree, withMergeLock } from "../src/mer
 import { judgePlan } from "../src/deploy-plan.ts";
 import { Engine } from "../src/engine.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
-import { LONGER, holdWork, until as waitUntil } from "./wait.ts";
+import { LONGER, holdWork, sleep, until as waitUntil } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -84,13 +84,13 @@ function finished(x: Project, o: { review?: boolean; provisional?: boolean; fail
   x.emit(x.worker, { type: "step.done", queue: "Q", step: "Q1", summary: "did Q1" });
   if (o.provisional) x.emit(x.orch, { type: "review.provisional", queue: "Q", step: "Q1" });
   else x.emit(x.user, { type: "review.accepted", queue: "Q", step: "Q1" });
-  const integrate = () => {
+  const integrate = (failedCheck = !!o.failedCheck) => {
     const start = git(wt, "rev-parse", "HEAD");
     const started_at = x.at();
     x.emit(x.worker, { type: "step.started", queue: "Q", step: "Q.integrate" });
     try { git(wt, "merge", "--no-edit", "-q", "main"); } catch { /* up to date */ }
     const end = git(wt, "rev-parse", "HEAD");
-    x.emit(x.worker, { type: "check.result", queue: "Q", step: "Q.integrate", name: "npm test", ok: !o.failedCheck });
+    x.emit(x.worker, { type: "check.result", queue: "Q", step: "Q.integrate", name: "npm test", ok: !failedCheck });
     x.emit(x.worker, { type: "step.done", queue: "Q", step: "Q.integrate", summary: "merged main", commit: end });
     if (!o.review) x.emit(x.user, { type: "review.accepted", queue: "Q", step: "Q.integrate" });
     const g = x.store.readGit("Q")!;
@@ -192,23 +192,21 @@ test("unconfirmed provisional work (counting as accepted) is merged, but the cle
 test("when main moves on, the integration step runs again, at most twice; then it waits; main never moves but forward", () => {
   const x = project();
   const q = finished(x);
-  const moves: string[] = [];
-  for (let round = 1; round <= 3; round++) {
-    moves.push(x.commit(x.root, `main${round}.txt`, `main moved ${round}\n`));
-    q.look();
-    if (round <= 2) {
-      assert.equal(x.queue().steps.at(-1)!.status, "pending", `round ${round}: back to pending`);
-      assert.equal(x.store.readGit("Q")!.merge!.reintegrations, round);
-      assert.deepEqual(q.starts, Array(round).fill("Q"), "its run is started");
-      assert.equal(x.main(), moves.at(-1), "main is not moved over it");
-      // The integration step runs again (as its worker does: main merged into the branch), and is accepted.
-      x.store.writeRun("Q", { protocol: 1, session: x.worker.id, state: "running", started_at: now(), updated_at: now() });
-      q.look(); // the run holds it: nothing happens meanwhile
-      q.integrate();
-      x.store.writeRun("Q", { protocol: 1, session: x.worker.id, state: "finished", started_at: now(), updated_at: now(), ended_at: now() });
-      q.look(); // its round opened: the request is used up
-      if (round < 3) continue;
-    }
+  const moves: string[] = [x.commit(x.root, "main1.txt", "main moved 1\n")];
+  q.look();
+  for (let round = 1; round <= 2; round++) {
+    assert.equal(x.queue().steps.at(-1)!.status, "pending", `round ${round}: back to pending`);
+    assert.equal(x.store.readGit("Q")!.merge!.reintegrations, round);
+    assert.deepEqual(q.starts, Array(round).fill("Q"), "its run is started");
+    assert.equal(x.main(), moves.at(-1), "main is not moved over it");
+    // The integration step runs again (as its worker does: main merged into the branch), and is accepted; main moves
+    // on again meanwhile (the user commits there).
+    x.store.writeRun("Q", { protocol: 1, session: x.worker.id, state: "running", started_at: now(), updated_at: now() });
+    q.look(); // the run holds it: nothing happens meanwhile
+    q.integrate();
+    moves.push(x.commit(x.root, `main${round + 1}.txt`, `main moved ${round + 1}\n`));
+    x.store.writeRun("Q", { protocol: 1, session: x.worker.id, state: "finished", started_at: now(), updated_at: now(), ended_at: now() });
+    q.look(); // its round opened (the request is used up) and ended: judged at once
   }
   // The third move: no third run again; it waits for the user.
   assert.equal(q.starts.length, 2);
@@ -266,6 +264,117 @@ test("a step at work in the main checkout, or one waiting for an answer, makes i
   q.look();
   assert.equal(x.main(), q.sha);
   assert.deepEqual(q.releases, ["M"]);
+});
+
+/** A queue M working in the main checkout, its step M1 at work; `held()` holds it at M1's end as the engine does. */
+function atWorkInMain(x: Project, q: ReturnType<typeof finished>) {
+  x.store.writeQueue({ protocol: 1, id: "M", title: "Main", revision: 1, status: "proposed", stop_conditions: [], checks: [], approvals: [], history: [], steps: [{ id: "M1", title: "One", goal: "", acceptance: [] }, { id: "M2", title: "Two", goal: "", acceptance: [] }] });
+  approveQueue(x.store, "M");
+  x.emit(x.worker, { type: "step.started", queue: "M", step: "M1" });
+  x.store.writeRun("M", { protocol: 1, session: x.worker.id, state: "running", step: "M1", started_at: now(), updated_at: now() });
+  return {
+    held: () => {
+      x.emit(x.worker, { type: "step.done", queue: "M", step: "M1", summary: "did M1" });
+      x.emit(x.user, { type: "review.accepted", queue: "M", step: "M1" });
+      const hold = q.merger.atBoundary("M", "M1", loadProjectState(x.store));
+      assert.ok(hold, "held at M1's end");
+      x.store.writeRun("M", { ...x.store.readRun("M")!, state: "paused", resume_after_restart: true, reason: hold.hold });
+    },
+  };
+}
+
+test("a step at work with uncommitted changes in the main checkout: held first, not a dirty checkout; once held and clean it goes", () => {
+  const x = project();
+  const q = finished(x);
+  const m = atWorkInMain(x, q);
+  writeFileSync(join(x.root, ".gitignore"), ".nexus/\nnode_modules/\nM1's work\n"); // M1's work, not committed yet
+  assert.equal(judgeMerge(x.store, loadProjectState(x.store), x.queue(), "nexus", join(x.base, "elsewhere")).kind, "hold");
+  q.look();
+  assert.equal(x.store.readGit("Q")!.merge, undefined, "nothing waits: the step's work is not a dirty checkout");
+  git(x.root, "commit", "-qam", "M1: its work"); // the step commits its work at its end: main moves on
+  m.held();
+  q.look(); // held, clean, main moved on: the integration step runs again while M stays held
+  assert.deepEqual(q.starts, ["Q"]);
+  assert.equal(x.store.readGit("Q")!.merge!.reintegrations, 1);
+  assert.deepEqual(q.releases, [], "M stays held during the run again");
+  x.store.writeRun("Q", { protocol: 1, session: x.worker.id, state: "running", started_at: now(), updated_at: now() });
+  q.look();
+  const sha = q.integrate();
+  q.look(); // its run still ending: held on
+  assert.deepEqual(q.releases, []);
+  x.store.writeRun("Q", { protocol: 1, session: x.worker.id, state: "finished", started_at: now(), updated_at: now(), ended_at: now() });
+  q.look();
+  assert.equal(x.main(), sha, "one run again, then the fast-forward");
+  assert.deepEqual(q.releases, ["M"], "then M goes on");
+  assert.equal(x.store.readGit("Q")!.merge, undefined);
+  assert.equal(git(x.root, "reflog", "--format=%gs", "main").split("\n").filter((l) => /^merge/.test(l) && !/Fast-forward/.test(l)).length, 0, "main only moved by commits and fast-forwards");
+});
+
+test("held, then the merge back cannot go: a dirty checkout or failed checks let the run go at once, and the user and the orchestrator are told", () => {
+  // A dirty checkout once held: M1 ended without committing its work.
+  const x = project();
+  const q = finished(x);
+  const m = atWorkInMain(x, q);
+  q.look();
+  m.held();
+  writeFileSync(join(x.root, ".gitignore"), ".nexus/\nnode_modules/\nleft uncommitted\n");
+  q.look();
+  assert.notEqual(x.main(), q.sha);
+  assert.deepEqual(q.releases, ["M"]);
+  const w = x.store.readGit("Q")!.merge!.waiting!;
+  assert.match(w.reason, /has uncommitted changes/);
+  assert.deepEqual(w.released, ["M"]);
+  const item = loadProjectState(x.store).attention.find((a) => a.kind === "merge")!;
+  assert.match(item.text, /has uncommitted changes.*; the run of queue M, held at its step's end for this merge back, goes on$/);
+  q.look();
+  assert.equal(x.store.readGit("Q")!.merge!.waiting!.since, w.since, "told once");
+  assert.deepEqual(q.releases, ["M"], "let go once");
+
+  // Failed checks in the run again during the hold.
+  const y = project();
+  const r = finished(y);
+  const n = atWorkInMain(y, r);
+  r.look();
+  const m1 = y.commit(y.root, "m1.txt", "M1's work\n");
+  n.held();
+  r.look();
+  assert.deepEqual(r.starts, ["Q"]);
+  y.store.writeRun("Q", { protocol: 1, session: y.worker.id, state: "running", started_at: now(), updated_at: now() });
+  r.integrate(true);
+  y.store.writeRun("Q", { protocol: 1, session: y.worker.id, state: "finished", started_at: now(), updated_at: now(), ended_at: now() });
+  r.look();
+  assert.deepEqual(r.releases, ["M"]);
+  const v = y.store.readGit("Q")!.merge!.waiting!;
+  assert.match(v.reason, /checks of queue Q's integration step failed/);
+  assert.deepEqual(v.released, ["M"]);
+  assert.equal(y.main(), m1, "main stays where M left it");
+
+  // A run again that does not get through (it halted) lets it go too.
+  const z = project();
+  const s = finished(z);
+  const o = atWorkInMain(z, s);
+  s.look();
+  z.commit(z.root, "m1.txt", "M1's work\n");
+  o.held();
+  s.look();
+  z.store.writeRun("Q", { protocol: 1, session: z.worker.id, state: "running", started_at: now(), updated_at: now() });
+  z.emit(z.worker, { type: "step.started", queue: "Q", step: "Q.integrate" });
+  s.look();
+  assert.deepEqual(s.releases, []);
+  z.store.writeRun("Q", { protocol: 1, session: z.worker.id, state: "halted", started_at: now(), updated_at: now(), reason: "a failed turn" });
+  s.look();
+  assert.deepEqual(s.releases, ["M"]);
+  assert.match(z.store.readGit("Q")!.merge!.waiting!.reason, /did not get through its run again \(it is \w+, its run halted\)/);
+  assert.deepEqual(z.store.readGit("Q")!.merge!.waiting!.released, ["M"]);
+});
+
+test("untracked files in the main checkout never keep the fast-forward", () => {
+  const x = project();
+  const q = finished(x);
+  writeFileSync(join(x.root, "scratch.txt"), "not in git\n");
+  q.look();
+  assert.equal(x.main(), q.sha);
+  assert.equal(x.store.readGit("Q")!.merge, undefined);
 });
 
 test("the button and the server do not race: one lock per queue; whoever comes second finds it merged; merged.by stays", () => {
@@ -362,4 +471,39 @@ test("engine: main moved while the merge waited: the integration step runs again
     assert.equal(git(x.root, "rev-list", "--parents", "-n", "1", "main~0").split(" ").length, 3, "the integrated commit is the worker's merge on the queue's branch");
     assert.ok(ok(() => git(x.root, "merge-base", "--is-ancestor", "HEAD~1", "main")));
   } finally { x.merger.shutdown(); x.engine.shutdown(); }
+});
+
+test("engine: a step at work in the main checkout with uncommitted work is held at its end; one run again of the integration step, the fast-forward, then the run goes on", async () => {
+  const hold = holdWork();
+  const x = wired({ W: [step("W1", "commit")], M: [step("M1", "slow"), step("M2", "done")] });
+  let dirtyWait = false;
+  const watch = (pred: () => boolean) => () => {
+    if (/uncommitted changes/.test(x.store.readGit("W")?.merge?.waiting?.reason ?? "")) dirtyWait = true;
+    return pred();
+  };
+  try {
+    x.engine.start("M", { runtime: "claude" });
+    await x.until("M1 at work", () => x.queue("M").steps[0]!.status === "running");
+    writeFileSync(join(x.root, ".gitignore"), ".nexus/\nnode_modules/\nM1's work\n"); // M1's work, not committed yet
+    x.engine.start("W", { runtime: "claude" });
+    await x.until("W done", watch(() => x.queue("W").status === "done"));
+    const first = x.store.readGit("W")!.steps["W.integrate"]!.at(-1)!.end!;
+    await sleep(500); // a few looks of the merger's (pollMs 200)
+    watch(() => true)();
+    assert.equal(dirtyWait, false, "M1's uncommitted work is not a dirty checkout: M1 is held first");
+    assert.equal(x.store.readGit("W")!.merged, undefined, "not while M1 is at work in the main checkout");
+    git(x.root, "commit", "-qam", "M1: its work"); // M1 commits at its end: main moves on
+    const m1 = x.main();
+    hold.release();
+    await x.until("W merged back", watch(() => !!x.store.readGit("W")?.merged));
+    await x.until("M finished", () => x.queue("M").run?.state === "finished");
+    assert.equal(dirtyWait, false);
+    const g = x.store.readGit("W")!;
+    assert.equal(g.steps["W.integrate"]!.length, 2, "one run again of the integration step");
+    assert.notEqual(g.merged!.sha, first);
+    assert.equal(x.main(), g.merged!.sha);
+    assert.ok(ok(() => git(x.root, "merge-base", "--is-ancestor", m1, "main")), "M1's work is in main");
+    assert.ok(g.merged!.at <= x.queue("M").steps[1]!.started_at!, `the fast-forward (${g.merged!.at}) before M2 opened (${x.queue("M").steps[1]!.started_at})`);
+    assert.equal(git(x.root, "reflog", "--format=%gs", "main").split("\n").filter((l) => /^merge/.test(l) && !/Fast-forward/.test(l)).length, 0, "main only moved by commits and fast-forwards");
+  } finally { hold.done(); x.merger.shutdown(); x.engine.shutdown(); }
 });
