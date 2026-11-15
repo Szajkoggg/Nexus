@@ -6,7 +6,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { StaticAnalysisNote } from "./schemas.ts";
 
-export type Stack = "node" | "dotnet" | "unity";
+type Stack = "node" | "dotnet" | "unity";
 
 export interface StaticAnalysis {
   /** The stacks recognised, in this order: node, dotnet, unity (a Unity project is not counted as .NET too). */

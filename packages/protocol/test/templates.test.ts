@@ -114,8 +114,8 @@ test("a free queue id from the template's id, numbered when taken", () => {
   assert.equal(templateQueueId({ id: "bugfix" }, (x) => taken.has(x)), "BUGFIX3");
 });
 
-/** The seven maintenance templates (MT): each with the values of its required parameters. */
-const SIX: Record<string, Record<string, string>> = {
+/** The maintenance templates (MT): each with the values of its required parameters. */
+const MAINTENANCE: Record<string, Record<string, string>> = {
   dependencies: { outdated_command: "npm outdated", test_command: "npm test" },
   "security-audit": { audit_command: "npm audit" },
   "dead-code": { dead_code_command: "npx knip", lint_command: "npm run lint", test_command: "npm test" },
@@ -125,7 +125,7 @@ const SIX: Record<string, Record<string, string>> = {
   notes: { memory_dir: "~/.claude/projects/p/memory" },
 };
 /** The steps each of them has in survey mode and in fix_small mode. */
-const SIX_STEPS: Record<string, { survey: number; fix: number }> = {
+const MAINTENANCE_STEPS: Record<string, { survey: number; fix: number }> = {
   dependencies: { survey: 1, fix: 2 }, "security-audit": { survey: 1, fix: 1 }, "dead-code": { survey: 1, fix: 2 },
   "test-health": { survey: 3, fix: 3 }, performance: { survey: 1, fix: 1 }, "docs-freshness": { survey: 1, fix: 2 },
   notes: { survey: 3, fix: 4 },
@@ -139,7 +139,7 @@ const VALUES: Record<string, Record<string, string>> = {
   refactor: { target: "store.ts", reason: "smaller functions" },
   maintenance: {},
   "static-analysis": { test_command: "npm test" },
-  ...SIX,
+  ...MAINTENANCE,
 };
 
 test("Nexus's shipped templates, each filled, are valid queues the draft path accepts", () => {
@@ -190,27 +190,27 @@ steps:
 });
 
 const shipped = () => readTemplates(undefined, { nexus: shippedTemplatesDir(), global: join(tmpdir(), "nexus-no-such-dir") }).templates;
-const sixTemplate = (id: string) => shipped().find((x) => x.id === id)!;
+const shippedTemplate = (id: string) => shipped().find((x) => x.id === id)!;
 const stepIds = (q: Record<string, unknown>) => (q.steps as { id: string }[]).map((s) => s.id);
 
-test("the six maintenance templates: survey is coding: false without a fixing step; fix_small adds only the small fixes", () => {
-  for (const id of Object.keys(SIX)) {
-    const t = sixTemplate(id);
+test("the maintenance templates: survey is coding: false without a fixing step; fix_small adds only the small fixes", () => {
+  for (const id of Object.keys(MAINTENANCE)) {
+    const t = shippedTemplate(id);
     assert.equal(t.maintenance, "survey", id);
-    const survey = fillTemplate(t, SIX[id]!, "M");
+    const survey = fillTemplate(t, MAINTENANCE[id]!, "M");
     assert.equal(survey.coding, false, id);
     assert.equal(survey.maintenance, "survey", id);
-    assert.equal(stepIds(survey).length, SIX_STEPS[id]!.survey, id);
-    assert.equal(stepIds(fillTemplate(t, SIX[id]!, "M", { maintenance: "fix_small" })).length, SIX_STEPS[id]!.fix, id);
+    assert.equal(stepIds(survey).length, MAINTENANCE_STEPS[id]!.survey, id);
+    assert.equal(stepIds(fillTemplate(t, MAINTENANCE[id]!, "M", { maintenance: "fix_small" })).length, MAINTENANCE_STEPS[id]!.fix, id);
   }
   // The suite's health, the audit and the measurement never get a fixing step, not even in fix_small mode.
   for (const id of ["test-health", "security-audit", "performance"]) {
-    const fix = fillTemplate(sixTemplate(id), SIX[id]!, "M", { maintenance: "fix_small" });
-    assert.deepEqual(stepIds(fix), stepIds(fillTemplate(sixTemplate(id), SIX[id]!, "M")), id);
+    const fix = fillTemplate(shippedTemplate(id), MAINTENANCE[id]!, "M", { maintenance: "fix_small" });
+    assert.deepEqual(stepIds(fix), stepIds(fillTemplate(shippedTemplate(id), MAINTENANCE[id]!, "M")), id);
     assert.equal(fix.coding, false, id);
   }
   // The small fixes: patch updates, surely unused exports, typos in the documents.
-  const fixStep = (id: string) => JSON.stringify((fillTemplate(sixTemplate(id), SIX[id]!, "M", { maintenance: "fix_small" }).steps as unknown[]).at(-1));
+  const fixStep = (id: string) => JSON.stringify((fillTemplate(shippedTemplate(id), MAINTENANCE[id]!, "M", { maintenance: "fix_small" }).steps as unknown[]).at(-1));
   assert.match(fixStep("dependencies"), /patch-level/);
   assert.match(fixStep("dead-code"), /surely unused/);
   assert.match(fixStep("docs-freshness"), /typos/);
@@ -218,7 +218,7 @@ test("the six maintenance templates: survey is coding: false without a fixing st
 });
 
 test("the test suite health template: three parts, candidates with their evidence and certainty, no coverage method", () => {
-  const text = JSON.stringify(fillTemplate(sixTemplate("test-health"), SIX["test-health"]!, "M")).replaceAll("\\n", " ");
+  const text = JSON.stringify(fillTemplate(shippedTemplate("test-health"), MAINTENANCE["test-health"]!, "M")).replaceAll("\\n", " ");
   for (const part of ["Flaky tests", "Slow tests", "Redundant tests"]) assert.match(text, new RegExp(part));
   assert.match(text, /places of the two tests/);
   assert.match(text, /the reasoning/);
@@ -231,15 +231,15 @@ test("the test suite health template: three parts, candidates with their evidenc
 });
 
 test("every maintenance template's report ends with the recommended additions; clone_command may be empty or given", () => {
-  for (const id of Object.keys(SIX)) {
-    const text = JSON.stringify(fillTemplate(sixTemplate(id), SIX[id]!, "M"));
+  for (const id of Object.keys(MAINTENANCE)) {
+    const text = JSON.stringify(fillTemplate(shippedTemplate(id), MAINTENANCE[id]!, "M"));
     assert.match(text, /ends with \\"Recommended additions\\" \(not counted among the findings\)/, id);
   }
-  const t = sixTemplate("test-health");
+  const t = shippedTemplate("test-health");
   assert.equal(t.params.find((p) => p.name === "clone_command")!.default, "");
   const store = ProjectStore.init(mkdtempSync(join(tmpdir(), "nexus-clone-")), { id: "p", name: "P", root: "." });
-  const empty = fillTemplate(t, SIX["test-health"]!, "CL1");
-  const given = fillTemplate(t, { ...SIX["test-health"]!, clone_command: "npx jscpd test/" }, "CL2");
+  const empty = fillTemplate(t, MAINTENANCE["test-health"]!, "CL1");
+  const given = fillTemplate(t, { ...MAINTENANCE["test-health"]!, clone_command: "npx jscpd test/" }, "CL2");
   assert.match(applyDraft(store, empty), /created as proposed/);
   assert.match(applyDraft(store, given), /created as proposed/);
   assert.match(JSON.stringify(given), /npx jscpd test\//);
@@ -250,7 +250,7 @@ test("the shipped templates carry no command of the Nexus repository; its own in
   const read = readTemplateDir(join(shippedTemplatesDir(), "..", "nexus-templates"), "project");
   assert.deepEqual(read.filter((x) => "problem" in x), []);
   const instances = read as Template[];
-  assert.deepEqual(instances.map((t) => t.id).sort(), Object.keys(SIX).map((x) => `nexus-${x}`).sort());
+  assert.deepEqual(instances.map((t) => t.id).sort(), Object.keys(MAINTENANCE).map((x) => `nexus-${x}`).sort());
   for (const t of instances) {
     assert.ok(t.params.every((p) => p.default !== undefined), `${t.id}: every parameter has the repository's value`);
     assert.doesNotMatch(JSON.stringify(fillTemplate(t, {}, "NX")), /\{\{/, t.id);
@@ -258,15 +258,15 @@ test("the shipped templates carry no command of the Nexus repository; its own in
 });
 
 test("the notes template: needs memory_dir; survey only reads, the fix step touches the project documents alone", () => {
-  const t = sixTemplate("notes");
+  const t = shippedTemplate("notes");
   assert.throws(() => fillTemplate(t, {}, "N"), /needs memory_dir/);
-  const survey = fillTemplate(t, SIX.notes!, "N");
+  const survey = fillTemplate(t, MAINTENANCE.notes!, "N");
   assert.equal(survey.coding, false);
   assert.deepEqual(stepIds(survey), ["N1", "N2", "N3"]);
   const text = JSON.stringify(survey).replaceAll("\\n", " ");
   for (const part of ["Memory notes", "Ideas notes", "Project documents"]) assert.match(text, new RegExp(part));
   assert.match(text, /`nexus template show docs-freshness`/);
-  const fix = fillTemplate(t, SIX.notes!, "N", { maintenance: "fix_small" });
+  const fix = fillTemplate(t, MAINTENANCE.notes!, "N", { maintenance: "fix_small" });
   assert.deepEqual(stepIds(fix), ["N1", "N2", "N3", "N4"]);
   const step = (fix.steps as { goal: string }[]).at(-1)!.goal.replaceAll("\n", " ");
   assert.match(step, /Fix only the typos among the findings of N3 in AGENTS\.md and the design and protocol documents under docs\//);
