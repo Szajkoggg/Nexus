@@ -4,7 +4,7 @@
 // drafts under .nexus/drafts/: permission mode dontAsk with a read-only allow list plus the drafts rules.
 import { randomUUID } from "node:crypto";
 import {
-  ActionError, ClaudeEffort, HOLDING_RUN_STATES, ProjectStore, applyDraft, defineMetric, inPlan, loadProjectState, metricDef, openPlan, overThreshold, proposePlan, proposeTags, readAway, readUsage, orchestratorStatusChange, newId, now, sendBack, type Event, type ProjectState, type SessionFile,
+  ActionError, ClaudeEffort, HOLDING_RUN_STATES, ProjectStore, applyDraft, defineMetric, inPlan, loadProjectState, metricDef, openPlan, overThreshold, proposePlan, proposeTags, readAway, readUsage, orchestratorStatusChange, newId, now, sendBack, type Event, type EventType, type ProjectState, type SessionFile,
 } from "@nexus/protocol";
 import type { AgentProcess } from "./agent.ts";
 import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Launch } from "./agent-host.ts";
@@ -30,6 +30,9 @@ const READ_ONLY_TOOLS = [
 const DRAFTS = ".nexus/drafts";
 const DRAFT_TOOLS = [`Write(${DRAFTS}/**)`, `Edit(${DRAFTS}/**)`];
 const NEVER = ["NotebookEdit", "MultiEdit"];
+
+/** The orchestrator's events the server carries out (applyRequests), each once, its outcome in applied.jsonl. */
+const REQUESTS: ReadonlySet<EventType> = new Set(["queue.drafted", "session.request", "status.set", "review.sent_back", "plan.proposed", "tags.proposed", "metric.defined"]);
 
 /** A push notification for the user's devices (src/remote.ts `push`). */
 export interface UserNotice { title: string; body: string; url: string; tag: string }
@@ -296,7 +299,7 @@ ${n.text}` });
     this.applying = true;
     try {
       const done = new Set(this.store.readApplied(s.id).entries.map((a) => a.event));
-      const pending = this.store.readEvents(s.id).entries.filter((e) => (e.type === "queue.drafted" || e.type === "session.request" || e.type === "status.set" || e.type === "review.sent_back" || e.type === "plan.proposed" || e.type === "tags.proposed" || e.type === "metric.defined") && !done.has(e.id));
+      const pending = this.store.readEvents(s.id).entries.filter((e) => REQUESTS.has(e.type) && !done.has(e.id));
       for (const e of pending) {
         let ok = true; let message: string;
         try { message = this.apply(e); }
