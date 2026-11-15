@@ -63,6 +63,8 @@ type Values = Record<string, unknown>;
 const at = (o: unknown, key: string): unknown => key.split(".").reduce<unknown>((x, k) => (x && typeof x === "object" ? (x as Values)[k] : undefined), o);
 /** A kind's fallback chain: edited as one line of text (fallback.ts). */
 const isChain = (k: string) => k.startsWith("kinds.") && k.endsWith(".fallback");
+/** A list edited as text: its entries, trimmed, without empty ones. */
+const entries = (text: string, separator: string | RegExp = "\n") => text.split(separator).map((x) => x.trim()).filter(Boolean);
 /** The settings that are global with a project override, by key, from a project's (effective) or the global settings. */
 const valuesOf = (o: unknown): Values => Object.fromEntries(SETTING_KEYS.map((k) => [k, isChain(k) ? fallbackLine(at(o, k) as never) : at(o, k)]));
 /**
@@ -483,9 +485,9 @@ function ProjectSettingsPage({ project, info, onChanged }: { project: ProjectFil
       const mine = SETTING_KEYS.filter((k) => own.has(k));
       const body = nested(v.values, mine) as { defaults?: Values; runtimes?: { claude?: Values; codex?: Values } & Values; conversations?: Values; languages?: Values };
       body.defaults = { ...body.defaults, worktree_dir: local.worktrees || null, worktree_setup: local.worktreeSetup.trim() || null,
-        checks: local.checks.split("\n").map((x) => x.trim()).filter(Boolean) };
-      body.runtimes = { ...body.runtimes, claude: { ...body.runtimes?.claude, allowed_tools: local.tools.split(/\n|,/).map((x) => x.trim()).filter(Boolean) },
-        codex: { ...body.runtimes?.codex, mcp_servers: local.mcp.split(/\n|,/).map((x) => x.trim()).filter(Boolean) } };
+        checks: entries(local.checks) };
+      body.runtimes = { ...body.runtimes, claude: { ...body.runtimes?.claude, allowed_tools: entries(local.tools, /\n|,/) },
+        codex: { ...body.runtimes?.codex, mcp_servers: entries(local.mcp, /\n|,/) } };
       body.conversations = { ...body.conversations, notes_dir: local.notesDir || null };
       body.languages = { ...body.languages, working: local.working };
       await act(project.id, "PATCH", "/settings", { ...body, name: local.name, own: mine, follow: SETTING_KEYS.filter((k) => !own.has(k)) });
