@@ -186,7 +186,7 @@ export function freshSessionSeed(q: QueueView, because: string, done: StepView |
     next.closing
       ? `\nRead its work from its commits (the step below names their range) and its steps' summaries.`
       : summary && done
-      ? `\nIts context summary at the end of ${done.id}:\n${summary.text}${summary.topics.length ? `\nTopics: ${summary.topics.join(", ")}` : ""}${summary.files.length ? `\nFiles: ${summary.files.join(", ")}` : ""}`
+      ? `\nIts context summary at the end of ${done.id}:\n${[summary.text, ...summaryLists(summary)].join("\n")}`
       : `\nIt left no context summary${done ? ` of ${done.id}` : ""}; the queue's description and its finished steps' summaries below are what there is.`,
     `\nThe queue${q.description ? `:\n${q.description.trim()}` : ` has no description.`}`,
     `\nIts steps:\n${q.steps.map((s) => `- ${s.id} ${s.title}: ${s.id === next.id ? "yours now" : s.status}${s.summary ? `. ${s.summary}` : ""}`).join("\n")}`,
@@ -217,6 +217,11 @@ export function carriedMessages(unread: string[]): string | undefined {
     : undefined;
 }
 
+/** A context summary's topics and files, a line each (none for an empty list). */
+export function summaryLists(summary: { topics: string[]; files: string[] }): string[] {
+  return [summary.topics.length ? `Topics: ${summary.topics.join(", ")}` : "", summary.files.length ? `Files: ${summary.files.join(", ")}` : ""].filter(Boolean);
+}
+
 /** The orchestrator's context is fuller than its threshold (both in %): the summary for a fresh session is asked for. */
 export function orchestratorSummaryRequest(fill: number, threshold: number): string {
   return `[Nexus] Your context is ${fill} % full (the threshold is ${threshold} %): Nexus goes on with you in a fresh orchestrator session, which starts from your summary, your current briefing and \`nexus status\`. Write that summary now with \`nexus context "<summary>" --topics a,b --files x,y\`: the decisions made with the user and why, the open items, the plan (what runs, what comes next and what it waits for), and what you promised the user. Leave out what \`nexus status\` and the files show anyway. Then end your turn; do not start anything else.`;
@@ -231,7 +236,7 @@ export function orchestratorFreshSeed(fill: number, summary: SessionView["contex
   return [
     `[Nexus] You go on as the project's orchestrator in a fresh session: the previous orchestrator session's context was ${fill} % full. You have not seen its conversation, only what follows.`,
     summary
-      ? `\nIts summary, written for you at the switch (the user can read it in .nexus/orchestrator/summary.md):\n${summary.text}${summary.topics.length ? `\nTopics: ${summary.topics.join(", ")}` : ""}${summary.files.length ? `\nFiles: ${summary.files.join(", ")}` : ""}`
+      ? `\nIts summary, written for you at the switch (the user can read it in .nexus/orchestrator/summary.md):\n${[summary.text, ...summaryLists(summary)].join("\n")}`
       : `\nThe previous session left no summary: start from your briefing and the state below, and ask the user about anything you need from the earlier conversation.`,
     `\nYour briefing (the system prompt) is the current one: where the summary or anything older says otherwise, the briefing holds. The files are the truth: the state below is the project's now; read the queues and run \`nexus status\` again before you act on anything older. Go on where the previous session left off; do not repeat the summary to the user, and end your turn when nothing is waiting.`,
     carried ? `\n${carried}` : "",

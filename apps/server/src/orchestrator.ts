@@ -16,7 +16,7 @@ import { describeDeployChanges, type DeployChanges } from "./deploy.ts";
 import type { PlanNotice } from "./deploy-plan.ts";
 import {
   acceptedNoteNotice, approvalNotice, discardNotice, liftNotice, mergedNotice, mergeWaitNotice, missedStartNotice, noticeText, orchestratorBriefing, pausedNotice,
-  carriedMessages, formatInbox, orchestratorFreshSeed, orchestratorSummaryRequest, questionNotice, rejectionNotice, restartedNotice, fixAskedNotice, levelToUserNotice, reviewNotice, awayOnNotice, awayEndNotice, awayStuckNotice, planDecisionNotice, planHeldNotice, runEndNotice, stepNoteNotice, tagDecisionNotice, fallbackNotice, metricNotice, userMessage, withdrawalNotice,
+  carriedMessages, formatInbox, orchestratorFreshSeed, orchestratorSummaryRequest, summaryLists, questionNotice, rejectionNotice, restartedNotice, fixAskedNotice, levelToUserNotice, reviewNotice, awayOnNotice, awayEndNotice, awayStuckNotice, planDecisionNotice, planHeldNotice, runEndNotice, stepNoteNotice, tagDecisionNotice, fallbackNotice, metricNotice, userMessage, withdrawalNotice,
 } from "./prompts.ts";
 
 // Agent (formerly Task) lets it call subagents; they run within these same read-only permissions.
@@ -48,6 +48,9 @@ const VIEW_ENTRIES = 300;
 /** The earlier sessions' entries the view sends at least, however long the current session's chat. */
 const EARLIER_MIN = 60;
 
+/** A summary an orchestrator session wrote for the fresh one that went on from it (a context.summary event). */
+type Summary = NonNullable<SessionView["context"]>;
+
 /**
  * A session the current orchestrator session went on from (context care), as the chat view sends it: its newest
  * entries, and its switch to the next: when, its context fill then (0 to 1), and the summary it wrote (none: null).
@@ -56,7 +59,7 @@ interface EarlierSession {
   session: string;
   created_at: string;
   chat: ReturnType<typeof chatView>["chat"];
-  switch: { at: string; fill: number | null; summary: { text: string; topics: string[]; files: string[]; at: string } | null };
+  switch: { at: string; fill: number | null; summary: Summary | null };
 }
 
 /** A push notification for the user's devices (src/remote.ts `push`). */
@@ -92,7 +95,11 @@ export class Orchestrator {
 
   /** The current orchestrator session, if one was ever started. */
   session(): SessionFile | undefined {
-    const id = this.store.readProject().orchestrator?.session;
+    return this.sessionFile(this.store.readProject().orchestrator?.session);
+  }
+
+  /** A session's file, if there is one. */
+  private sessionFile(id: string | null | undefined): SessionFile | undefined {
     if (!id) return undefined;
     try { return this.store.readSession(id); } catch { return undefined; }
   }
@@ -132,9 +139,8 @@ export class Orchestrator {
   /** How a session went on in a fresh one: when, how full its context was, and the summary it wrote (if any). */
   private switchOf(old: SessionFile): EarlierSession["switch"] {
     const asked = this.summaryAsked(old);
-    const written = asked && this.store.readEvents(old.id).entries.filter((e) => e.type === "context.summary" && e.at >= asked.at).at(-1);
-    const summary = written && written.type === "context.summary" ? { text: written.text, topics: written.topics, files: written.files, at: written.at } : null;
-    const next = old.continued_by ? (() => { try { return this.store.readSession(old.continued_by!); } catch { return undefined; } })() : undefined;
+    const summary = (asked && this.summaryWritten(old, asked)) ?? null;
+    const next = this.sessionFile(old.continued_by);
     return { at: next?.created_at ?? asked?.at ?? old.created_at, fill: asked ? Number(asked.message) : null, summary };
   }
 
@@ -396,6 +402,12 @@ ${n.text}` });
     return this.store.readApplied(s.id).entries.find((a) => a.event === SUMMARY_ASKED);
   }
 
+  /** The summary the session wrote once Nexus asked for it (`asked`): its last context.summary since, if any. */
+  private summaryWritten(s: SessionFile, asked: Applied): Summary | undefined {
+    const e = this.store.readEvents(s.id).entries.filter((x) => x.type === "context.summary" && x.at >= asked.at).at(-1);
+    return e?.type === "context.summary" ? { text: e.text, topics: e.topics, files: e.files, at: e.at } : undefined;
+  }
+
   /**
    * The orchestrator's context care (decided by the user on 2026-11-15, queue CC): it is not compacted; it goes on in a
    * fresh session started from a summary it writes on purpose. When its context is fuller than its threshold
@@ -438,8 +450,7 @@ ${n.text}` });
    */
   private goOnFresh(old: SessionFile, asked: Applied): void {
     const fill = pct(Number(asked.message));
-    const written = this.store.readEvents(old.id).entries.filter((e) => e.type === "context.summary" && e.at >= asked.at).at(-1);
-    const summary: SessionView["context"] = written?.type === "context.summary" ? { text: written.text, topics: written.topics, files: written.files, at: written.at } : undefined;
+    const summary = this.summaryWritten(old, asked);
     const state = loadProjectState(this.store);
     const unread = (state.sessions.find((x) => x.id === old.id)?.inbox ?? []).filter((m) => !m.read_at && !m.id.startsWith("notice-"));
     const project = this.store.readProject();
@@ -451,7 +462,7 @@ ${n.text}` });
     this.store.writeSession(fresh);
     this.store.writeSession({ ...this.store.readSession(old.id), continued_by: fresh.id });
     if (summary) {
-      const lists = [summary.topics.length ? `Topics: ${summary.topics.join(", ")}` : "", summary.files.length ? `Files: ${summary.files.join(", ")}` : ""].filter(Boolean);
+      const lists = summaryLists(summary);
       this.store.writeOrchestratorSummary(`# Orchestrator summary\n\nWritten by orchestrator session ${old.id} at ${summary.at}, when its context was ${fill} % full. The fresh session ${fresh.id} started from it.\n\n${summary.text.trim()}\n${lists.length ? `\n${lists.join("\n")}\n` : ""}`);
     }
     for (const m of unread) this.store.appendDelivered(old.id, { at: now(), kind: "inbox", id: m.id, via: "carried", to: fresh.id });
