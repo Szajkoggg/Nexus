@@ -5,7 +5,7 @@ import { useState, type ReactNode } from "react";
 import type { QueueView, StepView } from "../api.ts";
 import { TimeAgo, reviewLabel, statusWord, toneOf } from "./ui.tsx";
 import { t } from "../i18n.ts";
-import { ClosingTag, stepMark } from "./Closing.tsx";
+import { ClosingTag, IntegrationTag, stepMark } from "./Closing.tsx";
 import { HOLDING_RUN_STATES, retryLine } from "@nexus/protocol/times";
 import { stepValuesText } from "@nexus/protocol/steps";
 import { queueStatus, type Tone } from "../queueStatus.ts";
@@ -154,6 +154,7 @@ function StepLine({ step, queue, current, phone, onStep, onQueue, stop }: {
         <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
           <span className={`truncate ${step.status === "skipped" ? "text-fg-2" : "text-fg"}`}>{step.title}</span>
           {step.closing && <ClosingTag />}
+          {step.integration && <IntegrationTag />}
         </span>
         <span className="flex items-center gap-2">{meta}<span className={`whitespace-nowrap text-xs ${provisional ? "text-review" : step.status === "done" ? "text-fg-3" : tone.text}`}>{word}</span></span>
       </button>
@@ -175,7 +176,7 @@ function StepLine({ step, queue, current, phone, onStep, onQueue, stop }: {
       <span className={`mt-1.5 h-2 w-2 rounded-full ${tone.dot}`} />
       <span className="truncate pt-px font-mono text-xs leading-5 text-fg-3" title={step.id}>{stepMark(step)}</span>
       <span className="min-w-0">
-        <span className="font-semibold text-fg">{step.title}</span>{step.closing && <> <ClosingTag className="align-[1px]" /></>} <span className={`whitespace-nowrap text-xs ${tone.text}`}>{word}</span>
+        <span className="font-semibold text-fg">{step.title}</span>{step.closing && <> <ClosingTag className="align-[1px]" /></>}{step.integration && <> <IntegrationTag className="align-[1px]" /></>} <span className={`whitespace-nowrap text-xs ${tone.text}`}>{word}</span>
         {stopHere && queue.stop ? <QueueStopReason queue={queue} clamp className="mt-0.5 text-xs text-fg-2" />
           : why && <span className="mt-0.5 line-clamp-2 block text-xs text-fg-2">{plain(why)}</span>}
         {status === "running" && step.progress?.pct !== undefined && (

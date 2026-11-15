@@ -259,7 +259,8 @@ queue then waits for the one you chose, and the queues that waited for it wait f
 you move an item in a list. An approved queue outside the plan is listed under it, with "After…" to put it in. The
 orchestrator's proposal shows on the queue and in "Waiting for you" with Accept and Decline; ↩ on a dependency you set
 ("after A · set by you") hands it back to the orchestrator.
-Queues run side by side only in worktrees of their own: never two in one checkout, and no more at once, across all
+Queues run side by side only in worktrees of their own (the orchestrator gives independent work one, and runs queues
+that touch the same code one after another): never two in one checkout, and no more at once, across all
 projects, than "Queues running at once" in the settings panel's Nexus section (Global tab) (2 by default; a queue waiting for your
 review or an answer does not count). A queue paused or waiting keeps its checkout. Starting a queue whose checkout
 another queue holds, or over the limit, is refused with the reason. A planned queue or a schedule that comes due then waits
@@ -460,11 +461,29 @@ and nothing of the queue is pushed in between.
 per round; in the project's own checkout, a commit not made during its worker's turns is marked ◆. A queue shows its
 branch: how far ahead and behind of its base and of its remote-tracking branch, as last fetched (Nexus never fetches).
 
+**The integration step.** A queue with a worktree of its own ends with a step Nexus keeps (⇄ "Integration", by
+Nexus), after the closing refactoring step: its worker merges the current main into the queue's branch in the worktree
+and runs the checks there, so main only ever moves forward to a tested result. A conflict stops the queue for you,
+unless Settings → Merging back → "Conflicts" lets the worker resolve it (then the step's review judges the
+resolution); resolve it in the worktree, or with a new revision, and press Continue: the step runs again.
+
 **Merge back and clean up.** A finished queue that ran in a worktree of its own offers "Merge into <base>…" and
-"Clean up…". Each asks first. Merge runs where the base branch is checked out (a fast-forward when possible, else a
-merge commit) and refuses if that checkout has uncommitted changes or a run going; a conflict is aborted, leaving
-everything as it was. Clean up removes the worktree and deletes the branch, only if nothing is uncommitted and the
-branch is merged. Only you can do either, from the dashboard; nothing is pushed.
+"Clean up…". Each asks first. For a queue with an integration step, Merge moves main forward to the commit the
+integration step tested (a fast-forward, never a merge commit); if main moved on since, the integration step runs
+again instead. It refuses while the checkout of main has uncommitted changes or a step is at work there. Clean up
+removes the worktree and deletes the branch, only if nothing is uncommitted and the branch is merged. Nothing is
+pushed. (A queue from before the integration step merges as before: a fast-forward when possible, else a merge commit;
+a conflict is aborted.)
+
+**Merging back by itself** (Settings → Merging back, global with a project override, off by default): Nexus does the
+merge back and the cleanup itself, once every step is accepted and the integration step's checks pass. If the checkout
+of main has uncommitted changes, main is checked out nowhere, the checks failed, or main moved on again after two runs
+of the integration step, it waits and tells you: an item "Merging back" in Waiting for you, which opens the integration
+step with the reason. A step at work in the main checkout is held at its end for the moment of the fast-forward. The
+integration step's page says who merged it back ("Merged back by Nexus"). The cleanup waits until you have confirmed
+the queue's provisional acceptances. Turn it on where the project's checks are strong: everything then rests on them.
+"Worktree setup" (project only) is a command run once in each new worktree before its first step, for example `npm ci`;
+if it fails, the run stops with the reason.
 
 **Push accepted steps** (Settings, off by default): when a step is accepted, by you or the orchestrator, Nexus pushes
 the commit the step was reviewed at (not later work) to the branch the queue runs on, at its upstream remote or

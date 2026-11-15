@@ -411,7 +411,8 @@ function attentionOf(queues: QueueView[], questions: QuestionView[]): AttentionI
       const when = q.start.at ? `at ${formatClock(q.start.at, new Date())}` : after.length ? `after ${after.join(", ")}` : "by the plan";
       out.push({ kind: "start", queue: q.id, text: `Did not start ${when}: ${q.start.failed.reason}`, at: q.start.failed.at });
     }
-    if (q.git?.merge?.waiting && q.status !== "cancelled") out.push({ kind: "merge", queue: q.id, text: q.git.merge.waiting.reason, at: q.git.merge.waiting.since });
+    // On the integration step, whose page says how the merge back stands.
+    if (q.git?.merge?.waiting && q.status !== "cancelled") out.push({ kind: "merge", queue: q.id, step: q.steps.find((s) => s.integration)?.id, text: q.git.merge.waiting.reason, at: q.git.merge.waiting.since });
     if (q.status === "cancelled" || q.status === "done") continue;
     for (const s of q.steps) {
       // A review the orchestrator does is not the user's (the queue still shows it waiting).

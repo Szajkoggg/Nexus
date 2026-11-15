@@ -75,7 +75,7 @@ function nested(values: Values, keys: readonly string[]): Values {
 /** Every setting with a global value, in the order of PROTOCOL.md's list. */
 const SETTING_KEYS = [
   "defaults.stop_conditions", "defaults.review_level", "defaults.review_send_back_limit", "defaults.context_reuse_threshold",
-  "defaults.context_care", "defaults.protect_nexus", "defaults.push_accepted", "defaults.provisional_counts", "defaults.usage_pause_threshold",
+  "defaults.context_care", "defaults.protect_nexus", "defaults.push_accepted", "defaults.provisional_counts", "defaults.merge_back", "defaults.resolve_conflicts", "defaults.usage_pause_threshold",
   "runtimes.default", "runtimes.claude.model", "runtimes.claude.effort", "runtimes.claude.permission_mode",
   "runtimes.codex.model", "runtimes.codex.effort", "runtimes.codex.sandbox", "runtimes.codex.approval_policy", "runtimes.codex.approvals_reviewer",
   "conversations.runtime", "conversations.model", "conversations.effort",
@@ -259,6 +259,22 @@ function SettingRows({ form, project }: { form: Form; project?: { values: Record
           </Row>
         )}
       </Section>
+
+      <Section title={t("settings.merging")}>
+        <p className="pb-1 text-xs text-fg-3">{t("settings.mergingNote")}</p>
+        <Setting form={f} keys={["defaults.merge_back"]} label={t("settings.mergeBack")} hint={t("settings.mergeBackHint")}>
+          {(d) => <Check checked={f.bool("defaults.merge_back")} onChange={(v) => f.set("defaults.merge_back", v)} disabled={d}>{t("settings.mergeBackCheck")}</Check>}
+        </Setting>
+        <Setting form={f} keys={["defaults.resolve_conflicts"]} label={t("settings.resolveConflicts")} hint={t("settings.resolveConflictsHint")}>
+          {(d) => <Check checked={f.bool("defaults.resolve_conflicts")} onChange={(v) => f.set("defaults.resolve_conflicts", v)} disabled={d}>{t("settings.resolveConflictsCheck")}</Check>}
+        </Setting>
+        {p && (
+          <Row label={t("settings.worktreeSetup")} hint={t("settings.worktreeSetupHint")}>
+            <input value={p.values.worktreeSetup} onChange={(e) => p.set("worktreeSetup", e.target.value)} placeholder={t("settings.worktreeSetupPlaceholder")} className={`${field} font-mono text-xs`} />
+          </Row>
+        )}
+        <div id="settings-merging-end" />
+      </Section>
     </>
   );
 }
@@ -323,7 +339,7 @@ function ProjectSettingsPage({ project, info, onChanged }: { project: ProjectFil
   const [own, setOwn] = useState<Set<string>>(() => new Set(info.own));
   const [local, setLocal] = useState({
     name: project.name, tools: project.runtimes.claude.allowed_tools.join("\n"),
-    notesDir: project.conversations.notes_dir ?? "", worktrees: project.defaults.worktree_dir ?? "",
+    notesDir: project.conversations.notes_dir ?? "", worktrees: project.defaults.worktree_dir ?? "", worktreeSetup: project.defaults.worktree_setup ?? "",
     working: project.languages?.working ?? "en",
   });
   const [busy, setBusy] = useState(false);
@@ -342,7 +358,7 @@ function ProjectSettingsPage({ project, info, onChanged }: { project: ProjectFil
     try {
       const mine = SETTING_KEYS.filter((k) => own.has(k));
       const body = nested(v.values, mine) as { defaults?: Values; runtimes?: { claude?: Values } & Values; conversations?: Values; languages?: Values };
-      body.defaults = { ...body.defaults, worktree_dir: local.worktrees || null };
+      body.defaults = { ...body.defaults, worktree_dir: local.worktrees || null, worktree_setup: local.worktreeSetup.trim() || null };
       body.runtimes = { ...body.runtimes, claude: { ...body.runtimes?.claude, allowed_tools: local.tools.split(/\n|,/).map((x) => x.trim()).filter(Boolean) } };
       body.conversations = { ...body.conversations, notes_dir: local.notesDir || null };
       body.languages = { ...body.languages, working: local.working };

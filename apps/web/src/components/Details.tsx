@@ -397,8 +397,10 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
       </>}
     </div>
   );
+  const integration = step.integration ? <IntegrationBox project={project} queue={queue} step={step} /> : null;
   const body = reviewing ? (
     <>
+      {integration}
       {summary}
       {reviewPictures}
       <div className="mt-6">{chat}</div>
@@ -406,7 +408,7 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
     </>
   ) : (
     <>
-      {provisionalBox}{chat}{retry}{summary}{reviewNotes}{push}{rejected}{sentBack}{message}{questionsPart}{statusNote}{goalAcceptance}{material}{viewer}
+      {provisionalBox}{integration}{chat}{retry}{summary}{reviewNotes}{push}{rejected}{sentBack}{message}{questionsPart}{statusNote}{goalAcceptance}{material}{viewer}
       {checks}{notes}{messages}{refusals}{changes}{activity}{commits}{timeline}
     </>
   );
@@ -698,6 +700,39 @@ function StepCommits({ project, queue, step, version, toggle }: {
 }
 
 /**
+ * The integration step's box (PROTOCOL.md, "The integration step", "Merge back and clean up"): what it does, and how
+ * the merge back stands: done (by Nexus or you), waiting (and why), run again because the base moved on, or the user's
+ * when the project's merge_back is off.
+ */
+function IntegrationBox({ project, queue, step }: { project: ProjectState; queue: QueueView; step: StepView }) {
+  const g = queue.git;
+  const base = g?.base?.ref ?? "main";
+  const code = (s: string, key: string) => <span key={key} className="font-mono">{s}</span>;
+  const merged = g?.merged && (!step.finished_at || g.merged.at >= step.finished_at) ? g.merged : undefined;
+  const waiting = g?.merge?.waiting;
+  const again = g?.merge?.reintegrations ?? 0;
+  const own = project.project.defaults.merge_back;
+  return (
+    <div className={`mb-5 rounded-lg border px-4 py-3 text-sm ${waiting ? "border-warn/40 bg-warn/5" : "border-line"}`}>
+      <p className="text-xs text-fg-3">{rich("integration.box", { base: code(base, "base"), branch: code(queue.branch ?? t("details.worktree.itsBranch"), "branch") })}</p>
+      {merged && (
+        <p className="mt-1.5 text-ok">
+          {rich(merged.by === "nexus" ? "integration.mergedByNexus" : "integration.mergedByYou", { into: code(merged.into, "into"), sha: code(merged.sha.slice(0, 7), "sha") })}
+          {" "}<span className="text-xs text-fg-3">· <TimeAgo at={merged.at} /></span>
+        </p>
+      )}
+      {!merged && waiting && (
+        <p className="mt-1.5 text-warn"><span className="text-fg-3">{t("integration.waiting")} </span>{waiting.reason} <span className="text-xs text-fg-3">· <TimeAgo at={waiting.since} /></span></p>
+      )}
+      {!merged && !waiting && step.status === "done" && queue.status === "done" && (
+        <p className="mt-1.5 text-fg-2">{own ? t("integration.byNexusSoon") : t("integration.yours")}</p>
+      )}
+      {again > 0 && !merged && <p className="mt-1 text-xs text-fg-3">{t("integration.again", { count: again })}</p>}
+    </div>
+  );
+}
+
+/**
  * A finished queue with a worktree of its own: merge its branch back into its base, and clean up (the worktree removed,
  * the branch deleted with -d). The user's only; each asks first and tells what it will do.
  */
@@ -724,7 +759,7 @@ function WorktreeActions({ project, root, queue, onChanged }: { project: string;
         path: <span key="path" className="font-mono">{queue.worktree}</span>, branch: <span key="branch" className="font-mono">{branch}</span>,
         base: <span key="base" className="font-mono">{g?.base?.ref}</span>,
       })}</p>
-      {g?.merged && <p className="mt-1.5 text-sm text-ok">{rich("details.worktree.merged", {
+      {g?.merged && <p className="mt-1.5 text-sm text-ok">{rich(g.merged.by === "nexus" ? "details.worktree.mergedByNexus" : "details.worktree.merged", {
         into: <span key="into" className="font-mono">{g.merged.into}</span>,
         how: g.merged.fast_forward ? t("details.worktree.fastForward") : t("details.worktree.mergeCommit", { sha: g.merged.sha.slice(0, 7) }),
       })} <span className="text-xs text-fg-3">· <TimeAgo at={g.merged.at} /></span></p>}
@@ -741,7 +776,7 @@ function WorktreeActions({ project, root, queue, onChanged }: { project: string;
           {ask === "merge" ? (
             <>
               <p className="text-sm text-warn">{rich("details.worktree.mergeQuestion", { branch: <span key="branch" className="font-mono">{branch}</span>, base: <span key="base" className="font-mono">{base}</span> })}</p>
-              <p className="mt-1 text-xs text-fg-2">{t("details.worktree.mergeText", { base: base ?? "" })}</p>
+              <p className="mt-1 text-xs text-fg-2">{t(queue.steps.some((s) => s.integration) ? "details.worktree.mergeTextIntegrated" : "details.worktree.mergeText", { base: base ?? "" })}</p>
             </>
           ) : (
             <>

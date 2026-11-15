@@ -378,3 +378,22 @@ test("the briefings carry the review standard's essentials and point to nexus he
     assert.ok(orch.includes(part), `the orchestrator's briefing has ${JSON.stringify(part)}`);
   }
 });
+
+test("the orchestrator's briefing and notices on parallel worktrees and merging back (queue PW)", async () => {
+  const { orchestratorBriefing, mergeWaitNotice, mergedNotice } = await import("../src/prompts.ts");
+  const orch = orchestratorBriefing("Pilot", 60);
+  for (const part of [
+    "give a queue a worktree of its own (worktree: auto) when its work is independent",
+    "queues that touch the same code run one after another (put them in the plan in order), never side by side",
+    "id <queue>.integrate, review level 2",
+    "it resolves a conflict only where the project's resolve_conflicts setting allows it",
+    "Merging the queue back into main is Nexus's own only where the project's merge_back setting is on",
+    "with the setting off it is the user's (Merge back in the dashboard). Never merge, rebase or move main yourself.",
+  ]) assert.ok(orch.includes(part), `the orchestrator's briefing has ${JSON.stringify(part)}`);
+  const q = { id: "W", title: "Work" } as Parameters<typeof mergeWaitNotice>[0];
+  const wait = mergeWaitNotice(q, "C:/p has uncommitted changes: commit or stash them, then merge");
+  assert.equal(wait.fact, "Queue W is not merged back yet: C:/p has uncommitted changes: commit or stash them, then merge");
+  assert.match(wait.todo, /Do not touch the base's checkout yourself/);
+  const done = mergedNotice(q, { into: "main", sha: "0123456789abcdef" });
+  assert.equal(done.fact, "Queue W is merged back: main moved forward to its integrated work (0123456), by a fast-forward. Nothing was pushed.");
+});
