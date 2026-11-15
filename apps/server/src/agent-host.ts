@@ -136,9 +136,8 @@ export class AgentHost<E extends object = object> {
   start(session: SessionFile, launch: (resume: boolean) => Launch, extra: E, handlers: (l: Hosted<E>) => HostHandlers): Hosted<E> {
     const resume = this.store.readRuntime(session.id) !== undefined;
     const how = launch(resume);
-    // A Claude Code briefing goes in the session's own file (sessions/<id>/briefing.md), not on the command line; the
-    // file is no setting, so `launched` keeps the launch without it (stale).
-    const proc = this.spawn(how.runtime === "claude" ? { ...how, options: { ...how.options, briefingFile: join(this.store.sessionDir(session.id), BRIEFING_FILE) } } : how);
+    // `launched` keeps the launch without the briefing's file: it is no setting (stale).
+    const proc = this.spawn(this.withBriefingFile(session.id, how));
     const l = { ...extra, session: session.id, proc } as Hosted<E>;
     this.live.set(session.id, l);
     this.launched.set(proc, how);
@@ -184,6 +183,12 @@ export class AgentHost<E extends object = object> {
       on.exit?.(code, this.ended.has(proc));
     });
     return l;
+  }
+
+  /** A Claude Code briefing goes in the session's own file (sessions/<id>/briefing.md), not on the command line. */
+  private withBriefingFile(session: string, how: Launch): Launch {
+    if (how.runtime !== "claude") return how;
+    return { ...how, options: { ...how.options, briefingFile: join(this.store.sessionDir(session), BRIEFING_FILE) } };
   }
 
   /**
