@@ -126,6 +126,7 @@ export const en = {
   "desk.chats": "Chats",
   "desk.orchestrator": "Orchestrator",
   "desk.ideas": "Ideas",
+  "desk.stats": "Stats",
 
   // ---------------------------------------------------------------- the phone: top line and bottom bar
   "phone.running": "{ids} running",
@@ -135,6 +136,7 @@ export const en = {
   "phone.tab.waiting": "Waiting",
   "phone.tab.queues": "Queues",
   "phone.tab.ideas": "Ideas",
+  "phone.tab.stats": "Stats",
   "phone.orchestratorWorking": "The orchestrator is working",
 
   // ---------------------------------------------------------------- the right rail
@@ -1308,4 +1310,29 @@ export const en = {
   "stats.scatterNote": "each dot a group: up is accepted in the first round more often, left is quicker; the line spans the middle half of the working times",
   "stats.scatterX": "median working time →",
   "stats.scatterY": "accepted in the first round ↑",
+
+  // ---------------------------------------------------------------- a project's Stats tab (ProjectStats.tsx), a step's metrics
+  "metrics.title": "Metrics",
+  "metrics.note": "defined by the orchestrator, recorded by the workers · a value opens its step",
+  "metrics.none": "No metric yet. The orchestrator defines what the project measures (nexus metric define); the checks' times appear once a worker reports a check.",
+  "metrics.show.line": "line",
+  "metrics.show.bar": "bar",
+  "metrics.show.number": "number",
+  "metrics.target": "target {value}",
+  "metrics.targetShort": "target {value}",
+  "metrics.warnAbove": "warns above {value}",
+  "metrics.warnBelow": "warns below {value}",
+  "metrics.noValues": "No values yet.",
+  "metrics.recordWith": "A worker records one with",
+  "metrics.beyond": "beyond its warning threshold, {limit}",
+  "metrics.openStep": "Open the step →",
+  "metrics.up": "▲ {value} since {since}",
+  "metrics.down": "▼ {value} since {since}",
+  "metrics.last": "last {value} ·",
+  "metrics.col.step": "Step",
+  "metrics.col.value": "Value",
+  "metrics.col.commit": "Commit",
+  "details.metrics": "Metrics",
+  "details.metricBeyond": "⚠ beyond its warning threshold, {limit}",
+  "details.metricsWarning": { one: "⚠ {count} metric beyond its threshold", other: "⚠ {count} metrics beyond their thresholds" },
 } as const;

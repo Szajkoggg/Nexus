@@ -60,35 +60,49 @@ const barPath = (x0: number, x1: number, y: number, h: number, r = 4) => {
 const AX = "fill-fg-3 text-[10px] tabular-nums";
 const LABEL = "fill-fg-2 text-[11px] tabular-nums";
 
-export interface TimePoint { value: number | null; tip: TipLines }
+export interface TimePoint {
+  value: number | null; tip: TipLines;
+  /** Beyond a warning threshold: the warn colour and ⚠ with the value (a dot on a line, the column itself). */
+  warn?: boolean;
+}
 export interface Reference { value: number; label: string; tone: "warn" | "target" }
 
 /**
- * A chart over time: columns (a value per day) or a line with a 10 % wash (a level), one series; the reference lines
- * dashed and labelled at the right; the line's last value labelled. A day without a value draws nothing (a column)
- * or is passed over (the line joins its neighbours).
+ * A chart over time or over steps: columns (a value per day or step, from zero) or a line, one series; the line with
+ * a 10 % wash (`area`, a level) or a dot on every value (`dots`, each a step of its own); the reference lines dashed
+ * and labelled at the right; the line's last value labelled. A day without a value draws nothing (a column) or is
+ * passed over (the line joins its neighbours). With `onPick` a value is a link: a click or Enter on it picks it.
  */
-export function TimeChart({ kind, points, max, ticks, format, xLabels, refs = [], end, height = 128 }: {
-  kind: "columns" | "line"; points: TimePoint[]; max: number; ticks: number[]; format: (v: number) => string;
-  xLabels: [number, string][]; refs?: Reference[]; end?: string; height?: number;
+export function TimeChart({ kind, points, min = 0, max, ticks, format, xLabels, refs = [], end, height = 128, area, dots, onPick, valueLabel = format }: {
+  kind: "columns" | "line"; points: TimePoint[]; min?: number; max: number; ticks: number[]; format: (v: number) => string;
+  xLabels: [number, string][]; refs?: Reference[]; end?: string; height?: number; area?: boolean; dots?: boolean;
+  onPick?: (i: number) => void;
+  /** How a value beyond the threshold is written beside its mark (default: as the ticks). */
+  valueLabel?: (v: number) => string;
 }) {
   const [ref, w] = useWidth<HTMLDivElement>();
   const { props, tip } = useTip();
-  const m = { l: 36, r: 62, t: 10, b: 20 };
+  const m = { l: 36, r: 62, t: 14, b: 20 };
   const pw = Math.max(0, w - m.l - m.r), ph = height - m.t - m.b;
   const band = points.length ? pw / points.length : 0;
   const X = (i: number) => m.l + band * i + band / 2;
-  const Y = (v: number) => m.t + ph - (Math.min(v, max) / max) * ph;
+  const Y = (v: number) => m.t + ph - ((Math.min(Math.max(v, min), max) - min) / (max - min || 1)) * ph;
   const known = points.map((p, i) => [p, i] as const).filter(([p]) => p.value !== null) as (readonly [TimePoint & { value: number }, number])[];
   const line = known.map(([p, i], k) => `${k ? "L" : "M"}${X(i)} ${Y(p.value)}`).join("");
   const last = known.at(-1);
   const cw = Math.min(24, Math.max(2, band - 2));
+  const pick = (i: number) => onPick && {
+    onClick: () => onPick(i),
+    onKeyDown: (e: React.KeyboardEvent) => { if (e.key === "Enter") { e.preventDefault(); onPick(i); } },
+    role: "link",
+  };
   return (
     <div ref={ref}>
       {w > 0 && (
         <svg width={w} height={height} role="img" className="block overflow-visible">
           {ticks.map((t) => <g key={t}>
-            <line x1={m.l} x2={w - m.r} y1={Y(t)} y2={Y(t)} className={t === 0 ? "stroke-line-strong" : "stroke-line"} />
+            {/* A reference line at a tick takes its place: one line there, the dashed one. */}
+            {!refs.some((r) => r.value === t) && <line x1={m.l} x2={w - m.r} y1={Y(t)} y2={Y(t)} className={t === min ? "stroke-line-strong" : "stroke-line"} />}
             <text x={m.l - 6} y={Y(t) + 3} textAnchor="end" className={AX}>{format(t)}</text>
           </g>)}
           {xLabels.map(([i, label]) => <text key={i} x={X(i)} y={height - 4} textAnchor="middle" className={AX}>{label}</text>)}
@@ -97,22 +111,41 @@ export function TimeChart({ kind, points, max, ticks, format, xLabels, refs = []
             <text x={w - m.r + 4} y={Y(r.value) + 3} className={AX}>{r.label}</text>
           </g>)}
           {kind === "line" && line && <>
-            <path d={`${line}L${X(last![1])} ${Y(0)}L${X(known[0]![1])} ${Y(0)}Z`} className="fill-series" opacity={0.1} />
+            {area && <path d={`${line}L${X(last![1])} ${Y(min)}L${X(known[0]![1])} ${Y(min)}Z`} className="fill-series" opacity={0.1} />}
             <path d={line} fill="none" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" className="stroke-series" />
           </>}
           {points.map((p, i) => p.value === null ? null : (
             <g key={i}>
-              <rect x={X(i) - Math.max(band, 24) / 2} y={m.t} width={Math.max(band, 24)} height={ph} fill="transparent" className="cursor-default outline-none" {...props(p.tip)} />
-              {kind === "columns" && p.value > 0 && <path d={colPath(X(i) - cw / 2, Y(0), Y(p.value), cw)} className="pointer-events-none fill-series" />}
+              {kind === "columns" && p.value > min && <path d={colPath(X(i) - cw / 2, Y(min), Y(p.value), cw)} className={`pointer-events-none ${p.warn ? "fill-warn" : "fill-series"}`} />}
+              {kind === "line" && (dots || p.warn) && <circle cx={X(i)} cy={Y(p.value)} r={p.warn ? 5 : 4} strokeWidth={2} className={`pointer-events-none stroke-surface ${p.warn ? "fill-warn" : "fill-series"}`} />}
+              {p.warn && <text x={X(i)} y={Y(p.value) - 8} textAnchor="middle" className="pointer-events-none fill-fg text-[11px] tabular-nums">{kind === "line" ? `⚠ ${valueLabel(p.value)}` : "⚠"}</text>}
+              <rect x={X(i) - Math.max(band, 24) / 2} y={0} width={Math.max(band, 24)} height={m.t + ph} fill="transparent"
+                className={`outline-none ${onPick ? "cursor-pointer" : "cursor-default"}`} {...props(p.tip)} {...pick(i)} />
             </g>
           ))}
           {kind === "line" && last && <>
-            <circle cx={X(last[1])} cy={Y(last[0].value)} r={4} strokeWidth={2} className="pointer-events-none fill-series stroke-surface" />
-            {end && <text x={X(last[1]) + 8} y={Y(last[0].value) + 4} className="fill-fg text-[11px] font-semibold tabular-nums">{end}</text>}
+            {!dots && !last[0].warn && <circle cx={X(last[1])} cy={Y(last[0].value)} r={4} strokeWidth={2} className="pointer-events-none fill-series stroke-surface" />}
+            {end && !last[0].warn && <text x={X(last[1]) + 8} y={Y(last[0].value) + 4} className="pointer-events-none fill-fg text-[11px] font-semibold tabular-nums">{end}</text>}
           </>}
         </svg>
       )}
       {tip}
+    </div>
+  );
+}
+
+/** A 12-point sparkline beside a number: the de-emphasis ink, the current value a dot in the series colour. */
+export function Sparkline({ values, height = 48 }: { values: number[]; height?: number }) {
+  const [ref, w] = useWidth<HTMLDivElement>();
+  const lo = Math.min(...values), hi = Math.max(...values);
+  const X = (i: number) => 4 + (i / Math.max(1, values.length - 1)) * (w - 10);
+  const Y = (v: number) => 5 + (1 - (v - lo) / (hi - lo || 1)) * (height - 10);
+  return (
+    <div ref={ref} className="min-w-0 flex-1" aria-hidden="true">
+      {w > 0 && values.length > 1 && <svg width={w} height={height} className="block overflow-visible">
+        <path d={values.map((v, i) => `${i ? "L" : "M"}${X(i)} ${Y(v)}`).join("")} fill="none" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" className="stroke-fg-3" />
+        <circle cx={X(values.length - 1)} cy={Y(values.at(-1)!)} r={4} strokeWidth={2} className="fill-series stroke-surface" />
+      </svg>}
     </div>
   );
 }
@@ -266,8 +299,11 @@ export function Segmented<T extends string>({ options, value, onChange, small, l
 }
 
 /** A chart's card: its title and caption, its views (the chart, the table…) behind a switch in the corner. */
-export function ChartCard<T extends string>({ title, caption, views, initial, store, children }: {
-  title: string; caption?: ReactNode; views: { value: T; label: string }[]; initial: T;
+export function ChartCard<T extends string>({ title, heading, caption, views, initial, store, children }: {
+  title: string;
+  /** The title as shown, when it is more than text (a metric's name in mono with its unit); `title` names the switch. */
+  heading?: ReactNode;
+  caption?: ReactNode; views: { value: T; label: string }[]; initial: T;
   /** A localStorage key that keeps the view picked across visits. */
   store?: string;
   children: (view: T) => ReactNode;
@@ -280,7 +316,7 @@ export function ChartCard<T extends string>({ title, caption, views, initial, st
   return (
     <section className="min-w-0 rounded-xl border border-line bg-surface px-3.5 pb-2.5 pt-3">
       <div className="flex items-start gap-2">
-        <h3 className="min-w-0 flex-1 text-[13px] font-semibold text-fg">{title}</h3>
+        <h3 className="min-w-0 flex-1 text-[13px] font-semibold text-fg">{heading ?? title}</h3>
         <Segmented options={views} value={view} onChange={setView} small label={title} />
       </div>
       {caption && <p className="mt-0.5 text-xs text-fg-3">{caption}</p>}

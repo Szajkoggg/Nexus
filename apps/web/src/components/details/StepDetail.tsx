@@ -14,6 +14,7 @@ import { StepSwitches } from "../Fallback.tsx";
 import { LevelMark, LevelPicker, levelChangeable, levelShort, levelTitle, pendingProvisional, provisionalWord } from "../Levels.tsx";
 import { StepRefusals } from "../Refusals.tsx";
 import { Activity } from "../Run.tsx";
+import { stepMetrics } from "../../metrics.ts";
 import { StepTags } from "../Tags.tsx";
 import { PanelBody, PanelHeader, Section, StatusBadge, StepTimes, reviewLabel } from "../ui.tsx";
 import { ImageViewer } from "../Viewer.tsx";
@@ -23,7 +24,7 @@ import { Changes } from "./QueueDetail.tsx";
 import { AnswerBar, Question, QuestionSheet } from "./questions.tsx";
 import { PictureActions, Rejected, ReviewBar } from "./review.tsx";
 import {
-  GoalAcceptance, Material, MessageAgent, Messages, Notes, ProvisionalBox, RetryLine, ReviewNotes, ReviewPictures, SentBack, StatusNote, StepChecks,
+  GoalAcceptance, Material, MessageAgent, Messages, Notes, ProvisionalBox, RetryLine, ReviewNotes, ReviewPictures, SentBack, StatusNote, StepChecks, StepMetrics,
   Summary, Timeline,
 } from "./stepParts.tsx";
 
@@ -65,11 +66,14 @@ export function StepDetail({ project, queue, step, onClose, of }: PanelProps & {
   const activitySession = step.session ?? (queue.run?.step === step.id ? queue.run.session : undefined);
   const activity = activitySession && <Activity project={id} session={activitySession} queue={queue.id} step={step.id} />;
   const integration = step.integration ? <IntegrationBox project={project} queue={queue} step={step} /> : null;
+  // Its metrics whose latest value is beyond the threshold: said in the header too, so a review sees it at once.
+  const warned = stepMetrics(step.metrics).filter((m) => m.warn).length;
   const body = reviewing ? (
     <>
       {integration}
       {summary}
       <StepTags step={step} />
+      <StepMetrics step={step} />
       <ReviewPictures project={id} queue={queue} step={step} pairs={pairs} orchestratorAsks={orchestratorAsks} />
       <div className="mt-6">{chat}</div>
       {retry}{switches}{push}{rejected}<SentBack step={step} />{message}{questionsPart}<StatusNote step={step} />{notes}<Messages step={step} />{refusals}{changes}{activity}{viewer}
@@ -80,7 +84,7 @@ export function StepDetail({ project, queue, step, onClose, of }: PanelProps & {
       <ReviewNotes step={step} reviewing={reviewing} orchestratorAsks={orchestratorAsks} />
       {push}{rejected}<SentBack step={step} />{message}{questionsPart}<StatusNote step={step} /><GoalAcceptance step={step} />
       <Material project={id} step={step} pairs={pairs} />{viewer}
-      <StepChecks step={step} />{notes}<Messages step={step} />{refusals}{changes}{activity}
+      <StepChecks step={step} /><StepMetrics step={step} />{notes}<Messages step={step} />{refusals}{changes}{activity}
       <StepCommits project={id} queue={queue.id} step={step.id} /><Timeline step={step} />
     </>
   );
@@ -104,6 +108,7 @@ export function StepDetail({ project, queue, step, onClose, of }: PanelProps & {
               </span>
             )}
           <StepTimes step={step} />
+          {warned > 0 && <span className="font-medium text-warn">{t("details.metricsWarning", { count: warned })}</span>}
           {step.commit && <span className="font-mono">{step.commit}</span>}
           {session && <span>{t("details.by", { session: session.title ?? session.id.slice(-8), runtime: session.runtime })}</span>}
           {stepValuesText(step) && (

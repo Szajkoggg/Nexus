@@ -131,7 +131,7 @@ function WindowCard({ panel: p, threshold }: { panel: WindowPanel; threshold: nu
   return (
     <ChartCard title={windowTitle(p)} caption={caption} initial="chart" views={[{ value: "chart", label: t("stats.view.chart") }, { value: "table", label: t("stats.view.table") }]}>
       {(view) => view === "chart"
-        ? <TimeChart kind={p.kind === "5h" ? "columns" : "line"} max={100} ticks={[0, 50, 100]} format={pct} xLabels={xLabels}
+        ? <TimeChart kind={p.kind === "5h" ? "columns" : "line"} area max={100} ticks={[0, 50, 100]} format={pct} xLabels={xLabels}
             refs={[{ value: threshold * 100, label: `⚠ ${t("stats.pause", { threshold: pct(threshold * 100) })}`, tone: "warn" }]}
             end={p.kind === "7d" && p.last !== undefined ? t("stats.now", { value: pct(p.last) }) : undefined}
             points={p.points.map((x) => ({ value: x.value, tip: x.value === null ? [] : [pct(x.value), what, formatWeekday(dayOf(x.day))] }))} />

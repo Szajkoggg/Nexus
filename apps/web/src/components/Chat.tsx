@@ -428,9 +428,9 @@ export interface Desk {
  * itself (the chat's state, its tool calls and ⋯), and the column's own buttons. The project's queues show it too,
  * with neither side of the switch on. A switch adds no history entry (layers.ts, switchTab).
  */
-export function DeskHead({ which, desk, children }: { which?: "chat" | "ideas"; desk: Desk; children?: ReactNode }) {
+export function DeskHead({ which, desk, children }: { which?: "chat" | "ideas" | "stats"; desk: Desk; children?: ReactNode }) {
   const o = desk.orchestrator;
-  const item = (p: "chat" | "ideas", label: ReactNode) => (
+  const item = (p: "chat" | "ideas" | "stats", label: ReactNode) => (
     <button key={p} onClick={() => nav.tab(p)} aria-pressed={p === which}
       className={`flex items-center gap-1.5 rounded-md px-3 py-1 text-[13px] ${p === which ? "bg-surface-3 font-semibold text-fg" : "text-fg-2 hover:text-fg"}`}>{label}</button>
   );
@@ -439,6 +439,7 @@ export function DeskHead({ which, desk, children }: { which?: "chat" | "ideas"; 
       <div className="flex shrink-0 items-center gap-0.5 rounded-lg border border-line bg-surface-2 p-0.5" role="group" aria-label={t("desk.chats")}>
         {item("chat", <><span className={`h-2 w-2 rounded-full ${o?.state === "working" ? "animate-pulse bg-accent" : o?.session ? "bg-ok" : "bg-fg-3"}`} />{t("desk.orchestrator")}<UnreadMark n={desk.unread.chat} /></>)}
         {item("ideas", <>{t("desk.ideas")}{desk.ideas ? <span className="text-fg-3">· {desk.ideas}</span> : null}<UnreadMark n={desk.unread.ideas ? -1 : 0} /></>)}
+        {item("stats", t("desk.stats"))}
       </div>
       {children}
       <span className="flex-1" />

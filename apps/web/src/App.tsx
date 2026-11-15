@@ -39,6 +39,7 @@ import { needsApproval } from "./approval.ts";
 import { rich, t, type Key } from "./i18n.ts";
 import { PageProvider, type Page } from "./page.ts";
 import { StatsView } from "./components/Stats.tsx";
+import { ProjectStats } from "./components/ProjectStats.tsx";
 
 /** The file viewer and its Markdown and highlighting load when a file is first opened. */
 const FileView = lazy(() => import("./components/FileView.tsx").then((m) => ({ default: m.FileView })));
@@ -268,7 +269,7 @@ export function App() {
   }
 
   if (phone) {
-    const scrolls = tab === "waiting" || tab === "queues";
+    const scrolls = tab === "waiting" || tab === "queues" || tab === "stats";
     return (
       <PageProvider value={page}><RefsProvider project={projectId} queues={state?.queues}>
       <div className="flex h-dvh flex-col">
@@ -290,6 +291,7 @@ export function App() {
           {tab === "waiting" && <div className="mb-4 empty:hidden">{digest}</div>}
           {tab === "waiting" && <WaitingList projects={projects ?? []} onOpen={openWaiting} onChoose={(w, o) => { if (w.qid) chooseOption(w.qid, o); openWaiting(w); }} />}
           {tab === "queues" && queuesPage}
+          {tab === "stats" && projectId && state && <ProjectStats key={`stats-${projectId}`} project={projectId} queues={state.queues} phone />}
           {tab === "chat" && projectId && (
             <ChatPanel key={`chat-${projectId}`} inline project={projectId} name={state?.project.name ?? projectId} view={orchestrator} />
           )}
@@ -352,6 +354,13 @@ export function App() {
           {projectId && state && (
             <ConversationsPanel key={`ideas-${projectId}`} desk={desk} project={projectId} name={state.project.name} defaultRuntime={state.project.conversations.runtime} />
           )}
+        </>}
+        {view === "stats" && <>
+          <DeskHead which="stats" desk={desk} />
+          {alerts}
+          <div className="@container scroll-thin min-h-0 flex-1 overflow-y-auto px-6 py-5">
+            {projectId && state && <ProjectStats key={`stats-${projectId}`} project={projectId} queues={state.queues} phone={false} />}
+          </div>
         </>}
         {view === "queues" && <>
           <DeskHead desk={desk}>

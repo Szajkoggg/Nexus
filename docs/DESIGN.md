@@ -1296,9 +1296,9 @@ Opacity modifiers compile to `color-mix()` on the token, with a fixed Graphite f
 Below 1024 px (phones and narrow windows; `PHONE` in `apps/web/src/phone.ts`) the dashboard has a phone layout
 (UX proposals, item 18): a top line and a bottom bar instead of the header. The top line is one row: the project
 picker, what runs in the project ("SF running"), and settings (with "offline" while live updates reconnect). The
-bottom bar has four tabs at the thumb: **Orchestrator** (the chat), **Waiting** (everything that waits in all
-projects, with its count), **Queues** (the project's queues; what waits has its own tab) and **Ideas** (the
-conversations). The header's tools (the update, the usage, notifications, remote access) are in Settings there, at
+bottom bar has five tabs at the thumb: **Orchestrator** (the chat), **Waiting** (everything that waits in all
+projects, with its count), **Queues** (the project's queues; what waits has its own tab), **Ideas** (the
+conversations) and **Stats** (the project's metrics; queue ST3). The header's tools (the update, the usage, notifications, remote access) are in Settings there, at
 the top, under "Nexus on this device". From 1024 px the desktop layout takes over ("Chat-first on a desktop").
 
 The tab is not a layer. It is a field of the history entry (`Nav.tab`), and switching rewrites the entry it is on

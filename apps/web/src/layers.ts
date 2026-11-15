@@ -18,10 +18,10 @@ import { hasItem } from "./hash.ts";
 export type Layer = string;
 /**
  * The view: the phone's tab (below 1024 px; "The phone" in DESIGN.md), or what a desktop's middle column shows (the
- * chat, Ideas or the project's queues; "Chat-first on a desktop"). It is not a layer: switching rewrites the entry it
+ * chat, Ideas, the project's queues or its Stats; "Chat-first on a desktop"). It is not a layer: switching rewrites the entry it
  * is on and adds none, so Back closes sheets and layers, then leaves. Absent until one is picked (the layout's first).
  */
-export type Tab = "chat" | "waiting" | "queues" | "ideas";
+export type Tab = "chat" | "waiting" | "queues" | "ideas" | "stats";
 export interface Nav { hash: string; layers: Layer[]; depth: number; tab?: Tab }
 
 export type Step =
@@ -148,7 +148,7 @@ export function navOf(state: unknown, hash: string, query: string): Nav {
 /** Which layout reads an entry: the phone (below 1024 px) or a desktop (from 1024 px). */
 export type Layout = "phone" | "desk";
 
-const TABS: readonly Tab[] = ["chat", "waiting", "queues", "ideas"];
+const TABS: readonly Tab[] = ["chat", "waiting", "queues", "ideas", "stats"];
 
 /**
  * The layers a layout shows as a view instead: on the phone the chat, the Ideas panel and the waiting list are tabs;
@@ -159,7 +159,7 @@ const TABBED: Record<Layout, Record<string, Tab>> = {
   desk: { chat: "chat", ideas: "ideas" },
 };
 /** The views a layout has, the first shown when none is picked (or the picked one is not the layout's). */
-const VIEWS: Record<Layout, readonly Tab[]> = { phone: ["waiting", "chat", "queues", "ideas"], desk: ["chat", "ideas", "queues"] };
+const VIEWS: Record<Layout, readonly Tab[]> = { phone: ["waiting", "chat", "queues", "ideas", "stats"], desk: ["chat", "ideas", "queues", "stats"] };
 
 /** The view a layer stands for in a layout ("chat" → the chat), or undefined when it stays a layer. */
 export const viewFor = (layout: Layout, layer: Layer): Tab | undefined => TABBED[layout][layer];

@@ -1,4 +1,4 @@
-// The phone layout's own parts (below 1024 px): the top line and the bottom bar with its four tabs. What each tab
+// The phone layout's own parts (below 1024 px): the top line and the bottom bar with its five tabs. What each tab
 // shows, and the sheets over them, are in App; the routing (tabs add no history entry) is in layers.ts.
 import type { ReactNode } from "react";
 import type { Tab } from "../layers.ts";
@@ -23,12 +23,13 @@ const ICONS: Record<Tab, ReactNode> = {
   waiting: <><path d="M4 13l2-8h12l2 8v6H4z" /><path d="M4 13h5l1 2h4l1-2h5" /></>,
   queues: <path d="M5 6h14M5 12h14M5 18h9" />,
   ideas: <path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9V16h7v-2.1A6 6 0 0 0 12 3z" />,
+  stats: <path d="M4 20V10M10 20V4M16 20v-7M22 20H2" />,
 };
-const LABELS: Record<Tab, Key> = { chat: "phone.tab.chat", waiting: "phone.tab.waiting", queues: "phone.tab.queues", ideas: "phone.tab.ideas" };
-const ORDER: Tab[] = ["chat", "waiting", "queues", "ideas"];
+const LABELS: Record<Tab, Key> = { chat: "phone.tab.chat", waiting: "phone.tab.waiting", queues: "phone.tab.queues", ideas: "phone.tab.ideas", stats: "phone.tab.stats" };
+const ORDER: Tab[] = ["chat", "waiting", "queues", "ideas", "stats"];
 
 /**
- * The bottom bar: Orchestrator, Waiting (with what waits in all projects), Queues, Ideas. One tap switches; the tab
+ * The bottom bar: Orchestrator, Waiting (with what waits in all projects), Queues, Ideas, Stats (the project's metrics). One tap switches; the tab
  * shown is marked. A dot on Orchestrator while it works.
  */
 export function BottomBar({ tab, waiting, working, unread, onTab }: {
@@ -38,7 +39,7 @@ export function BottomBar({ tab, waiting, working, unread, onTab }: {
   onTab: (t: Tab) => void;
 }) {
   return (
-    <nav aria-label={t("phone.tabs")} className="grid shrink-0 grid-cols-4 border-t border-line bg-surface pb-[env(safe-area-inset-bottom)]">
+    <nav aria-label={t("phone.tabs")} className="grid shrink-0 grid-cols-5 border-t border-line bg-surface pb-[env(safe-area-inset-bottom)]">
       {ORDER.map((x) => (
         <button key={x} onClick={() => onTab(x)} aria-current={x === tab ? "page" : undefined}
           className={`relative flex min-h-14 flex-col items-center justify-center gap-0.5 text-[11px] ${x === tab ? "text-fg" : "text-fg-3 hover:text-fg-2"}`}>
