@@ -9,8 +9,8 @@
 //             a click on one say the same), so three lanes fit the window
 //   time      the time axis: each queue's expected start and end from the estimates (a view of its own: the columns
 //             are not proportional to time)
-//   folded    the finished queues folded into one line above the plan
-//   phone     at 390 px: the tools, the critical path, the finished line, and a tapped "after" chip's details
+//   folded    the finished queues folded into one line below the plan (the user, PL2 round 2: they stay at the bottom)
+//   phone     at 390 px: the tools, the critical path, a tapped "after" chip's details, the finished line at the list's end
 // Helpers (el, svgEl, EDGES, byId, rank…) are plan-mock.js's; the hooks run once it has loaded.
 
 const PLAN_FEATURE = (() => {
@@ -25,7 +25,7 @@ const PLAN_FEATURE = (() => {
       ...TOOLS.map(([k, label]) => el("span", { class: `tg${k === f || (f === "phone" && k === "critical") ? " on" : ""}` }, label))));
     if (hint) document.querySelector(".plan-head .hint").textContent = hint;
     if (folded) {
-      document.querySelector(".plan-head").after(el("div", { class: "folded", "data-box": "finished" },
+      document.querySelector("section[aria-label='The plan']").append(el("div", { class: "folded", "data-box": "finished" },
         el("span", { class: "fg3" }, "▸"), el("b", {}, "Finished · 3"),
         ...Object.entries(DONE).map(([id, title]) => el("span", { class: "chip done", title }, el("span", { class: "mono" }, id))),
         el("span", { class: "fg3 show" }, "show")));
@@ -235,6 +235,6 @@ const PLAN_FEATURE = (() => {
     };
   }
 
-  if (f === "folded") return { page: page("The finished queues are folded into one line.", true) };
+  if (f === "folded") return { page: page("The finished queues are folded into one line below the plan.", true) };
   return {};
 })();

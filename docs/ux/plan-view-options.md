@@ -60,10 +60,11 @@ Each has a mockup (key in brackets) and was measured at 0 faults.
   per queue with its expected start and end from the statistics. A queue starts when the last of its predecessors
   ends, and NB starts at 22:00. CH waits for approval, so it and what follows it are hatched ("if approved now").
   This view has no lines: the starts show the order.
-- **Finished queues folded** (`plan-finished-folded@1440`): one line above the plan, "Finished · 3" with their ids
-  (the title on hover) and "show". Unfolded, they would be a Done column at the left.
+- **Finished queues folded** (`plan-finished-folded@1440`): one line below the plan, "Finished · 3" with their ids
+  (the title on hover) and "show". The user decided in PL2's review that the finished queues stay at the bottom:
+  unfolded, they show there too, under the plan, not as a column at its left.
 - **On the phone** (`plan-features@390`): the same tools as chips that wrap. The critical path is marked on the list,
-  with the finished line above it. Tapping an "after" chip opens the line's details under the card. Dragging stays
+  and the finished line comes at the list's end. Tapping an "after" chip opens the line's details under the card. Dragging stays
   on the desktop (the phone has "After…").
 
 ## Recommendation
