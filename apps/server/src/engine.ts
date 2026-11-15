@@ -27,6 +27,7 @@ import {
   ClockTimers, REAL_CLOCK, Scheduler, type PlanOptions, type Clock, type ScheduleOptions,
 } from "./scheduler.ts";
 import { Recurrer, type RecurringSet } from "./recurring.ts";
+import { StaticReminder } from "./static-reminder.ts";
 import { gitBranch, recordSetup, runSetup, setupPending, worktreeFor } from "./worktree.ts";
 import { closingContext } from "./closing.ts";
 import { integrationContext } from "./integration.ts";
@@ -138,6 +139,8 @@ export class Engine implements Member {
   private readonly scheduler: Scheduler;
   /** Recurring queues: made from their template and started at their times (src/recurring.ts). */
   private readonly recurrer: Recurrer;
+  /** The monthly reminder of a project without static analysis (src/static-reminder.ts). */
+  private readonly staticReminder: StaticReminder;
   private readonly clock: Clock;
   private busy = new Set<string>();
   /** Set while Nexus drains for an update: nothing new starts. */
@@ -194,8 +197,10 @@ export class Engine implements Member {
     // Schedules are armed again; what came due while no server ran is looked at once this one is up.
     this.scheduler.armAll();
     this.recurrer = new Recurrer(store, this.clockTimers, { plan: (queueId, o) => this.scheduler.plan(queueId, o), stopped: () => this.stopped, changed: () => this.changed() });
+    this.staticReminder = new StaticReminder(store, this.clockTimers, () => this.changed());
     // The recurring queues' times too, once the engine is up: one that came while no server ran comes now, or is missed.
-    this.timers.set("starts", setTimeout(() => { this.timers.delete("starts"); this.checkStarts(); this.recurrer.armAll(); }, this.startupMs));
+    // The static analysis reminder looks then too.
+    this.timers.set("starts", setTimeout(() => { this.timers.delete("starts"); this.checkStarts(); this.recurrer.armAll(); this.staticReminder.arm(); }, this.startupMs));
   }
 
   /** Pushes what was accepted (src/accepted.ts). */
@@ -542,6 +547,8 @@ export class Engine implements Member {
   approveRecurring(id: string): string { return this.recurrer.approve(id); }
   pauseRecurring(id: string, paused: boolean): string { return this.recurrer.pause(id, paused); }
   removeRecurring(id: string): string { return this.recurrer.remove(id); }
+  /** The user declined the static analysis template (the orchestrator's `nexus static-analysis decline`). */
+  declineStaticAnalysis(reason: string, session?: string): string { return this.staticReminder.decline(reason, session); }
 
   /** The user's reorder: `queueId` after `after` (null: none before it), as in a list (Scheduler.move). */
   move(queueId: string, after: string | null): string { return this.scheduler.move(queueId, after); }

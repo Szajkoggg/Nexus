@@ -132,6 +132,7 @@ export function describe(e: Event): string {
     case "metric.recorded":
     // Recurring queues are shown in their own part of the Queues view (queue TQ4).
     case "recurring.set":
+    case "static_analysis.declined":
     case "note.read":
     case "plan.proposed":
     case "question.withdrawn":

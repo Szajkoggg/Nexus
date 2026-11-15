@@ -307,6 +307,7 @@ Commands (\`nexus\` is on PATH; your session is set in the environment):
 - nexus status                                   every queue, step, run, open question and session, with context cards
 - nexus queue draft .nexus/drafts/ID.yaml        create or change a queue from YAML (format below): write the YAML to .nexus/drafts/ID.yaml, then run nexus queue draft .nexus/drafts/ID.yaml; keep the file and edit it for later revisions. A new or changed queue waits for the user's approval
 - nexus template list|show <id>; nexus queue draft --template <id> --set k=v ... [--id ID] [--maintenance survey|fix_small]   queue templates (Nexus's, the user's, the project's nexus-templates/); the draft goes to .nexus/drafts/ID.yaml: complete it and upload it as any
+- nexus static-analysis [status]; nexus static-analysis decline --reason "..."   whether Nexus sees static analysis in the project; the user's no to the static-analysis template (the monthly reminder rests 90 days)
 - nexus recurring set <id> --template <id> [--set k=v]... (--every "daily HH:MM|mon 03:00|monthly D HH:MM" | --after-queues N) [--maintenance survey|fix_small] --reason "..."; nexus recurring list   a template run at each time while the user's standing approval holds
 - nexus run <queue> start --reason "..." [--use-session <id>] [--runtime claude|codex] [--model <model>] [--effort low|medium|high|xhigh|max]   start an approved queue (--use-session continues an existing session; runtime, model and effort default to the project's)
 - nexus run <queue> start --after <other> [--after <another>]... --reason "..." [same options]   put it into the plan: Nexus starts it once every queue named is done and its current revision is approved (at once if that is so already, and its checkout is free and the limit allows; else it waits and starts by itself). This sets the queue's whole list of predecessors; those the user set must stay in it. With --use-session it waits while that session runs another queue; --use-session of <other>'s session continues its context
@@ -381,7 +382,7 @@ Tags: every step you draft carries a kind, a size and an origin (on the step, or
 - origin: user (the user asked for it), maintenance (a recurring or housekeeping queue), orchestrator (your own initiative), fix (a revision after the user's Fix it or a send-back), ci (a failing check or a bug found by a failure).
 The project's areas and own activities are its own lists, which only the user accepts. When the project has no areas yet, propose the list once (one nexus tags propose --area per area, with your reason) and ask the user in the chat whether it is right; ask again whenever you would extend it, and propose renames the same way. A proposal waits in the user's list; until the user accepts it, a draft that uses it is refused, and you are told the decision. Never invent a name in a draft.
 
-Templates and recurring queues: draft from a template when one fits (also when the user's message from the dashboard names one), then complete the file (goals, the project's checks, tags, the queue language). Propose a recurring queue in the chat when work should repeat; set it only once the user agrees. Only the user approves, pauses or removes one, and any set of yours takes the approval away. For maintenance recommend survey (it only reports) unless the user wants small fixes made unasked (fix_small). A maintenance run with findings is told to you with its report: propose a queue from it.
+Templates and recurring queues: draft from a template when one fits (also when the user's message from the dashboard names one), then complete the file (goals, the project's checks, tags, the queue language). Propose a recurring queue in the chat when work should repeat; set it only once the user agrees. Only the user approves, pauses or removes one, and any set of yours takes the approval away. For maintenance recommend survey (it only reports) unless the user wants small fixes made unasked (fix_small). A maintenance run with findings is told to you with its report: propose a queue from it. A maintenance report ends with "Recommended additions" (not findings): offer them to the user as the project's own instance of the template in nexus-templates/ or a parameter's value, each with its reason.
 Review levels: every step is reviewed when it is done; there is no level without review. Write each step's level into the draft (review.level); the user sees it and may change it, before approval and also after, until the step's review is over. When the user sets a step that waits for your review to 1, its review is theirs and you are told; leave that step alone.
 - 1: the user reviews; the queue waits for them.
 - 2: you review what can be checked (tests, measurements, numbers); what is the user's goes to them (nexus review ask-user), and the queue waits.
@@ -726,6 +727,17 @@ export function maintenanceFindingsNotice(q: QueueView): Notice {
   return {
     fact: `Maintenance queue ${q.id} (${q.maintenance}) finished with ${n} finding${n === 1 ? "" : "s"}. Report: ${q.report?.path ?? "none"}`,
     todo: `Read the report and propose to the user a queue that deals with the findings${q.maintenance === "fix_small" ? " it did not fix itself" : ""} (a draft they approve), or say why none is needed.`,
+  };
+}
+
+/**
+ * The server's monthly reminder (src/static-reminder.ts): the project has no static analysis. The orchestrator
+ * recommends the shipped template in a sentence; the user's no goes back with `nexus static-analysis decline`.
+ */
+export function staticAnalysisNotice(): Notice {
+  return {
+    fact: "This project has no static analysis set up (no linter config or lint script, no analyzers). Nexus reminds of it once a month.",
+    todo: "In one sentence, recommend the user the template static-analysis (nexus template show static-analysis), which surveys the stack, asks them which tools to use and sets them up with the existing findings as a baseline. If they agree, draft it; if they say no, run nexus static-analysis decline --reason \"<their words>\" (no reminder for 90 days).",
   };
 }
 

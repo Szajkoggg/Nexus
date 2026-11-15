@@ -30,6 +30,7 @@ a shell command can take part.
   orchestrator/summary.md               server: the orchestrator's latest summary for a fresh session (its context care)
   drafts/<queue-id>.yaml                the orchestrator: its queue drafts (also `nexus queue draft --template`)
   recurring/<id>.yaml                   server: a recurring queue (template, values, schedule, standing approval)
+  static-analysis.yaml                  server: the static analysis reminder's last time and the user's last no
   queues/
     <queue-id>/
       queue.yaml                        server: definition, revisions, approvals
@@ -554,6 +555,7 @@ Every line:
 | `plan.proposed` | `queue`, `after` (ids), `reason` | Orchestrator only: proposes to the user a new list of predecessors for the queue that changes dependencies the user set (see "The plan") |
 | `tags.proposed` | one of `area`, `activity`, `rename` (`from`, `to`); `reason?` | Orchestrator only: proposes a change to the project's tag lists; the server records it in `tags.yaml`'s proposals and answers in `applied.jsonl` (see "Tags") |
 | `recurring.set` | `recurring`, `template`, `params`, `every?` or `after_queues?`, `maintenance?`, `reason?` | Orchestrator only: sets a recurring queue (`nexus recurring set`); the server checks it, writes `recurring/<id>.yaml` (taking the standing approval away) and answers in `applied.jsonl`. It carries no approval (see "Recurring queues") |
+| `static_analysis.declined` | `reason` | Orchestrator only: the user declined the `static-analysis` template (`nexus static-analysis decline`); the server notes it in `static-analysis.yaml`, rests the reminder for 90 days and answers in `applied.jsonl` (see "Static analysis reminder") |
 | `metric.defined` | `name`, `unit?`, `show?`, `target?`, `warn_above?`, `warn_below?` | Orchestrator only: defines one of the project's metrics, or changes it (the whole definition); the server checks it, writes `metrics.yaml` and answers in `applied.jsonl` (see "Project metrics") |
 | `metric.recorded` | `queue`, `step`, `name`, `value`, `unit`, `commit?` | Worker only (the loader ignores it from any other session): a value of one of the project's metrics for the step, with the metric's unit then and the HEAD of the worker's checkout (see "Project metrics") |
 | `review.sent_back` | `queue`, `step`, `text` | Orchestrator or user only: a step in review goes back to its worker with what to fix (see "Sending a step back") |
@@ -1083,10 +1085,12 @@ nexus report W --file <temp>/nexus-reports/<project>/W.md --summary "..." [--fin
 nexus propose-change W --file patch.yaml --reason "..."
 nexus template list | show <id>                # the queue templates in effect (see "Queue templates")
 nexus recurring list                           # the recurring queues and their state (see "Recurring queues")
+nexus static-analysis [status]                 # the stacks and static analysis Nexus sees, and the reminder's state (see "Static analysis reminder")
 # orchestrator only
 nexus queue draft --file queue.yaml
 nexus queue draft --template bugfix --set issue="..." --set area=engine [--id BF]   # writes .nexus/drafts/BF.yaml to complete and upload
 nexus recurring set weekly --template maintenance [--set scope=...] (--every "mon 03:00" | --after-queues 5) [--maintenance survey|fix_small] [--reason ...]   # through the server; the user approves it
+nexus static-analysis decline --reason "..."  # the user's no to the static-analysis template: no reminder for 90 days
 nexus answer <qid> "..." [--escalate [--recommend <option>]] [--continue|--wait]
                                                # --recommend only with --escalate: one of the question's options
 nexus session start|resume|fork|pause|stop ...
@@ -1793,7 +1797,7 @@ steps:
 
 | Layer | Folder | |
 |---|---|---|
-| `nexus` | `templates/` in Nexus's repository | shipped with Nexus: `bugfix`, `ui-change`, `spike`, `refactor`, `maintenance`, and the maintenance templates `dependencies`, `security-audit`, `dead-code`, `test-health`, `performance`, `docs-freshness` |
+| `nexus` | `templates/` in Nexus's repository | shipped with Nexus: `bugfix`, `ui-change`, `spike`, `refactor`, `maintenance`, `static-analysis`, and the maintenance templates `dependencies`, `security-audit`, `dead-code`, `test-health`, `performance`, `docs-freshness` |
 | `global` | `<NEXUS_HOME>/templates/` | the user's own, for every project |
 | `project` | `nexus-templates/` in the project's repository root | versioned with the project and seen by its agents (not under `.nexus/`, which git ignores) |
 
@@ -1903,6 +1907,34 @@ updated_at: ...
   be sent), a maintenance template's mode and the user's own words, and sends them as the user's message to the
   orchestrator (`POST /api/projects/:id/orchestrator/messages`), with the `nexus queue draft --template` command that
   writes the draft; the orchestrator drafts the queue, which waits for the user's approval as any.
+
+## Static analysis reminder
+
+Nexus ships a `static-analysis` template (`templates/static-analysis.yaml`, for any stack): survey the stack and ask the
+user which tools to use, set them up with the existing findings as a baseline, and propose the lines for the project's
+`defaults.checks` (which the user sets). While a project has none, its orchestrator is reminded of it once a month.
+
+- **Detection** (`@nexus/protocol` static-analysis.ts, `detectStaticAnalysis`: pure, on a list of the project's files
+  and a reader; `listProjectFiles` skips `node_modules`, `.git`, `.nexus`, `Library`, `Temp`, `Logs`, `obj`, `bin`,
+  `dist`, `build`, `out`, `.vs`, `.idea`, `UserSettings`, at most 6 folders deep and 20000 files). Stacks: Node (a
+  `package.json`), .NET (a `.csproj`, `.fsproj`, `.vbproj`, `.sln` or `.slnx`), Unity
+  (`ProjectSettings/ProjectVersion.txt`; its generated projects do not make it .NET). Static analysis: for Node a linter
+  config (ESLint, Biome, oxlint, JSHint, TSLint), `eslintConfig` in a package.json or a `lint` script; for .NET
+  `EnableNETAnalyzers`, `AnalysisLevel`, `AnalysisMode` or `EnforceCodeStyleInBuild` in a project or
+  `Directory.Build.props`, an analyzer package, or `dotnet_diagnostic.` rules in an `.editorconfig` or `.globalconfig`;
+  for Unity a DLL whose `.meta` carries the label `RoslynAnalyzer`, an analyzer in a `csc.rsp`, or such rules. A
+  project of no known stack is never reminded.
+- **The note**: `.nexus/static-analysis.yaml` (`StaticAnalysisNote`), written only by the server
+  (apps/server/src/static-reminder.ts): `reminded_at`, the last reminder; `declined` (`at`, `reason`, `session?`),
+  the user's last no.
+- **The reminder**: the engine looks at its start and then on its clock: when due (a month, 30 days, after
+  `reminded_at`, and not before 90 days after `declined.at`) and the project has none, it writes `reminded_at`. The
+  orchestrator is told that latest reminder once (also a session started after it), unless the user declined since:
+  "This project has no static analysis set up ...", with the instruction to recommend the template in one sentence. A
+  project that has static analysis is looked at again a month later.
+- **The user's no**: `nexus static-analysis decline --reason "..."` (orchestrator only) records
+  `static_analysis.declined`; the server writes `declined` and answers in `applied.jsonl` ("noted: ... no reminder
+  until <time>"). `nexus static-analysis [status]` (any session) prints the stacks, what was found, and the note.
 
 ## One queue per checkout, and a limit
 

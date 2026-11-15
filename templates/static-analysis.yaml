@@ -1,0 +1,73 @@
+# Static analysis setup, for any stack: survey it, let the user choose the tools, set them up with the existing findings
+# as a baseline, and propose the checks. Nexus reminds a project that has none of this template once a month.
+template:
+  id: static-analysis
+  title: Static analysis setup
+  description: Set up static analysis for the project's stack (a linter, analyzers, a formatter check), the existing findings taken as a baseline; the user chooses the tools.
+params:
+  - name: stack
+    description: "the project's stack, if known (for example Node with TypeScript, .NET 8, Unity 2022 with C#); left empty, the first step finds it"
+    default: ""
+  - name: test_command
+    description: "runs the project's tests (Node: npm test; .NET: dotnet test; Unity: the Test Runner in batch mode)"
+title: "Static analysis setup"
+description: |
+  The project gets static analysis for its stack ({{stack}}): the tools the user chooses, set up so that the existing
+  findings do not fail it (a baseline), and its checks proposed for the project's settings. Examples: ESLint (with
+  typescript-eslint) or Biome for Node; the .NET analyzers (EnableNETAnalyzers, AnalysisLevel), Roslynator or
+  StyleCop.Analyzers and `dotnet format --verify-no-changes` for .NET; the same analyzers as DLLs labelled
+  RoslynAnalyzer, an .editorconfig and `dotnet format` on the generated solution for Unity.
+coding: true
+origin: user
+stop_conditions:
+  - The choice of tools or of how strict they are comes up, which is the user's; ask with nexus ask, with a recommendation.
+  - Setting up would need the network beyond installing the chosen tools (an account, a hosted service); ask first.
+  - A file to commit has changes this queue did not make; ask with nexus ask, never commit them.
+  - The same check fails three times in a row after attempted fixes.
+steps:
+  - id: "{{id}}1"
+    title: "Survey the stack and propose the tools"
+    goal: |
+      Find the project's stack ({{stack}}; empty: from its files), what static analysis it already has (a linter or
+      analyzer config, a lint script, rules in an .editorconfig) and what the stack supports. Propose the tools to
+      the user with nexus ask: two or three options, each with what it checks, what it costs to run, and how many
+      findings it would likely report on the code as it is; recommend one. The choice is the user's: wait for the
+      answer. Change nothing, commit nothing.
+    acceptance:
+      - The stack and what it has already, named.
+      - A nexus ask with the options and a recommendation, and the user's answer.
+    review:
+      level: 2
+    kind: research
+    activities: [build]
+    size: S
+  - id: "{{id}}2"
+    title: "Set up the chosen tools with a baseline"
+    goal: |
+      Set up the tools the user chose in {{id}}1, with a command that runs them (a lint script, or its stack's
+      equivalent). Take the findings of the code as it is as a baseline (a baseline file, or the rules found failing
+      set to warnings with a note) so that the command passes now and fails on new findings; fix none of the old
+      findings here. Add the command to the project's documentation for contributors (its AGENTS.md if it has one).
+      {{test_command}} passes as before.
+    acceptance:
+      - The command runs the tools and passes on the code as it is; a new finding makes it fail (shown with a small trial, undone).
+      - The baseline named with its number of findings, for a later queue to work down.
+    review:
+      level: 2
+    kind: code
+    activities: [build]
+    size: M
+  - id: "{{id}}3"
+    title: "Propose the checks"
+    goal: |
+      Propose to the user the lines for the project's checks (defaults.checks in the project's settings, which the
+      user sets in the dashboard): the command of {{id}}2, and a formatter check if one was chosen. Say in the summary
+      which lines to add and why; the setting itself is the user's. If the project has CI, propose the same step
+      there as a finding, without changing it.
+    acceptance:
+      - The lines for defaults.checks proposed, each with its reason; nothing in the project's settings changed by the step.
+    review:
+      level: 1
+    kind: docs
+    activities: [build]
+    size: S

@@ -869,6 +869,7 @@ function apply(
     case "tags.proposed":
     case "metric.defined":
     case "recurring.set":
+    case "static_analysis.declined":
     default:
       return;
   }

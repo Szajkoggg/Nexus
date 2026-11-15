@@ -338,7 +338,7 @@ once you accepted it. A renamed tag reads as its new name everywhere, so what wa
 together.
 
 **Queue templates.** "New queue from template" at the top of a project's queues (the Queues tab on a phone) lists
-the templates: Nexus's own (bug fix, UI change with pictures, spike, refactor, maintenance and the six below), yours for every project
+the templates: Nexus's own (bug fix, UI change with pictures, spike, refactor, maintenance, static analysis setup and the six maintenance templates below), yours for every project
 (in `<NEXUS_HOME>/templates/`, `%APPDATA%\Nexus\templates\` by default) and the project's (`nexus-templates/` in its
 repository, versioned with it); a project's template replaces one of yours with the same id, and yours replaces
 Nexus's. Pick one, fill in what it asks (a maintenance template also asks its mode) and add anything else; "Send to
@@ -357,6 +357,12 @@ a test, in any mode. `performance` measures with the project's command and compa
 `docs-freshness` compares the documents with the code (fix_small fixes typos only). Each report ends with
 "Recommended additions": what the project's stack supports but is not set up, for the orchestrator to offer you.
 Nexus's own instances, filled in for this repository, are in `nexus-templates/`.
+
+**Static analysis setup.** The `static-analysis` template sets up static analysis for any stack (ESLint or Biome
+for Node, the .NET analyzers and `dotnet format` for .NET and Unity): it asks you which tools to use, takes the
+existing findings as a baseline and proposes the lines for your project's checks. While a Node, .NET or Unity project
+has no linter or analyzers, its orchestrator recommends the template once a month; say no and it stays quiet for 90
+days.
 
 **Recurring queues.** The orchestrator can set a template to recur, at a time (every day, a weekday or a day of the
 month, the PC's local time) or after every N queues of the project are done; it proposes one in the chat first. Each

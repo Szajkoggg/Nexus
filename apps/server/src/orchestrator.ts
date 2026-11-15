@@ -16,7 +16,7 @@ import { describeDeployChanges, type DeployChanges } from "./deploy.ts";
 import type { PlanNotice } from "./deploy-plan.ts";
 import {
   acceptedNoteNotice, approvalNotice, discardNotice, liftNotice, mergedNotice, mergeWaitNotice, missedStartNotice, noticeText, orchestratorBriefing, pausedNotice,
-  carriedMessages, formatInbox, orchestratorFreshSeed, orchestratorSummaryRequest, summaryLists, questionNotice, rejectionNotice, restartedNotice, fixAskedNotice, levelToUserNotice, reviewNotice, awayOnNotice, awayEndNotice, awayStuckNotice, planDecisionNotice, planHeldNotice, runEndNotice, maintenanceFindingsNotice, stepNoteNotice, tagDecisionNotice, fallbackNotice, metricNotice, userMessage, withdrawalNotice,
+  carriedMessages, formatInbox, orchestratorFreshSeed, orchestratorSummaryRequest, summaryLists, questionNotice, rejectionNotice, restartedNotice, fixAskedNotice, levelToUserNotice, reviewNotice, awayOnNotice, awayEndNotice, awayStuckNotice, planDecisionNotice, planHeldNotice, runEndNotice, maintenanceFindingsNotice, staticAnalysisNotice, stepNoteNotice, tagDecisionNotice, fallbackNotice, metricNotice, userMessage, withdrawalNotice,
 } from "./prompts.ts";
 import { shellRules } from "./shell-rules.ts";
 
@@ -33,7 +33,7 @@ const DRAFT_TOOLS = [`Write(${DRAFTS}/**)`, `Edit(${DRAFTS}/**)`];
 const NEVER = ["NotebookEdit", "MultiEdit"];
 
 /** The orchestrator's events the server carries out (applyRequests), each once, its outcome in applied.jsonl. */
-const REQUESTS: ReadonlySet<EventType> = new Set(["queue.drafted", "session.request", "status.set", "review.sent_back", "plan.proposed", "tags.proposed", "metric.defined", "recurring.set"]);
+const REQUESTS: ReadonlySet<EventType> = new Set(["queue.drafted", "session.request", "status.set", "review.sent_back", "plan.proposed", "tags.proposed", "metric.defined", "recurring.set", "static_analysis.declined"]);
 
 /**
  * The orchestrator's context care (contextCare), recorded in its session's applied.jsonl: the request for its summary
@@ -522,6 +522,7 @@ ${n.text}` });
     if (e.type === "recurring.set") {
       return this.engine.setRecurring({ id: e.recurring, template: e.template, params: e.params, every: e.every, after_queues: e.after_queues, maintenance: e.maintenance, by: "orchestrator", reason: e.reason });
     }
+    if (e.type === "static_analysis.declined") return this.engine.declineStaticAnalysis(e.reason, e.session);
     if (e.type === "status.set") {
       const message = orchestratorStatusChange(this.store, { queue: e.queue, step: e.step, to: e.to, reason: e.reason });
       // A cancel reaches the user as a push notification, like other notifications; nothing waits in their list.
@@ -619,6 +620,14 @@ ${n.text}` });
     for (const d of updateOnly ? [] : state.tags.decisions) {
       if (d.at < since) continue;
       items.push({ key: `notify:tagdecision:${d.proposal.id}`, ...tagDecisionNotice(d) });
+    }
+    // A project without static analysis (src/static-reminder.ts): the server's latest monthly reminder, told once (also
+    // to a session started after it), unless the user declined since.
+    if (!updateOnly) {
+      const note = this.store.readStaticAnalysisNote();
+      if (note.reminded_at && !(note.declined && note.declined.at >= note.reminded_at)) {
+        items.push({ key: `notify:static-analysis:${note.reminded_at}`, ...staticAnalysisNotice() });
+      }
     }
     for (const x of updateOnly ? [] : state.questions) {
       const asker = state.sessions.find((y) => y.id === x.session);

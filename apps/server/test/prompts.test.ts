@@ -489,3 +489,16 @@ test("the orchestrator's briefing and notices on parallel worktrees and merging 
   const done = mergedNotice(q, { into: "main", sha: "0123456789abcdef" });
   assert.equal(done.fact, "Queue W is merged back: main moved forward to its integrated work (0123456), by a fast-forward. Nothing was pushed.");
 });
+
+test("the static analysis reminder: the notice, the command and the recommended additions in the orchestrator's briefing (queue MT)", async () => {
+  const { orchestratorBriefing, staticAnalysisNotice } = await import("../src/prompts.ts");
+  const orch = orchestratorBriefing("Pilot", 60);
+  for (const part of [
+    "nexus static-analysis decline --reason \"...\"",
+    "A maintenance report ends with \"Recommended additions\" (not findings)",
+  ]) assert.ok(orch.includes(part), `the orchestrator's briefing has ${JSON.stringify(part)}`);
+  const n = staticAnalysisNotice();
+  assert.match(n.fact, /^This project has no static analysis set up/);
+  assert.match(n.todo, /^In one sentence, recommend the user the template static-analysis/);
+  assert.match(n.todo, /nexus static-analysis decline --reason "<their words>" \(no reminder for 90 days\)/);
+});

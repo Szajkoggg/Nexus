@@ -136,6 +136,7 @@ const VALUES: Record<string, Record<string, string>> = {
   spike: { question: "Can the CLI start faster?" },
   refactor: { target: "store.ts", reason: "smaller functions" },
   maintenance: {},
+  "static-analysis": { test_command: "npm test" },
   ...SIX,
 };
 

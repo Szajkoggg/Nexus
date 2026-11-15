@@ -9,7 +9,7 @@ import { monotonicFactory } from "ulid";
 import YAML from "yaml";
 import type { z } from "zod";
 import {
-  Activity, Applied, AwayFile, ChatEntry, PinsFile, RecurringFile, Refusal, Delivery, Event, GlobalSettings, InboxEntry, MaxRunning, MetricsFile, NoteMeta, GitFile, ProjectFile, PushFile, QueueFile, type QueueInput, LegacyReviewPolicy, RegistryFile, RunFile, RuntimeFile, SessionFile, StartFile, PlanFile, StoredProject, TagsFile, TurnRecord, UsageFile,
+  Activity, Applied, AwayFile, ChatEntry, PinsFile, RecurringFile, Refusal, Delivery, Event, GlobalSettings, InboxEntry, MaxRunning, MetricsFile, NoteMeta, GitFile, ProjectFile, PushFile, QueueFile, type QueueInput, LegacyReviewPolicy, RegistryFile, RunFile, RuntimeFile, SessionFile, StartFile, StaticAnalysisNote, PlanFile, StoredProject, TagsFile, TurnRecord, UsageFile,
   type Note,
 } from "./schemas.ts";
 import { applyChange, builtInSettings, effectiveProject, migrateStored, storedFrom } from "./settings.ts";
@@ -351,6 +351,13 @@ export class ProjectStore {
     const f = join(this.dir, "recurring", `${id}.yaml`);
     if (existsSync(f)) { unlinkSync(f); writes++; }
   }
+  /** The server's note on the static analysis reminder (.nexus/static-analysis.yaml); empty while there is none. */
+  readStaticAnalysisNote(): StaticAnalysisNote {
+    const f = join(this.dir, "static-analysis.yaml");
+    return existsSync(f) ? readYaml(f, StaticAnalysisNote) : StaticAnalysisNote.parse({ protocol: 1 });
+  }
+  /** Written only by the server (apps/server/src/static-reminder.ts). */
+  writeStaticAnalysisNote(n: StaticAnalysisNote): void { writeYaml(join(this.dir, "static-analysis.yaml"), StaticAnalysisNote.parse(n)); }
   /** The project's metrics (.nexus/metrics.yaml); none while the file does not exist. */
   readMetrics(): MetricsFile {
     const f = join(this.dir, "metrics.yaml");

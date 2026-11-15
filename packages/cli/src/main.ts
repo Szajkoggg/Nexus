@@ -11,6 +11,7 @@ import {
   NEXUS_ACTIVITIES, TAG_KINDS, TAG_ORIGINS, TAG_SIZES, tagIssues, tagProposalText, tagsText,
   STAT_DIMENSIONS, readTurns, sinceTime, statDimension, statsReport, statsText, stepStats,
   CHECK_METRIC, isCheckMetric, metricDef, metricDefText, metricRequestIssues, metricValueText,
+  projectStaticAnalysis, staticReminderDue,
   TemplateError, fillTemplate, filledTemplateYaml, parseEvery, MaintenanceMode, readTemplates, templateQueueId, unusableTemplate, type MergedTemplates,
   type PictureRole, type ReviewItem, type Role, type Runtime, type SessionFile,
 } from "@nexus/protocol";
@@ -61,6 +62,10 @@ Agent commands (session from NEXUS_SESSION or --session):
                                       this project's mode for a maintenance template. Any set takes the standing
                                       approval away: the user approves it again (only the user approves, pauses or
                                       removes one, in the dashboard)
+  nexus static-analysis [status]      whether Nexus sees static analysis in the project (a linter config or lint script,
+                                      .NET or Unity analyzers), and the monthly reminder's state
+  nexus static-analysis decline --reason <text>   (orchestrator only) the user said no to the static-analysis
+                                      template: the server notes it, and the reminder rests for 90 days
   nexus recurring list                the recurring queues: template, schedule, state, next and last run
   nexus template list                 the templates in effect: Nexus's, the user's global ones (<NEXUS_HOME>/templates/)
                                       and the project's (nexus-templates/ in its repository); a project's replaces a
@@ -710,6 +715,29 @@ const commands: Record<string, () => void | Promise<void>> = {
       type: "recurring.set", recurring: need(args[2], "<id>"), template: need(o.template, "--template <id>"), params: setValues(),
       every: o.every, after_queues: afterQueues, maintenance: maintenanceMode(), reason: o.reason?.trim() || undefined,
     });
+    report(waitApplied(st, s.id, e.id));
+  },
+
+  /**
+   * `nexus static-analysis [status]` (reads the project and the server's note) and `nexus static-analysis decline`
+   * (the orchestrator; the server notes the user's no in .nexus/static-analysis.yaml).
+   */
+  "static-analysis"() {
+    const sub = args[1] ?? "status";
+    const st = store();
+    if (sub === "status") {
+      const a = projectStaticAnalysis(st.readProject().root);
+      const note = st.readStaticAnalysisNote();
+      console.log(`stacks: ${a.stacks.length ? a.stacks.join(", ") : "none Nexus knows (no reminder)"}`);
+      console.log(a.found.length ? `static analysis: ${a.found.join("; ")}` : "static analysis: none found");
+      if (note.reminded_at) console.log(`last reminder: ${note.reminded_at}`);
+      if (note.declined) console.log(`declined: ${note.declined.at} (${note.declined.reason})`);
+      if (a.stacks.length && !a.found.length) console.log(`next reminder: ${staticReminderDue(note) ? new Date(staticReminderDue(note)).toISOString() : "when the server next looks"}`);
+      return;
+    }
+    if (sub !== "decline") throw new UsageError("nexus static-analysis [status] | nexus static-analysis decline --reason <text>");
+    const s = orchestrator(st);
+    const e = emit(st, s, { type: "static_analysis.declined", reason: need(o.reason?.trim() || undefined, "--reason") });
     report(waitApplied(st, s.id, e.id));
   },
 

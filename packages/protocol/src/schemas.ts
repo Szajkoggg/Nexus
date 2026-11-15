@@ -772,6 +772,11 @@ export const Event = z.discriminatedUnion("type", [
    * A worker records a value of one of the project's metrics (`nexus metric record`), for its step at work, with the
    * metric's unit as it was then and the HEAD of its checkout (`commit`; absent outside a git repository).
    */
+  /**
+   * The orchestrator says the user declined the "static analysis setup" template (`nexus static-analysis decline`):
+   * the server notes it in .nexus/static-analysis.yaml, and the monthly reminder rests for 90 days.
+   */
+  z.object({ ...base, type: z.literal("static_analysis.declined"), reason: z.string().min(1) }),
   z.object({ ...base, type: z.literal("metric.recorded"), ...qs, name: z.string().min(1), value: z.number(), unit: z.string(), commit: z.string().optional() }),
   z.object({ ...base, type: z.literal("log"), level: z.enum(["info", "warn", "error"]), text: z.string() }),
   /**
@@ -815,6 +820,7 @@ export type EventType = Event["type"];
 export const ORCHESTRATOR_ONLY: ReadonlySet<EventType> = new Set([
   "answer.given", "queue.drafted", "session.request", "review.accepted", "review.sent_back", "review.asked_user", "status.set",
   "review.provisional", "plan.proposed", "tags.proposed", "metric.defined", "recurring.set",
+  "static_analysis.declined",
 ]);
 
 /** Event types only a worker session may write: a metric's value belongs to a step's work (metrics.ts). */
@@ -1290,6 +1296,18 @@ export const RecurringFile = z.object({
   updated_at: Time,
 });
 export type RecurringFile = z.infer<typeof RecurringFile>;
+
+/**
+ * .nexus/static-analysis.yaml: the server's note on the reminder that a project has no static analysis
+ * (static-analysis.ts). `reminded_at`: the last reminder to the orchestrator; `declined`: the user's last no, which
+ * rests the reminder for 90 days. Written only by the server.
+ */
+export const StaticAnalysisNote = z.object({
+  protocol: z.literal(1),
+  reminded_at: Time.optional(),
+  declined: z.object({ at: Time, reason: z.string(), session: Id.optional() }).optional(),
+});
+export type StaticAnalysisNote = z.infer<typeof StaticAnalysisNote>;
 
 /** .nexus/metrics.yaml: the project's metrics, in the order they were first defined. Written only by the server. */
 export const MetricsFile = z.object({
