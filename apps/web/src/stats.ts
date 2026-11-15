@@ -2,7 +2,7 @@
 // form: docs/ux/stats-mockups.md): the range's start, the comparison rows by model or effort, the headline figures,
 // the usage windows' panels. Pure and unit tested; the report and the days come from GET /api/stats and
 // GET /api/usage/days (packages/protocol/src/stats.ts).
-import { dayKey, type StatFilter, type StatGroup, type StatsReport, type UsageDays } from "@nexus/protocol/stats";
+import { byRuntime, dayKey, type StatFilter, type StatGroup, type StatsReport, type UsageDays } from "@nexus/protocol/stats";
 import { windowKind } from "@nexus/protocol/digest";
 
 export const RANGES = ["7d", "30d", "90d", "all"] as const;
@@ -45,7 +45,7 @@ export function weeklyUse(g: Pick<StatGroup, "usage" | "usage_steps">): WeeklyUs
       return { runtime, window, perStep: n ? (sum / n) * 100 : 0, n };
     })
     .filter((u) => windowKind(u.window) === "7d" && u.n > 0)
-    .sort((a, b) => (a.runtime === "claude" ? -1 : b.runtime === "claude" ? 1 : a.runtime.localeCompare(b.runtime)))
+    .sort((a, b) => byRuntime(a.runtime, b.runtime))
     .map(({ runtime, window, perStep }) => ({ runtime, window, perStep }));
 }
 

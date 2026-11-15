@@ -237,6 +237,9 @@ interface UsageDay {
 /** GET /api/usage/days: the days (local dates, oldest first) and each window's values for them. */
 export interface UsageDays { days: string[]; windows: UsageDay[] }
 
+/** Runtimes in the order the statistics list them: Claude Code's first, then by name. */
+export const byRuntime = (a: string, b: string): number => (a === b ? 0 : a === "claude" ? -1 : b === "claude" ? 1 : a.localeCompare(b));
+
 /** A local date as the days are keyed (2026-11-14): the server's days here, the browser's in the Stats view. */
 export const dayKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
@@ -283,7 +286,7 @@ export function usageDays(turns: readonly TurnRecord[], from: Date, to: Date): U
     });
     windows.push({ runtime, window, kind, values });
   }
-  windows.sort((a, b) => (a.runtime === b.runtime ? 0 : a.runtime === "claude" ? -1 : b.runtime === "claude" ? 1 : a.runtime.localeCompare(b.runtime))
+  windows.sort((a, b) => byRuntime(a.runtime, b.runtime)
     || (a.kind === b.kind ? a.window.localeCompare(b.window) : a.kind === "5h" ? -1 : 1));
   return { days: days.map((d) => d.key), windows };
 }
