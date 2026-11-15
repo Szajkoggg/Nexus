@@ -11,7 +11,7 @@ import { join } from "node:path";
 import type { IncomingMessage } from "node:http";
 import webpush from "web-push";
 import QRCode from "qrcode";
-import { knownTimeZone, nexusHome, notifySettingsOf, now, parseNotifySettings, shouldNotify, type AttentionItem, type NotificationKind, type NotifyKind, type NotifySettings } from "@nexus/protocol";
+import { attentionKey, knownTimeZone, nexusHome, notifySettingsOf, now, parseNotifySettings, shouldNotify, type AttentionItem, type NotificationKind, type NotifyKind, type NotifySettings } from "@nexus/protocol";
 
 const COOKIE = "nexus_auth";
 const authFile = () => join(nexusHome(), "auth.json");
@@ -230,10 +230,6 @@ const LABEL: Record<AttentionItem["kind"], string> = {
   question: "Question", stopped: "Stopped", approval: "Needs approval", review: "Review", failed: "Failed", start: "Did not start",
   provisional: "To confirm", plan: "The plan", merge: "Merging back", tags: "Tags", recurring: "Recurring",
 };
-// A stopped queue is one item whatever happens to its step (a skip by the orchestrator is no news for the user). A
-// plan's items: one per proposal (by its time) and one per predecessor that holds the queue. A tag proposal: by its id.
-// A recurring queue's: by its id and time (a new approval to give, or another time without a run, is news again).
-const key = (a: AttentionItem) => [a.kind, a.queue, a.lift ? undefined : a.step, a.qid, a.plan?.predecessor ?? (a.plan?.proposal ? a.at : undefined), a.tags?.id, a.recurring, a.recurring ? a.at : undefined].join("/");
 
 /**
  * Pushes what newly appears in a project's "waiting for you" list. The first look at a project is the baseline,
@@ -246,19 +242,19 @@ export class AttentionWatch {
   /** A project removed from Nexus: added again, its first look is a baseline again (nothing old is pushed). */
   forget(id: string): void { this.seen.delete(id); }
   check(project: { id: string; name: string }, items: AttentionItem[]): void {
-    const keys = new Set(items.map(key));
+    const keys = new Set(items.map(attentionKey));
     const before = this.seen.get(project.id);
     this.seen.set(project.id, keys);
     if (!before) return;
     for (const a of items) {
-      if (before.has(key(a))) continue;
+      if (before.has(attentionKey(a))) continue;
       const where = [a.queue, a.step].filter(Boolean).join("/");
       void this.send({
         title: `${project.name}: ${LABEL[a.kind]}`,
         body: `${where ? where + " " : ""}${a.text.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\*\*|`/g, "")}`.slice(0, 180),
         // A stopped queue's notification opens the queue, whose stop box has Continue.
         url: `/#/${[project.id, a.queue, a.lift ? undefined : a.step].filter(Boolean).map((x) => encodeURIComponent(x!)).join("/")}`,
-        tag: `${project.id}:${key(a)}`,
+        tag: `${project.id}:${attentionKey(a)}`,
       }, { kind: a.kind satisfies NotifyKind });
     }
   }

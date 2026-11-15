@@ -1,6 +1,5 @@
 // Data access for the dashboard: the server's HTTP API and its change notifications.
 import { useEffect, useReducer, useRef, useState } from "react";
-import type { AttentionItem } from "@nexus/protocol";
 import { Action, type ActionState } from "./action.ts";
 import { HttpError, request } from "./http.ts";
 import { Query, Reloads, Requests, fetchJson, type LiveMessage, type QueryView, type Version } from "./query.ts";
@@ -65,11 +64,8 @@ export function useAction(): ActionState & { run: Action["run"]; fail: Action["f
   return { ...state, run: action.run, fail: action.fail };
 }
 
-/**
- * A stopped queue is one item whatever happens to its step (as the server's push notifications key it); a tag
- * proposal is one item each.
- */
-export const attentionKey = (a: AttentionItem) => [a.kind, a.queue, a.lift ? undefined : a.step, a.qid, ...(a.tags ? [a.tags.id] : [])].join("/");
+/** A waiting item's key within its project, the same as the server's push notifications use. */
+export { attentionKey } from "@nexus/protocol/attention";
 
 export const fileUrl = (project: string, path: string) => projectUrl(project, `/file?path=${enc(path)}`);
 
