@@ -521,33 +521,29 @@ app.post("/api/projects/:id/queues/:queue/steps/:step/confirm", act((st, _b, p) 
 app.post("/api/projects/:id/queues/:queue/steps/:step/accept", act((_st, b, p, e) => e.engine.acceptReview(p("queue"), p("step"), b.text, b.note_to)));
 
 // Removing the project from Nexus (src/removal.ts), the user's only: there is no CLI command for it, and the guard above
-// refuses a request that does not come from the dashboard's own page. What the server's live parts say about it:
-function liveParts(e: Entry) {
+// refuses a request that does not come from the dashboard's own page.
+/**
+ * What removing the project would be now: from its state read again from its files (a write from another process may
+ * not have come through yet), and from what the server's live parts say.
+ */
+function removalNow(e: Entry): RemovalView {
+  e.state = undefined; e.error = undefined;
+  const s = stateOf(e);
   const plan = planner.view()?.after;
-  return {
+  return removalView(e.root, s?.project.name ?? e.id, s, {
     engineIdle: e.engine.idle(), orchestratorIdle: e.orchestrator.idle(), conversationsIdle: e.conversations.idle(),
     merging: e.merger.merging(), updating: lifecycle.busy,
     deploy: plan?.project === e.id ? { queue: plan.queue, step: plan.step } : undefined,
-  };
+  });
 }
-/** The project's state read again from its files (a write from another process may not have come through yet). */
-function freshState(e: Entry): ProjectState | undefined {
-  e.state = undefined; e.error = undefined;
-  return stateOf(e);
-}
-app.get("/api/projects/:id/removal", (c) => {
-  const e = c.get("entry");
-  const s = freshState(e);
-  return c.json(removalView(e.root, s?.project.name ?? e.id, s, liveParts(e)) satisfies RemovalView);
-});
+app.get("/api/projects/:id/removal", (c) => c.json(removalNow(c.get("entry"))));
 // `delete_data: true` (with `name`, the project's name as typed): its .nexus folder is deleted too. Refused (409, with
 // `blockers`) while anything runs in the project.
 app.post("/api/projects/:id/remove", async (c) => {
   const e = c.get("entry");
   const body = (await c.req.json().catch(() => ({}))) as Body;
   try {
-    const s = freshState(e);
-    const view = removalView(e.root, s?.project.name ?? e.id, s, liveParts(e));
+    const view = removalNow(e);
     const { deleteData } = checkRemoval(e.id, e.root, view, body);
     // Off the registry and out of this server in one go: no request in between may load it again.
     unregister(e.id, e.root);
