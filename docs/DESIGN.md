@@ -1784,6 +1784,14 @@ in the protocol `PROTOCOL_VERSION`, `EventOf`, `hasOwn`, `isClosingStep` and the
 aliases. No baseline was needed. `tsc --noUnusedLocals` would find about a hundred unused locals and imports more; not
 switched on, a matter for a later queue.
 
+**The project's checks.** `npm run lint` is a check of every step, also of queues approved before it existed, without
+a new revision of each: a project setting, `defaults.checks`, puts its checks before every queue's own. It is
+project-only, not global: a global `npm run lint` would break every project that is not on Node. A run fixes the list
+when it starts (`checks` in run.yaml) instead of reading the setting at each step, so a running queue's steps all run
+the same checks and its reviews judge them by the same list; the change comes with the queue's next start. A check
+both lists name runs once (the queue need not drop its own `npm run lint`). Shown in the approval view, marked as the
+project's, the way the project's stop conditions are.
+
 ## Open questions
 
 1. **The orchestrator on Codex.** The orchestrator runs on Claude Code only: its read-only guarantee rests on Claude

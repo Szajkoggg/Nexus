@@ -223,6 +223,12 @@ export const ProjectFile = z.object({
      * auto`), before its first step opens, through the shell (Nexus: `npm ci`). A failure halts the run with the reason.
      */
     worktree_setup: z.string().optional(),
+    /**
+     * The project's checks (project only): run in every step of every queue, before the queue's own checks (a check
+     * both name runs once). A run fixes them when it starts (`checks` in run.yaml), so a change reaches a queue at its
+     * next run. Empty (the default): only the queue's checks.
+     */
+    checks: z.array(z.string()).default([]),
   })).prefault({}),
   runtimes: z.object({
     /** The runtime a run uses when its start does not name one. */
@@ -289,6 +295,7 @@ export const StoredProject = z.object({
     usage_pause_threshold: own(Fraction),
     worktree_dir: z.string().optional(),
     worktree_setup: z.string().optional(),
+    checks: z.array(z.string()).optional(),
   })).prefault({}),
   runtimes: z.object({
     default: own(WorkerRuntime),
@@ -815,6 +822,11 @@ export const RunFile = z.object({
   model: z.string().optional(),
   effort: Effort.optional(),
   from_defaults: z.array(z.enum(["runtime", "model", "effort"])).optional(),
+  /**
+   * The project's checks (`defaults.checks`) as they were when the run started: every step of the run runs them before
+   * the queue's own. A change of the setting reaches the queue at its next run. Absent (older runs): none.
+   */
+  checks: z.array(z.string()).optional(),
   /** The step whose end Nexus asked the session to write its context summary for, before a fresh session (asked once). */
   summary_asked: Id.optional(),
   /**

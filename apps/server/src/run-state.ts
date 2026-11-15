@@ -10,11 +10,14 @@ import { ActionError, HOLDING_RUN_STATES, runIsOlder, stopPlace, type Effort, ty
 export function startedRun(o: {
   session: string; revision: number; runtime: "claude" | "codex"; model?: string; effort?: Effort; after?: string[]; at: string;
   from_defaults?: ("runtime" | "model" | "effort")[];
+  /** The project's checks (defaults.checks) now: the run keeps them for all its steps. */
+  checks?: string[];
 }): RunFile {
   return {
     protocol: 1, session: o.session, state: "running", started_at: o.at, updated_at: o.at, revision: o.revision,
     runtime: o.runtime, model: o.model, effort: o.effort, after: o.after,
     ...(o.from_defaults?.length ? { from_defaults: o.from_defaults } : {}),
+    ...(o.checks?.length ? { checks: o.checks } : {}),
   };
 }
 

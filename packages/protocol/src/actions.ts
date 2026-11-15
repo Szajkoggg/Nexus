@@ -9,6 +9,7 @@ import { HOLDING_RUN_STATES } from "./times.ts";
 import { commentTarget, isApproved, loadProjectState, pendingProvisional, type ProjectState, type QueueView } from "./state.ts";
 import { validAllowRule } from "./refusals.ts";
 import { closingStepId, integrationStepId, stepDefs } from "./closing.ts";
+import { stepChecks } from "./steps.ts";
 
 export class ActionError extends Error {
   readonly status: number;
@@ -658,6 +659,7 @@ export function updateSettings(store: ProjectStore, patch: unknown): void {
   };
   const r = ProjectFile.safeParse(next);
   if (!r.success) throw new ActionError(r.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "));
+  r.data.defaults.checks = stepChecks(r.data.defaults.checks, []);
   const notes = r.data.conversations.notes_dir;
   if (notes !== undefined) r.data.conversations.notes_dir = notesDir(notes);
   store.updateProject(() => r.data, follow, own);

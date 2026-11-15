@@ -11,8 +11,9 @@ Acceptance:
 - It is tested
 
 Checks for every step:
-- npm run typecheck
+- npm run lint
 - npm test
+- npm run typecheck
 
 Review to prepare: Before/after shots of the page
 Prepare it by Nexus's standard: read `nexus help review` first (view keys, roles, the same conditions on both sides of a pair).
@@ -63,8 +64,9 @@ Acceptance:
 - It is tested
 
 Checks for every step:
-- npm run typecheck
+- npm run lint
 - npm test
+- npm run typecheck
 
 Review to prepare: Before/after shots of the page
 Prepare it by Nexus's standard: read `nexus help review` first (view keys, roles, the same conditions on both sides of a pair).
@@ -85,8 +87,9 @@ Goal:
 Do the second thing.
 
 Checks for every step:
-- npm run typecheck
+- npm run lint
 - npm test
+- npm run typecheck
 
 Stop conditions (meeting one ends the queue: report it with `nexus stop`):
 - A file outside the repository would change.
@@ -121,8 +124,9 @@ Acceptance:
 - Third acceptance
 
 Checks for every step:
-- npm run typecheck
+- npm run lint
 - npm test
+- npm run typecheck
 
 Stop conditions (meeting one ends the queue: report it with `nexus stop`):
 - A file outside the repository would change.
@@ -162,8 +166,9 @@ Acceptance:
 - Last acceptance
 
 Checks for every step:
-- npm run typecheck
+- npm run lint
 - npm test
+- npm run typecheck
 
 Stop conditions (meeting one ends the queue: report it with `nexus stop`):
 - A file outside the repository would change.
@@ -200,8 +205,9 @@ Acceptance:
 - Last acceptance
 
 Checks for every step:
-- npm run typecheck
+- npm run lint
 - npm test
+- npm run typecheck
 
 Stop conditions (meeting one ends the queue: report it with `nexus stop`):
 - A file outside the repository would change.

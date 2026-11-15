@@ -14,6 +14,19 @@ export function stepValuesText(step: Pick<StepDef, "runtime" | "model" | "effort
   return parts.length ? parts.join(" · ") : undefined;
 }
 
+/**
+ * The checks a step of a queue runs: the project's (`defaults.checks`, as its run fixed them) first, then the queue's
+ * own; a check named by both (or twice) runs once, where it first comes.
+ */
+export function stepChecks(project: readonly string[] | undefined, queue: readonly string[]): string[] {
+  const out: string[] = [];
+  for (const c of [...(project ?? []), ...queue]) {
+    const name = c.trim();
+    if (name && !out.includes(name)) out.push(name);
+  }
+  return out;
+}
+
 /** One check's outcome as reported; `duration`: how long it ran, in seconds, when the reporter gave it. */
 export interface CheckView { name: string; ok: boolean; summary?: string; duration?: number; at: string }
 /** The latest outcome of each check, in the order the checks were first reported (a check run again replaces its earlier outcome). */

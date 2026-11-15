@@ -230,7 +230,8 @@ export class Engine implements Member {
     // again at each step (runValues).
     const from_defaults = reused ? [] : ([["runtime", opts.runtime], ["model", opts.model], ["effort", opts.effort]] as const)
       .filter(([, v]) => v === undefined).map(([k]) => k);
-    const run = startedRun({ session: session.id, revision: q.revision, ...values, after: opts.after, at: now(), from_defaults: [...from_defaults] });
+    const run = startedRun({ session: session.id, revision: q.revision, ...values, after: opts.after, at: now(), from_defaults: [...from_defaults],
+      checks: state.project.defaults.checks });
     this.store.writeRun(queueId, run);
     this.store.clearStart(queueId); // a planned start is used up by any start
     // The plan stays, used: the queue started since it was planned (a proposal about it is moot).
@@ -829,7 +830,7 @@ export class Engine implements Member {
     const integration = step.integration ? integrationContext(this.store, state, q) : undefined;
     recordStepStart(this.store, queueId, step.id, run.session);
     const opening = stepOpening({
-      q, step, mode, why, projectStopConditions: project.defaults.stop_conditions, notes, answers, last,
+      q, step, mode, why, projectStopConditions: project.defaults.stop_conditions, projectChecks: run.checks, notes, answers, last,
       report: reportFile(project.id, q.id), languages: workerLanguages(project.languages), closing, integration,
     });
     live.proc.send([around.before, opening, around.after].filter(Boolean).join("\n\n"));

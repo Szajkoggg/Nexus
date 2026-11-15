@@ -94,7 +94,8 @@ function setup(t: TestContext, name: string) {
 test("the worker's texts: briefing, step openings, inbox entries, seeds and nudges match the golden file", (t) => {
   const { root, store, later, event, queue } = setup(t, "worker");
   const p = store.readProject();
-  store.writeProject({ ...p, defaults: { ...p.defaults, stop_conditions: ["The project's own stop condition."], context_care: true, context_reuse_threshold: 0.6 } });
+  store.writeProject({ ...p, defaults: { ...p.defaults, stop_conditions: ["The project's own stop condition."], context_care: true, context_reuse_threshold: 0.6,
+    checks: ["npm run lint", "npm test"] } }); // the project's checks: listed first, npm test once
   queue({
     id: "Q", title: "Prompts under test", description: "Context the worker needs.\nOn two lines.\n",
     checks: ["npm run typecheck", "npm test"], stop_conditions: ["A file outside the repository would change."],

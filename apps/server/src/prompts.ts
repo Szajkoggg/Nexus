@@ -4,7 +4,7 @@
 // (src/conversations.ts). Agents rely on them (a change to one carries an `Agents:` line in its commit), so each is
 // covered by a snapshot test: test/prompts.test.ts compares what the agents' processes receive with golden files.
 import {
-  INTEGRATION_CONDITION, formatClock, formatSeconds, languageName, levelNow, runIsOlder, type AwayNow, type ConversationWeb, type InboxView, type LanguageCode, type ProjectFile, type ProjectState, type QuestionView, type QueueView, type SessionView, type StepView,
+  INTEGRATION_CONDITION, formatClock, formatSeconds, languageName, levelNow, runIsOlder, stepChecks, type AwayNow, type ConversationWeb, type InboxView, type LanguageCode, type ProjectFile, type ProjectState, type QuestionView, type QueueView, type SessionView, type StepView,
 } from "@nexus/protocol";
 import type { ClosingContext } from "./closing.ts";
 import type { IntegrationContext } from "./integration.ts";
@@ -77,6 +77,8 @@ export function workerBriefing(l: Languages): string {
  */
 export function stepOpening(o: {
   q: QueueView; step: StepView; mode: "start" | "continue"; why?: string; projectStopConditions: string[];
+  /** The project's checks as the run fixed them (run.yaml `checks`): listed before the queue's own. */
+  projectChecks?: readonly string[];
   notes: StepView["notes"]; answers: QuestionView[]; last: boolean; report: string;
   /** The language line (workerLanguages), if any. */
   languages?: string;
@@ -85,6 +87,7 @@ export function stepOpening(o: {
 }): string {
   const { q, step, mode, why, projectStopConditions, notes, answers, last, report, languages, closing, integration } = o;
   const index = q.steps.findIndex((s) => s.id === step.id);
+  const checks = stepChecks(o.projectChecks, q.checks);
   return [
     `[Nexus] Queue ${q.id} "${q.title}" (revision ${q.revision}, approved), step ${step.id} (${index + 1} of ${q.steps.length}): ${step.title}.`,
     mode === "continue" ? `Continue this step where it was left${why ? ` (${why})` : step.reason ? ` (it was left: ${step.reason})` : ""}.` : "",
@@ -92,7 +95,7 @@ export function stepOpening(o: {
     step.acceptance.length ? `\nAcceptance:\n${step.acceptance.map((a) => `- ${a}`).join("\n")}` : "",
     closing ? closingText(closing) : "",
     integration ? integrationText(step.id, integration) : "",
-    q.checks.length ? `\nChecks for every step:\n${q.checks.map((c) => `- ${c}`).join("\n")}` : "",
+    checks.length ? `\nChecks for every step:\n${checks.map((c) => `- ${c}`).join("\n")}` : "",
     step.review?.prepare ? `\nReview to prepare: ${step.review.prepare}\nPrepare it by Nexus's standard: read \`nexus help review\` first (view keys, roles, the same conditions on both sides of a pair).` : "",
     `\nStop conditions (meeting one ends the queue: report it with \`nexus stop\`):\n${[...q.stop_conditions, ...projectStopConditions].map((c) => `- ${c}`).join("\n") || "- none beyond your judgement"}`,
     notes.length ? `\nNotes from the user for this step:\n${notes.map((n) => `- ${n.body}`).join("\n")}` : "",
@@ -587,7 +590,7 @@ function reviewBrief(q: QueueView, st: StepView, away: AwayNow = { on: false }):
   const since = st.segments.at(-1)?.start ?? "";
   const round = st.timeline.filter((e) => e.type === "step.done").length;
   const checks = st.checks.filter((c) => c.at >= since);
-  const missing = q.checks.filter((name) => !checks.some((c) => c.name === name));
+  const missing = stepChecks(q.run?.checks, q.checks).filter((name) => !checks.some((c) => c.name === name));
   const items = st.review_items.filter((i) => i.at >= since);
   const commits = [...new Set(st.timeline.flatMap((e) => (e.type === "step.done" && e.commit ? [e.commit] : [])))];
   const list = (xs: string[]) => (xs.length ? xs.map((x) => `- ${x}`).join("\n") : "- none");

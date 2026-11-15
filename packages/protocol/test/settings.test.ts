@@ -184,6 +184,19 @@ test("merging back by itself and resolving conflicts: off by default, global wit
   assert.equal(effective().worktree_setup, undefined);
 });
 
+test("the project's checks: the project's only, empty by default, stored trimmed and once each", () => {
+  const base = mkdtempSync(join(tmpdir(), "nexus-settings-"));
+  process.env.NEXUS_HOME = join(base, "home");
+  const store = ProjectStore.init(join(base, "p"), { id: "p", name: "P", root: join(base, "p") });
+  assert.deepEqual(store.readProject().defaults.checks, [], "a new project: none");
+  updateSettings(store, { defaults: { checks: ["npm run lint ", "", "npm test", "npm run lint"] } });
+  assert.deepEqual(store.readStoredProject().defaults.checks, ["npm run lint", "npm test"]);
+  assert.deepEqual(ownKeys(store.readStoredProject()).filter((k) => k.includes("checks")), [], "not a global setting");
+  assert.throws(() => updateSettings(store, { follow: ["defaults.checks"] }), (e: Error) => e instanceof ActionError && /not a setting with a global value/.test(e.message));
+  updateSettings(store, { defaults: { checks: [] } });
+  assert.deepEqual(store.readProject().defaults.checks, []);
+});
+
 for (const [name, shape] of [["Nexus", NEXUS_SHAPE], ["Project Honeycomb", HONEYCOMB_SHAPE]] as const) {
   test(`migrating ${name}'s project.yaml: equal values follow, different ones become its own, effective values unchanged, once`, () => {
     const x = legacy(shape);
