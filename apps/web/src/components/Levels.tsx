@@ -2,9 +2,10 @@
 // the approval view, a step's level and provisional mark on its line and panel, Confirm and Fix it on a provisional
 // acceptance (the return batch and the step), and the away-mode switch with its "until HH:MM" field and its sign.
 import { useState } from "react";
-import { act, actResult, enc, type AttentionItem, type StepView } from "../api.ts";
+import { act, actResult, enc, request, useAction, type AttentionItem, type StepView } from "../api.ts";
 import { Button, TEXTAREA } from "./ui.tsx";
 import { formatClock, t } from "../i18n.ts";
+import { usePage } from "../page.ts";
 
 type Level = 1 | 2 | 3;
 const LEVELS: Level[] = [1, 2, 3];
@@ -26,15 +27,12 @@ export interface Away { on: boolean; since?: string; until?: string }
  * one control, the chosen level's words beside it, and "set by you" with Reset when the user set it. Setting a level
  * asks for no new approval.
  */
-export function LevelPicker({ project, queue, step, onChanged, away }: {
-  project: string; queue: string; step: Pick<StepView, "id" | "level" | "level_from">; onChanged: () => void; away?: Away;
+export function LevelPicker({ project, queue, step, away }: {
+  project: string; queue: string; step: Pick<StepView, "id" | "level" | "level_from">; away?: Away;
 }) {
-  const [error, setError] = useState<string>();
-  const [busy, setBusy] = useState(false);
-  const set = (level: Level | null) => {
-    setBusy(true); setError(undefined);
-    act(project, "PUT", `/queues/${enc(queue)}/steps/${enc(step.id)}/level`, { level }).then(onChanged, (e: Error) => setError(e.message)).finally(() => setBusy(false));
-  };
+  const { reload: onChanged } = usePage();
+  const { busy, error, run } = useAction();
+  const set = (level: Level | null) => void run(() => act(project, "PUT", `/queues/${enc(queue)}/steps/${enc(step.id)}/level`, { level }), onChanged);
   const mine = step.level_from === "user";
   return (
     <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1 text-xs" onClick={(e) => e.stopPropagation()}>
@@ -92,12 +90,11 @@ export function provisionalWord(s: Pick<StepView, "provisional">): string | unde
 export function ProvisionalActions({ project, queue, step, onDone, wide }: { project: string; queue: string; step: string; onDone: () => void; wide?: boolean }) {
   const [fixing, setFixing] = useState(false);
   const [text, setText] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string>();
-  const go = (path: string, body: unknown) => {
-    setBusy(true); setError(undefined);
-    actResult(project, "POST", `/queues/${enc(queue)}/steps/${enc(step)}/${path}`, body).then(() => { setFixing(false); setText(""); onDone(); }, (e: Error) => setError(e.message)).finally(() => setBusy(false));
-  };
+  const { busy, error, run } = useAction();
+  const go = (path: string, body: unknown) => void run(
+    () => actResult(project, "POST", `/queues/${enc(queue)}/steps/${enc(step)}/${path}`, body),
+    () => { setFixing(false); setText(""); onDone(); },
+  );
   return (
     <div className={wide ? "space-y-2" : "space-y-1.5"} onClick={(e) => e.stopPropagation()}>
       <div className="flex flex-wrap items-center gap-2">
@@ -143,10 +140,7 @@ export function BatchRows({ project, item, onOpen, onChanged }: {
 
 // ---------------------------------------------------------------- away mode
 
-async function setAway(until: string | null): Promise<void> {
-  const r = await fetch("/api/server/away", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ until }) });
-  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? r.statusText);
-}
+const setAway = (until: string | null) => request("/api/server/away", { method: "POST", body: { until } });
 
 /** "Away until 08:00" as a sign (the rail, the phone's header); nothing while away mode is off. */
 export function AwaySign({ away, long }: { away?: Away; long?: boolean }) {
@@ -164,15 +158,12 @@ export function AwaySign({ away, long }: { away?: Away; long?: boolean }) {
  * The away-mode switch: off, "Away…" opens the "until HH:MM" field (08:00 by default: the next such time) and Turn on;
  * on, it says until when, with Turn off. `labelled`: as a settings row's control.
  */
-export function AwaySwitch({ away, onChanged, labelled }: { away?: Away; onChanged: () => void; labelled?: boolean }) {
+export function AwaySwitch({ away, labelled }: { away?: Away; labelled?: boolean }) {
+  const { reload: onChanged } = usePage();
   const [open, setOpen] = useState(false);
   const [time, setTime] = useState("08:00");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string>();
-  const go = (until: string | null) => {
-    setBusy(true); setError(undefined);
-    setAway(until).then(() => { setOpen(false); onChanged(); }, (e: Error) => setError(e.message)).finally(() => setBusy(false));
-  };
+  const { busy, error, run } = useAction();
+  const go = (until: string | null) => void run(() => setAway(until), () => { setOpen(false); onChanged(); });
   if (away?.on) {
     return (
       <span className="inline-flex flex-wrap items-center gap-2">

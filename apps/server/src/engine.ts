@@ -9,7 +9,7 @@ import type { ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import {
-  CHECKOUT_RUN_STATES, ENDED_RUN_STATES, HOLDING_RUN_STATES,
+  runCounted, runHoldsCheckout, runEnded, runGoing,
   ActionError, ProjectStore, USER_SESSION, ensureUserSession, liftByContinue, loadProjectState, openPlanFile, releaseOrphanedSteps, stepClosed, reportFile, ensureReportFolder, newId, normPath, now, readUsage,
   RETRY_LIMIT, START_KEYS, chooseRoute, effortIssue, formatClock, kindDefaults, overThreshold, routeStep, runStart, type Effort, type Routed, type ProjectFile, type StartValues, type ProjectState, type QueueView, type RunFile, type SessionFile,
   type SessionView, type StepView, type PlanBy,
@@ -266,8 +266,8 @@ export class Engine implements Member {
     const run = this.run(queueId);
     // Also a queue held for an update: the user's pause wins, so the restart does not resume it. A pending retry or
     // usage wait is cancelled. A run waiting for an approval is paused too (a later resume goes on under the approved
-    // revision).
-    if (run.state === "running" || run.state === "usage_wait" || run.state === "retry_wait" || run.state === "approval_wait" || run.resume_after_restart) {
+    // revision). One already pausing is left to finish its pause.
+    if ((runGoing(run) && run.state !== "pausing") || run.resume_after_restart) {
       const working = this.host.get(run.session)?.proc.state === "working";
       this.clearTimer(queueId);
       this.writeRun(queueId, toPausedByUser(run, "paused by the user", { pausing: working }));
@@ -288,7 +288,7 @@ export class Engine implements Member {
     const state = loadProjectState(this.store);
     const q = this.queue(state, queueId);
     const block = !before || before.state === "finished" ? this.coordinator.startBlock(state, q)
-      : CHECKOUT_RUN_STATES.includes(before.state) ? undefined : this.coordinator.checkoutBlock(state, q);
+      : runHoldsCheckout(before) ? undefined : this.coordinator.checkoutBlock(state, q);
     if (block) throw new ActionError(refusalText(queueId, "continue", block), 409);
     const lift = liftByContinue(this.store, queueId, o);
     const run = this.store.readRun(queueId);
@@ -315,7 +315,7 @@ export class Engine implements Member {
     const q = this.queue(state, queueId);
     assertCanResume(q, run);
     // A halted run holds no checkout: another queue may have started there meanwhile.
-    if (!CHECKOUT_RUN_STATES.includes(run.state)) {
+    if (!runHoldsCheckout(run)) {
       const block = this.coordinator.checkoutBlock(state, q);
       if (block) throw new ActionError(refusalText(queueId, "go on", block), 409);
     }
@@ -455,7 +455,7 @@ export class Engine implements Member {
     if (st.status !== "review") throw new ActionError("the step is not waiting for review", 409);
     // A halted run holds no checkout: accepting goes on only where no other queue works now.
     const own = q.run;
-    if (own && own.state !== "finished" && !CHECKOUT_RUN_STATES.includes(own.state)) {
+    if (own && own.state !== "finished" && !runHoldsCheckout(own)) {
       const block = this.coordinator.checkoutBlock(state, q);
       if (block) throw new ActionError(refusalText(queueId, "go on", block), 409);
     }
@@ -473,7 +473,7 @@ export class Engine implements Member {
   onChange(state: ProjectState): void {
     if (!this.stopped) this.pusher.onChange(state);
     for (const l of this.host.all()) this.deliverInbox(state, l);
-    for (const q of state.queues) if (q.run && (q.run.state === "running" || q.run.state === "pausing")) this.advance(q.id, state);
+    for (const q of state.queues) if (runCounted(q.run)) this.advance(q.id, state);
     for (const q of state.queues) if (q.run?.state === "approval_wait" && q.approved) this.continueApproved(q.id);
     this.checkStarts();
   }
@@ -678,7 +678,7 @@ export class Engine implements Member {
       const latest = this.store.readRun(queueId);
       this.store.appendActivity(run.session, { at: now(), kind: failure ? "error" : "text", text: failure ? `The worktree setup command failed: ${failure}` : "The worktree setup command succeeded", queue: queueId });
       if (!failure) return this.advance(queueId);
-      if (latest && (latest.state === "running" || latest.state === "pausing")) this.halt(queueId, `the worktree setup command (${command}) failed: ${failure}`);
+      if (runCounted(latest)) this.halt(queueId, `the worktree setup command (${command}) failed: ${failure}`);
     });
     return true;
   }
@@ -950,7 +950,7 @@ export class Engine implements Member {
     if (!unread.length) return;
     const owner = state.queues.find((q) => q.run?.session === l.session);
     const run = owner?.run;
-    const idleAllowed = !run || run.state === "running" || run.state === "pausing";
+    const idleAllowed = !run || runCounted(run);
     // A new turn of an idle session within its step (an answer, a send-back, a message): its runtime beyond the usage
     // threshold goes on on the step's fallback in a fresh session, which gets these entries (or the run waits). A stop
     // is not a turn; an entry for a working session goes into its running turn, which is never cut off.
@@ -1048,7 +1048,7 @@ export class Engine implements Member {
   private reuseSession(state: ProjectState, id: string, queueId: string, model?: string, effort?: Effort): SessionFile {
     const s = this.sessionFile(state, id);
     if (s.runtime === "external" || s.launched_by !== "nexus" || !s.native_id) throw new ActionError("only a session Nexus launched (and started at least once) can be continued", 409);
-    const busy = state.queues.find((q) => q.id !== queueId && q.run?.session === id && HOLDING_RUN_STATES.includes(q.run.state));
+    const busy = state.queues.find((q) => q.id !== queueId && q.run?.session === id && runGoing(q.run));
     if (busy) throw new ActionError(`that session is running queue ${busy.id}`, 409);
     const issue = effortIssue(s.runtime, effort);
     if (issue) throw new ActionError(issue);
@@ -1114,7 +1114,7 @@ export class Engine implements Member {
     const tag = () => {
       // The run that drives the session now; a session continued from an earlier queue still has that one's run too.
       const runs = this.store.queueIds().map((q) => [q, this.store.readRun(q)] as const).filter(([, r]) => r?.session === session.id);
-      const run = runs.find(([, r]) => HOLDING_RUN_STATES.includes(r!.state)) ?? runs.sort(([, a], [, b]) => b!.updated_at.localeCompare(a!.updated_at))[0];
+      const run = runs.find(([, r]) => runGoing(r)) ?? runs.sort(([, a], [, b]) => b!.updated_at.localeCompare(a!.updated_at))[0];
       if (!run) return {};
       // A turn of a step on its fallback says so in its record: what it would have run on, and why it did not.
       const f = run[1]?.fallbacks?.findLast((x) => x.step === run[1]?.step);
@@ -1299,8 +1299,8 @@ export class Engine implements Member {
     // ended_at: set when the run stops going (finished, halted, paused), kept while it stays stopped, cleared when it
     // goes on, so the dashboard can show when it ended and how long it took.
     const old = this.store.readRun(queueId);
-    const ended = ENDED_RUN_STATES.has(run.state)
-      ? (old && ENDED_RUN_STATES.has(old.state) && old.ended_at ? old.ended_at : now())
+    const ended = runEnded(run)
+      ? (old && runEnded(old) && old.ended_at ? old.ended_at : now())
       : undefined;
     this.store.writeRun(queueId, { ...run, ended_at: ended, updated_at: now() });
     // A run that stopped going may free its checkout or a place under the limit, for a waiting start in any project.

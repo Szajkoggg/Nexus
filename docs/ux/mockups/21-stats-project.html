@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockup 21: a project's Stats tab</title>
+<!-- Queue ST3, step ST3.0. The project's metrics as the orchestrator defined them (metrics.yaml: unit, show, target,
+     one warning threshold), each value from a worker's step. ?theme=paper|honey; ?tip=1 shows a point's tooltip.
+     The data is seeded and made up: the last 30 days up to 15 Nov 2026. -->
+<link rel="stylesheet" href="stats-mock.css">
+<script src="stats-mock.js"></script>
+</head>
+<body>
+<div class="ptop"><b>Nexus</b><span class="proj" style="margin:0;padding:0"><span class="badge">2</span></span><span style="font-size:12px;color:var(--accent)">● ST3 running</span><span class="grow"></span><span class="fg3">⚙</span></div>
+<div class="app with-rail">
+  <aside class="side">
+    <div class="brand">Nexus <span class="live">live</span></div>
+    <h6>PROJECTS</h6>
+    <div class="proj on"><span class="av">NX</span>Nexus<span class="badge">2</span></div>
+    <div class="proj"><span class="av b">GA</span>Garden app</div>
+    <div class="nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Stats<span class="fg3" style="margin-left:auto;font-size:11px">all projects</span></div>
+    <div class="foot"><span>Away…</span><span class="row">notify off<span class="grow"></span>settings</span></div>
+  </aside>
+
+  <div class="mid">
+    <div class="midtop"><span class="tabs"><span>● Orchestrator</span><span>Ideas</span><span class="on">Stats</span></span></div>
+    <main class="page">
+      <div class="head">
+        <h2>Metrics</h2><span class="sub">defined by the orchestrator, recorded by the workers · a point opens its step</span>
+        <span class="grow desk-only"></span>
+        <span class="seg"><span>7 days</span><span class="on">30 days</span><span>90 days</span><span>All</span></span>
+      </div>
+      <div class="grid2" id="cards"></div>
+    </main>
+  </div>
+
+  <aside class="rail">
+    <h6>WAITING FOR YOU · 1</h6>
+    <div class="item"><span class="pill">Review</span> <span class="fg3 mono" style="font-size:12px">UI4/UI4.2</span><div style="margin-top:4px">Rail overflow: the long lists fold</div></div>
+    <h6>RUNNING IN NEXUS</h6>
+    <div class="item"><span class="fg3 mono" style="font-size:12px">ST3</span> Stats views — ST3.0 Mockup of the two views <span style="color:var(--accent)">● 1/4</span></div>
+    <h6>FINISHED TODAY · 2</h6>
+    <div class="item fg2">MX2 Merge-back on by default <span class="fg3">· 09:12</span></div>
+    <div class="item fg2">TS2 Test files in parallel <span class="fg3">· 07:40</span></div>
+    <div class="btn">All queues of Nexus</div>
+  </aside>
+</div>
+<nav class="pbar">
+  <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 5h16v11H9l-5 4z"/></svg>Orchestrator</div>
+  <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 13l2-8h12l2 8v6H4z"/><path d="M4 13h5l1 2h4l1-2h5"/></svg>Waiting</div>
+  <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 6h14M5 12h14M5 18h9"/></svg>Queues</div>
+  <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9V16h7v-2.1A6 6 0 0 0 12 3z"/></svg>Ideas</div>
+  <div class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Stats</div>
+</nav>
+
+<script>
+// ---- seeded values: each one a step's, with its commit (the shape of ProjectMetrics.values) ----
+const r = rng(21);
+const steps = [
+  ["FB", "FB1", "Fallback rules"], ["FB", "FB2", "Fallback in the rail"], ["RX", "RX1", "One keyed query"], ["RX", "RX2", "Snapshots per change"],
+  ["ST1", "ST1.1", "Tags in queue.yaml"], ["ST1", "ST1.2", "Tags on the cards"], ["ST2", "ST2.1", "Metric define and record"], ["ST2", "ST2.2", "Turn records"],
+  ["UI4", "UI4.1", "Rail overflow"], ["ST2", "ST2.3", "nexus stats and the endpoints"], ["MX", "MX1", "Merge-back"], ["TS", "TS1", "Test files in parallel"],
+  ["TS", "TS2", "Slow tests split"], ["MX", "MX2", "Merge-back on by default"],
+];
+const hex = () => Array.from({ length: 7 }, () => "0123456789abcdef"[Math.floor(r() * 16)]).join("");
+const when = steps.map((_, i) => TODAY - Math.round((27 - i * 2) * DAY + r() * 8 * 3600000));
+const at = steps.map((s, i) => ({ queue: s[0], step: s[1], title: s[2], commit: hex(), at: when[i] }));
+const xl = [[0, dayName(at[0].at)], [6, dayName(at[6].at)], [13, dayName(at[13].at)]];
+
+function point(v, i, fmt, def) {
+  const a = at[i], warn = def.warn_above !== undefined && v > def.warn_above;
+  const lines = [[fmt(v), "b"]];
+  if (warn) lines.push([`⚠ above the warning threshold, ${fmt(def.warn_above)}`, "k"]);
+  lines.push([`${a.queue}/${a.step} · ${a.title}`, "k"], [`${a.commit} · ${dayName(a.at)}`, "k"], ["Open the step →", "go"]);
+  return { y: v, warn, tip: lines };
+}
+function caption(def) {
+  return [def.show, def.target !== undefined ? `target ${def.target} ${def.unit}` : undefined,
+    def.warn_above !== undefined ? `warns above ${def.warn_above} ${def.unit}` : undefined].filter(Boolean).join(" · ");
+}
+function card(def) {
+  const c = document.createElement("div"); c.className = "card";
+  c.innerHTML = `<div class="ttl"><span><b class="mono"></b> <span class="fg3" style="font-size:12px"></span></span>${def.values ? viewToggle() : ""}</div><div class="cap"></div><div class="chart"></div><div class="tbl"></div>`;
+  c.querySelector("b").textContent = def.name;
+  c.querySelector(".ttl span.fg3").textContent = def.unit;
+  c.querySelector(".cap").textContent = caption(def);
+  document.getElementById("cards").appendChild(c);
+  if (def.values) {
+    c.querySelector(".tbl").appendChild(table(["Step", "Value", "Commit", "Day"], def.values.map((v, i) => [`${at[i].queue}/${at[i].step}`, def.fmt(v), at[i].commit, dayName(at[i].at)]).reverse()));
+    const last = def.values.length - 1;
+    const f = document.createElement("div"); f.className = "foot-link";
+    f.append(`last ${def.fmt(def.values[last])} · `);
+    const a = document.createElement("a"); a.href = "#"; a.textContent = `${at[last].queue}/${at[last].step} →`; f.append(a);
+    c.appendChild(f);
+  }
+  return c;
+}
+
+const metrics = [
+  { name: "bundle-kb", unit: "KB", show: "line", target: 400, warn_above: 450, fmt: (v) => `${v} KB`,
+    values: [388, 391, 396, 402, 405, 409, 418, 426, 457, 431, 424, 419, 421, 421] },
+  { name: "known-bugs", unit: "bugs", show: "number", target: 0, fmt: (v) => `${v}`,
+    values: [6, 6, 5, 5, 7, 6, 5, 5, 4, 5, 4, 3, 3, 3] },
+  { name: "check:npm test", unit: "s", show: "line", fmt: (v) => `${v} s`,
+    values: [212, 218, 223, 231, 238, 244, 251, 262, 266, 271, 268, 181, 164, 169] },
+  { name: "check:npm run build -w @nexus/web", unit: "s", show: "line", fmt: (v) => `${v} s`,
+    values: [21, 21, 22, 22, 23, 22, 23, 24, 25, 24, 24, 24, 23, 24] },
+  { name: "long-files", unit: "files", show: "bar", target: 0, warn_above: 12, fmt: (v) => `${v} files`,
+    values: [15, 15, 14, 14, 13, 13, 12, 12, 11, 11, 10, 9, 9, 8] },
+  { name: "startup-ms", unit: "ms", show: "line", target: 800, fmt: (v) => `${v} ms` },
+];
+
+for (const def of metrics) {
+  const c = card(def);
+  const host = c.querySelector(".chart");
+  if (!def.values) {
+    host.innerHTML = `<div class="empty"><div>No values yet.<br>A worker records one with<br><code>nexus metric record startup-ms &lt;value&gt;</code></div></div>`;
+    continue;
+  }
+  if (def.show === "number") {
+    // A stat tile: the latest value, its change over the range, a 12-point sparkline.
+    const v = def.values.at(-1), was = def.values[0];
+    host.innerHTML = `<div class="row" style="gap:16px;margin-top:10px;align-items:flex-end"><div><div class="big">${v} <span class="fg2" style="font-size:14px;font-weight:400">${def.unit}</span></div><div class="delta-good">▼ ${was - v} since ${dayName(at[0].at)}</div></div><div class="grow spark"></div></div>`;
+    requestAnimationFrame(() => sparkline(host.querySelector(".spark"), def.values.slice(-12), 54));
+    host.style.height = "128px";
+    continue;
+  }
+  const max = Math.max(...def.values, def.warn_above ?? 0, def.target ?? 0);
+  // Clean ticks: a step of 1, 2 or 5 times a power of ten, two to three intervals.
+  const lo0 = def.show === "bar" ? 0 : Math.min(...def.values, def.target ?? Infinity) * 0.95, hi0 = max * 1.05;
+  const p = 10 ** Math.floor(Math.log10((hi0 - lo0) / 2));
+  const stepV = [1, 2, 5, 10].map((k) => k * p).find((s) => (hi0 - lo0) / s <= 3);
+  const lo = Math.floor(lo0 / stepV) * stepV, hi = Math.ceil(hi0 / stepV) * stepV;
+  const ticks = []; for (let t = lo; t <= hi + 1e-9; t += stepV) ticks.push(t);
+  const refs = [];
+  if (def.target !== undefined && def.target > lo) refs.push({ y: def.target, text: `target ${def.target}`, cls: "ref-target" });
+  if (def.warn_above !== undefined) refs.push({ y: def.warn_above, text: `⚠ ${def.warn_above}`, cls: "ref-warn" });
+  requestAnimationFrame(() => {
+    timeChart(host, {
+      kind: def.show === "bar" ? "col" : "line", dots: true, height: 128, yMin: lo, yMax: hi, ticks, fmt: (v) => `${v}`, xLabels: xl, refs,
+      endRoom: 66, end: def.show === "bar" ? undefined : def.fmt(def.values.at(-1)),
+      pts: def.values.map((v, i) => point(v, i, def.fmt, def)),
+    });
+    if (def.name === "bundle-kb" && params.get("tip")) {
+      // The tooltip of the point beyond the threshold, shown as a hover would show it.
+      const hit = host.querySelectorAll(".hit")[8], rc = hit.getBoundingClientRect();
+      fillTip(tip, point(def.values[8], 8, def.fmt, def).tip);
+      Object.assign(tip.style, { display: "block", left: `${rc.left + rc.width / 2 + 10}px`, top: `${rc.top + 30}px` });
+    }
+  });
+}
+</script>
+</body>
+</html>

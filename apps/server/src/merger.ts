@@ -20,7 +20,7 @@
 // Nothing happens while Nexus updates, deploys or hands over (`busy`). After a merge back the worktree and branch are
 // cleaned up once every provisional acceptance of the queue is confirmed; a Fix it until then runs in the worktree and
 // goes through the integration step again. Nothing is pushed.
-import { normPath, now, pendingProvisional, stepClosed, HOLDING_RUN_STATES, type ProjectState, type ProjectStore, type QueueView } from "@nexus/protocol";
+import { normPath, now, pendingProvisional, stepClosed, runGoing, type ProjectState, type ProjectStore, type QueueView } from "@nexus/protocol";
 import { checkoutOf, patchGit } from "./gitinfo.ts";
 import { ROOT } from "./lifecycle.ts";
 import { cleanUp, fastForward, judgeMerge, reintegrate, withMergeLock } from "./mergeback.ts";
@@ -128,7 +128,7 @@ export class Merger {
     if (merge?.reintegrating) {
       const opened = (integ.segments.at(-1)?.start ?? "") > merge.reintegrating;
       if (!opened) {
-        if (integ.status === "pending" && q.steps.every((s) => s === integ || stepClosed(q, s)) && !(q.run && HOLDING_RUN_STATES.includes(q.run.state))) {
+        if (integ.status === "pending" && q.steps.every((s) => s === integ || stepClosed(q, s)) && !runGoing(q.run)) {
           try { this.o.start(q.id); } catch (e) { return cannotStart(e); }
           if (mine) claim(mine);
           return;

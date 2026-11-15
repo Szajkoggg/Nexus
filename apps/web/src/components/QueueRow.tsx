@@ -6,7 +6,8 @@ import type { QueueView, StepView } from "../api.ts";
 import { TimeAgo, reviewLabel, statusWord, toneOf } from "./ui.tsx";
 import { t } from "../i18n.ts";
 import { KeptTag, stepMark } from "./Closing.tsx";
-import { HOLDING_RUN_STATES, retryLine } from "@nexus/protocol/times";
+import { retryLine } from "@nexus/protocol/times";
+import { isOpenQuestion, runGoing, waitsForUserReview } from "@nexus/protocol/status-rules";
 import { stepValuesText } from "@nexus/protocol/steps";
 import { queueStatus, type Tone } from "../queueStatus.ts";
 import { currentIndex, foldSteps, twoColumns } from "../steplist.ts";
@@ -37,7 +38,7 @@ const TINT: Record<string, string> = {
  * restart, a pause) reads "paused", like its queue, not "running".
  */
 const shownStatus = (step: StepView, queue: QueueView) =>
-  step.status === "running" && !HOLDING_RUN_STATES.includes(queue.run?.state ?? "") ? "paused" : step.status;
+  step.status === "running" && !runGoing(queue.run) ? "paused" : step.status;
 
 const plain = (s: string) => s.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\*\*|`/g, "");
 
@@ -165,13 +166,13 @@ function StepLine({ step, queue, current, phone, onStep, onQueue, stop }: {
       </button>
     );
   }
-  const questions = queue.questions.filter((q) => q.step === step.id && (q.state === "open" || q.state === "escalated"));
+  const questions = queue.questions.filter((q) => q.step === step.id && isOpenQuestion(q));
   const stopHere = queue.status === "stopped";
   const retry = queue.run?.step === step.id ? retryLine(queue.run, new Date()) : undefined;
   const why = stopHere ? queue.status_reason
     : questions[0]?.text ?? retry ?? (status === "paused" ? queue.status_reason ?? queue.run?.reason : undefined) ?? (status === "running" ? step.progress?.text : undefined) ?? step.reason ?? step.summary ?? step.status_note;
   const action = stopHere ? undefined
-    : step.status === "review" && step.review_with !== "orchestrator" ? { label: t("queue.reviewAction"), go: onStep }
+    : waitsForUserReview(step) ? { label: t("queue.reviewAction"), go: onStep }
     : questions.length ? { label: t("queue.questions", { count: questions.length }), go: onStep }
     : step.status === "failed" || step.status === "rejected" ? { label: t("queue.openAction"), go: onStep }
     : undefined;

@@ -17,6 +17,7 @@ import { StopBox, stopVersion, useLeft } from "./Stop.tsx";
 import { KeptTag, SkipClosingBox, closingNotRun, stepMark } from "./Closing.tsx";
 import { rich, t } from "../i18n.ts";
 import { LevelPicker } from "./Levels.tsx";
+import { usePage } from "../page.ts";
 
 // ---------------------------------------------------------------- which form
 
@@ -246,7 +247,7 @@ export function CompactSteps({ project, queue, chat, onFull, onChanged }: { proj
               </button>
               {onChanged && (
                 <div className="px-3 pb-2.5 pl-[4.25rem]">
-                  <LevelPicker project={project.project.id} queue={queue.id} step={s} onChanged={onChanged} away={project.away} />
+                  <LevelPicker project={project.project.id} queue={queue.id} step={s} away={project.away} />
                 </div>
               )}
               {o && (
@@ -283,10 +284,11 @@ export function CompactSteps({ project, queue, chat, onFull, onChanged }: { proj
  * desktop it leaves the project sidebar in sight (`sidebar`, its width); "Ask the orchestrator…" shows the queue as a
  * panel beside the chat, so the chat and the queue are both in view.
  */
-export function ApprovalView({ project, queue, chat, sidebar, onClose, onPanel, onChanged }: {
+export function ApprovalView({ project, queue, chat, sidebar, onClose, onPanel }: {
   project: ProjectState; queue: QueueView; chat: readonly ChatEntry[]; sidebar?: string;
-  onClose: () => void; onPanel: () => void; onChanged: () => void;
+  onClose: () => void; onPanel: () => void;
 }) {
+  const { reload: onChanged } = usePage();
   const id = project.project.id;
   const stopped = queue.status === "stopped";
   const leftState = useLeft(id, queue.id, stopped, stopVersion(queue));
@@ -391,7 +393,7 @@ export function ApprovalView({ project, queue, chat, sidebar, onClose, onPanel, 
               <section key={s.id} data-part={`step-${s.id}`} className={`space-y-2 border-b border-line pb-4 ${s.closing ? "rounded-lg border border-dashed border-line-strong bg-surface-2/50 p-4" : ""}`}>
                 <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1.5">
                   <h2 className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 font-semibold text-fg"><span className="font-mono text-xs font-normal text-fg-3">{s.id}</span>{s.title}<KeptTag step={s} className="self-center" /></h2>
-                  <LevelPicker project={id} queue={queue.id} step={s} onChanged={onChanged} away={project.away} />
+                  <LevelPicker project={id} queue={queue.id} step={s} away={project.away} />
                 </div>
                 <StepOwn step={s} />
                 {s.closing && <p className="text-xs text-fg-3">{t("closing.note")}</p>}

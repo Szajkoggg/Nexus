@@ -2,10 +2,11 @@
 // setting with a global value switched between following it and the project's own value (PROTOCOL.md, "Global settings").
 import { useState, type ReactNode } from "react";
 import type { GlobalSettings, ProjectFile, TagsFile } from "@nexus/protocol";
+import type { ModelInfo } from "@nexus/protocol/api";
 import { LANGUAGES } from "@nexus/protocol/languages";
 import { TAG_KINDS } from "@nexus/protocol/tags";
 import { fallbackLine, parseFallback } from "../fallback.ts";
-import { act, useFetch } from "../api.ts";
+import { act, HttpError, projectUrl, request, useQuery, type Version } from "../api.ts";
 import { Button, Section } from "./ui.tsx";
 import { rich, t, type Key } from "../i18n.ts";
 import { CHOICES, readChoice, setChoice, type ThemeChoice } from "../theme.ts";
@@ -14,6 +15,7 @@ import { levelTitle } from "./Levels.tsx";
 import { ProjectTags } from "./Tags.tsx";
 import { PlannedDeployCard, type PlannedDeploy } from "./DeployPlan.tsx";
 import { SEND_BACKS, STOPS, conditionList, savedConditions, settingsProblem, type SettingsProblem } from "../settingsCheck.ts";
+import { usePage } from "../page.ts";
 
 const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 
@@ -420,15 +422,16 @@ function useValues(initial: Values) {
   };
 }
 
-export function SettingsPanel({ project, tags, onChanged, server, tools }: {
-  project: ProjectFile; onChanged: () => void; server?: ServerInfo;
+export function SettingsPanel({ project, tags, server, tools }: {
+  project: ProjectFile; server?: ServerInfo;
   /** The project's tag lists (ProjectState.tags), shown under its settings. */
   tags?: TagsFile;
   /** On the phone, where the header has no icon row: the update, the usage, notifications and remote access. */
   tools?: ReactNode;
 }) {
+  const { reload: onChanged } = usePage();
   const [tab, setTab] = useState<"project" | "global">("project");
-  const info = useFetch<ProjectSettingsInfo>(`/api/projects/${encodeURIComponent(project.id)}/settings`, project);
+  const info = useQuery<ProjectSettingsInfo>(projectUrl(project.id, "/settings"), usePage().version).data;
   return (
     <div>
       <div className="break-all pr-8 text-xs text-fg-3">{tab === "project" ? project.root : t("settings.globalNote")}</div>
@@ -442,8 +445,8 @@ export function SettingsPanel({ project, tags, onChanged, server, tools }: {
       {/* This device's own things (live updates, usage, notifications, remote access): global only, so on the global page. */}
       {tools && tab === "global" && <div className="mt-6">{tools}</div>}
       <div className="mt-6">
-        {tab === "global" ? <GlobalSettingsPage key="global" onChanged={onChanged} server={server} />
-          : info ? <ProjectSettingsPage key={`${project.id}:${info.own.join(",")}`} project={project} info={info} onChanged={onChanged} />
+        {tab === "global" ? <GlobalSettingsPage key="global" server={server} />
+          : info ? <ProjectSettingsPage key={`${project.id}:${info.own.join(",")}`} project={project} info={info} />
           : <p className="text-sm text-fg-3">{t("common.loading")}</p>}
         {tab === "project" && tags && <div id="project-tags" className="mt-10"><ProjectTags project={project.id} tags={tags} onChanged={onChanged} /></div>}
       </div>
@@ -455,7 +458,8 @@ export function SettingsPanel({ project, tags, onChanged, server, tools }: {
  * A project's settings: the project-only ones, and for each setting with a global value a switch between following
  * the global value (shown greyed, marked "global") and its own.
  */
-function ProjectSettingsPage({ project, info, onChanged }: { project: ProjectFile; info: ProjectSettingsInfo; onChanged: () => void }) {
+function ProjectSettingsPage({ project, info }: { project: ProjectFile; info: ProjectSettingsInfo; }) {
+  const { reload: onChanged } = usePage();
   const global = valuesOf(info.global);
   const effective = valuesOf(project);
   // A following setting shows the global value (also where the project has no section for it yet: its orchestrator).
@@ -509,9 +513,10 @@ function ProjectSettingsPage({ project, info, onChanged }: { project: ProjectFil
 }
 
 /** The global settings, which every project follows where it has no value of its own, and the global-only ones. */
-function GlobalSettingsPage({ onChanged, server }: { onChanged: () => void; server?: ServerInfo }) {
+function GlobalSettingsPage({ server }: { server?: ServerInfo }) {
+  const { reload: onChanged } = usePage();
   const [version, setVersion] = useState(0);
-  const data = useFetch<{ global: GlobalSettings }>("/api/settings", version);
+  const data = useQuery<{ global: GlobalSettings }>("/api/settings", version).data;
   if (!data) return <p className="text-sm text-fg-3">{t("common.loading")}</p>;
   return <GlobalForm key={version} global={data.global} server={server} onSaved={() => { setVersion((x) => x + 1); onChanged(); }} onChanged={onChanged} />;
 }
@@ -524,7 +529,7 @@ function GlobalForm({ global, server, onSaved, onChanged }: { global: GlobalSett
   const save = async () => {
     setBusy(true); setMsg(undefined);
     try {
-      await request("/api/settings", "PATCH", nested(v.values, SETTING_KEYS));
+      await request("/api/settings", { method: "PATCH", body: nested(v.values, SETTING_KEYS) });
       setMsg({ ok: true, text: t("settings.savedGlobal") });
       onSaved();
     } catch (e) { setMsg({ ok: false, text: (e as Error).message }); }
@@ -535,17 +540,9 @@ function GlobalForm({ global, server, onSaved, onChanged }: { global: GlobalSett
       <SettingRows form={{ get: v.get, bool: v.bool, list: v.list, set: v.set }} />
       <SaveRow busy={busy} problem={problem} msg={msg} onSave={() => void save()} />
       <BrowserSection />
-      <ServerSection info={server} onChanged={onChanged} />
+      <ServerSection info={server} />
     </>
   );
-}
-
-/** A write outside a project (the global settings): JSON, from this page. */
-async function request(path: string, method: string, body: unknown): Promise<unknown> {
-  const r = await fetch(path, { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-  const data = (await r.json().catch(() => ({}))) as { error?: string };
-  if (!r.ok) throw new Error(data.error ?? `${r.status}`);
-  return data;
 }
 
 // ---------------------------------------------------------------- this browser
@@ -592,8 +589,8 @@ export interface ServerInfo {
 const PUSH_TONE = { pushed: "text-ok", failed: "text-danger", skipped: "text-fg-2" } as const;
 const PUSH_LABEL: Record<"pushed" | "failed" | "skipped", Key> = { pushed: "settings.server.pushed", failed: "settings.server.pushFailed", skipped: "settings.server.notPushed" };
 
-export function useServer(version: unknown) {
-  return useFetch<ServerInfo>("/api/server", version);
+export function useServer(version: Version) {
+  return useQuery<ServerInfo>("/api/server", version).data;
 }
 
 /** A pill in the header while Nexus updates itself. */
@@ -609,15 +606,17 @@ export function UpdatePill({ info }: { info: ServerInfo | undefined }) {
   );
 }
 
-function ServerSection({ info, onChanged }: { info: ServerInfo | undefined; onChanged: () => void }) {
+function ServerSection({ info }: { info: ServerInfo | undefined; }) {
+  const { reload: onChanged } = usePage();
   const [msg, setMsg] = useState<string>();
   if (!info) return null;
   const u = info.update;
   const call = async (path: string, body: unknown = {}) => {
     setMsg(undefined);
-    const r = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-    if (!r.ok) setMsg((await r.json().catch(() => ({}))).error ?? r.statusText);
-    onChanged();
+    // A refusal is said here; a network failure as before. The server's state is read again either way.
+    try { await request(path, { method: "POST", body }); }
+    catch (e) { if (e instanceof HttpError) setMsg(e.message); else throw e; }
+    finally { onChanged(); }
   };
   const busy = u.phase === "draining" || u.phase === "updating" || u.phase === "restarting";
   return (
@@ -637,7 +636,7 @@ function ServerSection({ info, onChanged }: { info: ServerInfo | undefined; onCh
         </div>
       )}
       <div className="mt-3 rounded-lg bg-canvas p-3">
-        {info.plan ? <PlannedDeployCard plan={info.plan} onChanged={onChanged} framed={false} />
+        {info.plan ? <PlannedDeployCard plan={info.plan} framed={false} />
           : <p className="text-xs text-fg-3">{t("settings.server.noPlan")}</p>}
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -675,7 +674,6 @@ function ServerSection({ info, onChanged }: { info: ServerInfo | undefined; onCh
 // ---------------------------------------------------------------- choosing a model
 
 
-interface ModelInfo { value: string; label: string; description?: string; efforts?: string[] }
 
 /**
  * A model, chosen from the list the runtime itself gives (Claude Code's and Codex's own model lists). "Other…" takes
@@ -684,7 +682,7 @@ interface ModelInfo { value: string; label: string; description?: string; effort
 export function ModelSelect({ runtime, value, onChange, defaultLabel = t("run.default"), className = "", disabled }: {
   runtime: "claude" | "codex"; value: string; onChange: (v: string) => void; defaultLabel?: string; className?: string; disabled?: boolean;
 }) {
-  const models = useFetch<ModelInfo[]>(`/api/models/${runtime}`, runtime);
+  const models = useQuery<ModelInfo[]>(`/api/models/${runtime}`, runtime).data;
   const [typing, setTyping] = useState(false);
   const options: [string, string, string?][] = (models ?? []).map((m) => [m.value, m.label, m.description]);
   if (value && !options.some(([v]) => v === value)) options.push([value, value]);
@@ -713,7 +711,7 @@ export function ModelSelect({ runtime, value, onChange, defaultLabel = t("run.de
  * default model, every level some model takes.
  */
 export function useEfforts(runtime: "claude" | "codex", model: string): string[] {
-  const models = useFetch<ModelInfo[]>(`/api/models/${runtime}`, runtime);
+  const models = useQuery<ModelInfo[]>(`/api/models/${runtime}`, runtime).data;
   const fallback = runtime === "claude" ? [...CLAUDE_EFFORTS] : ["low", "medium", "high", "xhigh"];
   if (!models?.length) return fallback;
   const chosen = models.find((m) => m.value === model)?.efforts;

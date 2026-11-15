@@ -2,16 +2,10 @@
 // line, the waiting cards; components/Stop.tsx): from whether the revision is approved, what the stopped step left
 // and the user's Keep or Discard so far, which buttons show, with what words, and the hint beside them. Pure, unit
 // tested (test/stopDecision.test.ts).
+import type { LeftView } from "@nexus/protocol/api";
 import { t } from "./i18n.ts";
 
-/** What the stopped step left, as `/queues/:queue/left` gives it (null outside git). */
-export interface LeftView {
-  step: string;
-  commits: { sha: string; subject: string; author: string; at: string; files: number; insertions: number; deletions: number }[];
-  uncommitted: { status: string; path: string }[];
-  uncommitted_note: string;
-  discarded: { at: string } | null;
-}
+export type { LeftView };
 
 /** What is known of it: undefined while first read, "error" when it could not be read. */
 export type LeftState = LeftView | null | "error" | undefined;

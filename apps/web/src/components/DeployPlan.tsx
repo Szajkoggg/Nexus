@@ -1,10 +1,11 @@
 // The planned deploy (PROTOCOL.md, "Planned deploys"; queue PD): what it waits for (a step, a queue, or a time), where
 // it stands, and Cancel. One plan for the whole server, so it shows wherever the server's state does: at the top of
 // the right rail, the phone's Waiting tab, and the Nexus section of the global settings.
-import { useState } from "react";
+import { request, useAction } from "../api.ts";
 import { formatClock, formatDateTime, t } from "../i18n.ts";
 import { nav } from "../nav.ts";
 import { Button } from "./ui.tsx";
+import { usePage } from "../page.ts";
 
 export interface PlannedDeploy {
   id: string;
@@ -26,25 +27,19 @@ export interface PlannedDeploy {
   started?: { at: string; update: string };
 }
 
-async function cancelPlan(): Promise<void> {
-  const r = await fetch("/api/server/cancel-plan", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
-  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? r.statusText);
-}
+const cancelPlan = () => request("/api/server/cancel-plan", { method: "POST" });
 
 /**
  * The plan as a card: the rail and the Waiting tab frame it; the settings show it as it is (`framed` false).
  * `projects`: where known, to show the target project's name rather than its id.
  */
-export function PlannedDeployCard({ plan, onChanged, framed = true, projects }: {
-  plan: PlannedDeploy; onChanged: () => void; framed?: boolean; projects?: readonly { id: string; name: string }[];
+export function PlannedDeployCard({ plan, framed = true, projects }: {
+  plan: PlannedDeploy; framed?: boolean; projects?: readonly { id: string; name: string }[];
 }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string>();
+  const { reload: onChanged } = usePage();
+  const { busy, error, run } = useAction();
   const now = new Date();
-  const cancel = () => {
-    setBusy(true); setError(undefined);
-    cancelPlan().then(onChanged, (e: Error) => setError(e.message)).finally(() => setBusy(false));
-  };
+  const cancel = () => void run(cancelPlan, onChanged);
   const a = plan.after;
   const target = a ? t(a.step ? "deploy.afterStep" : "deploy.afterQueue", { queue: a.queue, step: a.step ?? "" }) : t("deploy.at", { time: formatClock(plan.at!, now) });
   const confirming = !plan.started && !!plan.waiting_for?.length;

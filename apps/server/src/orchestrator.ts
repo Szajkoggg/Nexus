@@ -4,7 +4,7 @@
 // drafts under .nexus/drafts/: permission mode dontAsk with a read-only allow list plus the drafts rules.
 import { randomUUID } from "node:crypto";
 import {
-  ActionError, ClaudeEffort, HOLDING_RUN_STATES, ProjectStore, applyDraft, defineMetric, inPlan, loadProjectState, metricDef, openPlan, overThreshold, proposePlan, proposeTags, readAway, readUsage, orchestratorStatusChange, newId, now, sendBack, type Event, type EventType, type ProjectState, type SessionFile,
+  ActionError, ClaudeEffort, reviewedByOrchestrator, runGoing, ProjectStore, applyDraft, defineMetric, inPlan, loadProjectState, metricDef, openPlan, overThreshold, proposePlan, proposeTags, readAway, readUsage, orchestratorStatusChange, newId, now, sendBack, type Event, type EventType, type ProjectState, type SessionFile,
 } from "@nexus/protocol";
 import type { AgentProcess } from "./agent.ts";
 import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Launch } from "./agent-host.ts";
@@ -148,7 +148,7 @@ export class Orchestrator {
     const notes = this.pendingNotes(state);
     if (!s) {
       // A step waiting for its review, or a note or rejection of the user's, starts it (after a reset, or before it ever ran).
-      if (this.engine.draining || (!notes.length && !state.queues.some((q) => q.steps.some((x) => x.review_with === "orchestrator")))) return;
+      if (this.engine.draining || (!notes.length && !state.queues.some((q) => q.steps.some(reviewedByOrchestrator)))) return;
       s = this.ensure();
     }
     this.applyRequests(s);
@@ -440,7 +440,7 @@ ${n.text}` });
       // A step waiting for its review: told whenever it entered review (also to a session started after that), once
       // per round.
       for (const st of q.steps) {
-        if (st.status !== "review" || st.review_with !== "orchestrator") continue;
+        if (!reviewedByOrchestrator(st)) continue;
         items.push({ key: `notify:review:${q.id}:${st.id}:${st.finished_at}`, ...reviewNotice(q, st, state.away) });
       }
       // A metric's value beyond its warning threshold: told once, if it came after the threshold was set.
@@ -456,7 +456,7 @@ ${n.text}` });
           if (st.status !== "review" || st.review_with !== "user") continue;
           const why = st.sent_back.some((b) => b.to_user) && st.asked_user ? "your send-backs reached the limit"
             : st.asked_user && st.asked_user.by !== "user" ? "you handed it to the user" : st.level === 1 ? "review level 1: the user reviews it" : "the user reviews it";
-          const next = state.queues.filter((x) => x.id !== q.id && inPlan(x) && x.status !== "done" && x.status !== "cancelled" && !(x.run && HOLDING_RUN_STATES.includes(x.run.state)))
+          const next = state.queues.filter((x) => x.id !== q.id && inPlan(x) && x.status !== "done" && x.status !== "cancelled" && !runGoing(x.run))
             .map((x) => ({ id: x.id, title: x.title, waiting: x.start?.waiting || x.plan?.waiting || "it may start" }));
           const paused = this.engine.startable(state).filter((x) => x.id !== q.id && x.status === "paused").map((x) => ({ id: x.id, title: x.title }));
           items.push({ key: `notify:awaywait:${q.id}:${st.id}:${st.asked_user?.at ?? st.finished_at}`, ...awayStuckNotice(q, st, why, next, paused) });

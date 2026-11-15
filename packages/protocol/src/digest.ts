@@ -3,6 +3,7 @@
 // server serves it across projects (GET /api/digest?since=); this part is pure and unit tested.
 import type { Activity, Event, Refusal, TurnRecord } from "./schemas.ts";
 import type { ProjectState, QueueView } from "./state.ts";
+import { isOpenQuestion } from "./status-rules.ts";
 
 type DigestKind = "done" | "failed" | "stopped" | "queue_done" | "queue_cancelled" | "refused" | "retried";
 
@@ -98,7 +99,7 @@ export function runsNow(q: Pick<QueueView, "status" | "approved" | "revision" | 
   if (q.status === "cancelled" || q.status === "stopped") return false;
   if (q.approved === false && q.status !== "done" && q.status !== "draft" && ((q.revision ?? 1) > 1 || q.status !== "proposed")) return false;
   if (q.steps.some((s) => s.status === "review")) return false;
-  return !q.questions.some((x) => (x.state === "open" || x.state === "escalated") && !x.can_continue);
+  return !q.questions.some((x) => isOpenQuestion(x) && !x.can_continue);
 }
 
 /** The project's queues running now (runsNow), each with its step and since when it has been at it. */
@@ -116,7 +117,7 @@ export function projectRunning(state: ProjectState): DigestRunning[] {
 export interface UsageRun { session: string; state: string; updated_at: string }
 
 /** Which window a usage window's name is: Claude's five_hour and seven_day, Codex's codex_<n>h / codex_<n>d. */
-function windowKind(name: string): "5h" | "7d" | undefined {
+export function windowKind(name: string): "5h" | "7d" | undefined {
   if (name === "five_hour" || /^codex_5h$/.test(name)) return "5h";
   if (name === "seven_day" || /^codex_(7d|weekly|week)$/.test(name)) return "7d";
   return undefined;

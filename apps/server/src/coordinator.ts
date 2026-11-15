@@ -9,7 +9,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
-  CHECKOUT_RUN_STATES, COUNTED_RUN_STATES, loadProjectState, nexusHome, renameRetrying,
+  runHoldsCheckout, runCounted, loadProjectState, nexusHome, renameRetrying,
   type ProjectState, type ProjectStore, type QueueView,
 } from "@nexus/protocol";
 import { checkoutPath, samePath } from "./worktree.ts";
@@ -71,11 +71,11 @@ export const refusalText = (queue: string, verb: string, b: Block): string =>
 
 /** The queues of a project whose runs hold their checkouts. */
 function holdersOf(state: ProjectState): Holder[] {
-  return state.queues.filter((q) => q.run && CHECKOUT_RUN_STATES.includes(q.run.state)).map((q) => ({
+  return state.queues.filter((q) => runHoldsCheckout(q.run)).map((q) => ({
     project: state.project.id, name: state.project.name, queue: q.id, state: q.run!.state, checkout: checkoutPath(state, q),
     // A queue waiting for a review or an answer does not count, nor one waiting for the usage window, a retry or an
     // approval: only a run at work.
-    counts: COUNTED_RUN_STATES.includes(q.run!.state) && q.status !== "waiting",
+    counts: runCounted(q.run) && q.status !== "waiting",
   }));
 }
 

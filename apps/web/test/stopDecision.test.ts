@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { needsWorkChoice, stopDecision, type LeftView } from "../src/stopDecision.ts";
 
-const commit = (sha: string) => ({ sha, subject: `commit ${sha}`, author: "Worker", at: "2026-11-13T10:00:00Z", files: 1, insertions: 3, deletions: 0 });
+const commit = (sha: string) => ({ sha, subject: `commit ${sha}`, author: "Worker", at: "2026-11-13T10:00:00Z", files: 1, insertions: 3, deletions: 0, foreign: false });
 const left = (commits: number, extra: Partial<LeftView> = {}): LeftView => ({
   step: "W4c", commits: Array.from({ length: commits }, (_, i) => commit(`c${i}`)), uncommitted: [], uncommitted_note: "in the checkout", discarded: null, ...extra,
 });

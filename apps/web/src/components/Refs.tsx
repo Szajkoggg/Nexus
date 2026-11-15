@@ -18,6 +18,7 @@ import { Marked } from "./ChatTools.tsx";
 import { matchRanges } from "@nexus/protocol/chat";
 import { statusWord } from "./ui.tsx";
 import { t } from "../i18n.ts";
+import { commitHref, fileHref, itemHash } from "../hash.ts";
 
 interface Refs { project: string; queues: readonly QueueView[]; index: RefIndex }
 const RefsContext = createContext<Refs | null>(null);
@@ -34,7 +35,6 @@ const STEP_DOT: Record<string, string> = {
 };
 const QUEUE_DOT = new Set(["running", "waiting", "review", "stopped", "failed"]);
 
-const hashOf = (project: string, t: RefTarget) => "#/" + [project, t.queue, t.step].filter((x): x is string => !!x).map(encodeURIComponent).join("/");
 
 function RefLink({ refs, target, children }: { refs: Refs; target: RefTarget; children: ReactNode }) {
   const q = refs.queues.find((x) => x.id === target.queue);
@@ -43,7 +43,7 @@ function RefLink({ refs, target, children }: { refs: Refs; target: RefTarget; ch
   const dot = step ? STEP_DOT[step.status] : tone && QUEUE_DOT.has(tone) ? TONE[tone][0] : undefined;
   const title = step ? `${target.queue}/${step.id} ${step.title} · ${statusWord(step.status)}` : q ? `${q.id} ${q.title} · ${queueStatus(q).label}` : target.queue;
   return (
-    <a href={hashOf(refs.project, target)} title={title}
+    <a href={itemHash(refs.project, target.queue, target.step)} title={title}
       onClick={(e) => { if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey) return; e.preventDefault(); nav.item(refs.project, target.queue, target.step); }}
       className="mx-px inline-flex items-center gap-1.5 whitespace-nowrap rounded-[7px] border border-line-strong bg-surface-2 px-1.5 py-px align-baseline text-[0.9em] font-normal text-fg no-underline hover:border-fg-3 hover:bg-surface-3">
       {dot && <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dot}`} />}{children}
@@ -56,7 +56,7 @@ const LINK = "text-accent underline decoration-dotted underline-offset-2 hover:d
 
 /** A file at a line: opens the file viewer there; a new tab (Ctrl+click) opens the dashboard with it. */
 function FileLink({ project, target, children }: { project: string; target: FileRef; children: ReactNode }) {
-  const href = `?file=${encodeURIComponent(target.path)}&line=${target.line}#/${encodeURIComponent(project)}`;
+  const href = fileHref(project, target.path, target.line);
   return (
     <a href={href} title={t("refs.openFile", { path: target.path, line: target.line })} className={LINK}
       onClick={(e) => { if (!plainClick(e)) return; e.preventDefault(); nav.file(target.path, target.line); }}>{children}</a>
@@ -65,7 +65,7 @@ function FileLink({ project, target, children }: { project: string; target: File
 
 /** A commit: opens its details. */
 function CommitLink({ project, target, children }: { project: string; target: CommitRef; children: ReactNode }) {
-  const href = `?commit=${target.hash}#/${encodeURIComponent(project)}`;
+  const href = commitHref(project, target.hash);
   return (
     <a href={href} title={t("refs.openCommit", { hash: target.hash })} className={LINK}
       onClick={(e) => { if (!plainClick(e)) return; e.preventDefault(); nav.open(`commit:${target.hash}`); }}>{children}</a>

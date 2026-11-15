@@ -2,7 +2,7 @@
 // transitions"). Every write of run.yaml that sets a state goes through one of the transitions here: each returns the
 // next run record and owns which fields it sets and clears. They are pure; the engine writes the result (adding
 // ended_at and updated_at) and keeps the side effects (timers, processes, messages to the agent).
-import { ActionError, HOLDING_RUN_STATES, runIsOlder, stopPlace, type Effort, type QueueView, type RunFile } from "@nexus/protocol";
+import { ActionError, runGoing, runIsOlder, stopPlace, type Effort, type QueueView, type RunFile } from "@nexus/protocol";
 
 // ---------------------------------------------------------------- transitions
 
@@ -118,7 +118,7 @@ function assertApprovedAndNotRejected(q: QueueView): void {
 export function assertCanStart(q: QueueView): void {
   if (q.run?.state === "approval_wait" && !q.approved) throw new ActionError(`the queue's run waits for approval of revision ${q.revision}; it goes on by itself once you approve it`, 409);
   assertApprovedAndNotRejected(q);
-  if (q.run && HOLDING_RUN_STATES.includes(q.run.state)) throw new ActionError("the queue is already running", 409);
+  if (runGoing(q.run)) throw new ActionError("the queue is already running", 409);
   if (q.status === "stopped") throw new ActionError(stoppedMessage(q), 409);
   if (q.status === "done" || q.status === "cancelled") throw new ActionError(`the queue is ${q.status}`, 409);
 }

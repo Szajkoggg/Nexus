@@ -1,14 +1,15 @@
 // The statistics (stats.ts) on a known history of two projects: the share accepted in the first round, the average
 // rounds, stops and failures, the median working time, grouping by model, effort and every tag facet (a project's own
 // prefixed activities and areas only within it), the planned against the reported activities, "few data" under 5
-// steps, the untagged group, fallback turns, the estimated use, --since, and the metrics of a project.
+// steps, the untagged group, fallback turns, the estimated use, --since, the tag filter and the total of the Stats
+// view, the usage windows day by day, and the metrics of a project.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  ProjectStore, approveQueue, loadProjectState, projectMetrics, sinceTime, statsReport, statsText, stepStats, type Event, type StepDef, type TurnRecord,
+  ProjectStore, approveQueue, loadProjectState, projectMetrics, sinceTime, statsReport, statsText, stepStats, usageDays, type Event, type StepDef, type TurnRecord,
 } from "../src/index.ts";
 
 const at = (h: number, m = 0) => new Date(Date.UTC(2026, 10, 15, h, m)).toISOString();
@@ -154,4 +155,48 @@ test("a project's metrics: its own and the checks' times seen, with each value's
   const m = projectMetrics(loadProjectState(p.store));
   assert.deepEqual(m.metrics.map((d) => [d.name, d.unit]), [["bundle-kb", "KB"], ["check:npm test", "s"]]);
   assert.deepEqual(m.values.map((v) => [v.name, v.value, v.queue, v.step, v.commit, v.warn?.side]), [["bundle-kb", 600, "A", "A1", "abc", "above"], ["check:npm test", 12, "A", "A1", undefined, undefined]]);
+});
+
+test("a tag filter narrows the steps; the total counts each step once; the facets list what the range has", () => {
+  const { steps } = history();
+  const r = statsReport(steps, { by: "activity", project: "p", filter: { kind: "code" } });
+  assert.deepEqual(r.filter, { kind: "code" });
+  assert.equal(r.total.key, "all");
+  assert.deepEqual([r.steps, r.total.steps], [4, 4], "A1, A2, A4, A7: code; A3 debugging and A5 untagged left out");
+  assert.ok(r.groups.reduce((a, g) => a + g.steps, 0) > r.total.steps, "A2 is under feature and test, once in the total");
+  assert.deepEqual(r.facets.kind, ["code", "debugging", "untagged"], "the facets before the filter");
+  const none = statsReport(steps, { by: "model", project: "p", filter: { area: "engine", origin: "ci" } });
+  assert.deepEqual([none.steps, none.groups.length, none.total.steps, none.total.median_ms], [0, 0, 0, undefined]);
+  const empty = statsReport(steps, { by: "model", project: "p", filter: { kind: "" } });
+  assert.equal(empty.filter, undefined, "an empty value filters nothing");
+  assert.equal(empty.steps, 6);
+});
+
+test("a group's runtimes, and how many of its steps have an estimate in each window", () => {
+  const { steps } = history();
+  const opus = statsReport(steps, { by: "model", project: "p" }).groups.find((g) => g.key === "opus")!;
+  assert.deepEqual(opus.runtimes, ["claude"]);
+  assert.deepEqual(opus.usage_steps, { "claude:five_hour": 1 }, "only A1 ran while the window was reported");
+});
+
+test("the usage windows day by day: a 5-hour window's daily peak, a weekly window's level at the day's end", () => {
+  const t = (d: number, h: number) => new Date(2026, 10, d, h).toISOString();
+  const rec = (d: number, h: number, five: number, week: number, weekReset: string, runtime: "claude" | "codex" = "claude"): TurnRecord => ({
+    v: 1, at: t(d, h), started_at: t(d, h - 1), project: "p", session: "w", role: "worker", runtime, outcome: "ok",
+    windows_end: runtime === "claude"
+      ? { five_hour: { utilization: five }, seven_day: { utilization: week, resets_at: weekReset }, seven_day_opus: { utilization: 0.5 } }
+      : { codex_7d: { utilization: week, resets_at: weekReset } },
+  });
+  const turns = [
+    rec(10, 12, 0.2, 0.05, t(12, 6)), // before the period: only carries the weekly level
+    rec(13, 9, 0.4, 0.3, t(14, 6)), rec(13, 15, 0.9, 0.35, t(14, 6)),
+    rec(15, 10, 0.3, 0.02, t(21, 6)), rec(15, 11, 0.1, 0.1, t(21, 6), "codex"),
+  ];
+  const r = usageDays(turns, new Date(2026, 10, 12, 8), new Date(2026, 10, 15, 20));
+  assert.deepEqual(r.days, ["2026-11-12", "2026-11-13", "2026-11-14", "2026-11-15"]);
+  assert.deepEqual(r.windows.map((w) => [w.runtime, w.window, w.kind]), [["claude", "five_hour", "5h"], ["claude", "seven_day", "7d"], ["codex", "codex_7d", "7d"]],
+    "Claude's first, the 5-hour before the weekly; other windows (seven_day_opus) left out");
+  assert.deepEqual(r.windows[0]!.values, [null, 0.9, null, 0.3], "the highest of the day; none on a day without a turn");
+  assert.deepEqual(r.windows[1]!.values, [0, 0.35, 0, 0.02], "the 10th's reading reset on the 12th; the 13th's on the 14th");
+  assert.deepEqual(r.windows[2]!.values, [null, null, null, 0.1]);
 });

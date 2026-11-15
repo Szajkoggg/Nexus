@@ -1228,6 +1228,7 @@ values are the mockup's; `surface-4` (hover over `surface-3`) and `scrim` (black
 | `accent`, `accent-strong`, `on-accent` | The one accent: actions, links, focus, selection, what is running; a primary button's fill and its text |
 | `ok`, `warn`, `stop`, `review`, `info`, `danger` | Status colours: done; waiting and questions; stopped; in review (and the orchestrator's doings); approval and pending deliveries; failed, rejected and errors |
 | `user-bubble`, `scrim` | The user's own chat messages; the dimming behind a drawer or menu |
+| `series` | A chart's one series colour (the Stats views): the accent stepped into the lightness band the `dataviz` skill's validator allows for the mode (Graphite `#3f7cf5`, Paper `#2f6fec`, Honey `#c47e14`), checked against the cards' surface; a few-data group is `fg-3`, a value beyond a threshold `warn` with ⚠ |
 
 Rules the components keep:
 
@@ -1239,6 +1240,10 @@ Rules the components keep:
 - **One accent** for actions: primary buttons, links, focus, checkboxes. Information that is not an action (a
   pending delivery, a planned start) uses `info`.
 - Opacity modifiers derive tints from tokens (`bg-warn/15`), so a theme defines each colour once.
+- **Charts** (components/charts.tsx, the reasons per form in docs/ux/stats-mockups.md) follow Claude Code's `dataviz`
+  skill: one series colour, never a status colour for a series; thin marks with a 4 px rounded end; hairline solid grid,
+  dashed only for a reference line (a threshold, a target); text in the text tokens; a tooltip on hover and focus;
+  and a table view beside every chart. Two measures of different units are two charts, never two y-axes.
 
 ### The interface texts in one place
 
@@ -1311,9 +1316,9 @@ Opacity modifiers compile to `color-mix()` on the token, with a fixed Graphite f
 Below 1024 px (phones and narrow windows; `PHONE` in `apps/web/src/phone.ts`) the dashboard has a phone layout
 (UX proposals, item 18): a top line and a bottom bar instead of the header. The top line is one row: the project
 picker, what runs in the project ("SF running"), and settings (with "offline" while live updates reconnect). The
-bottom bar has four tabs at the thumb: **Orchestrator** (the chat), **Waiting** (everything that waits in all
-projects, with its count), **Queues** (the project's queues; what waits has its own tab) and **Ideas** (the
-conversations). The header's tools (the update, the usage, notifications, remote access) are in Settings there, at
+bottom bar has five tabs at the thumb: **Orchestrator** (the chat), **Waiting** (everything that waits in all
+projects, with its count), **Queues** (the project's queues; what waits has its own tab), **Ideas** (the
+conversations) and **Stats** (the project's metrics; queue ST3). The header's tools (the update, the usage, notifications, remote access) are in Settings there, at
 the top, under "Nexus on this device". From 1024 px the desktop layout takes over ("Chat-first on a desktop").
 
 The tab is not a layer. It is a field of the history entry (`Nav.tab`), and switching rewrites the entry it is on
@@ -1343,12 +1348,12 @@ header and action bar, the bottom bar and the waiting cards is at least 44 px hi
 breakpoint as the phone layout).
 
 **Questions.** A step with an open question opens on the phone as the question's sheet (`QuestionSheet` in
-Details.tsx): the question first, what the orchestrator said passing it on, the options as 48 px buttons, the user's
-own words, whether the worker may go on, then the step's details below; Answer in the action bar. An option and words
-go together in one answer: the option, a blank line, the words. A waiting card shows a question's options as buttons
-(the attention item carries `options`); a tap opens the sheet with that option chosen and the user confirms there.
-The choice travels in memory (`chooseOption`), not in the URL: a reload opens the sheet with nothing chosen. On the
-desktop the card has no option buttons and the step keeps its answer box in the action bar.
+`components/details/questions.tsx`): the question first, what the orchestrator said passing it on, the options as 48 px
+buttons, the user's own words, whether the worker may go on, then the step's details below; Answer in the action bar. An
+option and words go together in one answer: the option, a blank line, the words. A waiting card shows a question's
+options as buttons (the attention item carries `options`); a tap opens the sheet with that option chosen and the user
+confirms there. The choice travels in memory (`chooseOption`), not in the URL: a reload opens the sheet with nothing
+chosen. On the desktop the card has no option buttons and the step keeps its answer box in the action bar.
 
 **Waiting cards** put the kind, where it is and when on one line and give the text the full width (three lines). The
 phone's chat composer is one line that grows with the text (up to six) and a round Send.
@@ -1453,7 +1458,7 @@ both runtimes seeing that file.
   under `.nexus/`): a dashboard action only, shown as the change to each file before it is made, written by the server
   and not committed. It keeps the files' bytes (BOM, line endings) and refuses a file that is not UTF-8 rather than
   re-encode it. "A run in the root checkout is not finished" is read as a run that holds that checkout
-  (`CHECKOUT_RUN_STATES`, paused included): a halted run holds nothing and does not block the fix; a worker that comes
+  (`runHoldsCheckout`, paused included): a halted run holds nothing and does not block the fix; a worker that comes
   back to a changed file reads it again at its next turn. The fix carries the check's `version` (a hash of both files),
   so a file changed after the user looked is never overwritten by a change the user did not see.
 - **Moving `CLAUDE.md` into `AGENTS.md`** leaves the link lines out of the moved text (they would import the file
@@ -1971,6 +1976,63 @@ when it starts (`checks` in run.yaml) instead of reading the setting at each ste
 the same checks and its reviews judge them by the same list; the change comes with the queue's next start. A check
 both lists name runs once (the queue need not drop its own `npm run lint`). Shown in the approval view, marked as the
 project's, the way the project's stop conditions are.
+
+## The dashboard's reads (queue RX1)
+
+Every GET of the dashboard goes through one keyed query (`apps/web/src/query.ts`, used as `useQuery` from `api.ts`).
+An answer belongs to the URL it was asked for: a new URL shows nothing until its own answer lands, never the previous
+URL's, and a late answer for a URL no longer asked is dropped. Before, `useFetch` kept the previous URL's data, so
+switching steps showed the first step's commits under the second until the reply landed (for good if it failed), and
+the project's state had no guard against a late reply for the previously selected project. A failure is the query's
+`error` (the data it had for the same URL stays), not swallowed. Queries asking the same URL at the same version share
+one request; nothing is cached beyond that.
+
+What is asked again comes from the live notifications, counted per scope (`Versions`): every message bumps `all`
+(read at it: what spans projects, the digest, the usage, the server's state, remote access), a project's `changed` its
+own counter (its state, orchestrator chat, conversations), and `changed` or `projects` the project list. A reconnect
+may have missed anything: it bumps an epoch that is part of every project's version. Before, one global tick refetched
+every read on any message from any project. Reads inside a step or queue still key on the project state's
+`generated_at`, which moves only with that project.
+
+Every request goes through `apps/web/src/http.ts` (queue RX2): `request` checks the status and rejects with an
+`HttpError` (the server's reason, else the status text; its status; `reason`, the server's own only), `open` does the
+same for a reply whose body the caller reads itself (a file). The typed endpoint functions are built on them, next to
+the type they return until the API types have a module of their own. Before, five calls parsed whatever came back: an
+error reply read as "no conversation yet" started a new one, a refused token rotation said "replaced". A user's action
+keeps its busy and error state in `useAction` (over the tested `Action` in `action.ts`): busy until every run of it has
+settled, the last error cleared when a run starts. Places whose state is a result line or a toast keep their own.
+
+The browser check of the fix (a script, not a test: a development instance, a project whose two steps have their own
+commits, every commits reply held back 700 ms, switching between the steps five times and sampling the page at every
+frame): at the base commit 556 of 1101 samples showed the other step's commits; with the keyed query none did.
+
+## One place for the status rules (queue RX3)
+
+When a run is going (holds its session), holds its checkout, counts toward the limit or has ended; when a step waits for
+the user's review or the orchestrator's, is at work, or holds its queue in `waiting`; when a question is open: each is
+one function in `@nexus/protocol/status-rules`, a module free of Node that the dashboard imports directly, the way it
+imports `times`. Before, the run-state lists lived in `times.ts` and were also spelled out by hand in the engine, and
+"open question" was written out in ten places (server, CLI, dashboard, the state derivation). A check of one status
+(`status === "review"`) stays as it is: a rule is what combines several. The rules take a status as plain text too,
+since the dashboard's pure helpers hold it so. The server's replies the dashboard reads are typed once in
+`@nexus/protocol/api` (types only); the first typecheck with it found the dashboard's copy of "what a stopped step left"
+missing the commits' `foreign` flag.
+
+## The cost of rebuilding state (queue RX5)
+
+Measured on 2026-11-15 on a copy of Nexus's own `.nexus` (70 queues, 214 steps, 55 sessions, 2,457 events, 13,735
+activity lines, 2,211 chat lines, 14 MB): one `loadProjectState` takes 121-124 ms (median of 30, after a warm-up).
+`changed()` in the server rebuilt the state five times on every change, before each of the planner, the orchestrator,
+the engine and the attention watch, whether or not the decision before it had written anything: about 590 ms of
+rebuilding per change notification, the decisions' own work not counted (a replay of its sequence on the copy, without
+the server, which would have touched the worktrees the copy's queues name). Now the store counts the writes this process
+makes (`writeCount`), and the server passes one snapshot on until the count moves; `changed()` forces only the first
+rebuild (the change came from outside). With no decision writing, one rebuild per change: about 125 ms. A decision that
+writes still gets the state its predecessors left. A write by another process between two decisions is seen at the next
+change notification, which the watcher sends for it anyway. The rest of a rebuild is reading: a profile puts 17% in
+`existsSync`, 15% in reading files and a quarter in parsing YAML; a cache of parsed files by modification time would be
+the next step if 120 ms starts to hurt. The engine's own 15 rebuilds are in actions (a start, a resume, a review), not
+on every change, and were left.
 
 ## Open questions
 

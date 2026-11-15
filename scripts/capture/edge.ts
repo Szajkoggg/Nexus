@@ -123,6 +123,8 @@ export class EdgeBrowser implements Browser {
       const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), "value")?.set;
       setter ? setter.call(el, ${JSON.stringify(text)}) : (el.value = ${JSON.stringify(text)});
       el.dispatchEvent(new Event("input", { bubbles: true }));
+      // A select (and React's onChange on it) hears "change", not "input".
+      el.dispatchEvent(new Event("change", { bubbles: true }));
       return true;
     })()`);
   }

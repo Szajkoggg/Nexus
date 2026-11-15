@@ -4,7 +4,8 @@
 import { useState } from "react";
 import type { Refusal } from "@nexus/protocol";
 import { groupRefusals, refusalKind, suggestAllowRule } from "@nexus/protocol/refusals";
-import { act, enc, useFetch, type ProjectState } from "../api.ts";
+import { act, enc, projectUrl, useQuery, type ProjectState } from "../api.ts";
+import { usePage } from "../page.ts";
 import { Button, Section, TimeAgo } from "./ui.tsx";
 import { rich, t, type Key } from "../i18n.ts";
 
@@ -17,7 +18,7 @@ const BY: Record<Refusal["by"], Key> = {
 /** The refusals of one step. */
 export function StepRefusals({ project, queue, step }: { project: ProjectState; queue: string; step: string }) {
   const id = project.project.id;
-  const list = useFetch<Refusal[]>(`/api/projects/${enc(id)}/refusals?queue=${enc(queue)}&step=${enc(step)}`, project.generated_at);
+  const list = useQuery<Refusal[]>(projectUrl(id, `/refusals?queue=${enc(queue)}&step=${enc(step)}`), usePage().version).data;
   const [open, setOpen] = useState<string>();
   if (!list?.length) return null;
   return (
@@ -46,7 +47,7 @@ export function StepRefusals({ project, queue, step }: { project: ProjectState; 
 /** Every refusal of the project, grouped by kind (tool, command prefix), with counts and the latest time. */
 export function ProjectRefusals({ project }: { project: ProjectState }) {
   const id = project.project.id;
-  const list = useFetch<Refusal[]>(`/api/projects/${enc(id)}/refusals`, project.generated_at);
+  const list = useQuery<Refusal[]>(projectUrl(id, "/refusals"), usePage().version).data;
   const [open, setOpen] = useState<string>();
   if (!list?.length) return null;
   const groups = groupRefusals(list);

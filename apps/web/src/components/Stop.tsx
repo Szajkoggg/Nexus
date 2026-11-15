@@ -4,7 +4,7 @@
 // once when there is nothing to decide; when the stopped step left commits of its own, "Continue…" opens SC2's Keep or
 // Discard first, in place. A queue whose revision is not approved has "Approve revision N…", which opens the queue.
 import { useEffect, useId, useState, type ReactNode } from "react";
-import { actResult, enc } from "../api.ts";
+import { actResult, enc, projectUrl, request, useAction } from "../api.ts";
 import { stopDecision, type LeftState, type LeftView, type WorkChoice } from "../stopDecision.ts";
 import { stopPlace } from "@nexus/protocol/attention";
 import type { QueueView } from "../api.ts";
@@ -143,9 +143,8 @@ function readLeft(project: string, queue: string, version: string, force = false
   lefts.set(key, e);
   if (!force && e.version === version && (e.reading || e.value !== undefined)) return e;
   e.version = version;
-  const reading: Promise<void> = fetch(`/api/projects/${enc(project)}/queues/${enc(queue)}/left`)
-    .then((r) => (r.ok ? r.json() : Promise.reject(new Error(r.statusText))))
-    .then((d: LeftView | null) => d, (): Left => "error")
+  const reading: Promise<void> = request<LeftView | null>(projectUrl(project, `/queues/${enc(queue)}/left`))
+    .then((d) => d, (): Left => "error")
     .then((v) => {
       if (e.reading !== reading) return; // a newer read is under way
       e.value = v; e.reading = undefined;
@@ -174,21 +173,20 @@ export function useLeft(project: string, queue: string, enabled: boolean, versio
  * place showing the stop then reads what the step left anew.
  */
 export function useContinue({ project, queue, onChanged }: { project: string; queue: string; onChanged?: () => void }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string>();
+  const { busy, error, run } = useAction();
   const [note, setNote] = useState<string>();
   /** `skipClosing`: the user skips the queue's closing refactoring step with it (only the queue's bar offers it). */
-  const go = async (needsChoice: boolean, work?: WorkChoice, skipClosing?: boolean): Promise<boolean> => {
-    setBusy(true); setError(undefined); setNote(undefined);
-    try {
-      const r = await actResult<{ message?: string } | string>(project, "POST", `/queues/${enc(queue)}/continue`, { ...(needsChoice ? { work } : {}), ...(skipClosing ? { skip_closing: true } : {}) });
-      if (r && typeof r === "object" && r.message) setNote(r.message);
-      const e = lefts.get(`${project}/${queue}`);
-      if (e) readLeft(project, queue, e.version ?? "", true);
-      onChanged?.();
-      return true;
-    } catch (e) { setError((e as Error).message); return false; }
-    finally { setBusy(false); }
+  const go = (needsChoice: boolean, work?: WorkChoice, skipClosing?: boolean): Promise<boolean> => {
+    setNote(undefined);
+    return run(
+      () => actResult<{ message?: string } | string>(project, "POST", `/queues/${enc(queue)}/continue`, { ...(needsChoice ? { work } : {}), ...(skipClosing ? { skip_closing: true } : {}) }),
+      (r) => {
+        if (r && typeof r === "object" && r.message) setNote(r.message);
+        const e = lefts.get(`${project}/${queue}`);
+        if (e) readLeft(project, queue, e.version ?? "", true);
+        onChanged?.();
+      },
+    );
   };
   return { go, busy, error, note, setNote };
 }

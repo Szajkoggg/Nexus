@@ -3,7 +3,7 @@
 // engine owns the runs; the scheduler decides when a planned start comes due and asks the engine to start the queue. Also the long timers both use (ClockTimers): a retry or usage wait
 // of a run, and a schedule's time, armed on a clock tests can move.
 import {
-  ActionError, HOLDING_RUN_STATES, checkPredecessors, doneForPlan, effortIssue, formatClock, loadProjectState, newPlan, now, openPlan, openPlanFile, readUsage, reorderedFollowers,
+  ActionError, runGoing, checkPredecessors, doneForPlan, effortIssue, formatClock, loadProjectState, newPlan, now, openPlan, openPlanFile, readUsage, reorderedFollowers,
   type PlanBy, type ProjectState, type ProjectStore, type QueueView, type RunFile, type StartFile, type StartView,
 } from "@nexus/protocol";
 import type { StartOptions } from "./engine.ts";
@@ -243,7 +243,7 @@ export class Scheduler {
   /** What every planned start checks: the queue can be planned, and the start's options make sense. */
   private planOptions(state: ProjectState, q: QueueView, o: Omit<StartOptions, "after">): Pick<StartOptions, "runtime" | "model" | "effort" | "session"> {
     if (q.status === "done" || q.status === "cancelled") throw new ActionError(`queue ${q.id} is ${q.status}`, 409);
-    if (q.run && HOLDING_RUN_STATES.includes(q.run.state)) throw new ActionError(`queue ${q.id} is already running`, 409);
+    if (runGoing(q.run)) throw new ActionError(`queue ${q.id} is already running`, 409);
     const runtime = o.session ? undefined : o.runtime ?? state.project.runtimes.default;
     const issue = runtime ? effortIssue(runtime, o.effort) : undefined;
     if (issue) throw new ActionError(issue);
@@ -345,5 +345,5 @@ const areDone = (ids: readonly string[]) => `${ids.length === 1 ? "queue" : "que
 /** The queue (other than `except`) whose run holds `session`: one session never runs two queues. */
 function holdingSession(state: ProjectState, session: string | undefined, except: string): QueueView | undefined {
   if (!session) return undefined;
-  return state.queues.find((x) => x.id !== except && !!x.run && x.run.session === session && HOLDING_RUN_STATES.includes(x.run.state));
+  return state.queues.find((x) => x.id !== except && !!x.run && x.run.session === session && runGoing(x.run));
 }

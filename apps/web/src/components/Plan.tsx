@@ -7,12 +7,13 @@
 // dragging it onto another (onto "Next": to the front). The orchestrator's proposals have Accept and Decline on the
 // queue (and in the waiting list, PlanRow); a dependency the user set can be handed back to the orchestrator (↩).
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { act, enc, useFetch, type AttentionItem, type QueueView } from "../api.ts";
+import { act, enc, projectUrl, useAction, useQuery, type AttentionItem, type QueueView } from "../api.ts";
 import type { EstimatesResponse } from "@nexus/protocol";
 import { t } from "../i18n.ts";
 import { estimateWords, moveTargets, planLayout, planList, type PlanLayout, type PlanNode, type Why } from "../plan.ts";
 import { Button } from "./ui.tsx";
 import { TONE } from "./QueueRow.tsx";
+import { usePage } from "../page.ts";
 
 /** A reason's colour: what the user can do in the approval and stop colours; what waits by itself muted. */
 const WHY: Record<Why["tone"], string> = {
@@ -25,14 +26,8 @@ const listText = (ids: readonly string[]) => (ids.length ? t("plan.after", { que
 
 /** The user's actions on the plan: each a POST to …/queues/:q/plan. */
 function usePlanActions(project: string, onChanged: () => void) {
-  const [error, setError] = useState<string>();
-  const [busy, setBusy] = useState(false);
-  const post = async (queue: string, body: Record<string, unknown>) => {
-    setBusy(true); setError(undefined);
-    try { await act(project, "POST", `/queues/${enc(queue)}/plan`, body); onChanged(); }
-    catch (e) { setError((e as Error).message); }
-    finally { setBusy(false); }
-  };
+  const { busy, error, run } = useAction();
+  const post = (queue: string, body: Record<string, unknown>) => run(() => act(project, "POST", `/queues/${enc(queue)}/plan`, body), onChanged);
   return {
     error, busy,
     move: (queue: string, after: string | null) => post(queue, { action: "move", after }),
@@ -47,14 +42,14 @@ type Actions = ReturnType<typeof usePlanActions> & {
   estimates?: EstimatesResponse;
 };
 
-export function PlanView({ project, queues, version, onOpen, onChanged }: {
-  project: string; queues: readonly QueueView[]; onOpen: (queue: string) => void; onChanged: () => void;
+export function PlanView({ project, queues, onOpen }: {
+  project: string; queues: readonly QueueView[]; onOpen: (queue: string) => void;
   /** Changes when the project's files do: the estimates are fetched again. */
-  version?: unknown;
 }) {
+  const { reload: onChanged } = usePage();
   const layout = useMemo(() => planLayout(queues), [queues]);
   const base = usePlanActions(project, onChanged);
-  const estimates = useFetch<EstimatesResponse>(`/api/projects/${enc(project)}/estimates`, version);
+  const estimates = useQuery<EstimatesResponse>(projectUrl(project, "/estimates"), usePage().version).data;
   const actions: Actions = { ...base, targets: (q) => moveTargets(layout, queues, q), estimates };
   // Nothing planned: the view says nothing (the queue lists below say what there is).
   if (!layout.columns.some((c, i) => i > 0 && c.length) && !layout.outside.length) return null;

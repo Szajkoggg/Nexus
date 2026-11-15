@@ -1,7 +1,7 @@
 // The plan as the Queues view shows it (PROTOCOL.md, "The plan"): what runs now, then what follows, in columns; lines
 // from each queue to those it waits for; on every queue what it waits for. Pure and unit tested; components/Plan.tsx
 // draws it (lanes on a desktop, an ordered list on the phone).
-import { HOLDING_RUN_STATES } from "@nexus/protocol/times";
+import { runGoing } from "@nexus/protocol/status-rules";
 import { formatClock, type Key, type Params } from "./i18n.ts";
 import { openPlan, queueStatus, type HonestStatus, type QueueLike } from "./queueStatus.ts";
 
@@ -65,7 +65,7 @@ const ENDED = new Set(["done", "cancelled"]);
 /** In progress now: at work, waiting for a review or an answer, paused, stopped, or its run holds its checkout. */
 export function isNow(q: Pick<PlanQueue, "status" | "run">): boolean {
   if (ENDED.has(q.status)) return false;
-  return NOW_STATUS.has(q.status) || (!!q.run && HOLDING_RUN_STATES.includes(q.run.state));
+  return NOW_STATUS.has(q.status) || runGoing(q.run);
 }
 
 /** In the plan: a place that is not used yet (planned and not started since), or a schedule. */

@@ -11,10 +11,14 @@ import { PROJECT_ACTIVITY, type StepTags } from "./tags.ts";
 import { usageEstimates } from "./usage-estimate.ts";
 import { metricDef, type MetricValue } from "./metrics.ts";
 import { formatSeconds } from "./times.ts";
+import { windowKind } from "./digest.ts";
 
 /** What a report groups by: the step's model or effort (from its worker turns), or one of its tag facets. */
 export const STAT_DIMENSIONS = ["model", "effort", "kind", "activity", "area", "size", "origin"] as const;
 export type StatDimension = (typeof STAT_DIMENSIONS)[number];
+/** The tag facets a report can be narrowed to (one value each): the Stats view's filters. */
+export const STAT_FILTERS = ["kind", "activity", "area", "size", "origin"] as const;
+export type StatFilter = Partial<Record<(typeof STAT_FILTERS)[number], string>>;
 
 /** A group with fewer steps than this is marked "few data" (the estimates' minimum too). */
 const FEW_STEPS = 5;
@@ -102,9 +106,11 @@ interface ActivityCounts {
   planned: number; observed: number; unplanned: number; skipped: number;
 }
 
-interface StatGroup {
+export interface StatGroup {
   key: string;
   steps: number;
+  /** The runtimes of its steps' last worker turns, sorted. */
+  runtimes: string[];
   /** Fewer than FEW_STEPS steps: read with care. */
   few: boolean;
   decided: number;
@@ -118,6 +124,8 @@ interface StatGroup {
   median_ms?: number; p25_ms?: number; p75_ms?: number;
   /** Estimated use by window, summed; an estimate, and the turns without one. */
   usage: Record<string, number>;
+  /** By window: how many of its steps have an estimate in it (what a use per step divides by). */
+  usage_steps: Record<string, number>;
   usage_missing: number;
   /** Steps with a turn on a fallback. */
   fallback: number;
@@ -129,9 +137,15 @@ export interface StatsReport {
   /** The one project counted; absent: every project. */
   project?: string;
   since?: string;
+  /** The tag filter applied (StatFilter): only steps under each value given. */
+  filter?: StatFilter;
   /** Steps counted in all (a step of several activities is in several groups). */
   steps: number;
   groups: StatGroup[];
+  /** Every step counted, as one group (key "all"): each step once. */
+  total: StatGroup;
+  /** By tag facet: the values the steps in the range (and project) have before the tag filter, sorted; what it can pick. */
+  facets: Record<(typeof STAT_FILTERS)[number], string[]>;
 }
 
 /** A quantile of sorted numbers, interpolated. */
@@ -167,42 +181,114 @@ function keysOf(s: StepStat, by: StatDimension, across: boolean): string[] {
  * The report: the steps (of `project`, or all) whose last outcome is at or after `since`, grouped by `by`, the
  * largest group first.
  */
-export function statsReport(all: readonly StepStat[], o: { by: StatDimension; project?: string; since?: string }): StatsReport {
-  const steps = all.filter((s) => (!o.project || s.project === o.project) && (!o.since || s.at >= o.since));
-  const across = !o.project && new Set(steps.map((s) => s.project)).size > 1;
-  const groups = new Map<string, { key: string; steps: StepStat[] }>();
-  for (const s of steps) for (const key of keysOf(s, o.by, across)) {
-    const g = groups.get(key) ?? { key, steps: [] };
-    g.steps.push(s);
-    groups.set(key, g);
-  }
-  const out = [...groups.values()].map(({ key, steps: xs }): StatGroup => {
-    const decided = xs.filter((s) => s.decided).length;
-    const first = xs.filter((s) => s.first).length;
-    const done = xs.filter((s) => s.rounds > 0);
-    const times = xs.filter((s) => s.accepted && s.work_ms !== undefined).map((s) => s.work_ms!).sort((a, b) => a - b);
-    const usage: Record<string, number> = {};
-    for (const s of xs) for (const [w, v] of Object.entries(s.usage)) usage[w] = (usage[w] ?? 0) + v;
-    const g: StatGroup = {
-      key, steps: xs.length, few: xs.length < FEW_STEPS, decided, first_accepted: first,
-      first_rate: decided ? first / decided : undefined,
-      avg_rounds: done.length ? done.reduce((a, s) => a + s.rounds, 0) / done.length : undefined,
-      stops: xs.reduce((a, s) => a + s.stops, 0), failures: xs.reduce((a, s) => a + s.failures, 0),
-      median_ms: quantile(times, 0.5), p25_ms: quantile(times, 0.25), p75_ms: quantile(times, 0.75),
-      usage, usage_missing: xs.reduce((a, s) => a + s.usage_missing, 0), fallback: xs.filter((s) => s.fallback).length,
+export function statsReport(all: readonly StepStat[], o: { by: StatDimension; project?: string; since?: string; filter?: StatFilter }): StatsReport {
+  const ranged = all.filter((s) => (!o.project || s.project === o.project) && (!o.since || s.at >= o.since));
+  const across = !o.project && new Set(ranged.map((s) => s.project)).size > 1;
+  const filter = Object.entries(o.filter ?? {}).filter(([, v]) => v) as [(typeof STAT_FILTERS)[number], string][];
+  const steps = ranged.filter((s) => filter.every(([facet, v]) => keysOf(s, facet, across).includes(v)));
+  const groups = new Map<string, StepStat[]>();
+  for (const s of steps) for (const key of keysOf(s, o.by, across)) groups.set(key, [...(groups.get(key) ?? []), s]);
+  const out = [...groups].map(([key, xs]) => groupOf(key, xs, o.by, across)).sort((a, b) => b.steps - a.steps || a.key.localeCompare(b.key));
+  const facets = Object.fromEntries(STAT_FILTERS.map((f) => [f, [...new Set(ranged.flatMap((s) => keysOf(s, f, across)))].sort()])) as StatsReport["facets"];
+  return {
+    by: o.by, project: o.project, since: o.since, ...(filter.length ? { filter: Object.fromEntries(filter) } : {}),
+    steps: steps.length, groups: out, total: groupOf("all", steps, o.by, across), facets,
+  };
+}
+
+/** One group's figures from its steps. */
+function groupOf(key: string, xs: readonly StepStat[], by: StatDimension, across: boolean): StatGroup {
+  const decided = xs.filter((s) => s.decided).length;
+  const first = xs.filter((s) => s.first).length;
+  const done = xs.filter((s) => s.rounds > 0);
+  const times = xs.filter((s) => s.accepted && s.work_ms !== undefined).map((s) => s.work_ms!).sort((a, b) => a - b);
+  const usage: Record<string, number> = {}, usageSteps: Record<string, number> = {};
+  for (const s of xs) for (const [w, v] of Object.entries(s.usage)) { usage[w] = (usage[w] ?? 0) + v; usageSteps[w] = (usageSteps[w] ?? 0) + 1; }
+  const g: StatGroup = {
+    key, steps: xs.length, runtimes: [...new Set(xs.map((s) => s.runtime).filter((r): r is string => !!r))].sort(),
+    few: xs.length < FEW_STEPS, decided, first_accepted: first,
+    first_rate: decided ? first / decided : undefined,
+    avg_rounds: done.length ? done.reduce((a, s) => a + s.rounds, 0) / done.length : undefined,
+    stops: xs.reduce((a, s) => a + s.stops, 0), failures: xs.reduce((a, s) => a + s.failures, 0),
+    median_ms: quantile(times, 0.5), p25_ms: quantile(times, 0.25), p75_ms: quantile(times, 0.75),
+    usage, usage_steps: usageSteps, usage_missing: xs.reduce((a, s) => a + s.usage_missing, 0), fallback: xs.filter((s) => s.fallback).length,
+  };
+  if (by === "activity" && key !== UNTAGGED && key !== "all") {
+    const has = (list: readonly string[] | undefined, s: StepStat) => !!list?.some((a) => activityKey(s, a, across) === key);
+    g.activities = {
+      planned: xs.filter((s) => has(s.tags.activities, s)).length,
+      observed: xs.filter((s) => has(s.observed, s)).length,
+      unplanned: xs.filter((s) => has(s.observed, s) && !has(s.tags.activities, s)).length,
+      skipped: xs.filter((s) => s.observed && has(s.tags.activities, s) && !has(s.observed, s)).length,
     };
-    if (o.by === "activity" && key !== UNTAGGED) {
-      const has = (list: readonly string[] | undefined, s: StepStat) => !!list?.some((a) => activityKey(s, a, across) === key);
-      g.activities = {
-        planned: xs.filter((s) => has(s.tags.activities, s)).length,
-        observed: xs.filter((s) => has(s.observed, s)).length,
-        unplanned: xs.filter((s) => has(s.observed, s) && !has(s.tags.activities, s)).length,
-        skipped: xs.filter((s) => s.observed && has(s.tags.activities, s) && !has(s.observed, s)).length,
-      };
+  }
+  return g;
+}
+
+/** One usage window's course, day by day (UsageDays). */
+interface UsageDay {
+  runtime: string;
+  /** The window's name as the runtime reports it (five_hour, seven_day, codex_7d…). */
+  window: string;
+  /** "5h": the highest reading of each day; "7d": the level at each day's end. Utilization, 0 to 1; null: unknown. */
+  kind: "5h" | "7d";
+  values: (number | null)[];
+}
+/** GET /api/usage/days: the days (local dates, oldest first) and each window's values for them. */
+export interface UsageDays { days: string[]; windows: UsageDay[] }
+
+/** Runtimes in the order the statistics list them: Claude Code's first, then by name. */
+export const byRuntime = (a: string, b: string): number => (a === b ? 0 : a === "claude" ? -1 : b === "claude" ? 1 : a.localeCompare(b));
+
+/** A local date as the days are keyed (2026-11-14): the server's days here, the browser's in the Stats view. */
+export const dayKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+/**
+ * The usage windows day by day from `from`'s day to `to`'s, in local dates, for the Stats view. The readings are
+ * every turn's windows at its start and end (turns.jsonl), so a window is known only when some turn ran. A 5-hour
+ * window: the highest reading of the day (null on a day without one). A weekly window: the last reading by the
+ * day's end, 0 once that reading's reset time has passed, null before its first reading. Only the 5-hour and weekly
+ * windows (digest.ts, windowKind) with a reading in the period; Claude Code's first, then by name.
+ */
+export function usageDays(turns: readonly TurnRecord[], from: Date, to: Date): UsageDays {
+  const days: { key: string; start: number; end: number }[] = [];
+  for (let d = new Date(from.getFullYear(), from.getMonth(), from.getDate()); d.getTime() <= to.getTime(); d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)) {
+    const next = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
+    days.push({ key: dayKey(d), start: d.getTime(), end: next.getTime() });
+  }
+  const readings = new Map<string, { runtime: string; window: string; kind: "5h" | "7d"; list: { t: number; u: number; reset?: number }[] }>();
+  for (const r of turns) {
+    for (const [time, windows] of [[r.started_at, r.windows_start], [r.at, r.windows_end]] as const) {
+      if (!time || !windows) continue;
+      for (const [name, w] of Object.entries(windows)) {
+        const kind = windowKind(name);
+        if (!kind) continue;
+        const id = `${r.runtime}:${name}`;
+        const entry = readings.get(id) ?? { runtime: r.runtime, window: name, kind, list: [] };
+        entry.list.push({ t: Date.parse(time), u: w.utilization, ...(w.resets_at ? { reset: Date.parse(w.resets_at) } : {}) });
+        readings.set(id, entry);
+      }
     }
-    return g;
-  }).sort((a, b) => b.steps - a.steps || a.key.localeCompare(b.key));
-  return { by: o.by, project: o.project, since: o.since, steps: steps.length, groups: out };
+  }
+  const first = days[0]?.start ?? 0, last = days.at(-1)?.end ?? 0;
+  const windows: UsageDay[] = [];
+  for (const { runtime, window, kind, list } of readings.values()) {
+    list.sort((a, b) => a.t - b.t);
+    if (!list.some((x) => x.t >= first && x.t < last)) continue;
+    const values = days.map(({ start, end }) => {
+      if (kind === "5h") {
+        const own = list.filter((x) => x.t >= start && x.t < end);
+        return own.length ? Math.max(...own.map((x) => x.u)) : null;
+      }
+      const before = list.filter((x) => x.t < end).at(-1);
+      if (!before) return null;
+      return before.reset !== undefined && before.reset <= end ? 0 : before.u;
+    });
+    windows.push({ runtime, window, kind, values });
+  }
+  windows.sort((a, b) => byRuntime(a.runtime, b.runtime)
+    || (a.kind === b.kind ? a.window.localeCompare(b.window) : a.kind === "5h" ? -1 : 1));
+  return { days: days.map((d) => d.key), windows };
 }
 
 /**

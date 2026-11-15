@@ -1,5 +1,6 @@
 // The statistics over the API (PROTOCOL.md, "Statistics"): GET /api/stats across projects or of one, grouped and since
-// a time, and GET /api/projects/:id/metrics; an unknown project is 404, an unknown grouping 400. A real server process
+// a time, narrowed by a tag, GET /api/usage/days, and GET /api/projects/:id/metrics; an unknown project is 404, an
+// unknown grouping 400. A real server process
 // on a free port with a temporary NEXUS_HOME, two projects and a made-up turns.jsonl; no runtime is started.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -7,7 +8,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ProjectStore, approveQueue, writeRegistry, type Event, type ProjectMetrics, type StatsReport, type TurnRecord } from "@nexus/protocol";
+import { ProjectStore, approveQueue, writeRegistry, type Event, type ProjectMetrics, type StatsReport, type TurnRecord, type UsageDays } from "@nexus/protocol";
 import { spawnServer } from "./helpers.ts";
 import { serverUp } from "./wait.ts";
 
@@ -16,7 +17,7 @@ const freePort = () => new Promise<number>((resolve) => {
   s.listen(0, "127.0.0.1", () => { const p = (s.address() as { port: number }).port; s.close(() => resolve(p)); });
 });
 
-test("GET /api/stats and GET /api/projects/:id/metrics; unknown project 404, unknown grouping 400", async () => {
+test("GET /api/stats, GET /api/usage/days and GET /api/projects/:id/metrics; unknown project 404, unknown grouping 400", async () => {
   const base = mkdtempSync(join(tmpdir(), "nexus-stats-api-"));
   const home = join(base, "home");
   process.env.NEXUS_HOME = home;
@@ -42,7 +43,7 @@ test("GET /api/stats and GET /api/projects/:id/metrics; unknown project 404, unk
   b.emit(1, "w", { type: "step.started" });
   b.emit(2, "w", { type: "step.failed", reason: "no" });
   writeRegistry({ protocol: 1, projects: [{ id: "a", root: a.root }, { id: "b", root: b.root }] });
-  const turn = (p: string, model: string): TurnRecord => ({ v: 1, at: at(2), started_at: at(1), duration_ms: 3_600_000, project: p, session: "w", role: "worker", runtime: "claude", queue: "Q", step: "Q1", model, outcome: "ok" });
+  const turn = (p: string, model: string): TurnRecord => ({ v: 1, at: at(2), started_at: at(1), duration_ms: 3_600_000, project: p, session: "w", role: "worker", runtime: "claude", queue: "Q", step: "Q1", model, outcome: "ok", windows_end: { five_hour: { utilization: p === "a" ? 0.4 : 0.2 } } });
   mkdirSync(home, { recursive: true });
   writeFileSync(join(home, "turns.jsonl"), [turn("a", "opus"), turn("b", "haiku")].map((t) => JSON.stringify(t)).join("\n") + "\n");
 
@@ -62,6 +63,16 @@ test("GET /api/stats and GET /api/projects/:id/metrics; unknown project 404, unk
     assert.equal((await get("/api/stats?project=nope")).status, 404);
     assert.equal((await get("/api/stats?by=colour")).status, 400);
     assert.equal((await get("/api/stats?since=nonsense")).status, 400);
+    const docs = (await get("/api/stats?kind=docs")).body as unknown as StatsReport;
+    assert.deepEqual([docs.filter, docs.steps, docs.total.steps, docs.facets.kind], [{ kind: "docs" }, 1, 1, ["code", "docs"]]);
+
+    const days = (await get("/api/usage/days?since=2026-11-14")).body as unknown as UsageDays & { threshold: number };
+    const d = new Date(at(2));
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    assert.equal(days.days[0], "2026-11-14");
+    assert.deepEqual(days.windows.map((w) => [w.runtime, w.window, w.values[days.days.indexOf(key)]]), [["claude", "five_hour", 0.4]], "the day's highest");
+    assert.equal(days.threshold, 0.9, "the global default");
+    assert.equal((await get("/api/usage/days?since=nonsense")).status, 400);
 
     const m = (await get("/api/projects/a/metrics")).body as unknown as ProjectMetrics;
     assert.deepEqual(m.metrics.map((d) => [d.name, d.unit, d.warn_above]), [["bundle-kb", "KB", 500]]);

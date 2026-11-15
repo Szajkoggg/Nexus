@@ -6,7 +6,7 @@ import { basename, extname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { execFileSync } from "node:child_process";
 import {
-  Event, HOLDING_RUN_STATES, ProjectStore, checksLine, findNexusDir, inReportFolder, loadProjectState, openPlan, stepValuesText, stopPlace, newId, normPath, now, readRegistry, writeRegistry,
+  Event, isOpenQuestion, runGoing, ProjectStore, checksLine, findNexusDir, inReportFolder, loadProjectState, openPlan, stepValuesText, stopPlace, newId, normPath, now, readRegistry, writeRegistry,
   PICTURE_ROLES, REVIEW_HELP, checkPicture, levelNow, pictureSize, recommendedOption, stepDefs,
   NEXUS_ACTIVITIES, TAG_KINDS, TAG_ORIGINS, TAG_SIZES, tagIssues, tagProposalText, tagsText,
   STAT_DIMENSIONS, readTurns, sinceTime, statDimension, statsReport, statsText, stepStats,
@@ -249,7 +249,7 @@ Queues (${state.queues.length - done.length} open; finished: ${done.map((q) => `
     for (const line of stopLines(q)) console.log(line);
     for (const line of planLines(q)) console.log(line);
   }
-  const open = state.questions.filter((x) => x.state === "open" || x.state === "escalated");
+  const open = state.questions.filter(isOpenQuestion);
   console.log(`
 Open questions (${open.length})`);
   for (const x of open) console.log(`- ${x.qid} [${x.state}] ${x.queue ?? ""}${x.step ? `/${x.step}` : ""}: ${x.text}`);
@@ -257,7 +257,7 @@ Open questions (${open.length})`);
   console.log(`
 Worker sessions (${workers.length})`);
   for (const w of workers) {
-    const busy = state.queues.find((q) => q.run?.session === w.id && HOLDING_RUN_STATES.includes(q.run.state));
+    const busy = state.queues.find((q) => q.run?.session === w.id && runGoing(q.run));
     console.log(`- ${w.id} "${w.title ?? ""}" ${w.runtime}${w.launched_by === "nexus" ? "" : " (external)"}, ${w.live?.state ?? "not live"}, ${w.live?.model ?? w.model ?? "model ?"}, ${pct(w.live?.context_tokens, w.live?.context_window)}${busy ? `, running queue ${busy.id}` : ", free"}`);
     if (w.context) console.log(`  knows: ${w.context.topics.join(", ") || "-"}; ${w.context.text.replace(/\s+/g, " ").slice(0, 300)}`);
   }
@@ -578,7 +578,7 @@ const commands: Record<string, () => void | Promise<void>> = {
         const checks = checksLine(step.checks);
         if (checks) console.log(`        checks: ${checks}`);
       }
-      const open = q.questions.filter((x) => x.state === "open" || x.state === "escalated");
+      const open = q.questions.filter(isOpenQuestion);
       for (const x of open) console.log(`  question ${x.qid} [${x.state}]: ${x.text}`);
     }
     // The session's inbox: messages and answers not yet seen. Shown here is delivered, so each is recorded as read.

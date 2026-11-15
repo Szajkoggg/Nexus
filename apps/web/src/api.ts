@@ -1,81 +1,77 @@
 // Data access for the dashboard: the server's HTTP API and its change notifications.
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { AttentionItem, ProjectState } from "@nexus/protocol";
+import { useEffect, useReducer, useRef, useState } from "react";
+import type { AttentionItem } from "@nexus/protocol";
+import { Action, type ActionState } from "./action.ts";
+import { HttpError, request } from "./http.ts";
+import { Query, Requests, fetchJson, type LiveMessage, type QueryView, type Version } from "./query.ts";
 
+export { HttpError, open, request } from "./http.ts";
+
+export type { QueryView, Version } from "./query.ts";
+export type { ProjectSummary } from "@nexus/protocol/api";
 export type { AttentionItem, ProjectState, QueueView, StepView, QuestionView, SessionView } from "@nexus/protocol";
-
-export interface ProjectSummary {
-  id: string; name: string; root: string; error?: string;
-  running: number; waiting: number; stopped: number; open_questions: number;
-  attention: AttentionItem[];
-}
-
-/** A write to the server. Resolves when it is done; rejects with the server's reason. */
-export async function act(project: string, method: "POST" | "PATCH" | "PUT" | "DELETE", path: string, body: unknown = {}): Promise<void> {
-  const r = await fetch(`/api/projects/${encodeURIComponent(project)}${path}`, {
-    method, headers: { "content-type": "application/json" }, body: JSON.stringify(body),
-  });
-  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? r.statusText);
-}
 
 export const enc = encodeURIComponent;
 
-/** A write whose answer matters: resolves with the server's `result` (e.g. `{ message }`); rejects with its reason. */
-export async function actResult<T>(project: string, method: "POST" | "PATCH" | "DELETE", path: string, body: unknown = {}): Promise<T | null> {
-  const r = await fetch(`/api/projects/${encodeURIComponent(project)}${path}`, {
-    method, headers: { "content-type": "application/json" }, body: JSON.stringify(body),
-  });
-  const b = await r.json().catch(() => ({})) as { result?: T; error?: string };
-  if (!r.ok) throw new Error(b.error ?? r.statusText);
-  return b.result ?? null;
+/** A project's part of the API: `/api/projects/<id>` and `path`. */
+export const projectUrl = (project: string, path = "") => `/api/projects/${enc(project)}${path}`;
+
+type Write = "POST" | "PATCH" | "PUT" | "DELETE";
+
+/** A write to the server. Resolves when it is done; rejects with the server's reason. */
+export async function act(project: string, method: Write, path: string, body: unknown = {}): Promise<void> {
+  await request(projectUrl(project, path), { method, body });
 }
 
-/** A write the server refused, with its HTTP status (the reason's text is the server's, in English). */
-export class HttpError extends Error {
-  readonly status: number;
-  constructor(message: string, status: number) { super(message); this.status = status; }
+/** A write whose answer matters: resolves with the server's `result` (e.g. `{ message }`); rejects with its reason. */
+export async function actResult<T>(project: string, method: Write, path: string, body: unknown = {}): Promise<T | null> {
+  const b = await request<{ result?: T } | undefined>(projectUrl(project, path), { method, body });
+  return b?.result ?? null;
 }
 
 /** Uploads a picture for a chat message (base64, as a data: URL); resolves with the saved file's absolute path. */
 export async function uploadPicture(project: string, data: string): Promise<string> {
-  const r = await fetch(`/api/projects/${encodeURIComponent(project)}/uploads`, {
-    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ data }),
-  });
-  const b = await r.json().catch(() => ({})) as { result?: { path: string }; error?: string };
-  if (!r.ok || !b.result) throw new HttpError(b.error ?? r.statusText, r.status);
-  return b.result.path;
+  const path = (await actResult<{ path: string }>(project, "POST", "/uploads", { data }))?.path;
+  if (!path) throw new HttpError("the server saved no picture", 500);
+  return path;
 }
 
 export interface Usage { updated_at: string; windows: Record<string, { utilization: number; resets_at?: string; status?: string }> }
 export interface ActivityEntry { at: string; kind: string; text: string; queue?: string; step?: string }
 
-/** Re-fetches whenever `version` changes (the page bumps it on every live change of the project). */
-export function useFetch<T>(url: string | undefined, version: unknown): T | undefined {
-  const [data, setData] = useState<T>();
-  useEffect(() => {
-    if (!url) { setData(undefined); return; }
-    let alive = true;
-    fetch(url).then((r) => (r.ok ? r.json() : undefined)).then((d) => { if (alive) setData(d as T); }, () => {});
-    return () => { alive = false; };
-  }, [url, version]);
-  return data;
+const requests = new Requests(fetchJson);
+
+/**
+ * A keyed read (query.ts): asked again whenever `version` changes; while a new URL's answer is on its way it shows
+ * nothing, never the previous URL's. A failure is the view's `error`; the data it had for the same URL stays.
+ */
+export function useQuery<T>(url: string | undefined, version?: Version): QueryView<T> {
+  const [, render] = useReducer((n: number) => n + 1, 0);
+  const [query] = useState(() => new Query<T>(requests, render));
+  useEffect(() => { query.ask(url, version); return () => query.stop(); }, [query, url, version]);
+  return query.view(url);
 }
+
+/**
+ * A user's action with its busy and error state (action.ts): `run(work, done)` marks it busy, clears the last error,
+ * and keeps the failure's message as `error`; `done` gets a success's result. `fail` shows a failure found before
+ * any request.
+ */
+export function useAction(): ActionState & { run: Action["run"]; fail: Action["fail"] } {
+  const [state, setState] = useState<ActionState>(() => ({ busy: false, error: undefined }));
+  const [action] = useState(() => new Action(setState));
+  return { ...state, run: action.run, fail: action.fail };
+}
+
 /**
  * A stopped queue is one item whatever happens to its step (as the server's push notifications key it); a tag
  * proposal is one item each.
  */
 export const attentionKey = (a: AttentionItem) => [a.kind, a.queue, a.lift ? undefined : a.step, a.qid, ...(a.tags ? [a.tags.id] : [])].join("/");
 
-export const fileUrl = (project: string, path: string) =>
-  `/api/projects/${encodeURIComponent(project)}/file?path=${encodeURIComponent(path)}`;
+export const fileUrl = (project: string, path: string) => projectUrl(project, `/file?path=${enc(path)}`);
 
-async function getJson<T>(url: string): Promise<T> {
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`${r.status} ${(await r.json().catch(() => ({}))).error ?? r.statusText}`);
-  return r.json() as Promise<T>;
-}
-
-type Listener = (msg: { type: string; project?: string }) => void;
+type Listener = (msg: LiveMessage) => void;
 
 /** One WebSocket for the page, reconnecting with backoff. */
 export function useLive(onMessage: Listener): boolean {
@@ -97,26 +93,4 @@ export function useLive(onMessage: Listener): boolean {
     return () => { closed = true; clearTimeout(timer); ws?.close(); };
   }, []);
   return connected;
-}
-
-export function useProjects() {
-  const [projects, setProjects] = useState<ProjectSummary[]>();
-  const [error, setError] = useState<string>();
-  const reload = useCallback(() => {
-    getJson<ProjectSummary[]>("/api/projects").then((p) => { setProjects(p); setError(undefined); }, (e: Error) => setError(e.message));
-  }, []);
-  useEffect(reload, [reload]);
-  return { projects, error, reload };
-}
-
-export function useProjectState(id: string | undefined) {
-  const [state, setState] = useState<ProjectState>();
-  const [error, setError] = useState<string>();
-  const reload = useCallback(() => {
-    if (!id) return;
-    getJson<ProjectState>(`/api/projects/${encodeURIComponent(id)}/state`)
-      .then((s) => { setState(s); setError(undefined); }, (e: Error) => setError(e.message));
-  }, [id]);
-  useEffect(() => { setState(undefined); reload(); }, [reload]);
-  return { state, error, reload };
 }

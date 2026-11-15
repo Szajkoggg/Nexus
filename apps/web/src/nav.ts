@@ -3,6 +3,7 @@ import { useSyncExternalStore } from "react";
 import { close, closeThen, closeTop, navOf, open, openConversation, switchProject, switchTab, viewFor, type Layer, type Layout, type Nav, type Step, type Tab } from "./layers.ts";
 import { PHONE } from "./phone.ts";
 import { fileLayer } from "./fileview.ts";
+import { itemHash, projectPart } from "./hash.ts";
 
 const write = (n: Nav, how: "push" | "replace") =>
   history[how === "push" ? "pushState" : "replaceState"]({ ...(history.state ?? {}), nexus: n }, "", n.hash || location.pathname + location.search);
@@ -53,8 +54,7 @@ function start(): void {
 }
 
 /** The hash of the current project's page, without a queue or step. */
-const projectHash = () => current.hash.replace(/^(#\/[^/]+).*$/, "$1");
-const hashOf = (...parts: (string | undefined)[]) => "#/" + parts.filter((x): x is string => !!x).map(encodeURIComponent).join("/");
+const projectHash = () => projectPart(current.hash);
 /**
  * The layout: the phone below 1024 px (the chat, Ideas and the waiting list are tabs there), a desktop from 1024 px
  * (the chat and Ideas are its middle column). Either way they are views, not layers.
@@ -84,12 +84,14 @@ export const nav = {
   /** Closes the layer of this kind and what lies above it. */
   close: (kind: string) => apply(close(current, kind, kind === "item" ? projectHash() : current.hash)),
   /** Opens a queue or step in its drawer; from one already open, it switches in place. */
-  item: (project: string, queue: string, step?: string) => apply(open(current, "item", hashOf(project, queue, step))),
+  item: (project: string, queue: string, step?: string) => apply(open(current, "item", itemHash(project, queue, step))),
   /** Opens a file of the current project in the viewer, at a line; from a file already open, it switches in place. */
   file: (path: string, line?: number) => apply(open(current, fileLayer(path, line))),
   /** Shows a project, in place: switching projects is not a layer, so Back does not walk through them. */
-  project: (project: string) => apply(switchProject(current, hashOf(project), layout())),
+  project: (project: string) => apply(switchProject(current, itemHash(project), layout())),
+  /** Closes a layer, then opens another over what that leaves (the project picker's Stats). */
+  closeThenOpen: (kind: string, layer: Layer) => apply(closeThen(current, kind, current.hash, layer)),
   /** Closes a layer, then opens a queue or step in another project (the waiting list). */
   closeThenItem: (kind: string, project: string, queue?: string, step?: string) =>
-    apply(queue ? closeThen(current, kind, hashOf(project, queue, step), "item") : closeThen(current, kind, hashOf(project))),
+    apply(queue ? closeThen(current, kind, itemHash(project, queue, step), "item") : closeThen(current, kind, itemHash(project))),
 };

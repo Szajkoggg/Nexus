@@ -1,5 +1,7 @@
 // When steps and runs started and ended, how long they took, and how that reads. Pure and free of Node: the dashboard
-// imports this module directly (`@nexus/protocol/times`), so it must import nothing at run time.
+// imports this module directly (`@nexus/protocol/times`), so it must import nothing at run time but other such modules.
+import type { RunFile } from "./schemas.ts";
+import { runEnded } from "./status-rules.ts";
 
 /** A stretch in which a step was at work: from a step.started to its outcome, a stop, or the run ending. */
 export interface Segment { start: string; end?: string }
@@ -34,31 +36,11 @@ export function stepTimes(segments: readonly Segment[], now: number): StepTimes 
   };
 }
 
-/**
- * Run states in which the run holds its session and its checkout: it goes on by itself (running, pausing, a usage or
- * retry wait) or once the user approves the queue's new revision (approval_wait). Such a queue cannot be started or
- * cancelled, and its session runs no other queue.
- */
-export const HOLDING_RUN_STATES: readonly string[] = ["running", "pausing", "usage_wait", "retry_wait", "approval_wait"];
-
-/**
- * Run states in which the run holds its checkout (the project's own, or its worktree): those holding its session, and
- * paused (it will go on there). No other queue starts, resumes or continues in that checkout meanwhile. A halted or
- * finished run holds none.
- */
-export const CHECKOUT_RUN_STATES: readonly string[] = [...HOLDING_RUN_STATES, "paused"];
-
-/** Run states that count toward the limit on queues running at once (a queue waiting for a review or an answer does not). */
-export const COUNTED_RUN_STATES: readonly string[] = ["running", "pausing"];
-
-/** The run's states that mean it is not going (it may be resumed later). */
-export const ENDED_RUN_STATES: ReadonlySet<string> = new Set(["finished", "halted", "paused"]);
-
 export interface RunTimes { started: string; ended?: string; running: boolean; total_ms: number }
 
 /** A run's span: from its start to when it finished, halted or was stopped (or to now while it goes). */
-export function runTimes(run: { state: string; started_at: string; ended_at?: string; updated_at: string }, now: number): RunTimes {
-  const ended = ENDED_RUN_STATES.has(run.state) ? (run.ended_at ?? run.updated_at) : undefined;
+export function runTimes(run: { state: RunFile["state"]; started_at: string; ended_at?: string; updated_at: string }, now: number): RunTimes {
+  const ended = runEnded(run) ? (run.ended_at ?? run.updated_at) : undefined;
   return { started: run.started_at, ended, running: !ended, total_ms: Math.max(0, (ended ? ms(ended) : now) - ms(run.started_at)) };
 }
 

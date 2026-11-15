@@ -3,10 +3,10 @@
 import { existsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { ProjectFile, QueueFile, USER_SESSION, type GlobalSettings, effortIssue, type StatusChange, type InboxEntry, ReviewLevel, type RunFile, type SessionFile } from "./schemas.ts";
-import { ProjectStore, newId, now, readGlobalSettings, revisionHash, writeGlobalSettings } from "./store.ts";
+import { ProjectStore, countWrite, newId, now, readGlobalSettings, revisionHash, writeGlobalSettings } from "./store.ts";
 import { OVERRIDABLE, changedGlobal, settingKey } from "./settings.ts";
-import { HOLDING_RUN_STATES } from "./times.ts";
-import { commentTarget, isApproved, loadProjectState, pendingProvisional, type ProjectState, type QueueView, type StepView } from "./state.ts";
+import { reviewedByOrchestrator, runGoing } from "./status-rules.ts";
+import { commentTarget, isApproved, loadProjectState, pendingProvisional, type ProjectState, type QueueView } from "./state.ts";
 import { validAllowRule } from "./refusals.ts";
 import { closingStepId, integrationStepId, stepDefs } from "./closing.ts";
 import { stepChecks } from "./steps.ts";
@@ -55,7 +55,7 @@ export function addNote(store: ProjectStore, queue: string, step: string, text: 
   stepOf(store, queue, step);
   const id = newId();
   const st = loadProjectState(store).queues.find((q) => q.id === queue)?.steps.find((s) => s.id === step);
-  const to = st?.status === "review" && st.review_with === "orchestrator" ? "orchestrator" as const : undefined;
+  const to = st && reviewedByOrchestrator(st) ? "orchestrator" as const : undefined;
   store.writeNote(queue, { id, step, from: "user", at: now(), to }, nonEmpty(text, "the note"));
   return id;
 }
@@ -67,7 +67,7 @@ export function deleteNote(store: ProjectStore, queue: string, step: string, id:
   if (!note) throw new ActionError("no such note", 404);
   if (note.read_at) throw new ActionError("the note was already delivered", 409);
   const file = join(store.queueDir(queue), "notes", step, `${id}.md`);
-  if (existsSync(file)) unlinkSync(file);
+  if (existsSync(file)) { unlinkSync(file); countWrite(); }
 }
 
 export function sendMessage(store: ProjectStore, session: string, text: unknown, about?: { queue?: string; step?: string }): string {
@@ -153,12 +153,9 @@ export function setQueueSettings(store: ProjectStore, queue: string, settings: {
 /** A step whose review is over (or will not come): its level no longer changes. */
 const LEVEL_CLOSED: ReadonlySet<string> = new Set(["done", "skipped", "failed", "rejected"]);
 
-/** Whether a step waits for the orchestrator's review. */
-const withOrchestrator = (s: Pick<StepView, "status" | "review_with">) => s.status === "review" && s.review_with === "orchestrator";
-
 /** The steps of a queue waiting for the orchestrator's review now (before a change of levels). */
 const heldByOrchestrator = (store: ProjectStore, queue: string): string[] =>
-  (loadProjectState(store).queues.find((x) => x.id === queue)?.steps ?? []).filter(withOrchestrator).map((s) => s.id);
+  (loadProjectState(store).queues.find((x) => x.id === queue)?.steps ?? []).filter(reviewedByOrchestrator).map((s) => s.id);
 
 /**
  * After the user changed a level (a step's, or the queue's): a step that waited for the orchestrator's review (`held`,
@@ -187,7 +184,7 @@ export function setStepLevel(store: ProjectStore, queue: string, step: string, l
   const value = levelOf(level, "a step's level");
   const shown = loadProjectState(store).queues.find((x) => x.id === q.id)?.steps.find((s) => s.id === step);
   if (shown && LEVEL_CLOSED.has(shown.status)) throw new ActionError(`step ${q.id}/${step} is ${shown.status}: its review level no longer changes`, 409);
-  const held = shown && withOrchestrator(shown) ? [step] : [];
+  const held = shown && reviewedByOrchestrator(shown) ? [step] : [];
   const { [step]: _old, ...rest } = q.user_levels ?? {};
   const user_levels = value === undefined ? rest : { ...rest, [step]: value };
   store.writeQueue({ ...q, user_levels: Object.keys(user_levels).length ? user_levels : undefined, updated_at: now() });
@@ -528,7 +525,7 @@ export function liftByContinue(store: ProjectStore, queue: string, o: { skipClos
   if (view.status !== "stopped") throw new ActionError(`queue ${q.id} is not stopped (it is ${view.status})`, 409);
   if (!isApproved(q)) throw new ActionError(`revision ${q.revision} of queue ${q.id} is not approved: approve it instead, which lifts the stop`, 409);
   const run = store.readRun(q.id);
-  if (run && HOLDING_RUN_STATES.includes(run.state)) throw new ActionError(`queue ${q.id}'s run is still going (${run.state})`, 409);
+  if (run && runGoing(run)) throw new ActionError(`queue ${q.id}'s run is still going (${run.state})`, 409);
   const closing = o.skipClosing ? closingToSkip(view) : undefined;
   const at = now();
   const lift: StatusChange = { at, kind: "lift", by: "user_continue", from: "stopped", to: "approved", reason: view.status_reason, revision: q.revision };
@@ -583,7 +580,7 @@ export function runIsOlder(run: Pick<RunFile, "revision" | "started_at">, revisi
 
 /** A live run (one that is going) has the step open: the step is at work. */
 function heldByLiveRun(run: RunFile | undefined, step: string): boolean {
-  return !!run && HOLDING_RUN_STATES.includes(run.state) && run.step === step;
+  return !!run && runGoing(run) && run.step === step;
 }
 
 /**
@@ -677,7 +674,7 @@ export function orchestratorStatusChange(store: ProjectStore, input: { queue: st
       if (step) throw new ActionError("cancelling is for a queue; a step is skipped");
       if (view.status === "done" || view.status === "cancelled") throw new ActionError(`queue ${q.id} is ${view.status} already`, 409);
       const run = store.readRun(q.id);
-      if (run && HOLDING_RUN_STATES.includes(run.state)) throw new ActionError(`queue ${q.id} is ${run.state === "running" ? "running" : `running (${run.state})`}: stop its run first`, 409);
+      if (run && runGoing(run)) throw new ActionError(`queue ${q.id} is ${run.state === "running" ? "running" : `running (${run.state})`}: stop its run first`, 409);
       record({ kind: "status", from: view.status, to: "cancelled", reason });
       return `queue ${q.id} cancelled (was ${view.status}); the user is notified`;
     }

@@ -3,7 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useLayoutEffect, use
 import type { ChatEntry, RuntimeFile, SessionFile } from "@nexus/protocol";
 import type { NumberedEntry } from "@nexus/protocol/chat";
 import { PinButton, PinsBar, SearchBar, SearchButton, StopButton, type PinView, type SearchState } from "./ChatTools.tsx";
-import { act, enc, useFetch } from "../api.ts";
+import { act, actResult, enc, projectUrl, request, useAction, useQuery, type Version } from "../api.ts";
 import { Button, Clock, Composer, Menu, TimeAgo, type MenuEntry } from "./ui.tsx";
 import { CopyButton, ReplyTools } from "./MessageTools.tsx";
 import { messageSource, replyTools } from "../messageTools.ts";
@@ -19,6 +19,25 @@ import { EffortSelect, ModelSelect, useEfforts } from "./Settings.tsx";
 import { rich, t } from "../i18n.ts";
 import { SentPictures, filesOf, usePictures } from "./Pictures.tsx";
 import { splitPictures, withPictures } from "../pictures.ts";
+import { usePage } from "../page.ts";
+
+// ---------------------------------------------------------------- the endpoints this file reads and writes
+
+/** A session's chat lines from `from` up to (not including) `to`: the older part of a long chat. */
+const chatLines = (project: string, session: string, from: number, to: number) =>
+  request<{ chat: NumberedEntry[] }>(projectUrl(project, `/sessions/${enc(session)}/chat?from=${from}&to=${to}`));
+/** The chat lines a search finds (with `tools`, also in tool calls). */
+const searchChat = (project: string, session: string, query: string, tools: boolean, signal: AbortSignal) =>
+  request<{ lines?: number[] }>(projectUrl(project, `/sessions/${enc(session)}/chat/search?q=${enc(query)}${tools ? "&tools=1" : ""}`), { signal });
+/** The step's latest conversation that is not archived, if any. */
+const stepConversation = (project: string, queue: string, step: string) =>
+  request<{ conversation: { id: string } | null }>(projectUrl(project, `/queues/${enc(queue)}/steps/${enc(step)}/conversation`));
+/** Starts a conversation (about a step, or with a title and a runtime); resolves with its id. */
+async function newConversation(project: string, body: { queue: string; step: string } | { title: string; runtime: string; model?: string; effort?: string }): Promise<string> {
+  const made = await actResult<{ id: string }>(project, "POST", "/conversations", body);
+  if (!made) throw new Error("the server started no conversation");
+  return made.id;
+}
 
 /** A chat view: the newest entries with their lines in chat.jsonl, and the pinned messages (apps/server/src/chats.ts). */
 interface View { session: SessionFile | null; state: "working" | "idle" | "exited"; runtime: RuntimeFile | null; chat: NumberedEntry[]; pins: PinView[]; model: string | null; effort: string | null }
@@ -26,8 +45,8 @@ interface View { session: SessionFile | null; state: "working" | "idle" | "exite
 /** A chat's search, open or not: its button is in the chat's header, or in the desktop column's for the orchestrator. */
 interface Search { open: boolean; set: (open: boolean) => void }
 
-export function useOrchestrator(project: string | undefined, version: unknown) {
-  return useFetch<View>(project ? `/api/projects/${enc(project)}/orchestrator` : undefined, version);
+export function useOrchestrator(project: string | undefined, version: Version) {
+  return useQuery<View>(project ? projectUrl(project, "/orchestrator") : undefined, version).data;
 }
 
 /** A chat: what it is (its header; on a desktop's orchestrator chat, in the middle column's header), the messages, and the composer. */
@@ -147,9 +166,9 @@ function useOlder(project: string, session: string | undefined, loaded: Numbered
   const mine = useMemo(() => (older.session === session ? older.chat : []), [older, session]);
   const load = useCallback(async (from: number) => {
     if (!session || first === undefined || from >= first) return;
-    const r = await fetch(`/api/projects/${enc(project)}/sessions/${enc(session)}/chat?from=${from}&to=${first}`);
-    if (!r.ok) return;
-    const j = await r.json() as { chat: NumberedEntry[] };
+    // Older lines that cannot be read stay out; the next scroll to the top asks again.
+    const j = await chatLines(project, session, from, first).catch(() => undefined);
+    if (!j) return;
     setOlder({ session, to: first, chat: j.chat });
   }, [project, session, first]);
   useEffect(() => { if (mine.length && first !== undefined && first > older.to) void load(mine[0]!.line); }, [first, older.to, mine, load]);
@@ -202,10 +221,10 @@ function useSearch(project: string, session: string | undefined, showTools: bool
     setHits(undefined);
     const ctl = new AbortController();
     const timer = setTimeout(() => {
-      void fetch(`/api/projects/${enc(project)}/sessions/${enc(session)}/chat/search?q=${encodeURIComponent(query)}${showTools ? "&tools=1" : ""}`, { signal: ctl.signal })
-        .then((r) => r.json() as Promise<{ lines?: number[] }>)
+      void searchChat(project, session, query, showTools, ctl.signal)
         .then((j) => { const lines = j.lines ?? []; setHits(lines); setAt(Math.max(0, lines.length - 1)); if (lines.length) goTo(lines.at(-1)!, "search"); })
-        .catch(() => { /* a newer query took over */ });
+        // A newer query took over (aborted), or the search failed: no hits, as a refused search showed before.
+        .catch((e: Error) => { if (e.name !== "AbortError") setHits([]); });
     }, 250);
     return () => { clearTimeout(timer); ctl.abort(); };
   }, [project, session, showTools, search.open, query, goTo]);
@@ -409,9 +428,9 @@ export interface Desk {
  * itself (the chat's state, its tool calls and ⋯), and the column's own buttons. The project's queues show it too,
  * with neither side of the switch on. A switch adds no history entry (layers.ts, switchTab).
  */
-export function DeskHead({ which, desk, children }: { which?: "chat" | "ideas"; desk: Desk; children?: ReactNode }) {
+export function DeskHead({ which, desk, children }: { which?: "chat" | "ideas" | "stats"; desk: Desk; children?: ReactNode }) {
   const o = desk.orchestrator;
-  const item = (p: "chat" | "ideas", label: ReactNode) => (
+  const item = (p: "chat" | "ideas" | "stats", label: ReactNode) => (
     <button key={p} onClick={() => nav.tab(p)} aria-pressed={p === which}
       className={`flex items-center gap-1.5 rounded-md px-3 py-1 text-[13px] ${p === which ? "bg-surface-3 font-semibold text-fg" : "text-fg-2 hover:text-fg"}`}>{label}</button>
   );
@@ -420,6 +439,7 @@ export function DeskHead({ which, desk, children }: { which?: "chat" | "ideas"; 
       <div className="flex shrink-0 items-center gap-0.5 rounded-lg border border-line bg-surface-2 p-0.5" role="group" aria-label={t("desk.chats")}>
         {item("chat", <><span className={`h-2 w-2 rounded-full ${o?.state === "working" ? "animate-pulse bg-accent" : o?.session ? "bg-ok" : "bg-fg-3"}`} />{t("desk.orchestrator")}<UnreadMark n={desk.unread.chat} /></>)}
         {item("ideas", <>{t("desk.ideas")}{desk.ideas ? <span className="text-fg-3">· {desk.ideas}</span> : null}<UnreadMark n={desk.unread.ideas ? -1 : 0} /></>)}
+        {item("stats", t("desk.stats"))}
       </div>
       {children}
       <span className="flex-1" />
@@ -463,9 +483,10 @@ const stateText = (v: View | undefined) =>
 // ---------------------------------------------------------------- the orchestrator
 
 /** The orchestrator's chat: the phone's Orchestrator tab (`inline`), a desktop's middle column (`desk`). */
-export function ChatPanel({ project, name, view, onChanged, inline, desk }: {
-  project: string; name: string; view: View | undefined; onChanged: () => void; inline?: boolean; desk?: Desk;
+export function ChatPanel({ project, name, view, inline, desk }: {
+  project: string; name: string; view: View | undefined; inline?: boolean; desk?: Desk;
 }) {
+  const { reload: onChanged } = usePage();
   const [showTools, setShowTools] = useState(false);
   const [searching, setSearching] = useState(false);
   const fresh: MenuEntry[] = view?.session ? [{
@@ -524,27 +545,15 @@ function AboutStep({ project, c, className = "" }: { project: string; c: Session
  * seeds it with the step's context at the first message); "New conversation" starts another. Below, the step's
  * conversations, each a link into it.
  */
-export function StepChat({ project, queue, step, version }: { project: string; queue: string; step: string; version: unknown }) {
-  const list = useFetch<ConversationItem[]>(`/api/projects/${enc(project)}/conversations`, version);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string>();
+export function StepChat({ project, queue, step }: { project: string; queue: string; step: string }) {
+  const { version } = usePage();
+  const list = useQuery<ConversationItem[]>(projectUrl(project, "/conversations"), version).data;
+  const { busy, error, run } = useAction();
   const mine = (list ?? []).filter((c) => !c.archived && c.about?.queue === queue && c.about.step === step);
-  const go = async (fresh: boolean) => {
-    setBusy(true); setError(undefined);
-    try {
-      if (!fresh) {
-        const r = await fetch(`/api/projects/${enc(project)}/queues/${enc(queue)}/steps/${enc(step)}/conversation`);
-        const j = await r.json() as { conversation: { id: string } | null };
-        if (j.conversation) { nav.conversation(j.conversation.id); return; }
-      }
-      const r = await fetch(`/api/projects/${enc(project)}/conversations`, {
-        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ queue, step }),
-      });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.error ?? r.statusText);
-      nav.conversation(j.result.id as string);
-    } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
-  };
+  const go = (fresh: boolean) => run(async () => {
+    const open = fresh ? null : (await stepConversation(project, queue, step)).conversation;
+    return open?.id ?? await newConversation(project, { queue, step });
+  }, (id) => nav.conversation(id));
   return (
     <div>
       <div className="flex flex-wrap items-center gap-2">
@@ -577,17 +586,18 @@ export function StepChat({ project, queue, step, version }: { project: string; q
 }
 
 /** The conversations with a thinking partner: the phone's Ideas tab (`inline`), a desktop's middle column (`desk`). */
-export function ConversationsPanel({ project, name, version, onChanged, defaultRuntime, inline, desk }: {
-  project: string; name: string; version: unknown; onChanged: () => void; defaultRuntime: "claude" | "codex"; inline?: boolean; desk?: Desk;
+export function ConversationsPanel({ project, name, defaultRuntime, inline, desk }: {
+  project: string; name: string; defaultRuntime: "claude" | "codex"; inline?: boolean; desk?: Desk;
 }) {
-  const list = useFetch<ConversationItem[]>(`/api/projects/${enc(project)}/conversations`, version);
+  const { reload: onChanged, version } = usePage();
+  const list = useQuery<ConversationItem[]>(projectUrl(project, "/conversations"), version).data;
   usePlaces(); // the list's unread dots follow each conversation's place
   // The open conversation (or the new-conversation form) is a layer above the panel: Back returns to the list.
   const layer = layerValue(useNav(), "conversation");
   const creating = layer === "new";
   const open = creating ? undefined : layer;
   const [showArchived, setShowArchived] = useState(false);
-  const view = useFetch<ConversationView>(open ? `/api/projects/${enc(project)}/conversations/${enc(open)}` : undefined, version);
+  const view = useQuery<ConversationView>(open ? projectUrl(project, `/conversations/${enc(open)}`) : undefined, version).data;
   // On the phone's tab the list or one conversation at a time; on a desktop both, side by side.
   const side = !desk;
   const current = list?.find((c) => c.id === open);
@@ -691,13 +701,8 @@ function NewConversation({ project, defaultRuntime, onBack, onCreated }: {
   const field = "w-full rounded-md border border-line-strong bg-canvas px-2 py-1.5 text-sm text-fg placeholder:text-fg-3";
   const create = async () => {
     setError(undefined);
-    const r = await fetch(`/api/projects/${enc(project)}/conversations`, {
-      method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ title, runtime, model: model || undefined, effort: effort || undefined }),
-    });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) { setError(j.error ?? r.statusText); return; }
-    onCreated(j.result.id as string);
+    try { onCreated(await newConversation(project, { title, runtime, model: model || undefined, effort: effort || undefined })); }
+    catch (e) { setError((e as Error).message); }
   };
   return (
     <div className="flex min-w-0 flex-1 flex-col">

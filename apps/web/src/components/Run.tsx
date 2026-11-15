@@ -1,11 +1,13 @@
 // Running queues through Nexus-launched sessions: controls, live activity, sessions and usage.
 import { useEffect, useState, type ReactNode } from "react";
-import { HOLDING_RUN_STATES, retryLine } from "@nexus/protocol/times";
-import { act, enc, useFetch, type ActivityEntry, type ProjectState, type QueueView, type SessionView, type Usage } from "../api.ts";
+import { retryLine } from "@nexus/protocol/times";
+import { runGoing } from "@nexus/protocol/status-rules";
+import { act, enc, projectUrl, useAction, useQuery, type ActivityEntry, type ProjectState, type QueueView, type SessionView, type Usage } from "../api.ts";
 import { Button, RunTimes, Section, TimeAgo } from "./ui.tsx";
 import { formatClock, formatDateTime, formatTime, formatNumber, rich, t, type Key } from "../i18n.ts";
 import { EffortSelect, ModelSelect } from "./Settings.tsx";
 import { openPlan } from "../queueStatus.ts";
+import { usePage } from "../page.ts";
 
 // The run's state as a dot and a word: [dot, text].
 const RUN_TONE: Record<string, [string, string]> = {
@@ -126,7 +128,8 @@ function PlannedStart({ queue, busy, onCancel }: { queue: QueueView; busy: boole
 const endedHalt = (queue: QueueView) => queue.run?.state === "halted" && (queue.status === "done" || queue.status === "cancelled");
 
 /** Start, pause, stop and resume a queue's run. */
-export function RunControls({ project, queue, onChanged }: { project: ProjectState; queue: QueueView; onChanged: () => void }) {
+export function RunControls({ project, queue }: { project: ProjectState; queue: QueueView; }) {
+  const { reload: onChanged } = usePage();
   const id = project.project.id;
   const [model, setModel] = useState("");
   const [effort, setEffort] = useState("");
@@ -137,20 +140,14 @@ export function RunControls({ project, queue, onChanged }: { project: ProjectSta
   // "When": "" now, AT a time, USAGE the usage window's reset, else a queue to start after.
   const [after, setAfter] = useState("");
   const [time, setTime] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string>();
+  const { busy, error, run: perform } = useAction();
   const run = queue.run;
   // A run that holds its session: going on by itself, or waiting for the approval of the queue's new revision.
-  const active = run && HOLDING_RUN_STATES.includes(run.state);
+  const active = runGoing(run);
   const waitsApproval = run?.state === "approval_wait";
-  const call = async (body: Record<string, unknown>) => {
-    setBusy(true); setError(undefined);
-    try { await act(id, "POST", `/queues/${enc(queue.id)}/run`, body); onChanged(); }
-    catch (e) { setError((e as Error).message); }
-    finally { setBusy(false); }
-  };
+  const call = (body: Record<string, unknown>) => perform(() => act(id, "POST", `/queues/${enc(queue.id)}/run`, body), onChanged);
   const reusable = project.sessions.filter((s) => s.role === "worker" && s.runtime !== "external" && s.launched_by === "nexus" && s.native_id
-    && !project.queues.some((q) => q.id !== queue.id && q.run?.session === s.id && HOLDING_RUN_STATES.includes(q.run.state)));
+    && !project.queues.some((q) => q.id !== queue.id && q.run?.session === s.id && runGoing(q.run)));
   const runSession = run ? project.sessions.find((s) => s.id === run.session) : undefined;
   // A stopped queue goes on only through Continue or a newly approved revision (the stop box above).
   const canStart = queue.approved && !active && queue.status !== "done" && queue.status !== "cancelled" && queue.status !== "stopped";
@@ -268,8 +265,9 @@ const KIND_STYLE: Record<string, string> = {
 const KIND_ICON: Record<string, string> = { tool: "›", text: "¶", tool_error: "✗", error: "!", turn_start: "▸", turn_end: "■", exit: "■", retry: "↻" };
 
 /** What the agent did during a step, from the runtime's stream. */
-export function Activity({ project, session, queue, step, version }: { project: string; session: string; queue: string; step: string; version: unknown }) {
-  const items = useFetch<ActivityEntry[]>(`/api/projects/${enc(project)}/sessions/${enc(session)}/activity?queue=${enc(queue)}&step=${enc(step)}`, version);
+export function Activity({ project, session, queue, step }: { project: string; session: string; queue: string; step: string }) {
+  const { version } = usePage();
+  const items = useQuery<ActivityEntry[]>(projectUrl(project, `/sessions/${enc(session)}/activity?queue=${enc(queue)}&step=${enc(step)}`), version).data;
   const [all, setAll] = useState(false);
   if (!items?.length) return null;
   const shown = all ? items : items.slice(-40);
@@ -303,12 +301,12 @@ export function ContextBar({ s }: { s: SessionView }) {
 }
 
 /** The subscription's windows, from the latest report of any session. */
-export function UsageMeter({ version, always, stacked }: {
-  version: unknown; always?: boolean;
+export function UsageMeter({ always, stacked }: {
+  always?: boolean;
   /** At a desktop sidebar's foot: one row per window, its name, a bar and the percentage. */
   stacked?: boolean;
 }) {
-  const u = useFetch<Usage | null>("/api/usage", version);
+  const u = useQuery<Usage | null>("/api/usage", usePage().all).data;
   const none = always ? <span className="text-xs text-fg-3">{t("usage.none")}</span> : null;
   if (!u) return none;
   const windows = Object.entries(u.windows).filter(([, w]) => !w.resets_at || Date.parse(w.resets_at) > Date.now());
