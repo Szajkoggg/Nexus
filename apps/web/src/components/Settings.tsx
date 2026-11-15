@@ -72,13 +72,16 @@ function nested(values: Values, keys: readonly string[]): Values {
   return out;
 }
 
+/** The hint under the partners' web level: what each level lets them do, and for `fetch` its risk. */
+const WEB_HINT: Record<string, Key> = { off: "settings.web.offHint", search: "settings.web.searchHint", fetch: "settings.web.fetchHint" };
+
 /** Every setting with a global value, in the order of PROTOCOL.md's list. */
 const SETTING_KEYS = [
   "defaults.stop_conditions", "defaults.review_level", "defaults.review_send_back_limit", "defaults.context_reuse_threshold",
   "defaults.context_care", "defaults.protect_nexus", "defaults.push_accepted", "defaults.provisional_counts", "defaults.merge_back", "defaults.resolve_conflicts", "defaults.usage_pause_threshold",
   "runtimes.default", "runtimes.claude.model", "runtimes.claude.effort", "runtimes.claude.permission_mode",
   "runtimes.codex.model", "runtimes.codex.effort", "runtimes.codex.sandbox", "runtimes.codex.approval_policy", "runtimes.codex.approvals_reviewer",
-  "conversations.runtime", "conversations.model", "conversations.effort",
+  "conversations.runtime", "conversations.model", "conversations.effort", "conversations.web",
   "orchestrator.runtime", "orchestrator.model", "orchestrator.effort", "orchestrator.notify",
   "languages.reader",
 ] as const;
@@ -231,6 +234,10 @@ function SettingRows({ form, project }: { form: Form; project?: { values: Record
         </Setting>
         <Setting form={f} keys={["conversations.effort"]} label={t("settings.effort")}>
           {(d) => <EffortSelect runtime={ideasRuntime} model={f.get("conversations.model")} value={f.get("conversations.effort")} onChange={(v) => f.set("conversations.effort", v)} disabled={d} className="w-full" />}
+        </Setting>
+        <Setting form={f} keys={["conversations.web"]} label={t("settings.web")} hint={t(WEB_HINT[f.get("conversations.web")] ?? "settings.web.searchHint")}>
+          {(d) => <Select value={f.get("conversations.web")} onChange={(v) => f.set("conversations.web", v)} disabled={d}
+            options={[["off", t("settings.web.off")], ["search", t("settings.web.search")], ["fetch", t("settings.web.fetch")]]} />}
         </Setting>
       </Section>
 

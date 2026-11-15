@@ -13,6 +13,13 @@ any work. A partner reads the whole project and writes only in the project's not
 can record what you decide; "Hand to orchestrator" (under ⋯ in the conversation) has it summarize the conversation
 into the orchestrator's chat, which turns it into queues.
 
+**The web in Ideas.** Settings → "Ideas (conversations)" → **Web** (global, or the project's own): **off**, **web
+search** (the default: partners search and name their sources, but open no page) or **web search and reading pages**.
+Reading pages carries a risk: a page can hide instructions that lead a partner to put something from the project into
+an address it opens, and so send it out. In every level, pages on this machine and its network are refused, and what
+a partner takes from the web is quoted with its URL in its notes and hand-overs. A change applies from a
+conversation's next message.
+
 **Chat about a step.** Every step, in every state, has "Chat about this": it opens the step's latest conversation (an
 archived one does not count) or starts one, and "New conversation" beside it starts another. The partner gets the
 step's context with your first message: its goal, acceptance criteria and notes, its progress while it runs, and its
