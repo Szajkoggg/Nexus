@@ -86,6 +86,15 @@ closes. The pin beside a message's copy icon pins it to the top of the chat (on 
 message's pin stays, filled): the two most recently pinned show there, the others behind "N more pinned"; a click goes
 to the message, ✕ unpins it. Pins belong to the conversation: a new orchestrator conversation starts without them.
 
+**Searching the whole project.** **Search history…** in the project's header (Ctrl+K on a desktop; the magnifier at the
+top on the phone, where it opens full screen) searches everything the project has recorded: queues and their goals,
+step outcomes, questions and answers, the orchestrator's and the thinking partners' chats, reports, review comments and
+step notes. Case and accents do not matter; with several words, each must occur. The hits come newest first, each with
+its kind, its place, its time and the words marked; the chips above them keep one kind, and **Tool calls** adds the
+chats' tool calls. A click goes to the hit's place: a step's or queue's details, the chat scrolled to the message (an
+older orchestrator session's message only while the chat still shows it), a report in the file viewer. The search
+opens again with your last query.
+
 **A fresh orchestrator session.** The orchestrator's long chat is not compacted. When its context is fuller than its
 threshold (85 % by default: "Fresh session at" in the settings' Orchestrator section) at the end of a turn, Nexus asks
 it for a summary of the decisions, open items, the plan and what it promised you, and goes on in a fresh session that

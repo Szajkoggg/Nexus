@@ -76,6 +76,8 @@ test("the excerpt: around the first match, cut at words, every word highlighted"
   const early = searchExcerpt(words.join(" "), ["arviz", "word5"], 60);
   assert.ok(early.excerpt.startsWith("…word2 ") && !early.excerpt.includes("Árvíz"));
   assert.deepEqual(early.ranges.map(([s, e]) => early.excerpt.slice(s, e)), ["word5"]);
+  // Markdown's line marks are left out.
+  assert.equal(searchExcerpt("# Report\n\n## Left\n\n- A pump\n> quoted\n1. first\n```ts\ncode\n```", ["pump"]).excerpt, "Report Left A pump quoted first code");
   // Overlapping words are merged into one range.
   const merged = searchExcerpt("integration", ["integr", "gration"]);
   assert.deepEqual(merged.ranges, [[0, 11]]);
@@ -99,7 +101,7 @@ test("what events offer: outcomes, questions and answers, review texts; nothing 
 test("what a queue offers: its title and description, each step's title and goal", () => {
   const queue = QueueFile.parse({ protocol: 1, id: "Q", title: "Search", description: "Find things", steps: [{ id: "Q1", title: "Server", goal: "An endpoint", acceptance: [] }], updated_at: at });
   const items = queueItems(queue);
-  assert.deepEqual(items.map((i) => [i.kind, i.queue, i.step, i.text, i.title]), [["queue", "Q", undefined, "Search\nFind things", "Search"], ["queue", "Q", "Q1", "Server\nAn endpoint", "Search"]]);
+  assert.deepEqual(items.map((i) => [i.kind, i.queue, i.step, i.text, i.title]), [["queue", "Q", undefined, "Search: Find things", "Search"], ["queue", "Q", "Q1", "Server: An endpoint", "Search"]]);
   assert.equal(chatItem({ at, from: "user", kind: "tool", text: "x" }, "01S", 7).tool, true);
 });
 
@@ -112,5 +114,5 @@ test("the hits: newest first, only the newest `limit` kept, all of them counted"
   assert.equal(r.total, 10);
   assert.equal(r.more, true);
   assert.deepEqual(r.hits[0]!.ranges, [[0, 6]]);
-  assert.ok(!("text" in r.hits[0]!) && !("tool" in r.hits[0]!));
+  assert.ok(!("text" in r.hits[0]!) && !("tool" in r.hits[0]!), "no whole text; `tool` only on a tool line");
 });

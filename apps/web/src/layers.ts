@@ -13,7 +13,7 @@ import { hasItem } from "./hash.ts";
 /**
  * A layer is a kind, optionally with a value: "settings", "item" (the queue or step drawer), "conversation:<id>",
  * "file:<line>:<path>" (the file viewer, fileview.ts), "commit:<hash>" (a commit's details), "stats" (the global Stats
- * view, a page over the project's).
+ * view, a page over the project's), "search" (the search of the project's history, components/Search.tsx).
  */
 export type Layer = string;
 /**
@@ -133,7 +133,10 @@ export function navOf(state: unknown, hash: string, query: string): Nav {
   }
   const q = new URLSearchParams(query);
   const layers: Layer[] = hasItem(hash) ? ["item"] : [];
-  for (const k of ["ideas", "chat", "settings", "remote", "waiting", "projects", "stats"]) if (q.has(k)) layers.push(k);
+  for (const k of ["ideas", "chat", "settings", "remote", "waiting", "projects", "stats", "search"]) if (q.has(k)) layers.push(k);
+  // ?conversation=<id> opens a conversation over the Ideas view (a search hit's link, hash.ts chatHref).
+  const conversation = q.get("conversation");
+  if (conversation) layers.push(`conversation:${conversation}`);
   // ?file=<path>&line=<n> opens a file in the viewer (components/FileView.tsx) over the rest.
   const file = q.get("file");
   if (file) layers.push(fileLayer(file, Number(q.get("line")) || undefined));
@@ -226,6 +229,12 @@ function endOf(at: Nav, steps: Step[]): Nav {
   }
   return at;
 }
+
+/**
+ * Closes a layer, then goes on from where that leaves the user (a search hit: the chat's view, a conversation). Back
+ * afterwards does not reopen the closed layer.
+ */
+export const closeThenStep = (cur: Nav, kind: string, next: (at: Nav) => Step): Step => andThen(cur, close(cur, kind), next);
 
 /** One step, then another made from where the first leaves the user (also after a Back, once it has arrived). */
 function andThen(cur: Nav, first: Step, next: (at: Nav) => Step): Step {

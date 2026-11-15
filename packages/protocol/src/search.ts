@@ -40,7 +40,7 @@ export interface SearchItem {
 }
 
 /** A hit as the API sends it: the item without its whole text, with an excerpt and the matches in it. */
-export type SearchHit = Omit<SearchItem, "text" | "tool"> & { excerpt: string; ranges: [number, number][] };
+export type SearchHit = Omit<SearchItem, "text"> & { excerpt: string; ranges: [number, number][] };
 
 /** A search's answer: the newest hits first; `total` counts every match, `more` says there were more than sent. */
 export interface SearchResult { hits: SearchHit[]; total: number; more: boolean }
@@ -122,13 +122,21 @@ export function itemMatches(item: SearchItem, q: SearchQuery): boolean {
   return q.terms.every((t) => f.includes(t));
 }
 
+/** Text as one plain line: Markdown's marks at the start of lines (headings, lists, quotes, fences) dropped, whitespace collapsed. */
+function plain(text: string): string {
+  return text
+    .replace(/^\s{0,3}(```.*|#{1,6}\s+|>\s?|[-*+]\s+|\d+[.)]\s+)/gm, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 /**
- * An item's text as one short line around its first match: whitespace collapsed, at most about `width` characters,
+ * An item's text as one short line around its first match: Markdown's line marks dropped, whitespace collapsed, at most about `width` characters,
  * cut at word boundaries with "…" where text is left out; `ranges` are where the words occur in it ([start, end) of
  * the excerpt, in order, not overlapping), for the highlight.
  */
 export function searchExcerpt(text: string, terms: readonly string[], width = 160): { excerpt: string; ranges: [number, number][] } {
-  const flat = text.replace(/\s+/g, " ").trim();
+  const flat = plain(text);
   const { folded, map } = fold(flat);
   const first = Math.min(...terms.map((t) => folded.indexOf(t)).filter((i) => i >= 0), Number.MAX_SAFE_INTEGER);
   const at = first === Number.MAX_SAFE_INTEGER ? 0 : map[first]!;
@@ -165,8 +173,8 @@ export function queueItems(q: QueueFile): SearchItem[] {
   const at = q.updated_at ?? q.created_at ?? "1970-01-01T00:00:00.000Z";
   const title = q.title;
   return [
-    { kind: "queue", at, queue: q.id, title, text: `${q.title}\n${q.description}` },
-    ...q.steps.map((s): SearchItem => ({ kind: "queue", at, queue: q.id, step: s.id, title, text: `${s.title}\n${s.goal}` })),
+    { kind: "queue", at, queue: q.id, title, text: `${q.title}: ${q.description}` },
+    ...q.steps.map((s): SearchItem => ({ kind: "queue", at, queue: q.id, step: s.id, title, text: `${s.title}: ${s.goal}` })),
   ];
 }
 
@@ -179,8 +187,7 @@ export function eventItems(e: Event): SearchItem[] {
   const where = { at: e.at, session: e.session };
   if (e.type === "step.done") return [{ kind: "step", ...where, queue: e.queue, step: e.step, text: e.summary }];
   if (e.type === "step.failed") return [{ kind: "step", ...where, queue: e.queue, step: e.step, text: e.reason }];
-  if (e.type === "queue.stop") return [{ kind: "step", ...where, queue: e.queue, step: e.step, text: `${e.condition}
-${e.reason}` }];
+  if (e.type === "queue.stop") return [{ kind: "step", ...where, queue: e.queue, step: e.step, text: `${e.condition}\n${e.reason}` }];
   if (e.type === "question.asked") return [{ kind: "question", ...where, queue: e.queue, step: e.step, qid: e.qid, text: e.text }];
   if (e.type === "answer.given") return [{ kind: "question", ...where, qid: e.qid, text: e.text }];
   if (e.type === "review.accepted" || e.type === "review.sent_back" || e.type === "review.rejected" || e.type === "review.commented"
@@ -224,7 +231,7 @@ export class SearchHits {
     this.kept.length = Math.min(this.kept.length, this.q.limit);
   }
   result(): SearchResult {
-    const hits = this.items().map(({ text, tool: _tool, ...rest }): SearchHit => ({ ...rest, ...searchExcerpt(text, this.q.terms) }));
+    const hits = this.items().map(({ text, ...rest }): SearchHit => ({ ...rest, ...searchExcerpt(text, this.q.terms) }));
     return { hits, total: this.total, more: this.total > hits.length };
   }
 }

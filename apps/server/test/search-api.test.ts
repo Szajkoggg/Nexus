@@ -88,7 +88,7 @@ test("the project's history searched: every kind found, filters, tool lines on r
     assert.equal(all.body.more, false);
     // The excerpt and its highlight; titles; the answer placed at its question's step.
     const report = all.body.hits.find((h) => h.kind === "report")!;
-    assert.equal(report.excerpt, "# Report The árvíz walls hold.");
+    assert.equal(report.excerpt, "Report The árvíz walls hold.");
     assert.deepEqual(report.ranges.map(([s, e]) => report.excerpt.slice(s, e)), ["árvíz"]);
     assert.equal(report.title, "Flood defence");
     assert.match(report.path!, /\/queues\/Q\/report\.md$/);
@@ -106,7 +106,7 @@ test("the project's history searched: every kind found, filters, tool lines on r
     // Tool lines only on request; the line is the chat's (the broken line counts).
     assert.deepEqual((await search("q=grep&kinds=chat")).body.hits, []);
     const tool = (await search("q=grep&kinds=chat&tools=1")).body.hits;
-    assert.deepEqual(tool.map((h) => [h.session, h.line, h.from]), [[orch.id, 2, "orchestrator"]]);
+    assert.deepEqual(tool.map((h) => [h.session, h.line, h.from, h.tool]), [[orch.id, 2, "orchestrator", true]]);
 
     // Refused: no words, an unknown kind, a bad time; an unknown project.
     assert.equal((await search("q=%20%20")).status, 400);

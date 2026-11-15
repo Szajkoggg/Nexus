@@ -1,0 +1,27 @@
+# The search of a project's history (queue SR), on the demo project of scripts/capture/seed-search.ts: the panel with
+# the hits for "pump" on a desktop and on the phone, and the panel before anything is typed.
+#   node scripts/capture.ts scripts/capture/examples/search.yaml --step <queue>/<step> --no-before
+seed: scripts/capture/seed-search.ts
+views:
+  - key: search-results@1440
+    route: "#/demo"
+    label: "A keresés találatai a „pump” szóra, asztalon"
+    actions:
+      - click: { selector: "button[title^='Search everything']" }
+      - wait: 400
+      - type: { text: "pump", into: "[data-history-search] input" }
+      - wait: 1200
+  - key: search-results@390
+    route: "#/demo"
+    label: "A keresés találatai a „pump” szóra, telefonon"
+    actions:
+      - click: { selector: "button[title^='Search everything']" }
+      - wait: 400
+      - type: { text: "pump", into: "[data-history-search] input" }
+      - wait: 1200
+  - key: search-empty@1440
+    route: "#/demo"
+    label: "A keresőpanel, mielőtt bármit beírnánk"
+    actions:
+      - click: { selector: "button[title^='Search everything']" }
+      - wait: 600

@@ -1299,10 +1299,11 @@ in any order, also inside longer words. `kinds`, comma-separated (every kind whe
 | `note` | each step note's body (notes/<step>/<id>.md) | `queue`, `step` |
 
 `since` (ISO 8601) leaves out what is older; `limit` (1 to 500, 50 when missing) is how many hits are sent. A hit is
-`{ kind, at, excerpt, ranges, queue?, step?, session?, line?, path?, qid?, from?, title? }`: `excerpt` is one line
-around the first match (whitespace collapsed, about 160 characters, cut at words with `…`), `ranges` the
+`{ kind, at, excerpt, ranges, queue?, step?, session?, line?, path?, qid?, from?, title?, tool? }`: `excerpt` is one line
+around the first match (Markdown's line marks dropped, whitespace collapsed, about 160 characters, cut at words with `…`), `ranges` the
 `[start, end)` spans of the words in it for the highlight; `from` who wrote it where known (a chat entry's `from`, a
-note's author); `session` the session whose file holds it; `title` the queue's title, or the conversation's.
+note's author); `session` the session whose file holds it; `title` the queue's title, or the conversation's; `tool`
+true on a chat's tool line.
 `total` counts every match and `more` says there were more than `limit`. Worker activity (activity.jsonl), inboxes
 and refusals are not searched. A JSONL log is read line by line in 64 KB chunks, a line is parsed only when every word
 occurs in it raw, a file last written before `since` is not read (events.jsonl still is when questions are searched,
