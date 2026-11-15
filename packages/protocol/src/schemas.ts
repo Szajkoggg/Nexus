@@ -102,6 +102,11 @@ const Fraction = z.number().min(0).max(1);
 /** One of the offered languages, by its code (languages.ts). */
 const Language = z.enum(LANGUAGE_CODES);
 
+/** How many queues may run at once when nothing else is set. */
+export const DEFAULT_MAX_RUNNING = 2;
+/** A limit on queues running at once: a whole number from 1 to 20. */
+export const MaxRunning = z.number().int().min(1).max(20);
+
 const DefaultsShape = z.object({
   stop_conditions: z.array(z.string()).default([]),
   /** The review level of a step whose step and queue set none. */
@@ -145,6 +150,11 @@ const DefaultsShape = z.object({
    */
   resolve_conflicts: z.boolean().default(false),
   usage_pause_threshold: Fraction.default(0.9),
+  /**
+   * How many queues may run at once (a whole number from 1 to 20). The global value is the limit across all projects;
+   * a project's own value limits its own queues as well, and both hold (src/coordinator.ts).
+   */
+  max_running: MaxRunning.default(DEFAULT_MAX_RUNNING),
 });
 /** `defaults` as read: an old `review_policy` becomes its `review_level`. */
 const legacyDefaults = (x: unknown) => withLevel(x, "review_policy", "review_level");
@@ -355,6 +365,7 @@ export const StoredProject = z.object({
     merge_back: own(z.boolean()),
     resolve_conflicts: own(z.boolean()),
     usage_pause_threshold: own(Fraction),
+    max_running: own(MaxRunning),
     worktree_dir: z.string().optional(),
     worktree_setup: z.string().optional(),
     checks: z.array(z.string()).optional(),

@@ -9,7 +9,7 @@ import { monotonicFactory } from "ulid";
 import YAML from "yaml";
 import type { z } from "zod";
 import {
-  Activity, Applied, AwayFile, ChatEntry, PinsFile, Refusal, Delivery, Event, GlobalSettings, InboxEntry, MetricsFile, NoteMeta, GitFile, ProjectFile, PushFile, QueueFile, type QueueInput, LegacyReviewPolicy, RegistryFile, RunFile, RuntimeFile, SessionFile, StartFile, PlanFile, StoredProject, TagsFile, TurnRecord, UsageFile,
+  Activity, Applied, AwayFile, ChatEntry, PinsFile, Refusal, Delivery, Event, GlobalSettings, InboxEntry, MaxRunning, MetricsFile, NoteMeta, GitFile, ProjectFile, PushFile, QueueFile, type QueueInput, LegacyReviewPolicy, RegistryFile, RunFile, RuntimeFile, SessionFile, StartFile, PlanFile, StoredProject, TagsFile, TurnRecord, UsageFile,
   type Note,
 } from "./schemas.ts";
 import { applyChange, builtInSettings, effectiveProject, migrateStored, storedFrom } from "./settings.ts";
@@ -403,12 +403,40 @@ export function readGlobalSettings(): GlobalSettings {
   const f = globalSettingsFile();
   return existsSync(f) ? readYaml(f, GlobalSettings) : builtInSettings();
 }
-/** Written only by the server. */
-export function writeGlobalSettings(g: GlobalSettings): void { writeYaml(globalSettingsFile(), GlobalSettings.parse(g)); }
-/** At the server's start: the global settings file exists, the first time with the built-in defaults. */
+/**
+ * <NEXUS_HOME>/limits.json: where the limit on queues running at once was kept before it became a global setting
+ * (`defaults.max_running`, decided 2026-11-15, queue OP). It stays, as a copy the server writes with every change of
+ * the global settings, so that an older server (an update rolled back) still reads the current limit.
+ */
+const limitsFile = () => join(nexusHome(), "limits.json");
+/** The limit limits.json holds, if it holds a valid one. */
+function legacyMaxRunning(): number | undefined {
+  try {
+    const v = (JSON.parse(readFileSync(limitsFile(), "utf8")) as { max_running?: unknown }).max_running;
+    return MaxRunning.safeParse(v).success ? (v as number) : undefined;
+  } catch { return undefined; }
+}
+
+/** Written only by the server; limits.json gets the limit's copy (see limitsFile). */
+export function writeGlobalSettings(g: GlobalSettings): void {
+  const parsed = GlobalSettings.parse(g);
+  writeYaml(globalSettingsFile(), parsed);
+  const f = limitsFile();
+  writeFileSync(`${f}.tmp`, `${JSON.stringify({ max_running: parsed.defaults.max_running }, null, 2)}\n`);
+  renameRetrying(`${f}.tmp`, f);
+}
+/**
+ * At the server's start: the global settings file exists, the first time with the built-in defaults. A settings file
+ * without `defaults.max_running` (from before it, or rewritten by an older server) takes the limit from limits.json.
+ */
 export function ensureGlobalSettings(): GlobalSettings {
-  const g = readGlobalSettings();
-  if (!existsSync(globalSettingsFile())) writeGlobalSettings(g);
+  const f = globalSettingsFile();
+  const raw = existsSync(f) ? (YAML.parse(readFileSync(f, "utf8")) as { defaults?: { max_running?: unknown } } | null) : undefined;
+  let g = readGlobalSettings();
+  const noLimit = raw?.defaults?.max_running === undefined;
+  const legacy = noLimit ? legacyMaxRunning() : undefined;
+  if (legacy !== undefined) g = { ...g, defaults: { ...g.defaults, max_running: legacy } };
+  if (!raw || noLimit) writeGlobalSettings(g);
   return g;
 }
 

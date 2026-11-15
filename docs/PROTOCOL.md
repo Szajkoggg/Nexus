@@ -92,7 +92,7 @@ for a project then. Same paths as in `project.yaml`:
 protocol: 1
 defaults: { stop_conditions: [], review_level: 2, review_send_back_limit: 2, context_reuse_threshold: 0.6,
             context_care: true, protect_nexus: true, push_accepted: false, provisional_counts: true,
-            merge_back: false, resolve_conflicts: false, usage_pause_threshold: 0.9 }
+            merge_back: false, resolve_conflicts: false, usage_pause_threshold: 0.9, max_running: 2 }
 runtimes:
   default: claude
   claude: { permission_mode: acceptEdits }            # model, effort: none (the runtime's default)
@@ -140,7 +140,7 @@ one: `null`). The effective settings do not change. It writes only such a file, 
 
 | Kind | Settings |
 |---|---|
-| Global, with a project override | `defaults`: `stop_conditions`, `review_level`, `review_send_back_limit`, `context_reuse_threshold`, `context_care`, `protect_nexus`, `push_accepted`, `provisional_counts`, `merge_back`, `resolve_conflicts`, `usage_pause_threshold`. `runtimes`: `default`; `claude`: `model`, `effort`, `permission_mode`; `codex`: `model`, `effort`, `sandbox`, `approval_policy`, `approvals_reviewer`. `conversations`: `runtime`, `model`, `effort`, `web`. `orchestrator`: `runtime`, `model`, `effort`, `notify`. `languages`: `reader`. `kinds.<kind>`: `runtime`, `model`, `effort` (a model or effort may be the project's own `null`: the project's for that runtime), `fallback` |
+| Global, with a project override | `defaults`: `stop_conditions`, `review_level`, `review_send_back_limit`, `context_reuse_threshold`, `context_care`, `protect_nexus`, `push_accepted`, `provisional_counts`, `merge_back`, `resolve_conflicts`, `usage_pause_threshold`, `max_running` (see "One queue per checkout, and a limit"). `runtimes`: `default`; `claude`: `model`, `effort`, `permission_mode`; `codex`: `model`, `effort`, `sandbox`, `approval_policy`, `approvals_reviewer`. `conversations`: `runtime`, `model`, `effort`, `web`. `orchestrator`: `runtime`, `model`, `effort`, `notify`. `languages`: `reader`. `kinds.<kind>`: `runtime`, `model`, `effort` (a model or effort may be the project's own `null`: the project's for that runtime), `fallback` |
 | Project only | `name`, `defaults.worktree_dir`, `defaults.worktree_setup`, `defaults.checks`, `runtimes.claude.allowed_tools` (the project's own allow rules), `runtimes.codex.mcp_servers` (the user's Codex MCP servers, by name, that Codex workers keep; empty by default), `conversations.notes_dir`, `languages.working` (`id` and `root` identify the project) |
 | Global only | Remote access (`<NEXUS_HOME>/auth.json`, `push.json`), the deploy push (`deploy.json`), the server; each stays in its own file |
 | State, not a setting | `orchestrator.session` |
@@ -591,7 +591,7 @@ Written only by the server's queue engine; agents never touch them.
 | `<NEXUS_HOME>/usage.json` | The subscription's windows (5-hour, 7-day: utilization and reset time) from the latest `rate_limit_event` (Codex: `account/rateLimits`) of any session. Every session's turns count toward usage, workers', orchestrators' and thinking partners' alike (one subscription), so the usage display and the usage pause see them all |
 | `<NEXUS_HOME>/turns.jsonl` | One line per agent turn of every project and role, appended by the server (AgentHost, its one writer) when the turn ends, or when its process ends first: `v`, `at` (the end), `started_at` (the runtime's turn start, or the first thing it streamed after the previous turn's end), `duration_ms`, `project`, `session`, `role` (`worker`, `orchestrator`, `conversation`), `runtime`, `model`, `effort`, `queue` and `step` (a worker's run, when any), `tags` (that step's tags as planned when the turn ended: its own over its queue's, renamed names read as the new ones; absent when it has none, see "Tags"), `fallback` (a turn of a step that runs on its fallback: `from`, the runtime it would have run on, and `reason`, its full window; see "Fallback when usage runs out"), `outcome` (`ok`; a failure's kind `passing`, `lasting` or `usage`, with `failure`, the runtime's code; `interrupted`: no result, because Nexus interrupted the turn or its process ended: a kill, an update's drain, a crash), `tokens` (the turn's own, its main loop's: `input` not from the cache, `output`, `cache_read`, `cache_creation`), `subagent_tokens` (what the turn's sub-agents used, in the same four figures, apart from `tokens`: Claude Code turns only, zeros when none ran; absent where unknown: a Codex turn, the first turn of a resumed process, an older record; read from the growth of `result.modelUsage`, the process's running total, less `result.usage`, see DESIGN.md "Sub-agent tokens"), `cost_usd` (the turn's own, where the runtime reports cost and it is known: Claude Code, not the first turn of a resumed process), `windows_start` and `windows_end` (the turn's runtime's usage windows, `utilization` and `resets_at`, as the server knew them when the turn began and ended; left out when none was known). In one file because the windows are the account's, across projects; statistics are computed from it when read. A turn's use of the windows is estimated when read (`usageEstimates`, `packages/protocol/src/usage-estimate.ts`, free of Node): per window, the window's growth between the turn's two readings times the turn's weighted tokens (sub-agents' included) over the weighted tokens of every turn of the same runtime within that stretch, each overlapping turn with the part of its tokens spent within it; `{ share }` (in utilization, 0 to 1) or `{ none }`: `missing` (no reading at the start or the end), `reset` (the window reset between them), `tokens` (the turn's tokens unknown). The token weights (`TOKEN_WEIGHTS`) and the method: DESIGN.md, "Estimating a turn's use" |
 | `<NEXUS_HOME>/away.yaml` | The user's away mode: `current` (`since`, `until`) while on, `past` periods (`since`, `until`, `ended`, `why`: `expired` or `off`). One writer: the server, on `POST /api/server/away` and when a period's time comes. See "Away mode" under "Review" |
-| `<NEXUS_HOME>/limits.json` | `{ max_running: number }`: how many queues may run at once across all projects, a whole number from 1 to 20 (default `2` when the file or the value is missing). One writer: the server, on `POST /api/server/settings` from the dashboard |
+| `<NEXUS_HOME>/limits.json` | `{ max_running: number }`: where the limit on queues running at once was kept before it became the global setting `defaults.max_running` (decided 2026-11-15, queue OP). A server whose `settings.yaml` has no `defaults.max_running` (from before it, or rewritten by an older server) takes a valid value from here into it at its start. The file stays: the server writes the global limit into it with every write of the global settings, so an older server (an update rolled back) reads the current limit. One writer: the server |
 | `<NEXUS_HOME>/deploy.json` | `{ push_on_deploy: boolean }` (default `true` when the file is missing). One writer: the server, on `POST /api/server/settings` from the dashboard |
 | `<NEXUS_HOME>/deploy-plan.json` | The planned deploy, if any: `plan?` (`id`, either `after` (`project`, `queue`, `step?`: none, the whole queue) or `at` (ISO 8601) with `deadline?`, `ref?`, `by?` (`project`, `session`: the orchestrator that planned it), `created_at`, `warning?`, `waiting_for?` (`queue/step`: the unconfirmed provisional work it waits for), `held?` (`project`, `queue`: the run it holds while it waits), `started?` (`at`, `update`: the id of the update it started)), and the last plan that ended, `ended?` (`plan`, `at`, `why`: `carried-out`, `dropped`, `update-failed` or `cancelled`, `reason`, `by?`). One writer: the server. See "Planned deploys" |
 | `<NEXUS_HOME>/deploy-changes.jsonl` | One line per successful deploy with changes for agents: `key` (`deploy-changes:<new sha>`), `at`, `from`, `to` (full shas), `changes` (`commit`, `text`: the commits' `Agents:` lines, oldest first). One writer: the server that took over (a successor, once per deploy) |
@@ -1316,7 +1316,7 @@ then) and `update`:
 `phase` (`idle`, `draining`, `updating`, `restarting`, `failed`, or `updated` on a server that took over from an
 update), `held`, `waiting`, `log`, `error?`, and after a deploy `push?` (`result`: `pushed`, `failed` or `skipped`,
 `text`, `at`), `id` (the update's id), `by?` (`project`, `session`: the orchestrator that asked for it) and, on a
-successor, `up` (`commit`, `subject`, `previous?`). It also gives `push_on_deploy`, `max_running` (the limit on queues
+successor, `up` (`commit`, `subject`, `previous?`). It also gives `push_on_deploy`, `max_running` (the global `defaults.max_running`: the limit on queues
 running at once), `away` (the away mode now: `on`, `since?`, `until?`), `plan` (the planned deploy, as in
 `deploy-plan.json`, with `waiting?`: what it waits for, in a sentence; null when none) and `running`: the steps running
 now, per project (`project`, `name`, `steps`: `queue`, `step`, `title`, `session`, `run`), which `nexus server status`
@@ -1331,7 +1331,7 @@ when refused; see "Planned deploys"). `POST
 /api/server/away` (`until`: a local time "8:00", an ISO 8601 time, or null for off; it answers `away`) switches the
 user's away mode; like update and cancel it is taken from `nexus server away` without an `Origin`, and the CLI refuses
 it from every agent session. `POST /api/server/settings` (`push_on_deploy?`: boolean, `max_running?`: a whole number
-from 1 to 20; at least one of them; it answers both values) is the
+from 1 to 20, written as the global `defaults.max_running`; at least one of them; it answers both values) is the
 user's only: like withdrawing an approval, it is refused without the dashboard page's own `Origin`. A server waiting
 to take over answers every `/api/projects…` request, and every write under `/api/server/`, with 503.
 
@@ -1714,7 +1714,8 @@ schedule.
 
 ## One queue per checkout, and a limit
 
-Queues run side by side only in worktrees of their own, never two in one checkout, and no more at once than a limit.
+Queues run side by side only in worktrees of their own, never two in one checkout, and no more at once than the
+limits: the global one across all projects, and a project's own for its queues (both hold).
 
 - A queue's checkout is its worktree (`worktree`: a path; with `auto`, the folder Nexus creates for it, under
   `defaults.worktree_dir`), else the project's own checkout (`root`). Paths are compared without regard to case or
@@ -1722,23 +1723,26 @@ Queues run side by side only in worktrees of their own, never two in one checkou
 - A checkout is held by a queue whose run is `running` (also with a step waiting for a review or an answer),
   `pausing`, `paused`, `usage_wait`, `retry_wait` or `approval_wait`: it will go on there. A halted or finished run
   holds none.
-- The limit (`max_running` in `<NEXUS_HOME>/limits.json`, default 2) counts the queues whose run is `running` or
-  `pausing` across all projects, except a queue waiting for a review or an answer (its status `waiting`). Runs
-  waiting for the usage window, a retry or an approval do not count.
+- The limits are the setting `defaults.max_running` (a whole number from 1 to 20, default 2; see "Global settings";
+  decided 2026-11-15, queue OP). The global value limits the queues running at once across all projects; a project's
+  own value limits its own queues as well, and a start must keep within both. A project that follows the global value
+  has it as its own limit too, which adds nothing to the global one. Each limit counts the queues whose run is
+  `running` or `pausing` (across all projects, or in the project), except a queue waiting for a review or an answer
+  (its status `waiting`). Runs waiting for the usage window, a retry or an approval do not count.
 - A start from the dashboard or the CLI (`nexus run Q start`, also a Continue that starts afresh) is refused with
   409 and the reason: "queue B cannot start: its checkout is in use, queue A runs there" ("… queue A is paused there";
-  "… queue A of <project> runs there" for another project's queue), or "queue B cannot start: 2 queues run, the limit
-  is 2".
+  "… queue A of <project> runs there" for another project's queue), "queue B cannot start: 2 queues run, the limit
+  is 2", or for the project's own limit "queue B cannot start: 1 queue of <project> runs, its limit is 1".
 - Resuming a halted run, continuing a stopped queue whose run halted and accepting a review of a step whose run halted
   check the checkout the same way ("cannot go on", "cannot continue"); the limit does not apply to them. A paused or
   waiting run already holds its checkout and goes on as before.
 - A planned start (by the plan or a schedule) that came due but may not start waits instead: its `start.yaml` gets
   `held` (`since`, `kind`: `checkout` or `limit`, `reason`: "waits for the checkout: queue A runs there", "waits: 2
-  queues run, the limit is 2"), shown in the plan's `waiting`. It starts by itself once it may; a held schedule is
+  queues run, the limit is 2", "waits: 1 queue of <project> runs, its limit is 1"), shown in the plan's `waiting`. It starts by itself once it may; a held schedule is
   never missed. A plan that is no longer due (A opened again) loses `held`.
 - The server has one coordinator over all projects' engines. It looks at the planned starts of every project after
-  any change to a project's files, after a run stops going (finished, halted, paused, waiting) and after the limit
-  changes. It takes the due plans of all projects in the order they were made (`created_at`) and looks again after
+  any change to a project's files (a project's own limit among them), after a run stops going (finished, halted,
+  paused, waiting) and after the global limit changes. It takes the due plans of all projects in the order they were made (`created_at`) and looks again after
   each start, so one pass never starts two queues into one checkout or past the limit.
 - Runs that were going before this rule came are left alone.
 - The engine's long timers (schedules, usage waits, retries) are armed in pieces of at most a day, each looking at the

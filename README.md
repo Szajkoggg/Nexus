@@ -287,8 +287,11 @@ orchestrator's proposal shows on the queue and in "Waiting for you" with Accept 
 Queues run side by side only in worktrees of their own (the orchestrator gives independent work one, and runs queues
 that touch the same code one after another): never two in one checkout, and no more at once, across all
 projects, than "Queues running at once" in the settings panel's Nexus section (Global tab) (2 by default; a queue waiting for your
-review or an answer does not count). A queue paused or waiting keeps its checkout. Starting a queue whose checkout
-another queue holds, or over the limit, is refused with the reason. A planned queue or a schedule that comes due then waits
+review or an answer does not count). A project can have a limit of its own as well: "Queues running at once" in its
+settings (Defaults), switched from Global to Own. Both limits hold: with the global limit at 3 and a project's own at
+1, that project runs one queue at a time while other projects may start theirs. An older `limits.json` is taken over
+into the global setting at the first start. A queue paused or waiting keeps its checkout. Starting a queue whose checkout
+another queue holds, or over a limit, is refused with the reason. A planned queue or a schedule that comes due then waits
 instead: its row and the rail say "waits for the checkout" or "waits: limit reached", the plan on the queue (and
 `nexus status`) says which queue holds the checkout or how many run, and it starts by itself once it may, in the order
 the plans were made. A schedule waiting this way is not missed.

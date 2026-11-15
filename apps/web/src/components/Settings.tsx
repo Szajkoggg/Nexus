@@ -100,6 +100,7 @@ const WEB_HINT: Record<string, Key> = { off: "settings.web.offHint", search: "se
 const SETTING_KEYS = [
   "defaults.stop_conditions", "defaults.review_level", "defaults.review_send_back_limit", "defaults.context_reuse_threshold",
   "defaults.context_care", "defaults.protect_nexus", "defaults.push_accepted", "defaults.provisional_counts", "defaults.merge_back", "defaults.resolve_conflicts", "defaults.usage_pause_threshold",
+  "defaults.max_running",
   "runtimes.default", "runtimes.claude.model", "runtimes.claude.effort", "runtimes.claude.permission_mode",
   "runtimes.codex.model", "runtimes.codex.effort", "runtimes.codex.sandbox", "runtimes.codex.approval_policy", "runtimes.codex.approvals_reviewer",
   "conversations.runtime", "conversations.model", "conversations.effort", "conversations.web",
@@ -107,6 +108,17 @@ const SETTING_KEYS = [
   "languages.reader",
   ...TAG_KINDS.flatMap((k) => [`kinds.${k}.runtime`, `kinds.${k}.model`, `kinds.${k}.effort`, `kinds.${k}.fallback`]),
 ];
+
+/**
+ * The limit on queues running at once. Its global value is changed in the Nexus section (POST /api/server/settings),
+ * so the global form neither shows nor saves it (a save would put back the value it was opened with); a project's
+ * page has its own value of it, beside the global one (both hold).
+ */
+const MAX_RUNNING = "defaults.max_running";
+/** The settings the global form saves. */
+const GLOBAL_FORM_KEYS = SETTING_KEYS.filter((k) => k !== MAX_RUNNING);
+/** The limits offered: 1 to 10, and a value set otherwise (up to 20). */
+const limitChoices = (current: string) => [...new Set([...Array.from({ length: 10 }, (_, i) => i + 1), Number(current) || 1])].sort((a, b) => a - b).map(String);
 
 /**
  * What a row needs: the value of a setting, its change, and on a project's page whether it follows the global value
@@ -297,6 +309,11 @@ function SettingRows({ form, project }: { form: Form; project?: { values: Record
         <Setting form={f} keys={["defaults.usage_pause_threshold"]} label={t("settings.pauseAt")} hint={t("settings.pauseAtHint")}>
           {(d) => <Percent value={f.get("defaults.usage_pause_threshold")} onChange={(v) => f.set("defaults.usage_pause_threshold", v)} disabled={d} />}
         </Setting>
+        {p && (
+          <Setting form={f} keys={[MAX_RUNNING]} label={t("settings.maxRunning")} hint={t("settings.maxRunningHint")}>
+            {(d) => <span className="block w-24"><Select value={f.get(MAX_RUNNING)} onChange={(v) => f.set(MAX_RUNNING, Number(v))} disabled={d} options={limitChoices(f.get(MAX_RUNNING))} /></span>}
+          </Setting>
+        )}
         <Setting form={f} keys={["defaults.context_reuse_threshold"]} label={t("settings.reuse")} hint={t("settings.reuseHint")}>
           {(d) => <Percent value={f.get("defaults.context_reuse_threshold")} onChange={(v) => f.set("defaults.context_reuse_threshold", v)} disabled={d} />}
         </Setting>
@@ -529,13 +546,13 @@ function GlobalSettingsPage({ server }: { server?: ServerInfo }) {
 function GlobalForm({ global, server }: { global: GlobalSettings; server?: ServerInfo }) {
   const { reloaded } = usePage();
   const v = useValues(valuesOf(global));
-  const problem = settingsProblem(v.values, SETTING_KEYS);
+  const problem = settingsProblem(v.values, GLOBAL_FORM_KEYS);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string }>();
   const save = async () => {
     setBusy(true); setMsg(undefined);
     try {
-      await request("/api/settings", { method: "PATCH", body: nested(v.values, SETTING_KEYS) });
+      await request("/api/settings", { method: "PATCH", body: nested(v.values, GLOBAL_FORM_KEYS) });
       // Saving until the state after the save shows (page.ts, reloaded).
       await reloaded();
       setMsg({ ok: true, text: t("settings.savedGlobal") });
@@ -585,7 +602,7 @@ export interface ServerInfo {
   };
   /** Whether a deploy pushes the deployed main to its upstream. */
   push_on_deploy: boolean;
-  /** How many queues may run at once, across all projects. */
+  /** How many queues may run at once, across all projects (the global `defaults.max_running`). */
   max_running?: number;
   /** The user's away mode now (PROTOCOL.md, "Away mode"). */
   away?: { on: boolean; since?: string; until?: string };

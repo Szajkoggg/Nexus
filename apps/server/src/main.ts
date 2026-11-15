@@ -12,14 +12,14 @@ import chokidar, { type FSWatcher } from "chokidar";
 import type { Server } from "node:http";
 import {
   ActionError, Effort, ProjectStore, addNote, closingToSkip, closingToSkipAtApproval, updateSettings, answerAsUser, approveQueue, deleteNote, loadProjectState, nexusHome, withdrawApproval, addAllowRule,
-  ensureGlobalSettings, readGlobalSettings, updateGlobalSettings, ownKeys, OVERRIDABLE, settingKey, readRegistry, readUsage, readTurns, commentOnPicture, markPicture, routeAnswers, routeSendBacks, sendBack, sendMessage, setQueueSettings, setStepLevel, confirmProvisional, type ProjectState,
+  ensureGlobalSettings, readGlobalSettings, updateGlobalSettings, MaxRunning, ownKeys, OVERRIDABLE, settingKey, readRegistry, readUsage, readTurns, commentOnPicture, markPicture, routeAnswers, routeSendBacks, sendBack, sendMessage, setQueueSettings, setStepLevel, confirmProvisional, type ProjectState,
   readAway, writeAway, awayNow, awayUntil, turnAway, expireAway, acceptPlanProposal, declinePlanProposal, handBackPlan, acceptTagProposal, declineTagProposal,
   STAT_DIMENSIONS, STAT_FILTERS, projectMetrics, sinceTime, statDimension, statsReport, stepStats, usageDays, type ProjectMetrics, type StatsReport, type UsageDays,
   MIN_SAMPLES, queueEstimate, stepSamples, isOpenQuestion, writeCount, type EstimatesResponse, type LeftView, type ProjectSummary, type RemovalView,
 } from "@nexus/protocol";
 import { newestFirst, projectDigest, projectRunning, usageSince, type DigestEvent, type DigestResponse, type DigestRunning, type UsageRun } from "@nexus/protocol/digest";
 import { Engine } from "./engine.ts";
-import { Coordinator, readLimits, validLimit, writeLimits } from "./coordinator.ts";
+import { Coordinator } from "./coordinator.ts";
 import { branchState, leftBehind, stepCommits } from "./gitinfo.ts";
 import { cleanUp, mergeBack } from "./mergeback.ts";
 import { Merger } from "./merger.ts";
@@ -686,7 +686,7 @@ app.get("/api/usage", (c) => c.json(readUsage() ?? null));
 // Nexus itself: its version, and updating it without cutting off running work (src/lifecycle.ts).
 // `local`: whether this request comes straight from this machine (src/remote.ts isLocal), so the dashboard shows what
 // only makes sense on the server machine ("Open in editor": a path on another device points nowhere).
-app.get("/api/server", async (c) => c.json({ ...(await version()), local: isLocal(c.env.incoming), update: lifecycle.status, plan: planner.view(), push_on_deploy: readDeploySettings().push_on_deploy, max_running: readLimits().max_running, running: runningSteps(), away: awayNow(readAway()) }));
+app.get("/api/server", async (c) => c.json({ ...(await version()), local: isLocal(c.env.incoming), update: lifecycle.status, plan: planner.view(), push_on_deploy: readDeploySettings().push_on_deploy, max_running: readGlobalSettings().defaults.max_running, running: runningSteps(), away: awayNow(readAway()) }));
 
 // ---------------------------------------------------------------- away mode (PROTOCOL.md, "Away mode")
 
@@ -734,19 +734,23 @@ function runningSteps() {
   });
 }
 // The server's settings, the user's to change, from the dashboard only: whether a deploy pushes the deployed main
-// (src/deploy.ts), and how many queues may run at once (src/coordinator.ts).
+// (src/deploy.ts), and how many queues may run at once across all projects (the global `defaults.max_running`,
+// src/coordinator.ts).
 app.post("/api/server/settings", async (c) => {
   const b = (await c.req.json().catch(() => ({}))) as { push_on_deploy?: unknown; max_running?: unknown };
   if (b.push_on_deploy === undefined && b.max_running === undefined) return c.json({ error: "give push_on_deploy or max_running" }, 400);
   if (b.push_on_deploy !== undefined && typeof b.push_on_deploy !== "boolean") return c.json({ error: "push_on_deploy is true or false" }, 400);
-  if (b.max_running !== undefined && !validLimit(b.max_running)) return c.json({ error: "max_running is a whole number from 1 to 20" }, 400);
+  const limit = MaxRunning.safeParse(b.max_running);
+  if (b.max_running !== undefined && !limit.success) return c.json({ error: "max_running is a whole number from 1 to 20" }, 400);
   if (typeof b.push_on_deploy === "boolean") writeDeploySettings({ ...readDeploySettings(), push_on_deploy: b.push_on_deploy });
-  if (validLimit(b.max_running)) {
-    writeLimits({ ...readLimits(), max_running: b.max_running });
-    coordinator.wake(); // a higher limit lets waiting starts go
+  if (limit.success) {
+    updateGlobalSettings({ defaults: { max_running: limit.data } });
+    // Every project that follows it has a new effective limit; a higher one lets waiting starts go.
+    for (const id of projects.keys()) changed(id);
+    coordinator.wake();
   }
   broadcast({ type: "server" });
-  return c.json({ ok: true, push_on_deploy: readDeploySettings().push_on_deploy, max_running: readLimits().max_running });
+  return c.json({ ok: true, push_on_deploy: readDeploySettings().push_on_deploy, max_running: readGlobalSettings().defaults.max_running });
 });
 /** An orchestrator session of a registered project, as the CLI sends it (`by`); anything else counts as the user. */
 function askerOf(b: { project?: unknown; session?: unknown } | undefined): { project: string; session: string } | undefined {

@@ -1,14 +1,17 @@
-// Never two queues in one checkout, and a limit on queues running at once (src/coordinator.ts), against the fake
-// runtimes: projects whose engines share one coordinator, as the server's do.
+// Never two queues in one checkout, and the limits on queues running at once, across all projects and a project's own
+// (src/coordinator.ts), against the fake runtimes: projects whose engines share one coordinator, as the server's do.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ProjectStore, approveQueue, loadProjectState, newId, routeAnswers, type Event, type StepDef } from "@nexus/protocol";
+import {
+  DEFAULT_MAX_RUNNING, ProjectStore, approveQueue, ensureGlobalSettings, loadProjectState, newId, readGlobalSettings, routeAnswers, updateGlobalSettings, updateSettings,
+  type Event, type StepDef,
+} from "@nexus/protocol";
 import { Engine, type Clock } from "../src/engine.ts";
-import { Coordinator, DEFAULT_MAX_RUNNING, readLimits, writeLimits } from "../src/coordinator.ts";
+import { Coordinator } from "../src/coordinator.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
 import { WAIT_MS, until as waitUntil, LONGER, holdWork } from "./wait.ts";
 
@@ -42,19 +45,25 @@ class TestClock implements Clock {
 /** A queue: its steps' fake behaviours; `own`: in a worktree of its own (a folder), else the project's checkout. */
 type Spec = string[] | { steps: string[]; own?: boolean; level?: 1 | 2 | 3 };
 
-/** Projects sharing one coordinator (limit `limit`), each with its engine, under one NEXUS_HOME. */
+/**
+ * Projects sharing one coordinator, each with its engine, under one NEXUS_HOME whose global limit is `limit` (as the
+ * server's coordinator, it reads it from the global settings).
+ */
 function world(opts: { limit?: number; clock?: Clock } = {}) {
   const base = mkdtempSync(join(tmpdir(), "nexus-coord-"));
   process.env.NEXUS_HOME = join(base, "home");
   process.env.FAKE_LOG = join(base, "fake.log");
-  const coordinator = new Coordinator({ limit: () => opts.limit ?? 2 });
+  updateGlobalSettings({ defaults: { max_running: opts.limit ?? 2 } });
+  const coordinator = new Coordinator();
   const ticks: (() => void)[] = [];
   const engines: Engine[] = [];
 
-  const add = (id: string, queues: Record<string, Spec>) => {
+  /** `own`: the project's own limit on its queues running at once (else it follows the global one). */
+  const add = (id: string, queues: Record<string, Spec>, own?: number) => {
     const root = join(base, id);
     mkdirSync(root, { recursive: true });
     const store = ProjectStore.init(root, { id, name: `Project ${id}`, root, orchestrator: { notify: false } });
+    if (own !== undefined) updateSettings(store, { defaults: { max_running: own } });
     for (const [qid, spec] of Object.entries(queues)) {
       const s = Array.isArray(spec) ? { steps: spec } : spec;
       const steps: StepDef[] = s.steps.map((b, i) => ({ id: `${qid}${i + 1}`, title: `Step ${i + 1}`, goal: `FAKE: ${b}`, acceptance: [] }));
@@ -229,11 +238,89 @@ test("a schedule waiting for its checkout is not marked missed, and starts once 
   } finally { w.stop(); work.done(); }
 });
 
-test("the limit is read from limits.json in NEXUS_HOME, 2 by default", () => {
-  process.env.NEXUS_HOME = mkdtempSync(join(tmpdir(), "nexus-limits-"));
+test("a project's own limit holds beside the global one: one of its queues at a time, while another project's start", async () => {
+  const work = holdWork();
+  const w = world({ limit: 3 });
+  const p = w.add("p", { A: { steps: ["slow"], own: true }, B: { steps: ["done"], own: true }, B0: ["done"] }, 1);
+  const r = w.add("r", { Z: { steps: ["slow"], own: true } });
+  try {
+    assert.equal(loadProjectState(p.store).project.defaults.max_running, 1, "its own value");
+    assert.equal(loadProjectState(r.store).project.defaults.max_running, 3, "the other follows the global one");
+    p.engine.start("A");
+    await w.until("A at work", () => going(p.queue("A").run?.state), LONGER.step);
+    assert.throws(() => p.engine.start("B"), /^Error: queue B cannot start: 1 queue of Project p runs, its limit is 1$/);
+    // The other project starts meanwhile: one queue runs of the three the global limit allows.
+    r.engine.start("Z");
+    await w.until("Z at work beside A", () => going(r.queue("Z").run?.state), LONGER.step);
+    // A planned start in the project waits for its own limit, and starts by itself once A ends.
+    doneByHand(p.store, "B0", ["B01"]);
+    assert.equal(p.engine.plan("B", { after: ["B0"], by: "user" }), "queue B0 is done; queue B waits: 1 queue of Project p runs, its limit is 1; it starts by itself then");
+    assert.equal(p.queue("B").start!.held!.kind, "limit");
+    work.release("A1"); // Z stays at work
+    await w.until("B to finish once A ended", () => p.queue("B").run?.state === "finished", LONGER.run);
+    assert.ok(going(r.queue("Z").run?.state), "Z still at work: B waited for its project's limit, not the global one");
+  } finally { w.stop(); work.done(); }
+});
+
+test("the global limit holds whatever the projects' own limits are", async () => {
+  const work = holdWork();
+  const w = world({ limit: 2 });
+  const p = w.add("p", { A: { steps: ["slow"], own: true }, B: { steps: ["slow"], own: true }, C: { steps: ["done"], own: true } }, 5);
+  const r = w.add("r", { Z: { steps: ["done"], own: true } }, 4);
+  try {
+    p.engine.start("A");
+    p.engine.start("B");
+    await w.until("A and B at work", () => going(p.queue("A").run?.state) && going(p.queue("B").run?.state), LONGER.step);
+    assert.throws(() => p.engine.start("C"), /^Error: queue C cannot start: 2 queues run, the limit is 2$/, "its own limit of 5 does not lift the global one");
+    assert.throws(() => r.engine.start("Z"), /queue Z cannot start: 2 queues run, the limit is 2/);
+    work.release();
+    await w.until("A and B to finish", () => p.queue("A").run?.state === "finished" && p.queue("B").run?.state === "finished", LONGER.run);
+    r.engine.start("Z");
+    await w.until("Z to finish", () => r.queue("Z").run?.state === "finished", LONGER.run);
+  } finally { w.stop(); work.done(); }
+});
+
+test("the limit is a global setting: limits.json's value moves into it once, and the file stays as its copy", () => {
+  const fresh = () => { const home = mkdtempSync(join(tmpdir(), "nexus-limits-")); process.env.NEXUS_HOME = home; return home; };
+  const limits = (home: string) => JSON.parse(readFileSync(join(home, "limits.json"), "utf8")) as { max_running: number };
+  const settings = (home: string) => join(home, "settings.yaml");
+
+  // Nothing set: the default, 2.
+  let home = fresh();
   assert.equal(DEFAULT_MAX_RUNNING, 2);
   assert.equal(new Coordinator().limit(), 2);
-  writeLimits({ max_running: 3 });
-  assert.deepEqual(readLimits(), { max_running: 3 });
+  assert.equal(ensureGlobalSettings().defaults.max_running, 2);
+
+  // Global settings from before the setting, and the old file: its value moves in; the other settings stay.
+  home = fresh();
+  writeFileSync(join(home, "limits.json"), JSON.stringify({ max_running: 3 }));
+  writeFileSync(settings(home), "protocol: 1\ndefaults:\n  review_level: 3\n");
+  assert.equal(ensureGlobalSettings().defaults.max_running, 3);
+  assert.equal(readGlobalSettings().defaults.max_running, 3, "written into settings.yaml");
+  assert.equal(readGlobalSettings().defaults.review_level, 3);
   assert.equal(new Coordinator().limit(), 3);
+  assert.ok(existsSync(join(home, "limits.json")), "the old file stays");
+  assert.equal(limits(home).max_running, 3);
+
+  // No global settings yet (a first start of this version over an old home): the same.
+  home = fresh();
+  writeFileSync(join(home, "limits.json"), JSON.stringify({ max_running: 4 }));
+  assert.equal(ensureGlobalSettings().defaults.max_running, 4);
+
+  // Moved once: from then on the setting decides, and every change is copied into limits.json for an older server.
+  updateGlobalSettings({ defaults: { max_running: 5 } });
+  assert.equal(limits(home).max_running, 5, "the copy follows the setting");
+  writeFileSync(join(home, "limits.json"), JSON.stringify({ max_running: 7 }));
+  assert.equal(ensureGlobalSettings().defaults.max_running, 5, "the file no longer decides");
+
+  // An older server (an update rolled back) rewrote settings.yaml without the setting and changed limits.json: the
+  // next start takes the limit it set.
+  writeFileSync(settings(home), readFileSync(settings(home), "utf8").replace(/^ {2}max_running: \d+\n/m, ""));
+  assert.doesNotMatch(readFileSync(settings(home), "utf8"), /max_running/);
+  assert.equal(ensureGlobalSettings().defaults.max_running, 7);
+
+  // An unreadable or invalid old file is ignored.
+  home = fresh();
+  writeFileSync(join(home, "limits.json"), JSON.stringify({ max_running: 50 }));
+  assert.equal(ensureGlobalSettings().defaults.max_running, 2);
 });

@@ -1,47 +1,19 @@
 // Over the projects' engines, the two rules about queues running side by side (DESIGN.md, "Never two queues in one
 // checkout"): a checkout (the project's own, or a queue's worktree) has one queue at work at a time, and at most
-// `max_running` queues run at once across all projects. A direct start that would break either is refused with the
+// `max_running` queues run at once across all projects, and at most a project's own `max_running` of that project's
+// (both limits hold; decided 2026-11-15, queue OP). A direct start that would break any of them is refused with the
 // reason; a planned start (a chain or a schedule) that came due waits, says why on its plan (`held`), and starts by
 // itself once it may. Waiting starts go in the order their plans were made, across projects; every start inside a
-// pass is followed by a fresh look, so a pass never starts two queues into one checkout or past the limit.
+// pass is followed by a fresh look, so a pass never starts two queues into one checkout or past a limit.
 //
-// The limit lives in <NEXUS_HOME>/limits.json (one writer: the server, from the dashboard's server panel).
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+// The limits are settings: the global `defaults.max_running` (<NEXUS_HOME>/settings.yaml, changed from the dashboard's
+// server panel; limits.json, where it was kept before, is its copy for an older server) and a project's own value of it
+// (its effective `defaults.max_running`: the global one when it has none of its own).
 import {
-  runHoldsCheckout, runCounted, loadProjectState, nexusHome, renameRetrying,
+  runHoldsCheckout, runCounted, loadProjectState, readGlobalSettings,
   type ProjectState, type ProjectStore, type QueueView,
 } from "@nexus/protocol";
 import { checkoutPath, samePath } from "./worktree.ts";
-
-/** How many queues may run at once when nothing else is set. */
-export const DEFAULT_MAX_RUNNING = 2;
-
-export interface Limits { max_running: number }
-
-const limitsFile = () => join(nexusHome(), "limits.json");
-
-/** The server-wide limits; the default for what the file does not say (or when it is missing or unreadable). */
-export function readLimits(): Limits {
-  const f = limitsFile();
-  if (!existsSync(f)) return { max_running: DEFAULT_MAX_RUNNING };
-  try {
-    const v = JSON.parse(readFileSync(f, "utf8")) as Partial<Limits>;
-    return { max_running: validLimit(v.max_running) ? v.max_running : DEFAULT_MAX_RUNNING };
-  } catch { return { max_running: DEFAULT_MAX_RUNNING }; }
-}
-
-/** A limit is a whole number from 1 to 20. */
-export function validLimit(v: unknown): v is number {
-  return typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= 20;
-}
-
-export function writeLimits(l: Limits): void {
-  const f = limitsFile();
-  mkdirSync(dirname(f), { recursive: true });
-  writeFileSync(f + ".tmp", JSON.stringify(l, null, 2) + "\n");
-  renameRetrying(f + ".tmp", f);
-}
 
 /** What the coordinator needs of a project's engine. */
 export interface Member {
@@ -90,13 +62,13 @@ export class Coordinator {
   private wakeTimer?: NodeJS.Timeout;
 
   constructor(o: { limit?: () => number } = {}) {
-    this.limitOf = o.limit ?? (() => readLimits().max_running);
+    this.limitOf = o.limit ?? (() => readGlobalSettings().defaults.max_running);
   }
 
   add(m: Member): void { this.members.add(m); }
   remove(m: Member): void { this.members.delete(m); }
 
-  /** How many queues may run at once. */
+  /** How many queues may run at once, across all projects. */
   limit(): number { return this.limitOf(); }
 
   /** The queues holding their checkouts, across the projects. */
@@ -120,11 +92,18 @@ export class Coordinator {
     return { kind: "checkout", detail: other.state === "paused" ? `${which} is paused there` : `${which} runs there` };
   }
 
-  /** As many queues run as the limit allows. */
+  /**
+   * As many queues run as a limit allows: the global one (across all projects), or the project's own (its effective
+   * `defaults.max_running`, which is the global one unless it has a value of its own).
+   */
   limitBlock(state: ProjectState, q: Pick<QueueView, "id">): Block | undefined {
     const limit = this.limit();
-    const n = this.holders().filter((h) => h.counts && !(h.project === state.project.id && h.queue === q.id)).length;
-    return n >= limit ? { kind: "limit", detail: `${n} ${n === 1 ? "queue runs" : "queues run"}, the limit is ${limit}` } : undefined;
+    const others = this.holders().filter((h) => h.counts && !(h.project === state.project.id && h.queue === q.id));
+    if (others.length >= limit) return { kind: "limit", detail: `${others.length} ${others.length === 1 ? "queue runs" : "queues run"}, the limit is ${limit}` };
+    const own = state.project.defaults.max_running;
+    const mine = others.filter((h) => h.project === state.project.id).length;
+    if (mine < own) return undefined;
+    return { kind: "limit", detail: `${mine} ${mine === 1 ? "queue" : "queues"} of ${state.project.name} ${mine === 1 ? "runs" : "run"}, its limit is ${own}` };
   }
 
   /** Why `q` may not start now: its checkout is held, or the limit is reached. */

@@ -987,6 +987,8 @@ export const en = {
   "settings.pushCheck": "push accepted steps",
   "settings.pauseAt": "Pause new steps at",
   "settings.pauseAtHint": "Share of a usage window (Claude's 5 hours, Codex's windows) above which no new step starts.",
+  "settings.maxRunning": "Queues running at once",
+  "settings.maxRunningHint": "How many of this project's queues may run at once. The global limit across all projects (the Nexus section of the Global tab) holds as well: with it at 3 and this at 1, one of this project's queues runs at a time while other projects start theirs.",
   "settings.reuse": "Reuse a session up to",
   "settings.reuseHint": "The orchestrator continues a session only below this context fill; with context care on, so does a run from one step to the next.",
   "settings.care": "Context care",
@@ -1045,7 +1047,7 @@ export const en = {
   "settings.server.pushDeploy": "Push the deployed main to GitHub after an update",
   "settings.server.pushDeployDev": "Push the deployed main to GitHub after an update (only a live instance pushes)",
   "settings.server.maxRunning": "Queues running at once, across all projects:",
-  "settings.server.maxRunningHint": "Queues run side by side only in worktrees of their own, never two in one checkout. A queue waiting for a review or an answer does not count. A start over the limit, or into a checkout another queue holds, is refused; a chain or a schedule waits and starts by itself once it may.",
+  "settings.server.maxRunningHint": "Queues run side by side only in worktrees of their own, never two in one checkout. A queue waiting for a review or an answer does not count. A project may also have a limit of its own (its settings, Defaults); both hold. A start over a limit, or into a checkout another queue holds, is refused; a chain or a schedule waits and starts by itself once it may.",
   "settings.server.updateHint": "Update Nexus lets every running step finish (new steps wait), moves this instance to the newest commit on main, builds it and restarts. The queues it held go on by themselves; paused or stopped ones stay as they are. Once the new version is up, it pushes that commit of main to its upstream, fast-forward only; a failed push leaves the update in place and says why here.",
   "settings.server.noPlan": "No deploy planned. Ask the orchestrator for one after a step, after a queue or at a time (nexus server update --after or --at).",
 
