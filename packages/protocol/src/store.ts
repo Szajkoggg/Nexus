@@ -412,8 +412,7 @@ const limitsFile = () => join(nexusHome(), "limits.json");
 /** The limit limits.json holds, if it holds a valid one. */
 function legacyMaxRunning(): number | undefined {
   try {
-    const v = (JSON.parse(readFileSync(limitsFile(), "utf8")) as { max_running?: unknown }).max_running;
-    return MaxRunning.safeParse(v).success ? (v as number) : undefined;
+    return MaxRunning.safeParse((JSON.parse(readFileSync(limitsFile(), "utf8")) as { max_running?: unknown }).max_running).data;
   } catch { return undefined; }
 }
 
@@ -432,12 +431,12 @@ export function writeGlobalSettings(g: GlobalSettings): void {
 export function ensureGlobalSettings(): GlobalSettings {
   const f = globalSettingsFile();
   const raw = existsSync(f) ? (YAML.parse(readFileSync(f, "utf8")) as { defaults?: { max_running?: unknown } } | null) : undefined;
-  let g = readGlobalSettings();
-  const noLimit = raw?.defaults?.max_running === undefined;
-  const legacy = noLimit ? legacyMaxRunning() : undefined;
-  if (legacy !== undefined) g = { ...g, defaults: { ...g.defaults, max_running: legacy } };
-  if (!raw || noLimit) writeGlobalSettings(g);
-  return g;
+  const g = readGlobalSettings();
+  if (raw?.defaults?.max_running !== undefined) return g;
+  const legacy = legacyMaxRunning();
+  const next = legacy === undefined ? g : { ...g, defaults: { ...g.defaults, max_running: legacy } };
+  writeGlobalSettings(next);
+  return next;
 }
 
 const awayFile = () => join(nexusHome(), "away.yaml");
