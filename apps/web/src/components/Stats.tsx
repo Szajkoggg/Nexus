@@ -2,8 +2,8 @@
 // docs/ux/stats-mockups.md): the subscription's usage windows day by day, and how steps went by model or effort,
 // narrowed by project and tag. Opened from the desktop's sidebar or the phone's project picker; a page of its own,
 // across every project. Its data is made ready in stats.ts; the forms are in charts.tsx.
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import type { StatFilter, StatsReport, UsageDays } from "@nexus/protocol/stats";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import { STAT_FILTERS, type StatFilter, type StatsReport, type UsageDays } from "@nexus/protocol/stats";
 import { useQuery, type ProjectSummary } from "../api.ts";
 import { usePage } from "../page.ts";
 import { formatDate, formatDay, formatWeekday, t, type Key } from "../i18n.ts";
@@ -13,9 +13,8 @@ import {
 } from "../stats.ts";
 import { AxisCell, BarCell, ChartCard, DataTable, DotCell, Scatter, Segmented, TimeChart, type ScatterPoint } from "./charts.tsx";
 
-const FACETS = ["kind", "activity", "area", "size", "origin"] as const;
 const RANGE_LABEL: Record<Range, Key> = { "7d": "stats.range.7d", "30d": "stats.range.30d", "90d": "stats.range.90d", all: "stats.range.all" };
-const FACET_LABEL: Record<(typeof FACETS)[number], Key> = { kind: "stats.facet.kind", activity: "stats.facet.activity", area: "stats.facet.area", size: "stats.facet.size", origin: "stats.facet.origin" };
+const FACET_LABEL: Record<(typeof STAT_FILTERS)[number], Key> = { kind: "stats.facet.kind", activity: "stats.facet.activity", area: "stats.facet.area", size: "stats.facet.size", origin: "stats.facet.origin" };
 
 const pct = (v: number) => `${Math.round(v)} %`;
 const mins = (v: number) => (v > 0 && v < 1 ? t("stats.underMinute") : t("stats.minutes", { n: Math.round(v) }));
@@ -61,9 +60,7 @@ export function StatsView({ projects, phone }: { projects: ProjectSummary[]; pho
           <span className="text-xs text-fg-3">{t("stats.allProjects", { date: formatDate(new Date().toISOString()) })}</span>
           <span className="flex-1" />
         </>}
-        <div className={phone ? "w-full [&>div]:flex [&>div]:w-full [&_button]:flex-1" : ""}>
-          <Segmented label={t("stats.range")} value={range} onChange={setRange} options={RANGES.map((x) => ({ value: x, label: t(RANGE_LABEL[x]) }))} />
-        </div>
+        <RangeSwitch value={range} onChange={setRange} phone={phone} />
       </div>
 
       <Heading title={t("stats.windows")} note={t("stats.windowsNote")} phone={phone} />
@@ -78,7 +75,7 @@ export function StatsView({ projects, phone }: { projects: ProjectSummary[]; pho
         <span className="shrink-0 whitespace-nowrap text-xs text-fg-3">{t("stats.groupBy")}</span>
         <Segmented label={t("stats.groupBy")} value={by} onChange={setBy} options={[{ value: "model", label: t("stats.byModel") }, { value: "effort", label: t("stats.byEffort") }]} />
         <Pick label={t("stats.facet.project")} value={project} onChange={setProject} options={projects.map((p) => ({ value: p.id, label: p.name }))} />
-        {FACETS.map((f) => (
+        {STAT_FILTERS.map((f) => (
           <Pick key={f} label={t(FACET_LABEL[f])} value={filter[f] ?? ""} onChange={(v) => setFilter((x) => ({ ...x, [f]: v }))}
             options={[...new Set([...(r?.facets[f] ?? []), ...(filter[f] ? [filter[f]] : [])])].map((v) => ({ value: v, label: v === "untagged" ? t("stats.untagged") : v }))} />
         ))}
@@ -93,6 +90,18 @@ export function StatsView({ projects, phone }: { projects: ProjectSummary[]; pho
     </div>
   );
 }
+
+/** The range picked for a Stats view (the global one, a project's tab); full width on the phone. */
+export function RangeSwitch({ value, onChange, phone }: { value: Range; onChange: (r: Range) => void; phone: boolean }) {
+  return (
+    <div className={phone ? "w-full [&>div]:flex [&>div]:w-full [&_button]:flex-1" : ""}>
+      <Segmented label={t("stats.range")} value={value} onChange={onChange} options={RANGES.map((x) => ({ value: x, label: t(RANGE_LABEL[x]) }))} />
+    </div>
+  );
+}
+
+/** A chart card's two views: the chart and its table. */
+export const chartOrTable = () => [{ value: "chart" as const, label: t("stats.view.chart") }, { value: "table" as const, label: t("stats.view.table") }];
 
 function Heading({ title, note, phone }: { title: string; note: string; phone: boolean }) {
   return (
@@ -128,7 +137,7 @@ function WindowCard({ panel: p, threshold }: { panel: WindowPanel; threshold: nu
     ? (p.over ? t("stats.window.peakOver", { count: p.over, threshold: pct(threshold * 100) }) : t("stats.window.peak"))
     : t("stats.window.level");
   return (
-    <ChartCard title={windowTitle(p)} caption={caption} initial="chart" views={[{ value: "chart", label: t("stats.view.chart") }, { value: "table", label: t("stats.view.table") }]}>
+    <ChartCard title={windowTitle(p)} caption={caption} initial="chart" views={chartOrTable()}>
       {(view) => view === "chart"
         ? <TimeChart kind={p.kind === "5h" ? "columns" : "line"} area max={100} ticks={[0, 50, 100]} format={pct} xLabels={xLabels}
             refs={[{ value: threshold * 100, label: `⚠ ${t("stats.pause", { threshold: pct(threshold * 100) })}`, tone: "warn" }]}
@@ -173,8 +182,7 @@ function Comparison({ report, phone, by }: { report: StatsReport; phone: boolean
   ];
   const label = (row: CompareRow) => row.key === "untagged" ? t("stats.untagged") : row.key === "default" ? t("stats.defaultEffort") : row.label;
   return (
-    <ChartCard<CompareView> title={t(by === "model" ? "stats.compare.model" : "stats.compare.effort")} initial="columns" store="nexus.stats.compare" views={views}
-      caption={undefined}>
+    <ChartCard<CompareView> title={t(by === "model" ? "stats.compare.model" : "stats.compare.effort")} initial="columns" store="nexus.stats.compare" views={views}>
       {(view) => view === "columns" ? <Columns rows={rows} scales={scales} phone={phone} label={label} />
         : view === "scatter" ? <ScatterView rows={rows} scales={scales} phone={phone} label={label} />
         : <DataTable head={[t(by === "model" ? "stats.col.model" : "stats.col.effort"), t("stats.col.steps"), t("stats.col.first"), t("stats.col.rounds"), t("stats.col.median"), t("stats.col.middle"), t("stats.col.use"), t("stats.col.stops"), t("stats.col.failures"), t("stats.col.fallback")]}
@@ -240,7 +248,7 @@ function Columns({ rows, scales, phone, label }: { rows: CompareRow[]; scales: {
           <div className="text-xs font-semibold text-fg-2">{t(m.head)}</div>
           <div className="mb-1 text-[11px] text-fg-3">{t(m.sub)}</div>
           <div className="grid grid-cols-[7.5rem_minmax(0,1fr)] gap-x-3">
-            {rows.map((r) => <Row key={r.key}><NameCell row={r} label={label(r)} /><div className="border-t border-line">{m.cell(r)}</div></Row>)}
+            {rows.map((r) => <Fragment key={r.key}><NameCell row={r} label={label(r)} /><div className="border-t border-line">{m.cell(r)}</div></Fragment>)}
             <div />{m.axis}
           </div>
         </div>
@@ -251,13 +259,12 @@ function Columns({ rows, scales, phone, label }: { rows: CompareRow[]; scales: {
     <div className="grid grid-cols-[11rem_repeat(4,minmax(0,1fr))] gap-x-4.5">
       <div />
       {ms.map((m) => <div key={m.head} className="pb-1 text-xs font-semibold text-fg-2">{t(m.head)}<small className="block font-normal text-fg-3">{t(m.sub)}</small></div>)}
-      {rows.map((r) => <Row key={r.key}><NameCell row={r} label={label(r)} />{ms.map((m) => <div key={m.head} className="min-w-0 border-t border-line">{m.cell(r)}</div>)}</Row>)}
+      {rows.map((r) => <Fragment key={r.key}><NameCell row={r} label={label(r)} />{ms.map((m) => <div key={m.head} className="min-w-0 border-t border-line">{m.cell(r)}</div>)}</Fragment>)}
       <div />
       {ms.map((m) => <div key={m.head}>{m.axis}</div>)}
     </div>
   );
 }
-const Row = ({ children }: { children: ReactNode }) => <>{children}</>;
 
 function ScatterView({ rows, scales, phone, label }: { rows: CompareRow[]; scales: { minutes: number; use: number }; phone: boolean; label: (r: CompareRow) => string }) {
   const placed = rows.filter((r) => r.rate !== undefined && r.median !== undefined);

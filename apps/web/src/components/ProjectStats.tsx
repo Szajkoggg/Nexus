@@ -10,10 +10,9 @@ import { usePage } from "../page.ts";
 import { nav } from "../nav.ts";
 import { formatDay, formatNumber, formatWeekday, t } from "../i18n.ts";
 import { metricCards, type MetricCard, type MetricPoint } from "../metrics.ts";
-import { RANGES, dayOf, rangeSince, type Range } from "../stats.ts";
-import { ChartCard, DataTable, Segmented, Sparkline, TimeChart, type Reference } from "./charts.tsx";
-
-const RANGE_LABEL = { "7d": "stats.range.7d", "30d": "stats.range.30d", "90d": "stats.range.90d", all: "stats.range.all" } as const;
+import { dayOf, rangeSince, type Range } from "../stats.ts";
+import { ChartCard, DataTable, Sparkline, TimeChart, type Reference } from "./charts.tsx";
+import { RangeSwitch, chartOrTable } from "./Stats.tsx";
 
 /** The range's start as an ISO time (its first day's start, local); none for all. */
 const sinceIso = (range: Range) => {
@@ -33,9 +32,7 @@ export function ProjectStats({ project, queues, phone }: { project: string; queu
         <h2 className="text-[13px] font-semibold uppercase tracking-wider text-fg-2">{t("metrics.title")}</h2>
         {!phone && <span className="text-xs text-fg-3">{t("metrics.note")}</span>}
         <span className="flex-1" />
-        <div className={phone ? "w-full [&>div]:flex [&>div]:w-full [&_button]:flex-1" : ""}>
-          <Segmented label={t("stats.range")} value={range} onChange={setRange} options={RANGES.map((x) => ({ value: x, label: t(RANGE_LABEL[x]) }))} />
-        </div>
+        <RangeSwitch value={range} onChange={setRange} phone={phone} />
       </div>
       {cards && !cards.length && <p className="rounded-xl border border-line bg-surface px-4 py-6 text-center text-sm text-fg-3">{t("metrics.none")}</p>}
       <div className={`grid gap-3 ${phone ? "grid-cols-1" : "grid-cols-[repeat(auto-fit,minmax(20rem,1fr))]"}`}>
@@ -84,8 +81,7 @@ function MetricCardView({ project, card: c, title }: { project: string; card: Me
   const refs: Reference[] = c.refs.map((r) => ({ value: r.value, tone: r.kind, label: r.kind === "warn" ? `⚠ ${formatNumber(r.value)}` : t("metrics.targetShort", { value: formatNumber(r.value) }) }));
   const last = c.last!;
   return (
-    <ChartCard title={d.name} caption={caption(c)} initial="chart" views={[{ value: "chart", label: t("stats.view.chart") }, { value: "table", label: t("stats.view.table") }]}
-      heading={heading}>
+    <ChartCard title={d.name} caption={caption(c)} initial="chart" views={chartOrTable()} heading={heading}>
       {(view) => <>
         {view === "table"
           ? <DataTable head={[t("metrics.col.step"), t("metrics.col.value"), t("metrics.col.commit"), t("stats.col.day")]}
