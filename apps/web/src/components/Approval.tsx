@@ -7,7 +7,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { ChatEntry } from "@nexus/protocol";
 import { actResult, enc, type ProjectState, type QueueView, type StepView } from "../api.ts";
-import { draftOf, pinsText, queueChecks, queueReference, runSettings, withReference, type QueueCheck } from "../approval.ts";
+import { draftOf, pinsText, queueChecks, queueReference, runSettings, withReference, stepOwnLine, type QueueCheck } from "../approval.ts";
 import { draftKey, putDraft, readDraft } from "../drafts.ts";
 import { nav } from "../nav.ts";
 import { queueStatus } from "../queueStatus.ts";
@@ -202,6 +202,12 @@ export const Checks = ({ checks }: { checks: readonly QueueCheck[] }) => (
       : <li key={c.name} className="flex gap-2"><span className="text-ok/80">✓</span><Markdown className="[&_p]:m-0">{c.name}</Markdown></li>)}
   </ul>
 );
+/** A step's own runtime, model and effort, when it has any (stepOwnLine); nothing for a step that runs on the run's. */
+function StepOwn({ step }: { step: QueueView["steps"][number] }) {
+  const line = stepOwnLine(step);
+  return line ? <span className="block text-xs font-normal text-review" title={t("approval.ownValues")}>⚙ {line}</span> : null;
+}
+
 const stopCount = (project: ProjectState, queue: QueueView) => queue.stop_conditions.length + project.project.defaults.stop_conditions.length;
 
 // ---------------------------------------------------------------- the compact list (the drawer, the phone)
@@ -239,6 +245,7 @@ export function CompactSteps({ project, queue, chat, onFull, onChanged }: { proj
                 <span className="pt-px font-mono text-xs leading-5 text-fg-3" title={s.id}>{stepMark(s)}</span>
                 <span className="min-w-0">
                   <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 font-semibold text-fg">{s.title}<KeptTag step={s} /></span>
+                  <StepOwn step={s} />
                   {s.goal && !o && <span className="mt-0.5 line-clamp-2 text-sm text-fg-2">{s.goal.replace(/\s+/g, " ")}</span>}
                 </span>
                 <span className="whitespace-nowrap pt-0.5 text-xs text-fg-3">{n ? t("approval.criteria", { count: n }) : t("approval.noCriteria")} {o ? "▴" : "▾"}</span>
@@ -392,6 +399,7 @@ export function ApprovalView({ project, queue, chat, sidebar, onClose, onPanel, 
                   <h2 className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 font-semibold text-fg"><span className="font-mono text-xs font-normal text-fg-3">{s.id}</span>{s.title}<KeptTag step={s} className="self-center" /></h2>
                   <LevelPicker project={id} queue={queue.id} step={s} onChanged={onChanged} away={project.away} />
                 </div>
+                <StepOwn step={s} />
                 {s.closing && <p className="text-xs text-fg-3">{t("closing.note")}</p>}
                 {s.goal ? <div className="text-sm text-fg-2"><Markdown>{s.goal}</Markdown></div> : <p className="text-sm text-fg-3">{t("approval.noGoal")}</p>}
                 <Acceptance step={s} />

@@ -28,6 +28,15 @@ const LEVEL_KEYS: Record<number, Key> = { 1: "approval.level.1", 2: "approval.le
 /** How each step is reviewed, by its review level, in words: "wait for my review"; an unknown level as it is. */
 export const levelWords = (level: number): string => (LEVEL_KEYS[level] ? t(LEVEL_KEYS[level]) : String(level));
 
+/**
+ * The line a step shows in the approval when it runs on a runtime, model or effort of its own (SF2): "runs on Codex ·
+ * gpt-6-luna · low effort". Without values of its own the step runs on the run's, which the settings line says: none.
+ */
+export function stepOwnLine(step: Pick<QueueView["steps"][number], "runtime" | "model" | "effort">): string | undefined {
+  const values = stepValuesText(step);
+  return values ? t("approval.stepRunsOn", { values }) : undefined;
+}
+
 export interface RunSettings {
   /** "4 steps · on main, after SF · Claude, high · after each step: go on", in parts. */
   parts: string[];
