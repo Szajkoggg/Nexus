@@ -9,7 +9,7 @@ import { monotonicFactory } from "ulid";
 import YAML from "yaml";
 import type { z } from "zod";
 import {
-  Activity, Applied, AwayFile, ChatEntry, PinsFile, Refusal, Delivery, Event, GlobalSettings, InboxEntry, NoteMeta, GitFile, ProjectFile, PushFile, QueueFile, type QueueInput, LegacyReviewPolicy, RegistryFile, RunFile, RuntimeFile, SessionFile, StartFile, PlanFile, StoredProject, TagsFile, TurnRecord, UsageFile,
+  Activity, Applied, AwayFile, ChatEntry, PinsFile, Refusal, Delivery, Event, GlobalSettings, InboxEntry, MetricsFile, NoteMeta, GitFile, ProjectFile, PushFile, QueueFile, type QueueInput, LegacyReviewPolicy, RegistryFile, RunFile, RuntimeFile, SessionFile, StartFile, PlanFile, StoredProject, TagsFile, TurnRecord, UsageFile,
   type Note,
 } from "./schemas.ts";
 import { applyChange, builtInSettings, effectiveProject, migrateStored, storedFrom } from "./settings.ts";
@@ -307,6 +307,13 @@ export class ProjectStore {
   }
   /** Written only by the server (tags.ts). */
   writeTags(t: TagsFile): void { writeYaml(join(this.dir, "tags.yaml"), TagsFile.parse(t)); }
+  /** The project's metrics (.nexus/metrics.yaml); none while the file does not exist. */
+  readMetrics(): MetricsFile {
+    const f = join(this.dir, "metrics.yaml");
+    return existsSync(f) ? readYaml(f, MetricsFile) : MetricsFile.parse({ protocol: 1 });
+  }
+  /** Written only by the server (metric-define.ts). */
+  writeMetrics(m: MetricsFile): void { writeYaml(join(this.dir, "metrics.yaml"), MetricsFile.parse(m)); }
   readRun(queueId: string): RunFile | undefined {
     const f = join(this.queueDir(queueId), "run.yaml");
     return existsSync(f) ? readYaml(f, RunFile) : undefined;

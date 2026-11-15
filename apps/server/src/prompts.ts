@@ -4,7 +4,7 @@
 // (src/conversations.ts). Agents rely on them (a change to one carries an `Agents:` line in its commit), so each is
 // covered by a snapshot test: test/prompts.test.ts compares what the agents' processes receive with golden files.
 import {
-  INTEGRATION_CONDITION, formatClock, formatSeconds, languageName, levelNow, runIsOlder, stepChecks, type AwayNow, type ConversationWeb, type InboxView, type LanguageCode, type ProjectFile, type ProjectState, type QuestionView, type QueueView, type SessionView, type StepView, type TagProposal, tagsText,
+  INTEGRATION_CONDITION, formatClock, formatSeconds, isCheckMetric, languageName, levelNow, metricValueText, runIsOlder, stepChecks, type MetricValue, type AwayNow, type ConversationWeb, type InboxView, type LanguageCode, type ProjectFile, type ProjectState, type QuestionView, type QueueView, type SessionView, type StepView, type TagProposal, tagsText,
 } from "@nexus/protocol";
 import type { ClosingContext } from "./closing.ts";
 import type { IntegrationContext } from "./integration.ts";
@@ -48,6 +48,7 @@ Report through the \`nexus\` command (on PATH; your session is set in the enviro
 - nexus review add <step> <picture> --key <view@width> --role <role> --label "..."   a review picture, one per command
 - nexus review add <step> <file|url>... --label "..."       other review material (documents, data, links)
 - nexus check <step> <name> --ok|--fail --summary "..." --duration <seconds>   results of the step's checks, with how long each ran (the times show when a check grows slower)
+- nexus metric record <name> <value>                        a value of one of the project's metrics, when the step asks you to measure one (\`nexus metric list\` shows them); it is kept with your step and HEAD commit
 - nexus step done <step> --summary "..." [--commit <sha>] --activities a,b   when the acceptance criteria are met; --activities names what you actually did, whatever was planned (\`nexus tags\` lists the names)
 - nexus step failed <step> --reason "..."                   when the step cannot be done as written
 - nexus stop <step> --condition "<the stop condition met>" --reason "<what happened, short>"   when a stop condition is met (first commit what is consistent, see below); give both: --condition names the condition as the queue words it, --reason says in a sentence or two what happened and what you left out (the user sees the reason first, the condition behind "more")
@@ -272,6 +273,7 @@ Commands (\`nexus\` is on PATH; your session is set in the environment):
 - nexus tags                                     the tags a step may carry: Nexus's kinds, activities, origins and sizes, the project's areas and own activities, renames, and your proposals waiting for the user
 - nexus tags propose --area <name> | --activity <prefix:name> --reason "..."   propose a new area or project activity; it waits in the user's list, and a draft may use it only once the user accepts it (you are told)
 - nexus tags rename <old> <new> --reason "..."   propose renaming an area or a project activity; once accepted, the old name reads as the new one everywhere (use the new one)
+- nexus metric define <name> --unit <unit> [--show line|bar|number] [--target <value>] [--warn-above|--warn-below <value>]   name something the project measures, or change it (the whole definition); say in a step's goal what its worker should measure and record (nexus metric record). Each check's time is the metric check:<its name>, in seconds, without a definition; define it for a target or a threshold. A value beyond the threshold is marked on its step and told to you; nexus metric list shows the metrics
 - nexus run <queue> start --at "YYYY-MM-DD HH:MM" --reason "..." [same options]   start it at that local time; --at usage-reset: when the usage window of its runtime resets (refused while Nexus knows no usage data of that runtime). At the time its session must be free, or it does not start and the user is told; not approved yet, it waits for the approval and starts then; if Nexus was down then (more than 15 minutes late) it does not start, and you are told
 - nexus run <queue> cancel-start --reason "..."   take the queue out of the plan (its predecessors and its schedule); not one the user put into it
 - nexus run <queue> pause|resume|stop --reason "..."
@@ -593,6 +595,15 @@ export function tagDecisionNotice(d: { accepted: boolean; proposal: Pick<TagProp
     : { fact: `The user accepted your tag proposal: ${p.kind} ${p.name} is on the project's list.`, todo: "Drafts may use it now." };
 }
 
+/** A value of one of the project's metrics beyond its warning threshold (StepView.metrics, `warn`). */
+export function metricNotice(q: QueueView, st: StepView, m: MetricValue): Notice {
+  const w = m.warn!;
+  return {
+    fact: `Step ${st.id} of queue ${q.id}: ${m.name} is ${metricValueText(m.value, m.unit)}, ${w.side} its warning threshold of ${metricValueText(w.limit, m.unit)}${m.commit ? ` (at ${m.commit.slice(0, 7)})` : ""}.`,
+    todo: `Weigh it in the step's review, or plan what deals with it (a send-back, a fix in a later step) and tell the user if it matters. If the threshold no longer fits, change it with nexus metric define.`,
+  };
+}
+
 /** A step opened on its fallback because its runtime's usage ran out, or on its own runtime again (run.yaml `fallbacks`). */
 export function fallbackNotice(q: QueueView, f: { step: string; runtime: "claude" | "codex"; model?: string; effort?: string; from: { runtime: "claude" | "codex" }; reason: string; back?: true }): Notice {
   const on = [RUNTIME_NAME[f.runtime], f.model, f.effort && `${f.effort} effort`].filter(Boolean).join(", ");
@@ -647,6 +658,7 @@ function reviewBrief(q: QueueView, st: StepView, away: AwayNow = { on: false }):
   const checks = st.checks.filter((c) => c.at >= since);
   const missing = stepChecks(q.run?.checks, q.checks).filter((name) => !checks.some((c) => c.name === name));
   const items = st.review_items.filter((i) => i.at >= since);
+  const metrics = st.metrics.filter((m) => m.at >= since && !isCheckMetric(m.name));
   const commits = [...new Set(st.timeline.flatMap((e) => (e.type === "step.done" && e.commit ? [e.commit] : [])))];
   const list = (xs: string[]) => (xs.length ? xs.map((x) => `- ${x}`).join("\n") : "- none");
   return [
@@ -655,6 +667,8 @@ function reviewBrief(q: QueueView, st: StepView, away: AwayNow = { on: false }):
     `Acceptance:\n${list(st.acceptance)}`,
     `Checks reported this round:\n${list(checks.map((c) => `${c.name}: ${c.ok ? "ok" : "FAILED"}${c.duration !== undefined ? `, ${formatSeconds(c.duration)}` : ""}${c.summary ? ` (${c.summary})` : ""}`))}`,
     ...(missing.length ? [`Checks of the queue not reported this round: ${missing.join("; ")}`] : []),
+    ...(metrics.length ? [`Metrics recorded this round:
+${list(metrics.map((m) => `${m.name}: ${metricValueText(m.value, m.unit)}${m.warn ? ` (${m.warn.side} its warning threshold of ${metricValueText(m.warn.limit, m.unit)})` : ""}`))}`] : []),
     `Review material:\n${list(items.map((i) => `${i.label ?? i.kind ?? "item"}: ${i.path ?? i.url ?? ""}`))}`,
     `Commits: ${commits.join(", ") || "none reported"}`,
     ...(st.sent_back.length ? [`Sent back before:\n${list(st.sent_back.map((b) => `round ${b.round}, by the ${b.by}: ${b.text}`))}`] : []),

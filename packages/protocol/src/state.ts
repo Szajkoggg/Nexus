@@ -1,6 +1,6 @@
 // Derives the dashboard's view of a project from its files. Pure apart from reading through the store;
 // nothing here is ever written back (state.json, if kept, is only a cache of this).
-import { ORCHESTRATOR_ONLY, USER_ONLY, type StatusChange, type Event, type InboxEntry, type Note, type GitFile, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type ReviewItem, type ReviewLevel, type LegacyReviewPolicy, type AwayFile, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type PlanFile, type StepDef, type StepStatus, type TagProposal, type TagsFile } from "./schemas.ts";
+import { ORCHESTRATOR_ONLY, USER_ONLY, WORKER_ONLY, type MetricsFile, type StatusChange, type Event, type InboxEntry, type Note, type GitFile, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type ReviewItem, type ReviewLevel, type LegacyReviewPolicy, type AwayFile, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type PlanFile, type StepDef, type StepStatus, type TagProposal, type TagsFile } from "./schemas.ts";
 import { ProjectStore, chainPlan, readAway, revisionHash } from "./store.ts";
 import { awayAt, awayNow, type AwayNow } from "./away.ts";
 import { ENDED_RUN_STATES, HOLDING_RUN_STATES, formatClock, type Segment } from "./times.ts";
@@ -8,6 +8,7 @@ import { stopPlace } from "./attention.ts";
 import { closingStepId, integrationStepId, stepDefs } from "./closing.ts";
 import { openPlan, planView, proposalText, type PlanView } from "./plan.ts";
 import { stepTags, tagProposalText, type StepTags } from "./tags.ts";
+import { checkMetric, metricDef, metricWarning, type MetricValue } from "./metrics.ts";
 
 import type { CheckView } from "./steps.ts";
 interface AnswerView { id: string; text: string; at: string; escalate?: boolean; continue?: boolean; session: string; by: "orchestrator" | "user" }
@@ -118,6 +119,11 @@ export interface StepView extends StepDef {
    */
   pictures: Record<string, { accepted?: string; comments: { text: string; at: string; to: "send_back" | "note" | "orchestrator"; note_step?: string }[] }>;
   checks: CheckView[];
+  /**
+   * The step's metric values, oldest first, over every round (metrics.ts): what its workers recorded, and its checks'
+   * times as `check:<name>`; each with its commit, and `warn` when beyond its metric's warning threshold.
+   */
+  metrics: MetricValue[];
   notes: (Note & { read_at?: string })[];
   /** Messages sent to a session about this step while it ran. */
   messages: (InboxView & { session: string })[];
@@ -187,6 +193,8 @@ export interface ProjectState {
   questions: QuestionView[];
   /** The project's tag lists (.nexus/tags.yaml): its areas, its own activities, renames, proposals waiting. */
   tags: TagsFile;
+  /** The project's metrics (.nexus/metrics.yaml), as the orchestrator defined them. */
+  metrics: MetricsFile;
   /** What waits for the user, newest first. */
   attention: AttentionItem[];
   warnings: string[];
@@ -210,6 +218,8 @@ export function loadProjectState(store: ProjectStore): ProjectState {
   const away = readAway();
   let tags: TagsFile;
   try { tags = store.readTags(); } catch (e) { warnings.push(`tags.yaml: ${(e as Error).message}`); tags = { protocol: 1, areas: [], activities: [], renames: [], proposals: [], decisions: [] }; }
+  let metrics: MetricsFile;
+  try { metrics = store.readMetrics(); } catch (e) { warnings.push(`metrics.yaml: ${(e as Error).message}`); metrics = { protocol: 1, metrics: [] }; }
 
   const queues = new Map<string, QueueView>();
   const plans = new Map<string, PlanFile>();
@@ -261,6 +271,9 @@ export function loadProjectState(store: ProjectStore): ProjectState {
         if (USER_ONLY.has(e.type) && s.role !== "user") {
           warnings.push(`session ${id}: ${e.type} is the user's; ignored`); continue;
         }
+        if (WORKER_ONLY.has(e.type) && s.role !== "worker") {
+          warnings.push(`session ${id}: ${e.type} is for workers; ignored`); continue;
+        }
         events.push(e);
       }
     } catch (e) { warnings.push(`session ${id}: ${(e as Error).message}`); }
@@ -291,6 +304,11 @@ export function loadProjectState(store: ProjectStore): ProjectState {
     const f = q.run?.fallbacks?.findLast((x) => x.step === st.id);
     if (f) st.usage_switch = f;
     if (st.observed_activities) st.observed_activities = stepTags({ activities: st.observed_activities }, {}, tags).activities;
+    // Beyond its metric's warning threshold, as the metric is defined now.
+    for (const m of st.metrics) {
+      const w = metricWarning(metricDef(metrics, m.name), m.value);
+      if (w) m.warn = w;
+    }
   }
   // A rejection holds until an approval of a newer revision; while it holds the queue is paused.
   for (const q of queues.values()) {
@@ -375,6 +393,7 @@ export function loadProjectState(store: ProjectStore): ProjectState {
     sessions: [...sessions.values()],
     questions: [...questions.values()],
     tags,
+    metrics,
     attention: attentionOf([...queues.values()], [...questions.values()], tags),
     warnings,
     away: awayNow(away),
@@ -492,7 +511,7 @@ function initQueue(q: QueueFile, notes: Note[], project: Pick<ProjectFile, "defa
         ...(s.id === closingStepId(q.id) && q.coding ? { closing: true as const } : {}),
         ...(s.id === integrationStepId(q.id) ? { integration: true as const } : {}),
         status: s.status ?? "pending",
-        review_items: [], checks: [], timeline: [], messages: [], segments: [], sent_back: [], pictures: {},
+        review_items: [], checks: [], metrics: [], timeline: [], messages: [], segments: [], sent_back: [], pictures: {},
         notes: notes.filter((n) => n.step === s.id),
       };
     }),
@@ -595,7 +614,14 @@ function apply(
     }
     case "check.result": {
       const st = stepOf(queueOf(e.queue), e.step);
-      if (st) st.checks.push({ name: e.name, ok: e.ok, summary: e.summary, duration: e.duration, at: e.at });
+      if (!st) return;
+      st.checks.push({ name: e.name, ok: e.ok, summary: e.summary, duration: e.duration, at: e.at });
+      if (e.duration !== undefined) st.metrics.push({ name: checkMetric(e.name), value: e.duration, unit: "s", at: e.at, event: e.id, session: e.session, commit: e.commit });
+      return;
+    }
+    case "metric.recorded": {
+      const st = stepOf(queueOf(e.queue), e.step);
+      if (st) st.metrics.push({ name: e.name, value: e.value, unit: e.unit, at: e.at, event: e.id, session: e.session, commit: e.commit });
       return;
     }
     case "step.done": {
@@ -776,6 +802,7 @@ function apply(
     case "session.request":
     case "status.set":
     case "tags.proposed":
+    case "metric.defined":
     default:
       return;
   }

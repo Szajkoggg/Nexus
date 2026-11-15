@@ -26,6 +26,7 @@ a shell command can take part.
 <main checkout>/.nexus/                 git-ignored
   project.yaml                          server
   tags.yaml                             server: the project's tag lists (areas, own activities, renames, proposals)
+  metrics.yaml                          server: the project's metrics (unit, how shown, target, warning threshold)
   queues/
     <queue-id>/
       queue.yaml                        server: definition, revisions, approvals
@@ -525,7 +526,7 @@ Every line:
 | `review.added` | `queue`, `step`, `items: [{path or url, label, kind?, before?, key?, role?, size?}]`, `round?` | Review material, `kind` = image, sheet, doc, data, link; `before`: the path of the picture this one is compared with; `key` (a view key), `role` (before, mockup, after, variant-a, variant-b, result) and `size` (`width`, `height` in pixels): a keyed picture, always with its `round` (see "Review pictures") |
 | `review.marked` | `queue`, `step`, `path`, `accepted` | User only: a review picture marked accepted (or the mark taken back). A mark only: it does not accept the step |
 | `review.commented` | `queue`, `step`, `path`, `text`, `to` (`send_back`, `note`, `orchestrator`), `note_step?` | User only: a comment on a review picture, and where it went (see "Review pictures") |
-| `check.result` | `queue`, `step`, `name`, `ok`, `summary`, `duration` | One check's outcome; `duration`: how long it ran, in seconds (optional, non-negative) |
+| `check.result` | `queue`, `step`, `name`, `ok`, `summary`, `duration`, `commit?` | One check's outcome; `duration`: how long it ran, in seconds (optional, non-negative), which is also the metric `check:<name>`; `commit`: the HEAD of the session's checkout when it was reported (see "Project metrics") |
 | `step.done` | `queue`, `step`, `summary`, `commit?`, `warning?`, `activities?` | Acceptance met; the step's work is finished. `warning`: what `nexus step done` warned about at the step's end (see the CLI). `activities`: what the worker actually did (`--activities`), from the same lists as a draft (see "Tags") |
 | `step.failed` | `queue`, `step`, `reason` | The step cannot be finished as written |
 | `queue.stop` | `queue`, `step`, `condition`, `reason` | A stop condition was met; the engine halts the queue. `condition`: the condition met, as the queue words it; `reason`: what happened, short. The derived queue keeps them apart in `stop` (`{ condition, reason }`, until a lift) besides `status_reason` ("<condition>: <reason>"); the stopped waiting item's `text` is the reason and its `condition` the condition. A stop known only as one text (a queue imported as stopped) has no `stop`, and shows its `status_reason` |
@@ -541,6 +542,8 @@ Every line:
 | `session.request` | `action` (start, resume, pause, stop, cancel_start), `queue`, `use_session?`, `runtime?`, `model?`, `effort?`, `after?`, `next?`, `start_at?`, `reason` | Orchestrator only: asks the engine to act on a queue's run (`use_session` continues an existing session). `start` with `after` (a list of queue ids; one id from an older CLI): put the queue into the plan, it starts when those are done (see "The plan"); with `next: true`: into the plan with none before it; with `start_at` (ISO 8601, or `usage-reset`): start at that time (a schedule, see "Schedules"); `cancel_start`: take the queue out of the plan (its predecessors and its schedule) |
 | `plan.proposed` | `queue`, `after` (ids), `reason` | Orchestrator only: proposes to the user a new list of predecessors for the queue that changes dependencies the user set (see "The plan") |
 | `tags.proposed` | one of `area`, `activity`, `rename` (`from`, `to`); `reason?` | Orchestrator only: proposes a change to the project's tag lists; the server records it in `tags.yaml`'s proposals and answers in `applied.jsonl` (see "Tags") |
+| `metric.defined` | `name`, `unit?`, `show?`, `target?`, `warn_above?`, `warn_below?` | Orchestrator only: defines one of the project's metrics, or changes it (the whole definition); the server checks it, writes `metrics.yaml` and answers in `applied.jsonl` (see "Project metrics") |
+| `metric.recorded` | `queue`, `step`, `name`, `value`, `unit`, `commit?` | Worker only (the loader ignores it from any other session): a value of one of the project's metrics for the step, with the metric's unit then and the HEAD of the worker's checkout (see "Project metrics") |
 | `review.sent_back` | `queue`, `step`, `text` | Orchestrator or user only: a step in review goes back to its worker with what to fix (see "Sending a step back") |
 | `review.rejected` | `queue`, `step`, `text?` | User only (the loader ignores it from any other session, the orchestrator's included): rejects a step waiting for the user's review (see "Reject") |
 | `review.asked_user` | `queue`, `step`, `text` | Orchestrator only in practice (the loader takes it from an orchestrator or the user): a step waiting for the orchestrator's review goes to the user, with why |
@@ -995,7 +998,9 @@ nexus review add W3 $TEMP/nexus-review/W3/cliff@1280.png --key cliff-lit@1280 --
 nexus review add W3 $TEMP/nexus-review/W3/lit.png --before $TEMP/nexus-review/W3/unlit.png --label "Lighting"   # older: no key
 nexus help review                              # the standard for review material (nexus help: the topics)
 nexus help summaries|questions|refusals|commits   # the other standards
-nexus check W3 core-tests --ok --summary "548 passed" --duration 190   # how long it ran, in seconds
+nexus check W3 core-tests --ok --summary "548 passed" --duration 190   # how long it ran, in seconds: the metric check:core-tests
+nexus metric record bundle-kb 512 [--step W3]  # worker only: a value of a project metric for the step at work, with HEAD
+nexus metric list                              # the project's metrics (any session)
 nexus step done W3 --summary "No floating body on any fixture" [--commit 1a2b3c] [--activities feature,test]   # warns at an unclean end; --activities: what was actually done (refused: a name on no list)
 nexus step failed W3 --reason "..."
 nexus stop W3 --condition "user decision" --reason "..."   # the condition as the queue words it; the reason short (shown first)
@@ -1011,6 +1016,8 @@ nexus answer <qid> "..." [--escalate [--recommend <option>]] [--continue|--wait]
 nexus session start|resume|fork|pause|stop ...
 nexus tags propose --area <name> | --activity <prefix:name> [--reason ...]   # a proposal for the project's tag lists
 nexus tags rename <old> <new> [--reason ...]    # the user accepts it (see "Tags"); `nexus tags` lists them (any session)
+nexus metric define bundle-kb --unit KB [--show line|bar|number] [--target 400] [--warn-above 500 | --warn-below=-1]
+                                               # a project metric, or a change to one (see "Project metrics")
 nexus attach                                   # register a hand-started session as external
 # setup (the user)
 nexus project add <path> [--id] [--name]       # creates .nexus/ (self-ignoring), registers the project, prints the rules files' check
@@ -1714,6 +1721,44 @@ done-not-planned marked +), the queue card (its own steps' kinds and areas in a 
 lists on request), and the waiting list (a `tags` item has Accept and Decline; on the project's page it opens the
 settings). The pure part of the module (`@nexus/protocol/tags`) is free of Node; the proposals and decisions, which
 write `tags.yaml`, are in `tag-proposals.ts`.
+
+## Project metrics
+
+What a project measures, beside its checks' times (decided 2026-11-14, docs/ideas/statistics.md;
+`packages/protocol/src/metrics.ts`): the orchestrator names the metrics, the workers record their values, and every
+value belongs to its step and the commit it was measured at. The statistics' views (queue ST3) and `nexus stats` read
+them.
+
+`.nexus/metrics.yaml` (`MetricsFile`), written only by the server: `metrics`, in the order they were first defined,
+each `name`, `unit`, `show` (`line`, `bar` or `number`: how the views show it; default `line`), `target?` (the value
+aimed at), `warn_above?` or `warn_below?` (the warning threshold, one at most), `at` (when it was last defined) and
+`session?` (the orchestrator session). Missing: no metrics.
+
+- The orchestrator defines one with `nexus metric define <name> --unit <unit> [--show …] [--target <n>]
+  [--warn-above|--warn-below <n>]` (event `metric.defined`). The CLI checks it and the server checks it again, writes
+  it and answers in `applied.jsonl`: a name is lowercase words and digits joined by hyphens, dots or underscores
+  (`bundle-kb`, `fps.p95`, at most 64 characters); a unit is one short word (at most 16 characters); numbers are
+  finite; one threshold at most. Defining a known name again replaces its whole definition (what it leaves out is
+  gone), in its place. A worker cannot define (the CLI refuses it, and the loader ignores the event from any session
+  but an orchestrator's or the user's).
+- A worker records a value with `nexus metric record <name> <value> [--step <step>]` (event `metric.recorded`, among
+  its own events): for its one step at work (`--step` names another of its queue), with the metric's unit as it is
+  then and the HEAD of the session's checkout (`commit`; absent outside a git repository). Refused, with nothing
+  written: a value that is no finite number, a name the project has not defined (the refusal lists those it has), a
+  check's time, no step at work, or any session but a worker's (the loader ignores a `metric.recorded` from any other
+  session, with a warning). The orchestrator says in a step's goal what its worker should measure; the worker's
+  briefing names the command.
+- A check's time is a metric without a definition: `check:<the check's name, as reported with nexus check>`, in
+  seconds, from `check.result`'s `duration`; `nexus check` records the HEAD commit with it. The orchestrator may define
+  `check:<name>` for a target or a threshold (its unit is `s`, the only one taken). It is never recorded by hand.
+
+Derived: `ProjectState.metrics` is the file; `StepView.metrics` the step's values over every round, oldest first, each
+`name`, `value`, `unit`, `at`, `event` (the event's id), `session`, `commit?`, and `warn` (`side`: `above` or `below`,
+`limit`) when the value is strictly beyond its metric's threshold as the metric is defined now. A value beyond the
+threshold that was recorded after the threshold was defined (and after the orchestrator session began) is told to the
+orchestrator once (`notify:metric:<event>`: "Step W3 of queue W: bundle-kb is 900 KB, above its warning threshold of
+500 KB (at 1a2b3c4)."), and its review notice lists the round's recorded values ("Metrics recorded this round"), each
+beyond its threshold marked. The dashboard does not show metrics yet (queue ST3); `nexus metric list` lists them.
 
 ## Fallback when usage runs out
 
