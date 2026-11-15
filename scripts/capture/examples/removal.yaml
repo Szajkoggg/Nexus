@@ -1,0 +1,41 @@
+# The Danger zone of a project's settings (DangerZone.tsx), on the projects of scripts/capture/seed-removal.ts.
+#   node scripts/capture.ts scripts/capture/examples/removal.yaml --step <queue>/<step>
+seed: scripts/capture/seed-removal.ts
+views:
+  - key: project-remove@1440
+    route: "#/demo"
+    label: "The Danger zone at the bottom of the project's settings"
+    actions:
+      - click: { selector: "button[title='Project settings']" }
+      - wait: 800
+      - click: { selector: "#danger-zone" }
+      - wait: 400
+  - key: project-remove-confirm@1440
+    route: "#/demo"
+    label: "Remove from Nexus: the confirmation, what goes and what stays"
+    actions:
+      - click: { selector: "button[title='Project settings']" }
+      - wait: 800
+      - click: "Remove from Nexus…"
+      - wait: 400
+      - click: { selector: "#danger-zone [role=group]" }
+      - wait: 300
+  - key: project-delete-confirm@390
+    route: "#/demo"
+    label: "Delete Nexus's data with the name typed, phone"
+    actions:
+      - click: { selector: "button[title='Project settings']" }
+      - wait: 800
+      - click: "Delete Nexus's data…"
+      - wait: 400
+      - type: { text: "Demo app", into: "#danger-zone input" }
+      - wait: 300
+      - click: { selector: "#danger-zone [role=group] label" }
+  - key: project-remove-blocked@1440
+    route: "#/busy"
+    label: "Something runs: both buttons off, and what runs"
+    actions:
+      - click: { selector: "button[title='Project settings']" }
+      - wait: 800
+      - click: { selector: "#danger-zone" }
+      - wait: 400
