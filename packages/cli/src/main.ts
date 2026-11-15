@@ -9,6 +9,7 @@ import {
   Event, HOLDING_RUN_STATES, ProjectStore, checksLine, findNexusDir, inReportFolder, loadProjectState, openPlan, stepValuesText, stopPlace, newId, normPath, now, readRegistry, writeRegistry,
   PICTURE_ROLES, REVIEW_HELP, checkPicture, levelNow, pictureSize, recommendedOption, stepDefs,
   NEXUS_ACTIVITIES, TAG_KINDS, TAG_ORIGINS, TAG_SIZES, tagIssues, tagProposalText, tagsText,
+  STAT_DIMENSIONS, readTurns, sinceTime, statDimension, statsReport, statsText, stepStats,
   CHECK_METRIC, isCheckMetric, metricDef, metricDefText, metricRequestIssues, metricValueText,
   type PictureRole, type ReviewItem, type Role, type Runtime, type SessionFile,
 } from "@nexus/protocol";
@@ -35,6 +36,10 @@ Agent commands (session from NEXUS_SESSION or --session):
   nexus metric record <name> <value> [--step <step>]   (worker only) a value of one of the project's metrics, for your
                     step at work, with the HEAD commit; a negative value goes after --: nexus metric record delta -- -5
   nexus metric list                   the project's metrics: unit, how shown, target, warning threshold
+  nexus stats [--project <id>] [--since <date>] [--by model|effort|kind|activity|area|size|origin]
+                                      how steps went, by group: steps, accepted in the first round, average rounds,
+                                      stops and failures, median working time, estimated use of the usage windows
+                                      (default: every registered project, by model)
   nexus stop <step> --condition <text> --reason <text>   the condition met, as the queue words it; the reason, short
   nexus ask <text> [--step <step>] [--option <text>]... [--recommend <option>] [--can-continue]
   nexus withdraw <qid> --reason <text>
@@ -114,6 +119,7 @@ const { values: o, positionals: args } = parseArgs({
     "dry-run": { type: "boolean" }, replace: { type: "boolean" },
     role: { type: "string" }, runtime: { type: "string" }, title: { type: "string" }, from: { type: "string" },
     area: { type: "string" }, activity: { type: "string" }, activities: { type: "string" },
+    project: { type: "string" }, since: { type: "string" }, by: { type: "string" },
     unit: { type: "string" }, show: { type: "string" }, target: { type: "string" }, "warn-above": { type: "string" }, "warn-below": { type: "string" },
     help: { type: "boolean", short: "h" }, key: { type: "string" }, note: { type: "string" }, before: { type: "string" }, now: { type: "boolean" }, ref: { type: "string" },
   },
@@ -787,6 +793,25 @@ const commands: Record<string, () => void | Promise<void>> = {
     } else throw new UsageError("nexus tags [list] | nexus tags propose --area <name> | --activity <prefix:name> [--reason <text>] | nexus tags rename <old> <new> [--reason <text>]");
     const e = emit(st, s, { type: "tags.proposed", ...body, reason });
     report(waitApplied(st, s.id, e.id));
+  },
+
+  /**
+   * `nexus stats`: the statistics (@nexus/protocol stats.ts) from the files: the registered projects (and the one this
+   * runs in, if it is not registered) and <NEXUS_HOME>/turns.jsonl. Reads only.
+   */
+  stats() {
+    const by = statDimension(o.by);
+    if (!by) throw new UsageError(`--by is one of ${STAT_DIMENSIONS.join(", ")}, not ${o.by}`);
+    const since = o.since === undefined ? undefined : sinceTime(o.since);
+    if (o.since !== undefined && !since) throw new UsageError(`--since takes a date (2026-11-14) or a time, not "${o.since}"`);
+    const stores = new Map<string, ProjectStore>();
+    for (const p of readRegistry().projects) stores.set(p.id, ProjectStore.forRoot(p.root));
+    try { const here = store(); const id = here.readProject().id; if (!stores.has(id)) stores.set(id, here); } catch { /* not in a project */ }
+    if (o.project && !stores.has(o.project)) throw new UsageError(`unknown project ${o.project} (nexus project list shows them)`);
+    const states = [...stores].filter(([id]) => !o.project || id === o.project).flatMap(([id, st]) => {
+      try { return [loadProjectState(st)]; } catch (e) { console.error(`nexus: project ${id} left out: ${(e as Error).message}`); return []; }
+    });
+    console.log(statsText(statsReport(stepStats(states, readTurns().entries), { by, project: o.project, since })));
   },
 
   metric() {

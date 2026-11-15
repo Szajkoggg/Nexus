@@ -14,6 +14,7 @@ import {
   ActionError, Effort, ProjectStore, addNote, closingToSkip, updateSettings, answerAsUser, approveQueue, deleteNote, loadProjectState, nexusHome, withdrawApproval, addAllowRule,
   ensureGlobalSettings, readGlobalSettings, updateGlobalSettings, ownKeys, OVERRIDABLE, settingKey, readRegistry, readUsage, readTurns, commentOnPicture, markPicture, routeAnswers, routeSendBacks, sendBack, sendMessage, setQueueSettings, setStepLevel, confirmProvisional, type ProjectState,
   readAway, writeAway, awayNow, awayUntil, turnAway, expireAway, acceptPlanProposal, declinePlanProposal, handBackPlan, acceptTagProposal, declineTagProposal,
+  STAT_DIMENSIONS, projectMetrics, sinceTime, statDimension, statsReport, stepStats, type ProjectMetrics, type StatsReport,
   MIN_SAMPLES, queueEstimate, stepSamples, type EstimatesResponse,
 } from "@nexus/protocol";
 import { newestFirst, projectDigest, projectRunning, usageSince, type DigestEvent, type DigestResponse, type DigestRunning, type UsageRun } from "@nexus/protocol/digest";
@@ -280,6 +281,15 @@ app.get("/api/projects/:id/estimates", (c) => {
   const samples = stepSamples(readTurns().entries, (p, q, st) => states.get(p)?.queues.find((x) => x.id === q)?.steps.find((x) => x.id === st)?.status === "done");
   const queues = Object.fromEntries(s.queues.filter((q) => q.status !== "done" && q.status !== "cancelled").map((q) => [q.id, queueEstimate(q, s.project, samples)]));
   return c.json({ samples: samples.length, min: MIN_SAMPLES, queues } satisfies EstimatesResponse);
+});
+
+// A project's metrics and their values (@nexus/protocol stats.ts, projectMetrics), for the project's Stats views.
+app.get("/api/projects/:id/metrics", (c) => {
+  const e = projects.get(c.req.param("id"));
+  if (!e) return c.json({ error: "unknown project" }, 404);
+  const s = stateOf(e);
+  if (!s) return c.json({ error: e.error }, 500);
+  return c.json(projectMetrics(s) satisfies ProjectMetrics);
 });
 
 app.get("/api/projects/:id/file", (c) => {
@@ -549,6 +559,21 @@ app.get("/api/projects/:id/refusals", (c) => {
 
 // The morning digest across projects (UX proposals, 16): what happened after ?since= (ISO 8601; default the last 24
 // hours), newest first, at most 200 lines; and the queues at work now (packages/protocol/src/digest.ts).
+// The statistics across projects, or of one (?project=), grouped (?by=, default model) since a time (?since=): the
+// same computation as nexus stats (@nexus/protocol stats.ts), the use of the windows estimated from turns.jsonl.
+app.get("/api/stats", (c) => {
+  refreshRegistry();
+  const by = statDimension(c.req.query("by"));
+  if (!by) return c.json({ error: `by is one of ${STAT_DIMENSIONS.join(", ")}` }, 400);
+  const sinceText = c.req.query("since");
+  const since = sinceText ? sinceTime(sinceText) : undefined;
+  if (sinceText && !since) return c.json({ error: "since is a date (2026-11-14) or a time" }, 400);
+  const project = c.req.query("project") || undefined;
+  if (project && !projects.has(project)) return c.json({ error: "unknown project" }, 404);
+  const states = [...projects.values()].map(stateOf).filter((x): x is ProjectState => !!x);
+  return c.json(statsReport(stepStats(states, readTurns().entries), { by, project, since }) satisfies StatsReport);
+});
+
 app.get("/api/digest", (c) => {
   refreshRegistry();
   const q = c.req.query("since");

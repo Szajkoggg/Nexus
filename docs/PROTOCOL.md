@@ -1001,6 +1001,7 @@ nexus help summaries|questions|refusals|commits   # the other standards
 nexus check W3 core-tests --ok --summary "548 passed" --duration 190   # how long it ran, in seconds: the metric check:core-tests
 nexus metric record bundle-kb 512 [--step W3]  # worker only: a value of a project metric for the step at work, with HEAD
 nexus metric list                              # the project's metrics (any session)
+nexus stats [--by model|effort|kind|activity|area|size|origin] [--project <id>] [--since <date>]   # see "Statistics"
 nexus step done W3 --summary "No floating body on any fixture" [--commit 1a2b3c] [--activities feature,test]   # warns at an unclean end; --activities: what was actually done (refused: a name on no list)
 nexus step failed W3 --reason "..."
 nexus stop W3 --condition "user decision" --reason "..."   # the condition as the queue words it; the reason short (shown first)
@@ -1130,6 +1131,8 @@ from every agent session, and the others from every session but an orchestrator'
 | `POST /api/projects/:id/questions/:qid/answer` | `text`, `continue?` | The user's answer, routed to the asker |
 | `POST /api/projects/:id/queues/:q/run` | `action` (`start`, `pause`, `resume`, `stop`, `cancel_start`), `runtime?`, `model?`, `effort?`, `session?`, `after?`, `next?`, `at?` | Runs the queue through a Nexus-launched session (`session` continues an existing one). `start` with `after` (a queue id or a list): the user's place for the queue in the plan, it starts when those are done; with `next: true`: in the plan with none before it (`{message}`; see "The plan"); with `at` (ISO 8601, or `usage-reset`): a schedule (`{message}`); `cancel_start` takes the queue out of the plan (`{message}`) |
 | `GET /api/projects/:id/estimates` | | Expected times of the project's open queues, as estimates (`{ samples, min, queues: { <id>: { steps, ms? } } }`): `steps` the steps left (not closed), `ms` their expected time, absent while fewer than `min` (5) steps are finished. A finished (done) step's time is the sum of its worker turns' `duration_ms` in `turns.jsonl` (send-back rounds included, the wait for its review not), over every project the server has; a step to come takes the average of those on its model and effort, else its model, else all, each from at least 5 steps |
+| `GET /api/projects/:id/metrics` | | The project's metrics and their values (`ProjectMetrics`: `metrics`, its own definitions and every check's time seen, `check:<name>`; `values`, oldest first, each a `StepView.metrics` entry with its `queue` and `step`); see "Project metrics". Unknown project: 404 |
+| `GET /api/stats?by=&project=&since=` | | The statistics (`StatsReport`, see "Statistics"): every registered project, or one (`project`; unknown: 404), grouped by `by` (`model`, `effort`, `kind`, `activity`, `area`, `size`, `origin`; default `model`; another: 400), the steps whose last outcome is at or after `since` (a date or a time; unreadable: 400) |
 | `POST /api/projects/:id/tags/:proposal` | `action` (`accept`, `decline`) | The user's decision on the orchestrator's proposal for the project's tag lists (see "Tags"); only the user: no CLI command or event does it (`{message}`) |
 | `POST /api/projects/:id/queues/:q/plan` | `action` (`move`, `accept`, `decline`, `hand_back`), `after?` | The user's plan: `move` the queue after `after` (a queue id; `null`: with no queue before it), as in a list (see "The plan"); accept or decline the orchestrator's proposal; hand a dependency the user set (`after`; without it, all of them) back to the orchestrator (`{message}`) |
 | `POST /api/projects/:id/queues/:q/steps/:s/pictures/mark` | `path`, `accepted` | The user's mark on a review picture (`review.marked`) |
@@ -1759,6 +1762,41 @@ threshold that was recorded after the threshold was defined (and after the orche
 orchestrator once (`notify:metric:<event>`: "Step W3 of queue W: bundle-kb is 900 KB, above its warning threshold of
 500 KB (at 1a2b3c4)."), and its review notice lists the round's recorded values ("Metrics recorded this round"), each
 beyond its threshold marked. The dashboard does not show metrics yet (queue ST3); `nexus metric list` lists them.
+
+## Statistics
+
+How steps went, by group, for two readers (decided 2026-11-14, docs/ideas/statistics.md): the orchestrator choosing a
+model and effort, the user watching the use of the subscription. One computation, free of Node
+(`packages/protocol/src/stats.ts`), read by `nexus stats` from the files and by `GET /api/stats` (and the project's
+metrics by `GET /api/projects/:id/metrics`) for the Stats views.
+
+- **The steps counted** (`stepStats`): every step with an outcome in its timeline (`step.done`, `step.failed`, a
+  `queue.stop` at it), with its worker turns from `turns.jsonl` (`role` worker, its project, queue and step). `rounds`:
+  how many times it was reported done; `accepted`: its status is done; `first`: accepted with one round; `decided`:
+  accepted, rejected or failed; `stops` and `failures`: its `queue.stop` and `step.failed` events; `work_ms`: the sum of
+  its worker turns' `duration_ms` (its own work, never the wait for a review); `model`, `effort`, `runtime`: its last
+  worker turn's; `fallback`: a worker turn of it ran on a fallback (`TurnRecord.fallback`); `usage`: the estimated use
+  of each window (`<runtime>:<window>`, in utilization, 0 to 1) summed over its worker turns (`usageEstimates`, see
+  `turns.jsonl`), and `usage_missing`, its turns without an estimate. `--since` compares its last outcome.
+- **Groups** (`statsReport`), by `model`, `effort`, or a tag facet: `kind`, `activity` (a step is in the group of each
+  activity it planned or reported), `area`, `size`, `origin`. A step without the facet (older queues), or without a
+  worker turn's model, is `untagged`; one with a model and no effort is `default`. A project's own names, its areas and
+  prefixed activities, count only within it: across projects they read `<project>/<name>`; Nexus's activities are
+  compared across projects as they are.
+- **Each group** (`StatGroup`): `steps`; `few` when fewer than 5 (`FEW_STEPS`: read with care); `decided`,
+  `first_accepted` and `first_rate`; `avg_rounds` (of the steps reported done); `stops`, `failures`; `median_ms`,
+  `p25_ms`, `p75_ms` (the working time of its accepted steps; by size, how the planned size came out); `usage` and
+  `usage_missing` (an estimate, and labelled so); `fallback` (steps with a turn on a fallback); by activity also
+  `activities`: `planned` (steps that planned it), `observed` (that reported it), `unplanned`, `skipped` (planned, and
+  the step reported other activities). Largest group first.
+- **`nexus stats`** prints a line per group (`statsText`): "- opus: 5 steps; accepted in the first round 3 of 4
+  (75 %); 1.2 rounds on average; 1 stop, 0 failures; median work 30 min (25 min to 33 min 45 s); estimated use
+  claude:five_hour 1 %; 1 on a fallback", with "(few data)" after a small group's count and a closing line that says
+  the use is estimated. It reads the registered projects (and the one it runs in, if not registered) and
+  `<NEXUS_HOME>/turns.jsonl`, and writes nothing. `--since` takes a date (from that day's start, local time) or a time.
+- The orchestrator's briefing asks it to look at `nexus stats --by model` and `--by effort` (and `--by kind`) before it
+  chooses a model or effort other than the kind's, or proposes changing a kind's values, and to cite the figures it goes
+  by; a few-data group is no evidence.
 
 ## Fallback when usage runs out
 

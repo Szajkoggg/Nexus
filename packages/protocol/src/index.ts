@@ -22,4 +22,5 @@ export * from "./tag-proposals.ts";
 export * from "./metrics.ts";
 export * from "./metric-define.ts";
 export * from "./usage-estimate.ts";
+export * from "./stats.ts";
 export * from "./routing.ts";
