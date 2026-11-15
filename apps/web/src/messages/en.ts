@@ -637,7 +637,7 @@ export const en = {
   "viewer.markedOf": "{marked} of {total} marked",
   "viewer.keys": "← → to move",
   "viewer.split": "{left} and {right} split",
-  // ---------------------------------------------------------------- a step's panel (Details.tsx)
+  // ---------------------------------------------------------------- a step's panel (components/details/)
   "details.summary": "Summary:",
   "details.reason": "Reason:",
   "details.now": "Now:",

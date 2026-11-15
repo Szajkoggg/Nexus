@@ -79,3 +79,28 @@ const chat: [number, "user" | "orchestrator", string][] = [
   [29, "orchestrator", "PL is planned after SC; it starts once you approve it."],
 ];
 for (const [min, from, text] of chat) st.appendChat(orch.id, { at: ago(min), from, text });
+
+// RV: a step waiting for the user's review (level 1), with its checks and its summary.
+const rv: SessionFile = { protocol: 1, id: newId(), project: "demo", role: "worker", runtime: "claude", title: "RV worker", cwd: root, launched_by: "nexus", created_at: ago(50), queue: "RV" };
+st.writeSession(rv);
+st.writeQueue({ protocol: 1, id: "RV", title: "Search filters", revision: 1, status: "proposed", review_level: 1, checks: ["npm test"], stop_conditions: [], steps: [
+  { id: "RV1", title: "Filter by date", goal: "Searches can be limited to a date range.", acceptance: ["A unit test of the range", "The filter shows on the search page"] },
+  { id: "RV2", title: "Filter by author", goal: "Searches can be limited to one author.", acceptance: ["A unit test"] },
+] });
+approveQueue(st, "RV");
+emit(rv, 40, { type: "step.started", queue: "RV", step: "RV1" });
+emit(rv, 25, { type: "check.result", queue: "RV", step: "RV1", name: "npm test", ok: true, duration: 19 });
+emit(rv, 24, { type: "step.done", queue: "RV", step: "RV1", summary: "Searches take a from and a to date; a unit test covers the range's ends." });
+
+// QS: a step at work whose question waits for the user, with options and a recommendation.
+const qs: SessionFile = { protocol: 1, id: newId(), project: "demo", role: "worker", runtime: "claude", title: "QS worker", cwd: root, launched_by: "nexus", created_at: ago(30), queue: "QS" };
+st.writeSession(qs);
+st.writeQueue({ protocol: 1, id: "QS", title: "Search page layout", revision: 1, status: "proposed", checks: ["npm test"], stop_conditions: [], steps: [
+  { id: "QS1", title: "Results list", goal: "The results as a list or a grid.", acceptance: ["A screenshot of the results"] },
+] });
+approveQueue(st, "QS");
+emit(qs, 20, { type: "step.started", queue: "QS", step: "QS1" });
+// The orchestrator has already passed it on to the user (so the instance's orchestrator has nothing to answer).
+const qid = newId();
+emit(qs, 15, { type: "question.asked", queue: "QS", step: "QS1", qid, text: "Should the results show as a list or as a grid?", options: ["A list", "A grid"], recommended: "A list", can_continue: false });
+emit(orch, 14, { type: "answer.given", qid, text: "This is the user's to decide: it changes how the page looks.", escalate: true, recommended: "A list" });

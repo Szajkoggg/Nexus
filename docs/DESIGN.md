@@ -1273,12 +1273,12 @@ header and action bar, the bottom bar and the waiting cards is at least 44 px hi
 breakpoint as the phone layout).
 
 **Questions.** A step with an open question opens on the phone as the question's sheet (`QuestionSheet` in
-Details.tsx): the question first, what the orchestrator said passing it on, the options as 48 px buttons, the user's
-own words, whether the worker may go on, then the step's details below; Answer in the action bar. An option and words
-go together in one answer: the option, a blank line, the words. A waiting card shows a question's options as buttons
-(the attention item carries `options`); a tap opens the sheet with that option chosen and the user confirms there.
-The choice travels in memory (`chooseOption`), not in the URL: a reload opens the sheet with nothing chosen. On the
-desktop the card has no option buttons and the step keeps its answer box in the action bar.
+`components/details/questions.tsx`): the question first, what the orchestrator said passing it on, the options as 48 px
+buttons, the user's own words, whether the worker may go on, then the step's details below; Answer in the action bar. An
+option and words go together in one answer: the option, a blank line, the words. A waiting card shows a question's
+options as buttons (the attention item carries `options`); a tap opens the sheet with that option chosen and the user
+confirms there. The choice travels in memory (`chooseOption`), not in the URL: a reload opens the sheet with nothing
+chosen. On the desktop the card has no option buttons and the step keeps its answer box in the action bar.
 
 **Waiting cards** put the kind, where it is and when on one line and give the text the full width (three lines). The
 phone's chat composer is one line that grows with the text (up to six) and a round Send.
