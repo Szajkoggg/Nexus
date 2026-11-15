@@ -109,15 +109,17 @@ export class Conversations {
    */
   compact(id: string): void {
     const s = this.session(id);
-    if (!this.canCompact(s)) throw new ActionError(`a ${s.runtime} conversation cannot be compacted`, 409);
+    const cannot = () => new ActionError(`a ${s.runtime} conversation cannot be compacted`, 409);
+    const answering = () => new ActionError("the partner is answering: compact once its turn is over", 409);
+    if (!this.canCompact(s)) throw cannot();
     if (!this.store.readChat(id).entries.some((c) => c.from === "partner" && c.kind === "message")) throw new ActionError("the conversation has nothing to compact yet", 409);
-    if (this.host.running(id)?.proc.state === "working") throw new ActionError("the partner is answering: compact once its turn is over", 409);
+    if (this.host.running(id)?.proc.state === "working") throw answering();
     const l = this.ensure(s);
-    if (!l.proc.compact) throw new ActionError(`a ${s.runtime} conversation cannot be compacted`, 409);
+    if (!l.proc.compact) throw cannot();
     clearTimeout(l.timer);
     l.compacting = true;
     l.compacted = false;
-    if (!l.proc.compact()) { l.compacting = false; throw new ActionError("the partner is answering: compact once its turn is over", 409); }
+    if (!l.proc.compact()) { l.compacting = false; throw answering(); }
     this.changed();
   }
 

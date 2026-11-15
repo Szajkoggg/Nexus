@@ -202,9 +202,10 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
 
   private startCompact(): void {
     void this.request("thread/compact/start", { threadId: this.threadId }).catch((err) => {
-      this.emit("activity", { kind: "error", text: `thread/compact/start: ${(err as Error).message}` });
+      const text = (err as Error).message;
+      this.emit("activity", { kind: "error", text: `thread/compact/start: ${text}` });
       this.state = "idle";
-      this.emit("turnEnd", { ok: false, text: (err as Error).message, failure: { kind: "lasting", code: "compactRejected", text: clip((err as Error).message, 300) } });
+      this.emit("turnEnd", { ok: false, text, failure: { kind: "lasting", code: "compactRejected", text: clip(text, 300) } });
     });
   }
 
