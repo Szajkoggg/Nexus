@@ -152,6 +152,13 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
    * turn by itself with the task's notification.
    */
   background: readonly string[] = [];
+  /**
+   * A fresh session whose conversation is not saved yet: Claude Code saves it as it reads the first message, and
+   * writes nothing before (probed 2026-11-15), so the first turn's start says it is saved (facts `saved`).
+   */
+  private unsaved: boolean;
+  /** The CLI refused the start, naming whether the session has a saved conversation (savedFromRefusal): told once. */
+  private refusalTold = false;
 
   constructor(options: ClaudeOptions) {
     super();
@@ -183,6 +190,7 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
       windowsHide: true,
     });
     this.pid = this.proc.pid;
+    this.unsaved = !options.resume;
     this.costSoFar = options.resume ? undefined : 0;
     this.modelSoFar = options.resume ? undefined : { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 };
     // A write to a process that is exiting (killed, crashed) fails with EPIPE: its exit is handled, the write is moot.
@@ -190,7 +198,12 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
     this.proc.stdout.setEncoding("utf8");
     this.proc.stdout.on("data", (d: string) => this.read(d));
     this.proc.stderr.setEncoding("utf8");
-    this.proc.stderr.on("data", (d: string) => { this.lastStderr = (this.lastStderr + d).slice(-2000); });
+    this.proc.stderr.on("data", (d: string) => {
+      this.lastStderr = (this.lastStderr + d).slice(-2000);
+      // A refused start names whether the session has a saved conversation; its words may come after the exit event.
+      const saved = this.refusalTold ? undefined : savedFromRefusal(this.lastStderr);
+      if (saved !== undefined) { this.refusalTold = true; this.emit("facts", { saved }); }
+    });
     this.proc.on("error", (err) => {
       this.emit("activity", { kind: "error", text: `could not start claude: ${err.message}` });
     });
@@ -287,6 +300,10 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
   }
 
   private handle(m: Record<string, any>): void {
+    if (this.unsaved && ((m.type === "system" && m.subtype === "init") || m.type === "assistant" || m.type === "result")) {
+      this.unsaved = false;
+      this.emit("facts", { saved: true });
+    }
     switch (m.type) {
       case "system":
         if (m.subtype === "api_retry") {
@@ -407,6 +424,17 @@ function claudeAbsolutePath(path: string): string {
 export function nexusDenyRules(nexusDir: string): string[] {
   const p = claudeAbsolutePath(nexusDir);
   return [`Edit(${p}/**)`, `Write(${p}/**)`];
+}
+
+/**
+ * What Claude Code's refusal of a start says of the session's conversation (2.1.323, probed 2026-11-15): `--resume` of
+ * an id it never saved exits 1 with "No conversation found with session ID: <id>" (none: false); `--session-id` of a
+ * saved one with "Error: Session ID <id> is already in use." (there is one: true). Anything else: undefined.
+ */
+function savedFromRefusal(stderr: string): boolean | undefined {
+  if (/No conversation found with session ID/i.test(stderr)) return false;
+  if (/Session ID \S+ is already in use/i.test(stderr)) return true;
+  return undefined;
 }
 
 const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + "…" : s);

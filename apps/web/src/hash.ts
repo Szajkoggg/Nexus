@@ -28,3 +28,21 @@ export const fileHref = (project: string, path: string, line?: number): string =
 
 /** A link that opens a commit's details over the project's page. */
 export const commitHref = (project: string, hash: string): string => `?commit=${hash}${itemHash(project)}`;
+
+/**
+ * A link to a chat message (queue SR, a search hit): the orchestrator's chat (`?chat=<session>`) or a conversation
+ * (`?conversation=<id>`), at the entry with that line in its chat.jsonl (`&line=<n>`, from 0), which the chat scrolls
+ * to once it has loaded (chatTarget.ts).
+ */
+export const chatHref = (project: string, chat: { conversation: string } | { orchestrator: string }, line: number): string =>
+  `?${"conversation" in chat ? `conversation=${encodeURIComponent(chat.conversation)}` : `chat=${encodeURIComponent(chat.orchestrator)}`}&line=${line}${itemHash(project)}`;
+
+/** The chat message a link's query names (chatHref): the session, whether it is a conversation, the line. */
+export function chatOf(query: string): { session: string; conversation: boolean; line: number } | undefined {
+  const q = new URLSearchParams(query);
+  const line = Number(q.get("line"));
+  const conversation = q.get("conversation"), chat = q.get("chat");
+  const session = conversation || chat;
+  if (!session || q.get("line") === null || !Number.isInteger(line) || line < 0) return undefined;
+  return { session, conversation: !!conversation, line };
+}

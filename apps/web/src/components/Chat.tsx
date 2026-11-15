@@ -22,6 +22,8 @@ import { SentPictures, filesOf, usePictures } from "./Pictures.tsx";
 import { splitPictures, withPictures } from "../pictures.ts";
 import { usePage } from "../page.ts";
 import { fileHref } from "../hash.ts";
+import { clearChatTarget, useChatTarget } from "../chatTarget.ts";
+import { SearchField } from "./Search.tsx";
 
 // ---------------------------------------------------------------- the endpoints this file reads and writes
 
@@ -68,7 +70,7 @@ export function useOrchestrator(project: string | undefined, version: Version) {
 }
 
 /** A chat: what it is (its header; on a desktop's orchestrator chat, in the middle column's header), the messages, and the composer. */
-function ChatColumn({ project, title, over, who, about, view, ready, error, place, status, showTools, menu, empty, draft, placeholder, onSend, onStop, onBack, bare, search }: {
+function ChatColumn({ project, title, over, who, about, view, ready, error, place, status, showTools, onNeedTools, menu, empty, draft, placeholder, onSend, onStop, onBack, bare, search }: {
   /** The project: where pictures are uploaded, and served from. */
   project: string;
   title: string; over: string;
@@ -88,6 +90,8 @@ function ChatColumn({ project, title, over, who, about, view, ready, error, plac
   search: Search;
   /** The stop button's action, shown while the agent is in a turn (ChatTools.tsx, StopButton). */
   onStop: () => Promise<void>;
+  /** Shows the tool calls: a search hit on a tool line goes there (chatTarget.ts). */
+  onNeedTools: () => void;
 }) {
   const side = useContext(Side);
   const phone = usePhone();
@@ -101,6 +105,7 @@ function ChatColumn({ project, title, over, who, about, view, ready, error, plac
   const p = usePlace(place, full, ready, showTools, view?.state);
   const goTo = useGoTo(p.scroller, full, older.load);
   const s = useSearch(project, session, showTools, search, goTo);
+  useTarget(place, ready, session, earlier, showTools, onNeedTools, goTo, p.scroller);
   const highlight = s?.query ?? "";
   const current = s?.hits?.[s.at];
   const pins = ready ? view?.pins ?? [] : [];
@@ -155,7 +160,7 @@ function ChatColumn({ project, title, over, who, about, view, ready, error, plac
             {earlier.map((b, k) => (
               <div key={b.session} className={phone ? "space-y-3" : "space-y-4"}>
                 {b.chat.filter((c) => showTools || c.kind !== "tool").map((c) => (
-                  <div key={`${b.session}:${c.line}`}><Entry c={c} flat={!phone} who={who} project={project} highlight={highlight} /></div>
+                  <div key={`${b.session}:${c.line}`} data-earlier={`${b.session}:${c.line}`}><Entry c={c} flat={!phone} who={who} project={project} highlight={highlight} /></div>
                 ))}
                 <FreshSessionLine project={project} sw={b.switch} latest={k === earlier.length - 1} />
               </div>
@@ -236,6 +241,27 @@ function useGoTo(scroller: RefObject<HTMLDivElement | null>, full: NumberedEntry
     if (p && scrollTo(p.line, p.how)) pending.current = null;
   }, [full, scrollTo]);
   return goTo;
+}
+
+/**
+ * Going to a search hit's message (chatTarget.ts) once this chat, its place, has loaded: in the current session by its
+ * line (loading older entries if needed, as a chat's own search does); in a session the orchestrator went on from, if
+ * the view holds it (its newest entries); else the chat simply opens where the user left it. A tool line first turns
+ * the tool calls on. The target is taken, so it is gone to once.
+ */
+function useTarget(place: string, ready: boolean, session: string | undefined, earlier: EarlierSession[], showTools: boolean, onNeedTools: () => void,
+  goTo: (line: number, how: "search") => void, scroller: RefObject<HTMLDivElement | null>) {
+  const target = useChatTarget();
+  useEffect(() => {
+    if (!target || target.place !== place || !ready) return;
+    if (target.tool && !showTools) { onNeedTools(); return; }
+    clearChatTarget();
+    if (target.session === session) { goTo(target.line, "search"); return; }
+    const el = scroller.current?.querySelector<HTMLElement>(`[data-earlier="${target.session}:${target.line}"]`);
+    if (!el) return;
+    el.scrollIntoView({ block: "center" });
+    el.classList.add("md-flash");
+  }, [target, place, ready, session, earlier, showTools, onNeedTools, goTo, scroller]);
 }
 
 /**
@@ -513,6 +539,7 @@ export function DeskHead({ which, desk, children }: { which?: "chat" | "ideas" |
       </div>
       {children}
       <span className="flex-1" />
+      <SearchField />
       {desk.tools}
     </header>
   );
@@ -558,6 +585,7 @@ export function ChatPanel({ project, name, view, error, inline, desk }: {
 }) {
   const { reload: onChanged } = usePage();
   const [showTools, setShowTools] = useState(false);
+  const showToolCalls = useCallback(() => setShowTools(true), []);
   const [searching, setSearching] = useState(false);
   const fresh: MenuEntry[] = view?.session ? [{
     label: t("chat.newConversationMenu"), onSelect: () => {
@@ -579,7 +607,7 @@ export function ChatPanel({ project, name, view, error, inline, desk }: {
     <Panel inline={inline} desk={desk} which="chat" head={head}>
       <ChatColumn project={project}
         over={name} title={t("desk.orchestrator")} who={t("desk.orchestrator")} view={view} status={stateText(view)}
-        ready={!!view && (!view.session || view.session.project === project)} error={error} place={placeKey(project, "orchestrator")} showTools={showTools} search={{ open: searching, set: setSearching }} menu={inline ? menu : undefined} bare={!!desk}
+        ready={!!view && (!view.session || view.session.project === project)} error={error} place={placeKey(project, "orchestrator")} showTools={showTools} onNeedTools={showToolCalls} search={{ open: searching, set: setSearching }} menu={inline ? menu : undefined} bare={!!desk}
         empty={<>
           <p>{t("chat.orchestratorEmpty")}</p>
           <p className="mt-1 text-fg-3">{rich("chat.orchestratorEmptyNote", { nexus: <code key="nexus">nexus</code> })}</p>
@@ -674,6 +702,7 @@ export function ConversationsPanel({ project, name, defaultRuntime, inline, desk
   const current = list?.find((c) => c.id === open);
   const shown = (list ?? []).filter((c) => showArchived || !c.archived);
   const [showTools, setShowTools] = useState(false);
+  const showToolCalls = useCallback(() => setShowTools(true), []);
   const [searching, setSearching] = useState(false);
   useEffect(() => setSearching(false), [open]);
   const efforts = useEfforts(current?.runtime === "codex" ? "codex" : "claude", current?.model ?? "");
@@ -747,7 +776,7 @@ export function ConversationsPanel({ project, name, defaultRuntime, inline, desk
         <ChatColumn key={open} project={project}
           ready={view?.session?.id === open} error={viewError} place={placeKey(project, "conversation", open)}
           over={t("chat.ideasOf", { project: name })} title={current.title ?? t("chat.conversation")} who={t("chat.partner")} about={<AboutStep project={project} c={current} className="mt-1" />} view={view} status={stateText(view)} onBack={() => nav.close("conversation")}
-          showTools={showTools} menu={menu} search={{ open: searching, set: setSearching }}
+          showTools={showTools} onNeedTools={showToolCalls} menu={menu} search={{ open: searching, set: setSearching }}
           empty={<>
             <p>{t("chat.ideasEmpty")}</p>
             <p className="mt-1 text-fg-3">

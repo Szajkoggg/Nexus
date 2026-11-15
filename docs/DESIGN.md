@@ -237,6 +237,26 @@ key", an expired token or a plain 403 about permissions stays lasting.
 A process that exits while its run goes on, without Nexus ending it, is a passing failure (`processExited`): the
 retry starts a new process that resumes the same session (Claude Code `--resume`, Codex `thread/resume`).
 
+**When Claude Code saves a conversation** (queue RN, probed 2026-11-15 with Claude Code 2.1.323 and haiku: five runs,
+one model call). Not at its start: a process started with `--session-id` and left without a message for 8 s wrote
+nothing, and `--resume` of that id then failed with "No conversation found with session ID: <id>" (exit 1, an error
+result). Not at the turn's end either: the transcript appears as the CLI reads the first message (its queue entry and
+the user message, before the turn's `system init` and the model call). A transcript cut right after that message
+resumes without an error, and `--session-id` of a saved id fails with "Error: Session ID <id> is already in use."
+(exit 1). So a session whose process ended before it read a message (a deploy's hand-over right after its start, a
+CLI still starting up) has nothing to resume, and the old rule, "resume whenever there is a runtime record", ended
+the run with "No conversation found" after a deploy. Now `runtime.json` keeps `conversation_saved`: false from a fresh
+Claude start, true once the process shows it read a message (its first turn's `system init`; Claude Code writes
+nothing to stdout before); only a session whose record does not say false resumes, the others start afresh with the
+same id, and the step or the cut-off message goes to the new process as before. A record without the field (written
+before RN) counts as saved, so the deploy that brought this dropped no conversation. The CLI's own refusal corrects
+the record both ways (`savedFromRefusal` in `src/claude.ts`): "No conversation found" marks it unsaved, "already in
+use" saved, so the next start is right also for a record from before RN whose process never saved anything, and for
+a process ended in the moment between its read and its first output. Why the stream's sign and not the transcript
+file: the file's place (`~/.claude/projects/<folder from the path>/<id>.jsonl`) is Claude Code's internal layout,
+the stream is its interface. The fake runtime keeps what it saved across its processes and refuses in both directions
+as Claude Code does (`test/fake-claude.ts`; FAKE_START_MS holds its first read).
+
 - **Retries**: after 1, 2, 4, 8 and 16 minutes (`RETRY_BASE_MS` 60 000, doubled each time; `RETRY_LIMIT` 5 in a
   row). The sixth failure in a row halts the run with the last failure as its reason. A turn that ends well clears
   the count (`retries` in run.yaml), and so does a new step. The retry continues the step with a turn that says the

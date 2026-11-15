@@ -17,9 +17,9 @@ export type NotifyKind = (typeof NOTIFY_KINDS)[number];
 export type NotificationKind = NotifyKind | "test";
 
 /** The kinds "urgent breaks through" lets through the quiet hours. */
-export const URGENT_KINDS: readonly NotifyKind[] = ["stopped", "failed", "update_failed"];
+const URGENT_KINDS: readonly NotifyKind[] = ["stopped", "failed", "update_failed"];
 
-export interface QuietHours {
+interface QuietHours {
   on: boolean;
   /** From and to, local time in the device's time zone, "HH:MM"; from later than to runs over midnight. */
   from: string;

@@ -53,6 +53,9 @@
 // longReply("SUMMARY"). "FAKE-SLOW" in a chat message: the turn works for FAKE_CHAT_SLOW_MS (default 4000), then
 // replies "slow reply"; a stop (interrupt) ends it early. "FAKE-HISTORY": the reply lists every message the agent took
 // in so far ("history: a | b"): the turns' messages and those read inside a turn (Claude's `next`, Codex's steer).
+// Claude's fake keeps the conversations it saved (fakeSaved below) and refuses, as Claude Code does, to resume one it
+// never saved or to start a saved one anew; FAKE_START_MS: it reads its input only after that long (Claude Code's
+// start-up), so a test can end it before it saved anything.
 import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -177,6 +180,28 @@ export function longReply(label: string): string {
  */
 export function recordArgs(what: Record<string, unknown>): void {
   if (process.env.FAKE_ARGS) appendFileSync(process.env.FAKE_ARGS, JSON.stringify({ ...what, handover: process.env.NEXUS_HANDOVER ?? null }) + "\n");
+}
+
+/**
+ * The conversations Claude's fake saved, across its processes: one id per line in a file in the test's temporary
+ * folder (beside FAKE_LOG, else in NEXUS_HOME, else the system's). Claude Code 2.1.323 saves a session's
+ * conversation when it reads the session's first message, not at its start nor at the turn's end (probed
+ * 2026-11-15, DESIGN.md, "When Claude Code saves a conversation"); a test may mark one saved itself (a session that
+ * ran before the test's files).
+ */
+function fakeSavedFile(): string {
+  const dir = process.env.FAKE_LOG ? dirname(process.env.FAKE_LOG) : process.env.NEXUS_HOME ?? tmpdir();
+  mkdirSync(dir, { recursive: true });
+  return join(dir, "fake-claude-saved.txt");
+}
+
+export function fakeSaved(id: string): boolean {
+  const f = fakeSavedFile();
+  return existsSync(f) && readFileSync(f, "utf8").split(/\r?\n/).includes(id);
+}
+
+export function saveFakeConversation(id: string): void {
+  if (!fakeSaved(id)) appendFileSync(fakeSavedFile(), `${id}\n`);
 }
 
 /** The integration step stopped on a conflict (this turn): it writes no report. */

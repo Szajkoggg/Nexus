@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { commitHref, fileHref, hasItem, itemHash, parseHash, projectPart } from "../src/hash.ts";
+import { commitHref, fileHref, hasItem, itemHash, parseHash, projectPart, chatHref, chatOf } from "../src/hash.ts";
 
 test("a project's page, a queue and a step, each part encoded", () => {
   assert.equal(itemHash("nexus"), "#/nexus");
@@ -34,4 +34,15 @@ test("links for a new tab: a file at a line, a file, a commit, each over the pro
   assert.equal(fileHref("nexus", "docs/DESIGN.md", 12), "?file=docs%2FDESIGN.md&line=12#/nexus");
   assert.equal(fileHref("nexus", "C:\\Code\\a b.ts"), "?file=C%3A%5CCode%5Ca%20b.ts#/nexus");
   assert.equal(commitHref("my app", "4b055ca"), "?commit=4b055ca#/my%20app");
+});
+
+test("a link to a chat message: the orchestrator's chat or a conversation, at a line, read back", () => {
+  assert.equal(chatHref("nexus", { orchestrator: "01ORCH" }, 12), "?chat=01ORCH&line=12#/nexus");
+  assert.equal(chatHref("my app", { conversation: "01CONV" }, 0), "?conversation=01CONV&line=0#/my%20app");
+  assert.deepEqual(chatOf("?chat=01ORCH&line=12"), { session: "01ORCH", conversation: false, line: 12 });
+  assert.deepEqual(chatOf("?conversation=01CONV&line=0"), { session: "01CONV", conversation: true, line: 0 });
+  assert.equal(chatOf("?chat"), undefined, "the chat without a message");
+  assert.equal(chatOf("?chat=01ORCH"), undefined);
+  assert.equal(chatOf("?chat=01ORCH&line=-1"), undefined);
+  assert.equal(chatOf("?chat=01ORCH&line=x"), undefined);
 });

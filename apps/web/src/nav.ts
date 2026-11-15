@@ -1,6 +1,6 @@
 // Applies layers.ts to the browser: history entries, Back, Escape, and a React hook to read what is open.
 import { useSyncExternalStore } from "react";
-import { close, closeThen, closeTop, navOf, open, openConversation, switchProject, switchTab, viewFor, type Layer, type Layout, type Nav, type Step, type Tab } from "./layers.ts";
+import { close, closeThen, closeThenStep, closeTop, navOf, open, openConversation, switchProject, switchTab, viewFor, type Layer, type Layout, type Nav, type Step, type Tab } from "./layers.ts";
 import { PHONE } from "./phone.ts";
 import { fileLayer } from "./fileview.ts";
 import { itemHash, projectPart } from "./hash.ts";
@@ -91,6 +91,10 @@ export const nav = {
   project: (project: string) => apply(switchProject(current, itemHash(project), layout())),
   /** Closes a layer, then opens another over what that leaves (the project picker's Stats). */
   closeThenOpen: (kind: string, layer: Layer) => apply(closeThen(current, kind, current.hash, layer)),
+  /** Closes a layer, then shows a view (the search's chat hit: the orchestrator's chat). */
+  closeThenTab: (kind: string, tab: Tab) => { const l = layout(); apply(closeThenStep(current, kind, (at) => switchTab(at, tab, l))); },
+  /** Closes a layer, then opens a conversation over the Ideas view (the search's chat hit in a conversation). */
+  closeThenConversation: (kind: string, id: string) => { const l = layout(); apply(closeThenStep(current, kind, (at) => openConversation(at, id, l))); },
   /** Closes a layer, then opens a queue or step in another project (the waiting list). */
   closeThenItem: (kind: string, project: string, queue?: string, step?: string) =>
     apply(queue ? closeThen(current, kind, itemHash(project, queue, step), "item") : closeThen(current, kind, itemHash(project))),

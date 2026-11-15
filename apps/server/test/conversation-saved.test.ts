@@ -1,0 +1,216 @@
+// Resuming only a conversation Claude Code saved (queue RN): Claude Code saves a session's conversation when it reads
+// the session's first message, so a process that ended before that left nothing to resume, and `--resume` then fails
+// with "No conversation found" (the failure after a deploy). The fake keeps what it saved across its processes and
+// refuses as Claude Code does (fake-claude.ts); FAKE_START_MS holds its first read, so a test can end it before.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { ProjectStore, newId, now, type SessionFile } from "@nexus/protocol";
+import { AgentHost, ROLE_RECORDS, type Launch } from "../src/agent-host.ts";
+import { Orchestrator } from "../src/orchestrator.ts";
+import type { Engine } from "../src/engine.ts";
+import { RESTARTED } from "../src/chats.ts";
+import { saveFakeConversation } from "./fake-behaviour.ts";
+import { restart, setup } from "./engine-setup.ts";
+import { LONGER, holdWork, until } from "./wait.ts";
+
+/** The fake's starts (FAKE_ARGS), each as its flag and the id: ["--session-id", id] or ["--resume", id]. */
+function starts(): string[][] {
+  const f = process.env.FAKE_ARGS!;
+  if (!existsSync(f)) return [];
+  return readFileSync(f, "utf8").trim().split("\n").map((l) => (JSON.parse(l) as { argv: string[] }).argv).map((a) => {
+    const i = a.findIndex((x) => x === "--session-id" || x === "--resume");
+    return [a[i]!, a[i + 1]!];
+  });
+}
+
+/** Ends a test's own environment settings. */
+function clean(): void { delete process.env.FAKE_START_MS; delete process.env.FAKE_ARGS; }
+
+// ---------------------------------------------------------------- the worker
+
+test("a worker whose process ended before it saved the conversation starts afresh after the restart, and its step runs", async () => {
+  const { store, engine, queue, until: wait } = setup(["done", "done"]);
+  process.env.FAKE_ARGS = join(dirname(process.env.FAKE_LOG!), "args.log");
+  process.env.FAKE_START_MS = "60000"; // the process never reads its first message
+  let next: Engine | undefined;
+  try {
+    engine.start("Q");
+    const session = queue().run!.session;
+    await wait("the process to start", () => starts().length === 1 && store.readRuntime(session)?.pid !== undefined);
+    engine.drainForUpdate(true); // a deploy: the process is ended before it read the step
+    await wait("the process to exit", () => store.readRuntime(session)?.state === "exited");
+    engine.shutdown();
+    delete process.env.FAKE_START_MS;
+    next = restart(store);
+    await wait("the run to finish", () => queue().run?.state === "finished", LONGER.run);
+    const native = store.readSession(session).native_id!;
+    assert.deepEqual(starts(), [["--session-id", native], ["--session-id", native]], "the same id, started afresh");
+    assert.deepEqual(queue().steps.map((s) => s.status), ["done", "done"]);
+    assert.equal(queue().run?.retries, undefined, "no failed turn on the way");
+    assert.equal(store.readRuntime(session)?.conversation_saved, true);
+    assert.ok(!store.readActivity(session).entries.some((a) => /No conversation found/.test(a.text)));
+  } finally { engine.shutdown(); next?.shutdown(); clean(); }
+});
+
+test("a worker stopped during its first turn, after the conversation was saved, resumes it without an error", async () => {
+  const work = holdWork();
+  const { store, engine, queue, until: wait } = setup(["slow", "done"]);
+  process.env.FAKE_ARGS = join(dirname(process.env.FAKE_LOG!), "args.log");
+  let next: Engine | undefined;
+  try {
+    engine.start("Q");
+    await wait("the step to run", () => queue().steps[0]!.status === "running", LONGER.step);
+    const session = queue().run!.session;
+    assert.equal(store.readRuntime(session)?.conversation_saved, true, "saved once the first message was read");
+    assert.equal(store.readRuntime(session)?.turns, 0, "in its first turn");
+    engine.drainForUpdate(true);
+    await wait("the process to exit", () => store.readRuntime(session)?.state === "exited");
+    engine.shutdown();
+    work.release();
+    next = restart(store);
+    await wait("the run to finish", () => queue().run?.state === "finished", LONGER.run);
+    const native = store.readSession(session).native_id!;
+    assert.deepEqual(starts(), [["--session-id", native], ["--resume", native]], "the saved conversation goes on");
+    assert.equal(queue().run?.retries, undefined);
+    assert.ok(!store.readActivity(session).entries.some((a) => a.kind === "error"), "no error on the way");
+  } finally { engine.shutdown(); next?.shutdown(); work.done(); clean(); }
+});
+
+// ---------------------------------------------------------------- every role, on AgentHost
+
+function hostSetup() {
+  const root = mkdtempSync(join(tmpdir(), "nexus-saved-"));
+  process.env.NEXUS_HOME = join(root, "home");
+  process.env.FAKE_LOG = join(root, "fake.log");
+  process.env.FAKE_ARGS = join(root, "args.log");
+  const store = ProjectStore.init(root, { id: "p", name: "P", root });
+  const s: SessionFile = { protocol: 1, id: newId(), project: "p", role: "conversation", runtime: "claude", title: "S", native_id: randomUUID(), cwd: root, launched_by: "nexus", created_at: now() };
+  store.writeSession(s);
+  return { root, store, s };
+}
+
+/** A server's AgentHost for the role, starting the session's process with the fake (the real ClaudeSession). */
+function host(store: ProjectStore, s: SessionFile, role: keyof typeof ROLE_RECORDS) {
+  const h = new AgentHost(store, ROLE_RECORDS[role]);
+  const replies: string[] = [];
+  const launch = (resume: boolean): Launch => ({ runtime: "claude", options: { cwd: s.cwd, uuid: s.native_id!, resume, permissionMode: "dontAsk", allowedTools: [], env: h.env(s.id) } });
+  const l = h.start(s, launch, {}, () => ({ message: (t) => replies.push(t) }));
+  return { h, l, replies };
+}
+
+for (const role of Object.keys(ROLE_RECORDS) as (keyof typeof ROLE_RECORDS)[]) {
+  test(`${role}: a session whose process ended before it saved anything starts afresh with the same id, and its message is answered`, async () => {
+    const { store, s } = hostSetup();
+    process.env.FAKE_START_MS = "60000";
+    let second: ReturnType<typeof host> | undefined;
+    const first = host(store, s, role);
+    try {
+      first.h.send(first.l, "the first message");
+      await until("the process to start", () => starts().length === 1);
+      assert.equal(store.readRuntime(s.id)?.conversation_saved, false);
+      first.h.shutdown(); // the server stops
+      await until("the process to exit", () => store.readRuntime(s.id)?.state === "exited");
+      delete process.env.FAKE_START_MS;
+      second = host(store, s, role); // the next server
+      second.h.send(second.l, "the first message, again");
+      await until("the reply", () => second!.replies.includes("ok"));
+      assert.deepEqual(starts(), [["--session-id", s.native_id], ["--session-id", s.native_id]]);
+      assert.equal(store.readRuntime(s.id)?.conversation_saved, true);
+    } finally { first.h.shutdown(); second?.h.shutdown(); clean(); }
+  });
+}
+
+test("a session with a saved conversation is resumed after a restart", async () => {
+  const { store, s } = hostSetup();
+  let second: ReturnType<typeof host> | undefined;
+  const first = host(store, s, "orchestrator");
+  try {
+    first.h.send(first.l, "hello");
+    await until("the reply", () => first.replies.includes("ok"));
+    first.h.shutdown();
+    await until("the process to exit", () => store.readRuntime(s.id)?.state === "exited");
+    second = host(store, s, "orchestrator");
+    second.h.send(second.l, "hello again");
+    await until("the reply", () => second!.replies.includes("ok"));
+    assert.deepEqual(starts(), [["--session-id", s.native_id], ["--resume", s.native_id]]);
+  } finally { first.h.shutdown(); second?.h.shutdown(); clean(); }
+});
+
+test("a runtime record written before the mark (none) is taken as a saved conversation and resumed", async () => {
+  const { store, s } = hostSetup();
+  saveFakeConversation(s.native_id!); // the conversation the earlier server's process saved
+  store.writeRuntime(s.id, { state: "exited", turns: 4, model: "fake-model", updated_at: now() });
+  const h = host(store, s, "worker");
+  try {
+    h.h.send(h.l, "hello");
+    await until("the reply", () => h.replies.includes("ok"));
+    assert.deepEqual(starts(), [["--resume", s.native_id]]);
+    assert.equal(store.readRuntime(s.id)?.conversation_saved, undefined, "a resumed session's record is left as it was");
+  } finally { h.h.shutdown(); clean(); }
+});
+
+test("what Claude Code says at a refused start corrects the record: none found is unsaved, already in use is saved", async () => {
+  const { store, s } = hostSetup();
+  // A record from before the mark whose process never saved anything (the sessions stuck before RN).
+  store.writeRuntime(s.id, { state: "exited", turns: 0, updated_at: now() });
+  const a = host(store, s, "conversation");
+  try {
+    a.h.send(a.l, "hello");
+    // What the CLI says may come after its exit.
+    await until("the refused start, nothing to resume", () => store.readRuntime(s.id)?.state === "exited" && store.readRuntime(s.id)?.conversation_saved === false);
+  } finally { a.h.shutdown(); }
+  const b = host(store, s, "conversation");
+  try {
+    b.h.send(b.l, "hello");
+    await until("the reply", () => b.replies.includes("ok"));
+  } finally { b.h.shutdown(); }
+  // A record that says unsaved while the conversation was saved (a process ended between its read and its output).
+  store.writeRuntime(s.id, { ...store.readRuntime(s.id)!, state: "exited", conversation_saved: false });
+  const c = host(store, s, "conversation");
+  try {
+    c.h.send(c.l, "hello");
+    await until("the refused start, a conversation to resume", () => store.readRuntime(s.id)?.state === "exited" && store.readRuntime(s.id)?.conversation_saved === true);
+  } finally { c.h.shutdown(); }
+  const d = host(store, s, "conversation");
+  try {
+    d.h.send(d.l, "hello");
+    await until("the reply", () => d.replies.includes("ok"));
+    assert.deepEqual(starts().map(([flag]) => flag), ["--resume", "--session-id", "--session-id", "--resume"]);
+  } finally { d.h.shutdown(); clean(); }
+});
+
+// ---------------------------------------------------------------- the orchestrator, with its message cut off
+
+test("the orchestrator: a message its process had not read when the server stopped reaches the fresh process", async () => {
+  const root = mkdtempSync(join(tmpdir(), "nexus-saved-orch-"));
+  process.env.NEXUS_HOME = join(root, "home");
+  process.env.FAKE_LOG = join(root, "fake.log");
+  process.env.FAKE_ARGS = join(root, "args.log");
+  process.env.FAKE_START_MS = "60000";
+  const store = ProjectStore.init(root, { id: "p", name: "P", root });
+  const engine = { draining: false, onChange() {}, shutdown() {} } as unknown as Engine;
+  const first = new Orchestrator(store, engine, () => {});
+  let next: Orchestrator | undefined;
+  try {
+    first.say("Plan the layout, please.");
+    await until("the process to start", () => starts().length === 1);
+    first.cutOff(); // an update's hand-over: the turn is cut off, its message kept
+    first.shutdown();
+    const s = store.readProject().orchestrator!.session!;
+    await until("the process to exit", () => store.readRuntime(s)?.state === "exited");
+    delete process.env.FAKE_START_MS;
+    next = new Orchestrator(store, engine, () => {});
+    next.resumeCutOff();
+    const read = () => (existsSync(process.env.FAKE_LOG!) ? readFileSync(process.env.FAKE_LOG!, "utf8") : "");
+    await until("the message to reach the agent", () => read().includes("Plan the layout, please."));
+    await until("the reply", () => next!.view().chat.some((c) => c.from === "orchestrator" && c.text === "ok"));
+    const native = store.readSession(s).native_id!;
+    assert.deepEqual(starts(), [["--session-id", native], ["--session-id", native]]);
+    assert.ok(next.view().chat.some((c) => c.text === RESTARTED));
+    assert.ok(!next.view().chat.some((c) => c.kind === "error"), "no error in the chat");
+  } finally { first.shutdown(); next?.shutdown(); clean(); }
+});

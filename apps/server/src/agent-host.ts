@@ -130,18 +130,25 @@ export class AgentHost<E extends object = object> {
   alive(): boolean { return this.all().some((l) => l.proc.state !== "exited"); }
 
   /**
-   * Starts a process for the session. `launch` gets whether the runtime resumes the session (it ran before: it has a
-   * runtime record) and says what to start; `handlers` get the hosted entry, with the role's own `extra` fields.
+   * Starts a process for the session. `launch` gets whether the runtime resumes the session and says what to start;
+   * `handlers` get the hosted entry, with the role's own `extra` fields. A session resumes when it ran before (it has
+   * a runtime record) and its runtime saved its conversation: Claude Code saves it only when it reads the first
+   * message, so a process that ended before left nothing to resume (`--resume` then fails with "No conversation
+   * found"), and the session starts afresh with the same id. A record without the mark (`conversation_saved`, written
+   * before queue RN) is taken as saved: no conversation that may exist is dropped (DESIGN.md, "When Claude Code saves
+   * a conversation").
    */
   start(session: SessionFile, launch: (resume: boolean) => Launch, extra: E, handlers: (l: Hosted<E>) => HostHandlers): Hosted<E> {
-    const resume = this.store.readRuntime(session.id) !== undefined;
+    const record = this.store.readRuntime(session.id);
+    const resume = record !== undefined && record.conversation_saved !== false;
     const how = launch(resume);
     // `launched` keeps the launch without the briefing's file: it is no setting (stale).
     const proc = this.spawn(this.withBriefingFile(session.id, how));
     const l = { ...extra, session: session.id, proc } as Hosted<E>;
     this.live.set(session.id, l);
     this.launched.set(proc, how);
-    this.write(session.id, { state: "idle", pid: proc.pid });
+    // A fresh Claude Code session is unsaved until its process says otherwise (facts `saved`).
+    this.write(session.id, { state: "idle", pid: proc.pid, ...(!resume && how.runtime === "claude" ? { conversation_saved: false } : {}) });
     const on = handlers(l);
     // The per-turn record (turns.jsonl): a turn begins with the runtime's turn start, or else with the first thing it
     // streams after the previous turn's end.
@@ -290,6 +297,7 @@ export class AgentHost<E extends object = object> {
     if (f.contextWindow) patch.context_window = f.contextWindow;
     if (this.record.cost && f.costUsd !== undefined) patch.cost_usd = f.costUsd;
     if (f.contextTokens !== undefined || (this.record.workingFromModel && f.model)) patch.state = "working";
+    if (f.saved !== undefined && this.store.readRuntime(session)?.conversation_saved !== f.saved) patch.conversation_saved = f.saved;
     if (Object.keys(patch).length) this.write(session, patch);
     // Every session's usage windows count (one subscription; decided with ST1 on 2026-11-14).
     if (f.usage) writeUsage({ updated_at: now(), windows: { ...readUsage()?.windows, ...f.usage } });
