@@ -11,7 +11,7 @@ import {
   NEXUS_ACTIVITIES, TAG_KINDS, TAG_ORIGINS, TAG_SIZES, tagIssues, tagProposalText, tagsText,
   STAT_DIMENSIONS, readTurns, sinceTime, statDimension, statsReport, statsText, stepStats,
   CHECK_METRIC, isCheckMetric, metricDef, metricDefText, metricRequestIssues, metricValueText,
-  TemplateError, fillTemplate, filledTemplateYaml, parseEvery, MaintenanceMode, readTemplates, templateQueueId, type MergedTemplates,
+  TemplateError, fillTemplate, filledTemplateYaml, parseEvery, MaintenanceMode, readTemplates, templateQueueId, unusableTemplate, type MergedTemplates,
   type PictureRole, type ReviewItem, type Role, type Runtime, type SessionFile,
 } from "@nexus/protocol";
 import { checkRules, describeRules } from "@nexus/protocol/rules";
@@ -716,8 +716,9 @@ const commands: Record<string, () => void | Promise<void>> = {
   /** `nexus template list|show`: the templates of the three layers (@nexus/protocol templates.ts). Reads only. */
   template() {
     const sub = args[1] ?? "list";
-    const { templates, problems } = templatesHere();
+    const merged = templatesHere();
     if (sub === "list") {
+      const { templates, problems } = merged;
       if (!templates.length) console.log("no templates");
       for (const t of templates) {
         const params = t.params.map((p) => (p.default === undefined ? p.name : `[${p.name}]`)).join(" ");
@@ -727,7 +728,7 @@ const commands: Record<string, () => void | Promise<void>> = {
       return;
     }
     if (sub !== "show") throw new UsageError("nexus template list | nexus template show <id>");
-    const t = template(templates, problems, need(args[2], "<id>"));
+    const t = template(merged, need(args[2], "<id>"));
     console.log(`${t.id}: ${t.title} (${t.layer}: ${t.path}${t.replaces.length ? `; replaces the ${t.replaces.join(" and ")} one` : ""})`);
     if (t.description) console.log(t.description);
     console.log(`parameters: {{id}} is the queue's id (--id)${t.params.length ? "" : "; no others"}`);
@@ -972,10 +973,11 @@ function templatesHere(): MergedTemplates {
   return readTemplates(dir ? dirname(normPath(dir)) : undefined);
 }
 
-function template(templates: MergedTemplates["templates"], problems: MergedTemplates["problems"], id: string): MergedTemplates["templates"][number] {
+/** The template in effect with this id; refused, saying why, when there is none. */
+function template({ templates, problems }: MergedTemplates, id: string): MergedTemplates["templates"][number] {
   const t = templates.find((x) => x.id === id);
   if (t) return t;
-  const bad = problems.filter((p) => basename(p.path).replace(/\.ya?ml$/i, "") === id);
+  const bad = unusableTemplate(problems, id);
   throw new UsageError(bad.length ? `template ${id} cannot be used: ${bad.map((p) => `${p.path}: ${p.problem}`).join("; ")}` : `no template ${id} (nexus template list)`);
 }
 
@@ -1008,8 +1010,7 @@ function setValues(): Record<string, string> {
 function draftFromTemplate(): void {
   if (args[2] !== undefined) throw new UsageError("nexus queue draft --template <id> [--set name=value]... [--id <queue-id>]: no file with --template");
   const st = store();
-  const { templates, problems } = templatesHere();
-  const t = template(templates, problems, need(o.template, "--template <id>"));
+  const t = template(templatesHere(), need(o.template, "--template <id>"));
   const given = setValues();
   const ids = new Set(st.queueIds().map((x) => x.toLowerCase()));
   const draftFile = (id: string) => join(st.dir, "drafts", `${id}.yaml`);

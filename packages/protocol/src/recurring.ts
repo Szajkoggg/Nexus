@@ -3,7 +3,7 @@
 // a run's queue id, and what state a recurring is in. The server (apps/server/src/recurring.ts) acts on them.
 import { createHash } from "node:crypto";
 import type { RecurringFile } from "./schemas.ts";
-import { fillTemplate, type MergedTemplates, type Template } from "./templates.ts";
+import { fillTemplate, unusableTemplate, type MergedTemplates, type Template } from "./templates.ts";
 
 /** A recurring queue's id: short enough that `<id>-<yyyymmdd>-<hhmm>` (and a number) is still a queue id. */
 export const RECURRING_ID = /^[A-Za-z0-9][\w-]{0,15}$/;
@@ -97,7 +97,7 @@ export type Resolved = { template: Template; queue: Record<string, unknown>; has
 export function resolveRecurring(r: Pick<RecurringFile, "id" | "template" | "params" | "maintenance"> & Schedule, merged: MergedTemplates): Resolved {
   const t = merged.templates.find((x) => x.id === r.template);
   if (!t) {
-    const bad = merged.problems.find((p) => p.path.replace(/\\/g, "/").split("/").at(-1)!.replace(/\.ya?ml$/i, "") === r.template);
+    const bad = unusableTemplate(merged.problems, r.template)[0];
     return { problem: bad ? `template ${r.template} cannot be used: ${bad.problem}` : `no template ${r.template}` };
   }
   try {

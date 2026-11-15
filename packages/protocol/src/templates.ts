@@ -122,6 +122,11 @@ export function mergeTemplates(read: readonly (Template | TemplateProblem)[]): M
   return { templates: [...byId.values()].sort((a, b) => a.id.localeCompare(b.id)), problems };
 }
 
+/** The files named like template `id` (`<id>.yaml`) that could not be read as one: why a template is missing. */
+export function unusableTemplate(problems: readonly TemplateProblem[], id: string): TemplateProblem[] {
+  return problems.filter((p) => p.path.replace(/\\/g, "/").split("/").at(-1)!.replace(/\.ya?ml$/i, "") === id);
+}
+
 /** The values for a template's parameters: those given, then the defaults. Refused: an unknown or missing one. */
 function templateValues(t: Template, given: Readonly<Record<string, string>>, queueId: string): Record<string, string> {
   const unknown = Object.keys(given).filter((n) => !t.params.some((p) => p.name === n));
