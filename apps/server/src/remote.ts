@@ -11,7 +11,7 @@ import { join } from "node:path";
 import type { IncomingMessage } from "node:http";
 import webpush from "web-push";
 import QRCode from "qrcode";
-import { nexusHome, notifySettingsOf, now, parseNotifySettings, shouldNotify, type AttentionItem, type NotificationKind, type NotifyKind, type NotifySettings } from "@nexus/protocol";
+import { knownTimeZone, nexusHome, notifySettingsOf, now, parseNotifySettings, shouldNotify, type AttentionItem, type NotificationKind, type NotifyKind, type NotifySettings } from "@nexus/protocol";
 
 const COOKIE = "nexus_auth";
 const authFile = () => join(nexusHome(), "auth.json");
@@ -155,9 +155,8 @@ export function subscribe(sub: unknown, label?: unknown, timezone?: unknown): vo
   const p = pushStore();
   const before = p.subscriptions.find((x) => x.endpoint === s.endpoint);
   p.subscriptions = p.subscriptions.filter((x) => x.endpoint !== s.endpoint);
-  let notify = before?.notify;
-  const zone = parseNotifySettings({ ...notify, timezone });
-  if (typeof timezone === "string" && "settings" in zone) notify = zone.settings;
+  const zone = typeof timezone === "string" && knownTimeZone(timezone) ? timezone : undefined;
+  const notify = zone ? { ...notifySettingsOf(before?.notify), timezone: zone } : before?.notify;
   p.subscriptions.push({
     endpoint: s.endpoint, keys: { p256dh: s.keys.p256dh, auth: s.keys.auth }, label: typeof label === "string" ? label.slice(0, 80) : undefined, added_at: now(),
     ...(notify ? { notify } : {}),
@@ -224,6 +223,9 @@ export async function push(payload: PushPayload, o: { kind: NotificationKind; en
   return sent;
 }
 
+/** Sends a notification of a waiting item's kind (`push`; a fake in the tests). */
+type Notifier = (payload: PushPayload, o: { kind: NotifyKind }) => Promise<number>;
+
 const LABEL: Record<AttentionItem["kind"], string> = {
   question: "Question", stopped: "Stopped", approval: "Needs approval", review: "Review", failed: "Failed", start: "Did not start",
   provisional: "To confirm", plan: "The plan", merge: "Merging back", tags: "Tags", recurring: "Recurring",
@@ -239,8 +241,8 @@ const key = (a: AttentionItem) => [a.kind, a.queue, a.lift ? undefined : a.step,
  */
 export class AttentionWatch {
   private seen = new Map<string, Set<string>>();
-  private readonly send: (payload: PushPayload, o: { kind: NotifyKind }) => Promise<number>;
-  constructor(send: (payload: PushPayload, o: { kind: NotifyKind }) => Promise<number> = push) { this.send = send; }
+  private readonly send: Notifier;
+  constructor(send: Notifier = push) { this.send = send; }
   /** A project removed from Nexus: added again, its first look is a baseline again (nothing old is pushed). */
   forget(id: string): void { this.seen.delete(id); }
   check(project: { id: string; name: string }, items: AttentionItem[]): void {

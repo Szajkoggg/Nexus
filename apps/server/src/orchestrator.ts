@@ -4,9 +4,8 @@
 // drafts under .nexus/drafts/: permission mode dontAsk with a read-only allow list plus the drafts rules.
 import { randomUUID } from "node:crypto";
 import {
-  ActionError, ClaudeEffort, reviewedByOrchestrator, runGoing, ProjectStore, applyDraft, defineMetric, inPlan, loadProjectState, metricDef, openPlan, orchestratorOverview, overThreshold, proposePlan, proposeTags, readAway, readUsage, orchestratorStatusChange, newId, now, sendBack, type Applied, type Event, type EventType, type ProjectState, type SessionFile, type SessionView,
+  ActionError, ClaudeEffort, reviewedByOrchestrator, runGoing, ProjectStore, applyDraft, defineMetric, inPlan, loadProjectState, metricDef, openPlan, orchestratorOverview, overThreshold, proposePlan, proposeTags, readAway, readUsage, orchestratorStatusChange, newId, now, sendBack, type Applied, type Event, type EventType, type NotifyKind, type ProjectState, type SessionFile, type SessionView,
 } from "@nexus/protocol";
-import type { NotifyKind } from "@nexus/protocol";
 import type { AgentProcess } from "./agent.ts";
 import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Hosted, type Launch } from "./agent-host.ts";
 import type { Engine } from "./engine.ts";
