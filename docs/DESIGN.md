@@ -2258,6 +2258,30 @@ Decisions, building it:
 - In the ⋯ menu, beside "Hand to orchestrator", with a confirmation that says what it does (details it leaves out are
   no longer in the partner's context).
 
+## Layout faults (queue PL)
+
+The user decided on 2026-11-15 that layout faults are part of the dashboard's design work, checked on the designs and
+the pictures rather than found in use: a dependency line running through a queue's box (seen in the built plan view:
+ST2 → ST3 crossed RX's box and read as a chain), boxes overlapping, and text cut short ("Statisztik…").
+
+`scripts/layout-faults.ts` measures them on a page: a mockup file (served with its folder over http, its query kept)
+or a development instance's dashboard (`--click` opens the view, e.g. "All queues of Nexus"). The page side
+(`collector` in `scripts/capture/faults.ts`) gathers only geometry, so the judging is plain functions with a unit test:
+
+- **Boxes** are `[data-plan-card], [data-box]`; **lines** `[data-edge]` (on the dashboard:
+  `section[aria-label='The plan'] svg path`), each sampled every 2 px with `getPointAtLength` and the shape's screen
+  matrix. A line with a point inside a box shrunk by 1 px is a fault, so a line ending on a box's edge is not.
+- **Text cut short**: an element whose content is wider than it (`scrollWidth > clientWidth`), or taller where its
+  overflow is hidden; only the innermost of a chain of ancestors. Found building it: the two are whole pixels, so a
+  title 0.2 px too wide is cut with an ellipsis yet equal by them (the plan's "Small fixes from the user's notes of 14
+  November" on the phone, 310.1 px in 309.9). The element's own text nodes are measured too, with a Range against
+  its content box; its children's are not, since a child may sit in the padding on purpose (the ↩ of a chip, -2 px).
+- **Crossings** of two lines are counted but are no fault: fewer is easier to read, and a layout can compare them.
+
+On the plan view of the step's base commit (seed `scripts/capture/seed-plan-nexus.ts`, Nexus's own plan of 15 queues)
+it found 6 lines through boxes and 15 titles or reasons cut short at 1440 px, and 9 cut texts at 390 px; on the PL1
+mockups (`docs/ux/mockups/22-plan-layout.html`, variants A and B) none.
+
 ## Open questions
 
 1. **The orchestrator on Codex.** The orchestrator runs on Claude Code only: its read-only guarantee rests on Claude
