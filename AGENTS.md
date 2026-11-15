@@ -36,7 +36,8 @@ Nexus is developed with Nexus. The agents working on this repository are run by 
   the user reply in the language the user writes in.
 - **Commits**: on `main` in this checkout, one or more per step, each with a subject line and a body that says why.
   Stage explicit paths (never `git add -A`). Do not push.
-- **Before every commit**: `npm run typecheck` and `npm test` pass. If the dashboard changed: `npm run build -w @nexus/web`.
+- **Before every commit**: `npm run typecheck`, `npm run lint` and `npm test` pass. If the dashboard changed:
+  `npm run build -w @nexus/web`. Fix a lint finding rather than silence it (docs/DESIGN.md, "Static analysis").
 - **Tests**: behaviour in the engine, orchestrator, conversations or lifecycle gets a test against the fake runtimes
   (`apps/server/test/fake-claude.ts`, `fake-codex.ts`, steered by `fake-behaviour.ts`); protocol logic gets a unit
   test. Tests never call a model.
@@ -51,6 +52,13 @@ Nexus is developed with Nexus. The agents working on this repository are run by 
   (from the step's base commit) the befores, each on its own development instance with the fake runtimes; headless
   Edge by hand only for a view it cannot take. Widths: 492 px (the narrowest window), 390 px in an iframe for a
   phone, 1440 px for a desktop. Register them as `nexus help review` says (keys and roles).
+
+## Refactoring
+
+The closing refactoring step of a queue also runs `npm run knip` and fixes its findings in the files the queue changed
+(`git diff <base>..HEAD --name-only`): an export nothing imports loses `export`, or goes if nothing uses it; a file
+loaded only by its path becomes an entry in `knip.json`. Findings in other files are reported, not fixed: they belong
+to a maintenance queue.
 
 ## Rules the code keeps
 
