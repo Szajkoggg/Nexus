@@ -1144,6 +1144,7 @@ export function QueueDetail({ project, queue, onChanged, onClose, of, chat = [],
   const id = project.project.id;
   const latest = queue.approvals.at(-1);
   const inherited = project.project.defaults.stop_conditions;
+  const checks = queueChecks(project.project, queue);
   // A stopped queue: what its stopped step left, and the user's Keep or Discard, shared by Continue and the approval.
   // The same read as the step's line and the waiting cards (Stop.tsx), so they never disagree.
   const leftState = useLeft(id, queue.id, queue.status === "stopped", stopVersion(queue));
@@ -1218,8 +1219,8 @@ export function QueueDetail({ project, queue, onChanged, onClose, of, chat = [],
           {queue.stop_conditions.length + inherited.length === 0 && <li className="text-fg-3">{t("approval.none")}</li>}
         </ul>
       </Section>}
-      {!approving && queueChecks(project.project, queue).length > 0 && (
-        <Section title={t("approval.checks")}><Checks project={project} queue={queue} /></Section>
+      {!approving && checks.length > 0 && (
+        <Section title={t("approval.checks")}><Checks checks={checks} /></Section>
       )}
       {queue.source && (
         <p className="mt-6 text-xs text-fg-3">{rich("details.imported", { path: <span key="path" className="font-mono">{queue.source.path}</span>, time: <TimeAgo key="time" at={queue.source.imported_at} /> })}</p>

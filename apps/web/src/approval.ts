@@ -6,15 +6,17 @@ import { stepChecks, stepValuesText } from "@nexus/protocol/steps";
 import { formatClock, t, type Key } from "./i18n.ts";
 import { plannedAfter } from "./queueStatus.ts";
 
+/** One check a queue's steps run; `project`: one of the project's (defaults.checks), not the queue's own. */
+export interface QueueCheck { name: string; project: boolean }
+
 /**
  * The checks a queue's steps run, the project's first (marked `project`), then the queue's own that the project's do
  * not already name. The project's are the ones its run fixed while it has a run that has not finished, else the
  * project's setting now (what its next run will fix).
  */
-export function queueChecks(project: Pick<ProjectFile, "defaults">, q: Pick<QueueView, "checks" | "run">): { name: string; project: boolean }[] {
-  const fromProject = q.run && q.run.state !== "finished" ? q.run.checks ?? [] : project.defaults.checks;
-  const own = stepChecks(fromProject, []);
-  return stepChecks(own, q.checks).map((name) => ({ name, project: own.includes(name) }));
+export function queueChecks(project: Pick<ProjectFile, "defaults">, q: Pick<QueueView, "checks" | "run">): QueueCheck[] {
+  const fromProject = stepChecks(q.run && q.run.state !== "finished" ? q.run.checks : project.defaults.checks, []);
+  return stepChecks(fromProject, q.checks).map((name) => ({ name, project: fromProject.includes(name) }));
 }
 
 /** A queue whose current revision waits for the user's approval: not approved, and neither finished nor cancelled. */
