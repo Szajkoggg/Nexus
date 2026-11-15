@@ -43,11 +43,11 @@ const RUN_WORDS: Record<RunFile["state"], string> = {
   usage_wait: "waits for the usage window", retry_wait: "waits to try a turn again", approval_wait: "waits for an approval",
 };
 
-/** How a run that keeps the project reads: "queue A runs", "queue B is stopped", "queue C is held for an update". */
+/** How a run that keeps the project reads after "queue A ": "runs", "is stopped", "is held (it goes on by itself)". */
 function runText(q: QueueView, run: RunFile): string {
-  if (run.state === "halted" && q.status === "stopped") return `queue ${q.id} is stopped`;
-  if (run.state === "paused" && run.resume_after_restart) return `queue ${q.id} is held (it goes on by itself)`;
-  return `queue ${q.id} ${RUN_WORDS[run.state]}`;
+  if (run.state === "halted" && q.status === "stopped") return "is stopped";
+  if (run.state === "paused" && run.resume_after_restart) return "is held (it goes on by itself)";
+  return RUN_WORDS[run.state];
 }
 
 /**
@@ -58,18 +58,22 @@ function runText(q: QueueView, run: RunFile): string {
  */
 export function removalBlockers(state: ProjectState | undefined, live: LiveParts): string[] {
   const out: string[] = [];
+  /** The queues listed so far: each once. */
+  const listed = new Set<string>();
+  const queue = (id: string, text: string) => { listed.add(id); out.push(`queue ${id} ${text}`); };
   if (live.updating) out.push("Nexus is updating");
   const queues = state?.queues ?? [];
   for (const q of queues) {
-    if (q.run && q.run.state !== "finished" && q.status !== "done" && q.status !== "cancelled") out.push(runText(q, q.run));
+    if (q.run && q.run.state !== "finished" && q.status !== "done" && q.status !== "cancelled") queue(q.id, runText(q, q.run));
   }
-  if (!live.engineIdle && !out.some((x) => x.startsWith("queue "))) out.push("a worker of the project is in a turn");
+  // A worker in a turn belongs to one of those runs; only without one is it said on its own.
+  if (!live.engineIdle && !listed.size) out.push("a worker of the project is in a turn");
   for (const q of queues) {
     const merge = q.git?.merge;
-    if (merge?.reintegrating) out.push(`queue ${q.id} is being integrated again before its merge back`);
-    else if (merge?.waiting && q.status !== "cancelled" && !q.git?.cleaned) out.push(`queue ${q.id} waits to be merged back: ${merge.waiting.reason}`);
+    if (merge?.reintegrating) queue(q.id, "is being integrated again before its merge back");
+    else if (merge?.waiting && q.status !== "cancelled" && !q.git?.cleaned) queue(q.id, `waits to be merged back: ${merge.waiting.reason}`);
   }
-  for (const id of live.merging) if (!out.some((x) => x.startsWith(`queue ${id} `))) out.push(`Nexus is merging queue ${id} back`);
+  for (const id of live.merging) if (!listed.has(id)) out.push(`Nexus is merging queue ${id} back`);
   if (live.deploy) out.push(`a deploy is planned after ${live.deploy.step ? `step ${live.deploy.queue}/${live.deploy.step}` : `queue ${live.deploy.queue}`} of this project`);
   if (!live.orchestratorIdle) out.push("the orchestrator is in a turn");
   if (!live.conversationsIdle) out.push("a thinking partner is in a turn");
