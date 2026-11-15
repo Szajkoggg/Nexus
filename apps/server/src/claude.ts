@@ -48,6 +48,35 @@ function claudeTurnTokens(u: Record<string, any> | undefined): TurnTokens | unde
   return { input: n(u.input_tokens), output: n(u.output_tokens), cacheRead: n(u.cache_read_input_tokens), cacheCreation: n(u.cache_creation_input_tokens) };
 }
 
+/**
+ * result.modelUsage summed over its models: the process's running total of every model call, its sub-agents' included
+ * (probed 2026-11-15: it grows across turns, like total_cost_usd, while result.usage is the main loop's turn alone).
+ * Undefined when the result carries no token counts.
+ */
+function claudeModelTotals(mu: unknown): TurnTokens | undefined {
+  if (!mu || typeof mu !== "object") return undefined;
+  const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
+  let any = false;
+  const t: TurnTokens = { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 };
+  for (const m of Object.values(mu as Record<string, Record<string, unknown>>)) {
+    const f = [n(m?.inputTokens), n(m?.outputTokens), n(m?.cacheReadInputTokens), n(m?.cacheCreationInputTokens)];
+    if (f.every((x) => x === undefined)) continue;
+    any = true;
+    t.input += f[0] ?? 0; t.output += f[1] ?? 0; t.cacheRead += f[2] ?? 0; t.cacheCreation += f[3] ?? 0;
+  }
+  return any ? t : undefined;
+}
+
+/**
+ * A turn's sub-agent tokens: what the process's running total grew by since the previous result, less the main
+ * loop's turn (each figure at least 0). Undefined without both, or without the previous total.
+ */
+function subagentTokens(total: TurnTokens | undefined, before: TurnTokens | undefined, turn: TurnTokens | undefined): TurnTokens | undefined {
+  if (!total || !before || !turn) return undefined;
+  const d = (k: keyof TurnTokens) => Math.max(0, total[k] - before[k] - turn[k]);
+  return { input: d("input"), output: d("output"), cacheRead: d("cacheRead"), cacheCreation: d("cacheCreation") };
+}
+
 function httpCode(status: unknown): string | undefined {
   if (typeof status !== "number") return undefined;
   if (status === 529) return "overloaded";
@@ -92,6 +121,8 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
    * from the total its transcript saved, unknown here), so a turn's cost is the difference.
    */
   private costSoFar: number | undefined;
+  /** result.modelUsage's sum at the previous result (claudeModelTotals): unknown, like costSoFar, in a resumed process. */
+  private modelSoFar: TurnTokens | undefined;
   /** Tool calls of the running turn, by tool_use_id: a permission_denied message names the call, not its input. */
   private calls = new Map<string, { name: string; input: unknown }>();
   /** Refused tool calls already reported, by tool_use_id: the result's permission_denials repeat the messages. */
@@ -139,6 +170,7 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
     });
     this.pid = this.proc.pid;
     this.costSoFar = options.resume ? undefined : 0;
+    this.modelSoFar = options.resume ? undefined : { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 };
     // A write to a process that is exiting (killed, crashed) fails with EPIPE: its exit is handled, the write is moot.
     this.proc.stdin.on("error", () => {});
     this.proc.stdout.setEncoding("utf8");
@@ -259,9 +291,9 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
       case "assistant": {
         if (m.error && !m.parent_tool_use_id) this.signs.apiError = String(m.error);
         for (const c of m.message?.content ?? []) if (c.type === "tool_use" && c.id) this.calls.set(c.id, { name: c.name, input: c.input });
+        if (m.parent_tool_use_id) return; // a subagent's message: its parent's tool call is what we show; its context is its own
         const u = m.message?.usage;
         if (u) this.emit("facts", { contextTokens: (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) });
-        if (m.parent_tool_use_id) return; // a subagent's message: its parent's tool call is what we show
         if (this.stopping) return; // what a stopped turn still writes is not shown
         for (const c of m.message?.content ?? []) {
           if (c.type === "text" && c.text?.trim()) {
@@ -313,8 +345,13 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
         const total = typeof m.total_cost_usd === "number" ? m.total_cost_usd : undefined;
         const costUsd = total !== undefined && this.costSoFar !== undefined ? Math.max(0, Math.round((total - this.costSoFar) * 1e9) / 1e9) : undefined; // to a nano-dollar: no float residue
         if (total !== undefined) this.costSoFar = total;
+        // Sub-agents' tokens: in modelUsage's running total, not in result.usage (DESIGN.md, "Sub-agent tokens").
+        const tokens = claudeTurnTokens(m.usage);
+        const modelTotal = claudeModelTotals(m.modelUsage);
+        const sub = subagentTokens(modelTotal, this.modelSoFar, tokens);
+        if (modelTotal) this.modelSoFar = modelTotal;
         const stopped = this.stopping;
-        this.emit("turnEnd", stopped ? { ok: false, text: "stopped", tokens: claudeTurnTokens(m.usage), costUsd } : { ok, text, failure, tokens: claudeTurnTokens(m.usage), costUsd });
+        this.emit("turnEnd", stopped ? { ok: false, text: "stopped", tokens, subagentTokens: sub, costUsd } : { ok, text, failure, tokens, subagentTokens: sub, costUsd });
         if (stopped) this.settleStop(); else this.nextInTurn = 0;
         return;
       }

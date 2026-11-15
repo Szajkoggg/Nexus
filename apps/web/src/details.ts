@@ -116,6 +116,9 @@ export function describe(e: Event): string {
     case "change.proposed":
     case "log":
     case "message.read":
+    // A step's metrics are shown by the statistics' views (queue ST3).
+    case "metric.defined":
+    case "metric.recorded":
     case "note.read":
     case "plan.proposed":
     case "question.withdrawn":

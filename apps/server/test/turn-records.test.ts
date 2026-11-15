@@ -130,3 +130,17 @@ test("a worker's turn carries its step's tags as planned: inherited from the que
     assert.equal(turnsOf("orchestrator").length, 0);
   } finally { stop(); }
 });
+
+test("a Claude turn with a sub-agent records its tokens apart from the main loop's; one without has zeros; the context stays the main loop's", async () => {
+  const { store, engine, queue, until, stop } = setup(["subagent", "done"]);
+  try {
+    engine.start("Q", { runtime: "claude" });
+    await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
+    const [a, b] = turnsOf("worker");
+    // The process's second turn: 20 input, 10 output, 2 cache-creation, 200 cache-read (the fake's turn n).
+    assert.deepEqual([a!.step, a!.tokens, a!.subagent_tokens], ["Q1", { input: 10, output: 5, cache_read: 100, cache_creation: 1 }, { input: 2, output: 1, cache_read: 0, cache_creation: 500 }]);
+    assert.deepEqual([b!.step, b!.tokens, b!.subagent_tokens], ["Q2", { input: 20, output: 10, cache_read: 200, cache_creation: 2 }, { input: 0, output: 0, cache_read: 0, cache_creation: 0 }]);
+    // The sub-agent's message (502 tokens of its own context) does not count as the session's context.
+    assert.equal(store.readRuntime(queue().run!.session)!.context_tokens, 100);
+  } finally { stop(); }
+});

@@ -12,6 +12,8 @@ let unread: string[] = [];
 /** Turns so far, and the running total_cost_usd the CLI reports (the process's, not the turn's). */
 let turns = 0;
 let totalCost = 0;
+/** The running totals of every model call in the process, sub-agents' included, as result.modelUsage reports them. */
+const totals = { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 };
 const queue: string[] = [];
 
 async function turn(text: string): Promise<void> {
@@ -40,7 +42,16 @@ async function turn(text: string): Promise<void> {
   const bg = fake.background;
   fake.background = undefined;
   if (bg) startBackground(bg);
-  out({ type: "result", subtype: "success", is_error: false, result: reply, num_turns: 1, total_cost_usd: totalCost, usage, modelUsage: { fake: { contextWindow: 1000 } }, permission_denials: denials });
+  // A sub-agent's tokens (probed 2026-11-15): its own messages carry parent_tool_use_id; result.usage leaves them out,
+  // and modelUsage, the process's running total, has them.
+  const sub = fake.subagent ? { input_tokens: 2, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 500 } : undefined;
+  fake.subagent = undefined;
+  if (sub) out({ type: "assistant", message: { content: [{ type: "text", text: "sub-agent answer" }], usage: sub }, parent_tool_use_id: "toolu_fake_agent" });
+  totals.inputTokens += usage.input_tokens + (sub?.input_tokens ?? 0);
+  totals.outputTokens += usage.output_tokens + (sub?.output_tokens ?? 0);
+  totals.cacheReadInputTokens += usage.cache_read_input_tokens + (sub?.cache_read_input_tokens ?? 0);
+  totals.cacheCreationInputTokens += usage.cache_creation_input_tokens + (sub?.cache_creation_input_tokens ?? 0);
+  out({ type: "result", subtype: "success", is_error: false, result: reply, num_turns: 1, total_cost_usd: totalCost, usage, modelUsage: { fake: { contextWindow: 1000, ...totals } }, permission_denials: denials });
 }
 
 /**

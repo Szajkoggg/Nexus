@@ -3,6 +3,7 @@ import { z } from "zod";
 import { PICTURE_ROLES, VIEW_KEY } from "./pictures.ts";
 import { DEFAULT_WORKING_LANGUAGE, LANGUAGE_CODES } from "./languages.ts";
 import { TAG_KINDS, TAG_SIZES } from "./tags.ts";
+import { METRIC_SHOWS } from "./metrics.ts";
 
 
 const Id = z.string().min(1);
@@ -627,7 +628,8 @@ export const Event = z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("step.started"), ...qs }),
   z.object({ ...base, type: z.literal("step.progress"), ...qs, text: z.string(), pct: z.number().min(0).max(100).optional() }),
   z.object({ ...base, type: z.literal("review.added"), ...qs, items: z.array(ReviewItem).min(1), round: z.number().int().optional() }),
-  z.object({ ...base, type: z.literal("check.result"), ...qs, name: z.string(), ok: z.boolean(), summary: z.string().optional(), duration: z.number().nonnegative().optional() }),
+  /** `commit`: the HEAD of the session's checkout when it was reported (the check's time is the metric `check:<name>`). */
+  z.object({ ...base, type: z.literal("check.result"), ...qs, name: z.string(), ok: z.boolean(), summary: z.string().optional(), duration: z.number().nonnegative().optional(), commit: z.string().optional() }),
   /**
    * `warning`: what nexus step done found at the step's end and warned about (it never refuses): tracked files with
    * uncommitted changes, or a HEAD that moved since the step started while no commit was named (nexus help commits).
@@ -697,6 +699,20 @@ export const Event = z.discriminatedUnion("type", [
     area: z.string().optional(), activity: z.string().optional(), rename: z.object({ from: z.string(), to: z.string() }).optional(),
     reason: z.string().optional(),
   }),
+  /**
+   * The orchestrator names one of the project's metrics, or changes it (`nexus metric define`): the server checks it
+   * and writes it into .nexus/metrics.yaml (metrics.ts).
+   */
+  z.object({
+    ...base, type: z.literal("metric.defined"), name: z.string().min(1),
+    unit: z.string().optional(), show: z.string().optional(),
+    target: z.number().optional(), warn_above: z.number().optional(), warn_below: z.number().optional(),
+  }),
+  /**
+   * A worker records a value of one of the project's metrics (`nexus metric record`), for its step at work, with the
+   * metric's unit as it was then and the HEAD of its checkout (`commit`; absent outside a git repository).
+   */
+  z.object({ ...base, type: z.literal("metric.recorded"), ...qs, name: z.string().min(1), value: z.number(), unit: z.string(), commit: z.string().optional() }),
   z.object({ ...base, type: z.literal("log"), level: z.enum(["info", "warn", "error"]), text: z.string() }),
   /**
    * The user (or orchestrator) accepts a step waiting in review. The user's note (`text`) goes `to` the next step (as
@@ -738,8 +754,11 @@ export type EventType = Event["type"];
 /** Event types a worker session may not write (orchestrators and the user may). */
 export const ORCHESTRATOR_ONLY: ReadonlySet<EventType> = new Set([
   "answer.given", "queue.drafted", "session.request", "review.accepted", "review.sent_back", "review.asked_user", "status.set",
-  "review.provisional", "plan.proposed", "tags.proposed",
+  "review.provisional", "plan.proposed", "tags.proposed", "metric.defined",
 ]);
+
+/** Event types only a worker session may write: a metric's value belongs to a step's work (metrics.ts). */
+export const WORKER_ONLY: ReadonlySet<EventType> = new Set(["metric.recorded"]);
 
 /** Event types only the user's session may write (the server writes them for the dashboard). */
 export const USER_ONLY: ReadonlySet<EventType> = new Set(["review.rejected", "review.marked", "review.commented", "review.confirmed", "review.fix_asked"]);
@@ -1055,6 +1074,9 @@ export const UsageFile = z.object({
 export type UsageFile = z.infer<typeof UsageFile>;
 
 const UsageWindow = z.object({ utilization: z.number(), resets_at: Time.optional() });
+/** A turn's tokens in four figures: input not from the cache, output, cache read and cache written. */
+const TokenCounts = z.object({ input: z.number(), output: z.number(), cache_read: z.number(), cache_creation: z.number() });
+export type TokenCounts = z.infer<typeof TokenCounts>;
 
 /**
  * <NEXUS_HOME>/turns.jsonl: one line per agent turn of every project and role (workers, orchestrators, thinking
@@ -1084,7 +1106,12 @@ export const TurnRecord = z.object({
   outcome: z.enum(["ok", "passing", "lasting", "usage", "interrupted"]),
   failure: z.string().optional(),
   /** The turn's own tokens, as the runtime reported them: input not from the cache, output, cache read and written. */
-  tokens: z.object({ input: z.number(), output: z.number(), cache_read: z.number(), cache_creation: z.number() }).optional(),
+  tokens: TokenCounts.optional(),
+  /**
+   * What the turn's sub-agents used, apart from `tokens` (the main loop's), in the same four figures: Claude Code turns
+   * only (zeros: none ran); absent where unknown (a Codex turn, the first turn of a resumed process, an older record).
+   */
+  subagent_tokens: TokenCounts.optional(),
   /** The turn's own cost, where the runtime reports one (Claude Code) and it is known. */
   cost_usd: z.number().optional(),
   /** The account's usage windows of the turn's runtime as the server knew them when the turn began and ended. */
@@ -1126,6 +1153,33 @@ export const TagsFile = z.object({
   decisions: z.array(z.object({ at: Time, accepted: z.boolean(), proposal: TagProposal })).default([]),
 });
 export type TagsFile = z.infer<typeof TagsFile>;
+
+// ---------------------------------------------------------------- metrics.yaml (the project's metrics)
+
+/**
+ * One of the project's metrics (metrics.ts): `unit` its values' unit, `show` how the views show it, `target` the value
+ * aimed at, `warn_above` / `warn_below` the warning threshold (one at most): a value beyond it is marked on its step
+ * and told to the orchestrator. `at`: when it was last defined (a value recorded before it is not told); `session`:
+ * the orchestrator session that defined it.
+ */
+export const MetricDef = z.object({
+  name: z.string().min(1),
+  unit: z.string().min(1),
+  show: z.enum(METRIC_SHOWS).default("line"),
+  target: z.number().optional(),
+  warn_above: z.number().optional(),
+  warn_below: z.number().optional(),
+  at: Time.optional(),
+  session: Id.optional(),
+});
+export type MetricDef = z.infer<typeof MetricDef>;
+
+/** .nexus/metrics.yaml: the project's metrics, in the order they were first defined. Written only by the server. */
+export const MetricsFile = z.object({
+  protocol: z.literal(1),
+  metrics: z.array(MetricDef).default([]),
+});
+export type MetricsFile = z.infer<typeof MetricsFile>;
 
 // ---------------------------------------------------------------- inbox (sessions/<id>/inbox.jsonl)
 

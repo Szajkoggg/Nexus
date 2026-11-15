@@ -18,6 +18,9 @@
 //               as Claude Code does; Codex's does not (Nexus nudges). Told of the end either way, it reports done.
 //   bgagent     the same with a sub-agent in the background
 //   bglong      the same command, running FAKE_BG_LONG_MS (default 600000): past the engine's limit in a test
+//   subagent    run a sub-agent in the foreground within the turn (Claude's fake reports its tokens apart: 2 input, 1
+//               output, 500 cache-creation, as Claude Code does in modelUsage only), then done
+//   metric      record each "FAKE-METRIC: <name> <value>" line of the goal with nexus metric record, then done
 //   review      write a picture and a note into <temp>/nexus-review/<step>/ (outside the working tree), add them with
 //               nexus review add (the picture keyed, as a result), then done
 //   checks      report each check its opening lists under "Checks for every step" with nexus check, under that exact
@@ -77,6 +80,8 @@ export interface Fake {
   step?: string;
   /** Work this turn leaves running in the background, for the runtime's fake to report after the turn (see the header). */
   background?: { kind: "command" | "agent"; ms: number };
+  /** This turn ran a sub-agent in the foreground (FAKE: subagent), for the runtime's fake to report its tokens. */
+  subagent?: boolean;
   /** Every message the agent took in, in order (FAKE-HISTORY shows them). */
   history?: string[];
 }
@@ -254,6 +259,14 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
       nexus("review", "add", step, shot, "--key", `${step.toLowerCase()}-shot@492`, "--role", "result", "--label", `${step} shot`);
       nexus("review", "add", step, note, "--label", `${step} notes`);
       nexus("step", "done", step, "--summary", `fake finished ${step} with review material`);
+    }
+    if (behaviour === "subagent") {
+      fake.subagent = true;
+      nexus("step", "done", step, "--summary", `fake finished ${step} with a sub-agent`);
+    }
+    if (behaviour === "metric") {
+      for (const [, name, value] of text.matchAll(/FAKE-METRIC: (\S+) (\S+)/g)) nexus("metric", "record", name!, value!);
+      nexus("step", "done", step, "--summary", `fake finished ${step} with its metrics`);
     }
     if (behaviour === "refused") { refused?.(); nexus("step", "done", step, "--summary", `fake finished ${step} without what was refused`); }
     // A closing refactoring step done finds nothing worth refactoring.

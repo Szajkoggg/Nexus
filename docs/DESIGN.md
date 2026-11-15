@@ -472,6 +472,56 @@ usage runs out"). Choices made while building it (FB4):
   while Claude Code is full would spend the very usage that ran out. The notice is put into its inbox (seen there, not
   told) and told once the runtime is free; the reviews it would do wait with it, as decided.
 
+### Estimating a turn's use
+
+A step's use of the usage windows is an estimate, labelled as one (decided 2026-11-14, docs/ideas/statistics.md): the
+windows are the account's, measured only as a utilization now and then, and several turns run at once. Built in ST2
+(`usageEstimates`, packages/protocol/src/usage-estimate.ts, a pure function of the turn records):
+
+- **A window's growth over a turn, shared by tokens.** For each window a turn's record names, the growth is the
+  utilization at its end less that at its start (as the server knew them, `windows_start` / `windows_end`). The turn's
+  part is growth × its weighted tokens / the weighted tokens of every turn of the same runtime within the stretch, its
+  own included. A step's (and a queue's, a tag's) use is the sum of its turns' parts, done by the statistics.
+- **Only the same runtime shares a window.** Claude Code's windows and Codex's are apart; every role and project
+  counts (one subscription): an orchestrator's turn beside a worker's takes its part.
+- **A partly overlapping turn counts with the part of its tokens within.** Its tokens are taken as spent evenly over
+  its duration, so a turn that began just before the end of this one takes little of its growth. The approved wording
+  ("the turn's tokens over the overlapping turns' tokens") is the case of full overlap; prorating keeps a long turn
+  from taking a share of every short turn it touches.
+- **No estimate rather than a wrong one.** A reset between the two readings (the growth is negative, the starting
+  reading's reset time passed before the turn ended, or the reset times differ by more than five minutes: Codex's is
+  computed from a countdown and drifts) gives `reset`; a reading missing at either end gives `missing`; a turn whose
+  tokens are unknown (interrupted, no result) gives `tokens`, and counts with no tokens in its neighbours' shares.
+- **The token weights are the API's price ratios.** What the windows meter is not published; the prices are the best
+  public proxy for the compute a token costs, and only ratios matter, since a share compares turns of one runtime:
+  input not from the cache 1, output 5 (thinking is billed as output), a cache write 1.25, a cache read 0.1
+  (`TOKEN_WEIGHTS`). The same weights for Codex (its cached input is priced near a tenth too). Sub-agent tokens count
+  with the same weights, added to the turn's.
+- **Known limits.** The starting reading is the last the server had, possibly from a turn that ended before this one
+  began, so growth from before the turn can land in it; a window that moves only in whole percents makes a short
+  turn's growth 0 or a percent. Summed over a step's turns these even out; one turn's estimate is coarse.
+
+### Sub-agent tokens
+
+A Claude Code turn may run sub-agents (the Agent tool); they use the same subscription. Probed on 2026-11-15 (Claude
+Code 2.1.323, haiku, a temporary directory, one turn that ran one sub-agent, then a turn without; about $0.008 at list
+prices, `costBasis: list`):
+
+- `result.usage` is the main loop's turn alone: the sub-agent's 24 492 cache-creation tokens were not in it.
+- `result.modelUsage` (per model: `inputTokens`, `outputTokens`, `cacheReadInputTokens`, `cacheCreationInputTokens`)
+  is the process's running total, sub-agents included, like `total_cost_usd`: the second turn's figures were the first
+  turn's plus its own.
+- So a turn's sub-agent tokens are the growth of modelUsage (summed over its models) since the previous result, less
+  `result.usage`: in the probe exactly the sub-agent's message (2 input, 24 492 cache creation; output differs by a
+  few tokens from its streamed message, whose usage is a snapshot). The turns after it came out at zero.
+- The sub-agent ran in the background (`isAsync`), and Claude Code started a turn by itself when it ended; its tokens
+  land in the turn whose result follows them. Its streamed messages carry `parent_tool_use_id`; their usage is the
+  sub-agent's own context, which the adapter no longer takes as the session's context fill.
+
+The adapter keeps the previous total like the cost's (unknown in a resumed process, so that process's first turn has
+no `subagent_tokens`), clamps each figure at zero, and the record keeps the field apart from `tokens`; zeros mean no
+sub-agent ran.
+
 ### The plan
 
 "When queues A and C are done, start B" is a place in the plan kept in a file of B's (`plan.yaml`, with the start's

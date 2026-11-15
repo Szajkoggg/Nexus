@@ -9,6 +9,8 @@ import {
   Event, isOpenQuestion, runGoing, ProjectStore, checksLine, findNexusDir, inReportFolder, loadProjectState, openPlan, stepValuesText, stopPlace, newId, normPath, now, readRegistry, writeRegistry,
   PICTURE_ROLES, REVIEW_HELP, checkPicture, levelNow, pictureSize, recommendedOption, stepDefs,
   NEXUS_ACTIVITIES, TAG_KINDS, TAG_ORIGINS, TAG_SIZES, tagIssues, tagProposalText, tagsText,
+  STAT_DIMENSIONS, readTurns, sinceTime, statDimension, statsReport, statsText, stepStats,
+  CHECK_METRIC, isCheckMetric, metricDef, metricDefText, metricRequestIssues, metricValueText,
   type PictureRole, type ReviewItem, type Role, type Runtime, type SessionFile,
 } from "@nexus/protocol";
 import { checkRules, describeRules } from "@nexus/protocol/rules";
@@ -29,7 +31,15 @@ Agent commands (session from NEXUS_SESSION or --session):
                     [--before <path>]   (older material without a key: the "before" of one picture)
                     Files are copied into .nexus/queues/<queue>/review/<step>/ (write them outside the working tree).
                     Read nexus help review before preparing review material.
-  nexus check <step> <name> --ok|--fail [--summary <text>] [--duration <seconds>]   (how long the check ran)
+  nexus check <step> <name> --ok|--fail [--summary <text>] [--duration <seconds>]   (how long the check ran; it is
+                    the metric check:<name>)
+  nexus metric record <name> <value> [--step <step>]   (worker only) a value of one of the project's metrics, for your
+                    step at work, with the HEAD commit; a negative value goes after --: nexus metric record delta -- -5
+  nexus metric list                   the project's metrics: unit, how shown, target, warning threshold
+  nexus stats [--project <id>] [--since <date>] [--by model|effort|kind|activity|area|size|origin]
+                                      how steps went, by group: steps, accepted in the first round, average rounds,
+                                      stops and failures, median working time, estimated use of the usage windows
+                                      (default: every registered project, by model)
   nexus stop <step> --condition <text> --reason <text>   the condition met, as the queue words it; the reason, short
   nexus ask <text> [--step <step>] [--option <text>]... [--recommend <option>] [--can-continue]
   nexus withdraw <qid> --reason <text>
@@ -57,6 +67,12 @@ Agent commands (session from NEXUS_SESSION or --session):
                                       area or project activity; the user accepts it, and only then may a draft use it
   nexus tags rename <old> <new> [--reason <text>]   (orchestrator only) propose renaming an area or a project
                                       activity; once the user accepts, the old name reads as the new one everywhere
+  nexus metric define <name> --unit <unit> [--show line|bar|number] [--target <value>] [--warn-above|--warn-below <value>]
+                                      (orchestrator only) name what the project measures, or change it (the whole
+                                      definition: what you leave out is gone); workers record its values. A check's
+                                      time is check:<its name> (in seconds) without a definition: define it for a
+                                      target or a threshold. A value beyond the threshold is marked and told to you.
+                                      A negative number: --warn-below=-5
   (--queue <id> picks the queue when the session has none or the step id is ambiguous)
 
 Help:
@@ -103,6 +119,8 @@ const { values: o, positionals: args } = parseArgs({
     "dry-run": { type: "boolean" }, replace: { type: "boolean" },
     role: { type: "string" }, runtime: { type: "string" }, title: { type: "string" }, from: { type: "string" },
     area: { type: "string" }, activity: { type: "string" }, activities: { type: "string" },
+    project: { type: "string" }, since: { type: "string" }, by: { type: "string" },
+    unit: { type: "string" }, show: { type: "string" }, target: { type: "string" }, "warn-above": { type: "string" }, "warn-below": { type: "string" },
     help: { type: "boolean", short: "h" }, key: { type: "string" }, note: { type: "string" }, before: { type: "string" }, now: { type: "boolean" }, ref: { type: "string" },
   },
 });
@@ -154,12 +172,12 @@ function emit(st: ProjectStore, s: SessionFile, body: Record<string, unknown>): 
   return r.data;
 }
 
-function stepEvent(type: string, step: string | undefined, extra: () => Record<string, unknown> = () => ({})): void {
+function stepEvent(type: string, step: string | undefined, extra: (s: SessionFile) => Record<string, unknown> = () => ({})): void {
   const st = store(); const s = session(st);
   step = need(step, "<step>");
   const queue = queueFor(st, s, step);
   checkStep(st, queue, step);
-  emit(st, s, { type, queue, step, ...extra() });
+  emit(st, s, { type, queue, step, ...extra(s) });
   console.log(`ok: ${type} ${queue}/${step}`);
 }
 
@@ -321,6 +339,59 @@ const readText = (v: string) => (v === "-" ? readFileSync(0, "utf8").trim() : v)
 function gitOut(cwd: string, args: string[]): string | undefined {
   try { return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim(); }
   catch { return undefined; }
+}
+
+/** The HEAD of the session's checkout (its working directory); undefined outside a git repository. */
+const headCommit = (s: SessionFile) => gitOut(s.cwd || process.cwd(), ["rev-parse", "HEAD"]) || undefined;
+
+/** A number given on the command line (`what` names it in the refusal); undefined when not given. */
+function numberArg(v: string | undefined, what: string): number | undefined {
+  if (v === undefined) return undefined;
+  const n = Number(v);
+  if (v.trim() === "" || !Number.isFinite(n)) throw new UsageError(`${what} takes a number (for example 12, 3.5 or -2), not "${v}"`);
+  return n;
+}
+
+/** `nexus metric define`: the orchestrator's definition, checked here first, then carried out by the server. */
+function metricDefine(): void {
+  const st = store(); const s = orchestrator(st);
+  const req = {
+    name: need(args[2], "<name>"), unit: o.unit, show: o.show,
+    target: numberArg(o.target, "--target"), warn_above: numberArg(o["warn-above"], "--warn-above"), warn_below: numberArg(o["warn-below"], "--warn-below"),
+  };
+  const issues = metricRequestIssues(req);
+  if (issues.length) throw new UsageError(issues.join("; "));
+  const e = emit(st, s, { type: "metric.defined", ...req });
+  report(waitApplied(st, s.id, e.id));
+}
+
+/**
+ * `nexus metric record`: a worker's value of one of the project's metrics, for its step at work (or --step), with the
+ * metric's unit and the HEAD of its checkout. A check's time is not recorded by hand: nexus check --duration gives it.
+ */
+function metricRecord(): void {
+  const st = store(); const s = session(st);
+  if (s.role !== "worker") throw new UsageError("only a worker records a metric's value, for the step it works on (an orchestrator defines metrics: nexus metric define)");
+  const name = need(args[2], "<name>").trim();
+  const value = numberArg(need(args[3], "<value>"), "<value>")!;
+  if (isCheckMetric(name)) throw new UsageError(`a check's time (${CHECK_METRIC}<name>) is recorded by nexus check <step> <name> --ok|--fail --duration <seconds>`);
+  const metrics = st.readMetrics();
+  const def = metricDef(metrics, name);
+  if (!def) {
+    const known = metrics.metrics.map((m) => m.name);
+    throw new UsageError(`the project has no metric ${name} (${known.length ? `it has ${known.join(", ")}` : "it has none yet"}); the orchestrator defines metrics with nexus metric define`);
+  }
+  let step = o.step;
+  let queue: string;
+  if (step) { queue = queueFor(st, s, step); checkStep(st, queue, step); }
+  else {
+    const at = loadProjectState(st).queues.flatMap((q) => q.steps.filter((x) => x.status === "running" && x.session === s.id).map((x) => ({ queue: q.id, step: x.id })));
+    if (at.length !== 1) throw new UsageError(at.length ? `several of your steps are at work (${at.map((x) => `${x.queue}/${x.step}`).join(", ")}): add --step` : "none of your steps is at work: add --step <step>");
+    ({ queue, step } = at[0]!);
+  }
+  const commit = headCommit(s);
+  emit(st, s, { type: "metric.recorded", queue, step, name, value, unit: def.unit, commit });
+  console.log(`ok: ${name} = ${metricValueText(value, def.unit)} for ${queue}/${step}${commit ? ` at ${commit.slice(0, 7)}` : ""}`);
 }
 
 /**
@@ -588,7 +659,7 @@ const commands: Record<string, () => void | Promise<void>> = {
     if (duration !== undefined && (o.duration!.trim() === "" || !Number.isFinite(duration) || duration < 0)) {
       throw new UsageError(`--duration takes the check's time in seconds (for example 12 or 3.5), not "${o.duration}"`);
     }
-    stepEvent("check.result", args[1], () => ({ name, ok: !!o.ok, summary: o.summary, duration }));
+    stepEvent("check.result", args[1], (s) => ({ name, ok: !!o.ok, summary: o.summary, duration, commit: headCommit(s) }));
   },
 
   stop() {
@@ -722,6 +793,35 @@ const commands: Record<string, () => void | Promise<void>> = {
     } else throw new UsageError("nexus tags [list] | nexus tags propose --area <name> | --activity <prefix:name> [--reason <text>] | nexus tags rename <old> <new> [--reason <text>]");
     const e = emit(st, s, { type: "tags.proposed", ...body, reason });
     report(waitApplied(st, s.id, e.id));
+  },
+
+  /**
+   * `nexus stats`: the statistics (@nexus/protocol stats.ts) from the files: the registered projects (and the one this
+   * runs in, if it is not registered) and <NEXUS_HOME>/turns.jsonl. Reads only.
+   */
+  stats() {
+    const by = statDimension(o.by);
+    if (!by) throw new UsageError(`--by is one of ${STAT_DIMENSIONS.join(", ")}, not ${o.by}`);
+    const since = o.since === undefined ? undefined : sinceTime(o.since);
+    if (o.since !== undefined && !since) throw new UsageError(`--since takes a date (2026-11-14) or a time, not "${o.since}"`);
+    const stores = new Map<string, ProjectStore>();
+    for (const p of readRegistry().projects) stores.set(p.id, ProjectStore.forRoot(p.root));
+    try { const here = store(); const id = here.readProject().id; if (!stores.has(id)) stores.set(id, here); } catch { /* not in a project */ }
+    if (o.project && !stores.has(o.project)) throw new UsageError(`unknown project ${o.project} (nexus project list shows them)`);
+    const states = [...stores].filter(([id]) => !o.project || id === o.project).flatMap(([id, st]) => {
+      try { return [loadProjectState(st)]; } catch (e) { console.error(`nexus: project ${id} left out: ${(e as Error).message}`); return []; }
+    });
+    console.log(statsText(statsReport(stepStats(states, readTurns().entries), { by, project: o.project, since })));
+  },
+
+  metric() {
+    const sub = args[1] ?? "list";
+    if (sub === "define") return metricDefine();
+    if (sub === "record") return metricRecord();
+    if (sub !== "list") throw new UsageError("nexus metric list | nexus metric record <name> <value> [--step <step>] | nexus metric define <name> --unit <unit> [--show line|bar|number] [--target <value>] [--warn-above|--warn-below <value>]");
+    const defs = store().readMetrics().metrics;
+    console.log(defs.length ? `the project's metrics:\n${defs.map((d) => `  ${metricDefText(d)}`).join("\n")}` : "the project has no metrics yet (the orchestrator defines them with nexus metric define)");
+    console.log(`every check's time is a metric too: ${CHECK_METRIC}<the check's name> (s), from nexus check --duration`);
   },
 
   answer() {

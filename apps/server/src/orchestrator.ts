@@ -4,7 +4,7 @@
 // drafts under .nexus/drafts/: permission mode dontAsk with a read-only allow list plus the drafts rules.
 import { randomUUID } from "node:crypto";
 import {
-  ActionError, ClaudeEffort, reviewedByOrchestrator, runGoing, ProjectStore, applyDraft, inPlan, loadProjectState, openPlan, overThreshold, proposePlan, proposeTags, readAway, readUsage, orchestratorStatusChange, newId, now, sendBack, type Event, type ProjectState, type SessionFile,
+  ActionError, ClaudeEffort, reviewedByOrchestrator, runGoing, ProjectStore, applyDraft, defineMetric, inPlan, loadProjectState, metricDef, openPlan, overThreshold, proposePlan, proposeTags, readAway, readUsage, orchestratorStatusChange, newId, now, sendBack, type Event, type EventType, type ProjectState, type SessionFile,
 } from "@nexus/protocol";
 import type { AgentProcess } from "./agent.ts";
 import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Launch } from "./agent-host.ts";
@@ -16,7 +16,7 @@ import { describeDeployChanges, type DeployChanges } from "./deploy.ts";
 import type { PlanNotice } from "./deploy-plan.ts";
 import {
   acceptedNoteNotice, approvalNotice, discardNotice, liftNotice, mergedNotice, mergeWaitNotice, missedStartNotice, noticeText, orchestratorBriefing, pausedNotice,
-  questionNotice, rejectionNotice, fixAskedNotice, levelToUserNotice, reviewNotice, awayOnNotice, awayEndNotice, awayStuckNotice, planDecisionNotice, planHeldNotice, runEndNotice, stepNoteNotice, tagDecisionNotice, fallbackNotice, userMessage, withdrawalNotice,
+  questionNotice, rejectionNotice, fixAskedNotice, levelToUserNotice, reviewNotice, awayOnNotice, awayEndNotice, awayStuckNotice, planDecisionNotice, planHeldNotice, runEndNotice, stepNoteNotice, tagDecisionNotice, fallbackNotice, metricNotice, userMessage, withdrawalNotice,
 } from "./prompts.ts";
 
 // Agent (formerly Task) lets it call subagents; they run within these same read-only permissions.
@@ -30,6 +30,9 @@ const READ_ONLY_TOOLS = [
 const DRAFTS = ".nexus/drafts";
 const DRAFT_TOOLS = [`Write(${DRAFTS}/**)`, `Edit(${DRAFTS}/**)`];
 const NEVER = ["NotebookEdit", "MultiEdit"];
+
+/** The orchestrator's events the server carries out (applyRequests), each once, its outcome in applied.jsonl. */
+const REQUESTS: ReadonlySet<EventType> = new Set(["queue.drafted", "session.request", "status.set", "review.sent_back", "plan.proposed", "tags.proposed", "metric.defined"]);
 
 /** A push notification for the user's devices (src/remote.ts `push`). */
 export interface UserNotice { title: string; body: string; url: string; tag: string }
@@ -296,7 +299,7 @@ ${n.text}` });
     this.applying = true;
     try {
       const done = new Set(this.store.readApplied(s.id).entries.map((a) => a.event));
-      const pending = this.store.readEvents(s.id).entries.filter((e) => (e.type === "queue.drafted" || e.type === "session.request" || e.type === "status.set" || e.type === "review.sent_back" || e.type === "plan.proposed" || e.type === "tags.proposed") && !done.has(e.id));
+      const pending = this.store.readEvents(s.id).entries.filter((e) => REQUESTS.has(e.type) && !done.has(e.id));
       for (const e of pending) {
         let ok = true; let message: string;
         try { message = this.apply(e); }
@@ -311,6 +314,7 @@ ${n.text}` });
     if (e.type === "review.sent_back") return sendBack(this.store, { queue: e.queue, step: e.step, from: "orchestrator", text: e.text, event: e.id });
     if (e.type === "plan.proposed") return proposePlan(this.store, e.queue, e.after, e.reason);
     if (e.type === "tags.proposed") return proposeTags(this.store, { area: e.area, activity: e.activity, rename: e.rename, reason: e.reason }, e.session);
+    if (e.type === "metric.defined") return defineMetric(this.store, { name: e.name, unit: e.unit, show: e.show, target: e.target, warn_above: e.warn_above, warn_below: e.warn_below }, e.session);
     if (e.type === "status.set") {
       const message = orchestratorStatusChange(this.store, { queue: e.queue, step: e.step, to: e.to, reason: e.reason });
       // A cancel reaches the user as a push notification, like other notifications; nothing waits in their list.
@@ -438,6 +442,12 @@ ${n.text}` });
       for (const st of q.steps) {
         if (!reviewedByOrchestrator(st)) continue;
         items.push({ key: `notify:review:${q.id}:${st.id}:${st.finished_at}`, ...reviewNotice(q, st, state.away) });
+      }
+      // A metric's value beyond its warning threshold: told once, if it came after the threshold was set.
+      for (const st of q.steps) for (const m of st.metrics) {
+        const def = m.warn && metricDef(state.metrics, m.name);
+        if (!def || m.at < since || (def.at && m.at < def.at)) continue;
+        items.push({ key: `notify:metric:${m.event}`, ...metricNotice(q, st, m) });
       }
       // While the user is away, a queue that waits for the user at a step (level 1, the send-back limit, or handed to
       // the user): which other approved queues can start now, once per such wait.

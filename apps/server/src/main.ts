@@ -14,6 +14,7 @@ import {
   ActionError, Effort, ProjectStore, addNote, closingToSkip, closingToSkipAtApproval, updateSettings, answerAsUser, approveQueue, deleteNote, loadProjectState, nexusHome, withdrawApproval, addAllowRule,
   ensureGlobalSettings, readGlobalSettings, updateGlobalSettings, ownKeys, OVERRIDABLE, settingKey, readRegistry, readUsage, readTurns, commentOnPicture, markPicture, routeAnswers, routeSendBacks, sendBack, sendMessage, setQueueSettings, setStepLevel, confirmProvisional, type ProjectState,
   readAway, writeAway, awayNow, awayUntil, turnAway, expireAway, acceptPlanProposal, declinePlanProposal, handBackPlan, acceptTagProposal, declineTagProposal,
+  STAT_DIMENSIONS, projectMetrics, sinceTime, statDimension, statsReport, stepStats, type ProjectMetrics, type StatsReport,
   MIN_SAMPLES, queueEstimate, stepSamples, isOpenQuestion, writeCount, type EstimatesResponse, type LeftView, type ProjectSummary,
 } from "@nexus/protocol";
 import { newestFirst, projectDigest, projectRunning, usageSince, type DigestEvent, type DigestResponse, type DigestRunning, type UsageRun } from "@nexus/protocol/digest";
@@ -323,6 +324,14 @@ app.get("/api/projects/:id/estimates", (c) => {
   return c.json({ samples: samples.length, min: MIN_SAMPLES, queues } satisfies EstimatesResponse);
 });
 
+// A project's metrics and their values (@nexus/protocol stats.ts, projectMetrics), for the project's Stats views.
+app.get("/api/projects/:id/metrics", (c) => {
+  const e = c.get("entry");
+  const s = stateOf(e);
+  if (!s) return c.json({ error: e.error }, 500);
+  return c.json(projectMetrics(s) satisfies ProjectMetrics);
+});
+
 app.get("/api/projects/:id/file", (c) => {
   const e = c.get("entry");
   const s = stateOf(e);
@@ -560,6 +569,21 @@ app.get("/api/projects/:id/refusals", (c) => {
   const all = e.store.sessionIds().flatMap((s) => e.store.readRefusals(s).entries)
     .filter((r) => (!queue || r.queue === queue) && (!step || r.step === step));
   return c.json(all.sort((a, b) => a.at.localeCompare(b.at)));
+});
+
+// The statistics across projects, or of one (?project=), grouped (?by=, default model) since a time (?since=): the
+// same computation as nexus stats (@nexus/protocol stats.ts), the use of the windows estimated from turns.jsonl.
+app.get("/api/stats", (c) => {
+  refreshRegistry();
+  const by = statDimension(c.req.query("by"));
+  if (!by) return c.json({ error: `by is one of ${STAT_DIMENSIONS.join(", ")}` }, 400);
+  const sinceText = c.req.query("since");
+  const since = sinceText ? sinceTime(sinceText) : undefined;
+  if (sinceText && !since) return c.json({ error: "since is a date (2026-11-14) or a time" }, 400);
+  const project = c.req.query("project") || undefined;
+  if (project && !projects.has(project)) return c.json({ error: "unknown project" }, 404);
+  const states = [...projects.values()].map(stateOf).filter((x): x is ProjectState => !!x);
+  return c.json(statsReport(stepStats(states, readTurns().entries), { by, project, since }) satisfies StatsReport);
 });
 
 // The morning digest across projects (UX proposals, 16): what happened after ?since= (ISO 8601; default the last 24

@@ -4,9 +4,9 @@
 // process so that the session's next message starts a new one. What a role does with its agent's texts, turns and
 // exits stays with the role: it gives its handlers when it starts a process.
 import {
-  appendTurn, now, readUsage, stepDefs, stepTags, writeUsage, type ProjectStore, type SessionFile, type TurnRecord,
+  appendTurn, now, readUsage, stepDefs, stepTags, writeUsage, type ProjectStore, type SessionFile, type TokenCounts, type TurnRecord,
 } from "@nexus/protocol";
-import type { ActivityItem, AgentEvents, AgentProcess, RefusalItem, StreamFacts } from "./agent.ts";
+import type { ActivityItem, AgentEvents, AgentProcess, RefusalItem, StreamFacts, TurnTokens } from "./agent.ts";
 import { ClaudeSession, type ClaudeOptions } from "./claude.ts";
 import { CodexSession, type CodexOptions } from "./codex.ts";
 
@@ -51,6 +51,10 @@ export interface HostHandlers {
 interface OpenTurn { started: string; windows?: TurnRecord["windows_start"]; tag: TurnTag }
 /** What a turn works on, for its record: the queue and step, and the fallback the step runs on, if it does. */
 type TurnTag = { queue?: string; step?: string; fallback?: TurnRecord["fallback"] };
+
+/** A runtime's token counts as turns.jsonl keeps them. */
+const tokenCounts = (t: TurnTokens | undefined): TokenCounts | undefined =>
+  t && { input: t.input, output: t.output, cache_read: t.cacheRead, cache_creation: t.cacheCreation };
 
 /** A session's running process, with what the role keeps beside it (`E`). */
 export type Hosted<E extends object = object> = { readonly session: string; readonly proc: AgentProcess } & E;
@@ -253,7 +257,8 @@ export class AgentHost<E extends object = object> {
         model: model ?? s.model ?? undefined, effort: s.effort ?? undefined, ...turn.tag, tags: this.tagsOf(turn.tag),
         outcome: !end ? "interrupted" : end.ok ? "ok" : end.failure ? end.failure.kind : "interrupted",
         failure: end?.failure?.code,
-        tokens: end?.tokens ? { input: end.tokens.input, output: end.tokens.output, cache_read: end.tokens.cacheRead, cache_creation: end.tokens.cacheCreation } : undefined,
+        tokens: tokenCounts(end?.tokens),
+        subagent_tokens: tokenCounts(end?.subagentTokens),
         cost_usd: end?.costUsd,
         windows_start: turn.windows, windows_end: this.windows(s.runtime),
       });
