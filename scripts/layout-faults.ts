@@ -76,6 +76,7 @@ try {
 } finally {
   await browser?.close();
   server?.close();
-  rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+  // The browser may hold its profile a moment after it closed: a folder left in the temp folder is no failure.
+  try { rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }); } catch { /* left behind */ }
 }
 process.exit(code);
