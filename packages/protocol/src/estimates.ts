@@ -4,7 +4,7 @@
 // average of finished steps on the same model and effort, else the same model, else all, each only with at least
 // MIN_SAMPLES steps; with fewer finished steps in all there is no estimate. Pure: the server reads the files.
 import type { ProjectFile, TurnRecord } from "./schemas.ts";
-import { kindDefaults, routeStep, type StartValues } from "./routing.ts";
+import { START_KEYS, kindDefaults, routeStep, runStart, type StartValues } from "./routing.ts";
 import { stepClosed, type QueueView } from "./state.ts";
 
 /** Fewer finished steps than this: no estimate (and no group average from fewer). */
@@ -59,12 +59,8 @@ export function queueEstimate(
   project: Pick<ProjectFile, "runtimes" | "kinds">, samples: readonly Sample[],
 ): QueueEstimate {
   const left = q.steps.filter((s) => !stepClosed(q, s));
-  const r = q.run;
-  const keys = ["runtime", "model", "effort"] as const;
-  const fromDefaults = new Set(r?.from_defaults ?? []);
-  const start: StartValues = r?.runtime
-    ? { runtime: r.runtime, model: r.model, effort: r.effort, explicit: keys.filter((k) => !fromDefaults.has(k)) }
-    : { runtime: q.start?.runtime ?? project.runtimes.default, model: q.start?.model, effort: q.start?.effort, explicit: keys.filter((k) => q.start?.[k] !== undefined) };
+  const start: StartValues = (q.run && runStart(q.run))
+    ?? { runtime: q.start?.runtime ?? project.runtimes.default, model: q.start?.model, effort: q.start?.effort, explicit: START_KEYS.filter((k) => q.start?.[k] !== undefined) };
   let ms = 0;
   for (const st of left) {
     const v = routeStep({ step: st, queue: q, start, kind: kindDefaults(project, st.tags?.kind), project });

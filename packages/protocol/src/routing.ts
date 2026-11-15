@@ -3,7 +3,7 @@
 // what the run's start named explicitly (--runtime, --model, --effort, or the session it continues); the step's kind's
 // defaults (the project's own, else the global ones); the project's defaults. Pure and free of Node: the engine, the
 // estimates and the dashboard use it alike.
-import { effortIssue, type Effort, type FallbackEntry, type KindDefaults, type ProjectFile } from "./schemas.ts";
+import { effortIssue, type Effort, type FallbackEntry, type KindDefaults, type ProjectFile, type RunFile } from "./schemas.ts";
 import { TAG_KINDS } from "./tags.ts";
 
 type WorkerRuntime = "claude" | "codex";
@@ -27,7 +27,21 @@ export interface Routed {
  * --runtime, --model, --effort, or all three when it continues a session. The others came from the project's defaults
  * and count only as those, so the kind's defaults go over them.
  */
-export interface StartValues { runtime: WorkerRuntime; model?: string; effort?: Effort; explicit: readonly ("runtime" | "model" | "effort")[] }
+export interface StartValues { runtime: WorkerRuntime; model?: string; effort?: Effort; explicit: readonly StartKey[] }
+
+/** The values a run's start resolves. */
+export const START_KEYS = ["runtime", "model", "effort"] as const;
+type StartKey = (typeof START_KEYS)[number];
+
+/**
+ * A run's start as its run file records it: its values, those it took from the project's defaults (`from_defaults`)
+ * not explicit. Undefined for an older run file without its values.
+ */
+export function runStart(run: Pick<RunFile, "runtime" | "model" | "effort" | "from_defaults">): StartValues | undefined {
+  if (!run.runtime) return undefined;
+  const d = new Set(run.from_defaults ?? []);
+  return { runtime: run.runtime, model: run.model, effort: run.effort, explicit: START_KEYS.filter((k) => !d.has(k)) };
+}
 
 /** A kind's defaults in the project's effective settings; undefined for no kind, or one Nexus does not know. */
 export function kindDefaults(project: Pick<ProjectFile, "kinds">, kind: string | undefined): KindDefaults | undefined {

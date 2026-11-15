@@ -11,7 +11,7 @@ import { join } from "node:path";
 import {
   CHECKOUT_RUN_STATES, ENDED_RUN_STATES, HOLDING_RUN_STATES,
   ActionError, ProjectStore, USER_SESSION, ensureUserSession, liftByContinue, loadProjectState, openPlanFile, releaseOrphanedSteps, stepClosed, reportFile, ensureReportFolder, newId, normPath, now, readUsage,
-  RETRY_LIMIT, chooseRoute, effortIssue, formatClock, kindDefaults, overThreshold, routeStep, type Effort, type Routed, type ProjectFile, type StartValues, type ProjectState, type QueueView, type RunFile, type SessionFile,
+  RETRY_LIMIT, START_KEYS, chooseRoute, effortIssue, formatClock, kindDefaults, overThreshold, routeStep, runStart, type Effort, type Routed, type ProjectFile, type StartValues, type ProjectState, type QueueView, type RunFile, type SessionFile,
   type SessionView, type StepView, type PlanBy,
   addNote,
 } from "@nexus/protocol";
@@ -99,14 +99,9 @@ const RESTART_KILL_MS = 10_000;
 export interface StepValues { runtime: "claude" | "codex"; model?: string; effort?: Effort }
 
 /**
- * What a step runs on, by the precedence of routing.ts (routeStep): the step's own values, the queue's, what the run's
- * start named, the step's kind's defaults, the project's defaults.
+ * What a step runs on, and its fallback chain, by the precedence of routing.ts (routeStep): the step's own values, the
+ * queue's, what the run's start named, the step's kind's defaults, the project's defaults.
  */
-function stepValues(start: StartValues, step: StepView, q: Pick<QueueView, "runtime" | "model" | "effort" | "fallback">, project: ProjectFile): StepValues {
-  const r = stepRoute(start, step, q, project);
-  return { runtime: r.runtime, model: r.model, effort: r.effort };
-}
-/** The step's own values and its fallback chain (routing.ts, routeStep). */
 function stepRoute(start: StartValues, step: StepView, q: Pick<QueueView, "runtime" | "model" | "effort" | "fallback">, project: ProjectFile): Routed {
   return routeStep({ step, queue: q, start, kind: kindDefaults(project, step.tags.kind), project });
 }
@@ -214,35 +209,30 @@ export class Engine implements Member {
     };
     const own = effortIssue(runtime, values.effort);
     if (own) throw new ActionError(own);
-    // What the start named itself (or took from the session it continues); the rest is the project's defaults, which
-    // a step's kind goes over.
-    const start: StartValues = {
-      ...values,
-      explicit: reused ? ["runtime", "model", "effort"] : ([["runtime", opts.runtime], ["model", opts.model], ["effort", opts.effort]] as const).filter(([, v]) => v !== undefined).map(([k]) => k),
-    };
+    // What the start did not choose, nor take from a session it continues, came from the project's defaults: resolved
+    // again at each step (startOf), where a step's kind goes over them. The rest is explicit.
+    const from_defaults = START_KEYS.filter((k) => !reused && opts[k] === undefined);
+    const start: StartValues = { ...values, explicit: START_KEYS.filter((k) => !from_defaults.includes(k)) };
     // Every step still to run is checked now, so a bad combination refuses the start rather than halting the run later.
     for (const st of q.steps.filter((x) => !stepClosed(q, x))) {
-      const w = stepValues(start, st, q, state.project);
+      const w = stepRoute(start, st, q, state.project);
       const issue = effortIssue(w.runtime, w.effort);
       if (issue) throw new ActionError(`step ${st.id} would run on ${RUNTIME_NAME[w.runtime]} at effort ${w.effort}: ${issue}`, 409);
     }
     const first = q.steps.find((x) => x.status === "pending");
-    const want = first ? stepValues(start, first, q, state.project) : values;
+    const firstRoute = first && stepRoute(start, first, q, state.project);
+    const want: StepValues = firstRoute ?? values;
     if (reused && want.runtime !== reused.runtime) {
       throw new ActionError(`step ${first!.id} runs on ${RUNTIME_NAME[want.runtime]}; the session to continue is a ${RUNTIME_NAME[reused.runtime as "claude" | "codex"]} session`, 409);
     }
     // A first step whose runtime is beyond the usage threshold opens on its fallback (advance records it): a new session
     // is made on that one at once. A continued session keeps its own runtime; advance switches from it if it must.
-    const choice = first && !reused ? this.chooseFor(state, stepRoute(start, first, q, state.project)) : undefined;
+    const choice = firstRoute && !reused ? this.chooseFor(state, firstRoute) : undefined;
     const open = choice?.kind === "fallback" ? choice.values : want;
     const session = reused
       ? this.reuseSession(state, reused.id, queueId, want.model, want.effort)
       : this.newSession(state, q, open.runtime, open.model, open.effort);
-    // What the start did not choose, nor take from a session it continues, came from the project's defaults: resolved
-    // again at each step (runValues).
-    const from_defaults = reused ? [] : ([["runtime", opts.runtime], ["model", opts.model], ["effort", opts.effort]] as const)
-      .filter(([, v]) => v === undefined).map(([k]) => k);
-    const run = startedRun({ session: session.id, revision: q.revision, ...values, after: opts.after, at: now(), from_defaults: [...from_defaults],
+    const run = startedRun({ session: session.id, revision: q.revision, ...values, after: opts.after, at: now(), from_defaults,
       checks: state.project.defaults.checks });
     this.store.writeRun(queueId, run);
     this.store.clearStart(queueId); // a planned start is used up by any start
@@ -901,12 +891,10 @@ export class Engine implements Member {
    * values: its session's, all explicit.
    */
   private startOf(state: ProjectState, run: RunFile): StartValues {
-    if (run.runtime) {
-      const d = new Set(run.from_defaults ?? []);
-      return { runtime: run.runtime, model: run.model, effort: run.effort, explicit: (["runtime", "model", "effort"] as const).filter((k) => !d.has(k)) };
-    }
+    const recorded = runStart(run);
+    if (recorded) return recorded;
     const s = this.sessionFile(state, run.session);
-    return { runtime: s.runtime === "codex" ? "codex" : "claude", model: s.model, effort: s.effort, explicit: ["runtime", "model", "effort"] };
+    return { runtime: s.runtime === "codex" ? "codex" : "claude", model: s.model, effort: s.effort, explicit: START_KEYS };
   }
 
   private openStep(queueId: string, step: StepView, q: QueueView, mode: "start" | "continue", why?: string, around: { before?: string; after?: string } = {}): void {
