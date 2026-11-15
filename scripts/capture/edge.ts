@@ -134,6 +134,16 @@ export class EdgeBrowser implements Browser {
     })()`);
   }
 
+  scroll(text: string): Promise<boolean> {
+    // The text as written (textContent): a heading styled in capitals reads in capitals through innerText.
+    return this.js<boolean>(`(() => {
+      const el = [...document.querySelectorAll("h1, h2, h3, h4, h5, h6, legend, label, p, span, div")].find((e) => e.textContent.trim() === ${JSON.stringify(text)});
+      if (!el) return false;
+      el.scrollIntoView({ block: "start" });
+      return true;
+    })()`);
+  }
+
   press(key: string): Promise<boolean> {
     return this.js<boolean>(`(() => {
       const el = document.activeElement ?? document.body;

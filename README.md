@@ -551,7 +551,7 @@ node scripts/capture.ts views.yaml --no-before                                  
 The view list names a seed script that writes the test projects (`scripts/capture/seed-demo.ts`, a demo project
 with a step waiting for review) and the views: a key such as `viewer-before-after@390` (the width comes from it),
 a route such as `#/demo/UI/UI1`, a label, and a few setup actions (click a button by its text or an element by a CSS
-selector, type, press a key, wait). A view's `script` (a `.js` file) runs in the page before the dashboard does, for
+selector, type, press a key, scroll a heading to the top by its text, wait). A view's `script` (a `.js` file) runs in the page before the dashboard does, for
 that view only: `scripts/capture/fake-speech.js` stands in for the browser's speech recognition, so a picture can show
 the microphone listening without a microphone. The format is in `nexus help review` and `scripts/capture/views.ts`. The tool builds this checkout's dashboard,
 seeds a development instance (port 4318 and up, its own data in a temporary folder, the fake runtimes, and
@@ -577,6 +577,14 @@ proxy or from another address needs the access token once (it sets a cookie for 
    token and a QR code. Scan it with the phone: it opens Nexus and signs in.
 5. On the phone, add Nexus to the home screen (iPhone: Share, Add to Home Screen), open it from there and turn on
    the bell: notifications arrive even with Nexus closed. "Send a test notification" in the panel checks it.
+
+**Which notifications a device gets** is chosen on that device, in Settings, Global, "This browser", Notifications:
+a switch for each kind (a question, a stopped queue, a step to review, a failed update of Nexus…; all on at first),
+quiet hours (for example 22:00 to 07:00, in the device's own time zone; off at first) and "Urgent breaks through",
+which lets a stopped queue, a failed step and a failed update of Nexus through the quiet hours. What the quiet hours
+hold back does not come later; the waiting list and the morning digest show it. A change applies at once. With push
+on, the settings go with the device's subscription, so the phone and the computer each keep their own; without it,
+the open tab's notifications follow them. The test notification always comes.
 
 On a narrow screen the project sidebar gives way to a picker: the current project's name at the top left, with its
 "waiting for you" count and running dot. Tap it for the list of all projects (each with its count and dot), tap one to

@@ -15,6 +15,8 @@ export interface Browser {
   click(target: string | { selector: string }): Promise<boolean>;
   type(text: string, into?: string): Promise<boolean>;
   press(key: string): Promise<boolean>;
+  /** Scrolls the first element whose own text is exactly `text` (a section's heading) to the top of the window. */
+  scroll(text: string): Promise<boolean>;
   /** Saves a picture of the window (only the window: a fixed-viewport capture). */
   shot(file: string): Promise<void>;
 }
@@ -23,6 +25,7 @@ const describe = (a: Action): string => {
   if ("click" in a) return typeof a.click === "string" ? `click "${a.click}"` : `click ${a.click.selector}`;
   if ("type" in a) return `type into ${a.type.into ?? "the focused element"}`;
   if ("press" in a) return `press ${a.press}`;
+  if ("scroll" in a) return `scroll to "${a.scroll}"`;
   return `wait ${a.wait} ms`;
 };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -48,6 +51,7 @@ export async function captureViews(views: View[], browser: Browser, o: {
         if ("click" in a) done = await browser.click(a.click);
         else if ("type" in a) done = await browser.type(a.type.text, a.type.into);
         else if ("press" in a) done = await browser.press(a.press);
+        else if ("scroll" in a) done = await browser.scroll(a.scroll);
         else await sleep(a.wait);
         if (!done) throw new Error(`action ${i + 1} (${describe(a)}) found nothing to act on`);
         await sleep(400);

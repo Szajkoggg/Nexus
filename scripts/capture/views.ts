@@ -8,6 +8,7 @@ export type Action =
   | { click: string | { selector: string } }      // a button, link or tab by its text; or the first element matching a CSS selector
   | { type: { text: string; into?: string } }     // typed into the element matching `into` (a CSS selector), else the focused one
   | { press: string }                             // a key, e.g. Escape, Enter, ArrowRight
+  | { scroll: string }                            // the first element with exactly this text (a heading, as written, not as styled) to the top
   | { wait: number };                             // milliseconds
 
 /** One picture: its key (subject-state@width), the dashboard route, and the setup. */
@@ -79,7 +80,7 @@ export function parseViews(text: string): ViewList {
 }
 
 function actionProblem(a: unknown): string | undefined {
-  const usage = "one of click: <text> | click: {selector}, type: {text, into?}, press: <key>, wait: <ms>";
+  const usage = "one of click: <text> | click: {selector}, type: {text, into?}, press: <key>, scroll: <text>, wait: <ms>";
   if (typeof a !== "object" || a === null || Array.isArray(a) || Object.keys(a).length !== 1) return usage;
   const [kind, value] = Object.entries(a)[0]!;
   if (kind === "click") {
@@ -92,6 +93,7 @@ function actionProblem(a: unknown): string | undefined {
     return t && typeof t === "object" && typeof t.text === "string" && (t.into === undefined || typeof t.into === "string") ? undefined : "type: {text: <text>, into?: <css>}";
   }
   if (kind === "press") return typeof value === "string" && value ? undefined : "press: a key name, e.g. Escape";
+  if (kind === "scroll") return typeof value === "string" && value ? undefined : "scroll: the text of a heading to bring to the top";
   if (kind === "wait") return Number.isInteger(value) && (value as number) >= 0 ? undefined : "wait: milliseconds";
   return usage;
 }
