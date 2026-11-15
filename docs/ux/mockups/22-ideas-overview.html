@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockup 22: the ideas overview in the Ideas panel</title>
+<!-- Queue IO, step IO1 (docs/ux/ideas-overview.md). The notes of docs/ideas by area, each dated Decided entry with
+     its status. ?view=overview (default) | entry (a note opened in the rail's place) | matching (the suggestions for
+     the existing queues). ?theme=paper|honey. Note titles and files are Nexus's own; statuses, times, queues' states
+     and commits are made up. -->
+<link rel="stylesheet" href="stats-mock.css">
+<style>
+  .page { padding: 16px 24px 28px; }
+  .bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+  .search { border: 1px solid var(--line-strong); border-radius: 8px; padding: 4px 10px; font-size: 12px; color: var(--fg-3); background: var(--canvas); width: 200px; }
+  .seg span .n { color: var(--fg-3); font-weight: 400; margin-left: 3px; }
+  .seg span.on .n { color: var(--fg-2); }
+  .match { display: flex; align-items: center; gap: 10px; border: 1px solid color-mix(in oklab, var(--warn) 40%, var(--line)); background: color-mix(in oklab, var(--warn) 7%, var(--surface)); border-radius: 10px; padding: 8px 12px; font-size: 13px; margin-bottom: 14px; }
+  .match b { color: var(--warn); }
+  .btn2 { border: 1px solid var(--line-strong); border-radius: 8px; padding: 4px 11px; font-size: 12px; font-weight: 600; color: var(--fg); background: var(--surface-2); white-space: nowrap; }
+  .btn2.pri { background: var(--accent-strong); border-color: var(--accent-strong); color: #fff; }
+  .btn2.ghost { background: transparent; border-color: transparent; color: var(--fg-2); font-weight: 500; }
+
+  /* the hierarchy */
+  .area { margin-bottom: 14px; }
+  .ahead { display: flex; align-items: baseline; gap: 8px; padding: 4px 2px 6px; }
+  .ahead h3 { margin: 0; font-size: 12px; letter-spacing: .07em; text-transform: uppercase; color: var(--fg-2); font-weight: 600; }
+  .ahead .c { font-size: 12px; color: var(--fg-3); }
+  .ahead .fold { color: var(--fg-3); width: 12px; display: inline-flex; align-self: center; } .ahead .fold svg { width: 12px; height: 12px; }
+  .area.folded .notes { display: none; }
+  .sub { margin: 8px 0 4px 18px; font-size: 12px; color: var(--fg-3); font-weight: 600; }
+  .sub b { color: var(--fg-2); }
+  .notes { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .notes + .sub { margin-top: 10px; }
+  .nt { padding: 9px 14px 8px; border-top: 1px solid var(--line); }
+  .nt:first-child { border-top: 0; }
+  .nt.on { background: color-mix(in oklab, var(--accent) 9%, var(--surface)); box-shadow: inset 3px 0 0 var(--accent); }
+  .nrow { display: flex; align-items: baseline; gap: 10px; }
+  .nrow .t { font-weight: 600; font-size: 13.5px; white-space: nowrap; }
+  .nrow .s { flex: 1; min-width: 0; font-size: 12.5px; color: var(--fg-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ent { display: grid; grid-template-columns: 52px minmax(0, 1fr) auto 128px; gap: 10px; align-items: baseline; margin-top: 4px; padding-left: 12px; font-size: 12.5px; }
+  .ent .d { color: var(--fg-3); font-variant-numeric: tabular-nums; }
+  .ent .l { color: var(--fg-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ent .l small { color: var(--fg-3); font-size: 12px; }
+  .ent .q { overflow: hidden; text-overflow: ellipsis; font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; color: var(--accent); white-space: nowrap; }
+  .ent .q span { color: var(--fg-3); font-family: ui-sans-serif, system-ui, "Segoe UI", sans-serif; }
+  .ent.dim .l, .ent.dim .d { opacity: .55; }
+
+  /* statuses: a dot and a word */
+  .st { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; white-space: nowrap; color: var(--fg-2); }
+  .st::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--fg-3); flex: none; }
+  .st.worked::before { background: transparent; box-shadow: inset 0 0 0 1.5px var(--fg-3); }
+  .st.decided { color: var(--info); } .st.decided::before { background: var(--info); }
+  .st.handed { color: var(--review); } .st.handed::before { background: var(--review); }
+  .st.queued { color: var(--accent); } .st.queued::before { background: var(--accent); }
+  .st.built { color: var(--ok); } .st.built::before { background: var(--ok); }
+  .st.dropped, .st.replaced { color: var(--fg-3); }
+  .openq { font-size: 11px; font-weight: 600; color: var(--warn); border: 1px solid color-mix(in oklab, var(--warn) 45%, transparent); border-radius: 5px; padding: 0 5px; white-space: nowrap; }
+  .hint { font-size: 12px; color: var(--fg-3); font-style: italic; }
+
+  /* the note, in the rail's place */
+  .notepanel { border-left: 1px solid var(--line); background: var(--surface); display: flex; flex-direction: column; overflow: hidden; box-shadow: -10px 0 30px rgb(0 0 0 / .25); }
+  .nphead { padding: 14px 16px 12px; border-bottom: 1px solid var(--line); }
+  .nphead .top { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--fg-3); }
+  .nphead h2 { text-transform: none; letter-spacing: 0; font-size: 16px; color: var(--fg); margin: 6px 0 4px; }
+  .nphead .file { font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; color: var(--accent); }
+  .npbody { flex: 1; overflow: hidden; padding: 12px 16px; display: flex; flex-direction: column; gap: 14px; }
+  .npbody .sum { font-size: 13px; color: var(--fg-2); line-height: 1.5; }
+  .lab { font-size: 11px; letter-spacing: .08em; color: var(--fg-3); font-weight: 600; text-transform: uppercase; margin-bottom: 6px; }
+  .ecard { border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; background: var(--canvas); }
+  .ecard + .ecard { margin-top: 8px; }
+  .ecard .h { display: flex; align-items: baseline; gap: 8px; }
+  .ecard .h b { font-size: 13px; }
+  .ecard .lead { font-size: 12.5px; color: var(--fg-2); margin-top: 3px; }
+  .ecard .lead small { color: var(--fg-3); }
+  .hist { margin: 8px 0 0; padding: 0; list-style: none; position: relative; }
+  .hist::before { content: ""; position: absolute; left: 3px; top: 6px; bottom: 6px; width: 1px; background: var(--line-strong); }
+  .hist li { position: relative; padding-left: 16px; font-size: 12px; color: var(--fg-2); line-height: 1.65; display: flex; gap: 8px; }
+  .hist li::before { content: ""; position: absolute; left: 0; top: 7px; width: 7px; height: 7px; border-radius: 50%; background: var(--fg-3); }
+  .hist li.decided::before { background: var(--info); } .hist li.handed::before { background: var(--review); }
+  .hist li.queued::before { background: var(--accent); } .hist li.built::before { background: var(--ok); }
+  .hist li.faint { color: var(--fg-3); } .hist li.faint::before { width: 5px; height: 5px; left: 1px; top: 8px; background: var(--line-strong); }
+  .hist .w { width: 84px; flex: none; color: var(--fg-3); font-variant-numeric: tabular-nums; }
+  .hist .mono, .qline .mono { color: var(--accent); font-size: 11.5px; }
+  .oq { font-size: 12.5px; color: var(--fg-2); padding-left: 14px; position: relative; }
+  .oq::before { content: "?"; position: absolute; left: 0; color: var(--warn); font-weight: 700; }
+  .qline { display: flex; align-items: baseline; gap: 8px; font-size: 12.5px; padding: 3px 0; }
+  .qline .t { flex: 1; min-width: 0; color: var(--fg-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .npfoot { border-top: 1px solid var(--line); padding: 10px 16px; display: flex; gap: 8px; align-items: center; }
+
+  /* matching */
+  .mcard { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 11px 14px; margin-bottom: 10px; }
+  .mcard .h { display: flex; align-items: baseline; gap: 10px; }
+  .mcard .h .id { font-family: ui-monospace, Consolas, monospace; font-size: 12px; color: var(--fg-3); }
+  .mcard .h b { font-size: 13.5px; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mcard .h .qs { font-size: 12px; color: var(--fg-3); white-space: nowrap; }
+  .quote { margin: 7px 0 8px; border-left: 2px solid var(--line-strong); padding: 1px 10px; font-size: 12.5px; color: var(--fg-2); }
+  .quote mark { background: color-mix(in oklab, var(--accent) 22%, transparent); color: var(--fg); border-radius: 3px; padding: 0 2px; }
+  .sugg { display: grid; grid-template-columns: minmax(0, 1fr) 96px auto; gap: 10px; align-items: center; padding: 5px 0; border-top: 1px solid var(--line); font-size: 12.5px; }
+  .sugg .ref { font-family: ui-monospace, Consolas, monospace; font-size: 12px; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sugg .ref small { font-family: ui-sans-serif, system-ui, "Segoe UI", sans-serif; color: var(--fg-3); font-size: 12px; margin-left: 6px; }
+  .kindtag { font-size: 11px; font-weight: 600; border-radius: 5px; padding: 1px 6px; text-align: center; white-space: nowrap; }
+  .kindtag.exact { color: var(--ok); background: color-mix(in oklab, var(--ok) 14%, transparent); }
+  .kindtag.dated { color: var(--accent); background: color-mix(in oklab, var(--accent) 14%, transparent); }
+  .kindtag.file { color: var(--warn); background: color-mix(in oklab, var(--warn) 14%, transparent); }
+  .decided-y { font-size: 12px; color: var(--ok); white-space: nowrap; } .decided-n { font-size: 12px; color: var(--fg-3); white-space: nowrap; }
+
+  /* the Ideas panel's own switch */
+  .ideaswitch { margin-left: 4px; }
+  .phone-switch { display: none; }
+  @media (max-width: 1023px) {
+    .page { padding: 10px 12px 90px; }
+    .phone-switch { display: flex; margin-bottom: 10px; }
+    .phone-switch .seg { width: 100%; } .phone-switch .seg span { flex: 1; text-align: center; padding: 6px 10px; font-size: 13px; }
+    .bar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin-bottom: 10px; }
+    .bar .search { display: none; }
+    .bar .seg span { padding: 5px 10px; }
+    .match { font-size: 12.5px; padding: 8px 10px; }
+    .nrow { flex-wrap: wrap; row-gap: 0; }
+    .nrow .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    .nrow .s { flex-basis: 100%; order: 3; }
+    .nt { padding: 9px 12px 8px; }
+    .ent { grid-template-columns: 44px minmax(0, 1fr) auto; padding-left: 0; gap: 8px; }
+    .ent .q { display: none; }
+    .sub { margin-left: 4px; }
+  }
+</style>
+</head>
+<body>
+<div class="ptop"><b>Nexus</b><span class="proj" style="margin:0;padding:0"><span class="badge">2</span></span><span style="font-size:12px;color:var(--accent)">● IO running</span><span class="grow"></span><span class="fg3">⌕</span><span class="fg3">⚙</span></div>
+<div class="app with-rail">
+  <aside class="side">
+    <div class="brand">Nexus <span class="live">live</span></div>
+    <h6>PROJECTS</h6>
+    <div class="proj on"><span class="av">NX</span>Nexus<span class="badge">2</span></div>
+    <div class="proj"><span class="av b">GA</span>Garden app</div>
+    <div class="nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Stats<span class="fg3" style="margin-left:auto;font-size:11px">all projects</span></div>
+    <div class="foot"><span>Away…</span><span class="row">notify off<span class="grow"></span>settings</span></div>
+  </aside>
+
+  <div class="mid">
+    <div class="midtop">
+      <span class="tabs"><span>● Orchestrator</span><span class="on">Ideas <span class="fg3">· 2</span></span><span>Stats</span></span>
+      <span class="seg ideaswitch"><span>Conversations</span><span class="on">Overview</span></span>
+      <span class="grow"></span>
+      <span class="search" style="width:180px">Search…</span>
+    </div>
+    <main class="page" id="page"></main>
+  </div>
+
+  <aside class="rail" id="rail">
+    <h6>WAITING FOR YOU · 2</h6>
+    <div class="item"><span class="pill">Review</span> <span class="fg3 mono" style="font-size:12px">IO/IO1</span><div style="margin-top:4px">The statuses and the view, decided by the user</div></div>
+    <div class="item"><span class="pill" style="color:var(--info);background:color-mix(in oklab, var(--info) 18%, transparent)">Approval</span> <span class="fg3 mono" style="font-size:12px">CI</span><div style="margin-top:4px">Pictures in the chats by pasting or dragging</div></div>
+    <h6>RUNNING IN NEXUS</h6>
+    <div class="item"><span class="fg3 mono" style="font-size:12px">IO</span> The ideas overview — IO1 The statuses and the view <span style="color:var(--accent)">● 1/7</span></div>
+    <h6>FINISHED TODAY · 3</h6>
+    <div class="item fg2">PL The plan view's design <span class="fg3">· 10:41</span></div>
+    <div class="item fg2">ST3 Stats views <span class="fg3">· 09:55</span></div>
+    <div class="item fg2">MX Merge-back on by default <span class="fg3">· 09:12</span></div>
+    <div class="btn">All queues of Nexus</div>
+  </aside>
+</div>
+<nav class="pbar">
+  <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 5h16v11H9l-5 4z"/></svg>Orchestrator</div>
+  <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 13l2-8h12l2 8v6H4z"/><path d="M4 13h5l1 2h4l1-2h5"/></svg>Waiting</div>
+  <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 6h14M5 12h14M5 18h9"/></svg>Queues</div>
+  <div class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9V16h7v-2.1A6 6 0 0 0 12 3z"/></svg>Ideas</div>
+  <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Stats</div>
+</nav>
+
+<script>
+const params = new URLSearchParams(location.search);
+if (params.get("theme")) document.documentElement.dataset.theme = params.get("theme");
+const view = params.get("view") ?? "overview";
+
+const WORD = { worked: "being worked out", decided: "decided", handed: "handed over", queued: "queued", built: "built", dropped: "dropped", replaced: "replaced" };
+const ORDER = ["worked", "decided", "handed", "queued", "built"];
+const st = (s) => `<span class="st ${s}">${WORD[s]}</span>`;
+
+// [date, lead, decisions, status, queue (id · its state)]
+const AREAS = [
+  { area: "lifecycle", notes: [
+    { title: "Deploy timing", file: "deploy-timing", sum: "Deploys can be planned after a step, after a queue, or at a time (with an optional deadline).", entries: [["13 Nov", "Planned deploys: after a step, a queue, or at a time", 5, "built", "PD"], ["14 Nov", "A deadline, and what waits for a running step", 3, "built", "PD"]] },
+    { title: "Deploy changes for orchestrators", file: "deploy-changes-for-orchestrators", sum: "At a deploy, every project's orchestrator is told the commits' Agents: lines.", entries: [["14 Nov", "Agents: lines in commits, told at a deploy", 4, "built", "N4"]] },
+    { title: "Parallel worktrees and merge-back", file: "parallel-worktrees-and-merge-back", sum: "Independent queues run in their own worktrees; a closing integration step merges main in.", open: 1, entries: [["15 Nov", "Own worktrees; Nexus merges back after the integration step", 6, "built", "PW"]] },
+  ] },
+  { area: "protocol", notes: [
+    { title: "Tags", file: "tags", sum: "Tags are facets: one kind per step, activities, area, size and origin.", entries: [["14 Nov", "Facets: kind, activities, area, size, origin", 7, "built", "ST2"]] },
+    { title: "Stopped queue: a new revision", file: "stopped-queue-new-revision", sum: "Only the user lifts a stop: by approving a new revision of the stopped queue, or with Continue.", entries: [["13 Nov", "A stop is lifted by a new revision or Continue", 3, "built", "SC"], ["14 Nov", "The work of a stopped step is kept or discarded", 2, "replaced", null, "orchestrator-status-changes#2026-11-14"]] },
+  ] },
+  { area: "dashboard", groups: [
+    { name: "chats", notes: [
+      { title: "Chat improvements", file: "chat-improvements", sum: "Tools for the chats: quoting, pictures by pasting or dragging, voice.", open: 2, entries: [["14 Nov", "Quoting a selection; pictures by pasting, dragging, attaching", 5, "built", "CH2"], ["15 Nov", "Pictures in the chats by pasting or dragging", 3, "queued", "CI", "proposed"]] },
+      { title: "Side panels and the waiting list", file: "side-panels-and-waiting-list", sum: "The chat panel opened last is on top; a chat keeps its place.", entries: [["14 Nov", "Panels stack in the order opened; a chat keeps its place", 4, "built", "SP"]] },
+    ] },
+    { name: "queues and plan", notes: [
+      { title: "Queue plan view", file: "queue-plan-view", sum: "The Queues view shows the planned order as a binding graph of dependencies.", entries: [["14 Nov", "The planned order, ready for parallel queues", 6, "built", "PV"], ["15 Nov", "Lines must not run through queues; the layouts", 7, "queued", "PB", "running 2/5"]] },
+    ] },
+  ] },
+  { area: "conversations", notes: [
+    { title: "An overview of the ideas", file: "ideas-overview", sum: "The Ideas panel gets an overview of the notes grouped by area, showing each dated decision's status.", entries: [["15 Nov", "A view in a hierarchy with statuses; queues name their notes", 6, "queued", "IO", "running 1/7"]] },
+    { title: "Chat context", file: "chat-context", sum: "The Ideas conversations get a Compact action; the orchestrator goes on in a fresh session.", entries: [["15 Nov", "Compact in the Ideas conversations", 3, "handed", null]] },
+    { title: "Conversation hand-over scope", file: "conversation-handoff-scope", sum: "A hand-over summarizes only its own conversation's topics and names the dates it covers.", entries: [["14 Nov", "Only the conversation's own topics are handed over", 2, "decided", null]] },
+  ] },
+  { area: null, notes: [
+    { title: "Game dev features", file: "game-dev-features", sum: "Game features, Unity first but generic: video as review material, performance measures.", open: 3, entries: [["14 Nov", "Video as review material; a fixture × seed matrix", 4, "decided", null]] },
+    { title: "Test speed", file: "test-speed", sum: "The slowdown came from runs in which many tests failed by timing out.", entries: [] },
+  ] },
+];
+
+const least = (n) => {
+  const live = n.entries.filter((e) => ORDER.includes(e[3]));
+  if (n.entries.length === 0) return "worked";
+  if (live.length === 0) return n.entries[0][3];
+  return live.reduce((a, e) => ORDER.indexOf(e[3]) < ORDER.indexOf(a) ? e[3] : a, "built");
+};
+const entryLine = (e) => {
+  const [d, lead, n, s, q, qs] = e;
+  const right = q ? `<span class="q">${q}${qs ? ` <span>· ${qs}</span>` : ""}</span>` : (e[5] && s === "replaced" ? `<span class="q"><span>→ ${e[5]}</span></span>` : `<span></span>`);
+  return `<div class="ent${s === "dropped" || s === "replaced" ? " dim" : ""}"><span class="d">${d}</span><span class="l">${lead} <small>· ${n}</small></span>${st(s)}${right}</div>`;
+};
+const noteRow = (n, on) => `<div class="nt${on ? " on" : ""}">
+  <div class="nrow"><span class="t">${n.title}</span><span class="s">${n.sum}</span>${n.open ? `<span class="openq">${n.open} open</span>` : ""}${st(least(n))}</div>
+  ${n.entries.map(entryLine).join("")}${n.entries.length === 0 ? `<div class="ent"><span class="d"></span><span class="l" style="color:var(--fg-3)">No decision yet <small>· 2 ideas, 1 open question</small></span></div>` : ""}
+</div>`;
+const countNotes = (a) => (a.notes ?? a.groups.flatMap((g) => g.notes)).length;
+
+function overview(openFile, folded = []) {
+  const all = AREAS.flatMap((a) => a.notes ?? a.groups.flatMap((g) => g.notes)).flatMap((n) => n.entries);
+  const c = (s) => all.filter((e) => e[3] === s).length;
+  // the counts of Nexus's real notes would be larger; these are the mockup's own
+  const seg = [["All", 47, true], ["Decided", 5], ["Handed over", 3], ["Queued", 6], ["Built", 31], ["Dropped", 2]];
+  let h = `<div class="phone-switch"><span class="seg"><span>Conversations</span><span class="on">Overview</span></span></div>
+  <div class="bar"><span class="seg">${seg.map(([l, n, on]) => `<span class="${on ? "on" : ""}">${l}<span class="n">${n}</span></span>`).join("")}</span>
+  <span class="grow"></span><span class="search">Filter notes…</span></div>
+  <div class="match"><span><b>To match · 31</b> suggestions for 41 earlier queues: which notes they came from</span><span class="grow"></span><span class="btn2">Review</span></div>`;
+  for (const a of AREAS) {
+    const name = a.area ?? "Unsorted";
+    const fold = folded.includes(name);
+    h += `<section class="area${fold ? " folded" : ""}"><div class="ahead"><span class="fold">${fold ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg>' : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>'}</span><h3>${name}</h3><span class="c">${countNotes(a)} notes</span>${a.area ? "" : `<span class="hint">· no <code>**Area:**</code> line; the partner adds one</span>`}</div>`;
+    if (a.groups) for (const g of a.groups) h += `<div class="sub" style="${fold ? "display:none" : ""}">${a.area} / <b>${g.name}</b></div><div class="notes">${g.notes.map((n) => noteRow(n, n.file === openFile)).join("")}</div>`;
+    else h += `<div class="notes">${a.notes.map((n) => noteRow(n, n.file === openFile)).join("")}</div>`;
+    h += `</section>`;
+  }
+  document.getElementById("page").innerHTML = h;
+}
+
+function notePanel() {
+  const rail = document.getElementById("rail");
+  rail.className = "notepanel";
+  rail.innerHTML = `
+  <div class="nphead">
+    <div class="top"><span>dashboard / queues and plan</span><span class="grow"></span><span>⤢</span><span style="font-size:15px">✕</span></div>
+    <h2>Queue plan view</h2>
+    <div class="row" style="gap:10px"><span class="file">docs/ideas/queue-plan-view.md</span><span class="grow"></span>${st("queued")}</div>
+  </div>
+  <div class="npbody">
+    <div class="sum">The Queues view shows the planned order as a binding graph of dependencies, ready for parallel queues. The plan's layouts were chosen on mockups (PL); building them runs in PB.</div>
+    <div>
+      <div class="lab">Decided · 2 entries</div>
+      <div class="ecard">
+        <div class="h"><b>15 Nov 2026</b><span class="fg3" style="font-size:12px">2 headings · 7 decisions</span><span class="grow"></span>${st("queued")}</div>
+        <div class="lead">Lines must not run through queues; the layouts from the mockups <small>· also “2026-11-15: lines must not run through queues”</small></div>
+        <ul class="hist">
+          <li class="decided"><span class="w">15 Nov</span>decided</li>
+          <li class="handed"><span class="w">15 Nov 12:40</span>handed over · “Plan view layouts”</li>
+          <li class="queued"><span class="w">15 Nov 12:58</span>queued in <span class="mono">PB</span></li>
+          <li class="faint"><span class="w">15 Nov 13:05</span>approved; started 14:10 · running 2/5</li>
+        </ul>
+      </div>
+      <div class="ecard">
+        <div class="h"><b>14 Nov 2026</b><span class="fg3" style="font-size:12px">6 decisions</span><span class="grow"></span>${st("built")}</div>
+        <div class="lead">The planned order as a graph, ready for parallel queues</div>
+        <ul class="hist">
+          <li class="decided"><span class="w">14 Nov</span>decided</li>
+          <li class="faint"><span class="w"></span>handed over: before the records</li>
+          <li class="queued"><span class="w">14 Nov 18:02</span>queued in <span class="mono">PV</span> · and <span class="mono">PS</span> (matched)</li>
+          <li class="built"><span class="w">15 Nov 08:47</span>built · <span class="mono">PV 7c41e0a</span>, <span class="mono">PS 2b9d311</span></li>
+        </ul>
+      </div>
+    </div>
+    <div>
+      <div class="lab">Open · 1</div>
+      <div class="oq">Should a recurring queue show in the graph once, or at each of its runs?</div>
+    </div>
+    <div>
+      <div class="lab">Queues</div>
+      <div class="qline"><span class="mono">PB</span><span class="t">The plan view, part 1: routes, full titles, line details</span><span class="st queued">running</span></div>
+      <div class="qline"><span class="mono">PL</span><span class="t">The plan view's design: layouts on mockups</span><span class="st built">done</span></div>
+      <div class="qline"><span class="mono">PV</span><span class="t">The planned order in the Queues view</span><span class="st built">done</span></div>
+      <div class="qline"><span class="mono">PS</span><span class="t">Never two queues in one checkout</span><span class="st built">done</span></div>
+    </div>
+    <div class="fg3" style="font-size:12px">Ideas (not decided) · 2 — in the file</div>
+  </div>
+  <div class="npfoot"><span class="btn2">Open the file</span><span class="grow"></span><span class="fg3" style="font-size:12px">Updated 15 Nov 12:31</span></div>`;
+}
+
+function matching() {
+  const cards = [
+    { id: "SP", t: "Side panels stack in the order opened; a finished queue never shows as stopped", qs: "done 14 Nov · 5d0c2e7",
+      q: "Decided by the user on <mark>2026-11-14</mark>; notes in <mark>docs/ideas/side-panels-and-waiting-list.md</mark> (section \"2026-11-14 (later): the place in a chat is kept\")",
+      s: [["side-panels-and-waiting-list.md#2026-11-14", "Panels stack in the order opened", "dated"]] },
+    { id: "PL", t: "The plan view's design: layouts and features on mockups, the user's choice", qs: "done 15 Nov · a81f4c2",
+      q: "A felhasználó <mark>2026-11-15</mark>-i döntései: <mark>docs/ideas/queue-plan-view.md</mark> (Decided); a mockupok stílusa: <mark>docs/ideas/ui-ux-redesign.md</mark>",
+      s: [["queue-plan-view.md#2026-11-15", "Lines must not run through queues; the layouts", "dated"], ["ui-ux-redesign.md#2026-11-14", "Survey first, then proposals with mockups", "file"], ["ui-ux-redesign.md#2026-11-13", "A redesign, the user picks from variants", "file"]] },
+    { id: "ST2", t: "Statistics: project metrics, the usage estimate, nexus stats", qs: "done 15 Nov · 9e03b5d",
+      q: "Decided: <mark>docs/ideas/statistics.md</mark> (<mark>2026-11-14</mark>) and the area tags of <mark>docs/ideas/tags.md#2026-11-14</mark>",
+      s: [["tags.md#2026-11-14", "Facets: kind, activities, area, size, origin", "exact", "yes"], ["statistics.md#2026-11-14", "By model, effort and tag, in usage windows", "dated"]] },
+    { id: "R1", t: "Refactoring 1: a behaviour guard, then explicit run state transitions", qs: "done 14 Nov · 41594a4",
+      q: "The plan is in <mark>docs/ideas/refactoring.md</mark>; this queue does items 1 and 2.",
+      s: [["refactoring.md#2026-11-14", "A ranked plan for refactoring the code", "file", "no"]] },
+  ];
+  const tag = { exact: "exact", dated: "date in text", file: "file only" };
+  let h = `<div class="bar"><span class="btn2 ghost">‹ Overview</span><h2 style="font-size:15px;text-transform:none;letter-spacing:0;color:var(--fg)">Which notes did the earlier queues come from?</h2></div>
+  <div class="note" style="border:0;padding:0 0 10px;color:var(--fg-3);font-size:12.5px">Suggestions from the queues' own words (title, description, step goals). An accepted one counts as the queue's source; the closed queues are not changed. Only you decide here.</div>
+  <div class="bar"><span class="seg"><span class="on">To decide<span class="n">31</span></span><span>Accepted<span class="n">14</span></span><span>Rejected<span class="n">3</span></span></span>
+  <span class="grow"></span><span class="btn2 pri">Accept the exact and dated ones (24)</span></div>`;
+  for (const c of cards) {
+    h += `<div class="mcard"><div class="h"><span class="id">${c.id}</span><b>${c.t}</b><span class="qs">${c.qs}</span></div><div class="quote">${c.q}</div>`;
+    for (const [ref, lead, k, dec] of c.s) {
+      const act = dec === "yes" ? `<span class="decided-y">✓ accepted</span>` : dec === "no" ? `<span class="decided-n">rejected · <u>undo</u></span>` : `<span class="row" style="gap:6px"><span class="btn2">Accept</span><span class="btn2 ghost">Reject</span></span>`;
+      h += `<div class="sugg"><span class="ref">${ref}<small>${lead}</small></span><span class="kindtag ${k}">${tag[k]}</span>${act}</div>`;
+    }
+    h += `</div>`;
+  }
+  document.getElementById("page").innerHTML = h;
+}
+
+if (view === "matching") matching();
+else if (view === "entry") { overview("queue-plan-view", ["lifecycle", "protocol"]); notePanel(); }
+else overview();
+</script>
+</body>
+</html>
