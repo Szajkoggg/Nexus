@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { StatusChange } from "@nexus/protocol";
 import { stepValuesText } from "@nexus/protocol/steps";
+import { importedFrom } from "@nexus/protocol/ideas";
 import { act, enc, fileUrl, projectUrl, type ProjectState, type QueueView } from "../../api.ts";
 import { needsApproval, levelWords, queueChecks } from "../../approval.ts";
 import { approvalHistory, approvalWord, canWithdrawApproval, queueOver } from "../../details.ts";
@@ -30,6 +31,7 @@ export function QueueDetail({ project, queue, onClose, of, chat = [], onFull }: 
   const id = project.project.id;
   const inherited = project.project.defaults.stop_conditions;
   const checks = queueChecks(project.project, queue);
+  const imported = importedFrom(queue.source);
   // A stopped queue: what its stopped step left, and the user's Keep or Discard, shared by Continue and the approval.
   // The same read as the step's line and the waiting cards (Stop.tsx), so they never disagree.
   const leftState = useLeft(id, queue.id, queue.status === "stopped", stopVersion(queue));
@@ -113,8 +115,8 @@ export function QueueDetail({ project, queue, onClose, of, chat = [], onFull }: 
       {!approving && checks.length > 0 && (
         <Section title={t("approval.checks")}><Checks checks={checks} /></Section>
       )}
-      {queue.source && (
-        <p className="mt-6 text-xs text-fg-3">{rich("details.imported", { path: <span key="path" className="font-mono">{queue.source.path}</span>, time: <TimeAgo key="time" at={queue.source.imported_at} /> })}</p>
+      {imported && (
+        <p className="mt-6 text-xs text-fg-3">{rich("details.imported", { path: <span key="path" className="font-mono">{imported.path}</span>, time: <TimeAgo key="time" at={imported.imported_at} /> })}</p>
       )}
       </PanelBody>
       <QueueBar key={queue.id} project={project} queue={queue} left={leftState} work={work} needsChoice={needsChoice} />

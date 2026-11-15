@@ -524,6 +524,18 @@ export type StatusChange = z.infer<typeof StatusChange>;
 export const MaintenanceMode = z.enum(["survey", "fix_small"]);
 export type MaintenanceMode = z.infer<typeof MaintenanceMode>;
 
+/** A note reference: a thinking partner's note (a path from the project's root, ending .md) and a Decided entry's date. */
+export const NOTE_REF = /^(?!\/)(?![A-Za-z]:)[^#\s\\]*?([^/#\s\\]+\.md)#(\d{4}-\d{2}-\d{2})$/;
+/** The Markdown file a queue was imported from (`nexus import`). */
+export const ImportSource = z.object({ path: z.string(), imported_at: Time });
+export type ImportSource = z.infer<typeof ImportSource>;
+/** One item of a queue's `source`: a note reference, or the file it was imported from. */
+export const QueueSource = z.union([
+  z.string().regex(NOTE_REF, "a note reference: <notes folder>/<file>.md#<YYYY-MM-DD> (for example docs/ideas/tags.md#2026-11-14)"),
+  ImportSource,
+]);
+export type QueueSource = z.infer<typeof QueueSource>;
+
 const QueueShape = z.object({
   protocol: z.literal(1),
   id: Id,
@@ -584,7 +596,13 @@ const QueueShape = z.object({
   history: z.array(z.object({ revision: z.number().int(), hash: z.string(), replaced_at: Time })).default([]),
   /** Status changes made through Nexus (lifts of a stop, for now), oldest first. Written only by the server. */
   changes: z.array(StatusChange).default([]),
-  source: z.object({ path: z.string(), imported_at: Time }).optional(),
+  /**
+   * Where the queue came from (ideas.ts): note references (`docs/ideas/<file>.md#<date>`, a thinking partner's dated
+   * Decided entry; set by the orchestrator, checked against the notes when drafted, and pinned by the approval when
+   * given), and the Markdown file a `nexus import` read it from (`{ path, imported_at }`, not pinned). An older file's
+   * single import object reads as a list of one.
+   */
+  source: z.preprocess((x) => (x && typeof x === "object" && !Array.isArray(x) ? [x] : x), z.array(QueueSource)).optional(),
   created_at: Time.optional(),
   updated_at: Time.optional(),
 });

@@ -12,6 +12,8 @@ import { closingStepId, integrationStepId, stepDefs } from "./closing.ts";
 import { stepChecks } from "./steps.ts";
 import { inheritedTags, kindListIssue, tagIssues, type StepTags } from "./tags.ts";
 import { fallbackIssues, kindIssues } from "./routing.ts";
+import { importedFrom, noteRefIssue, noteRefs } from "./ideas.ts";
+import { readNotes } from "./ideas-read.ts";
 
 export class ActionError extends Error {
   readonly status: number;
@@ -425,12 +427,14 @@ export function applyDraft(store: ProjectStore, definition: unknown): string {
   try { old = store.readQueue(draft.id); } catch { old = undefined; }
   const tagged = draftTagIssues(store, draft, old);
   if (tagged.length) throw new ActionError(tagged.join("; "));
+  const sourced = draftSourceIssues(store, draft, old);
+  if (sourced.length) throw new ActionError(sourced.join("; "));
   const at = now();
   // A new step starts pending, or skipped (kept for the record); statuses change through nexus queue set only.
   const fresh = draft.steps.filter((s) => !old?.steps.some((o) => o.id === s.id) && s.status && s.status !== "skipped");
   if (fresh.length) throw new ActionError(`a new step has no status or skipped: ${fresh.map((s) => `${s.id} (${s.status})`).join(", ")}`);
   if (!old) {
-    store.writeQueue({ ...draft, revision: 1, approvals: [], history: [], created_at: at, updated_at: at });
+    store.writeQueue({ ...draft, source: draft.source?.length ? draft.source : undefined, revision: 1, approvals: [], history: [], created_at: at, updated_at: at });
     return `queue ${draft.id} created as ${draft.status} (revision 1); the user approves it in the dashboard`;
   }
   // A draft may not change the status of an existing step (that is nexus queue set's, recorded), nor drop a step
@@ -476,6 +480,7 @@ export function applyDraft(store: ProjectStore, definition: unknown): string {
     review_level: draft.review_level ?? old.review_level,
     // Left out, it stays as it was; `coding: false` takes it back before the queue has started.
     coding: draft.coding ?? old.coding,
+    source: draftSource(draft, old),
     // The queue's tags, runtime, model, effort and fallback are its steps' defaults, as drafted (left out: none), like
     // the steps' own.
     ...queueTags(draft),
@@ -496,6 +501,32 @@ export function applyDraft(store: ProjectStore, definition: unknown): string {
   return changed
     ? `queue ${draft.id} updated to revision ${next.revision}; it needs the user's approval again`
     : `queue ${draft.id} updated (no change to steps, checks or stop conditions: the approval stands)`;
+}
+
+/**
+ * The source of a revised queue: left out of the draft, it stays as it was; given, its note references replace the
+ * queue's, and the record of the file it was imported from stays (it is Nexus's, not the draft's).
+ */
+function draftSource(draft: QueueFile, old: QueueFile): QueueFile["source"] {
+  if (draft.source === undefined) return old.source;
+  const imported = importedFrom(old.source);
+  const next = [...(imported ? [imported] : []), ...noteRefs(draft.source)];
+  return next.length ? next : undefined;
+}
+
+/**
+ * What is wrong with the note references a draft gives (ideas.ts, noteRefIssue): each must name an entry of a note in
+ * the project's notes folder as the notes are now. A reference the queue already had is not checked again (the note
+ * may have changed since it was approved).
+ */
+function draftSourceIssues(store: ProjectStore, draft: QueueFile, old: QueueFile | undefined): string[] {
+  const had = new Set(noteRefs(old?.source));
+  const refs = noteRefs(draft.source).filter((r) => !had.has(r));
+  if (!refs.length) return [];
+  const p = store.readProject();
+  const dir = p.conversations.notes_dir;
+  const notes = readNotes(p.root, dir);
+  return refs.flatMap((r) => noteRefIssue(r, dir, notes) ?? []).map((x) => `source: ${x}`);
 }
 
 /** A queue's own tags, each key present (undefined when the queue sets none), so that they replace the old ones. */

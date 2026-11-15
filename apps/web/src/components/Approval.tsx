@@ -6,6 +6,7 @@
 // N" in the action bar with what it pins; Ctrl+Enter approves. A stopped queue's revision keeps SC2's Keep or Discard.
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { ChatEntry } from "@nexus/protocol";
+import { importedFrom } from "@nexus/protocol/ideas";
 import { actResult, enc, projectUrl, type ProjectState, type QueueView, type StepView } from "../api.ts";
 import { draftOf, pinsText, queueChecks, queueReference, runSettings, withReference, stepOwnLine, type QueueCheck } from "../approval.ts";
 import { draftKey, putDraft, readDraft } from "../drafts.ts";
@@ -118,10 +119,11 @@ export const AskButton = ({ project, queue, first }: { project: string; queue: Q
 /** Who proposed the queue and when, with the orchestrator's message one click away (shown below when open). */
 function Proposed({ queue, chat, open, setOpen }: { queue: QueueView; chat: readonly ChatEntry[]; open: boolean; setOpen: (o: boolean) => void }) {
   const draft = draftOf(chat, queue.id);
+  const imported = importedFrom(queue.source);
   return (
     <span className="inline-flex flex-wrap items-center gap-x-1.5">
-      {queue.source
-        ? <span>{rich("approval.imported", { path: <span key="path" className="font-mono">{queue.source.path}</span>, time: <TimeAgo key="time" at={queue.source.imported_at} /> })}</span>
+      {imported
+        ? <span>{rich("approval.imported", { path: <span key="path" className="font-mono">{imported.path}</span>, time: <TimeAgo key="time" at={imported.imported_at} /> })}</span>
         : draft ? <span>{rich("approval.proposedByOrchestrator", { time: <TimeAgo key="time" at={draft.at} /> })}</span>
         : queue.updated_at ? <span>{rich("approval.proposed", { time: <TimeAgo key="time" at={queue.updated_at} /> })}</span> : null}
       {draft?.message && (

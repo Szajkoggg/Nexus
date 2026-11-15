@@ -12,6 +12,7 @@ import {
   Activity, Applied, AwayFile, ChatEntry, PinsFile, RecurringFile, Refusal, Delivery, Event, GlobalSettings, InboxEntry, MaxRunning, MetricsFile, NoteMeta, GitFile, ProjectFile, PushFile, QueueFile, type QueueInput, LegacyReviewPolicy, RegistryFile, RunFile, RuntimeFile, SessionFile, StartFile, StaticAnalysisNote, PlanFile, StoredProject, TagsFile, TurnRecord, UsageFile,
   type Note,
 } from "./schemas.ts";
+import { noteRefs } from "./ideas.ts";
 import { applyChange, builtInSettings, effectiveProject, migrateStored, storedFrom } from "./settings.ts";
 
 const NEXUS_DIRNAME = ".nexus";
@@ -513,22 +514,25 @@ function parseFrontMatter(text: string): { meta: unknown; body: string } {
 
 /**
  * The hash an approval pins: steps (without baseline state), stop conditions and checks, `coding`, and the queue's
- * defaults for its steps (its tags, runtime, model, effort and fallback). A step's drafted review level and tags are
- * part of it; the levels the user set (`user_levels`) and the queue's own level are not.
+ * defaults for its steps (its tags, runtime, model, effort and fallback), and the note references of its `source`. A
+ * step's drafted review level and tags are part of it; the levels the user set (`user_levels`), the queue's own level
+ * and the file it was imported from are not.
  */
 export function revisionHash(q: HashedQueue): string {
   return hashOf(q.steps.map(({ status: _s, status_note: _n, ...def }) => def), q);
 }
 /** The queue's defaults for its steps: its tags, and its runtime, model, effort and fallback. */
 const STEP_DEFAULTS = ["kind", "activities", "area", "size", "origin", "runtime", "model", "effort", "fallback"] as const;
-type HashedQueue = Pick<QueueFile, "steps" | "stop_conditions" | "checks" | "coding"> & Partial<Pick<QueueFile, (typeof STEP_DEFAULTS)[number] | "maintenance">>;
+type HashedQueue = Pick<QueueFile, "steps" | "stop_conditions" | "checks" | "coding"> & Partial<Pick<QueueFile, (typeof STEP_DEFAULTS)[number] | "maintenance" | "source">>;
 // `coding` counts only when true, and a queue's tags and its runtime, model, effort and fallback only when set, so the
-// hash of a queue without them is what it was before those fields (a step's left out is not in its JSON either).
+// hash of a queue without them is what it was before those fields (a step's left out is not in its JSON either). So do
+// note references: an imported queue's source (the file it was read from) never counts.
 const hashOf = (steps: unknown[], q: Omit<HashedQueue, "steps">) =>
   "sha256:" + createHash("sha256").update(JSON.stringify({
     steps, stop_conditions: q.stop_conditions, checks: q.checks, ...(q.coding ? { coding: true } : {}),
     ...(q.maintenance ? { maintenance: q.maintenance } : {}),
     ...Object.fromEntries(STEP_DEFAULTS.filter((k) => q[k] !== undefined).map((k) => [k, q[k]])),
+    ...(noteRefs(q.source).length ? { source: noteRefs(q.source) } : {}),
   })).digest("hex");
 
 /**

@@ -207,6 +207,9 @@ origin: user
 runtime: claude                        # optional: the runtime, model, effort and fallback of its steps that name none
 fallback: [{ runtime: codex, effort: high }, wait]   # (see "Kinds and their defaults")
 integration: true                      # written only by the server: the queue works in a worktree of its own, so it ends with the integration step (below)
+source:                                # optional: where it came from (see "Where a queue came from" below)
+  - docs/ideas/queue-plan-view.md#2026-11-15   # a note reference: a thinking partner's dated Decided entry; pinned by the approval
+  - { path: QUEUE.md, imported_at: 2026-11-12T00:00:00Z }   # written by nexus import: the file it was read from; not pinned
 user_levels: { W3: 1 }                 # levels the user set on steps; written only by the server (see "Review")
 legacy_policies: { W1: continue }      # each step's review policy from before review levels; written only by the server
 stop_conditions:                       # in addition to the project defaults
@@ -406,6 +409,20 @@ a stop (`lift`, `approved`, `running` or `pending` for a queue), reopening a fin
 skipping a step at work, and any other status. The engine reads a step's status again before it opens a step, so
 skipping a pending step of a running queue takes effect: the step is never opened. A cancelled queue is neither
 started nor resumed.
+
+**Where a queue came from** (`source`, decided by the user 2026-11-15, queue IO; docs/ux/ideas-overview.md). A list:
+note references, set by the orchestrator in a draft, and the record of the Markdown file `nexus import` read the queue
+from. An older file's single `{ path, imported_at }` reads as a list of one. A note reference is
+`<notes folder>/<file>.md#<YYYY-MM-DD>`: a note in the project's `conversations.notes_dir` (subfolders allowed, the
+README is not a note) and the date of one of its Decided entries; every Decided heading of that date in the note is the
+one entry it names (`2026-11-15` and `2026-11-15 (later): …` alike). A queue may name several entries, and an entry may
+be named by several queues. A draft that brings a new reference is refused, with the reason, when it is not one, when
+the project has no notes folder, when the file is outside the folder or missing, or when the note has no entry of that
+date (the refusal lists its dates); a reference the queue already had is not checked again. Left out of a revision's
+draft, the source stays; given, its note references replace the queue's, and the import record stays. The note
+references are part of what an approval pins, in their order, only when there are any: the hash of a queue without
+them (an imported one included) is the one it had before the list, and a revision that changes them needs the user's
+approval again.
 
 **Drafts do not change statuses.** In a draft of an existing queue a step's `status` may be left out or be the one in
 the file; any other value refuses the whole draft, listing the steps. A new step has no status or `skipped`. A draft
@@ -1524,6 +1541,22 @@ tools (`Bash(nexus status:*)` and `PowerShell(nexus status:*)`, and so on), and 
 with `notes_dir` as its working directory in a `workspace-write` sandbox (`read-only` without a notes folder), approval
 `never`, where its commands (`nexus help` among them, which only reads) run in the sandbox. Its briefing points it to
 `nexus help` for how Nexus works (decided 2026-11-15, queue OP). It starts no work. An idle partner's process ends after 15 minutes; the next message resumes the conversation.
+
+**The ideas overview** (`ideas.ts`, `ideas-read.ts` in the protocol package; docs/ux/ideas-overview.md). The notes in
+`notes_dir` are read, never written, as topics: the title (the first `# ` heading), the `**Summary:**` line and the
+`**Area:** <area> [/ <sub-group>]` line under it, the Open questions and the Ideas (top-level bullets under headings
+named so), and the dated Decided entries. A Decided section is a heading named "Decided" at any level, up to the next
+heading of its level or above; in it a heading that begins with a date, or ends with `(decided <date>)`, starts that
+date's entry (a heading `… (decided <date>)` is one anywhere), a deeper heading without a date goes on with it, and the
+headings of one date are one entry. An entry's lines `**Dropped:** <date>: <why>` and `**Replaced by:**
+<file>#<date>`, written by the partner, mark it so. Each entry's status is derived, never kept: `decided` (nothing
+since), `handed_over` (a hand-over record covers it), `queued` (a queue that is not cancelled names it in its `source`,
+from the upload on), `built` (every such queue is done), and `dropped` or `replaced`, which win over every other, even
+after a queue built it. A topic shows its least advanced live entry, `worked_out` with no entry at all (only dropped or
+replaced ones: dropped, else replaced). Its history is in time order: decided (the entry's date), handed over, and each
+naming queue's queued (created), approved, started, finished (with its last commit) or cancelled, then dropped or
+replaced. A note without an Area line takes the area most of its queues' steps carry. A queue's reference to a note or
+an entry that is not there is listed apart (`unknown_refs`).
 
 **The web** (`conversations.web`, global with a project override, decided by the user 2026-11-15): `off`, `search`
 (the default) or `fetch`. A changed level applies from the partner's next message (a new process, resuming the
