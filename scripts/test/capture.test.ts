@@ -91,6 +91,28 @@ test("a development instance started with decoys in the parent's environment ign
   rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 });
 
+test("a view's script reaches the browser with that view only; one not read is reported", async () => {
+  const opened: (string | undefined)[] = [];
+  const browser: Browser = {
+    async open(_url, _w, _h, script) { opened.push(script); },
+    async click() { return true; },
+    async type() { return true; },
+    async press() { return true; },
+    async shot() {},
+  };
+  const views = parseViews(`
+views:
+  - { key: plain@1440, route: "#/demo", settle: 0 }
+  - { key: faked@390, route: "#/demo", settle: 0, script: scripts/capture/fake-speech.js }
+  - { key: missing@390, route: "#/demo", settle: 0, script: scripts/capture/other.js }
+`).views;
+  assert.equal(views[1]!.script, "scripts/capture/fake-speech.js");
+  const shots = await captureViews(views, browser, { base: "http://127.0.0.1:4318", out: "C:/out", side: "after", scripts: new Map([["scripts/capture/fake-speech.js", "window.x = 1;"]]) });
+  assert.deepEqual(opened, [undefined, "window.x = 1;"]);
+  assert.deepEqual(shots.map((s) => s.error), [undefined, undefined, "its script scripts/capture/other.js was not read"]);
+  assert.throws(() => parseViews(`views: [{ key: "a@390", route: "#/p", script: fake.ts }]`), /script: the path of a \.js file/);
+});
+
 test("a view that fails is reported with why; the others are taken", async () => {
   const taken: string[] = [];
   const browser: Browser = {

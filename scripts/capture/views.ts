@@ -21,6 +21,11 @@ export interface View {
   height?: number;
   /** How long the page settles after it opens, in milliseconds (default 1500). */
   settle?: number;
+  /**
+   * A JavaScript file (a path from the repository root) run in the page before the dashboard's own scripts, in every
+   * frame: a stand-in for a browser API the capture must not use for real (a fake speech recognition).
+   */
+  script?: string;
   actions: Action[];
   /** From the key. */
   width: number;
@@ -52,6 +57,7 @@ export function parseViews(text: string): ViewList {
     seen.add(key);
     if (typeof v.route !== "string" || !v.route.startsWith("#/")) problems.push(`${at} (${key}).route: a dashboard route starting with #/, e.g. "#/demo/UI/UI1"`);
     if (v.label !== undefined && typeof v.label !== "string") problems.push(`${at} (${key}).label: text`);
+    if (v.script !== undefined && (typeof v.script !== "string" || !v.script.endsWith(".js"))) problems.push(`${at} (${key}).script: the path of a .js file from the repository root`);
     for (const f of ["height", "settle"] as const) {
       if (v[f] !== undefined && !(Number.isInteger(v[f]) && (v[f] as number) >= 0)) problems.push(`${at} (${key}).${f}: a whole number of ${f === "height" ? "pixels" : "milliseconds"}`);
     }
@@ -64,7 +70,7 @@ export function parseViews(text: string): ViewList {
     }
     const width = splitKey(key).width;
     views.push({
-      key, route: v.route as string, label: v.label as string | undefined, actions, width,
+      key, route: v.route as string, label: v.label as string | undefined, script: v.script as string | undefined, actions, width,
       height: (v.height as number | undefined) ?? (width >= 1024 ? 900 : 844), settle: (v.settle as number | undefined) ?? 1500,
     });
   }

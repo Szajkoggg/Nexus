@@ -423,6 +423,20 @@ export const en = {
   "ui.withShortcut": "{action} (Ctrl+Enter)",
   "ui.moreActions": "More actions",
 
+  // ---------------------------------------------------------------- speaking into a chat's box (voice.ts, Voice.tsx)
+  "voice.start": "Speak",
+  "voice.stop": "Stop listening",
+  "voice.listening": "Listening…",
+  "voice.stopHint": "tap the microphone again to stop",
+  /** Said once, at the first use: where the sound goes. */
+  "voice.notice": "Your browser recognises speech on its maker's servers: Chrome sends the sound to Google, Edge to Microsoft.",
+  "voice.noSpeech": "Nothing was heard.",
+  "voice.notAllowed": "The browser was not allowed to use the microphone.",
+  "voice.noMicrophone": "No microphone was found.",
+  "voice.network": "Speech recognition needs a network connection.",
+  "voice.language": "The browser cannot recognise this language.",
+  "voice.failed": "Speech recognition did not work.",
+
   // ---------------------------------------------------------------- a queue's card on the project page (QueueRow.tsx)
   "queue.questions": { one: "{count} question", other: "{count} questions" },
   "queue.closedOf": "{closed} of {total}",

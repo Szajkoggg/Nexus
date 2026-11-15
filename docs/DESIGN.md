@@ -1233,6 +1233,26 @@ as the pictures below its bubble (`splitPictures`), served by the file endpoint,
 new tab. Smaller choices made while building, not by the user: the paths surviving a reload, the click opening a new
 tab rather than the review viewer, and the plain-text rule for pastes.
 
+### Speaking into a chat
+
+Decided by the user on 2026-11-14 (queue BI; docs/ideas/backlog-smaller-items.md): a microphone in every chat's box,
+only where the browser has speech recognition (the Web Speech API: Chrome, Edge, Safari; not Firefox); it listens in
+the reader's language as a BCP-47 tag, else the browser's language; what it hears goes into the box and is never sent
+by itself; tapping it again or a silence stops it. Chrome and Edge send the sound to their maker's servers, so the
+first use says so in a line under the box.
+
+How it is built (`apps/web/src/voice.ts`, pure and unit tested with a fake recognition class; `components/Voice.tsx`):
+`recognitionOf` finds `SpeechRecognition` or `webkitSpeechRecognition`; without either `useVoice` returns nothing and
+no button is drawn. A `Dictation` runs one utterance (`continuous` off, interim results on): final text goes to the
+draft through `useDraftText`'s `append` (after the text as it is then, a space between), interim text shows under the
+box. The reader's language reaches the box through the page context (`page.ts`, the current project's effective
+setting); `voiceLanguage` keeps the browser's region when it has one for that language ("en" with an en-GB browser:
+en-GB), else uses a usual one (hu-HU, en-US…). Only the chat layouts (the card and the phone's line) show it; the
+forms' plain boxes do not. Headless Edge has `webkitSpeechRecognition`, so the capture shows the button as it is; the
+listening state is captured with `scripts/capture/fake-speech.js`, loaded through a view's `script` before the
+dashboard. Smaller choices made while building, not by the user: the regions, en-US for English, a stop square on a red
+button while it listens, and the notice remembered per browser (localStorage `nexus.voice.noticed`).
+
 ### The file viewer
 
 Decided by the user on 2026-11-14 (queue CH3; docs/ideas/chat-improvements.md): a referenced file opens in the
