@@ -97,6 +97,7 @@ test("a deploy after a queue does not happen when a step stops: the plan is drop
     assert.match(readPlanFile().ended!.reason, /step Q\/Q2 stopped.*so queue Q is not done/);
     assert.equal(t.pushed.length, 1, "the user's devices are told");
     assert.match(t.pushed[0]!.body, /^No deploy after queue Q: step Q\/Q2 stopped/);
+    assert.equal(t.pushed[0]!.kind, "deploy");
     await until("the orchestrator to be told", () => t.orchestrator()!.view().chat.some((c) => c.from === "nexus" && /The deploy planned after queue Q will not happen/.test(c.text)), LONGER.step);
   } finally { t.stop(); }
 });

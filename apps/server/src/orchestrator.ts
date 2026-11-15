@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import {
   ActionError, ClaudeEffort, reviewedByOrchestrator, runGoing, ProjectStore, applyDraft, defineMetric, inPlan, loadProjectState, metricDef, openPlan, orchestratorOverview, overThreshold, proposePlan, proposeTags, readAway, readUsage, orchestratorStatusChange, newId, now, sendBack, type Applied, type Event, type EventType, type ProjectState, type SessionFile, type SessionView,
 } from "@nexus/protocol";
+import type { NotifyKind } from "@nexus/protocol";
 import type { AgentProcess } from "./agent.ts";
 import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Hosted, type Launch } from "./agent-host.ts";
 import type { Engine } from "./engine.ts";
@@ -64,7 +65,7 @@ interface EarlierSession {
 }
 
 /** A push notification for the user's devices (src/remote.ts `push`). */
-export interface UserNotice { title: string; body: string; url: string; tag: string }
+export interface UserNotice { title: string; body: string; url: string; tag: string; kind: NotifyKind }
 
 export class Orchestrator {
   private readonly host: AgentHost;
@@ -528,7 +529,7 @@ ${n.text}` });
       // A cancel reaches the user as a push notification, like other notifications; nothing waits in their list.
       if (e.to.trim().toLowerCase() === "cancelled") {
         const p = this.store.readProject();
-        this.news.push?.({ title: `${p.name}: queue cancelled`, body: `${e.queue} cancelled by the orchestrator: ${e.reason}`.slice(0, 180), url: `/#/${encodeURIComponent(p.id)}/${encodeURIComponent(e.queue)}`, tag: `${p.id}:cancelled:${e.queue}` });
+        this.news.push?.({ title: `${p.name}: queue cancelled`, body: `${e.queue} cancelled by the orchestrator: ${e.reason}`.slice(0, 180), url: `/#/${encodeURIComponent(p.id)}/${encodeURIComponent(e.queue)}`, tag: `${p.id}:cancelled:${e.queue}`, kind: "cancelled" });
       }
       return message;
     }

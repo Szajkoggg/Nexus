@@ -42,7 +42,40 @@ test("the first look at a project is the baseline; only what is new afterwards i
   assert.deepEqual(sent.map((x) => [x.title, x.body, x.url]), [["Project: Question", "W/W3 Question b", "/#/p/W/W3"]]);
   watch.check({ id: "p", name: "Project" }, [item("b")]);            // a was answered: nothing to say
   assert.equal(sent.length, 1);
-  assert.equal(await remote.push({ title: "t", body: "b", url: "/" }), 0, "no subscribed device: nothing is sent");
+  assert.equal(await remote.push({ title: "t", body: "b", url: "/" }, { kind: "question" }), 0, "no subscribed device: nothing is sent");
+});
+
+test("each device gets what its own settings let through: two devices, the same news, one notification", async () => {
+  const phone = "https://push.example/phone", desk = "https://push.example/desk";
+  remote.subscribe({ endpoint: phone, keys: { p256dh: "k", auth: "a" } }, "Phone", "Europe/Budapest");
+  remote.subscribe({ endpoint: desk, keys: { p256dh: "k", auth: "a" } }, "Desktop");
+  assert.deepEqual(remote.deviceNotify(desk), { off: [], quiet: { on: false, from: "22:00", to: "07:00" }, urgent: false }, "a device without settings: all of them");
+  assert.equal(remote.deviceNotify(phone)!.timezone, "Europe/Budapest", "the zone it subscribed with");
+  // The phone keeps quiet at night in its own zone, and wants no reviews at all.
+  remote.setDeviceNotify(phone, { off: ["review"], quiet: { on: true, from: "22:00", to: "07:00" }, urgent: true, timezone: "Europe/Budapest" });
+  assert.throws(() => remote.setDeviceNotify(phone, { quiet: { from: "late" } }), /quiet\.from/);
+  assert.throws(() => remote.setDeviceNotify("https://push.example/none", {}), remote.NotSubscribed);
+  remote.subscribe({ endpoint: phone, keys: { p256dh: "k3", auth: "a3" } }, "Phone");
+  assert.deepEqual(remote.deviceNotify(phone)!.off, ["review"], "subscribing again keeps the settings");
+
+  const reached: string[] = [];
+  const send = async (s: { endpoint: string }) => { reached.push(s.endpoint); };
+  const night = new Date("2026-11-15T22:30:00Z"); // 23:30 in Budapest
+  const day = new Date("2026-11-15T10:00:00Z");
+  const through = (kind: Parameters<typeof remote.push>[1]["kind"], at: Date) => { reached.length = 0; return remote.push({ title: "t", body: "b", url: "/" }, { kind, at, send }).then((n) => [n, [...reached].sort()]); };
+  // The same new question, seen through the watch: only the desktop at night.
+  const watch = new remote.AttentionWatch((p, o) => remote.push(p, { ...o, at: night, send }));
+  const q = (qid: string): AttentionItem => ({ kind: "question", queue: "W", step: "W3", qid, text: "Which?" });
+  watch.check({ id: "p", name: "Project" }, []);
+  watch.check({ id: "p", name: "Project" }, [q("x")]);
+  await new Promise((r) => setTimeout(r, 10));
+  assert.deepEqual(reached, [desk]);
+  assert.deepEqual(await through("question", day), [2, [desk, phone].sort()], "by day both");
+  assert.deepEqual(await through("review", day), [1, [desk]], "reviews are off on the phone");
+  assert.deepEqual(await through("stopped", night), [2, [desk, phone].sort()], "urgent breaks through the quiet hours");
+  assert.deepEqual(await through("test", night), [2, [desk, phone].sort()], "the test always goes");
+  remote.unsubscribe(phone);
+  remote.unsubscribe(desk);
 });
 
 test("a push subscription needs an endpoint and keys", () => {

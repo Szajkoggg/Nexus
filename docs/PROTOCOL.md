@@ -1327,10 +1327,31 @@ WebSocket alike, needs the `nexus_auth` cookie holding the token from `<NEXUS_HO
 receiving push and, to local requests only, the token, a sign-in link and its QR code; `POST /api/remote/rotate`
 (local only) replaces the token.
 
-**Push.** `GET /api/push/key` (the VAPID public key), `POST /api/push/subscribe` (`subscription`, `label`),
-`POST /api/push/unsubscribe` (`endpoint`), `POST /api/push/test`. Keys and subscriptions are in
-`<NEXUS_HOME>/push.json`. Whatever newly appears in a project's "waiting for you" list is pushed to every device; the
-list as found when the server starts is the baseline.
+**Push.** `GET /api/push/key` (the VAPID public key), `POST /api/push/subscribe` (`subscription`, `label`,
+`timezone?`: the device's IANA time zone), `POST /api/push/unsubscribe` (`endpoint`), `POST /api/push/test`
+(`endpoint?`), `GET /api/push/settings?endpoint=` (a device's notification settings: `{ settings }`, the defaults for
+a device that has none; 404 for an endpoint not subscribed) and `PUT /api/push/settings` (`endpoint`, `settings`:
+replaces them; 400 with what is wrong, 404 for an endpoint not subscribed; answers `{ settings }` as stored). Keys and
+subscriptions are in `<NEXUS_HOME>/push.json`, written by the server only:
+
+```json
+{ "vapid": { "publicKey": "…", "privateKey": "…" },
+  "subscriptions": [{ "endpoint": "https://…", "keys": { "p256dh": "…", "auth": "…" }, "label": "Android", "added_at": "…",
+    "notify": { "off": ["review"], "quiet": { "on": true, "from": "22:00", "to": "07:00" }, "urgent": true, "timezone": "Europe/Budapest" } }] }
+```
+
+Whatever newly appears in a project's "waiting for you" list is pushed; the list as found when the server starts is
+the baseline. Every push has a kind, and each device gets it only when its `notify` lets it through
+(`@nexus/protocol` notify.ts, `shouldNotify`): the waiting list's kinds (`question`, `stopped`, `approval`, `review`,
+`failed`, `start`, `provisional`, `plan`, `merge`, `tags`, `recurring`), `update_failed` (an update of Nexus failed),
+`deploy` (a planned deploy waits or was dropped), `cancelled` (the orchestrator cancelled a queue), and `test`, which
+always goes. `off` lists the kinds turned off (a kind not listed is on). Within the quiet hours (`quiet.on`; `from` up
+to `to`, `HH:MM` in the device's `timezone`, over midnight when `from` is later; none when they are equal) nothing
+goes, except `stopped`, `failed` and `update_failed` when `urgent` is true; what they hold back is not sent later (the
+waiting list and the digest show it). A subscription without `notify` (from before them), or with values that do not
+parse, gets the defaults: every kind, no quiet hours, `urgent` false. Subscribing the same endpoint again keeps its
+`notify`; a `timezone` sent with it replaces the zone. The in-tab notifications (where push is not available) filter
+the same way with settings kept in the browser's localStorage (`nexus.notify.settings`, the same shape).
 
 **Nexus itself.** `GET /api/server` gives the version (`commit`, `subject`, `live`, `branch`, `root`), `local` (whether
 this request came straight from this machine, as remote access judges it: the dashboard shows "Open in editor" only

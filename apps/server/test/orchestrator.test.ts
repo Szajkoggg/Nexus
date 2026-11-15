@@ -465,6 +465,7 @@ test("a cancel by the orchestrator reaches the user as a push notification, with
     assert.equal(sent.length, 1);
     assert.match(sent[0]!.title, /P: queue cancelled/);
     assert.match(sent[0]!.body, /C cancelled by the orchestrator: superseded by queue D/);
+    assert.equal(sent[0]!.kind, "cancelled", "devices that turned cancels off do not get it");
     assert.ok(!x.state().attention.some((a) => a.queue === "C"));
     assert.throws(() => x.engine.start("C"), /cancelled/);
   } finally { x.stop(); }

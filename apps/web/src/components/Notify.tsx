@@ -7,6 +7,7 @@ import { attentionKey, HttpError, request, type AttentionItem, type ProjectSumma
 import { itemHash } from "../hash.ts";
 import { t } from "../i18n.ts";
 import { attentionTarget, kindLabel, textOf } from "./Attention.tsx";
+import { readLocalNotify, tabNews, type TabItem } from "../notify.ts";
 
 const STORAGE = "nexus.notify";
 const stored = (): boolean => { try { return localStorage.getItem(STORAGE) === "on"; } catch { return false; } };
@@ -77,11 +78,11 @@ export function useNotifications(projects: ProjectSummary[] | undefined) {
   // In-tab notifications, only where push is not available.
   useEffect(() => {
     if (!projects || usePush || typeof Notification === "undefined") return;
-    const current = new Map<string, { p: ProjectSummary; a: AttentionItem }>();
-    for (const p of projects) for (const a of p.attention) current.set(`${p.id}:${attentionKey(a)}`, { p, a });
-    if (seen.current && on) {
-      for (const [key, { p, a }] of current) {
-        if (seen.current.has(key)) continue;
+    const current: TabItem<{ p: ProjectSummary; a: AttentionItem }>[] = [];
+    for (const p of projects) for (const a of p.attention) current.push({ key: `${p.id}:${attentionKey(a)}`, kind: a.kind, item: { p, a } });
+    // Filtered as a push device's would be (kinds, quiet hours), with this browser's settings.
+    if (on) {
+      for (const { key, item: { p, a } } of tabNews(seen.current, current, readLocalNotify(), new Date())) {
         try {
           const n = new Notification(t("notify.notification", { project: p.name, kind: kindLabel(a.kind).text }), {
             body: `${a.queue ?? ""}${a.step ? `/${a.step}` : ""} ${textOf(a)}`.trim().slice(0, 200),
@@ -91,7 +92,7 @@ export function useNotifications(projects: ProjectSummary[] | undefined) {
         } catch { /* a browser that shows notifications only through a service worker */ }
       }
     }
-    seen.current = new Set(current.keys());
+    seen.current = new Set(current.map((c) => c.key));
   }, [projects, on, usePush]);
 
   const turnOnPush = async () => {
@@ -107,7 +108,7 @@ export function useNotifications(projects: ProjectSummary[] | undefined) {
       t("notify.pushNoAnswer"),
     );
     const device = /iPhone|iPad/.test(navigator.userAgent) ? "iPhone / iPad" : /Android/.test(navigator.userAgent) ? "Android" : t("notify.desktopBrowser");
-    await request("/api/push/subscribe", { method: "POST", body: { subscription: sub.toJSON(), label: device } }).catch((e: unknown) => {
+    await request("/api/push/subscribe", { method: "POST", body: { subscription: sub.toJSON(), label: device, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone } }).catch((e: unknown) => {
       // The server's reason when it gave one, else its status.
       throw new Error(e instanceof HttpError ? e.reason ?? t("common.serverAnswered", { status: String(e.status) }) : (e as Error).message);
     });
