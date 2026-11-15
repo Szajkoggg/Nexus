@@ -5,7 +5,7 @@
 // again.
 //
 // Pure apart from the recognition class it is given, so it is unit tested (test/voice.test.ts) with a fake one;
-// useDictation (components/Voice.tsx) is the React side.
+// useVoice (components/Voice.tsx) is the React side.
 import type { Key } from "./i18n.ts";
 
 /** One result of a recognition: its best alternative, and whether it is final or still being heard. */
@@ -74,6 +74,8 @@ export function voiceError(code: string): Key | undefined {
 
 /** Where a dictation is: listening (with what it has heard so far that is not final yet), or not, and why it ended. */
 export interface DictationState { listening: boolean; interim: string; error?: Key }
+/** What a dictation tells its box: each final piece of text heard, and where it is. */
+interface DictationEvents { heard: (text: string) => void; state: (s: DictationState) => void }
 
 /**
  * One box's dictation: start() listens for one utterance, stop() ends it early (what was heard by then still comes).
@@ -82,9 +84,9 @@ export interface DictationState { listening: boolean; interim: string; error?: K
 export class Dictation {
   private current: Recognition | undefined;
   private readonly make: RecognitionClass;
-  private readonly on: { heard: (text: string) => void; state: (s: DictationState) => void };
+  private readonly on: DictationEvents;
 
-  constructor(make: RecognitionClass, on: { heard: (text: string) => void; state: (s: DictationState) => void }) {
+  constructor(make: RecognitionClass, on: DictationEvents) {
     this.make = make;
     this.on = on;
   }
