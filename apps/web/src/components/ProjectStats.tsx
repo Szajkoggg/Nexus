@@ -69,9 +69,12 @@ function MetricCardView({ project, card: c, title }: { project: string; card: Me
       </section>
     );
   }
+  // The threshold in words, for a value beyond it (a metric without one has no such value).
+  const limit = d.warn_above ?? d.warn_below;
+  const beyond = limit === undefined ? undefined : t("metrics.beyond", { limit: text(limit) });
   const tipOf = (p: MetricPoint) => [
     text(p.value),
-    ...(p.warn ? [t("metrics.beyond", { limit: text((d.warn_above ?? d.warn_below)!) })] : []),
+    ...(p.warn && beyond ? [beyond] : []),
     `${p.queue}/${p.step}${title(p) ? ` · ${title(p)}` : ""}`,
     [p.commit, formatWeekday(new Date(p.at))].filter(Boolean).join(" · "),
     t("metrics.openStep"),
@@ -94,7 +97,7 @@ function MetricCardView({ project, card: c, title }: { project: string; card: Me
                   {c.change !== undefined && c.change !== 0 && (
                     <div className="text-xs text-fg-2">{t(c.change < 0 ? "metrics.down" : "metrics.up", { value: formatNumber(Math.abs(c.change)), since: formatDay(new Date(c.points[0]!.at)) })}</div>
                   )}
-                  {last.warn && <div className="text-xs text-warn">⚠ {t("metrics.beyond", { limit: text((d.warn_above ?? d.warn_below)!) })}</div>}
+                  {last.warn && <div className="text-xs text-warn">⚠ {beyond}</div>}
                 </div>
                 <Sparkline values={c.points.slice(-12).map((p) => p.value)} />
               </div>
