@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import {
   ChatEntry, Event, SearchHits, chatItem, eventItems, lineMayMatch, normPath, noteItem, queueItems,
-  type ProjectStore, type SearchQuery, type SearchResult, type SessionFile,
+  type ProjectStore, type SearchKind, type SearchQuery, type SearchResult, type SessionFile,
 } from "@nexus/protocol";
 
 const CHUNK = 64 * 1024;
@@ -44,10 +44,10 @@ function parsed<T>(line: string, schema: { safeParse(x: unknown): { success: tru
 /** Searches a project's queues, notes, reports, events and chats; the newest hits first. */
 export function searchProject(store: ProjectStore, q: SearchQuery): SearchResult {
   const hits = new SearchHits(q);
-  const wants = (...kinds: string[]) => kinds.some((k) => (q.kinds as readonly string[]).includes(k));
+  const wants = (kind: SearchKind) => q.kinds.includes(kind);
+  const questions = wants("question");
 
-  const queueIds = store.queueIds();
-  for (const id of queueIds) {
+  for (const id of store.queueIds()) {
     if (wants("queue")) {
       try { for (const item of queueItems(store.readQueue(id))) hits.add(item); } catch { /* a queue.yaml that does not parse offers nothing */ }
     }
@@ -61,21 +61,20 @@ export function searchProject(store: ProjectStore, q: SearchQuery): SearchResult
 
   // An answer names only its question: where each question was asked (every one, matching or not).
   const asked = new Map<string, { queue?: string; step?: string }>();
-  const events = wants("step", "question", "review");
+  const events = questions || wants("step") || wants("review");
   for (const id of store.sessionIds()) {
     const dir = store.sessionDir(id);
     if (events) {
       const file = join(dir, "events.jsonl");
       // Every question counts for an answer's place, so a file is skipped by its time only when no question is searched.
-      if (wants("question") || changedSince(file, q.since)) {
+      if (questions || changedSince(file, q.since)) {
         eachLine(file, (line) => {
-          const question = wants("question") && line.includes('"question.asked"');
-          if (!question && !lineMayMatch(line, q)) return;
+          const may = lineMayMatch(line, q);
+          if (!may && !(questions && line.includes('"question.asked"'))) return;
           const e = parsed(line, Event);
           if (!e) return;
           if (e.type === "question.asked") asked.set(e.qid, { queue: e.queue, step: e.step });
-          if (question && !lineMayMatch(line, q)) return;
-          for (const item of eventItems(e)) hits.add(item);
+          if (may) for (const item of eventItems(e)) hits.add(item);
         });
       }
     }
@@ -101,10 +100,7 @@ export function searchProject(store: ProjectStore, q: SearchQuery): SearchResult
   };
   for (const item of hits.items()) {
     if (item.qid && !item.queue) Object.assign(item, asked.get(item.qid) ?? {});
-    if (item.queue && item.title === undefined) {
-      const title = titleOf(item.queue);
-      if (title !== undefined) item.title = title;
-    }
+    if (item.queue) item.title ??= titleOf(item.queue);
   }
   return hits.result();
 }
