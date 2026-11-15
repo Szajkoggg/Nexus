@@ -2,6 +2,7 @@
 import { z } from "zod";
 import { PICTURE_ROLES, VIEW_KEY } from "./pictures.ts";
 import { DEFAULT_WORKING_LANGUAGE, LANGUAGE_CODES } from "./languages.ts";
+import { TAG_KINDS } from "./tags.ts";
 
 
 const Id = z.string().min(1);
@@ -179,6 +180,49 @@ const OrchestratorSettings = z.object({
   /** Tell the orchestrator when a worker asks, or a run halts or finishes (it starts if needed). */
   notify: z.boolean().default(true),
 });
+/**
+ * One entry of a fallback chain (routing.ts; PROTOCOL.md, "Kinds and their defaults"): a runtime with an optional model
+ * and effort (left out: the project's for that runtime), or `wait` (wait for the usage window instead).
+ */
+export const FallbackEntry = z.union([
+  z.literal("wait"),
+  z.object({ runtime: WorkerRuntime, model: z.string().min(1).optional(), effort: Effort.optional() }).strict(),
+]);
+export type FallbackEntry = z.infer<typeof FallbackEntry>;
+const FallbackChain = z.array(FallbackEntry);
+
+/**
+ * A kind's defaults (routing.ts): the runtime, model and effort a step of that kind runs on where nothing stronger
+ * names one, and its fallback chain. `model` and `effort` left out: the project's for that runtime.
+ */
+const KindDefaults = z.object({
+  runtime: WorkerRuntime,
+  model: z.string().min(1).optional(),
+  effort: Effort.optional(),
+  fallback: FallbackChain.default([]),
+});
+export type KindDefaults = z.infer<typeof KindDefaults>;
+type Kind = (typeof TAG_KINDS)[number];
+
+/**
+ * The kinds' defaults as Nexus ships them (decided with queue FB, 2026-11-14); the user changes them in the settings.
+ * A fallback on Codex without a model takes the project's Codex model.
+ */
+export const SHIPPED_KIND_DEFAULTS: Record<Kind, KindDefaults> = {
+  mechanical: { runtime: "claude", model: "claude-sonnet-5-5", effort: "low", fallback: [{ runtime: "codex", model: "gpt-6-luna", effort: "low" }] },
+  code: { runtime: "claude", model: "claude-opus-5-5", effort: "high", fallback: [{ runtime: "codex", effort: "high" }] },
+  debugging: { runtime: "claude", model: "claude-opus-5-5", effort: "high", fallback: [{ runtime: "codex", effort: "high" }] },
+  design: { runtime: "claude", model: "claude-opus-5-5", effort: "high", fallback: ["wait"] },
+  research: { runtime: "claude", model: "claude-opus-5-5", effort: "high", fallback: [{ runtime: "codex", effort: "high" }] },
+  docs: { runtime: "claude", model: "claude-sonnet-5-5", effort: "medium", fallback: [{ runtime: "codex", effort: "medium" }] },
+};
+/** Every kind's defaults; a kind missing from a file (or the whole section) is the shipped one. */
+const kindOf = (k: Kind) => KindDefaults.prefault(SHIPPED_KIND_DEFAULTS[k]);
+const KindsSettings = z.object({
+  mechanical: kindOf("mechanical"), code: kindOf("code"), debugging: kindOf("debugging"),
+  design: kindOf("design"), research: kindOf("research"), docs: kindOf("docs"),
+});
+
 const LanguageSettings = z.object({
   /**
    * The reader's language: what everything written to the user is in (chat, step summaries, questions, progress lines,
@@ -203,6 +247,8 @@ export const GlobalSettings = z.object({
   conversations: ConversationSettings.prefault({}),
   orchestrator: OrchestratorSettings.prefault({}),
   languages: LanguageSettings.prefault({}),
+  /** Each kind's runtime, model, effort and fallback chain (routing.ts). */
+  kinds: KindsSettings.prefault({}),
 });
 export type GlobalSettings = z.infer<typeof GlobalSettings>;
 
@@ -255,6 +301,7 @@ export const ProjectFile = z.object({
     /** The working language (project only): files, code, comments, commits, context cards, notes. */
     working: Language.default(DEFAULT_WORKING_LANGUAGE),
   }).prefault({}),
+  kinds: KindsSettings.prefault({}),
 });
 export type ProjectFile = z.infer<typeof ProjectFile>;
 
@@ -262,6 +309,14 @@ export type ProjectFile = z.infer<typeof ProjectFile>;
 const own = <T extends z.ZodType>(t: T) => t.optional();
 /** The same for a setting without a default: `null` is the project's own "none" (the runtime's default). */
 const ownOrNone = <T extends z.ZodType>(t: T) => t.nullable().optional();
+
+/** A kind's defaults as a project stores them: its own values (overrides) of the global ones. */
+const OwnKind = () => z.object({
+  runtime: own(WorkerRuntime),
+  model: ownOrNone(z.string().min(1)),
+  effort: ownOrNone(Effort),
+  fallback: own(FallbackChain),
+}).optional();
 
 /**
  * .nexus/project.yaml as stored: the project-only settings, the state, and the project's own values of the global
@@ -331,6 +386,9 @@ export const StoredProject = z.object({
     reader: ownOrNone(Language),
     working: Language.optional(),
   }).prefault({}),
+  kinds: z.object({
+    mechanical: OwnKind(), code: OwnKind(), debugging: OwnKind(), design: OwnKind(), research: OwnKind(), docs: OwnKind(),
+  }).optional(),
 });
 export type StoredProject = z.infer<typeof StoredProject>;
 
@@ -369,6 +427,8 @@ export const StepDef = z.object({
   runtime: z.enum(["claude", "codex"]).optional(),
   model: z.string().min(1).optional(),
   effort: Effort.optional(),
+  /** The step's fallback chain when its runtime's usage runs out (routing.ts); over its queue's and its kind's. */
+  fallback: FallbackChain.optional(),
   ...TagFields,
   /** Baseline state before any event: set by imports and manual corrections. Events take precedence. */
   status: StepStatus.optional(),
@@ -456,6 +516,14 @@ const QueueShape = z.object({
   coding: z.boolean().optional(),
   /** The tags of the queue's steps that set none of their own (TagFields); part of what an approval pins when set. */
   ...TagFields,
+  /**
+   * The runtime, model, effort and fallback chain of the queue's steps that name none (routing.ts): over the run's
+   * start and the kind's defaults, under a step's own. Part of what an approval pins when set.
+   */
+  runtime: z.enum(["claude", "codex"]).optional(),
+  model: z.string().min(1).optional(),
+  effort: Effort.optional(),
+  fallback: FallbackChain.optional(),
   /**
    * The queue works in a worktree of its own, so it ends with the integration step (closing.ts). Written only by the
    * server, when it first gives the queue its worktree; kept across revisions; not part of what an approval pins.

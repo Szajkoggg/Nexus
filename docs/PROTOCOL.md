@@ -98,6 +98,10 @@ runtimes:
 conversations: { runtime: claude, web: search }       # model, effort: none
 orchestrator: { runtime: claude, notify: true }       # model, effort: none
 languages: {}                                         # reader: none (the language the user writes in)
+kinds:                                                # each kind's runtime, model, effort and fallback (see "Kinds and their defaults")
+  mechanical: { runtime: claude, model: claude-sonnet-5-5, effort: low, fallback: [{ runtime: codex, model: gpt-6-luna, effort: low }] }
+  code:       { runtime: claude, model: claude-opus-5-5, effort: high, fallback: [{ runtime: codex, effort: high }] }
+  # debugging and research as code; docs: claude-sonnet-5-5, medium, fallback codex medium; design: claude-opus-5-5, high, fallback [wait]
 ```
 
 **The effective value** of a setting in a project is its own value where `project.yaml` has one, else the global
@@ -134,7 +138,7 @@ one: `null`). The effective settings do not change. It writes only such a file, 
 
 | Kind | Settings |
 |---|---|
-| Global, with a project override | `defaults`: `stop_conditions`, `review_level`, `review_send_back_limit`, `context_reuse_threshold`, `context_care`, `protect_nexus`, `push_accepted`, `provisional_counts`, `merge_back`, `resolve_conflicts`, `usage_pause_threshold`. `runtimes`: `default`; `claude`: `model`, `effort`, `permission_mode`; `codex`: `model`, `effort`, `sandbox`, `approval_policy`, `approvals_reviewer`. `conversations`: `runtime`, `model`, `effort`, `web`. `orchestrator`: `runtime`, `model`, `effort`, `notify`. `languages`: `reader` |
+| Global, with a project override | `defaults`: `stop_conditions`, `review_level`, `review_send_back_limit`, `context_reuse_threshold`, `context_care`, `protect_nexus`, `push_accepted`, `provisional_counts`, `merge_back`, `resolve_conflicts`, `usage_pause_threshold`. `runtimes`: `default`; `claude`: `model`, `effort`, `permission_mode`; `codex`: `model`, `effort`, `sandbox`, `approval_policy`, `approvals_reviewer`. `conversations`: `runtime`, `model`, `effort`, `web`. `orchestrator`: `runtime`, `model`, `effort`, `notify`. `languages`: `reader`. `kinds.<kind>`: `runtime`, `model`, `effort` (a model or effort may be the project's own `null`: the project's for that runtime), `fallback` |
 | Project only | `name`, `defaults.worktree_dir`, `defaults.worktree_setup`, `defaults.checks`, `runtimes.claude.allowed_tools` (the project's own allow rules), `conversations.notes_dir`, `languages.working` (`id` and `root` identify the project) |
 | Global only | Remote access (`<NEXUS_HOME>/auth.json`, `push.json`), the deploy push (`deploy.json`), the server; each stays in its own file |
 | State, not a setting | `orchestrator.session` |
@@ -193,6 +197,8 @@ review_level: 2                        # optional: the level of steps that set n
 coding: true                           # optional: the queue contains coding; Nexus adds a closing refactoring step (below)
 kind: code                             # optional tags, the defaults of its steps (see "Tags"): kind, activities, area, size, origin
 origin: user
+runtime: claude                        # optional: the runtime, model, effort and fallback of its steps that name none
+fallback: [{ runtime: codex, effort: high }, wait]   # (see "Kinds and their defaults")
 integration: true                      # written only by the server: the queue works in a worktree of its own, so it ends with the integration step (below)
 user_levels: { W3: 1 }                 # levels the user set on steps; written only by the server (see "Review")
 legacy_policies: { W1: continue }      # each step's review policy from before review levels; written only by the server
@@ -226,6 +232,7 @@ steps:
     runtime: codex                     # optional: claude | codex; this step only
     model: gpt-6-luna                  # optional
     effort: low                        # optional: low, medium, high, xhigh, max (Claude Code); Codex: the model's levels
+    fallback: [wait]                   # optional: its fallback chain (see "Kinds and their defaults")
 approvals:
   - revision: 3
     at: 2026-11-12T09:14:00Z
@@ -1708,18 +1715,56 @@ lists on request), and the waiting list (a `tags` item has Accept and Decline; o
 settings). The pure part of the module (`@nexus/protocol/tags`) is free of Node; the proposals and decisions, which
 write `tags.yaml`, are in `tag-proposals.ts`.
 
+## Kinds and their defaults
+
+Each kind (see "Tags") has its own runtime, model, effort and fallback chain in the settings (`kinds.<kind>`, global
+with a project override, edited per kind in the settings panel's "Kinds of work"). They replace the project's one
+model as the only default (decided with queue FB, 2026-11-14). As shipped (the user changes them at any time):
+
+| Kind | Runtime | Model | Effort | Fallback |
+|---|---|---|---|---|
+| mechanical | Claude Code | claude-sonnet-5-5 | low | Codex, gpt-6-luna, low |
+| code, debugging, research | Claude Code | claude-opus-5-5 | high | Codex, the project's Codex model, high |
+| docs | Claude Code | claude-sonnet-5-5 | medium | Codex, the project's Codex model, medium |
+| design | Claude Code | claude-opus-5-5 | high | wait |
+
+A kind's model or effort left out (or the project's own `null`) is the project's for that runtime
+(`runtimes.<runtime>`). A fallback chain is a list: each entry a runtime with an optional model and effort (left out:
+the project's for that runtime), or `wait`; `wait` ends the chain. Checked where it is written: a draft, the settings
+(an effort the runtime does not take, an entry after `wait`, an unknown key are refused).
+
+**The precedence** (`packages/protocol/src/routing.ts`, `routeStep`), strongest first:
+
+1. The step's own `runtime`, `model`, `effort`, `fallback` in the queue YAML.
+2. The queue's `runtime`, `model`, `effort`, `fallback` (part of what an approval pins when set).
+3. What the run's start named explicitly: `--runtime`, `--model`, `--effort` (the dashboard's start the same), or all
+   three when it continues a session. Those it took from the project's defaults (`run.yaml` `from_defaults`) are not
+   this level.
+4. The step's kind's defaults: the project's own values, else the global ones.
+5. The project's defaults: `runtimes.default`, and `runtimes.<runtime>.model` and `effort`.
+
+The runtime is the strongest level's that names one. A model or effort comes from the strongest level that names one
+and belongs to that runtime: the step's always; the queue's when the queue names no runtime or the same one; the
+start's and the kind's only when their runtime is the step's (the start's runtime is the one it resolved, explicit or
+from the defaults); else the project's for that runtime. So the kind overrides only what the start took from the
+defaults (a run started with `--model X` runs a mechanical step on X, at the kind's effort), and with an explicit
+runtime the kind's model and effort count only when the kind's runtime is the same one; else the run's values. The
+fallback chain is the strongest level's that names one (step, queue, kind; an empty list is a choice too); none: the
+run waits for the usage window, as before. A step without a kind gets the project's defaults. The orchestrator may
+depart from this for a run or a step (`--model`, the step's own values) and says why. The estimates
+(`queueEstimate`) use the same precedence.
+
 ## Runtime, model and effort per step
 
 A run records its own runtime, model and effort when it starts (`run.yaml`). Those its start chose (or took from the
 session it continues) stay for the whole run. Those it took from the project's defaults are listed in `from_defaults`
 and resolved again from the project's effective settings (its own values, else the global ones) when each step opens,
-so a changed default reaches a running queue at its next step. A model or effort chosen at the start belongs to the
-runtime the run started on: when a runtime taken from the defaults resolves to another one, that runtime's defaults
-apply. The values are checked when the step opens: an effort the resolved runtime does not take halts the run, naming
-the step and the reason (`step Q2: Claude Code takes effort …`). A step runs on its own values where it names them and
-on the run's where it does not, never on the previous step's. A step on another runtime than the run's
-takes a model or effort it does not name from the project's defaults for that runtime (`runtimes.<runtime>`): the
-run's model belongs to the run's runtime.
+so a changed default reaches a running queue at its next step. Which values a step runs on follows "Kinds and their
+defaults" above: its own, its queue's, the start's, its kind's, the project's, never the previous step's. A model or
+effort chosen at the start belongs to the runtime the run started on: a step on another runtime takes what it does not
+name from its kind (when the kind is on that runtime) or the project's defaults for that runtime. The values are
+checked when the step opens: an effort the resolved runtime does not take halts the run, naming the step and the reason
+(`step Q2: Claude Code takes effort …`).
 
 Starting a run checks every step still to run: one that would run on Claude Code at an effort Claude Code does not take
 refuses the start, naming the step and the reason; nothing is written. A run that continues a session (`session`,

@@ -86,7 +86,7 @@ Begin with `nexus step start A1` (again is fine). End with `nexus step done A1 -
 Goal:
 Do the second thing.
 
-Tags as planned: code; feature, test; size M; from user. At the end name what you actually did with `nexus step done --activities`.
+Tags as planned: feature, test; size M; from user. At the end name what you actually did with `nexus step done --activities`.
 
 Checks for every step:
 - npm run lint

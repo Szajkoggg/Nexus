@@ -131,3 +131,20 @@ test("an invalid combination refuses the start with the reason", async () => {
     await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
   } finally { done(); }
 });
+
+test("kinds: a mechanical step starts on its kind's model and effort; a step without a kind on the project's; --model wins over the kind", async () => {
+  const a = setup([{ fake: "done", kind: "mechanical" }, { fake: "done" }, { fake: "done", kind: "design" }]);
+  try {
+    a.engine.start("Q", { runtime: "claude" });
+    await a.until("the run to finish", () => a.queue().run?.state === "finished", LONGER.run);
+    const starts = a.args().filter((x) => x.argv).map(claudeStart);
+    assert.deepEqual(starts.map((s) => [s.model, s.effort]), [["claude-sonnet-5-5", "low"], [null, null], ["claude-opus-5-5", "high"]],
+      "the shipped mechanical and design defaults; the project names no Claude model or effort");
+  } finally { a.done(); }
+  const b = setup([{ fake: "done", kind: "mechanical" }]);
+  try {
+    b.engine.start("Q", { model: "X" });
+    await b.until("the run to finish", () => b.queue().run?.state === "finished", LONGER.run);
+    assert.deepEqual(b.args().filter((x) => x.argv).map(claudeStart).map((s) => [s.model, s.effort]), [["X", "low"]], "the model the start named, the kind's effort");
+  } finally { b.done(); }
+});

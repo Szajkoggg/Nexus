@@ -1,6 +1,7 @@
 // Global settings that projects follow, with a per-setting override (PROTOCOL.md, "Global settings"). Pure: the files
 // are read and written by the store (store.ts); the global file only by the server.
 import { GlobalSettings, ProjectFile, StoredProject } from "./schemas.ts";
+import { TAG_KINDS } from "./tags.ts";
 
 /**
  * Every setting that is global with a project override, by its path in project.yaml (and in the global file).
@@ -27,6 +28,12 @@ export const OVERRIDABLE: readonly { path: readonly string[]; none?: true }[] = 
   { path: ["orchestrator", "effort"], none: true },
   { path: ["orchestrator", "notify"] },
   { path: ["languages", "reader"], none: true },
+  ...TAG_KINDS.flatMap((k) => [
+    { path: ["kinds", k, "runtime"] },
+    { path: ["kinds", k, "model"], none: true as const },
+    { path: ["kinds", k, "effort"], none: true as const },
+    { path: ["kinds", k, "fallback"] },
+  ]),
 ] as const;
 
 /** A setting's path as written in PROTOCOL.md and in an update's `follow` list: `runtimes.claude.model`. */

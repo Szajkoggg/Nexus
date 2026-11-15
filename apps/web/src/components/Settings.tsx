@@ -3,6 +3,8 @@
 import { useState, type ReactNode } from "react";
 import type { GlobalSettings, ProjectFile, TagsFile } from "@nexus/protocol";
 import { LANGUAGES } from "@nexus/protocol/languages";
+import { TAG_KINDS } from "@nexus/protocol/tags";
+import { fallbackLine, parseFallback } from "../fallback.ts";
 import { act, useFetch } from "../api.ts";
 import { Button, Section } from "./ui.tsx";
 import { rich, t, type Key } from "../i18n.ts";
@@ -58,9 +60,14 @@ interface ProjectSettingsInfo { own: string[]; global: GlobalSettings }
 
 type Values = Record<string, unknown>;
 const at = (o: unknown, key: string): unknown => key.split(".").reduce<unknown>((x, k) => (x && typeof x === "object" ? (x as Values)[k] : undefined), o);
+/** A kind's fallback chain: edited as one line of text (fallback.ts). */
+const isChain = (k: string) => k.startsWith("kinds.") && k.endsWith(".fallback");
 /** The settings that are global with a project override, by key, from a project's (effective) or the global settings. */
-const valuesOf = (o: unknown): Values => Object.fromEntries(SETTING_KEYS.map((k) => [k, at(o, k)]));
-/** Nested settings from keys and values, for a write: an empty optional value is sent as null (none). */
+const valuesOf = (o: unknown): Values => Object.fromEntries(SETTING_KEYS.map((k) => [k, isChain(k) ? fallbackLine(at(o, k) as never) : at(o, k)]));
+/**
+ * Nested settings from keys and values, for a write: an empty optional value is sent as null (none); a fallback
+ * chain's line is read back into the list (an entry it cannot read stops the save with its text).
+ */
 function nested(values: Values, keys: readonly string[]): Values {
   const out: Values = {};
   for (const k of keys) {
@@ -68,6 +75,12 @@ function nested(values: Values, keys: readonly string[]): Values {
     let x = out;
     for (const p of path.slice(0, -1)) x = (x[p] ??= {}) as Values;
     const v = values[k];
+    if (isChain(k)) {
+      const r = parseFallback(typeof v === "string" ? v : "");
+      if ("bad" in r) throw new Error(t("settings.fallback.bad", { entry: r.bad, kind: path[1]! }));
+      x[path.at(-1)!] = r.chain;
+      continue;
+    }
     x[path.at(-1)!] = v === "" || v === undefined ? null : v;
   }
   return out;
@@ -85,7 +98,8 @@ const SETTING_KEYS = [
   "conversations.runtime", "conversations.model", "conversations.effort", "conversations.web",
   "orchestrator.runtime", "orchestrator.model", "orchestrator.effort", "orchestrator.notify",
   "languages.reader",
-] as const;
+  ...TAG_KINDS.flatMap((k) => [`kinds.${k}.runtime`, `kinds.${k}.model`, `kinds.${k}.effort`, `kinds.${k}.fallback`]),
+];
 
 /**
  * What a row needs: the value of a setting, its change, and on a project's page whether it follows the global value
@@ -209,6 +223,11 @@ function SettingRows({ form, project }: { form: Form; project?: { values: Record
         </Setting>
       </Section>
 
+      <Section title={t("settings.kinds")}>
+        <p className="pb-1 text-xs text-fg-3">{t("settings.kindsNote")}</p>
+        {TAG_KINDS.map((k) => <KindRow key={k} form={f} kind={k} />)}
+      </Section>
+
       <Section title={t("settings.orchestrator")}>
         <Setting form={f} keys={["orchestrator.model"]} label={t("settings.model")} hint={t("settings.orchestratorModelHint")}>
           {(d) => <ModelSelect runtime="claude" value={f.get("orchestrator.model")} onChange={(v) => f.set("orchestrator.model", v)} disabled={d} defaultLabel={t("settings.claudeDefault")} className="w-full" />}
@@ -289,6 +308,34 @@ function SettingRows({ form, project }: { form: Form; project?: { values: Record
         <div id="settings-merging-end" />
       </Section>
     </>
+  );
+}
+
+/**
+ * One kind's defaults: runtime, model and effort on one line, the fallback chain under them. The four go together
+ * (global or the project's own).
+ */
+function KindRow({ form: f, kind }: { form: Form; kind: string }) {
+  const key = (x: string) => `kinds.${kind}.${x}`;
+  const runtime = (f.get(key("runtime")) || "claude") as "claude" | "codex";
+  const model = f.get(key("model"));
+  return (
+    <Setting form={f} keys={["runtime", "model", "effort", "fallback"].map(key)} label={kind}>
+      {(d) => (
+        <span className="block space-y-1.5" id={`kind-${kind}`}>
+          <span className="flex flex-wrap items-center gap-1.5">
+            <Select value={runtime} disabled={d} onChange={(v) => { f.set(key("runtime"), v); f.set(key("model"), ""); f.set(key("effort"), ""); }} options={[["claude", "Claude Code"], ["codex", "Codex"]]} />
+            <ModelSelect runtime={runtime} value={model} onChange={(v) => f.set(key("model"), v)} disabled={d} defaultLabel={t("settings.kindModelDefault")} />
+            <EffortSelect runtime={runtime} model={model} value={f.get(key("effort"))} onChange={(v) => f.set(key("effort"), v)} disabled={d} defaultLabel={t("settings.kindEffortDefault")} />
+          </span>
+          <span className="flex items-center gap-2 text-xs text-fg-3">
+            <span className="shrink-0">{t("settings.fallback")}</span>
+            <input value={f.get(key("fallback"))} disabled={d} onChange={(e) => f.set(key("fallback"), e.target.value)} placeholder={t("settings.fallbackNone")}
+              className={`${field} font-mono text-xs`} aria-label={t("settings.fallbackOf", { kind })} />
+          </span>
+        </span>
+      )}
+    </Setting>
   );
 }
 

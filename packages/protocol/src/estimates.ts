@@ -3,7 +3,8 @@
 // work, send-backs included, never the wait for its review (no turn runs then). A step to come is estimated by the
 // average of finished steps on the same model and effort, else the same model, else all, each only with at least
 // MIN_SAMPLES steps; with fewer finished steps in all there is no estimate. Pure: the server reads the files.
-import type { Effort, ProjectFile, TurnRecord } from "./schemas.ts";
+import type { ProjectFile, TurnRecord } from "./schemas.ts";
+import { kindDefaults, routeStep, type StartValues } from "./routing.ts";
 import { stepClosed, type QueueView } from "./state.ts";
 
 /** Fewer finished steps than this: no estimate (and no group average from fewer). */
@@ -49,23 +50,25 @@ export interface QueueEstimate { steps: number; ms?: number }
 export interface EstimatesResponse { samples: number; min: number; queues: Record<string, QueueEstimate> }
 
 /**
- * What a queue's steps left are expected to take: each on its own model and effort, else the run's (or the planned
- * start's), else the project's defaults for its runtime (the engine's stepValues rule). A step already running counts
- * whole.
+ * What a queue's steps left are expected to take: each on the model and effort it would run on (routing.ts,
+ * routeStep: its own, the queue's, what the run's start or the planned start named, its kind's, the project's). A step
+ * already running counts whole.
  */
-export function queueEstimate(q: Pick<QueueView, "steps" | "run" | "start" | "rejection">, project: Pick<ProjectFile, "runtimes">, samples: readonly Sample[]): QueueEstimate {
+export function queueEstimate(
+  q: Pick<QueueView, "steps" | "run" | "start" | "rejection"> & Partial<Pick<QueueView, "runtime" | "model" | "effort" | "fallback">>,
+  project: Pick<ProjectFile, "runtimes" | "kinds">, samples: readonly Sample[],
+): QueueEstimate {
   const left = q.steps.filter((s) => !stepClosed(q, s));
-  const runtime = q.run?.runtime ?? q.start?.runtime ?? project.runtimes.default;
-  const run = {
-    runtime, model: q.run?.model ?? q.start?.model ?? project.runtimes[runtime].model,
-    effort: (q.run?.effort ?? q.start?.effort ?? project.runtimes[runtime].effort) as Effort | undefined,
-  };
+  const r = q.run;
+  const keys = ["runtime", "model", "effort"] as const;
+  const fromDefaults = new Set(r?.from_defaults ?? []);
+  const start: StartValues = r?.runtime
+    ? { runtime: r.runtime, model: r.model, effort: r.effort, explicit: keys.filter((k) => !fromDefaults.has(k)) }
+    : { runtime: q.start?.runtime ?? project.runtimes.default, model: q.start?.model, effort: q.start?.effort, explicit: keys.filter((k) => q.start?.[k] !== undefined) };
   let ms = 0;
   for (const st of left) {
-    const rt = st.runtime ?? run.runtime;
-    const same = rt === run.runtime;
-    const d = project.runtimes[rt];
-    const e = estimateStep(samples, st.model ?? (same ? run.model : d.model), st.effort ?? (same ? run.effort : d.effort));
+    const v = routeStep({ step: st, queue: q, start, kind: kindDefaults(project, st.tags?.kind), project });
+    const e = estimateStep(samples, v.model, v.effort);
     if (e === undefined) return { steps: left.length };
     ms += e;
   }

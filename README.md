@@ -277,6 +277,15 @@ the plans were made. A schedule waiting this way is not missed.
 A step in a queue may name its own runtime, model and effort (`runtime`, `model`, `effort` in the queue YAML, shown
 on the step); a step without them runs on the run's. Another runtime runs the step in a fresh session given the
 previous step's summary; another model or effort keeps the session.
+**Kinds of work.** Each kind of step (mechanical, code, debugging, design, research, docs) has its own runtime, model,
+effort and fallback in the settings panel's "Kinds of work" (global, and per project with Global or Own, like the other
+settings): as shipped, mechanical steps run on claude-sonnet-5-5 at low effort, code, debugging and research on
+claude-opus-5-5 at high, docs on claude-sonnet-5-5 at medium, design on claude-opus-5-5 at high. What a step runs on,
+strongest first: what the step names in the queue YAML, what its queue names, what you or the orchestrator named when
+starting the run (--runtime, --model, --effort), its kind's settings, the project's defaults. So a run started with a
+model of your choice keeps it, and a step without a kind runs on the project's defaults. The fallback (where a step
+goes on when its runtime's usage runs out: a runtime with an optional model and effort, or wait) is written as a line,
+e.g. `codex gpt-6-luna low, wait`.
 **Tags.** The orchestrator tags every step it plans: one kind (mechanical, code, debugging, design, research or docs),
 its activities, its area of the project, a size (S, M or L) and where the work came from. The step's details show
 them, with the activities planned beside those its worker reported doing (planned and not done struck through, done

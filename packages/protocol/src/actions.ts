@@ -11,6 +11,7 @@ import { validAllowRule } from "./refusals.ts";
 import { closingStepId, integrationStepId, stepDefs } from "./closing.ts";
 import { stepChecks } from "./steps.ts";
 import { inheritedTags, kindListIssue, tagIssues, type StepTags } from "./tags.ts";
+import { fallbackIssues, kindIssues } from "./routing.ts";
 
 export class ActionError extends Error {
   readonly status: number;
@@ -328,7 +329,7 @@ function askFix(store: ProjectStore, queue: string, step: string, text: string):
 // ---------------------------------------------------------------- queue drafts (from an orchestrator)
 
 /** What a draft may not change of a started step (besides removing it or moving it among the started steps). */
-const STEP_FIELDS = ["title", "goal", "acceptance", "review", "runtime", "model", "effort"] as const;
+const STEP_FIELDS = ["title", "goal", "acceptance", "review", "runtime", "model", "effort", "fallback"] as const;
 /** What a draft may not change of a queue once a run exists. */
 const CHECKOUT_FIELDS = ["worktree", "branch", "base"] as const;
 
@@ -369,7 +370,11 @@ export function applyDraft(store: ProjectStore, definition: unknown): string {
   for (const st of draft.steps) {
     const issue = st.runtime ? effortIssue(st.runtime, st.effort) : undefined;
     if (issue) throw new ActionError(`step ${st.id}: ${issue}`);
+    const chain = fallbackIssues(st.fallback);
+    if (chain.length) throw new ActionError(`step ${st.id}: ${chain.join("; ")}`);
   }
+  const queueIssues = [...(draft.runtime ? [effortIssue(draft.runtime, draft.effort)].filter((x): x is string => !!x) : []), ...fallbackIssues(draft.fallback)];
+  if (queueIssues.length) throw new ActionError(`queue ${draft.id}: ${queueIssues.join("; ")}`);
 
   let old: QueueFile | undefined;
   try { old = store.readQueue(draft.id); } catch { old = undefined; }
@@ -426,8 +431,10 @@ export function applyDraft(store: ProjectStore, definition: unknown): string {
     review_level: draft.review_level ?? old.review_level,
     // Left out, it stays as it was; `coding: false` takes it back before the queue has started.
     coding: draft.coding ?? old.coding,
-    // The queue's tags are its steps' defaults, as drafted (left out: none), like the steps' own.
+    // The queue's tags, runtime, model, effort and fallback are its steps' defaults, as drafted (left out: none), like
+    // the steps' own.
     ...queueTags(draft),
+    runtime: draft.runtime, model: draft.model, effort: draft.effort, fallback: draft.fallback,
     // The user's levels stay over whatever the revision drafts, for the steps it keeps (the closing step's too).
     user_levels: keptLevels(old.user_levels, stepDefs({ ...old, coding: draft.coding ?? old.coding, steps })),
     // What the steps done before review levels meant stays with them.
@@ -680,6 +687,8 @@ export function updateSettings(store: ProjectStore, patch: unknown): void {
     },
     conversations: merged(p.conversations, b.conversations),
     languages: merged(p.languages, b.languages),
+    // Each kind's runtime, model, effort and fallback (a null model or effort: the project's for that runtime).
+    kinds: Object.fromEntries(Object.entries(p.kinds).map(([k, d]) => [k, merged(d, b.kinds?.[k])])),
     // The orchestrator's notices, model and effort (its section is made here if the project has had none yet).
     orchestrator: b.orchestrator === undefined
       ? p.orchestrator
@@ -691,6 +700,8 @@ export function updateSettings(store: ProjectStore, patch: unknown): void {
   };
   const r = ProjectFile.safeParse(next);
   if (!r.success) throw new ActionError(r.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "));
+  const kinds = kindIssues(r.data.kinds);
+  if (kinds.length) throw new ActionError(kinds.join("; "));
   r.data.defaults.checks = stepChecks(r.data.defaults.checks, []);
   const notes = r.data.conversations.notes_dir;
   if (notes !== undefined) r.data.conversations.notes_dir = notesDir(notes);
@@ -705,6 +716,8 @@ export function updateGlobalSettings(patch: unknown): GlobalSettings {
     const issues = (e as { issues?: { path: (string | number)[]; message: string }[] }).issues;
     throw new ActionError(issues ? issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") : (e as Error).message);
   }
+  const kinds = kindIssues(next.kinds);
+  if (kinds.length) throw new ActionError(kinds.join("; "));
   writeGlobalSettings(next);
   return next;
 }

@@ -11,7 +11,7 @@ import { join } from "node:path";
 import {
   CHECKOUT_RUN_STATES, ENDED_RUN_STATES, HOLDING_RUN_STATES,
   ActionError, ProjectStore, USER_SESSION, ensureUserSession, liftByContinue, loadProjectState, openPlanFile, releaseOrphanedSteps, stepClosed, reportFile, ensureReportFolder, newId, normPath, now, readUsage,
-  RETRY_LIMIT, effortIssue, formatClock, type Effort, type ProjectFile, type StepDef, type ProjectState, type QueueView, type RunFile, type SessionFile,
+  RETRY_LIMIT, effortIssue, formatClock, kindDefaults, routeStep, type Effort, type ProjectFile, type StartValues, type ProjectState, type QueueView, type RunFile, type SessionFile,
   type SessionView, type StepView, type PlanBy,
   addNote,
 } from "@nexus/protocol";
@@ -99,14 +99,12 @@ const RESTART_KILL_MS = 10_000;
 export interface StepValues { runtime: "claude" | "codex"; model?: string; effort?: Effort }
 
 /**
- * What a step runs on: its own values, else the run's. A step on another runtime than the run's takes a value it does
- * not name from the project's defaults for that runtime (the run's model and effort belong to the run's runtime).
+ * What a step runs on, by the precedence of routing.ts (routeStep): the step's own values, the queue's, what the run's
+ * start named, the step's kind's defaults, the project's defaults.
  */
-function stepValues(run: StepValues, step: Pick<StepDef, "runtime" | "model" | "effort">, project: ProjectFile): StepValues {
-  const runtime = step.runtime ?? run.runtime;
-  const same = runtime === run.runtime;
-  const d = project.runtimes[runtime];
-  return { runtime, model: step.model ?? (same ? run.model : d.model), effort: step.effort ?? (same ? run.effort : d.effort) };
+function stepValues(start: StartValues, step: StepView, q: Pick<QueueView, "runtime" | "model" | "effort" | "fallback">, project: ProjectFile): StepValues {
+  const r = routeStep({ step, queue: q, start, kind: kindDefaults(project, step.tags.kind), project });
+  return { runtime: r.runtime, model: r.model, effort: r.effort };
 }
 
 export class Engine implements Member {
@@ -212,14 +210,20 @@ export class Engine implements Member {
     };
     const own = effortIssue(runtime, values.effort);
     if (own) throw new ActionError(own);
+    // What the start named itself (or took from the session it continues); the rest is the project's defaults, which
+    // a step's kind goes over.
+    const start: StartValues = {
+      ...values,
+      explicit: reused ? ["runtime", "model", "effort"] : ([["runtime", opts.runtime], ["model", opts.model], ["effort", opts.effort]] as const).filter(([, v]) => v !== undefined).map(([k]) => k),
+    };
     // Every step still to run is checked now, so a bad combination refuses the start rather than halting the run later.
     for (const st of q.steps.filter((x) => !stepClosed(q, x))) {
-      const w = stepValues(values, st, state.project);
+      const w = stepValues(start, st, q, state.project);
       const issue = effortIssue(w.runtime, w.effort);
       if (issue) throw new ActionError(`step ${st.id} would run on ${RUNTIME_NAME[w.runtime]} at effort ${w.effort}: ${issue}`, 409);
     }
     const first = q.steps.find((x) => x.status === "pending");
-    const want = first ? stepValues(values, first, state.project) : values;
+    const want = first ? stepValues(start, first, q, state.project) : values;
     if (reused && want.runtime !== reused.runtime) {
       throw new ActionError(`step ${first!.id} runs on ${RUNTIME_NAME[want.runtime]}; the session to continue is a ${RUNTIME_NAME[reused.runtime as "claude" | "codex"]} session`, 409);
     }
@@ -618,7 +622,7 @@ export class Engine implements Member {
     }
     if (run.state === "pausing") return this.writeRun(queueId, toPaused(run));
     if (this.worktreeSetup(queueId, run, q)) return;
-    const want = stepValues(this.runValues(state, run), next, state.project);
+    const want = stepValues(this.startOf(state, run), next, q, state.project);
     const issue = effortIssue(want.runtime, want.effort);
     if (issue) return this.halt(queueId, `step ${next.id}: ${issue}`);
     const wait = this.usageWait(state, want.runtime);
@@ -787,27 +791,19 @@ export class Engine implements Member {
     this.openStep(queueId, next, this.queue(state, queueId), "start", undefined, { before: seed, after: carried });
   }
 
-  /** The run's own runtime, model and effort; an older run file without them: its session's. */
   /**
-   * The run's runtime, model and effort for the step that opens now: those it took from the project's defaults
-   * (`from_defaults`) as the effective settings say now, the others as its start chose them. A model or effort chosen
-   * at the start belongs to the runtime the run started on: when a runtime taken from the defaults is another one now,
-   * that runtime's defaults apply instead.
+   * The run's start for the step that opens now (routing.ts, StartValues): its values, with those it took from the
+   * project's defaults (`from_defaults`) not explicit, so the effective settings (and a step's kind) decide them now.
+   * A model or effort chosen at the start belongs to the runtime the run started on. An older run file without its
+   * values: its session's, all explicit.
    */
-  private runValues(state: ProjectState, run: RunFile): StepValues {
+  private startOf(state: ProjectState, run: RunFile): StartValues {
     if (run.runtime) {
       const d = new Set(run.from_defaults ?? []);
-      const runtime = d.has("runtime") ? state.project.runtimes.default : run.runtime;
-      const defaults = state.project.runtimes[runtime];
-      const moved = runtime !== run.runtime;
-      return {
-        runtime,
-        model: d.has("model") || moved ? defaults.model : run.model,
-        effort: d.has("effort") || moved ? defaults.effort : run.effort,
-      };
+      return { runtime: run.runtime, model: run.model, effort: run.effort, explicit: (["runtime", "model", "effort"] as const).filter((k) => !d.has(k)) };
     }
     const s = this.sessionFile(state, run.session);
-    return { runtime: s.runtime === "codex" ? "codex" : "claude", model: s.model, effort: s.effort };
+    return { runtime: s.runtime === "codex" ? "codex" : "claude", model: s.model, effort: s.effort, explicit: ["runtime", "model", "effort"] };
   }
 
   private openStep(queueId: string, step: StepView, q: QueueView, mode: "start" | "continue", why?: string, around: { before?: string; after?: string } = {}): void {
