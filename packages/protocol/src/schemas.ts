@@ -1074,6 +1074,9 @@ export const UsageFile = z.object({
 export type UsageFile = z.infer<typeof UsageFile>;
 
 const UsageWindow = z.object({ utilization: z.number(), resets_at: Time.optional() });
+/** A turn's tokens in four figures: input not from the cache, output, cache read and cache written. */
+const TokenCounts = z.object({ input: z.number(), output: z.number(), cache_read: z.number(), cache_creation: z.number() });
+export type TokenCounts = z.infer<typeof TokenCounts>;
 
 /**
  * <NEXUS_HOME>/turns.jsonl: one line per agent turn of every project and role (workers, orchestrators, thinking
@@ -1103,12 +1106,12 @@ export const TurnRecord = z.object({
   outcome: z.enum(["ok", "passing", "lasting", "usage", "interrupted"]),
   failure: z.string().optional(),
   /** The turn's own tokens, as the runtime reported them: input not from the cache, output, cache read and written. */
-  tokens: z.object({ input: z.number(), output: z.number(), cache_read: z.number(), cache_creation: z.number() }).optional(),
+  tokens: TokenCounts.optional(),
   /**
    * What the turn's sub-agents used, apart from `tokens` (the main loop's), in the same four figures: Claude Code turns
    * only (zeros: none ran); absent where unknown (a Codex turn, the first turn of a resumed process, an older record).
    */
-  subagent_tokens: z.object({ input: z.number(), output: z.number(), cache_read: z.number(), cache_creation: z.number() }).optional(),
+  subagent_tokens: TokenCounts.optional(),
   /** The turn's own cost, where the runtime reports one (Claude Code) and it is known. */
   cost_usd: z.number().optional(),
   /** The account's usage windows of the turn's runtime as the server knew them when the turn began and ended. */

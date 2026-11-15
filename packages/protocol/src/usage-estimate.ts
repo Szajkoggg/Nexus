@@ -3,21 +3,19 @@
 // own) are the account's, so their growth over a turn is shared by every turn of the same runtime running meanwhile,
 // in every project and role. A turn's part of the growth is its weighted tokens over the weighted tokens spent in that
 // stretch by all of them. Pure and free of Node: `nexus stats`, the server's statistics and the dashboard read it.
-import type { TurnRecord } from "./schemas.ts";
-
-type Tokens = { input: number; output: number; cache_read: number; cache_creation: number };
+import type { TokenCounts, TurnRecord } from "./schemas.ts";
 
 /**
  * How much each kind of token counts toward the windows, relative to an input token not read from the cache: the
  * ratios of the API's prices (output 5×, a cache write 1.25×, a cache read 0.1×), the best public proxy for what the
  * windows meter. Only ratios matter: a turn's share compares turns of one runtime.
  */
-export const TOKEN_WEIGHTS: Readonly<Tokens> = { input: 1, output: 5, cache_read: 0.1, cache_creation: 1.25 };
+export const TOKEN_WEIGHTS: Readonly<TokenCounts> = { input: 1, output: 5, cache_read: 0.1, cache_creation: 1.25 };
 
 /** A turn's weighted tokens, its sub-agents' included; undefined when the turn's tokens are unknown. */
 export function weightedTokens(t: Pick<TurnRecord, "tokens" | "subagent_tokens">): number | undefined {
   if (!t.tokens) return undefined;
-  const w = (x: Tokens | undefined) => (x ? x.input * TOKEN_WEIGHTS.input + x.output * TOKEN_WEIGHTS.output + x.cache_read * TOKEN_WEIGHTS.cache_read + x.cache_creation * TOKEN_WEIGHTS.cache_creation : 0);
+  const w = (x: TokenCounts | undefined) => (x ? x.input * TOKEN_WEIGHTS.input + x.output * TOKEN_WEIGHTS.output + x.cache_read * TOKEN_WEIGHTS.cache_read + x.cache_creation * TOKEN_WEIGHTS.cache_creation : 0);
   return w(t.tokens) + w(t.subagent_tokens);
 }
 
