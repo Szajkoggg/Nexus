@@ -378,6 +378,20 @@ function ConditionList({ value, onChange, disabled }: { value: string[]; onChang
 /** What stops a save, in a sentence for the save row. */
 const problemText = (p: SettingsProblem) => (p.kind === "emptyCondition" ? t("settings.problem.emptyCondition", { n: p.n }) : t("settings.problem.badLimit"));
 
+/**
+ * Save, and beside it what stops a save (the button is off then) or how the last one went. The same on the project's
+ * page and the global one.
+ */
+function SaveRow({ busy, problem, msg, onSave }: { busy: boolean; problem?: SettingsProblem; msg?: { ok: boolean; text: string }; onSave: () => void }) {
+  return (
+    <div className="mt-6 flex flex-wrap items-center gap-3">
+      <Button onClick={onSave} disabled={busy || !!problem}>{t(busy ? "settings.saving" : "settings.save")}</Button>
+      {problem ? <span className="text-sm text-danger">{problemText(problem)}</span>
+        : msg && <span className={`text-sm ${msg.ok ? "text-ok" : "text-danger"}`}>{msg.text}</span>}
+    </div>
+  );
+}
+
 /** A share (0 to 1) shown and typed as a percentage. */
 function Percent({ value, onChange, disabled }: { value: string; onChange: (v: number) => void; disabled: boolean }) {
   return (
@@ -481,11 +495,7 @@ function ProjectSettingsPage({ project, info, onChanged }: { project: ProjectFil
         {rich("settings.projectNote", { global: <span key="global" className="rounded bg-surface-2 px-1.5 py-px text-[11px] font-medium uppercase tracking-wide">{t("settings.global")}</span> })}
       </p>
       <div className="mt-4"><SettingRows form={form} project={p} /></div>
-      <div className="mt-6 flex flex-wrap items-center gap-3">
-        <Button onClick={() => void save()} disabled={busy || !!problem}>{t(busy ? "settings.saving" : "settings.save")}</Button>
-        {problem ? <span className="text-sm text-danger">{problemText(problem)}</span>
-          : msg && <span className={`text-sm ${msg.ok ? "text-ok" : "text-danger"}`}>{msg.text}</span>}
-      </div>
+      <SaveRow busy={busy} problem={problem} msg={msg} onSave={() => void save()} />
     </>
   );
 }
@@ -515,11 +525,7 @@ function GlobalForm({ global, server, onSaved, onChanged }: { global: GlobalSett
   return (
     <>
       <SettingRows form={{ get: v.get, bool: v.bool, list: v.list, set: v.set }} />
-      <div className="mt-6 flex flex-wrap items-center gap-3">
-        <Button onClick={() => void save()} disabled={busy || !!problem}>{t(busy ? "settings.saving" : "settings.save")}</Button>
-        {problem ? <span className="text-sm text-danger">{problemText(problem)}</span>
-          : msg && <span className={`text-sm ${msg.ok ? "text-ok" : "text-danger"}`}>{msg.text}</span>}
-      </div>
+      <SaveRow busy={busy} problem={problem} msg={msg} onSave={() => void save()} />
       <BrowserSection />
       <ServerSection info={server} onChanged={onChanged} />
     </>
