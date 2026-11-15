@@ -181,7 +181,6 @@ export function App() {
   const queuesPage = <>
     {state && <RulesWarning key={state.project.id} project={state} />}
     {state && <NewFromTemplate key={state.project.id} project={state.project.id} />}
-    {state && <RecurringList project={state.project.id} recurring={state.recurring} onOpen={(id) => projectId && nav.item(projectId, id)} />}
     {state && <PlanView project={state.project.id} queues={state.queues} onOpen={(id) => projectId && nav.item(projectId, id)} />}
     {state && byGroup.map((g) => (
       <section key={g.title} className="mb-8">
@@ -198,6 +197,9 @@ export function App() {
         {g.queues.length === 0 && <p className="text-sm text-fg-3">{t("common.nothingHere")}</p>}
       </section>
     ))}
+
+    {/* Below what runs and what comes next (the user's order): the recurring queues. */}
+    {state && <RecurringList project={state.project.id} recurring={state.recurring} onOpen={(id) => projectId && nav.item(projectId, id)} />}
 
     {state && projectId && <FinishedGroup project={projectId} rows={finished} onOpen={(id) => nav.item(projectId, id)} />}
 

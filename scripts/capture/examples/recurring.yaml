@@ -1,6 +1,6 @@
 # Templates and recurring queues on the Queues view (queue TQ4), on the projects of scripts/capture/seed-recurring.ts:
-# "New queue from template" open with a template chosen and filled in, the recurring queues of a project, and one that
-# waits for the user's approval. All new views (role result).
+# "New queue from template" open with a template chosen and filled in, the recurring queues of a project (below the
+# plan and the queues, scrolled to), and those that wait for the user's approval. All new views (role result).
 #   node scripts/capture.ts scripts/capture/examples/recurring.yaml --step <queue>/<step> --no-before
 seed: scripts/capture/seed-recurring.ts
 views:
@@ -35,15 +35,21 @@ views:
     actions:
       - click: All queues of Demo app
       - wait: 1000
+      - click: { selector: "section[aria-label='Recurring']" }
+      - wait: 400
   - key: recurring-list@390
     route: "#/demo"
     label: "Az Ismétlődő rész telefonon"
     actions:
       - click: Queues
       - wait: 1000
+      - click: { selector: "section[aria-label='Recurring']" }
+      - wait: 400
   - key: recurring-needs-approval@1440
     route: "#/fresh"
     label: "Jóváhagyásra váró ismétlődők (új, és megváltozott), a várakozó elemekkel"
     actions:
       - click: All queues of Fresh app
       - wait: 1000
+      - click: { selector: "section[aria-label='Recurring']" }
+      - wait: 400

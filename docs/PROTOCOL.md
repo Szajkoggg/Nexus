@@ -1892,9 +1892,9 @@ updated_at: ...
 - `nexus recurring list` (any session) prints each with its template, values, schedule, state, next and last run, and
   the last time that passed without one.
 - The user pauses it and lets it go on (`pause`, `resume`) and removes it (`DELETE`); the queues it made stay.
-- **The dashboard**: "Recurring" on the project's queues lists each with its state, schedule, values, mode, next and
-  last run, and the user's Approve (while it waits for that), Pause or Resume, and Remove. "New queue from template"
-  (above it) picks a template (`GET /api/projects/:id/templates`), takes its parameters (the required ones before it can
+- **The dashboard**: "Recurring" on the project's queues (below the plan and the queues in progress and planned) lists
+  each with its state, schedule, values, mode, next and last run, and the user's Approve (while it waits for that),
+  Pause or Resume, and Remove. "New queue from template" (at the top of the page) picks a template (`GET /api/projects/:id/templates`), takes its parameters (the required ones before it can
   be sent), a maintenance template's mode and the user's own words, and sends them as the user's message to the
   orchestrator (`POST /api/projects/:id/orchestrator/messages`), with the `nexus queue draft --template` command that
   writes the draft; the orchestrator drafts the queue, which waits for the user's approval as any.

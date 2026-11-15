@@ -348,7 +348,7 @@ it as any queue. A template is a queue's YAML with a `template:` header, `params
 
 **Recurring queues.** The orchestrator can set a template to recur, at a time (every day, a weekday or a day of the
 month, the PC's local time) or after every N queues of the project are done; it proposes one in the chat first. Each
-appears under "Recurring" on the project's queues with its schedule, values, mode, next and last run. You approve it
+appears under "Recurring" on the project's queues (below the plan and the queues in progress and planned) with its schedule, values, mode, next and last run. You approve it
 once (Approve, also in "Waiting for you"): its runs then start by themselves while it stays as it is. Anything that
 changes it (the orchestrator's change, an edited or replaced template, a Nexus update that changes Nexus's template)
 asks for your approval again, and until then nothing runs. Pause and Remove are yours too; the queues it made stay.
