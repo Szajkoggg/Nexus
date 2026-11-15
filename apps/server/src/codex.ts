@@ -43,6 +43,9 @@ function userToolsOff(config: Json | undefined, keep: readonly string[] = []): R
 
 type Json = Record<string, any>;
 
+/** thread/resume of a thread Codex never saved (0.167.2, probed 2026-11-15: JSON-RPC error -32600). */
+const NO_ROLLOUT = /no rollout found for thread id/i;
+
 /** CodexErrorInfo values worth trying again: overloaded, the server's own error, the network, a short rate limit. */
 const CODEX_PASSING = new Set([
   "serverOverloaded", "internalServerError", "rateLimitExceeded", "httpConnectionFailed", "responseStreamConnectionFailed",
@@ -267,9 +270,7 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
         ...(o.withoutUserTools ? userToolsOff((await this.request("config/read", { cwd: o.cwd })).config, o.keepMcpServers) : {}),
       };
       if (Object.keys(config).length) Object.assign(common, { config });
-      const r = o.threadId
-        ? await this.request("thread/resume", { threadId: o.threadId, ...common, excludeTurns: true })
-        : await this.request("thread/start", common);
+      const r = o.threadId ? await this.resumeThread(o.threadId, common) : await this.request("thread/start", common);
       this.threadId = r.thread.id as string;
       this.base = { model: (r.model as string | undefined) ?? o.model, effort: (r.reasoningEffort as string | null | undefined) ?? o.effort };
       this.emit("facts", { nativeId: this.threadId, model: r.model });
@@ -280,6 +281,23 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
     } catch (err) {
       this.emit("activity", { kind: "error", text: `codex: ${(err as Error).message}` });
       this.kill();
+    }
+  }
+
+  /**
+   * Resumes the session's thread. Codex 0.167.2 saves a thread (its rollout) only when the thread's first turn starts,
+   * not at thread/start (probed 2026-11-15), so a process that ended between the two left a thread id with nothing
+   * behind it, and thread/resume fails with "no rollout found for thread id <id>". Then there is no conversation to
+   * lose: a new thread is started instead, its id recorded (facts `nativeId`), and the session's message goes into it
+   * (queue RN; DESIGN.md, "When Claude Code saves a conversation"). Any other failure stays a failure.
+   */
+  private async resumeThread(threadId: string, common: Json): Promise<Json> {
+    try {
+      return await this.request("thread/resume", { threadId, ...common, excludeTurns: true });
+    } catch (err) {
+      if (!NO_ROLLOUT.test((err as Error).message)) throw err;
+      this.emit("activity", { kind: "retry", text: `Codex has no saved thread ${threadId} (${clip((err as Error).message, 200)}); started a new thread` });
+      return await this.request("thread/start", common);
     }
   }
 
@@ -300,6 +318,9 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
         if (this.stopping && this.turnId && this.state === "working") void this.request("turn/interrupt", { threadId: this.threadId, turnId: this.turnId }).catch(() => {});
       })
       .catch((err) => {
+        // The process exited before it answered: its exit is the end (no turn ends after it, which would mark the
+        // record idle again).
+        if (this.state === "exited") return;
         this.emit("activity", { kind: "error", text: `turn/start: ${(err as Error).message}` });
         this.state = "idle";
         this.emit("turnEnd", { ok: false, text: (err as Error).message, failure: { kind: "lasting", code: "turnStartRejected", text: clip((err as Error).message, 300) } });

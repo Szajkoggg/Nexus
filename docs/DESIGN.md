@@ -262,6 +262,19 @@ file: the file's place (`~/.claude/projects/<folder from the path>/<id>.jsonl`) 
 the stream is its interface. The fake runtime keeps what it saved across its processes and refuses in both directions
 as Claude Code does (`test/fake-claude.ts`; FAKE_START_MS holds its first read).
 
+**Codex is affected the same way** (step RN2, probed 2026-11-15 with Codex 0.167.2 and gpt-6-luna: four runs, no
+token figures reported; the one turn was ended as it started). `thread/start` saves nothing: three seconds after it,
+and after the process ended, no rollout file of the thread existed, and `thread/resume` of it failed with "no rollout
+found for thread id <id>" (JSON-RPC error -32600). The rollout is written when the thread's first turn starts (it
+was there at `turn/start`'s answer), and a thread ended in its first turn resumes. Nexus records the thread id
+(`native_id`) from `thread/start`'s answer, so a process ended between the two (a deploy, a turn/start not yet
+taken) left an id that cannot be resumed, and the run failed again on every retry. Codex chooses its ids, so there is
+no fresh start with the same id and no mark is needed: Codex's own answer decides. `CodexSession` resumes the
+thread, and on exactly that error starts a new thread, records its id, and sends the session's message into it
+(`resumeThread` in `src/codex.ts`); any other failure stays a failure. A session from before RN with a saved thread
+resumes as before. The fake Codex saves a thread at its first turn and refuses `thread/resume` of one it never saved
+(`test/fake-codex.ts`; FAKE_TURN_START_MS holds its turn/start).
+
 - **Retries**: after 1, 2, 4, 8 and 16 minutes (`RETRY_BASE_MS` 60 000, doubled each time; `RETRY_LIMIT` 5 in a
   row). The sixth failure in a row halts the run with the last failure as its reason. A turn that ends well clears
   the count (`retries` in run.yaml), and so does a new step. The retry continues the step with a turn that says the
@@ -2262,6 +2275,30 @@ Decisions, building it:
 - A conversation without a reply yet has nothing to compact: refused.
 - In the ⋯ menu, beside "Hand to orchestrator", with a confirmation that says what it does (details it leaves out are
   no longer in the partner's context).
+
+## Layout faults (queue PL)
+
+The user decided on 2026-11-15 that layout faults are part of the dashboard's design work, checked on the designs and
+the pictures rather than found in use: a dependency line running through a queue's box (seen in the built plan view:
+ST2 → ST3 crossed RX's box and read as a chain), boxes overlapping, and text cut short ("Statisztik…").
+
+`scripts/layout-faults.ts` measures them on a page: a mockup file (served with its folder over http, its query kept)
+or a development instance's dashboard (`--click` opens the view, e.g. "All queues of Nexus"). The page side
+(`collector` in `scripts/capture/faults.ts`) gathers only geometry, so the judging is plain functions with a unit test:
+
+- **Boxes** are `[data-plan-card], [data-box]`; **lines** `[data-edge]` (on the dashboard:
+  `section[aria-label='The plan'] svg path`), each sampled every 2 px with `getPointAtLength` and the shape's screen
+  matrix. A line with a point inside a box shrunk by 1 px is a fault, so a line ending on a box's edge is not.
+- **Text cut short**: an element whose content is wider than it (`scrollWidth > clientWidth`), or taller where its
+  overflow is hidden; only the innermost of a chain of ancestors. Found building it: the two are whole pixels, so a
+  title 0.2 px too wide is cut with an ellipsis yet equal by them (the plan's "Small fixes from the user's notes of 14
+  November" on the phone, 310.1 px in 309.9). The element's own text nodes are measured too, with a Range against
+  its content box; its children's are not, since a child may sit in the padding on purpose (the ↩ of a chip, -2 px).
+- **Crossings** of two lines are counted but are no fault: fewer is easier to read, and a layout can compare them.
+
+On the plan view of the step's base commit (seed `scripts/capture/seed-plan-nexus.ts`, Nexus's own plan of 15 queues)
+it found 6 lines through boxes and 15 titles or reasons cut short at 1440 px, and 9 cut texts at 390 px; on the PL1
+mockups (`docs/ux/mockups/22-plan-layout.html`, variants A and B) none.
 
 ## Open questions
 

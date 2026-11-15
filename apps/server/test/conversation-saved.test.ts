@@ -306,3 +306,82 @@ test("the orchestrator: a message its process had not read when the server stopp
     assert.ok(!next.view().chat.some((c) => c.kind === "error"), "no error in the chat");
   } finally { first.shutdown(); next?.shutdown(); clean(); }
 });
+
+// ---------------------------------------------------------------- Codex (queue RN, step RN2)
+// Codex saves a thread when its first turn starts, not at thread/start: a process ended between the two leaves a
+// thread id with nothing behind it, and thread/resume fails with "no rollout found". FAKE_TURN_START_MS holds the
+// fake's turn/start, so a test can end the process there.
+
+/** The fake Codex's thread calls (FAKE_ARGS): ["thread/start"] or ["thread/resume", id]. */
+function threadCalls(): string[][] {
+  const f = process.env.FAKE_ARGS!;
+  if (!existsSync(f)) return [];
+  return readFileSync(f, "utf8").trim().split("\n").map((l) => JSON.parse(l) as { method?: string; threadId?: string })
+    .filter((c) => c.method === "thread/start" || c.method === "thread/resume")
+    .map((c) => (c.method === "thread/resume" ? [c.method, c.threadId!] : [c.method!]));
+}
+
+test("codex: a worker whose process ended before its thread was saved goes on in a new thread after the restart, and its step runs", async () => {
+  const { store, engine, queue, until: wait } = setup(["done", "done"]);
+  process.env.FAKE_ARGS = join(dirname(process.env.FAKE_LOG!), "args.log");
+  process.env.FAKE_TURN_START_MS = "60000"; // the thread is started, its first turn never
+  let next: Engine | undefined;
+  try {
+    engine.start("Q", { runtime: "codex" });
+    const session = queue().run!.session;
+    await wait("the thread to start", () => !!store.readSession(session).native_id && threadCalls().length === 1);
+    const unsaved = store.readSession(session).native_id!;
+    engine.drainForUpdate(true); // held for the restart; the process, waiting for its turn, ends with the server
+    engine.shutdown();
+    await wait("the process to exit", () => store.readRuntime(session)?.state === "exited");
+    delete process.env.FAKE_TURN_START_MS;
+    next = restart(store);
+    await wait("the run to finish", () => queue().run?.state === "finished", LONGER.run);
+    assert.deepEqual(threadCalls(), [["thread/start"], ["thread/resume", unsaved], ["thread/start"]], "resume refused, a new thread instead");
+    assert.notEqual(store.readSession(session).native_id, unsaved, "the session names its new thread");
+    assert.deepEqual(queue().steps.map((s) => s.status), ["done", "done"]);
+    assert.equal(queue().run?.retries, undefined, "no failed turn on the way");
+  } finally { engine.shutdown(); next?.shutdown(); delete process.env.FAKE_TURN_START_MS; clean(); }
+});
+
+test("codex: a worker whose thread was saved (stopped in its first turn) resumes the same thread after the restart", async () => {
+  const work = holdWork();
+  const { store, engine, queue, until: wait } = setup(["slow", "done"]);
+  process.env.FAKE_ARGS = join(dirname(process.env.FAKE_LOG!), "args.log");
+  let next: Engine | undefined;
+  try {
+    engine.start("Q", { runtime: "codex" });
+    await wait("the step to run", () => queue().steps[0]!.status === "running", LONGER.step);
+    const session = queue().run!.session;
+    const thread = store.readSession(session).native_id!;
+    engine.drainForUpdate(true);
+    await wait("the process to exit", () => store.readRuntime(session)?.state === "exited");
+    engine.shutdown();
+    work.release();
+    next = restart(store);
+    await wait("the run to finish", () => queue().run?.state === "finished", LONGER.run);
+    assert.deepEqual(threadCalls(), [["thread/start"], ["thread/resume", thread]]);
+    assert.equal(store.readSession(session).native_id, thread);
+    assert.equal(queue().run?.retries, undefined);
+    assert.ok(!store.readActivity(session).entries.some((a) => a.kind === "error"), "no error on the way");
+  } finally { engine.shutdown(); next?.shutdown(); work.done(); clean(); }
+});
+
+test("codex: a session from before RN (its record as then written) resumes its saved thread", async () => {
+  const { store, s: claudeSession } = hostSetup();
+  const thread = randomUUID();
+  saveFakeConversation(thread, "codex"); // the thread the earlier server's process saved
+  const s: SessionFile = { ...claudeSession, runtime: "codex", native_id: thread };
+  store.writeSession(s);
+  store.writeRuntime(s.id, { state: "exited", turns: 0, updated_at: now() });
+  const h = new AgentHost(store, ROLE_RECORDS.conversation);
+  const replies: string[] = [];
+  const launch = (): Launch => ({ runtime: "codex", options: { cwd: s.cwd, env: h.env(s.id), threadId: store.readSession(s.id).native_id, sandbox: "read-only", approvalPolicy: "never", writableRoots: [] } });
+  const l = h.start(s, launch, {}, () => ({ message: (t) => replies.push(t) }));
+  try {
+    h.send(l, "hello");
+    await until("the reply", () => replies.includes("ok"));
+    assert.deepEqual(threadCalls(), [["thread/resume", thread]]);
+    assert.equal(store.readSession(s.id).native_id, thread);
+  } finally { h.shutdown(); clean(); }
+});
