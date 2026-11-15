@@ -57,6 +57,9 @@ test("every write without the dashboard's origin is refused; approve and setting
     assert.equal(loadProjectState(store).queues[0]!.approved, false, "nothing was approved");
     assert.equal(store.readProject().name, "P", "no setting changed");
 
+    // A step's review level: the user's, refused to an agent's request (there is no CLI command for it either).
+    assert.equal((await send("PUT", "/api/projects/p/queues/Q/steps/Q1/level", { level: 1 })).status, 403);
+    assert.equal(store.readQueue("Q").user_levels, undefined, "no level set");
     // Skipping the closing refactoring with an approval: the user's too, refused to anyone else.
     assert.equal((await send("POST", "/api/projects/p/queues/Q/approve", { skip_closing: true })).status, 403);
     const page = { origin: url, "sec-fetch-site": "same-origin" };

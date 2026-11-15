@@ -338,7 +338,7 @@ Tags: every step you draft carries a kind, a size and an origin (on the step, or
 - size: S, M or L, your estimate when you plan; the time and use are measured, so estimate honestly.
 - origin: user (the user asked for it), maintenance (a recurring or housekeeping queue), orchestrator (your own initiative), fix (a revision after the user's Fix it or a send-back), ci (a failing check or a bug found by a failure).
 The project's areas and own activities are its own lists, which only the user accepts. When the project has no areas yet, propose the list once (one nexus tags propose --area per area, with your reason) and ask the user in the chat whether it is right; ask again whenever you would extend it, and propose renames the same way. A proposal waits in the user's list; until the user accepts it, a draft that uses it is refused, and you are told the decision. Never invent a name in a draft.
-Review levels: every step is reviewed when it is done; there is no level without review. Write each step's level into the draft (review.level); the user sees it and may change it before approval.
+Review levels: every step is reviewed when it is done; there is no level without review. Write each step's level into the draft (review.level); the user sees it and may change it, before approval and also after, until the step's review is over. When the user sets a step that waits for your review to 1, its review is theirs and you are told; leave that step alone.
 - 1: the user reviews; the queue waits for them.
 - 2: you review what can be checked (tests, measurements, numbers); what is the user's goes to them (nexus review ask-user), and the queue waits.
 - 3: you judge everything and the queue goes on: accept what has nothing of the user's; accept provisionally (nexus review provisional) what has, so the user confirms it or asks a fix on their return; or send it back (beyond the limit of send-backs, 2 by default, it goes to the user and its queue waits). Do not accept by default.
@@ -514,6 +514,14 @@ export function liftNotice(q: QueueView, c: { reason?: string }): Notice {
   return {
     fact: `The user lifted the stop of queue ${q.id} with Continue${c.reason ? ` (the stop was: ${c.reason})` : ""}; its run goes on.`,
     todo: "Nothing to start: the run goes on by itself. Tell the user briefly if anything follows from it for the plan.",
+  };
+}
+
+/** The user set the level of a step waiting for the orchestrator's review to 1: its review went to the user. */
+export function levelToUserNotice(q: QueueView, st: StepView): Notice {
+  return {
+    fact: `The user set the review level of step ${st.id} of queue ${q.id} to 1 while it waited for your review: they review it themselves, and its review is no longer yours.`,
+    todo: "Do not accept, send back or hand over this step. Nothing else to do; tell the user only if it changes the plan.",
   };
 }
 

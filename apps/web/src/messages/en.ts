@@ -372,6 +372,8 @@ export const en = {
   /** A step with a runtime, model or effort of its own: "SC3 on Codex · gpt-6-luna". */
   "approval.run.stepOn": "{step} on {values}",
   "approval.stepRunsOn": "runs on {values}",
+  "details.stepLevels": "Review levels",
+  "details.stepLevelsText": "The steps whose review is still to come. A new level asks for no new approval; a step waiting for the orchestrator's review that you set to 1 comes to you.",
   "approval.pins": "Approving pins revision {revision}: these steps, their acceptance, the checks and stop conditions",
   "approval.pinsLifts": "Approving pins revision {revision}: these steps, their acceptance, the checks and stop conditions; it also lifts the stop",
   // ---------------------------------------------------------------- statuses as words, times of steps and runs (ui.tsx)

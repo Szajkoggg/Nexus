@@ -16,7 +16,7 @@ import { describeDeployChanges, type DeployChanges } from "./deploy.ts";
 import type { PlanNotice } from "./deploy-plan.ts";
 import {
   acceptedNoteNotice, approvalNotice, discardNotice, liftNotice, mergedNotice, mergeWaitNotice, missedStartNotice, noticeText, orchestratorBriefing, pausedNotice,
-  questionNotice, rejectionNotice, fixAskedNotice, reviewNotice, awayOnNotice, awayEndNotice, awayStuckNotice, planDecisionNotice, planHeldNotice, runEndNotice, stepNoteNotice, tagDecisionNotice, fallbackNotice, metricNotice, userMessage, withdrawalNotice,
+  questionNotice, rejectionNotice, fixAskedNotice, levelToUserNotice, reviewNotice, awayOnNotice, awayEndNotice, awayStuckNotice, planDecisionNotice, planHeldNotice, runEndNotice, stepNoteNotice, tagDecisionNotice, fallbackNotice, metricNotice, userMessage, withdrawalNotice,
 } from "./prompts.ts";
 
 // Agent (formerly Task) lets it call subagents; they run within these same read-only permissions.
@@ -432,6 +432,11 @@ ${n.text}` });
         if (w.at < since) return;
         items.push({ key: `notify:withdrawal:${q.id}:${i}`, ...withdrawalNotice(q, w) });
       });
+      // A step the user took over by setting its level to 1 while it waited for the orchestrator's review: told once.
+      for (const st of q.steps) {
+        if (st.status !== "review" || st.review_with !== "user" || st.asked_user?.by !== "user" || st.asked_user.at < since) continue;
+        items.push({ key: `notify:leveltouser:${q.id}:${st.id}:${st.asked_user.at}`, ...levelToUserNotice(q, st) });
+      }
       // A step waiting for its review: told whenever it entered review (also to a session started after that), once
       // per round.
       for (const st of q.steps) {
@@ -450,7 +455,7 @@ ${n.text}` });
         for (const st of q.steps) {
           if (st.status !== "review" || st.review_with !== "user") continue;
           const why = st.sent_back.some((b) => b.to_user) && st.asked_user ? "your send-backs reached the limit"
-            : st.asked_user ? "you handed it to the user" : st.level === 1 ? "review level 1: the user reviews it" : "the user reviews it";
+            : st.asked_user && st.asked_user.by !== "user" ? "you handed it to the user" : st.level === 1 ? "review level 1: the user reviews it" : "the user reviews it";
           const next = state.queues.filter((x) => x.id !== q.id && inPlan(x) && x.status !== "done" && x.status !== "cancelled" && !(x.run && HOLDING_RUN_STATES.includes(x.run.state)))
             .map((x) => ({ id: x.id, title: x.title, waiting: x.start?.waiting || x.plan?.waiting || "it may start" }));
           const paused = this.engine.startable(state).filter((x) => x.id !== q.id && x.status === "paused").map((x) => ({ id: x.id, title: x.title }));

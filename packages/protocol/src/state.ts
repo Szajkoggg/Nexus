@@ -102,8 +102,11 @@ export interface StepView extends StepDef {
    * `confirmed` it, or asked a `fix` (Fix it: the orchestrator drafts a revision with a step that fixes it).
    */
   provisional?: { at: string; event: string; text?: string; confirmed?: string; fix?: { text: string; at: string } };
-  /** The orchestrator's reason for handing the step's review to the user, in the current round. */
-  asked_user?: { text: string; at: string };
+  /**
+   * Why the step's review went to the user in the current round: the orchestrator's reason for handing it over, or
+   * (`by: "user"`) the user's own change of its level to 1 while it waited for the orchestrator.
+   */
+  asked_user?: { text: string; at: string; by?: "user" };
   /**
    * Send-backs of this step, oldest first: `id` is the review.sent_back event's; `round` the round it opened once the
    * server delivered it to the worker (`delivered`); `to_user`: the orchestrator's beyond the limit, which handed the
@@ -465,7 +468,7 @@ function attentionOf(queues: QueueView[], questions: QuestionView[], tags: TagsF
     if (q.status === "cancelled" || q.status === "done") continue;
     for (const s of q.steps) {
       // A review the orchestrator does is not the user's (the queue still shows it waiting).
-      if (s.status === "review" && s.review_with !== "orchestrator") out.push({ kind: "review", queue: q.id, step: s.id, text: s.asked_user?.text ?? s.summary ?? s.title, at: s.asked_user?.at ?? s.finished_at });
+      if (s.status === "review" && s.review_with !== "orchestrator") out.push({ kind: "review", queue: q.id, step: s.id, text: (s.asked_user?.by !== "user" ? s.asked_user?.text : undefined) ?? s.summary ?? s.title, at: s.asked_user?.at ?? s.finished_at });
       if (s.status === "failed") out.push({ kind: "failed", queue: q.id, step: s.id, text: s.reason ?? s.title, at: s.finished_at });
     }
   }
@@ -699,8 +702,11 @@ function apply(
     }
     case "review.asked_user": {
       const st = stepOf(queueOf(e.queue), e.step);
-      if (!st || st.status !== "review" || st.review_with !== "orchestrator") { warnings.push(`event ${e.id}: step ${e.queue}/${e.step} is not waiting for the orchestrator's review; ignored`); return; }
-      st.review_with = "user"; st.asked_user = { text: e.text, at: e.at };
+      // The user's own (their level 1 on a step the orchestrator held) also where the step's level, read now, already
+      // gives its review to the user: it keeps the review the user's whatever the level becomes.
+      const own = s?.role === "user" && st?.status === "review";
+      if (!st || (!own && (st.status !== "review" || st.review_with !== "orchestrator"))) { warnings.push(`event ${e.id}: step ${e.queue}/${e.step} is not waiting for the orchestrator's review; ignored`); return; }
+      st.review_with = "user"; st.asked_user = { text: e.text, at: e.at, ...(s?.role === "user" ? { by: "user" as const } : {}) };
       return;
     }
     case "review.rejected": {

@@ -22,7 +22,7 @@ export interface Away { on: boolean; since?: string; until?: string }
 // ---------------------------------------------------------------- levels
 
 /**
- * A step's review level, to set before approval (or later): 1 · 2 · 3 as one control, the chosen level's words beside
+ * A step's review level, to set before approval or later, until its review is over (levelChangeable): 1 · 2 · 3 as one control, the chosen level's words beside
  * it, and "set by you" with Reset when the user set it. Setting a level asks for no new approval.
  */
 export function LevelPicker({ project, queue, step, onChanged, away }: {
@@ -55,6 +55,12 @@ export function LevelPicker({ project, queue, step, onChanged, away }: {
     </span>
   );
 }
+
+/**
+ * Whether the user may still change a step's level: until its review is over (done, also provisionally), it is skipped,
+ * failed or rejected. Pending, running, waiting, in review and stopped steps take a new level, also after approval.
+ */
+export const levelChangeable = (s: Pick<StepView, "status">) => !["done", "skipped", "failed", "rejected"].includes(s.status);
 
 /** A step's level on its line ("L1"), marked when the user set it; level 2, the usual, shows nothing on a line. */
 export function LevelMark({ step, always }: { step: Pick<StepView, "level" | "level_from">; always?: boolean }) {

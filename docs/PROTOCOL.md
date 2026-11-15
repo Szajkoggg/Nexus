@@ -551,7 +551,7 @@ Every line:
 | `metric.recorded` | `queue`, `step`, `name`, `value`, `unit`, `commit?` | Worker only (the loader ignores it from any other session): a value of one of the project's metrics for the step, with the metric's unit then and the HEAD of the worker's checkout (see "Project metrics") |
 | `review.sent_back` | `queue`, `step`, `text` | Orchestrator or user only: a step in review goes back to its worker with what to fix (see "Sending a step back") |
 | `review.rejected` | `queue`, `step`, `text?` | User only (the loader ignores it from any other session, the orchestrator's included): rejects a step waiting for the user's review (see "Reject") |
-| `review.asked_user` | `queue`, `step`, `text` | Orchestrator only in practice (the loader takes it from an orchestrator or the user): a step waiting for the orchestrator's review goes to the user, with why |
+| `review.asked_user` | `queue`, `step`, `text` | The orchestrator's: a step waiting for its review goes to the user, with why. Also the server's from the user's session, when the user sets such a step's level to 1 (see "The user's level"): then taken for a step in review whoever its level gives it to, and marked `by: user` |
 | `review.provisional` | `queue`, `step`, `text?` | Orchestrator only (the loader ignores the user's too): a step of review level 3 waiting for its review is accepted provisionally, `text` what the user should look at; the run goes on (see "Provisional acceptances") |
 | `review.confirmed` | `queue`, `step` | User only: confirms a provisional acceptance |
 | `review.fix_asked` | `queue`, `step`, `text` | User only: Fix it on a provisional acceptance; the orchestrator drafts a revision with a step that fixes it |
@@ -723,7 +723,15 @@ feel) gives 1.
 only by the server. It is not part of what an approval pins (the `hash` in `approvals`: steps, checks and stop conditions), so it asks for no new approval; a
 later revision keeps it for the steps it keeps, and a draft cannot bring levels of the user's (its `user_levels` is
 ignored). `null` clears it: the step's drafted level applies again. The queue's own `review_level` (`PATCH
-…/queues/:q`) is not pinned either.
+…/queues/:q`) is not pinned either. Both change also after approval, until the step's review is over: a step that is
+`done` (also accepted provisionally), `skipped`, `failed` or `rejected` keeps its level, and a request to change it is
+refused (409). A step waiting for the orchestrator's review whose level a change of the user's makes 1 (its own, or
+the queue's it takes) goes to the user: the server writes `review.asked_user` from the user's session ("The user set
+the step's review level to 1: they review it themselves."), the step's `asked_user` gets `by: user`, and the
+orchestrator is told once ("The user set the review level of step S of queue Q to 1 while it waited for your
+review…"); the user's item shows the step's summary. A step the user's change sets to 3 keeps waiting for the
+orchestrator: nothing is accepted by itself. The level a step's review goes by is read when the state is derived, so
+the user's `review.asked_user` is what keeps such a review the user's should the level change again.
 
 **Before review levels** there were review policies: `review_policy` on the queue, `review.policy` on a step and
 `defaults.review_policy` in the settings, with `continue` (no review), `wait` and `orchestrator`. Every reader takes
