@@ -130,6 +130,11 @@ function stateOf(e: Entry): ProjectState | undefined {
 // ---------------------------------------------------------------- change notification
 
 const sockets = new Set<WebSocket>();
+/** Tells every open dashboard what changed: a project, the project list, or the server's own state. */
+function broadcast(m: { type: "changed"; project: string } | { type: "projects" | "server" }): void {
+  const msg = JSON.stringify(m);
+  for (const s of sockets) if (s.readyState === s.OPEN) s.send(msg);
+}
 const pending = new Map<string, NodeJS.Timeout>();
 
 function changed(id: string): void {
@@ -164,8 +169,7 @@ function changed(id: string): void {
       }
     }
     if (e) { const s = stateOf(e); if (s) watch.check({ id, name: s.project.name }, s.attention); }
-    const msg = JSON.stringify({ type: "changed", project: id });
-    for (const s of sockets) if (s.readyState === s.OPEN) s.send(msg);
+    broadcast({ type: "changed", project: id });
   }, 150));
 }
 
@@ -181,7 +185,7 @@ function watchProject(id: string, dir: string): void {
 chokidar.watch(join(nexusHome(), "projects.yaml"), { ignoreInitial: true }).on("all", () => {
   if (!active) return;
   refreshRegistry();
-  for (const s of sockets) if (s.readyState === s.OPEN) s.send(JSON.stringify({ type: "projects" }));
+  broadcast({ type: "projects" });
 });
 
 // ---------------------------------------------------------------- files the dashboard may show
@@ -194,7 +198,9 @@ function allowedRoots(e: Entry, state: ProjectState): string[] {
 
 // ---------------------------------------------------------------- HTTP
 
-const app = new Hono<{ Bindings: HttpBindings }>();
+/** The app's context: a project's routes find its entry once (the lookup below) and read it with c.get("entry"). */
+type Env = { Bindings: HttpBindings; Variables: { entry: Entry } };
+const app = new Hono<Env>();
 const lifecycle = new Lifecycle(() => [...projects.values()].map((e) => ({
   id: e.id,
   idle: () => e.engine.idle() && e.orchestrator.idle() && e.conversations.idle(),
@@ -202,7 +208,7 @@ const lifecycle = new Lifecycle(() => [...projects.values()].map((e) => ({
   cancel: () => { e.conversations.draining = false; e.engine.cancelDrain(); },
   hurry: () => e.engine.hurryDrain(),
   shutdown: () => { e.engine.shutdown(); e.orchestrator.shutdown(); e.conversations.shutdown(); e.merger.shutdown(); },
-})), () => { for (const s of sockets) if (s.readyState === s.OPEN) s.send(JSON.stringify({ type: "server" })); }, {
+})), () => broadcast({ type: "server" }), {
   release, reacquire,
   notify: (text) => void push({ title: "Nexus: update failed", body: text.slice(0, 180), url: "/?settings", tag: "nexus-update" }),
   // Settled (up and pushed, failed, cancelled): what was held while it drained, and its outcome, go out now.
@@ -220,7 +226,7 @@ const planner = new DeployPlanner({
   push: (n) => void push(n),
   changed: () => {
     if (!active) return;
-    for (const s of sockets) if (s.readyState === s.OPEN) s.send(JSON.stringify({ type: "server" }));
+    broadcast({ type: "server" });
     for (const id of projects.keys()) changed(id); // its orchestrator is told when a plan is dropped
   },
 });
@@ -252,69 +258,6 @@ app.post("/login", async (c) => {
   return c.redirect("/");
 });
 
-app.get("/api/projects", (c) => {
-  refreshRegistry();
-  const list: ProjectSummary[] = [...projects.values()].map((e) => {
-    const s = stateOf(e);
-    const count = (st: string) => s?.queues.filter((q) => q.status === st).length ?? 0;
-    return {
-      id: e.id, root: e.root, name: s?.project.name ?? e.id, error: e.error,
-      running: count("running"), waiting: count("waiting"), stopped: count("stopped"),
-      open_questions: s?.questions.filter(isOpenQuestion).length ?? 0,
-      attention: s?.attention ?? [],
-    };
-  });
-  return c.json(list);
-});
-
-app.get("/api/projects/:id/state", (c) => {
-  const e = projects.get(c.req.param("id"));
-  if (!e) return c.json({ error: "unknown project" }, 404);
-  const s = stateOf(e);
-  return s ? c.json(s) : c.json({ error: e.error }, 500);
-});
-
-// Expected times of a project's queues, as estimates (@nexus/protocol estimates.ts): the samples are the finished
-// steps of every project this server has, from the worker turns' durations in turns.jsonl.
-app.get("/api/projects/:id/estimates", (c) => {
-  const e = projects.get(c.req.param("id"));
-  if (!e) return c.json({ error: "unknown project" }, 404);
-  const s = stateOf(e);
-  if (!s) return c.json({ error: e.error }, 500);
-  const states = new Map([...projects.values()].map(stateOf).filter((x): x is ProjectState => !!x).map((x) => [x.project.id, x]));
-  const samples = stepSamples(readTurns().entries, (p, q, st) => states.get(p)?.queues.find((x) => x.id === q)?.steps.find((x) => x.id === st)?.status === "done");
-  const queues = Object.fromEntries(s.queues.filter((q) => q.status !== "done" && q.status !== "cancelled").map((q) => [q.id, queueEstimate(q, s.project, samples)]));
-  return c.json({ samples: samples.length, min: MIN_SAMPLES, queues } satisfies EstimatesResponse);
-});
-
-app.get("/api/projects/:id/file", (c) => {
-  const e = projects.get(c.req.param("id"));
-  const s = e && stateOf(e);
-  const path = c.req.query("path");
-  if (!e || !s || !path) return c.json({ error: "unknown project or no path" }, 404);
-  const at = locate(e.root, allowedRoots(e, s), path);
-  if ("error" in at) return c.json({ error: at.error }, at.status);
-  return fileResponse(at.real);
-});
-
-// The project's rules files: does each runtime see the rules, and the fix the user may make (src/rulesfix.ts).
-app.get("/api/projects/:id/rules", (c) => {
-  const e = projects.get(c.req.param("id"));
-  if (!e) return c.json({ error: "unknown project" }, 404);
-  return c.json(projectRules(e.root));
-});
-
-app.get("/api/projects/:id/commits/:hash", (c) => {
-  const e = projects.get(c.req.param("id"));
-  if (!e) return c.json({ error: "unknown project" }, 404);
-  const hash = c.req.param("hash");
-  if (!COMMIT_HASH.test(hash)) return c.json({ error: "not a commit hash (7 to 40 lowercase hex digits)" }, 400);
-  const commit = commitDetail(e.root, hash);
-  return commit ? c.json(commit) : c.json({ error: "not found" }, 404);
-});
-
-// ---------------------------------------------------------------- writes (the user's actions)
-
 /**
  * Writes accept JSON only and only from this server's own pages: a cross-site form cannot send JSON without a
  * preflight this server never grants, and a stray Origin is refused outright.
@@ -339,6 +282,73 @@ app.use("/api/*", async (c, next) => {
   return next();
 });
 
+// A project's routes: the project is looked up once, here; an unknown one is a 404 for every route under it.
+app.use("/api/projects/:id/*", async (c, next) => {
+  const e = projects.get(c.req.param("id"));
+  if (!e) return c.json({ error: "unknown project" }, 404);
+  c.set("entry", e);
+  return next();
+});
+
+app.get("/api/projects", (c) => {
+  refreshRegistry();
+  const list: ProjectSummary[] = [...projects.values()].map((e) => {
+    const s = stateOf(e);
+    const count = (st: string) => s?.queues.filter((q) => q.status === st).length ?? 0;
+    return {
+      id: e.id, root: e.root, name: s?.project.name ?? e.id, error: e.error,
+      running: count("running"), waiting: count("waiting"), stopped: count("stopped"),
+      open_questions: s?.questions.filter(isOpenQuestion).length ?? 0,
+      attention: s?.attention ?? [],
+    };
+  });
+  return c.json(list);
+});
+
+app.get("/api/projects/:id/state", (c) => {
+  const e = c.get("entry");
+  const s = stateOf(e);
+  return s ? c.json(s) : c.json({ error: e.error }, 500);
+});
+
+// Expected times of a project's queues, as estimates (@nexus/protocol estimates.ts): the samples are the finished
+// steps of every project this server has, from the worker turns' durations in turns.jsonl.
+app.get("/api/projects/:id/estimates", (c) => {
+  const e = c.get("entry");
+  const s = stateOf(e);
+  if (!s) return c.json({ error: e.error }, 500);
+  const states = new Map([...projects.values()].map(stateOf).filter((x): x is ProjectState => !!x).map((x) => [x.project.id, x]));
+  const samples = stepSamples(readTurns().entries, (p, q, st) => states.get(p)?.queues.find((x) => x.id === q)?.steps.find((x) => x.id === st)?.status === "done");
+  const queues = Object.fromEntries(s.queues.filter((q) => q.status !== "done" && q.status !== "cancelled").map((q) => [q.id, queueEstimate(q, s.project, samples)]));
+  return c.json({ samples: samples.length, min: MIN_SAMPLES, queues } satisfies EstimatesResponse);
+});
+
+app.get("/api/projects/:id/file", (c) => {
+  const e = c.get("entry");
+  const s = stateOf(e);
+  const path = c.req.query("path");
+  if (!s || !path) return c.json({ error: s ? "no path" : e.error ?? "the project's state could not be read" }, 404);
+  const at = locate(e.root, allowedRoots(e, s), path);
+  if ("error" in at) return c.json({ error: at.error }, at.status);
+  return fileResponse(at.real);
+});
+
+// The project's rules files: does each runtime see the rules, and the fix the user may make (src/rulesfix.ts).
+app.get("/api/projects/:id/rules", (c) => {
+  const e = c.get("entry");
+  return c.json(projectRules(e.root));
+});
+
+app.get("/api/projects/:id/commits/:hash", (c) => {
+  const e = c.get("entry");
+  const hash = c.req.param("hash");
+  if (!COMMIT_HASH.test(hash)) return c.json({ error: "not a commit hash (7 to 40 lowercase hex digits)" }, 400);
+  const commit = commitDetail(e.root, hash);
+  return commit ? c.json(commit) : c.json({ error: "not found" }, 404);
+});
+
+// ---------------------------------------------------------------- writes (the user's actions)
+
 // While an update drains, nothing new starts: no run, no orchestrator turn.
 app.use("/api/projects/:id/*", async (c, next) => {
   if (c.req.method === "POST" && lifecycle.busy) {
@@ -352,13 +362,13 @@ app.use("/api/projects/:id/*", async (c, next) => {
 });
 
 type Body = Record<string, unknown>;
-function act(handler: (store: ProjectStore, body: Body, p: (name: string) => string) => unknown) {
-  return async (c: import("hono").Context) => {
-    const e = projects.get(c.req.param("id") ?? "");
-    if (!e) return c.json({ error: "unknown project" }, 404);
+/** A user's write to a project: the handler gets the project's store, the JSON body, the route's parameters and the entry. */
+function act(handler: (store: ProjectStore, body: Body, p: (name: string) => string, entry: Entry) => unknown) {
+  return async (c: import("hono").Context<Env>) => {
+    const e = c.get("entry");
     const body = (await c.req.json().catch(() => ({}))) as Body;
     try {
-      const result = handler(e.store, body, (n) => c.req.param(n) ?? "");
+      const result = handler(e.store, body, (n) => c.req.param(n) ?? "", e);
       changed(e.id);
       return c.json({ ok: true, result: result ?? null });
     } catch (err) {
@@ -394,9 +404,8 @@ app.put("/api/projects/:id/queues/:queue/steps/:step/level", act((st, b, p) => s
 app.post("/api/projects/:id/questions/:qid/answer", act((st, b, p) => answerAsUser(st, p("qid"), b.text, b.continue)));
 
 // The engine: running queues through Nexus-launched sessions.
-const engineOf = (st: ProjectStore) => [...projects.values()].find((e) => e.store === st)!.engine;
-app.post("/api/projects/:id/queues/:queue/run", act((st, b, p) => {
-  const engine = engineOf(st); const q = p("queue");
+app.post("/api/projects/:id/queues/:queue/run", act((_st, b, p, e) => {
+  const engine = e.engine; const q = p("queue");
   switch (b.action) {
     case "start": {
       const options = {
@@ -424,11 +433,11 @@ app.post("/api/projects/:id/queues/:queue/run", act((st, b, p) => {
 // The user's answers about the plan (PROTOCOL.md, "The plan"): accept or decline the orchestrator's proposal for the
 // queue, or hand a dependency they set back to the orchestrator (`after`: one predecessor; without it, all of them);
 // and the user's reorder: `move` the queue after `after` (null: with no queue before it), as in a list.
-app.post("/api/projects/:id/queues/:queue/plan", act((st, b, p) => {
+app.post("/api/projects/:id/queues/:queue/plan", act((st, b, p, e) => {
   switch (b.action) {
     case "move": {
       if (b.after !== null && (typeof b.after !== "string" || !b.after)) throw new ActionError("after is a queue id, or null for none before it");
-      return { message: engineOf(st).move(p("queue"), b.after as string | null) };
+      return { message: e.engine.move(p("queue"), b.after as string | null) };
     }
     case "accept": return { message: acceptPlanProposal(st, p("queue")) };
     case "decline": return { message: declinePlanProposal(st, p("queue")) };
@@ -450,7 +459,7 @@ app.post("/api/projects/:id/tags/:proposal", act((st, b, p) => {
 }));
 // Continue on a stopped queue: the user's lift of the stop, then the run goes on (only from the dashboard, as every write).
 // `skip_closing: true`: the user skips the queue's closing refactoring step with it (checked before anything is recorded).
-app.post("/api/projects/:id/queues/:queue/continue", act((st, b, p) => {
+app.post("/api/projects/:id/queues/:queue/continue", act((st, b, p, e) => {
   if (b.skip_closing !== undefined && typeof b.skip_closing !== "boolean") throw new ActionError("skip_closing is true or false");
   const skipClosing = b.skip_closing === true;
   if (skipClosing) {
@@ -460,26 +469,26 @@ app.post("/api/projects/:id/queues/:queue/continue", act((st, b, p) => {
   }
   const d = decideStoppedWork(st, p("queue"), b.work, "user_continue");
   if (!d.proceed) return { message: d.message };
-  return engineOf(st).continueQueue(p("queue"), { skipClosing });
+  return e.engine.continueQueue(p("queue"), { skipClosing });
 }));
 // Fix it: the user sends a step waiting for their review back to its worker, with what they want (required).
 app.post("/api/projects/:id/queues/:queue/steps/:step/send-back", act((st, b, p) => ({ message: sendBack(st, { queue: p("queue"), step: p("step"), from: "user", text: b.text }) })));
 // Merge back and clean up a finished worktree queue: the user's only (no CLI command or event leads here).
-app.post("/api/projects/:id/queues/:queue/merge", act((st, _b, p) => ({ message: mergeBack(st, p("queue"), undefined, (q) => void engineOf(st).start(q)) })));
+app.post("/api/projects/:id/queues/:queue/merge", act((st, _b, p, e) => ({ message: mergeBack(st, p("queue"), undefined, (q) => void e.engine.start(q)) })));
 app.post("/api/projects/:id/queues/:queue/cleanup", act((st, _b, p) => ({ message: cleanUp(st, p("queue")) })));
 // Push again: the last failed push of an accepted step of this queue, tried again.
 // The fix of the rules files, as the user saw it (`version`): it changes the project's own files and commits nothing.
 app.post("/api/projects/:id/rules/fix", act((st, b) => ({ message: fixProjectRules(st, b.version) })));
-app.post("/api/projects/:id/queues/:queue/push", act((st, _b, p) => ({ message: engineOf(st).pushAgain(p("queue")) })));
+app.post("/api/projects/:id/queues/:queue/push", act((_st, _b, p, e) => ({ message: e.engine.pushAgain(p("queue")) })));
 // Review pictures: the user's mark (a mark only) and comment (a Fix it while the step waits for the user, else a note
 // on the next pending step).
 app.post("/api/projects/:id/queues/:queue/steps/:step/pictures/mark", act((st, b, p) => markPicture(st, { queue: p("queue"), step: p("step"), path: b.path, accepted: b.accepted })));
 app.post("/api/projects/:id/queues/:queue/steps/:step/pictures/comment", act((st, b, p) => ({ message: commentOnPicture(st, { queue: p("queue"), step: p("step"), path: b.path, text: b.text }) })));
 // Reject: the user's, on a step waiting for their review; the run pauses until a new revision is approved.
-app.post("/api/projects/:id/queues/:queue/steps/:step/reject", act((st, b, p) => ({ message: engineOf(st).rejectStep(p("queue"), p("step"), b.text) })));
+app.post("/api/projects/:id/queues/:queue/steps/:step/reject", act((_st, b, p, e) => ({ message: e.engine.rejectStep(p("queue"), p("step"), b.text) })));
 // The user confirms a step the orchestrator accepted provisionally (review level 3); Fix it on one is the send-back.
 app.post("/api/projects/:id/queues/:queue/steps/:step/confirm", act((st, _b, p) => ({ message: confirmProvisional(st, p("queue"), p("step")) })));
-app.post("/api/projects/:id/queues/:queue/steps/:step/accept", act((st, b, p) => engineOf(st).acceptReview(p("queue"), p("step"), b.text, b.note_to)));
+app.post("/api/projects/:id/queues/:queue/steps/:step/accept", act((_st, b, p, e) => e.engine.acceptReview(p("queue"), p("step"), b.text, b.note_to)));
 
 // A picture for a chat message (src/uploads.ts): the body's size is checked before it is read or parsed (also when it
 // comes without a Content-Length), and the guard above has already taken it as the user's, from the dashboard.
@@ -489,8 +498,7 @@ app.post("/api/projects/:id/uploads", bodyLimit({
   // socket the server is about to close.
   onError: (c) => c.json({ error: "only PNG, JPEG, WebP or GIF up to 10 MB" }, 413, { connection: "close" }),
 }), async (c) => {
-  const e = projects.get(c.req.param("id"));
-  if (!e) return c.json({ error: "unknown project" }, 404);
+  const e = c.get("entry");
   const body = (await c.req.json().catch(() => undefined)) as Body | undefined;
   if (!body || typeof body !== "object") return c.json({ error: "not a JSON object" }, 400);
   try {
@@ -504,54 +512,50 @@ app.post("/api/projects/:id/uploads", bodyLimit({
 
 // A chat's older entries, its search over the whole chat.jsonl, and its pins (src/chats.ts).
 app.get("/api/projects/:id/sessions/:session/chat", (c) => {
-  const e = projects.get(c.req.param("id"));
-  if (!e) return c.json({ error: "unknown project" }, 404);
+  const e = c.get("entry");
   const from = Number(c.req.query("from") ?? 0), to = Number(c.req.query("to") ?? Number.MAX_SAFE_INTEGER);
   if (!Number.isInteger(from) || !Number.isInteger(to)) return c.json({ error: "from and to: whole numbers (lines)" }, 400);
   try { return c.json({ chat: chatRange(e.store, c.req.param("session"), from, to) }); } catch (err) { return c.json({ error: (err as Error).message }, 404); }
 });
 app.get("/api/projects/:id/sessions/:session/chat/search", (c) => {
-  const e = projects.get(c.req.param("id"));
-  if (!e) return c.json({ error: "unknown project" }, 404);
+  const e = c.get("entry");
   try { return c.json({ lines: searchLines(e.store, c.req.param("session"), c.req.query("q") ?? "", c.req.query("tools") === "1") }); } catch (err) { return c.json({ error: (err as Error).message }, 404); }
 });
 app.post("/api/projects/:id/sessions/:session/pins", act((st, b, p) => ({ pins: pin(st, p("session"), b.line, b.pinned) })));
 
 app.get("/api/projects/:id/sessions/:session/activity", (c) => {
-  const e = projects.get(c.req.param("id"));
-  if (!e) return c.json({ error: "unknown project" }, 404);
+  const e = c.get("entry");
   return c.json(e.engine.activity(c.req.param("session"), c.req.query("queue"), c.req.query("step"), Number(c.req.query("limit") ?? 300)));
 });
 
 // Git on the dashboard (src/gitinfo.ts; local git only, never a fetch): a step's commits per round, a queue's branch.
 // null when the project is not a git repository (or nothing was recorded).
 app.get("/api/projects/:id/queues/:queue/steps/:step/commits", (c) => {
-  const e = projects.get(c.req.param("id"));
-  const q = e ? stateOf(e)?.queues.find((x) => x.id === c.req.param("queue")) : undefined;
-  if (!e || !q) return c.json({ error: "unknown project or queue" }, 404);
+  const e = c.get("entry");
+  const q = stateOf(e)?.queues.find((x) => x.id === c.req.param("queue"));
+  if (!q) return c.json({ error: "unknown queue" }, 404);
   return c.json(stepCommits(e.store, q, c.req.param("step")) ?? null);
 });
 // What a stopped queue's stopped step left (its own commits, the checkout's uncommitted changes) and whether a Discard
 // is recorded for this stop; null when the queue is not stopped at a step.
 app.get("/api/projects/:id/queues/:queue/left", (c) => {
-  const e = projects.get(c.req.param("id"));
-  const q = e ? stateOf(e)?.queues.find((x) => x.id === c.req.param("queue")) : undefined;
-  if (!e || !q) return c.json({ error: "unknown project or queue" }, 404);
+  const e = c.get("entry");
+  const q = stateOf(e)?.queues.find((x) => x.id === c.req.param("queue"));
+  if (!q) return c.json({ error: "unknown queue" }, 404);
   const left = leftBehind(e.store, q);
   const view: LeftView | null = left ? { ...left, discarded: discardRecorded(q) ?? null } : null;
   return c.json(view);
 });
 app.get("/api/projects/:id/queues/:queue/git", (c) => {
-  const e = projects.get(c.req.param("id"));
-  const q = e ? stateOf(e)?.queues.find((x) => x.id === c.req.param("queue")) : undefined;
-  if (!e || !q) return c.json({ error: "unknown project or queue" }, 404);
+  const e = c.get("entry");
+  const q = stateOf(e)?.queues.find((x) => x.id === c.req.param("queue"));
+  if (!q) return c.json({ error: "unknown queue" }, 404);
   return c.json(branchState(e.store, q) ?? null);
 });
 
 // Refused actions of every session of the project, oldest first; with ?queue= (and &step=) only those of a step.
 app.get("/api/projects/:id/refusals", (c) => {
-  const e = projects.get(c.req.param("id"));
-  if (!e) return c.json({ error: "unknown project" }, 404);
+  const e = c.get("entry");
   const queue = c.req.query("queue"), step = c.req.query("step");
   const all = e.store.sessionIds().flatMap((s) => e.store.readRefusals(s).entries)
     .filter((r) => (!queue || r.queue === queue) && (!step || r.step === step));
@@ -600,7 +604,7 @@ let awayTimer: NodeJS.Timeout | undefined;
 /** Every project looks again (the orchestrators are told), and the dashboards reload the server's state. */
 function awayChanged(): void {
   for (const id of projects.keys()) changed(id);
-  for (const s of sockets) if (s.readyState === s.OPEN) s.send(JSON.stringify({ type: "server" }));
+  broadcast({ type: "server" });
 }
 
 /** Ends an away mode whose time has come (recorded as expired), and arms a timer for the end of the current one. */
@@ -650,7 +654,7 @@ app.post("/api/server/settings", async (c) => {
     writeLimits({ ...readLimits(), max_running: b.max_running });
     coordinator.wake(); // a higher limit lets waiting starts go
   }
-  for (const s of sockets) if (s.readyState === s.OPEN) s.send(JSON.stringify({ type: "server" }));
+  broadcast({ type: "server" });
   return c.json({ ok: true, push_on_deploy: readDeploySettings().push_on_deploy, max_running: readLimits().max_running });
 });
 /** An orchestrator session of a registered project, as the CLI sends it (`by`); anything else counts as the user. */
@@ -731,42 +735,35 @@ app.get("/api/models/:runtime", async (c) => {
 });
 
 // The orchestrator chat.
-const orchestratorOf = (st: ProjectStore) => [...projects.values()].find((e) => e.store === st)!.orchestrator;
 app.get("/api/projects/:id/orchestrator", (c) => {
-  const e = projects.get(c.req.param("id"));
-  return e ? c.json(e.orchestrator.view()) : c.json({ error: "unknown project" }, 404);
+  return c.json(c.get("entry").orchestrator.view());
 });
-app.post("/api/projects/:id/orchestrator/messages", act((st, b) => orchestratorOf(st).say(b.text)));
-app.post("/api/projects/:id/orchestrator/reset", act((st) => orchestratorOf(st).reset()));
-app.post("/api/projects/:id/orchestrator/stop", act((st) => orchestratorOf(st).stop()));
+app.post("/api/projects/:id/orchestrator/messages", act((_st, b, _p, e) => e.orchestrator.say(b.text)));
+app.post("/api/projects/:id/orchestrator/reset", act((_st, _b, _p, e) => e.orchestrator.reset()));
+app.post("/api/projects/:id/orchestrator/stop", act((_st, _b, _p, e) => e.orchestrator.stop()));
 // Conversations: thinking partners for the project.
-const conversationsOf = (st: ProjectStore) => [...projects.values()].find((e) => e.store === st)!.conversations;
 app.get("/api/projects/:id/conversations", (c) => {
-  const e = projects.get(c.req.param("id"));
-  return e ? c.json(e.conversations.list()) : c.json({ error: "unknown project" }, 404);
+  return c.json(c.get("entry").conversations.list());
 });
 app.get("/api/projects/:id/conversations/:cid", (c) => {
-  const e = projects.get(c.req.param("id"));
-  if (!e) return c.json({ error: "unknown project" }, 404);
+  const e = c.get("entry");
   try { return c.json(e.conversations.view(c.req.param("cid"))); } catch (err) { return c.json({ error: (err as Error).message }, 404); }
 });
-app.post("/api/projects/:id/conversations", act((st, b) => conversationsOf(st).create(b)));
+app.post("/api/projects/:id/conversations", act((_st, b, _p, e) => e.conversations.create(b)));
 // The step's latest conversation that is not archived ("Chat about this" opens it, or starts one when there is none).
 app.get("/api/projects/:id/queues/:q/steps/:s/conversation", (c) => {
-  const e = projects.get(c.req.param("id"));
-  if (!e) return c.json({ error: "unknown project" }, 404);
+  const e = c.get("entry");
   return c.json({ conversation: e.conversations.latestFor(c.req.param("q"), c.req.param("s")) ?? null });
 });
-app.patch("/api/projects/:id/conversations/:cid", act((st, b, p) => conversationsOf(st).update(p("cid"), b)));
-app.post("/api/projects/:id/conversations/:cid/messages", act((st, b, p) => conversationsOf(st).say(p("cid"), b.text)));
-app.post("/api/projects/:id/conversations/:cid/stop", act((st, _b, p) => conversationsOf(st).stop(p("cid"))));
-app.post("/api/projects/:id/conversations/:cid/handoff", act((st, _b, p) => conversationsOf(st).handoff(p("cid"))));
-app.post("/api/projects/:id/orchestrator/settings", act((st, b) => orchestratorOf(st).settings(b.model, b.effort)));
+app.patch("/api/projects/:id/conversations/:cid", act((_st, b, p, e) => e.conversations.update(p("cid"), b)));
+app.post("/api/projects/:id/conversations/:cid/messages", act((_st, b, p, e) => e.conversations.say(p("cid"), b.text)));
+app.post("/api/projects/:id/conversations/:cid/stop", act((_st, _b, p, e) => e.conversations.stop(p("cid"))));
+app.post("/api/projects/:id/conversations/:cid/handoff", act((_st, _b, p, e) => e.conversations.handoff(p("cid"))));
+app.post("/api/projects/:id/orchestrator/settings", act((_st, b, _p, e) => e.orchestrator.settings(b.model, b.effort)));
 app.patch("/api/projects/:id/settings", act((st, b) => updateSettings(st, b)));
 // Which settings the project has its own value of (the others follow the global ones), and the global values.
 app.get("/api/projects/:id/settings", (c) => {
-  const e = projects.get(c.req.param("id"));
-  if (!e) return c.json({ error: "unknown project" }, 404);
+  const e = c.get("entry");
   return c.json({ own: ownKeys(e.store.readStoredProject()), global: readGlobalSettings() });
 });
 // The global settings, which every project follows where it has no value of its own (PROTOCOL.md, "Global settings").
@@ -866,7 +863,7 @@ async function reacquire(): Promise<void> {
   } finally {
     reacquiring = false;
     activate();
-    for (const s of sockets) if (s.readyState === s.OPEN) s.send(JSON.stringify({ type: "projects" }));
+    broadcast({ type: "projects" });
   }
 }
 let reacquiring = false;
