@@ -19,7 +19,7 @@ export const baseName = (path: string) => path.split(/[\\/]/).filter(Boolean).at
 export const folderOf = (path: string) => { const i = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")); return i > 0 ? path.slice(0, i) : ""; };
 const extOf = (path: string) => { const n = baseName(path).toLowerCase(); const i = n.lastIndexOf("."); return i > 0 ? n.slice(i + 1) : n; };
 
-export const isMarkdown = (path: string) => ["md", "markdown"].includes(extOf(path));
+const isMarkdown = (path: string) => ["md", "markdown"].includes(extOf(path));
 
 /** Highlight.js languages by extension (or a whole name such as Dockerfile); others are shown as plain text. */
 const LANGUAGES: Record<string, string> = {
@@ -145,7 +145,7 @@ function hasLongNumber(text: string): boolean {
 export interface Table { header: string[]; rows: string[][]; more: number }
 
 /** How many rows of a table the viewer shows; the rest are in the raw file. */
-export const TABLE_LIMIT = 1000;
+const TABLE_LIMIT = 1000;
 
 /**
  * Parses CSV (RFC 4180): fields split by the delimiter (a comma; a tab for TSV), a field in double quotes may hold the
