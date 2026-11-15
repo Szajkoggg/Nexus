@@ -31,6 +31,8 @@ export interface RecurringSet {
 }
 
 const iso = (ms: number) => new Date(ms).toISOString();
+/** The later of two ISO times: a recurring's `handled` never goes back. */
+const later = (a: string | undefined, b: string) => (a !== undefined && a > b ? a : b);
 const TERMINAL = new Set(["done", "cancelled"]);
 
 export class Recurrer {
@@ -104,7 +106,7 @@ export class Recurrer {
     this.store.writeRecurring({
       ...r, approval: { hash: resolved.hash, at }, updated_at: at,
       skipped: r.skipped?.kind === "approval" ? undefined : r.skipped,
-      handled: [r.handled, at].filter((x): x is string => !!x).sort().at(-1),
+      handled: later(r.handled, at),
       // After N queues: the count starts at the approval.
       ...(r.after_queues !== undefined ? { baseline: this.doneNow() } : {}),
     });
@@ -118,7 +120,7 @@ export class Recurrer {
     const r = this.read(id);
     if (!!r.paused === paused) throw new ActionError(`recurring ${id} is ${paused ? "paused already" : "not paused"}`, 409);
     const at = iso(this.now);
-    this.store.writeRecurring({ ...r, paused: paused || undefined, updated_at: at, handled: [r.handled, at].filter((x): x is string => !!x).sort().at(-1) });
+    this.store.writeRecurring({ ...r, paused: paused || undefined, updated_at: at, handled: later(r.handled, at) });
     this.arm(id);
     this.deps.changed();
     return paused ? `recurring ${id} paused` : `recurring ${id} goes on (${scheduleText(r)})`;
@@ -197,8 +199,9 @@ export class Recurrer {
     if ("problem" in resolved) { pass("template", resolved.problem); return; }
     if (!r.approval) { pass("approval", "it has no standing approval"); return; }
     if (r.approval.hash !== resolved.hash) { pass("approval", "it changed since your approval (its template, values or schedule)"); return; }
-    if (late) { pass("missed", `missed: Nexus was not running at ${formatClock(iso(due), new Date(this.now))}`); return; }
-    const when = r.every !== undefined ? `its time ${formatClock(iso(due), new Date(this.now))} came` : `${r.after_queues} queues were done`;
+    const clock = formatClock(iso(due), new Date(this.now));
+    if (late) { pass("missed", `missed: Nexus was not running at ${clock}`); return; }
+    const when = r.every !== undefined ? `its time ${clock} came` : `${r.after_queues} queues were done`;
     const state = loadProjectState(this.store);
     const previous = r.last && state.queues.find((q) => q.id === r.last!.queue);
     if (previous && !TERMINAL.has(previous.status)) { pass("previous", `its previous run ${previous.id} is still ${previous.status}`); return; }
