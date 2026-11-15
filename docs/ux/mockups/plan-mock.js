@@ -10,6 +10,10 @@
 // Both: the whole title on the card (it wraps; never cut), what the queue waits for, its "after" chips as today.
 // ?theme=paper|honey; ?tip=<queue> shows the bubble with a queue's full title and its dependencies, as on hover.
 // scripts/layout-faults.ts measures the result: [data-plan-card] and [data-box] are boxes, [data-edge] lines.
+// The features (23-plan-features.html) hook in through PLAN_FEATURE (plan-features.js, loaded first): setup() changes the
+// plan before it is laid out, bands (lanes) and left (their labels' room) change variant A's layout, card() and edge()
+// change a card or a line, desktop() and phone() add to a drawn plan, render() draws the plan another way, page() the
+// page around it.
 
 const QUEUES = [
   { id: "MX", title: "Small fixes from the user's notes of 14 November", now: ["running", "running · MX1"], est: "3.5 h" },
@@ -33,6 +37,8 @@ const A_COLUMNS = [
   ["MX>RA", "TS", "IO>DG", "ST3", "LG"],
   ["DG", "RA"],
 ];
+const F = typeof PLAN_FEATURE === "undefined" ? {} : PLAN_FEATURE; // a const of plan-features.js: not on globalThis
+F.setup?.();
 const GAP = 36, HEAD = 24, VGAP = 12, SLOT = 18, DUMMY = 14;
 
 const byId = new Map(QUEUES.map((q) => [q.id, q]));
@@ -80,7 +86,9 @@ function card(q) {
     kids.push(el("div", { class: "chips" }, ...q.after.map(([p, by, done]) => el("span", { class: `chip${by === "user" ? " user" : ""}${done ? " done" : ""}` },
       `after ${p}${by === "user" ? " · set by you" : ""}${done ? " · done" : ""}`, ...(by === "user" ? [el("b", {}, "↩")] : [])))));
   }
-  return el("div", { class: `pc${q.now ? " now" : ""}`, "data-plan-card": q.id }, ...kids);
+  const c = el("div", { class: `pc${q.now ? " now" : ""}`, "data-plan-card": q.id }, ...kids);
+  F.card?.(q, c);
+  return c;
 }
 
 /** Rounded corners on a path through `pts` at right angles. */
@@ -103,17 +111,29 @@ function markers(svg) {
   }
 }
 
-/** Variant A: the columns stacked from the top, with the gaps of A_COLUMNS. Positions are tops, in the plan's pixels. */
+/**
+ * Variant A: the columns stacked from the top, with the gaps of A_COLUMNS; or in bands (F.bands: lanes, each with its
+ * own columns), one under the other. Positions are tops, in the plan's pixels.
+ */
 function layoutA(h) {
-  const top = new Map(), slot = new Map();
-  A_COLUMNS.forEach((col) => {
-    let y = HEAD;
-    for (const item of col) {
-      if (item.includes(">")) { slot.set(`${item}@${A_COLUMNS.indexOf(col)}`, y + SLOT / 2); y += SLOT + VGAP; }
-      else { top.set(item, y); y += h.get(item) + VGAP; }
-    }
-  });
-  return { top, slot, order: A_COLUMNS.map((c) => c.filter((i) => !i.includes(">"))) };
+  const top = new Map(), slot = new Map(), bands = [];
+  const PAD = F.bands ? 10 : 0;
+  let y0 = HEAD;
+  for (const band of F.bands ?? [{ columns: A_COLUMNS }]) {
+    let bottom = y0 + 2 * PAD;
+    band.columns.forEach((col, c) => {
+      let y = y0 + PAD;
+      for (const item of col) {
+        if (item.includes(">")) { slot.set(`${item}@${c}`, y + SLOT / 2); y += SLOT + VGAP; }
+        else { top.set(item, y); y += h.get(item) + VGAP; }
+      }
+      bottom = Math.max(bottom, y - VGAP + PAD);
+    });
+    bands.push({ ...band, top: y0, bottom });
+    y0 = bottom + (F.bands ? 8 : 0);
+  }
+  const order = A_COLUMNS.map((_, c) => (F.bands ?? [{ columns: A_COLUMNS }]).flatMap((b) => (b.columns[c] ?? []).filter((i) => !i.includes(">"))));
+  return { top, slot, bands, order };
 }
 
 /** Variant B: a layered layout (dummies, barycenter ordering, isotonic placement), as dagre or ELK do it. */
@@ -190,8 +210,8 @@ function layoutB(h) {
 }
 
 function desktop(host) {
-  const W = host.clientWidth, colW = (W - (RANKS - 1) * GAP) / RANKS;
-  const x = (c) => c * (colW + GAP);
+  const LEFT = F.left ?? 0, W = host.clientWidth, colW = (W - LEFT - (RANKS - 1) * GAP) / RANKS;
+  const x = (c) => LEFT + c * (colW + GAP);
   for (let c = 0; c < RANKS; c++) host.append(el("div", { class: "colh", "data-box": `column ${c}`, style: `left:${x(c)}px` }, columnTitle(c)));
   const cards = new Map(), h = new Map();
   for (const q of QUEUES) {
@@ -247,7 +267,8 @@ function desktop(host) {
         if (tx !== undefined) pts.push([tx, ys[i]], [tx, y]);
         pts.push([g + 1 === rank.get(e.to) ? x(g + 1) - 5 : x(g + 1) + colW, y]);
       });
-      svgEl("path", { d: orthogonal(pts), class: `edge ${e.by}`, "data-edge": e.key, "marker-end": `url(#arrow-${e.by})` }, svg);
+      const path = svgEl("path", { d: orthogonal(pts), class: `edge ${e.by}`, "data-edge": e.key, "marker-end": `url(#arrow-${e.by})` }, svg);
+      F.edge?.(e, path, pts);
     }
   } else {
     for (const { e, ys } of runs) {
@@ -274,6 +295,7 @@ function desktop(host) {
     host.append(b);
     bottom = Math.max(bottom, b.offsetTop + b.offsetHeight);
   }
+  bottom = F.desktop?.({ host, x, colW, W, L, h, cards, svg, bottom, port }) ?? bottom;
   host.style.height = `${bottom + 4}px`;
   return L.order;
 }
@@ -287,10 +309,10 @@ function phone(host, order) {
     const k = card(byId.get(id));
     host.append(k); cards.set(id, k);
   });
+  F.phone?.({ host, cards });
   if (VARIANT !== "b") return;
   // Lanes: each line its own, the shorter nearer the cards; a line leaves at a queue's lower left, arrives at its upper.
   const at = (id) => ({ top: cards.get(id).offsetTop, bottom: cards.get(id).offsetTop + cards.get(id).offsetHeight });
-  const outs = new Map(), ins = new Map();
   const lay = (gutter) => {
     host.style.paddingLeft = `${gutter}px`;
     // A queue's lines of the same kind leave together on one lane and part where each arrives (as a trunk).
@@ -332,8 +354,9 @@ function phone(host, order) {
 
 addEventListener("DOMContentLoaded", () => {
   const plan = document.getElementById("plan"), list = document.getElementById("plist");
+  F.page?.();
   const order = VARIANT === "a" ? layoutA(new Map(QUEUES.map((q) => [q.id, 0]))).order : null;
-  if (getComputedStyle(plan).display !== "none") desktop(plan);
+  if (getComputedStyle(plan).display !== "none") (F.render ?? desktop)(plan);
   else {
     // The phone's order is the desktop's: B's comes from its layout, worked out on a hidden plan of desktop width.
     let o = order;
