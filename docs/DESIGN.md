@@ -732,7 +732,7 @@ rather than starting a second update.
 | `apps/server` | Hono (HTTP), ws (WebSocket), chokidar (file watching), the runtime adapters |
 | `apps/web` | React, Vite, Tailwind CSS; usable at phone width; installable as a PWA later |
 | Storage | The `.nexus/` files are the source of truth; an in-memory index, SQLite only if search or history needs it |
-| Static analysis | ESLint (typed, correctness rules only) and dependency-cruiser (module boundaries): `npm run lint` |
+| Static analysis | ESLint (typed, correctness rules only) and dependency-cruiser (module boundaries): `npm run lint`; knip (unused code): `npm run knip` |
 | Remote access (later) | Tailscale (no open ports); Cloudflare Tunnel with Access as an alternative |
 
 Needed on the machine: Node.js LTS, and the Codex CLI (`npm i -g @openai/codex`) for the Codex adapter.
@@ -1767,6 +1767,22 @@ change what the user sees) goes to the tool's own baseline with its reason: ESLi
 dependency-cruiser's known violations (`depcruise-baseline`, then `--ignore-known` in the script). When the rules came
 both were empty: the 20 findings (15 misused promises, 5 non-exhaustive switches) were fixed without a change in
 behaviour, and the 686 floating promises were all `node:test` calls.
+
+**knip** (`knip.json`) finds files nothing loads, exports nothing imports and dependencies nothing uses (or uses
+without listing). It runs in the closing refactoring step and in maintenance queues, not as every step's check: an
+export a step adds for the next step is not dead yet. The entries are what runs: `apps/server/src/main.ts` (the root `start` script), the CLI's
+`bin`, the dashboard's `index.html` (through knip's Vite plugin), every `*.test.ts`, the scripts, and the seeds of
+`scripts/capture`, which views files load by path. The protocol is checked with its entry exports included
+(`includeEntryExports`): it is a package of this repository, not a published one, so an export of it nobody imports is
+as dead as any other.
+
+When it came (2026-11-15) it found 50 unused exports outside the protocol and 34 in it, and `yaml` used without being
+listed (by the server's tests and the capture scripts). The unused exports were nearly all used inside their own
+module: they lost `export`. What was not used at all was deleted: `clearDraft` (drafts.ts), `WorkChoice`
+(stopwork.ts), the re-exports of `ActivityItem`, `StreamFacts` (claude.ts) and `ChatEntry` (orchestrator.ts), and
+in the protocol `PROTOCOL_VERSION`, `EventOf`, `hasOwn`, `isClosingStep` and the `Approval` and `Withdrawal` type
+aliases. No baseline was needed. `tsc --noUnusedLocals` would find about a hundred unused locals and imports more; not
+switched on, a matter for a later queue.
 
 ## Open questions
 

@@ -1,0 +1,52 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "workspaces": {
+    ".": {
+      "entry": [
+        "scripts/*.{ts,mjs}",
+        "scripts/test/*.test.ts",
+        "scripts/capture/seed-*.ts"
+      ],
+      "project": [
+        "scripts/**/*.{ts,mjs}"
+      ]
+    },
+    "packages/protocol": {
+      "entry": [
+        "test/*.test.ts"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "test/**/*.ts"
+      ],
+      "includeEntryExports": true
+    },
+    "packages/cli": {
+      "entry": [
+        "test/*.test.ts"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "test/**/*.ts"
+      ]
+    },
+    "apps/server": {
+      "entry": [
+        "test/*.test.ts"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "test/**/*.ts"
+      ]
+    },
+    "apps/web": {
+      "entry": [
+        "test/*.test.{ts,tsx}"
+      ],
+      "project": [
+        "src/**/*.{ts,tsx,css}",
+        "test/**/*.{ts,tsx}"
+      ]
+    }
+  }
+}

@@ -12,6 +12,7 @@
     "typecheck": "tsc -p packages/protocol && tsc -p packages/cli && tsc -p apps/server && tsc -p apps/web && tsc -p apps/web/test && tsc -p scripts",
     "test": "node --test packages/*/test/*.test.ts apps/*/test/*.test.ts scripts/test/*.test.ts",
     "lint": "eslint . && depcruise packages apps scripts --config .dependency-cruiser.cjs",
+    "knip": "knip",
     "test:files": "node scripts/test-files.mjs",
     "test:times": "node --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./scripts/test-times.mjs --test-reporter-destination=stdout packages/*/test/*.test.ts apps/*/test/*.test.ts scripts/test/*.test.ts"
   },
@@ -20,8 +21,10 @@
     "dependency-cruiser": "^18.7.2",
     "eslint": "^9.39.5",
     "eslint-plugin-react-hooks": "^7.1.1",
+    "knip": "^6.45.1",
     "typescript": "^5.9.0",
-    "typescript-eslint": "^8.72.2"
+    "typescript-eslint": "^8.72.2",
+    "yaml": "^2.9.1"
   },
   "engines": {
     "node": ">=24"

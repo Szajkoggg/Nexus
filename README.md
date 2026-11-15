@@ -369,6 +369,7 @@ npm run test:files -- apps/server/test/engine.test.ts   # while working: only th
 npm run test:times   # the whole suite, then how long each file took, slowest first
 npm run typecheck
 npm run lint     # ESLint (correctness rules, with types) and dependency-cruiser (module boundaries); about 15 s
+npm run knip     # unused files, exports and dependencies (closing refactoring steps and maintenance)
 node scripts/load-tests.mjs --burners 12 --copies 4 --rounds 5 apps/server/test/review.test.ts   # tests under load
 ```
 
@@ -381,7 +382,9 @@ several times at once beside busy-loop processes and reports each run, its failu
 expected, a `switch` over a union that leaves a member out (a `default` does not count), the rules of React hooks, and
 the module boundaries (the protocol imports nothing from `apps/`, neither the dashboard nor the CLI imports the
 server). There are no style rules and no formatter. Fix a finding rather than silence it; a promise left alone on
-purpose takes `void`. The rules and their reasons: [docs/DESIGN.md](docs/DESIGN.md), "Static analysis".
+purpose takes `void`. `npm run knip` lists files nothing loads, exports nothing imports and dependencies nothing uses;
+a file loaded only by its path (a seed of `scripts/capture`, a fake runtime) is an entry in `knip.json`. The rules
+and their reasons: [docs/DESIGN.md](docs/DESIGN.md), "Static analysis".
 
 `NEXUS_PORT` and `NEXUS_HOST` change where the server listens (default `127.0.0.1:4317`, this machine only).
 
