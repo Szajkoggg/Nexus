@@ -14,7 +14,7 @@ import { queueStatus } from "../queueStatus.ts";
 import { needsWorkChoice, stopDecision, type LeftState, type WorkChoice } from "../stopDecision.ts";
 import { ActionBar, Button, CloseButton, Markdown, TEXTAREA, TimeAgo, useDraftText, type MenuEntry } from "./ui.tsx";
 import { StopBox, stopVersion, useLeft } from "./Stop.tsx";
-import { KeptTag, stepMark } from "./Closing.tsx";
+import { KeptTag, SkipClosingBox, closingNotRun, stepMark } from "./Closing.tsx";
 import { rich, t } from "../i18n.ts";
 import { LevelPicker } from "./Levels.tsx";
 
@@ -50,8 +50,7 @@ export function useApprove({ project, queue, left, work, onChanged }: {
   const needsChoice = d?.needsChoice ?? false;
   // The approval of a stopped queue's new revision may skip its closing refactoring step while it has not run, as
   // Continue does (the user's choice, not an agent's).
-  const closing = queue.steps.find((s) => s.closing);
-  const canSkipClosing = stopped && !queue.approved && !!closing && (closing.status === "pending" || closing.status === "stopped");
+  const canSkipClosing = stopped && !queue.approved && closingNotRun(queue);
   const [skipClosing, setSkipClosing] = useState(false);
   const wordsKey = draftKey(project, "approval", queue.id);
   const [wordsOpen, setWordsOpen] = useState(() => !!readDraft(wordsKey));
@@ -73,12 +72,7 @@ export function useApprove({ project, queue, left, work, onChanged }: {
     submit: () => { if (!disabled) void words.submit(); },
     menu: (!wordsOpen ? [{ label: t("approval.wordsMenu"), onSelect: () => setWordsOpen(true) }] : []) as MenuEntry[],
     /** The check box "Skip the closing refactoring", for the action bar's left; nothing when there is no choice. */
-    skipBox: canSkipClosing && (
-      <label className="flex items-center gap-2 text-sm text-fg max-lg:min-h-11">
-        <input type="checkbox" checked={skipClosing} onChange={(e) => setSkipClosing(e.target.checked)} className="accent-accent" />
-        {t("stop.skipClosing")}
-      </label>
-    ),
+    skipBox: canSkipClosing && <SkipClosingBox checked={skipClosing} onChange={setSkipClosing} />,
     wordsBox: wordsOpen && (
       <textarea value={words.text} rows={2} placeholder={t("approval.wordsPlaceholder")} aria-label={t("approval.wordsLabel")}
         onChange={(e) => words.change(e.target.value)} onKeyDown={words.onKeyDown} className={TEXTAREA} />

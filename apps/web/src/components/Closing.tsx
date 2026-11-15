@@ -31,3 +31,23 @@ export function KeptTag({ step, className = "" }: { step: Kept; className?: stri
     </span>
   );
 }
+
+/**
+ * Whether the user may still skip the queue's closing refactoring step: it has a closing step that has not run yet.
+ * Where the choice is offered (Continue on a stopped queue, the approval of a stopped queue's new revision) is the
+ * caller's; only the user skips it, never an agent.
+ */
+export function closingNotRun(queue: { steps: readonly Pick<StepView, "closing" | "status">[] }): boolean {
+  const closing = queue.steps.find((s) => s.closing);
+  return !!closing && (closing.status === "pending" || closing.status === "stopped");
+}
+
+/** The check box "Skip the closing refactoring", beside Continue or Approve. */
+export function SkipClosingBox({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <label className="flex items-center gap-2 text-sm text-fg max-lg:min-h-11">
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="accent-accent" />
+      {t("stop.skipClosing")}
+    </label>
+  );
+}

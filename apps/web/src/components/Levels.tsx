@@ -22,8 +22,9 @@ export interface Away { on: boolean; since?: string; until?: string }
 // ---------------------------------------------------------------- levels
 
 /**
- * A step's review level, to set before approval or later, until its review is over (levelChangeable): 1 · 2 · 3 as one control, the chosen level's words beside
- * it, and "set by you" with Reset when the user set it. Setting a level asks for no new approval.
+ * A step's review level, to set before approval or later, until its review is over (levelChangeable): 1 · 2 · 3 as
+ * one control, the chosen level's words beside it, and "set by you" with Reset when the user set it. Setting a level
+ * asks for no new approval.
  */
 export function LevelPicker({ project, queue, step, onChanged, away }: {
   project: string; queue: string; step: Pick<StepView, "id" | "level" | "level_from">; onChanged: () => void; away?: Away;

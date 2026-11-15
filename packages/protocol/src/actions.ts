@@ -6,7 +6,7 @@ import { ProjectFile, QueueFile, USER_SESSION, type GlobalSettings, effortIssue,
 import { ProjectStore, newId, now, readGlobalSettings, revisionHash, writeGlobalSettings } from "./store.ts";
 import { OVERRIDABLE, changedGlobal, settingKey } from "./settings.ts";
 import { HOLDING_RUN_STATES } from "./times.ts";
-import { commentTarget, isApproved, loadProjectState, pendingProvisional, type ProjectState, type QueueView } from "./state.ts";
+import { commentTarget, isApproved, loadProjectState, pendingProvisional, type ProjectState, type QueueView, type StepView } from "./state.ts";
 import { validAllowRule } from "./refusals.ts";
 import { closingStepId, integrationStepId, stepDefs } from "./closing.ts";
 import { stepChecks } from "./steps.ts";
@@ -153,9 +153,12 @@ export function setQueueSettings(store: ProjectStore, queue: string, settings: {
 /** A step whose review is over (or will not come): its level no longer changes. */
 const LEVEL_CLOSED: ReadonlySet<string> = new Set(["done", "skipped", "failed", "rejected"]);
 
+/** Whether a step waits for the orchestrator's review. */
+const withOrchestrator = (s: Pick<StepView, "status" | "review_with">) => s.status === "review" && s.review_with === "orchestrator";
+
 /** The steps of a queue waiting for the orchestrator's review now (before a change of levels). */
 const heldByOrchestrator = (store: ProjectStore, queue: string): string[] =>
-  (loadProjectState(store).queues.find((x) => x.id === queue)?.steps ?? []).filter((s) => s.status === "review" && s.review_with === "orchestrator").map((s) => s.id);
+  (loadProjectState(store).queues.find((x) => x.id === queue)?.steps ?? []).filter(withOrchestrator).map((s) => s.id);
 
 /**
  * After the user changed a level (a step's, or the queue's): a step that waited for the orchestrator's review (`held`,
@@ -169,8 +172,7 @@ function handLevelOneReviews(store: ProjectStore, queue: string, held: readonly 
   const view = loadProjectState(store).queues.find((x) => x.id === queue);
   for (const st of view?.steps ?? []) {
     if (!held.includes(st.id) || st.status !== "review" || st.level !== 1) continue;
-    const user = ensureUserSession(store);
-    store.appendEvent({ v: 1, id: newId(), at: now(), session: user.id, type: "review.asked_user", queue, step: st.id, text: "The user set the step's review level to 1: they review it themselves." });
+    store.appendEvent({ v: 1, id: newId(), at: now(), session: ensureUserSession(store).id, type: "review.asked_user", queue, step: st.id, text: "The user set the step's review level to 1: they review it themselves." });
   }
 }
 
@@ -185,7 +187,7 @@ export function setStepLevel(store: ProjectStore, queue: string, step: string, l
   const value = levelOf(level, "a step's level");
   const shown = loadProjectState(store).queues.find((x) => x.id === q.id)?.steps.find((s) => s.id === step);
   if (shown && LEVEL_CLOSED.has(shown.status)) throw new ActionError(`step ${q.id}/${step} is ${shown.status}: its review level no longer changes`, 409);
-  const held = heldByOrchestrator(store, q.id).filter((s) => s === step);
+  const held = shown && withOrchestrator(shown) ? [step] : [];
   const { [step]: _old, ...rest } = q.user_levels ?? {};
   const user_levels = value === undefined ? rest : { ...rest, [step]: value };
   store.writeQueue({ ...q, user_levels: Object.keys(user_levels).length ? user_levels : undefined, updated_at: now() });
