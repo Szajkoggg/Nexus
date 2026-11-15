@@ -732,6 +732,7 @@ rather than starting a second update.
 | `apps/server` | Hono (HTTP), ws (WebSocket), chokidar (file watching), the runtime adapters |
 | `apps/web` | React, Vite, Tailwind CSS; usable at phone width; installable as a PWA later |
 | Storage | The `.nexus/` files are the source of truth; an in-memory index, SQLite only if search or history needs it |
+| Static analysis | ESLint (typed, correctness rules only) and dependency-cruiser (module boundaries): `npm run lint` |
 | Remote access (later) | Tailscale (no open ports); Cloudflare Tunnel with Access as an alternative |
 
 Needed on the machine: Node.js LTS, and the Codex CLI (`npm i -g @openai/codex`) for the Codex adapter.
@@ -1721,6 +1722,51 @@ each) and seven short Codex turns on the ChatGPT subscription (20k to 40k tokens
 - **Codex's search modes**: `cached` searches; `live` also opens pages (an `openPage` action). Both run at OpenAI, so
   no local address is reachable through them. A webSearch item's query is empty when it starts; the chat line is
   written at its completion, from its action.
+
+## Static analysis (queue SA)
+
+Agents make mistakes a static check catches cheaply; the user decided on 2026-11-14 that Nexus checks them by machine
+(docs/ideas/software-dev-features.md). `npm run lint` runs ESLint, then dependency-cruiser, and fails on any finding.
+
+**ESLint** (`eslint.config.js`) with type information (`projectService`, each file under its own tsconfig) over
+`packages/protocol`, `packages/cli`, `apps/server` and `apps/web`, sources and tests. Correctness rules only, no style
+rules, and every rule an error (a warning nobody has to fix is noise):
+
+- `no-floating-promises`: a promise nobody awaits loses its rejection and its ordering (the forgotten `await`). The
+  `test()` calls of `node:test` are exempt: the runner awaits them. A promise left alone on purpose says so with `void`.
+- `no-misused-promises`: a promise where a condition or a void callback is expected, e.g. an async function as a
+  React `onClick`. The dashboard's handlers write `() => void save()`: the handlers catch their own errors.
+- `switch-exhaustiveness-check`, with a `default` not counting as handling the members it hides: a switch over a union
+  names every member, so a new state or event type is a lint error wherever it is not decided on. A switch that does
+  nothing for some members lists them as empty cases before its `default` (the `default` stays for values from files
+  written by another version).
+- `react-hooks/rules-of-hooks` and `react-hooks/exhaustive-deps` on the dashboard: a hook called conditionally breaks
+  React's bookkeeping; a missing dependency leaves an effect working on stale values. Only these two of the plugin:
+  its React Compiler rules are about a compiler Nexus does not use.
+- Unused `eslint-disable` comments are errors, so a suppression cannot outlive its reason.
+
+No `--cache`: ESLint's cache is per file, and with type information a change in one file (a function becoming async)
+can create a finding in another, unchanged one. The whole run takes about 12 s.
+
+**dependency-cruiser** (`.dependency-cruiser.cjs`) over `packages`, `apps` and `scripts`, type-only imports included
+(a type pulled from the server is still a dependency on it):
+
+- `protocol-not-to-apps`: the protocol is the shared contract and imports nothing from `apps/` or the CLI.
+- `web-not-to-server`: the dashboard talks to the server over HTTP only.
+- `cli-not-to-server`: agents never call the server; the CLI writes files through the protocol.
+- `not-to-unresolvable`: an import that resolves to nothing.
+
+What the code showed when the rules came (2026-11-15): no boundary crossed. The server, the CLI, the dashboard and the
+scripts depend on the protocol and on nothing else of each other; nothing depends on the server. The dashboard imports
+the protocol's index (mostly types) besides its Node-free subpaths (`times`, `attention`, …); that the subpaths it runs
+stay free of Node is kept by the Vite build, not by a rule.
+
+**Baselines.** Findings are fixed, not suppressed; one that cannot be fixed safely in the step (or whose fix would
+change what the user sees) goes to the tool's own baseline with its reason: ESLint's `eslint-suppressions.json`
+(`eslint --suppress-rule`; ESLint fails while an entry no longer matches, so the file can only shrink) and
+dependency-cruiser's known violations (`depcruise-baseline`, then `--ignore-known` in the script). When the rules came
+both were empty: the 20 findings (15 misused promises, 5 non-exhaustive switches) were fixed without a change in
+behaviour, and the 686 floating promises were all `node:test` calls.
 
 ## Open questions
 

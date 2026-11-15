@@ -368,6 +368,7 @@ npm test         # protocol, importer, engine and orchestrator tests (the last t
 npm run test:files -- apps/server/test/engine.test.ts   # while working: only these files, stops at the first failure
 npm run test:times   # the whole suite, then how long each file took, slowest first
 npm run typecheck
+npm run lint     # ESLint (correctness rules, with types) and dependency-cruiser (module boundaries); about 15 s
 node scripts/load-tests.mjs --burners 12 --copies 4 --rounds 5 apps/server/test/review.test.ts   # tests under load
 ```
 
@@ -375,6 +376,12 @@ The tests that run fake runtimes or servers wait 10 s for what they expect (`NEX
 on a slow machine; `apps/server/test/wait.ts`), so a change that breaks many of them fails the suite in minutes.
 A test that fails only now and then usually fails on a busy machine: `scripts/load-tests.mjs` runs the files given
 several times at once beside busy-loop processes and reports each run, its failures and its slow tests.
+
+`npm run lint` checks what the compiler does not: a promise nobody awaits, an async function where a void callback is
+expected, a `switch` over a union that leaves a member out (a `default` does not count), the rules of React hooks, and
+the module boundaries (the protocol imports nothing from `apps/`, neither the dashboard nor the CLI imports the
+server). There are no style rules and no formatter. Fix a finding rather than silence it; a promise left alone on
+purpose takes `void`. The rules and their reasons: [docs/DESIGN.md](docs/DESIGN.md), "Static analysis".
 
 `NEXUS_PORT` and `NEXUS_HOST` change where the server listens (default `127.0.0.1:4317`, this machine only).
 
