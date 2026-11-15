@@ -46,6 +46,7 @@ test("a Claude partner asks nothing and may write only in the notes folder", asy
     assert.equal(argv[argv.indexOf("--effort") + 1], "high");
     const allowed = argv.slice(argv.indexOf("--allowedTools") + 1);
     assert.ok(allowed.includes("Edit(Dev/Concepts/Gameplay/**)"), "writes go to the notes folder");
+    assert.ok(allowed.includes("Bash(nexus status:*)") && allowed.includes("Bash(nexus help:*)"), "nexus status, and nexus help to read about Nexus");
     assert.ok(!allowed.some((t) => t === "Edit" || t === "Write" || t.startsWith("Bash(nexus run") || t === "Bash(nexus:*)"), "nothing else is writable, no run can start");
     assert.equal(argv[argv.indexOf("--disallowedTools") + 1], "NotebookEdit,WebFetch", "no .nexus deny rules for a partner (those are the workers'); at the default web level no page fetching");
     assert.equal(loadProjectState(conversations["store"]).sessions.find((s) => s.id === c.id)?.role, "conversation");
@@ -69,7 +70,11 @@ test("a Codex partner works in the notes folder's sandbox, or reads only without
     const c = b.conversations.create({ title: "Look", runtime: "codex" });
     b.conversations.say(c.id, "Hello");
     await b.until("the reply", () => b.conversations.view(c.id).chat.some((x) => x.from === "partner"));
-    assert.equal(b.args().find((x) => x.method === "thread/start")!.sandbox, "read-only");
+    const start = b.args().find((x) => x.method === "thread/start")!;
+    assert.equal(start.sandbox, "read-only");
+    // Codex takes no allow rules: its commands run in the sandbox, which reads everywhere, and nexus help only reads
+    // (packages/cli/test/help.test.ts), so the briefing's pointer to it holds there too.
+    assert.match(String(start.instructions), /Read about Nexus itself with `nexus help`/);
   } finally { b.stop(); }
 });
 

@@ -1446,9 +1446,10 @@ hand-over's again: its reply goes to the orchestrator. Then `interrupted` is dro
 role `conversation`: a thinking partner the user talks with about the project, one session per topic, with its chat
 in `chat.jsonl` (`from: partner` for its replies, whole). It reads the whole project and writes only in `notes_dir`
 (relative to the root, checked to lie inside it): Claude Code runs it in `dontAsk` mode allowed `Read`, `Grep`,
-`Glob`, `Bash(nexus status:*)`, read-only git and `Edit(<notes_dir>/**)` only; Codex runs it with `notes_dir` as its
-working directory in a `workspace-write` sandbox (`read-only` without a notes folder), approval `never`. It starts no
-work. An idle partner's process ends after 15 minutes; the next message resumes the conversation.
+`Glob`, `Bash(nexus status:*)`, `Bash(nexus help:*)`, read-only git and `Edit(<notes_dir>/**)` only; Codex runs it
+with `notes_dir` as its working directory in a `workspace-write` sandbox (`read-only` without a notes folder), approval
+`never`, where its commands (`nexus help` among them, which only reads) run in the sandbox. Its briefing points it to
+`nexus help` for how Nexus works (decided 2026-11-15, queue OP). It starts no work. An idle partner's process ends after 15 minutes; the next message resumes the conversation.
 
 **The web** (`conversations.web`, global with a project override, decided by the user 2026-11-15): `off`, `search`
 (the default) or `fetch`. A changed level applies from the partner's next message (a new process, resuming the

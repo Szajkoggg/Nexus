@@ -725,6 +725,7 @@ The project's root is ${p.root.replaceAll("\\", "/")}; paths below are relative 
 
 What you may do:
 - Read anything in the project (and run \`nexus status\` to see its queues and runs, read-only git commands for its history).
+- Read about Nexus itself with \`nexus help\`: it lists its topics (how agents report, review material, questions, refusals, commits, tests); \`nexus help <topic>\` gives one. Use it when the user asks how Nexus works or what its agents are held to.
 ${notes ? `- Write only in ${notes}/ (relative to the project's root): notes of what the user decides or asks you to record. Keep to the project's own conventions for that folder (its README or AGENTS.md). One file per topic, dated entries, decisions separate from open ideas.` : `- No notes folder is set for this project, so you cannot write files; the user can set one in the project's settings.`}
 ${partnerWeb(p.conversations?.web ?? "search")}
 - You start no work: no builds, no tests, no code changes, no queues. When the user wants something done, suggest handing the conversation to the orchestrator (the "Hand to orchestrator" button); then you write the summary it asks for.

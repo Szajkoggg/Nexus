@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,6 +13,15 @@ const cwd = mkdtempSync(join(tmpdir(), "nexus-help-")); // no .nexus here
 const env: NodeJS.ProcessEnv = { ...process.env };
 delete env.NEXUS_SESSION; delete env.NEXUS_DIR;
 const nexus = (...args: string[]) => execFileSync(process.execPath, [CLI, ...args], { cwd, env, encoding: "utf8", stdio: "pipe" });
+
+test("nexus help only reads: it writes nothing, so a thinking partner may run it (a Codex one in its read-only sandbox)", () => {
+  const home = join(mkdtempSync(join(tmpdir(), "nexus-help-home-")), "home");
+  const run = (...args: string[]) => execFileSync(process.execPath, [CLI, ...args], { cwd, env: { ...env, NEXUS_HOME: home }, encoding: "utf8", stdio: "pipe" });
+  assert.match(run("help"), /Topics \(nexus help <topic>\):/);
+  run("help", "review");
+  assert.equal(existsSync(home), false, "nothing written to NEXUS_HOME");
+  assert.deepEqual(readdirSync(cwd), [], "nothing written where it ran");
+});
 
 test("nexus help lists the standards' topics", () => {
   const list = nexus("help");
