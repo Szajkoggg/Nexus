@@ -162,7 +162,7 @@ export function RunControls({ project, queue, onChanged }: { project: ProjectSta
 
   return (
     <Section title={t("run.title")}>
-      <PlannedStart queue={queue} busy={busy} onCancel={() => call({ action: "cancel_start" })} />
+      <PlannedStart queue={queue} busy={busy} onCancel={() => void call({ action: "cancel_start" })} />
       {!!queue.starts_next?.length && (
         <p className="mb-3 text-xs text-fg-2">
           <span className="text-info">→</span> {rich("run.startsNext", {
@@ -192,9 +192,9 @@ export function RunControls({ project, queue, onChanged }: { project: ProjectSta
         </div>
       )}
       <div className="flex flex-wrap items-center gap-2">
-        {active && run?.state !== "pausing" && <Button variant="quiet" disabled={busy} onClick={() => call({ action: "pause" })}>{t(waitsApproval ? "run.pause" : "run.pauseAfterStep")}</Button>}
-        {active && !waitsApproval && <Button variant="danger" disabled={busy} onClick={() => call({ action: "stop" })}>{t("run.stopNow")}</Button>}
-        {run && !ended && queue.status !== "stopped" && (run.state === "paused" || run.state === "halted") && <Button disabled={busy || !queue.approved} onClick={() => call({ action: "resume" })}>{t("run.resume")}</Button>}
+        {active && run?.state !== "pausing" && <Button variant="quiet" disabled={busy} onClick={() => void call({ action: "pause" })}>{t(waitsApproval ? "run.pause" : "run.pauseAfterStep")}</Button>}
+        {active && !waitsApproval && <Button variant="danger" disabled={busy} onClick={() => void call({ action: "stop" })}>{t("run.stopNow")}</Button>}
+        {run && !ended && queue.status !== "stopped" && (run.state === "paused" || run.state === "halted") && <Button disabled={busy || !queue.approved} onClick={() => void call({ action: "resume" })}>{t("run.resume")}</Button>}
       </div>
       {canStart && (!run || run.state === "finished" || run.state === "halted" || run.state === "paused") && (
         <div className={`${run ? "mt-4 border-t border-line pt-3" : ""} flex flex-wrap items-end gap-3`}>
@@ -241,7 +241,7 @@ export function RunControls({ project, queue, onChanged }: { project: ProjectSta
               <input type="datetime-local" value={time} onChange={(e) => setTime(e.target.value)} className="rounded-md border border-line-strong bg-canvas px-2 py-1 text-sm text-fg" />
             </label>
           )}
-          <Button disabled={busy || (after === AT && !time)} onClick={() => call({
+          <Button disabled={busy || (after === AT && !time)} onClick={() => void call({
             action: "start", model: model || undefined, effort: effort || undefined, session: session || undefined, runtime: session ? undefined : runtime,
             ...(after === AT ? { at: new Date(time).toISOString() } : after === USAGE ? { at: "usage-reset" } : after ? { after } : {}),
           })}>

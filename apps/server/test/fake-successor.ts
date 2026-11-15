@@ -20,12 +20,13 @@ if (behaviour === "crash") {
 } else if (behaviour === "never") {
   setTimeout(() => process.exit(0), Number(process.env.FAKE_LIFE_MS ?? 30_000));
 } else {
-  setTimeout(async () => {
+  const stand = async () => {
     const predecessor = standby.predecessor();
     standby.ready({ commit: "fake-new", subject: "the stand-in successor" });
     const readyAt = Date.now();
     const { released } = await standby.released();
     log({ readyAt, releasedAt: Date.now(), released: released ?? null, predecessorAliveAtReady: predecessor ? isAlive(predecessor.pid) : null });
     process.exit(0);
-  }, Number(process.env.FAKE_READY_MS ?? 500));
+  };
+  setTimeout(() => void stand(), Number(process.env.FAKE_READY_MS ?? 500));
 }

@@ -737,6 +737,13 @@ function apply(
       stepOf(queueOf(e.queue), e.step);
       return;
     }
+    // Events that change nothing in the derived state.
+    case "change.proposed":
+    case "log":
+    case "plan.proposed":
+    case "queue.drafted":
+    case "session.request":
+    case "status.set":
     default:
       return;
   }

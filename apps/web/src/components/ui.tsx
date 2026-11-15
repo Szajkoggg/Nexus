@@ -285,7 +285,7 @@ function ComposerBox({ draft, placeholder, button, onSubmit, allowEmpty = false,
             onChange={(e) => d.change(e.target.value)} onKeyDown={d.onKeyDown} onPaste={onPaste}
             className="min-h-14 flex-1 resize-none bg-transparent py-1.5 text-sm leading-[22px] text-fg placeholder:text-fg-3 focus:outline-none" />
           <span className="mb-2 shrink-0 rounded border border-line-strong px-1.5 text-[11px] text-fg-3">{t("ui.ctrlEnter")}</span>
-          <Button onClick={d.submit} disabled={!d.ready}>{d.busy ? t("ui.sending") : button}</Button>
+          <Button onClick={() => void d.submit()} disabled={!d.ready}>{d.busy ? t("ui.sending") : button}</Button>
           </div>
         </div>
         {error && <p className="mt-1 text-xs text-danger">{error}</p>}
@@ -301,7 +301,7 @@ function ComposerBox({ draft, placeholder, button, onSubmit, allowEmpty = false,
           <textarea ref={box} value={d.text} rows={1} placeholder={placeholder} aria-label={placeholder}
             onChange={(e) => d.change(e.target.value)} onKeyDown={d.onKeyDown} onPaste={onPaste}
             className="min-h-11 flex-1 resize-none rounded-[22px] border border-line-strong bg-canvas px-4 py-2.5 text-sm leading-[22px] text-fg placeholder:text-fg-3 focus:border-accent focus:outline-none" />
-          <button onClick={d.submit} disabled={!d.ready} aria-label={button} title={t("ui.withShortcut", { action: button })}
+          <button onClick={() => void d.submit()} disabled={!d.ready} aria-label={button} title={t("ui.withShortcut", { action: button })}
             className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-accent-strong text-on-accent hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M3.4 20.4 21 12 3.4 3.6l-.1 6.5L15 12 3.3 13.9z" /></svg>
           </button>
@@ -314,7 +314,7 @@ function ComposerBox({ draft, placeholder, button, onSubmit, allowEmpty = false,
     <div>
       <textarea ref={box} value={d.text} rows={rows} placeholder={placeholder} onChange={(e) => d.change(e.target.value)} onKeyDown={d.onKeyDown} className={TEXTAREA} />
       <div className="mt-2 flex flex-wrap items-center gap-3">
-        <Button onClick={d.submit} disabled={!d.ready}>{d.busy ? t("ui.sending") : button}</Button>
+        <Button onClick={() => void d.submit()} disabled={!d.ready}>{d.busy ? t("ui.sending") : button}</Button>
         {extra}
         <span className="text-xs text-fg-3">{t("ui.ctrlEnter")}</span>
         {d.error && <span className="text-xs text-danger">{d.error}</span>}

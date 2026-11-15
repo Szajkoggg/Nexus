@@ -583,8 +583,11 @@ export class Engine implements Member {
         case "failed":
         case "stopped":
           return this.halt(queueId, `step ${current.id} ${current.status}${current.reason ? `: ${current.reason}` : ""}`);
+        case "done":
+        case "rejected":
+        case "skipped":
         default:
-          break; // done or skipped: go on
+          break; // ended: go on
       }
       // A deploy planned after this step (or queue) starts now: its drain holds the run here, so nothing of the next
       // step slips in. Looked at again: held, the run waits for the restart; paused by the user, the pause is reached.

@@ -511,7 +511,7 @@ function QuestionSheet({ q, project, onChanged, children }: { q: QuestionView; p
       </PanelBody>
       <ActionBar
         hint={d.error ? <span className="text-danger">{d.error}</span> : choice ? t(d.text.trim() ? "details.answer.answersWithWords" : "details.answer.answers", { option: choice }) : undefined}
-        primary={<Button onClick={d.submit} disabled={!ready}>{d.busy ? t("ui.sending") : t("details.answer.button")}</Button>}
+        primary={<Button onClick={() => void d.submit()} disabled={!ready}>{d.busy ? t("ui.sending") : t("details.answer.button")}</Button>}
       />
     </>
   );
@@ -616,7 +616,7 @@ function PictureActions({ project, queue, step, path, src, onChanged }: { projec
       left={
         <div className="flex min-w-0 flex-1 basis-80 items-center gap-2">
           <button
-            onClick={() => act(project, "POST", `${base}/mark`, { path, accepted: !marks?.accepted }).then(onChanged, (e: Error) => setError(e.message))}
+            onClick={() => void act(project, "POST", `${base}/mark`, { path, accepted: !marks?.accepted }).then(onChanged, (e: Error) => setError(e.message))}
             aria-pressed={!!marks?.accepted} title={t("details.picture.markTitle")}
             className={`shrink-0 whitespace-nowrap rounded-md border px-3 py-1.5 text-sm font-medium max-lg:min-h-11 ${marks?.accepted ? "border-ok/50 bg-ok/20 text-ok" : "border-line-strong bg-surface-2 text-fg hover:bg-surface-3"}`}
           >{t(marks?.accepted ? "details.picture.marked" : "details.picture.mark")}</button>
@@ -943,7 +943,7 @@ function AnswerBar({ q, project, onChanged }: { q: QuestionView; project: string
   return (
     <ActionBar
       hint={d.error ? <span className="text-danger">{d.error}</span> : t("details.answer.ctrlEnter")}
-      primary={<Button onClick={d.submit} disabled={!d.ready}>{d.busy ? t("ui.sending") : t("details.answer.button")}</Button>}
+      primary={<Button onClick={() => void d.submit()} disabled={!d.ready}>{d.busy ? t("ui.sending") : t("details.answer.button")}</Button>}
     >
       <textarea value={d.text} rows={2} placeholder={t("details.answer.placeholder")} onChange={(e) => d.change(e.target.value)} onKeyDown={d.onKeyDown} className={TEXTAREA} />
       <label className="mt-1.5 flex items-center gap-1.5 text-xs text-fg-2">
@@ -961,7 +961,7 @@ function WithdrawNote({ project, queue, step, note, onChanged }: { project: stri
       {error && <span className="text-danger">{error}</span>}
       <button
         className="text-fg-3 hover:text-danger"
-        onClick={() => act(project, "DELETE", `/queues/${enc(queue)}/steps/${enc(step)}/notes/${enc(note)}`).then(onChanged, (e: Error) => setError(e.message))}
+        onClick={() => void act(project, "DELETE", `/queues/${enc(queue)}/steps/${enc(step)}/notes/${enc(note)}`).then(onChanged, (e: Error) => setError(e.message))}
       >{t("details.note.withdraw")}</button>
     </>
   );
@@ -984,6 +984,21 @@ function describe(e: Event): string {
     case "review.rejected": return e.text ?? "";
     case "review.provisional": return e.text ?? "";
     case "review.fix_asked": return e.text;
+    // Events this line shows no text for.
+    case "change.proposed":
+    case "log":
+    case "message.read":
+    case "note.read":
+    case "plan.proposed":
+    case "question.withdrawn":
+    case "queue.drafted":
+    case "queue.report":
+    case "review.commented":
+    case "review.confirmed":
+    case "review.marked":
+    case "session.request":
+    case "status.set":
+    case "step.started":
     default: return "";
   }
 }
@@ -1057,6 +1072,7 @@ function Changes({ entries, queue }: { entries: StatusChange[]; queue: QueueView
       case "proposal": return t("details.change.proposal");
       case "run": return t("details.change.run");
       case "work": return t(c.to === "kept" ? "details.change.kept" : "details.change.discarded", { step: c.step ?? "", count: c.commits?.length ?? 0 });
+      case "status":
       default: return c.step ? t("details.change.step", { step: c.step, from: statusWord(c.from), to: statusWord(c.to) }) : t("details.change.queue", { queue: queue.id, from: statusWord(c.from), to: statusWord(c.to) });
     }
   };

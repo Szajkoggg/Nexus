@@ -383,7 +383,7 @@ function ProjectSettingsPage({ project, info, onChanged }: { project: ProjectFil
       </p>
       <div className="mt-4"><SettingRows form={form} project={p} /></div>
       <div className="mt-6 flex flex-wrap items-center gap-3">
-        <Button onClick={save} disabled={busy}>{t(busy ? "settings.saving" : "settings.save")}</Button>
+        <Button onClick={() => void save()} disabled={busy}>{t(busy ? "settings.saving" : "settings.save")}</Button>
         {msg && <span className={`text-sm ${msg.ok ? "text-ok" : "text-danger"}`}>{msg.text}</span>}
       </div>
     </>
@@ -415,7 +415,7 @@ function GlobalForm({ global, server, onSaved, onChanged }: { global: GlobalSett
     <>
       <SettingRows form={{ get: v.get, bool: v.bool, set: v.set }} />
       <div className="mt-6 flex flex-wrap items-center gap-3">
-        <Button onClick={save} disabled={busy}>{t(busy ? "settings.saving" : "settings.save")}</Button>
+        <Button onClick={() => void save()} disabled={busy}>{t(busy ? "settings.saving" : "settings.save")}</Button>
         {msg && <span className={`text-sm ${msg.ok ? "text-ok" : "text-danger"}`}>{msg.text}</span>}
       </div>
       <BrowserSection />
