@@ -1,0 +1,51 @@
+# A bug fix: reproduce the bug with a failing test, find its cause, fix it.
+template:
+  id: bugfix
+  title: Bug fix
+  description: Reproduce a bug with a failing test, find its cause and fix it; the test stays as a guard.
+params:
+  - name: issue
+    description: what goes wrong and how it shows (where, with which input, since when if known)
+  - name: area
+    description: the part of the project where it shows
+title: "Fix: {{issue}}"
+description: |
+  The bug: {{issue}}
+  Where: {{area}}.
+coding: true
+origin: user
+stop_conditions:
+  - A decision that belongs to the user comes up (behaviour as the user sees it, beyond fixing the bug); ask with nexus
+    ask, with a recommendation.
+  - The cause lies outside {{area}} and fixing it would change something else's behaviour; ask with nexus ask.
+  - A file to commit has changes this step did not make; ask with nexus ask, never commit them.
+  - The same check fails three times in a row after attempted fixes.
+steps:
+  - id: "{{id}}1"
+    title: "Reproduce and find the cause: {{issue}}"
+    goal: |
+      Reproduce the bug ({{issue}}) with a test that fails for the reason the bug has, and find its cause. Commit the
+      failing test only if the project allows it (else keep it for the next step); say in the summary where the cause
+      is and why it happens, with the evidence.
+    acceptance:
+      - A test that fails because of the bug, and only because of it.
+      - The cause named in the summary, with the code and the evidence that shows it.
+    review:
+      level: 2
+    kind: debugging
+    activities: [bugfix, test]
+    size: S
+  - id: "{{id}}2"
+    title: "Fix: {{issue}}"
+    goal: |
+      Fix the cause found in {{id}}1, the smallest change that removes it. The test of {{id}}1 passes, and nothing
+      else changes behaviour; look for the same mistake elsewhere and name what you find (fix it only where it is the
+      same bug).
+    acceptance:
+      - The test of {{id}}1 passes; the checks pass.
+      - The summary says what the fix changes and what else was checked for the same mistake.
+    review:
+      level: 2
+    kind: code
+    activities: [bugfix]
+    size: S

@@ -1,0 +1,36 @@
+# A spike: find something out within a time box and report; nothing to merge.
+template:
+  id: spike
+  title: Spike
+  description: Find out a question within a time box, by reading, measuring or throwaway probes, and report with a recommendation.
+params:
+  - name: question
+    description: what to find out, as one question
+  - name: timebox
+    description: how long the work may take at most
+    default: two hours
+title: "Spike: {{question}}"
+description: |
+  The question: {{question}}
+  The time box: {{timebox}}. Probes are throwaway, outside the working tree; nothing is committed.
+coding: false
+origin: user
+stop_conditions:
+  - The time box ({{timebox}}) is spent before the question is answered; report what is known and what is left.
+  - Answering would need a real cost (a paid service, a real model beyond the smallest probe) the queue does not allow;
+    ask with nexus ask, with what it would cost.
+  - A decision that belongs to the user comes up; ask with nexus ask, with a recommendation.
+steps:
+  - id: "{{id}}1"
+    title: "Find out: {{question}}"
+    goal: |
+      Answer the question "{{question}}" within {{timebox}}: by reading, measuring or small throwaway probes outside
+      the working tree. Write a report (nexus report): the answer, the evidence for it, the options with their costs,
+      your recommendation, and what stays unknown. Commit nothing.
+    acceptance:
+      - The report, with the answer, the evidence, the options and a recommendation.
+      - The working tree as it was (no commit, no leftover files).
+    review:
+      level: 2
+    kind: research
+    size: S

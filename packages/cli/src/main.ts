@@ -2,7 +2,7 @@
 // Every agent-side command validates its input and appends one event to the session's own log.
 import { readFileSync, existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import YAML from "yaml";
-import { basename, extname, join, resolve } from "node:path";
+import { basename, dirname, extname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { execFileSync } from "node:child_process";
 import {
@@ -11,6 +11,7 @@ import {
   NEXUS_ACTIVITIES, TAG_KINDS, TAG_ORIGINS, TAG_SIZES, tagIssues, tagProposalText, tagsText,
   STAT_DIMENSIONS, readTurns, sinceTime, statDimension, statsReport, statsText, stepStats,
   CHECK_METRIC, isCheckMetric, metricDef, metricDefText, metricRequestIssues, metricValueText,
+  TemplateError, fillTemplate, filledTemplateYaml, readTemplates, templateQueueId, type MergedTemplates,
   type PictureRole, type ReviewItem, type Role, type Runtime, type SessionFile,
 } from "@nexus/protocol";
 import { checkRules, describeRules } from "@nexus/protocol/rules";
@@ -48,6 +49,13 @@ Agent commands (session from NEXUS_SESSION or --session):
   nexus log <text> [--level info|warn|error]
   nexus answer <qid> <text> [--escalate [--recommend <option>]] [--continue|--wait]     (orchestrator only)
   nexus queue draft <file.yaml|->                                 (orchestrator only) create or change a queue
+  nexus queue draft --template <id> [--set name=value]... [--id <queue-id>]
+                                      write a draft from a template into .nexus/drafts/<queue-id>.yaml (refused when a
+                                      parameter without a default is missing); complete it, then upload it as above
+  nexus template list                 the templates in effect: Nexus's, the user's global ones (<NEXUS_HOME>/templates/)
+                                      and the project's (nexus-templates/ in its repository); a project's replaces a
+                                      global one of the same id, a global one Nexus's
+  nexus template show <id>            a template's parameters and its YAML
   nexus review accept <queue> <step> [--note <text>]             (orchestrator only) a step waiting for your review
   nexus review send-back <queue> <step> <what to fix>             (orchestrator only) back to its worker
   nexus review ask-user <queue> <step> <why>                      (orchestrator only) hand the review to the user
@@ -121,6 +129,7 @@ const { values: o, positionals: args } = parseArgs({
     area: { type: "string" }, activity: { type: "string" }, activities: { type: "string" },
     project: { type: "string" }, since: { type: "string" }, by: { type: "string" },
     unit: { type: "string" }, show: { type: "string" }, target: { type: "string" }, "warn-above": { type: "string" }, "warn-below": { type: "string" },
+    set: { type: "string", multiple: true }, template: { type: "string" },
     help: { type: "boolean", short: "h" }, key: { type: "string" }, note: { type: "string" }, before: { type: "string" }, now: { type: "boolean" }, ref: { type: "string" },
   },
 });
@@ -643,6 +652,8 @@ const commands: Record<string, () => void | Promise<void>> = {
       return;
     }
     if (args[1] !== "draft") throw new UsageError("nexus queue draft <file.yaml|-> | nexus queue set <queue> [--step <step>] <status> --reason <text>");
+    if (o.template !== undefined) { draftFromTemplate(); return; }
+    if (o.set?.length) throw new UsageError("--set goes with --template");
     const st = store(); const s = orchestrator(st);
     const src = need(args[2], "<file.yaml|->");
     const text = src === "-" ? readFileSync(0, "utf8") : readFileSync(normPath(src), "utf8");
@@ -652,6 +663,29 @@ const commands: Record<string, () => void | Promise<void>> = {
     if (typeof id !== "string") throw new UsageError("the queue needs an id");
     const e = emit(st, s, { type: "queue.drafted", queue: id, definition });
     report(waitApplied(st, s.id, e.id));
+  },
+
+  /** `nexus template list|show`: the templates of the three layers (@nexus/protocol templates.ts). Reads only. */
+  template() {
+    const sub = args[1] ?? "list";
+    const { templates, problems } = templatesHere();
+    if (sub === "list") {
+      if (!templates.length) console.log("no templates");
+      for (const t of templates) {
+        const params = t.params.map((p) => (p.default === undefined ? p.name : `[${p.name}]`)).join(" ");
+        console.log(`${t.id} (${t.layer}${t.replaces.length ? `, over ${t.replaces.join(" and ")}` : ""}): ${t.title}${params ? ` (params: ${params})` : ""}`);
+      }
+      for (const p of problems) console.log(`not used: ${p.path} (${p.layer}): ${p.problem}`);
+      return;
+    }
+    if (sub !== "show") throw new UsageError("nexus template list | nexus template show <id>");
+    const t = template(templates, problems, need(args[2], "<id>"));
+    console.log(`${t.id}: ${t.title} (${t.layer}: ${t.path}${t.replaces.length ? `; replaces the ${t.replaces.join(" and ")} one` : ""})`);
+    if (t.description) console.log(t.description);
+    console.log(`parameters: {{id}} is the queue's id (--id)${t.params.length ? "" : "; no others"}`);
+    for (const p of t.params) console.log(`  ${p.name}: ${p.description}${p.default === undefined ? " (required)" : ` (default: ${p.default})`}`);
+    console.log("");
+    console.log(readFileSync(t.path, "utf8").trimEnd());
   },
 
   run() {
@@ -882,6 +916,54 @@ function reviewCopy(st: ProjectStore, queue: string, step: string, file: string)
     if (!existsSync(target)) { writeFileSync(target, data); return target; }
     if (statSync(target).isFile() && readFileSync(target).equals(data)) return target;
   }
+}
+
+/** The templates in effect here: with the project's when run inside one, else Nexus's and the user's only. */
+function templatesHere(): MergedTemplates {
+  const dir = process.env.NEXUS_DIR ?? findNexusDir();
+  return readTemplates(dir ? dirname(normPath(dir)) : undefined);
+}
+
+function template(templates: MergedTemplates["templates"], problems: MergedTemplates["problems"], id: string): MergedTemplates["templates"][number] {
+  const t = templates.find((x) => x.id === id);
+  if (t) return t;
+  const bad = problems.filter((p) => basename(p.path).replace(/\.ya?ml$/i, "") === id);
+  throw new UsageError(bad.length ? `template ${id} cannot be used: ${bad.map((p) => `${p.path}: ${p.problem}`).join("; ")}` : `no template ${id} (nexus template list)`);
+}
+
+/**
+ * `nexus queue draft --template`: fills the template and writes the result into .nexus/drafts/<queue>.yaml, the file
+ * the orchestrator completes and uploads with `nexus queue draft`. It writes no event: the draft path checks the rest.
+ * Refused: a missing or unknown parameter, a queue id that exists already, or a draft file of that name.
+ */
+function draftFromTemplate(): void {
+  if (args[2] !== undefined) throw new UsageError("nexus queue draft --template <id> [--set name=value]... [--id <queue-id>]: no file with --template");
+  const st = store();
+  const { templates, problems } = templatesHere();
+  const t = template(templates, problems, need(o.template, "--template <id>"));
+  const given: Record<string, string> = {};
+  for (const pair of o.set ?? []) {
+    const eq = pair.indexOf("=");
+    if (eq < 1) throw new UsageError(`--set takes name=value, not "${pair}"`);
+    const name = pair.slice(0, eq).trim();
+    if (name in given) throw new UsageError(`--set ${name} given twice`);
+    given[name] = pair.slice(eq + 1);
+  }
+  const ids = new Set(st.queueIds().map((x) => x.toLowerCase()));
+  const draftFile = (id: string) => join(st.dir, "drafts", `${id}.yaml`);
+  const id = o.id ?? templateQueueId(t, (x) => ids.has(x.toLowerCase()) || existsSync(draftFile(x)));
+  if (ids.has(id.toLowerCase())) throw new UsageError(`queue ${id} exists already: give another --id (a revision of it is drafted from its own file)`);
+  const file = draftFile(id);
+  if (existsSync(file)) throw new UsageError(`${normPath(file)} exists already: give another --id, or remove that draft first`);
+  let queue: Record<string, unknown>;
+  try { queue = fillTemplate(t, given, id); } catch (e) {
+    if (e instanceof TemplateError) throw new UsageError(e.message);
+    throw e;
+  }
+  const shown = `.nexus/drafts/${id}.yaml`;
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, filledTemplateYaml(t, queue, shown), "utf8");
+  console.log(`ok: draft ${shown} from template ${t.id} (${t.layer}); complete it, then: nexus queue draft ${shown}`);
 }
 
 function guessKind(p: string): ReviewItem["kind"] {

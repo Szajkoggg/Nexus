@@ -1,0 +1,48 @@
+# A refactor: the behaviour pinned by tests first, then the structure changed in small commits.
+template:
+  id: refactor
+  title: Refactor
+  description: Change the structure of some code without changing its behaviour; tests pin the behaviour first.
+params:
+  - name: target
+    description: the code to refactor (files, modules or a function)
+  - name: reason
+    description: why, and what should be better afterwards
+title: "Refactor: {{target}}"
+description: |
+  What: {{target}}
+  Why: {{reason}}
+  Behaviour stays as it is; the checks pass before and after every commit.
+coding: true
+origin: user
+stop_conditions:
+  - Keeping behaviour unchanged turns out impossible (a bug the refactor would fix, or a behaviour others rely on); ask
+    with nexus ask, with a recommendation.
+  - A file to commit has changes this step did not make; ask with nexus ask, never commit them.
+  - The same check fails three times in a row after attempted fixes.
+steps:
+  - id: "{{id}}1"
+    title: "Pin the behaviour: {{target}}"
+    goal: |
+      Tests that pin the behaviour of {{target}} where the existing ones leave it open, especially where the refactor
+      ({{reason}}) will move code. They pass on the code as it is now.
+    acceptance:
+      - New tests that pass before any change, and what they cover named in the summary.
+    review:
+      level: 2
+    kind: code
+    activities: [test]
+    size: S
+  - id: "{{id}}2"
+    title: "Refactor: {{target}}"
+    goal: |
+      Refactor {{target}}: {{reason}}. Small commits, each with the checks passing; behaviour unchanged, the tests of
+      {{id}}1 untouched and passing.
+    acceptance:
+      - The tests of {{id}}1 pass unchanged; the checks pass.
+      - The summary says what is better, measured where it can be (lines, duplication, the reason above).
+    review:
+      level: 2
+    kind: code
+    activities: [refactor]
+    size: M

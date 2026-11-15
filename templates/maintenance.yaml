@@ -1,0 +1,32 @@
+# Maintenance, the general skeleton: survey the project and report what needs care; it changes nothing.
+template:
+  id: maintenance
+  title: Maintenance
+  description: Survey the project for what needs care and report the findings, so that a queue can be proposed from them.
+params:
+  - name: scope
+    description: what to survey
+    default: dependencies (outdated, vulnerable), failing or slow checks, lint findings, dead code, stale documentation
+title: "Maintenance: {{scope}}"
+description: |
+  A survey: {{scope}}. It only looks and reports; the findings become a queue the user approves. Nothing is changed or
+  committed.
+coding: false
+origin: maintenance
+stop_conditions:
+  - Surveying would need a change to the project (an install, a fix, a commit); report it as a finding instead.
+  - A decision that belongs to the user comes up; ask with nexus ask, with a recommendation.
+steps:
+  - id: "{{id}}1"
+    title: "Survey: {{scope}}"
+    goal: |
+      Survey the project: {{scope}}. Write a report (nexus report) with each finding: what it is, where, how much it
+      matters, and the fix it needs (small or not); or say that there were none. Change nothing, commit nothing.
+    acceptance:
+      - The report, with each finding and its weight, or that there were none.
+      - The working tree as it was (no commit, no leftover files).
+    review:
+      level: 2
+    kind: research
+    activities: [cleanup]
+    size: S

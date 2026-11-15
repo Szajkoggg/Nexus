@@ -28,6 +28,7 @@ a shell command can take part.
   tags.yaml                             server: the project's tag lists (areas, own activities, renames, proposals)
   metrics.yaml                          server: the project's metrics (unit, how shown, target, warning threshold)
   orchestrator/summary.md               server: the orchestrator's latest summary for a fresh session (its context care)
+  drafts/<queue-id>.yaml                the orchestrator: its queue drafts (also `nexus queue draft --template`)
   queues/
     <queue-id>/
       queue.yaml                        server: definition, revisions, approvals
@@ -1076,8 +1077,10 @@ nexus ask "Canyon joints: vertical only, or also inclined?" [--option ...] [--re
 nexus context --topics rock,support --files Runtime/Core/Rock/* <<< "summary text"
 nexus report W --file <temp>/nexus-reports/<project>/W.md --summary "..."   # copied to .nexus/queues/W/report.md
 nexus propose-change W --file patch.yaml --reason "..."
+nexus template list | show <id>                # the queue templates in effect (see "Queue templates")
 # orchestrator only
 nexus queue draft --file queue.yaml
+nexus queue draft --template bugfix --set issue="..." --set area=engine [--id BF]   # writes .nexus/drafts/BF.yaml to complete and upload
 nexus answer <qid> "..." [--escalate [--recommend <option>]] [--continue|--wait]
                                                # --recommend only with --escalate: one of the question's options
 nexus session start|resume|fork|pause|stop ...
@@ -1728,6 +1731,67 @@ schedule.
 - At its time, a queue waiting for its approval, whose checkout is held by another queue, or that would pass the
   limit on queues running at once, waits (`held`) and starts by itself once it may; a waiting schedule is never
   missed, however long it waits.
+
+## Queue templates
+
+A template is a queue skeleton with parameters: a queue's YAML (as an orchestrator drafts it) with two more keys,
+`template:` and `params:`, and `{{name}}` placeholders in its texts (`packages/protocol/src/templates.ts`).
+
+```yaml
+template:
+  id: bugfix                   # 1-40 lowercase letters, digits and dashes
+  title: Bug fix
+  description: Reproduce a bug with a failing test, find its cause and fix it.   # optional
+params:
+  - name: issue                # lowercase letters, digits and underscores
+    description: what goes wrong and how it shows
+  - name: area
+    description: the part of the project where it shows
+    default: the engine        # optional: without one the parameter must be given
+title: "Fix: {{issue}}"
+coding: true
+steps:
+  - id: "{{id}}1"
+    title: "Reproduce and find the cause: {{issue}}"
+    goal: |
+      ...
+```
+
+- A placeholder is `{{name}}` (spaces inside the braces allowed) in any string value, never in a key. `{{id}}` is
+  always there: the queue's id, given when the template is filled (step ids are written `"{{id}}1"`); a parameter may
+  not be named `id`. A placeholder that names no parameter is refused when the template is read, since it would stay
+  unfilled. A template has at least one step; a top-level `id` in it is ignored.
+- Filling puts each value in as it is (a `{{…}}` inside a value is not filled again), takes the defaults for what is
+  not given, and drops `template:` and `params:`; the queue's id comes first. Refused: a parameter without a default
+  that is not given (named with its description), a parameter the template does not have, a placeholder left unfilled,
+  and a result that is not a valid queue definition. The rest of the draft path's checks (tags against the project's
+  lists, a queue of that id) apply when the draft is uploaded.
+
+**Three layers**, weakest first; for the same template id the stronger replaces the weaker:
+
+| Layer | Folder | |
+|---|---|---|
+| `nexus` | `templates/` in Nexus's repository | shipped with Nexus: `bugfix`, `ui-change`, `spike`, `refactor`, `maintenance` |
+| `global` | `<NEXUS_HOME>/templates/` | the user's own, for every project |
+| `project` | `nexus-templates/` in the project's repository root | versioned with the project and seen by its agents (not under `.nexus/`, which git ignores) |
+
+Every `*.yaml` and `*.yml` file of a folder is read; a file that is not a valid template, or a second file of one
+layer with an id already taken there (the first by path is used), is listed as not used, with the reason.
+
+- `nexus template list` (any session, or none: outside a project only the `nexus` and `global` layers) prints each
+  template in effect, `bugfix (project, over nexus and global): Bug fix (params: issue [area])` (a parameter with a
+  default in brackets), then the files not used.
+- `nexus template show <id>` prints its layer and file, what it replaces, its parameters (required, or the default),
+  and the file's YAML.
+- `nexus queue draft --template <id> [--set name=value]... [--id <queue-id>]` fills it and writes the result into
+  `.nexus/drafts/<queue-id>.yaml`, with a comment at the top naming the template and what to complete (the goals'
+  details, the project's checks, tags such as the area, the texts in the queue's language). It records no event and
+  uploads nothing: the orchestrator completes the file and uploads it with `nexus queue draft .nexus/drafts/<id>.yaml`,
+  and the queue then goes as any other, through the user's approval. Without `--id` the queue's id is the template's
+  id in capitals (letters and digits, at most 12), numbered from 2 when a queue or a draft file has it (`SPIKE2`).
+  Refused before anything is written: a missing or unknown parameter, `--set` without `name=value` or given twice, an
+  unknown template (or one whose file is not used, with the reason), a queue of that id that exists already, and a
+  draft file of that name.
 
 ## One queue per checkout, and a limit
 

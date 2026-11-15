@@ -1,0 +1,55 @@
+# A change the user sees: a mockup first, then the change, with pictures before and after.
+template:
+  id: ui-change
+  title: UI change with pictures
+  description: A change of a view the user sees, designed as a mockup first, then built, reviewed by pictures.
+params:
+  - name: change
+    description: what changes in the view, as the user would see it
+  - name: view
+    description: the view's key without its width (the subject, and its state if it matters), e.g. waiting-tab
+  - name: widths
+    description: the window widths the pictures are taken at, in pixels
+    default: "1440, 390"
+title: "{{change}}"
+description: |
+  The change: {{change}}
+  The view: {{view}}, pictured at {{widths}} px. The look is the user's: the user reviews the mockup before it is
+  built, and the result beside it.
+coding: true
+origin: user
+stop_conditions:
+  - A decision about the look or behaviour that the mockup and this text do not settle comes up; ask with nexus ask,
+    with a recommendation, do not decide.
+  - A file to commit has changes this step did not make; ask with nexus ask, never commit them.
+  - The same check fails three times in a row after attempted fixes.
+steps:
+  - id: "{{id}}1"
+    title: "Mockup: {{change}}"
+    goal: |
+      A mockup of {{change}} in the view {{view}}, at each width ({{widths}} px), true to the existing look and the
+      project's components; where there is a real choice, two variants with what differs. Pictures of the view as it
+      is now beside them, taken the same way.
+    acceptance:
+      - "Pictures: {{view}} at each width as it is now (before) and as designed (mockup, or variant-a and variant-b),
+        registered with their keys as nexus help review says."
+    review:
+      prepare: "{{view}}@<width> before -> mockup (or variant-a / variant-b), one pair per width: {{widths}}"
+      level: 1
+    kind: design
+    activities: [ui]
+    size: S
+  - id: "{{id}}2"
+    title: "Build: {{change}}"
+    goal: |
+      Build {{change}} in the view {{view}} as the accepted mockup of {{id}}1 shows it. Tests for the logic behind it
+      (not for the look); pictures of the result at each width ({{widths}} px), taken as the befores were.
+    acceptance:
+      - Tests for the logic the change adds or moves; the checks pass.
+      - "Pictures: {{view}} at each width (after), beside the befores and mockups of {{id}}1."
+    review:
+      prepare: "{{view}}@<width> before -> after, one pair per width: {{widths}}"
+      level: 1
+    kind: code
+    activities: [feature, ui]
+    size: M
