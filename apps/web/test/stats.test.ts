@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { StatGroup, StatsReport } from "@nexus/protocol/stats";
-import { compareRows, compareScales, daysUrl, estimate, headline, niceMax, rangeSince, statsUrl, weeklyUse, windowPanels } from "../src/stats.ts";
+import { compareRows, compareScales, dayOf, daysUrl, estimate, headline, niceMax, rangeSince, statsUrl, weeklyUse, windowPanels } from "../src/stats.ts";
 
 const today = new Date(2026, 10, 15, 14, 30);
 
@@ -23,6 +23,7 @@ test("the range's first day, as a local date; the addresses carry the range, gro
   assert.equal(rangeSince("7d", today), "2026-11-09", "today and the six days before");
   assert.equal(rangeSince("30d", today), "2026-10-17");
   assert.equal(rangeSince("all", today), undefined);
+  assert.equal(dayOf("2026-11-09").getTime(), new Date(2026, 10, 9).getTime(), "a day's key back to its local start");
   assert.equal(statsUrl({ range: "30d", by: "effort", filter: { kind: "code", area: "" } }, today), "/api/stats?by=effort&since=2026-10-17&kind=code");
   assert.equal(statsUrl({ range: "all", by: "model", project: "p", filter: {} }, today), "/api/stats?by=model&project=p");
   assert.equal(daysUrl("all", today), "/api/usage/days?since=2026-08-18", "all: the last 90 days of windows");

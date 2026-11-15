@@ -2,19 +2,20 @@
 // form: docs/ux/stats-mockups.md): the range's start, the comparison rows by model or effort, the headline figures,
 // the usage windows' panels. Pure and unit tested; the report and the days come from GET /api/stats and
 // GET /api/usage/days (packages/protocol/src/stats.ts).
-import type { StatFilter, StatGroup, StatsReport, UsageDays } from "@nexus/protocol/stats";
+import { dayKey, type StatFilter, type StatGroup, type StatsReport, type UsageDays } from "@nexus/protocol/stats";
 import { windowKind } from "@nexus/protocol/digest";
 
 export const RANGES = ["7d", "30d", "90d", "all"] as const;
 export type Range = (typeof RANGES)[number];
 const RANGE_DAYS: Record<Range, number | undefined> = { "7d": 7, "30d": 30, "90d": 90, all: undefined };
 
-const day = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+/** A day's key (2026-11-14, dayKey) as that day's local start. */
+export const dayOf = (key: string): Date => { const [y, m, d] = key.split("-").map(Number); return new Date(y!, m! - 1, d!); };
 
 /** The first day of a range ending today, as a local date (`since` of both endpoints); undefined: all. */
 export function rangeSince(range: Range, today = new Date()): string | undefined {
   const n = RANGE_DAYS[range];
-  return n === undefined ? undefined : day(new Date(today.getFullYear(), today.getMonth(), today.getDate() - (n - 1)));
+  return n === undefined ? undefined : dayKey(new Date(today.getFullYear(), today.getMonth(), today.getDate() - (n - 1)));
 }
 
 /** What the view asks for: the report's address with the range, grouping, project and tag filter. */

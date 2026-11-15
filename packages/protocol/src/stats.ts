@@ -237,7 +237,8 @@ interface UsageDay {
 /** GET /api/usage/days: the days (local dates, oldest first) and each window's values for them. */
 export interface UsageDays { days: string[]; windows: UsageDay[] }
 
-const dayKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+/** A local date as the days are keyed (2026-11-14): the server's days here, the browser's in the Stats view. */
+export const dayKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
 /**
  * The usage windows day by day from `from`'s day to `to`'s, in local dates, for the Stats view. The readings are

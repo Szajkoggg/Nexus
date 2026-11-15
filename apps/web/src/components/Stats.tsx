@@ -8,7 +8,7 @@ import { useQuery, type ProjectSummary } from "../api.ts";
 import { usePage } from "../page.ts";
 import { formatDate, formatDay, formatWeekday, t, type Key } from "../i18n.ts";
 import {
-  RANGES, compareRows, compareScales, daysUrl, estimate, headline, statsUrl, windowPanels,
+  RANGES, compareRows, compareScales, dayOf, daysUrl, estimate, headline, statsUrl, windowPanels,
   type CompareRow, type Range, type WindowPanel,
 } from "../stats.ts";
 import { AxisCell, BarCell, ChartCard, DataTable, DotCell, Scatter, Segmented, TimeChart, type ScatterPoint } from "./charts.tsx";
@@ -20,7 +20,6 @@ const FACET_LABEL: Record<(typeof FACETS)[number], Key> = { kind: "stats.facet.k
 const pct = (v: number) => `${Math.round(v)} %`;
 const mins = (v: number) => (v > 0 && v < 1 ? t("stats.underMinute") : t("stats.minutes", { n: Math.round(v) }));
 const runtimeName = (r: string) => (r === "claude" ? "Claude Code" : r === "codex" ? "Codex" : r);
-const dayOf = (key: string) => { const [y, m, d] = key.split("-").map(Number); return new Date(y!, m! - 1, d!); };
 
 /**
  * The version the view reads at: the page's cross-project version, followed at most once a minute (the report is

@@ -10,7 +10,7 @@ import { usePage } from "../page.ts";
 import { nav } from "../nav.ts";
 import { formatDay, formatNumber, formatWeekday, t } from "../i18n.ts";
 import { metricCards, type MetricCard, type MetricPoint } from "../metrics.ts";
-import { RANGES, rangeSince, type Range } from "../stats.ts";
+import { RANGES, dayOf, rangeSince, type Range } from "../stats.ts";
 import { ChartCard, DataTable, Segmented, Sparkline, TimeChart, type Reference } from "./charts.tsx";
 
 const RANGE_LABEL = { "7d": "stats.range.7d", "30d": "stats.range.30d", "90d": "stats.range.90d", all: "stats.range.all" } as const;
@@ -18,9 +18,7 @@ const RANGE_LABEL = { "7d": "stats.range.7d", "30d": "stats.range.30d", "90d": "
 /** The range's start as an ISO time (its first day's start, local); none for all. */
 const sinceIso = (range: Range) => {
   const day = rangeSince(range);
-  if (!day) return undefined;
-  const [y, m, d] = day.split("-").map(Number);
-  return new Date(y!, m! - 1, d!).toISOString();
+  return day && dayOf(day).toISOString();
 };
 
 export function ProjectStats({ project, queues, phone }: { project: string; queues: QueueView[]; phone: boolean }) {
