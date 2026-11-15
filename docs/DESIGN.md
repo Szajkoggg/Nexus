@@ -1724,6 +1724,27 @@ is gone. Three things the move needed:
 Measured back to back on a quiet machine, the eight files went from 606 s to 503 s together; the suite (240 s against
 246 s) is set by its slowest files, which this did not touch.
 
+## One full test run on the machine (queue FX)
+
+Decided on 2026-11-15: with queues in worktrees side by side, two checkouts often ran `npm test` at once; each run
+then took 480 to 510 s instead of 240 s, and unrelated tests failed on their time limits (MX2, ST2.3, ST2.integrate).
+The suite runs every file side by side on every core already, so two at once only compete. `npm test` (and
+`npm run test:times`, whose times mean nothing under such load) run through `scripts/test-lock.ts`:
+
+- **A file, created exclusively**, in the system's temporary folder, with the pid and the checkout of its run (the
+  wrapper's process, which lives as long as the run). Of two runs starting at once, one creates it.
+- **The other waits**, saying once a minute on stderr what for (the checkout, the pid, since when), so a worker's
+  check does not look stuck. A lock whose process is not alive is taken over at once (a run killed with its tree,
+  a crash); one that cannot be read is being written while it is young, and is taken over once it is not.
+- **At most 15 minutes**, then the run goes on without the lock: a run stuck for longer, or a pid that Windows gave to
+  another process, never blocks the suite for good. Two runs taking over the same dead lock in the same moment could
+  both run; that is today's behaviour, not worse.
+- **`npm run test:files` never waits**: a few files while working, short, and run often.
+- Only branches that contain the lock take it: an older branch's run neither waits nor is waited for.
+
+Measured with two temporary clones started 5 s apart (a busy machine, other work running): the first took 268 s,
+the second waited about 263 s and then took 181 s; both green.
+
 ## Findings from the flaky tests (queue FU4)
 
 Four server tests failed now and then on a busy machine. `scripts/load-tests.mjs` brings such failures out (12

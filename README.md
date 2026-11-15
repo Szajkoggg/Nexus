@@ -402,6 +402,11 @@ npm run knip     # unused files, exports and dependencies (closing refactoring s
 node scripts/load-tests.mjs --burners 12 --copies 4 --rounds 5 apps/server/test/review.test.ts   # tests under load
 ```
 
+One full run at a time on the machine: `npm test` and `npm run test:times` take a lock in the system's temporary
+folder first (`scripts/test-lock.ts`). When another checkout's full run holds it, they wait, saying once a minute
+what for, and after 15 minutes run anyway; a lock left by a run that died is taken over at once. `npm run test:files`
+never waits. `NEXUS_TEST_LOCK` names another lock file, `NEXUS_TEST_LOCK_MAX_MS` another longest wait.
+
 The tests that run fake runtimes or servers wait 10 s for what they expect (`NEXUS_TEST_WAIT_MS` sets it, e.g. higher
 on a slow machine; `apps/server/test/wait.ts`), so a change that breaks many of them fails the suite in minutes.
 A test that fails only now and then usually fails on a busy machine: `scripts/load-tests.mjs` runs the files given
