@@ -9,8 +9,10 @@
 //             a click on one say the same), so three lanes fit the window
 //   time      the time axis: each queue's expected start and end from the estimates (a view of its own: the columns
 //             are not proportional to time)
-//   folded    the finished queues folded into one line below the plan (the user, PL2 round 2: they stay at the bottom)
-//   phone     at 390 px: the tools, the critical path, a tapped "after" chip's details, the finished line at the list's end
+//   folded    the finished queues stay where they are today: folded into "Finished (3)" at the bottom of the page,
+//             under what is in progress; the plan above shows only what runs and what is planned (the user, PL2
+//             rounds 2 and 3). Shown scrolled to the page's end.
+//   phone     at 390 px: the tools, the critical path, a tapped "after" chip's details
 // Helpers (el, svgEl, EDGES, byId, rank…) are plan-mock.js's; the hooks run once it has loaded.
 
 const PLAN_FEATURE = (() => {
@@ -18,17 +20,20 @@ const PLAN_FEATURE = (() => {
   const hours = (q) => parseFloat(q.est);
   const TOOLS = [["critical", "Critical path"], ["blocked", "What blocks · 2"], ["lanes", "Lanes by area"], ["time", "Time axis"]];
 
-  /** The tools above the plan, the one shown on; the hint's text; the finished queues' line where asked. */
+  /** The tools above the plan, the one shown on; the hint's text; where asked, the page's end as it is today. */
   const page = (hint, folded = false) => () => {
     const tools = document.querySelector(".tools");
     tools.prepend(el("div", { class: "toggles", "data-box": "tools" },
       ...TOOLS.map(([k, label]) => el("span", { class: `tg${k === f || (f === "phone" && k === "critical") ? " on" : ""}` }, label))));
     if (hint) document.querySelector(".plan-head .hint").textContent = hint;
     if (folded) {
-      document.querySelector("section[aria-label='The plan']").append(el("div", { class: "folded", "data-box": "finished" },
-        el("span", { class: "fg3" }, "▸"), el("b", {}, "Finished · 3"),
-        ...Object.entries(DONE).map(([id, title]) => el("span", { class: "chip done", title }, el("span", { class: "mono" }, id))),
-        el("span", { class: "fg3 show" }, "show")));
+      // Today's page below the plan, unchanged: what is in progress, then the finished queues folded (FinishedGroup).
+      const below = document.querySelector(".below");
+      for (const [id, title, st] of [["ST2", byId.get("ST2").title, ["review", "waiting for your review · ST21"]], ["PL", byId.get("PL").title, ["usage", "waiting for the usage window · PL1"]]])
+        below.append(el("div", { class: "item", style: "margin-top:10px" }, el("span", { class: "mono fg3" }, id), " ", el("b", {}, title), " ", el("span", { class: `tone-${st[0]}` }, `· ${st[1]}`)));
+      below.after(el("section", { class: "below finished desk-only", "data-box": "finished" },
+        el("h2", {}, el("span", { class: "fg3" }, "› "), "Finished ", el("span", { class: "fg3" }, `(${Object.keys(DONE).length})`))));
+      setTimeout(() => { const p = document.querySelector(".page"); p.scrollTop = p.scrollHeight; });
     }
   };
 
@@ -65,7 +70,7 @@ const PLAN_FEATURE = (() => {
     return {
       page: () => {
         const c = on();
-        page(`Critical path: ${c.path.join(" → ")}, about ${c.hours} h to the end (estimate).`, f === "phone")();
+        page(`Critical path: ${c.path.join(" → ")}, about ${c.hours} h to the end (estimate).`)();
       },
       card: (q, c) => c.classList.add(on().path.includes(q.id) ? "crit" : "dim"),
       edge: (e, p) => {
@@ -235,6 +240,6 @@ const PLAN_FEATURE = (() => {
     };
   }
 
-  if (f === "folded") return { page: page("The finished queues are folded into one line below the plan.", true) };
+  if (f === "folded") return { page: page("Only what runs and what is planned; the finished queues stay folded at the page's end.", true) };
   return {};
 })();

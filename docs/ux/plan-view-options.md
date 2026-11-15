@@ -60,11 +60,11 @@ Each has a mockup (key in brackets) and was measured at 0 faults.
   per queue with its expected start and end from the statistics. A queue starts when the last of its predecessors
   ends, and NB starts at 22:00. CH waits for approval, so it and what follows it are hatched ("if approved now").
   This view has no lines: the starts show the order.
-- **Finished queues folded** (`plan-finished-folded@1440`): one line below the plan, "Finished · 3" with their ids
-  (the title on hover) and "show". The user decided in PL2's review that the finished queues stay at the bottom:
-  unfolded, they show there too, under the plan, not as a column at its left.
-- **On the phone** (`plan-features@390`): the same tools as chips that wrap. The critical path is marked on the list,
-  and the finished line comes at the list's end. Tapping an "after" chip opens the line's details under the card. Dragging stays
+- **Finished queues folded** (`plan-finished-folded@1440`, the page scrolled to its end): the finished queues stay
+  where they are today, folded into "Finished (3)" at the bottom of the page, under what is in progress. The plan
+  shows only what runs and what is planned; a finished predecessor is still named on its follower's chip ("after PW
+  · done"). The user decided this in PL2's review (rounds 2 and 3): nothing about the finished queues moves.
+- **On the phone** (`plan-features@390`): the same tools as chips that wrap. The critical path is marked on the list. Tapping an "after" chip opens the line's details under the card. Dragging stays
   on the desktop (the phone has "After…").
 
 ## Recommendation
@@ -79,7 +79,7 @@ Order for the build queue (IO):
 1. The routing and the full titles: this ends the faults the user saw.
 2. A line's details, "also after" by dragging, Undo.
 3. The critical path and "what blocks".
-4. The finished queues folded.
+4. (The finished queues: nothing to build; they stay folded at the page's end, as today.)
 5. Lanes by area.
 6. The time axis, once the estimates have enough samples (queue ST3).
 
