@@ -19,7 +19,7 @@ export const DEFAULT_MAX_RUNNING = 2;
 
 export interface Limits { max_running: number }
 
-export const limitsFile = () => join(nexusHome(), "limits.json");
+const limitsFile = () => join(nexusHome(), "limits.json");
 
 /** The server-wide limits; the default for what the file does not say (or when it is missing or unreadable). */
 export function readLimits(): Limits {
@@ -70,7 +70,7 @@ export const refusalText = (queue: string, verb: string, b: Block): string =>
   b.kind === "checkout" ? `queue ${queue} cannot ${verb}: its checkout is in use, ${b.detail}` : `queue ${queue} cannot ${verb}: ${b.detail}`;
 
 /** The queues of a project whose runs hold their checkouts. */
-export function holdersOf(state: ProjectState): Holder[] {
+function holdersOf(state: ProjectState): Holder[] {
   return state.queues.filter((q) => q.run && CHECKOUT_RUN_STATES.includes(q.run.state)).map((q) => ({
     project: state.project.id, name: state.project.name, queue: q.id, state: q.run!.state, checkout: checkoutPath(state, q),
     // A queue waiting for a review or an answer does not count, nor one waiting for the usage window, a retry or an

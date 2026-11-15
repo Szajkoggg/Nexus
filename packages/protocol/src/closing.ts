@@ -7,7 +7,7 @@
 import type { QueueFile, ReviewLevel, StepDef } from "./schemas.ts";
 
 /** The closing step's review level: its criteria can be checked (tests, the diff), so the orchestrator reviews it. */
-export const CLOSING_LEVEL: ReviewLevel = 2;
+const CLOSING_LEVEL: ReviewLevel = 2;
 
 /** The closing step's reserved id in queue `queue`: no step of the queue's own may have it. */
 export function closingStepId(queue: string): string {
@@ -27,7 +27,7 @@ export const CLOSING_ACCEPTANCE: readonly string[] = [
 ];
 
 /** The closing step of a queue that contains coding; undefined for one that does not. */
-export function closingStep(q: Pick<QueueFile, "id" | "coding">): StepDef | undefined {
+function closingStep(q: Pick<QueueFile, "id" | "coding">): StepDef | undefined {
   if (!q.coding) return undefined;
   return {
     id: closingStepId(q.id), title: CLOSING_TITLE, goal: CLOSING_GOAL, acceptance: [...CLOSING_ACCEPTANCE],
@@ -43,7 +43,7 @@ export function closingStep(q: Pick<QueueFile, "id" | "coding">): StepDef | unde
 // later only moves forward to that result. Kept like the closing step: outside the list, a reserved id, Nexus's text.
 
 /** The integration step's review level: the merge and the checks can be judged, so the orchestrator reviews it. */
-export const INTEGRATION_LEVEL: ReviewLevel = 2;
+const INTEGRATION_LEVEL: ReviewLevel = 2;
 
 /** The integration step's reserved id in queue `queue`. */
 export function integrationStepId(queue: string): string {
@@ -69,12 +69,12 @@ export const INTEGRATION_CONDITION = "The integration found a conflict that it d
  * The queue has a worktree of its own: `worktree: auto` (made when it starts), or the server marked it when it began
  * to work in one (`integration`). A queue that worked in a worktree before the integration step existed has neither.
  */
-export function hasOwnWorktree(q: Pick<QueueFile, "worktree" | "integration">): boolean {
+function hasOwnWorktree(q: Pick<QueueFile, "worktree" | "integration">): boolean {
   return q.integration === true || q.worktree === "auto";
 }
 
 /** The integration step of a queue with a worktree of its own; undefined for one without. */
-export function integrationStep(q: Pick<QueueFile, "id" | "worktree" | "integration">): StepDef | undefined {
+function integrationStep(q: Pick<QueueFile, "id" | "worktree" | "integration">): StepDef | undefined {
   if (!hasOwnWorktree(q)) return undefined;
   return {
     id: integrationStepId(q.id), title: INTEGRATION_TITLE, goal: INTEGRATION_GOAL, acceptance: [...INTEGRATION_ACCEPTANCE],
@@ -85,11 +85,6 @@ export function integrationStep(q: Pick<QueueFile, "id" | "worktree" | "integrat
 /** Every step the queue runs, in order: its own, then the closing step, then the integration step, each when it has one. */
 export function stepDefs(q: Pick<QueueFile, "id" | "coding" | "steps"> & Partial<Pick<QueueFile, "worktree" | "integration">>): StepDef[] {
   return [...q.steps, ...[closingStep(q), integrationStep(q)].filter((s): s is StepDef => !!s)];
-}
-
-/** The step is a queue's closing step. */
-export function isClosingStep(queue: string, step: string): boolean {
-  return step === closingStepId(queue);
 }
 
 /** The step is one Nexus keeps after the queue's own (the closing or the integration step), so its id is reserved. */

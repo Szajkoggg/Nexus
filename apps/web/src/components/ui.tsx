@@ -70,7 +70,7 @@ export function Markdown({ children, className = "" }: { children: string; class
  * A window wide enough for the right rail beside a desktop's chat (UX proposals, 11A: from 1280 px; between 1024 and
  * 1280 px the rail folds into a button). The breakpoint is N2B.3's, where two readable panels still fit beside a column.
  */
-export const WIDE = "(min-width: 1280px)";
+const WIDE = "(min-width: 1280px)";
 export function useWide(): boolean {
   const [wide, setWide] = useState(() => typeof matchMedia !== "undefined" && matchMedia(WIDE).matches);
   useEffect(() => {
@@ -83,7 +83,7 @@ export function useWide(): boolean {
 }
 
 
-export function useNow(intervalMs = 30_000): number {
+function useNow(intervalMs = 30_000): number {
   const [now, setNow] = useState(Date.now());
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), intervalMs); return () => clearInterval(t); }, [intervalMs]);
   return now;

@@ -4,7 +4,7 @@
 // drafts under .nexus/drafts/: permission mode dontAsk with a read-only allow list plus the drafts rules.
 import { randomUUID } from "node:crypto";
 import {
-  ActionError, ClaudeEffort, HOLDING_RUN_STATES, ProjectStore, applyDraft, inPlan, loadProjectState, openPlan, proposePlan, readAway, orchestratorStatusChange, newId, now, sendBack, type ChatEntry, type Event, type ProjectState, type SessionFile,
+  ActionError, ClaudeEffort, HOLDING_RUN_STATES, ProjectStore, applyDraft, inPlan, loadProjectState, openPlan, proposePlan, readAway, orchestratorStatusChange, newId, now, sendBack, type Event, type ProjectState, type SessionFile,
 } from "@nexus/protocol";
 import type { AgentProcess } from "./agent.ts";
 import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Launch } from "./agent-host.ts";
@@ -467,4 +467,3 @@ ${n.text}` });
   }
 }
 
-export type { ChatEntry };

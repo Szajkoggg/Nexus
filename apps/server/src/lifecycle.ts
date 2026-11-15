@@ -98,7 +98,7 @@ const hashOf = (file: string) => (existsSync(file) ? createHash("sha256").update
 const firstLine = (e: unknown) => (e as Error).message.split("\n")[0]!;
 
 /** Ends a process and everything it started (on Windows its tree; elsewhere its process group: it was detached). */
-export async function stopTree(pid: number): Promise<void> {
+async function stopTree(pid: number): Promise<void> {
   if (!isAlive(pid)) return;
   if (process.platform === "win32") await run("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true }).catch(() => {});
   else { try { process.kill(-pid, "SIGKILL"); } catch { try { process.kill(pid, "SIGKILL"); } catch { /* gone */ } } }

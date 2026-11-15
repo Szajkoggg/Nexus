@@ -22,9 +22,9 @@ export const MAX_TEXT = 1024 * 1024;
  * the same policy without `sandbox`: default-src 'none' still lets nothing in the file run or load.
  */
 export const FILE_CSP = "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox";
-export const PDF_CSP = "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'";
+const PDF_CSP = "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'";
 
-export const PICTURES: Record<string, string> = {
+const PICTURES: Record<string, string> = {
   ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp",
   ".svg": "image/svg+xml",
 };
@@ -120,7 +120,7 @@ export function fileResponse(real: string): Response {
 /** A commit hash as the dashboard may ask for it: 7 to 40 lowercase hex digits, nothing else reaches git. */
 export const COMMIT_HASH = /^[0-9a-f]{7,40}$/;
 
-export interface CommitFile { path: string; insertions: number | null; deletions: number | null }
+interface CommitFile { path: string; insertions: number | null; deletions: number | null }
 export interface CommitDetail {
   sha: string; subject: string; author: string; at: string;
   files: CommitFile[]; insertions: number; deletions: number;

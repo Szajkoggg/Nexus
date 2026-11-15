@@ -73,7 +73,7 @@ export function recordBase(store: ProjectStore, q: Pick<QueueView, "id" | "base"
 
 // ---------------------------------------------------------------- a step's commits
 
-export interface CommitView {
+interface CommitView {
   sha: string; subject: string; author: string; at: string;
   files: number; insertions: number; deletions: number;
   /** Not made in a turn of the worker's session on this step (the main checkout only). */

@@ -7,7 +7,7 @@ import { ActionError, ProjectStore, searchChat, setPin, type NumberedEntry, type
 export const STOPPED = "Stopped.";
 
 /** Every entry of a session's chat, with its line. */
-export function numberedChat(store: ProjectStore, sessionId: string): NumberedEntry[] {
+function numberedChat(store: ProjectStore, sessionId: string): NumberedEntry[] {
   const r = store.readChat(sessionId);
   return r.entries.map((e, i) => ({ ...e, line: r.lines[i]! }));
 }
@@ -24,7 +24,7 @@ export function chatView(store: ProjectStore, sessionId: string, last: number): 
 }
 
 /** A session whose chat the dashboard shows: the project's orchestrator or one of its conversations. */
-export function chatSession(store: ProjectStore, sessionId: string): SessionFile {
+function chatSession(store: ProjectStore, sessionId: string): SessionFile {
   let s: SessionFile | undefined;
   try { s = store.readSession(sessionId); } catch { s = undefined; }
   if (!s || (s.role !== "orchestrator" && s.role !== "conversation")) throw new ActionError("no such chat", 404);

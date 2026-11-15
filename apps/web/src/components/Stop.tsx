@@ -16,7 +16,7 @@ import { rich, t } from "../i18n.ts";
  * changes, which are not necessarily the step's and are never cleaned. `pushAccepted` unknown (a waiting card of
  * another project): Keep says only that the commits stay.
  */
-export function StoppedWork({ left, work, setWork, needsChoice, pushAccepted, branch }: {
+function StoppedWork({ left, work, setWork, needsChoice, pushAccepted, branch }: {
   left: LeftView; work?: WorkChoice; setWork: (w: WorkChoice) => void; needsChoice: boolean; pushAccepted?: boolean; branch?: string;
 }) {
   const name = useId();

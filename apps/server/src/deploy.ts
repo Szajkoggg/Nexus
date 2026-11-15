@@ -20,7 +20,7 @@ export const PUSH_ENV = { GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never" } a
 export interface DeploySettings { push_on_deploy: boolean }
 const DEFAULTS: DeploySettings = { push_on_deploy: true };
 
-export const deploySettingsFile = () => join(nexusHome(), "deploy.json");
+const deploySettingsFile = () => join(nexusHome(), "deploy.json");
 
 export function readDeploySettings(): DeploySettings {
   const f = deploySettingsFile();

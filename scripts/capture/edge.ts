@@ -17,7 +17,7 @@ const NARROWEST = 492;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** The browser to drive: NEXUS_CAPTURE_BROWSER, else Edge or Chrome where they are usually installed. */
-export function browserPath(): string | undefined {
+function browserPath(): string | undefined {
   const own = process.env.NEXUS_CAPTURE_BROWSER;
   if (own) return existsSync(own) ? own : undefined;
   return CANDIDATES.find((p) => existsSync(p));

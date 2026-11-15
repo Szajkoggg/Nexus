@@ -23,13 +23,13 @@ import { guardSettings, webFetchDenyRules } from "./web-guard.ts";
 
 const READ = ["Read", "Grep", "Glob", "Bash(nexus status:*)", "Bash(git log:*)", "Bash(git status:*)", "Bash(git diff:*)", "Bash(git show:*)"];
 /** What a hand-over covers (decided 2026-11-14): this conversation's topics, and the dates of the decisions it passes on. */
-export const HANDOFF_SCOPE = "Summarize only the topics discussed in this conversation, unless the user asked you to include others. From a notes file, pass on what this conversation decided or recorded; another topic in the notes folder, even a related one, is not part of this hand-over: name its file at most, as 'see also', without its content. In every notes file only the Decided section holds decisions. Name the dates of the Decided entries you cover.";
+const HANDOFF_SCOPE = "Summarize only the topics discussed in this conversation, unless the user asked you to include others. From a notes file, pass on what this conversation decided or recorded; another topic in the notes folder, even a related one, is not part of this hand-over: name its file at most, as 'see also', without its content. In every notes file only the Decided section holds decisions. Name the dates of the Decided entries you cover.";
 /**
  * What a Claude partner may do on the web, by the `conversations.web` level: its allow and deny rules, and for `fetch`
  * the guard hook that refuses any host resolving to a local or internal address (web-guard.ts). WebSearch runs at
  * Anthropic and reaches no local address; WebFetch runs on this machine.
  */
-export function claudeWeb(web: ConversationWeb): { allowed: string[]; denied: string[]; settings?: string } {
+function claudeWeb(web: ConversationWeb): { allowed: string[]; denied: string[]; settings?: string } {
   if (web === "off") return { allowed: [], denied: ["WebSearch", "WebFetch"] };
   if (web === "search") return { allowed: ["WebSearch"], denied: ["WebFetch"] };
   return { allowed: ["WebSearch", "WebFetch"], denied: webFetchDenyRules(), settings: guardSettings() };

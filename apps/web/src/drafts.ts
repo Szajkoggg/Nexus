@@ -5,7 +5,7 @@
 // below it is a thin wrapper.
 
 /** One stored draft: the text and when it was last touched (ms since the epoch). */
-export interface Draft { text: string; at: number }
+interface Draft { text: string; at: number }
 export type Drafts = Record<string, Draft>;
 
 /** Drafts untouched for this long are dropped when the page loads. */
@@ -60,7 +60,6 @@ function save(drafts: Drafts): void {
 
 export const readDraft = (key: string): string => load()[key]?.text ?? "";
 export const writeDraft = (key: string, text: string): void => save(withDraft(load(), key, text, Date.now()));
-export const clearDraft = (key: string): void => writeDraft(key, "");
 /** Told when a draft is put from elsewhere (putDraft), so that an open box with that draft shows it. */
 export const DRAFT_EVENT = "nexus:draft";
 /** Writes a draft from outside its box ("Ask the orchestrator…" puts a reference in the composer); an open box follows. */

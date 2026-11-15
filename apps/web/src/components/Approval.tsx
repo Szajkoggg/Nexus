@@ -93,7 +93,7 @@ export function useCtrlEnter(enabled: boolean, go: () => void) {
 }
 
 /** "Ask the orchestrator…": the orchestrator's chat, with the queue referenced at the start of its composer. */
-export function askOrchestrator(project: string, queue: QueueView) {
+function askOrchestrator(project: string, queue: QueueView) {
   const key = draftKey(project, "orchestrator");
   putDraft(key, withReference(readDraft(key), queueReference(queue.id, queue.revision)));
   nav.open("chat");

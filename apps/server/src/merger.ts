@@ -37,7 +37,7 @@ export interface MergerOptions {
 }
 
 /** How often a merge back that waits is looked at again. */
-export const POLL_MS = 30_000;
+const POLL_MS = 30_000;
 
 export class Merger {
   /** Checkouts (normalised, lower case) a fast-forward waits on, with the queue it is for. */

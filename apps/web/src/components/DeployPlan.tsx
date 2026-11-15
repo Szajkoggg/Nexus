@@ -26,7 +26,7 @@ export interface PlannedDeploy {
   started?: { at: string; update: string };
 }
 
-export async function cancelPlan(): Promise<void> {
+async function cancelPlan(): Promise<void> {
   const r = await fetch("/api/server/cancel-plan", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
   if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? r.statusText);
 }

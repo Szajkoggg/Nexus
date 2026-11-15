@@ -24,7 +24,7 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
 const dist = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y);
 
 /** How a one-finger drag at no zoom ends: a swipe to the next (-1 means previous) image, or nothing. */
-export function swipeOf(dx: number, dy: number, width: number): -1 | 0 | 1 {
+function swipeOf(dx: number, dy: number, width: number): -1 | 0 | 1 {
   if (Math.abs(dx) < Math.max(50, width * 0.12) || Math.abs(dx) < Math.abs(dy) * 1.5) return 0;
   return dx < 0 ? 1 : -1;
 }

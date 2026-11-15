@@ -2,7 +2,7 @@
 // what each compact line says, as a pure helper (unit tested); the dashboard draws the group.
 
 /** "Finished" is the queue status done or cancelled. */
-export const FINISHED_STATUSES: readonly string[] = ["done", "cancelled"];
+const FINISHED_STATUSES: readonly string[] = ["done", "cancelled"];
 
 /** What the helper reads of a queue (a QueueView has all of it). */
 export interface QueueLike {
@@ -17,7 +17,7 @@ export interface QueueLike {
 export interface FinishedRow<Q> { queue: Q; finished_at?: string; ran_ms?: number }
 
 /** Something in the queue still waits for the user: a step in review, an open or escalated question. */
-export function waitsForUser(q: QueueLike): boolean {
+function waitsForUser(q: QueueLike): boolean {
   return q.steps.some((s) => s.status === "review") || (q.questions ?? []).some((x) => x.state === "open" || x.state === "escalated");
 }
 

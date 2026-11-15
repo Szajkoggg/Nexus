@@ -8,10 +8,10 @@ import { en } from "./messages/en.ts";
 export type Key = keyof typeof en;
 
 /** A text that depends on a number (the `count` parameter): one form per plural category of the language. */
-export interface Plural { zero?: string; one?: string; two?: string; few?: string; many?: string; other: string }
-export type Message = string | Plural;
+interface Plural { zero?: string; one?: string; two?: string; few?: string; many?: string; other: string }
+type Message = string | Plural;
 /** A translation: any subset of the English keys; what it lacks shows in English. */
-export type Catalogue = Partial<Record<Key, Message>>;
+type Catalogue = Partial<Record<Key, Message>>;
 export type Params = Record<string, string | number>;
 
 export interface Language {

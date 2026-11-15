@@ -4,7 +4,7 @@
 import type { Activity, Event, Refusal, TurnRecord } from "./schemas.ts";
 import type { ProjectState, QueueView } from "./state.ts";
 
-export type DigestKind = "done" | "failed" | "stopped" | "queue_done" | "queue_cancelled" | "refused" | "retried";
+type DigestKind = "done" | "failed" | "stopped" | "queue_done" | "queue_cancelled" | "refused" | "retried";
 
 export interface DigestEvent {
   at: string;

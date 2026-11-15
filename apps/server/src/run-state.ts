@@ -96,7 +96,7 @@ export function toRetryWait(run: RunFile, o: { tries: number; failure: string; r
 // ---------------------------------------------------------------- guards
 
 /** Why a queue with a rejected step does not go on, and what lets it. */
-export function rejectedMessage(q: QueueView): string {
+function rejectedMessage(q: QueueView): string {
   return `step ${q.rejection!.step} of queue ${q.id} was rejected: the run goes on once you approve a new revision of the queue that deals with it (the orchestrator proposes one)`;
 }
 

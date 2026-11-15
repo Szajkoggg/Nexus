@@ -493,7 +493,7 @@ export function UpdatePill({ info }: { info: ServerInfo | undefined }) {
   );
 }
 
-export function ServerSection({ info, onChanged }: { info: ServerInfo | undefined; onChanged: () => void }) {
+function ServerSection({ info, onChanged }: { info: ServerInfo | undefined; onChanged: () => void }) {
   const [msg, setMsg] = useState<string>();
   if (!info) return null;
   const u = info.update;

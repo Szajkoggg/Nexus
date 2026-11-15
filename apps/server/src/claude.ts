@@ -2,9 +2,9 @@
 // alive across turns. Signed in with the user's own subscription (no API key, no Agent SDK).
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { EDGE_BLOCK, agentEnv, edgeBlock, shortInput, type ActivityItem, type AgentEvents, type AgentProcess, type Priority, type StreamFacts, type TurnFailure, type TurnTokens } from "./agent.ts";
+import { EDGE_BLOCK, agentEnv, edgeBlock, shortInput, type AgentEvents, type AgentProcess, type Priority, type StreamFacts, type TurnFailure, type TurnTokens } from "./agent.ts";
 
-export type { ActivityItem, Priority, StreamFacts };
+export type { Priority };
 
 /** What a turn showed about an error before its result: read when the result says the turn failed. */
 export interface ClaudeTurnSigns {
@@ -42,7 +42,7 @@ export function classifyClaudeResult(m: Record<string, any>, signs: ClaudeTurnSi
 }
 
 /** A result's usage (one turn's, the main agent loop's) as the four figures, or undefined without one. */
-export function claudeTurnTokens(u: Record<string, any> | undefined): TurnTokens | undefined {
+function claudeTurnTokens(u: Record<string, any> | undefined): TurnTokens | undefined {
   if (!u || typeof u !== "object") return undefined;
   const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
   return { input: n(u.input_tokens), output: n(u.output_tokens), cacheRead: n(u.cache_read_input_tokens), cacheCreation: n(u.cache_creation_input_tokens) };
@@ -329,7 +329,7 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
  * Windows the drive letter as the first segment (`C:\\x\\y` is `//c/x/y`), as Claude Code normalizes Windows paths
  * to that form before matching.
  */
-export function claudeAbsolutePath(path: string): string {
+function claudeAbsolutePath(path: string): string {
   const p = path.replaceAll("\\", "/").replace(/\/+$/, "");
   const drive = /^([A-Za-z]):(\/.*)?$/.exec(p);
   return drive ? `//${drive[1]!.toLowerCase()}${drive[2] ?? ""}` : `/${p.startsWith("/") ? p : `/${p}`}`;

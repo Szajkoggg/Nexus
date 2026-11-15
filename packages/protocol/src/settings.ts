@@ -71,11 +71,6 @@ export function changedGlobal(global: GlobalSettings, patch: unknown): GlobalSet
   return GlobalSettings.parse(out);
 }
 
-/** Whether the project has its own value of a setting (else it follows the global one). */
-export function hasOwn(stored: StoredProject, path: readonly string[]): boolean {
-  return get(stored, path) !== undefined;
-}
-
 /** A project's effective settings: its own value of each setting where it has one, else the global value. */
 export function effectiveProject(stored: StoredProject, global: GlobalSettings): ProjectFile {
   const out = structuredClone(stored) as Tree;

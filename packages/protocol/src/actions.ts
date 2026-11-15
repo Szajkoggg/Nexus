@@ -690,7 +690,7 @@ export function addAllowRule(store: ProjectStore, rule: unknown): { added: boole
 }
 
 /** The notes folder, relative to the project's root, inside it, with forward slashes and no trailing slash. */
-export function notesDir(dir: string): string {
+function notesDir(dir: string): string {
   const d = dir.trim().replaceAll("\\", "/").replace(/^\.\//, "").replace(/\/+$/, "");
   if (!d || d.startsWith("/") || /^[A-Za-z]:/.test(d) || d.split("/").includes("..")) {
     throw new ActionError("the notes folder is a path inside the project, relative to its root (for example Dev/Concepts/Gameplay)");

@@ -28,7 +28,7 @@ export interface PlanQueue extends Omit<QueueLike, "plan" | "start"> {
 export interface Why { key: Key; params?: Params; tone: "approval" | "blocked" | "time" | "usage" | "checkout" | "limit" | "failed" | "ready" }
 
 /** A queue it waits for, as the card names it: who set it ("set by you"), done or not. */
-export interface Before { queue: string; by: "user" | "orchestrator"; done: boolean }
+interface Before { queue: string; by: "user" | "orchestrator"; done: boolean }
 
 export interface PlanNode {
   id: string;

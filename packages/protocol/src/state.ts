@@ -9,7 +9,7 @@ import { closingStepId, integrationStepId, stepDefs } from "./closing.ts";
 import { openPlan, planView, proposalText, type PlanView } from "./plan.ts";
 
 import type { CheckView } from "./steps.ts";
-export interface AnswerView { id: string; text: string; at: string; escalate?: boolean; continue?: boolean; session: string; by: "orchestrator" | "user" }
+interface AnswerView { id: string; text: string; at: string; escalate?: boolean; continue?: boolean; session: string; by: "orchestrator" | "user" }
 export interface QuestionView {
   qid: string; session: string; queue?: string; step?: string; text: string; options?: string[];
   /**
@@ -478,12 +478,12 @@ function legacyPolicy(q: Pick<QueueFile, "legacy_policies">, st: Pick<StepView, 
   return q.legacy_policies?.[st.id] ?? (st.level === 1 ? "wait" : "continue");
 }
 
-export type LevelSource = "user" | "step" | "queue" | "project";
+type LevelSource = "user" | "step" | "queue" | "project";
 /**
  * The review level that applies to a step, and what set it: the level the user set on it, else the one it was drafted
  * with, else its queue's, else the project's (its own value, else the global one: the project's effective settings).
  */
-export function reviewLevelOf(st: Pick<StepDef, "id" | "review">, q: Pick<QueueFile, "review_level" | "user_levels">, project: Pick<ProjectFile, "defaults">): { level: ReviewLevel; from: LevelSource } {
+function reviewLevelOf(st: Pick<StepDef, "id" | "review">, q: Pick<QueueFile, "review_level" | "user_levels">, project: Pick<ProjectFile, "defaults">): { level: ReviewLevel; from: LevelSource } {
   const user = q.user_levels?.[st.id];
   if (user !== undefined) return { level: user, from: "user" };
   if (st.review?.level !== undefined) return { level: st.review.level, from: "step" };

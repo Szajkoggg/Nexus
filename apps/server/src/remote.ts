@@ -50,7 +50,7 @@ export function isLocal(req: IncomingMessage): boolean {
   return loopback && !proxied;
 }
 
-export function cookieOf(req: IncomingMessage): string | undefined {
+function cookieOf(req: IncomingMessage): string | undefined {
   const raw = req.headers.cookie ?? "";
   for (const part of raw.split(";")) {
     const [k, ...v] = part.trim().split("=");

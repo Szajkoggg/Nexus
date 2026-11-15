@@ -1004,7 +1004,7 @@ function describe(e: Event): string {
 }
 
 /** A question and its answers; open, with its answer box, unless the panel's action bar answers it (`inBar`). */
-export function Question({ q, project, onChanged, inBar }: { q: QuestionView; project: string; onChanged: () => void; inBar?: boolean }) {
+function Question({ q, project, onChanged, inBar }: { q: QuestionView; project: string; onChanged: () => void; inBar?: boolean }) {
   const open = q.state === "open" || q.state === "escalated";
   const tone = q.state === "escalated" ? "border-review/40 bg-review/5" : open ? "border-warn/30 bg-warn/5" : "border-line";
   return (

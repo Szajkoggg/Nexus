@@ -38,7 +38,7 @@ export interface PlanOptions extends Omit<StartOptions, "after"> { after: string
  * its windows not yet reset, the last to reset among those at or above the pause threshold (the run waits for all of
  * them), else the first to reset. Undefined while nothing is known.
  */
-export function usageReset(runtime: "claude" | "codex", threshold: number, nowMs: number): number | undefined {
+function usageReset(runtime: "claude" | "codex", threshold: number, nowMs: number): number | undefined {
   const windows = Object.entries(readUsage()?.windows ?? {})
     .filter(([k, w]) => (runtime === "codex" ? k.startsWith("codex_") : k === "five_hour") && w.resets_at && Date.parse(w.resets_at) > nowMs);
   if (!windows.length) return undefined;

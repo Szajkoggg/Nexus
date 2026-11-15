@@ -14,7 +14,7 @@ export interface PinView { line: number; at: string; entry: NumberedEntry }
 
 const ICON_BUTTON = "grid h-7 w-7 shrink-0 place-items-center rounded-md text-fg-2 hover:bg-surface-3 hover:text-fg disabled:opacity-35 max-lg:h-10 max-lg:w-10";
 
-export const SearchIcon = () => (
+const SearchIcon = () => (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
 );
 
@@ -69,7 +69,7 @@ export function SearchBar({ s }: { s: SearchState }) {
   );
 }
 
-export const PinIcon = ({ filled }: { filled?: boolean }) => (
+const PinIcon = ({ filled }: { filled?: boolean }) => (
   <svg width="13" height="13" viewBox="0 0 24 24" fill={filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <path d="M9 4h6l-1 6 4 4H6l4-4z" /><path d="M12 14v7" />
   </svg>

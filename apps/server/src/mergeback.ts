@@ -27,7 +27,7 @@ import { samePath } from "./worktree.ts";
 const ENV = { ...process.env, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never", GIT_EDITOR: "true", GIT_MERGE_AUTOEDIT: "no" };
 
 /** How many times Nexus runs the integration step again by itself when the base moved on, before it waits for the user. */
-export const REINTEGRATION_LIMIT = 2;
+const REINTEGRATION_LIMIT = 2;
 
 /** Runs git, returning its output or throwing with what git said. */
 function run(cwd: string, args: string[]): string {
@@ -65,7 +65,7 @@ export function withMergeLock<T>(store: ProjectStore, queueId: string, f: () => 
 // ---------------------------------------------------------------- the base's checkout
 
 /** Where the base branch is checked out, or what keeps it from being moved there now. */
-export function baseCheckout(root: string, base: string, serverRoot = ROOT): { path: string } | { blocked: string } {
+function baseCheckout(root: string, base: string, serverRoot = ROOT): { path: string } | { blocked: string } {
   const target = worktrees(root).find((w) => w.branch === base);
   if (!target) return { blocked: `branch ${base} is not checked out in any worktree (or only detached): check it out, then merge` };
   // This server's own checkout when it runs as the live instance: never touched by a merge.
@@ -88,7 +88,7 @@ function runningIn(store: ProjectStore, state: ProjectState, path: string): Queu
  * Queues with a step at work in checkout `path`: its step running or waiting for an answer, or a pause asked for that
  * waits for the step's end. A run between steps, held, paused, or with its step in review is not at work there.
  */
-export function atWorkIn(store: ProjectStore, state: ProjectState, path: string): QueueView[] {
+function atWorkIn(store: ProjectStore, state: ProjectState, path: string): QueueView[] {
   return runningIn(store, state, path).filter((x) => {
     if (x.run!.state === "pausing") return true;
     const st = x.run!.step ? x.steps.find((s) => s.id === x.run!.step) : undefined;

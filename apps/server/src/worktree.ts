@@ -81,7 +81,7 @@ export function recordSetup(store: ProjectStore, queueId: string, command: strin
 }
 
 /** How long the setup command may run before it counts as failed. */
-export const SETUP_LIMIT_MS = 30 * 60_000;
+const SETUP_LIMIT_MS = 30 * 60_000;
 const OUTPUT_TAIL = 1500;
 
 /**

@@ -11,7 +11,7 @@ export interface RefTarget { queue: string; step?: string }
 /** A file at a line (a column, when written, is dropped: the viewer shows lines). */
 export interface FileRef { kind: "file"; path: string; line: number }
 export interface CommitRef { kind: "commit"; hash: string }
-export type Ref = (RefTarget & { kind?: undefined }) | FileRef | CommitRef;
+type Ref = (RefTarget & { kind?: undefined }) | FileRef | CommitRef;
 /** A piece of text: plain, or a ref with the words it was written as. */
 export type Segment = string | (Ref & { text: string });
 

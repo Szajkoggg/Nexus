@@ -3,7 +3,6 @@ import { z } from "zod";
 import { PICTURE_ROLES, VIEW_KEY } from "./pictures.ts";
 import { DEFAULT_WORKING_LANGUAGE, LANGUAGE_CODES } from "./languages.ts";
 
-export const PROTOCOL_VERSION = 1;
 
 const Id = z.string().min(1);
 const Time = z.string().min(1); // ISO 8601 UTC
@@ -18,7 +17,7 @@ const Time = z.string().min(1); // ISO 8601 UTC
 export const ReviewLevel = z.union([z.literal(1), z.literal(2), z.literal(3)]);
 export type ReviewLevel = z.infer<typeof ReviewLevel>;
 /** The level when nothing sets one. */
-export const DEFAULT_REVIEW_LEVEL: ReviewLevel = 2;
+const DEFAULT_REVIEW_LEVEL: ReviewLevel = 2;
 
 /**
  * The review modes before review levels, still read from older files and drafts: `continue` (no review) and
@@ -37,7 +36,7 @@ const isObject = (x: unknown): x is Loose => !!x && typeof x === "object" && !Ar
  * wins); the old key is dropped. A value that is no old policy goes under `to` as it is, for the level's check to
  * refuse. Anything but an object is left as it is.
  */
-export function withLevel(x: unknown, from: string, to: string): unknown {
+function withLevel(x: unknown, from: string, to: string): unknown {
   if (!isObject(x) || !(from in x)) return x;
   const { [from]: policy, ...rest } = x;
   if (to in rest && rest[to] !== undefined) return rest;
@@ -72,7 +71,7 @@ export const Runtime = z.enum(["claude", "codex", "external"]);
  */
 export const Effort = z.enum(["low", "medium", "high", "xhigh", "max", "ultra"]);
 export type Effort = z.infer<typeof Effort>;
-export const CLAUDE_EFFORTS: readonly Effort[] = ["low", "medium", "high", "xhigh", "max"];
+const CLAUDE_EFFORTS: readonly Effort[] = ["low", "medium", "high", "xhigh", "max"];
 export const ClaudeEffort = Effort.exclude(["ultra"]);
 export type Runtime = z.infer<typeof Runtime>;
 
@@ -99,7 +98,7 @@ const ApprovalsReviewer = z.enum(["user", "auto_review", "guardian_subagent"]);
 const WorkerRuntime = z.enum(["claude", "codex"]);
 const Fraction = z.number().min(0).max(1);
 /** One of the offered languages, by its code (languages.ts). */
-export const Language = z.enum(LANGUAGE_CODES);
+const Language = z.enum(LANGUAGE_CODES);
 
 const DefaultsShape = z.object({
   stop_conditions: z.array(z.string()).default([]),
@@ -355,25 +354,23 @@ export const StepDef = z.object({
 });
 export type StepDef = z.infer<typeof StepDef>;
 
-export const Approval = z.object({
+const Approval = z.object({
   revision: z.number().int().positive(),
   at: Time,
   words: z.string().optional(),
   hash: z.string(),
 });
-export type Approval = z.infer<typeof Approval>;
 
 /**
  * The user took an approval back before the queue ever ran. `approvals` is how many approval records there were
  * then: the queue is approved again only by a later one. The approvals themselves stay as they were.
  */
-export const Withdrawal = z.object({
+const Withdrawal = z.object({
   revision: z.number().int().positive(),
   at: Time,
   reason: z.string().optional(),
   approvals: z.number().int().nonnegative(),
 });
-export type Withdrawal = z.infer<typeof Withdrawal>;
 
 /**
  * One change of a status made through Nexus, in queue.yaml's `changes` (written only by the server). Derivation applies
@@ -630,7 +627,6 @@ export const Event = z.discriminatedUnion("type", [
 ]);
 export type Event = z.infer<typeof Event>;
 export type EventType = Event["type"];
-export type EventOf<T extends EventType> = Extract<Event, { type: T }>;
 
 /** Event types a worker session may not write (orchestrators and the user may). */
 export const ORCHESTRATOR_ONLY: ReadonlySet<EventType> = new Set([

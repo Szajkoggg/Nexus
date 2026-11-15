@@ -48,15 +48,15 @@ export { MAX_TIMER_MS, type Clock } from "./scheduler.ts";
 
 /** A turn that failed for a passing reason is tried again RETRY_LIMIT times (5), after 1, 2, 4, 8 and 16 minutes. */
 export { RETRY_LIMIT };
-export const RETRY_BASE_MS = 60_000;
+const RETRY_BASE_MS = 60_000;
 /** A run waiting for the usage window goes on this long after the window's reset. */
-export const USAGE_MARGIN_MS = 60_000;
+const USAGE_MARGIN_MS = 60_000;
 
 /**
  * How long a turn's end without the step's outcome waits for the work the agent left running in the background (a
  * command, a sub-agent) before the usual rule (one nudge, then a halt) applies. DESIGN.md, "Background work".
  */
-export const BACKGROUND_LIMIT_MS = 30 * 60_000;
+const BACKGROUND_LIMIT_MS = 30 * 60_000;
 
 /** After background work ends with the session idle, Nexus looks again this much later: Claude Code starts a turn by itself first. */
 const BACKGROUND_SETTLE_MS = 2000;
@@ -93,7 +93,7 @@ export interface EngineOptions {
 }
 
 /** A process asked to end for a restart (another model or effort) is killed if it has not exited by then. */
-export const RESTART_KILL_MS = 10_000;
+const RESTART_KILL_MS = 10_000;
 
 /** The runtime, model and effort a step runs on. */
 export interface StepValues { runtime: "claude" | "codex"; model?: string; effort?: Effort }
@@ -102,7 +102,7 @@ export interface StepValues { runtime: "claude" | "codex"; model?: string; effor
  * What a step runs on: its own values, else the run's. A step on another runtime than the run's takes a value it does
  * not name from the project's defaults for that runtime (the run's model and effort belong to the run's runtime).
  */
-export function stepValues(run: StepValues, step: Pick<StepDef, "runtime" | "model" | "effort">, project: ProjectFile): StepValues {
+function stepValues(run: StepValues, step: Pick<StepDef, "runtime" | "model" | "effort">, project: ProjectFile): StepValues {
   const runtime = step.runtime ?? run.runtime;
   const same = runtime === run.runtime;
   const d = project.runtimes[runtime];

@@ -26,10 +26,10 @@ export interface UpdateAsker { project: string; session: string }
  * The update being handed over: its id (for telling its asker once), who asked, and the full commits it went from and
  * to (the successor tells the orchestrators the Agents: lines between them).
  */
-export interface UpdateInfo { id: string; by?: UpdateAsker; from?: string; to?: string }
+interface UpdateInfo { id: string; by?: UpdateAsker; from?: string; to?: string }
 export interface PredecessorFile extends Version { pid: number; at: string; update?: UpdateInfo }
-export interface ReadyFile extends Version { pid: number; at: string }
-export interface FailedFile { pid: number; at: string; reason: string }
+interface ReadyFile extends Version { pid: number; at: string }
+interface FailedFile { pid: number; at: string; reason: string }
 /** `ref`: what the update deployed (absent from older predecessors). */
 export interface ReleasedFile { at: string; log: string[]; ref?: string }
 

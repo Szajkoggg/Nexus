@@ -17,7 +17,7 @@ export const EDITOR_CHOICES: { value: Editor; label: Key }[] = [
   { value: "none", label: "settings.editor.none" },
 ];
 
-export const EDITOR_KEY = "nexus.editor";
+const EDITOR_KEY = "nexus.editor";
 export const DEFAULT_EDITOR: Editor = "vscode";
 
 /** The stored choice; anything missing or unknown is the default. */

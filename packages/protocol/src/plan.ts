@@ -16,7 +16,7 @@ import type { PlanBy, PlanEntry, PlanFile, ProjectFile } from "./schemas.ts";
  * user or the orchestrator can change. `cause`: the predecessor is stopped, cancelled or does not exist (the user and
  * the orchestrator are told).
  */
-export interface PlanEntryView extends PlanEntry { done: boolean; waiting: string; blocked: boolean; cause?: "stopped" | "cancelled" | "missing" }
+interface PlanEntryView extends PlanEntry { done: boolean; waiting: string; blocked: boolean; cause?: "stopped" | "cancelled" | "missing" }
 
 /**
  * A queue's place in the plan as the dashboard shows it. `used`: the queue started since it was planned (the plan stays,
@@ -39,7 +39,7 @@ export function doneForPlan(project: Pick<ProjectFile, "defaults">, a: Pick<Queu
 }
 
 /** Why a planned queue still waits for its predecessor `id` (`a`, undefined when it does not exist). */
-export function predecessorWait(project: Pick<ProjectFile, "defaults">, id: string, a: QueueView | undefined): Omit<PlanEntryView, keyof PlanEntry> {
+function predecessorWait(project: Pick<ProjectFile, "defaults">, id: string, a: QueueView | undefined): Omit<PlanEntryView, keyof PlanEntry> {
   if (!a) return { done: false, waiting: `queue ${id} does not exist`, blocked: true, cause: "missing" };
   if (doneForPlan(project, a)) return { done: true, waiting: `queue ${id} is done`, blocked: false };
   if (a.status === "done") {
@@ -84,7 +84,7 @@ export const openPlanFile = (p: PlanFile | undefined): PlanFile | undefined => (
 export const inPlan = (q: Pick<QueueView, "plan" | "start">): boolean => !!openPlan(q) || !!q.start;
 
 /** The unused plans' predecessors, by queue: what the loop check follows. */
-export function planEdges(state: Pick<ProjectState, "queues">): Map<string, string[]> {
+function planEdges(state: Pick<ProjectState, "queues">): Map<string, string[]> {
   return new Map(state.queues.flatMap((q) => {
     const plan = openPlan(q);
     return plan ? [[q.id, plan.after.map((e) => e.queue)] as const] : [];
@@ -136,7 +136,7 @@ export function checkPredecessors(state: Pick<ProjectState, "queues">, queue: st
 }
 
 /** The predecessors the user set that a new list `after` leaves out. */
-export function droppedUserEntries(plan: Pick<PlanFile, "after" | "started_at"> | undefined, after: readonly string[]): string[] {
+function droppedUserEntries(plan: Pick<PlanFile, "after" | "started_at"> | undefined, after: readonly string[]): string[] {
   if (!plan || plan.started_at) return [];
   return plan.after.filter((e) => e.by === "user" && !after.includes(e.queue)).map((e) => e.queue);
 }
@@ -147,7 +147,7 @@ export function droppedUserEntries(plan: Pick<PlanFile, "after" | "started_at"> 
  * `nexus plan propose`); entries it keeps stay as they were, new ones are its own. A used plan (the queue started since)
  * is history: a new plan starts afresh.
  */
-export function planEntries(old: PlanFile | undefined, queue: string, after: readonly string[], by: PlanBy, reason: string | undefined, at: string): PlanEntry[] {
+function planEntries(old: PlanFile | undefined, queue: string, after: readonly string[], by: PlanBy, reason: string | undefined, at: string): PlanEntry[] {
   const live = openPlanFile(old);
   if (by === "orchestrator") {
     const dropped = droppedUserEntries(live, after);

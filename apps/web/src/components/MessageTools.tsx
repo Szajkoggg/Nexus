@@ -10,7 +10,7 @@ import { t } from "../i18n.ts";
  * Puts text on the clipboard. The Clipboard API needs a secure page (localhost, https); over plain http (remote access
  * on the home network) a hidden text area and the older copy command do it.
  */
-export async function copyToClipboard(text: string): Promise<boolean> {
+async function copyToClipboard(text: string): Promise<boolean> {
   try {
     if (window.isSecureContext && navigator.clipboard) { await navigator.clipboard.writeText(text); return true; }
   } catch { /* falls back below */ }
@@ -57,7 +57,7 @@ export function CopyButton({ text, label, className = "" }: { text: string | (()
 }
 
 /** Scrolls a message's element for a source line into view (below the sticky line over a long reply) and flashes it. */
-export function goToLine(message: HTMLElement | null, line: number) {
+function goToLine(message: HTMLElement | null, line: number) {
   const el = message?.querySelector<HTMLElement>(`[data-md-line="${line}"]`);
   if (!el) return;
   el.scrollIntoView({ block: "start", behavior: "smooth" });

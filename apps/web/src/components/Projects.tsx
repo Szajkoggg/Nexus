@@ -12,7 +12,7 @@ const Running = ({ n }: { n: number }) =>
   n > 0 ? <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-accent" title={t("sidebar.running", { count: n })} /> : null;
 
 /** A project's mark in the sidebar: the first letters of its first two words ("Project Honeycomb" → PH). */
-export const initials = (name: string) =>
+const initials = (name: string) =>
   name.split(/[\s_-]+/).filter(Boolean).slice(0, 2).map((w) => [...w][0]!.toUpperCase()).join("") || "?";
 
 /**

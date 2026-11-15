@@ -432,7 +432,7 @@ export function DeskHead({ which, desk, children }: { which?: "chat" | "ideas"; 
 export interface Unread { chat: number; ideas: boolean }
 
 /** An unread marker: the count of new messages ("Orchestrator (2)"), or a dot when only "something" is new (`n` < 0). */
-export function UnreadMark({ n }: { n: number }) {
+function UnreadMark({ n }: { n: number }) {
   if (n === 0) return null;
   return n < 0
     ? <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" title={t("common.newMessagesTitle")} aria-label={t("common.newMessages")} />

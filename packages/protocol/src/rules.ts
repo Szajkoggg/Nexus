@@ -11,7 +11,7 @@
  * - `only-claude`: Codex would not see the rules.
  * - `unlinked`: both files, CLAUDE.md does not pull in AGENTS.md: Claude Code would not see AGENTS.md's rules.
  */
-export type RulesState = "linked" | "neither" | "only-agents" | "only-claude" | "unlinked";
+type RulesState = "linked" | "neither" | "only-agents" | "only-claude" | "unlinked";
 
 /** A file the fix creates or replaces, with its whole content before and after (before: absent for a new file). */
 export interface RulesFileChange {
@@ -21,7 +21,7 @@ export interface RulesFileChange {
   after: string;
 }
 
-export interface RulesFix {
+interface RulesFix {
   changes: RulesFileChange[];
   /** Moving CLAUDE.md into AGENTS.md: the @imports in the moved text, which Codex does not follow. */
   imports: string[];
@@ -67,7 +67,7 @@ export function isLinked(claude: string): boolean {
 }
 
 /** The file's line ending: CRLF when it has one, else LF. */
-export const lineEnding = (text: string): "\r\n" | "\n" => (text.includes("\r\n") ? "\r\n" : "\n");
+const lineEnding = (text: string): "\r\n" | "\n" => (text.includes("\r\n") ? "\r\n" : "\n");
 
 /** The text without its link lines (moved into AGENTS.md, they would import the file itself). */
 function withoutLinks(text: string): string {

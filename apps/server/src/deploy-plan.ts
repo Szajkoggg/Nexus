@@ -89,13 +89,13 @@ function writePlanFile(f: PlanFile, file = deployPlanFile()): void {
 }
 
 /** A time as the user reads it, on this machine: "2026-11-15 06:00". */
-export const localTime = (iso: string) => new Date(iso).toLocaleString("sv-SE").slice(0, 16);
+const localTime = (iso: string) => new Date(iso).toLocaleString("sv-SE").slice(0, 16);
 
 /** "step Q/S" or "queue Q", for the texts. */
-export const targetText = (t: PlanTarget) => (t.step ? `step ${t.queue}/${t.step}` : `queue ${t.queue}`);
+const targetText = (t: PlanTarget) => (t.step ? `step ${t.queue}/${t.step}` : `queue ${t.queue}`);
 
 /** "after step Q/S", "after queue Q" or "at 2026-11-15 06:00". */
-export const whenText = (p: Pick<DeployPlan, "after" | "at">) => (p.after ? `after ${targetText(p.after)}` : `at ${localTime(p.at!)}`);
+const whenText = (p: Pick<DeployPlan, "after" | "at">) => (p.after ? `after ${targetText(p.after)}` : `at ${localTime(p.at!)}`);
 
 /**
  * A time given for a plan: "HH:MM" (its next occurrence, today or tomorrow), "YYYY-MM-DD HH:MM" (this machine's local
@@ -165,7 +165,7 @@ export function judgePlan(t: PlanTarget, state: ProjectState): { verdict: "in" }
  * review commit is `sha` or an ancestor of it and that made commits of its own (as src/accepted.ts holds a push), and
  * the plan's own target step while it is such a step (it counts only once confirmed, commits or not).
  */
-export function unconfirmedIn(states: ProjectState[], sha: string | undefined, isAncestor: (a: string, b: string) => boolean, target?: PlanTarget): string[] {
+function unconfirmedIn(states: ProjectState[], sha: string | undefined, isAncestor: (a: string, b: string) => boolean, target?: PlanTarget): string[] {
   const out: string[] = [];
   for (const state of states) {
     if (state.project.defaults.provisional_counts) continue;
@@ -181,7 +181,7 @@ export function unconfirmedIn(states: ProjectState[], sha: string | undefined, i
 }
 
 /** What the planner needs of the update lifecycle (src/lifecycle.ts). */
-export interface PlanLifecycle {
+interface PlanLifecycle {
   readonly busy: boolean;
   readonly status: UpdateStatus;
   start(opts: { ref?: string; by?: UpdateAsker }): UpdateStatus;

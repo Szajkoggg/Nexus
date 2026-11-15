@@ -12,7 +12,7 @@ export function hasNews(events: readonly DigestEvent[], waiting: readonly Pick<W
   return events.some((e) => after(e.at, since)) || waiting.some((w) => after(w.at, since));
 }
 
-export interface Tile { n: number; text: string }
+interface Tile { n: number; text: string }
 export interface Tiles { finished: Tile; stopped: Tile; waiting: Tile; running: Tile }
 
 const KIND_WORDS: Record<WaitingItem["kind"], Key> = {

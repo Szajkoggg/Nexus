@@ -14,7 +14,7 @@ import {
 } from "./schemas.ts";
 import { applyChange, builtInSettings, effectiveProject, migrateStored, storedFrom } from "./settings.ts";
 
-export const NEXUS_DIRNAME = ".nexus";
+const NEXUS_DIRNAME = ".nexus";
 
 const nextUlid = monotonicFactory();
 export const newId = (): string => nextUlid();
@@ -27,12 +27,12 @@ export function normPath(p: string, base = process.cwd()): string {
 
 // ---------------------------------------------------------------- generic file helpers
 
-export function readYaml<S extends z.ZodType>(file: string, schema: S): z.infer<S> {
+function readYaml<S extends z.ZodType>(file: string, schema: S): z.infer<S> {
   return schema.parse(YAML.parse(readFileSync(file, "utf8")));
 }
 
 /** How long a rename is tried again while Windows refuses it (see renameRetrying). */
-export const RENAME_RETRY_MS = 2_000;
+const RENAME_RETRY_MS = 2_000;
 
 /**
  * renameSync, tried again while Windows refuses it for a moment. Windows does not replace (or move) a file that
@@ -85,7 +85,7 @@ export function readJsonl<S extends z.ZodType>(file: string, schema: S): JsonlRe
 }
 
 /** One complete line in a single write. */
-export function appendJsonl(file: string, entry: unknown): void {
+function appendJsonl(file: string, entry: unknown): void {
   mkdirSync(dirname(file), { recursive: true });
   appendFileSync(file, JSON.stringify(entry) + "\n", "utf8");
 }
@@ -411,7 +411,7 @@ function subdirs(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name).sort();
 }
 
-export function parseFrontMatter(text: string): { meta: unknown; body: string } {
+function parseFrontMatter(text: string): { meta: unknown; body: string } {
   const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(text);
   if (!m) throw new Error("missing front matter");
   return { meta: YAML.parse(m[1] ?? ""), body: (m[2] ?? "").trim() };
@@ -455,7 +455,7 @@ function legacyRevisionHash(raw: unknown, q: QueueFile): string | undefined {
  * an approved queue stays approved (`continue` and `orchestrator` became level 2, `wait` level 1). The file is written
  * in the new form at its next write.
  */
-export function parseQueue(raw: unknown): QueueFile {
+function parseQueue(raw: unknown): QueueFile {
   const parsed = QueueFile.parse(raw);
   const q = parsed.legacy_policies ? parsed : { ...parsed, legacy_policies: legacyPolicies(raw) };
   const legacy = legacyRevisionHash(raw, q);

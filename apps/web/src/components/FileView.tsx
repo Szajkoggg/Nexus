@@ -25,7 +25,7 @@ type Loaded =
 /** Highlighting a very long text would hold the page; past this it is shown plain. */
 const HIGHLIGHT_LIMIT = 512 * 1024;
 
-export function sizeText(bytes: number): string {
+function sizeText(bytes: number): string {
   if (bytes < 1024) return t("file.bytes", { size: formatNumber(bytes) });
   if (bytes < 1024 * 1024) return t("file.kb", { size: formatNumber(Math.round(bytes / 102.4) / 10) });
   return t("file.mb", { size: formatNumber(Math.round(bytes / (1024 * 102.4)) / 10) });

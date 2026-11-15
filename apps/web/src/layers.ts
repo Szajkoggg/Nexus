@@ -41,7 +41,7 @@ export function layerValue(nav: Nav, kind: string): string | undefined {
 export const isOpen = (nav: Nav, kind: string) => nav.layers.some((x) => kindOf(x) === kind);
 
 /** A hash with a queue in it has the queue or step drawer open. */
-export const hasItem = (hash: string) => hash.replace(/^#\/?/, "").split("/").filter(Boolean).length > 1;
+const hasItem = (hash: string) => hash.replace(/^#\/?/, "").split("/").filter(Boolean).length > 1;
 
 /** Layers that belong to another and close with it: a conversation in the Ideas panel, an image of a step. */
 const PARENT: Record<string, string> = { conversation: "ideas", viewer: "item" };
@@ -147,7 +147,7 @@ export function navOf(state: unknown, hash: string, query: string): Nav {
 /** Which layout reads an entry: the phone (below 1024 px) or a desktop (from 1024 px). */
 export type Layout = "phone" | "desk";
 
-export const TABS: readonly Tab[] = ["chat", "waiting", "queues", "ideas"];
+const TABS: readonly Tab[] = ["chat", "waiting", "queues", "ideas"];
 
 /**
  * The layers a layout shows as a view instead: on the phone the chat, the Ideas panel and the waiting list are tabs;
@@ -227,7 +227,7 @@ function endOf(at: Nav, steps: Step[]): Nav {
 }
 
 /** One step, then another made from where the first leaves the user (also after a Back, once it has arrived). */
-export function andThen(cur: Nav, first: Step, next: (at: Nav) => Step): Step {
+function andThen(cur: Nav, first: Step, next: (at: Nav) => Step): Step {
   if (first.op === "back") {
     return { ...first, then: (arrived) => { const done = first.then?.(arrived) ?? []; return [...done, next(endOf(arrived, done))]; } };
   }

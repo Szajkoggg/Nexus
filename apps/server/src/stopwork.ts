@@ -7,7 +7,6 @@
 import { ActionError, loadProjectState, now, type ProjectStore, type QueueView, type StatusChange } from "@nexus/protocol";
 import { leftBehind } from "./gitinfo.ts";
 
-export type WorkChoice = "keep" | "discard";
 
 /** When the queue's stop came: the stopped step's latest queue.stop (an imported stop has none). */
 function stopAt(q: QueueView): string | undefined {

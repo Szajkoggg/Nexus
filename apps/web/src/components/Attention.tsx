@@ -229,7 +229,7 @@ async function pushSubscription(): Promise<PushSubscription | null> {
 }
 
 /** Why this device cannot get push notifications, if it cannot. */
-export function pushBlocker(): string | undefined {
+function pushBlocker(): string | undefined {
   if (typeof window === "undefined") return undefined;
   if (!window.isSecureContext) {
     return t("notify.blocker.https", { protocol: location.protocol.replace(":", "") });

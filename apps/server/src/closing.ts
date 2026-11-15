@@ -9,7 +9,7 @@ import { isKeptStep, type ProjectStore, type QueueView } from "@nexus/protocol";
 import { checkoutOf } from "./gitinfo.ts";
 
 /** How many lines of git's --stat the opening shows at most (the summary line is always kept). */
-export const STAT_LINES = 60;
+const STAT_LINES = 60;
 
 export interface ClosingContext {
   /** The queue's commits: from..to (undefined when the checkout is no git repository, or nothing was recorded). */
@@ -22,7 +22,7 @@ export interface ClosingContext {
 
 /** The range of the queue's own steps' rounds of work, from git.yaml; the rounds of the steps Nexus keeps (the closing
  * and the integration step) are left out. */
-export function queueRange(store: ProjectStore, q: Pick<QueueView, "id">): { from: string; to: string } | undefined {
+function queueRange(store: ProjectStore, q: Pick<QueueView, "id">): { from: string; to: string } | undefined {
   const g = store.readGit(q.id);
   const own = Object.entries(g?.steps ?? {}).filter(([step]) => !isKeptStep(q.id, step)).flatMap(([, rounds]) => rounds);
   const from = own.filter((r) => r.start).sort((a, b) => a.started_at.localeCompare(b.started_at))[0]?.start;

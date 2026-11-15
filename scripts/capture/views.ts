@@ -91,7 +91,7 @@ function actionProblem(a: unknown): string | undefined {
 }
 
 /** What a session's environment may carry that must not reach the instance: it would act on the real project or the live instance. */
-export const CLEARED = ["NEXUS_DIR", "NEXUS_HANDOVER", "NEXUS_SESSION"] as const;
+const CLEARED = ["NEXUS_DIR", "NEXUS_HANDOVER", "NEXUS_SESSION"] as const;
 
 /**
  * The development instance's environment: the parent's without NEXUS_DIR, NEXUS_HANDOVER and NEXUS_SESSION, with its

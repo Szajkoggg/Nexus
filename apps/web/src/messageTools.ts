@@ -17,7 +17,7 @@ export interface ReplyTools { contents: Heading[]; questions?: number }
 /** A reply is long from this many characters on: about a screen of a desktop chat. */
 export const LONG_REPLY = 1500;
 /** A table of contents needs at least this many headings. */
-export const MIN_HEADINGS = 2;
+const MIN_HEADINGS = 2;
 
 interface Node { type: string; depth?: number; value?: string; position?: { start: { line: number } }; children?: Node[] }
 
@@ -75,7 +75,7 @@ export function questionsOf(markdown: string): number | undefined {
 }
 
 /** A reply long enough to need its tools. */
-export const isLong = (markdown: string): boolean => markdown.trim().length >= LONG_REPLY;
+const isLong = (markdown: string): boolean => markdown.trim().length >= LONG_REPLY;
 
 /** What a reply of the agent offers: nothing for a short one; for a long one its contents and its questions' place. */
 export function replyTools(markdown: string): ReplyTools {

@@ -32,7 +32,7 @@ export interface CodexOptions extends AgentOptions {
 }
 
 /** The overrides that turn off the MCP servers a config/read result names, the plugins and the apps. */
-export function userToolsOff(config: Json | undefined): Record<string, unknown> {
+function userToolsOff(config: Json | undefined): Record<string, unknown> {
   const key = (name: string) => (/^[A-Za-z0-9_-]+$/.test(name) ? name : JSON.stringify(name));
   const servers = Object.keys((config?.mcp_servers ?? {}) as Json);
   return { "features.apps": false, "features.plugins": false, ...Object.fromEntries(servers.map((n) => [`mcp_servers.${key(n)}.enabled`, false])) };
@@ -514,7 +514,7 @@ function reviewedAction(a: Json): { tool: string; input: string } {
  * Codex's token breakdown (TokenUsageBreakdown: inputTokens including cachedInputTokens, cacheWriteInputTokens,
  * outputTokens including reasoningOutputTokens) as the four figures, less a baseline (an earlier running total).
  */
-export function codexTokens(now: Json, before: Json): TurnTokens {
+function codexTokens(now: Json, before: Json): TurnTokens {
   const d = (k: string) => Math.max(0, (Number(now[k]) || 0) - (Number(before[k]) || 0));
   return { input: Math.max(0, d("inputTokens") - d("cachedInputTokens")), output: d("outputTokens"), cacheRead: d("cachedInputTokens"), cacheCreation: d("cacheWriteInputTokens") };
 }

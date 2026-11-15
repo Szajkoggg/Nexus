@@ -128,7 +128,7 @@ const CLI = resolve(dirname(fileURLToPath(import.meta.url)), "../../../packages/
  * A `nexus` command that works from any shell an agent uses: a .cmd for cmd and PowerShell (npm's .ps1 shim is blocked
  * where scripts are disabled) and a POSIX script for Git Bash. Their directory goes first on the agents' PATH.
  */
-export function ensureShims(): string {
+function ensureShims(): string {
   const bin = join(nexusHome(), "bin");
   mkdirSync(bin, { recursive: true });
   const node = process.execPath;
