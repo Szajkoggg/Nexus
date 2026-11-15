@@ -35,7 +35,9 @@ async function turns(proc: AgentProcess, messages: string[]): Promise<End[]> {
 const t = (input: number, output: number, cacheRead: number, cacheCreation: number): TurnTokens => ({ input, output, cacheRead, cacheCreation });
 
 test("Claude Code: two turns in one session report each turn's tokens and cost, not the running totals", async () => {
-  const claude = (resume: boolean) => new ClaudeSession({ cwd, uuid: randomUUID(), resume, permissionMode: "dontAsk", allowedTools: [], env: {} });
+  // One session: the fake resumes only a conversation it saved (as Claude Code does).
+  const uuid = randomUUID();
+  const claude = (resume: boolean) => new ClaudeSession({ cwd, uuid, resume, permissionMode: "dontAsk", allowedTools: [], env: {} });
   const ends = await turns(claude(false), ["hello", "again"]);
   assert.deepEqual(ends.map((e) => e.tokens), [t(10, 5, 100, 1), t(20, 10, 200, 2)], "the second turn's own, not 30/15/300/3");
   assert.deepEqual(ends.map((e) => e.costUsd), [0.01, 0.02], "the difference of the running total_cost_usd (0.01, 0.03)");
