@@ -121,14 +121,15 @@ function closingText(c: ClosingContext): string {
 function integrationText(step: string, c: IntegrationContext): string {
   const stop = `nexus stop ${step} --condition "${INTEGRATION_CONDITION}" --reason "<the conflicting files, and why they are not resolved>"`;
   const branch = c.branch ? `the queue's branch ${c.branch}` : "the queue's branch";
+  const intro = `\nThis is the queue's integration step, kept by Nexus: it runs last, in the queue's worktree, on ${branch}.`;
   if (!c.base) {
     return [
-      `\nThis is the queue's integration step, kept by Nexus: it runs last, in the queue's worktree, on ${branch}.`,
+      intro,
       `Nexus found no base branch to merge (the queue's base is no branch, and the project's checkout is on none). Merge nothing, and stop: nexus stop ${step} --condition "${INTEGRATION_CONDITION}" --reason "no base branch to merge"`,
     ].join("\n");
   }
   return [
-    `\nThis is the queue's integration step, kept by Nexus: it runs last, in the queue's worktree, on ${branch}.`,
+    intro,
     `Merge the base into it: git merge --no-edit ${c.base} (the base branch ${c.base} is at ${c.sha} now). Never rebase, never push, and change neither the base branch nor any other checkout: the base moves forward to this step's result later, by Nexus or the user.`,
     `- No conflict (or the branch already contains the base): run the checks on the result. If a check fails because of what the two sides do together, fix it on this branch in small commits that say why, and run the checks again. Report the step done with the resulting HEAD as its commit, and say in the summary what the merge brought in.`,
     c.resolve
