@@ -186,7 +186,7 @@ ${text}`;
     // (queue FU4). Idle, it starts the turn at once.
     clearTimeout(l.timer);
     if (l.proc.state === "working") l.handoffNext = true; else l.handoff = true;
-    this.host.send(l, `[Nexus] The user hands this conversation to the orchestrator, who plans and runs work in queues. Write a summary for it, in ${languageName(this.store.readProject().languages.working)}: what was decided (only what the user decided), the open questions, the work you propose (as steps with what each should achieve), and the files where the notes are. ${HANDOFF_SCOPE} Reply with the summary only.`);
+    this.host.send(l, `[Nexus] The user hands this conversation to the orchestrator, who plans and runs work in queues. Write a summary for it, in ${languageName(this.store.readProject().languages.working)}: what was decided (only what the user decided), the open questions, the work you propose (as steps with what each should achieve), and the files where the notes are. ${HANDOFF_SCOPE} Reply with the summary only.`, { afterTurn: true });
     this.changed();
   }
 
@@ -212,7 +212,7 @@ ${text}`;
         const l = this.ensure(s);
         clearTimeout(l.timer);
         if (cut.handoff) l.handoff = true;
-        this.host.send(l, restartedNotice(cut.asked), l.proc.state === "working" ? "next" : undefined, cut.asked);
+        this.host.send(l, restartedNotice(cut.asked), { quote: cut.asked });
       } catch (e) {
         this.store.appendChat(s.id, { at: now(), from: "nexus", kind: "error", text: `Could not go on after the restart: ${(e as Error).message}` });
       }
@@ -239,7 +239,7 @@ ${text}`;
   private deliver(s: SessionFile, text: string, quote: readonly string[]): void {
     const l = this.ensure(s);
     clearTimeout(l.timer);
-    this.host.send(l, text, l.proc.state === "working" ? "next" : undefined, quote);
+    this.host.send(l, text, { quote });
     this.changed();
   }
 

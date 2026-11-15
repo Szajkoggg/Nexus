@@ -6,7 +6,7 @@
 import {
   appendTurn, now, readUsage, stepDefs, stepTags, writeUsage, type ProjectStore, type RuntimeFile, type SessionFile, type TokenCounts, type TurnRecord,
 } from "@nexus/protocol";
-import type { ActivityItem, AgentEvents, AgentProcess, Priority, RefusalItem, StreamFacts, TurnTokens } from "./agent.ts";
+import type { ActivityItem, AgentEvents, AgentProcess, RefusalItem, StreamFacts, TurnTokens } from "./agent.ts";
 import { ClaudeSession, type ClaudeOptions } from "./claude.ts";
 import { CodexSession, type CodexOptions } from "./codex.ts";
 
@@ -222,15 +222,16 @@ export class AgentHost<E extends object = object> {
   }
 
   /**
-   * Sends `text` to the hosted process as the role's own `send` would (no priority: a new turn, after the running one;
-   * `next`: into the running turn), remembering `quote` (by default the text) as what that turn answers: what a
-   * restart that cuts the turn off quotes (cutOff). Empty: the turn answers nothing worth quoting.
+   * Sends `text` to the hosted process: into its running turn, or as a turn of its own when it is idle; with
+   * `afterTurn`, as the turn after the running one. Remembers `quote` (by default the text) as what that turn answers:
+   * what a restart that cuts the turn off quotes (cutOff). Empty: the turn answers nothing worth quoting.
    */
-  send(l: Hosted<E>, text: string, priority?: Priority, quote: readonly string[] = [text]): void {
+  send(l: Hosted<E>, text: string, o: { afterTurn?: boolean; quote?: readonly string[] } = {}): void {
+    const later = l.proc.state === "working" && !!o.afterTurn;
     const a = this.asked.get(l.proc) ?? { turn: [], next: [] };
-    if (l.proc.state === "working" && (!priority || priority === "later")) a.next.push(...quote); else a.turn.push(...quote);
+    (later ? a.next : a.turn).push(...(o.quote ?? [text]));
     this.asked.set(l.proc, a);
-    l.proc.send(text, priority);
+    l.proc.send(text, l.proc.state === "working" && !later ? "next" : undefined);
   }
 
   /**

@@ -7,7 +7,7 @@ import {
   ActionError, ClaudeEffort, reviewedByOrchestrator, runGoing, ProjectStore, applyDraft, defineMetric, inPlan, loadProjectState, metricDef, openPlan, overThreshold, proposePlan, proposeTags, readAway, readUsage, orchestratorStatusChange, newId, now, sendBack, type Event, type EventType, type ProjectState, type SessionFile,
 } from "@nexus/protocol";
 import type { AgentProcess } from "./agent.ts";
-import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Launch } from "./agent-host.ts";
+import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Hosted, type Launch } from "./agent-host.ts";
 import type { Engine } from "./engine.ts";
 import { orchestratorAgentsFile } from "./helpers.ts";
 import { RESTARTED, STOPPED, chatView } from "./chats.ts";
@@ -61,8 +61,9 @@ export class Orchestrator {
     this.host = new AgentHost(store, ROLE_RECORDS.orchestrator, host);
   }
 
-  /** The orchestrator's process (one at a time): the latest one started, until it exits or Nexus ends it. */
-  private get proc(): AgentProcess | undefined { return this.host.all()[0]?.proc; }
+  /** The orchestrator's hosted process (one at a time): the latest one started, until it exits or Nexus ends it. */
+  private get hosted(): Hosted | undefined { return this.host.all()[0]; }
+  private get proc(): AgentProcess | undefined { return this.hosted?.proc; }
 
   /** The current orchestrator session, if one was ever started. */
   session(): SessionFile | undefined {
@@ -118,7 +119,7 @@ export class Orchestrator {
     const s = this.session();
     if (s) this.store.writeSession({ ...s, model: m, effort: e?.data });
     // New settings wait for a running turn to end; the next message starts a process with them.
-    const l = this.host.all()[0];
+    const l = this.hosted;
     if (l) this.host.restartAfterTurn(l.session);
   }
 
@@ -136,7 +137,7 @@ export class Orchestrator {
 
   /** Ends the current orchestrator session and starts the next message in a new one (the old transcript stays). */
   reset(): void {
-    const l = this.host.all()[0];
+    const l = this.hosted;
     if (l) this.host.close(l.session);
     this.store.updateProject((p) => ({ ...p, orchestrator: { runtime: "claude", notify: true, ...p.orchestrator, session: null } }));
   }
@@ -311,8 +312,7 @@ ${n.text}` });
    * restart cut it off (by default the text itself; a cut-off turn's own quotes when it goes on, so they never nest).
    */
   private deliver(text: string, quote: readonly string[] = [text]): void {
-    const l = this.host.all()[0]!;
-    this.host.send(l, text, l.proc.state === "working" ? "next" : undefined, quote);
+    this.host.send(this.hosted!, text, { quote });
     this.changed();
   }
 
