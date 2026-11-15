@@ -242,19 +242,19 @@ export class AttentionWatch {
   /** A project removed from Nexus: added again, its first look is a baseline again (nothing old is pushed). */
   forget(id: string): void { this.seen.delete(id); }
   check(project: { id: string; name: string }, items: AttentionItem[]): void {
-    const keys = new Set(items.map(attentionKey));
+    const keyed = items.map((a) => [attentionKey(a), a] as const);
     const before = this.seen.get(project.id);
-    this.seen.set(project.id, keys);
+    this.seen.set(project.id, new Set(keyed.map(([key]) => key)));
     if (!before) return;
-    for (const a of items) {
-      if (before.has(attentionKey(a))) continue;
+    for (const [key, a] of keyed) {
+      if (before.has(key)) continue;
       const where = [a.queue, a.step].filter(Boolean).join("/");
       void this.send({
         title: `${project.name}: ${LABEL[a.kind]}`,
         body: `${where ? where + " " : ""}${a.text.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\*\*|`/g, "")}`.slice(0, 180),
         // A stopped queue's notification opens the queue, whose stop box has Continue.
         url: `/#/${[project.id, a.queue, a.lift ? undefined : a.step].filter(Boolean).map((x) => encodeURIComponent(x!)).join("/")}`,
-        tag: `${project.id}:${attentionKey(a)}`,
+        tag: `${project.id}:${key}`,
       }, { kind: a.kind satisfies NotifyKind });
     }
   }
