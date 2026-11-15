@@ -14,7 +14,7 @@ import {
   ActionError, Effort, ProjectStore, addNote, closingToSkip, closingToSkipAtApproval, updateSettings, answerAsUser, approveQueue, deleteNote, loadProjectState, nexusHome, withdrawApproval, addAllowRule,
   ensureGlobalSettings, readGlobalSettings, updateGlobalSettings, ownKeys, OVERRIDABLE, settingKey, readRegistry, readUsage, readTurns, commentOnPicture, markPicture, routeAnswers, routeSendBacks, sendBack, sendMessage, setQueueSettings, setStepLevel, confirmProvisional, type ProjectState,
   readAway, writeAway, awayNow, awayUntil, turnAway, expireAway, acceptPlanProposal, declinePlanProposal, handBackPlan, acceptTagProposal, declineTagProposal,
-  STAT_DIMENSIONS, projectMetrics, sinceTime, statDimension, statsReport, stepStats, type ProjectMetrics, type StatsReport,
+  STAT_DIMENSIONS, STAT_FILTERS, projectMetrics, sinceTime, statDimension, statsReport, stepStats, usageDays, type ProjectMetrics, type StatsReport, type UsageDays,
   MIN_SAMPLES, queueEstimate, stepSamples, isOpenQuestion, writeCount, type EstimatesResponse, type LeftView, type ProjectSummary,
 } from "@nexus/protocol";
 import { newestFirst, projectDigest, projectRunning, usageSince, type DigestEvent, type DigestResponse, type DigestRunning, type UsageRun } from "@nexus/protocol/digest";
@@ -582,8 +582,19 @@ app.get("/api/stats", (c) => {
   if (sinceText && !since) return c.json({ error: "since is a date (2026-11-14) or a time" }, 400);
   const project = c.req.query("project") || undefined;
   if (project && !projects.has(project)) return c.json({ error: "unknown project" }, 404);
+  const filter = Object.fromEntries(STAT_FILTERS.map((f) => [f, c.req.query(f) || undefined]).filter(([, v]) => v));
   const states = [...projects.values()].map(stateOf).filter((x): x is ProjectState => !!x);
-  return c.json(statsReport(stepStats(states, readTurns().entries), { by, project, since }) satisfies StatsReport);
+  return c.json(statsReport(stepStats(states, readTurns().entries), { by, project, since, filter }) satisfies StatsReport);
+});
+
+// The usage windows day by day for the global Stats view (UsageDays), from ?since= (a date or a time; default 30 days
+// ago) to now, and the global usage pause threshold to draw beside them.
+app.get("/api/usage/days", (c) => {
+  const sinceText = c.req.query("since");
+  const since = sinceText ? sinceTime(sinceText) : new Date(Date.now() - 29 * 86_400_000).toISOString();
+  if (!since) return c.json({ error: "since is a date (2026-11-14) or a time" }, 400);
+  const days: UsageDays = usageDays(readTurns().entries, new Date(since), new Date());
+  return c.json({ ...days, threshold: readGlobalSettings().defaults.usage_pause_threshold });
 });
 
 // The morning digest across projects (UX proposals, 16): what happened after ?since= (ISO 8601; default the last 24

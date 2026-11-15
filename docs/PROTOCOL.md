@@ -1149,7 +1149,8 @@ from every agent session, and the others from every session but an orchestrator'
 | `POST /api/projects/:id/queues/:q/run` | `action` (`start`, `pause`, `resume`, `stop`, `cancel_start`), `runtime?`, `model?`, `effort?`, `session?`, `after?`, `next?`, `at?` | Runs the queue through a Nexus-launched session (`session` continues an existing one). `start` with `after` (a queue id or a list): the user's place for the queue in the plan, it starts when those are done; with `next: true`: in the plan with none before it (`{message}`; see "The plan"); with `at` (ISO 8601, or `usage-reset`): a schedule (`{message}`); `cancel_start` takes the queue out of the plan (`{message}`) |
 | `GET /api/projects/:id/estimates` | | Expected times of the project's open queues, as estimates (`{ samples, min, queues: { <id>: { steps, ms? } } }`): `steps` the steps left (not closed), `ms` their expected time, absent while fewer than `min` (5) steps are finished. A finished (done) step's time is the sum of its worker turns' `duration_ms` in `turns.jsonl` (send-back rounds included, the wait for its review not), over every project the server has; a step to come takes the average of those on its model and effort, else its model, else all, each from at least 5 steps |
 | `GET /api/projects/:id/metrics` | | The project's metrics and their values (`ProjectMetrics`: `metrics`, its own definitions and every check's time seen, `check:<name>`; `values`, oldest first, each a `StepView.metrics` entry with its `queue` and `step`); see "Project metrics". Unknown project: 404 |
-| `GET /api/stats?by=&project=&since=` | | The statistics (`StatsReport`, see "Statistics"): every registered project, or one (`project`; unknown: 404), grouped by `by` (`model`, `effort`, `kind`, `activity`, `area`, `size`, `origin`; default `model`; another: 400), the steps whose last outcome is at or after `since` (a date or a time; unreadable: 400) |
+| `GET /api/stats?by=&project=&since=&kind=&activity=&area=&size=&origin=` | | The statistics (`StatsReport`, see "Statistics"): every registered project, or one (`project`; unknown: 404), grouped by `by` (`model`, `effort`, `kind`, `activity`, `area`, `size`, `origin`; default `model`; another: 400), the steps whose last outcome is at or after `since` (a date or a time; unreadable: 400), narrowed to the steps under each tag value given (`kind=code`, `area=p/engine` across projects; the value as the groups name it) |
+| `GET /api/usage/days?since=` | | The usage windows day by day for the global Stats view (`UsageDays`, see "Statistics") from `since` (a date or a time; default 30 days ago; unreadable: 400) to today, with `threshold`, the global `defaults.usage_pause_threshold` |
 | `POST /api/projects/:id/tags/:proposal` | `action` (`accept`, `decline`) | The user's decision on the orchestrator's proposal for the project's tag lists (see "Tags"); only the user: no CLI command or event does it (`{message}`) |
 | `POST /api/projects/:id/queues/:q/plan` | `action` (`move`, `accept`, `decline`, `hand_back`), `after?` | The user's plan: `move` the queue after `after` (a queue id; `null`: with no queue before it), as in a list (see "The plan"); accept or decline the orchestrator's proposal; hand a dependency the user set (`after`; without it, all of them) back to the orchestrator (`{message}`) |
 | `POST /api/projects/:id/queues/:q/steps/:s/pictures/mark` | `path`, `accepted` | The user's mark on a review picture (`review.marked`) |
@@ -1805,7 +1806,17 @@ metrics by `GET /api/projects/:id/metrics`) for the Stats views.
   `p25_ms`, `p75_ms` (the working time of its accepted steps; by size, how the planned size came out); `usage` and
   `usage_missing` (an estimate, and labelled so); `fallback` (steps with a turn on a fallback); by activity also
   `activities`: `planned` (steps that planned it), `observed` (that reported it), `unplanned`, `skipped` (planned, and
-  the step reported other activities). Largest group first.
+  the step reported other activities). Largest group first. Also `runtimes` (of its steps' last worker turns) and
+  `usage_steps` (by window, its steps with an estimate in it: what a use per step divides by).
+- **The report** (`StatsReport`): `by`, `project?`, `since?`, `filter?` (the tag values it was narrowed to: `kind`,
+  `activity`, `area`, `size`, `origin`, one each; a step passes when it is in that facet's group of the value),
+  `steps`, `groups`, `total` (every step counted, once, as one group keyed `all`) and `facets` (by facet, the values the
+  steps in the range and project have before the tag filter, sorted: what the view's filters offer).
+- **The windows day by day** (`usageDays`, `GET /api/usage/days`): `days` (local dates of the server, oldest first)
+  and `windows`, each `{ runtime, window, kind, values }` for the 5-hour (`kind` `5h`) and weekly (`7d`) windows with
+  a reading in the period (Claude Code's first). The readings are every turn's `windows_start` and `windows_end` in
+  `turns.jsonl`. A 5-hour window's value is the day's highest reading (null on a day without one); a weekly window's
+  the last reading by the day's end, 0 once its `resets_at` has passed, null before its first reading.
 - **`nexus stats`** prints a line per group (`statsText`): "- opus: 5 steps; accepted in the first round 3 of 4
   (75 %); 1.2 rounds on average; 1 stop, 0 failures; median work 30 min (25 min to 33 min 45 s); estimated use
   claude:five_hour 1 %; 1 on a fallback", with "(few data)" after a small group's count and a closing line that says
