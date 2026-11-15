@@ -459,6 +459,15 @@ usage runs out"). Choices made while building it (FB4):
 - **The record lives in run.yaml, not in an event.** A session's events log is its own (one writer per file); the
   engine's decisions are the server's, so they go into run.yaml `fallbacks` beside `switches`, and the step view and
   the turn records read them from there.
+- **In the middle of a step, only between turns (FB5).** One gate, `usageGate`, stands before every turn the engine
+  starts within a step (the nudge, the inbox delivery to an idle session: an answer, a send-back, a message) and
+  after a turn that failed on the limit; not before the continue of a resume or a retry, which the decision does not
+  name and which goes on as before (the run-state golden files stay as they were); it looks only when the session is idle, so a running turn is never cut off. The new
+  session is told what the old one cannot hand over itself: its progress lines, its commits since the round began and
+  `git status` of the checkout. The changes are not touched: the seed asks the new session to keep them. Asking the
+  full runtime for a context summary first (as at a boundary) would spend the usage that ran out, so none is asked.
+- **A failed turn's reset counts as a window.** A turn refused for the usage limit names its reset; that is added as a
+  full window of the runtime for the decision, since usage.json may not show it yet.
 - **Notices wait in the orchestrator's inbox.** The orchestrator runs on Claude Code; a notice that started its turn
   while Claude Code is full would spend the very usage that ran out. The notice is put into its inbox (seen there, not
   told) and told once the runtime is free; the reviews it would do wait with it, as decided.

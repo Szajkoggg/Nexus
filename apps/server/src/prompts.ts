@@ -191,6 +191,23 @@ export function freshSessionSeed(q: QueueView, because: string, done: StepView |
   ].join("\n");
 }
 
+/**
+ * The first text of a fresh session that takes over a step in its middle, because the old session's runtime is beyond
+ * the usage limit (`because`): the step's progress lines, its commits so far and the uncommitted changes the old
+ * session left in the checkout (kept there), then the queue. The step's opening ("Continue this step") follows it.
+ */
+export function midStepSeed(q: QueueView, step: StepView, because: string, work: { progress: string[]; commits: string[]; uncommitted: string[]; diffstat?: string }): string {
+  return [
+    `[Nexus] You take over step ${step.id} of queue ${q.id} "${q.title}" in a fresh session, in the middle of the step: ${because}. You have not seen the work done on it so far, only what follows.`,
+    work.progress.length ? `\nIts progress so far:\n${work.progress.map((p) => `- ${p}`).join("\n")}` : `\nIt reported no progress yet.`,
+    work.commits.length ? `\nIts commits so far, oldest first:\n${work.commits.map((c) => `- ${c}`).join("\n")}` : `\nIt made no commit yet.`,
+    work.uncommitted.length
+      ? `\nUncommitted changes it left in the checkout (git status): they are the step's work so far. Keep them and go on from them; do not discard or reset them.\n${work.uncommitted.map((f) => `  ${f}`).join("\n")}${work.diffstat ? `\n${work.diffstat}` : ""}`
+      : `\nThe checkout has no uncommitted changes.`,
+    `\nThe queue${q.description ? `:\n${q.description.trim()}` : ` has no description.`}`,
+  ].join("\n");
+}
+
 /** The previous session's unread inbox entries (as formatInbox gives them), carried into the fresh session's first turn. */
 export function carriedMessages(unread: string[]): string | undefined {
   return unread.length

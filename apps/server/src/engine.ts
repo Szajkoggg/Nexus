@@ -2,7 +2,7 @@
 // messages and answers to live sessions, and records what the agent does. See docs/DESIGN.md, "Nexus drives the
 // queue, step by step". All of its state is in files (run.yaml, runtime.json, delivered.jsonl, activity.jsonl);
 // the processes are the only thing a restart loses, and a restart pauses the runs that had one.
-import { recordStepEnd, recordStepStart } from "./gitinfo.ts";
+import { git as gitRead, recordStepEnd, recordStepStart } from "./gitinfo.ts";
 import { AcceptedPusher } from "./accepted.ts";
 import type { GitRunner } from "./deploy.ts";
 import type { ChildProcess } from "node:child_process";
@@ -11,7 +11,7 @@ import { join } from "node:path";
 import {
   CHECKOUT_RUN_STATES, ENDED_RUN_STATES, HOLDING_RUN_STATES,
   ActionError, ProjectStore, USER_SESSION, ensureUserSession, liftByContinue, loadProjectState, openPlanFile, releaseOrphanedSteps, stepClosed, reportFile, ensureReportFolder, newId, normPath, now, readUsage,
-  RETRY_LIMIT, chooseRoute, effortIssue, formatClock, kindDefaults, routeStep, type Effort, type Routed, type ProjectFile, type StartValues, type ProjectState, type QueueView, type RunFile, type SessionFile,
+  RETRY_LIMIT, chooseRoute, effortIssue, formatClock, kindDefaults, overThreshold, routeStep, type Effort, type Routed, type ProjectFile, type StartValues, type ProjectState, type QueueView, type RunFile, type SessionFile,
   type SessionView, type StepView, type PlanBy,
   addNote,
 } from "@nexus/protocol";
@@ -19,7 +19,7 @@ import type { TurnFailure } from "./agent.ts";
 import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Hosted, type Launch } from "./agent-host.ts";
 import { nexusDenyRules } from "./claude.ts";
 import {
-  RUNTIME_NAME, carriedMessages, formatInbox, withLanguages, workerBriefing, workerLanguages, freshSessionSeed, noOutcomeNudge, stepOpening, summaryReason,
+  RUNTIME_NAME, carriedMessages, midStepSeed, formatInbox, withLanguages, workerBriefing, workerLanguages, freshSessionSeed, noOutcomeNudge, stepOpening, summaryReason,
   summaryRequest, switchReason, userStopNow,
 } from "./prompts.ts";
 import {
@@ -580,6 +580,8 @@ export class Engine implements Member {
           // Work the agent left running in the background: its end brings the next move, up to a limit.
           const background = this.backgroundWait(queueId, run.session, current.id, live.proc.background ?? []);
           if (background === "wait") return;
+          // Before a turn within the step: its runtime beyond the usage threshold goes on on its fallback (or waits).
+          if (this.usageGate(queueId, state, run, live)) return;
           // The turn ended and the step has no outcome: ask once, then hand it to the user.
           if (run.nudged) return this.halt(queueId, `step ${current.id} ended twice without an outcome`);
           this.writeRun(queueId, { ...run, nudged: true });
@@ -776,6 +778,92 @@ export class Engine implements Member {
     return true;
   }
 
+  /**
+   * Before a turn within the run's step (a nudge, an answer, a send-back, a message; and after a turn that failed on
+   * the usage limit, `failed`): when the session's runtime is beyond the usage
+   * threshold, the step goes on by its fallback chain (routing.ts, chooseRoute): in a fresh session on the first free
+   * entry (or on its own values again, when the session is on a fallback that is full now), seeded with the step's
+   * work so far; at `wait`, or with no free entry, the run waits (usage_wait) for the earliest reset. Never while a turn
+   * runs. True: taken over (the caller sends nothing now).
+   */
+  private usageGate(queueId: string, state: ProjectState, run: RunFile, live: Live | undefined, failed?: { until: string; reason: string }): boolean {
+    if (!live || live.proc.state === "working" || live.proc.state === "exited" || this.ending.has(live.session)) return false;
+    const q = state.queues.find((x) => x.id === queueId);
+    const step = q?.steps.find((s) => s.id === run.step);
+    const session = state.sessions.find((x) => x.id === run.session);
+    if (!q || !step || !session || session.runtime === "external") return false;
+    const current = session.runtime as "claude" | "codex";
+    // A turn that failed on the limit: its runtime is full until the reset it names, whatever usage.json says.
+    const windows = { ...(readUsage()?.windows ?? {}), ...(failed ? { [current === "codex" ? "codex_limit" : "limit"]: { utilization: 1, resets_at: failed.until } } : {}) };
+    const threshold = state.project.defaults.usage_pause_threshold;
+    const nowMs = this.clock.now();
+    const full = overThreshold(current, windows, threshold, nowMs);
+    if (!full) return false;
+    const reason = failed?.reason ?? full.reason;
+    const routed = stepRoute(this.startOf(state, run), step, q, state.project);
+    const choice = chooseRoute(routed, { windows, threshold, nowMs, project: state.project });
+    if (choice.kind === "wait") {
+      // A failed turn's wait says what it always said (the run-state golden files keep it).
+      this.writeRun(queueId, toUsageWait(run, failed ? `${reason}; goes on when it resets` : choice.reason, choice.until));
+      this.schedule(queueId, choice.until, this.usageMarginMs);
+      this.store.appendActivity(run.session, { at: now(), kind: "turn_end", text: `Nexus holds step ${step.id} until the usage window resets: ${choice.reason}`, queue: queueId, step: step.id });
+      return true;
+    }
+    if (choice.values.runtime === current) return false;
+    const issue = effortIssue(choice.values.runtime, choice.values.effort);
+    if (issue) { this.halt(queueId, `step ${step.id} on its fallback: ${issue}`); return true; }
+    const recorded = this.recordRoute(queueId, run, step.id, routed, choice.kind === "fallback" ? { ...choice, reason } : choice, true);
+    this.switchMidStep(queueId, recorded, q, session, live, step, choice.values, reason);
+    return true;
+  }
+
+  /**
+   * Goes on with `step`, in its middle, in a fresh session on `want` that continues `old` (usageGate): the new session
+   * gets the step's progress lines, its commits so far and the uncommitted changes (left in the checkout), the old
+   * session's unread inbox entries, and the step's opening to continue it.
+   */
+  private switchMidStep(queueId: string, run: RunFile, q: QueueView, old: SessionView, live: Live, step: StepView, want: StepValues, reason: string): void {
+    const oldFile = this.store.readSession(old.id);
+    const part = (run.switches?.length ?? 0) + 2;
+    const fresh: SessionFile = {
+      protocol: 1, id: newId(), project: oldFile.project, role: "worker", runtime: want.runtime,
+      native_id: want.runtime === "claude" ? randomUUID() : null,
+      title: `${q.id} worker (${part})`, cwd: oldFile.cwd, branch: gitBranch(oldFile.cwd) ?? oldFile.branch, queue: q.id,
+      launched_by: "nexus", created_at: now(), model: want.model, effort: want.effort, continues: old.id,
+    };
+    // What the step has done so far, read before anything opens a new round: its progress lines, its commits since its
+    // round began, and what is uncommitted in the checkout (which stays as it is).
+    const start = this.store.readGit(queueId)?.steps[step.id]?.at(-1)?.start;
+    const lines = (out: string | undefined) => (out ?? "").split(/\r?\n/).filter((x) => x.trim());
+    const work = {
+      progress: step.timeline.filter((e) => e.type === "step.progress").map((e) => (e.type === "step.progress" ? `${e.text}${e.pct !== undefined ? ` (${e.pct} %)` : ""}` : "")),
+      commits: start ? lines(gitRead(oldFile.cwd, ["log", "--reverse", "--format=%h %s", `${start}..HEAD`])) : [],
+      uncommitted: lines(gitRead(oldFile.cwd, ["status", "--porcelain=v1", "--untracked-files=all"])),
+      diffstat: lines(gitRead(oldFile.cwd, ["diff", "--stat", "HEAD"])).at(-1)?.trim(),
+    };
+    this.store.writeSession(fresh);
+    this.store.writeSession({ ...oldFile, continued_by: fresh.id });
+    const unread = (loadProjectState(this.store).sessions.find((x) => x.id === old.id)?.inbox ?? []).filter((m) => !m.read_at);
+    this.ending.add(old.id);
+    live.proc.close();
+    const because = `${RUNTIME_NAME[old.runtime as "claude" | "codex"]} is beyond the usage limit (${reason}), so the step goes on on ${RUNTIME_NAME[want.runtime]}`;
+    this.writeRun(queueId, {
+      ...run, session: fresh.id, summary_asked: undefined,
+      switches: [...(run.switches ?? []), { at: now(), from: old.id, to: fresh.id, step: step.id, why: "usage", summary: "fallback" }],
+    });
+    this.store.appendActivity(old.id, { at: now(), kind: "turn_end", text: `Nexus goes on with step ${step.id} in a fresh session (${fresh.id}): ${because}`, queue: queueId, step: step.id });
+    for (const m of unread) {
+      this.store.appendDelivered(old.id, { at: now(), kind: "inbox", id: m.id, via: "carried", to: fresh.id });
+      if (m.type === "send_back") recordStepStart(this.store, m.queue, m.step, fresh.id); // the next round
+    }
+    const state = loadProjectState(this.store);
+    this.ensureProcess(fresh);
+    const seed = midStepSeed(q, step, because, work);
+    const carried = carriedMessages(unread.map((m) => formatInbox(m, state)));
+    const view = this.queue(state, queueId);
+    this.openStep(queueId, view.steps.find((s) => s.id === step.id) ?? step, view, "continue", "its earlier session's runtime reached the usage limit", { before: seed, after: carried });
+  }
+
   /** Goes on with `next` in a fresh session (with `want`'s runtime, model and effort) that continues `old`. */
   private switchSession(queueId: string, run: RunFile, q: QueueView, old: SessionView, live: Live, done: StepView | undefined, next: StepView, want: StepValues, why: "context" | "runtime" | "refactor", fill: number | undefined, source: "written" | "asked" | "fallback"): void {
     const oldFile = this.store.readSession(old.id);
@@ -858,8 +946,13 @@ export class Engine implements Member {
     const s = state.sessions.find((x) => x.id === l.session);
     const unread = (s?.inbox ?? []).filter((m) => !m.read_at);
     if (!unread.length) return;
-    const run = state.queues.find((q) => q.run?.session === l.session)?.run;
+    const owner = state.queues.find((q) => q.run?.session === l.session);
+    const run = owner?.run;
     const idleAllowed = !run || run.state === "running" || run.state === "pausing";
+    // A new turn of an idle session within its step (an answer, a send-back, a message): its runtime beyond the usage
+    // threshold goes on on the step's fallback in a fresh session, which gets these entries (or the run waits). A stop
+    // is not a turn; an entry for a working session goes into its running turn, which is never cut off.
+    if (owner && run && idleAllowed && l.proc.state !== "working" && unread.some((m) => m.type !== "stop") && this.usageGate(owner.id, state, run, l)) return;
     // The language line goes with each message, so a changed setting reaches the session with its next message.
     const languages = workerLanguages(state.project.languages);
     for (const m of unread) {
@@ -917,6 +1010,9 @@ export class Engine implements Member {
     }
     if (f.kind === "lasting") return this.halt(queueId, `the turn failed (${what})`, f.code);
     if (f.kind === "usage" && f.resetsAt) {
+      // The step's fallback chain first: the runtime counts as full until the reset the failure names.
+      const live = this.host.get(run.session);
+      if (live && this.usageGate(queueId, loadProjectState(this.store), run, live, { until: f.resetsAt, reason: `the usage limit was reached (${what})` })) return;
       this.writeRun(queueId, toUsageWait(run, `the usage limit was reached (${what}); goes on when it resets`, f.resetsAt));
       this.schedule(queueId, f.resetsAt, this.usageMarginMs);
       return;
@@ -1102,7 +1198,7 @@ export class Engine implements Member {
    * per step (advance runs again while a summary is asked for), with an activity line; the orchestrator is told from
    * the record. Returns the run as written.
    */
-  private recordRoute(queueId: string, run: RunFile, step: string, own: Routed, choice: ReturnType<typeof chooseRoute>): RunFile {
+  private recordRoute(queueId: string, run: RunFile, step: string, own: Routed, choice: ReturnType<typeof chooseRoute>, mid = false): RunFile {
     const list = run.fallbacks ?? [];
     const last = list.at(-1);
     const from = { runtime: own.runtime, model: own.model, effort: own.effort };
@@ -1110,7 +1206,7 @@ export class Engine implements Member {
     if (choice.kind === "fallback") {
       if (last && !last.back && last.step === step && last.runtime === choice.values.runtime) return run;
       entry = { at: now(), step, ...choice.values, from, reason: choice.reason };
-    } else if (last && !last.back && last.step !== step) {
+    } else if (last && !last.back && (last.step !== step || mid)) {
       entry = { at: now(), step, ...from, from: { runtime: last.runtime, model: last.model, effort: last.effort }, reason: `the ${RUNTIME_NAME[own.runtime]} usage is below the limit again`, back: true };
     } else return run;
     const next: RunFile = { ...run, fallbacks: [...list, entry] };

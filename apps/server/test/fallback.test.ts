@@ -118,8 +118,9 @@ test("a wait rule waits for the window's reset; both runtimes full: the run wait
 test("back on its own runtime at the next boundary once the window reset, without a fresh reading; a window never reported is free", async () => {
   const x = setup([{ fake: "summaryslow", kind: "mechanical" }, { fake: "done", kind: "mechanical" }]);
   try {
-    process.env.FAKE_SLOW_MS = "3000";
-    usage(claude(0.95, 0.1, 1500)); // no Codex window known: Codex counts as free
+    // The reset comes while Q1 works (well after the start, also on a busy machine), its turn outlasts it.
+    process.env.FAKE_SLOW_MS = "6000";
+    usage(claude(0.95, 0.1, 4000)); // no Codex window known: Codex counts as free
     x.engine.start("Q");
     await x.until("the run to finish", () => x.queue().run?.state === "finished", LONGER.run);
     assert.equal(readUsage()!.windows.five_hour!.utilization, 0.95, "no fresh reading: the window's reset time passed");

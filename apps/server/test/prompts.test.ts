@@ -25,7 +25,7 @@ import {
 import type { AgentEvents, AgentProcess, Priority } from "../src/agent.ts";
 import type { Launch } from "../src/agent-host.ts";
 import { Engine } from "../src/engine.ts";
-import { freshSessionSeed, noOutcomeNudge, stepOpening, switchReason } from "../src/prompts.ts";
+import { freshSessionSeed, midStepSeed, noOutcomeNudge, stepOpening, switchReason } from "../src/prompts.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { Conversations } from "../src/conversations.ts";
 import type { DeployChanges } from "../src/deploy.ts";
@@ -203,6 +203,15 @@ test("the worker's texts: briefing, step openings, inbox entries, seeds and nudg
   tr.add(open({ range: { from: "1111111111111111111111111111111111111111", to: "2222222222222222222222222222222222222222" }, stat: [" src/code.ts | 12 +++++++-----", " 1 file changed, 7 insertions(+), 5 deletions(-)"].join("\n"), rules: true }));
   tr.section("the closing refactoring step without git records, and without a Refactoring section");
   tr.add(open({ rules: false }));
+
+  tr.section("a step taken over in its middle on its fallback (usage): with progress, commits and uncommitted files, and without");
+  const mq = loadProjectState(store).queues.find((x) => x.id === "Q")!;
+  const because = "Claude Code is beyond the usage limit (the 5-hour window is at 95 % (limit 90 %)), so the step goes on on Codex";
+  tr.add(midStepSeed(mq, mq.steps[1]!, because, {
+    progress: ["half way (50 %)", "tests written"], commits: ["1a2b3c4 A2 first half"],
+    uncommitted: ["M src/a.ts", "?? src/b.ts"], diffstat: "1 file changed, 2 insertions(+)",
+  }));
+  tr.add(midStepSeed(mq, mq.steps[1]!, because, { progress: [], commits: [], uncommitted: [] }));
 
   tr.section("the worker's briefing (Claude Code: appended to the system prompt)");
   tr.add(briefing);

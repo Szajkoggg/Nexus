@@ -4,6 +4,10 @@
 //   noop   end the turn without an outcome   stop    report a stop condition
 //   fail   report the step failed            slow    work for FAKE_SLOW_MS (default 1500), or until FAKE_RELEASE's file exists; then done
 //   stop1  report a stop condition the first time, done once the stop is lifted
+//   ask1   ask a blocking question the first time (a step turn of this step in any session counts), done after
+//   partial  the first time: a progress line, a commit of <step>-a.txt, then <step>-a.txt changed and <step>-b.txt
+//            written without a commit, and the turn ends without an outcome; after: done if <step>-b.txt is still
+//            there ("kept the uncommitted work"), else failed
 //   slownoop  work for FAKE_SLOW_MS, then end the turn without an outcome (the step stays open)
 //   slowask   work for FAKE_SLOW_MS, then ask a blocking question and end the turn
 //   doneexit  report the step done, then the process exits on a signal before its turn ends
@@ -256,6 +260,29 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
       else { writeFileSync(file, "1"); nexus("stop", step, "--condition", "fake condition", "--reason", "fake stop"); }
     }
     if (behaviour === "ask" || behaviour === "slowask") nexus("ask", "Which way?", "--step", step);
+    // ask1 and partial: what they do the first time, counted in a file beside FAKE_LOG (any session of the step).
+    const first = (kind: string) => {
+      const file = join(dirname(process.env.FAKE_LOG ?? "."), `fake-${kind}-${step}`);
+      if (existsSync(file)) return false;
+      writeFileSync(file, "1");
+      return true;
+    };
+    if (behaviour === "ask1") {
+      if (first("ask1")) nexus("ask", "Which way?", "--step", step);
+      else nexus("step", "done", step, "--summary", `fake finished ${step} after its question`);
+    }
+    if (behaviour === "partial") {
+      if (first("partial")) {
+        nexus("step", "progress", step, "half way", "--pct", "50");
+        const g = ["-c", "user.name=worker", "-c", "user.email=worker@example.invalid", "-c", "commit.gpgsign=false"];
+        writeFileSync(join(process.cwd(), `${step}-a.txt`), "first\n");
+        execFileSync("git", [...g, "add", `${step}-a.txt`], { stdio: "ignore" });
+        execFileSync("git", [...g, "commit", "-q", "-m", `${step} first half`], { stdio: "ignore" });
+        writeFileSync(join(process.cwd(), `${step}-a.txt`), "first\nsecond\n");
+        writeFileSync(join(process.cwd(), `${step}-b.txt`), "not committed\n");
+      } else if (existsSync(join(process.cwd(), `${step}-b.txt`))) nexus("step", "done", step, "--summary", `fake finished ${step}: kept the uncommitted work`);
+      else nexus("step", "failed", step, "--reason", "the uncommitted work is gone");
+    }
     if (behaviour === "background" || behaviour === "bgagent" || behaviour === "bglong") {
       fake.background = { kind: behaviour === "bgagent" ? "agent" : "command", ms: Number(behaviour === "bglong" ? process.env.FAKE_BG_LONG_MS ?? 600_000 : process.env.FAKE_BG_MS ?? 1500) };
     }
