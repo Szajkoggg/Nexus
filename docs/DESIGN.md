@@ -373,6 +373,35 @@ the natural cut, and the worker's own summary is a better hand-over than an auto
 - The switch is recorded in `run.yaml` (`switches`) and on both `session.yaml` files (`continues`, `continued_by`),
   and the run's panel lists it: from which step, how full the old context was, and where the seed came from.
 
+**The orchestrator's context care** (decided by the user on 2026-11-15, queue CC; docs/ideas/chat-context.md). The
+orchestrator's long chat is not compacted: when its context nears full, Nexus asks it for a summary and goes on in a
+fresh orchestrator session started from it (protocol: "The orchestrator's context care"). Compacting keeps the session
+but leaves the choice of what to keep to the model, and compacting again summarizes a summary; a fresh session starts
+from a summary written on purpose and kept as a file the user can read, from the **current briefing** (a session
+started before a deploy keeps the old one), and from the files, where an orchestrator's truth is anyway (`nexus
+status` in its first message), so wrong beliefs it built up do not carry over. What is lost is the chat's tone and
+detail. (The Ideas conversations, whose material is the conversation itself, get a "Compact" action instead.)
+Decisions, building it:
+
+- Its own threshold, `orchestrator.context_threshold` (global with a project override, default 0.85: "nears full"),
+  apart from the workers' `context_reuse_threshold`, which is about reusing a session for related work.
+- Only between turns, with its process idle: a turn is never cut into, and a turn ending is the orchestrator's
+  equivalent of a step's end. The request is a turn of its own and asked once (`context:asked` in `applied.jsonl`, a
+  file, so a restart in between still switches); after that turn the switch comes with or without a summary.
+- While the summary is written, nothing else goes to the old session: the user's message would land in a session that
+  is about to end, so it waits in its inbox and is carried into the fresh session's first turn, as a worker's unread
+  messages are. Notices are not carried: the fresh session is told them anew, as what no session of its line was told
+  (the `notify:…` keys of every session it continues), since the first of them.
+- The status in the first message is the same text `nexus status` prints in an orchestrator's session: the overview
+  moved from the CLI into the protocol (`overview.ts`), so both read one function.
+- Answers to a question of an old orchestrator session go to the newest session of its line (`routeAnswers` follows
+  `continued_by` for orchestrators), and the orchestrator now gets the answers in its inbox delivered as a turn:
+  before this nothing delivered them, as it asked no questions in practice.
+- A fresh session that is above the threshold already at the end of its first turn (a threshold below what a briefing
+  and a status fill) is not switched again: another would be no emptier, and the switches would loop.
+- A setting with a default that a write leaves out (an `orchestrator` section written before the setting existed, or
+  made from a literal) is not cleared: only a setting without a default has a project's own "none".
+
 **Runtime, model and effort per step.** A step may name its runtime, model and effort (a mechanical step on a small
 model, a design step on a strong one). Decisions:
 

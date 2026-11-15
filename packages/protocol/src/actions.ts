@@ -207,19 +207,28 @@ export function answerAsUser(store: ProjectStore, qid: string, text: unknown, co
 }
 
 /**
- * Delivers every final answer (not an escalation) to the inbox of the session that asked, once. Safe to run on
- * every change: an answer already in the inbox is not added again.
+ * Delivers every final answer (not an escalation) to the inbox of the session that asked, once. An orchestrator
+ * session that went on in a fresh one (`continued_by`, the orchestrator's context care) has its answers delivered to
+ * the newest session of that line. Safe to run on every change: an answer already in an inbox of the line is not
+ * added again (one the old session had not read went into the fresh one's first turn).
  */
 export function routeAnswers(store: ProjectStore, state: ProjectState = loadProjectState(store)): number {
   let routed = 0;
   for (const x of state.questions) {
     const asker = state.sessions.find((s) => s.id === x.session);
     if (!asker || asker.role === "user") continue;
+    const line = [asker];
+    for (let s = asker; s.role === "orchestrator" && s.continued_by;) {
+      const next = state.sessions.find((y) => y.id === s.continued_by);
+      if (!next || line.includes(next)) break;
+      line.push((s = next));
+    }
+    const to = line.at(-1)!;
     for (const a of x.answers) {
       if (a.escalate) continue;
       const id = `answer-${a.id}`;
-      if (asker.inbox.some((m) => m.id === id)) continue;
-      store.appendInbox(asker.id, { v: 1, id, at: now(), from: a.by, type: "answer", qid: x.qid, text: a.text, continue: a.continue });
+      if (line.some((s) => s.inbox.some((m) => m.id === id))) continue;
+      store.appendInbox(to.id, { v: 1, id, at: now(), from: a.by, type: "answer", qid: x.qid, text: a.text, continue: a.continue });
       routed++;
     }
   }
@@ -738,13 +747,15 @@ export function updateSettings(store: ProjectStore, patch: unknown): void {
     languages: merged(p.languages, b.languages),
     // Each kind's runtime, model, effort and fallback (a null model or effort: the project's for that runtime).
     kinds: Object.fromEntries(Object.entries(p.kinds).map(([k, d]) => [k, merged(d, b.kinds?.[k])])),
-    // The orchestrator's notices, model and effort (its section is made here if the project has had none yet).
+    // The orchestrator's notices, model, effort and context threshold (its section is made here if the project has had
+    // none yet).
     orchestrator: b.orchestrator === undefined
       ? p.orchestrator
       : merged({ runtime: "claude" as const, session: null, notify: true, ...p.orchestrator }, {
         ...(b.orchestrator.notify !== undefined ? { notify: !!b.orchestrator.notify } : {}),
         ...("model" in b.orchestrator ? { model: b.orchestrator.model } : {}),
         ...("effort" in b.orchestrator ? { effort: b.orchestrator.effort } : {}),
+        ...(b.orchestrator.context_threshold !== undefined ? { context_threshold: b.orchestrator.context_threshold } : {}),
       }),
   };
   const r = ProjectFile.safeParse(next);

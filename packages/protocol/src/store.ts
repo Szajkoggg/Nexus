@@ -198,6 +198,19 @@ export class ProjectStore {
    */
   writeProject(p: ProjectFile): void { this.writeStoredProject(storedFrom(p, readGlobalSettings())); }
   /**
+   * .nexus/orchestrator/summary.md: the summary the orchestrator wrote when its context neared full, which the fresh
+   * session that went on from it started from (the latest one; each is also a context.summary event of its session).
+   */
+  get orchestratorSummaryFile(): string { return join(this.dir, "orchestrator", "summary.md"); }
+  /** Written only by the server (src/orchestrator.ts), replaced whole. */
+  writeOrchestratorSummary(text: string): void {
+    const f = this.orchestratorSummaryFile;
+    mkdirSync(dirname(f), { recursive: true });
+    const tmp = `${f}.${process.pid}.tmp`;
+    writeFileSync(tmp, text, "utf8");
+    renameRetrying(tmp, f);
+  }
+  /**
    * Turns a project.yaml from before global settings into the stored form, once (settings.ts, migrateStored): values
    * equal to the global ones follow them, different ones become the project's own; effective settings do not change.
    * Writes only when the file is not migrated yet; returns whether it wrote.

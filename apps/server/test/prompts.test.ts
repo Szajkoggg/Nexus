@@ -382,6 +382,39 @@ test("the orchestrator's texts: briefing, helpers and notices match the golden f
   golden("orchestrator", tr.text([[orch, "<orchestrator session>"], [root, "<root>"]]));
 });
 
+test("the orchestrator's context care: the summary request, the fresh session's first message and summary.md match the golden file", (t) => {
+  const { root, store, later, event, queue } = setup(t, "orchestrator-fresh");
+  const tr = new Transcript("orchestrator");
+  const orchestrator = new Orchestrator(store, { draining: false } as unknown as Engine, () => {}, {}, { spawn: tr.spawn });
+  t.after(() => orchestrator.shutdown());
+  const change = () => orchestrator.onChange(loadProjectState(store));
+  queue({ id: "QA", title: "The planned work", steps: [{ id: "A1", title: "Step A1", goal: "Goal of A1.", acceptance: ["A1 is done"] }] });
+  approveQueue(store, "QA");
+
+  tr.section("the user's first message starts the orchestrator");
+  orchestrator.say("Hello.");
+  const old = store.readProject().orchestrator!.session!;
+
+  tr.section("its turn ended with its context 90 % full: the summary is asked for");
+  later(); store.writeRuntime(old, { state: "idle", context_tokens: 900, context_window: 1000, turns: 0, updated_at: now() });
+  change();
+
+  tr.section("the user writes meanwhile: the message waits for the fresh session");
+  later(); orchestrator.say("Also: the release is on Friday.");
+
+  tr.section("the summary written, the turn over: the fresh session starts from it");
+  event(old, { type: "context.summary", text: "Decided: two columns. Open: the colours. Plan: QA next. Promised: a digest on Friday.", topics: ["layout", "plan"], files: ["docs/plan.md"] });
+  change();
+  const fresh = store.readProject().orchestrator!.session!;
+
+  tr.section("the chat lines Nexus wrote: the old session's, then the fresh one's");
+  for (const id of [old, fresh]) for (const c of store.readChat(id).entries) if (c.from !== "orchestrator") tr.add(`${c.from}: ${c.text}`);
+  tr.section(".nexus/orchestrator/summary.md");
+  tr.add(readFileSync(store.orchestratorSummaryFile, "utf8"));
+
+  golden("orchestrator-fresh", tr.text([[fresh, "<fresh session>"], [old, "<orchestrator session>"], [root, "<root>"]]));
+});
+
 test("the thinking partner's briefing, with a notes folder and without, at each web level, matches the golden file", (t) => {
   const { root, store } = setup(t, "partner");
   const tr = new Transcript("partner");

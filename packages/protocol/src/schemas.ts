@@ -190,6 +190,11 @@ const OrchestratorSettings = z.object({
   effort: ClaudeEffort.optional(),
   /** Tell the orchestrator when a worker asks, or a run halts or finishes (it starts if needed). */
   notify: z.boolean().default(true),
+  /**
+   * The orchestrator's context care: when its context is fuller than this at the end of a turn, Nexus asks it for a
+   * summary and goes on in a fresh orchestrator session started from it (src/orchestrator.ts, contextCare).
+   */
+  context_threshold: Fraction.default(0.85),
 });
 /**
  * One entry of a fallback chain (routing.ts; PROTOCOL.md, "Kinds and their defaults"): a runtime with an optional model
@@ -313,7 +318,11 @@ export const ProjectFile = z.object({
    * Absent: every step.done is derived by level.
    */
   review_levels_since: Time.optional(),
-  orchestrator: OrchestratorSettings.extend({ session: Id.nullable().default(null) }).optional(),
+  orchestrator: OrchestratorSettings.extend({
+    session: Id.nullable().default(null),
+    /** Always there in effective settings (the global value, else the project's own); optional for a literal's sake. */
+    context_threshold: Fraction.optional(),
+  }).optional(),
   languages: LanguageSettings.extend({
     /** The working language (project only): files, code, comments, commits, context cards, notes. */
     working: Language.default(DEFAULT_WORKING_LANGUAGE),
@@ -400,6 +409,7 @@ export const StoredProject = z.object({
     model: ownOrNone(z.string()),
     effort: ownOrNone(ClaudeEffort),
     notify: own(z.boolean()),
+    context_threshold: own(Fraction),
   }).optional(),
   languages: z.object({
     reader: ownOrNone(Language),

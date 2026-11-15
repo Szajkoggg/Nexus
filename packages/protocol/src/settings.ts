@@ -27,6 +27,7 @@ export const OVERRIDABLE: readonly { path: readonly string[]; none?: true }[] = 
   { path: ["orchestrator", "model"], none: true },
   { path: ["orchestrator", "effort"], none: true },
   { path: ["orchestrator", "notify"] },
+  { path: ["orchestrator", "context_threshold"] },
   { path: ["languages", "reader"], none: true },
   ...TAG_KINDS.flatMap((k) => [
     { path: ["kinds", k, "runtime"] },
@@ -97,10 +98,11 @@ export function effectiveProject(stored: StoredProject, global: GlobalSettings):
 export function storedFrom(effective: ProjectFile, global: GlobalSettings): StoredProject {
   const out = structuredClone(effective) as Tree;
   out.follows_global = true;
-  for (const { path } of OVERRIDABLE) {
+  for (const { path, none } of OVERRIDABLE) {
     if (!applies(out, path)) continue;
     const value = get(effective, path);
-    set(out, path, same(value, get(global, path)) ? undefined : value === undefined ? null : value);
+    // A setting with a default that the settings leave out (a section written before it existed) follows.
+    set(out, path, same(value, get(global, path)) || (value === undefined && !none) ? undefined : value === undefined ? null : value);
   }
   return StoredProject.parse(out);
 }
@@ -121,11 +123,13 @@ export function applyChange(stored: StoredProject, global: GlobalSettings, next:
   const before = effectiveProject({ ...stored, orchestrator: stored.orchestrator ?? { session: null } }, global);
   const out = structuredClone(next) as Tree;
   out.follows_global = true;
-  for (const { path } of OVERRIDABLE) {
+  for (const { path, none } of OVERRIDABLE) {
     if (!applies(out, path)) continue;
     const value = get(next, path);
+    // Left out, a setting with a default is not cleared (only one without a default has a "none").
+    const given = value !== undefined || none;
     if (follow.includes(settingKey(path))) set(out, path, undefined);
-    else if (own.includes(settingKey(path)) || !same(value, get(before, path))) set(out, path, value === undefined ? null : value);
+    else if (given && (own.includes(settingKey(path)) || !same(value, get(before, path)))) set(out, path, value === undefined ? null : value);
     else set(out, path, get(stored, path)); // unchanged: following stays following, own stays own
   }
   return StoredProject.parse(out);

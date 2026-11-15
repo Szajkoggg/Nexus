@@ -93,6 +93,14 @@ function legacy(shape: (root: string) => string) {
   return { store, text, file: join(root, ".nexus", "project.yaml"), stored: () => YAML.parse(readFileSync(join(root, ".nexus", "project.yaml"), "utf8")) as StoredProject };
 }
 
+/**
+ * What a project.yaml from before global settings meant: its values, the built-in defaults for the rest, and the
+ * settings added since it was written (the orchestrator's context threshold) at their built-in values.
+ */
+const meant = (text: string): ProjectFile => {
+  const p = ProjectFile.parse(YAML.parse(text));
+  return p.orchestrator ? { ...p, orchestrator: { ...p.orchestrator, context_threshold: builtInSettings().orchestrator.context_threshold } } : p;
+};
 const globalWith = (change: (g: GlobalSettings) => void): GlobalSettings => { const g = builtInSettings(); change(g); return g; };
 
 test("the effective value is the project's own where it has one, else the global one; null is its own 'none'", () => {
@@ -216,7 +224,7 @@ test("the project's checks: the project's only, empty by default, stored trimmed
 for (const [name, shape] of [["Nexus", NEXUS_SHAPE], ["Project Honeycomb", HONEYCOMB_SHAPE]] as const) {
   test(`migrating ${name}'s project.yaml: equal values follow, different ones become its own, effective values unchanged, once`, () => {
     const x = legacy(shape);
-    const before = ProjectFile.parse(YAML.parse(x.text)); // what the file meant before global settings
+    const before = meant(x.text); // what the file meant before global settings
     assert.deepEqual(x.store.readProject(), before, "an unmigrated file reads as before");
     assert.equal(x.store.migrateProject(), true);
     const s = x.stored();
@@ -253,7 +261,7 @@ for (const [name, shape] of [["Nexus", NEXUS_SHAPE], ["Project Honeycomb", HONEY
 
 test("migrating against global values that differ keeps the effective values: an unset model becomes the project's own 'none'", () => {
   const x = legacy(NEXUS_SHAPE);
-  const before = ProjectFile.parse(YAML.parse(x.text));
+  const before = meant(x.text);
   writeGlobalSettings(globalWith((g) => { g.runtimes.claude.model = "opus"; g.defaults.review_level = 1; g.defaults.context_reuse_threshold = 0.7; }));
   assert.equal(x.store.migrateProject(), true);
   const s = x.stored();
@@ -291,6 +299,28 @@ test("a change of the global settings: values replaced, null clears an optional 
   assert.throws(() => updateGlobalSettings({ runtimes: { claude: { effort: "ultra" } } }), (e: Error) => e instanceof ActionError && /runtimes\.claude\.effort/.test(e.message));
   assert.equal(readGlobalSettings().runtimes.claude.effort, "high", "nothing written");
   assert.deepEqual(ownKeys(store.readStoredProject()), []);
+});
+
+test("the orchestrator's context threshold: 0.85 by default, global with a project override; a section written without it keeps it", () => {
+  const base = mkdtempSync(join(tmpdir(), "nexus-settings-"));
+  process.env.NEXUS_HOME = join(base, "home");
+  const store = ProjectStore.init(join(base, "p"), { id: "p", name: "P", root: join(base, "p") });
+  assert.equal(builtInSettings().orchestrator.context_threshold, 0.85);
+  // The orchestrator's section made from a literal that leaves the setting out (as the server makes it): it follows.
+  store.updateProject((p) => ({ ...p, orchestrator: { runtime: "claude", notify: true, session: null, ...p.orchestrator } }));
+  assert.equal(store.readStoredProject().orchestrator?.context_threshold, undefined);
+  assert.equal(store.readProject().orchestrator?.context_threshold, 0.85);
+  writeGlobalSettings(globalWith((x) => { x.orchestrator.context_threshold = 0.8; }));
+  assert.equal(store.readProject().orchestrator?.context_threshold, 0.8);
+  updateSettings(store, { orchestrator: { context_threshold: 0.9 } });
+  assert.deepEqual([store.readStoredProject().orchestrator?.context_threshold, store.readProject().orchestrator?.context_threshold], [0.9, 0.9]);
+  assert.ok(ownKeys(store.readStoredProject()).includes("orchestrator.context_threshold"));
+  // Left out of a later write of the section, the project's own value stays.
+  store.updateProject((p) => ({ ...p, orchestrator: { runtime: "claude", notify: true, session: "s1" } }));
+  assert.equal(store.readProject().orchestrator?.context_threshold, 0.9);
+  assert.throws(() => updateSettings(store, { orchestrator: { context_threshold: 1.5 } }));
+  updateSettings(store, { follow: ["orchestrator.context_threshold"] });
+  assert.equal(store.readProject().orchestrator?.context_threshold, 0.8);
 });
 
 test("the partners' web level: search by default, global with a project override, one of off, search and fetch", () => {

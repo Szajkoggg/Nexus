@@ -217,6 +217,28 @@ export function carriedMessages(unread: string[]): string | undefined {
     : undefined;
 }
 
+/** The orchestrator's context is fuller than its threshold (both in %): the summary for a fresh session is asked for. */
+export function orchestratorSummaryRequest(fill: number, threshold: number): string {
+  return `[Nexus] Your context is ${fill} % full (the threshold is ${threshold} %): Nexus goes on with you in a fresh orchestrator session, which starts from your summary, your current briefing and \`nexus status\`. Write that summary now with \`nexus context "<summary>" --topics a,b --files x,y\`: the decisions made with the user and why, the open items, the plan (what runs, what comes next and what it waits for), and what you promised the user. Leave out what \`nexus status\` and the files show anyway. Then end your turn; do not start anything else.`;
+}
+
+/**
+ * The first message of a fresh orchestrator session that goes on from one whose context was `fill` % full: its
+ * summary (none: a line says so), what to do with it, the messages the old session had not read, and `status`, the
+ * project's state as `nexus status` shows it now.
+ */
+export function orchestratorFreshSeed(fill: number, summary: SessionView["context"] | undefined, status: string, carried: string | undefined): string {
+  return [
+    `[Nexus] You go on as the project's orchestrator in a fresh session: the previous orchestrator session's context was ${fill} % full. You have not seen its conversation, only what follows.`,
+    summary
+      ? `\nIts summary, written for you at the switch (the user can read it in .nexus/orchestrator/summary.md):\n${summary.text}${summary.topics.length ? `\nTopics: ${summary.topics.join(", ")}` : ""}${summary.files.length ? `\nFiles: ${summary.files.join(", ")}` : ""}`
+      : `\nThe previous session left no summary: start from your briefing and the state below, and ask the user about anything you need from the earlier conversation.`,
+    `\nYour briefing (the system prompt) is the current one: where the summary or anything older says otherwise, the briefing holds. The files are the truth: the state below is the project's now; read the queues and run \`nexus status\` again before you act on anything older. Go on where the previous session left off; do not repeat the summary to the user, and end your turn when nothing is waiting.`,
+    carried ? `\n${carried}` : "",
+    `\nThe project now (nexus status):\n${status.trim()}`,
+  ].filter(Boolean).join("\n");
+}
+
 /** The user stops the running turn (`text`: why, in the user's words). */
 export function userStopNow(text?: string): string {
   return `[Nexus] The user asks you to stop now${text ? `: ${text}` : "."} Leave the work in a consistent state, record where you are with \`nexus step progress\`, and end your turn. Do not start anything new.`;
@@ -250,7 +272,11 @@ export function formatInbox(m: InboxView, state: ProjectState): string {
 
 // ---------------------------------------------------------------- the orchestrator
 
-export function orchestratorBriefing(project: string, threshold: number, l: Languages = { working: "en" }): string {
+/**
+ * The orchestrator's briefing: `threshold`, the workers' context reuse threshold (%); `own`, the orchestrator's own
+ * context threshold (%), at which it goes on in a fresh session.
+ */
+export function orchestratorBriefing(project: string, threshold: number, l: Languages = { working: "en" }, own = 85): string {
   const working = languageName(l.working);
   // Queue text follows the reader's language; with none set, the working language (as before the settings).
   const queueLanguage = l.reader ? languageName(l.reader) : working;
@@ -358,6 +384,8 @@ A revision changes only what has not started: add, change, remove or reorder pen
 Choosing model and effort: a step's kind chooses them by default. Each kind has its runtime, model, effort and fallback in the settings (nexus tags lists the kinds; the user sets their values), so tag each step with its one dominant kind and usually name nothing else. What a step runs on, strongest first: the step's own runtime, model, effort and fallback in the YAML; the queue's; what you name when you start the run (--runtime, --model, --effort); the step's kind's; the project's defaults. So start runs without --model and --effort unless you mean to override every kind for that run, and say why when you do; to depart for one step, name its values in the YAML. Before you choose a model or effort other than the kind's (for a run or a step), or propose to the user changing a kind's values, look at nexus stats --by model and --by effort (with --by kind for the work at hand) and cite the figures you go by in your reason: accepted in the first round, rounds, failures, working time and use. A group marked few data is no evidence yet; say so rather than lean on it. Codex takes effort low to xhigh; Claude Code also max. A step without values of its own runs on what this resolves to, not on the previous step's. Another runtime runs the step in a fresh session given the previous step's context summary; another model or effort keeps the session.
 
 Choosing a session for a run: \`nexus status\` shows each session's context card (topics, files, context fill). Continue a session (--use-session) when it worked on closely related things and its context is below ${threshold} %; otherwise start a fresh one and put what it needs into the queue's description and goals. Never give one session two running queues. With context care on (the project's default), a run whose session gets fuller than that at the end of a step goes on in a fresh session by itself, seeded with the step's context summary; \`nexus status\` shows the run's current session.
+
+Your own context: when it is fuller than ${own} % at the end of a turn, Nexus asks you, once, for a summary and then goes on in a fresh orchestrator session, which starts from that summary, your briefing as it is then, and \`nexus status\`. Write it with \`nexus context "<summary>" --topics a,b --files x,y\` (or \`nexus context -\` to read it from standard input): the decisions made with the user and why, the open items, the plan (what runs, what comes next and what it waits for), and what you promised the user; leave out what \`nexus status\` and the files show anyway. Then end your turn. The user can read it in .nexus/orchestrator/summary.md.
 
 Helpers (subagents, through the Agent tool; they read only (you also write queue drafts), and keep long research out of your context):
 - queue-reviewer: before you propose a queue, have it review the draft${defaultLanguages(l) ? "" : ` (tell it the queue's text is to be in ${queueLanguage})`}; fix what it finds, then propose.

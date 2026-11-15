@@ -27,6 +27,7 @@ a shell command can take part.
   project.yaml                          server
   tags.yaml                             server: the project's tag lists (areas, own activities, renames, proposals)
   metrics.yaml                          server: the project's metrics (unit, how shown, target, warning threshold)
+  orchestrator/summary.md               server: the orchestrator's latest summary for a fresh session (its context care)
   queues/
     <queue-id>/
       queue.yaml                        server: definition, revisions, approvals
@@ -98,7 +99,7 @@ runtimes:
   claude: { permission_mode: acceptEdits }            # model, effort: none (the runtime's default)
   codex:  { sandbox: workspace-write, approval_policy: never }   # model, effort, approvals_reviewer: none
 conversations: { runtime: claude, web: search }       # model, effort: none
-orchestrator: { runtime: claude, notify: true }       # model, effort: none
+orchestrator: { runtime: claude, notify: true, context_threshold: 0.85 }   # model, effort: none
 languages: {}                                         # reader: none (the language the user writes in)
 kinds:                                                # each kind's runtime, model, effort and fallback (see "Kinds and their defaults")
   mechanical: { runtime: claude, model: claude-sonnet-5-5, effort: low, fallback: [{ runtime: codex, model: gpt-6-luna, effort: low }] }
@@ -584,7 +585,7 @@ Written only by the server's queue engine; agents never touch them.
 | `sessions/<id>/delivered.jsonl` | What the server handed to the session (notes put into a step turn, inbox entries injected or sent as a turn, or `carried` into the first turn of the session `to` that took over); counts as read |
 | `sessions/<id>/refusals.jsonl` | One line per action the agent wanted but was refused: `at`, `session`, `runtime`, `by` (`permissions`: Claude Code's permission mode or rules; `nexus`: Nexus declined a Codex approval request; `auto_review`: Codex's auto reviewer), `tool` (Claude Code's tool name; for Codex `command`, `file_change`, `network`, `mcp`, `permissions`, …), `input` in short (the command, path or host, at most 300 characters), `reason` when the runtime gave one, `ref` (the runtime's id for the call: one record per refusal), `queue`, `step` |
 | `sessions/<id>/activity.jsonl` | A condensed record of the agent's stream: turns, tool calls, texts (clipped to 600 characters), tool errors, exits, and retries (`retry`: the runtime's own and the engine's), tagged with queue and step |
-| `sessions/<orchestrator>/applied.jsonl` | The server's result for each orchestrator request (`queue.drafted`, `session.request`, `status.set`), and the notices it has sent the orchestrator; the CLI waits for the result and prints it |
+| `sessions/<orchestrator>/applied.jsonl` | The server's result for each orchestrator request (`queue.drafted`, `session.request`, `status.set`), and the notices it has sent the orchestrator; the CLI waits for the result and prints it. Its context care's records: `context:asked` (its summary asked for; `message`: the context fill then, 0 to 1) and `context:first` (a fresh session's fill at the end of its first turn); see "The orchestrator's context care" |
 | `sessions/<orchestrator>/chat.jsonl` | The chat shown in the dashboard: the user's messages, the orchestrator's texts (whole, however long) and tool calls, Nexus notices. Append-only: an entry's **line** is the index from 0 of its line in the file (blank and broken lines counted, never shown), and stays its line for good |
 | `sessions/<orchestrator or conversation>/pins.json` | The chat's pinned messages: `{ pins: [{ line, at }] }`, `line` the message's line in that session's chat.jsonl, `at` when it was pinned; in chat order. A tool line cannot be pinned. A fresh session (a new orchestrator conversation) starts without pins; the old session's file stays with it. One writer: the server, on `POST …/sessions/:session/pins` from the dashboard |
 | `<NEXUS_HOME>/settings.yaml` | The global settings, which projects follow where they have no value of their own (see "Global settings") |
@@ -1010,7 +1011,9 @@ holds the user's answers (`answer.given`). Like an orchestrator, it may write th
 Written by the server, read by the session's adapter or hook. A `message` may name the `queue` and `step` it is
 about, so the dashboard shows it on that step. The server **routes answers**: every final `answer.given` (not an
 escalation), from the orchestrator or the user, is appended to the asking session's inbox once, with the id
-`answer-<event id>`. It routes send-backs the same way (`send_back`, see "Sending a step back"). The session records
+`answer-<event id>`. An orchestrator session that went on in a fresh one (`continued_by`, see "The orchestrator's
+context care") has its answers appended to the newest session of that line instead, unless one of them has it already.
+The orchestrator gets an answer in its inbox as a turn of its own (or into the running one), once; the chat shows it. It routes send-backs the same way (`send_back`, see "Sending a step back"). The session records
 each entry it has seen with `message.read`; `nexus status` shows the unread ones and records them.
 
 ```json
@@ -1037,7 +1040,7 @@ branch: v2/cliffs
 launched_by: nexus                     # nexus | external
 created_at: ...
 forked_from: null
-continues: 01JD...                     # context care: the session this one took over from
+continues: 01JD...                     # context care (a worker's, the orchestrator's): the session this one took over from
 continued_by: 01JD...                  # context care: the session that took over from this one
 about:                                 # a conversation about a step (role conversation only); not `queue`
   queue: W
@@ -1225,7 +1228,7 @@ from every agent session, and the others from every session but an orchestrator'
 | `POST /api/projects/:id/orchestrator/reset` | | The next message starts a new orchestrator session |
 | `POST /api/projects/:id/orchestrator/stop` | | Stops the orchestrator's running turn (see "Stopping a chat agent's turn" under "The orchestrator"); refused (409) when it is not in a turn |
 | `POST /api/projects/:id/orchestrator/settings` | `model`, `effort` (empty: the default) | The orchestrator's model and effort, from its next message on |
-| `PATCH /api/projects/:id/settings` | `name`, `runtimes`, `defaults`, `conversations`, `languages` (`reader`, `working`), `orchestrator` (`notify`, `model`, `effort`) (an empty value clears a field), `own?`, `follow?` (lists of setting keys, `runtimes.claude.model`) | Project settings, checked against the schema (see "Global settings"): a setting given another value, or named in `own`, becomes the project's own (in `own` also when it equals the global value); one named in `follow` follows the global value again; naming one in both is refused |
+| `PATCH /api/projects/:id/settings` | `name`, `runtimes`, `defaults`, `conversations`, `languages` (`reader`, `working`), `orchestrator` (`notify`, `model`, `effort`, `context_threshold`) (an empty value clears a field), `own?`, `follow?` (lists of setting keys, `runtimes.claude.model`) | Project settings, checked against the schema (see "Global settings"): a setting given another value, or named in `own`, becomes the project's own (in `own` also when it equals the global value); one named in `follow` follows the global value again; naming one in both is refused |
 | `GET /api/projects/:id/settings` | | `own` (the keys of the settings the project has its own value of) and `global` (the global settings) |
 | `GET /api/settings`, `PATCH /api/settings` | the global settings, nested as in `settings.yaml` (null or empty clears an optional one) | The global settings (`global`; GET also `keys`, every setting with a global value). PATCH writes `<NEXUS_HOME>/settings.yaml`, checked against the schema; every project that follows a changed value has it at once |
 | `POST /api/projects/:id/uploads` | `data` (the picture, base64, optionally as a `data:` URL) | Saves a picture for a chat message under `.nexus/uploads/` and answers `{ ok, result: { path, type, bytes } }`: `path` absolute (forward slashes), `type` `png`, `jpeg`, `webp` or `gif`. See "Uploads" below |
@@ -1509,7 +1512,8 @@ state. It records the step's status in `about.seeded`. When the step's status di
 
 ## The orchestrator
 
-`project.yaml` holds `orchestrator: { runtime, session, model?, notify }`. The orchestrator is a Claude Code session
+`project.yaml` holds `orchestrator: { runtime, session, model?, notify, context_threshold }` (`context_threshold`: see
+"The orchestrator's context care"). The orchestrator is a Claude Code session
 launched in the project's checkout with `--permission-mode dontAsk`, allowed only `Read`, `Grep`, `Glob`, `Agent`,
 `Bash(nexus:*)`, read-only git commands, and `Write(.nexus/drafts/**)` and `Edit(.nexus/drafts/**)`, and with
 `NotebookEdit` and `MultiEdit` disallowed: anything else, writes outside `.nexus/drafts/` included, is refused without
@@ -2060,6 +2064,39 @@ Its steps:
 [Nexus] Queue W "Variant B made a system" (revision 3, approved), step W3 (3 of 7): Support.
 ...
 ```
+
+## The orchestrator's context care
+
+The orchestrator is not compacted: it goes on in a fresh session started from a summary it writes on purpose (decided
+by the user on 2026-11-15; DESIGN.md, "The orchestrator's context care"). `orchestrator.context_threshold` (global
+with a project override, 0 to 1, default 0.85) is the fill (`context_tokens` / `context_window` in its
+`runtime.json`) at which this happens.
+
+1. **The request.** When the server looks at a change (`Orchestrator.onChange`) and the orchestrator's process is idle
+   (between turns) with its fill above the threshold, it asks once, with a turn: "[Nexus] Your context is N % full (the
+   threshold is T %): Nexus goes on with you in a fresh orchestrator session … Write that summary now with `nexus
+   context …`: the decisions made with the user and why, the open items, the plan …, and what you promised the user
+   … Then end your turn". It records `context:asked` in the session's `applied.jsonl` (the fill as its `message`), and
+   the chat shows a Nexus line. Never while a turn runs; not while the orchestrator's runtime is beyond the usage
+   threshold; not while an update drains. Without a known context window, nothing happens.
+2. **Meanwhile** nothing else reaches the session: notices and the user's notes wait for the fresh session, and a
+   message the user sends shows in the chat and waits in the session's inbox (`say-<id>`, a `message` from the user).
+3. **The switch**, once that turn is over (or the process has ended): the summary is the session's latest
+   `context.summary` at or after the request. If there is one, the server writes `.nexus/orchestrator/summary.md`
+   (replaced whole: a heading, which session wrote it when and at what fill, which session started from it, the text,
+   its topics and files). It writes the new `session.yaml` (`continues`) and sets `continued_by` on the old one, marks
+   the old session's unread inbox entries (not held notices) `carried` in its `delivered.jsonl`, closes the old process
+   and points `orchestrator.session` at the new session. The old chat gets "The orchestrator goes on in a fresh session
+   (<id>).", the new one a line that says whether it starts from the summary or, without one, from its current briefing
+   and `nexus status` only.
+4. **The fresh session's first message**: who it is and why (the old fill); the summary (text, topics, files) or the
+   line that there was none; that its briefing (the system prompt, the current one) holds over the summary and the files
+   are the truth; the messages carried over (`formatInbox`); and the project's state as `nexus status` shows it in an
+   orchestrator's session (`orchestratorOverview` in the protocol's `overview.ts`, which the CLI prints too).
+5. **Afterwards** the fresh session is told what no session of its line was told, since the first of them (the
+   `notify:…` keys of every session it continues); deploy changes only those after its own start. A fresh session
+   whose fill is above the threshold at the end of its first turn is not switched again (`context:first`): another
+   would be no emptier.
 
 ## How the engine runs a Codex session
 

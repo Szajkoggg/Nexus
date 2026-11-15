@@ -6,7 +6,7 @@ import { basename, extname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { execFileSync } from "node:child_process";
 import {
-  Event, isOpenQuestion, runGoing, ProjectStore, checksLine, findNexusDir, inReportFolder, loadProjectState, openPlan, stepValuesText, stopPlace, newId, normPath, now, readRegistry, writeRegistry,
+  Event, isOpenQuestion, orchestratorOverview, planLines, stopLines, ProjectStore, checksLine, findNexusDir, inReportFolder, loadProjectState, stepValuesText, newId, normPath, now, readRegistry, writeRegistry,
   PICTURE_ROLES, REVIEW_HELP, checkPicture, levelNow, pictureSize, recommendedOption, stepDefs,
   NEXUS_ACTIVITIES, TAG_KINDS, TAG_ORIGINS, TAG_SIZES, tagIssues, tagProposalText, tagsText,
   STAT_DIMENSIONS, readTurns, sinceTime, statDimension, statsReport, statsText, stepStats,
@@ -181,35 +181,6 @@ function stepEvent(type: string, step: string | undefined, extra: (s: SessionFil
   console.log(`ok: ${type} ${queue}/${step}`);
 }
 
-type QueueOf = ReturnType<typeof loadProjectState>["queues"][number];
-
-/** A stopped queue's ways out: where the stop is, how the user lifts it, and the orchestrator's proposal to lift it. */
-function stopLines(q: QueueOf): string[] {
-  if (q.status !== "stopped") return [];
-  const how = q.approved ? "the user lifts it with Continue, or by approving a new revision" : `the user lifts it by approving revision ${q.revision}`;
-  const p = q.lift_proposal;
-  return [`  stopped${stopPlace(q)}; ${how}`, ...(p ? [`  proposal to lift (orchestrator, ${p.at}): ${p.reason.replace(/\s+/g, " ").slice(0, 300)}`] : [])];
-}
-
-/**
- * A queue's place in the plan: the queues it waits for (each with who set it and how it stands), a proposal waiting for
- * the user, its planned start, and why it has not started.
- */
-function planLines(q: QueueOf): string[] {
-  const out: string[] = [];
-  const plan = openPlan(q);
-  const p = q.start;
-  if (plan) {
-    const entries = plan.after.map((e) => `${e.queue} (${e.by === "user" ? "set by the user" : "yours"}${e.done ? ", done" : ""})`);
-    out.push(`  in the plan${plan.by === "user" ? " (put in by the user)" : ""}: ${entries.length ? `starts after ${entries.join(", ")}` : "starts as soon as it may"}${p?.session ? `, in session ${p.session}` : ""}`);
-    if (plan.proposal) out.push(`  your proposal waits for the user: ${plan.proposal.after.length ? `after ${plan.proposal.after.join(", ")}` : "with no queue before it"} (${plan.proposal.reason.replace(/\s+/g, " ").slice(0, 200)})`);
-  }
-  if (p?.at) out.push(`  scheduled at ${new Date(p.at).toLocaleString("sv-SE").slice(0, 16)}${p.usage ? " (usage reset)" : ""}${p.session ? `, in session ${p.session}` : ""}`);
-  if (p?.failed) out.push(`  the planned start did not happen: ${p.failed.reason} (the user sees it; start the queue or take it out of the plan with nexus run ${q.id} cancel-start)`);
-  else if (p || plan) out.push(`  now: ${(p?.waiting || plan?.waiting || "it may start")}${p?.held ? " (it starts by itself)" : ""}`);
-  return out;
-}
-
 /** "YYYY-MM-DD HH:MM" in this machine's local time, as ISO 8601. */
 function localTime(text: string): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})$/.exec(text.trim());
@@ -217,65 +188,6 @@ function localTime(text: string): string {
   const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]));
   if (d.getMonth() !== Number(m[2]) - 1 || d.getDate() !== Number(m[3]) || d.getHours() !== Number(m[4])) throw new UsageError(`no such time: ${text}`);
   return d.toISOString();
-}
-
-/** A provisional acceptance in the overview: waiting for the user, confirmed, or sent to a fix. */
-function provisionalText(x: { provisional?: { confirmed?: string; fix?: { text: string } } }): string {
-  const p = x.provisional;
-  if (!p) return "";
-  return p.fix ? ` (accepted provisionally; the user asked a fix: ${p.fix.text.replace(/\s+/g, " ").slice(0, 120)})`
-    : p.confirmed ? " (accepted provisionally, confirmed by the user)" : " (accepted provisionally, waits for the user's confirmation)";
-}
-
-/** The user's skip of the queue's closing refactoring step (at Continue or with an approval), with its reason; empty without one. */
-function closingSkipped(q: QueueOf): string {
-  const c = q.steps.find((x) => x.closing);
-  return c?.status === "skipped" ? `closing refactoring skipped by the user: ${(c.reason ?? "").replace(/\s+/g, " ").slice(0, 200)}` : "";
-}
-
-/** What an orchestrator needs to see: every queue, run, open question and worker session with its context card. */
-function overview(state: ReturnType<typeof loadProjectState>): void {
-  const pct = (t?: number, w?: number) => (t && w ? `${Math.round((100 * t) / w)} % context` : "context unknown");
-  const done = state.queues.filter((q) => q.status === "done" || q.status === "cancelled");
-  console.log(`
-Queues (${state.queues.length - done.length} open; finished: ${done.map((q) => `${q.id}${closingSkipped(q) ? ` (${closingSkipped(q)})` : ""}`).join(", ") || "none"})`);
-  for (const q of state.queues.filter((x) => !done.includes(x))) {
-    const run = q.run ? `; run ${q.run.state}${q.run.step ? ` at ${q.run.step}` : ""} in session ${q.run.session}${q.run.reason ? ` (${q.run.reason})` : ""}` : "";
-    console.log(`- ${q.id} [${q.status}] ${q.title}: revision ${q.revision}, ${q.approved ? "approved" : "not approved"}${run}`);
-    // A revision waiting for approval comes first: nothing runs and no planned start fires until the user approves it.
-    if (!q.approved) console.log(`  needs approval (revision ${q.revision})${(q.start && !q.start.failed) || openPlan(q) ? ": its planned start below waits for it" : ""}`);
-    console.log(`  steps: ${q.steps.map((x) => `${x.id} ${x.status} (level ${x.level}${x.level_from === "user" ? ", set by the user" : ""})${provisionalText(x)}${x.closing && x.status === "skipped" ? ` (${closingSkipped(q)})` : ""}${x.review_with ? ` (for ${x.review_with === "user" ? "the user" : "you"})` : ""}${stepValuesText(x) ? ` [on ${stepValuesText(x)}]` : ""}${x.tags.kind || x.tags.size ? ` {${[x.tags.kind, x.tags.size].filter(Boolean).join(" ")}}` : ""}`).join(", ")}`);
-    if (q.status_reason && q.status !== "running") console.log(`  why: ${q.status_reason.replace(/\s+/g, " ").slice(0, 300)}`);
-    for (const line of stopLines(q)) console.log(line);
-    for (const line of planLines(q)) console.log(line);
-  }
-  const open = state.questions.filter(isOpenQuestion);
-  console.log(`
-Open questions (${open.length})`);
-  for (const x of open) console.log(`- ${x.qid} [${x.state}] ${x.queue ?? ""}${x.step ? `/${x.step}` : ""}: ${x.text}`);
-  const workers = state.sessions.filter((x) => x.role === "worker");
-  console.log(`
-Worker sessions (${workers.length})`);
-  for (const w of workers) {
-    const busy = state.queues.find((q) => q.run?.session === w.id && runGoing(q.run));
-    console.log(`- ${w.id} "${w.title ?? ""}" ${w.runtime}${w.launched_by === "nexus" ? "" : " (external)"}, ${w.live?.state ?? "not live"}, ${w.live?.model ?? w.model ?? "model ?"}, ${pct(w.live?.context_tokens, w.live?.context_window)}${busy ? `, running queue ${busy.id}` : ", free"}`);
-    if (w.context) console.log(`  knows: ${w.context.topics.join(", ") || "-"}; ${w.context.text.replace(/\s+/g, " ").slice(0, 300)}`);
-  }
-  const attention = state.attention.filter((a) => a.kind !== "question");
-  if (attention.length) {
-    console.log(`
-Waiting for the user`);
-    for (const a of attention) {
-      const where = a.lift ? `${a.queue}${a.lift.place}` : `${a.queue ?? ""}${a.step ? `/${a.step}` : ""}`;
-      // A stop's waiting item has its reason as its text and its condition apart: the agent reads both, as before.
-      const text = a.condition ? `${a.condition}: ${a.text}` : a.text;
-      console.log(`- ${a.kind} ${where}: ${text.replace(/\s+/g, " ").slice(0, 160)}`);
-      if (!a.lift) continue;
-      console.log(`  ${a.lift.continue ? "Continue lifts it" : `approving revision ${a.lift.revision} lifts it`}`);
-      const p = a.lift.proposal;
-      if (p) console.log(`  proposal to lift (orchestrator, ${p.at}): ${p.reason.replace(/\s+/g, " ").slice(0, 300)}`);
-    }
-  }
 }
 
 function orchestrator(st: ProjectStore): SessionFile {
@@ -552,7 +464,7 @@ const commands: Record<string, () => void | Promise<void>> = {
     const sid = o.session ?? process.env.NEXUS_SESSION;
     const s = sid ? state.sessions.find((x) => x.id === sid) : undefined;
     console.log(`project ${state.project.name} (${state.project.id})`);
-    if (s?.role === "orchestrator" || s?.role === "conversation") return overview(state);
+    if (s?.role === "orchestrator" || s?.role === "conversation") return console.log(orchestratorOverview(state));
     if (s) console.log(`session ${s.id}: ${s.role}, ${s.runtime}, queue ${s.queue ?? "-"}`);
     // Without a queue of its own: the queues at work, then the approved ones not running (ready to start or resume).
     const queues = s?.queue ? state.queues.filter((q) => q.id === s.queue) : [

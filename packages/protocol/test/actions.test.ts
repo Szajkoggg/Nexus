@@ -74,6 +74,25 @@ test("answers reach the asker's inbox exactly once; escalations go to the user",
   assert.deepEqual([inbox[0]!.type, inbox[0]!.from], ["answer", "user"]);
 });
 
+test("an answer to an orchestrator session that went on in a fresh one goes to the newest of its line, once", () => {
+  const { st, session, emit } = setup();
+  const o1 = session("orchestrator"); const o2 = session("orchestrator"); const o3 = session("orchestrator");
+  st.writeSession({ ...o1, continued_by: o2.id }); st.writeSession({ ...o2, continues: o1.id, continued_by: o3.id }); st.writeSession({ ...o3, continues: o2.id });
+  emit(o1, { type: "question.asked", qid: "qa", text: "Which plan?", can_continue: true });
+  emit(o1, { type: "question.asked", qid: "qb", text: "Which name?", can_continue: true });
+  // One answer already reached the old session (and went into the fresh one's first turn): it is not routed again.
+  st.appendInbox(o2.id, { v: 1, id: "answer-early", at: now(), from: "user", type: "answer", qid: "qb", text: "Early." });
+  emit(session("user"), { type: "answer.given", qid: "qa", text: "Plan A." });
+  st.appendEvent({ v: 1, id: "early", at: now(), session: o1.id, type: "answer.given", qid: "qb", text: "Early." } as Event);
+  assert.equal(routeAnswers(st), 1);
+  assert.equal(routeAnswers(st), 0);
+  const inbox = (id: string) => st.readInbox(id).entries.map((m) => m.id);
+  assert.deepEqual(inbox(o1.id), []);
+  assert.deepEqual(inbox(o2.id), ["answer-early"]);
+  assert.equal(inbox(o3.id).length, 1);
+  assert.equal(st.readInbox(o3.id).entries[0]!.type === "answer" && st.readInbox(o3.id).entries[0]!.text, "Plan A.");
+});
+
 test("a message to a running session shows on its step until it is read", () => {
   const { st, session, emit } = setup();
   const w = session("worker");

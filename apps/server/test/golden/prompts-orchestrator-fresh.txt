@@ -1,0 +1,49 @@
+== the user's first message starts the orchestrator
+-- to orchestrator 1
+Hello.
+== its turn ended with its context 90 % full: the summary is asked for
+-- to orchestrator 1
+[Nexus] Your context is 90 % full (the threshold is 85 %): Nexus goes on with you in a fresh orchestrator session, which starts from your summary, your current briefing and `nexus status`. Write that summary now with `nexus context "<summary>" --topics a,b --files x,y`: the decisions made with the user and why, the open items, the plan (what runs, what comes next and what it waits for), and what you promised the user. Leave out what `nexus status` and the files show anyway. Then end your turn; do not start anything else.
+== the user writes meanwhile: the message waits for the fresh session
+== the summary written, the turn over: the fresh session starts from it
+-- to orchestrator 2
+[Nexus] You go on as the project's orchestrator in a fresh session: the previous orchestrator session's context was 90 % full. You have not seen its conversation, only what follows.
+
+Its summary, written for you at the switch (the user can read it in .nexus/orchestrator/summary.md):
+Decided: two columns. Open: the colours. Plan: QA next. Promised: a digest on Friday.
+Topics: layout, plan
+Files: docs/plan.md
+
+Your briefing (the system prompt) is the current one: where the summary or anything older says otherwise, the briefing holds. The files are the truth: the state below is the project's now; read the queues and run `nexus status` again before you act on anything older. Go on where the previous session left off; do not repeat the summary to the user, and end your turn when nothing is waiting.
+
+Messages that came for the previous session and were not read yet:
+
+[Nexus] Message from the user:
+Also: the release is on Friday.
+
+The project now (nexus status):
+project Pilot (p)
+
+Queues (1 open; finished: none)
+- QA [approved] The planned work: revision 1, approved
+  steps: A1 pending (level 2)
+
+Open questions (0)
+
+Worker sessions (0)
+== the chat lines Nexus wrote: the old session's, then the fresh one's
+user: Hello.
+nexus: The orchestrator's context is 90 % full (its threshold is 85 %): Nexus asked it for a summary, and it goes on in a fresh session.
+user: Also: the release is on Friday.
+nexus: The orchestrator goes on in a fresh session (<fresh session>).
+nexus: A fresh orchestrator session: the previous one's context was 90 % full. It starts from the summary the previous session wrote (.nexus/orchestrator/summary.md), its current briefing and nexus status.
+== .nexus/orchestrator/summary.md
+# Orchestrator summary
+
+Written by orchestrator session <orchestrator session> at 2026-01-01T09:03:00.000Z, when its context was 90 % full. The fresh session <fresh session> started from it.
+
+Decided: two columns. Open: the colours. Plan: QA next. Promised: a digest on Friday.
+
+Topics: layout, plan
+Files: docs/plan.md
+

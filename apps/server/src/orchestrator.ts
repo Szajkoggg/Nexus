@@ -4,7 +4,7 @@
 // drafts under .nexus/drafts/: permission mode dontAsk with a read-only allow list plus the drafts rules.
 import { randomUUID } from "node:crypto";
 import {
-  ActionError, ClaudeEffort, reviewedByOrchestrator, runGoing, ProjectStore, applyDraft, defineMetric, inPlan, loadProjectState, metricDef, openPlan, overThreshold, proposePlan, proposeTags, readAway, readUsage, orchestratorStatusChange, newId, now, sendBack, type Event, type EventType, type ProjectState, type SessionFile,
+  ActionError, ClaudeEffort, reviewedByOrchestrator, runGoing, ProjectStore, applyDraft, defineMetric, inPlan, loadProjectState, metricDef, openPlan, orchestratorOverview, overThreshold, proposePlan, proposeTags, readAway, readUsage, orchestratorStatusChange, newId, now, sendBack, type Applied, type Event, type EventType, type ProjectState, type SessionFile, type SessionView,
 } from "@nexus/protocol";
 import type { AgentProcess } from "./agent.ts";
 import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Hosted, type Launch } from "./agent-host.ts";
@@ -16,7 +16,7 @@ import { describeDeployChanges, type DeployChanges } from "./deploy.ts";
 import type { PlanNotice } from "./deploy-plan.ts";
 import {
   acceptedNoteNotice, approvalNotice, discardNotice, liftNotice, mergedNotice, mergeWaitNotice, missedStartNotice, noticeText, orchestratorBriefing, pausedNotice,
-  questionNotice, rejectionNotice, restartedNotice, fixAskedNotice, levelToUserNotice, reviewNotice, awayOnNotice, awayEndNotice, awayStuckNotice, planDecisionNotice, planHeldNotice, runEndNotice, stepNoteNotice, tagDecisionNotice, fallbackNotice, metricNotice, userMessage, withdrawalNotice,
+  carriedMessages, formatInbox, orchestratorFreshSeed, orchestratorSummaryRequest, questionNotice, rejectionNotice, restartedNotice, fixAskedNotice, levelToUserNotice, reviewNotice, awayOnNotice, awayEndNotice, awayStuckNotice, planDecisionNotice, planHeldNotice, runEndNotice, stepNoteNotice, tagDecisionNotice, fallbackNotice, metricNotice, userMessage, withdrawalNotice,
 } from "./prompts.ts";
 
 // Agent (formerly Task) lets it call subagents; they run within these same read-only permissions.
@@ -33,6 +33,16 @@ const NEVER = ["NotebookEdit", "MultiEdit"];
 
 /** The orchestrator's events the server carries out (applyRequests), each once, its outcome in applied.jsonl. */
 const REQUESTS: ReadonlySet<EventType> = new Set(["queue.drafted", "session.request", "status.set", "review.sent_back", "plan.proposed", "tags.proposed", "metric.defined"]);
+
+/**
+ * The orchestrator's context care (contextCare), recorded in its session's applied.jsonl: the request for its summary
+ * (the message: the context fill then, 0 to 1), and the fill of a fresh session at the end of its first turn.
+ */
+const SUMMARY_ASKED = "context:asked";
+const FIRST_FILL = "context:first";
+/** The orchestrator's context threshold when the project has none (the setting's default). */
+const DEFAULT_CONTEXT_THRESHOLD = 0.85;
+const pct = (fill: number) => Math.round(fill * 100);
 
 /** A push notification for the user's devices (src/remote.ts `push`). */
 export interface UserNotice { title: string; body: string; url: string; tag: string }
@@ -89,6 +99,14 @@ export class Orchestrator {
   /** A message from the user in the chat. */
   say(text: unknown): void {
     if (typeof text !== "string" || !text.trim()) throw new ActionError("the message is empty");
+    // While the session writes its summary for a fresh one, the message waits for the fresh session (its first turn).
+    const current = this.session();
+    if (current && this.summaryAsked(current)) {
+      this.store.appendChat(current.id, { at: now(), from: "user", text: text.trim() });
+      this.store.appendInbox(current.id, { v: 1, id: `say-${newId()}`, at: now(), from: "user", type: "message", text: text.trim() });
+      this.changed();
+      return;
+    }
     const s = this.ensure();
     this.store.appendChat(s.id, { at: now(), from: "user", text: text.trim() });
     // Changes for agents held while notices are off go in with this turn (and count as told only now).
@@ -154,6 +172,8 @@ export class Orchestrator {
     }
     this.applyRequests(s);
     if (this.engine.draining) return; // held until the update settles: told after its restart, or once it fails
+    // Its summary for a fresh session asked for, or the switch made: what follows waits for the fresh session.
+    if (this.contextCare(state, s)) return;
     // The user's notes on an acceptance are like chat messages of the user: told whatever notify says.
     for (const n of notes) {
       this.ensure();
@@ -185,6 +205,7 @@ ${n.text}` });
     }
     // With notices off it is still told the outcome of an update it ran itself: that answers its own command.
     this.notify(state, s, state.project.orchestrator?.notify === false);
+    this.deliverAnswers(state, s);
   }
 
   /**
@@ -284,7 +305,7 @@ ${n.text}` });
       permissionMode: "dontAsk",
       allowedTools: [...READ_ONLY_TOOLS, ...DRAFT_TOOLS],
       disallowedTools: NEVER,
-      appendSystemPrompt: orchestratorBriefing(project.name, Math.round(project.defaults.context_reuse_threshold * 100), project.languages),
+      appendSystemPrompt: orchestratorBriefing(project.name, pct(project.defaults.context_reuse_threshold), project.languages, pct(o?.context_threshold ?? DEFAULT_CONTEXT_THRESHOLD)),
       agentsFile: orchestratorAgentsFile(),
       env: this.host.env(s.id),
     } });
@@ -314,6 +335,111 @@ ${n.text}` });
   private deliver(text: string, quote: readonly string[] = [text]): void {
     this.host.send(this.hosted!, text, { quote });
     this.changed();
+  }
+
+  // ---------------------------------------------------------------- context care: a fresh session with a summary
+
+  /** The session and those it went on from (context care), newest first. */
+  private lineage(s: SessionFile): SessionFile[] {
+    const out = [s];
+    for (let x = s; x.continues && !out.some((y) => y.id === x.continues);) {
+      try { x = this.store.readSession(x.continues); } catch { break; }
+      out.push(x);
+    }
+    return out;
+  }
+
+  /** The request for the session's summary, if Nexus made it (it then goes on in a fresh session). */
+  private summaryAsked(s: SessionFile): Applied | undefined {
+    return this.store.readApplied(s.id).entries.find((a) => a.event === SUMMARY_ASKED);
+  }
+
+  /**
+   * The orchestrator's context care (decided by the user on 2026-11-15, queue CC): it is not compacted; it goes on in a
+   * fresh session started from a summary it writes on purpose. When its context is fuller than its threshold
+   * (orchestrator.context_threshold) at the end of a turn, its process idle, it is asked once for that summary (with
+   * `nexus context`); once that turn is over, a fresh session goes on from it (goOnFresh). Meanwhile notices, notes
+   * and the user's messages wait for the fresh session. A fresh session already that full at the end of its first turn
+   * is not switched again: another would be no emptier. True: what else this change would tell it waits.
+   */
+  private contextCare(state: ProjectState, s: SessionFile): boolean {
+    const applied = this.store.readApplied(s.id).entries;
+    const asked = applied.find((a) => a.event === SUMMARY_ASKED);
+    if (asked) {
+      // Its summary turn runs; the fresh session's first turn waits while its runtime is beyond the usage threshold.
+      if (!this.idle() || this.runtimeFull(state)) return true;
+      this.goOnFresh(s, asked);
+      return true;
+    }
+    if (this.proc?.state !== "idle") return false;
+    const live = this.store.readRuntime(s.id);
+    const fill = live?.context_tokens && live.context_window ? live.context_tokens / live.context_window : undefined;
+    if (fill === undefined) return false;
+    let first = applied.find((a) => a.event === FIRST_FILL);
+    if (s.continues && !first) {
+      first = { at: now(), event: FIRST_FILL, ok: true, message: String(fill) };
+      this.store.appendApplied(s.id, first);
+    }
+    const threshold = state.project.orchestrator?.context_threshold ?? DEFAULT_CONTEXT_THRESHOLD;
+    if (fill <= threshold || (first && Number(first.message) > threshold) || this.runtimeFull(state)) return false;
+    this.store.appendApplied(s.id, { at: now(), event: SUMMARY_ASKED, ok: true, message: String(fill) });
+    this.store.appendChat(s.id, { at: now(), from: "nexus", text: `The orchestrator's context is ${pct(fill)} % full (its threshold is ${pct(threshold)} %): Nexus asked it for a summary, and it goes on in a fresh session.` });
+    this.deliver(orchestratorSummaryRequest(pct(fill), pct(threshold)));
+    return true;
+  }
+
+  /**
+   * The switch: a fresh orchestrator session that continues `old`, whose process ends. Its first message is the
+   * summary `old` wrote after it was asked (also written to .nexus/orchestrator/summary.md), or a line that it left
+   * none, what to do, the messages `old` had not read (answers, the user's words; notices are told again), and the
+   * project's state as `nexus status` shows it. The current briefing comes with the new process.
+   */
+  private goOnFresh(old: SessionFile, asked: Applied): void {
+    const fill = pct(Number(asked.message));
+    const written = this.store.readEvents(old.id).entries.filter((e) => e.type === "context.summary" && e.at >= asked.at).at(-1);
+    const summary: SessionView["context"] = written?.type === "context.summary" ? { text: written.text, topics: written.topics, files: written.files, at: written.at } : undefined;
+    const state = loadProjectState(this.store);
+    const unread = (state.sessions.find((x) => x.id === old.id)?.inbox ?? []).filter((m) => !m.read_at && !m.id.startsWith("notice-"));
+    const project = this.store.readProject();
+    const fresh: SessionFile = {
+      protocol: 1, id: newId(), project: project.id, role: "orchestrator", runtime: "claude", native_id: randomUUID(),
+      title: "Orchestrator", cwd: project.root, launched_by: "nexus", created_at: now(),
+      model: project.orchestrator?.model, effort: project.orchestrator?.effort, continues: old.id,
+    };
+    this.store.writeSession(fresh);
+    this.store.writeSession({ ...this.store.readSession(old.id), continued_by: fresh.id });
+    if (summary) {
+      const lists = [summary.topics.length ? `Topics: ${summary.topics.join(", ")}` : "", summary.files.length ? `Files: ${summary.files.join(", ")}` : ""].filter(Boolean);
+      this.store.writeOrchestratorSummary(`# Orchestrator summary\n\nWritten by orchestrator session ${old.id} at ${summary.at}, when its context was ${fill} % full. The fresh session ${fresh.id} started from it.\n\n${summary.text.trim()}\n${lists.length ? `\n${lists.join("\n")}\n` : ""}`);
+    }
+    for (const m of unread) this.store.appendDelivered(old.id, { at: now(), kind: "inbox", id: m.id, via: "carried", to: fresh.id });
+    const l = this.hosted;
+    if (l) this.host.close(l.session);
+    this.store.updateProject((p) => ({ ...p, orchestrator: { runtime: "claude", notify: true, ...p.orchestrator, session: fresh.id } }));
+    this.store.appendChat(old.id, { at: now(), from: "nexus", text: `The orchestrator goes on in a fresh session (${fresh.id}).` });
+    this.store.appendChat(fresh.id, { at: now(), from: "nexus", text: summary
+      ? `A fresh orchestrator session: the previous one's context was ${fill} % full. It starts from the summary the previous session wrote (.nexus/orchestrator/summary.md), its current briefing and nexus status.`
+      : `A fresh orchestrator session: the previous one's context was ${fill} % full. It left no summary, so the fresh session starts from its current briefing and nexus status only.` });
+    this.ensure();
+    const status = `project ${state.project.name} (${state.project.id})\n${orchestratorOverview(state)}`;
+    this.deliver(orchestratorFreshSeed(fill, summary, status, carriedMessages(unread.map((m) => formatInbox(m, state)))));
+  }
+
+  /**
+   * Answers to the orchestrator's own questions (nexus ask), routed to its current session (routeAnswers; also those
+   * to a question of a session it went on from): each goes in once, as a turn or into the running one.
+   */
+  private deliverAnswers(state: ProjectState, s: SessionFile): void {
+    const answers = (state.sessions.find((x) => x.id === s.id)?.inbox ?? []).filter((m) => m.type === "answer" && !m.read_at);
+    if (!answers.length || this.runtimeFull(state)) return;
+    this.ensure();
+    for (const m of answers) {
+      if (m.type !== "answer") continue;
+      const q = state.questions.find((x) => x.qid === m.qid);
+      this.store.appendDelivered(s.id, { at: now(), kind: "inbox", id: m.id, via: "turn" });
+      this.store.appendChat(s.id, { at: now(), from: "nexus", text: `The ${m.from} answered the orchestrator's question${q ? ` "${q.text}"` : ""}:\n${m.text}` });
+      this.deliver(formatInbox(m, state));
+    }
   }
 
   // ---------------------------------------------------------------- requests from the orchestrator
@@ -402,8 +528,10 @@ ${n.text}` });
   }
 
   private notify(state: ProjectState, s: SessionFile, updateOnly = false): void {
-    const told = new Set(this.store.readApplied(s.id).entries.map((a) => a.event));
-    const since = s.created_at;
+    // A fresh session that goes on from earlier ones (context care) is told what none of them was told, since the first.
+    const line = this.lineage(s);
+    const told = new Set(line.flatMap((x) => this.store.readApplied(x.id).entries.map((a) => a.event)));
+    const since = line.at(-1)!.created_at;
     // fact: what happened, shown in the chat too (unless `quiet`); todo: the instruction, for the orchestrator only;
     // more: further text for the orchestrator only, recorded under its own keys.
     const items: { key: string; fact: string; todo: string; quiet?: boolean; more?: { text: string; keys: string[] } }[] = [];
