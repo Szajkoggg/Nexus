@@ -614,8 +614,7 @@ app.post("/api/projects/:id/sessions/:session/pins", act((st, b, p) => ({ pins: 
 app.get("/api/projects/:id/search", (c) => {
   const e = c.get("entry");
   try {
-    const q = parseSearch({ q: c.req.query("q"), kinds: c.req.query("kinds"), since: c.req.query("since"), limit: c.req.query("limit"), tools: c.req.query("tools") });
-    return c.json(searchProject(e.store, q));
+    return c.json(searchProject(e.store, parseSearch(c.req.query())));
   } catch (err) {
     if (err instanceof SearchError) return c.json({ error: err.message }, 400);
     console.error(err);
