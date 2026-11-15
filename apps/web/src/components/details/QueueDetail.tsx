@@ -142,7 +142,9 @@ function QueueBar({ project, queue, left, work, needsChoice }: {
   const a = useApprove({ project: id, queue, left, work, reloaded });
   // A finished or cancelled queue is only read: no approval, no review policy.
   const over = queueOver(queue);
-  useCtrlEnter(!queue.approved && !over, a.submit);
+  // Approving is open while the revision is not approved and the queue is not over.
+  const approvable = !queue.approved && !over;
+  useCtrlEnter(approvable, a.submit);
   const [error, setError] = useState<string>();
   const canWithdraw = canWithdrawApproval(queue);
   const [withdrawOpen, setWithdrawOpen] = useState(false);
@@ -158,7 +160,7 @@ function QueueBar({ project, queue, left, work, needsChoice }: {
   const policy = queue.review_level ? levelWords(queue.review_level) : projectDefault;
 
   const menu: MenuEntry[] = [
-    ...(!queue.approved && !over ? a.menu : []),
+    ...(approvable ? a.menu : []),
     ...(canWithdraw && !withdrawOpen ? [{ label: t("details.withdraw.menu"), danger: true, onSelect: () => setWithdrawOpen(true) }] : []),
     ...(!policyOpen && !over ? [{ label: t("details.level.menu", { level: policy }), onSelect: () => setPolicyOpen(true) }] : []),
   ];
@@ -167,19 +169,19 @@ function QueueBar({ project, queue, left, work, needsChoice }: {
   const hint = fail ? <span className="text-danger">{fail}</span>
     : said ? <span className="text-info">{said}</span>
     : stopped && queue.approved ? d!.hint
-    : !queue.approved && !over ? a.hint
+    : approvable ? a.hint
     : undefined;
   const primary = stopped && queue.approved
     ? d!.confirm && <Button disabled={cont.busy || d!.confirm.disabled} onClick={() => void cont.go(d!.needsChoice, work, canSkipClosing && skipClosing)}>{d!.confirm.label}</Button>
-    : !queue.approved && !over
+    : approvable
       ? <Button disabled={a.disabled} onClick={a.submit}>{a.label}</Button>
       : undefined;
   const opened = (!queue.approved && a.wordsOpen) || (canWithdraw && withdrawOpen) || policyOpen;
   // A finished or cancelled queue's panel has no bar: nothing is left to do in it.
   if (over && !hint && !menu.length && !opened) return null;
   return (
-    <ActionBar hint={hint} menu={menu.length ? menu : undefined} secondary={!queue.approved && !over && <AskButton project={id} queue={queue} />} primary={primary}
-      left={canSkipClosing ? <SkipClosingBox checked={skipClosing} onChange={setSkipClosing} /> : !queue.approved && !over && a.skipBox}>
+    <ActionBar hint={hint} menu={menu.length ? menu : undefined} secondary={approvable && <AskButton project={id} queue={queue} />} primary={primary}
+      left={canSkipClosing ? <SkipClosingBox checked={skipClosing} onChange={setSkipClosing} /> : approvable && a.skipBox}>
       {opened && (
         <div className="space-y-4">
           {!queue.approved && a.wordsBox}
