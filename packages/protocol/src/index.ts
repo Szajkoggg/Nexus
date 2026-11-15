@@ -30,3 +30,4 @@ export * from "./overview.ts";
 export * from "./templates.ts";
 export * from "./recurring.ts";
 export * from "./static-analysis.ts";
+export * from "./search.ts";

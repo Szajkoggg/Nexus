@@ -15,7 +15,7 @@ import {
   ensureGlobalSettings, readGlobalSettings, updateGlobalSettings, MaxRunning, ownKeys, OVERRIDABLE, settingKey, readRegistry, readUsage, readTurns, commentOnPicture, markPicture, routeAnswers, routeSendBacks, sendBack, sendMessage, setQueueSettings, setStepLevel, confirmProvisional, type ProjectState,
   readAway, writeAway, awayNow, awayUntil, turnAway, expireAway, acceptPlanProposal, declinePlanProposal, handBackPlan, acceptTagProposal, declineTagProposal,
   STAT_DIMENSIONS, STAT_FILTERS, projectMetrics, sinceTime, statDimension, statsReport, stepStats, usageDays, type ProjectMetrics, type StatsReport, type UsageDays,
-  MIN_SAMPLES, queueEstimate, stepSamples, isOpenQuestion, writeCount, type EstimatesResponse, type LeftView, type TemplatesResponse, readTemplates, type ProjectSummary, type RemovalView,
+  SearchError, parseSearch, MIN_SAMPLES, queueEstimate, stepSamples, isOpenQuestion, writeCount, type EstimatesResponse, type LeftView, type TemplatesResponse, readTemplates, type ProjectSummary, type RemovalView,
 } from "@nexus/protocol";
 import { newestFirst, projectDigest, projectRunning, usageSince, type DigestEvent, type DigestResponse, type DigestRunning, type UsageRun } from "@nexus/protocol/digest";
 import { Engine } from "./engine.ts";
@@ -36,6 +36,7 @@ import { DeployPlanner, PlanError, planTime } from "./deploy-plan.ts";
 import { MAX_UPLOAD_BODY, UploadError, saveUpload } from "./uploads.ts";
 import { COMMIT_HASH, commitDetail, fileResponse, locate } from "./files.ts";
 import { chatRange, pin, searchLines } from "./chats.ts";
+import { searchProject } from "./search.ts";
 import {
   AttentionWatch, allowed, auth, authCookie, isLocal, loginPage, push, pushDevices, pushKey, qrSvg, rotateToken,
   subscribe, tailscaleInfo, tokenMatches, unsubscribe,
@@ -608,6 +609,19 @@ app.get("/api/projects/:id/sessions/:session/chat/search", (c) => {
   try { return c.json({ lines: searchLines(e.store, c.req.param("session"), c.req.query("q") ?? "", c.req.query("tools") === "1") }); } catch (err) { return c.json({ error: (err as Error).message }, 404); }
 });
 app.post("/api/projects/:id/sessions/:session/pins", act((st, b, p) => ({ pins: pin(st, p("session"), b.line, b.pinned) })));
+
+// The project's whole history searched, from its files without an index (src/search.ts): the newest hits first.
+app.get("/api/projects/:id/search", (c) => {
+  const e = c.get("entry");
+  try {
+    const q = parseSearch({ q: c.req.query("q"), kinds: c.req.query("kinds"), since: c.req.query("since"), limit: c.req.query("limit"), tools: c.req.query("tools") });
+    return c.json(searchProject(e.store, q));
+  } catch (err) {
+    if (err instanceof SearchError) return c.json({ error: err.message }, 400);
+    console.error(err);
+    return c.json({ error: (err as Error).message }, 500);
+  }
+});
 
 app.get("/api/projects/:id/sessions/:session/activity", (c) => {
   const e = c.get("entry");
