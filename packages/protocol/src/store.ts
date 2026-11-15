@@ -31,6 +31,17 @@ function readYaml<S extends z.ZodType>(file: string, schema: S): z.infer<S> {
   return schema.parse(YAML.parse(readFileSync(file, "utf8")));
 }
 
+/**
+ * The writes this process has made through this module (and a note's withdrawal, actions.ts): a project state built
+ * since the last one is still current as far as this process is concerned, so the server passes one snapshot on until
+ * it writes (apps/server/src/main.ts, stateOf). Another process's writes (an agent's `nexus`) reach the server through
+ * its file watcher instead.
+ */
+let writes = 0;
+export const writeCount = (): number => writes;
+/** Counts a write made outside this module's helpers. */
+export const countWrite = (): void => { writes++; };
+
 /** How long a rename is tried again while Windows refuses it (see renameRetrying). */
 const RENAME_RETRY_MS = 2_000;
 
@@ -45,7 +56,7 @@ const RENAME_RETRY_MS = 2_000;
 export function renameRetrying(from: string, to: string): void {
   const start = Date.now();
   for (let wait = 5; ; wait = Math.min(wait * 2, 200)) {
-    try { renameSync(from, to); return; }
+    try { renameSync(from, to); writes++; return; }
     catch (e) {
       const code = (e as NodeJS.ErrnoException).code;
       if ((code !== "EPERM" && code !== "EACCES" && code !== "EBUSY") || Date.now() - start >= RENAME_RETRY_MS) throw e;
@@ -88,6 +99,7 @@ export function readJsonl<S extends z.ZodType>(file: string, schema: S): JsonlRe
 function appendJsonl(file: string, entry: unknown): void {
   mkdirSync(dirname(file), { recursive: true });
   appendFileSync(file, JSON.stringify(entry) + "\n", "utf8");
+  writes++;
 }
 
 // ---------------------------------------------------------------- registry
@@ -157,6 +169,7 @@ export class ProjectStore {
     mkdirSync(join(store.dir, "queues"), { recursive: true });
     mkdirSync(join(store.dir, "sessions"), { recursive: true });
     writeFileSync(join(store.dir, ".gitignore"), "*\n", "utf8");
+    writes++;
     if (!existsSync(store.projectFile)) store.writeStoredProject(StoredProject.parse({ protocol: 1, follows_global: true, ...project }));
     return store;
   }
@@ -235,6 +248,7 @@ export class ProjectStore {
     const file = join(this.queueDir(queueId), "notes", meta.step, `${meta.id}.md`);
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, `---\n${YAML.stringify(NoteMeta.parse(meta)).trimEnd()}\n---\n${body.trimEnd()}\n`, "utf8");
+    writes++;
     return file;
   }
 
@@ -270,7 +284,7 @@ export class ProjectStore {
   writeStart(queueId: string, s: StartFile): void { writeYaml(join(this.queueDir(queueId), "start.yaml"), StartFile.parse(s)); }
   clearStart(queueId: string): void {
     const f = join(this.queueDir(queueId), "start.yaml");
-    if (existsSync(f)) unlinkSync(f);
+    if (existsSync(f)) { unlinkSync(f); writes++; }
   }
   readPlan(queueId: string): PlanFile | undefined {
     const f = join(this.queueDir(queueId), "plan.yaml");
@@ -279,7 +293,7 @@ export class ProjectStore {
   writePlan(queueId: string, p: PlanFile): void { writeYaml(join(this.queueDir(queueId), "plan.yaml"), PlanFile.parse(p)); }
   clearPlan(queueId: string): void {
     const f = join(this.queueDir(queueId), "plan.yaml");
-    if (existsSync(f)) unlinkSync(f);
+    if (existsSync(f)) { unlinkSync(f); writes++; }
   }
   /**
    * Moves the chains of before the plan into it: a start.yaml with `after` (one queue it waited for) becomes a
@@ -325,7 +339,7 @@ export class ProjectStore {
   }
   clearRun(queueId: string): void {
     const f = join(this.queueDir(queueId), "run.yaml");
-    if (existsSync(f)) unlinkSync(f);
+    if (existsSync(f)) { unlinkSync(f); writes++; }
   }
 
   readDelivered(sessionId: string): JsonlRead<Delivery> { return readJsonl(join(this.sessionDir(sessionId), "delivered.jsonl"), Delivery); }

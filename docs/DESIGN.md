@@ -1877,6 +1877,22 @@ since the dashboard's pure helpers hold it so. The server's replies the dashboar
 `@nexus/protocol/api` (types only); the first typecheck with it found the dashboard's copy of "what a stopped step left"
 missing the commits' `foreign` flag.
 
+## The cost of rebuilding state (queue RX5)
+
+Measured on 2026-11-15 on a copy of Nexus's own `.nexus` (70 queues, 214 steps, 55 sessions, 2,457 events, 13,735
+activity lines, 2,211 chat lines, 14 MB): one `loadProjectState` takes 121-124 ms (median of 30, after a warm-up).
+`changed()` in the server rebuilt the state five times on every change, before each of the planner, the orchestrator,
+the engine and the attention watch, whether or not the decision before it had written anything: about 590 ms of
+rebuilding per change notification, the decisions' own work not counted (a replay of its sequence on the copy, without
+the server, which would have touched the worktrees the copy's queues name). Now the store counts the writes this process
+makes (`writeCount`), and the server passes one snapshot on until the count moves; `changed()` forces only the first
+rebuild (the change came from outside). With no decision writing, one rebuild per change: about 125 ms. A decision that
+writes still gets the state its predecessors left. A write by another process between two decisions is seen at the next
+change notification, which the watcher sends for it anyway. The rest of a rebuild is reading: a profile puts 17% in
+`existsSync`, 15% in reading files and a quarter in parsing YAML; a cache of parsed files by modification time would be
+the next step if 120 ms starts to hurt. The engine's own 15 rebuilds are in actions (a start, a resume, a review), not
+on every change, and were left.
+
 ## Open questions
 
 1. **The orchestrator on Codex.** The orchestrator runs on Claude Code only: its read-only guarantee rests on Claude

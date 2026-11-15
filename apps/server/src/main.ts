@@ -14,7 +14,7 @@ import {
   ActionError, Effort, ProjectStore, addNote, closingToSkip, closingToSkipAtApproval, updateSettings, answerAsUser, approveQueue, deleteNote, loadProjectState, nexusHome, withdrawApproval, addAllowRule,
   ensureGlobalSettings, readGlobalSettings, updateGlobalSettings, ownKeys, OVERRIDABLE, settingKey, readRegistry, readUsage, readTurns, commentOnPicture, markPicture, routeAnswers, routeSendBacks, sendBack, sendMessage, setQueueSettings, setStepLevel, confirmProvisional, type ProjectState,
   readAway, writeAway, awayNow, awayUntil, turnAway, expireAway, acceptPlanProposal, declinePlanProposal, handBackPlan, acceptTagProposal, declineTagProposal,
-  MIN_SAMPLES, queueEstimate, stepSamples, isOpenQuestion, type EstimatesResponse, type LeftView, type ProjectSummary,
+  MIN_SAMPLES, queueEstimate, stepSamples, isOpenQuestion, writeCount, type EstimatesResponse, type LeftView, type ProjectSummary,
 } from "@nexus/protocol";
 import { newestFirst, projectDigest, projectRunning, usageSince, type DigestEvent, type DigestResponse, type DigestRunning, type UsageRun } from "@nexus/protocol/digest";
 import { Engine } from "./engine.ts";
@@ -81,7 +81,7 @@ let standingBy = !!HANDOVER;
 
 // ---------------------------------------------------------------- projects
 
-interface Entry { id: string; root: string; store: ProjectStore; engine: Engine; orchestrator: Orchestrator; conversations: Conversations; merger: Merger; state?: ProjectState; error?: string }
+interface Entry { id: string; root: string; store: ProjectStore; engine: Engine; orchestrator: Orchestrator; conversations: Conversations; merger: Merger; state?: ProjectState; stateAt?: number; error?: string }
 const projects = new Map<string, Entry>();
 /** Over every project's engine: one queue per checkout, and the limit on queues running at once (src/coordinator.ts). */
 const coordinator = new Coordinator();
@@ -114,9 +114,15 @@ function refreshRegistry(): void {
   for (const [id, e] of projects) if (!reg.projects.some((p) => p.id === id)) { coordinator.remove(e.engine); projects.delete(id); }
 }
 
+/**
+ * The project's state, one snapshot passed on until this process writes (writeCount) or a change from outside clears it
+ * (changed()): a rebuild reads the whole history, about 120 ms on a project of 70 queues (DESIGN.md, "The cost of
+ * rebuilding state").
+ */
 function stateOf(e: Entry): ProjectState | undefined {
-  if (!e.state && !e.error) {
-    try { e.state = loadProjectState(e.store); } catch (err) { e.error = (err as Error).message; }
+  if (!e.error && (!e.state || e.stateAt !== writeCount())) {
+    const at = writeCount();
+    try { e.state = loadProjectState(e.store); e.stateAt = at; } catch (err) { e.error = (err as Error).message; }
   }
   return e.state;
 }
@@ -135,28 +141,26 @@ function changed(id: string): void {
     const e = projects.get(id);
     if (e) {
       e.state = undefined; e.error = undefined;
+      // Each decision below gets the state as it stands: one snapshot, rebuilt only after a write of the decisions
+      // before it (stateOf; a change from another process comes back here through the watcher).
       // Deliver new answers to the sessions that asked. Its own inbox writes come back here and route nothing.
       const s = stateOf(e);
       if (s) {
-        try { if (routeAnswers(e.store, s) > 0) e.state = undefined; }
+        try { routeAnswers(e.store, s); }
         catch (err) { console.error(`routing answers in ${id}: ${(err as Error).message}`); }
         // Send-backs not delivered yet (the action delivers its own at once; this is the backstop).
-        try { const fresh = stateOf(e); if (fresh && routeSendBacks(e.store, fresh) > 0) e.state = undefined; }
+        try { const fresh = stateOf(e); if (fresh) routeSendBacks(e.store, fresh); }
         catch (err) { console.error(`routing send-backs in ${id}: ${(err as Error).message}`); }
         // A worktree queue merged back by Nexus (or integrated again, or waiting): before a planned deploy looks.
         try { const fresh = stateOf(e); if (fresh) e.merger.onChange(fresh); }
         catch (err) { console.error(`merging back in ${id}: ${(err as Error).message}`); }
-        e.state = undefined;
         // A planned deploy whose target is in starts its update (or is dropped): before the engine goes on.
         try { const fresh = stateOf(e); if (fresh) planner.check(id, fresh); }
         catch (err) { console.error(`deploy plan in ${id}: ${(err as Error).message}`); }
-        e.state = undefined;
         try { const fresh = stateOf(e); if (fresh) e.orchestrator.onChange(fresh); }
         catch (err) { console.error(`orchestrator in ${id}: ${(err as Error).message}`); }
-        e.state = undefined;
         try { const fresh = stateOf(e); if (fresh) e.engine.onChange(fresh); }
         catch (err) { console.error(`engine in ${id}: ${(err as Error).message}`); }
-        e.state = undefined;
       }
     }
     if (e) { const s = stateOf(e); if (s) watch.check({ id, name: s.project.name }, s.attention); }
