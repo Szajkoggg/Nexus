@@ -8,7 +8,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  ProjectStore, TurnRecord, acceptTagProposal, applyDraft, approveQueue, declineTagProposal, inheritedTags, isApproved, loadProjectState,
+  ProjectStore, TurnRecord, acceptTagProposal, activityDifference, applyDraft, approveQueue, declineTagProposal, inheritedTags, isApproved, loadProjectState,
   proposeTags, renamedTag, revisionHash, stepTags, type QueueFile,
 } from "../src/index.ts";
 
@@ -138,4 +138,25 @@ test("a TurnRecord carries the step's tags", () => {
   });
   assert.deepEqual(r.tags, { kind: "code", activities: ["feature"], area: "engine", size: "M", origin: "user" });
   assert.equal(TurnRecord.parse({ ...r, tags: undefined }).tags, undefined, "a record without tags (older, or no step) still reads");
+});
+
+test("planned against observed activities: both, unplanned and skipped; over every round, renames read through", () => {
+  assert.equal(activityDifference(["feature"], undefined), undefined, "nothing reported: nothing to compare");
+  assert.deepEqual(activityDifference(["feature", "test"], ["feature", "refactor"]), { both: ["feature"], unplanned: ["refactor"], skipped: ["test"] });
+  assert.deepEqual(activityDifference(undefined, ["docs-x"]), { both: [], unplanned: ["docs-x"], skipped: [] });
+
+  const store = setup();
+  const at = "2026-11-15T00:00:00.000Z";
+  store.writeTags({ ...store.readTags(), prefix: "hc", activities: [{ name: "hc:ground", at }], renames: [{ from: "hc:terrain", to: "hc:ground", at }] });
+  applyDraft(store, draft({ kind: "code" }, [step("Q1", { activities: ["feature", "test"] })]));
+  store.writeSession({ protocol: 1, id: "w", project: "p", role: "worker", runtime: "claude", cwd: ".", launched_by: "nexus", created_at: at });
+  const done = (min: number, activities: string[]) => {
+    store.appendEvent({ v: 1, id: `s${min}`, at: `2026-11-15T00:0${min}:00.000Z`, session: "w", type: "step.started", queue: "Q", step: "Q1" });
+    store.appendEvent({ v: 1, id: `d${min}`, at: `2026-11-15T00:0${min}:30.000Z`, session: "w", type: "step.done", queue: "Q", step: "Q1", summary: "s", activities });
+  };
+  done(1, ["feature", "hc:terrain"]);
+  done(2, ["refactor", "feature"]); // a second round (a send-back) adds what it did
+  const st = loadProjectState(store).queues[0]!.steps[0]!;
+  assert.deepEqual(st.observed_activities, ["feature", "hc:ground", "refactor"]);
+  assert.deepEqual(activityDifference(st.tags.activities, st.observed_activities), { both: ["feature"], unplanned: ["hc:ground", "refactor"], skipped: ["test"] });
 });

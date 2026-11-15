@@ -4,7 +4,7 @@
 // (src/conversations.ts). Agents rely on them (a change to one carries an `Agents:` line in its commit), so each is
 // covered by a snapshot test: test/prompts.test.ts compares what the agents' processes receive with golden files.
 import {
-  INTEGRATION_CONDITION, formatClock, formatSeconds, languageName, levelNow, runIsOlder, stepChecks, type AwayNow, type ConversationWeb, type InboxView, type LanguageCode, type ProjectFile, type ProjectState, type QuestionView, type QueueView, type SessionView, type StepView, type TagProposal,
+  INTEGRATION_CONDITION, formatClock, formatSeconds, languageName, levelNow, runIsOlder, stepChecks, type AwayNow, type ConversationWeb, type InboxView, type LanguageCode, type ProjectFile, type ProjectState, type QuestionView, type QueueView, type SessionView, type StepView, type TagProposal, tagsText,
 } from "@nexus/protocol";
 import type { ClosingContext } from "./closing.ts";
 import type { IntegrationContext } from "./integration.ts";
@@ -48,7 +48,7 @@ Report through the \`nexus\` command (on PATH; your session is set in the enviro
 - nexus review add <step> <picture> --key <view@width> --role <role> --label "..."   a review picture, one per command
 - nexus review add <step> <file|url>... --label "..."       other review material (documents, data, links)
 - nexus check <step> <name> --ok|--fail --summary "..." --duration <seconds>   results of the step's checks, with how long each ran (the times show when a check grows slower)
-- nexus step done <step> --summary "..." [--commit <sha>]   when the acceptance criteria are met
+- nexus step done <step> --summary "..." [--commit <sha>] --activities a,b   when the acceptance criteria are met; --activities names what you actually did, whatever was planned (\`nexus tags\` lists the names)
 - nexus step failed <step> --reason "..."                   when the step cannot be done as written
 - nexus stop <step> --condition "<the stop condition met>" --reason "<what happened, short>"   when a stop condition is met (first commit what is consistent, see below); give both: --condition names the condition as the queue words it, --reason says in a sentence or two what happened and what you left out (the user sees the reason first, the condition behind "more")
 - nexus ask "<question>" --step <step> [--option "..."]... [--recommend "<option>"] [--can-continue]   a question for the orchestrator or the user; give the options with --option (one each) and name the one you recommend with --recommend (its text or number); without --can-continue, end your turn after asking: the answer arrives as a message
@@ -93,6 +93,7 @@ export function stepOpening(o: {
     mode === "continue" ? `Continue this step where it was left${why ? ` (${why})` : step.reason ? ` (it was left: ${step.reason})` : ""}.` : "",
     step.goal ? `\nGoal:\n${step.goal}` : "",
     step.acceptance.length ? `\nAcceptance:\n${step.acceptance.map((a) => `- ${a}`).join("\n")}` : "",
+    tagsText(step.tags) ? `\nTags as planned: ${tagsText(step.tags)}. At the end name what you actually did with \`nexus step done --activities\`.` : "",
     closing ? closingText(closing) : "",
     integration ? integrationText(step.id, integration) : "",
     checks.length ? `\nChecks for every step:\n${checks.map((c) => `- ${c}`).join("\n")}` : "",

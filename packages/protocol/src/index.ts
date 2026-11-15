@@ -18,3 +18,4 @@ export * from "./closing.ts";
 export * from "./plan.ts";
 export * from "./estimates.ts";
 export * from "./tags.ts";
+export * from "./tag-proposals.ts";

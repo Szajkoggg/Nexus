@@ -519,7 +519,7 @@ Every line:
 | `review.marked` | `queue`, `step`, `path`, `accepted` | User only: a review picture marked accepted (or the mark taken back). A mark only: it does not accept the step |
 | `review.commented` | `queue`, `step`, `path`, `text`, `to` (`send_back`, `note`, `orchestrator`), `note_step?` | User only: a comment on a review picture, and where it went (see "Review pictures") |
 | `check.result` | `queue`, `step`, `name`, `ok`, `summary`, `duration` | One check's outcome; `duration`: how long it ran, in seconds (optional, non-negative) |
-| `step.done` | `queue`, `step`, `summary`, `commit?`, `warning?` | Acceptance met; the step's work is finished. `warning`: what `nexus step done` warned about at the step's end (see the CLI) |
+| `step.done` | `queue`, `step`, `summary`, `commit?`, `warning?`, `activities?` | Acceptance met; the step's work is finished. `warning`: what `nexus step done` warned about at the step's end (see the CLI). `activities`: what the worker actually did (`--activities`), from the same lists as a draft (see "Tags") |
 | `step.failed` | `queue`, `step`, `reason` | The step cannot be finished as written |
 | `queue.stop` | `queue`, `step`, `condition`, `reason` | A stop condition was met; the engine halts the queue. `condition`: the condition met, as the queue words it; `reason`: what happened, short. The derived queue keeps them apart in `stop` (`{ condition, reason }`, until a lift) besides `status_reason` ("<condition>: <reason>"); the stopped waiting item's `text` is the reason and its `condition` the condition. A stop known only as one text (a queue imported as stopped) has no `stop`, and shows its `status_reason` |
 | `question.asked` | `queue?`, `step?`, `qid`, `text`, `options?`, `recommended?`, `can_continue` | A question; `can_continue` says whether independent work remains; `recommended`: the asker's recommendation, one of `options` (the CLI refuses another; the state drops it with a warning) |
@@ -989,7 +989,7 @@ nexus review add W3 $TEMP/nexus-review/W3/lit.png --before $TEMP/nexus-review/W3
 nexus help review                              # the standard for review material (nexus help: the topics)
 nexus help summaries|questions|refusals|commits   # the other standards
 nexus check W3 core-tests --ok --summary "548 passed" --duration 190   # how long it ran, in seconds
-nexus step done W3 --summary "No floating body on any fixture" [--commit 1a2b3c]   # warns at an unclean end
+nexus step done W3 --summary "No floating body on any fixture" [--commit 1a2b3c] [--activities feature,test]   # warns at an unclean end; --activities: what was actually done (refused: a name on no list)
 nexus step failed W3 --reason "..."
 nexus stop W3 --condition "user decision" --reason "..."   # the condition as the queue words it; the reason short (shown first)
 nexus ask "Canyon joints: vertical only, or also inclined?" [--option ...] [--recommend <option>] [--can-continue]
@@ -1691,9 +1691,22 @@ name), `reason?`, `session?`) and `decisions` (`at`, `accepted`, `proposal`). Mi
   `nexus status` and the turn records; the files that carry the old name are never rewritten, so the history does not
   split. The old name is not used again.
 
+Planned and observed: the orchestrator plans a step's tags; at `nexus step done --activities a,b` its worker says which
+activities it actually did (checked like a draft's: a name on no list, or not accepted yet, is refused and nothing is
+recorded). `StepView.observed_activities` is what the step's `step.done` events reported, over every round, renamed
+names read as the new ones; absent while none was reported. `activityDifference(planned, observed)` gives `both`,
+`unplanned` (done, not planned) and `skipped` (planned, not reported); the difference is itself a measure. The worker's
+briefing asks for `--activities`, and a step's opening names its planned tags.
+
 Where they show: `StepView.tags` (the step's as they read now), `ProjectState.tags` (the lists), the worker's `nexus
 status` (a `tags:` line under each step), the orchestrator's overview (`{kind size}` after each step), and each worker
-turn's record in `turns.jsonl`.
+turn's record in `turns.jsonl`. The dashboard (`apps/web/src/components/Tags.tsx`): the step's details (a Tags section:
+kind, size, area and origin, then the activities planned beside those done, planned-not-done struck through,
+done-not-planned marked +), the queue card (its own steps' kinds and areas in a quiet line), the project's settings
+(a Tags section: the proposals waiting, with Accept and Decline, the areas, own activities and renames, and Nexus's own
+lists on request), and the waiting list (a `tags` item has Accept and Decline; on the project's page it opens the
+settings). The pure part of the module (`@nexus/protocol/tags`) is free of Node; the proposals and decisions, which
+write `tags.yaml`, are in `tag-proposals.ts`.
 
 ## Runtime, model and effort per step
 

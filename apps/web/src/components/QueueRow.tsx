@@ -13,6 +13,7 @@ import { currentIndex, foldSteps, twoColumns } from "../steplist.ts";
 import { usePhone } from "../phone.ts";
 import { QueueStopReason, STOP_BUTTON, StopActions, stopVersion } from "./Stop.tsx";
 import { LevelMark, pendingProvisional } from "./Levels.tsx";
+import { QueueTags } from "./Tags.tsx";
 
 /** The honest status's colours: a dot and a word. */
 export const TONE: Record<Tone, [string, string]> = {
@@ -77,6 +78,7 @@ export function QueueRow({ project, queue, pushAccepted, onQueue, onStep, onChan
             <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${TONE[s.tone][0]}`} />{s.label}
           </span>
           {s.questions > 0 && <span className="text-xs text-fg-3">· {t("queue.questions", { count: s.questions })}</span>}
+          <QueueTags queue={queue} />
         </span>
         <span className="flex items-center gap-3 text-xs text-fg-3 lg:ml-auto">
           {queue.branch && !phone && <span className="font-mono">{queue.branch}</span>}

@@ -8,7 +8,7 @@ import { execFileSync } from "node:child_process";
 import {
   Event, HOLDING_RUN_STATES, ProjectStore, checksLine, findNexusDir, inReportFolder, loadProjectState, openPlan, stepValuesText, stopPlace, newId, normPath, now, readRegistry, writeRegistry,
   PICTURE_ROLES, REVIEW_HELP, checkPicture, levelNow, pictureSize, recommendedOption, stepDefs,
-  NEXUS_ACTIVITIES, TAG_KINDS, TAG_ORIGINS, TAG_SIZES, tagProposalText, tagsText,
+  NEXUS_ACTIVITIES, TAG_KINDS, TAG_ORIGINS, TAG_SIZES, tagIssues, tagProposalText, tagsText,
   type PictureRole, type ReviewItem, type Role, type Runtime, type SessionFile,
 } from "@nexus/protocol";
 import { checkRules, describeRules } from "@nexus/protocol/rules";
@@ -22,7 +22,7 @@ Agent commands (session from NEXUS_SESSION or --session):
                                                 session: the queues at work, then the approved ones not running)
   nexus step start <step>
   nexus step progress <step> <text> [--pct N]
-  nexus step done <step> --summary <text> [--commit <sha>]
+  nexus step done <step> --summary <text> [--commit <sha>] [--activities a,b]   (what you actually did: nexus tags)
   nexus step failed <step> --reason <text>
   nexus review add <step> <path|url>... [--label <text>] [--kind image|sheet|doc|data|link] [--round N]
                     [--key <view@width> --role before|mockup|after|variant-a|variant-b|result]   (one picture; pairs by key)
@@ -102,7 +102,7 @@ const { values: o, positionals: args } = parseArgs({
     id: { type: "string" }, name: { type: "string" }, prefix: { type: "string" },
     "dry-run": { type: "boolean" }, replace: { type: "boolean" },
     role: { type: "string" }, runtime: { type: "string" }, title: { type: "string" }, from: { type: "string" },
-    area: { type: "string" }, activity: { type: "string" },
+    area: { type: "string" }, activity: { type: "string" }, activities: { type: "string" },
     help: { type: "boolean", short: "h" }, key: { type: "string" }, note: { type: "string" }, before: { type: "string" }, now: { type: "boolean" }, ref: { type: "string" },
   },
 });
@@ -354,8 +354,15 @@ function stepDone(stepArg: string | undefined): void {
   const queue = queueFor(st, s, step);
   checkStep(st, queue, step);
   const summary = need(o.summary, "--summary");
+  // What the worker actually did, from the same lists a draft uses: refused before anything is recorded.
+  const activities = o.activities === undefined ? undefined : list(o.activities);
+  if (activities) {
+    if (!activities.length) throw new UsageError("--activities takes a comma-separated list, e.g. --activities feature,test");
+    const issues = tagIssues({ activities }, st.readTags());
+    if (issues.length) throw new UsageError(`${issues.join("; ")} (nexus tags lists the activities)`);
+  }
   const warning = stepEndWarning(st, s, queue, step, o.commit);
-  emit(st, s, { type: "step.done", queue, step, summary, commit: o.commit, ...(warning ? { warning } : {}) });
+  emit(st, s, { type: "step.done", queue, step, summary, commit: o.commit, ...(activities ? { activities } : {}), ...(warning ? { warning } : {}) });
   console.log(`ok: step.done ${queue}/${step}`);
   if (warning) console.log(`warning: ${warning}`);
 }

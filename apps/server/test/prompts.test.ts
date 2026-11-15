@@ -101,7 +101,7 @@ test("the worker's texts: briefing, step openings, inbox entries, seeds and nudg
     checks: ["npm run typecheck", "npm test"], stop_conditions: ["A file outside the repository would change."],
     steps: [
       { id: "A1", title: "First step", goal: "Do the first thing.\nPrecisely.", acceptance: ["It is done", "It is tested"], review: { prepare: "Before/after shots of the page" } },
-      { id: "A2", title: "Second step", goal: "Do the second thing.", acceptance: [] },
+      { id: "A2", title: "Second step", goal: "Do the second thing.", acceptance: [], kind: "code", activities: ["feature", "test"], size: "M", origin: "user" },
       { id: "A3", title: "Third step", goal: "", acceptance: ["Third acceptance"] },
       { id: "A4", title: "Last step on Codex", goal: "Do the last thing.", acceptance: ["Last acceptance"], runtime: "codex" },
     ],

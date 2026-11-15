@@ -210,7 +210,7 @@ export function App() {
   // The sheets and drawers over either layout: settings, remote access, a queue or step.
   const drawers = <>
     <Drawer open={settingsOpen && !!state} onClose={() => nav.close("settings")}>
-      {state && <SettingsPanel key={state.project.id} project={state.project} onChanged={() => { reload(); setTick((t) => t + 1); }} server={server}
+      {state && <SettingsPanel key={state.project.id} project={state.project} tags={state.tags} onChanged={() => { reload(); setTick((t) => t + 1); }} server={server}
         tools={phone ? <PhoneTools connected={connected} version={tick} server={server} notify={notify} onChanged={() => setTick((n) => n + 1)} /> : undefined} />}
     </Drawer>
 
@@ -332,7 +332,11 @@ export function App() {
               {!wide && state && state.attention.length > 0 && (
                 <AttentionPanel project={state.project.id} items={state.attention} queues={state.queues} pushAccepted={state.project.defaults.push_accepted}
                   onChanged={reload}
-                  onOpen={(a: AttentionItem) => { if (projectId && a.queue) nav.item(projectId, a.queue, attentionTarget(a)); }} />
+                  onOpen={(a: AttentionItem) => {
+                    // A tag proposal opens the project's settings, where its lists are.
+                    if (a.kind === "tags") nav.open("settings");
+                    else if (projectId && a.queue) nav.item(projectId, a.queue, attentionTarget(a));
+                  }} />
               )}
               {queuesPage}
             </div>

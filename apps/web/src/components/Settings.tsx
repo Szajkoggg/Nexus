@@ -1,7 +1,7 @@
 // Settings: the global ones every project follows, and a project's own (how its agents run, its defaults), each
 // setting with a global value switched between following it and the project's own value (PROTOCOL.md, "Global settings").
 import { useState, type ReactNode } from "react";
-import type { GlobalSettings, ProjectFile } from "@nexus/protocol";
+import type { GlobalSettings, ProjectFile, TagsFile } from "@nexus/protocol";
 import { LANGUAGES } from "@nexus/protocol/languages";
 import { act, useFetch } from "../api.ts";
 import { Button, Section } from "./ui.tsx";
@@ -9,6 +9,7 @@ import { rich, t, type Key } from "../i18n.ts";
 import { CHOICES, readChoice, setChoice, type ThemeChoice } from "../theme.ts";
 import { EDITOR_CHOICES, readEditor, setEditor, type Editor } from "../editor.ts";
 import { levelTitle } from "./Levels.tsx";
+import { ProjectTags } from "./Tags.tsx";
 import { PlannedDeployCard, type PlannedDeploy } from "./DeployPlan.tsx";
 
 const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
@@ -311,8 +312,10 @@ function useValues(initial: Values) {
   };
 }
 
-export function SettingsPanel({ project, onChanged, server, tools }: {
+export function SettingsPanel({ project, tags, onChanged, server, tools }: {
   project: ProjectFile; onChanged: () => void; server?: ServerInfo;
+  /** The project's tag lists (ProjectState.tags), shown under its settings. */
+  tags?: TagsFile;
   /** On the phone, where the header has no icon row: the update, the usage, notifications and remote access. */
   tools?: ReactNode;
 }) {
@@ -334,6 +337,7 @@ export function SettingsPanel({ project, onChanged, server, tools }: {
         {tab === "global" ? <GlobalSettingsPage key="global" onChanged={onChanged} server={server} />
           : info ? <ProjectSettingsPage key={`${project.id}:${info.own.join(",")}`} project={project} info={info} onChanged={onChanged} />
           : <p className="text-sm text-fg-3">{t("common.loading")}</p>}
+        {tab === "project" && tags && <div id="project-tags" className="mt-10"><ProjectTags project={project.id} tags={tags} onChanged={onChanged} /></div>}
       </div>
     </div>
   );

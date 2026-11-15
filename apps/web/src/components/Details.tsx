@@ -19,6 +19,7 @@ import { needsApproval, levelWords, queueChecks } from "../approval.ts";
 import { queueStatus } from "../queueStatus.ts";
 import { needsWorkChoice, stopDecision, type LeftState, type LeftView, type WorkChoice } from "../stopDecision.ts";
 import { formatSeconds, rich, t, type Key } from "../i18n.ts";
+import { StepTags } from "./Tags.tsx";
 import { LevelMark, ProvisionalActions, levelShort, levelTitle, pendingProvisional, provisionalWord } from "./Levels.tsx";
 
 interface Props {
@@ -178,6 +179,7 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
       )}
     </>
   );
+  const tags = <StepTags step={step} />;
   const goalAcceptance = (
     <>
       {step.goal && <Section title={t("details.goal")}><Markdown>{step.goal}</Markdown></Section>}
@@ -191,6 +193,7 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
         </Section>
       )}
       {step.review?.prepare && <Section title={t("details.reviewToPrepare")}><Markdown>{step.review.prepare}</Markdown></Section>}
+      {tags}
     </>
   );
   const material = (
@@ -402,6 +405,7 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
     <>
       {integration}
       {summary}
+      {tags}
       {reviewPictures}
       <div className="mt-6">{chat}</div>
       {retry}{push}{rejected}{sentBack}{message}{questionsPart}{statusNote}{notes}{messages}{refusals}{changes}{activity}{viewer}

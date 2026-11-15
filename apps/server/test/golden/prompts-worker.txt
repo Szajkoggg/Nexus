@@ -86,6 +86,8 @@ Begin with `nexus step start A1` (again is fine). End with `nexus step done A1 -
 Goal:
 Do the second thing.
 
+Tags as planned: code; feature, test; size M; from user. At the end name what you actually did with `nexus step done --activities`.
+
 Checks for every step:
 - npm run lint
 - npm test
@@ -239,6 +241,8 @@ Acceptance:
 - Small commits, each saying in its message what it simplified; or none, with the reasons in the summary why nothing was worth refactoring.
 - Only what the queue changed, or code closely tied to it.
 
+Tags as planned: code; refactor; from maintenance. At the end name what you actually did with `nexus step done --activities`.
+
 This is the queue's closing refactoring step, kept by Nexus: it runs after the queue's own steps, in a fresh session, so that their work is read with fresh eyes.
 The queue's work: commits 1111111111111111111111111111111111111111..2222222222222222222222222222222222222222 in this checkout (git log 1111111111111111111111111111111111111111..2222222222222222222222222222222222222222, git diff 1111111111111111111111111111111111111111..2222222222222222222222222222222222222222).
 What they changed (git diff --stat):
@@ -267,6 +271,8 @@ Acceptance:
 - Small commits, each saying in its message what it simplified; or none, with the reasons in the summary why nothing was worth refactoring.
 - Only what the queue changed, or code closely tied to it.
 
+Tags as planned: code; refactor; from maintenance. At the end name what you actually did with `nexus step done --activities`.
+
 This is the queue's closing refactoring step, kept by Nexus: it runs after the queue's own steps, in a fresh session, so that their work is read with fresh eyes.
 Nexus has no commit range of the queue's work (no git records of its steps): find its commits from the steps' summaries and git log.
 The project's AGENTS.md has no "Refactoring" section: this text alone applies.
@@ -291,7 +297,7 @@ Report through the `nexus` command (on PATH; your session is set in the environm
 - nexus review add <step> <picture> --key <view@width> --role <role> --label "..."   a review picture, one per command
 - nexus review add <step> <file|url>... --label "..."       other review material (documents, data, links)
 - nexus check <step> <name> --ok|--fail --summary "..." --duration <seconds>   results of the step's checks, with how long each ran (the times show when a check grows slower)
-- nexus step done <step> --summary "..." [--commit <sha>]   when the acceptance criteria are met
+- nexus step done <step> --summary "..." [--commit <sha>] --activities a,b   when the acceptance criteria are met; --activities names what you actually did, whatever was planned (`nexus tags` lists the names)
 - nexus step failed <step> --reason "..."                   when the step cannot be done as written
 - nexus stop <step> --condition "<the stop condition met>" --reason "<what happened, short>"   when a stop condition is met (first commit what is consistent, see below); give both: --condition names the condition as the queue words it, --reason says in a sentence or two what happened and what you left out (the user sees the reason first, the condition behind "more")
 - nexus ask "<question>" --step <step> [--option "..."]... [--recommend "<option>"] [--can-continue]   a question for the orchestrator or the user; give the options with --option (one each) and name the one you recommend with --recommend (its text or number); without --can-continue, end your turn after asking: the answer arrives as a message

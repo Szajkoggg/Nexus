@@ -61,6 +61,11 @@ export interface StepView extends StepDef {
   /** The step's tags as planned: its own over its queue's, renamed names read as the new ones (tags.ts, stepTags). */
   tags: StepTags;
   /**
+   * The activities its worker reported doing (`nexus step done --activities`), over every round, renamed names read as
+   * the new ones; absent while none was reported. Compared with the planned ones by activityDifference.
+   */
+  observed_activities?: string[];
+  /**
    * The queue's closing refactoring step (closing.ts): Nexus keeps it after the queue's own steps, with a reserved id
    * and the standard text; it is not in queue.yaml.
    */
@@ -276,6 +281,10 @@ export function loadProjectState(store: ProjectStore): ProjectState {
     apply(e, queues, sessions, questions, warnings, project, delivered, away);
   }
   for (; next < changes.length; next++) applyChange(changes[next]!.q, changes[next]!.c);
+  // What the workers reported doing, as the names read now.
+  for (const q of queues.values()) for (const st of q.steps) {
+    if (st.observed_activities) st.observed_activities = stepTags({ activities: st.observed_activities }, {}, tags).activities;
+  }
   // A rejection holds until an approval of a newer revision; while it holds the queue is paused.
   for (const q of queues.values()) {
     const r = q.rejection;
@@ -591,6 +600,7 @@ function apply(
       const policy = project.review_levels_since && e.at < project.review_levels_since ? legacyPolicy(q, st) : undefined;
       st.asked_user = undefined;
       st.finished_at = e.at; st.summary = e.summary; st.commit = e.commit;
+      if (e.activities) st.observed_activities = [...new Set([...(st.observed_activities ?? []), ...e.activities])];
       endSegment(st, e.at);
       if (policy === "continue" && !st.user_fix) {
         st.status = "done"; st.review_with = undefined;

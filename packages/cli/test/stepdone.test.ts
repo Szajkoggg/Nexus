@@ -8,7 +8,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ProjectStore, newId, updateSettings, type Event } from "@nexus/protocol";
+import { ProjectStore, loadProjectState, newId, updateSettings, type Event } from "@nexus/protocol";
 
 const CLI = join(dirname(fileURLToPath(import.meta.url)), "../bin/nexus.js");
 const G = ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false"];
@@ -36,7 +36,7 @@ function setup() {
     const last = store.readEvents("w").entries.filter((e) => e.type === "step.done").at(-1) as Extract<Event, { type: "step.done" }>;
     return { out, warning: last.warning };
   };
-  return { root, git, done, start };
+  return { root, git, done, start, store };
 }
 
 test("a clean tree with the commit named: no warning", () => {
@@ -82,4 +82,18 @@ test("outside a git repository: no check, no warning", () => {
   const env: NodeJS.ProcessEnv = { ...process.env, NEXUS_DIR: store.dir, NEXUS_SESSION: "w", GIT_CEILING_DIRECTORIES: dirname(root) };
   const out = execFileSync(process.execPath, [CLI, "step", "done", "Q1", "--summary", "s"], { cwd: root, env, encoding: "utf8", stdio: "pipe" });
   assert.doesNotMatch(out, /warning/);
+});
+
+test("--activities: what the worker did, from the lists; an unknown name is refused and nothing is recorded", () => {
+  const x = setup();
+  x.store.writeTags({ ...x.store.readTags(), prefix: "p", activities: [{ name: "p:terrain", at: new Date().toISOString() }] });
+  const err = (() => { try { x.done("--commit", x.start.slice(0, 7), "--activities", "feature,frobnicate"); } catch (e) { return String((e as { stderr?: string }).stderr); } return ""; })();
+  assert.match(err, /activity frobnicate is not one of Nexus's activities .*\(nexus tags lists the activities\)/);
+  assert.equal(x.store.readEvents("w").entries.filter((e) => e.type === "step.done").length, 0, "refused before anything is recorded");
+  const pending = (() => { try { x.done("--activities", "p:rivers"); } catch (e) { return String((e as { stderr?: string }).stderr); } return ""; })();
+  assert.match(pending, /activity p:rivers is not in the project's list/);
+  x.done("--commit", x.start.slice(0, 7), "--activities", "feature, p:terrain");
+  const last = x.store.readEvents("w").entries.filter((e) => e.type === "step.done").at(-1) as Extract<Event, { type: "step.done" }>;
+  assert.deepEqual(last.activities, ["feature", "p:terrain"]);
+  assert.deepEqual(loadProjectState(x.store).queues[0]!.steps[0]!.observed_activities, ["feature", "p:terrain"]);
 });

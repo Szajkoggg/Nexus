@@ -564,7 +564,11 @@ export const Event = z.discriminatedUnion("type", [
    * `warning`: what nexus step done found at the step's end and warned about (it never refuses): tracked files with
    * uncommitted changes, or a HEAD that moved since the step started while no commit was named (nexus help commits).
    */
-  z.object({ ...base, type: z.literal("step.done"), ...qs, summary: z.string(), commit: z.string().optional(), warning: z.string().optional() }),
+  /**
+   * `activities`: what the worker actually did in the step (`nexus step done --activities`), from Nexus's activities and
+   * the project's own (tags.ts); compared with the planned ones.
+   */
+  z.object({ ...base, type: z.literal("step.done"), ...qs, summary: z.string(), commit: z.string().optional(), warning: z.string().optional(), activities: z.array(z.string().min(1)).optional() }),
   z.object({ ...base, type: z.literal("step.failed"), ...qs, reason: z.string() }),
   z.object({ ...base, type: z.literal("queue.stop"), queue: Id, step: Id.optional(), condition: z.string(), reason: z.string() }),
   z.object({

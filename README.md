@@ -277,6 +277,14 @@ the plans were made. A schedule waiting this way is not missed.
 A step in a queue may name its own runtime, model and effort (`runtime`, `model`, `effort` in the queue YAML, shown
 on the step); a step without them runs on the run's. Another runtime runs the step in a fresh session given the
 previous step's summary; another model or effort keeps the session.
+**Tags.** The orchestrator tags every step it plans: one kind (mechanical, code, debugging, design, research or docs),
+its activities, its area of the project, a size (S, M or L) and where the work came from. The step's details show
+them, with the activities planned beside those its worker reported doing (planned and not done struck through, done
+and not planned marked +); a queue's card shows its kinds and areas in a quiet line. The project's areas and its own
+activities are lists you keep: the orchestrator proposes additions and renames, which appear under "Waiting for you"
+with Accept and Decline (and in the settings panel's Tags section, beside the lists); a draft may use a name only
+once you accepted it. A renamed tag reads as its new name everywhere, so what was counted under the old name stays
+together.
 
 ## Requirements
 
