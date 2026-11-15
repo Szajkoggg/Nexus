@@ -12,7 +12,8 @@ import { hasItem } from "./hash.ts";
 
 /**
  * A layer is a kind, optionally with a value: "settings", "item" (the queue or step drawer), "conversation:<id>",
- * "file:<line>:<path>" (the file viewer, fileview.ts), "commit:<hash>" (a commit's details).
+ * "file:<line>:<path>" (the file viewer, fileview.ts), "commit:<hash>" (a commit's details), "stats" (the global Stats
+ * view, a page over the project's).
  */
 export type Layer = string;
 /**
@@ -132,7 +133,7 @@ export function navOf(state: unknown, hash: string, query: string): Nav {
   }
   const q = new URLSearchParams(query);
   const layers: Layer[] = hasItem(hash) ? ["item"] : [];
-  for (const k of ["ideas", "chat", "settings", "remote", "waiting", "projects"]) if (q.has(k)) layers.push(k);
+  for (const k of ["ideas", "chat", "settings", "remote", "waiting", "projects", "stats"]) if (q.has(k)) layers.push(k);
   // ?file=<path>&line=<n> opens a file in the viewer (components/FileView.tsx) over the rest.
   const file = q.get("file");
   if (file) layers.push(fileLayer(file, Number(q.get("line")) || undefined));

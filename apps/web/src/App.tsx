@@ -38,6 +38,7 @@ import { ApprovalView, useApprovalForm } from "./components/Approval.tsx";
 import { needsApproval } from "./approval.ts";
 import { rich, t, type Key } from "./i18n.ts";
 import { PageProvider, type Page } from "./page.ts";
+import { StatsView } from "./components/Stats.tsx";
 
 /** The file viewer and its Markdown and highlighting load when a file is first opened. */
 const FileView = lazy(() => import("./components/FileView.tsx").then((m) => ({ default: m.FileView })));
@@ -83,6 +84,8 @@ export function App() {
   const settingsOpen = isOpen(route.nav, "settings");
   const remoteOpen = isOpen(route.nav, "remote");
   const waitingOpen = isOpen(route.nav, "waiting");
+  // The global Stats view: a page over the project's (the desktop's middle column and rail; the phone's tabs).
+  const statsOpen = isOpen(route.nav, "stats");
   const file = fileOf(layerValue(route.nav, "file"));
   const commit = layerValue(route.nav, "commit");
 
@@ -245,6 +248,25 @@ export function App() {
     )}
   </>;
 
+  if (phone && statsOpen) {
+    return (
+      <PageProvider value={page}>
+      <div className="flex h-dvh flex-col">
+        <header className="z-30 shrink-0 border-b border-line bg-surface pt-[env(safe-area-inset-top)]">
+          <div className="flex min-h-13 items-center gap-2.5 px-3 py-2">
+            <button onClick={() => nav.close("stats")} aria-label={t("stats.back")} className="grid h-9 w-9 place-items-center rounded-lg text-fg-2 active:bg-surface-3">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg>
+            </button>
+            <h1 className="text-base font-semibold text-fg">{t("stats.title")}</h1>
+            <span className="text-xs text-fg-3">{t("stats.openHint")}</span>
+          </div>
+        </header>
+        <main className="scroll-thin min-h-0 flex-1 overflow-y-auto"><StatsView projects={projects ?? []} phone /></main>
+      </div>
+      </PageProvider>
+    );
+  }
+
   if (phone) {
     const scrolls = tab === "waiting" || tab === "queues";
     return (
@@ -253,7 +275,7 @@ export function App() {
         {/* The top line: the project picker, what runs, settings. The header's other tools are in Settings here. */}
         <header className="z-30 shrink-0 border-b border-line bg-surface pt-[env(safe-area-inset-top)]">
           <div className="flex min-h-13 items-center gap-3 px-3 py-2">
-            {projects && <ProjectPicker projects={projects} current={projectId} open={isOpen(route.nav, "projects")} onPick={(id) => nav.project(id)} />}
+            {projects && <ProjectPicker projects={projects} current={projectId} open={isOpen(route.nav, "projects")} onPick={(id) => nav.project(id)} onStats={() => nav.closeThenOpen("projects", "stats")} />}
             {state && <RunningNow queues={state.queues} />}
             <span className="flex-1" />
             <AwaySign away={server?.away} />
@@ -306,7 +328,8 @@ export function App() {
   return (
     <PageProvider value={page}><RefsProvider project={projectId} queues={state?.queues}>
     <div className="flex h-dvh">
-      <ProjectSidebar projects={projects ?? []} current={projectId} connected={connected} onPick={(id) => nav.project(id)} foot={<>
+      <ProjectSidebar projects={projects ?? []} current={projectId} connected={connected} onPick={(id) => nav.project(id)}
+        stats={{ open: statsOpen, onOpen: () => nav.open("stats") }} foot={<>
         <UpdatePill info={server} />
         <UsageMeter stacked />
         <div className="-mx-1.5"><AwaySwitch away={server?.away} /></div>
@@ -318,7 +341,8 @@ export function App() {
         </div>
       </>} />
 
-      <main className="flex min-w-0 flex-1 flex-col" style={besideShown ? { marginRight: RAIL } : undefined}>
+      {statsOpen && <main className="scroll-thin min-w-0 flex-1 overflow-y-auto"><StatsView projects={projects ?? []} phone={false} /></main>}
+      {!statsOpen && <main className="flex min-w-0 flex-1 flex-col" style={besideShown ? { marginRight: RAIL } : undefined}>
         {view === "chat" && <>
           {alerts}
           {projectId && <ChatPanel key={`chat-${projectId}`} desk={desk} project={projectId} name={state?.project.name ?? projectId} view={orchestrator} />}
@@ -349,9 +373,9 @@ export function App() {
             </div>
           </div>
         </>}
-      </main>
+      </main>}
 
-      {wide && (
+      {wide && !statsOpen && (
         <aside className="shrink-0 border-l border-line bg-surface" style={{ width: RAIL }}>
           <Rail {...railProps} />
         </aside>

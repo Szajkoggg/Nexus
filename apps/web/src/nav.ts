@@ -89,6 +89,8 @@ export const nav = {
   file: (path: string, line?: number) => apply(open(current, fileLayer(path, line))),
   /** Shows a project, in place: switching projects is not a layer, so Back does not walk through them. */
   project: (project: string) => apply(switchProject(current, itemHash(project), layout())),
+  /** Closes a layer, then opens another over what that leaves (the project picker's Stats). */
+  closeThenOpen: (kind: string, layer: Layer) => apply(closeThen(current, kind, current.hash, layer)),
   /** Closes a layer, then opens a queue or step in another project (the waiting list). */
   closeThenItem: (kind: string, project: string, queue?: string, step?: string) =>
     apply(queue ? closeThen(current, kind, itemHash(project, queue, step), "item") : closeThen(current, kind, itemHash(project))),

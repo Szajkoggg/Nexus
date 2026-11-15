@@ -92,6 +92,16 @@ test("an entry's own state is read back; the hash decides whether the drawer is 
   assert.deepEqual(navOf({ nexus: { layers: [], depth: 1 } }, "#/p/Q", "").layers, ["item"]);
   assert.deepEqual(navOf({ other: 1 }, "#/p", "").layers, []);
   assert.equal(isOpen(navOf(null, "#/p", "?settings&waiting"), "waiting"), true);
+  assert.equal(isOpen(navOf(null, "#/p", "?stats"), "stats"), true, "the global Stats view from a link");
+});
+
+test("Stats from the phone's project picker: the picker closes, the Stats page opens over the project, Back closes it", () => {
+  const b = browser(home);
+  b.apply(open(b.cur(), "projects"));
+  b.apply(closeThen(b.cur(), "projects", b.cur().hash, "stats"));
+  assert.deepEqual([b.cur().hash, b.cur().layers], ["#/p", ["stats"]]);
+  b.back();
+  assert.deepEqual(b.cur(), home, "Back leaves Stats for the project, not the picker");
 });
 
 test("switching projects from the picker closes it, then changes the page in place", () => {

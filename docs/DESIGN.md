@@ -1208,6 +1208,7 @@ values are the mockup's; `surface-4` (hover over `surface-3`) and `scrim` (black
 | `accent`, `accent-strong`, `on-accent` | The one accent: actions, links, focus, selection, what is running; a primary button's fill and its text |
 | `ok`, `warn`, `stop`, `review`, `info`, `danger` | Status colours: done; waiting and questions; stopped; in review (and the orchestrator's doings); approval and pending deliveries; failed, rejected and errors |
 | `user-bubble`, `scrim` | The user's own chat messages; the dimming behind a drawer or menu |
+| `series` | A chart's one series colour (the Stats views): the accent stepped into the lightness band the `dataviz` skill's validator allows for the mode (Graphite `#3f7cf5`, Paper `#2f6fec`, Honey `#c47e14`), checked against the cards' surface; a few-data group is `fg-3`, a value beyond a threshold `warn` with ⚠ |
 
 Rules the components keep:
 
@@ -1219,6 +1220,10 @@ Rules the components keep:
 - **One accent** for actions: primary buttons, links, focus, checkboxes. Information that is not an action (a
   pending delivery, a planned start) uses `info`.
 - Opacity modifiers derive tints from tokens (`bg-warn/15`), so a theme defines each colour once.
+- **Charts** (components/charts.tsx, the reasons per form in docs/ux/stats-mockups.md) follow Claude Code's `dataviz`
+  skill: one series colour, never a status colour for a series; thin marks with a 4 px rounded end; hairline solid grid,
+  dashed only for a reference line (a threshold, a target); text in the text tokens; a tooltip on hover and focus;
+  and a table view beside every chart. Two measures of different units are two charts, never two y-axes.
 
 ### The interface texts in one place
 

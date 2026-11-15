@@ -307,6 +307,16 @@ with Accept and Decline (and in the settings panel's Tags section, beside the li
 once you accepted it. A renamed tag reads as its new name everywhere, so what was counted under the old name stays
 together.
 
+**Stats.** "Stats · all projects" under the projects in the sidebar (on a phone at the foot of the project list that
+opens from the project's name) shows, across every project: the **usage windows day by day** (Claude Code's 5-hour
+window as the highest reading of each day, its 7-day window and Codex's weekly window at each day's end, with the
+pause threshold), then **how steps went by model or effort**: the steps, the share accepted in the first round, the
+median working time and the estimated use of the weekly window per step, and per group the same four side by side
+(**Columns**), as a dot per group of first-round rate against working time (**Scatter**), or as a **Table**; the
+choice is kept in that browser. The range (7, 30, 90 days, all) is at the top; the project and the tags (kind,
+activity, area, size, origin) narrow the steps, not the windows. Use is an estimate and says so (≈); a group of fewer
+than 5 steps is marked "few data"; ↺ counts steps with a turn on a fallback. Every chart has a table view beside it.
+
 ## Requirements
 
 Node.js 24 or later (TypeScript runs natively; only the dashboard is built, with Vite).
