@@ -50,8 +50,9 @@ export function defaultLockFile(): string {
 }
 
 function defaultMaxWait(): number {
-  const v = Number(process.env.NEXUS_TEST_LOCK_MAX_MS);
-  return Number.isFinite(v) && v >= 0 && process.env.NEXUS_TEST_LOCK_MAX_MS ? v : 15 * MINUTE;
+  const raw = process.env.NEXUS_TEST_LOCK_MAX_MS;
+  const v = Number(raw);
+  return raw && Number.isFinite(v) && v >= 0 ? v : 15 * MINUTE;
 }
 
 /** Whether a process with this pid is alive (EPERM: it is, but not ours to signal). */
