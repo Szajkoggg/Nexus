@@ -357,8 +357,17 @@ reads it) and `CLAUDE.md` pulls them in with the line `@AGENTS.md` (Claude Code 
 would not, the project's page in the dashboard warns and offers the fix: it shows the change to the two files, and
 makes it when you confirm (not while a queue runs in the project's own checkout). Nexus does not commit it: you do.
 The list of registered projects is in `%APPDATA%/Nexus/projects.yaml` (`NEXUS_HOME` overrides the directory).
-`project add` on a folder whose `.nexus/` was kept (a project removed from Nexus) brings the project back under the id
-it had, with everything as it was.
+
+To take a project off Nexus, use the Danger zone at the bottom of its settings in the dashboard (there is no command
+for it, and no agent can do it). **Remove from Nexus** takes it off the list and stops its agents; its `.nexus/`
+stays, and `nexus project add <path>` brings it back under the id it had, with everything as it was. **Delete Nexus's
+data** also deletes its `.nexus/` folder (queues, sessions, chats, notes, review material); you confirm it by typing
+the project's name. Neither touches the project's own files, nor the worktrees and branches Nexus made for its queues
+(remove those with git when you no longer need them). Both are off while anything runs in the project (a queue
+running, paused, waiting or stopped, a merge back, a planned deploy after its work, the orchestrator or a thinking
+partner in a turn): the zone says what. Planned and scheduled starts and open questions go with the project; the
+confirmation lists them, and what stays.
+
 Pictures added to chat messages are kept in the project's `.nexus/uploads/`, named by the time and a short hash. Nexus
 never deletes them: clear the folder by hand when you no longer need them.
 
