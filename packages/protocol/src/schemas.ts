@@ -627,6 +627,7 @@ export type ReviewItem = z.infer<typeof ReviewItem>;
 export const Event = z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("step.started"), ...qs }),
   z.object({ ...base, type: z.literal("step.progress"), ...qs, text: z.string(), pct: z.number().min(0).max(100).optional() }),
+  z.object({ ...base, type: z.literal("step.interrupted"), ...qs, text: z.string() }),
   z.object({ ...base, type: z.literal("review.added"), ...qs, items: z.array(ReviewItem).min(1), round: z.number().int().optional() }),
   /** `commit`: the HEAD of the session's checkout when it was reported (the check's time is the metric `check:<name>`). */
   z.object({ ...base, type: z.literal("check.result"), ...qs, name: z.string(), ok: z.boolean(), summary: z.string().optional(), duration: z.number().nonnegative().optional(), commit: z.string().optional() }),
@@ -761,7 +762,7 @@ export const ORCHESTRATOR_ONLY: ReadonlySet<EventType> = new Set([
 export const WORKER_ONLY: ReadonlySet<EventType> = new Set(["metric.recorded"]);
 
 /** Event types only the user's session may write (the server writes them for the dashboard). */
-export const USER_ONLY: ReadonlySet<EventType> = new Set(["review.rejected", "review.marked", "review.commented", "review.confirmed", "review.fix_asked"]);
+export const USER_ONLY: ReadonlySet<EventType> = new Set(["step.interrupted", "review.rejected", "review.marked", "review.commented", "review.confirmed", "review.fix_asked"]);
 
 // ---------------------------------------------------------------- server-owned runtime files
 

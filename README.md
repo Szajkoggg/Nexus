@@ -197,6 +197,12 @@ crashed runtime) is tried again by itself after 1, 2, 4, 8 and 16 minutes ("wait
 for its window; anything else, or a sixth failure in a row, halts the run with the reason. Pausing or stopping
 cancels a pending retry.
 
+In the run controls, **Stop now** asks the worker to leave its work consistent and end its turn. **Stop at once**
+interrupts the turn and ends that worker's process immediately, pausing the run. It records the interruption on
+the step's timeline and leaves all uncommitted changes in the checkout or worktree. **Resume** reopens the step in
+the same session after the process has exited. Stop at once is also available while a worker is still working after
+Stop now.
+
 A new revision of a running queue never stops the step at work: it goes on to its end, questions and answers
 included. A revision may change only steps that have not started. At the step's end the run goes on under the new
 revision in the same session if you have approved it; otherwise it waits for your approval (keeping its session) and

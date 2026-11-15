@@ -149,6 +149,8 @@ export function RunControls({ project, queue }: { project: ProjectState; queue: 
   const reusable = project.sessions.filter((s) => s.role === "worker" && s.runtime !== "external" && s.launched_by === "nexus" && s.native_id
     && !project.queues.some((q) => q.id !== queue.id && q.run?.session === s.id && runGoing(q.run)));
   const runSession = run ? project.sessions.find((s) => s.id === run.session) : undefined;
+  const canStopAtOnce = run && run.state !== "finished" && runSession?.queue === queue.id
+    && ((active && !waitsApproval) || runSession.live?.state === "working");
   // A stopped queue goes on only through Continue or a newly approved revision (the stop box above).
   const canStart = queue.approved && !active && queue.status !== "done" && queue.status !== "cancelled" && queue.status !== "stopped";
   const ended = endedHalt(queue);
@@ -191,8 +193,10 @@ export function RunControls({ project, queue }: { project: ProjectState; queue: 
       <div className="flex flex-wrap items-center gap-2">
         {active && run?.state !== "pausing" && <Button variant="quiet" disabled={busy} onClick={() => void call({ action: "pause" })}>{t(waitsApproval ? "run.pause" : "run.pauseAfterStep")}</Button>}
         {active && !waitsApproval && <Button variant="danger" disabled={busy} onClick={() => void call({ action: "stop" })}>{t("run.stopNow")}</Button>}
+        {canStopAtOnce && <Button variant="danger" disabled={busy || !runSession.live || runSession.live.state === "exited"} onClick={() => void call({ action: "stop_at_once" })}>{t("run.stopAtOnce")}</Button>}
         {run && !ended && queue.status !== "stopped" && (run.state === "paused" || run.state === "halted") && <Button disabled={busy || !queue.approved} onClick={() => void call({ action: "resume" })}>{t("run.resume")}</Button>}
       </div>
+      {canStopAtOnce && <p className="mt-2 text-xs text-fg-3">{t("run.stopAtOnceHint")}</p>}
       {canStart && (!run || run.state === "finished" || run.state === "halted" || run.state === "paused") && (
         <div className={`${run ? "mt-4 border-t border-line pt-3" : ""} flex flex-wrap items-end gap-3`}>
           <label className="text-xs text-fg-2">
