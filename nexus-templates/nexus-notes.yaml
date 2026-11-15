@@ -1,0 +1,113 @@
+# Nexus's instance of the shipped notes template (templates/notes.yaml): the parameters' defaults are this repository's.
+template:
+  id: nexus-notes
+  title: Notes kept true
+  description: Nexus's own instance of the notes template, filled in for this repository. Check the Claude sessions'
+    memory notes, the ideas notes and the project documents; report what is stale, unmarked or untrue; fix_small fixes
+    only typos in the project documents.
+maintenance: survey
+params:
+  - name: memory_dir
+    description: the folder of the Claude sessions' memory notes for this project, outside it (Claude Code keeps them under
+      ~/.claude/projects/<the project's path, with dashes>/memory); the worker reads it, and never writes to it
+    default: ~/.claude/projects/C--Code-Nexus/memory
+  - name: ideas_dir
+    description: the folder of the ideas notes
+    default: docs/ideas
+  - name: docs
+    description: the project documents to check against the code (for example AGENTS.md, a design and a protocol document)
+    default: AGENTS.md, README.md, docs/DESIGN.md and docs/PROTOCOL.md
+  - name: code
+    description: the code the documents describe (for example src/, or the project's API and command line)
+    default: packages/ and apps/ (the CLI's commands, the schemas, the HTTP API, the briefings)
+title: "Maintenance: notes kept true"
+description: |
+  A survey of three kinds of notes: the memory notes of the Claude sessions ({{memory_dir}}), the ideas notes
+  ({{ideas_dir}}) and the project documents ({{docs}}) against {{code}}. It reports what is stale, unmarked or untrue;
+  the report becomes a queue the user approves. In survey mode nothing is changed or committed. In fix_small mode
+  only the clear typos in the project documents are fixed: the memory notes (the orchestrator's) and the ideas notes
+  (the idea partner's) are only reported, in every mode.
+  The report ends with a section "Recommended additions" (see the last survey step).
+coding: true
+origin: maintenance
+stop_conditions:
+  - Surveying would need a change to the project, the memory folder or the ideas (a fix, a commit) in survey mode;
+    report it as a finding instead.
+  - A decision that belongs to the user comes up (which of a document and the code is right); ask with nexus ask, with a
+    recommendation.
+  - A file to commit has changes this queue did not make; ask with nexus ask, never commit them.
+steps:
+  - id: "{{id}}1"
+    title: "Survey: the memory notes"
+    goal: |
+      Read the memory notes in {{memory_dir}} (read only; the folder is outside the project, and it is not yours to
+      change). For each note: does what it says still hold? Check the files, functions, flags and states it names
+      against the project, and what it says is pending against the git history and the queues (`nexus status`). Name
+      the stale ones (what is no longer true, the evidence), those that say what the code or the history already
+      says, and notes that contradict each other. Or say there were none. Change nothing, commit nothing, in any mode.
+    acceptance:
+      - Each stale or contradicting memory note with the evidence, or that there were none.
+      - The memory folder as it was.
+    review:
+      level: 2
+    kind: research
+    activities:
+      - cleanup
+    size: S
+  - id: "{{id}}2"
+    title: "Survey: the ideas notes"
+    goal: |
+      Read the notes in {{ideas_dir}} (they may not be tracked by git: read only, change nothing). For each entry
+      that is decided or planned: has it been built? Look for the traces in the code, the documents, the git log and
+      the queues (`nexus status`, the queues' reports). Report the entries that were built but are not marked so,
+      with the commit or queue that built them, and the entries marked built that the code does not bear out.
+      Marking them is the idea partner's; you only report. Or say there were none. Change nothing, commit nothing.
+    acceptance:
+      - Each built but unmarked entry with the commit or queue that built it, and each wrong mark, or that there were
+        none.
+      - The ideas folder as it was.
+    review:
+      level: 2
+    kind: research
+    activities:
+      - cleanup
+    size: S
+  - id: "{{id}}3"
+    title: "Survey: the project documents, and the report"
+    goal: |
+      Survey {{docs}} against {{code}} as the survey step of the shipped docs-freshness template says (`nexus
+      template show docs-freshness`; its first step, "Survey: documents against the code"): each place where a
+      document says what the code no longer does, or leaves out what it now does, with its weight and whether the
+      fix is small (a typo) or not. Change nothing, commit nothing.
+      Then give the report: the findings of the three surveys together, under "Memory notes", "Ideas notes" and
+      "Project documents", each with its weight.
+      The report ends with "Recommended additions" (not counted among the findings): what the project could add to
+      keep its notes true (a link or example check for the documents, a marking convention for built ideas, a
+      parameter left to a default), each with its reason.
+    acceptance:
+      - The report has the three parts, Memory notes, Ideas notes and Project documents, each finding with its weight,
+        or that there were none.
+      - The report ends with "Recommended additions", each with its reason (or says there are none).
+      - The working tree as it was (no commit, no leftover files).
+    review:
+      level: 2
+    kind: research
+    activities:
+      - cleanup
+    size: S
+  - id: "{{id}}4"
+    maintenance: fix_small
+    title: Fix the typos in the project documents
+    goal: |
+      Fix only the typos among the findings of {{id}}3 in {{docs}}: spelling and wording slips that change no
+      meaning. Each fix in its own commit, with the checks passing. Touch no other file: not the code, not the memory
+      notes in {{memory_dir}}, not the ideas notes in {{ideas_dir}}; every difference of meaning and every finding in
+      the memory and ideas notes stays a finding for the report.
+    acceptance:
+      - Each typo fix committed with the checks passing, only in the project documents; the others listed as findings.
+    review:
+      level: 2
+    kind: docs
+    activities:
+      - cleanup
+    size: S

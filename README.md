@@ -338,7 +338,7 @@ once you accepted it. A renamed tag reads as its new name everywhere, so what wa
 together.
 
 **Queue templates.** "New queue from template" at the top of a project's queues (the Queues tab on a phone) lists
-the templates: Nexus's own (bug fix, UI change with pictures, spike, refactor, maintenance, static analysis setup and the six maintenance templates below), yours for every project
+the templates: Nexus's own (bug fix, UI change with pictures, spike, refactor, maintenance, static analysis setup and the seven maintenance templates below), yours for every project
 (in `<NEXUS_HOME>/templates/`, `%APPDATA%\Nexus\templates\` by default) and the project's (`nexus-templates/` in its
 repository, versioned with it); a project's template replaces one of yours with the same id, and yours replaces
 Nexus's. Pick one, fill in what it asks (a maintenance template also asks its mode) and add anything else; "Send to
@@ -346,7 +346,7 @@ the orchestrator" sends it as your message, and the orchestrator drafts the queu
 it as any queue. A template is a queue's YAML with a `template:` header, `params:` and `{{name}}` placeholders
 (docs/PROTOCOL.md, "Queue templates"); `nexus template list` shows the ones in effect.
 
-**Maintenance templates.** Six templates survey a project and report; none depends on a stack, the commands are
+**Maintenance templates.** Seven templates survey a project and report; none depends on a stack, the commands are
 parameters with Node and .NET/Unity examples. `dependencies` lists the outdated dependencies (minor and patch; in
 fix_small mode it applies the patch-level ones whose tests pass). `security-audit` runs the project's audit and only
 reports. `dead-code` finds unused code and lint findings (fix_small removes what is surely unused).
@@ -356,6 +356,10 @@ every candidate with the places of both tests, the reasoning and a degree of cer
 a test, in any mode. `performance` measures with the project's command and compares with earlier values.
 `docs-freshness` compares the documents with the code (fix_small fixes typos only). Each report ends with
 "Recommended additions": what the project's stack supports but is not set up, for the orchestrator to offer you.
+A seventh, `notes`, is meant to recur: it keeps the notes true. It reads the Claude sessions' memory notes (the
+`memory_dir` parameter, outside the project), the ideas notes and the project documents against the code, and reports what
+is stale, built but unmarked, or untrue. Only the clear typos in the project documents are fixed in fix_small mode; the
+memory and ideas notes are only reported.
 Nexus's own instances, filled in for this repository, are in `nexus-templates/`.
 
 **Static analysis setup.** The `static-analysis` template sets up static analysis for any stack (ESLint or Biome

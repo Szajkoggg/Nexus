@@ -114,7 +114,7 @@ test("a free queue id from the template's id, numbered when taken", () => {
   assert.equal(templateQueueId({ id: "bugfix" }, (x) => taken.has(x)), "BUGFIX3");
 });
 
-/** The six maintenance templates (MT): each with the values of its required parameters. */
+/** The seven maintenance templates (MT): each with the values of its required parameters. */
 const SIX: Record<string, Record<string, string>> = {
   dependencies: { outdated_command: "npm outdated", test_command: "npm test" },
   "security-audit": { audit_command: "npm audit" },
@@ -122,11 +122,13 @@ const SIX: Record<string, Record<string, string>> = {
   "test-health": { test_command: "npm test" },
   performance: { perf_command: "npm run bench" },
   "docs-freshness": { docs: "README.md and docs/", code: "src/" },
+  notes: { memory_dir: "~/.claude/projects/p/memory" },
 };
 /** The steps each of them has in survey mode and in fix_small mode. */
 const SIX_STEPS: Record<string, { survey: number; fix: number }> = {
   dependencies: { survey: 1, fix: 2 }, "security-audit": { survey: 1, fix: 1 }, "dead-code": { survey: 1, fix: 2 },
   "test-health": { survey: 3, fix: 3 }, performance: { survey: 1, fix: 1 }, "docs-freshness": { survey: 1, fix: 2 },
+  notes: { survey: 3, fix: 4 },
 };
 
 /** Values for each shipped template's required parameters. */
@@ -212,6 +214,7 @@ test("the six maintenance templates: survey is coding: false without a fixing st
   assert.match(fixStep("dependencies"), /patch-level/);
   assert.match(fixStep("dead-code"), /surely unused/);
   assert.match(fixStep("docs-freshness"), /typos/);
+  assert.match(fixStep("notes"), /typos/);
 });
 
 test("the test suite health template: three parts, candidates with their evidence and certainty, no coverage method", () => {
@@ -252,4 +255,22 @@ test("the shipped templates carry no command of the Nexus repository; its own in
     assert.ok(t.params.every((p) => p.default !== undefined), `${t.id}: every parameter has the repository's value`);
     assert.doesNotMatch(JSON.stringify(fillTemplate(t, {}, "NX")), /\{\{/, t.id);
   }
+});
+
+test("the notes template: needs memory_dir; survey only reads, the fix step touches the project documents alone", () => {
+  const t = sixTemplate("notes");
+  assert.throws(() => fillTemplate(t, {}, "N"), /needs memory_dir/);
+  const survey = fillTemplate(t, SIX.notes!, "N");
+  assert.equal(survey.coding, false);
+  assert.deepEqual(stepIds(survey), ["N1", "N2", "N3"]);
+  const text = JSON.stringify(survey).replaceAll("\\n", " ");
+  for (const part of ["Memory notes", "Ideas notes", "Project documents"]) assert.match(text, new RegExp(part));
+  assert.match(text, /`nexus template show docs-freshness`/);
+  const fix = fillTemplate(t, SIX.notes!, "N", { maintenance: "fix_small" });
+  assert.deepEqual(stepIds(fix), ["N1", "N2", "N3", "N4"]);
+  const step = (fix.steps as { goal: string }[]).at(-1)!.goal.replaceAll("\n", " ");
+  assert.match(step, /Fix only the typos among the findings of N3 in AGENTS\.md and the design and protocol documents under docs\//);
+  assert.match(step, /Touch no other file: not the code, not the memory notes in ~\/\.claude\/projects\/p\/memory, not the ideas notes in docs\/ideas/);
+  // The survey steps are told to change nothing.
+  for (const st of (survey.steps as { goal: string }[])) assert.match(st.goal, /Change nothing, commit nothing/);
 });
