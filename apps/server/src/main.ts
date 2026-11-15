@@ -146,29 +146,29 @@ function changed(id: string): void {
     const e = projects.get(id);
     if (e) {
       e.state = undefined; e.error = undefined;
-      // Each decision below gets the state as it stands: one snapshot, rebuilt only after a write of the decisions
-      // before it (stateOf; a change from another process comes back here through the watcher).
-      // Deliver new answers to the sessions that asked. Its own inbox writes come back here and route nothing.
-      const s = stateOf(e);
-      if (s) {
-        try { routeAnswers(e.store, s); }
-        catch (err) { console.error(`routing answers in ${id}: ${(err as Error).message}`); }
+      // The decisions on a change, in order. Each gets the state as it stands: one snapshot, rebuilt only after a write
+      // of the decisions before it (stateOf; a change from another process comes back here through the watcher). One
+      // that fails is logged and the next goes on.
+      const decisions: [string, (s: ProjectState) => unknown][] = [
+        // Deliver new answers to the sessions that asked. Its own inbox writes come back here and route nothing.
+        ["routing answers", (s) => routeAnswers(e.store, s)],
         // Send-backs not delivered yet (the action delivers its own at once; this is the backstop).
-        try { const fresh = stateOf(e); if (fresh) routeSendBacks(e.store, fresh); }
-        catch (err) { console.error(`routing send-backs in ${id}: ${(err as Error).message}`); }
+        ["routing send-backs", (s) => routeSendBacks(e.store, s)],
         // A worktree queue merged back by Nexus (or integrated again, or waiting): before a planned deploy looks.
-        try { const fresh = stateOf(e); if (fresh) e.merger.onChange(fresh); }
-        catch (err) { console.error(`merging back in ${id}: ${(err as Error).message}`); }
+        ["merging back", (s) => e.merger.onChange(s)],
         // A planned deploy whose target is in starts its update (or is dropped): before the engine goes on.
-        try { const fresh = stateOf(e); if (fresh) planner.check(id, fresh); }
-        catch (err) { console.error(`deploy plan in ${id}: ${(err as Error).message}`); }
-        try { const fresh = stateOf(e); if (fresh) e.orchestrator.onChange(fresh); }
-        catch (err) { console.error(`orchestrator in ${id}: ${(err as Error).message}`); }
-        try { const fresh = stateOf(e); if (fresh) e.engine.onChange(fresh); }
-        catch (err) { console.error(`engine in ${id}: ${(err as Error).message}`); }
+        ["deploy plan", (s) => planner.check(id, s)],
+        ["orchestrator", (s) => e.orchestrator.onChange(s)],
+        ["engine", (s) => e.engine.onChange(s)],
+      ];
+      for (const [what, decide] of decisions) {
+        const s = stateOf(e);
+        if (!s) break;
+        try { decide(s); } catch (err) { console.error(`${what} in ${id}: ${(err as Error).message}`); }
       }
+      const s = stateOf(e);
+      if (s) watch.check({ id, name: s.project.name }, s.attention);
     }
-    if (e) { const s = stateOf(e); if (s) watch.check({ id, name: s.project.name }, s.attention); }
     broadcast({ type: "changed", project: id });
   }, 150));
 }
