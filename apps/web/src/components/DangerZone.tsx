@@ -85,6 +85,7 @@ export function DangerZone({ project }: { project: ProjectFile }) {
   const blocked = !view || view.blockers.length > 0;
   // Something started to run while a confirmation was open: it closes (the buttons are off now).
   const level = blocked ? undefined : open;
+  const confirmTitle = level && view ? t(level === "remove" ? "danger.remove.confirmTitle" : "danger.delete.confirmTitle", { name: view.name }) : "";
   const toggle = (l: Level) => { setOpen((x) => (x === l ? undefined : l)); setTyped(""); action.fail(undefined); };
   const remove = (l: Level) => void action.run(
     () => actResult(project.id, "POST", "/remove", l === "delete" ? { delete_data: true, name: typed } : {}),
@@ -107,8 +108,8 @@ export function DangerZone({ project }: { project: ProjectFile }) {
               text={view?.delete_refused ? <span className="text-warn">{t("danger.delete.refused", { reason: view.delete_refused })}</span> : t("danger.delete.text")} />
           </div>
           {level && view && (
-            <div className="mt-3 rounded-md border border-danger/40 bg-danger/5 p-3" role="group" aria-label={t(level === "remove" ? "danger.remove.confirmTitle" : "danger.delete.confirmTitle", { name: view.name })}>
-              <p className="text-sm font-medium text-fg">{t(level === "remove" ? "danger.remove.confirmTitle" : "danger.delete.confirmTitle", { name: view.name })}</p>
+            <div className="mt-3 rounded-md border border-danger/40 bg-danger/5 p-3" role="group" aria-label={confirmTitle}>
+              <p className="text-sm font-medium text-fg">{confirmTitle}</p>
               <Consequences view={view} level={level} root={project.root} />
               {level === "delete" && (
                 <label className="mt-3 block text-xs text-fg-2">
