@@ -1,6 +1,6 @@
 // Chats: the project's orchestrator, and conversations with a thinking partner.
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
-import type { ChatEntry, RuntimeFile, SessionFile } from "@nexus/protocol";
+import type { ChatEntry, RuntimeFile, SessionFile, SessionView } from "@nexus/protocol";
 import type { NumberedEntry } from "@nexus/protocol/chat";
 import { PinButton, PinsBar, SearchBar, SearchButton, StopButton, type PinView, type SearchState } from "./ChatTools.tsx";
 import { act, actResult, enc, projectUrl, request, useAction, useQuery, type Version } from "../api.ts";
@@ -52,7 +52,7 @@ interface View { session: SessionFile | null; state: "working" | "idle" | "exite
  */
 interface EarlierSession {
   session: string; created_at: string; chat: NumberedEntry[];
-  switch: { at: string; fill: number | null; summary: { text: string; topics: string[]; files: string[]; at: string } | null };
+  switch: { at: string; fill: number | null; summary: NonNullable<SessionView["context"]> | null };
 }
 
 /** Where the server keeps the orchestrator's latest summary for a fresh session (PROTOCOL.md, "Layout"). */
