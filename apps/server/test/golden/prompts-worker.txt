@@ -249,7 +249,7 @@ What they changed (git diff --stat):
  src/code.ts | 12 +++++++-----
  1 file changed, 7 insertions(+), 5 deletions(-)
 The project's AGENTS.md has a "Refactoring" section: follow it too; it adds the project's own rules to this text.
-Run the checks before you change anything, and again after. If nothing is worth refactoring, make no commit and report the step done with your reasons in the summary: that is a valid outcome.
+Run the checks before you change anything, and again after. Report the run after your change with nexus check, one per check under its exact name in "Checks for every step" below (for example `nexus check <step> "npm test" --ok …`), never under a name of your own; mention the run before only in the summary. If nothing is worth refactoring, make no commit and report the step done with your reasons in the summary (the checks of that one run reported the same way): that is a valid outcome.
 
 Checks for every step:
 - npm test
@@ -276,7 +276,7 @@ Tags as planned: code; refactor; from maintenance. At the end name what you actu
 This is the queue's closing refactoring step, kept by Nexus: it runs after the queue's own steps, in a fresh session, so that their work is read with fresh eyes.
 Nexus has no commit range of the queue's work (no git records of its steps): find its commits from the steps' summaries and git log.
 The project's AGENTS.md has no "Refactoring" section: this text alone applies.
-Run the checks before you change anything, and again after. If nothing is worth refactoring, make no commit and report the step done with your reasons in the summary: that is a valid outcome.
+Run the checks before you change anything, and again after. Report the run after your change with nexus check, one per check under its exact name in "Checks for every step" below (for example `nexus check <step> "npm test" --ok …`), never under a name of your own; mention the run before only in the summary. If nothing is worth refactoring, make no commit and report the step done with your reasons in the summary (the checks of that one run reported the same way): that is a valid outcome.
 
 Checks for every step:
 - npm test
@@ -325,7 +325,7 @@ Report through the `nexus` command (on PATH; your session is set in the environm
 - nexus step progress <step> "<short status>" [--pct N]     at milestones, so the user sees where you are
 - nexus review add <step> <picture> --key <view@width> --role <role> --label "..."   a review picture, one per command
 - nexus review add <step> <file|url>... --label "..."       other review material (documents, data, links)
-- nexus check <step> <name> --ok|--fail --summary "..." --duration <seconds>   results of the step's checks, with how long each ran (the times show when a check grows slower)
+- nexus check <step> <name> --ok|--fail --summary "..." --duration <seconds>   results of the step's checks, with how long each ran (the times show when a check grows slower); <name> is the check exactly as the step's opening lists it under "Checks for every step" (`nexus check <step> "npm test" --ok …`, not "test"): a check reported under another name counts as not reported
 - nexus step done <step> --summary "..." [--commit <sha>] --activities a,b   when the acceptance criteria are met; --activities names what you actually did, whatever was planned (`nexus tags` lists the names)
 - nexus step failed <step> --reason "..."                   when the step cannot be done as written
 - nexus stop <step> --condition "<the stop condition met>" --reason "<what happened, short>"   when a stop condition is met (first commit what is consistent, see below); give both: --condition names the condition as the queue words it, --reason says in a sentence or two what happened and what you left out (the user sees the reason first, the condition behind "more")

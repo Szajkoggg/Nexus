@@ -20,6 +20,9 @@
 //   bglong      the same command, running FAKE_BG_LONG_MS (default 600000): past the engine's limit in a test
 //   review      write a picture and a note into <temp>/nexus-review/<step>/ (outside the working tree), add them with
 //               nexus review add (the picture keyed, as a result), then done
+//   checks      report each check its opening lists under "Checks for every step" with nexus check, under that exact
+//               name, as the opening asks, then done
+//   shortchecks the same under a short name of its own (the last word: "npm test" as "test"), as workers once did
 // The closing refactoring step's standard goal has no "FAKE:": it does FAKE_CLOSING's behaviour, by default done, with a
 // summary that finds nothing worth refactoring (the valid outcome of a small change).
 // The integration step's has none either: it does FAKE_INTEGRATE's behaviour, by default "merge": it runs the merge its
@@ -225,6 +228,12 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
     if (fail) return { fail };
     if (/^(overloaded|network|auth|limit|crash|cloudflare)/.test(behaviour)) nexus("step", "done", step, "--summary", `fake finished ${step} after failures`);
     if (behaviour === "slow" || behaviour === "slownoop" || behaviour === "slowask") await work(step);
+    if (behaviour === "checks" || behaviour === "shortchecks") {
+      const listed = /\nChecks for every step:\n((?:- .*(?:\n|$))+)/.exec(text)?.[1] ?? "";
+      for (const name of listed.split("\n").filter(Boolean).map((l) => l.slice(2).trim())) {
+        nexus("check", step, behaviour === "checks" ? name : name.split(/\s+/).at(-1)!, "--ok", "--summary", "fake run", "--duration", "1");
+      }
+    }
     // "commit": a commit in the working directory (a file named after the step), then done.
     // "commitstop": the same commit, then a stop condition (as the worker briefing asks: commit, then stop).
     if (behaviour === "commit" || behaviour === "commitstop") {
@@ -248,7 +257,7 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
     }
     if (behaviour === "refused") { refused?.(); nexus("step", "done", step, "--summary", `fake finished ${step} without what was refused`); }
     // A closing refactoring step done finds nothing worth refactoring.
-    if (["done", "slow", "summary", "summaryslow"].includes(behaviour)) nexus("step", "done", step, "--summary", closing ? `fake: nothing in ${step} is worth refactoring, the change is too small` : `fake finished ${step}`);
+    if (["done", "slow", "summary", "summaryslow", "checks", "shortchecks"].includes(behaviour)) nexus("step", "done", step, "--summary", closing ? `fake: nothing in ${step} is worth refactoring, the change is too small` : `fake finished ${step}`);
     if (behaviour.startsWith("summary")) nexus("context", `fake summary of ${step}`, "--topics", "fake,context");
     if (behaviour === "summaryslow") await work(step);
     if (behaviour === "fail") nexus("step", "failed", step, "--reason", "fake failure");

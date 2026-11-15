@@ -47,7 +47,7 @@ Report through the \`nexus\` command (on PATH; your session is set in the enviro
 - nexus step progress <step> "<short status>" [--pct N]     at milestones, so the user sees where you are
 - nexus review add <step> <picture> --key <view@width> --role <role> --label "..."   a review picture, one per command
 - nexus review add <step> <file|url>... --label "..."       other review material (documents, data, links)
-- nexus check <step> <name> --ok|--fail --summary "..." --duration <seconds>   results of the step's checks, with how long each ran (the times show when a check grows slower)
+- nexus check <step> <name> --ok|--fail --summary "..." --duration <seconds>   results of the step's checks, with how long each ran (the times show when a check grows slower); <name> is the check exactly as the step's opening lists it under "Checks for every step" (\`nexus check <step> "npm test" --ok …\`, not "test"): a check reported under another name counts as not reported
 - nexus step done <step> --summary "..." [--commit <sha>] --activities a,b   when the acceptance criteria are met; --activities names what you actually did, whatever was planned (\`nexus tags\` lists the names)
 - nexus step failed <step> --reason "..."                   when the step cannot be done as written
 - nexus stop <step> --condition "<the stop condition met>" --reason "<what happened, short>"   when a stop condition is met (first commit what is consistent, see below); give both: --condition names the condition as the queue words it, --reason says in a sentence or two what happened and what you left out (the user sees the reason first, the condition behind "more")
@@ -117,7 +117,7 @@ function closingText(c: ClosingContext): string {
     c.rules
       ? `The project's AGENTS.md has a "Refactoring" section: follow it too; it adds the project's own rules to this text.`
       : `The project's AGENTS.md has no "Refactoring" section: this text alone applies.`,
-    `Run the checks before you change anything, and again after. If nothing is worth refactoring, make no commit and report the step done with your reasons in the summary: that is a valid outcome.`,
+    `Run the checks before you change anything, and again after. Report the run after your change with nexus check, one per check under its exact name in "Checks for every step" below (for example \`nexus check <step> "npm test" --ok …\`), never under a name of your own; mention the run before only in the summary. If nothing is worth refactoring, make no commit and report the step done with your reasons in the summary (the checks of that one run reported the same way): that is a valid outcome.`,
   ].join("\n");
 }
 
@@ -135,6 +135,7 @@ function integrationText(step: string, c: IntegrationContext): string {
   return [
     intro,
     `Merge the base into it: git merge --no-edit ${c.base} (the base branch ${c.base} is at ${c.sha} now). Never rebase, never push, and change neither the base branch nor any other checkout: the base moves forward to this step's result later, by Nexus or the user.`,
+    `Report the checks you run on the result with nexus check, one per check under its exact name in "Checks for every step" below (for example \`nexus check <step> "npm test" --ok …\`), never under a short name of your own; report the last run of each.`,
     `- No conflict (or the branch already contains the base): run the checks on the result. If a check fails because of what the two sides do together, fix it on this branch in small commits that say why, and run the checks again. Report the step done with the resulting HEAD as its commit, and say in the summary what the merge brought in.`,
     c.resolve
       ? `- A conflict: resolve it (the project lets you: its resolve_conflicts setting is on). Keep what both sides meant, commit the merge, run the checks, and say in the summary which files conflicted and how you resolved each; the step's review judges it. If you cannot resolve one with confidence (the two sides want different things, and choosing is the user's), abort the merge (git merge --abort) and stop: ${stop}`
