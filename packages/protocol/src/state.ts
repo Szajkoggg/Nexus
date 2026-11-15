@@ -537,9 +537,7 @@ function apply(
         st.integration ? undefined : q.steps.find((x) => x.integration),
       ];
       for (const kept of again) {
-        if (!kept || kept.status === "pending" || kept.status === "skipped") continue;
-        kept.status = "pending"; kept.review_with = undefined; kept.asked_user = undefined;
-        kept.finished_at = undefined; kept.summary = undefined; kept.commit = undefined; kept.reason = undefined;
+        if (kept && kept.status !== "pending" && kept.status !== "skipped") toPending(kept);
       }
       st.status = "running"; st.started_at ??= e.at; st.session = e.session;
       st.finished_at = undefined; st.reason = undefined;
@@ -764,13 +762,13 @@ function applyChange(q: QueueView, c: StatusChange): void {
         if (!st) return;
         // Back to pending (Nexus, after a revision set its run aside, or to integrate again): no reason shows on a step
         // still to run, nor what its last round reported; a queue that was done has work again.
-        st.status = c.to as StepStatus; st.reason = c.to === "pending" ? undefined : c.reason;
         endSegment(st, c.at);
         if (c.to === "pending") {
-          st.review_with = undefined; st.asked_user = undefined; st.finished_at = undefined; st.summary = undefined; st.commit = undefined;
+          toPending(st);
           if (q.status === "done") { q.status = "approved"; q.status_reason = undefined; }
           return;
         }
+        st.status = c.to as StepStatus; st.reason = c.reason;
       } else if (c.to === "cancelled") {
         q.status = "cancelled"; q.status_reason = c.reason;
         return;
@@ -784,6 +782,12 @@ function applyChange(q: QueueView, c: StatusChange): void {
     case "work":
       return; // the user's choice about a stopped step's work: a record; a Keep's lift is its own entry
   }
+}
+
+/** A step back to pending, to run again: nothing of its last round (its outcome, review, reason) shows on it. */
+function toPending(st: StepView): void {
+  st.status = "pending"; st.review_with = undefined; st.asked_user = undefined;
+  st.finished_at = undefined; st.summary = undefined; st.commit = undefined; st.reason = undefined;
 }
 
 function endSegment(st: StepView, at: string): void {
