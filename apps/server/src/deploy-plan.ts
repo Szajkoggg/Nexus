@@ -23,7 +23,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { newId, nexusHome, now, pendingProvisional, renameRetrying, stepClosed, type ProjectState } from "@nexus/protocol";
+import { newId, nexusHome, now, pendingProvisional, renameRetrying, stepClosed, type NotifyKind, type ProjectState } from "@nexus/protocol";
 import type { UpdateAsker } from "./handover.ts";
 import type { UpdateStatus } from "./lifecycle.ts";
 
@@ -200,7 +200,7 @@ export interface PlannerOptions {
   /** Runs git in `root` (tests may replace it); returns its output, throws on a non-zero exit. */
   git?: (root: string, args: string[]) => string;
   /** A push notification for the user's devices. */
-  push?: (n: { title: string; body: string; url: string; tag: string }) => void;
+  push?: (n: { title: string; body: string; url: string; tag: string; kind: NotifyKind }) => void;
   /** The plan changed: dashboards reload the server's state; projects look again (their orchestrators are told). */
   changed?: () => void;
   /** A run the plan held at its step's end goes on (the plan ended without its deploy): Engine.releaseHold. */
@@ -379,7 +379,7 @@ export class DeployPlanner {
     if (p.waiting_for?.join() === holders.join()) return;
     this.f = { ...this.f, plan: { ...p, waiting_for: holders } };
     this.write();
-    this.o.push?.({ title: "Nexus: planned deploy waits", body: `The deploy planned ${whenText(p)} waits for your confirmation of provisional work: ${holders.join(", ")}`.slice(0, 180), url: "/?settings", tag: "nexus-deploy-plan" });
+    this.o.push?.({ title: "Nexus: planned deploy waits", body: `The deploy planned ${whenText(p)} waits for your confirmation of provisional work: ${holders.join(", ")}`.slice(0, 180), url: "/?settings", tag: "nexus-deploy-plan", kind: "deploy" });
   }
 
   /** It is due: start the update (or, when one is under way already, let it carry the plan). */
@@ -425,7 +425,7 @@ export class DeployPlanner {
   private drop(reason: string): void {
     const p = this.f.plan!;
     this.end("dropped", reason);
-    this.o.push?.({ title: "Nexus: planned deploy dropped", body: `No deploy ${whenText(p)}: ${reason}`.slice(0, 180), url: "/?settings", tag: "nexus-deploy-plan" });
+    this.o.push?.({ title: "Nexus: planned deploy dropped", body: `No deploy ${whenText(p)}: ${reason}`.slice(0, 180), url: "/?settings", tag: "nexus-deploy-plan", kind: "deploy" });
   }
 
   private end(why: EndedPlan["why"], reason: string, by?: UpdateAsker): void {

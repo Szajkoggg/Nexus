@@ -1,7 +1,7 @@
 // The history of open layers: Back closes the topmost; a close button does the same; nothing piles up.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { close, closeThen, closeTop, isOpen, layerValue, navOf, open, openConversation, phoneView, switchProject, switchTab, viewOf, type Nav, type Step } from "../src/layers.ts";
+import { close, closeThen, closeThenStep, closeTop, isOpen, layerValue, navOf, open, openConversation, phoneView, switchProject, switchTab, viewOf, type Nav, type Step } from "../src/layers.ts";
 
 /** A browser history in memory, to play the steps against. */
 function browser(start: Nav) {
@@ -329,4 +329,22 @@ test("phone: Chat about this on a step's sheet closes the sheet, shows Ideas and
   b.apply(openConversation(b.cur(), "01DEF"));
   assert.deepEqual(b.cur().layers, ["conversation:01DEF"], "from one conversation to another: switched in place");
   assert.equal(b.at, 1);
+});
+
+test("a search hit: the search closes, then the chat or a conversation shows; Back does not reopen the search", () => {
+  // Desktop, on the queues view: the search opens over it; a chat hit shows the chat.
+  const b = browser({ hash: "#/p", layers: [], depth: 0, tab: "queues" });
+  b.apply(open(b.cur(), "search"));
+  assert.equal(isOpen(b.cur(), "search"), true);
+  b.apply(closeThenStep(b.cur(), "search", (at) => switchTab(at, "chat", "desk")));
+  assert.deepEqual(b.cur(), { hash: "#/p", layers: [], depth: 0, tab: "chat" });
+  // A conversation hit opens the conversation over Ideas; Back returns to the Ideas list, not to the search.
+  b.apply(open(b.cur(), "search"));
+  b.apply(closeThenStep(b.cur(), "search", (at) => openConversation(at, "C1", "desk")));
+  assert.deepEqual(viewOf(b.cur(), "desk"), { tab: "ideas", layers: ["conversation:C1"] });
+  b.back();
+  assert.equal(isOpen(b.cur(), "search"), false);
+  // A link's query opens the search, or a conversation (a chat hit's link).
+  assert.equal(isOpen(navOf(null, "#/p", "?search"), "search"), true);
+  assert.equal(layerValue(navOf(null, "#/p", "?conversation=C1&line=3"), "conversation"), "C1");
 });

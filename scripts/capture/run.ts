@@ -7,11 +7,16 @@ import { instanceEnv, shotFile, type Action, type Shot, type View } from "./view
 
 /** What the capture needs of a browser. Each returns false (or throws) when it could not do it. */
 export interface Browser {
-  /** Opens the URL in a window of that size (a narrower one than the browser allows: in a frame of that size). */
-  open(url: string, width: number, height: number): Promise<void>;
+  /**
+   * Opens the URL in a window of that size (a narrower one than the browser allows: in a frame of that size). `script`:
+   * JavaScript run in every frame before the page's own (the view's `script`), for this view only.
+   */
+  open(url: string, width: number, height: number, script?: string): Promise<void>;
   click(target: string | { selector: string }): Promise<boolean>;
   type(text: string, into?: string): Promise<boolean>;
   press(key: string): Promise<boolean>;
+  /** Scrolls the first element whose own text is exactly `text` (a section's heading) to the top of the window. */
+  scroll(text: string): Promise<boolean>;
   /** Saves a picture of the window (only the window: a fixed-viewport capture). */
   shot(file: string): Promise<void>;
 }
@@ -20,6 +25,7 @@ const describe = (a: Action): string => {
   if ("click" in a) return typeof a.click === "string" ? `click "${a.click}"` : `click ${a.click.selector}`;
   if ("type" in a) return `type into ${a.type.into ?? "the focused element"}`;
   if ("press" in a) return `press ${a.press}`;
+  if ("scroll" in a) return `scroll to "${a.scroll}"`;
   return `wait ${a.wait} ms`;
 };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -28,17 +34,24 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * Takes each view's picture into `out` (<key>.png, the before <key>.before.png). A view that fails (an action that
  * finds nothing, a page that does not open) is reported with why, and the others go on: the tool never blocks.
  */
-export async function captureViews(views: View[], browser: Browser, o: { base: string; out: string; side: "before" | "after"; log?: (s: string) => void }): Promise<Shot[]> {
+export async function captureViews(views: View[], browser: Browser, o: {
+  base: string; out: string; side: "before" | "after"; log?: (s: string) => void;
+  /** The views' scripts by their path: what each file holds. */
+  scripts?: ReadonlyMap<string, string>;
+}): Promise<Shot[]> {
   const shots: Shot[] = [];
   for (const v of views) {
     try {
-      await browser.open(o.base + "/" + v.route, v.width, v.height!);
+      const script = v.script === undefined ? undefined : o.scripts?.get(v.script);
+      if (v.script !== undefined && script === undefined) throw new Error(`its script ${v.script} was not read`);
+      await browser.open(o.base + "/" + v.route, v.width, v.height!, script);
       await sleep(v.settle ?? 1500);
       for (const [i, a] of v.actions.entries()) {
         let done = true;
         if ("click" in a) done = await browser.click(a.click);
         else if ("type" in a) done = await browser.type(a.type.text, a.type.into);
         else if ("press" in a) done = await browser.press(a.press);
+        else if ("scroll" in a) done = await browser.scroll(a.scroll);
         else await sleep(a.wait);
         if (!done) throw new Error(`action ${i + 1} (${describe(a)}) found nothing to act on`);
         await sleep(400);

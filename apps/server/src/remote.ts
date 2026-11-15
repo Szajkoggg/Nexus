@@ -11,7 +11,7 @@ import { join } from "node:path";
 import type { IncomingMessage } from "node:http";
 import webpush from "web-push";
 import QRCode from "qrcode";
-import { nexusHome, now, type AttentionItem } from "@nexus/protocol";
+import { knownTimeZone, nexusHome, notifySettingsOf, now, parseNotifySettings, shouldNotify, type AttentionItem, type NotificationKind, type NotifyKind, type NotifySettings } from "@nexus/protocol";
 
 const COOKIE = "nexus_auth";
 const authFile = () => join(nexusHome(), "auth.json");
@@ -122,7 +122,11 @@ export async function qrSvg(text: string): Promise<string> {
 
 // ---------------------------------------------------------------- push notifications
 
-interface Subscription { endpoint: string; keys: { p256dh: string; auth: string }; label?: string; added_at: string }
+interface Subscription {
+  endpoint: string; keys: { p256dh: string; auth: string }; label?: string; added_at: string;
+  /** Which notifications this device gets (@nexus/protocol notify.ts); absent (a subscription from before them): all, at any time. */
+  notify?: NotifySettings;
+}
 interface PushFile { vapid: { publicKey: string; privateKey: string }; subscriptions: Subscription[] }
 
 function pushStore(): PushFile {
@@ -141,14 +145,44 @@ function savePush(p: PushFile): void {
 export const pushKey = () => pushStore().vapid.publicKey;
 export const pushDevices = () => pushStore().subscriptions.map((s) => ({ endpoint: s.endpoint, label: s.label, added_at: s.added_at }));
 
-export function subscribe(sub: unknown, label?: unknown): void {
+/**
+ * Subscribes a device. The same endpoint again (the browser renewed it, or it was turned on again) keeps its
+ * notification settings. `timezone`: the device's IANA zone, for its quiet hours; one not known here is left out.
+ */
+export function subscribe(sub: unknown, label?: unknown, timezone?: unknown): void {
   const s = sub as Partial<Subscription>;
   if (!s?.endpoint || !s.keys?.p256dh || !s.keys?.auth) throw new Error("not a push subscription");
   const p = pushStore();
+  const before = p.subscriptions.find((x) => x.endpoint === s.endpoint);
   p.subscriptions = p.subscriptions.filter((x) => x.endpoint !== s.endpoint);
-  p.subscriptions.push({ endpoint: s.endpoint, keys: { p256dh: s.keys.p256dh, auth: s.keys.auth }, label: typeof label === "string" ? label.slice(0, 80) : undefined, added_at: now() });
+  const zone = typeof timezone === "string" && knownTimeZone(timezone) ? timezone : undefined;
+  const notify = zone ? { ...notifySettingsOf(before?.notify), timezone: zone } : before?.notify;
+  p.subscriptions.push({
+    endpoint: s.endpoint, keys: { p256dh: s.keys.p256dh, auth: s.keys.auth }, label: typeof label === "string" ? label.slice(0, 80) : undefined, added_at: now(),
+    ...(notify ? { notify } : {}),
+  });
   savePush(p);
 }
+
+/** A device's notification settings (the defaults for one that has none), or undefined for an endpoint not subscribed. */
+export function deviceNotify(endpoint: unknown): NotifySettings | undefined {
+  const s = pushStore().subscriptions.find((x) => x.endpoint === endpoint);
+  return s && notifySettingsOf(s.notify);
+}
+
+/** Sets a device's notification settings; throws with what is wrong, or when the endpoint is not subscribed. */
+export function setDeviceNotify(endpoint: unknown, settings: unknown): NotifySettings {
+  const parsed = parseNotifySettings(settings);
+  if ("error" in parsed) throw new Error(parsed.error);
+  const p = pushStore();
+  const s = p.subscriptions.find((x) => x.endpoint === endpoint);
+  if (!s) throw new NotSubscribed();
+  s.notify = parsed.settings;
+  savePush(p);
+  return parsed.settings;
+}
+
+export class NotSubscribed extends Error { constructor() { super("this device is not subscribed to push notifications"); } }
 
 export function unsubscribe(endpoint: unknown): void {
   const p = pushStore();
@@ -156,16 +190,29 @@ export function unsubscribe(endpoint: unknown): void {
   savePush(p);
 }
 
-/** Sends to every subscribed device (or only to `endpoint`); drops subscriptions the push service says are gone. */
-export async function push(payload: { title: string; body: string; url: string; tag?: string }, endpoint?: string): Promise<number> {
+/** What a push carries to the device's service worker (public/sw.js). */
+export interface PushPayload { title: string; body: string; url: string; tag?: string }
+/** Hands one notification to the push service (web-push; a fake in the tests). */
+type Sender = (s: Subscription, body: string) => Promise<unknown>;
+const webPushSender: Sender = (s, body) => webpush.sendNotification(s, body, { TTL: 3600, urgency: "high" });
+
+/**
+ * Sends a notification of a kind to every subscribed device whose settings let it through now (or only to
+ * `endpoint`); drops subscriptions the push service says are gone. Resolves with how many devices it reached.
+ */
+export async function push(payload: PushPayload, o: { kind: NotificationKind; endpoint?: string; at?: Date; send?: Sender }): Promise<number> {
   const p = pushStore();
-  const targets = endpoint ? p.subscriptions.filter((s) => s.endpoint === endpoint) : p.subscriptions;
+  const at = o.at ?? new Date();
+  const targets = p.subscriptions
+    .filter((s) => !o.endpoint || s.endpoint === o.endpoint)
+    .filter((s) => shouldNotify(o.kind, at, notifySettingsOf(s.notify)));
   if (!targets.length) return 0;
-  webpush.setVapidDetails(process.env.NEXUS_VAPID_SUBJECT ?? "mailto:nexus@example.com", p.vapid.publicKey, p.vapid.privateKey);
+  const send = o.send ?? webPushSender;
+  if (!o.send) webpush.setVapidDetails(process.env.NEXUS_VAPID_SUBJECT ?? "mailto:nexus@example.com", p.vapid.publicKey, p.vapid.privateKey);
   const gone: string[] = [];
   let sent = 0;
   await Promise.all(targets.map(async (s) => {
-    try { await webpush.sendNotification(s, JSON.stringify(payload), { TTL: 3600, urgency: "high" }); sent++; }
+    try { await send(s, JSON.stringify(payload)); sent++; }
     catch (err) {
       const code = (err as { statusCode?: number }).statusCode;
       if (code === 404 || code === 410) gone.push(s.endpoint);
@@ -175,6 +222,9 @@ export async function push(payload: { title: string; body: string; url: string; 
   if (gone.length) { const q = pushStore(); q.subscriptions = q.subscriptions.filter((x) => !gone.includes(x.endpoint)); savePush(q); }
   return sent;
 }
+
+/** Sends a notification of a waiting item's kind (`push`; a fake in the tests). */
+type Notifier = (payload: PushPayload, o: { kind: NotifyKind }) => Promise<number>;
 
 const LABEL: Record<AttentionItem["kind"], string> = {
   question: "Question", stopped: "Stopped", approval: "Needs approval", review: "Review", failed: "Failed", start: "Did not start",
@@ -191,8 +241,8 @@ const key = (a: AttentionItem) => [a.kind, a.queue, a.lift ? undefined : a.step,
  */
 export class AttentionWatch {
   private seen = new Map<string, Set<string>>();
-  private readonly send: typeof push;
-  constructor(send: typeof push = push) { this.send = send; }
+  private readonly send: Notifier;
+  constructor(send: Notifier = push) { this.send = send; }
   /** A project removed from Nexus: added again, its first look is a baseline again (nothing old is pushed). */
   forget(id: string): void { this.seen.delete(id); }
   check(project: { id: string; name: string }, items: AttentionItem[]): void {
@@ -209,7 +259,7 @@ export class AttentionWatch {
         // A stopped queue's notification opens the queue, whose stop box has Continue.
         url: `/#/${[project.id, a.queue, a.lift ? undefined : a.step].filter(Boolean).map((x) => encodeURIComponent(x!)).join("/")}`,
         tag: `${project.id}:${key(a)}`,
-      });
+      }, { kind: a.kind satisfies NotifyKind });
     }
   }
 }

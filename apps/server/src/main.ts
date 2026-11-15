@@ -15,7 +15,7 @@ import {
   ensureGlobalSettings, readGlobalSettings, updateGlobalSettings, MaxRunning, ownKeys, OVERRIDABLE, settingKey, readRegistry, readUsage, readTurns, commentOnPicture, markPicture, routeAnswers, routeSendBacks, sendBack, sendMessage, setQueueSettings, setStepLevel, confirmProvisional, type ProjectState,
   readAway, writeAway, awayNow, awayUntil, turnAway, expireAway, acceptPlanProposal, declinePlanProposal, handBackPlan, acceptTagProposal, declineTagProposal,
   STAT_DIMENSIONS, STAT_FILTERS, projectMetrics, sinceTime, statDimension, statsReport, stepStats, usageDays, type ProjectMetrics, type StatsReport, type UsageDays,
-  MIN_SAMPLES, queueEstimate, stepSamples, isOpenQuestion, writeCount, type EstimatesResponse, type LeftView, type TemplatesResponse, readTemplates, type ProjectSummary, type RemovalView,
+  SearchError, parseSearch, MIN_SAMPLES, queueEstimate, stepSamples, isOpenQuestion, writeCount, type EstimatesResponse, type LeftView, type TemplatesResponse, readTemplates, type ProjectSummary, type RemovalView,
 } from "@nexus/protocol";
 import { newestFirst, projectDigest, projectRunning, usageSince, type DigestEvent, type DigestResponse, type DigestRunning, type UsageRun } from "@nexus/protocol/digest";
 import { Engine } from "./engine.ts";
@@ -36,9 +36,10 @@ import { DeployPlanner, PlanError, planTime } from "./deploy-plan.ts";
 import { MAX_UPLOAD_BODY, UploadError, saveUpload } from "./uploads.ts";
 import { COMMIT_HASH, commitDetail, fileResponse, locate } from "./files.ts";
 import { chatRange, pin, searchLines } from "./chats.ts";
+import { searchProject } from "./search.ts";
 import {
   AttentionWatch, allowed, auth, authCookie, isLocal, loginPage, push, pushDevices, pushKey, qrSvg, rotateToken,
-  subscribe, tailscaleInfo, tokenMatches, unsubscribe,
+  NotSubscribed, deviceNotify, setDeviceNotify, subscribe, tailscaleInfo, tokenMatches, unsubscribe,
 } from "./remote.ts";
 
 // Started by an update (src/handover.ts): NEXUS_HANDOVER names the folder to take over through. It is read once and
@@ -109,7 +110,7 @@ function refreshRegistry(): void {
     merger = new Merger(store, { start: (q) => void engine.start(q), release: (q, why) => engine.releaseHold(q, why), busy: () => engine.draining || lifecycle.busy, poke: () => changed(p.id) });
     // Through its usual notices it is told the outcome of an update it asked for (lifecycle.notice), and what changed
     // for agents in each deploy since its session began (deploy-changes.jsonl).
-    const orchestrator = new Orchestrator(store, engine, () => changed(p.id), { update: () => lifecycle.notice(), plan: () => planner.notices(), changes: readDeployChanges, push: (n) => void push(n) });
+    const orchestrator = new Orchestrator(store, engine, () => changed(p.id), { update: () => lifecycle.notice(), plan: () => planner.notices(), changes: readDeployChanges, push: ({ kind, ...n }) => void push(n, { kind }) });
     projects.set(p.id, { id: p.id, root: p.root, store, engine, orchestrator, merger, conversations: new Conversations(store, orchestrator, () => changed(p.id)) });
     watchProject(p.id, store.dir);
   }
@@ -224,7 +225,7 @@ type Env = { Bindings: HttpBindings; Variables: { entry: Entry } };
 const app = new Hono<Env>();
 const lifecycle = new Lifecycle(() => [...projects.values()].map(projectPart), () => broadcast({ type: "server" }), {
   release, reacquire,
-  notify: (text) => void push({ title: "Nexus: update failed", body: text.slice(0, 180), url: "/?settings", tag: "nexus-update" }),
+  notify: (text) => void push({ title: "Nexus: update failed", body: text.slice(0, 180), url: "/?settings", tag: "nexus-update" }, { kind: "update_failed" }),
   // Settled (up and pushed, failed, cancelled): what was held while it drained, and its outcome, go out now.
   settled: () => { for (const id of projects.keys()) changed(id); },
   // A planned deploy it carries ends with it (before the hand-over: the successor must not deploy again).
@@ -237,7 +238,7 @@ const planner = new DeployPlanner({
   projects: () => [...projects.keys()],
   root: ROOT,
   release: (id, queue, reason) => projects.get(id)?.engine.releaseHold(queue, reason),
-  push: (n) => void push(n),
+  push: ({ kind, ...n }) => void push(n, { kind }),
   changed: () => {
     if (!active) return;
     broadcast({ type: "server" });
@@ -609,6 +610,18 @@ app.get("/api/projects/:id/sessions/:session/chat/search", (c) => {
 });
 app.post("/api/projects/:id/sessions/:session/pins", act((st, b, p) => ({ pins: pin(st, p("session"), b.line, b.pinned) })));
 
+// The project's whole history searched, from its files without an index (src/search.ts): the newest hits first.
+app.get("/api/projects/:id/search", (c) => {
+  const e = c.get("entry");
+  try {
+    return c.json(searchProject(e.store, parseSearch(c.req.query())));
+  } catch (err) {
+    if (err instanceof SearchError) return c.json({ error: err.message }, 400);
+    console.error(err);
+    return c.json({ error: (err as Error).message }, 500);
+  }
+});
+
 app.get("/api/projects/:id/sessions/:session/activity", (c) => {
   const e = c.get("entry");
   return c.json(e.engine.activity(c.req.param("session"), c.req.query("queue"), c.req.query("step"), Number(c.req.query("limit") ?? 300)));
@@ -832,8 +845,18 @@ app.post("/api/remote/rotate", (c) => {
 });
 app.get("/api/push/key", (c) => c.json({ key: pushKey() }));
 app.post("/api/push/subscribe", async (c) => {
-  const b = (await c.req.json().catch(() => ({}))) as { subscription?: unknown; label?: unknown };
-  try { subscribe(b.subscription, b.label); return c.json({ ok: true }); } catch (e) { return c.json({ error: (e as Error).message }, 400); }
+  const b = (await c.req.json().catch(() => ({}))) as { subscription?: unknown; label?: unknown; timezone?: unknown };
+  try { subscribe(b.subscription, b.label, b.timezone); return c.json({ ok: true }); } catch (e) { return c.json({ error: (e as Error).message }, 400); }
+});
+// A device's notification settings (@nexus/protocol notify.ts), by its subscription's endpoint: read, and replaced.
+app.get("/api/push/settings", (c) => {
+  const settings = deviceNotify(c.req.query("endpoint"));
+  return settings ? c.json({ settings }) : c.json({ error: new NotSubscribed().message }, 404);
+});
+app.put("/api/push/settings", async (c) => {
+  const b = (await c.req.json().catch(() => ({}))) as { endpoint?: unknown; settings?: unknown };
+  try { return c.json({ settings: setDeviceNotify(b.endpoint, b.settings) }); }
+  catch (e) { return c.json({ error: (e as Error).message }, e instanceof NotSubscribed ? 404 : 400); }
 });
 app.post("/api/push/unsubscribe", async (c) => {
   const b = (await c.req.json().catch(() => ({}))) as { endpoint?: unknown };
@@ -843,7 +866,7 @@ app.post("/api/push/unsubscribe", async (c) => {
 app.post("/api/push/test", async (c) => {
   const b = (await c.req.json().catch(() => ({}))) as { endpoint?: unknown };
   const only = typeof b.endpoint === "string" ? b.endpoint : undefined;
-  return c.json({ sent: await push({ title: "Nexus", body: "Notifications reach this device.", url: "/", tag: "test" }, only) });
+  return c.json({ sent: await push({ title: "Nexus", body: "Notifications reach this device.", url: "/", tag: "test" }, { kind: "test", endpoint: only }) });
 });
 app.get("/api/models/:runtime", async (c) => {
   const r = c.req.param("runtime");

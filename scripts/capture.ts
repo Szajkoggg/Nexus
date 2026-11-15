@@ -40,6 +40,13 @@ let list;
 try { list = parseViews(readFileSync(positionals[0]!, "utf8")); } catch (e) { fail((e as Error).message); }
 const { views, seed } = list!;
 if (seed && !existsSync(join(root, seed))) fail(`no seed script at ${seed} (a path from the repository root)`);
+// The views' scripts, read from this checkout for both sides.
+const scripts = new Map<string, string>();
+for (const v of views) {
+  if (!v.script || scripts.has(v.script)) continue;
+  if (!existsSync(join(root, v.script))) fail(`${v.key}: no script at ${v.script} (a path from the repository root)`);
+  scripts.set(v.script, readFileSync(join(root, v.script), "utf8"));
+}
 
 // The base commit: --base, else the step's first start. Read before anything runs; the .nexus folder is only read.
 let base = o.base;
@@ -94,7 +101,7 @@ async function side(which: "before" | "after", checkout: string): Promise<void> 
   instances.push(inst);
   log(`${which}: development instance on ${inst.url} (pid ${inst.pid}), data in ${data}`);
   browser ??= await EdgeBrowser.launch(profileDir(tmp, "edge"));
-  shots.push(...await captureViews(views, browser, { base: inst.url, out, side: which, log }));
+  shots.push(...await captureViews(views, browser, { base: inst.url, out, side: which, log, scripts }));
   await inst.stop();
 }
 

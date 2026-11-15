@@ -17,6 +17,7 @@ import { DangerZone } from "./DangerZone.tsx";
 import { PlannedDeployCard, type PlannedDeploy } from "./DeployPlan.tsx";
 import { SEND_BACKS, STOPS, conditionList, savedConditions, settingsProblem, type SettingsProblem } from "../settingsCheck.ts";
 import { usePage } from "../page.ts";
+import { NotifySettingsRows } from "./NotifySettings.tsx";
 
 const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 
@@ -574,7 +575,10 @@ function GlobalForm({ global, server }: { global: GlobalSettings; server?: Serve
 
 // ---------------------------------------------------------------- this browser
 
-/** What this browser keeps for itself, for every project: the theme and the editor. Applies at once; nothing to save. */
+/**
+ * What this browser keeps for itself, for every project: the theme, the editor and which notifications it gets (those
+ * with its push subscription, when it has one). Applies at once; nothing to save.
+ */
 function BrowserSection() {
   const [choice, setLocal] = useState<ThemeChoice>(readChoice);
   const [editor, setEditorLocal] = useState<Editor>(readEditor);
@@ -588,6 +592,7 @@ function BrowserSection() {
         <Select value={editor} onChange={(v) => { setEditor(v as Editor); setEditorLocal(v as Editor); }}
           options={EDITOR_CHOICES.map((c) => [c.value, t(c.label)] as [string, string])} />
       </Row>
+      <NotifySettingsRows />
     </Section>
   );
 }

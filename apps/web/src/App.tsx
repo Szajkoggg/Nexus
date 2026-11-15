@@ -41,6 +41,7 @@ import { rich, t, type Key } from "./i18n.ts";
 import { PageProvider, type Page } from "./page.ts";
 import { StatsView } from "./components/Stats.tsx";
 import { ProjectStats } from "./components/ProjectStats.tsx";
+import { SearchIconButton, SearchPanel, useSearchShortcut } from "./components/Search.tsx";
 
 /** The file viewer and its Markdown and highlighting load when a file is first opened. */
 const FileView = lazy(() => import("./components/FileView.tsx").then((m) => ({ default: m.FileView })));
@@ -84,7 +85,8 @@ export function App() {
 
   const notify = useNotifications(projects);
   // App provides the page (below): what it reads itself takes the versions directly.
-  const page = useMemo<Page>(() => ({ version, all: versions.all, reload, reloaded }), [version, versions.all, reload, reloaded]);
+  const reader = state?.project.languages.reader;
+  const page = useMemo<Page>(() => ({ version, all: versions.all, reload, reloaded, reader }), [version, versions.all, reload, reloaded, reader]);
   const { data: orchestrator, error: orchestratorError } = useOrchestrator(projectId, version);
   const server = useServer(versions.all);
   // Each panel is a layer in the browser history: opening pushes an entry, closing (or Back) pops it.
@@ -93,6 +95,9 @@ export function App() {
   const waitingOpen = isOpen(route.nav, "waiting");
   // The global Stats view: a page over the project's (the desktop's middle column and rail; the phone's tabs).
   const statsOpen = isOpen(route.nav, "stats");
+  // The search of the project's history (components/Search.tsx): a layer over the page; Ctrl+K opens it.
+  const searchOpen = isOpen(route.nav, "search");
+  useSearchShortcut(!!projectId && !statsOpen);
   const file = fileOf(layerValue(route.nav, "file"));
   const commit = layerValue(route.nav, "commit");
 
@@ -237,6 +242,10 @@ export function App() {
         tools={phone ? <PhoneTools connected={connected} server={server} notify={notify} /> : undefined} />}
     </Drawer>
 
+    <Drawer open={searchOpen && !!projectId} onClose={() => nav.close("search")} panel>
+      {projectId && <SearchPanel key={projectId} project={projectId} onClose={() => nav.close("search")} />}
+    </Drawer>
+
     <Drawer open={remoteOpen} onClose={() => nav.close("remote")}>
       <RemotePanel />
     </Drawer>
@@ -290,6 +299,7 @@ export function App() {
             {state && <RunningNow queues={state.queues} />}
             <span className="flex-1" />
             <AwaySign away={server?.away} />
+            {state && <SearchIconButton />}
             {!connected && <span className="flex items-center gap-1.5 text-xs text-stop" title={t("common.reconnecting")}><span className="h-2 w-2 rounded-full bg-stop" />{t("common.offline")}</span>}
             {state && <SettingsButton onClick={() => nav.open("settings")} />}
           </div>

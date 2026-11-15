@@ -1239,6 +1239,7 @@ from every agent session, and the others from every session but an orchestrator'
 | `GET /api/projects/:id/queues/:q/left` | | What a stopped queue's stopped step left (see "The work a stopped step left"); null when not stopped at a step |
 | `GET /api/projects/:id/sessions/:session/chat` | query `from`, `to` (lines) | A chat's entries with lines from `from` up to, not including, `to`: `{ chat: [entry + line] }`; what is older than a chat view's window. Only the orchestrator's or a conversation's session (404 otherwise) |
 | `GET /api/projects/:id/sessions/:session/chat/search` | query `q`, `tools` (`1`: tool lines too) | Search over the whole chat.jsonl, not only a view's window: `{ lines }`, the lines of the entries that contain `q`, oldest first; case and accents ignored, the query's spaces collapsed (`searchChat` in `@nexus/protocol/chat`) |
+| `GET /api/projects/:id/search` | query `q`, `kinds`, `since`, `limit`, `tools` | The project's whole history searched, from its files without an index: `{ hits, total, more }`, newest first; see "Searching a project" below. Refused (400): no words, an unknown kind, an unreadable time, a limit out of range |
 | `POST /api/projects/:id/sessions/:session/pins` | `line`, `pinned` (true or false) | Pins or unpins a message of the orchestrator's or a conversation's chat (sessions/<id>/pins.json); answers `{ ok, result: { pins } }`. Refused (400): a line that holds no entry or a tool line (when pinning), a line that is not a whole number |
 | `POST /api/projects/:id/orchestrator/messages` | `text` | A chat message to the orchestrator (starts or wakes it) |
 | `POST /api/projects/:id/orchestrator/reset` | | The next message starts a new orchestrator session |
@@ -1280,6 +1281,35 @@ the usage line's numbers since the time (`usageSince`), from `<NEXUS_HOME>/turns
 (`seven_day`, `codex_7d`); and the waits for a usage window with their time in all: a turn with outcome `usage`, until
 its session's next turn (or now while that session's run is in `usage_wait`), and a run in `usage_wait` now that no
 such turn explains, from its file's last write (not before `since`). Read-only.
+
+**Searching a project.** `GET /api/projects/:id/search?q=&kinds=&since=&limit=&tools=` searches everything a project
+has recorded (queue SR), reading its files as they are, without an index (`apps/server/src/search.ts`; the pure part,
+what each entry offers, whether it matches and the excerpt, is `@nexus/protocol/search`). Matching ignores case and
+accents (`Kérdés` matches `kerdes`); a query of several words matches an item that holds every one of them, anywhere,
+in any order, also inside longer words. `kinds`, comma-separated (every kind when missing):
+
+| Kind | What is searched | Its place |
+|---|---|---|
+| `queue` | each queue.yaml's title with its description, and each step's title with its goal (time: the queue's `updated_at`) | `queue`, and `step` for a step's goal |
+| `step` | a step's outcome: `step.done`'s summary, `step.failed`'s reason, `queue.stop`'s condition and reason | `queue`, `step` |
+| `question` | `question.asked`'s text and `answer.given`'s; an answer gets its question's `queue` and `step` | `qid`, `queue`, `step` (none for a question not about a step) |
+| `chat` | every entry of the orchestrator's and the conversations' chat.jsonl; a tool line only with `tools=1`, as in a chat's own search | `session`, `line` (the entry's line in chat.jsonl, from 0, as the chat views number them) |
+| `report` | each queue's report.md, whole (time: the file's last write) | `queue`, `path` (absolute, for the file endpoint) |
+| `review` | the text of the review events the user (or the orchestrator holding a review) wrote: `review.accepted`, `sent_back`, `rejected`, `commented`, `asked_user`, `provisional`, `fix_asked` | `queue`, `step` |
+| `note` | each step note's body (notes/<step>/<id>.md) | `queue`, `step` |
+
+`since` (ISO 8601) leaves out what is older; `limit` (1 to 500, 50 when missing) is how many hits are sent. A hit is
+`{ kind, at, excerpt, ranges, queue?, step?, session?, line?, path?, qid?, from?, title?, tool? }`: `excerpt` is one line
+around the first match (Markdown's line marks dropped, whitespace collapsed, about 160 characters, cut at words with `…`), `ranges` the
+`[start, end)` spans of the words in it for the highlight; `from` who wrote it where known (a chat entry's `from`, a
+note's author); `session` the session whose file holds it; `title` the queue's title, or the conversation's; `tool`
+true on a chat's tool line.
+`total` counts every match and `more` says there were more than `limit`. Worker activity (activity.jsonl), inboxes
+and refusals are not searched. A JSONL log is read line by line in 64 KB chunks, a line is parsed only when every word
+occurs in it raw, a file last written before `since` is not read (events.jsonl still is when questions are searched,
+for an answer's place), and only the newest `limit` hits are kept while reading: newest first means every file is
+read. Measured on 2026-11-15 on a copy of the Nexus project's own `.nexus` (320 files, 4.7 MB searched): a search of
+every kind took 120 to 200 ms, of the chats alone 45 ms.
 
 **Uploads.** A browser does not reveal a file's path, so a picture added to a chat message travels in the request,
 base64 in a JSON body like every other write (and behind the same rules: the dashboard's own `Origin`, the token for
@@ -1327,10 +1357,31 @@ WebSocket alike, needs the `nexus_auth` cookie holding the token from `<NEXUS_HO
 receiving push and, to local requests only, the token, a sign-in link and its QR code; `POST /api/remote/rotate`
 (local only) replaces the token.
 
-**Push.** `GET /api/push/key` (the VAPID public key), `POST /api/push/subscribe` (`subscription`, `label`),
-`POST /api/push/unsubscribe` (`endpoint`), `POST /api/push/test`. Keys and subscriptions are in
-`<NEXUS_HOME>/push.json`. Whatever newly appears in a project's "waiting for you" list is pushed to every device; the
-list as found when the server starts is the baseline.
+**Push.** `GET /api/push/key` (the VAPID public key), `POST /api/push/subscribe` (`subscription`, `label`,
+`timezone?`: the device's IANA time zone), `POST /api/push/unsubscribe` (`endpoint`), `POST /api/push/test`
+(`endpoint?`), `GET /api/push/settings?endpoint=` (a device's notification settings: `{ settings }`, the defaults for
+a device that has none; 404 for an endpoint not subscribed) and `PUT /api/push/settings` (`endpoint`, `settings`:
+replaces them; 400 with what is wrong, 404 for an endpoint not subscribed; answers `{ settings }` as stored). Keys and
+subscriptions are in `<NEXUS_HOME>/push.json`, written by the server only:
+
+```json
+{ "vapid": { "publicKey": "…", "privateKey": "…" },
+  "subscriptions": [{ "endpoint": "https://…", "keys": { "p256dh": "…", "auth": "…" }, "label": "Android", "added_at": "…",
+    "notify": { "off": ["review"], "quiet": { "on": true, "from": "22:00", "to": "07:00" }, "urgent": true, "timezone": "Europe/Budapest" } }] }
+```
+
+Whatever newly appears in a project's "waiting for you" list is pushed; the list as found when the server starts is
+the baseline. Every push has a kind, and each device gets it only when its `notify` lets it through
+(`@nexus/protocol` notify.ts, `shouldNotify`): the waiting list's kinds (`question`, `stopped`, `approval`, `review`,
+`failed`, `start`, `provisional`, `plan`, `merge`, `tags`, `recurring`), `update_failed` (an update of Nexus failed),
+`deploy` (a planned deploy waits or was dropped), `cancelled` (the orchestrator cancelled a queue), and `test`, which
+always goes. `off` lists the kinds turned off (a kind not listed is on). Within the quiet hours (`quiet.on`; `from` up
+to `to`, `HH:MM` in the device's `timezone`, over midnight when `from` is later; none when they are equal) nothing
+goes, except `stopped`, `failed` and `update_failed` when `urgent` is true; what they hold back is not sent later (the
+waiting list and the digest show it). A subscription without `notify` (from before them), or with values that do not
+parse, gets the defaults: every kind, no quiet hours, `urgent` false. Subscribing the same endpoint again keeps its
+`notify`; a `timezone` sent with it replaces the zone. The in-tab notifications (where push is not available) filter
+the same way with settings kept in the browser's localStorage (`nexus.notify.settings`, the same shape).
 
 **Nexus itself.** `GET /api/server` gives the version (`commit`, `subject`, `live`, `branch`, `root`), `local` (whether
 this request came straight from this machine, as remote access judges it: the dashboard shows "Open in editor" only

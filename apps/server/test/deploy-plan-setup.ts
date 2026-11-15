@@ -79,7 +79,7 @@ export function setup(behaviours: string[], o: Options = {}) {
   approveQueue(store, "Q");
   for (const [step, level] of Object.entries(o.levels ?? {})) setStepLevel(store, "Q", step, level as 1 | 2 | 3);
 
-  const pushed: { title: string; body: string }[] = [];
+  const pushed: { title: string; body: string; kind?: string }[] = [];
   const drains: string[][] = []; // the step statuses of Q at each drain: when the update started
   let exited = false;
   let orchestrator: Orchestrator | undefined;
