@@ -2,6 +2,7 @@
 // the server builds each reply as one of these and the dashboard reads it as the same, so a change on one side that
 // the other does not follow fails the typecheck. PROTOCOL.md ("Server API") describes the endpoints.
 import type { AttentionItem } from "./state.ts";
+import type { MergedTemplates, TemplateLayer, TemplateProblem } from "./templates.ts";
 
 /** GET /api/projects: one registered project, with what the sidebar and the waiting list need. */
 export interface ProjectSummary {
@@ -80,13 +81,9 @@ export interface RemovalView {
 
 /** GET /api/projects/:id/templates: the queue templates in effect for the project (templates.ts), and files not used. */
 export interface TemplatesResponse {
-  templates: {
-    id: string; title: string; description?: string;
+  templates: (Pick<MergedTemplates["templates"][number], "id" | "title" | "description" | "params" | "maintenance"> & {
     /** The layer it comes from, and the weaker layers it replaces. */
-    layer: "nexus" | "global" | "project"; replaces: ("nexus" | "global" | "project")[];
-    params: { name: string; description: string; default?: string }[];
-    /** A maintenance template's default mode. */
-    maintenance?: "survey" | "fix_small";
-  }[];
-  problems: { layer: "nexus" | "global" | "project"; path: string; problem: string }[];
+    layer: TemplateLayer; replaces: TemplateLayer[];
+  })[];
+  problems: TemplateProblem[];
 }

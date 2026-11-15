@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import YAML from "yaml";
 import { z } from "zod";
-import { QueueFile } from "./schemas.ts";
+import { MaintenanceMode, QueueFile } from "./schemas.ts";
 import { nexusHome } from "./store.ts";
 
 /** The layers, weakest first: a template of a later layer replaces one of an earlier layer with the same id. */
@@ -50,10 +50,7 @@ export interface Template {
 
 export class TemplateError extends Error {}
 
-/** A maintenance queue's modes: only survey and report, or also fix the small findings the template names. */
-export const MAINTENANCE_MODES = ["survey", "fix_small"] as const;
-export type MaintenanceMode = (typeof MAINTENANCE_MODES)[number];
-const isMode = (x: unknown): x is MaintenanceMode => MAINTENANCE_MODES.includes(x as MaintenanceMode);
+const isMode = (x: unknown): x is MaintenanceMode => MaintenanceMode.safeParse(x).success;
 /** A step of a maintenance template marked `maintenance: fix_small` is there only in that mode. */
 const fixOnly = (step: unknown) => !!step && typeof step === "object" && (step as Record<string, unknown>).maintenance === "fix_small";
 

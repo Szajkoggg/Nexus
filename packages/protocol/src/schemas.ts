@@ -517,6 +517,13 @@ export const StatusChange = z.object({
 });
 export type StatusChange = z.infer<typeof StatusChange>;
 
+/**
+ * A maintenance queue's modes (PROTOCOL.md, "Recurring queues"): `survey` only looks and reports, `fix_small` also fixes
+ * the small findings its template names.
+ */
+export const MaintenanceMode = z.enum(["survey", "fix_small"]);
+export type MaintenanceMode = z.infer<typeof MaintenanceMode>;
+
 const QueueShape = z.object({
   protocol: z.literal(1),
   id: Id,
@@ -553,7 +560,7 @@ const QueueShape = z.object({
    * (Nexus stops a run that leaves a commit or a changed tracked file), `fix_small` also fixes the small findings its
    * template names. Part of what an approval pins when set.
    */
-  maintenance: z.enum(["survey", "fix_small"]).optional(),
+  maintenance: MaintenanceMode.optional(),
   /** The tags of the queue's steps that set none of their own (TagFields); part of what an approval pins when set. */
   ...TagFields,
   /**
@@ -753,18 +760,18 @@ export const Event = z.discriminatedUnion("type", [
     target: z.number().optional(), warn_above: z.number().optional(), warn_below: z.number().optional(),
   }),
   /**
-   * A worker records a value of one of the project's metrics (`nexus metric record`), for its step at work, with the
-   * metric's unit as it was then and the HEAD of its checkout (`commit`; absent outside a git repository).
-   */
-  /**
    * The orchestrator sets a recurring queue (`nexus recurring set`): the server checks it and writes
    * .nexus/recurring/<id>.yaml; the user's standing approval of it, if any, is taken away. It carries no approval.
    */
   z.object({
     ...base, type: z.literal("recurring.set"), recurring: Id, template: Id, params: z.record(z.string(), z.string()).default({}),
     every: z.string().min(1).optional(), after_queues: z.number().int().min(1).max(1000).optional(),
-    maintenance: z.enum(["survey", "fix_small"]).optional(), reason: z.string().optional(),
+    maintenance: MaintenanceMode.optional(), reason: z.string().optional(),
   }),
+  /**
+   * A worker records a value of one of the project's metrics (`nexus metric record`), for its step at work, with the
+   * metric's unit as it was then and the HEAD of its checkout (`commit`; absent outside a git repository).
+   */
   z.object({ ...base, type: z.literal("metric.recorded"), ...qs, name: z.string().min(1), value: z.number(), unit: z.string(), commit: z.string().optional() }),
   z.object({ ...base, type: z.literal("log"), level: z.enum(["info", "warn", "error"]), text: z.string() }),
   /**
@@ -1258,7 +1265,7 @@ export const RecurringFile = z.object({
    */
   baseline: z.array(Id).optional(),
   /** The maintenance mode for this project, over the template's own (`maintenance:` in the template). */
-  maintenance: z.enum(["survey", "fix_small"]).optional(),
+  maintenance: MaintenanceMode.optional(),
   /** Who set it last (the orchestrator, or the user), and why. */
   set_by: z.enum(["orchestrator", "user"]),
   reason: z.string().optional(),

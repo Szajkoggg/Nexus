@@ -1,11 +1,11 @@
 // Templates and recurring queues on the Queues view, the parts free of React (unit tested in test/recurring.test.ts):
 // what "New queue from template" asks of the orchestrator, which parameters are still missing, and how a recurring
 // queue's state and schedule read. The components are in components/Recurring.tsx.
-import type { RecurringView, TemplatesResponse } from "@nexus/protocol";
+import type { MaintenanceMode, RecurringView, TemplatesResponse } from "@nexus/protocol";
 import { language, t, type Key } from "./i18n.ts";
 
 export type Template = TemplatesResponse["templates"][number];
-export type Mode = "survey" | "fix_small";
+export type Mode = MaintenanceMode;
 
 /** The values to send: each typed value (trimmed), and nothing for an empty one (its default, if any, then applies). */
 export function filledValues(tpl: Pick<Template, "params">, typed: Readonly<Record<string, string>>): Record<string, string> {

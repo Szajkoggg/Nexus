@@ -11,7 +11,7 @@ import {
   NEXUS_ACTIVITIES, TAG_KINDS, TAG_ORIGINS, TAG_SIZES, tagIssues, tagProposalText, tagsText,
   STAT_DIMENSIONS, readTurns, sinceTime, statDimension, statsReport, statsText, stepStats,
   CHECK_METRIC, isCheckMetric, metricDef, metricDefText, metricRequestIssues, metricValueText,
-  TemplateError, fillTemplate, filledTemplateYaml, parseEvery, MAINTENANCE_MODES, type MaintenanceMode, readTemplates, templateQueueId, type MergedTemplates,
+  TemplateError, fillTemplate, filledTemplateYaml, parseEvery, MaintenanceMode, readTemplates, templateQueueId, type MergedTemplates,
   type PictureRole, type ReviewItem, type Role, type Runtime, type SessionFile,
 } from "@nexus/protocol";
 import { checkRules, describeRules } from "@nexus/protocol/rules";
@@ -982,8 +982,9 @@ function template(templates: MergedTemplates["templates"], problems: MergedTempl
 /** --maintenance survey|fix_small, checked. */
 function maintenanceMode(): MaintenanceMode | undefined {
   if (o.maintenance === undefined) return undefined;
-  if (!MAINTENANCE_MODES.includes(o.maintenance as MaintenanceMode)) throw new UsageError(`--maintenance is survey or fix_small, not ${o.maintenance}`);
-  return o.maintenance as MaintenanceMode;
+  const mode = MaintenanceMode.safeParse(o.maintenance);
+  if (!mode.success) throw new UsageError(`--maintenance is survey or fix_small, not ${o.maintenance}`);
+  return mode.data;
 }
 
 /** The --set name=value pairs, by name; refused: one without a name or "=", or a name given twice. */
