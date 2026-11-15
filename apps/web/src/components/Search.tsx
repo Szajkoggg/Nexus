@@ -3,7 +3,7 @@
 // goes to its place: a step's or queue's details, a chat message (CH4's jump, chatTarget.ts), a report in the file
 // viewer. The server searches the files (GET /api/projects/:id/search, apps/server/src/search.ts).
 import { useEffect, useState } from "react";
-import { SEARCH_KINDS, type SearchHit, type SearchKind, type SearchResult } from "@nexus/protocol/search";
+import { SEARCH_KINDS, SEARCH_LIMIT, SEARCH_MAX_LIMIT, type SearchHit, type SearchKind, type SearchResult } from "@nexus/protocol/search";
 import { enc, projectUrl, request, useQuery } from "../api.ts";
 import { usePage } from "../page.ts";
 import { nav } from "../nav.ts";
@@ -14,9 +14,9 @@ import { t, type Key } from "../i18n.ts";
 import { Marked } from "./ChatTools.tsx";
 import { CloseButton, TimeAgo } from "./ui.tsx";
 
-/** How many hits a search asks for at first, and how many more each "Show more" adds (the server's most is 500). */
-const PAGE = 50;
-const MOST = 500;
+/** How many hits a search asks for at first (the server's default); each "Show more" asks for twice as many more, up to the server's most. */
+const PAGE = SEARCH_LIMIT;
+const MOST = SEARCH_MAX_LIMIT;
 
 const KIND_LABEL: Record<SearchKind, Key> = {
   queue: "search.kind.queue", step: "search.kind.step", question: "search.kind.question", chat: "search.kind.chat",

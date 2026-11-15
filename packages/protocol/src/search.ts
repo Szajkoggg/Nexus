@@ -11,8 +11,8 @@ export const SEARCH_KINDS = ["queue", "step", "question", "chat", "report", "rev
 export type SearchKind = (typeof SEARCH_KINDS)[number];
 
 /** How many hits a search answers when it names no limit, and the most it may ask for. */
-const SEARCH_LIMIT = 50;
-const SEARCH_MAX_LIMIT = 500;
+export const SEARCH_LIMIT = 50;
+export const SEARCH_MAX_LIMIT = 500;
 /** The longest query taken, in characters. */
 const MAX_QUERY = 200;
 
