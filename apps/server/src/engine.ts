@@ -813,29 +813,17 @@ export class Engine implements Member {
    * session's unread inbox entries, and the step's opening to continue it.
    */
   private switchMidStep(queueId: string, run: RunFile, q: QueueView, old: SessionView, live: Live, step: StepView, want: StepValues, reason: string): void {
-    const oldFile = this.store.readSession(old.id);
-    const part = (run.switches?.length ?? 0) + 2;
-    const fresh: SessionFile = {
-      protocol: 1, id: newId(), project: oldFile.project, role: "worker", runtime: want.runtime,
-      native_id: want.runtime === "claude" ? randomUUID() : null,
-      title: `${q.id} worker (${part})`, cwd: oldFile.cwd, branch: gitBranch(oldFile.cwd) ?? oldFile.branch, queue: q.id,
-      launched_by: "nexus", created_at: now(), model: want.model, effort: want.effort, continues: old.id,
-    };
     // What the step has done so far, read before anything opens a new round: its progress lines, its commits since its
     // round began, and what is uncommitted in the checkout (which stays as it is).
     const start = this.store.readGit(queueId)?.steps[step.id]?.at(-1)?.start;
     const lines = (out: string | undefined) => (out ?? "").split(/\r?\n/).filter((x) => x.trim());
     const work = {
       progress: step.timeline.filter((e) => e.type === "step.progress").map((e) => (e.type === "step.progress" ? `${e.text}${e.pct !== undefined ? ` (${e.pct} %)` : ""}` : "")),
-      commits: start ? lines(gitRead(oldFile.cwd, ["log", "--reverse", "--format=%h %s", `${start}..HEAD`])) : [],
-      uncommitted: lines(gitRead(oldFile.cwd, ["status", "--porcelain=v1", "--untracked-files=all"])),
-      diffstat: lines(gitRead(oldFile.cwd, ["diff", "--stat", "HEAD"])).at(-1)?.trim(),
+      commits: start ? lines(gitRead(old.cwd, ["log", "--reverse", "--format=%h %s", `${start}..HEAD`])) : [],
+      uncommitted: lines(gitRead(old.cwd, ["status", "--porcelain=v1", "--untracked-files=all"])),
+      diffstat: lines(gitRead(old.cwd, ["diff", "--stat", "HEAD"])).at(-1)?.trim(),
     };
-    this.store.writeSession(fresh);
-    this.store.writeSession({ ...oldFile, continued_by: fresh.id });
-    const unread = (loadProjectState(this.store).sessions.find((x) => x.id === old.id)?.inbox ?? []).filter((m) => !m.read_at);
-    this.ending.add(old.id);
-    live.proc.close();
+    const { fresh, unread } = this.forkSession(run, q, old, live, want);
     const because = `${reason}, so the step goes on on ${RUNTIME_NAME[want.runtime]}`;
     this.writeRun(queueId, {
       ...run, session: fresh.id, summary_asked: undefined,
@@ -856,20 +844,7 @@ export class Engine implements Member {
 
   /** Goes on with `next` in a fresh session (with `want`'s runtime, model and effort) that continues `old`. */
   private switchSession(queueId: string, run: RunFile, q: QueueView, old: SessionView, live: Live, done: StepView | undefined, next: StepView, want: StepValues, why: "context" | "runtime" | "refactor", fill: number | undefined, source: "written" | "asked" | "fallback"): void {
-    const oldFile = this.store.readSession(old.id);
-    const part = (run.switches?.length ?? 0) + 2;
-    const fresh: SessionFile = {
-      protocol: 1, id: newId(), project: oldFile.project, role: "worker", runtime: want.runtime,
-      native_id: want.runtime === "claude" ? randomUUID() : null,
-      title: `${q.id} worker (${part})`, cwd: oldFile.cwd, branch: gitBranch(oldFile.cwd) ?? oldFile.branch, queue: q.id,
-      launched_by: "nexus", created_at: now(), model: want.model, effort: want.effort, continues: old.id,
-    };
-    this.store.writeSession(fresh);
-    this.store.writeSession({ ...oldFile, continued_by: fresh.id });
-    // What the old session has not read yet goes into the new one's first turn; the old process ends.
-    const unread = (loadProjectState(this.store).sessions.find((x) => x.id === old.id)?.inbox ?? []).filter((m) => !m.read_at);
-    this.ending.add(old.id);
-    live.proc.close();
+    const { fresh, unread } = this.forkSession(run, q, old, live, want);
     const because = switchReason(why, next.id, want.runtime, old.runtime as "claude" | "codex", fill);
     this.writeRun(queueId, {
       ...run, session: fresh.id, summary_asked: undefined,
@@ -882,6 +857,28 @@ export class Engine implements Member {
     const seed = freshSessionSeed(q, because, done, next, source === "fallback" ? undefined : old.context);
     const carried = carriedMessages(unread.map((m) => formatInbox(m, state)));
     this.openStep(queueId, next, this.queue(state, queueId), "start", undefined, { before: seed, after: carried });
+  }
+
+  /**
+   * A fresh worker session on `want` that continues `old` (switchSession, switchMidStep): written, the old one marked
+   * as continued by it and its process ended. Returns it, and what the old session has not read yet, which goes into
+   * the new one's first turn.
+   */
+  private forkSession(run: RunFile, q: QueueView, old: SessionView, live: Live, want: StepValues): { fresh: SessionFile; unread: SessionView["inbox"] } {
+    const oldFile = this.store.readSession(old.id);
+    const part = (run.switches?.length ?? 0) + 2;
+    const fresh: SessionFile = {
+      protocol: 1, id: newId(), project: oldFile.project, role: "worker", runtime: want.runtime,
+      native_id: want.runtime === "claude" ? randomUUID() : null,
+      title: `${q.id} worker (${part})`, cwd: oldFile.cwd, branch: gitBranch(oldFile.cwd) ?? oldFile.branch, queue: q.id,
+      launched_by: "nexus", created_at: now(), model: want.model, effort: want.effort, continues: old.id,
+    };
+    this.store.writeSession(fresh);
+    this.store.writeSession({ ...oldFile, continued_by: fresh.id });
+    const unread = (loadProjectState(this.store).sessions.find((x) => x.id === old.id)?.inbox ?? []).filter((m) => !m.read_at);
+    this.ending.add(old.id);
+    live.proc.close();
+    return { fresh, unread };
   }
 
   /**
