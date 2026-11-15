@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   GlobalSettings, ProjectStore, SHIPPED_KIND_DEFAULTS, applyDraft, builtInSettings, effectiveProject, fallbackIssues, kindDefaults,
-  routeStep, updateGlobalSettings, updateSettings, type ProjectFile, type StartValues,
+  chooseRoute, overThreshold, routeStep, updateGlobalSettings, updateSettings, type FallbackEntry, type ProjectFile, type StartValues,
 } from "../src/index.ts";
 
 function setup() {
@@ -116,4 +116,34 @@ test("a project follows the global kinds until it has its own value; null is its
   assert.deepEqual(values(routeStep({ step: {}, queue: {}, start: fromDefaults(p), kind: kindDefaults(p, "research"), project: p })), ["claude", "proj-claude", "high"]);
   updateSettings(store, { follow: ["kinds.research.model"] });
   assert.equal(store.readProject().kinds.research.model, "claude-opus-5-5", "follows the global value again");
+});
+
+test("beyond the threshold: any window of the runtime; a window never reported is free; a passed reset counts as reset; the later reset counts", () => {
+  const now = Date.parse("2026-11-15T10:00:00Z");
+  const at = (h: number) => new Date(now + h * 3_600_000).toISOString();
+  assert.equal(overThreshold("codex", {}, 0.9, now), undefined, "nothing reported: free");
+  assert.equal(overThreshold("claude", { five_hour: { utilization: 0.95, resets_at: at(-1) } }, 0.9, now), undefined, "its reset passed");
+  assert.equal(overThreshold("claude", { five_hour: { utilization: 0.95 } }, 0.9, now), undefined, "no reset time: nothing to wait for");
+  assert.equal(overThreshold("claude", { codex_5h: { utilization: 1, resets_at: at(1) } }, 0.9, now), undefined, "Codex's windows are not Claude Code's");
+  assert.deepEqual(overThreshold("claude", { five_hour: { utilization: 0.92, resets_at: at(1) }, seven_day: { utilization: 0.97, resets_at: at(30) } }, 0.9, now),
+    { until: at(30), reason: "the 7-day window is at 97 % (limit 90 %)" });
+  assert.deepEqual(overThreshold("codex", { codex_5h: { utilization: 0.9, resets_at: at(2) } }, 0.9, now), { until: at(2), reason: "the Codex 5h window is at 90 % (limit 90 %)" });
+});
+
+test("the chain: the first free entry, a wait, or the earliest reset when every runtime tried is full", () => {
+  const now = Date.parse("2026-11-15T10:00:00Z");
+  const at = (h: number) => new Date(now + h * 3_600_000).toISOString();
+  const project = { runtimes: { default: "claude", claude: { model: "c-default" }, codex: { model: "x-default", effort: "medium" } } } as never;
+  const own = { runtime: "claude" as const, model: "opus", effort: "high" as const };
+  const choose = (fallback: FallbackEntry[], windows: Record<string, { utilization: number; resets_at?: string }>) => chooseRoute({ ...own, fallback }, { windows, threshold: 0.9, nowMs: now, project });
+  const claudeFull = { five_hour: { utilization: 0.95, resets_at: at(3) } };
+  assert.deepEqual(choose([{ runtime: "codex" }], {}), { kind: "primary", values: own });
+  assert.deepEqual(choose([{ runtime: "codex" }], claudeFull), { kind: "fallback", values: { runtime: "codex", model: "x-default", effort: "medium" }, reason: "the 5-hour window is at 95 % (limit 90 %)" });
+  assert.deepEqual(choose(["wait", { runtime: "codex" }], claudeFull), { kind: "wait", until: at(3), reason: "the 5-hour window is at 95 % (limit 90 %); its fallback is to wait" });
+  assert.deepEqual(choose([], claudeFull).kind, "wait", "no chain: wait, as before fallbacks");
+  const both = { ...claudeFull, codex_5h: { utilization: 0.99, resets_at: at(1) } };
+  const w = choose([{ runtime: "codex", model: "luna", effort: "low" }], both);
+  assert.deepEqual([w.kind, w.kind === "wait" && w.until], ["wait", at(1)], "both full: the one that resets first");
+  assert.deepEqual(choose([{ runtime: "claude", model: "haiku" }, { runtime: "codex", model: "luna" }], claudeFull),
+    { kind: "fallback", values: { runtime: "codex", model: "luna", effort: "medium" }, reason: "the 5-hour window is at 95 % (limit 90 %)" }, "an entry on the full runtime is passed over");
 });

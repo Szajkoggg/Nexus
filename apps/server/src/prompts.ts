@@ -576,6 +576,14 @@ export function tagDecisionNotice(d: { accepted: boolean; proposal: Pick<TagProp
     : { fact: `The user accepted your tag proposal: ${p.kind} ${p.name} is on the project's list.`, todo: "Drafts may use it now." };
 }
 
+/** A step opened on its fallback because its runtime's usage ran out, or on its own runtime again (run.yaml `fallbacks`). */
+export function fallbackNotice(q: QueueView, f: { step: string; runtime: "claude" | "codex"; model?: string; effort?: string; from: { runtime: "claude" | "codex" }; reason: string; back?: true }): Notice {
+  const on = [RUNTIME_NAME[f.runtime], f.model, f.effort && `${f.effort} effort`].filter(Boolean).join(", ");
+  return f.back
+    ? { fact: `Step ${f.step} of queue ${q.id} runs on ${on} again: ${f.reason}.`, todo: "Nothing to do; Nexus switched back by the fallback rules." }
+    : { fact: `Step ${f.step} of queue ${q.id} runs on its fallback, ${on}, instead of ${RUNTIME_NAME[f.from.runtime]}: ${f.reason}.`, todo: "Nothing to do; Nexus switched by the fallback rules and switches back at a step boundary once that runtime is free. Tell the user if it matters for what they wait for." };
+}
+
 /** A scheduled start was missed: Nexus was not running at its time. */
 export function missedStartNotice(q: QueueView, missed: { at?: string }): Notice {
   return {

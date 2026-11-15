@@ -11,7 +11,7 @@ import { join } from "node:path";
 import {
   CHECKOUT_RUN_STATES, ENDED_RUN_STATES, HOLDING_RUN_STATES,
   ActionError, ProjectStore, USER_SESSION, ensureUserSession, liftByContinue, loadProjectState, openPlanFile, releaseOrphanedSteps, stepClosed, reportFile, ensureReportFolder, newId, normPath, now, readUsage,
-  RETRY_LIMIT, effortIssue, formatClock, kindDefaults, routeStep, type Effort, type ProjectFile, type StartValues, type ProjectState, type QueueView, type RunFile, type SessionFile,
+  RETRY_LIMIT, chooseRoute, effortIssue, formatClock, kindDefaults, routeStep, type Effort, type Routed, type ProjectFile, type StartValues, type ProjectState, type QueueView, type RunFile, type SessionFile,
   type SessionView, type StepView, type PlanBy,
   addNote,
 } from "@nexus/protocol";
@@ -103,8 +103,12 @@ export interface StepValues { runtime: "claude" | "codex"; model?: string; effor
  * start named, the step's kind's defaults, the project's defaults.
  */
 function stepValues(start: StartValues, step: StepView, q: Pick<QueueView, "runtime" | "model" | "effort" | "fallback">, project: ProjectFile): StepValues {
-  const r = routeStep({ step, queue: q, start, kind: kindDefaults(project, step.tags.kind), project });
+  const r = stepRoute(start, step, q, project);
   return { runtime: r.runtime, model: r.model, effort: r.effort };
+}
+/** The step's own values and its fallback chain (routing.ts, routeStep). */
+function stepRoute(start: StartValues, step: StepView, q: Pick<QueueView, "runtime" | "model" | "effort" | "fallback">, project: ProjectFile): Routed {
+  return routeStep({ step, queue: q, start, kind: kindDefaults(project, step.tags.kind), project });
 }
 
 export class Engine implements Member {
@@ -227,9 +231,13 @@ export class Engine implements Member {
     if (reused && want.runtime !== reused.runtime) {
       throw new ActionError(`step ${first!.id} runs on ${RUNTIME_NAME[want.runtime]}; the session to continue is a ${RUNTIME_NAME[reused.runtime as "claude" | "codex"]} session`, 409);
     }
+    // A first step whose runtime is beyond the usage threshold opens on its fallback (advance records it): a new session
+    // is made on that one at once. A continued session keeps its own runtime; advance switches from it if it must.
+    const choice = first && !reused ? this.chooseFor(state, stepRoute(start, first, q, state.project)) : undefined;
+    const open = choice?.kind === "fallback" ? choice.values : want;
     const session = reused
       ? this.reuseSession(state, reused.id, queueId, want.model, want.effort)
-      : this.newSession(state, q, want.runtime, want.model, want.effort);
+      : this.newSession(state, q, open.runtime, open.model, open.effort);
     // What the start did not choose, nor take from a session it continues, came from the project's defaults: resolved
     // again at each step (runValues).
     const from_defaults = reused ? [] : ([["runtime", opts.runtime], ["model", opts.model], ["effort", opts.effort]] as const)
@@ -622,16 +630,23 @@ export class Engine implements Member {
     }
     if (run.state === "pausing") return this.writeRun(queueId, toPaused(run));
     if (this.worktreeSetup(queueId, run, q)) return;
-    const want = stepValues(this.startOf(state, run), next, q, state.project);
-    const issue = effortIssue(want.runtime, want.effort);
-    if (issue) return this.halt(queueId, `step ${next.id}: ${issue}`);
-    const wait = this.usageWait(state, want.runtime);
-    if (wait) {
-      this.writeRun(queueId, toUsageWait(run, wait.reason, wait.until));
-      this.schedule(queueId, wait.until, this.usageMarginMs);
+    // The step's own values; beyond the usage threshold, the first free entry of its fallback chain, or a wait for the
+    // earliest reset (routing.ts, chooseRoute). Back on its own values at the first step boundary after its runtime
+    // is free again.
+    const routed = stepRoute(this.startOf(state, run), next, q, state.project);
+    const own = effortIssue(routed.runtime, routed.effort);
+    if (own) return this.halt(queueId, `step ${next.id}: ${own}`);
+    const choice = this.chooseFor(state, routed);
+    if (choice.kind === "wait") {
+      this.writeRun(queueId, toUsageWait(run, choice.reason, choice.until));
+      this.schedule(queueId, choice.until, this.usageMarginMs);
       return;
     }
-    if (this.prepareStep(queueId, run, state, q, current, next, want, live)) return;
+    const want = choice.values;
+    const issue = effortIssue(want.runtime, want.effort);
+    if (issue) return this.halt(queueId, `step ${next.id} on its fallback: ${issue}`);
+    const routedRun = this.recordRoute(queueId, run, next.id, routed, choice);
+    if (this.prepareStep(queueId, routedRun, state, q, current, next, want, live)) return;
     this.openStep(queueId, next, q, "start");
   }
 
@@ -999,7 +1014,10 @@ export class Engine implements Member {
       // The run that drives the session now; a session continued from an earlier queue still has that one's run too.
       const runs = this.store.queueIds().map((q) => [q, this.store.readRun(q)] as const).filter(([, r]) => r?.session === session.id);
       const run = runs.find(([, r]) => HOLDING_RUN_STATES.includes(r!.state)) ?? runs.sort(([, a], [, b]) => b!.updated_at.localeCompare(a!.updated_at))[0];
-      return run ? { queue: run[0], step: run[1]?.step } : {};
+      if (!run) return {};
+      // A turn of a step on its fallback says so in its record: what it would have run on, and why it did not.
+      const f = run[1]?.fallbacks?.findLast((x) => x.step === run[1]?.step);
+      return { queue: run[0], step: run[1]?.step, ...(f && !f.back ? { fallback: { from: f.from.runtime, reason: f.reason } } : {}) };
     };
     const runsOf = () => this.store.queueIds().filter((q) => this.store.readRun(q)?.session === session.id);
     // AgentHost keeps the runtime record (a turn's end counts in `turns`), the facts and the usage windows; these
@@ -1074,17 +1092,34 @@ export class Engine implements Member {
 
   // ---------------------------------------------------------------- usage limits
 
-  /** Claude's 5-hour window, or any of Codex's windows, above the project's threshold. */
-  private usageWait(state: ProjectState, runtime: string): { reason: string; until: string } | undefined {
-    const windows = readUsage()?.windows ?? {};
-    const names = runtime === "codex" ? Object.keys(windows).filter((k) => k.startsWith("codex_")) : ["five_hour"];
-    const limit = state.project.defaults.usage_pause_threshold;
-    for (const name of names) {
-      const w = windows[name];
-      if (!w || !w.resets_at || Date.parse(w.resets_at) < this.clock.now() || w.utilization < limit) continue;
-      return { reason: `the ${name.replace("codex_", "Codex ").replace("five_hour", "5-hour")} window is at ${Math.round(w.utilization * 100)} % (limit ${Math.round(limit * 100)} %)`, until: w.resets_at };
-    }
-    return undefined;
+  /** Where a step opens given the account's usage windows now and the project's threshold (routing.ts, chooseRoute). */
+  private chooseFor(state: ProjectState, routed: Routed): ReturnType<typeof chooseRoute> {
+    return chooseRoute(routed, { windows: readUsage()?.windows ?? {}, threshold: state.project.defaults.usage_pause_threshold, nowMs: this.clock.now(), project: state.project });
+  }
+
+  /**
+   * Records a step that opens on its fallback, or on its own values again after one did (run.yaml `fallbacks`), once
+   * per step (advance runs again while a summary is asked for), with an activity line; the orchestrator is told from
+   * the record. Returns the run as written.
+   */
+  private recordRoute(queueId: string, run: RunFile, step: string, own: Routed, choice: ReturnType<typeof chooseRoute>): RunFile {
+    const list = run.fallbacks ?? [];
+    const last = list.at(-1);
+    const from = { runtime: own.runtime, model: own.model, effort: own.effort };
+    let entry: NonNullable<RunFile["fallbacks"]>[number];
+    if (choice.kind === "fallback") {
+      if (last && !last.back && last.step === step && last.runtime === choice.values.runtime) return run;
+      entry = { at: now(), step, ...choice.values, from, reason: choice.reason };
+    } else if (last && !last.back && last.step !== step) {
+      entry = { at: now(), step, ...from, from: { runtime: last.runtime, model: last.model, effort: last.effort }, reason: `the ${RUNTIME_NAME[own.runtime]} usage is below the limit again`, back: true };
+    } else return run;
+    const next: RunFile = { ...run, fallbacks: [...list, entry] };
+    this.writeRun(queueId, next);
+    this.store.appendActivity(run.session, {
+      at: now(), kind: "text", queue: queueId, step,
+      text: entry.back ? `Step ${step} runs on ${RUNTIME_NAME[entry.runtime]} again: ${entry.reason}` : `Step ${step} runs on its fallback, ${RUNTIME_NAME[entry.runtime]}: ${entry.reason}`,
+    });
+    return next;
   }
 
   /**

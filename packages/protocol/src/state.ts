@@ -66,6 +66,11 @@ export interface StepView extends StepDef {
    */
   observed_activities?: string[];
   /**
+   * The step opened on its fallback (its runtime's usage was beyond the threshold), or on its own values again after a
+   * step that did (`back`): the latest record of its queue's run (run.yaml `fallbacks`) for this step.
+   */
+  usage_switch?: NonNullable<RunFile["fallbacks"]>[number];
+  /**
    * The queue's closing refactoring step (closing.ts): Nexus keeps it after the queue's own steps, with a reserved id
    * and the standard text; it is not in queue.yaml.
    */
@@ -281,8 +286,10 @@ export function loadProjectState(store: ProjectStore): ProjectState {
     apply(e, queues, sessions, questions, warnings, project, delivered, away);
   }
   for (; next < changes.length; next++) applyChange(changes[next]!.q, changes[next]!.c);
-  // What the workers reported doing, as the names read now.
+  // What the workers reported doing, as the names read now; where the run opened a step on its fallback.
   for (const q of queues.values()) for (const st of q.steps) {
+    const f = q.run?.fallbacks?.findLast((x) => x.step === st.id);
+    if (f) st.usage_switch = f;
     if (st.observed_activities) st.observed_activities = stepTags({ activities: st.observed_activities }, {}, tags).activities;
   }
   // A rejection holds until an approval of a newer revision; while it holds the queue is paused.

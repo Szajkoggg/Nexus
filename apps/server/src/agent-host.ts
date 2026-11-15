@@ -44,11 +44,13 @@ export interface HostHandlers {
   /** `byNexus`: the process was ended through AgentHost (retire, close, restartAfterTurn, shutdown). */
   exit?(code: number | null, byNexus: boolean): void;
   /** The queue and step a turn works on, for its record (a worker's run); asked when the turn begins. */
-  tag?(): { queue?: string; step?: string };
+  tag?(): TurnTag;
 }
 
 /** A turn in progress, for its record: when it began, the windows then, what it works on. */
-interface OpenTurn { started: string; windows?: TurnRecord["windows_start"]; tag: { queue?: string; step?: string } }
+interface OpenTurn { started: string; windows?: TurnRecord["windows_start"]; tag: TurnTag }
+/** What a turn works on, for its record: the queue and step, and the fallback the step runs on, if it does. */
+type TurnTag = { queue?: string; step?: string; fallback?: TurnRecord["fallback"] };
 
 /** A session's running process, with what the role keeps beside it (`E`). */
 export type Hosted<E extends object = object> = { readonly session: string; readonly proc: AgentProcess } & E;

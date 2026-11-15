@@ -105,3 +105,68 @@ export function kindIssues(kinds: Partial<Record<string, KindDefaults>>): string
     return [...(own ? [`kind ${k}: ${own}`] : []), ...fallbackIssues(d.fallback).map((x) => `kind ${k}: ${x}`)];
   });
 }
+
+// ---------------------------------------------------------------- usage: beyond the threshold, and the fallback chain
+
+/** A usage window as the server knows it (usage.json). */
+interface UsageWindow { utilization: number; resets_at?: string }
+
+/**
+ * A window's name as a person reads it: Claude Code's "5-hour" and "7-day" (as the usage waits have always said them),
+ * Codex's "Codex 5h".
+ */
+function windowName(name: string): string {
+  if (name.startsWith("codex_")) return `Codex ${name.slice("codex_".length).replaceAll("_", " ")}`;
+  return { five_hour: "5-hour", seven_day: "7-day" }[name] ?? name.replaceAll("_", " ").replace(/^seven day/, "7-day").replace(/^five hour/, "5-hour");
+}
+
+/**
+ * Whether a runtime is beyond the usage threshold now, and until when (PROTOCOL.md, "Fallback when usage runs out"):
+ * any of its windows (Claude Code's five_hour, seven_day and the like; Codex's codex_*) at or above `threshold`. A
+ * window the runtime has not reported is free; one whose `resets_at` has passed counts as reset, without a fresh
+ * reading; one without a reset time cannot be waited for and counts as free. With several full windows, the later
+ * reset counts. Undefined: free.
+ */
+export function overThreshold(runtime: WorkerRuntime, windows: Readonly<Record<string, UsageWindow>>, threshold: number, nowMs: number): { until: string; reason: string } | undefined {
+  const full = Object.entries(windows)
+    .filter(([k, w]) => (runtime === "codex") === k.startsWith("codex_") && w.utilization >= threshold && !!w.resets_at && Date.parse(w.resets_at) > nowMs)
+    .sort(([, a], [, b]) => Date.parse(a.resets_at!) - Date.parse(b.resets_at!));
+  const last = full.at(-1);
+  if (!last) return undefined;
+  const pct = (x: number) => `${Math.round(x * 100)} %`;
+  const [name, w] = last;
+  return { until: w.resets_at!, reason: `the ${windowName(name)} window is at ${pct(w.utilization)} (limit ${pct(threshold)})` };
+}
+
+/** The values a step runs on. */
+export interface RunOn { runtime: WorkerRuntime; model?: string; effort?: Effort }
+
+/**
+ * Where a step opens, given the usage now: on its own values (`primary`) while their runtime is free; else on the
+ * first entry of its fallback chain whose runtime is free (`fallback`, with why: the primary's full window); at a
+ * `wait` entry, or when the chain has no free entry left, it waits (`wait`) until the earliest reset among the runtimes
+ * it tried (both full: the one that comes back first). An entry's model or effort left out is the project's for its
+ * runtime.
+ */
+export function chooseRoute(routed: Pick<Routed, "runtime" | "model" | "effort" | "fallback">, o: {
+  windows: Readonly<Record<string, UsageWindow>>; threshold: number; nowMs: number; project: Pick<ProjectFile, "runtimes">;
+}): { kind: "primary"; values: RunOn } | { kind: "fallback"; values: RunOn; reason: string } | { kind: "wait"; until: string; reason: string } {
+  const primary: RunOn = { runtime: routed.runtime, model: routed.model, effort: routed.effort };
+  const full = overThreshold(primary.runtime, o.windows, o.threshold, o.nowMs);
+  if (!full) return { kind: "primary", values: primary };
+  const tried = [full];
+  for (const e of routed.fallback) {
+    if (e === "wait") return { kind: "wait", until: earliest(tried), reason: `${full.reason}; its fallback is to wait` };
+    const busy = overThreshold(e.runtime, o.windows, o.threshold, o.nowMs);
+    if (!busy) {
+      const d = o.project.runtimes[e.runtime];
+      return { kind: "fallback", values: { runtime: e.runtime, model: e.model ?? d.model, effort: e.effort ?? d.effort }, reason: full.reason };
+    }
+    tried.push(busy);
+  }
+  return {
+    kind: "wait", until: earliest(tried),
+    reason: tried.length > 1 ? `${tried.map((t) => t.reason).join("; ")}: every runtime of the chain is beyond the limit` : full.reason,
+  };
+}
+const earliest = (xs: { until: string }[]) => xs.map((x) => x.until).sort((a, b) => Date.parse(a) - Date.parse(b))[0]!;

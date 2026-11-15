@@ -4,7 +4,7 @@
 // drafts under .nexus/drafts/: permission mode dontAsk with a read-only allow list plus the drafts rules.
 import { randomUUID } from "node:crypto";
 import {
-  ActionError, ClaudeEffort, HOLDING_RUN_STATES, ProjectStore, applyDraft, inPlan, loadProjectState, openPlan, proposePlan, proposeTags, readAway, orchestratorStatusChange, newId, now, sendBack, type Event, type ProjectState, type SessionFile,
+  ActionError, ClaudeEffort, HOLDING_RUN_STATES, ProjectStore, applyDraft, inPlan, loadProjectState, openPlan, overThreshold, proposePlan, proposeTags, readAway, readUsage, orchestratorStatusChange, newId, now, sendBack, type Event, type ProjectState, type SessionFile,
 } from "@nexus/protocol";
 import type { AgentProcess } from "./agent.ts";
 import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Launch } from "./agent-host.ts";
@@ -16,7 +16,7 @@ import { describeDeployChanges, type DeployChanges } from "./deploy.ts";
 import type { PlanNotice } from "./deploy-plan.ts";
 import {
   acceptedNoteNotice, approvalNotice, discardNotice, liftNotice, mergedNotice, mergeWaitNotice, missedStartNotice, noticeText, orchestratorBriefing, pausedNotice,
-  questionNotice, rejectionNotice, fixAskedNotice, reviewNotice, awayOnNotice, awayEndNotice, awayStuckNotice, planDecisionNotice, planHeldNotice, runEndNotice, stepNoteNotice, tagDecisionNotice, userMessage, withdrawalNotice,
+  questionNotice, rejectionNotice, fixAskedNotice, reviewNotice, awayOnNotice, awayEndNotice, awayStuckNotice, planDecisionNotice, planHeldNotice, runEndNotice, stepNoteNotice, tagDecisionNotice, fallbackNotice, userMessage, withdrawalNotice,
 } from "./prompts.ts";
 
 // Agent (formerly Task) lets it call subagents; they run within these same read-only permissions.
@@ -39,6 +39,8 @@ export class Orchestrator {
   private readonly store: ProjectStore;
   private readonly engine: Engine;
   private readonly changed: () => void;
+  /** Wakes the notices held while the orchestrator's runtime is beyond the usage threshold (runtimeFull). */
+  private heldTimer: NodeJS.Timeout | undefined;
   private applying = false;
   /**
    * News about Nexus itself: the outcome of an update, for the session that asked for it (src/lifecycle.ts), and the
@@ -216,7 +218,7 @@ ${n.text}` });
   }
 
   /** For good: an orchestrator shut down starts no process again (a late change, an agent's exit, may still come in). */
-  shutdown(): void { this.stopped = true; this.host.shutdown(); }
+  shutdown(): void { this.stopped = true; clearTimeout(this.heldTimer); this.host.shutdown(); }
 
   /** Its process is still running (after shutdown: not yet exited). */
   alive(): boolean { return !!this.proc && this.proc.state !== "exited"; }
@@ -357,6 +359,20 @@ ${n.text}` });
 
   // ---------------------------------------------------------------- what the orchestrator is told
 
+  /**
+   * The orchestrator's runtime (Claude Code) is beyond the project's usage threshold now (routing.ts, overThreshold).
+   * While it is, a timer looks again just after the reset, so the held notices go out without waiting for a change.
+   */
+  private runtimeFull(state: ProjectState): boolean {
+    const runtime = state.project.orchestrator?.runtime === "codex" ? "codex" : "claude";
+    const full = overThreshold(runtime, readUsage()?.windows ?? {}, state.project.defaults.usage_pause_threshold, Date.now());
+    if (full && !this.heldTimer && !this.stopped) {
+      const ms = Math.min(Math.max(Date.parse(full.until) - Date.now() + 1000, 1000), 2 ** 31 - 1);
+      this.heldTimer = setTimeout(() => { this.heldTimer = undefined; if (!this.stopped) this.changed(); }, ms);
+    }
+    return !!full;
+  }
+
   private notify(state: ProjectState, s: SessionFile, updateOnly = false): void {
     const told = new Set(this.store.readApplied(s.id).entries.map((a) => a.event));
     const since = s.created_at;
@@ -449,6 +465,10 @@ ${n.text}` });
       // Merging back (src/merger.ts): what keeps Nexus from it, once per reason; a merge back Nexus did by itself.
       const waiting = q.git?.merge?.waiting;
       if (waiting && waiting.since >= since) items.push({ key: `notify:mergewait:${q.id}:${waiting.since}`, ...mergeWaitNotice(q, waiting.reason) });
+      // A step that opened on its fallback because its runtime's usage ran out, or on its own runtime again: told once.
+      for (const f of r?.fallbacks ?? []) {
+        if (f.at >= since) items.push({ key: `notify:fallback:${q.id}:${f.step}:${f.at}`, ...fallbackNotice(q, f) });
+      }
       const merged = q.git?.merged;
       if (merged?.by === "nexus" && merged.at >= since) items.push({ key: `notify:merged:${q.id}:${merged.at}`, ...mergedNotice(q, merged) });
       if (!r) continue;
@@ -462,8 +482,21 @@ ${n.text}` });
     }
     const fresh = items.filter((i) => !told.has(i.key));
     if (!fresh.length) return;
+    // The orchestrator's own runtime beyond the usage threshold: nothing starts its turn. Each notice waits in its
+    // inbox (once), not told yet; the reviews it would do (levels 2 and 3) wait with them. Told, all of them, at the
+    // first change once that runtime is free again (PROTOCOL.md, "Fallback when usage runs out").
+    const inbox = this.store.readInbox(s.id).entries;
+    const held = (key: string) => `notice-${key}`;
+    if (this.runtimeFull(state)) {
+      for (const i of fresh) {
+        if (inbox.some((m) => m.id === held(i.key))) continue;
+        this.store.appendInbox(s.id, { v: 1, id: held(i.key), at: now(), from: "nexus", type: "message", text: noticeText(i, i.more?.text) });
+      }
+      return;
+    }
     this.ensure();
     for (const i of fresh) {
+      if (inbox.some((m) => m.id === held(i.key))) this.store.appendDelivered(s.id, { at: now(), kind: "inbox", id: held(i.key), via: "turn" });
       if (i.quiet) this.markTold(s, i.more!.keys);
       else this.markTold(s, [i.key, ...(i.more?.keys ?? [])]);
       // The user sees the fact; the instruction after it, and any changes for agents, are for the orchestrator only.

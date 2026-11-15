@@ -941,6 +941,17 @@ export const RunFile = z.object({
     at: Time, from: Id, to: Id, step: Id, why: z.enum(["context", "runtime", "refactor"]).optional(), fill: z.number().optional(),
     summary: z.enum(["written", "asked", "fallback"]),
   })).optional(),
+  /**
+   * Each step that opened on its fallback because its own runtime was beyond the usage threshold, and each that opened
+   * on its own values again after one did (`back`), oldest first (routing.ts, chooseRoute; PROTOCOL.md, "Fallback when
+   * usage runs out"). `runtime`, `model`, `effort`: what it opened on; `from`: its own values; `reason`: the full
+   * window (for `back`: why it is free again).
+   */
+  fallbacks: z.array(z.object({
+    at: Time, step: Id, runtime: WorkerRuntime, model: z.string().optional(), effort: Effort.optional(),
+    from: z.object({ runtime: WorkerRuntime, model: z.string().optional(), effort: Effort.optional() }),
+    reason: z.string(), back: z.literal(true).optional(),
+  })).optional(),
 });
 export type RunFile = z.infer<typeof RunFile>;
 
@@ -1065,6 +1076,8 @@ export const TurnRecord = z.object({
   step: Id.optional(),
   /** A worker's turn: the step's tags as planned when the turn ended (inherited from the queue, renames read through). */
   tags: z.object(TagFields).optional(),
+  /** A worker's turn on its step's fallback: the runtime it would have run on, and why it did not (the full window). */
+  fallback: z.object({ from: WorkerRuntime, reason: z.string() }).optional(),
   /** `ok`; a failure's kind (`passing`, `lasting`, `usage`, with `failure`, the runtime's code); `interrupted`: ended
    *  without a result (Nexus interrupted it, or its process ended: a kill, an update's drain, a crash). */
   outcome: z.enum(["ok", "passing", "lasting", "usage", "interrupted"]),

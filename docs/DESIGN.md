@@ -444,6 +444,25 @@ The engine watches the subscription limits: Claude Code's 5-hour and 7-day usage
 new step turns; running turns finish. Queues paused this way resume when the window resets, and the dashboard says
 why they wait. Where Claude Code reports these figures in print mode is to be confirmed when the adapter is built.
 
+Since queue FB (2026-11-14) a step whose runtime is beyond the threshold goes on on a fallback instead of waiting,
+by rules: each kind's fallback chain in the settings, a queue's or a step's in its YAML (PROTOCOL.md, "Fallback when
+usage runs out"). Choices made while building it (FB4):
+
+- **One pure decision.** `chooseRoute` (routing.ts) takes the step's own values and chain, the usage windows, the
+  threshold and the time, and says primary, fallback or wait; the engine only carries it out. The tests drive it with
+  windows written into usage.json, no clock tricks needed: a reset time in the past is a reset.
+- **A passed reset is a reset.** Claude Code reports its windows only inside a turn: a runtime nobody used since its
+  window reset would otherwise look full for ever. So `resets_at` in the past counts as free, and a window never
+  reported counts as free too (Codex before its first session).
+- **Every Claude Code window counts, the later reset wins.** The 7-day window full with the 5-hour one free is still
+  full for a week; waiting for the 5-hour reset would wake the run only to wait again.
+- **The record lives in run.yaml, not in an event.** A session's events log is its own (one writer per file); the
+  engine's decisions are the server's, so they go into run.yaml `fallbacks` beside `switches`, and the step view and
+  the turn records read them from there.
+- **Notices wait in the orchestrator's inbox.** The orchestrator runs on Claude Code; a notice that started its turn
+  while Claude Code is full would spend the very usage that ran out. The notice is put into its inbox (seen there, not
+  told) and told once the runtime is free; the reviews it would do wait with it, as decided.
+
 ### The plan
 
 "When queues A and C are done, start B" is a place in the plan kept in a file of B's (`plan.yaml`, with the start's
