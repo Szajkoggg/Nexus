@@ -27,9 +27,8 @@ import {
   Summary, Timeline,
 } from "./stepParts.tsx";
 
-export function StepDetail({ project, queue, step, onChanged, onClose, of }: PanelProps & { step: StepView }) {
+export function StepDetail({ project, queue, step, onClose, of }: PanelProps & { step: StepView }) {
   const id = project.project.id;
-  const version = project.generated_at;
   const questions = queue.questions.filter((q) => q.step === step.id);
   const phone = usePhone();
   const { live, forOrchestrator, notesOpen, orchestratorAsks, reviewing, asking, questionFirst } = stepLayout(step, questions, phone);
@@ -37,40 +36,40 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pan
   // Review images open in the in-app viewer, a layer above the step (Back closes it); other items as links.
   const { pairs, images } = stepPictures(step, (path) => fileUrl(id, path));
   const shown = shownPicture(layerValue(useNav(), "viewer"), images.length);
-  const writes = { project: id, queue, step, onChanged };
+  const writes = { project: id, queue, step };
 
   // The step's parts. While it waits for the user's review the summary and the pictures come first (UX proposals,
   // 13 and 14); otherwise the usual order.
-  const chat = <StepChat project={id} queue={queue.id} step={step.id} version={version} />;
+  const chat = <StepChat project={id} queue={queue.id} step={step.id} />;
   const retry = <RetryLine queue={queue} step={step} />;
   const summary = <Summary queue={queue} step={step} />;
-  const push = <PushLine project={id} queue={queue} step={step.id} onChanged={onChanged} />;
+  const push = <PushLine project={id} queue={queue} step={step.id} />;
   const rejected = step.status === "rejected" && <Rejected step={step} holding={queue.rejection?.step === step.id} />;
   const message = live && session && <MessageAgent {...writes} session={session} />;
   const others = questions.filter((q) => !(questionFirst && q.qid === asking?.qid));
   const questionsPart = others.length > 0 && (
     <Section title={t(questionFirst ? "details.otherQuestions" : "details.questions")}>
-      {others.map((q) => <Question key={q.qid} q={q} project={id} onChanged={onChanged} inBar={q.qid === asking?.qid} />)}
+      {others.map((q) => <Question key={q.qid} q={q} project={id} inBar={q.qid === asking?.qid} />)}
     </Section>
   );
   const switches = <StepSwitches queue={queue} step={step.id} />;
   const viewer = shown !== undefined && images.length > 0 && (
     <ImageViewer images={images} index={shown} onIndex={(i) => nav.open(`viewer:${i}`)} onClose={() => nav.close("viewer")}
       back={step.id} context={`${project.project.name} · ${queue.id} · ${step.id} ${step.title}`}
-      footer={(i) => <PictureActions key={pairs[i]!.item.path} project={id} queue={queue} step={step} path={pairs[i]!.item.path!} src={images[i]!.src} onChanged={onChanged} />} />
+      footer={(i) => <PictureActions key={pairs[i]!.item.path} project={id} queue={queue} step={step} path={pairs[i]!.item.path!} src={images[i]!.src} />} />
   );
   const notes = <Notes {...writes} forOrchestrator={forOrchestrator} notesOpen={notesOpen} />;
   const refusals = <StepRefusals project={project} queue={queue.id} step={step.id} />;
   const changes = <Changes entries={queue.changes.filter((c) => c.step === step.id)} queue={queue} />;
   const activitySession = step.session ?? (queue.run?.step === step.id ? queue.run.session : undefined);
-  const activity = activitySession && <Activity project={id} session={(step.session ?? queue.run?.session)!} queue={queue.id} step={step.id} version={version} />;
+  const activity = activitySession && <Activity project={id} session={(step.session ?? queue.run?.session)!} queue={queue.id} step={step.id} />;
   const integration = step.integration ? <IntegrationBox project={project} queue={queue} step={step} /> : null;
   const body = reviewing ? (
     <>
       {integration}
       {summary}
       <StepTags step={step} />
-      <ReviewPictures project={id} queue={queue} step={step} pairs={pairs} orchestratorAsks={orchestratorAsks} version={version} />
+      <ReviewPictures project={id} queue={queue} step={step} pairs={pairs} orchestratorAsks={orchestratorAsks} />
       <div className="mt-6">{chat}</div>
       {retry}{switches}{push}{rejected}<SentBack step={step} />{message}{questionsPart}<StatusNote step={step} />{notes}<Messages step={step} />{refusals}{changes}{activity}{viewer}
     </>
@@ -81,7 +80,7 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pan
       {push}{rejected}<SentBack step={step} />{message}{questionsPart}<StatusNote step={step} /><GoalAcceptance step={step} />
       <Material project={id} step={step} pairs={pairs} />{viewer}
       <StepChecks step={step} />{notes}<Messages step={step} />{refusals}{changes}{activity}
-      <StepCommits project={id} queue={queue.id} step={step.id} version={version} /><Timeline step={step} />
+      <StepCommits project={id} queue={queue.id} step={step.id} /><Timeline step={step} />
     </>
   );
   return (
@@ -96,7 +95,7 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pan
           <StatusBadge status={pendingProvisional(step) ? "review" : step.status} label={reviewLabel(step) ?? provisionalWord(step)} />
           {/* Until its review is over the user may change the step's level, also after approval (no new approval). */}
           {levelChangeable(step)
-            ? <LevelPicker project={id} queue={queue.id} step={step} onChanged={onChanged} away={project.away} />
+            ? <LevelPicker project={id} queue={queue.id} step={step} away={project.away} />
             : (
               <span title={levelTitle(step.level)} className="inline-flex items-center gap-1">
                 <LevelMark step={step} always />
@@ -115,11 +114,11 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pan
         onClose={onClose}
       />
       {questionFirst
-        ? <QuestionSheet key={asking!.qid} q={asking!} project={id} onChanged={onChanged}>{body}</QuestionSheet>
+        ? <QuestionSheet key={asking!.qid} q={asking!} project={id}>{body}</QuestionSheet>
         : <PanelBody>{body}</PanelBody>}
       {questionFirst ? null : reviewing
-        ? <ReviewBar key={step.id} project={id} queue={queue.id} step={step.id} next={noteTargets(queue.steps, step.id).next} criteria={step.acceptance} onChanged={onChanged} />
-        : asking && <AnswerBar key={asking.qid} q={asking} project={id} onChanged={onChanged} />}
+        ? <ReviewBar key={step.id} project={id} queue={queue.id} step={step.id} next={noteTargets(queue.steps, step.id).next} criteria={step.acceptance} />
+        : asking && <AnswerBar key={asking.qid} q={asking} project={id} />}
     </>
   );
 }

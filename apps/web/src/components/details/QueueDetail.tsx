@@ -19,10 +19,12 @@ import { ActionBar, Button, Composer, Expandable, Markdown, PanelBody, PanelHead
 import { BranchLine, WorktreeActions } from "./git.tsx";
 import type { PanelProps } from "./props.ts";
 import { Question } from "./questions.tsx";
+import { usePage } from "../../page.ts";
 
 const WHO: Record<StatusChange["by"], Key> = { user_approval: "details.change.byApproval", user_continue: "details.change.byContinue", orchestrator: "details.change.byOrchestrator", nexus: "details.change.byNexus" };
 
-export function QueueDetail({ project, queue, onChanged, onClose, of, chat = [], onFull }: PanelProps) {
+export function QueueDetail({ project, queue, onClose, of, chat = [], onFull }: PanelProps) {
+  const { reload: onChanged } = usePage();
   const id = project.project.id;
   const inherited = project.project.defaults.stop_conditions;
   const checks = queueChecks(project.project, queue);
@@ -59,8 +61,8 @@ export function QueueDetail({ project, queue, onChanged, onClose, of, chat = [],
         onClose={onClose}
       />
       <PanelBody>
-      <BranchLine project={id} queue={queue.id} version={project.generated_at} />
-      <WorktreeActions project={id} root={project.project.root} queue={queue} onChanged={onChanged} />
+      <BranchLine project={id} queue={queue.id} />
+      <WorktreeActions project={id} root={project.project.root} queue={queue} />
 
       {queue.status === "stopped"
         ? <StopBox queue={queue} left={left ?? undefined} work={work} setWork={setWork} needsChoice={needsChoice} pushAccepted={project.project.defaults.push_accepted} />
@@ -72,10 +74,10 @@ export function QueueDetail({ project, queue, onChanged, onClose, of, chat = [],
           <a className="text-sm text-accent underline" href={fileUrl(id, queue.report.path)} target="_blank" rel="noreferrer">{t("details.openReport")}</a>
         </Section>
       )}
-      {queue.questions.length > 0 && <Section title={t("details.questions")}>{queue.questions.map((q) => <Question key={q.qid} q={q} project={id} onChanged={onChanged} />)}</Section>}
+      {queue.questions.length > 0 && <Section title={t("details.questions")}>{queue.questions.map((q) => <Question key={q.qid} q={q} project={id} />)}</Section>}
 
       {!approving && <OwnValues queue={queue} />}
-      {!approving && <StepLevels project={project} queue={queue} onChanged={onChanged} />}
+      {!approving && <StepLevels project={project} queue={queue} />}
 
       {history.length > 0 && <Section title={t("details.approval")}>
         {history.map((a, i) => (
@@ -87,7 +89,7 @@ export function QueueDetail({ project, queue, onChanged, onClose, of, chat = [],
           ))}
       </Section>}
 
-      <RunControls project={project} queue={queue} onChanged={onChanged} />
+      <RunControls project={project} queue={queue} />
 
       <Changes entries={queue.changes} queue={queue} />
 
@@ -107,7 +109,7 @@ export function QueueDetail({ project, queue, onChanged, onClose, of, chat = [],
         <p className="mt-6 text-xs text-fg-3">{rich("details.imported", { path: <span key="path" className="font-mono">{queue.source.path}</span>, time: <TimeAgo key="time" at={queue.source.imported_at} /> })}</p>
       )}
       </PanelBody>
-      <QueueBar key={queue.id} project={project} queue={queue} onChanged={onChanged} left={leftState} work={work} needsChoice={needsChoice} />
+      <QueueBar key={queue.id} project={project} queue={queue} left={leftState} work={work} needsChoice={needsChoice} />
     </>
   );
 }
@@ -116,9 +118,10 @@ export function QueueDetail({ project, queue, onChanged, onClose, of, chat = [],
  * The bar of a queue: Continue on a stopped queue whose revision is approved; Approve revision N (words with it under
  * ⋯) on one that is not; Withdraw approval (a queue approved but never started) and the review policy under ⋯.
  */
-function QueueBar({ project, queue, onChanged, left, work, needsChoice }: {
-  project: ProjectState; queue: QueueView; onChanged: () => void; left: LeftState; work?: WorkChoice; needsChoice: boolean;
+function QueueBar({ project, queue, left, work, needsChoice }: {
+  project: ProjectState; queue: QueueView; left: LeftState; work?: WorkChoice; needsChoice: boolean;
 }) {
+  const { reload: onChanged } = usePage();
   const id = project.project.id;
   const stopped = queue.status === "stopped";
   // A stop's buttons and hint, as everywhere the stop is shown; Continue itself is the one in Stop.tsx.
@@ -163,7 +166,7 @@ function QueueBar({ project, queue, onChanged, left, work, needsChoice }: {
       {opened && (
         <div className="space-y-4">
           {!queue.approved && a.wordsBox}
-          {canWithdraw && withdrawOpen && <WithdrawApproval project={id} queue={queue.id} onChanged={onChanged} onCancel={() => setWithdrawOpen(false)} />}
+          {canWithdraw && withdrawOpen && <WithdrawApproval project={id} queue={queue.id} onCancel={() => setWithdrawOpen(false)} />}
           {policyOpen && (
             <div className="flex flex-wrap items-center gap-2 text-sm text-fg">
               <label className="flex flex-wrap items-center gap-2">
@@ -223,7 +226,8 @@ export function Changes({ entries, queue }: { entries: StatusChange[]; queue: Qu
  * Takes the approval back from a queue that has never run (it is proposed again). A started queue is paused or
  * stopped instead, so this is not offered there.
  */
-function WithdrawApproval({ project, queue, onChanged, onCancel }: { project: string; queue: string; onChanged: () => void; onCancel: () => void }) {
+function WithdrawApproval({ project, queue, onCancel }: { project: string; queue: string; onCancel: () => void }) {
+  const { reload: onChanged } = usePage();
   return (
     <div className="rounded-lg border border-stop/30 bg-stop/5 p-3">
       <p className="mb-2 text-sm text-fg">
@@ -246,7 +250,7 @@ function WithdrawApproval({ project, queue, onChanged, onCancel }: { project: st
  * An approved queue's steps whose review is still to come, each with its level picker: the user may decide later that
  * they review a step themselves (or leave it to the orchestrator). Setting a level asks for no new approval.
  */
-function StepLevels({ project, queue, onChanged }: { project: ProjectState; queue: QueueView; onChanged: () => void }) {
+function StepLevels({ project, queue }: { project: ProjectState; queue: QueueView; }) {
   const open = queue.steps.filter(levelChangeable);
   if (!open.length) return null;
   return (
@@ -256,7 +260,7 @@ function StepLevels({ project, queue, onChanged }: { project: ProjectState; queu
           <li key={s.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
             <span className="w-16 shrink-0 font-mono text-xs text-fg-3" title={s.id}>{stepMark(s)}</span>
             <span className="min-w-0 flex-1 text-fg">{s.title}</span>
-            <LevelPicker project={project.project.id} queue={queue.id} step={s} onChanged={onChanged} away={project.away} />
+            <LevelPicker project={project.project.id} queue={queue.id} step={s} away={project.away} />
           </li>
         ))}
       </ul>

@@ -1,6 +1,6 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ProjectState, QueueStatus } from "@nexus/protocol";
-import { enc, useLive, useQuery, type AttentionItem, type ProjectSummary, type QueueView, type Version } from "./api.ts";
+import { enc, useLive, useQuery, type AttentionItem, type ProjectSummary, type QueueView } from "./api.ts";
 import { bump, noVersions, projectVersion } from "./query.ts";
 import { QueueRow } from "./components/QueueRow.tsx";
 import { QueueDetail } from "./components/details/QueueDetail.tsx";
@@ -9,7 +9,8 @@ import { StepDetail } from "./components/details/StepDetail.tsx";
 import { Button, Drawer, Section, TimeAgo, useWide } from "./components/ui.tsx";
 import { Rail, RAIL } from "./components/Rail.tsx";
 import { RefsProvider } from "./components/Refs.tsx";
-import { AttentionPanel, attentionTarget, NotifyToggle, useNotifications, WaitingList } from "./components/Attention.tsx";
+import { AttentionPanel, attentionTarget, WaitingList } from "./components/Attention.tsx";
+import { NotifyToggle, useNotifications } from "./components/Notify.tsx";
 import { AwaySign, AwaySwitch } from "./components/Levels.tsx";
 import { PlannedDeployCard } from "./components/DeployPlan.tsx";
 import { ContextBar, UsageMeter } from "./components/Run.tsx";
@@ -26,6 +27,7 @@ import { moveOn, placeOf, waitingPosition, type Place } from "./waiting.ts";
 import { Digest } from "./components/Digest.tsx";
 import { mergeAttention, type WaitingItem } from "@nexus/protocol/attention";
 import { nav, useNav } from "./nav.ts";
+import { parseHash } from "./hash.ts";
 import { SettingsButton, SettingsPanel, UpdatePill, useServer } from "./components/Settings.tsx";
 import { ProjectRefusals } from "./components/Refusals.tsx";
 import { RulesWarning } from "./components/Rules.tsx";
@@ -35,6 +37,7 @@ import { splitFinished } from "./finished.ts";
 import { ApprovalView, useApprovalForm } from "./components/Approval.tsx";
 import { needsApproval } from "./approval.ts";
 import { rich, t, type Key } from "./i18n.ts";
+import { PageProvider, type Page } from "./page.ts";
 
 /** The file viewer and its Markdown and highlighting load when a file is first opened. */
 const FileView = lazy(() => import("./components/FileView.tsx").then((m) => ({ default: m.FileView })));
@@ -52,8 +55,7 @@ const GROUPS: { title: Key; statuses: QueueStatus[] }[] = [
  */
 function useRoute() {
   const n = useNav();
-  const parts = n.hash.replace(/^#\/?/, "").split("/").map(decodeURIComponent).filter(Boolean);
-  return { project: parts[0], queue: parts[1], step: parts[2], nav: n };
+  return { ...parseHash(n.hash), nav: n };
 }
 
 export function App() {
@@ -73,6 +75,8 @@ export function App() {
   const reload = useCallback(() => setVersions((v) => bump(v, { type: "changed", project: projectId })), [projectId]);
 
   const notify = useNotifications(projects);
+  // App provides the page (below): what it reads itself takes the versions directly.
+  const page = useMemo<Page>(() => ({ version, all: versions.all, reload }), [version, versions.all, reload]);
   const orchestrator = useOrchestrator(projectId, version);
   const server = useServer(versions.all);
   // Each panel is a layer in the browser history: opening pushes an entry, closing (or Back) pops it.
@@ -128,7 +132,7 @@ export function App() {
       nav.item(next.project, next.queue, attentionTarget(next));
     } else if (!waiting.length) round.current = null;
   }, [waiting, projectId, route.queue, route.step]);
-  const digest = <Digest projects={projects ?? []} version={versions.all} onGoThrough={goThrough} />;
+  const digest = <Digest projects={projects ?? []} onGoThrough={goThrough} />;
   // On the phone an item that waits for the user says where it stands in the waiting list: "2 of 6".
   const place = phone && projectId && route.queue ? waitingPosition(waiting, { project: projectId, queue: route.queue, step: route.step }) : undefined;
   const of = place?.at ? t("shell.placeInWaiting", { at: place.at, total: place.total }) : undefined;
@@ -166,7 +170,7 @@ export function App() {
   // The project's queues (the desktop's page; the phone's Queues tab, where what waits has a tab of its own).
   const queuesPage = <>
     {state && <RulesWarning key={state.project.id} project={state} />}
-    {state && <PlanView project={state.project.id} queues={state.queues} version={state.generated_at} onOpen={(id) => projectId && nav.item(projectId, id)} onChanged={reload} />}
+    {state && <PlanView project={state.project.id} queues={state.queues} onOpen={(id) => projectId && nav.item(projectId, id)} />}
     {state && byGroup.map((g) => (
       <section key={g.title} className="mb-8">
         <div className="mb-3 flex items-baseline gap-3">
@@ -215,12 +219,12 @@ export function App() {
   // The sheets and drawers over either layout: settings, remote access, a queue or step.
   const drawers = <>
     <Drawer open={settingsOpen && !!state} onClose={() => nav.close("settings")}>
-      {state && <SettingsPanel key={state.project.id} project={state.project} version={state.generated_at} tags={state.tags} onChanged={reload} server={server}
-        tools={phone ? <PhoneTools connected={connected} version={versions.all} server={server} notify={notify} onChanged={reload} /> : undefined} />}
+      {state && <SettingsPanel key={state.project.id} project={state.project} tags={state.tags} server={server}
+        tools={phone ? <PhoneTools connected={connected} server={server} notify={notify} /> : undefined} />}
     </Drawer>
 
     <Drawer open={remoteOpen} onClose={() => nav.close("remote")}>
-      <RemotePanel version={versions.all} />
+      <RemotePanel />
     </Drawer>
 
     <Drawer open={!!commit && !!projectId} onClose={() => nav.close("commit")}>
@@ -231,12 +235,12 @@ export function App() {
 
     <Drawer open={itemShown && !fullApproval} onClose={close} beside={phone ? undefined : RAIL} panel>
       {state && queue && (step
-        ? <StepDetail project={state} queue={queue} step={step} onChanged={reload} onClose={close} of={of} />
-        : <QueueDetail project={state} queue={queue} onChanged={reload} onClose={close} of={of}
+        ? <StepDetail project={state} queue={queue} step={step} onClose={close} of={of} />
+        : <QueueDetail project={state} queue={queue} onClose={close} of={of}
             chat={orchestrator?.chat} onFull={() => setForm("full")} />)}
     </Drawer>
     {fullApproval && state && queue && (
-      <ApprovalView key={`${queue.id}/${queue.revision}`} project={state} queue={queue} chat={orchestrator?.chat ?? []} onChanged={reload} onClose={close}
+      <ApprovalView key={`${queue.id}/${queue.revision}`} project={state} queue={queue} chat={orchestrator?.chat ?? []} onClose={close}
         onPanel={() => setForm("panel")} sidebar={phone ? undefined : SIDEBAR} />
     )}
   </>;
@@ -244,7 +248,7 @@ export function App() {
   if (phone) {
     const scrolls = tab === "waiting" || tab === "queues";
     return (
-      <RefsProvider project={projectId} queues={state?.queues}>
+      <PageProvider value={page}><RefsProvider project={projectId} queues={state?.queues}>
       <div className="flex h-dvh flex-col">
         {/* The top line: the project picker, what runs, settings. The header's other tools are in Settings here. */}
         <header className="z-30 shrink-0 border-b border-line bg-surface pt-[env(safe-area-inset-top)]">
@@ -260,23 +264,22 @@ export function App() {
 
         <main className={scrolls ? "@container scroll-thin min-h-0 flex-1 overflow-y-auto px-4 py-4" : "flex min-h-0 flex-1 flex-col"}>
           {scrolls && banners}
-          {tab === "waiting" && server?.plan && <div className="mb-4"><PlannedDeployCard plan={server.plan} onChanged={reload} projects={projects} /></div>}
+          {tab === "waiting" && server?.plan && <div className="mb-4"><PlannedDeployCard plan={server.plan} projects={projects} /></div>}
           {tab === "waiting" && <div className="mb-4 empty:hidden">{digest}</div>}
           {tab === "waiting" && <WaitingList projects={projects ?? []} onOpen={openWaiting} onChoose={(w, o) => { if (w.qid) chooseOption(w.qid, o); openWaiting(w); }} />}
           {tab === "queues" && queuesPage}
           {tab === "chat" && projectId && (
-            <ChatPanel key={`chat-${projectId}`} inline project={projectId} name={state?.project.name ?? projectId} view={orchestrator} onChanged={reload} />
+            <ChatPanel key={`chat-${projectId}`} inline project={projectId} name={state?.project.name ?? projectId} view={orchestrator} />
           )}
           {tab === "ideas" && projectId && state && (
-            <ConversationsPanel key={`ideas-${projectId}`} inline project={projectId} name={state.project.name} version={version} defaultRuntime={state.project.conversations.runtime}
-              onChanged={reload} />
+            <ConversationsPanel key={`ideas-${projectId}`} inline project={projectId} name={state.project.name} defaultRuntime={state.project.conversations.runtime} />
           )}
         </main>
 
         <BottomBar tab={tab!} waiting={waiting.length} working={orchestrator?.state === "working"} unread={unread} onTab={(t) => nav.tab(t)} />
         {drawers}
       </div>
-      </RefsProvider>
+      </RefsProvider></PageProvider>
     );
   }
 
@@ -301,12 +304,12 @@ export function App() {
   const besideShown = !wide && ((itemShown && !fullApproval) || waitingOpen);
   const alerts = (projectsError || projects?.length === 0 || error) && <div className="px-6 pt-4">{banners}</div>;
   return (
-    <RefsProvider project={projectId} queues={state?.queues}>
+    <PageProvider value={page}><RefsProvider project={projectId} queues={state?.queues}>
     <div className="flex h-dvh">
       <ProjectSidebar projects={projects ?? []} current={projectId} connected={connected} onPick={(id) => nav.project(id)} foot={<>
         <UpdatePill info={server} />
-        <UsageMeter version={versions.all} stacked />
-        <div className="-mx-1.5"><AwaySwitch away={server?.away} onChanged={reload} /></div>
+        <UsageMeter stacked />
+        <div className="-mx-1.5"><AwaySwitch away={server?.away} /></div>
         <div className="-mx-1.5 flex items-center gap-0.5">
           <NotifyToggle {...notify} />
           <span className="flex-1" />
@@ -318,13 +321,12 @@ export function App() {
       <main className="flex min-w-0 flex-1 flex-col" style={besideShown ? { marginRight: RAIL } : undefined}>
         {view === "chat" && <>
           {alerts}
-          {projectId && <ChatPanel key={`chat-${projectId}`} desk={desk} project={projectId} name={state?.project.name ?? projectId} view={orchestrator} onChanged={reload} />}
+          {projectId && <ChatPanel key={`chat-${projectId}`} desk={desk} project={projectId} name={state?.project.name ?? projectId} view={orchestrator} />}
         </>}
         {view === "ideas" && <>
           {alerts}
           {projectId && state && (
-            <ConversationsPanel key={`ideas-${projectId}`} desk={desk} project={projectId} name={state.project.name} version={version} defaultRuntime={state.project.conversations.runtime}
-              onChanged={reload} />
+            <ConversationsPanel key={`ideas-${projectId}`} desk={desk} project={projectId} name={state.project.name} defaultRuntime={state.project.conversations.runtime} />
           )}
         </>}
         {view === "queues" && <>
@@ -360,7 +362,7 @@ export function App() {
 
       {drawers}
     </div>
-    </RefsProvider>
+    </RefsProvider></PageProvider>
   );
 }
 
@@ -380,8 +382,8 @@ function Banner({ children }: { children: React.ReactNode }) {
  * The phone's Settings, at the top: what the desktop header shows as icons (the update, the usage, notifications,
  * remote access) and whether live updates arrive.
  */
-function PhoneTools({ connected, version, server, notify, onChanged }: {
-  connected: boolean; version: Version; server: ReturnType<typeof useServer>; notify: ReturnType<typeof useNotifications>; onChanged: () => void;
+function PhoneTools({ connected, server, notify }: {
+  connected: boolean; server: ReturnType<typeof useServer>; notify: ReturnType<typeof useNotifications>;
 }) {
   const row = (label: string, value: React.ReactNode) => (
     <div className="grid gap-1 py-1.5 sm:grid-cols-[11rem_1fr] sm:items-center sm:gap-3">
@@ -393,9 +395,9 @@ function PhoneTools({ connected, version, server, notify, onChanged }: {
     <Section title={t("device.title")}>
       {row(t("device.liveUpdates"), connected ? t("common.on") : <span className="text-stop">{t("common.reconnectingDots")}</span>)}
       {server?.update && server.update.phase !== "idle" && server.update.phase !== "updated" && row(t("device.update"), <UpdatePill info={server} />)}
-      {row(t("device.usage"), <UsageMeter version={version} always />)}
+      {row(t("device.usage"), <UsageMeter always />)}
       {row(t("device.notifications"), <NotifyToggle {...notify} labelled />)}
-      {row(t("away.label"), <AwaySwitch away={server?.away} onChanged={onChanged} labelled />)}
+      {row(t("away.label"), <AwaySwitch away={server?.away} labelled />)}
       {row(t("device.remoteAccess"), <Button variant="quiet" onClick={() => nav.open("remote")}>{t("device.otherDevices")}</Button>)}
     </Section>
   );

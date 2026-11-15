@@ -1,8 +1,9 @@
 // Remote access: how a phone reaches this dashboard, signs in, and gets notifications.
 import { useEffect, useState } from "react";
-import { request, useQuery, type Version } from "../api.ts";
+import { request, useQuery } from "../api.ts";
 import { Button, Section } from "./ui.tsx";
 import { formatDate, rich, t } from "../i18n.ts";
+import { usePage } from "../page.ts";
 
 interface Remote {
   local: boolean;
@@ -58,7 +59,8 @@ export function RemoteButton({ onClick }: { onClick: () => void }) {
   );
 }
 
-export function RemotePanel({ version }: { version: Version }) {
+export function RemotePanel() {
+  const version = usePage().all;
   const [base, setBase] = useState("");
   const [bump, setBump] = useState(0);
   const r = useQuery<Remote>(`/api/remote${base ? `?base=${encodeURIComponent(base)}` : ""}`, `${String(version)}-${bump}`).data;

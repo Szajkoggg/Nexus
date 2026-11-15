@@ -8,15 +8,17 @@ import { t } from "../../i18n.ts";
 import { usePhone } from "../../phone.ts";
 import { reviewedByOrchestrator } from "@nexus/protocol/status-rules";
 import { ActionBar, Button, Composer, Markdown, TEXTAREA, TimeAgo, useDraftText, type MenuEntry } from "../ui.tsx";
+import { usePage } from "../../page.ts";
 
-interface ReviewArgs { project: string; queue: string; step: string; next?: string; criteria: string[]; onChanged: () => void }
+interface ReviewArgs { project: string; queue: string; step: string; next?: string; criteria: string[] }
 
 /**
  * The user's decision on a step in their review, for an action bar: Accept (with a note, under ⋯), Fix it… beside it,
  * Reject under ⋯, and the forms they open. Fix it opens with the text kept from before, if there is one. The step's
  * drawer and the picture viewer each show it (`accept` names the button).
  */
-function useReviewDecision({ project, queue, step, next, criteria, onChanged }: ReviewArgs, accept_label: string) {
+function useReviewDecision({ project, queue, step, next, criteria }: ReviewArgs, accept_label: string) {
+  const { reload: onChanged } = usePage();
   const [error, setError] = useState<string>();
   // Accept's note: closed by default; empty means a plain accept. It goes to the next step, or to the orchestrator
   // (always on the queue's last step).
@@ -42,7 +44,7 @@ function useReviewDecision({ project, queue, step, next, criteria, onChanged }: 
     secondary: <Button variant="quiet" pressed={fixOpen} onClick={() => setFixOpen(!fixOpen)}>{t("details.review.fixOpen")}</Button>,
     primary: <Button onClick={() => void accept()}>{note.trim() ? t("details.review.acceptWithNote") : accept_label}</Button>,
     forms: opened && <div className="space-y-4">
-      {rejectOpen && <RejectStep project={project} queue={queue} step={step} onChanged={onChanged} onCancel={() => setRejectOpen(false)} />}
+      {rejectOpen && <RejectStep project={project} queue={queue} step={step} onCancel={() => setRejectOpen(false)} />}
       {noteOpen && (
         <div>
           <textarea
@@ -108,7 +110,8 @@ export function ReviewBar(props: ReviewArgs) {
  * picture without leaving the viewer. A comment goes back to the worker as a Fix it while the step waits for the user's
  * review; otherwise it is a note on the next pending step. The original file is under ⋯.
  */
-export function PictureActions({ project, queue, step, path, src, onChanged }: { project: string; queue: QueueView; step: StepView; path: string; src: string; onChanged: () => void }) {
+export function PictureActions({ project, queue, step, path, src }: { project: string; queue: QueueView; step: StepView; path: string; src: string }) {
+  const { reload: onChanged } = usePage();
   const marks = step.pictures[path];
   const [error, setError] = useState<string>();
   const next = noteTargets(queue.steps, step.id).next;
@@ -121,7 +124,7 @@ export function PictureActions({ project, queue, step, path, src, onChanged }: {
     draft: draftKey(project, "picture", queue.id, step.id, path),
     onSubmit: async (text) => { await act(project, "POST", `${base}/comment`, { path, text }); onChanged(); },
   });
-  const decision = useReviewDecision({ project, queue: queue.id, step: step.id, next, criteria: step.acceptance, onChanged }, t("details.acceptTheStep"));
+  const decision = useReviewDecision({ project, queue: queue.id, step: step.id, next, criteria: step.acceptance }, t("details.acceptTheStep"));
   const original = { label: t("details.picture.original"), onSelect: () => window.open(src, "_blank", "noreferrer") };
   const phone = usePhone();
   const fail = error ?? comment.error ?? (reviewing ? decision.error : undefined);
@@ -189,7 +192,8 @@ export function Fold({ label, open, onToggle }: { label: string; open: boolean; 
 }
 
 /** Reject: the step is marked rejected, the run pauses, nothing is reverted; the orchestrator proposes what follows. */
-function RejectStep({ project, queue, step, onChanged, onCancel }: { project: string; queue: string; step: string; onChanged: () => void; onCancel: () => void }) {
+function RejectStep({ project, queue, step, onCancel }: { project: string; queue: string; step: string; onCancel: () => void }) {
+  const { reload: onChanged } = usePage();
   const [why, setWhy] = useState("");
   const { busy, error, run } = useAction();
   const reject = () => void run(

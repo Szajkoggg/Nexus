@@ -3,7 +3,7 @@ import type { ChatEntry } from "@nexus/protocol";
 import type { ProjectState, QueueView } from "../../api.ts";
 
 export interface PanelProps {
-  project: ProjectState; queue: QueueView; onChanged: () => void; onClose: () => void;
+  project: ProjectState; queue: QueueView; onClose: () => void;
   /** The orchestrator's chat: where its message with a queue's draft is found (the approval's compact list). */
   chat?: readonly ChatEntry[];
   /** Switches a queue waiting for approval to the full view (Approval.tsx). */

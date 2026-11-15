@@ -5,11 +5,12 @@
 import { useState } from "react";
 import type { DigestEvent, DigestResponse } from "@nexus/protocol/digest";
 import { mergeAttention } from "@nexus/protocol/attention";
-import { fileUrl, useQuery, type ProjectSummary, type Version } from "../api.ts";
+import { fileUrl, useQuery, type ProjectSummary } from "../api.ts";
 import { digestTiles, hasNews, outcome, usageLine, type Tone } from "../digest.ts";
 import { nav } from "../nav.ts";
 import { formatClock, t } from "../i18n.ts";
 import { Clock } from "./ui.tsx";
+import { usePage } from "../page.ts";
 
 const KEY = "nexus.digest.seen";
 /** When the user last marked the digest as seen on this device; the first time, a day ago. */
@@ -24,7 +25,8 @@ const SHOWN = 6;
 
 const greeting = (d = new Date()) => t(d.getHours() < 12 ? "digest.morning" : d.getHours() < 18 ? "digest.afternoon" : "digest.evening");
 
-export function Digest({ projects, version, onGoThrough }: { projects: ProjectSummary[]; version: Version; onGoThrough: () => void }) {
+export function Digest({ projects, onGoThrough }: { projects: ProjectSummary[]; onGoThrough: () => void }) {
+  const version = usePage().all;
   const [seen, setSeen] = useState(storedSeen);
   const [all, setAll] = useState(false);
   const d = useQuery<DigestResponse>(`/api/digest?since=${encodeURIComponent(seen)}`, version).data;

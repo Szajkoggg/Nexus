@@ -5,6 +5,7 @@ import { request, useAction } from "../api.ts";
 import { formatClock, formatDateTime, t } from "../i18n.ts";
 import { nav } from "../nav.ts";
 import { Button } from "./ui.tsx";
+import { usePage } from "../page.ts";
 
 export interface PlannedDeploy {
   id: string;
@@ -32,9 +33,10 @@ const cancelPlan = () => request("/api/server/cancel-plan", { method: "POST" });
  * The plan as a card: the rail and the Waiting tab frame it; the settings show it as it is (`framed` false).
  * `projects`: where known, to show the target project's name rather than its id.
  */
-export function PlannedDeployCard({ plan, onChanged, framed = true, projects }: {
-  plan: PlannedDeploy; onChanged: () => void; framed?: boolean; projects?: readonly { id: string; name: string }[];
+export function PlannedDeployCard({ plan, framed = true, projects }: {
+  plan: PlannedDeploy; framed?: boolean; projects?: readonly { id: string; name: string }[];
 }) {
+  const { reload: onChanged } = usePage();
   const { busy, error, run } = useAction();
   const now = new Date();
   const cancel = () => void run(cancelPlan, onChanged);

@@ -8,14 +8,16 @@ import { draftKey } from "../../drafts.ts";
 import { t } from "../../i18n.ts";
 import { isOpenQuestion } from "@nexus/protocol/status-rules";
 import { ActionBar, Button, Composer, Markdown, PanelBody, StatusBadge, TEXTAREA, TimeAgo, useDraftText } from "../ui.tsx";
+import { usePage } from "../../page.ts";
 
-interface AnswerProps { q: QuestionView; project: string; onChanged: () => void }
+interface AnswerProps { q: QuestionView; project: string }
 
 /**
  * An answer to a question: its draft, whether the worker may go on after it (on by default), and `send`, which posts
  * the answer and then reloads.
  */
-function useAnswer({ q, project, onChanged }: AnswerProps) {
+function useAnswer({ q, project }: AnswerProps) {
+  const { reload: onChanged } = usePage();
   const [goOn, setGoOn] = useState(true);
   return {
     goOn, setGoOn,
@@ -113,7 +115,7 @@ export function AnswerBar(props: AnswerProps) {
 }
 
 /** A question and its answers; open, with its answer box, unless the panel's action bar answers it (`inBar`). */
-export function Question({ q, project, onChanged, inBar }: AnswerProps & { inBar?: boolean }) {
+export function Question({ q, project, inBar }: AnswerProps & { inBar?: boolean }) {
   const open = isOpenQuestion(q);
   const tone = q.state === "escalated" ? "border-review/40 bg-review/5" : open ? "border-warn/30 bg-warn/5" : "border-line";
   return (
@@ -138,7 +140,7 @@ export function Question({ q, project, onChanged, inBar }: AnswerProps & { inBar
       ))}
       {open && !inBar && (
         <div className="mt-3">
-          <AnswerBox q={q} project={project} onChanged={onChanged} />
+          <AnswerBox q={q} project={project} />
         </div>
       )}
     </div>

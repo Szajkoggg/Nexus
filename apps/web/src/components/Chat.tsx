@@ -19,6 +19,7 @@ import { EffortSelect, ModelSelect, useEfforts } from "./Settings.tsx";
 import { rich, t } from "../i18n.ts";
 import { SentPictures, filesOf, usePictures } from "./Pictures.tsx";
 import { splitPictures, withPictures } from "../pictures.ts";
+import { usePage } from "../page.ts";
 
 /** A chat view: the newest entries with their lines in chat.jsonl, and the pinned messages (apps/server/src/chats.ts). */
 // ---------------------------------------------------------------- the endpoints this file reads and writes
@@ -481,9 +482,10 @@ const stateText = (v: View | undefined) =>
 // ---------------------------------------------------------------- the orchestrator
 
 /** The orchestrator's chat: the phone's Orchestrator tab (`inline`), a desktop's middle column (`desk`). */
-export function ChatPanel({ project, name, view, onChanged, inline, desk }: {
-  project: string; name: string; view: View | undefined; onChanged: () => void; inline?: boolean; desk?: Desk;
+export function ChatPanel({ project, name, view, inline, desk }: {
+  project: string; name: string; view: View | undefined; inline?: boolean; desk?: Desk;
 }) {
+  const { reload: onChanged } = usePage();
   const [showTools, setShowTools] = useState(false);
   const [searching, setSearching] = useState(false);
   const fresh: MenuEntry[] = view?.session ? [{
@@ -542,7 +544,8 @@ function AboutStep({ project, c, className = "" }: { project: string; c: Session
  * seeds it with the step's context at the first message); "New conversation" starts another. Below, the step's
  * conversations, each a link into it.
  */
-export function StepChat({ project, queue, step, version }: { project: string; queue: string; step: string; version: Version }) {
+export function StepChat({ project, queue, step }: { project: string; queue: string; step: string }) {
+  const { version } = usePage();
   const list = useQuery<ConversationItem[]>(`/api/projects/${enc(project)}/conversations`, version).data;
   const { busy, error, run } = useAction();
   const mine = (list ?? []).filter((c) => !c.archived && c.about?.queue === queue && c.about.step === step);
@@ -582,9 +585,10 @@ export function StepChat({ project, queue, step, version }: { project: string; q
 }
 
 /** The conversations with a thinking partner: the phone's Ideas tab (`inline`), a desktop's middle column (`desk`). */
-export function ConversationsPanel({ project, name, version, onChanged, defaultRuntime, inline, desk }: {
-  project: string; name: string; version: Version; onChanged: () => void; defaultRuntime: "claude" | "codex"; inline?: boolean; desk?: Desk;
+export function ConversationsPanel({ project, name, defaultRuntime, inline, desk }: {
+  project: string; name: string; defaultRuntime: "claude" | "codex"; inline?: boolean; desk?: Desk;
 }) {
+  const { reload: onChanged, version } = usePage();
   const list = useQuery<ConversationItem[]>(`/api/projects/${enc(project)}/conversations`, version).data;
   usePlaces(); // the list's unread dots follow each conversation's place
   // The open conversation (or the new-conversation form) is a layer above the panel: Back returns to the list.

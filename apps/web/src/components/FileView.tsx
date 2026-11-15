@@ -9,6 +9,7 @@ import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { fileUrl, HttpError, open } from "../api.ts";
+import { fileHref } from "../hash.ts";
 import { baseName, folderOf, isMarkdown, languageOf, plainLines, relativeTarget, withoutFinalNewline, type Token } from "../fileview.ts";
 import { formatNumber, t } from "../i18n.ts";
 import { nav } from "../nav.ts";
@@ -187,7 +188,7 @@ function MarkdownFile({ project, path, text, line }: { project: string; path: st
     a: ({ node: _n, href, children, ...p }: { node?: unknown; href?: string; children?: ReactNode }) => {
       const target = href ? relativeTarget(path, href) : undefined;
       if (target) {
-        const link = `?file=${encodeURIComponent(target.path)}${target.line ? `&line=${target.line}` : ""}#/${encodeURIComponent(project)}`;
+        const link = fileHref(project, target.path, target.line);
         return <a {...p} href={link} onClick={(e) => { if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey) return; e.preventDefault(); nav.file(target.path, target.line); }}>{children}</a>;
       }
       return <a {...p} href={href} target="_blank" rel="noreferrer">{children}</a>;

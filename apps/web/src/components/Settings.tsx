@@ -15,6 +15,7 @@ import { levelTitle } from "./Levels.tsx";
 import { ProjectTags } from "./Tags.tsx";
 import { PlannedDeployCard, type PlannedDeploy } from "./DeployPlan.tsx";
 import { SEND_BACKS, STOPS, conditionList, savedConditions, settingsProblem, type SettingsProblem } from "../settingsCheck.ts";
+import { usePage } from "../page.ts";
 
 const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 
@@ -414,17 +415,16 @@ function useValues(initial: Values) {
   };
 }
 
-export function SettingsPanel({ project, version, tags, onChanged, server, tools }: {
-  project: ProjectFile; onChanged: () => void; server?: ServerInfo;
-  /** The project's state's version (its generated_at): its settings are read again with every change of it. */
-  version: Version;
+export function SettingsPanel({ project, tags, server, tools }: {
+  project: ProjectFile; server?: ServerInfo;
   /** The project's tag lists (ProjectState.tags), shown under its settings. */
   tags?: TagsFile;
   /** On the phone, where the header has no icon row: the update, the usage, notifications and remote access. */
   tools?: ReactNode;
 }) {
+  const { reload: onChanged } = usePage();
   const [tab, setTab] = useState<"project" | "global">("project");
-  const info = useQuery<ProjectSettingsInfo>(`/api/projects/${encodeURIComponent(project.id)}/settings`, version).data;
+  const info = useQuery<ProjectSettingsInfo>(`/api/projects/${encodeURIComponent(project.id)}/settings`, usePage().version).data;
   return (
     <div>
       <div className="break-all pr-8 text-xs text-fg-3">{tab === "project" ? project.root : t("settings.globalNote")}</div>
@@ -438,8 +438,8 @@ export function SettingsPanel({ project, version, tags, onChanged, server, tools
       {/* This device's own things (live updates, usage, notifications, remote access): global only, so on the global page. */}
       {tools && tab === "global" && <div className="mt-6">{tools}</div>}
       <div className="mt-6">
-        {tab === "global" ? <GlobalSettingsPage key="global" onChanged={onChanged} server={server} />
-          : info ? <ProjectSettingsPage key={`${project.id}:${info.own.join(",")}`} project={project} info={info} onChanged={onChanged} />
+        {tab === "global" ? <GlobalSettingsPage key="global" server={server} />
+          : info ? <ProjectSettingsPage key={`${project.id}:${info.own.join(",")}`} project={project} info={info} />
           : <p className="text-sm text-fg-3">{t("common.loading")}</p>}
         {tab === "project" && tags && <div id="project-tags" className="mt-10"><ProjectTags project={project.id} tags={tags} onChanged={onChanged} /></div>}
       </div>
@@ -451,7 +451,8 @@ export function SettingsPanel({ project, version, tags, onChanged, server, tools
  * A project's settings: the project-only ones, and for each setting with a global value a switch between following
  * the global value (shown greyed, marked "global") and its own.
  */
-function ProjectSettingsPage({ project, info, onChanged }: { project: ProjectFile; info: ProjectSettingsInfo; onChanged: () => void }) {
+function ProjectSettingsPage({ project, info }: { project: ProjectFile; info: ProjectSettingsInfo; }) {
+  const { reload: onChanged } = usePage();
   const global = valuesOf(info.global);
   const effective = valuesOf(project);
   // A following setting shows the global value (also where the project has no section for it yet: its orchestrator).
@@ -504,7 +505,8 @@ function ProjectSettingsPage({ project, info, onChanged }: { project: ProjectFil
 }
 
 /** The global settings, which every project follows where it has no value of its own, and the global-only ones. */
-function GlobalSettingsPage({ onChanged, server }: { onChanged: () => void; server?: ServerInfo }) {
+function GlobalSettingsPage({ server }: { server?: ServerInfo }) {
+  const { reload: onChanged } = usePage();
   const [version, setVersion] = useState(0);
   const data = useQuery<{ global: GlobalSettings }>("/api/settings", version).data;
   if (!data) return <p className="text-sm text-fg-3">{t("common.loading")}</p>;
@@ -530,7 +532,7 @@ function GlobalForm({ global, server, onSaved, onChanged }: { global: GlobalSett
       <SettingRows form={{ get: v.get, bool: v.bool, list: v.list, set: v.set }} />
       <SaveRow busy={busy} problem={problem} msg={msg} onSave={() => void save()} />
       <BrowserSection />
-      <ServerSection info={server} onChanged={onChanged} />
+      <ServerSection info={server} />
     </>
   );
 }
@@ -596,7 +598,8 @@ export function UpdatePill({ info }: { info: ServerInfo | undefined }) {
   );
 }
 
-function ServerSection({ info, onChanged }: { info: ServerInfo | undefined; onChanged: () => void }) {
+function ServerSection({ info }: { info: ServerInfo | undefined; }) {
+  const { reload: onChanged } = usePage();
   const [msg, setMsg] = useState<string>();
   if (!info) return null;
   const u = info.update;
@@ -625,7 +628,7 @@ function ServerSection({ info, onChanged }: { info: ServerInfo | undefined; onCh
         </div>
       )}
       <div className="mt-3 rounded-lg bg-canvas p-3">
-        {info.plan ? <PlannedDeployCard plan={info.plan} onChanged={onChanged} framed={false} />
+        {info.plan ? <PlannedDeployCard plan={info.plan} framed={false} />
           : <p className="text-xs text-fg-3">{t("settings.server.noPlan")}</p>}
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-2">

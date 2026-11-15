@@ -7,12 +7,13 @@
 // dragging it onto another (onto "Next": to the front). The orchestrator's proposals have Accept and Decline on the
 // queue (and in the waiting list, PlanRow); a dependency the user set can be handed back to the orchestrator (↩).
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { act, enc, useAction, useQuery, type AttentionItem, type QueueView, type Version } from "../api.ts";
+import { act, enc, useAction, useQuery, type AttentionItem, type QueueView } from "../api.ts";
 import type { EstimatesResponse } from "@nexus/protocol";
 import { t } from "../i18n.ts";
 import { estimateWords, moveTargets, planLayout, planList, type PlanLayout, type PlanNode, type Why } from "../plan.ts";
 import { Button } from "./ui.tsx";
 import { TONE } from "./QueueRow.tsx";
+import { usePage } from "../page.ts";
 
 /** A reason's colour: what the user can do in the approval and stop colours; what waits by itself muted. */
 const WHY: Record<Why["tone"], string> = {
@@ -41,14 +42,14 @@ type Actions = ReturnType<typeof usePlanActions> & {
   estimates?: EstimatesResponse;
 };
 
-export function PlanView({ project, queues, version, onOpen, onChanged }: {
-  project: string; queues: readonly QueueView[]; onOpen: (queue: string) => void; onChanged: () => void;
+export function PlanView({ project, queues, onOpen }: {
+  project: string; queues: readonly QueueView[]; onOpen: (queue: string) => void;
   /** Changes when the project's files do: the estimates are fetched again. */
-  version?: Version;
 }) {
+  const { reload: onChanged } = usePage();
   const layout = useMemo(() => planLayout(queues), [queues]);
   const base = usePlanActions(project, onChanged);
-  const estimates = useQuery<EstimatesResponse>(`/api/projects/${enc(project)}/estimates`, version).data;
+  const estimates = useQuery<EstimatesResponse>(`/api/projects/${enc(project)}/estimates`, usePage().version).data;
   const actions: Actions = { ...base, targets: (q) => moveTargets(layout, queues, q), estimates };
   // Nothing planned: the view says nothing (the queue lists below say what there is).
   if (!layout.columns.some((c, i) => i > 0 && c.length) && !layout.outside.length) return null;

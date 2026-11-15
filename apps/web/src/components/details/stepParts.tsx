@@ -2,7 +2,7 @@
 // waits for the user's review, another otherwise).
 import { useState } from "react";
 import { latestChecks } from "@nexus/protocol/steps";
-import { act, enc, fileUrl, type QueueView, type SessionView, type StepView, type Version } from "../../api.ts";
+import { act, enc, fileUrl, type QueueView, type SessionView, type StepView } from "../../api.ts";
 import { describe, isImage, type stepPictures } from "../../details.ts";
 import { draftKey } from "../../drafts.ts";
 import { formatSeconds, rich, t } from "../../i18n.ts";
@@ -15,11 +15,12 @@ import { StepTags } from "../Tags.tsx";
 import { Composer, Expandable, Markdown, Section, TimeAgo } from "../ui.tsx";
 import { StepCommits } from "./git.tsx";
 import { Fold, PictureBadges } from "./review.tsx";
+import { usePage } from "../../page.ts";
 
 type Pairs = ReturnType<typeof stepPictures>["pairs"];
 interface StepProps { step: StepView }
 interface InQueue extends StepProps { queue: QueueView }
-interface Writes extends InQueue { project: string; onChanged: () => void }
+interface Writes extends InQueue { project: string }
 
 /** A retry the run waits for on this step. */
 export function RetryLine({ queue, step }: InQueue) {
@@ -90,7 +91,8 @@ export function SentBack({ step }: StepProps) {
 }
 
 /** A message to the agent at work on the step. */
-export function MessageAgent({ project, queue, step, session, onChanged }: Writes & { session: SessionView }) {
+export function MessageAgent({ project, queue, step, session }: Writes & { session: SessionView }) {
+  const { reload: onChanged } = usePage();
   return (
     <Section title={t("details.messageAgent")} aside={<span className="text-xs text-fg-3">{t("details.messageAgentAside")}</span>}>
       <Composer
@@ -185,7 +187,8 @@ export function StepChecks({ step }: StepProps) {
 }
 
 /** The notes on the step (to the worker, or to the orchestrator while it holds the review), and a new one while open. */
-export function Notes({ project, queue, step, onChanged, forOrchestrator, notesOpen }: Writes & { forOrchestrator: boolean; notesOpen: boolean }) {
+export function Notes({ project, queue, step, forOrchestrator, notesOpen }: Writes & { forOrchestrator: boolean; notesOpen: boolean }) {
+  const { reload: onChanged } = usePage();
   return (
     <Section title={t("details.notes")} aside={<span className="text-xs text-fg-3">{t(forOrchestrator ? "details.notesToOrchestrator" : "details.notesDelivered")}</span>}>
       <div className="space-y-2">
@@ -194,7 +197,7 @@ export function Notes({ project, queue, step, onChanged, forOrchestrator, notesO
             <div className="mb-1 flex items-center gap-2 text-xs text-fg-3">
               <span>{t(n.to === "orchestrator" ? "details.note.fromTo" : "details.note.from", { from: n.from })}</span><TimeAgo at={n.at} />
               <span className={`ml-auto ${n.read_at ? "text-ok" : "text-info"}`}>{t(n.read_at ? (n.to === "orchestrator" ? "details.note.told" : "details.note.delivered") : n.to === "orchestrator" ? "details.note.toOrchestrator" : "details.note.waiting")}</span>
-              {!n.read_at && <WithdrawNote project={project} queue={queue.id} step={step.id} note={n.id} onChanged={onChanged} />}
+              {!n.read_at && <WithdrawNote project={project} queue={queue.id} step={step.id} note={n.id} />}
             </div>
             <Markdown>{n.body}</Markdown>
           </div>
@@ -215,7 +218,8 @@ export function Notes({ project, queue, step, onChanged, forOrchestrator, notesO
   );
 }
 
-function WithdrawNote({ project, queue, step, note, onChanged }: { project: string; queue: string; step: string; note: string; onChanged: () => void }) {
+function WithdrawNote({ project, queue, step, note }: { project: string; queue: string; step: string; note: string; }) {
+  const { reload: onChanged } = usePage();
   const [error, setError] = useState<string>();
   return (
     <>
@@ -271,8 +275,8 @@ export function Timeline({ step }: StepProps) {
  * While the step waits for the user's review (UX proposals, 13 and 14): the pictures large, two per row, with their
  * marks; the other material as links; the checks, the goal, the commits and the timeline on one line, folded.
  */
-export function ReviewPictures({ project, queue, step, pairs, orchestratorAsks, version }: InQueue & {
-  project: string; pairs: Pairs; orchestratorAsks?: string; version: Version;
+export function ReviewPictures({ project, queue, step, pairs, orchestratorAsks }: InQueue & {
+  project: string; pairs: Pairs; orchestratorAsks?: string;
 }) {
   const [fold, setFold] = useState<{ goal?: boolean; commits?: boolean; timeline?: boolean }>({});
   const marked = pairs.filter((p) => step.pictures[p.item.path!]?.accepted).length;
@@ -312,18 +316,19 @@ export function ReviewPictures({ project, queue, step, pairs, orchestratorAsks, 
       <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
         {latestChecks(step.checks).map((c, i) => <span key={i} title={c.summary} className={c.ok ? "text-ok" : "text-danger"}>{c.ok ? "✓" : "✗"} {c.name}{c.duration !== undefined && <span className="tabular-nums text-fg-3"> {formatSeconds(c.duration)}</span>}</span>)}
         {(step.goal || step.acceptance.length > 0 || step.review?.prepare) && <Fold label={t("details.goalAcceptance")} open={!!fold.goal} onToggle={() => setFold((f) => ({ ...f, goal: !f.goal }))} />}
-        <StepCommits project={project} queue={queue.id} step={step.id} version={version} toggle={{ open: !!fold.commits, onToggle: () => setFold((f) => ({ ...f, commits: !f.commits })) }} />
+        <StepCommits project={project} queue={queue.id} step={step.id} toggle={{ open: !!fold.commits, onToggle: () => setFold((f) => ({ ...f, commits: !f.commits })) }} />
         {step.timeline.length > 0 && <Fold label={t("details.timeline")} open={!!fold.timeline} onToggle={() => setFold((f) => ({ ...f, timeline: !f.timeline }))} />}
       </div>
       {fold.goal && <GoalAcceptance step={step} />}
-      {fold.commits && <StepCommits project={project} queue={queue.id} step={step.id} version={version} />}
+      {fold.commits && <StepCommits project={project} queue={queue.id} step={step.id} />}
       {fold.timeline && <Timeline step={step} />}
     </>
   );
 }
 
 /** A provisional acceptance (review level 3): waiting for the user (Confirm, Fix it), confirmed, or a fix asked. */
-export function ProvisionalBox({ project, queue, step, onChanged }: Writes) {
+export function ProvisionalBox({ project, queue, step }: Writes) {
+  const { reload: onChanged } = usePage();
   const p = step.provisional;
   if (!p) return null;
   return (

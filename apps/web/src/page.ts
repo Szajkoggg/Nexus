@@ -1,0 +1,17 @@
+// What every part of a project's page reads from the page itself rather than through its parents' props: the versions
+// its reads are asked at (query.ts) and the reload after one of the user's writes. App.tsx provides it.
+import { createContext, useContext } from "react";
+import type { Version } from "./query.ts";
+
+export interface Page {
+  /** The current project's version: its own reads are asked again when it moves (a change in that project). */
+  version: Version;
+  /** Moves with every live message: what spans projects (the digest, the usage, the server's state) reads at it. */
+  all: Version;
+  /** After the user's own write: the project's reads and what spans projects are asked again. */
+  reload: () => void;
+}
+
+const PageContext = createContext<Page>({ version: undefined, all: undefined, reload: () => {} });
+export const PageProvider = PageContext.Provider;
+export const usePage = (): Page => useContext(PageContext);

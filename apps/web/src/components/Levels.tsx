@@ -5,6 +5,7 @@ import { useState } from "react";
 import { act, actResult, enc, request, useAction, type AttentionItem, type StepView } from "../api.ts";
 import { Button, TEXTAREA } from "./ui.tsx";
 import { formatClock, t } from "../i18n.ts";
+import { usePage } from "../page.ts";
 
 type Level = 1 | 2 | 3;
 const LEVELS: Level[] = [1, 2, 3];
@@ -26,9 +27,10 @@ export interface Away { on: boolean; since?: string; until?: string }
  * one control, the chosen level's words beside it, and "set by you" with Reset when the user set it. Setting a level
  * asks for no new approval.
  */
-export function LevelPicker({ project, queue, step, onChanged, away }: {
-  project: string; queue: string; step: Pick<StepView, "id" | "level" | "level_from">; onChanged: () => void; away?: Away;
+export function LevelPicker({ project, queue, step, away }: {
+  project: string; queue: string; step: Pick<StepView, "id" | "level" | "level_from">; away?: Away;
 }) {
+  const { reload: onChanged } = usePage();
   const { busy, error, run } = useAction();
   const set = (level: Level | null) => void run(() => act(project, "PUT", `/queues/${enc(queue)}/steps/${enc(step.id)}/level`, { level }), onChanged);
   const mine = step.level_from === "user";
@@ -156,7 +158,8 @@ export function AwaySign({ away, long }: { away?: Away; long?: boolean }) {
  * The away-mode switch: off, "Away…" opens the "until HH:MM" field (08:00 by default: the next such time) and Turn on;
  * on, it says until when, with Turn off. `labelled`: as a settings row's control.
  */
-export function AwaySwitch({ away, onChanged, labelled }: { away?: Away; onChanged: () => void; labelled?: boolean }) {
+export function AwaySwitch({ away, labelled }: { away?: Away; labelled?: boolean }) {
+  const { reload: onChanged } = usePage();
   const [open, setOpen] = useState(false);
   const [time, setTime] = useState("08:00");
   const { busy, error, run } = useAction();

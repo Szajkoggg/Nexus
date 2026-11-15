@@ -8,6 +8,7 @@
 //
 // This part is pure (no window, no history) and unit tested; nav.ts applies its steps to the browser.
 import { fileLayer } from "./fileview.ts";
+import { hasItem } from "./hash.ts";
 
 /**
  * A layer is a kind, optionally with a value: "settings", "item" (the queue or step drawer), "conversation:<id>",
@@ -41,7 +42,6 @@ export function layerValue(nav: Nav, kind: string): string | undefined {
 export const isOpen = (nav: Nav, kind: string) => nav.layers.some((x) => kindOf(x) === kind);
 
 /** A hash with a queue in it has the queue or step drawer open. */
-const hasItem = (hash: string) => hash.replace(/^#\/?/, "").split("/").filter(Boolean).length > 1;
 
 /** Layers that belong to another and close with it: a conversation in the Ideas panel, an image of a step. */
 const PARENT: Record<string, string> = { conversation: "ideas", viewer: "item" };
