@@ -142,8 +142,9 @@ in the queue's card and in the step list, where the ⟲ mark stands in for its i
 with the queue, and may set its review level (2 by default). It runs last, in a fresh session over the queue's
 commits, also again after steps a later revision adds, and it writes the queue's report; it may find that nothing is
 worth refactoring. Agents cannot skip it. You can: when you Continue a stopped queue whose closing step has not run,
-the queue's bar has a checkbox **Skip the closing refactoring** beside Continue; the skip is recorded with the stop's
-reason.
+the queue's bar has a checkbox **Skip the closing refactoring** beside Continue, and when you approve a stopped
+queue's new revision the same checkbox stands beside Approve (in the queue's bar and in the full approval view); the
+skip is recorded with the stop's reason.
 
 **Withdrawing an approval.** A queue approved but not started yet has "Withdraw approval…" under ⋯ in its bar (with
 an optional reason): it goes back to proposed and waits for your approval again; the earlier approval stays on record.

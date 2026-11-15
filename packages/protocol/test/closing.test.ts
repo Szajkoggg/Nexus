@@ -222,3 +222,63 @@ test("an agent cannot skip the closing step, also on a stopped queue", () => {
     (e: ActionError) => e.status === 409 && /closing refactoring step: it is not skipped/.test(e.message));
   assert.equal(x.queue().steps.at(-1)!.status, "pending");
 });
+
+/** Queue Q stopped at Q2 (Q1 done), and revision 2 drafted with a new step Q3: what the user approves. */
+function stoppedWithRevision(coding: boolean | undefined) {
+  const x = setup(coding);
+  approveQueue(x.st, "Q");
+  const w = x.session("worker"), u = x.session("user");
+  x.finish(w, u, "Q1");
+  x.emit(w, { type: "step.started", queue: "Q", step: "Q2" });
+  x.emit(w, { type: "queue.stop", queue: "Q", step: "Q2", condition: "a file outside", reason: "it would change" });
+  x.draft({ steps: [{ id: "Q1", title: "One" }, { id: "Q2", title: "Two" }, { id: "Q3", title: "Three" }] });
+  assert.deepEqual([x.queue().status, x.queue().approved, x.queue().revision], ["stopped", false, 2]);
+  return { ...x, w, u };
+}
+
+test("approving a stopped queue's new revision may skip the closing step: recorded by user_approval with its reason; the queue ends without it", () => {
+  const x = stoppedWithRevision(true);
+  approveQueue(x.st, "Q", "go on without it", { skipClosing: true });
+  const c = x.queue().steps.at(-1)!;
+  assert.equal(c.status, "skipped");
+  assert.equal(c.reason, "the user skipped the closing refactoring with the approval of revision 2; the stop was: a file outside: it would change");
+  const [lift, skip] = x.st.readQueue("Q").changes.slice(-2);
+  assert.deepEqual([lift!.kind, lift!.by], ["lift", "user_approval"], "the lift first");
+  assert.deepEqual({ kind: skip!.kind, by: skip!.by, step: skip!.step, from: skip!.from, to: skip!.to, revision: skip!.revision }, { kind: "status", by: "user_approval", step: "Q.refactor", from: "pending", to: "skipped", revision: 2 });
+  assert.ok(x.queue().approved);
+  // The stopped step and the new one end: the queue is done without the closing step.
+  x.finish(x.w, x.u, "Q2");
+  x.finish(x.w, x.u, "Q3");
+  assert.equal(x.queue().steps.at(-1)!.status, "skipped");
+  assert.equal(x.queue().status, "done");
+});
+
+test("approving without the skip leaves the closing step to run; an agent still cannot skip it", () => {
+  const x = stoppedWithRevision(true);
+  approveQueue(x.st, "Q");
+  assert.equal(x.queue().steps.at(-1)!.status, "pending");
+  assert.ok(!x.st.readQueue("Q").changes.some((c) => c.kind === "status"), "nothing but the lift");
+  assert.throws(() => orchestratorStatusChange(x.st, { queue: "Q", step: "Q.refactor", to: "skipped", reason: "the user approved" }),
+    (e: ActionError) => e.status === 409 && /closing refactoring step: it is not skipped/.test(e.message));
+  x.finish(x.w, x.u, "Q2");
+  x.finish(x.w, x.u, "Q3");
+  assert.equal(x.queue().status, "running", "the closing step is still to run");
+});
+
+test("the skip with an approval is refused, recording nothing, without a closing step or on a queue that is not stopped", () => {
+  const unchanged = (x: ReturnType<typeof setup>, what: string) => {
+    const before = JSON.stringify(x.st.readQueue("Q"));
+    return () => assert.equal(JSON.stringify(x.st.readQueue("Q")), before, `${what}: nothing recorded, not even the approval`);
+  };
+  // A stopped queue without coding: no closing step.
+  const a = stoppedWithRevision(undefined);
+  let same = unchanged(a, "no closing step");
+  assert.throws(() => approveQueue(a.st, "Q", undefined, { skipClosing: true }), (e: ActionError) => e.status === 409 && /has no closing refactoring step/.test(e.message));
+  same();
+  assert.equal(a.queue().status, "stopped");
+  // A queue never stopped: its first approval.
+  const b = setup(true);
+  same = unchanged(b, "not stopped");
+  assert.throws(() => approveQueue(b.st, "Q", undefined, { skipClosing: true }), (e: ActionError) => e.status === 409 && /is not stopped: the closing refactoring is skipped only with the approval of a stopped queue's new revision, or at Continue/.test(e.message));
+  same();
+});

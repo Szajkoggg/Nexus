@@ -57,8 +57,14 @@ test("every write without the dashboard's origin is refused; approve and setting
     assert.equal(loadProjectState(store).queues[0]!.approved, false, "nothing was approved");
     assert.equal(store.readProject().name, "P", "no setting changed");
 
+    // Skipping the closing refactoring with an approval: the user's too, refused to anyone else.
+    assert.equal((await send("POST", "/api/projects/p/queues/Q/approve", { skip_closing: true })).status, 403);
     const page = { origin: url, "sec-fetch-site": "same-origin" };
-    let res = await send("POST", "/api/projects/p/queues/Q/approve", { words: "go" }, page);
+    // From the page, on a queue that is not stopped: refused before anything is recorded (the approval neither).
+    let res = await send("POST", "/api/projects/p/queues/Q/approve", { words: "go", skip_closing: true }, page);
+    assert.equal(res.status, 409, await res.text());
+    assert.equal(loadProjectState(store).queues[0]!.approved, false, "the refused skip approved nothing");
+    res = await send("POST", "/api/projects/p/queues/Q/approve", { words: "go" }, page);
     assert.equal(res.status, 200, await res.text());
     assert.equal(loadProjectState(store).queues[0]!.approved, true);
     res = await send("PATCH", "/api/projects/p/settings", { name: "Renamed" }, page);

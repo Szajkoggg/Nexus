@@ -48,6 +48,11 @@ export function useApprove({ project, queue, left, work, onChanged }: {
   const stopped = queue.status === "stopped";
   const d = stopped ? stopDecision({ approved: queue.approved, revision: queue.revision, left, work }) : undefined;
   const needsChoice = d?.needsChoice ?? false;
+  // The approval of a stopped queue's new revision may skip its closing refactoring step while it has not run, as
+  // Continue does (the user's choice, not an agent's).
+  const closing = queue.steps.find((s) => s.closing);
+  const canSkipClosing = stopped && !queue.approved && !!closing && (closing.status === "pending" || closing.status === "stopped");
+  const [skipClosing, setSkipClosing] = useState(false);
   const wordsKey = draftKey(project, "approval", queue.id);
   const [wordsOpen, setWordsOpen] = useState(() => !!readDraft(wordsKey));
   const [note, setNote] = useState<string>();
@@ -55,7 +60,7 @@ export function useApprove({ project, queue, left, work, onChanged }: {
     draft: wordsKey, allowEmpty: true,
     onSubmit: async (text) => {
       if (needsChoice && !work) throw new Error("choose Keep or Discard first, in the stop box");
-      const r = await actResult<{ message?: string }>(project, "POST", `/queues/${enc(queue.id)}/approve`, { words: text, work: needsChoice ? work : undefined });
+      const r = await actResult<{ message?: string }>(project, "POST", `/queues/${enc(queue.id)}/approve`, { words: text, work: needsChoice ? work : undefined, ...(canSkipClosing && skipClosing ? { skip_closing: true } : {}) });
       if (r?.message) setNote(r.message);
       onChanged();
     },
@@ -67,6 +72,13 @@ export function useApprove({ project, queue, left, work, onChanged }: {
     hint: d?.approve?.hint ?? pinsText(queue.revision, stopped),
     submit: () => { if (!disabled) void words.submit(); },
     menu: (!wordsOpen ? [{ label: t("approval.wordsMenu"), onSelect: () => setWordsOpen(true) }] : []) as MenuEntry[],
+    /** The check box "Skip the closing refactoring", for the action bar's left; nothing when there is no choice. */
+    skipBox: canSkipClosing && (
+      <label className="flex items-center gap-2 text-sm text-fg max-lg:min-h-11">
+        <input type="checkbox" checked={skipClosing} onChange={(e) => setSkipClosing(e.target.checked)} className="accent-accent" />
+        {t("stop.skipClosing")}
+      </label>
+    ),
     wordsBox: wordsOpen && (
       <textarea value={words.text} rows={2} placeholder={t("approval.wordsPlaceholder")} aria-label={t("approval.wordsLabel")}
         onChange={(e) => words.change(e.target.value)} onKeyDown={words.onKeyDown} className={TEXTAREA} />
@@ -399,7 +411,7 @@ export function ApprovalView({ project, queue, chat, sidebar, onClose, onPanel, 
         </div>
       </div>
       <ActionBar hint={hint} menu={menu} secondary={<AskButton project={id} queue={queue} first={onPanel} />}
-        primary={<Button disabled={a.disabled} onClick={a.submit}>{a.label}</Button>}>
+        primary={<Button disabled={a.disabled} onClick={a.submit}>{a.label}</Button>} left={a.skipBox}>
         {a.wordsBox}
       </ActionBar>
     </div>

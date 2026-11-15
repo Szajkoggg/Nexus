@@ -209,7 +209,7 @@ function provisionalText(x: { provisional?: { confirmed?: string; fix?: { text: 
     : p.confirmed ? " (accepted provisionally, confirmed by the user)" : " (accepted provisionally, waits for the user's confirmation)";
 }
 
-/** The user's skip of the queue's closing refactoring step (at Continue), with its reason; empty without one. */
+/** The user's skip of the queue's closing refactoring step (at Continue or with an approval), with its reason; empty without one. */
 function closingSkipped(q: QueueOf): string {
   const c = q.steps.find((x) => x.closing);
   return c?.status === "skipped" ? `closing refactoring skipped by the user: ${(c.reason ?? "").replace(/\s+/g, " ").slice(0, 200)}` : "";
