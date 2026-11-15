@@ -1,6 +1,6 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ProjectState, QueueStatus } from "@nexus/protocol";
-import { projectUrl, useLive, useQuery, type AttentionItem, type ProjectSummary, type QueueView } from "./api.ts";
+import { projectUrl, reloads, useLive, useQuery, type AttentionItem, type ProjectSummary, type QueueView } from "./api.ts";
 import { bump, noVersions, projectVersion } from "./query.ts";
 import { QueueRow } from "./components/QueueRow.tsx";
 import { QueueDetail } from "./components/details/QueueDetail.tsx";
@@ -73,10 +73,15 @@ export function App() {
    * may come later).
    */
   const reload = useCallback(() => setVersions((v) => bump(v, { type: "changed", project: projectId })), [projectId]);
+  /** The same, resolving once the reads it asks have landed: a control stays in progress until then (query.ts, Reloads). */
+  const reloaded = useCallback((...urls: string[]) => { const landed = reloads.next(urls); reload(); return landed; }, [reload]);
+  // The reads at the new versions are asked in this commit's effects; once all of them have run (the microtask after),
+  // the writes waiting for their outcome wait for those reads.
+  useEffect(() => { queueMicrotask(() => reloads.asked()); }, [versions]);
 
   const notify = useNotifications(projects);
   // App provides the page (below): what it reads itself takes the versions directly.
-  const page = useMemo<Page>(() => ({ version, all: versions.all, reload }), [version, versions.all, reload]);
+  const page = useMemo<Page>(() => ({ version, all: versions.all, reload, reloaded }), [version, versions.all, reload, reloaded]);
   const orchestrator = useOrchestrator(projectId, version);
   const server = useServer(versions.all);
   // Each panel is a layer in the browser history: opening pushes an entry, closing (or Back) pops it.

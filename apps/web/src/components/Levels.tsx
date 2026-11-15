@@ -2,7 +2,7 @@
 // the approval view, a step's level and provisional mark on its line and panel, Confirm and Fix it on a provisional
 // acceptance (the return batch and the step), and the away-mode switch with its "until HH:MM" field and its sign.
 import { useState } from "react";
-import { act, actResult, enc, request, useAction, type AttentionItem, type StepView } from "../api.ts";
+import { act, actResult, enc, projectUrl, request, useAction, type AttentionItem, type StepView } from "../api.ts";
 import { Button, TEXTAREA } from "./ui.tsx";
 import { formatClock, t } from "../i18n.ts";
 import { usePage } from "../page.ts";
@@ -30,24 +30,35 @@ export interface Away { on: boolean; since?: string; until?: string }
 export function LevelPicker({ project, queue, step, away }: {
   project: string; queue: string; step: Pick<StepView, "id" | "level" | "level_from">; away?: Away;
 }) {
-  const { reload: onChanged } = usePage();
+  const { reloaded } = usePage();
   const { busy, error, run } = useAction();
-  const set = (level: Level | null) => void run(() => act(project, "PUT", `/queues/${enc(queue)}/steps/${enc(step.id)}/level`, { level }), onChanged);
+  // The level asked for shows at once and stays, the picker in progress, until the state after the write shows it
+  // (page.ts, reloaded); a failure shows the level as it is again, with why.
+  const [asked, setAsked] = useState<Level>();
+  const set = (level: Level | null) => {
+    if (level !== null) setAsked(level);
+    void run(async () => {
+      try { await act(project, "PUT", `/queues/${enc(queue)}/steps/${enc(step.id)}/level`, { level }); await reloaded(projectUrl(project, "/state")); }
+      finally { setAsked(undefined); }
+    });
+  };
+  const shown = asked ?? step.level;
   const mine = step.level_from === "user";
   return (
     <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1 text-xs" onClick={(e) => e.stopPropagation()}>
       <span className="text-fg-3">{t("level.label")}</span>
-      <span role="radiogroup" aria-label={t("level.pickerLabel", { step: step.id })} className="inline-flex overflow-hidden rounded-md border border-line-strong">
+      <span role="radiogroup" aria-label={t("level.pickerLabel", { step: step.id })} aria-busy={busy}
+        className={`inline-flex overflow-hidden rounded-md border border-line-strong ${busy ? "opacity-60" : ""}`}>
         {LEVELS.map((l) => (
-          <button key={l} type="button" role="radio" aria-checked={step.level === l} disabled={busy} title={levelTitle(l)}
-            onClick={() => { if (step.level !== l) set(l); }}
-            className={`min-w-7 px-2 py-0.5 font-mono max-lg:min-h-9 max-lg:min-w-9 ${l > 1 ? "border-l border-line-strong" : ""} ${step.level === l ? "bg-accent/20 font-semibold text-fg" : "text-fg-3 hover:bg-surface-3 hover:text-fg"}`}>
+          <button key={l} type="button" role="radio" aria-checked={shown === l} disabled={busy} title={levelTitle(l)}
+            onClick={() => { if (shown !== l) set(l); }}
+            className={`min-w-7 px-2 py-0.5 font-mono max-lg:min-h-9 max-lg:min-w-9 ${l > 1 ? "border-l border-line-strong" : ""} ${shown === l ? "bg-accent/20 font-semibold text-fg" : "text-fg-3 enabled:hover:bg-surface-3 enabled:hover:text-fg"}`}>
             {l}
           </button>
         ))}
       </span>
-      <span className="text-fg-2" title={levelTitle(step.level)}>{levelShort(step.level)}</span>
-      {away?.on && step.level === 2 && <span className="text-review">{t("level.awayAs3")}</span>}
+      <span className="text-fg-2" title={levelTitle(shown)}>{levelShort(shown)}</span>
+      {away?.on && shown === 2 && <span className="text-review">{t("level.awayAs3")}</span>}
       {mine && <span className="text-accent">{t("level.setByYou")}</span>}
       {mine && <button type="button" onClick={() => set(null)} disabled={busy} className="text-fg-3 underline-offset-2 hover:text-fg hover:underline">{t("level.reset")}</button>}
       {error && <span className="basis-full text-danger">{error}</span>}
@@ -159,11 +170,13 @@ export function AwaySign({ away, long }: { away?: Away; long?: boolean }) {
  * on, it says until when, with Turn off. `labelled`: as a settings row's control.
  */
 export function AwaySwitch({ away, labelled }: { away?: Away; labelled?: boolean }) {
-  const { reload: onChanged } = usePage();
+  const { reloaded } = usePage();
   const [open, setOpen] = useState(false);
   const [time, setTime] = useState("08:00");
   const { busy, error, run } = useAction();
-  const go = (until: string | null) => void run(() => setAway(until), () => { setOpen(false); onChanged(); });
+  // In progress until the server's state after the write shows (page.ts, reloaded): the field closes only then, so the
+  // switch never shows "off" for a moment after Turn on.
+  const go = (until: string | null) => void run(async () => { await setAway(until); await reloaded("/api/server"); }, () => setOpen(false));
   if (away?.on) {
     return (
       <span className="inline-flex flex-wrap items-center gap-2">

@@ -10,8 +10,14 @@ export interface Page {
   all: Version;
   /** After the user's own write: the project's reads and what spans projects are asked again. */
   reload: () => void;
+  /**
+   * The same, for a control that stays "in progress" until the page shows its write's outcome (query.ts, Reloads):
+   * resolves once the reads asked after the write of these URLs (the ones the control shows; none: all) have landed.
+   * Await it inside the action, after the write.
+   */
+  reloaded: (...urls: string[]) => Promise<void>;
 }
 
-const PageContext = createContext<Page>({ version: undefined, all: undefined, reload: () => {} });
+const PageContext = createContext<Page>({ version: undefined, all: undefined, reload: () => {}, reloaded: () => Promise.resolve() });
 export const PageProvider = PageContext.Provider;
 export const usePage = (): Page => useContext(PageContext);

@@ -1915,6 +1915,35 @@ The browser check of the fix (a script, not a test: a development instance, a pr
 commits, every commits reply held back 700 ms, switching between the steps five times and sampling the page at every
 frame): at the base commit 556 of 1101 samples showed the other step's commits; with the keyed query none did.
 
+**The order of reads after a write (queue DF1).** A control that writes stays in progress until the page shows the
+write's outcome: the write's answer is not that moment. The flicker the user saw on the approval, the review-level
+pickers, the away switch and the settings came from three places, measured with a script sampling each control at
+every frame on a development instance:
+
+- The busy state ended with the write's answer, while what the control shows comes from the next read of the state,
+  which landed 30–100 ms later on a small test project (more on a large one: a state rebuild there takes about
+  120 ms). In between the control showed the old value again and could be clicked again: "Approve revision 1" came
+  back after "Sending…", the level picker showed the old level, the away switch showed "off" for 175 ms after Turn on.
+- A control whose value is the server's (the "queues running at once" select, "push on deploy") is controlled by the
+  read: React set it back to the old value at once, until the read landed 450 ms later.
+- A form built again from a read after its save (the global settings, keyed on a counter; the project's, keyed on its
+  own keys) was built from the answer it still held, from before the save, and kept those values: the global form
+  showed the old value after Save for good.
+
+So `reloaded(...urls)` (page.ts) is the page's reload that resolves once the reads asked after the write have landed
+(`Reloads` in query.ts: taken before the versions move, armed once App's effects have asked at the new versions, which
+run after every child's). A control awaits it inside its action, after the write, and names the URLs it shows (the
+project's state, `/api/server`), so it does not wait for a slow read of something else (`/api/server` takes 300–600 ms,
+the git calls behind its version). The value asked for shows at once where the control is a choice (the levels, the
+server's settings), dimmed and disabled while in progress, and goes back to the read value on a failure, with why. A
+form keeps what it holds after a save, which is what was saved, instead of being built again from the reads as they
+land one by one. A wait ends after ten seconds at most, so a read that hangs never holds a control.
+
+An older answer never replaces a newer one: answers are ordered by the version they were asked at (a query's later ask
+wins, whatever lands first), and the server answers a read made after its own write from the state after it (the
+snapshot is rebuilt when `writeCount` has moved). The same script after the fix: no sample after the action showed the
+earlier value again on any of the six controls.
+
 ## One place for the status rules (queue RX3)
 
 When a run is going (holds its session), holds its checkout, counts toward the limit or has ended; when a step waits for

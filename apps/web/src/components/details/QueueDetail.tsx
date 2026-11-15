@@ -3,7 +3,7 @@
 import { useState } from "react";
 import type { StatusChange } from "@nexus/protocol";
 import { stepValuesText } from "@nexus/protocol/steps";
-import { act, enc, fileUrl, type ProjectState, type QueueView } from "../../api.ts";
+import { act, enc, fileUrl, projectUrl, type ProjectState, type QueueView } from "../../api.ts";
 import { needsApproval, levelWords, queueChecks } from "../../approval.ts";
 import { approvalHistory, approvalWord, canWithdrawApproval } from "../../details.ts";
 import { draftKey } from "../../drafts.ts";
@@ -121,7 +121,7 @@ export function QueueDetail({ project, queue, onClose, of, chat = [], onFull }: 
 function QueueBar({ project, queue, left, work, needsChoice }: {
   project: ProjectState; queue: QueueView; left: LeftState; work?: WorkChoice; needsChoice: boolean;
 }) {
-  const { reload: onChanged } = usePage();
+  const { reload: onChanged, reloaded } = usePage();
   const id = project.project.id;
   const stopped = queue.status === "stopped";
   // A stop's buttons and hint, as everywhere the stop is shown; Continue itself is the one in Stop.tsx.
@@ -131,14 +131,19 @@ function QueueBar({ project, queue, left, work, needsChoice }: {
   const canSkipClosing = stopped && queue.approved && closingNotRun(queue);
   const [skipClosing, setSkipClosing] = useState(false);
   // The approval (Approval.tsx, the same in the full view): its words, Keep or Discard, what it pins; Ctrl+Enter.
-  const a = useApprove({ project: id, queue, left, work, onChanged });
+  const a = useApprove({ project: id, queue, left, work, reloaded });
   useCtrlEnter(!queue.approved, a.submit);
   const [error, setError] = useState<string>();
   const canWithdraw = canWithdrawApproval(queue);
   const [withdrawOpen, setWithdrawOpen] = useState(false);
   const [policyOpen, setPolicyOpen] = useState(false);
-  const setLevel = (review_level: number | null) =>
-    act(id, "PATCH", `/queues/${enc(queue.id)}`, { review_level }).then(onChanged, (e: Error) => setError(e.message));
+  // The level asked for shows at once, the picker in progress, until the state after the write shows it (page.ts).
+  const [askedLevel, setAskedLevel] = useState<{ level: number | null }>();
+  const setLevel = (review_level: number | null) => {
+    setAskedLevel({ level: review_level }); setError(undefined);
+    void act(id, "PATCH", `/queues/${enc(queue.id)}`, { review_level }).then(() => reloaded(projectUrl(id, "/state")), (e: Error) => setError(e.message))
+      .finally(() => setAskedLevel(undefined));
+  };
   const projectDefault = t("details.level.projectDefault", { level: levelWords(project.project.defaults.review_level) });
   const policy = queue.review_level ? levelWords(queue.review_level) : projectDefault;
 
@@ -172,9 +177,9 @@ function QueueBar({ project, queue, left, work, needsChoice }: {
               <label className="flex flex-wrap items-center gap-2">
                 {t("details.level.label")}
                 <select
-                  value={queue.review_level ?? ""}
-                  onChange={(e) => void setLevel(e.target.value ? Number(e.target.value) : null)}
-                  className="rounded-md border border-line-strong bg-canvas px-2 py-1 text-sm"
+                  value={(askedLevel ? askedLevel.level : queue.review_level) ?? ""} disabled={!!askedLevel} aria-busy={!!askedLevel}
+                  onChange={(e) => setLevel(e.target.value ? Number(e.target.value) : null)}
+                  className="rounded-md border border-line-strong bg-canvas px-2 py-1 text-sm disabled:opacity-60"
                 >
                   <option value="">{projectDefault}</option>
                   <option value="1">{t("details.level.1")}</option>

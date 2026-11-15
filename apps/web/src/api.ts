@@ -3,7 +3,7 @@ import { useEffect, useReducer, useRef, useState } from "react";
 import type { AttentionItem } from "@nexus/protocol";
 import { Action, type ActionState } from "./action.ts";
 import { HttpError, request } from "./http.ts";
-import { Query, Requests, fetchJson, type LiveMessage, type QueryView, type Version } from "./query.ts";
+import { Query, Reloads, Requests, fetchJson, type LiveMessage, type QueryView, type Version } from "./query.ts";
 
 export { HttpError, open, request } from "./http.ts";
 
@@ -40,6 +40,8 @@ export interface Usage { updated_at: string; windows: Record<string, { utilizati
 export interface ActivityEntry { at: string; kind: string; text: string; queue?: string; step?: string }
 
 const requests = new Requests(fetchJson);
+/** The page's writes waiting for their outcome to show (query.ts, Reloads); App.tsx drives it. */
+export const reloads = new Reloads(requests);
 
 /**
  * A keyed read (query.ts): asked again whenever `version` changes; while a new URL's answer is on its way it shows

@@ -19,19 +19,59 @@ export const fetchJson = (url: string): Promise<unknown> => request(url).catch((
 
 /** The requests in flight, one per URL and version: every query asking for the same answer waits on one request. */
 export class Requests {
-  private readonly inflight = new Map<string, Promise<unknown>>();
+  private readonly inflight = new Map<string, { url: string; p: Promise<unknown> }>();
   private readonly fetcher: Fetcher;
   constructor(fetcher: Fetcher) { this.fetcher = fetcher; }
 
   get(url: string, version: Version): Promise<unknown> {
     // An encoded URL holds no space.
     const id = `${String(version)} ${url}`;
-    let p = this.inflight.get(id);
-    if (!p) {
-      p = this.fetcher(url).finally(() => this.inflight.delete(id));
-      this.inflight.set(id, p);
+    let r = this.inflight.get(id);
+    if (!r) {
+      r = { url, p: this.fetcher(url).finally(() => this.inflight.delete(id)) };
+      this.inflight.set(id, r);
     }
-    return p;
+    return r.p;
+  }
+
+  /**
+   * Resolves once every request in flight now (of these URLs; none given: of any) has settled, after the queries
+   * waiting on them have taken their answers (their handlers were attached first, so they run first). Never rejects.
+   */
+  settled(urls: readonly string[] = []): Promise<void> {
+    const of = [...this.inflight.values()].filter((r) => !urls.length || urls.includes(r.url));
+    return Promise.allSettled(of.map((r) => r.p)).then(() => undefined);
+  }
+}
+
+/**
+ * The user's writes waiting for the page to show their outcome. A control that wrote stays "in progress" until the
+ * reads asked after its write have landed; were it to stop at the write's answer, it would show the state from before
+ * the write (and could be clicked again) until those reads land, and would seem to jump back.
+ *
+ * `next(urls)` is taken when the write is done, before the page's versions move: the URLs of the reads the control
+ * shows (none: every read). `asked()` is called once the page has asked its reads at the new versions (after App's
+ * effects, which run after every child's). The waits then resolve when those reads have settled, or after `limit` ms
+ * at most (a read that hangs does not hold a control for ever). A control waits only for what it shows, not for a slow
+ * read of something else.
+ */
+export class Reloads {
+  private waiting: { urls: readonly string[]; done: () => void }[] = [];
+  private readonly requests: Requests;
+  private readonly limit: number;
+  constructor(requests: Requests, limit = 10_000) { this.requests = requests; this.limit = limit; }
+
+  next(urls: readonly string[] = []): Promise<void> {
+    return new Promise<void>((resolve) => {
+      let timer: ReturnType<typeof setTimeout> | undefined = undefined;
+      const done = () => { clearTimeout(timer); resolve(); };
+      timer = setTimeout(done, this.limit);
+      this.waiting.push({ urls, done });
+    });
+  }
+
+  asked(): void {
+    for (const w of this.waiting.splice(0)) void this.requests.settled(w.urls).then(w.done);
   }
 }
 

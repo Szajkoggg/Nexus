@@ -6,7 +6,7 @@
 // N" in the action bar with what it pins; Ctrl+Enter approves. A stopped queue's revision keeps SC2's Keep or Discard.
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { ChatEntry } from "@nexus/protocol";
-import { actResult, enc, type ProjectState, type QueueView, type StepView } from "../api.ts";
+import { actResult, enc, projectUrl, type ProjectState, type QueueView, type StepView } from "../api.ts";
 import { draftOf, pinsText, queueChecks, queueReference, runSettings, withReference, stepOwnLine, type QueueCheck } from "../approval.ts";
 import { draftKey, putDraft, readDraft } from "../drafts.ts";
 import { nav } from "../nav.ts";
@@ -43,8 +43,10 @@ export function useApprovalForm(project: string | undefined, queue: string | und
  * The approval of a queue's current revision, shared by both forms: the words with it (a draft), Keep or Discard of a
  * stopped queue (stopDecision), the button's words and whether it waits, and the hint with what approving pins.
  */
-export function useApprove({ project, queue, left, work, onChanged }: {
-  project: string; queue: QueueView; left: LeftState; work?: WorkChoice; onChanged: () => void;
+export function useApprove({ project, queue, left, work, reloaded }: {
+  project: string; queue: QueueView; left: LeftState; work?: WorkChoice;
+  /** The page's reload that resolves once the approved state shows (page.ts): the button says "Sending…" until then. */
+  reloaded: (...urls: string[]) => Promise<void>;
 }) {
   const stopped = queue.status === "stopped";
   const d = stopped ? stopDecision({ approved: queue.approved, revision: queue.revision, left, work }) : undefined;
@@ -62,7 +64,7 @@ export function useApprove({ project, queue, left, work, onChanged }: {
       if (needsChoice && !work) throw new Error("choose Keep or Discard first, in the stop box");
       const r = await actResult<{ message?: string }>(project, "POST", `/queues/${enc(queue.id)}/approve`, { words: text, work: needsChoice ? work : undefined, ...(canSkipClosing && skipClosing ? { skip_closing: true } : {}) });
       if (r?.message) setNote(r.message);
-      onChanged();
+      await reloaded(projectUrl(project, "/state"));
     },
   });
   const disabled = !words.ready || !!d?.approve?.disabled;
@@ -288,13 +290,13 @@ export function ApprovalView({ project, queue, chat, sidebar, onClose, onPanel }
   project: ProjectState; queue: QueueView; chat: readonly ChatEntry[]; sidebar?: string;
   onClose: () => void; onPanel: () => void;
 }) {
-  const { reload: onChanged } = usePage();
+  const { reloaded } = usePage();
   const id = project.project.id;
   const stopped = queue.status === "stopped";
   const leftState = useLeft(id, queue.id, stopped, stopVersion(queue));
   const left = leftState === "error" ? undefined : leftState;
   const [work, setWork] = useState<WorkChoice>();
-  const a = useApprove({ project: id, queue, left: leftState, work, onChanged });
+  const a = useApprove({ project: id, queue, left: leftState, work, reloaded });
   useCtrlEnter(true, a.submit);
   const [messageOpen, setMessageOpen] = useState(false);
 

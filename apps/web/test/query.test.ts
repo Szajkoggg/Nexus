@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Query, Requests, bump, noVersions, projectVersion, type Versions } from "../src/query.ts";
+import { Action, type ActionState } from "../src/action.ts";
+import { Query, Reloads, Requests, bump, noVersions, projectVersion, type Versions } from "../src/query.ts";
 
 /** A fetcher whose answers the test hands out by hand, in any order. */
 function manual() {
@@ -10,6 +11,13 @@ function manual() {
 }
 
 const settled = () => new Promise<void>((r) => setImmediate(r));
+
+/** A promise the test settles by hand. */
+function later<T>() {
+  let resolve!: (v: T) => void;
+  const promise = new Promise<T>((res) => { resolve = res; });
+  return { promise, resolve };
+}
 
 function setup() {
   const m = manual();
@@ -158,4 +166,137 @@ test("what each message bumps", () => {
   assert.notEqual(projectVersion(again, "B"), projectVersion(changed, "B"));
   assert.notEqual(projectVersion(again, "A"), projectVersion(changed, "A"));
   assert.equal(projectVersion(changed, "B"), projectVersion(v0, "B"));
+});
+
+// ---------------------------------------------------------------- a write's outcome (Reloads)
+
+test("settled waits for every request in flight, after the queries have taken their answers", async () => {
+  const { calls, requests, q } = setup();
+  q.ask("/a", 1);
+  let done = false;
+  void requests.settled().then(() => { done = true; assert.equal(q.view("/a").data, "a"); });
+  await settled();
+  assert.equal(done, false);
+  calls[0]!.resolve("a");
+  await settled();
+  assert.equal(done, true);
+});
+
+/**
+ * A control on a page: a query of the state it shows and an action that writes and then waits for the reads asked
+ * after the write (what App and page.ts do with `reloaded`). Each step records what the control shows: busy and value.
+ */
+function page() {
+  const m = manual();
+  const requests = new Requests(m.fetcher);
+  const reloads = new Reloads(requests, 60_000);
+  let version = 1;
+  const shown: string[] = [];
+  let state: ActionState = { busy: false, error: undefined };
+  const q: Query<string> = new Query<string>(requests, () => record());
+  const record = () => shown.push(`${state.busy ? "busy" : "idle"} ${q.view("/state").data ?? "-"}`);
+  const action = new Action((s) => { state = s; record(); });
+  // The page's reload: the version moves, the page asks again at it, then tells Reloads it has asked.
+  const reloaded = () => {
+    const landed = reloads.next();
+    version++;
+    q.ask("/state", version);
+    reloads.asked();
+    return landed;
+  };
+  q.ask("/state", version);
+  return { ...m, q, action, reloaded, shown, ask: (v: number) => { version = v; q.ask("/state", v); } };
+}
+
+test("a control is in progress until the state after its write has landed, never idle on the old state", async () => {
+  const p = page();
+  p.calls[0]!.resolve("level 2");
+  await settled();
+  const write = later<void>();
+  const run = p.action.run(async () => { await write.promise; await p.reloaded(); });
+  await settled();
+  write.resolve();
+  await settled();
+  // The write is done, the read after it is on its way: still in progress, showing what was there.
+  assert.equal(p.calls.length, 2);
+  assert.deepEqual(p.shown.at(-1), "busy level 2");
+  p.calls[1]!.resolve("level 3");
+  assert.equal(await run, true);
+  assert.deepEqual(p.shown, ["idle level 2", "busy level 2", "busy level 3", "idle level 3"]);
+});
+
+test("an answer asked before the write that lands after the one asked after it does not bring the old state back", async () => {
+  const p = page();
+  p.calls[0]!.resolve("level 2");
+  await settled();
+  // A live message moved the version just before the write: its read is on its way when the write is done.
+  p.ask(2);
+  const run = p.action.run(() => p.reloaded());
+  p.calls[2]!.resolve("level 3");
+  await settled();
+  p.calls[1]!.resolve("level 2");
+  assert.equal(await run, true);
+  await settled();
+  assert.equal(p.q.view("/state").data, "level 3");
+  assert.ok(!p.shown.slice(p.shown.indexOf("busy level 3")).some((s) => s.endsWith("level 2")), p.shown.join(", "));
+});
+
+test("a failed read ends the wait too: the control is not held, and the read's error is the query's", async () => {
+  const p = page();
+  p.calls[0]!.resolve("level 2");
+  await settled();
+  const run = p.action.run(() => p.reloaded());
+  p.calls[1]!.reject(new Error("503 Nexus is starting"));
+  assert.equal(await run, true);
+  assert.equal(p.q.view("/state").error, "503 Nexus is starting");
+});
+
+test("a read that hangs holds a control no longer than the limit; so does a page that never says it has asked", async () => {
+  const m = manual();
+  const requests = new Requests(m.fetcher);
+  const reloads = new Reloads(requests, 20);
+  const q = new Query<string>(requests, () => {});
+  const hanging = reloads.next();
+  q.ask("/state", 1);
+  reloads.asked();
+  const unasked = reloads.next();
+  const t = Date.now();
+  await Promise.all([hanging, unasked]);
+  assert.ok(Date.now() - t < 1000);
+});
+
+test("a wait taken after the page has asked waits for the next asking, not for what was in flight before", async () => {
+  const m = manual();
+  const requests = new Requests(m.fetcher);
+  const reloads = new Reloads(requests, 60_000);
+  const q = new Query<string>(requests, () => {});
+  q.ask("/state", 1);
+  reloads.asked();
+  let landed = false;
+  void reloads.next().then(() => { landed = true; });
+  m.calls[0]!.resolve("before");
+  await settled();
+  assert.equal(landed, false);
+  q.ask("/state", 2);
+  reloads.asked();
+  m.calls[1]!.resolve("after");
+  await settled();
+  assert.equal(landed, true);
+});
+
+test("a control waits only for the reads it shows, not for a slow read of something else", async () => {
+  const m = manual();
+  const requests = new Requests(m.fetcher);
+  const reloads = new Reloads(requests, 60_000);
+  const state = new Query<string>(requests, () => {});
+  const server = new Query<string>(requests, () => {});
+  let landed = false;
+  void reloads.next(["/state"]).then(() => { landed = true; });
+  state.ask("/state", 2);
+  server.ask("/server", 2);
+  reloads.asked();
+  m.calls[0]!.resolve("level 3");
+  await settled();
+  assert.equal(landed, true);
+  assert.equal(state.view("/state").data, "level 3");
 });

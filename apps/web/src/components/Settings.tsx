@@ -439,7 +439,7 @@ export function SettingsPanel({ project, tags, server, tools }: {
       {tools && tab === "global" && <div className="mt-6">{tools}</div>}
       <div className="mt-6">
         {tab === "global" ? <GlobalSettingsPage key="global" server={server} />
-          : info ? <ProjectSettingsPage key={`${project.id}:${info.own.join(",")}`} project={project} info={info} />
+          : info ? <ProjectSettingsPage project={project} info={info} />
           : <p className="text-sm text-fg-3">{t("common.loading")}</p>}
         {tab === "project" && tags && <div id="project-tags" className="mt-10"><ProjectTags project={project.id} tags={tags} onChanged={onChanged} /></div>}
       </div>
@@ -452,7 +452,7 @@ export function SettingsPanel({ project, tags, server, tools }: {
  * the global value (shown greyed, marked "global") and its own.
  */
 function ProjectSettingsPage({ project, info }: { project: ProjectFile; info: ProjectSettingsInfo; }) {
-  const { reload: onChanged } = usePage();
+  const { reloaded } = usePage();
   const global = valuesOf(info.global);
   const effective = valuesOf(project);
   // A following setting shows the global value (also where the project has no section for it yet: its orchestrator).
@@ -487,8 +487,10 @@ function ProjectSettingsPage({ project, info }: { project: ProjectFile; info: Pr
       body.conversations = { ...body.conversations, notes_dir: local.notesDir || null };
       body.languages = { ...body.languages, working: local.working };
       await act(project.id, "PATCH", "/settings", { ...body, name: local.name, own: mine, follow: SETTING_KEYS.filter((k) => !own.has(k)) });
+      // Saving until the state after the save shows (page.ts, reloaded). The form keeps what it holds, which is what was
+      // saved: built again from reads that land one by one, it would show values from before the save for a moment.
+      await reloaded(projectUrl(project.id, "/state"), projectUrl(project.id, "/settings"));
       setMsg({ ok: true, text: t("settings.savedProject") });
-      onChanged();
     } catch (e) { setMsg({ ok: false, text: (e as Error).message }); }
     finally { setBusy(false); }
   };
@@ -506,14 +508,15 @@ function ProjectSettingsPage({ project, info }: { project: ProjectFile; info: Pr
 
 /** The global settings, which every project follows where it has no value of its own, and the global-only ones. */
 function GlobalSettingsPage({ server }: { server?: ServerInfo }) {
-  const { reload: onChanged } = usePage();
-  const [version, setVersion] = useState(0);
-  const data = useQuery<{ global: GlobalSettings }>("/api/settings", version).data;
+  // Read when the page opens; the form is built once from it and keeps what it holds after a save (what was saved).
+  // Built again from a new read, it would show the values from before the save until that read landed.
+  const data = useQuery<{ global: GlobalSettings }>("/api/settings").data;
   if (!data) return <p className="text-sm text-fg-3">{t("common.loading")}</p>;
-  return <GlobalForm key={version} global={data.global} server={server} onSaved={() => { setVersion((x) => x + 1); onChanged(); }} onChanged={onChanged} />;
+  return <GlobalForm global={data.global} server={server} />;
 }
 
-function GlobalForm({ global, server, onSaved, onChanged }: { global: GlobalSettings; server?: ServerInfo; onSaved: () => void; onChanged: () => void }) {
+function GlobalForm({ global, server }: { global: GlobalSettings; server?: ServerInfo }) {
+  const { reloaded } = usePage();
   const v = useValues(valuesOf(global));
   const problem = settingsProblem(v.values, SETTING_KEYS);
   const [busy, setBusy] = useState(false);
@@ -522,8 +525,9 @@ function GlobalForm({ global, server, onSaved, onChanged }: { global: GlobalSett
     setBusy(true); setMsg(undefined);
     try {
       await request("/api/settings", { method: "PATCH", body: nested(v.values, SETTING_KEYS) });
+      // Saving until the state after the save shows (page.ts, reloaded).
+      await reloaded();
       setMsg({ ok: true, text: t("settings.savedGlobal") });
-      onSaved();
     } catch (e) { setMsg({ ok: false, text: (e as Error).message }); }
     finally { setBusy(false); }
   };
@@ -598,9 +602,15 @@ export function UpdatePill({ info }: { info: ServerInfo | undefined }) {
   );
 }
 
+/** What POST /api/server/settings takes. */
+interface ServerSettings { push_on_deploy?: boolean; max_running?: number }
+
 function ServerSection({ info }: { info: ServerInfo | undefined; }) {
-  const { reload: onChanged } = usePage();
+  const { reloaded } = usePage();
   const [msg, setMsg] = useState<string>();
+  // A server setting's value asked for: shown at once, its control in progress, until the server's state after the
+  // write shows (page.ts, reloaded). A controlled control would otherwise snap back to the old value until then.
+  const [asked, setAsked] = useState<ServerSettings>();
   if (!info) return null;
   const u = info.update;
   const call = async (path: string, body: unknown = {}) => {
@@ -608,8 +618,9 @@ function ServerSection({ info }: { info: ServerInfo | undefined; }) {
     // A refusal is said here; a network failure as before. The server's state is read again either way.
     try { await request(path, { method: "POST", body }); }
     catch (e) { if (e instanceof HttpError) setMsg(e.message); else throw e; }
-    finally { onChanged(); }
+    finally { await reloaded("/api/server"); }
   };
+  const setting = (body: ServerSettings) => { setAsked(body); void call("/api/server/settings", body).finally(() => setAsked(undefined)); };
   const busy = u.phase === "draining" || u.phase === "updating" || u.phase === "restarting";
   return (
     <Section title="Nexus">
@@ -637,16 +648,16 @@ function ServerSection({ info }: { info: ServerInfo | undefined; }) {
         {u.phase === "draining" && <Button variant="quiet" onClick={() => void call("/api/server/cancel")}>{t("common.cancel")}</Button>}
       </div>
       <label className="mt-3 flex items-start gap-2 text-sm text-fg">
-        <input type="checkbox" className="mt-0.5 accent-accent" checked={info.push_on_deploy}
-          onChange={(e) => void call("/api/server/settings", { push_on_deploy: e.target.checked })} />
+        <input type="checkbox" className="mt-0.5 accent-accent" checked={asked?.push_on_deploy ?? info.push_on_deploy} disabled={!!asked}
+          aria-busy={asked?.push_on_deploy !== undefined} onChange={(e) => setting({ push_on_deploy: e.target.checked })} />
         <span>{t(info.live ? "settings.server.pushDeploy" : "settings.server.pushDeployDev")}</span>
       </label>
       {info.max_running !== undefined && (
         <div className="mt-3 text-sm text-fg">
           <label className="flex flex-wrap items-center gap-2">
             <span>{t("settings.server.maxRunning")}</span>
-            <select className="rounded-md border border-line-strong bg-canvas px-2 py-1 text-sm text-fg" value={info.max_running}
-              onChange={(e) => void call("/api/server/settings", { max_running: Number(e.target.value) })}>
+            <select className="rounded-md border border-line-strong bg-canvas px-2 py-1 text-sm text-fg disabled:opacity-60" value={asked?.max_running ?? info.max_running}
+              disabled={!!asked} aria-busy={asked?.max_running !== undefined} onChange={(e) => setting({ max_running: Number(e.target.value) })}>
               {[...new Set([...Array.from({ length: 10 }, (_, i) => i + 1), info.max_running])].sort((a, b) => a - b).map((n) => <option key={n} value={n}>{n}</option>)}
             </select>
           </label>
