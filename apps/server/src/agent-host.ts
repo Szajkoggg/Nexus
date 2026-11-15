@@ -3,6 +3,7 @@
 // read from the runtime's stream (the record, the runtime's own session id, the account's usage windows), and ending a
 // process so that the session's next message starts a new one. What a role does with its agent's texts, turns and
 // exits stays with the role: it gives its handlers when it starts a process.
+import { join } from "node:path";
 import {
   appendTurn, now, readUsage, stepDefs, stepTags, writeUsage, type ProjectStore, type RuntimeFile, type SessionFile, type TokenCounts, type TurnRecord,
 } from "@nexus/protocol";
@@ -28,6 +29,9 @@ export const ROLE_RECORDS = {
   orchestrator: { cost: true, workingFromModel: false, countTurns: false },
   conversation: { cost: false, workingFromModel: false, countTurns: false },
 } as const satisfies Record<string, RoleRecord>;
+
+/** A Claude Code session's briefing, in its session folder (ClaudeOptions.briefingFile). */
+const BRIEFING_FILE = "briefing.md";
 
 /** Which runtime to start, with its options. */
 export type Launch = { runtime: "claude"; options: ClaudeOptions } | { runtime: "codex"; options: CodexOptions };
@@ -132,7 +136,9 @@ export class AgentHost<E extends object = object> {
   start(session: SessionFile, launch: (resume: boolean) => Launch, extra: E, handlers: (l: Hosted<E>) => HostHandlers): Hosted<E> {
     const resume = this.store.readRuntime(session.id) !== undefined;
     const how = launch(resume);
-    const proc = this.spawn(how);
+    // A Claude Code briefing goes in the session's own file (sessions/<id>/briefing.md), not on the command line; the
+    // file is no setting, so `launched` keeps the launch without it (stale).
+    const proc = this.spawn(how.runtime === "claude" ? { ...how, options: { ...how.options, briefingFile: join(this.store.sessionDir(session.id), BRIEFING_FILE) } } : how);
     const l = { ...extra, session: session.id, proc } as Hosted<E>;
     this.live.set(session.id, l);
     this.launched.set(proc, how);

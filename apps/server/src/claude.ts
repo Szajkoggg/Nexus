@@ -2,6 +2,8 @@
 // alive across turns. Signed in with the user's own subscription (no API key, no Agent SDK).
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { EDGE_BLOCK, agentEnv, edgeBlock, shortInput, type AgentEvents, type AgentProcess, type Priority, type StreamFacts, type TurnFailure, type TurnTokens } from "./agent.ts";
 
 export type { Priority };
@@ -100,7 +102,14 @@ export interface ClaudeOptions {
   disallowedTools?: string[];
   /** A file of subagent definitions (--agents). */
   agentsFile?: string;
+  /** The session's briefing, appended to Claude Code's system prompt. */
   appendSystemPrompt?: string;
+  /**
+   * Where the briefing is written for the CLI to read (--append-system-prompt-file), anew at each start: AgentHost
+   * gives the session's own file. Not on the command line, which Windows limits to 32,767 characters in all (DESIGN.md,
+   * "The orchestrator's briefing and the command line").
+   */
+  briefingFile?: string;
   /** More settings for the session (--settings, as JSON): a thinking partner's WebFetch guard hook. */
   settings?: string;
   env: Record<string, string>;
@@ -154,7 +163,12 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
     ];
     if (options.model) args.push("--model", options.model);
     if (options.effort) args.push("--effort", options.effort);
-    if (options.appendSystemPrompt) args.push("--append-system-prompt", options.appendSystemPrompt);
+    if (options.appendSystemPrompt) {
+      if (!options.briefingFile) throw new Error("a briefing needs a file to go in (ClaudeOptions.briefingFile)");
+      mkdirSync(dirname(options.briefingFile), { recursive: true });
+      writeFileSync(options.briefingFile, options.appendSystemPrompt, "utf8");
+      args.push("--append-system-prompt-file", options.briefingFile);
+    }
     if (options.agentsFile) args.push("--agents", options.agentsFile);
     if (options.settings) args.push("--settings", options.settings);
     if (options.disallowedTools?.length) args.push("--disallowedTools", options.disallowedTools.join(","));

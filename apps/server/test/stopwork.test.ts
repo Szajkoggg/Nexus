@@ -155,8 +155,7 @@ test("the worker briefing asks to commit and leave the tree clean before stoppin
     x.orchestrator.say("Hello");
     x.engine.start("Q");
     await x.until("both started", () => existsSync(process.env.FAKE_ARGS!) && readFileSync(process.env.FAKE_ARGS!, "utf8").trim().split("\n").length >= 2);
-    const prompts = readFileSync(process.env.FAKE_ARGS!, "utf8").trim().split("\n").map((l) => (JSON.parse(l) as { argv?: string[] }).argv ?? [])
-      .map((a) => a[a.indexOf("--append-system-prompt") + 1] ?? "");
+    const prompts = readFileSync(process.env.FAKE_ARGS!, "utf8").trim().split("\n").map((l) => (JSON.parse(l) as { briefing?: string | null }).briefing ?? "");
     const worker = prompts.find((p) => p.startsWith("You are a worker session"))!;
     const orchestrator = prompts.find((p) => p.startsWith("You are the orchestrator"))!;
     assert.match(worker, /Before you stop \(nexus stop, or a stop condition you meet\): commit what is in a consistent state/);

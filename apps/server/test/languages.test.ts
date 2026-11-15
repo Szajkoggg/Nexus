@@ -26,11 +26,7 @@ process.env.NEXUS_CODEX = join(here, "fake-codex.ts");
 
 const lines = (file: string | undefined) => (file && existsSync(file) ? readFileSync(file, "utf8").trim().split("\n").map((l) => JSON.parse(l) as Record<string, any>) : []);
 /** A Claude Code process's start: resumed or not, and its appended system prompt (the briefing). */
-const claudeStart = (a: Record<string, any>) => {
-  const argv = a.argv as string[];
-  const i = argv.indexOf("--append-system-prompt");
-  return { resume: argv.includes("--resume"), briefing: i >= 0 ? argv[i + 1]! : "" };
-};
+const claudeStart = (a: Record<string, any>) => ({ resume: (a.argv as string[]).includes("--resume"), briefing: (a.briefing as string | null) ?? "" });
 const setGlobal = (change: (g: GlobalSettings) => void) => { const g = readGlobalSettings(); change(g); writeGlobalSettings(g); };
 const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms);
 

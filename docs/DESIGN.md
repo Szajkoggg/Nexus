@@ -2156,6 +2156,16 @@ tests (whose temporary paths are longer than a real project's), so some 1,400 ch
 to the briefing should move it out of the command line (a file, if the CLI takes one: a small probe decides) rather than
 shorten other sentences again.
 
+Queue SH moved every Claude Code briefing (orchestrator, thinking partner, worker) out of the command line. Claude Code
+2.1.323 takes `--append-system-prompt-file <path>`: its `--help` lists it only in passing (`--bare` names
+`--append-system-prompt[-file]` among the ways to give context). Probed on 2026-11-15 with `haiku` in a temporary
+directory, a file asking for the password ZEBRA-4471 when asked: `-p` answered "ZEBRA-4471", and so did a stream-json
+session with `--session-id` and a Windows path to the file; without the file the model did not know it. Cost: about
+$0.011 (three one-line turns). The server writes the briefing to the session's own `sessions/<id>/briefing.md` at
+every start, overwriting the last (AgentHost; the path is no setting, so a start does not count as a change of them),
+and the CLI reads it as it starts. The orchestrator's command line went from about 31,600 characters in the tests to
+778; a test (command-line.test.ts) keeps every role's below 16,000 and says the length when it is not.
+
 ## Compacting a conversation (queue CC3)
 
 Decided by the user on 2026-11-15 (docs/ideas/chat-context.md): the Ideas conversations get a **Compact** action; the

@@ -1,8 +1,13 @@
 // A stand-in for `claude -p --input-format stream-json --output-format stream-json`, for testing without a model.
 // What it does is in fake-behaviour.ts.
+import { existsSync, readFileSync } from "node:fs";
 import { BACKGROUND_NOTICE, PARTIAL, actOnRead, contextTokens, interrupt, record, recordArgs, respond, type Fake, type FakeFailure } from "./fake-behaviour.ts";
 
-recordArgs({ argv: process.argv.slice(2) });
+// The briefing as the CLI reads it at its start (--append-system-prompt-file): the file is rewritten at the next start.
+const argv = process.argv.slice(2);
+const briefingAt = argv.indexOf("--append-system-prompt-file");
+const briefingFile = briefingAt >= 0 ? argv[briefingAt + 1] : undefined;
+recordArgs({ argv, briefing: briefingFile && existsSync(briefingFile) ? readFileSync(briefingFile, "utf8") : null });
 
 const out = (m: unknown) => process.stdout.write(JSON.stringify(m) + "\n");
 const fake: Fake = { history: [] };
