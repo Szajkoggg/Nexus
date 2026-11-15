@@ -20,6 +20,22 @@ export interface CodexOptions extends AgentOptions {
    * worktree's git paths (gitWritableRoots).
    */
   writableRoots: string[];
+  /** Config overrides for the thread (thread/start and thread/resume), beside the writable roots. */
+  config?: Record<string, unknown>;
+  /**
+   * Without the user's own Codex tools: the thread starts with its MCP servers (each one the effective config names,
+   * read with config/read), plugins and apps turned off. A thinking partner's (decided by the user 2026-11-15: probed,
+   * the user's node_repl MCP server ran outside the sandbox and fetched a local port, and the apps' search connector
+   * searched with web_search disabled). When the config cannot be read, the thread does not start.
+   */
+  withoutUserTools?: boolean;
+}
+
+/** The overrides that turn off the MCP servers a config/read result names, the plugins and the apps. */
+export function userToolsOff(config: Json | undefined): Record<string, unknown> {
+  const key = (name: string) => (/^[A-Za-z0-9_-]+$/.test(name) ? name : JSON.stringify(name));
+  const servers = Object.keys((config?.mcp_servers ?? {}) as Json);
+  return { "features.apps": false, "features.plugins": false, ...Object.fromEntries(servers.map((n) => [`mcp_servers.${key(n)}.enabled`, false])) };
 }
 
 type Json = Record<string, any>;
@@ -216,9 +232,14 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
         cwd: o.cwd, model: o.model ?? null, sandbox: o.sandbox, approvalPolicy: o.approvalPolicy,
         ...(o.approvalsReviewer ? { approvalsReviewer: o.approvalsReviewer } : {}),
         developerInstructions: o.instructions ?? null,
-        // The thread's own sandbox settings carry the roots too; every turn also sends them in its sandbox policy.
-        ...(o.sandbox === "workspace-write" && o.writableRoots.length ? { config: { "sandbox_workspace_write.writable_roots": o.writableRoots } } : {}),
       };
+      // The thread's own sandbox settings carry the roots too; every turn also sends them in its sandbox policy.
+      const config = {
+        ...(o.sandbox === "workspace-write" && o.writableRoots.length ? { "sandbox_workspace_write.writable_roots": o.writableRoots } : {}),
+        ...o.config,
+        ...(o.withoutUserTools ? userToolsOff((await this.request("config/read", { cwd: o.cwd })).config) : {}),
+      };
+      if (Object.keys(config).length) Object.assign(common, { config });
       const r = o.threadId
         ? await this.request("thread/resume", { threadId: o.threadId, ...common, excludeTurns: true })
         : await this.request("thread/start", common);
@@ -361,7 +382,6 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
         if (it.type === "subAgentActivity") this.subAgent(it);
         if (it.type === "commandExecution") this.emit("activity", { kind: "tool", text: `Shell: ${clip(unwrap(it.command), 300)}` });
         if (it.type === "mcpToolCall") this.emit("activity", { kind: "tool", text: `MCP ${it.server}.${it.tool}` });
-        if (it.type === "webSearch") this.emit("activity", { kind: "tool", text: `Web search: ${it.query ?? ""}` });
         return;
       }
       case "item/completed": {
@@ -379,6 +399,8 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
           this.emit("message", it.text);
         }
         if (it.type === "fileChange") this.emit("activity", { kind: "tool", text: `Edit: ${(it.changes ?? []).map((c: Json) => c.path).join(", ")}` });
+        // A web search says what it did only when completed (its query is empty at its start: probed with Codex 0.167.2).
+        if (it.type === "webSearch") this.emit("activity", { kind: "tool", text: clip(webSearchText(it), 300) });
         if (it.type === "commandExecution" && it.status === "failed") {
           this.emit("activity", { kind: "tool_error", text: clip(`exit ${it.exitCode}: ${it.aggregatedOutput ?? ""}`, 400) });
         }
@@ -497,6 +519,14 @@ export function codexTokens(now: Json, before: Json): TurnTokens {
   return { input: Math.max(0, d("inputTokens") - d("cachedInputTokens")), output: d("outputTokens"), cacheRead: d("cachedInputTokens"), cacheCreation: d("cacheWriteInputTokens") };
 }
 const addTokens = (a: TurnTokens, b: TurnTokens): TurnTokens => ({ input: a.input + b.input, output: a.output + b.output, cacheRead: a.cacheRead + b.cacheRead, cacheCreation: a.cacheCreation + b.cacheCreation });
+
+/** A completed webSearch item as a line of the chat: its action (WebSearchAction of Codex 0.167.2). */
+export function webSearchText(it: Json): string {
+  const a = (it.action ?? {}) as Json;
+  if (a.type === "openPage") return `Web page: ${a.url ?? ""}`;
+  if (a.type === "findInPage") return `Find in page: ${a.pattern ?? ""} (${a.url ?? ""})`;
+  return `Web search: ${a.query ?? (Array.isArray(a.queries) ? a.queries.join("; ") : undefined) ?? it.query ?? ""}`;
+}
 
 /**
  * A message's input items: its text, and each picture uploaded for a chat message (a line that is the absolute path of

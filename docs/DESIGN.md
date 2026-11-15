@@ -1694,6 +1694,34 @@ busy-loop processes on the user's 16 logical cores and 4 to 6 copies of the test
   is told the approved queues that pass the same check a start would (one queue per checkout, the limit), so it never
   gets a queue in the checkout the waiting one still holds.
 
+## The web for thinking partners (queue WB)
+
+Probed on 2026-11-15 with Claude Code 2.1.323 (`haiku`) and Codex 0.167.2 (`gpt-6-luna`), in temporary directories,
+against a local test server on port 4391. Cost: about $0.07 of Claude usage (six short turns, $0.005 to $0.023
+each) and seven short Codex turns on the ChatGPT subscription (20k to 40k tokens each, most of them cached).
+
+- **Claude Code's deny rules hold, by name only.** `WebFetch(domain:localhost)`, `(domain:127.0.0.1)` and a wildcard
+  `(domain:*.x)` refused the fetch (`permission_denied`, also inside a sub-agent). But a name that merely resolves to
+  127.0.0.1 (`127.0.0.1.nip.io`) was not denied, and WebFetch connected to the local port (its upgrade to https failed
+  the handshake there, which is luck, not protection). So `fetch` also gets a `PreToolUse` hook (web-guard.ts) that
+  resolves the host and refuses local, private, Tailscale and the machine's own addresses; probed: the nip.io name and
+  `[::1]` were refused by the hook, example.com was fetched. The machine's changing addresses are the hook's to check,
+  not rules': a changed rule would restart the partner's process.
+- **In Claude Code 2.1.323 the main agent has no WebFetch of its own**: it calls the `web-fetch` sub-agent, which
+  fetches. The rules and the hook apply inside it, so nothing more is needed. WebSearch is a deferred tool the model
+  loads with ToolSearch, which `dontAsk` allows.
+- **A Codex thread searches the web without any setting** (Codex's default), and with `web_search: "disabled"` it still
+  searched, through the `codex_apps` MCP server's search connector, an app of the user's ChatGPT account. Worse, the
+  user's own MCP servers run outside the sandbox: `node_repl` fetched `http://127.0.0.1:4391` without an approval, so a
+  Codex partner could already read the local API before this queue, whatever its sandbox. Thread config overrides
+  turn them off: `features.apps: false`, `features.plugins: false` (the plugins' servers: computer use, Blender) and
+  `mcp_servers.<name>.enabled: false` for each top-level server (`config/read` names them; an override for a name
+  that does not exist fails the thread start: "invalid transport"). The user decided that partners run so at every
+  level; workers and the orchestrator still get the user's tools, a matter for a later queue.
+- **Codex's search modes**: `cached` searches; `live` also opens pages (an `openPage` action). Both run at OpenAI, so
+  no local address is reachable through them. A webSearch item's query is empty when it starts; the chat line is
+  written at its completion, from its action.
+
 ## Open questions
 
 1. **The orchestrator on Codex.** The orchestrator runs on Claude Code only: its read-only guarantee rests on Claude

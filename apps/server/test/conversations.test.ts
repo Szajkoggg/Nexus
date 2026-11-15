@@ -3,13 +3,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ProjectStore, loadProjectState, updateSettings } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
-import { Conversations } from "../src/conversations.ts";
+import { CODEX_WEB_SEARCH, Conversations } from "../src/conversations.ts";
+import { CodexSession, webSearchText } from "../src/codex.ts";
 import type { AgentEvents, AgentProcess } from "../src/agent.ts";
 import { longReply } from "./fake-behaviour.ts";
 import { WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
@@ -46,7 +47,7 @@ test("a Claude partner asks nothing and may write only in the notes folder", asy
     const allowed = argv.slice(argv.indexOf("--allowedTools") + 1);
     assert.ok(allowed.includes("Edit(Dev/Concepts/Gameplay/**)"), "writes go to the notes folder");
     assert.ok(!allowed.some((t) => t === "Edit" || t === "Write" || t.startsWith("Bash(nexus run") || t === "Bash(nexus:*)"), "nothing else is writable, no run can start");
-    assert.equal(argv[argv.indexOf("--disallowedTools") + 1], "NotebookEdit", "unchanged: no .nexus deny rules for a partner (those are the workers')");
+    assert.equal(argv[argv.indexOf("--disallowedTools") + 1], "NotebookEdit,WebFetch", "no .nexus deny rules for a partner (those are the workers'); at the default web level no page fetching");
     assert.equal(loadProjectState(conversations["store"]).sessions.find((s) => s.id === c.id)?.role, "conversation");
   } finally { stop(); }
 });
@@ -186,4 +187,105 @@ test("the hand-over instruction keeps to this conversation's topics and asks for
     assert.ok(sent.includes("what was decided (only what the user decided), the open questions, the work you propose"), "the rest unchanged");
     assert.ok(sent.endsWith("Reply with the summary only."));
   } finally { stop(); delete process.env.FAKE_LOG; }
+});
+
+// ---------------------------------------------------------------- the web (queue WB)
+
+/** The tools a Claude partner's process was started with: allowed, denied, and its --settings (or undefined). */
+function claudeTools(argv: string[]) {
+  return {
+    allowed: argv.slice(argv.indexOf("--allowedTools") + 1),
+    denied: argv[argv.indexOf("--disallowedTools") + 1]!.split(","),
+    settings: argv.includes("--settings") ? JSON.parse(argv[argv.indexOf("--settings") + 1]!) as { hooks: { PreToolUse: { matcher: string; hooks: { command: string }[] }[] } } : undefined,
+  };
+}
+
+for (const web of ["off", "search", "fetch"] as const) {
+  test(`a Claude partner at web level ${web} gets its tools and deny rules; local and internal hosts are always refused`, async () => {
+    const { store, conversations, args, until, stop } = setup("Dev/Notes");
+    updateSettings(store, { conversations: { web } });
+    try {
+      const c = conversations.create({ title: "Web" });
+      conversations.say(c.id, "Hello");
+      await until("the reply", () => conversations.view(c.id).chat.some((x) => x.from === "partner"));
+      const t = claudeTools(args()[0]!.argv as string[]);
+      assert.ok(t.allowed.includes("Edit(Dev/Notes/**)") && t.allowed.includes("Read"), "the partner's other tools stay");
+      assert.equal(t.allowed.includes("WebSearch"), web !== "off");
+      assert.equal(t.allowed.includes("WebFetch"), web === "fetch");
+      if (web === "off") assert.deepEqual(t.denied, ["NotebookEdit", "WebSearch", "WebFetch"]);
+      if (web === "search") assert.deepEqual(t.denied, ["NotebookEdit", "WebFetch"]);
+      if (web === "fetch") {
+        for (const host of ["localhost", "*.localhost", "127.0.0.1", "0.0.0.0", "[::1]", "*.ts.net", "*.local", hostname().toLowerCase()]) {
+          assert.ok(t.denied.includes(`WebFetch(domain:${host})`), `WebFetch of ${host} is denied`);
+        }
+        assert.ok(!t.denied.includes("WebFetch"), "pages may be read");
+        const hook = t.settings!.hooks.PreToolUse[0]!;
+        assert.equal(hook.matcher, "WebFetch");
+        assert.match(hook.hooks[0]!.command, /^"[^"]+" "[^"]+\/apps\/server\/src\/web-guard\.ts"$/, "the guard hook runs web-guard.ts with this Node");
+      } else assert.equal(t.settings, undefined, "no guard hook without page fetching");
+    } finally { stop(); }
+  });
+
+  test(`a Codex partner at web level ${web} gets its search mode, without the user's own tools, and no network in its sandbox`, async () => {
+    const { store, conversations, args, until, stop } = setup("Dev/Notes");
+    updateSettings(store, { conversations: { web } });
+    process.env.FAKE_CODEX_MCP = "node_repl,blender,odd.name";
+    try {
+      const c = conversations.create({ title: "Web", runtime: "codex" });
+      conversations.say(c.id, "Hello");
+      await until("the reply", () => conversations.view(c.id).chat.some((x) => x.from === "partner"));
+      const start = args().find((x) => x.method === "thread/start")!;
+      assert.deepEqual(start.config, {
+        web_search: { off: "disabled", search: "cached", fetch: "live" }[web],
+        "features.apps": false, "features.plugins": false,
+        "mcp_servers.node_repl.enabled": false, "mcp_servers.blender.enabled": false, 'mcp_servers."odd.name".enabled': false,
+      });
+      assert.equal(CODEX_WEB_SEARCH[web], start.config.web_search);
+      assert.ok(args().some((x) => x.method === "config/read"), "the user's servers are read from Codex's own effective config");
+      const turn = args().find((x) => x.method === "turn/start")!;
+      assert.equal(turn.networkAccess, false, "the sandbox's network stays off");
+    } finally { stop(); delete process.env.FAKE_CODEX_MCP; }
+  });
+}
+
+test("a Codex thread's config overrides go beside its writable roots, not instead of them", async () => {
+  const root = mkdtempSync(join(tmpdir(), "nexus-conv-roots-"));
+  process.env.FAKE_ARGS = join(root, "args.log");
+  const extra = join(root, "extra");
+  const s = new CodexSession({ cwd: root, env: {}, sandbox: "workspace-write", approvalPolicy: "never", writableRoots: [extra], config: { web_search: "cached" }, withoutUserTools: true });
+  try {
+    s.send("Hello");
+    await waitUntil("the turn", () => existsSync(process.env.FAKE_ARGS!) && readFileSync(process.env.FAKE_ARGS!, "utf8").includes("turn/start"), WAIT_MS);
+    const calls = readFileSync(process.env.FAKE_ARGS!, "utf8").trim().split("\n").map((l) => JSON.parse(l) as Record<string, any>);
+    const start = calls.find((c) => c.method === "thread/start")!;
+    assert.deepEqual(start.config, { "sandbox_workspace_write.writable_roots": [extra], web_search: "cached", "features.apps": false, "features.plugins": false });
+    assert.deepEqual(calls.find((c) => c.method === "turn/start")!.writableRoots, [extra]);
+  } finally { s.kill(); delete process.env.FAKE_ARGS; }
+});
+
+test("a changed web level starts a new process for the partner's next message, which resumes the conversation", async () => {
+  const { store, conversations, args, until, stop } = setup("Dev/Notes");
+  try {
+    const c = conversations.create({ title: "Web" });
+    conversations.say(c.id, "Hello");
+    await until("the reply", () => conversations.view(c.id).chat.filter((x) => x.from === "partner").length === 1);
+    conversations.say(c.id, "Again");
+    await until("the second reply", () => conversations.view(c.id).chat.filter((x) => x.from === "partner").length === 2);
+    assert.equal(args().filter((x) => x.argv).length, 1, "the same settings: the same process");
+    updateSettings(store, { conversations: { web: "fetch" } });
+    conversations.say(c.id, "Now with pages");
+    await until("the third reply", () => conversations.view(c.id).chat.filter((x) => x.from === "partner").length === 3);
+    const starts = args().filter((x) => x.argv).map((x) => x.argv as string[]);
+    assert.equal(starts.length, 2, "a new process");
+    assert.ok(starts[1]!.includes("--resume"), "it resumes the conversation");
+    assert.ok(claudeTools(starts[1]!).allowed.includes("WebFetch"));
+  } finally { stop(); }
+});
+
+test("a Codex web search shows in the chat with what it did: its query, the page it opened, what it looked for", () => {
+  assert.equal(webSearchText({ type: "webSearch", query: "", action: { type: "search", query: "node lts", queries: null } }), "Web search: node lts");
+  assert.equal(webSearchText({ type: "webSearch", action: { type: "search", query: null, queries: ["a", "b"] } }), "Web search: a; b");
+  assert.equal(webSearchText({ type: "webSearch", action: { type: "openPage", url: "https://nodejs.org/en" } }), "Web page: https://nodejs.org/en");
+  assert.equal(webSearchText({ type: "webSearch", action: { type: "findInPage", url: "https://x.test/", pattern: "LTS" } }), "Find in page: LTS (https://x.test/)");
+  assert.equal(webSearchText({ type: "webSearch", query: "old shape" }), "Web search: old shape");
 });

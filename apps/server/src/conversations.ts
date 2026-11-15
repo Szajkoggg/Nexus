@@ -2,6 +2,9 @@
 // thread. They read the whole project and write only in its notes folder; they start no work. A conversation can
 // be handed to the orchestrator: the partner writes a summary, which goes into the orchestrator's chat.
 //
+// The web: by `conversations.web` (claudeWeb, CODEX_WEB_SEARCH; PROTOCOL.md, "Conversations"). A Codex partner runs
+// without the user's own Codex tools (MCP servers, plugins, apps), which run outside its sandbox.
+//
 // Writing only in the notes folder: Claude Code runs in `dontAsk` mode with `Edit(<notes>/**)` as the only write
 // rule (checked: writes elsewhere and shell writes are refused). Codex runs with the notes folder as its working
 // directory in a `workspace-write` sandbox, which reads everywhere and writes only there; it is never asked.
@@ -9,17 +12,36 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import {
-  ActionError, Effort, ProjectStore, effortIssue, languageName, loadProjectState, newId, normPath, now, type SessionFile,
+  ActionError, Effort, ProjectStore, type ConversationWeb, effortIssue, languageName, loadProjectState, newId, normPath, now, type SessionFile,
 } from "@nexus/protocol";
 import { findStep, sinceThen, stepSeed } from "./step-seed.ts";
 import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Hosted, type Launch } from "./agent-host.ts";
 import type { Orchestrator } from "./orchestrator.ts";
 import { partnerBriefing } from "./prompts.ts";
 import { STOPPED, chatView } from "./chats.ts";
+import { guardSettings, webFetchDenyRules } from "./web-guard.ts";
 
 const READ = ["Read", "Grep", "Glob", "Bash(nexus status:*)", "Bash(git log:*)", "Bash(git status:*)", "Bash(git diff:*)", "Bash(git show:*)"];
 /** What a hand-over covers (decided 2026-11-14): this conversation's topics, and the dates of the decisions it passes on. */
 export const HANDOFF_SCOPE = "Summarize only the topics discussed in this conversation, unless the user asked you to include others. From a notes file, pass on what this conversation decided or recorded; another topic in the notes folder, even a related one, is not part of this hand-over: name its file at most, as 'see also', without its content. In every notes file only the Decided section holds decisions. Name the dates of the Decided entries you cover.";
+/**
+ * What a Claude partner may do on the web, by the `conversations.web` level: its allow and deny rules, and for `fetch`
+ * the guard hook that refuses any host resolving to a local or internal address (web-guard.ts). WebSearch runs at
+ * Anthropic and reaches no local address; WebFetch runs on this machine.
+ */
+export function claudeWeb(web: ConversationWeb): { allowed: string[]; denied: string[]; settings?: string } {
+  if (web === "off") return { allowed: [], denied: ["WebSearch", "WebFetch"] };
+  if (web === "search") return { allowed: ["WebSearch"], denied: ["WebFetch"] };
+  return { allowed: ["WebSearch", "WebFetch"], denied: webFetchDenyRules(), settings: guardSettings() };
+}
+
+/**
+ * Codex's web search mode by level: `cached` searches OpenAI's index, `live` also opens pages (probed with Codex
+ * 0.167.2: an openPage action). Both run at OpenAI: no local address is reached. `disabled` turns it off; the user's
+ * tools (the apps' search connector among them) are off for a partner anyway (CodexOptions.withoutUserTools).
+ */
+export const CODEX_WEB_SEARCH: Record<ConversationWeb, string> = { off: "disabled", search: "cached", fetch: "live" };
+
 const IDLE_MS = 15 * 60_000; // an idle partner's process ends; the next message resumes the conversation
 
 /** What a partner's process keeps beside it: its idle timer, and whether its running turn writes a hand-over. */
@@ -216,6 +238,7 @@ ${text}`;
     const p = this.store.readProject();
     const notes = p.conversations.notes_dir;
     const env = this.host.env(s.id);
+    const web = p.conversations.web;
     const instructions = partnerBriefing(p, notes);
     const { model, effort } = this.values(s);
     return (resume) => {
@@ -226,13 +249,16 @@ ${text}`;
         return { runtime: "codex", options: {
           cwd, model, effort, instructions, env, threadId: s.native_id,
           sandbox: notes ? "workspace-write" : "read-only", approvalPolicy: "never", writableRoots: [],
+          config: { web_search: CODEX_WEB_SEARCH[web] }, withoutUserTools: true,
         } };
       }
+      const w = claudeWeb(web);
       return { runtime: "claude", options: {
         cwd: p.root, uuid: s.native_id!, resume,
         model, effort, permissionMode: "dontAsk",
-        allowedTools: notes ? [...READ, `Edit(${notes}/**)`] : READ,
-        disallowedTools: ["NotebookEdit"],
+        allowedTools: [...READ, ...(notes ? [`Edit(${notes}/**)`] : []), ...w.allowed],
+        disallowedTools: ["NotebookEdit", ...w.denied],
+        ...(w.settings ? { settings: w.settings } : {}),
         appendSystemPrompt: instructions, env,
       } };
     };

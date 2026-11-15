@@ -21,6 +21,7 @@ export const OVERRIDABLE: readonly { path: readonly string[]; none?: true }[] = 
   { path: ["conversations", "runtime"] },
   { path: ["conversations", "model"], none: true },
   { path: ["conversations", "effort"], none: true },
+  { path: ["conversations", "web"] },
   { path: ["orchestrator", "runtime"] },
   { path: ["orchestrator", "model"], none: true },
   { path: ["orchestrator", "effort"], none: true },

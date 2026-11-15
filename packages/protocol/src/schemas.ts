@@ -160,10 +160,18 @@ const CodexSettings = z.object({
   approval_policy: ApprovalPolicy.default("never"),
   approvals_reviewer: ApprovalsReviewer.optional(),
 });
+/**
+ * What the thinking partners may do on the web: `off` nothing; `search` a web search (Claude Code's WebSearch, Codex's
+ * hosted search from its cache); `fetch` also reading any page (Claude Code's WebFetch, Codex's live search, which
+ * opens pages). Local and internal addresses are refused in every level (PROTOCOL.md, "Conversations").
+ */
+export const ConversationWeb = z.enum(["off", "search", "fetch"]);
+export type ConversationWeb = z.infer<typeof ConversationWeb>;
 const ConversationSettings = z.object({
   runtime: WorkerRuntime.default("claude"),
   model: z.string().optional(),
   effort: Effort.optional(),
+  web: ConversationWeb.default("search"),
 });
 const OrchestratorSettings = z.object({
   runtime: Runtime.default("claude"),
@@ -304,6 +312,7 @@ export const StoredProject = z.object({
     runtime: own(WorkerRuntime),
     model: ownOrNone(z.string()),
     effort: ownOrNone(Effort),
+    web: own(ConversationWeb),
   }).prefault({}),
   orchestrator: z.object({
     session: Id.nullable().default(null),

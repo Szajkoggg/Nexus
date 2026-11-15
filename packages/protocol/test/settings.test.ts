@@ -263,3 +263,20 @@ test("a change of the global settings: values replaced, null clears an optional 
   assert.equal(readGlobalSettings().runtimes.claude.effort, "high", "nothing written");
   assert.deepEqual(ownKeys(store.readStoredProject()), []);
 });
+
+test("the partners' web level: search by default, global with a project override, one of off, search and fetch", () => {
+  const base = mkdtempSync(join(tmpdir(), "nexus-settings-"));
+  process.env.NEXUS_HOME = join(base, "home");
+  const store = ProjectStore.init(join(base, "p"), { id: "p", name: "P", root: join(base, "p") });
+  assert.equal(builtInSettings().conversations.web, "search", "built-in: a web search");
+  assert.equal(store.readProject().conversations.web, "search");
+  assert.equal(store.readStoredProject().conversations.web, undefined, "a new project follows the global value");
+  writeGlobalSettings(globalWith((x) => { x.conversations.web = "off"; }));
+  assert.equal(store.readProject().conversations.web, "off");
+  updateSettings(store, { conversations: { web: "fetch" } });
+  assert.deepEqual([store.readStoredProject().conversations.web, store.readProject().conversations.web], ["fetch", "fetch"]);
+  assert.ok(ownKeys(store.readStoredProject()).includes("conversations.web"));
+  assert.throws(() => updateSettings(store, { conversations: { web: "everything" } }));
+  updateSettings(store, { follow: ["conversations.web"] });
+  assert.equal(store.readProject().conversations.web, "off");
+});

@@ -140,6 +140,7 @@ test("the orchestrator gets Nexus's helper agents, which only read", async () =>
     const { readFileSync } = await import("node:fs");
     const argv = (JSON.parse(readFileSync(args, "utf8").trim().split("\n")[0]!) as { argv: string[] }).argv;
     assert.ok(argv.slice(argv.indexOf("--allowedTools") + 1).includes("Agent"), "it may call subagents");
+    assert.ok(!argv.slice(argv.indexOf("--allowedTools") + 1).some((t) => t.startsWith("WebSearch") || t.startsWith("WebFetch")) && !argv.includes("--settings"), "the partners' web setting is not the orchestrator's (queue WB)");
     const agents = JSON.parse(readFileSync(argv[argv.indexOf("--agents") + 1]!, "utf8")) as Record<string, { tools: string[] }>;
     assert.deepEqual(Object.keys(agents).sort(), ["question-triage", "queue-reviewer", "run-digest"]);
     for (const [name, a] of Object.entries(agents)) {

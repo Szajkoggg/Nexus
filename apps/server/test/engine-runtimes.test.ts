@@ -23,6 +23,8 @@ test("model and effort reach Claude Code as flags, and are kept on the session",
     const argv = (JSON.parse(readFileSync(process.env.FAKE_ARGS, "utf8").trim().split("\n")[0]!) as { argv: string[] }).argv;
     assert.equal(argv[argv.indexOf("--model") + 1], "sonnet");
     assert.equal(argv[argv.indexOf("--effort") + 1], "high");
+    const allowed = argv.slice(argv.indexOf("--allowedTools") + 1);
+    assert.ok(!allowed.some((t) => t.startsWith("WebSearch") || t.startsWith("WebFetch")) && !argv.includes("--settings"), "a worker's web tools are not the partners' setting's (queue WB)");
     const s = loadProjectState(store).sessions.find((x) => x.id === queue().run!.session)!;
     assert.deepEqual([s.model, s.effort], ["sonnet", "high"]);
   } finally { engine.shutdown(); delete process.env.FAKE_ARGS; }
@@ -109,6 +111,9 @@ test("Codex in a queue's own worktree may write the worktree's git paths, and no
     assert.deepEqual(start.map((c) => c.writableRoots?.map(mine)), [want], "the thread's sandbox config carries the roots");
     // Two steps of its own and the integration step a queue with a worktree of its own ends with.
     assert.deepEqual(turns.map((c) => c.writableRoots?.map(mine)), [want, want, want], "every turn's sandbox policy carries them");
+    const config = (start[0] as unknown as { config: Record<string, unknown> }).config;
+    assert.deepEqual(Object.keys(config), ["sandbox_workspace_write.writable_roots"], "a worker's thread keeps the user's Codex tools and its web search default (queue WB)");
+    assert.ok(!calls.some((c) => c.method === "config/read"));
   } finally { engine.shutdown(); delete process.env.FAKE_ARGS; }
 });
 

@@ -72,6 +72,8 @@ export interface ClaudeOptions {
   /** A file of subagent definitions (--agents). */
   agentsFile?: string;
   appendSystemPrompt?: string;
+  /** More settings for the session (--settings, as JSON): a thinking partner's WebFetch guard hook. */
+  settings?: string;
   env: Record<string, string>;
 }
 
@@ -123,6 +125,7 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
     if (options.effort) args.push("--effort", options.effort);
     if (options.appendSystemPrompt) args.push("--append-system-prompt", options.appendSystemPrompt);
     if (options.agentsFile) args.push("--agents", options.agentsFile);
+    if (options.settings) args.push("--settings", options.settings);
     if (options.disallowedTools?.length) args.push("--disallowedTools", options.disallowedTools.join(","));
     if (options.allowedTools.length) args.push("--allowedTools", ...options.allowedTools); // variadic: keep last
     // NEXUS_CLAUDE replaces the binary (tests use a fake written in TypeScript or JavaScript, run by this Node).

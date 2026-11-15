@@ -349,15 +349,19 @@ test("the orchestrator's texts: briefing, helpers and notices match the golden f
   golden("orchestrator", tr.text([[orch, "<orchestrator session>"], [root, "<root>"]]));
 });
 
-test("the thinking partner's briefing, with a notes folder and without, matches the golden file", (t) => {
+test("the thinking partner's briefing, with a notes folder and without, at each web level, matches the golden file", (t) => {
   const { root, store } = setup(t, "partner");
   const tr = new Transcript("partner");
   const orchestrator = new Orchestrator(store, { draining: false } as unknown as Engine, () => {});
   const conversations = new Conversations(store, orchestrator, () => {}, { spawn: tr.spawn });
   t.after(() => orchestrator.shutdown());
-  for (const [label, notes, runtime] of [["with a notes folder (Claude Code)", "docs/notes", "claude"], ["without one (Codex)", undefined, "codex"]] as const) {
+  for (const [label, notes, runtime, web] of [
+    ["with a notes folder (Claude Code), web search", "docs/notes", "claude", "search"],
+    ["without one (Codex), no web", undefined, "codex", "off"],
+    ["with a notes folder (Claude Code), web search and pages", "docs/notes", "claude", "fetch"],
+  ] as const) {
     const p = store.readProject();
-    store.writeProject({ ...p, conversations: { ...p.conversations, notes_dir: notes } });
+    store.writeProject({ ...p, conversations: { ...p.conversations, notes_dir: notes, web } });
     const s = conversations.create({ title: label, runtime });
     tr.section(`the partner's briefing, ${label}`);
     conversations.say(s.id, "Let us think.");

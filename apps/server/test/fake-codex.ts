@@ -155,13 +155,18 @@ process.stdin.on("data", (d: string) => {
     const images = (): string[] => (m.params?.input ?? []).filter((x: { type?: string }) => x.type === "localImage").map((x: { path: string }) => x.path);
     switch (m.method) {
       case "initialize": reply({ userAgent: "fake-codex" }); break;
-      case "thread/start": recordArgs({ method: m.method, model: m.params.model, approvalsReviewer: m.params.approvalsReviewer ?? null, approvalPolicy: m.params.approvalPolicy, sandbox: m.params.sandbox, cwd: m.params.cwd, writableRoots: m.params.config?.["sandbox_workspace_write.writable_roots"] ?? null, instructions: m.params.developerInstructions ?? null }); threadId = randomUUID(); reply({ thread: { id: threadId }, model: "fake-codex-model", reasoningEffort: "medium" }); break;
-      case "thread/resume": recordArgs({ method: m.method, threadId: m.params.threadId, instructions: m.params.developerInstructions ?? null }); threadId = m.params.threadId; reply({ thread: { id: threadId }, model: "fake-codex-model" }); break;
+      case "thread/start": recordArgs({ method: m.method, model: m.params.model, approvalsReviewer: m.params.approvalsReviewer ?? null, approvalPolicy: m.params.approvalPolicy, sandbox: m.params.sandbox, cwd: m.params.cwd, writableRoots: m.params.config?.["sandbox_workspace_write.writable_roots"] ?? null, config: m.params.config ?? null, instructions: m.params.developerInstructions ?? null }); threadId = randomUUID(); reply({ thread: { id: threadId }, model: "fake-codex-model", reasoningEffort: "medium" }); break;
+      case "thread/resume": recordArgs({ method: m.method, threadId: m.params.threadId, config: m.params.config ?? null, instructions: m.params.developerInstructions ?? null }); threadId = m.params.threadId; reply({ thread: { id: threadId }, model: "fake-codex-model" }); break;
+      // The user's MCP servers, as a real Codex reads them from its config: FAKE_CODEX_MCP names them (comma-separated).
+      case "config/read":
+        recordArgs({ method: m.method, cwd: m.params.cwd ?? null });
+        reply({ config: { mcp_servers: Object.fromEntries((process.env.FAKE_CODEX_MCP ?? "").split(",").filter(Boolean).map((n) => [n, { command: "x", enabled: true }])) }, origins: {}, layers: null });
+        break;
       case "account/rateLimits/read":
         reply({ rateLimits: { primary: { usedPercent: 5, windowDurationMins: 10080, resetsAt: Math.floor(Date.now() / 1000) + 86400 }, secondary: null } });
         break;
       case "turn/start": {
-        recordArgs({ method: m.method, effort: m.params.effort ?? null, model: m.params.model ?? null, writableRoots: m.params.sandboxPolicy?.writableRoots ?? null, images: images() });        const t = text();
+        recordArgs({ method: m.method, effort: m.params.effort ?? null, model: m.params.model ?? null, writableRoots: m.params.sandboxPolicy?.writableRoots ?? null, networkAccess: m.params.sandboxPolicy?.networkAccess ?? null, images: images() });        const t = text();
         record(t, null, !!turnId);
         if (turnId) { fail("a turn is already running"); break; }
         turnId = randomUUID();
