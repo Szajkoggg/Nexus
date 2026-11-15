@@ -427,8 +427,7 @@ export class Engine implements Member {
     this.stopping.add(run.session);
     this.ending.add(run.session);
     this.restarting.delete(run.session);
-    clearTimeout(this.timers.get(`restart:${run.session}`));
-    this.timers.delete(`restart:${run.session}`);
+    this.clearRestartKill(run.session);
     this.clearTimer(queueId);
     this.endBackgroundWait(queueId);
     this.writeRun(queueId, toPausedByUser(run, "stopped at once by the user; uncommitted changes kept"));
@@ -1199,8 +1198,7 @@ export class Engine implements Member {
         const byNexus = this.stopped || this.ending.delete(session.id);
         this.store.appendActivity(session.id, { at: now(), kind: code === 0 || byNexus ? "exit" : "error", text: `process exited (${code ?? "signal"})${byNexus ? ", ended by Nexus" : ""}`, ...tag() });
         if (this.restarting.delete(session.id)) {
-          clearTimeout(this.timers.get(`restart:${session.id}`));
-          this.timers.delete(`restart:${session.id}`);
+          this.clearRestartKill(session.id);
           if (!this.stopped) {
             try { this.ensureProcess(this.store.readSession(session.id)); }
             catch (e) { for (const q of runsOf()) this.halt(q, `could not restart the session: ${(e as Error).message}`); }
@@ -1272,6 +1270,12 @@ export class Engine implements Member {
 
   /** A queue's retry or usage-wait timer. */
   private clearTimer(queueId: string): void { this.clockTimers.clear(queueId); }
+
+  /** Drops the timer that kills a restarting session's old process when it does not exit by itself. */
+  private clearRestartKill(session: string): void {
+    clearTimeout(this.timers.get(`restart:${session}`));
+    this.timers.delete(`restart:${session}`);
+  }
 
   // ---------------------------------------------------------------- helpers
 
