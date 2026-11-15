@@ -24,6 +24,8 @@ export interface StreamFacts {
    * a start names either case (DESIGN.md, "When Claude Code saves a conversation").
    */
   saved?: boolean;
+  /** The process was replaced by a new one (a start Claude Code refused, tried again): its id. */
+  pid?: number;
 }
 
 /** What the agent did, condensed for the dashboard. `retry`: the runtime retries a request by itself. */
