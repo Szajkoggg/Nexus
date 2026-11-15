@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { ChatEntry } from "@nexus/protocol";
-import { draftOf, needsApproval, pinsText, queueChecks, queueReference, runSettings, withReference } from "../src/approval.ts";
+import { draftOf, needsApproval, pinsText, queueChecks, queueReference, runSettings, withReference, stepOwnLine } from "../src/approval.ts";
 
 const project = {
   defaults: { review_level: 2 },
@@ -79,4 +79,12 @@ test("a queue's checks: the project's first and marked, the queue's own after th
   assert.deepEqual(queueChecks(p, { checks: [], run: { state: "running", checks: ["npm run knip"] } } as never), [{ name: "npm run knip", project: true }]);
   assert.deepEqual(queueChecks(p, { checks: ["npm test"], run: { state: "paused" } } as never), [{ name: "npm test", project: false }], "a run from before the setting: none of the project's");
   assert.deepEqual(queueChecks(p, { checks: [], run: { state: "finished", checks: ["npm run knip"] } } as never).map((c) => c.name), ["npm run lint", "npm test"], "a finished run: the next one takes the setting now");
+});
+
+test("a step's own runtime, model and effort get a line in the approval; a step without them none (it runs on the run's)", () => {
+  assert.equal(stepOwnLine({}), undefined);
+  assert.equal(stepOwnLine({ runtime: undefined, model: undefined, effort: undefined }), undefined);
+  assert.equal(stepOwnLine({ runtime: "codex", model: "gpt-6-luna", effort: "low" }), "runs on Codex · gpt-6-luna · low effort");
+  assert.equal(stepOwnLine({ model: "claude-haiku-5-5" }), "runs on claude-haiku-5-5");
+  assert.equal(stepOwnLine({ effort: "high" }), "runs on high effort");
 });

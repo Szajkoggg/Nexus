@@ -371,6 +371,7 @@ export const en = {
   "approval.run.afterEach": "after each step: {level}",
   /** A step with a runtime, model or effort of its own: "SC3 on Codex · gpt-6-luna". */
   "approval.run.stepOn": "{step} on {values}",
+  "approval.stepRunsOn": "runs on {values}",
   "approval.pins": "Approving pins revision {revision}: these steps, their acceptance, the checks and stop conditions",
   "approval.pinsLifts": "Approving pins revision {revision}: these steps, their acceptance, the checks and stop conditions; it also lifts the stop",
   // ---------------------------------------------------------------- statuses as words, times of steps and runs (ui.tsx)
