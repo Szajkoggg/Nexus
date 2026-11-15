@@ -1464,7 +1464,8 @@ hand-over's again: its reply goes to the orchestrator. Then `interrupted` is dro
 role `conversation`: a thinking partner the user talks with about the project, one session per topic, with its chat
 in `chat.jsonl` (`from: partner` for its replies, whole). It reads the whole project and writes only in `notes_dir`
 (relative to the root, checked to lie inside it): Claude Code runs it in `dontAsk` mode allowed `Read`, `Grep`,
-`Glob`, `Bash(nexus status:*)`, `Bash(nexus help:*)`, read-only git and `Edit(<notes_dir>/**)` only; Codex runs it
+`Glob`, `nexus status`, `nexus help` and read-only git (`git log`, `git status`, `git diff`, `git show`) on both shell
+tools (`Bash(nexus status:*)` and `PowerShell(nexus status:*)`, and so on), and `Edit(<notes_dir>/**)` only; Codex runs it
 with `notes_dir` as its working directory in a `workspace-write` sandbox (`read-only` without a notes folder), approval
 `never`, where its commands (`nexus help` among them, which only reads) run in the sandbox. Its briefing points it to
 `nexus help` for how Nexus works (decided 2026-11-15, queue OP). It starts no work. An idle partner's process ends after 15 minutes; the next message resumes the conversation.
@@ -1539,7 +1540,9 @@ state. It records the step's status in `about.seeded`. When the step's status di
 `project.yaml` holds `orchestrator: { runtime, session, model?, notify, context_threshold }` (`context_threshold`: see
 "The orchestrator's context care"). The orchestrator is a Claude Code session
 launched in the project's checkout with `--permission-mode dontAsk`, allowed only `Read`, `Grep`, `Glob`, `Agent`,
-`Bash(nexus:*)`, read-only git commands, and `Write(.nexus/drafts/**)` and `Edit(.nexus/drafts/**)`, and with
+`nexus` and read-only git commands (`git log`, `git status`, `git diff`, `git show`, `git branch`, `git worktree list`)
+on both shell tools (`Bash(nexus:*)` and `PowerShell(nexus:*)`, and so on), and `Write(.nexus/drafts/**)` and
+`Edit(.nexus/drafts/**)`, and with
 `NotebookEdit` and `MultiEdit` disallowed: anything else, writes outside `.nexus/drafts/` included, is refused without
 a prompt. (`Write` and `Edit` are not disallowed: a disallow rule would beat the drafts rules.) Its briefing
 (appended system prompt) explains its role, the commands and the queue YAML.
@@ -1547,8 +1550,9 @@ a prompt. (`Write` and `Edit` are not disallowed: a disallow rule would beat the
 - `.nexus/drafts/<queue>.yaml` holds the orchestrator's queue drafts; the orchestrator is its only writer. It writes a
   draft there, uploads it with `nexus queue draft .nexus/drafts/<queue>.yaml` (relative to the project's root, its
   working directory), and keeps the file to edit for later revisions. The server reads only the path it is given.
-  The briefing tells it to run `nexus` commands on their own: a chained command (`cd …`, `&&`, a pipe) does not match
-  `Bash(nexus:*)` and is refused.
+  The briefing tells it to run `nexus` and git commands on their own, with nothing before the command name: a chained
+  command (`cd …`, `&&`, a pipe) or an option before the subcommand (`git -C <path> show`) does not match the rules
+  and is refused, on Bash and PowerShell alike. The workers' and the thinking partners' briefings say the same.
 
 - `nexus queue draft <file|->` sends a queue definition (YAML) as `queue.drafted`. The server writes it: a new queue
   becomes `proposed` (or `draft`); a change to an existing queue's steps, checks or stop conditions makes a new
@@ -2317,8 +2321,8 @@ completed, and a sub-agent from its `subAgentActivity` `started` (or `interacted
 ## How the engine runs a Claude Code session
 
 `claude -p --input-format stream-json --output-format stream-json --verbose --session-id <uuid>` (or `--resume
-<uuid>` for a session that ran before), with the project's permission mode, `--allowedTools Bash(nexus:*)` plus the
-project's list, the model, and a worker briefing as `--append-system-prompt-file <.nexus>/sessions/<id>/briefing.md`
+<uuid>` for a session that ran before), with the project's permission mode, `--allowedTools Bash(nexus:*)
+PowerShell(nexus:*)` plus the project's list (as it is: its rules get no PowerShell pair), the model, and a worker briefing as `--append-system-prompt-file <.nexus>/sessions/<id>/briefing.md`
 (every Claude Code session's briefing, the orchestrator's and a thinking partner's too, goes in that file, written by the
 server at each start: the command line stays short of Windows' 32,767 characters). With `defaults.protect_nexus` on (the
 default), `--disallowedTools Edit(//<.nexus>/**),Write(//<.nexus>/**)` names the project's `.nexus` by its absolute

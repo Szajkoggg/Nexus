@@ -2166,6 +2166,24 @@ every start, overwriting the last (AgentHost; the path is no setting, so a start
 and the CLI reads it as it starts. The orchestrator's command line went from about 31,600 characters in the tests to
 778; a test (command-line.test.ts) keeps every role's below 16,000 and says the length when it is not.
 
+## The same commands on every shell tool (queue SH)
+
+Claude Code on Windows has two shell tools, Bash and PowerShell, and Nexus allowed its commands only on Bash: an agent
+whose `nexus` call went to PowerShell was refused, and its briefing told it not to work around a refusal in another
+shell. Now one place (`apps/server/src/shell-rules.ts`) turns each role's command prefixes into a rule on every shell
+tool, and the orchestrator, the thinking partners and the workers use it; the lists of commands did not change, and a
+project's own `claude.allowed_tools` go on as they are. The three briefings ask for nexus and git commands on their own,
+the name first (not `git -C <path>`), and allow one retry of the same command alone, not in another shell.
+
+The rule's form, from Claude Code's permissions page ("PowerShell permission rules use the same shape as Bash rules";
+"Claude Code parses the PowerShell AST and checks each command in a compound command independently"), probed on
+2026-11-15 with Claude Code 2.1.323, `haiku`, `dontAsk`, `--tools PowerShell` and only `PowerShell(nexus:*)` and
+`PowerShell(git show:*)` allowed, one session per command: `nexus status` and `git show` ran; `nexus status; git push`,
+`nexus help | Out-File x.txt`, `nexus help > x.txt`, `nexus $(Remove-Item x.txt)`, `& { nexus status }` and
+`git -C <path> show` were refused (x.txt stayed). A PowerShell rule on a machine without the tool (here switched off
+with `CLAUDE_CODE_USE_POWERSHELL_TOOL=0`, as on Linux or macOS without `pwsh`) did no harm: no warning, no error, and
+the Bash rule worked; so the rules are the same on every platform. Cost: about $0.013 (nine one-command sessions).
+
 ## Compacting a conversation (queue CC3)
 
 Decided by the user on 2026-11-15 (docs/ideas/chat-context.md): the Ideas conversations get a **Compact** action; the

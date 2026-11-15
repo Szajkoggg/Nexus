@@ -39,6 +39,12 @@ export function withLanguages(text: string, line: string | undefined): string {
 
 // ---------------------------------------------------------------- the worker
 
+/**
+ * How the worker, the orchestrator and a thinking partner run nexus and git commands (queue SH): their allow rules
+ * (shell-rules.ts) match a command that stands alone and starts with the name, on Bash and PowerShell alike.
+ */
+const SHELL_COMMANDS = "Run nexus and git commands on their own, one per call, with nothing before the command name and no option before its subcommand: no cd, no &&, no pipes, not git -C <path> (they run in your working directory already). If one is refused, you may retry the same command once on its own (without chaining or -C), not in another shell.";
+
 export const WORKER_BRIEFING = `You are a worker session run by Nexus, the dashboard through which the user follows and steers your work.
 Nexus sends you one step of an approved queue at a time. Work on that step only; when its outcome is reported, end your turn: Nexus opens the next step.
 Do not end your turn while work you started still runs (a background command, a sub-agent): run a sub-agent in the foreground and take its result within the same turn, or do the work yourself. Nexus waits for background work only for a limited time, and a turn that ends without the step's outcome otherwise counts as one without an outcome.
@@ -58,6 +64,7 @@ Review material follows Nexus's standard: read \`nexus help review\` before you 
 Nexus's standards for the rest (the full texts: \`nexus help summaries\`, \`nexus help questions\`, \`nexus help refusals\`, \`nexus help commits\`, \`nexus help tests\`):
 - A step summary (nexus step done --summary) has four parts: what changed; how it was verified; what was left out or differs from the plan; what comes next, if anything.
 - A question (nexus ask) has three: what it blocks; the options (--option, one each); your recommendation (--recommend names the option, the text says why).
+- ${SHELL_COMMANDS}
 - When an action is refused, do not work around it through another tool or command that reaches the same end (PowerShell after Bash, the shell after the edit tool); retry once in a simpler form at most (without chaining, for example), otherwise report what you needed and why.
 - Tests: while you work, run only the tests of what you changed and stop at the first failure (the project's way is in its AGENTS.md; in Nexus's own repository \`npm run test:files -- <files>\`); the whole suite runs at the step's end, as the queue's checks.
 - Leave the working tree clean at every step's end, not only at a stop: commit everything the step did (only its own files, by name) and name the commit with nexus step done --commit, so every commit belongs to exactly one step.
@@ -325,7 +332,7 @@ Commands (\`nexus\` is on PATH; your session is set in the environment):
 - nexus server update --at <HH:MM|"YYYY-MM-DD HH:MM"> [--deadline <time>]   plan the deploy for a time (only when the user asks)
 - nexus server cancel-plan                       cancel the planned deploy
 
-Run nexus commands on their own (no cd, no &&, no pipes), since chained commands are refused.
+${SHELL_COMMANDS}
 When an action is refused, do not work around it through another tool or command that reaches the same end (PowerShell after Bash, for example); retry once in a simpler form at most, otherwise tell the user what you needed and why (\`nexus help refusals\`).
 
 Workers write by Nexus's standards, and you read them so: a step summary has four parts (what changed; how it was verified; what was left out or differs from the plan; what comes next), and a question three (what it blocks; the options; the worker's recommendation). A missing part is worth naming in your answer or send-back; what was left out or comes next goes into the plan. When you escalate a question, keep the same shape: your framing, the options, your recommendation. The full texts: \`nexus help summaries\`, \`nexus help questions\`, \`nexus help commits\` (every step ends with a clean tree and names its commit).
@@ -779,5 +786,6 @@ What you may do:
 ${notes ? `- Write only in ${notes}/ (relative to the project's root): notes of what the user decides or asks you to record. Keep to the project's own conventions for that folder (its README or AGENTS.md). One file per topic, dated entries, decisions separate from open ideas.` : `- No notes folder is set for this project, so you cannot write files; the user can set one in the project's settings.`}
 ${partnerWeb(p.conversations?.web ?? "search")}
 - You start no work: no builds, no tests, no code changes, no queues. When the user wants something done, suggest handing the conversation to the orchestrator (the "Hand to orchestrator" button); then you write the summary it asks for.
+- ${SHELL_COMMANDS}
 - When an action is refused, do not work around it through another tool or command that reaches the same end; retry once in a simpler form at most, otherwise tell the user what you needed and why (\`nexus help refusals\`).`;
 }

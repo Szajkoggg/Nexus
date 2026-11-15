@@ -296,7 +296,7 @@ export const ProjectFile = z.object({
     /** The runtime a run uses when its start does not name one. */
     default: WorkerRuntime.default("claude"),
     claude: ClaudeSettings.extend({
-      /** Added to every Nexus-launched session; `Bash(nexus:*)` is always allowed. */
+      /** Added to every Nexus-launched worker session as they are; `Bash(nexus:*)` and `PowerShell(nexus:*)` are always allowed. */
       allowed_tools: z.array(z.string()).default([]),
     }).prefault({}),
     codex: CodexSettings.extend({

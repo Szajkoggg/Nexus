@@ -179,6 +179,12 @@ test("the orchestrator may write only queue drafts, and its briefing uploads the
     const { argv, briefing } = JSON.parse(readFileSync(args, "utf8").trim().split("\n")[0]!) as { argv: string[]; briefing: string };
     assert.equal(argv[argv.indexOf("--permission-mode") + 1], "dontAsk");
     const allowed = argv.slice(argv.indexOf("--allowedTools") + 1);
+    const both = (p: string) => [`Bash(${p}:*)`, `PowerShell(${p}:*)`];
+    assert.deepEqual(allowed, [
+      "Read", "Grep", "Glob", "Agent", "Task",
+      ...["nexus", "git log", "git status", "git diff", "git show", "git branch", "git worktree list"].flatMap(both),
+      "Write(.nexus/drafts/**)", "Edit(.nexus/drafts/**)",
+    ], "the same commands on Bash and PowerShell, nothing more");
     assert.ok(allowed.includes("Write(.nexus/drafts/**)") && allowed.includes("Edit(.nexus/drafts/**)"), "drafts are writable");
     const writes = allowed.filter((t) => /^(Write|Edit|MultiEdit|NotebookEdit)\b/.test(t));
     assert.deepEqual(writes.sort(), ["Edit(.nexus/drafts/**)", "Write(.nexus/drafts/**)"], "nothing else is writable");

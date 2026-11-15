@@ -17,6 +17,8 @@ import { FAST, WINDOW, activityOf, fixtureRun, here, restart, setup } from "./en
 test("model and effort reach Claude Code as flags, and are kept on the session", async () => {
   const { store, engine, queue, until } = setup(["done"]);
   process.env.FAKE_ARGS = join(dirname(process.env.FAKE_LOG!), "args.log");
+  // The project's own rules go on as they are: no PowerShell pair is made for them.
+  store.updateProject((p) => ({ ...p, runtimes: { ...p.runtimes, claude: { ...p.runtimes.claude, allowed_tools: ["Edit", "Bash(npm test:*)"] } } }));
   try {
     engine.start("Q", { runtime: "claude", model: "sonnet", effort: "high" });
     await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
@@ -24,6 +26,7 @@ test("model and effort reach Claude Code as flags, and are kept on the session",
     assert.equal(argv[argv.indexOf("--model") + 1], "sonnet");
     assert.equal(argv[argv.indexOf("--effort") + 1], "high");
     const allowed = argv.slice(argv.indexOf("--allowedTools") + 1);
+    assert.deepEqual(allowed, ["Bash(nexus:*)", "PowerShell(nexus:*)", "Edit", "Bash(npm test:*)"], "the nexus CLI on both shell tools, then the project's rules unchanged");
     assert.ok(!allowed.some((t) => t.startsWith("WebSearch") || t.startsWith("WebFetch")) && !argv.includes("--settings"), "a worker's web tools are not the partners' setting's (queue WB)");
     const s = loadProjectState(store).sessions.find((x) => x.id === queue().run!.session)!;
     assert.deepEqual([s.model, s.effort], ["sonnet", "high"]);

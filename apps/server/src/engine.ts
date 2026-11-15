@@ -22,6 +22,7 @@ import {
   RUNTIME_NAME, carriedMessages, midStepSeed, formatInbox, withLanguages, workerBriefing, workerLanguages, freshSessionSeed, noOutcomeNudge, stepOpening, summaryReason,
   summaryRequest, switchReason, userStopNow,
 } from "./prompts.ts";
+import { shellRules } from "./shell-rules.ts";
 import {
   ClockTimers, REAL_CLOCK, Scheduler, type PlanOptions, type Clock, type ScheduleOptions,
 } from "./scheduler.ts";
@@ -1166,7 +1167,8 @@ export class Engine implements Member {
         model: session.model ?? claude.model,
         effort: session.effort ?? claude.effort,
         permissionMode: claude.permission_mode,
-        allowedTools: ["Bash(nexus:*)", ...claude.allowed_tools],
+        // The nexus CLI on every shell tool; the project's own rules as they are.
+        allowedTools: [...shellRules(["nexus"]), ...claude.allowed_tools],
         // The project's .nexus is the server's (and the CLI's) to write, not the worker's file tools'. Its absolute
         // path: the worker's cwd may be a worktree whose own .nexus does not exist.
         disallowedTools: project.defaults.protect_nexus ? nexusDenyRules(this.store.dir) : undefined,

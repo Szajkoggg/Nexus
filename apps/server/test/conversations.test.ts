@@ -45,6 +45,11 @@ test("a Claude partner asks nothing and may write only in the notes folder", asy
     assert.equal(argv[argv.indexOf("--permission-mode") + 1], "dontAsk");
     assert.equal(argv[argv.indexOf("--effort") + 1], "high");
     const allowed = argv.slice(argv.indexOf("--allowedTools") + 1);
+    assert.deepEqual(allowed, [
+      "Read", "Grep", "Glob",
+      ...["nexus status", "nexus help", "git log", "git status", "git diff", "git show"].flatMap((p) => [`Bash(${p}:*)`, `PowerShell(${p}:*)`]),
+      "Edit(Dev/Concepts/Gameplay/**)", "WebSearch",
+    ], "the same commands on Bash and PowerShell, nothing more");
     assert.ok(allowed.includes("Edit(Dev/Concepts/Gameplay/**)"), "writes go to the notes folder");
     assert.ok(allowed.includes("Bash(nexus status:*)") && allowed.includes("Bash(nexus help:*)"), "nexus status, and nexus help to read about Nexus");
     assert.ok(!allowed.some((t) => t === "Edit" || t === "Write" || t.startsWith("Bash(nexus run") || t === "Bash(nexus:*)"), "nothing else is writable, no run can start");

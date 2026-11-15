@@ -21,10 +21,11 @@ import type { Orchestrator } from "./orchestrator.ts";
 import { partnerBriefing, restartedNotice } from "./prompts.ts";
 import { RESTARTED, STOPPED, chatView } from "./chats.ts";
 import { guardSettings, webFetchDenyRules } from "./web-guard.ts";
+import { shellRules } from "./shell-rules.ts";
 
 // `nexus help` (decided 2026-11-15, queue OP): how Nexus works, its topics; it reads only. A Codex partner runs it in
 // its sandbox, which reads everywhere.
-const READ = ["Read", "Grep", "Glob", "Bash(nexus status:*)", "Bash(nexus help:*)", "Bash(git log:*)", "Bash(git status:*)", "Bash(git diff:*)", "Bash(git show:*)"];
+const READ = ["Read", "Grep", "Glob", ...shellRules(["nexus status", "nexus help", "git log", "git status", "git diff", "git show"])];
 /** What a hand-over covers (decided 2026-11-14): this conversation's topics, and the dates of the decisions it passes on. */
 const HANDOFF_SCOPE = "Summarize only the topics discussed in this conversation, unless the user asked you to include others. From a notes file, pass on what this conversation decided or recorded; another topic in the notes folder, even a related one, is not part of this hand-over: name its file at most, as 'see also', without its content. In every notes file only the Decided section holds decisions. Name the dates of the Decided entries you cover.";
 /**

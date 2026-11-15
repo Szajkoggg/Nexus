@@ -18,11 +18,12 @@ import {
   acceptedNoteNotice, approvalNotice, discardNotice, liftNotice, mergedNotice, mergeWaitNotice, missedStartNotice, noticeText, orchestratorBriefing, pausedNotice,
   carriedMessages, formatInbox, orchestratorFreshSeed, orchestratorSummaryRequest, summaryLists, questionNotice, rejectionNotice, restartedNotice, fixAskedNotice, levelToUserNotice, reviewNotice, awayOnNotice, awayEndNotice, awayStuckNotice, planDecisionNotice, planHeldNotice, runEndNotice, maintenanceFindingsNotice, stepNoteNotice, tagDecisionNotice, fallbackNotice, metricNotice, userMessage, withdrawalNotice,
 } from "./prompts.ts";
+import { shellRules } from "./shell-rules.ts";
 
 // Agent (formerly Task) lets it call subagents; they run within these same read-only permissions.
 const READ_ONLY_TOOLS = [
-  "Read", "Grep", "Glob", "Agent", "Task", "Bash(nexus:*)",
-  "Bash(git log:*)", "Bash(git status:*)", "Bash(git diff:*)", "Bash(git show:*)", "Bash(git branch:*)", "Bash(git worktree list:*)",
+  "Read", "Grep", "Glob", "Agent", "Task",
+  ...shellRules(["nexus", "git log", "git status", "git diff", "git show", "git branch", "git worktree list"]),
 ];
 // Queue drafts are files it writes and then hands to `nexus queue draft`: a long heredoc breaks in Claude Code's
 // shell wrapper on Windows. Edit and Write stay out of NEVER because a disallow rule beats these path rules;
