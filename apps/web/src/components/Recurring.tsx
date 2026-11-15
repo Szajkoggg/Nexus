@@ -6,12 +6,15 @@
 import { useState } from "react";
 import type { RecurringView, TemplatesResponse } from "@nexus/protocol";
 import { act, enc, projectUrl, useAction, useQuery, type AttentionItem } from "../api.ts";
-import { t } from "../i18n.ts";
+import { t, type Key } from "../i18n.ts";
 import { usePage } from "../page.ts";
 import { missingParams, recurringActions, recurringStatus, scheduleWords, templateMessage, type Mode, type Template } from "../recurring.ts";
 import { Button, CloseButton, Clock, StatusBadge, TEXTAREA } from "./ui.tsx";
 
 const LAYER = { nexus: "templates.layer.nexus", global: "templates.layer.global", project: "templates.layer.project" } as const;
+/** A maintenance template's modes, each in a word. */
+const MODE_WORDS: Record<Mode, Key> = { survey: "templates.mode.survey", fix_small: "templates.mode.fixSmall" };
+const MODES = Object.keys(MODE_WORDS) as Mode[];
 const INPUT = "w-full rounded-lg border border-line-strong bg-canvas px-3 py-2 text-sm text-fg placeholder:text-fg-3 focus:border-accent focus:outline-none";
 
 /** "New queue from template": a button on the Queues view that opens the form under it. */
@@ -82,8 +85,8 @@ function TemplateForm({ project, onClose, onSent }: { project: string; onClose: 
             <fieldset>
               <legend className="mb-1 text-sm text-fg">{t("templates.mode")}</legend>
               <div className="flex flex-wrap gap-2">
-                {(["survey", "fix_small"] as const).map((m) => (
-                  <Button key={m} variant="quiet" pressed={mode === m} onClick={() => setMode(m)}>{t(m === "survey" ? "templates.mode.survey" : "templates.mode.fixSmall")}</Button>
+                {MODES.map((m) => (
+                  <Button key={m} variant="quiet" pressed={mode === m} onClick={() => setMode(m)}>{t(MODE_WORDS[m])}</Button>
                 ))}
               </div>
             </fieldset>
@@ -152,7 +155,7 @@ function RecurringCard({ r, actions, onOpen }: { r: RecurringView; actions: Retu
         </>}
         {r.maintenance && <>
           <dt className="text-fg-3">{t("recurring.mode")}</dt>
-          <dd className="text-fg-2">{t(r.maintenance === "survey" ? "templates.mode.survey" : "templates.mode.fixSmall")}</dd>
+          <dd className="text-fg-2">{t(MODE_WORDS[r.maintenance])}</dd>
         </>}
         {r.next_at && r.status !== "paused" && r.status !== "broken" && <>
           <dt className="text-fg-3">{t("recurring.next")}</dt>
