@@ -1908,6 +1908,17 @@ updated_at: ...
   orchestrator (`POST /api/projects/:id/orchestrator/messages`), with the `nexus queue draft --template` command that
   writes the draft; the orchestrator drafts the queue, which waits for the user's approval as any.
 
+### The notes template and reading outside the project
+
+The `notes` template's worker reads the Claude sessions' memory folder (`memory_dir`), which is outside the project. Probed
+2026-11-15 (Claude Code, `haiku`, effort low, a temporary project with the folder beside it; about $0.01 in all): in
+`--permission-mode auto` the `Read` tool opens a file there; in `dontAsk` it is refused ("denied because the session is
+running in don't ask permission mode"). With the rule `Read(//c/<path>/**)` in `--allowedTools` `dontAsk` reads it, and a
+`Write` to the same folder is still refused: the rule gives reading of that folder only. So in a project whose
+`permission_mode` is not auto, the user adds that rule to `runtimes.claude.allowed_tools` (the dashboard's Allow rule on the
+refusal; a template cannot carry it, since a queue has no permission rules and an agent must not widen its own). The
+template's stop conditions tell the worker to report a refused read as a finding with the rule to add.
+
 ## Static analysis reminder
 
 Nexus ships a `static-analysis` template (`templates/static-analysis.yaml`, for any stack): survey the stack and ask the

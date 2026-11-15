@@ -271,6 +271,9 @@ test("the notes template: needs memory_dir; survey only reads, the fix step touc
   const step = (fix.steps as { goal: string }[]).at(-1)!.goal.replaceAll("\n", " ");
   assert.match(step, /Fix only the typos among the findings of N3 in AGENTS\.md and the design and protocol documents under docs\//);
   assert.match(step, /Touch no other file: not the code, not the memory notes in ~\/\.claude\/projects\/p\/memory, not the ideas notes in docs\/ideas/);
+  // Reading outside the project: the parameter says which permission modes allow it, and a refused read is a finding.
+  assert.match(t.params.find((p) => p.name === "memory_dir")!.description, /reads it in the auto permission mode, but not in dontAsk.*Read\(/);
+  assert.match(text, /Reading the memory folder is refused by the permissions/);
   // The survey steps are told to change nothing.
   for (const st of (survey.steps as { goal: string }[])) assert.match(st.goal, /Change nothing, commit nothing/);
 });

@@ -8,8 +8,11 @@ template:
 maintenance: survey
 params:
   - name: memory_dir
-    description: the folder of the Claude sessions' memory notes for this project, outside it (Claude Code keeps them under
-      ~/.claude/projects/<the project's path, with dashes>/memory); the worker reads it, and never writes to it
+    description: "the folder of the Claude sessions' memory notes for this project, outside it (Claude Code keeps them under
+      ~/.claude/projects/<the project's path, with dashes>/memory); the worker reads it, and never writes to it. The
+      folder is outside the project: a Claude Code worker reads it in the auto permission mode, but not in dontAsk,
+      where the project's allowed_tools (the user's setting) needs the rule Read(<the folder as
+      //c/users/.../memory/**>)"
     default: ~/.claude/projects/C--Code-Nexus/memory
   - name: ideas_dir
     description: the folder of the ideas notes
@@ -31,6 +34,9 @@ description: |
 coding: true
 origin: maintenance
 stop_conditions:
+  - Reading the memory folder is refused by the permissions (dontAsk without a Read rule for it): report it as a finding,
+      with the rule the user would add (in the project's allowed_tools, from the refusal's Allow rule), and survey the
+      rest.
   - Surveying would need a change to the project, the memory folder or the ideas (a fix, a commit) in survey mode;
     report it as a finding instead.
   - A decision that belongs to the user comes up (which of a document and the code is right); ask with nexus ask, with a
