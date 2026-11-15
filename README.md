@@ -110,7 +110,9 @@ actions under ⋯; the orchestrator's "New conversation" (which makes it start o
 **Reviewing a step** opens on its summary and its pictures, large, two per row, with your marks; the checks, the
 goal and acceptance, the commits and the timeline are one line below, folded. A picture opens in the viewer: full
 screen, two fingers to zoom (double-tap on a computer), swipe, the arrow keys or the filmstrip at the bottom to move
-between the step's pictures; "Open the original" under ⋯ opens the file in a new tab. A picture with a "before" (the
+between the step's pictures; "Open the original" under ⋯ opens the file in a new tab. Review material that is no picture
+(a report, a table, notes) opens in the same file viewer (below), formatted; Ctrl+click opens it in a new tab, and the
+viewer's **Raw** link shows the file itself. A picture with a "before" (the
 same label in an earlier round, or one the worker named with `--before`) can be seen beside it or overlaid with a
 slider. The viewer's bar: **✓ Mark this picture** (a mark for that picture only; it does not accept the step) and a
 comment (Enter sends it), which goes back to the worker as a Fix it while the step waits for your review, and
@@ -163,7 +165,9 @@ their own.
 
 **Files and commits in the chat.** A file path with a line in a message (`apps/server/src/engine.ts:138`) and a commit
 hash (`13118f1`) are links. A file opens in the dashboard's own read-only viewer at that line: code highlighted,
-Markdown rendered, pictures in the picture viewer; it works on the phone too and starts no program. A commit opens
+Markdown rendered, JSON indented, CSV (and TSV) as a table with its header (the first 1000 rows; the rest in the raw
+file), each with **Source** beside it; YAML highlighted; pictures in the picture viewer; it works on the phone too
+and starts no program. Opened at a line, JSON and CSV show their source, where the line is. A commit opens
 its subject, author, date and changed files. Both are checked when you click: "not found" if the file or commit does
 not exist. On the PC Nexus runs on, the viewer has **Open in editor**, which opens the file at the line in your
 editor through its link scheme: Settings, Global, "This browser", Editor: **VS Code** (the default), **Cursor**,

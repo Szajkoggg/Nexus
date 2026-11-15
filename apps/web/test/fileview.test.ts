@@ -2,7 +2,7 @@
 // tokens, and where a Markdown file's relative links point.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { baseName, fileLayer, fileOf, folderOf, languageOf, linesOf, plainLines, relativeTarget, withoutFinalNewline } from "../src/fileview.ts";
+import { baseName, delimiterOf, fileLayer, fileOf, folderOf, formatJson, formattedKind, languageOf, linesOf, parseTable, plainLines, relativeTarget, withoutFinalNewline } from "../src/fileview.ts";
 import { highlight } from "../src/highlight.ts";
 import { kindOf, layerValue, navOf } from "../src/layers.ts";
 
@@ -73,4 +73,56 @@ test("a Markdown file's relative links resolve against its folder; others are no
   for (const href of ["https://example.com", "mailto:x@y", "#heading", "//cdn.example.com/x.png", "javascript:alert(1)", ""]) {
     assert.equal(relativeTarget("docs/a.md", href), undefined, href);
   }
+});
+
+// ---------------------------------------------------------------- JSON and CSV
+
+test("which files have a formatted view: Markdown, JSON, CSV and TSV; YAML and the rest only their source", () => {
+  assert.equal(formattedKind("docs/a.md"), "markdown");
+  assert.equal(formattedKind("C:/r/data.JSON"), "json");
+  assert.equal(formattedKind("out/rows.csv"), "table");
+  assert.equal(formattedKind("out/rows.tsv"), "table");
+  assert.equal(formattedKind("plan.yaml"), undefined);
+  assert.equal(formattedKind("events.jsonl"), undefined);
+  assert.equal(delimiterOf("a.tsv"), "\t");
+  assert.equal(delimiterOf("a.csv"), ",");
+});
+
+test("JSON is indented by two spaces, keys in their order, strings untouched", () => {
+  assert.equal(formatJson('{"b":1,"a":[1,{"x":"a, \\"b\\"\\n"}],"e":{}}'),
+    '{\n  "b": 1,\n  "a": [\n    1,\n    {\n      "x": "a, \\"b\\"\\n"\n    }\n  ],\n  "e": {}\n}');
+  assert.equal(formatJson("  42 \n"), "42");
+});
+
+test("JSON that does not parse, or holds a number JavaScript cannot keep exactly, is not formatted", () => {
+  assert.equal(formatJson('{"a": 1,}'), undefined);
+  assert.equal(formatJson(""), undefined);
+  assert.equal(formatJson('{"id": 12345678901234567890}'), undefined);
+  // Long digit runs inside strings are only text.
+  assert.equal(formatJson('{"id":"12345678901234567890"}'), '{\n  "id": "12345678901234567890"\n}');
+});
+
+test("CSV: the first row is the header; quotes hold commas, line ends and doubled quotes", () => {
+  const t = parseTable('name,note\r\n"Smith, J.","said ""hi""\nand left"\nplain,\n');
+  assert.deepEqual(t.header, ["name", "note"]);
+  assert.deepEqual(t.rows, [["Smith, J.", 'said "hi"\nand left'], ["plain", ""]]);
+  assert.equal(t.more, 0);
+});
+
+test("CSV: empty lines are no rows, also at the end; an empty quoted field and empty cells are kept", () => {
+  const t = parseTable('\uFEFFa,b,c\n\n1,,3\n\n"",x,\n\n\n');
+  assert.deepEqual(t.header, ["a", "b", "c"]);
+  assert.deepEqual(t.rows, [["1", "", "3"], ["", "x", ""]]);
+  assert.deepEqual(parseTable(""), { header: [], rows: [], more: 0 });
+  assert.deepEqual(parseTable("only,a,header"), { header: ["only", "a", "header"], rows: [], more: 0 });
+});
+
+test("CSV: at most the limit's rows (1000 by default), the rest counted; TSV splits at tabs", () => {
+  const text = ["n", ...Array.from({ length: 1005 }, (_, i) => String(i))].join("\n");
+  const t = parseTable(text);
+  assert.equal(t.rows.length, 1000);
+  assert.deepEqual(t.rows.at(-1), ["999"]);
+  assert.equal(t.more, 5);
+  assert.deepEqual(parseTable("a\nb\nc\nd", { limit: 2 }), { header: ["a"], rows: [["b"], ["c"]], more: 1 });
+  assert.deepEqual(parseTable("a\tb,c\n1\t2,3", { delimiter: "\t" }), { header: ["a", "b,c"], rows: [["1", "2,3"]], more: 0 });
 });

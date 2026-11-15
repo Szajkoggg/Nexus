@@ -1,6 +1,6 @@
 // The file viewer's pure parts (components/FileView.tsx): the layer that names a file and its line, the language a
-// file is highlighted as, the highlighter's syntax tree split into lines of tokens, and the paths a Markdown file's
-// relative links and pictures point to. No React, no DOM; unit tested.
+// file is highlighted as, the highlighter's syntax tree split into lines of tokens, the paths a Markdown file's
+// relative links and pictures point to, and the formatters of JSON and CSV. No React, no DOM; unit tested.
 
 /** The viewer is a layer in the history (layers.ts): "file:<line>:<path>", the line empty when none was given. */
 export const fileLayer = (path: string, line?: number) => `file:${line && line > 0 ? Math.floor(line) : ""}:${path}`;
@@ -94,3 +94,101 @@ export function relativeTarget(file: string, href: string): { path: string; line
   if (!parts.length) return undefined;
   return { path: [...lead, ...parts].join(sep), ...(lineMatch ? { line: Number(lineMatch[1]) } : {}) };
 }
+
+// ---------------------------------------------------------------- formatted views: JSON indented, CSV as a table
+
+/**
+ * How a file can be shown besides its source: Markdown rendered, JSON indented, CSV (and TSV) as a table. Others
+ * (YAML among them) are shown as highlighted source only.
+ */
+export function formattedKind(path: string): "markdown" | "json" | "table" | undefined {
+  const ext = extOf(path);
+  if (isMarkdown(path)) return "markdown";
+  if (ext === "json") return "json";
+  if (ext === "csv" || ext === "tsv") return "table";
+  return undefined;
+}
+
+/**
+ * A JSON text indented by two spaces, keys in their order; undefined when it is not one JSON value (it is then shown as
+ * it is). A number beyond what JavaScript holds exactly would be changed by the round trip: such a text is not
+ * formatted either.
+ */
+export function formatJson(text: string): string | undefined {
+  let value: unknown;
+  try { value = JSON.parse(text); } catch { return undefined; }
+  if (hasLongNumber(text)) return undefined;
+  return JSON.stringify(value, null, 2);
+}
+
+const BACKSLASH = 92, QUOTE = 34, LF = String.fromCharCode(10), CR = String.fromCharCode(13), TAB = String.fromCharCode(9);
+const isDigit = (c: number) => c >= 48 && c <= 57;
+
+/** A run of 16 digits or more outside the strings of a JSON text: a number JavaScript may not hold exactly. */
+function hasLongNumber(text: string): boolean {
+  let inString = false, run = 0;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    if (inString) {
+      if (c === BACKSLASH) i++;
+      else if (c === QUOTE) inString = false;
+      continue;
+    }
+    if (c === QUOTE) { inString = true; run = 0; continue; }
+    run = isDigit(c) ? run + 1 : 0;
+    if (run >= 16) return true;
+  }
+  return false;
+}
+
+/** A CSV file as a table: its first row the header, then at most `limit` rows; `more` counts the rows left out. */
+export interface Table { header: string[]; rows: string[][]; more: number }
+
+/** How many rows of a table the viewer shows; the rest are in the raw file. */
+export const TABLE_LIMIT = 1000;
+
+/**
+ * Parses CSV (RFC 4180): fields split by the delimiter (a comma; a tab for TSV), a field in double quotes may hold the
+ * delimiter, line ends and doubled quotes (""). Both line ends (LF, CRLF) end a row; an empty line is no row. A byte
+ * order mark at the start is dropped. The first row is the header; rows shorter than it are shown with empty cells,
+ * longer ones as they are.
+ */
+export function parseTable(text: string, o: { delimiter?: string; limit?: number } = {}): Table {
+  const delimiter = o.delimiter ?? ",";
+  const limit = o.limit ?? TABLE_LIMIT;
+  const src = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+  let header: string[] | undefined;
+  const rows: string[][] = [];
+  let more = 0;
+  let row: string[] = [];
+  let field = "";
+  let quoted = false;
+  let touched = false; // the row has begun: a character, a quote or a delimiter
+  const endRow = () => {
+    if (touched) {
+      row.push(field);
+      if (!header) header = row;
+      else if (rows.length < limit) rows.push(row);
+      else more++;
+    }
+    row = []; field = ""; touched = false;
+  };
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i]!;
+    if (quoted) {
+      if (c === '"') {
+        if (src[i + 1] === '"') { field += '"'; i++; } else quoted = false;
+      } else field += c;
+      continue;
+    }
+    if (c === '"' && field === "") { quoted = true; touched = true; }
+    else if (c === delimiter) { row.push(field); field = ""; touched = true; }
+    else if (c === LF || c === CR) { if (c === CR && src[i + 1] === LF) i++; endRow(); }
+    else { field += c; touched = true; }
+  }
+  endRow();
+  return { header: header ?? [], rows, more };
+}
+
+/** The delimiter of a table file: a tab for .tsv, else a comma. */
+export const delimiterOf = (path: string) => (extOf(path) === "tsv" ? TAB : ",");

@@ -1,7 +1,9 @@
 // The dashboard's read-only file viewer (docs/ideas/chat-improvements.md, "How a referenced file opens"): a file of the
 // project opened at a line, over everything else; a layer in the history ("file:<line>:<path>", nav.file), so Back and
 // Escape close it. Code is highlighted (highlight.ts, loaded on first use) and scrolled to the line; Markdown is
-// rendered, with its raw HTML shown as text and pictures from the web not loaded; pictures open in the picture viewer.
+// rendered, with its raw HTML shown as text and pictures from the web not loaded; JSON is indented and CSV (TSV) shown
+// as a table (fileview.ts), each with its source a click away; pictures open in the picture viewer. The step's review
+// material that is no picture opens here too.
 // It works on the phone and starts no program. The file is data: it is fetched as text and rendered by React, never
 // injected as HTML; the server sandboxes every file it serves (PROTOCOL.md, "Files and commits").
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -10,7 +12,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { fileUrl, HttpError, open } from "../api.ts";
 import { fileHref } from "../hash.ts";
-import { baseName, folderOf, isMarkdown, languageOf, plainLines, relativeTarget, withoutFinalNewline, type Token } from "../fileview.ts";
+import { baseName, delimiterOf, folderOf, formatJson, formattedKind, languageOf, parseTable, plainLines, relativeTarget, withoutFinalNewline, type Token } from "../fileview.ts";
 import { formatNumber, t } from "../i18n.ts";
 import { nav } from "../nav.ts";
 import { EDITOR_CHOICES, editorLink, readEditor } from "../editor.ts";
@@ -67,8 +69,10 @@ export function FileView({ project, root, local, path, line, onClose }: {
 }) {
   const url = fileUrl(project, path);
   const file = useFile(url);
-  const markdown = isMarkdown(path);
-  const [source, setSource] = useState(false);
+  // Markdown rendered, JSON indented, CSV as a table; the source a click away. A line asked for is a line of the
+  // source: JSON and CSV open on their source then (Markdown marks the rendered block the line is in).
+  const formatted = formattedKind(path);
+  const [source, setSource] = useState(() => !!line && formatted !== "markdown");
   const folder = folderOf(path);
 
   if (file.kind === "picture") {
@@ -80,7 +84,13 @@ export function FileView({ project, root, local, path, line, onClose }: {
   const editor = readEditor();
   const inEditor = local && file.kind === "text" && file.real ? editorLink(editor, file.real, line, root) : undefined;
   const editorName = t(EDITOR_CHOICES.find((c) => c.value === editor)!.label);
-  const meta = [folder, where, file.kind === "text" && !where ? t("file.lines", { count }) : undefined].filter(Boolean).join(" · ");
+  // JSON that does not parse (or is indented already) has no other view than its source.
+  const pretty = formatted === "json" && file.kind === "text" ? formatJson(text) : undefined;
+  const switchable = file.kind === "text" && (formatted === "markdown" || formatted === "table" || (pretty !== undefined && pretty !== text));
+  // The line count of what is shown: the indented JSON's when that is what shows.
+  const shownLines = switchable && !source && pretty !== undefined ? pretty.split(LINE_END).length : count;
+  const meta = [folder, where, file.kind === "text" && !where ? t("file.lines", { count: shownLines }) : undefined].filter(Boolean).join(" · ");
+  const shownAs = FORMATTED_LABEL[formatted ?? "markdown"];
 
   return createPortal(
     <div role="dialog" aria-label={t("file.dialog")} className="fixed inset-0 z-[60] flex flex-col bg-canvas pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
@@ -89,9 +99,9 @@ export function FileView({ project, root, local, path, line, onClose }: {
           <div className="truncate font-mono font-semibold text-fg" title={path}>{baseName(path)}</div>
           {meta && <div className="truncate text-xs text-fg-3" title={meta}>{meta}</div>}
         </div>
-        {markdown && file.kind === "text" && (
+        {switchable && (
           <div className="flex shrink-0 gap-0.5 rounded-lg border border-line bg-surface-2 p-0.5" role="group" aria-label={t("file.show")}>
-            {([[false, t("file.rendered")], [true, t("file.source")]] as const).map(([s, label]) => (
+            {([[false, t(shownAs)], [true, t("file.source")]] as const).map(([s, label]) => (
               <button key={label} onClick={() => setSource(s)} aria-pressed={source === s}
                 className={`rounded-md px-3 py-1 text-xs max-lg:min-h-9 ${source === s ? "bg-surface-4 font-semibold text-fg" : "text-fg-2 hover:text-fg"}`}>{label}</button>
             ))}
@@ -117,11 +127,54 @@ export function FileView({ project, root, local, path, line, onClose }: {
       )}
       {file.kind === "pdf" && <Note>{t("file.pdf", { size: sizeText(file.size) })} <a href={url} target="_blank" rel="noreferrer" className="text-accent hover:underline">{t("file.openPdf")}</a></Note>}
       {file.kind === "binary" && <Note>{t("file.binary", { size: sizeText(file.size) })} <a href={url} download className="text-accent hover:underline">{t("file.download")}</a></Note>}
-      {file.kind === "text" && (markdown && !source
-        ? <MarkdownFile project={project} path={path} text={text} line={line} />
-        : <Code path={path} text={text} line={line} />)}
+      {file.kind === "text" && (!switchable || source ? <Code path={path} text={text} line={line} />
+        : formatted === "markdown" ? <MarkdownFile project={project} path={path} text={text} line={line} />
+        : formatted === "table" ? <TableFile path={path} text={text} raw={url} />
+        : <Code path={path} text={pretty!} />)}
     </div>,
     document.body,
+  );
+}
+
+const LINE_END = String.fromCharCode(10);
+
+/** What the formatted view of a file is called beside "Source". */
+const FORMATTED_LABEL = { markdown: "file.rendered", json: "file.formatted", table: "file.table" } as const;
+
+/**
+ * A CSV or TSV file as a table (fileview.ts, parseTable): its first row the header, sticky; each row numbered as in
+ * the table (the header not counted); at most TABLE_LIMIT rows, then how many more there are and the raw file.
+ */
+function TableFile({ path, text, raw }: { path: string; text: string; raw: string }) {
+  const table = useMemo(() => parseTable(text, { delimiter: delimiterOf(path) }), [path, text]);
+  const width = Math.max(table.header.length, ...table.rows.map((r) => r.length));
+  const cells = (r: string[]) => Array.from({ length: width }, (_, i) => r[i] ?? "");
+  const cell = "max-w-[32rem] whitespace-pre-wrap break-words border-b border-r border-line px-2.5 py-1 align-top";
+  return (
+    <div className="scroll-thin min-h-0 flex-1 overflow-auto text-[13px] leading-5 text-fg">
+      <table className="min-w-max border-separate border-spacing-0">
+        <thead>
+          <tr>
+            <th className="sticky left-0 top-0 z-20 border-b border-r border-line bg-surface-2 px-2 py-1" />
+            {cells(table.header).map((h, i) => <th key={i} scope="col" className={`${cell} sticky top-0 z-10 bg-surface-2 text-left font-semibold`}>{h}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {table.rows.map((r, n) => (
+            <tr key={n} className="hover:bg-surface-2/60">
+              <td className="sticky left-0 border-b border-r border-line bg-canvas px-2 py-1 text-right align-top font-mono text-xs text-fg-3">{n + 1}</td>
+              {cells(r).map((c, i) => <td key={i} className={cell}>{c}</td>)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {table.more > 0 && (
+        <p className="px-4 py-3 text-sm text-fg-2">
+          {t("file.moreRows", { count: table.more, shown: table.rows.length })}{" "}
+          <a href={raw} target="_blank" rel="noreferrer" className="text-accent hover:underline">{t("file.raw")}</a>
+        </p>
+      )}
+    </div>
   );
 }
 

@@ -5,6 +5,7 @@ import { latestChecks } from "@nexus/protocol/steps";
 import { act, enc, fileUrl, type QueueView, type SessionView, type StepView } from "../../api.ts";
 import { describe, isImage, type stepPictures } from "../../details.ts";
 import { draftKey } from "../../drafts.ts";
+import { fileHref } from "../../hash.ts";
 import { formatSeconds, rich, t } from "../../i18n.ts";
 import { nav } from "../../nav.ts";
 import { reviewedByOrchestrator } from "@nexus/protocol/status-rules";
@@ -135,7 +136,21 @@ export function GoalAcceptance({ step }: StepProps) {
   );
 }
 
-/** The review material as tiles: a picture opens in the viewer, anything else as a link. */
+/**
+ * Where a review item that is no picture opens: a file in the file viewer, formatted (Markdown rendered, JSON
+ * indented, CSV as a table; FileView.tsx), a plain click staying in the dashboard and Ctrl+click opening it in a new
+ * tab; a web link in a new tab.
+ */
+function materialLink(project: string, r: StepView["review_items"][number]) {
+  if (!r.path) return { href: r.url!, target: "_blank", rel: "noreferrer" };
+  const path = r.path;
+  return {
+    href: fileHref(project, path),
+    onClick: (e: React.MouseEvent) => { if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey) return; e.preventDefault(); nav.file(path); },
+  };
+}
+
+/** The review material as tiles: a picture opens in the picture viewer, a file in the file viewer, a link in a new tab. */
 export function Material({ project, step, pairs }: StepProps & { project: string; pairs: Pairs }) {
   if (!step.review_items.length) return null;
   return (
@@ -156,7 +171,7 @@ export function Material({ project, step, pairs }: StepProps & { project: string
             );
           }
           return (
-            <a key={i} href={href} target="_blank" rel="noreferrer" className={tile}>
+            <a key={i} {...materialLink(project, r)} className={tile}>
               <div className="flex aspect-video items-center justify-center text-2xl text-fg-3">{r.url ? "↗" : "▤"}</div>
               {caption}
             </a>
@@ -307,7 +322,7 @@ export function ReviewPictures({ project, queue, step, pairs, orchestratorAsks }
       {others.length > 0 && (
         <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm">
           {others.map((r, i) => (
-            <a key={i} href={r.path ? fileUrl(project, r.path) : r.url!} target="_blank" rel="noreferrer" className="text-accent hover:underline">
+            <a key={i} {...materialLink(project, r)} className="text-accent hover:underline">
               {r.url ? "↗" : "▤"} {r.label ?? r.path ?? r.url}
             </a>
           ))}
