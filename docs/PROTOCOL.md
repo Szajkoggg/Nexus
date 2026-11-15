@@ -1011,7 +1011,7 @@ nexus review add W3 $TEMP/nexus-review/W3/cliff@1280.png --key cliff-lit@1280 --
 nexus review add W3 $TEMP/nexus-review/W3/lit.png --before $TEMP/nexus-review/W3/unlit.png --label "Lighting"   # older: no key
 nexus help review                              # the standard for review material (nexus help: the topics)
 nexus help summaries|questions|refusals|commits   # the other standards
-nexus check W3 core-tests --ok --summary "548 passed" --duration 190   # how long it ran, in seconds: the metric check:core-tests
+nexus check W3 "npm test" --ok --summary "548 passed" --duration 190   # the name exactly as "Checks for every step" lists it (another counts as not reported); how long it ran, in seconds: the metric check:npm test
 nexus metric record bundle-kb 512 [--step W3]  # worker only: a value of a project metric for the step at work, with HEAD
 nexus metric list                              # the project's metrics (any session)
 nexus stats [--by model|effort|kind|activity|area|size|origin] [--project <id>] [--since <date>]   # see "Statistics"

@@ -149,6 +149,35 @@ test("the queue's level set to 1 hands its steps waiting for the orchestrator to
   } finally { x.stop(); }
 });
 
+for (const [behaviour, missing] of [["checks", false], ["shortchecks", true]] as const) {
+  test(`a closing step that reports the checks ${missing ? "under short names of its own: the review notice lists them as not reported" : "as its opening asks (exact names): the review notice misses none"}`, async () => {
+    const x = setup();
+    process.env.FAKE_CLOSING = behaviour;
+    try {
+      x.orchestrator.say("Hello");
+      await x.until("the session", () => !!x.orchestrator.session());
+      applyDraft(x.store, { id: "C", title: "Coding", coding: true, review_level: 2, checks: ["npm run typecheck", "npm test"],
+        steps: [{ id: "C1", title: "Step 1", goal: "FAKE: checks", acceptance: ["Criterion 1"] }] });
+      approveQueue(x.store, "C");
+      x.engine.start("C");
+      await x.until("C1's review notice", () => x.delivered().some((t) => t.startsWith("[Nexus] Step C1")));
+      assert.ok(!x.delivered().find((t) => t.startsWith("[Nexus] Step C1"))!.includes("not reported this round"), "the worker's step reported them by name");
+      x.orchestrator.say(`FAKE-NEXUS: ["review","accept","C","C1"]`);
+      await x.until("the closing step's review notice", () => x.delivered().some((t) => t.startsWith("[Nexus] Step C.refactor")), LONGER.step);
+      const sent = x.delivered().find((t) => t.startsWith("[Nexus] Step C.refactor"))!;
+      const names = x.step("C", "C.refactor").checks.map((c) => c.name);
+      if (missing) {
+        assert.deepEqual(names, ["typecheck", "test"]);
+        assert.match(sent, /Checks of the queue not reported this round: npm run typecheck; npm test/);
+      } else {
+        assert.deepEqual(names, ["npm run typecheck", "npm test"]);
+        assert.ok(!sent.includes("not reported this round"), sent);
+        assert.match(sent, /Checks reported this round:\n- npm run typecheck: ok, 1 s \(fake run\)\n- npm test: ok/);
+      }
+    } finally { delete process.env.FAKE_CLOSING; x.stop(); }
+  });
+}
+
 test("with notices off the step goes straight to the user, and the orchestrator hears nothing of it", async () => {
   const x = setup();
   try {
