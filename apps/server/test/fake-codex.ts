@@ -2,7 +2,9 @@
 // uses and sends the notifications Nexus reads. What it does with a message is in fake-behaviour.ts; a turn/steer
 // is recorded with priority "next", like Claude's mid-turn messages.
 import { randomUUID } from "node:crypto";
-import { PARTIAL, actOnRead, contextTokens, interrupt, record, recordArgs, respond, type Fake, type FakeFailure } from "./fake-behaviour.ts";
+import {
+  PARTIAL, actOnRead, contextTokens, fakeSaved, interrupt, record, recordArgs, respond, saveFakeConversation, type Fake, type FakeFailure,
+} from "./fake-behaviour.ts";
 
 const out = (m: unknown) => process.stdout.write(JSON.stringify(m) + "\n");
 const notify = (method: string, params: unknown) => out({ method, params });
@@ -137,10 +139,21 @@ function refused(turn: string): void {
   notify("item/completed", { threadId, turnId: turn, item: { type: "fileChange", id: "item-patch", status: "declined", changes: [{ path: "C:/Windows/hosts", kind: { type: "update" }, diff: "" }] } });
 }
 
+// Its threads, as Codex 0.167.2 keeps them (probed 2026-11-15): thread/start saves nothing; the thread's rollout is
+// written when its first turn starts (save); thread/resume of a thread never saved fails with "no rollout found for
+// thread id <id>" (JSON-RPC error -32600). FAKE_TURN_START_MS: a turn/start (or compaction) is taken only after that
+// long, so a test can end the process after thread/start, before the thread was saved.
+const save = () => saveFakeConversation(threadId, "codex");
 let buffer = "";
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (d: string) => {
   buffer += d;
+  const hold = Number(process.env.FAKE_TURN_START_MS ?? 0);
+  if (hold && /"method":"(turn\/start|thread\/compact\/start)"/.test(buffer)) { const rest = buffer; buffer = ""; setTimeout(() => take(rest), hold); return; }
+  take("");
+});
+function take(more: string): void {
+  buffer += more;
   let i: number;
   while ((i = buffer.indexOf("\n")) >= 0) {
     const line = buffer.slice(0, i); buffer = buffer.slice(i + 1);
@@ -156,7 +169,10 @@ process.stdin.on("data", (d: string) => {
     switch (m.method) {
       case "initialize": reply({ userAgent: "fake-codex" }); break;
       case "thread/start": recordArgs({ method: m.method, model: m.params.model, approvalsReviewer: m.params.approvalsReviewer ?? null, approvalPolicy: m.params.approvalPolicy, sandbox: m.params.sandbox, cwd: m.params.cwd, writableRoots: m.params.config?.["sandbox_workspace_write.writable_roots"] ?? null, config: m.params.config ?? null, instructions: m.params.developerInstructions ?? null }); threadId = randomUUID(); reply({ thread: { id: threadId }, model: "fake-codex-model", reasoningEffort: "medium" }); break;
-      case "thread/resume": recordArgs({ method: m.method, threadId: m.params.threadId, config: m.params.config ?? null, instructions: m.params.developerInstructions ?? null }); threadId = m.params.threadId; reply({ thread: { id: threadId }, model: "fake-codex-model" }); break;
+      case "thread/resume":
+        recordArgs({ method: m.method, threadId: m.params.threadId, config: m.params.config ?? null, instructions: m.params.developerInstructions ?? null });
+        if (!fakeSaved(m.params.threadId, "codex")) { out({ id: m.id, error: { code: -32600, message: `no rollout found for thread id ${m.params.threadId}` } }); break; }
+        threadId = m.params.threadId; reply({ thread: { id: threadId }, model: "fake-codex-model" }); break;
       // The user's MCP servers, as a real Codex reads them from its config: FAKE_CODEX_MCP names them (comma-separated).
       case "config/read":
         recordArgs({ method: m.method, cwd: m.params.cwd ?? null });
@@ -169,6 +185,7 @@ process.stdin.on("data", (d: string) => {
         recordArgs({ method: m.method, effort: m.params.effort ?? null, model: m.params.model ?? null, writableRoots: m.params.sandboxPolicy?.writableRoots ?? null, networkAccess: m.params.sandboxPolicy?.networkAccess ?? null, images: images() });        const t = text();
         record(t, null, !!turnId);
         if (turnId) { fail("a turn is already running"); break; }
+        save();
         turnId = randomUUID();
         reply({ turn: { id: turnId, status: "inProgress", items: [] } });
         void runTurn(turnId, t);
@@ -185,6 +202,7 @@ process.stdin.on("data", (d: string) => {
       case "thread/compact/start": {
         record("[compact]", null, !!turnId);
         if (turnId) { fail("a turn is already running"); break; }
+        save();
         const id = (turnId = randomUUID());
         reply({});
         const item = { type: "contextCompaction", id: randomUUID() };
@@ -198,6 +216,6 @@ process.stdin.on("data", (d: string) => {
       default: fail(`fake-codex does not implement ${m.method}`);
     }
   }
-});
+}
 // FAKE_EXIT_DELAY_MS: the process lingers that long after its input closed.
 process.stdin.on("end", () => setTimeout(() => process.exit(0), Number(process.env.FAKE_EXIT_DELAY_MS ?? 0)));

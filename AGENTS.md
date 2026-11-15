@@ -54,6 +54,8 @@ Nexus is developed with Nexus. The agents working on this repository are run by 
   (from the step's base commit) the befores, each on its own development instance with the fake runtimes; headless
   Edge by hand only for a view it cannot take. Widths: 492 px (the narrowest window), 390 px in an iframe for a
   phone, 1440 px for a desktop. Register them as `nexus help review` says (keys and roles).
+- **Layout faults** (lines through boxes, overlapping boxes, text cut short) are checked on designs and pictures, not
+  left to be found in use: `node scripts/layout-faults.ts <mockup file | dev instance URL>` (README.md).
 
 ## Refactoring
 

@@ -55,7 +55,7 @@
 // in so far ("history: a | b"): the turns' messages and those read inside a turn (Claude's `next`, Codex's steer).
 // Claude's fake keeps the conversations it saved (fakeSaved below) and refuses, as Claude Code does, to resume one it
 // never saved or to start a saved one anew; FAKE_START_MS: it reads its input only after that long (Claude Code's
-// start-up), so a test can end it before it saved anything.
+// start-up), so a test can end it before it saved anything; FAKE_REFUSE: it refuses every start, each in its way.
 import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -187,21 +187,22 @@ export function recordArgs(what: Record<string, unknown>): void {
  * folder (beside FAKE_LOG, else in NEXUS_HOME, else the system's). Claude Code 2.1.323 saves a session's
  * conversation when it reads the session's first message, not at its start nor at the turn's end (probed
  * 2026-11-15, DESIGN.md, "When Claude Code saves a conversation"); a test may mark one saved itself (a session that
- * ran before the test's files).
+ * ran before the test's files). Codex's fake keeps its threads the same way (fake-codex-saved.txt): Codex 0.167.2
+ * saves a thread (its rollout file) when the thread's first turn starts, not at thread/start (probed 2026-11-15).
  */
-function fakeSavedFile(): string {
+function fakeSavedFile(runtime: "claude" | "codex"): string {
   const dir = process.env.FAKE_LOG ? dirname(process.env.FAKE_LOG) : process.env.NEXUS_HOME ?? tmpdir();
   mkdirSync(dir, { recursive: true });
-  return join(dir, "fake-claude-saved.txt");
+  return join(dir, `fake-${runtime}-saved.txt`);
 }
 
-export function fakeSaved(id: string): boolean {
-  const f = fakeSavedFile();
+export function fakeSaved(id: string, runtime: "claude" | "codex" = "claude"): boolean {
+  const f = fakeSavedFile(runtime);
   return existsSync(f) && readFileSync(f, "utf8").split(/\r?\n/).includes(id);
 }
 
-export function saveFakeConversation(id: string): void {
-  if (!fakeSaved(id)) appendFileSync(fakeSavedFile(), `${id}\n`);
+export function saveFakeConversation(id: string, runtime: "claude" | "codex" = "claude"): void {
+  if (!fakeSaved(id, runtime)) appendFileSync(fakeSavedFile(runtime), `${id}\n`);
 }
 
 /** The integration step stopped on a conflict (this turn): it writes no report. */
