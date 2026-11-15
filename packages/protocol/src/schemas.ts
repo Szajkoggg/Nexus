@@ -1034,6 +1034,12 @@ export const RuntimeFile = z.object({
   context_window: z.number().optional(),
   turns: z.number().int().default(0),
   cost_usd: z.number().optional(),
+  /**
+   * A chat turn (the orchestrator's, a thinking partner's) the server cut off to hand over to its successor after an
+   * update: what the turn answered (`asked`: the user's words, or a notice), and whether it was a conversation's
+   * hand-over to the orchestrator. The next server goes on with it in the same session, quoting `asked`, and drops it.
+   */
+  interrupted: z.object({ at: Time, asked: z.array(z.string()), handoff: z.boolean().optional() }).optional(),
   updated_at: Time,
 });
 export type RuntimeFile = z.infer<typeof RuntimeFile>;

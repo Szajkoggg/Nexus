@@ -31,7 +31,7 @@ import { Conversations } from "./conversations.ts";
 import { listModels } from "./models.ts";
 import { readDeployChanges, readDeploySettings, writeDeploySettings } from "./deploy.ts";
 import { Standby, refuseHandoverDir, smokeCheck, takeHandoverEnv } from "./handover.ts";
-import { Lifecycle, ROOT, version } from "./lifecycle.ts";
+import { Lifecycle, ROOT, projectPart, version } from "./lifecycle.ts";
 import { DeployPlanner, PlanError, planTime } from "./deploy-plan.ts";
 import { MAX_UPLOAD_BODY, UploadError, saveUpload } from "./uploads.ts";
 import { COMMIT_HASH, commitDetail, fileResponse, locate } from "./files.ts";
@@ -222,14 +222,7 @@ function allowedRoots(e: Entry, state: ProjectState): string[] {
 /** The app's context: a project's routes find its entry once (the lookup below) and read it with c.get("entry"). */
 type Env = { Bindings: HttpBindings; Variables: { entry: Entry } };
 const app = new Hono<Env>();
-const lifecycle = new Lifecycle(() => [...projects.values()].map((e) => ({
-  id: e.id,
-  idle: () => e.engine.idle() && e.orchestrator.idle() && e.conversations.idle(),
-  drain: (now: boolean) => { e.conversations.draining = true; return e.engine.drainForUpdate(now); },
-  cancel: () => { e.conversations.draining = false; e.engine.cancelDrain(); },
-  hurry: () => e.engine.hurryDrain(),
-  shutdown: () => { e.engine.shutdown(); e.orchestrator.shutdown(); e.conversations.shutdown(); e.merger.shutdown(); },
-})), () => broadcast({ type: "server" }), {
+const lifecycle = new Lifecycle(() => [...projects.values()].map(projectPart), () => broadcast({ type: "server" }), {
   release, reacquire,
   notify: (text) => void push({ title: "Nexus: update failed", body: text.slice(0, 180), url: "/?settings", tag: "nexus-update" }),
   // Settled (up and pushed, failed, cancelled): what was held while it drained, and its outcome, go out now.
@@ -378,12 +371,11 @@ app.get("/api/projects/:id/commits/:hash", (c) => {
 
 // ---------------------------------------------------------------- writes (the user's actions)
 
-// While an update drains, nothing new starts: no run, no orchestrator turn.
+// While an update drains, no run starts or goes on. The chats stay open (src/lifecycle.ts).
 app.use("/api/projects/:id/*", async (c, next) => {
   if (c.req.method === "POST" && lifecycle.busy) {
-    const orchestrator = c.req.path.endsWith("/orchestrator/messages");
     const action = c.req.path.endsWith("/run") ? ((await c.req.json().catch(() => ({}))) as { action?: string }).action : undefined;
-    if (orchestrator || action === "start" || action === "resume" || c.req.path.endsWith("/continue")) {
+    if (action === "start" || action === "resume" || c.req.path.endsWith("/continue")) {
       return c.json({ error: "Nexus is updating; try again in a moment" }, 409);
     }
   }
@@ -897,6 +889,8 @@ function activate(): void {
   // up while the predecessor drained or restarted (a run finished, an approval, a question) would wait for the next
   // write in that project. This tells each orchestrator now, and starts its turn.
   for (const id of projects.keys()) changed(id);
+  // Chat turns an update's hand-over cut off (its predecessor's, or this server's own before a failed one) go on.
+  for (const e of projects.values()) { e.orchestrator.resumeCutOff(); e.conversations.resumeCutOff(); }
   armAway(); // an away mode ends at its time also across restarts
   planner.recover(); // a planned deploy stays across restarts
 }
@@ -929,7 +923,8 @@ async function release(): Promise<void> {
   watchers.clear();
   await Promise.all(closing);
   planner.shutdown(); // its timers write the plan file: no longer this server's
-  for (const e of projects.values()) { e.engine.shutdown(); e.orchestrator.shutdown(); e.conversations.shutdown(); e.merger.shutdown(); }
+  // Chat turns still running are cut off first and recorded: the successor goes on with them (src/lifecycle.ts).
+  for (const e of projects.values()) projectPart(e).shutdown();
   // An agent's exit is written to its runtime file: wait for those last writes.
   const alive = () => [...projects.values()].some((e) => e.engine.alive() || e.orchestrator.alive() || e.conversations.alive());
   for (const until = Date.now() + 10_000; alive() && Date.now() < until;) await new Promise((r) => setTimeout(r, 100));

@@ -5,6 +5,11 @@ import { ActionError, ProjectStore, searchChat, setPin, type NumberedEntry, type
 
 /** What a chat shows where the user stopped its agent's turn (a Nexus notice; the stop button, queue CH4). */
 export const STOPPED = "Stopped.";
+/**
+ * What a chat shows where an update's restart cut off its agent's turn, which goes on in the same session after the
+ * restart (a Nexus notice, written by the next server as it goes on).
+ */
+export const RESTARTED = "Nexus restarted while answering; it goes on.";
 
 /** Every entry of a session's chat, with its line. */
 function numberedChat(store: ProjectStore, sessionId: string): NumberedEntry[] {

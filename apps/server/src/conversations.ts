@@ -17,8 +17,8 @@ import {
 import { findStep, sinceThen, stepSeed } from "./step-seed.ts";
 import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Hosted, type Launch } from "./agent-host.ts";
 import type { Orchestrator } from "./orchestrator.ts";
-import { partnerBriefing } from "./prompts.ts";
-import { STOPPED, chatView } from "./chats.ts";
+import { partnerBriefing, restartedNotice } from "./prompts.ts";
+import { RESTARTED, STOPPED, chatView } from "./chats.ts";
 import { guardSettings, webFetchDenyRules } from "./web-guard.ts";
 
 const READ = ["Read", "Grep", "Glob", "Bash(nexus status:*)", "Bash(git log:*)", "Bash(git status:*)", "Bash(git diff:*)", "Bash(git show:*)"];
@@ -57,8 +57,6 @@ export class Conversations {
   private readonly orchestrator: Orchestrator;
   private readonly changed: () => void;
   private readonly host: AgentHost<Extra>;
-  /** Set while Nexus drains for an update: no new turn starts. */
-  draining = false;
   /** Set by shutdown: no idle timer is armed after it. */
   private stopped = false;
 
@@ -145,10 +143,9 @@ export class Conversations {
 
   say(id: string, text: unknown): void {
     if (typeof text !== "string" || !text.trim()) throw new ActionError("the message is empty");
-    if (this.draining) throw new ActionError("Nexus is updating; send it after the restart", 409);
     const s = this.session(id);
     this.store.appendChat(id, { at: now(), from: "user", text: text.trim() });
-    this.deliver(s, this.withStepContext(s, text.trim()));
+    this.deliver(s, this.withStepContext(s, text.trim()), [text.trim()]);
   }
 
   /**
@@ -179,7 +176,6 @@ ${text}`;
 
   /** The partner summarizes the conversation; the summary then goes to the orchestrator's chat. */
   handoff(id: string): void {
-    if (this.draining) throw new ActionError("Nexus is updating; try after the restart", 409);
     const s = this.session(id);
     this.store.appendChat(id, { at: now(), from: "nexus", text: "Summarizing this conversation for the orchestrator…" });
     const l = this.ensure(s);
@@ -188,11 +184,40 @@ ${text}`;
     // (queue FU4). Idle, it starts the turn at once.
     clearTimeout(l.timer);
     if (l.proc.state === "working") l.handoffNext = true; else l.handoff = true;
-    l.proc.send(`[Nexus] The user hands this conversation to the orchestrator, who plans and runs work in queues. Write a summary for it, in ${languageName(this.store.readProject().languages.working)}: what was decided (only what the user decided), the open questions, the work you propose (as steps with what each should achieve), and the files where the notes are. ${HANDOFF_SCOPE} Reply with the summary only.`);
+    this.host.send(l, `[Nexus] The user hands this conversation to the orchestrator, who plans and runs work in queues. Write a summary for it, in ${languageName(this.store.readProject().languages.working)}: what was decided (only what the user decided), the open questions, the work you propose (as steps with what each should achieve), and the files where the notes are. ${HANDOFF_SCOPE} Reply with the summary only.`);
     this.changed();
   }
 
   idle(): boolean { return this.host.idle(); }
+
+  /**
+   * Before the hand-over to the next server (an update): the partners' turns still running are cut off, and each
+   * session's record keeps what its turn answered, and whether it was the hand-over's (AgentHost.cutOff). The next
+   * server goes on with them (resumeCutOff).
+   */
+  cutOff(): void { this.host.cutOff((l) => (l.handoff || l.handoffNext ? { handoff: true } : {})); }
+
+  /**
+   * After a restart that cut off partners' turns (cutOff): each conversation goes on in its session, told what it was
+   * answering (a hand-over's turn is the hand-over's again); its chat says so in a line of its own.
+   */
+  resumeCutOff(): void {
+    for (const s of this.list()) {
+      const cut = this.host.interruption(s.id);
+      if (!cut) continue;
+      try {
+        this.store.appendChat(s.id, { at: now(), from: "nexus", text: RESTARTED });
+        const l = this.ensure(s);
+        clearTimeout(l.timer);
+        if (cut.handoff) l.handoff = true;
+        this.host.send(l, restartedNotice(cut.asked), l.proc.state === "working" ? "next" : undefined, cut.asked);
+      } catch (e) {
+        this.store.appendChat(s.id, { at: now(), from: "nexus", kind: "error", text: `Could not go on after the restart: ${(e as Error).message}` });
+      }
+      this.host.resumed(s.id);
+    }
+    this.changed();
+  }
 
   shutdown(): void { this.stopped = true; for (const l of this.host.all()) clearTimeout(l.timer); this.host.shutdown(); }
 
@@ -208,10 +233,11 @@ ${text}`;
     return s;
   }
 
-  private deliver(s: SessionFile, text: string): void {
+  /** `quote`: what the turn answers, should a restart cut it off (the user's words, without the step's context). */
+  private deliver(s: SessionFile, text: string, quote: readonly string[]): void {
     const l = this.ensure(s);
     clearTimeout(l.timer);
-    l.proc.send(text, l.proc.state === "working" ? "next" : undefined);
+    this.host.send(l, text, l.proc.state === "working" ? "next" : undefined, quote);
     this.changed();
   }
 

@@ -10,13 +10,13 @@ import type { AgentProcess } from "./agent.ts";
 import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Launch } from "./agent-host.ts";
 import type { Engine } from "./engine.ts";
 import { orchestratorAgentsFile } from "./helpers.ts";
-import { STOPPED, chatView } from "./chats.ts";
+import { RESTARTED, STOPPED, chatView } from "./chats.ts";
 import type { UpdateNotice } from "./lifecycle.ts";
 import { describeDeployChanges, type DeployChanges } from "./deploy.ts";
 import type { PlanNotice } from "./deploy-plan.ts";
 import {
   acceptedNoteNotice, approvalNotice, discardNotice, liftNotice, mergedNotice, mergeWaitNotice, missedStartNotice, noticeText, orchestratorBriefing, pausedNotice,
-  questionNotice, rejectionNotice, fixAskedNotice, levelToUserNotice, reviewNotice, awayOnNotice, awayEndNotice, awayStuckNotice, planDecisionNotice, planHeldNotice, runEndNotice, stepNoteNotice, tagDecisionNotice, fallbackNotice, metricNotice, userMessage, withdrawalNotice,
+  questionNotice, rejectionNotice, restartedNotice, fixAskedNotice, levelToUserNotice, reviewNotice, awayOnNotice, awayEndNotice, awayStuckNotice, planDecisionNotice, planHeldNotice, runEndNotice, stepNoteNotice, tagDecisionNotice, fallbackNotice, metricNotice, userMessage, withdrawalNotice,
 } from "./prompts.ts";
 
 // Agent (formerly Task) lets it call subagents; they run within these same read-only permissions.
@@ -93,7 +93,7 @@ export class Orchestrator {
     // Changes for agents held while notices are off go in with this turn (and count as told only now).
     const held = this.pendingChanges(s);
     if (held.length) this.markTold(s, held.map((d) => d.key));
-    this.deliver(userMessage(text.trim(), held.length ? describeDeployChanges(held) : undefined));
+    this.deliver(userMessage(text.trim(), held.length ? describeDeployChanges(held) : undefined), [text.trim()]);
   }
 
   /** Deploys whose changes for agents this session has not been told; none from before it started. */
@@ -220,6 +220,26 @@ ${n.text}` });
     return out.filter((n) => !told.has(n.key));
   }
 
+  /**
+   * Before the hand-over to the next server (an update): a turn still running is cut off, and its session's record
+   * keeps what it answered (AgentHost.cutOff). The next server goes on with it (resumeCutOff).
+   */
+  cutOff(): void { this.host.cutOff(); }
+
+  /**
+   * After a restart that cut off its turn (cutOff): the same session goes on, told what it was answering; the chat
+   * says so in a line of its own.
+   */
+  resumeCutOff(): void {
+    const s = this.session();
+    const cut = s && this.host.interruption(s.id);
+    if (!s || !cut) return;
+    this.store.appendChat(s.id, { at: now(), from: "nexus", text: RESTARTED });
+    this.ensure();
+    this.deliver(restartedNotice(cut.asked), cut.asked);
+    this.host.resumed(s.id);
+  }
+
   /** For good: an orchestrator shut down starts no process again (a late change, an agent's exit, may still come in). */
   shutdown(): void { this.stopped = true; clearTimeout(this.heldTimer); this.host.shutdown(); }
 
@@ -286,9 +306,13 @@ ${n.text}` });
     }));
   }
 
-  private deliver(text: string): void {
-    const proc = this.proc!;
-    proc.send(text, proc.state === "working" ? "next" : undefined);
+  /**
+   * Sends to its process: into the running turn, else as a turn of its own. `quote`: what the turn answers, should a
+   * restart cut it off (by default the text itself; a cut-off turn's own quotes when it goes on, so they never nest).
+   */
+  private deliver(text: string, quote: readonly string[] = [text]): void {
+    const l = this.host.all()[0]!;
+    this.host.send(l, text, l.proc.state === "working" ? "next" : undefined, quote);
     this.changed();
   }
 

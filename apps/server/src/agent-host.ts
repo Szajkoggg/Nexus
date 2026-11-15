@@ -4,9 +4,9 @@
 // process so that the session's next message starts a new one. What a role does with its agent's texts, turns and
 // exits stays with the role: it gives its handlers when it starts a process.
 import {
-  appendTurn, now, readUsage, stepDefs, stepTags, writeUsage, type ProjectStore, type SessionFile, type TokenCounts, type TurnRecord,
+  appendTurn, now, readUsage, stepDefs, stepTags, writeUsage, type ProjectStore, type RuntimeFile, type SessionFile, type TokenCounts, type TurnRecord,
 } from "@nexus/protocol";
-import type { ActivityItem, AgentEvents, AgentProcess, RefusalItem, StreamFacts, TurnTokens } from "./agent.ts";
+import type { ActivityItem, AgentEvents, AgentProcess, Priority, RefusalItem, StreamFacts, TurnTokens } from "./agent.ts";
 import { ClaudeSession, type ClaudeOptions } from "./claude.ts";
 import { CodexSession, type CodexOptions } from "./codex.ts";
 
@@ -86,6 +86,11 @@ export class AgentHost<E extends object = object> {
   private readonly ended = new WeakSet<AgentProcess>();
   /** Processes to end when their running turn ends. */
   private readonly afterTurn = new WeakSet<AgentProcess>();
+  /**
+   * What each process's turns answer (sent through `send`): the texts sent into the running turn (or the one they
+   * started), and those waiting as the turn after it. For a restart that cuts the turn off (cutOff).
+   */
+  private readonly asked = new WeakMap<AgentProcess, { turn: string[]; next: string[] }>();
 
   constructor(store: ProjectStore, record: RoleRecord, options: AgentHostOptions = {}) {
     this.store = store;
@@ -151,6 +156,8 @@ export class AgentHost<E extends object = object> {
       this.facts(session.id, f); on.facts?.(f);
     });
     proc.on("turnEnd", (end) => {
+      const a = this.asked.get(proc);
+      if (a) this.asked.set(proc, { turn: a.next, next: [] });
       begin(false);
       this.recordTurn(session, open!, model, end);
       open = undefined;
@@ -212,6 +219,45 @@ export class AgentHost<E extends object = object> {
     this.ended.add(l.proc);
     l.proc.kill();
     this.live.delete(session);
+  }
+
+  /**
+   * Sends `text` to the hosted process as the role's own `send` would (no priority: a new turn, after the running one;
+   * `next`: into the running turn), remembering `quote` (by default the text) as what that turn answers: what a
+   * restart that cuts the turn off quotes (cutOff). Empty: the turn answers nothing worth quoting.
+   */
+  send(l: Hosted<E>, text: string, priority?: Priority, quote: readonly string[] = [text]): void {
+    const a = this.asked.get(l.proc) ?? { turn: [], next: [] };
+    if (l.proc.state === "working" && (!priority || priority === "later")) a.next.push(...quote); else a.turn.push(...quote);
+    this.asked.set(l.proc, a);
+    l.proc.send(text, priority);
+  }
+
+  /**
+   * Before the hand-over to the next server (an update): every process in the middle of a turn has the turn stopped,
+   * and its session's runtime record keeps what the turn answered (`interrupted`), for the next server to go on with
+   * (interruption, resumed). `extra` adds what the role keeps of the turn. Returns the sessions cut off.
+   */
+  cutOff(extra: (l: Hosted<E>) => { handoff?: boolean } = () => ({})): string[] {
+    const cut: string[] = [];
+    for (const l of this.live.values()) {
+      if (l.proc.state !== "working") continue;
+      const a = this.asked.get(l.proc);
+      this.write(l.session, { interrupted: { at: now(), asked: [...(a?.turn ?? []), ...(a?.next ?? [])], ...extra(l) } });
+      l.proc.stop();
+      cut.push(l.session);
+    }
+    return cut;
+  }
+
+  /** The session's turn a hand-over cut off (cutOff), not gone on with yet. */
+  interruption(session: string): RuntimeFile["interrupted"] {
+    return this.store.readRuntime(session)?.interrupted;
+  }
+
+  /** The session goes on with the turn a hand-over cut off: its record drops it. */
+  resumed(session: string): void {
+    if (this.interruption(session)) this.write(session, { interrupted: undefined });
   }
 
   /** Kills every process (the server stops). */

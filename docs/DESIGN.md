@@ -724,6 +724,21 @@ the old server goes only once the new one has shown it works.
 4. If the successor does not come up, the predecessor rolls back. That is when it gets no signal within 60 seconds
    (a constant), finds `failed.json`, or sees the successor exit early. See "Rolling back" below.
 
+**The chats during an update** (decided 2026-11-15, queue OP). Before, the drain waited for every agent's turn and
+refused the user's chat messages, so a deploy that waited an hour for a step closed the orchestrator's chat and the
+conversations for that hour, with nothing gained: a chat turn starts no work, and a run start stays refused anyway. Now
+only the workers' turns hold the drain (`projectPart` in `src/lifecycle.ts`, the one wiring main.ts and the tests
+share). A chat turn still running when the drain ends is not waited for either: at the hand-over it is cut off. Waiting
+for it would let a long answer, or a chatty user, hold a deploy indefinitely, and cutting it off loses little, since the
+turn can be asked again. So the release first cuts off (interrupts) those turns, after it stopped taking requests, so no
+new turn slips in between, and writes what each answered into its session's `runtime.json` (`interrupted`). The server
+already owns that file, and every server, once active, reads it: a successor, and also a predecessor that rolled back,
+which goes on the same way. What a turn answers is tracked as messages are sent (`AgentHost.send`): the texts sent into
+the running turn, and those queued as the next one, by the roles' own quote, the user's words rather than a message
+wrapped with a step's context or deploy changes. The quote of a resumed turn is the original one, so a second restart
+does not nest them. The agent is asked to check what the cut-off turn had already done, because it may have written a
+draft or run a command before it was stopped.
+
 **Rolling back.** The predecessor's process still runs the old code from memory. Only what is read from disk has
 moved: the worktree, which the next start runs, and `node_modules` and the built dashboard, which this server serves.
 So rolling back means four things:

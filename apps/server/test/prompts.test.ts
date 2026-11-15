@@ -363,6 +363,16 @@ test("the orchestrator's texts: briefing, helpers and notices match the golden f
   });
   change();
 
+  tr.section("a turn an update's hand-over cut off goes on after the restart, quoting the user's message it answered");
+  later();
+  const cut = tr.stands.at(-1)!;
+  cut.emit("turnEnd", { ok: true, text: "" }); // its earlier turns are over
+  cut.state = "working";
+  orchestrator.say("Plan the layout.\nTwo columns, please.");
+  orchestrator.cutOff();
+  cut.state = "idle";
+  orchestrator.resumeCutOff();
+
   tr.section("the orchestrator's briefing (appended to the system prompt)");
   const options = tr.stands[0]!.launch.options as { appendSystemPrompt: string; agentsFile: string };
   tr.add(options.appendSystemPrompt);

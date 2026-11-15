@@ -405,6 +405,10 @@ the live worktree back, rebuilds and takes the port again. The settings panel th
 reason and "rolled back to <commit>", and your devices get a notification. There is nothing to undo by hand: fix the
 commit and update again. After a restart the server writes its log to `%APPDATA%\Nexus\server.log`.
 
+While an update waits, you can go on talking with the orchestrator and the thinking partners. An answer still being
+written when Nexus restarts is cut off; after the restart the chat says "Nexus restarted while answering; it goes on",
+and the same conversation answers your message again.
+
 A deploy can also wait. Ask the orchestrator to deploy after a step ("deploy once PD3 is in"), after a whole queue,
 or at a time ("deploy at 6:00, and by 7:00 at the latest"), or plan it yourself: `nexus server update --after
 <queue>[/<step>]`, or `--at <HH:MM|"YYYY-MM-DD HH:MM"> [--deadline <time>]`. One plan at a time.

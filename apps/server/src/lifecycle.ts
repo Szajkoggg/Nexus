@@ -2,10 +2,15 @@
 //
 // The live instance runs from its own git worktree on a detached HEAD (scripts/live.ps1 creates it); development
 // happens in another checkout. An update first lets every running step finish (or interrupts it with `now`): queues
-// stop at their step's end, marked to be resumed. When no agent is in a turn, the live worktree moves to the new
+// stop at their step's end, marked to be resumed. When no worker is in a turn, the live worktree moves to the new
 // commit, installs what changed, builds the dashboard, and the server hands over to its successor (src/handover.ts):
 // it stops every agent and its own writing, frees the port, starts the successor and exits once the successor has
 // passed its smoke check. The successor then resumes the marked queues.
+//
+// The chats stay open meanwhile (decided 2026-11-15, queue OP): the user's messages to the orchestrator and to the
+// thinking partners go on during the drain, which does not wait for their turns. A chat turn still running at the
+// hand-over is cut off and recorded in its session's runtime record; the successor goes on with it in the same
+// session, quoting what it answered (Orchestrator.resumeCutOff, Conversations.resumeCutOff).
 //
 // When it goes wrong, the old version goes on. Before the hand-over (a failed checkout, install or build), the live
 // worktree is put back and the held queues resume at once. When the successor does not come up (it crashes, fails its
@@ -21,14 +26,45 @@ import { promisify } from "node:util";
 import { newId, now } from "@nexus/protocol";
 import { HANDOVER_TIMEOUT_MS, handOver, isAlive, type PredecessorFile, type ReleasedFile, type UpdateAsker } from "./handover.ts";
 import { collectAgentChanges, pushDeployed, recordDeployChanges, type GitRunner, type PushResult } from "./deploy.ts";
+import type { Conversations } from "./conversations.ts";
+import type { Engine } from "./engine.ts";
+import type { Orchestrator } from "./orchestrator.ts";
 
 const run = promisify(execFile);
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 
+/** A project's part in an update (projectPart). */
 export interface Drainable {
-  id: string; idle(): boolean; drain(now: boolean): string[]; cancel(): void; shutdown(): void;
+  id: string;
+  /** No worker of the project is in a turn: the update need not wait for it. */
+  idle(): boolean;
+  /** Holds the running queues (at their step's end, or at once with `now`); returns them. */
+  drain(now: boolean): string[];
+  /** The update did not happen: the held queues go on. */
+  cancel(): void;
+  /** For the hand-over: chat turns still running are cut off and recorded (they go on after it); every agent stops. */
+  shutdown(): void;
   /** The drain goes on as with `now`: running steps are interrupted (Lifecycle.hurry). */
   hurry?(): void;
+}
+
+/**
+ * A project's part in an update, as the server wires it (main.ts). Only its workers' steps hold the update; its chats,
+ * the orchestrator's and the thinking partners', stay open while it waits, and a chat turn still running at the
+ * hand-over is cut off first, to go on in the same session after it.
+ */
+export function projectPart(e: { id: string; engine: Engine; orchestrator: Orchestrator; conversations: Conversations; merger: { shutdown(): void } }): Drainable {
+  return {
+    id: e.id,
+    idle: () => e.engine.idle(),
+    drain: (now) => e.engine.drainForUpdate(now),
+    cancel: () => e.engine.cancelDrain(),
+    hurry: () => e.engine.hurryDrain(),
+    shutdown: () => {
+      e.orchestrator.cutOff(); e.conversations.cutOff();
+      e.engine.shutdown(); e.orchestrator.shutdown(); e.conversations.shutdown(); e.merger.shutdown();
+    },
+  };
 }
 
 export interface UpdateStatus {
@@ -39,7 +75,7 @@ export interface UpdateStatus {
   ref?: string;
   /** Queues stopped for the update, "project/queue". */
   held: string[];
-  /** Projects with an agent still in a turn. */
+  /** Projects with a worker still in a turn (the chats' turns hold no update). */
   waiting: string[];
   log: string[];
   error?: string;
