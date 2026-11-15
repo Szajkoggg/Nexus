@@ -7,7 +7,7 @@
 // dragging it onto another (onto "Next": to the front). The orchestrator's proposals have Accept and Decline on the
 // queue (and in the waiting list, PlanRow); a dependency the user set can be handed back to the orchestrator (↩).
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { act, enc, useQuery, type AttentionItem, type QueueView, type Version } from "../api.ts";
+import { act, enc, useAction, useQuery, type AttentionItem, type QueueView, type Version } from "../api.ts";
 import type { EstimatesResponse } from "@nexus/protocol";
 import { t } from "../i18n.ts";
 import { estimateWords, moveTargets, planLayout, planList, type PlanLayout, type PlanNode, type Why } from "../plan.ts";
@@ -25,14 +25,8 @@ const listText = (ids: readonly string[]) => (ids.length ? t("plan.after", { que
 
 /** The user's actions on the plan: each a POST to …/queues/:q/plan. */
 function usePlanActions(project: string, onChanged: () => void) {
-  const [error, setError] = useState<string>();
-  const [busy, setBusy] = useState(false);
-  const post = async (queue: string, body: Record<string, unknown>) => {
-    setBusy(true); setError(undefined);
-    try { await act(project, "POST", `/queues/${enc(queue)}/plan`, body); onChanged(); }
-    catch (e) { setError((e as Error).message); }
-    finally { setBusy(false); }
-  };
+  const { busy, error, run } = useAction();
+  const post = (queue: string, body: Record<string, unknown>) => run(() => act(project, "POST", `/queues/${enc(queue)}/plan`, body), onChanged);
   return {
     error, busy,
     move: (queue: string, after: string | null) => post(queue, { action: "move", after }),

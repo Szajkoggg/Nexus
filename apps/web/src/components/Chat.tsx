@@ -3,7 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useLayoutEffect, use
 import type { ChatEntry, RuntimeFile, SessionFile } from "@nexus/protocol";
 import type { NumberedEntry } from "@nexus/protocol/chat";
 import { PinButton, PinsBar, SearchBar, SearchButton, StopButton, type PinView, type SearchState } from "./ChatTools.tsx";
-import { act, enc, useQuery, type Version } from "../api.ts";
+import { act, actResult, enc, projectUrl, request, useAction, useQuery, type Version } from "../api.ts";
 import { Button, Clock, Composer, Menu, TimeAgo, type MenuEntry } from "./ui.tsx";
 import { CopyButton, ReplyTools } from "./MessageTools.tsx";
 import { messageSource, replyTools } from "../messageTools.ts";
@@ -21,6 +21,24 @@ import { SentPictures, filesOf, usePictures } from "./Pictures.tsx";
 import { splitPictures, withPictures } from "../pictures.ts";
 
 /** A chat view: the newest entries with their lines in chat.jsonl, and the pinned messages (apps/server/src/chats.ts). */
+// ---------------------------------------------------------------- the endpoints this file reads and writes
+
+/** A session's chat lines from `from` up to (not including) `to`: the older part of a long chat. */
+const chatLines = (project: string, session: string, from: number, to: number) =>
+  request<{ chat: NumberedEntry[] }>(projectUrl(project, `/sessions/${enc(session)}/chat?from=${from}&to=${to}`));
+/** The chat lines a search finds (with `tools`, also in tool calls). */
+const searchChat = (project: string, session: string, query: string, tools: boolean, signal: AbortSignal) =>
+  request<{ lines?: number[] }>(projectUrl(project, `/sessions/${enc(session)}/chat/search?q=${encodeURIComponent(query)}${tools ? "&tools=1" : ""}`), { signal });
+/** The step's latest conversation that is not archived, if any. */
+const stepConversation = (project: string, queue: string, step: string) =>
+  request<{ conversation: { id: string } | null }>(projectUrl(project, `/queues/${enc(queue)}/steps/${enc(step)}/conversation`));
+/** Starts a conversation (about a step, or with a title and a runtime); resolves with its id. */
+async function newConversation(project: string, body: { queue: string; step: string } | { title: string; runtime: string; model?: string; effort?: string }): Promise<string> {
+  const made = await actResult<{ id: string }>(project, "POST", "/conversations", body);
+  if (!made) throw new Error("the server started no conversation");
+  return made.id;
+}
+
 interface View { session: SessionFile | null; state: "working" | "idle" | "exited"; runtime: RuntimeFile | null; chat: NumberedEntry[]; pins: PinView[]; model: string | null; effort: string | null }
 
 /** A chat's search, open or not: its button is in the chat's header, or in the desktop column's for the orchestrator. */
@@ -147,9 +165,9 @@ function useOlder(project: string, session: string | undefined, loaded: Numbered
   const mine = useMemo(() => (older.session === session ? older.chat : []), [older, session]);
   const load = useCallback(async (from: number) => {
     if (!session || first === undefined || from >= first) return;
-    const r = await fetch(`/api/projects/${enc(project)}/sessions/${enc(session)}/chat?from=${from}&to=${first}`);
-    if (!r.ok) return;
-    const j = await r.json() as { chat: NumberedEntry[] };
+    // Older lines that cannot be read stay out; the next scroll to the top asks again.
+    const j = await chatLines(project, session, from, first).catch(() => undefined);
+    if (!j) return;
     setOlder({ session, to: first, chat: j.chat });
   }, [project, session, first]);
   useEffect(() => { if (mine.length && first !== undefined && first > older.to) void load(mine[0]!.line); }, [first, older.to, mine, load]);
@@ -202,10 +220,10 @@ function useSearch(project: string, session: string | undefined, showTools: bool
     setHits(undefined);
     const ctl = new AbortController();
     const timer = setTimeout(() => {
-      void fetch(`/api/projects/${enc(project)}/sessions/${enc(session)}/chat/search?q=${encodeURIComponent(query)}${showTools ? "&tools=1" : ""}`, { signal: ctl.signal })
-        .then((r) => r.json() as Promise<{ lines?: number[] }>)
+      void searchChat(project, session, query, showTools, ctl.signal)
         .then((j) => { const lines = j.lines ?? []; setHits(lines); setAt(Math.max(0, lines.length - 1)); if (lines.length) goTo(lines.at(-1)!, "search"); })
-        .catch(() => { /* a newer query took over */ });
+        // A newer query took over (aborted), or the search failed: no hits, as a refused search showed before.
+        .catch((e: Error) => { if (e.name !== "AbortError") setHits([]); });
     }, 250);
     return () => { clearTimeout(timer); ctl.abort(); };
   }, [project, session, showTools, search.open, query, goTo]);
@@ -526,25 +544,12 @@ function AboutStep({ project, c, className = "" }: { project: string; c: Session
  */
 export function StepChat({ project, queue, step, version }: { project: string; queue: string; step: string; version: Version }) {
   const list = useQuery<ConversationItem[]>(`/api/projects/${enc(project)}/conversations`, version).data;
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string>();
+  const { busy, error, run } = useAction();
   const mine = (list ?? []).filter((c) => !c.archived && c.about?.queue === queue && c.about.step === step);
-  const go = async (fresh: boolean) => {
-    setBusy(true); setError(undefined);
-    try {
-      if (!fresh) {
-        const r = await fetch(`/api/projects/${enc(project)}/queues/${enc(queue)}/steps/${enc(step)}/conversation`);
-        const j = await r.json() as { conversation: { id: string } | null };
-        if (j.conversation) { nav.conversation(j.conversation.id); return; }
-      }
-      const r = await fetch(`/api/projects/${enc(project)}/conversations`, {
-        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ queue, step }),
-      });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.error ?? r.statusText);
-      nav.conversation(j.result.id as string);
-    } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
-  };
+  const go = (fresh: boolean) => run(async () => {
+    const open = fresh ? null : (await stepConversation(project, queue, step)).conversation;
+    return open?.id ?? await newConversation(project, { queue, step });
+  }, (id) => nav.conversation(id));
   return (
     <div>
       <div className="flex flex-wrap items-center gap-2">
@@ -691,13 +696,8 @@ function NewConversation({ project, defaultRuntime, onBack, onCreated }: {
   const field = "w-full rounded-md border border-line-strong bg-canvas px-2 py-1.5 text-sm text-fg placeholder:text-fg-3";
   const create = async () => {
     setError(undefined);
-    const r = await fetch(`/api/projects/${enc(project)}/conversations`, {
-      method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ title, runtime, model: model || undefined, effort: effort || undefined }),
-    });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) { setError(j.error ?? r.statusText); return; }
-    onCreated(j.result.id as string);
+    try { onCreated(await newConversation(project, { title, runtime, model: model || undefined, effort: effort || undefined })); }
+    catch (e) { setError((e as Error).message); }
   };
   return (
     <div className="flex min-w-0 flex-1 flex-col">

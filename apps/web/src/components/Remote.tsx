@@ -1,6 +1,6 @@
 // Remote access: how a phone reaches this dashboard, signs in, and gets notifications.
 import { useEffect, useState } from "react";
-import { useQuery, type Version } from "../api.ts";
+import { request, useQuery, type Version } from "../api.ts";
 import { Button, Section } from "./ui.tsx";
 import { formatDate, rich, t } from "../i18n.ts";
 
@@ -66,10 +66,8 @@ export function RemotePanel({ version }: { version: Version }) {
   const [note, setNote] = useState<string>();
   if (!r) return <p className="text-sm text-fg-3">{t("common.loading")}</p>;
 
-  const post = async (url: string) => {
-    const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
-    return res.json() as Promise<Record<string, unknown>>;
-  };
+  const post = <T,>(url: string) => request<T>(url, { method: "POST" });
+  const failed = (e: Error) => setNote(e.message);
 
   return (
     <div>
@@ -117,7 +115,7 @@ export function RemotePanel({ version }: { version: Version }) {
               <Button variant="quiet" onClick={() => setReveal(!reveal)}>{t(reveal ? "remote.hide" : "remote.show")}</Button>
               <Button variant="danger" onClick={() => {
                 if (confirm(t("remote.replaceConfirm"))) {
-                  void post("/api/remote/rotate").then(() => { setBump((b) => b + 1); setNote(t("remote.replaced")); });
+                  void post("/api/remote/rotate").then(() => { setBump((b) => b + 1); setNote(t("remote.replaced")); }, failed);
                 }
               }}>{t("remote.replace")}</Button>
             </div>
@@ -134,7 +132,7 @@ export function RemotePanel({ version }: { version: Version }) {
           </ul>
         ) : <p className="mt-2 text-sm text-fg-3">{t("remote.noDevice")}</p>}
         {r.devices.length > 0 && (
-          <div className="mt-2"><Button variant="quiet" onClick={() => void post("/api/push/test").then((x) => setNote(t("remote.testSent", { count: Number(x.sent) })))}>{t("remote.test")}</Button></div>
+          <div className="mt-2"><Button variant="quiet" onClick={() => void post<{ sent: number }>("/api/push/test").then((x) => setNote(t("remote.testSent", { count: x.sent })), failed)}>{t("remote.test")}</Button></div>
         )}
       </Section>
       {note && <p className="mt-4 text-sm text-info">{note}</p>}

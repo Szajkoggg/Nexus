@@ -2,6 +2,7 @@
 // for (a new URL shows nothing of the old one's, and a late answer for the old one is dropped), a failure is kept as
 // the query's error instead of being swallowed, a request in flight is shared by every query asking the same, and the
 // live notifications bump only the versions they concern (a change in one project refetches nothing of another's).
+import { HttpError, request } from "./http.ts";
 
 /** What a query is asked at: the same URL at a new version is asked again. */
 export type Version = string | number | undefined;
@@ -11,12 +12,10 @@ export interface QueryView<T> { data: T | undefined; error: string | undefined }
 
 export type Fetcher = (url: string) => Promise<unknown>;
 
-/** A GET of a JSON reply; a refusal rejects with its status and the server's reason. */
-export async function fetchJson(url: string): Promise<unknown> {
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`${r.status} ${((await r.json().catch(() => ({}))) as { error?: string }).error ?? r.statusText}`);
-  return r.json();
-}
+/** A GET of a JSON reply; a refusal rejects with its status and the server's reason ("404 unknown project"). */
+export const fetchJson = (url: string): Promise<unknown> => request(url).catch((e: unknown) => {
+  throw e instanceof HttpError ? new Error(`${e.status} ${e.message}`) : e;
+});
 
 /** The requests in flight, one per URL and version: every query asking for the same answer waits on one request. */
 export class Requests {

@@ -3,7 +3,7 @@
 // commits"). A layer in the history ("commit:<hash>"), shown in a drawer; the hash is checked when it opens, so a
 // hash-like word that is no commit says "not found" here.
 import { useEffect, useState } from "react";
-import { enc } from "../api.ts";
+import { enc, HttpError, projectUrl, request } from "../api.ts";
 import { formatDateTime, t } from "../i18n.ts";
 import { TimeAgo } from "./ui.tsx";
 
@@ -11,6 +11,9 @@ interface CommitDetail {
   sha: string; subject: string; author: string; at: string;
   files: { path: string; insertions: number | null; deletions: number | null }[]; insertions: number; deletions: number;
 }
+/** GET a commit's details. */
+const readCommit = (project: string, hash: string) => request<CommitDetail>(projectUrl(project, `/commits/${enc(hash)}`));
+
 type Loaded = { kind: "loading" } | { kind: "error"; status: number; reason: string } | { kind: "ok"; commit: CommitDetail };
 
 export function CommitDetails({ project, hash }: { project: string; hash: string }) {
@@ -18,12 +21,10 @@ export function CommitDetails({ project, hash }: { project: string; hash: string
   useEffect(() => {
     let alive = true;
     setLoaded({ kind: "loading" });
-    fetch(`/api/projects/${enc(project)}/commits/${enc(hash)}`)
-      .then(async (r) => {
-        const body = await r.json().catch(() => ({})) as CommitDetail & { error?: string };
-        return r.ok ? { kind: "ok", commit: body } as const : { kind: "error", status: r.status, reason: body.error ?? r.statusText } as const;
-      })
-      .then((x) => { if (alive) setLoaded(x); }, (e: Error) => { if (alive) setLoaded({ kind: "error", status: 0, reason: e.message }); });
+    readCommit(project, hash).then(
+      (commit) => { if (alive) setLoaded({ kind: "ok", commit }); },
+      (e: Error) => { if (alive) setLoaded({ kind: "error", status: e instanceof HttpError ? e.status : 0, reason: e.message }); },
+    );
     return () => { alive = false; };
   }, [project, hash]);
 

@@ -8,7 +8,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode }
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { fileUrl } from "../api.ts";
+import { fileUrl, HttpError, open } from "../api.ts";
 import { baseName, folderOf, isMarkdown, languageOf, plainLines, relativeTarget, withoutFinalNewline, type Token } from "../fileview.ts";
 import { formatNumber, t } from "../i18n.ts";
 import { nav } from "../nav.ts";
@@ -38,12 +38,11 @@ function useFile(url: string): Loaded {
     setLoaded({ kind: "loading" });
     const ctl = new AbortController();
     (async () => {
-      const r = await fetch(url, { signal: ctl.signal });
+      const r = await open(url, ctl.signal);
       const size = Number(r.headers.get("x-nexus-size") ?? 0);
       const kind = r.headers.get("x-nexus-kind");
       let next: Loaded;
-      if (!r.ok) next = { kind: "error", status: r.status, reason: ((await r.json().catch(() => ({}))) as { error?: string }).error ?? r.statusText };
-      else if (kind === "text") {
+      if (kind === "text") {
         const real = r.headers.get("x-nexus-path");
         next = { kind: "text", text: await r.text(), size, cut: r.headers.get("x-nexus-truncated") === "1", ...(real ? { real: decodeURIComponent(real) } : {}) };
       }
@@ -52,7 +51,7 @@ function useFile(url: string): Loaded {
         next = kind === "picture" ? { kind: "picture" } : { kind: kind === "pdf" ? "pdf" : "binary", size };
       }
       if (alive) setLoaded(next);
-    })().catch((e: Error) => { if (alive && e.name !== "AbortError") setLoaded({ kind: "error", status: 0, reason: e.message }); });
+    })().catch((e: Error) => { if (alive && e.name !== "AbortError") setLoaded({ kind: "error", status: e instanceof HttpError ? e.status : 0, reason: e.message }); });
     return () => { alive = false; ctl.abort(); };
   }, [url]);
   return loaded;

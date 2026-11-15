@@ -1,7 +1,11 @@
 // Data access for the dashboard: the server's HTTP API and its change notifications.
 import { useEffect, useReducer, useRef, useState } from "react";
 import type { AttentionItem } from "@nexus/protocol";
+import { Action, type ActionState } from "./action.ts";
+import { HttpError, request } from "./http.ts";
 import { Query, Requests, fetchJson, type LiveMessage, type QueryView, type Version } from "./query.ts";
+
+export { HttpError, open, request } from "./http.ts";
 
 export type { QueryView, Version } from "./query.ts";
 export type { AttentionItem, ProjectState, QueueView, StepView, QuestionView, SessionView } from "@nexus/protocol";
@@ -12,40 +16,29 @@ export interface ProjectSummary {
   attention: AttentionItem[];
 }
 
-/** A write to the server. Resolves when it is done; rejects with the server's reason. */
-export async function act(project: string, method: "POST" | "PATCH" | "PUT" | "DELETE", path: string, body: unknown = {}): Promise<void> {
-  const r = await fetch(`/api/projects/${encodeURIComponent(project)}${path}`, {
-    method, headers: { "content-type": "application/json" }, body: JSON.stringify(body),
-  });
-  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? r.statusText);
-}
-
 export const enc = encodeURIComponent;
 
-/** A write whose answer matters: resolves with the server's `result` (e.g. `{ message }`); rejects with its reason. */
-export async function actResult<T>(project: string, method: "POST" | "PATCH" | "DELETE", path: string, body: unknown = {}): Promise<T | null> {
-  const r = await fetch(`/api/projects/${encodeURIComponent(project)}${path}`, {
-    method, headers: { "content-type": "application/json" }, body: JSON.stringify(body),
-  });
-  const b = await r.json().catch(() => ({})) as { result?: T; error?: string };
-  if (!r.ok) throw new Error(b.error ?? r.statusText);
-  return b.result ?? null;
+/** A project's part of the API: `/api/projects/<id>` and `path`. */
+export const projectUrl = (project: string, path = "") => `/api/projects/${enc(project)}${path}`;
+
+type Write = "POST" | "PATCH" | "PUT" | "DELETE";
+
+/** A write to the server. Resolves when it is done; rejects with the server's reason. */
+export async function act(project: string, method: Write, path: string, body: unknown = {}): Promise<void> {
+  await request(projectUrl(project, path), { method, body });
 }
 
-/** A write the server refused, with its HTTP status (the reason's text is the server's, in English). */
-export class HttpError extends Error {
-  readonly status: number;
-  constructor(message: string, status: number) { super(message); this.status = status; }
+/** A write whose answer matters: resolves with the server's `result` (e.g. `{ message }`); rejects with its reason. */
+export async function actResult<T>(project: string, method: Write, path: string, body: unknown = {}): Promise<T | null> {
+  const b = await request<{ result?: T } | undefined>(projectUrl(project, path), { method, body });
+  return b?.result ?? null;
 }
 
 /** Uploads a picture for a chat message (base64, as a data: URL); resolves with the saved file's absolute path. */
 export async function uploadPicture(project: string, data: string): Promise<string> {
-  const r = await fetch(`/api/projects/${encodeURIComponent(project)}/uploads`, {
-    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ data }),
-  });
-  const b = await r.json().catch(() => ({})) as { result?: { path: string }; error?: string };
-  if (!r.ok || !b.result) throw new HttpError(b.error ?? r.statusText, r.status);
-  return b.result.path;
+  const path = (await actResult<{ path: string }>(project, "POST", "/uploads", { data }))?.path;
+  if (!path) throw new HttpError("the server saved no picture", 500);
+  return path;
 }
 
 export interface Usage { updated_at: string; windows: Record<string, { utilization: number; resets_at?: string; status?: string }> }
@@ -62,6 +55,17 @@ export function useQuery<T>(url: string | undefined, version?: Version): QueryVi
   const [query] = useState(() => new Query<T>(requests, render));
   useEffect(() => { query.ask(url, version); return () => query.stop(); }, [query, url, version]);
   return query.view(url);
+}
+
+/**
+ * A user's action with its busy and error state (action.ts): `run(work, done)` marks it busy, clears the last error,
+ * and keeps the failure's message as `error`; `done` gets a success's result. `fail` shows a failure found before
+ * any request.
+ */
+export function useAction(): ActionState & { run: Action["run"]; fail: Action["fail"] } {
+  const [state, setState] = useState<ActionState>(() => ({ busy: false, error: undefined }));
+  const [action] = useState(() => new Action(setState));
+  return { ...state, run: action.run, fail: action.fail };
 }
 
 /**

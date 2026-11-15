@@ -4,7 +4,7 @@
 import { useState } from "react";
 import { NEXUS_ACTIVITIES, TAG_KINDS, TAG_ORIGINS, activityDifference, tagProposalText } from "@nexus/protocol/tags";
 import type { TagProposal, TagsFile } from "@nexus/protocol";
-import { act, type AttentionItem, type QueueView, type StepView } from "../api.ts";
+import { act, useAction, type AttentionItem, type QueueView, type StepView } from "../api.ts";
 import { t } from "../i18n.ts";
 import { Button, Section } from "./ui.tsx";
 
@@ -78,14 +78,8 @@ export function QueueTags({ queue }: { queue: Pick<QueueView, "steps"> }) {
 
 /** The user's decision on a tag proposal: accept or decline, with the server's refusal shown. */
 function useDecision(project: string, onChanged?: () => void) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string>();
-  const decide = async (id: string, action: "accept" | "decline") => {
-    setBusy(true); setError(undefined);
-    try { await act(project, "POST", `/tags/${enc(id)}`, { action }); onChanged?.(); }
-    catch (e) { setError((e as Error).message); }
-    finally { setBusy(false); }
-  };
+  const { busy, error, run } = useAction();
+  const decide = (id: string, action: "accept" | "decline") => run(() => act(project, "POST", `/tags/${enc(id)}`, { action }), () => onChanged?.());
   return { busy, error, decide };
 }
 

@@ -1853,6 +1853,14 @@ may have missed anything: it bumps an epoch that is part of every project's vers
 every read on any message from any project. Reads inside a step or queue still key on the project state's
 `generated_at`, which moves only with that project.
 
+Every request goes through `apps/web/src/http.ts` (queue RX2): `request` checks the status and rejects with an
+`HttpError` (the server's reason, else the status text; its status; `reason`, the server's own only), `open` does the
+same for a reply whose body the caller reads itself (a file). The typed endpoint functions are built on them, next to
+the type they return until the API types have a module of their own. Before, five calls parsed whatever came back: an
+error reply read as "no conversation yet" started a new one, a refused token rotation said "replaced". A user's action
+keeps its busy and error state in `useAction` (over the tested `Action` in `action.ts`): busy until every run of it has
+settled, the last error cleared when a run starts. Places whose state is a result line or a toast keep their own.
+
 The browser check of the fix (a script, not a test: a development instance, a project whose two steps have their own
 commits, every commits reply held back 700 ms, switching between the steps five times and sampling the page at every
 frame): at the base commit 556 of 1101 samples showed the other step's commits; with the keyed query none did.

@@ -1,7 +1,7 @@
 // Running queues through Nexus-launched sessions: controls, live activity, sessions and usage.
 import { useEffect, useState, type ReactNode } from "react";
 import { HOLDING_RUN_STATES, retryLine } from "@nexus/protocol/times";
-import { act, enc, useQuery, type ActivityEntry, type ProjectState, type QueueView, type SessionView, type Usage, type Version } from "../api.ts";
+import { act, enc, useAction, useQuery, type ActivityEntry, type ProjectState, type QueueView, type SessionView, type Usage, type Version } from "../api.ts";
 import { Button, RunTimes, Section, TimeAgo } from "./ui.tsx";
 import { formatClock, formatDateTime, formatTime, formatNumber, rich, t, type Key } from "../i18n.ts";
 import { EffortSelect, ModelSelect } from "./Settings.tsx";
@@ -137,18 +137,12 @@ export function RunControls({ project, queue, onChanged }: { project: ProjectSta
   // "When": "" now, AT a time, USAGE the usage window's reset, else a queue to start after.
   const [after, setAfter] = useState("");
   const [time, setTime] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string>();
+  const { busy, error, run: perform } = useAction();
   const run = queue.run;
   // A run that holds its session: going on by itself, or waiting for the approval of the queue's new revision.
   const active = run && HOLDING_RUN_STATES.includes(run.state);
   const waitsApproval = run?.state === "approval_wait";
-  const call = async (body: Record<string, unknown>) => {
-    setBusy(true); setError(undefined);
-    try { await act(id, "POST", `/queues/${enc(queue.id)}/run`, body); onChanged(); }
-    catch (e) { setError((e as Error).message); }
-    finally { setBusy(false); }
-  };
+  const call = (body: Record<string, unknown>) => perform(() => act(id, "POST", `/queues/${enc(queue.id)}/run`, body), onChanged);
   const reusable = project.sessions.filter((s) => s.role === "worker" && s.runtime !== "external" && s.launched_by === "nexus" && s.native_id
     && !project.queues.some((q) => q.id !== queue.id && q.run?.session === s.id && HOLDING_RUN_STATES.includes(q.run.state)));
   const runSession = run ? project.sessions.find((s) => s.id === run.session) : undefined;

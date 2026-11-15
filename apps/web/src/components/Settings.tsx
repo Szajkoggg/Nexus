@@ -5,7 +5,7 @@ import type { GlobalSettings, ProjectFile, TagsFile } from "@nexus/protocol";
 import { LANGUAGES } from "@nexus/protocol/languages";
 import { TAG_KINDS } from "@nexus/protocol/tags";
 import { fallbackLine, parseFallback } from "../fallback.ts";
-import { act, useQuery, type Version } from "../api.ts";
+import { act, HttpError, request, useQuery, type Version } from "../api.ts";
 import { Button, Section } from "./ui.tsx";
 import { rich, t, type Key } from "../i18n.ts";
 import { CHOICES, readChoice, setChoice, type ThemeChoice } from "../theme.ts";
@@ -518,7 +518,7 @@ function GlobalForm({ global, server, onSaved, onChanged }: { global: GlobalSett
   const save = async () => {
     setBusy(true); setMsg(undefined);
     try {
-      await request("/api/settings", "PATCH", nested(v.values, SETTING_KEYS));
+      await request("/api/settings", { method: "PATCH", body: nested(v.values, SETTING_KEYS) });
       setMsg({ ok: true, text: t("settings.savedGlobal") });
       onSaved();
     } catch (e) { setMsg({ ok: false, text: (e as Error).message }); }
@@ -532,14 +532,6 @@ function GlobalForm({ global, server, onSaved, onChanged }: { global: GlobalSett
       <ServerSection info={server} onChanged={onChanged} />
     </>
   );
-}
-
-/** A write outside a project (the global settings): JSON, from this page. */
-async function request(path: string, method: string, body: unknown): Promise<unknown> {
-  const r = await fetch(path, { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-  const data = (await r.json().catch(() => ({}))) as { error?: string };
-  if (!r.ok) throw new Error(data.error ?? `${r.status}`);
-  return data;
 }
 
 // ---------------------------------------------------------------- this browser
@@ -609,9 +601,10 @@ function ServerSection({ info, onChanged }: { info: ServerInfo | undefined; onCh
   const u = info.update;
   const call = async (path: string, body: unknown = {}) => {
     setMsg(undefined);
-    const r = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-    if (!r.ok) setMsg((await r.json().catch(() => ({}))).error ?? r.statusText);
-    onChanged();
+    // A refusal is said here; a network failure as before. The server's state is read again either way.
+    try { await request(path, { method: "POST", body }); }
+    catch (e) { if (e instanceof HttpError) setMsg(e.message); else throw e; }
+    finally { onChanged(); }
   };
   const busy = u.phase === "draining" || u.phase === "updating" || u.phase === "restarting";
   return (

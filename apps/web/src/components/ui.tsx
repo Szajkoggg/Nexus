@@ -4,7 +4,7 @@ import { usePhone } from "../phone.ts";
 import ReactMarkdown from "react-markdown";
 import { runTimes, stepTimes } from "@nexus/protocol/times";
 import { formatClock, formatDateTime, formatDuration, rich, t, timeAgo, type Key } from "../i18n.ts";
-import type { QueueView, StepView } from "../api.ts";
+import { useAction, type QueueView, type StepView } from "../api.ts";
 import { AttachButton, PictureStrip, filesOf, type Pictures } from "./Pictures.tsx";
 
 // ---------------------------------------------------------------- status colours
@@ -191,8 +191,7 @@ export function useDraftText({ draft, onSubmit, allowEmpty = false, verbatim = f
   attached?: number; waiting?: boolean;
 }) {
   const [text, setText] = useState(() => readDraft(draft));
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string>();
+  const { busy, error, run } = useAction();
   const current = useRef(text);
   const change = (value: string) => { current.current = value; setText(value); writeDraft(draft, value); };
   // A draft put from elsewhere while this box is open (putDraft: a reference from "Ask the orchestrator…").
@@ -205,17 +204,11 @@ export function useDraftText({ draft, onSubmit, allowEmpty = false, verbatim = f
   const submit = async () => {
     if (!ready) return;
     const sent = text;
-    setBusy(true); setError(undefined);
-    try {
-      await onSubmit(verbatim ? sent : sent.trim());
-      // Whatever was typed while it was sending stays.
-      if (current.current === sent) change("");
-    }
-    catch (e) { setError((e as Error).message); }
-    finally { setBusy(false); }
+    // Whatever was typed while it was sending stays.
+    await run(() => onSubmit(verbatim ? sent : sent.trim()), () => { if (current.current === sent) change(""); });
   };
   const onKeyDown = (e: React.KeyboardEvent) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); void submit(); } };
-  return { text, change, submit, ready, busy, error, setError, onKeyDown };
+  return { text, change, submit, ready, busy, error, onKeyDown };
 }
 
 export const TEXTAREA = "w-full resize-y rounded-lg border border-line-strong bg-canvas px-3 py-2 text-sm text-fg placeholder:text-fg-3 focus:border-accent focus:outline-none";

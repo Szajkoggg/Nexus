@@ -1,6 +1,6 @@
 // A seed for the capture tool: a test project "demo" (a git repository) with a worktree queue "SC" whose two finished
 // steps have commits of their own (two in SC1, one in SC2), so that a step's commits and its queue's branch show, and a
-// planned queue "PL" beside it. The commits have fixed dates, so their hashes are the same on every run. Run by
+// planned queue "PL" beside it, and a short orchestrator chat. The commits have fixed dates, so their hashes are the same on every run. Run by
 // scripts/capture.ts as `node <this> <data dir>` with NEXUS_HOME set to the development instance's; it writes only
 // under the data directory and that NEXUS_HOME.
 import { execFileSync } from "node:child_process";
@@ -66,3 +66,16 @@ st.writeGit("SC", { protocol: 1, base: { ref: "main", sha: base, at: ago(100), b
 st.writeQueue({ protocol: 1, id: "PL", title: "Saved searches", revision: 1, status: "proposed", checks: ["npm test"], stop_conditions: [], steps: [
   { id: "PL1", title: "Save a search", goal: "A search can be saved under a name.", acceptance: ["A unit test"] },
 ] });
+
+// The orchestrator's chat: a few turns, so that the chat view has messages of both sides.
+const orch: SessionFile = { protocol: 1, id: newId(), project: "demo", role: "orchestrator", runtime: "claude", title: "Orchestrator", cwd: root, launched_by: "nexus", created_at: ago(60) };
+st.writeSession(orch);
+st.updateProject((p) => ({ ...p, orchestrator: { runtime: "claude", notify: false, ...p.orchestrator, session: orch.id } }));
+const PARAGRAPH = String.fromCharCode(10, 10);
+const chat: [number, "user" | "orchestrator", string][] = [
+  [50, "user", "Where does SC stand?"],
+  [49, "orchestrator", ["SC is done: both steps were accepted, and the closing refactoring step is next.", "PL waits for your approval."].join(PARAGRAPH)],
+  [30, "user", "Start PL after SC."],
+  [29, "orchestrator", "PL is planned after SC; it starts once you approve it."],
+];
+for (const [min, from, text] of chat) st.appendChat(orch.id, { at: ago(min), from, text });

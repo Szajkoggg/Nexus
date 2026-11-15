@@ -2,7 +2,7 @@ import { useState, type ReactNode } from "react";
 import type { ChatEntry, Event, StatusChange } from "@nexus/protocol";
 import { stopPlace } from "@nexus/protocol/attention";
 import { latestChecks, stepValuesText } from "@nexus/protocol/steps";
-import { act, actResult, enc, fileUrl, useQuery, type ProjectState, type QuestionView, type QueueView, type StepView, type Version } from "../api.ts";
+import { act, actResult, enc, fileUrl, HttpError, useAction, useQuery, type ProjectState, type QuestionView, type QueueView, type StepView, type Version } from "../api.ts";
 import { comparisonOf, noteTargets, pairPictures, showsReviewActions } from "../review.ts";
 import { ActionBar, Button, Composer, Expandable, Markdown, PanelBody, PanelHeader, Section, StatusBadge, StepTimes, TEXTAREA, TimeAgo, reviewLabel, statusWord, useDraftText, type MenuEntry } from "./ui.tsx";
 import { Activity, RetryNote, RunControls } from "./Run.tsx";
@@ -537,14 +537,11 @@ const PARAGRAPH = String.fromCharCode(10, 10);
 /** Reject: the step is marked rejected, the run pauses, nothing is reverted; the orchestrator proposes what follows. */
 function RejectStep({ project, queue, step, onChanged, onCancel }: { project: string; queue: string; step: string; onChanged: () => void; onCancel: () => void }) {
   const [why, setWhy] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string>();
-  const reject = () => {
-    setBusy(true); setError(undefined);
-    act(project, "POST", `/queues/${enc(queue)}/steps/${enc(step)}/reject`, why.trim() ? { text: why } : {})
-      .then(() => { onCancel(); setWhy(""); onChanged(); }, (e: Error) => setError(e.message))
-      .finally(() => setBusy(false));
-  };
+  const { busy, error, run } = useAction();
+  const reject = () => void run(
+    () => act(project, "POST", `/queues/${enc(queue)}/steps/${enc(step)}/reject`, why.trim() ? { text: why } : {}),
+    () => { onCancel(); setWhy(""); onChanged(); },
+  );
   return (
     <div className="rounded-lg border border-danger/30 bg-danger/10 p-3">
       <p className="text-sm text-danger">{t("details.reject.title")}</p>
@@ -762,9 +759,9 @@ function WorktreeActions({ project, root, queue, onChanged }: { project: string;
   const base = g?.base?.branch !== false ? g?.base?.ref : undefined;
   const go = (what: "merge" | "cleanup") => {
     setBusy(true); setResult(undefined);
-    fetch(`/api/projects/${enc(project)}/queues/${enc(queue.id)}/${what}`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })
-      .then(async (r) => { const b = await r.json().catch(() => ({})) as { result?: { message?: string }; error?: string }; setResult(r.ok ? { ok: true, text: b.result?.message ?? t("details.worktree.done") } : { ok: false, text: b.error ?? r.statusText }); if (r.ok) setAsk(undefined); onChanged(); })
-      .catch((e: Error) => setResult({ ok: false, text: e.message }))
+    actResult<{ message?: string }>(project, "POST", `/queues/${enc(queue.id)}/${what}`)
+      .then((r) => { setResult({ ok: true, text: r?.message ?? t("details.worktree.done") }); setAsk(undefined); onChanged(); },
+        (e: Error) => { setResult({ ok: false, text: e.message }); if (e instanceof HttpError) onChanged(); })
       .finally(() => setBusy(false));
   };
   return (
@@ -831,8 +828,7 @@ function BranchLine({ project, queue, version }: { project: string; queue: strin
 
 /** What became of pushing an accepted step: pushed, not pushed (no remote), or failed with Push again. */
 function PushLine({ project, queue, step, onChanged }: { project: string; queue: QueueView; step: string; onChanged: () => void }) {
-  const [error, setError] = useState<string>();
-  const [busy, setBusy] = useState(false);
+  const { busy, error, run } = useAction();
   const p = queue.push?.steps[step];
   if (!p) return null;
   const failed = p.result === "failed";
@@ -847,7 +843,7 @@ function PushLine({ project, queue, step, onChanged }: { project: string; queue:
       {failed && <p className="mt-1 text-xs text-fg-2">{t("details.push.failedText")}</p>}
       {latest && (
         <div className="mt-2 flex items-center gap-3">
-          <Button variant="quiet" disabled={busy} onClick={() => { setBusy(true); setError(undefined); act(project, "POST", `/queues/${enc(queue.id)}/push`).then(onChanged, (e: Error) => setError(e.message)).finally(() => setBusy(false)); }}>{t(busy ? "details.push.busy" : "details.push.again")}</Button>
+          <Button variant="quiet" disabled={busy} onClick={() => void run(() => act(project, "POST", `/queues/${enc(queue.id)}/push`), onChanged)}>{t(busy ? "details.push.busy" : "details.push.again")}</Button>
           {error && <span className="text-xs text-danger">{error}</span>}
         </div>
       )}

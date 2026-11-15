@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { attentionKey, type AttentionItem, type ProjectSummary, type QueueView } from "../api.ts";
+import { attentionKey, HttpError, request, type AttentionItem, type ProjectSummary, type QueueView } from "../api.ts";
 import { mergeAttention, type WaitingItem } from "@nexus/protocol/attention";
 import { TimeAgo } from "./ui.tsx";
 import { t, type Key } from "../i18n.ts";
@@ -297,18 +297,21 @@ export function useNotifications(projects: ProjectSummary[] | undefined) {
     const permission = await Notification.requestPermission();
     if (permission !== "granted") throw new Error(permission === "denied" ? pushBlocker() ?? t("notify.refused") : t("notify.notAllowed"));
     const reg = await worker();
-    const keyRes = await fetch("/api/push/key");
-    if (!keyRes.ok) throw new Error(keyRes.status === 401 ? t("notify.signedOut") : t("common.serverAnswered", { status: String(keyRes.status) }));
-    const { key } = (await keyRes.json()) as { key: string };
+    const { key } = await request<{ key: string }>("/api/push/key").catch((e: unknown) => {
+      if (!(e instanceof HttpError)) throw e;
+      throw new Error(e.status === 401 ? t("notify.signedOut") : t("common.serverAnswered", { status: String(e.status) }));
+    });
     const sub = await withTimeout(
       reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(key) }), 20_000,
       t("notify.pushNoAnswer"),
     );
     const device = /iPhone|iPad/.test(navigator.userAgent) ? "iPhone / iPad" : /Android/.test(navigator.userAgent) ? "Android" : t("notify.desktopBrowser");
-    const r = await fetch("/api/push/subscribe", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ subscription: sub.toJSON(), label: device }) });
-    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? t("common.serverAnswered", { status: String(r.status) }));
-    // A first notification right away shows that the whole path works.
-    await fetch("/api/push/test", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ endpoint: sub.endpoint }) });
+    await request("/api/push/subscribe", { method: "POST", body: { subscription: sub.toJSON(), label: device } }).catch((e: unknown) => {
+      // The server's reason when it gave one, else its status.
+      throw new Error(e instanceof HttpError ? e.reason ?? t("common.serverAnswered", { status: String(e.status) }) : (e as Error).message);
+    });
+    // A first notification right away shows that the whole path works; the subscription stands even if it fails.
+    await request("/api/push/test", { method: "POST", body: { endpoint: sub.endpoint } }).catch(() => undefined);
   };
 
   const toggle = async () => {
@@ -321,7 +324,8 @@ export function useNotifications(projects: ProjectSummary[] | undefined) {
         if (blocker) throw new Error(blocker);
         const existing = await pushSubscription();
         if (existing) {
-          await fetch("/api/push/unsubscribe", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ endpoint: existing.endpoint }) });
+          // The browser's subscription ends either way; one the server still holds is dropped at its first failed send.
+          await request("/api/push/unsubscribe", { method: "POST", body: { endpoint: existing.endpoint } }).catch(() => undefined);
           await existing.unsubscribe();
           setOn(false);
           setToast({ kind: "ok", text: t("notify.offForDevice") });
