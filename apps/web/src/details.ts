@@ -98,6 +98,7 @@ export const questionState = (state: string) => (QUESTION_STATES[state] ? t(QUES
 export function describe(e: Event): string {
   switch (e.type) {
     case "step.progress": return e.text + (e.pct !== undefined ? ` (${e.pct}%)` : "");
+    case "step.interrupted": return e.text;
     case "step.done": return e.summary;
     case "step.failed": return e.reason;
     case "queue.stop": return `${e.condition}: ${e.reason}`;

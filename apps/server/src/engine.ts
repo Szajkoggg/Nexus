@@ -139,6 +139,8 @@ export class Engine implements Member {
   private stopped = false;
   /** Sessions whose process Nexus itself is ending: their exit is no failure. */
   private readonly ending = new Set<string>();
+  /** A user's immediate stop is waiting for the old process to exit before Resume can open another. */
+  private readonly stopping = new Set<string>();
   /** Sessions whose process Nexus ends to start it again with another model or effort (Claude Code). */
   private readonly restarting = new Set<string>();
   /** Sessions whose process ended on its own while their run's step waited for its review (advance restarts them). */
@@ -309,6 +311,7 @@ export class Engine implements Member {
    */
   resume(queueId: string, why?: string): void {
     const run = this.run(queueId);
+    if (this.stopping.has(run.session)) throw new ActionError("the worker is still exiting; resume once it has stopped", 409);
     if (run.state === "running") return;
     if (run.state === "finished") throw new ActionError("the run is finished", 409);
     const state = loadProjectState(this.store);
@@ -401,7 +404,7 @@ export class Engine implements Member {
     this.checkStarts();
   }
 
-  /** Interrupts the running turn and pauses the run. */
+  /** Asks the worker to stop through a message and pauses the run. */
   stopNow(queueId: string, text?: string): void {
     const run = this.run(queueId);
     const live = this.host.get(run.session);
@@ -413,6 +416,34 @@ export class Engine implements Member {
         "now",
       );
     }
+  }
+
+  /** Interrupts and ends this worker's process, keeping its session and all checkout changes for Resume. */
+  async stopAtOnce(queueId: string): Promise<void> {
+    const run = this.run(queueId);
+    const live = this.host.running(run.session);
+    if (!live || run.state === "finished" || this.stopping.has(run.session)) throw new ActionError("the worker is not running", 409);
+    if (this.store.readSession(run.session).queue !== queueId) throw new ActionError("the worker now belongs to another queue", 409);
+    this.stopping.add(run.session);
+    this.ending.add(run.session);
+    this.restarting.delete(run.session);
+    clearTimeout(this.timers.get(`restart:${run.session}`));
+    this.timers.delete(`restart:${run.session}`);
+    this.clearTimer(queueId);
+    this.endBackgroundWait(queueId);
+    this.writeRun(queueId, toPausedByUser(run, "stopped at once by the user; uncommitted changes kept"));
+    if (run.step) {
+      const user = ensureUserSession(this.store);
+      this.store.appendEvent({ v: 1, id: newId(), at: now(), session: user.id, type: "step.interrupted", queue: queueId, step: run.step,
+        text: "Stopped at once by the user. Uncommitted changes remain; Resume continues in the same session." });
+    }
+    try {
+      await new Promise<void>((resolve) => {
+        live.proc.once("exit", () => resolve());
+        live.proc.stop();
+        live.proc.kill();
+      });
+    } finally { this.stopping.delete(run.session); this.changed(); }
   }
 
   /**
@@ -1145,6 +1176,7 @@ export class Engine implements Member {
         }, BACKGROUND_SETTLE_MS));
       },
       turnEnd: (end) => {
+        if (this.stopping.has(session.id)) return;
         // A failed turn is decided at once and is not a turn without an outcome.
         if (end.failure) { for (const q of runsOf()) this.turnFailed(q, end.failure); this.changed(); return; }
         if (end.ok) for (const q of runsOf()) { const r = this.store.readRun(q); if (r?.retries) this.writeRun(q, { ...r, retries: undefined, failure: undefined }); }

@@ -13,6 +13,7 @@ import { CHOICES, readChoice, setChoice, type ThemeChoice } from "../theme.ts";
 import { EDITOR_CHOICES, readEditor, setEditor, type Editor } from "../editor.ts";
 import { levelTitle } from "./Levels.tsx";
 import { ProjectTags } from "./Tags.tsx";
+import { DangerZone } from "./DangerZone.tsx";
 import { PlannedDeployCard, type PlannedDeploy } from "./DeployPlan.tsx";
 import { SEND_BACKS, STOPS, conditionList, savedConditions, settingsProblem, type SettingsProblem } from "../settingsCheck.ts";
 import { usePage } from "../page.ts";
@@ -449,6 +450,7 @@ export function SettingsPanel({ project, tags, server, tools }: {
           : info ? <ProjectSettingsPage key={`${project.id}:${info.own.join(",")}`} project={project} info={info} />
           : <p className="text-sm text-fg-3">{t("common.loading")}</p>}
         {tab === "project" && tags && <div id="project-tags" className="mt-10"><ProjectTags project={project.id} tags={tags} onChanged={onChanged} /></div>}
+        {tab === "project" && <div className="mt-10"><DangerZone project={project} /></div>}
       </div>
     </div>
   );

@@ -148,7 +148,7 @@ They are pure functions that each own which fields they set and clear. The engin
 | `startedRun` | running | (a new record) | a start |
 | `toResumed` | running | reason, `resume_at`, the hold; `nudged` false; a rejection, taking the approved revision | resume, a retry or usage wait come due, the restart after an update |
 | `toUnheld` | running | reason, the hold | a cancelled update releases a pausing run |
-| `toPausedByUser` | pausing / paused | `resume_at`, the hold (the user's pause wins) | Pause, Stop now, a rejected step |
+| `toPausedByUser` | pausing / paused | `resume_at`, the hold (the user's pause wins) | Pause, Stop now, Stop at once, a rejected step |
 | `toHeldForUpdate` | pausing / paused | (sets the hold, `resume_after_restart`) | an update drains; the next server takes it over |
 | `toPaused` | paused | nothing (reason when given) | a pausing run's step ended; a pausing turn failed; a server restart |
 | `toHalted` | halted | `resume_at`, the hold (sets `failure` when given) | stops, stalls, lasting failures, out of retries |
@@ -169,6 +169,13 @@ through `resume` once its revision is approved (the engine's `onChange`, a cance
 of a run in golden files, as a guard for refactoring the engine.
 
 ### One host for agent processes
+
+Stop at once (PJ3) first marks the worker as ending and pauses its run, then calls the runtime's pure interrupt
+and kills the process. Its exit is intentional, so it must not schedule a retry or process a late turn result. The
+API waits for exit; Resume refuses while that exit is pending, preventing two processes on the same session. The
+server records `step.interrupted` in the user's event log, closing the current work segment without giving the
+step an outcome. The worker's files and session remain, and its next process resumes that session. Stop now keeps
+its existing message and priority. Neither the CLI nor the orchestrator gains an immediate-stop action.
 
 Workers (the engine), the orchestrator and thinking partners (conversations) start their processes through one
 `AgentHost` (`apps/server/src/agent-host.ts`), one host per role. The host starts the runtime the role asks for (Claude

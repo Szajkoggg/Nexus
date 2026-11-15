@@ -1,0 +1,17 @@
+# Run with FAKE_SLOW_MS=300000 so each fake stays at work throughout the capture.
+seed: scripts/capture/seed-run-controls.ts
+views:
+  - key: run-controls@1440
+    route: "#/desktop/RUN"
+    label: "Run controls, desktop"
+    actions:
+      - click: Start
+      - wait: 1500
+      - click: { selector: "section:has(.animate-pulse) > p:last-child" }
+  - key: run-controls@390
+    route: "#/phone/RUN"
+    label: "Run controls, phone"
+    actions:
+      - click: Start
+      - wait: 1500
+      - click: { selector: "section:has(.animate-pulse) > p:last-child" }
