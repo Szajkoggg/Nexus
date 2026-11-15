@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { DRAFT_EVENT, DRAFT_FOCUS_EVENT, readDraft, writeDraft } from "../drafts.ts";
 import { usePhone } from "../phone.ts";
 import ReactMarkdown from "react-markdown";
@@ -6,6 +6,8 @@ import { runTimes, stepTimes } from "@nexus/protocol/times";
 import { formatClock, formatDateTime, formatDuration, rich, t, timeAgo, type Key } from "../i18n.ts";
 import { useAction, type QueueView, type StepView } from "../api.ts";
 import { AttachButton, PictureStrip, filesOf, type Pictures } from "./Pictures.tsx";
+import { MicButton, VoiceLine, useVoice } from "./Voice.tsx";
+import { withHeard } from "../voice.ts";
 
 // ---------------------------------------------------------------- status colours
 
@@ -216,7 +218,12 @@ export function useDraftText({ draft, onSubmit, allowEmpty = false, verbatim = f
     await run(() => onSubmit(verbatim ? sent : sent.trim()), () => { if (current.current === sent) change(""); });
   };
   const onKeyDown = (e: React.KeyboardEvent) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); void submit(); } };
-  return { text, change, submit, ready, busy, error, onKeyDown };
+  // What was heard (Voice.tsx) goes after the text as it is now, also when it changed while listening; never sent.
+  const append = useCallback((heard: string) => {
+    const next = withHeard(current.current, heard);
+    current.current = next; setText(next); writeDraft(draft, next);
+  }, [draft]);
+  return { text, change, append, submit, ready, busy, error, onKeyDown };
 }
 
 export const TEXTAREA = "w-full resize-y rounded-lg border border-line-strong bg-canvas px-3 py-2 text-sm text-fg placeholder:text-fg-3 focus:border-accent focus:outline-none";
@@ -253,6 +260,8 @@ function ComposerBox({ draft, placeholder, button, onSubmit, allowEmpty = false,
   });
   const error = d.error ?? pictures?.error;
   const box = useRef<HTMLTextAreaElement>(null);
+  // A chat's box (the card, the phone's line) has a microphone where the browser recognises speech.
+  const voice = useVoice(d.append);
   // A quote put in this draft (putDraftAndFocus): the box takes the focus with the cursor at the end, below the quote.
   useEffect(() => {
     const on = (e: Event) => {
@@ -285,10 +294,12 @@ function ComposerBox({ draft, placeholder, button, onSubmit, allowEmpty = false,
           <textarea ref={box} value={d.text} rows={2} placeholder={placeholder} aria-label={placeholder}
             onChange={(e) => d.change(e.target.value)} onKeyDown={d.onKeyDown} onPaste={onPaste}
             className="min-h-14 flex-1 resize-none bg-transparent py-1.5 text-sm leading-[22px] text-fg placeholder:text-fg-3 focus:outline-none" />
+          {voice && <MicButton voice={voice} />}
           <span className="mb-2 shrink-0 rounded border border-line-strong px-1.5 text-[11px] text-fg-3">{t("ui.ctrlEnter")}</span>
           <Button onClick={() => void d.submit()} disabled={!d.ready}>{d.busy ? t("ui.sending") : button}</Button>
           </div>
         </div>
+        <VoiceLine voice={voice} />
         {error && <p className="mt-1 text-xs text-danger">{error}</p>}
       </div>
     );
@@ -301,12 +312,14 @@ function ComposerBox({ draft, placeholder, button, onSubmit, allowEmpty = false,
           {pictures && <AttachButton pictures={pictures} round />}
           <textarea ref={box} value={d.text} rows={1} placeholder={placeholder} aria-label={placeholder}
             onChange={(e) => d.change(e.target.value)} onKeyDown={d.onKeyDown} onPaste={onPaste}
-            className="min-h-11 flex-1 resize-none rounded-[22px] border border-line-strong bg-canvas px-4 py-2.5 text-sm leading-[22px] text-fg placeholder:text-fg-3 focus:border-accent focus:outline-none" />
+            className="min-h-11 min-w-0 flex-1 resize-none rounded-[22px] border border-line-strong bg-canvas px-4 py-2.5 text-sm leading-[22px] text-fg placeholder:text-fg-3 focus:border-accent focus:outline-none" />
+          {voice && <MicButton voice={voice} round />}
           <button onClick={() => void d.submit()} disabled={!d.ready} aria-label={button} title={t("ui.withShortcut", { action: button })}
             className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-accent-strong text-on-accent hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M3.4 20.4 21 12 3.4 3.6l-.1 6.5L15 12 3.3 13.9z" /></svg>
           </button>
         </div>
+        <VoiceLine voice={voice} />
         {error && <p className="mt-1 text-xs text-danger">{error}</p>}
       </div>
     );

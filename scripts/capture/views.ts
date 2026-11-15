@@ -8,6 +8,7 @@ export type Action =
   | { click: string | { selector: string } }      // a button, link or tab by its text; or the first element matching a CSS selector
   | { type: { text: string; into?: string } }     // typed into the element matching `into` (a CSS selector), else the focused one
   | { press: string }                             // a key, e.g. Escape, Enter, ArrowRight
+  | { scroll: string }                            // the first element with exactly this text (a heading, as written, not as styled) to the top
   | { wait: number };                             // milliseconds
 
 /** One picture: its key (subject-state@width), the dashboard route, and the setup. */
@@ -21,6 +22,11 @@ export interface View {
   height?: number;
   /** How long the page settles after it opens, in milliseconds (default 1500). */
   settle?: number;
+  /**
+   * A JavaScript file (a path from the repository root) run in the page before the dashboard's own scripts, in every
+   * frame: a stand-in for a browser API the capture must not use for real (a fake speech recognition).
+   */
+  script?: string;
   actions: Action[];
   /** From the key. */
   width: number;
@@ -52,6 +58,7 @@ export function parseViews(text: string): ViewList {
     seen.add(key);
     if (typeof v.route !== "string" || !v.route.startsWith("#/")) problems.push(`${at} (${key}).route: a dashboard route starting with #/, e.g. "#/demo/UI/UI1"`);
     if (v.label !== undefined && typeof v.label !== "string") problems.push(`${at} (${key}).label: text`);
+    if (v.script !== undefined && (typeof v.script !== "string" || !v.script.endsWith(".js"))) problems.push(`${at} (${key}).script: the path of a .js file from the repository root`);
     for (const f of ["height", "settle"] as const) {
       if (v[f] !== undefined && !(Number.isInteger(v[f]) && (v[f] as number) >= 0)) problems.push(`${at} (${key}).${f}: a whole number of ${f === "height" ? "pixels" : "milliseconds"}`);
     }
@@ -64,7 +71,7 @@ export function parseViews(text: string): ViewList {
     }
     const width = splitKey(key).width;
     views.push({
-      key, route: v.route as string, label: v.label as string | undefined, actions, width,
+      key, route: v.route as string, label: v.label as string | undefined, script: v.script as string | undefined, actions, width,
       height: (v.height as number | undefined) ?? (width >= 1024 ? 900 : 844), settle: (v.settle as number | undefined) ?? 1500,
     });
   }
@@ -73,7 +80,7 @@ export function parseViews(text: string): ViewList {
 }
 
 function actionProblem(a: unknown): string | undefined {
-  const usage = "one of click: <text> | click: {selector}, type: {text, into?}, press: <key>, wait: <ms>";
+  const usage = "one of click: <text> | click: {selector}, type: {text, into?}, press: <key>, scroll: <text>, wait: <ms>";
   if (typeof a !== "object" || a === null || Array.isArray(a) || Object.keys(a).length !== 1) return usage;
   const [kind, value] = Object.entries(a)[0]!;
   if (kind === "click") {
@@ -86,6 +93,7 @@ function actionProblem(a: unknown): string | undefined {
     return t && typeof t === "object" && typeof t.text === "string" && (t.into === undefined || typeof t.into === "string") ? undefined : "type: {text: <text>, into?: <css>}";
   }
   if (kind === "press") return typeof value === "string" && value ? undefined : "press: a key name, e.g. Escape";
+  if (kind === "scroll") return typeof value === "string" && value ? undefined : "scroll: the text of a heading to bring to the top";
   if (kind === "wait") return Number.isInteger(value) && (value as number) >= 0 ? undefined : "wait: milliseconds";
   return usage;
 }

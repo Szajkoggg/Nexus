@@ -32,6 +32,8 @@ export class EdgeBrowser implements Browser {
   private readonly pending = new Map<number, (m: { result?: unknown; error?: { message: string } }) => void>();
   private framed = false;
   private frame = { width: 0, height: 0 };
+  /** The last view's script, removed before the next view opens. */
+  private script: string | undefined;
   readonly pids: number[] = [];
 
   static async launch(profile: string): Promise<EdgeBrowser> {
@@ -92,7 +94,10 @@ export class EdgeBrowser implements Browser {
   /** Evaluates an expression in the dashboard (a script that checks the page, not the capture's own views). */
   evaluate<T>(expr: string): Promise<T> { return this.js<T>(expr); }
 
-  async open(url: string, width: number, height: number): Promise<void> {
+  async open(url: string, width: number, height: number, script?: string): Promise<void> {
+    if (this.script) { await this.cdp("Page.removeScriptToEvaluateOnNewDocument", { identifier: this.script }); this.script = undefined; }
+    // In every frame (the 390 px view's too), in the page's own world, before its scripts.
+    if (script) this.script = (await this.cdp<{ identifier: string }>("Page.addScriptToEvaluateOnNewDocument", { source: script })).identifier;
     this.framed = width < NARROWEST;
     this.frame = { width, height };
     await this.cdp("Emulation.setDeviceMetricsOverride", { width: Math.max(width, NARROWEST), height, deviceScaleFactor: 1, mobile: false });
@@ -125,6 +130,16 @@ export class EdgeBrowser implements Browser {
       el.dispatchEvent(new Event("input", { bubbles: true }));
       // A select (and React's onChange on it) hears "change", not "input".
       el.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    })()`);
+  }
+
+  scroll(text: string): Promise<boolean> {
+    // The text as written (textContent): a heading styled in capitals reads in capitals through innerText.
+    return this.js<boolean>(`(() => {
+      const el = [...document.querySelectorAll("h1, h2, h3, h4, h5, h6, legend, label, p, span, div")].find((e) => e.textContent.trim() === ${JSON.stringify(text)});
+      if (!el) return false;
+      el.scrollIntoView({ block: "start" });
       return true;
     })()`);
   }

@@ -115,6 +115,14 @@ box (✕ removes it) and goes with your message; a picture alone is a message to
 it; the chat shows the picture, and a click opens it full size. Pictures are kept in the project's
 `.nexus/uploads/`.
 
+**Speaking.** Where the browser recognises speech (Chrome, Edge, Safari; not Firefox), a microphone beside the
+message box lets you speak instead of typing, in the orchestrator's chat, in a conversation and on the phone. It
+listens in the reader's language (Settings, "Reader's language"; without one, the browser's), shows what it hears under
+the box, and stops at a pause or when you tap it again. What it heard goes into the box after what is there; nothing
+is sent until you send it. Chrome and Edge recognise speech on Google's and Microsoft's servers, so the sound goes
+there; the first use says so. The browser asks once for the microphone; on the phone this needs the https address
+(Tailscale Serve, below).
+
 **A queue** on the project page shows one status ("running · SF3", "paused · B2", "stopped at W4c", "waiting for
 your review · UX2"…), a progress line with a segment per step, and its steps one line each, in two columns on a
 computer. "Running" means a run is really at work; a queue whose run is paused says so. The step that matters is
@@ -552,7 +560,9 @@ node scripts/capture.ts views.yaml --no-before                                  
 The view list names a seed script that writes the test projects (`scripts/capture/seed-demo.ts`, a demo project
 with a step waiting for review) and the views: a key such as `viewer-before-after@390` (the width comes from it),
 a route such as `#/demo/UI/UI1`, a label, and a few setup actions (click a button by its text or an element by a CSS
-selector, type, press a key, wait). The format is in `nexus help review`. The tool builds this checkout's dashboard,
+selector, type, press a key, scroll a heading to the top by its text, wait). A view's `script` (a `.js` file) runs in the page before the dashboard does, for
+that view only: `scripts/capture/fake-speech.js` stands in for the browser's speech recognition, so a picture can show
+the microphone listening without a microphone. The format is in `nexus help review` and `scripts/capture/views.ts`. The tool builds this checkout's dashboard,
 seeds a development instance (port 4318 and up, its own data in a temporary folder, the fake runtimes, and
 `NEXUS_DIR`, `NEXUS_HANDOVER` and `NEXUS_SESSION` cleared) and takes the afters with headless Edge. For the befores
 it makes a temporary git worktree at the base commit (the step's first start, from `.nexus/queues/<queue>/git.yaml`),
@@ -576,6 +586,14 @@ proxy or from another address needs the access token once (it sets a cookie for 
    token and a QR code. Scan it with the phone: it opens Nexus and signs in.
 5. On the phone, add Nexus to the home screen (iPhone: Share, Add to Home Screen), open it from there and turn on
    the bell: notifications arrive even with Nexus closed. "Send a test notification" in the panel checks it.
+
+**Which notifications a device gets** is chosen on that device, in Settings, Global, "This browser", Notifications:
+a switch for each kind (a question, a stopped queue, a step to review, a failed update of Nexus…; all on at first),
+quiet hours (for example 22:00 to 07:00, in the device's own time zone; off at first) and "Urgent breaks through",
+which lets a stopped queue, a failed step and a failed update of Nexus through the quiet hours. What the quiet hours
+hold back does not come later; the waiting list and the morning digest show it. A change applies at once. With push
+on, the settings go with the device's subscription, so the phone and the computer each keep their own; without it,
+the open tab's notifications follow them. The test notification always comes.
 
 On a narrow screen the project sidebar gives way to a picker: the current project's name at the top left, with its
 "waiting for you" count and running dot. Tap it for the list of all projects (each with its count and dot), tap one to

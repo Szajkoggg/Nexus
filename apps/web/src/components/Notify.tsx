@@ -7,6 +7,8 @@ import { attentionKey, HttpError, request, type AttentionItem, type ProjectSumma
 import { itemHash } from "../hash.ts";
 import { t } from "../i18n.ts";
 import { attentionTarget, kindLabel, textOf } from "./Attention.tsx";
+import { readLocalNotify, tabNews, writeLocalNotify, type TabItem } from "../notify.ts";
+import type { NotifySettings } from "@nexus/protocol/notify";
 
 const STORAGE = "nexus.notify";
 const stored = (): boolean => { try { return localStorage.getItem(STORAGE) === "on"; } catch { return false; } };
@@ -32,6 +34,30 @@ async function worker(): Promise<ServiceWorkerRegistration> {
 async function pushSubscription(): Promise<PushSubscription | null> {
   const reg = await navigator.serviceWorker.getRegistration();
   return reg ? reg.pushManager.getSubscription() : null;
+}
+
+/** This device's IANA time zone: its quiet hours are kept in it. */
+export const deviceZone = (): string | undefined => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { return undefined; } };
+
+/**
+ * This device's notification settings and where they are kept: with its push subscription on the server (`endpoint`),
+ * else in this browser (the in-tab notifications, or push not turned on yet: taken to the server when it is).
+ */
+export async function loadDeviceNotify(): Promise<{ settings: NotifySettings; endpoint?: string }> {
+  const sub = pushCapable() ? await pushSubscription().catch(() => null) : null;
+  if (!sub) return { settings: readLocalNotify() };
+  const r = await request<{ settings: NotifySettings }>(`/api/push/settings?endpoint=${encodeURIComponent(sub.endpoint)}`).catch(() => undefined);
+  // A subscription the server no longer holds: the browser's own settings until push is turned on again.
+  return r ? { settings: r.settings, endpoint: sub.endpoint } : { settings: readLocalNotify() };
+}
+
+/** Keeps this device's settings where loadDeviceNotify found them, in its time zone; resolves with what was kept. */
+export async function saveDeviceNotify(settings: NotifySettings, endpoint?: string): Promise<NotifySettings> {
+  const zone = deviceZone();
+  const s: NotifySettings = { ...settings, ...(zone ? { timezone: zone } : {}) };
+  writeLocalNotify(s);
+  if (!endpoint) return s;
+  return (await request<{ settings: NotifySettings }>("/api/push/settings", { method: "PUT", body: { endpoint, settings: s } })).settings;
 }
 
 /** Why this device cannot get push notifications, if it cannot. */
@@ -77,11 +103,11 @@ export function useNotifications(projects: ProjectSummary[] | undefined) {
   // In-tab notifications, only where push is not available.
   useEffect(() => {
     if (!projects || usePush || typeof Notification === "undefined") return;
-    const current = new Map<string, { p: ProjectSummary; a: AttentionItem }>();
-    for (const p of projects) for (const a of p.attention) current.set(`${p.id}:${attentionKey(a)}`, { p, a });
-    if (seen.current && on) {
-      for (const [key, { p, a }] of current) {
-        if (seen.current.has(key)) continue;
+    const current: TabItem<{ p: ProjectSummary; a: AttentionItem }>[] = [];
+    for (const p of projects) for (const a of p.attention) current.push({ key: `${p.id}:${attentionKey(a)}`, kind: a.kind, item: { p, a } });
+    // Filtered as a push device's would be (kinds, quiet hours), with this browser's settings.
+    if (on) {
+      for (const { key, item: { p, a } } of tabNews(seen.current, current, readLocalNotify(), new Date())) {
         try {
           const n = new Notification(t("notify.notification", { project: p.name, kind: kindLabel(a.kind).text }), {
             body: `${a.queue ?? ""}${a.step ? `/${a.step}` : ""} ${textOf(a)}`.trim().slice(0, 200),
@@ -91,7 +117,7 @@ export function useNotifications(projects: ProjectSummary[] | undefined) {
         } catch { /* a browser that shows notifications only through a service worker */ }
       }
     }
-    seen.current = new Set(current.keys());
+    seen.current = new Set(current.map((c) => c.key));
   }, [projects, on, usePush]);
 
   const turnOnPush = async () => {
@@ -107,10 +133,12 @@ export function useNotifications(projects: ProjectSummary[] | undefined) {
       t("notify.pushNoAnswer"),
     );
     const device = /iPhone|iPad/.test(navigator.userAgent) ? "iPhone / iPad" : /Android/.test(navigator.userAgent) ? "Android" : t("notify.desktopBrowser");
-    await request("/api/push/subscribe", { method: "POST", body: { subscription: sub.toJSON(), label: device } }).catch((e: unknown) => {
+    await request("/api/push/subscribe", { method: "POST", body: { subscription: sub.toJSON(), label: device, timezone: deviceZone() } }).catch((e: unknown) => {
       // The server's reason when it gave one, else its status.
       throw new Error(e instanceof HttpError ? e.reason ?? t("common.serverAnswered", { status: String(e.status) }) : (e as Error).message);
     });
+    // What was chosen in this browser before push was on goes with the subscription (a new one gets the defaults).
+    await saveDeviceNotify(readLocalNotify(), sub.endpoint).catch(() => undefined);
     // A first notification right away shows that the whole path works; the subscription stands even if it fails.
     await request("/api/push/test", { method: "POST", body: { endpoint: sub.endpoint } }).catch(() => undefined);
   };

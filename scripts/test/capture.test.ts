@@ -21,6 +21,7 @@ views:
       - click: { selector: "img[alt='Waiting tab']" }
       - type: { text: hello, into: textarea }
       - press: Escape
+      - scroll: This browser
       - wait: 300
   - key: rail@1440
     route: "#/demo"
@@ -29,7 +30,7 @@ views:
 `);
   assert.equal(list.seed, "scripts/capture/seed-demo.ts");
   const [a, b] = list.views;
-  assert.deepEqual([a!.key, a!.width, a!.height, a!.settle, a!.label, a!.actions.length], ["waiting-tab@492", 492, 844, 1500, "Waiting tab", 5]);
+  assert.deepEqual([a!.key, a!.width, a!.height, a!.settle, a!.label, a!.actions.length], ["waiting-tab@492", 492, 844, 1500, "Waiting tab", 6]);
   assert.deepEqual([b!.width, b!.height, b!.settle, b!.actions], [1440, 1000, 0, []]);
   assert.equal(parseViews(`views: [{ key: "x@1280", route: "#/p" }]`).views[0]!.height, 900, "900 high from 1024 wide");
 });
@@ -91,6 +92,29 @@ test("a development instance started with decoys in the parent's environment ign
   rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 });
 
+test("a view's script reaches the browser with that view only; one not read is reported", async () => {
+  const opened: (string | undefined)[] = [];
+  const browser: Browser = {
+    async open(_url, _w, _h, script) { opened.push(script); },
+    async click() { return true; },
+    async type() { return true; },
+    async press() { return true; },
+    async scroll() { return true; },
+    async shot() {},
+  };
+  const views = parseViews(`
+views:
+  - { key: plain@1440, route: "#/demo", settle: 0 }
+  - { key: faked@390, route: "#/demo", settle: 0, script: scripts/capture/fake-speech.js }
+  - { key: missing@390, route: "#/demo", settle: 0, script: scripts/capture/other.js }
+`).views;
+  assert.equal(views[1]!.script, "scripts/capture/fake-speech.js");
+  const shots = await captureViews(views, browser, { base: "http://127.0.0.1:4318", out: "C:/out", side: "after", scripts: new Map([["scripts/capture/fake-speech.js", "window.x = 1;"]]) });
+  assert.deepEqual(opened, [undefined, "window.x = 1;"]);
+  assert.deepEqual(shots.map((s) => s.error), [undefined, undefined, "its script scripts/capture/other.js was not read"]);
+  assert.throws(() => parseViews(`views: [{ key: "a@390", route: "#/p", script: fake.ts }]`), /script: the path of a \.js file/);
+});
+
 test("a view that fails is reported with why; the others are taken", async () => {
   const taken: string[] = [];
   const browser: Browser = {
@@ -98,19 +122,20 @@ test("a view that fails is reported with why; the others are taken", async () =>
     async click(t) { return typeof t === "string" ? t !== "Nope" : true; },
     async type() { return true; },
     async press() { return true; },
+    async scroll(t) { return t !== "Nowhere"; },
     async shot(file) { taken.push(file); },
   };
   const views = parseViews(`
 views:
   - { key: one@1440, route: "#/demo", settle: 0 }
-  - { key: two@1440, route: "#/demo", settle: 0, actions: [{ click: Accept }, { click: Nope }] }
+  - { key: two@1440, route: "#/demo", settle: 0, actions: [{ click: Accept }, { scroll: Nowhere }] }
   - { key: three@390, route: "#/broken", settle: 0 }
   - { key: four@390, route: "#/demo", settle: 0, label: Four }
 `).views;
   const shots = await captureViews(views, browser, { base: "http://127.0.0.1:4318", out: "C:/out", side: "after" });
   assert.deepEqual(shots, [
     { key: "one@1440", side: "after", file: "C:/out/one@1440.png" },
-    { key: "two@1440", side: "after", error: 'action 2 (click "Nope") found nothing to act on' },
+    { key: "two@1440", side: "after", error: 'action 2 (scroll to "Nowhere") found nothing to act on' },
     { key: "three@390", side: "after", error: "the page did not open: net::ERR_FAILED" },
     { key: "four@390", side: "after", file: "C:/out/four@390.png" },
   ]);
@@ -119,7 +144,7 @@ views:
   const befores = await captureViews(views, browser, { base: "http://127.0.0.1:4340", out: "C:/out", side: "before" });
   const text = report(views, [...shots, ...befores], { step: "RS3", base: "8800a052844399b3465d3cea89d53c4d701c0f85", beforeRun: true });
   assert.match(text, /^capture: 4 of 8 picture\(s\) taken \(befores at 8800a05\)/);
-  assert.match(text, /NOT TAKEN: two@1440 after: action 2 \(click "Nope"\) found nothing to act on/);
+  assert.match(text, /NOT TAKEN: two@1440 after: action 2 \(scroll to "Nowhere"\) found nothing to act on/);
   assert.match(text, /NOT TAKEN: three@390 before: the page did not open/);
   assert.match(text, /Take those by hand under the same conditions/);
   const adds = text.split("\n").filter((l) => l.startsWith("nexus review add"));

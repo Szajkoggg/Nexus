@@ -16,6 +16,8 @@ export interface Page {
    * Await it inside the action, after the write.
    */
   reloaded: (...urls: string[]) => Promise<void>;
+  /** The current project's reader's language (its effective setting, "hu"), if any: what a chat's microphone listens for. */
+  reader?: string;
 }
 
 const PageContext = createContext<Page>({ version: undefined, all: undefined, reload: () => {}, reloaded: () => Promise.resolve() });

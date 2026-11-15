@@ -85,7 +85,8 @@ export function App() {
 
   const notify = useNotifications(projects);
   // App provides the page (below): what it reads itself takes the versions directly.
-  const page = useMemo<Page>(() => ({ version, all: versions.all, reload, reloaded }), [version, versions.all, reload, reloaded]);
+  const reader = state?.project.languages.reader;
+  const page = useMemo<Page>(() => ({ version, all: versions.all, reload, reloaded, reader }), [version, versions.all, reload, reloaded, reader]);
   const { data: orchestrator, error: orchestratorError } = useOrchestrator(projectId, version);
   const server = useServer(versions.all);
   // Each panel is a layer in the browser history: opening pushes an entry, closing (or Back) pops it.
