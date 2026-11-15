@@ -557,8 +557,6 @@ app.get("/api/projects/:id/refusals", (c) => {
   return c.json(all.sort((a, b) => a.at.localeCompare(b.at)));
 });
 
-// The morning digest across projects (UX proposals, 16): what happened after ?since= (ISO 8601; default the last 24
-// hours), newest first, at most 200 lines; and the queues at work now (packages/protocol/src/digest.ts).
 // The statistics across projects, or of one (?project=), grouped (?by=, default model) since a time (?since=): the
 // same computation as nexus stats (@nexus/protocol stats.ts), the use of the windows estimated from turns.jsonl.
 app.get("/api/stats", (c) => {
@@ -574,6 +572,8 @@ app.get("/api/stats", (c) => {
   return c.json(statsReport(stepStats(states, readTurns().entries), { by, project, since }) satisfies StatsReport);
 });
 
+// The morning digest across projects (UX proposals, 16): what happened after ?since= (ISO 8601; default the last 24
+// hours), newest first, at most 200 lines; and the queues at work now (packages/protocol/src/digest.ts).
 app.get("/api/digest", (c) => {
   refreshRegistry();
   const q = c.req.query("since");

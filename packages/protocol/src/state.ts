@@ -8,7 +8,7 @@ import { stopPlace } from "./attention.ts";
 import { closingStepId, integrationStepId, stepDefs } from "./closing.ts";
 import { openPlan, planView, proposalText, type PlanView } from "./plan.ts";
 import { stepTags, tagProposalText, type StepTags } from "./tags.ts";
-import { checkMetric, metricDef, metricWarning, type MetricValue } from "./metrics.ts";
+import { CHECK_UNIT, checkMetric, metricDef, metricWarning, type MetricValue } from "./metrics.ts";
 
 import type { CheckView } from "./steps.ts";
 interface AnswerView { id: string; text: string; at: string; escalate?: boolean; continue?: boolean; session: string; by: "orchestrator" | "user" }
@@ -616,7 +616,7 @@ function apply(
       const st = stepOf(queueOf(e.queue), e.step);
       if (!st) return;
       st.checks.push({ name: e.name, ok: e.ok, summary: e.summary, duration: e.duration, at: e.at });
-      if (e.duration !== undefined) st.metrics.push({ name: checkMetric(e.name), value: e.duration, unit: "s", at: e.at, event: e.id, session: e.session, commit: e.commit });
+      if (e.duration !== undefined) st.metrics.push({ name: checkMetric(e.name), value: e.duration, unit: CHECK_UNIT, at: e.at, event: e.id, session: e.session, commit: e.commit });
       return;
     }
     case "metric.recorded": {
