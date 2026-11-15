@@ -50,8 +50,12 @@ export async function hookAnswer(input: unknown, resolve?: Resolve): Promise<str
   const i = (input && typeof input === "object" ? input : {}) as { tool_name?: string; tool_input?: { url?: unknown } };
   if (i.tool_name !== "WebFetch") return "";
   const why = await refusal(i.tool_input?.url, resolve);
-  return why ? JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: why } }) : "";
+  return why ? deny(why) : "";
 }
+
+/** Claude Code's PreToolUse answer that refuses the call, with its reason. */
+const deny = (reason: string): string =>
+  JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason } });
 
 if (import.meta.main) {
   let raw = "";
@@ -61,7 +65,7 @@ if (import.meta.main) {
     let input: unknown;
     try { input = JSON.parse(raw); } catch { input = { tool_name: "WebFetch", tool_input: {} }; } // unreadable: refused
     // A resolution that hangs is refused after a while rather than holding the turn.
-    const timeout = new Promise<string>((done) => setTimeout(() => done(JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: "the host did not resolve in time" } })), 8000).unref());
+    const timeout = new Promise<string>((done) => setTimeout(() => done(deny("the host did not resolve in time")), 8000).unref());
     void Promise.race([hookAnswer(input), timeout]).then((out) => { if (out) process.stdout.write(out); process.exit(0); });
   });
 }
