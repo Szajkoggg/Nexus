@@ -142,19 +142,22 @@ function quantile(sorted: readonly number[], q: number): number | undefined {
 }
 
 /**
- * The keys a step falls under. A project's own names (its areas, its prefixed activities) count only within their
- * project: across projects they read `<project>/<name>`, so two projects' "engine" areas stay apart; Nexus's
- * activities are compared across projects as they are.
+ * A project's own name (an area, a prefixed activity) as a key: it counts only within its project, so across projects
+ * it reads `<project>/<name>` and two projects' "engine" areas stay apart.
  */
+const ownKey = (s: StepStat, name: string, across: boolean) => (across ? `${s.project}/${name}` : name);
+/** An activity as a key: Nexus's activities are compared across projects as they are, a project's own are its own. */
+const activityKey = (s: StepStat, a: string, across: boolean) => (PROJECT_ACTIVITY.test(a) ? ownKey(s, a, across) : a);
+
+/** The keys a step falls under. */
 function keysOf(s: StepStat, by: StatDimension, across: boolean): string[] {
-  const own = (name: string) => (across ? `${s.project}/${name}` : name);
   switch (by) {
     case "model": return [s.model ?? UNTAGGED];
     case "effort": return [s.effort ?? (s.model ? "default" : UNTAGGED)];
-    case "area": return [s.tags.area ? own(s.tags.area) : UNTAGGED];
+    case "area": return [s.tags.area ? ownKey(s, s.tags.area, across) : UNTAGGED];
     case "activity": {
       const all = [...new Set([...(s.tags.activities ?? []), ...(s.observed ?? [])])];
-      return all.length ? all.map((a) => (PROJECT_ACTIVITY.test(a) ? own(a) : a)) : [UNTAGGED];
+      return all.length ? all.map((a) => activityKey(s, a, across)) : [UNTAGGED];
     }
     case "kind": case "size": case "origin": return [s.tags[by] ?? UNTAGGED];
   }
@@ -189,7 +192,7 @@ export function statsReport(all: readonly StepStat[], o: { by: StatDimension; pr
       usage, usage_missing: xs.reduce((a, s) => a + s.usage_missing, 0), fallback: xs.filter((s) => s.fallback).length,
     };
     if (o.by === "activity" && key !== UNTAGGED) {
-      const has = (list: readonly string[] | undefined, s: StepStat) => !!list?.some((a) => (PROJECT_ACTIVITY.test(a) && across ? `${s.project}/${a}` : a) === key);
+      const has = (list: readonly string[] | undefined, s: StepStat) => !!list?.some((a) => activityKey(s, a, across) === key);
       g.activities = {
         planned: xs.filter((s) => has(s.tags.activities, s)).length,
         observed: xs.filter((s) => has(s.observed, s)).length,
