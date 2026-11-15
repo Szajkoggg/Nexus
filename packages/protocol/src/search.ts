@@ -138,8 +138,8 @@ function plain(text: string): string {
 export function searchExcerpt(text: string, terms: readonly string[], width = 160): { excerpt: string; ranges: [number, number][] } {
   const flat = plain(text);
   const { folded, map } = fold(flat);
-  const first = Math.min(...terms.map((t) => folded.indexOf(t)).filter((i) => i >= 0), Number.MAX_SAFE_INTEGER);
-  const at = first === Number.MAX_SAFE_INTEGER ? 0 : map[first]!;
+  const firsts = terms.map((t) => folded.indexOf(t)).filter((i) => i >= 0);
+  const at = firsts.length ? map[Math.min(...firsts)]! : 0;
   let start = 0, end = flat.length;
   if (flat.length > width) {
     // The first match about a third of the way in, so the words before it give it context.
