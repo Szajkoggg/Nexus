@@ -20,7 +20,7 @@ import { existsSync, rmSync } from "node:fs";
 import {
   ActionError, HOLDING_RUN_STATES, loadProjectState, normPath, now, pendingProvisional, type GitFile, type ProjectState, type ProjectStore, type QueueView,
 } from "@nexus/protocol";
-import { checkoutOf, git } from "./gitinfo.ts";
+import { checkoutOf, git, patchGit } from "./gitinfo.ts";
 import { ROOT } from "./lifecycle.ts";
 import { samePath } from "./worktree.ts";
 
@@ -172,8 +172,7 @@ export function fastForward(store: ProjectStore, q: Pick<QueueView, "id">, d: Ex
   run(d.path, ["merge", "--ff-only", "--no-edit", d.sha]);
   const head = run(d.path, ["rev-parse", "HEAD"]);
   if (head !== d.sha) throw new ActionError(`the fast-forward of ${d.base} ended at ${head.slice(0, 7)}, not at ${d.sha.slice(0, 7)}: look at ${d.path}`, 500);
-  const g = store.readGit(q.id) ?? { protocol: 1 as const, steps: {} };
-  store.writeGit(q.id, { ...g, merged: { at: now(), into: d.base, path: d.path, sha: d.sha, fast_forward: true, by }, merge: undefined });
+  patchGit(store, q.id, { merged: { at: now(), into: d.base, path: d.path, sha: d.sha, fast_forward: true, by }, merge: undefined });
   return `${d.base} moved forward to ${d.branch} (${d.sha.slice(0, 7)}) in ${d.path}`;
 }
 
@@ -188,8 +187,7 @@ export function reintegrate(store: ProjectStore, q: QueueView, d: Extract<MergeD
   const at = now();
   const file = store.readQueue(q.id);
   store.writeQueue({ ...file, changes: [...file.changes, { at, kind: "status", by: "nexus", step: integ.id, from: integ.status, to: "pending", reason, revision: file.revision }], updated_at: at });
-  const g = store.readGit(q.id) ?? { protocol: 1 as const, steps: {} };
-  store.writeGit(q.id, { ...g, merge: { reintegrations: count, reintegrating: at } });
+  patchGit(store, q.id, { merge: { reintegrations: count, reintegrating: at } });
   return `queue ${q.id}'s integration step runs again: ${reason}`;
 }
 
@@ -259,8 +257,7 @@ export function mergeBack(store: ProjectStore, queueId: string, serverRoot = ROO
   }
   const sha = run(target.path, ["rev-parse", "HEAD"]);
   const fastForward_ = sha === tip;
-  const g = store.readGit(q.id) ?? { protocol: 1 as const, steps: {} };
-  store.writeGit(q.id, { ...g, merged: { at: now(), into: base.ref, path: target.path, sha, fast_forward: fastForward_, by: "user" } });
+  patchGit(store, q.id, { merged: { at: now(), into: base.ref, path: target.path, sha, fast_forward: fastForward_, by: "user" } });
   return `${branch} merged into ${base.ref} in ${target.path} (${fastForward_ ? "fast-forward" : `merge commit ${sha.slice(0, 7)}`})`;
 }
 
@@ -310,7 +307,6 @@ export function cleanUp(store: ProjectStore, queueId: string): string {
   if (here) removeWorktree(root, path);
   else run(root, ["worktree", "prune"]);
   run(cwd, ["branch", "-d", branch]);
-  const g = store.readGit(q.id) ?? { protocol: 1 as const, steps: {} };
-  store.writeGit(q.id, { ...g, cleaned: { at: now(), path, branch }, merge: undefined });
+  patchGit(store, q.id, { cleaned: { at: now(), path, branch }, merge: undefined });
   return `the worktree ${path} is removed and branch ${branch} deleted`;
 }

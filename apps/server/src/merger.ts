@@ -14,7 +14,7 @@
 // cleaned up once every provisional acceptance of the queue is confirmed; a Fix it until then runs in the worktree and
 // goes through the integration step again. Nothing is pushed.
 import { normPath, now, pendingProvisional, stepClosed, HOLDING_RUN_STATES, type ProjectState, type ProjectStore, type QueueView } from "@nexus/protocol";
-import { checkoutOf } from "./gitinfo.ts";
+import { checkoutOf, patchGit } from "./gitinfo.ts";
 import { ROOT } from "./lifecycle.ts";
 import { cleanUp, fastForward, judgeMerge, reintegrate, withMergeLock } from "./mergeback.ts";
 
@@ -145,9 +145,8 @@ export class Merger {
   }
 
   private writeMerge(q: QueueView, merge: NonNullable<NonNullable<QueueView["git"]>["merge"]>): void {
-    const g = this.store.readGit(q.id) ?? { protocol: 1 as const, steps: {} };
     const empty = !merge.waiting && merge.reintegrations === undefined && !merge.reintegrating;
-    this.store.writeGit(q.id, { ...g, merge: empty ? undefined : merge });
+    patchGit(this.store, q.id, { merge: empty ? undefined : merge });
   }
 
   private releaseAll(reason: string): void {

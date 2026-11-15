@@ -5,7 +5,7 @@ import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { ActionError, normPath, now, type ProjectState, type ProjectStore, type QueueView } from "@nexus/protocol";
-import { recordBase } from "./gitinfo.ts";
+import { patchGit, recordBase } from "./gitinfo.ts";
 
 /** Two paths name the same folder (Windows: case does not matter, nor the kind of slash). */
 export const samePath = (a: string, b: string): boolean => normPath(a).toLowerCase() === normPath(b).toLowerCase();
@@ -43,7 +43,7 @@ export function worktreeFor(store: ProjectStore, state: ProjectState, q: QueueVi
     catch (e) { throw new ActionError(`could not create the worktree: ${(e as { stderr?: Buffer }).stderr?.toString().trim() || (e as Error).message}`, 500); }
     // A new worktree gets the project's setup command once, before its first step (the engine runs it: setupPending).
     const command = state.project.defaults.worktree_setup?.trim();
-    if (command) store.writeGit(q.id, { ...(store.readGit(q.id) ?? { protocol: 1, steps: {} }), setup: { command, at: now() } });
+    if (command) patchGit(store, q.id, { setup: { command, at: now() } });
   }
   // Marked as a queue with a worktree of its own, so it keeps its integration step once `worktree` names the path.
   store.writeQueue({ ...store.readQueue(q.id), worktree: path, branch, integration: true, updated_at: now() });

@@ -31,6 +31,11 @@ function inMainCheckout(store: ProjectStore, q: Pick<QueueView, "worktree">): bo
 const head = (dir: string | undefined) => (dir ? git(dir, ["rev-parse", "HEAD"]) ?? null : null);
 const empty = (): GitFile => ({ protocol: 1, steps: {} });
 
+/** Sets fields of the queue's git.yaml (made when there is none yet); a field set to undefined is removed. */
+export function patchGit(store: ProjectStore, queue: string, patch: Partial<Omit<GitFile, "protocol" | "steps">>): void {
+  store.writeGit(queue, { ...(store.readGit(queue) ?? empty()), ...patch });
+}
+
 // ---------------------------------------------------------------- records
 
 /** A step opened (or a send-back reopened it): a new round starts, unless the last one has not ended (a continue). */
