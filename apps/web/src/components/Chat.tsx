@@ -21,7 +21,6 @@ import { SentPictures, filesOf, usePictures } from "./Pictures.tsx";
 import { splitPictures, withPictures } from "../pictures.ts";
 import { usePage } from "../page.ts";
 
-/** A chat view: the newest entries with their lines in chat.jsonl, and the pinned messages (apps/server/src/chats.ts). */
 // ---------------------------------------------------------------- the endpoints this file reads and writes
 
 /** A session's chat lines from `from` up to (not including) `to`: the older part of a long chat. */
@@ -40,6 +39,7 @@ async function newConversation(project: string, body: { queue: string; step: str
   return made.id;
 }
 
+/** A chat view: the newest entries with their lines in chat.jsonl, and the pinned messages (apps/server/src/chats.ts). */
 interface View { session: SessionFile | null; state: "working" | "idle" | "exited"; runtime: RuntimeFile | null; chat: NumberedEntry[]; pins: PinView[]; model: string | null; effort: string | null }
 
 /** A chat's search, open or not: its button is in the chat's header, or in the desktop column's for the orchestrator. */

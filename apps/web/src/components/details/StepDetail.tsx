@@ -61,8 +61,9 @@ export function StepDetail({ project, queue, step, onClose, of }: PanelProps & {
   const notes = <Notes {...writes} forOrchestrator={forOrchestrator} notesOpen={notesOpen} />;
   const refusals = <StepRefusals project={project} queue={queue.id} step={step.id} />;
   const changes = <Changes entries={queue.changes.filter((c) => c.step === step.id)} queue={queue} />;
+  // Its own session, or the run's while the run is at this step.
   const activitySession = step.session ?? (queue.run?.step === step.id ? queue.run.session : undefined);
-  const activity = activitySession && <Activity project={id} session={(step.session ?? queue.run?.session)!} queue={queue.id} step={step.id} />;
+  const activity = activitySession && <Activity project={id} session={activitySession} queue={queue.id} step={step.id} />;
   const integration = step.integration ? <IntegrationBox project={project} queue={queue} step={step} /> : null;
   const body = reviewing ? (
     <>
