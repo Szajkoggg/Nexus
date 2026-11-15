@@ -284,7 +284,13 @@ export const ProjectFile = z.object({
       /** Added to every Nexus-launched session; `Bash(nexus:*)` is always allowed. */
       allowed_tools: z.array(z.string()).default([]),
     }).prefault({}),
-    codex: CodexSettings.prefault({}),
+    codex: CodexSettings.extend({
+      /**
+       * The user's own Codex MCP servers (by name, as Codex's config names them) that Codex workers keep (project only).
+       * Every other one, and every plugin and app, is off in a Codex worker's thread; empty (the default): none.
+       */
+      mcp_servers: z.array(z.string()).default([]),
+    }).prefault({}),
   }).prefault({}),
   /** Conversations: thinking partners for the project. */
   conversations: ConversationSettings.extend({
@@ -367,6 +373,7 @@ export const StoredProject = z.object({
       sandbox: own(CodexSandbox),
       approval_policy: own(ApprovalPolicy),
       approvals_reviewer: ownOrNone(ApprovalsReviewer),
+      mcp_servers: z.array(z.string()).default([]),
     }).prefault({}),
   }).prefault({}),
   conversations: z.object({

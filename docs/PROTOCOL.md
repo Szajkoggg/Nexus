@@ -72,6 +72,7 @@ defaults:
 runtimes:
   claude: { permission_mode: auto, allowed_tools: [] }       # allowed_tools: project only
   codex:  { model: null, approval_policy: on-request, approvals_reviewer: auto_review }   # null: its own "none"
+  # codex.mcp_servers: [blender]       # project only: the user's Codex MCP servers Codex workers keep (default: none)
 conversations:
   notes_dir: Dev/Concepts/Gameplay     # project only
 orchestrator:
@@ -140,7 +141,7 @@ one: `null`). The effective settings do not change. It writes only such a file, 
 | Kind | Settings |
 |---|---|
 | Global, with a project override | `defaults`: `stop_conditions`, `review_level`, `review_send_back_limit`, `context_reuse_threshold`, `context_care`, `protect_nexus`, `push_accepted`, `provisional_counts`, `merge_back`, `resolve_conflicts`, `usage_pause_threshold`. `runtimes`: `default`; `claude`: `model`, `effort`, `permission_mode`; `codex`: `model`, `effort`, `sandbox`, `approval_policy`, `approvals_reviewer`. `conversations`: `runtime`, `model`, `effort`, `web`. `orchestrator`: `runtime`, `model`, `effort`, `notify`. `languages`: `reader`. `kinds.<kind>`: `runtime`, `model`, `effort` (a model or effort may be the project's own `null`: the project's for that runtime), `fallback` |
-| Project only | `name`, `defaults.worktree_dir`, `defaults.worktree_setup`, `defaults.checks`, `runtimes.claude.allowed_tools` (the project's own allow rules), `conversations.notes_dir`, `languages.working` (`id` and `root` identify the project) |
+| Project only | `name`, `defaults.worktree_dir`, `defaults.worktree_setup`, `defaults.checks`, `runtimes.claude.allowed_tools` (the project's own allow rules), `runtimes.codex.mcp_servers` (the user's Codex MCP servers, by name, that Codex workers keep; empty by default), `conversations.notes_dir`, `languages.working` (`id` and `root` identify the project) |
 | Global only | Remote access (`<NEXUS_HOME>/auth.json`, `push.json`), the deploy push (`deploy.json`), the server; each stays in its own file |
 | State, not a setting | `orchestrator.session` |
 
@@ -1995,6 +1996,14 @@ thread id) with the working directory, model, sandbox mode, approval policy (`ne
 approval request that still comes is declined) and the worker briefing as `developerInstructions`. The thread id
 becomes the session's `native_id`.
 
+A worker's thread starts without the user's own Codex tools (queue FX): before `thread/start` (or `thread/resume`)
+Nexus reads the effective config (`config/read` with the working directory) and adds to the thread's `config`
+`features.apps: false`, `features.plugins: false` and `mcp_servers.<name>.enabled: false` for every MCP server it
+names, except those in the project's `runtimes.codex.mcp_servers` (left as the user's config has them). A name that
+is not a bare key is quoted (`mcp_servers."odd.name".enabled`). When the config cannot be read, the thread does not
+start. A thinking partner's thread starts so too, keeping none. The orchestrator always runs on Claude Code (its
+`orchestrator.runtime` counts only for the usage threshold); should it run on Codex, it would keep none either.
+
 - a step turn: `turn/start` with `input: [{type: "text", text, text_elements: []}]`, the session's `effort` (and,
   once a step changed them, `model` and `effort`) and, in `workspace-write`, a `sandboxPolicy` whose writable roots include the project's `.nexus/` when the worktree is elsewhere
 - a message while the agent works: `turn/steer` with the running turn's id
@@ -2021,7 +2030,8 @@ default), `--disallowedTools Edit(//<.nexus>/**),Write(//<.nexus>/**)` names the
 path in Claude Code's rule form (`//` and forward slashes, the Windows drive letter as the first segment:
 `C:\Code\P\.nexus` is `//c/Code/P/.nexus`), so it holds from a worktree too; deny rules win over the allow list. The
 nexus CLI, which writes the worker's events there, is a process, not a file tool, and keeps working. Orchestrators
-and thinking partners keep their own rules. Codex workers are not restricted (see DESIGN.md). Environment: `NEXUS_SESSION`,
+and thinking partners keep their own rules. Codex workers start without the user's own Codex tools but the MCP servers
+the project names (see "How the engine runs a Codex session"). Environment: `NEXUS_SESSION`,
 `NEXUS_DIR`. The process stays alive across turns; stdin carries user messages:
 
 - a step turn: `{"type":"user","message":{"role":"user","content":"…"},"parent_tool_use_id":null}`

@@ -100,7 +100,7 @@ test("the effective value is the project's own where it has one, else the global
   const stored: StoredProject = {
     protocol: 1, id: "p", name: "P", root: "C:/p", follows_global: true,
     defaults: { context_reuse_threshold: 0.7, worktree_dir: "C:/w" },
-    runtimes: { claude: { effort: "high", allowed_tools: ["WebFetch"] }, codex: { model: null } },
+    runtimes: { claude: { effort: "high", allowed_tools: ["WebFetch"] }, codex: { model: null, mcp_servers: [] } },
     conversations: { notes_dir: "notes" },
     languages: {},
   };

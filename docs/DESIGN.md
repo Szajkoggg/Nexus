@@ -1876,10 +1876,32 @@ each) and seven short Codex turns on the ChatGPT subscription (20k to 40k tokens
   turn them off: `features.apps: false`, `features.plugins: false` (the plugins' servers: computer use, Blender) and
   `mcp_servers.<name>.enabled: false` for each top-level server (`config/read` names them; an override for a name
   that does not exist fails the thread start: "invalid transport"). The user decided that partners run so at every
-  level; workers and the orchestrator still get the user's tools, a matter for a later queue.
+  level; workers and the orchestrator still got the user's tools then (see below, queue FX).
 - **Codex's search modes**: `cached` searches; `live` also opens pages (an `openPage` action). Both run at OpenAI, so
   no local address is reachable through them. A webSearch item's query is empty when it starts; the chat line is
   written at its completion, from its action.
+
+## The user's Codex tools for workers (queue FX)
+
+Decided on 2026-11-15 with the queue's approval, after WB's probe: a Codex worker got the user's MCP servers,
+plugins and apps from `~/.codex/config.toml`, and an MCP server runs outside the sandbox (WB saw `node_repl` fetch a
+local port without an approval), so a Codex worker could reach this machine's Nexus API on port 4317.
+
+- **Off by default, kept by name.** A Codex worker's thread starts as a partner's does (`withoutUserTools`):
+  plugins and apps off, every MCP server `config/read` names off, except those the project lists in
+  `runtimes.codex.mcp_servers` (project only, empty by default: a project whose Codex workers need one, Blender in
+  Honeycomb, names it in its settings). Plugins and apps are never kept: a plugin's servers (computer use, Blender)
+  come and go with the plugin, and the apps' connectors searched even with web search off.
+- **The orchestrator runs on Claude Code** whatever `orchestrator.runtime` says (it only chooses the usage window the
+  orchestrator's notices wait for); a test guards that, and says that a Codex orchestrator would keep no server.
+- **Probed on 2026-11-15** with Codex 0.167.2 and `gpt-6-luna` (effort low, read-only sandbox, approval `never`), in
+  a temporary project, through `CodexSession` with the worker's options. The probe's own MCP server (one tool,
+  `fx_probe_echo`, noting its start) came in by `-c mcp_servers.fxprobe...` on a wrapper around `codex app-server`,
+  so the user's `~/.codex/config.toml` was not touched; the user's own servers were turned off as above. Off by
+  default: the server never started, and the model had no such tool ("NONE"). Kept by name: the server started and
+  the model called `fxprobe.fx_probe_echo` (the call did not complete under the read-only sandbox with approval
+  `never`, which is the probe's setting, not the subject). Cost: two short turns on the ChatGPT subscription,
+  1910 + 8368 input tokens (24704 + 31872 cached) and 31 + 75 output tokens; no model call otherwise.
 
 ## Static analysis (queue SA)
 

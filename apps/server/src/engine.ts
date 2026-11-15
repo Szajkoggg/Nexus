@@ -1073,6 +1073,9 @@ export class Engine implements Member {
           threadId: session.native_id, sandbox: codex.sandbox, approvalPolicy: codex.approval_policy, approvalsReviewer: codex.approvals_reviewer,
           // The folder for reports: the last step's report is written there (outside the working tree).
           writableRoots: [...(inside ? [] : [this.store.dir]), ...gitWritableRoots(session.cwd), ensureReportFolder(project.id)],
+          // Without the user's own Codex tools (queue FX): an MCP server runs outside the sandbox, so it could reach
+          // this machine's Nexus API; only the servers the project names stay on.
+          withoutUserTools: true, keepMcpServers: codex.mcp_servers,
         } };
       }
       const claude = project.runtimes.claude;

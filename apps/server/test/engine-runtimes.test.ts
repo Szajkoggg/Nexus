@@ -112,9 +112,49 @@ test("Codex in a queue's own worktree may write the worktree's git paths, and no
     // Two steps of its own and the integration step a queue with a worktree of its own ends with.
     assert.deepEqual(turns.map((c) => c.writableRoots?.map(mine)), [want, want, want], "every turn's sandbox policy carries them");
     const config = (start[0] as unknown as { config: Record<string, unknown> }).config;
-    assert.deepEqual(Object.keys(config), ["sandbox_workspace_write.writable_roots"], "a worker's thread keeps the user's Codex tools and its web search default (queue WB)");
-    assert.ok(!calls.some((c) => c.method === "config/read"));
+    assert.deepEqual(Object.keys(config), ["sandbox_workspace_write.writable_roots", "features.apps", "features.plugins"], "a worker's thread keeps its web search default, without the user's plugins and apps (queue FX)");
   } finally { engine.shutdown(); delete process.env.FAKE_ARGS; }
+});
+
+test("a Codex worker's thread starts without the user's MCP servers, plugins and apps, but those the project names; Claude Code's launch is as it was", async () => {
+  const { store, engine, queue, until } = setup(["done", "done"]);
+  process.env.FAKE_ARGS = join(dirname(process.env.FAKE_LOG!), "args.log");
+  process.env.FAKE_CODEX_MCP = "node_repl,blender,odd.name";
+  try {
+    engine.start("Q", { runtime: "codex" });
+    await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
+    const calls = () => readFileSync(process.env.FAKE_ARGS!, "utf8").trim().split("\n").map((l) => JSON.parse(l) as { method: string; config?: Record<string, unknown> | null });
+    assert.ok(calls().some((c) => c.method === "config/read"), "the user's servers are read from Codex's own effective config");
+    const off = { "features.apps": false, "features.plugins": false, "mcp_servers.node_repl.enabled": false, "mcp_servers.blender.enabled": false, 'mcp_servers."odd.name".enabled': false };
+    const start = calls().find((c) => c.method === "thread/start")!;
+    for (const [k, v] of Object.entries(off)) assert.equal(start.config![k], v, `${k} off by default`);
+
+    // The project names blender: a new worker thread keeps it; the rest stay off.
+    const p = store.readProject();
+    store.writeProject({ ...p, runtimes: { ...p.runtimes, codex: { ...p.runtimes.codex, mcp_servers: ["blender"] } } });
+    assert.deepEqual(store.readProject().runtimes.codex.mcp_servers, ["blender"]);
+    writeFileSync(process.env.FAKE_ARGS!, "");
+    store.writeQueue({ protocol: 1, id: "B", title: "Blender", revision: 1, status: "proposed", stop_conditions: [], checks: [], steps: [{ id: "B1", title: "One", goal: "FAKE: done", acceptance: [] }], approvals: [], history: [] });
+    approveQueue(store, "B");
+    engine.start("B", { runtime: "codex" });
+    await until("B to finish", () => loadProjectState(store).queues.find((q) => q.id === "B")!.run?.state === "finished", LONGER.run);
+    const kept = calls().find((c) => c.method === "thread/start" || c.method === "thread/resume")!.config!;
+    assert.equal(kept["mcp_servers.blender.enabled"], undefined, "blender is left as the user's config has it");
+    assert.equal(kept["mcp_servers.node_repl.enabled"], false);
+    assert.equal(kept['mcp_servers."odd.name".enabled'], false);
+    assert.equal(kept["features.apps"], false);
+    assert.equal(kept["features.plugins"], false);
+
+    // Claude Code: no config read, nothing of Codex's settings in its launch.
+    writeFileSync(process.env.FAKE_ARGS!, "");
+    store.writeQueue({ protocol: 1, id: "C", title: "Claude", revision: 1, status: "proposed", stop_conditions: [], checks: [], steps: [{ id: "C1", title: "One", goal: "FAKE: done", acceptance: [] }], approvals: [], history: [] });
+    approveQueue(store, "C");
+    engine.start("C", { runtime: "claude" });
+    await until("C to finish", () => loadProjectState(store).queues.find((q) => q.id === "C")!.run?.state === "finished", LONGER.run);
+    assert.ok(!readFileSync(process.env.FAKE_ARGS!, "utf8").includes("config/read"));
+    const argv = readFileSync(process.env.FAKE_ARGS!, "utf8").trim().split("\n").map((l) => JSON.parse(l) as { argv?: string[] }).filter((l) => l.argv).at(-1)!.argv!;
+    assert.doesNotMatch(argv.join(" "),/mcp|plugins|features\./i, "Claude Code's argv names nothing of it");
+  } finally { engine.shutdown(); delete process.env.FAKE_ARGS; delete process.env.FAKE_CODEX_MCP; }
 });
 
 test("Codex in the project's own checkout gets no git roots (its .git lies inside it), only the folder for reports", async () => {
