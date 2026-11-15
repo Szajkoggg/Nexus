@@ -73,19 +73,13 @@ export class Merger {
     for (const q of state.queues) {
       if (!q.steps.some((s) => s.integration)) continue;
       try { this.look(state, q, wanted); }
-      catch (e) { this.wait(q, `merging back failed: ${(e as Error).message.split("\n")[0]}`); }
+      catch (e) { this.wait(q, `merging back failed: ${firstLine(e)}`); }
     }
     // The checkouts no longer held: the runs held there go on, named in the wait of the queue they were held for.
-    const letGo = new Map<string, string[]>();
-    for (const [run, path] of this.held) {
-      if (wanted.has(path)) continue;
-      const by = this.holding.get(path) ?? "";
-      letGo.set(by, [...(letGo.get(by) ?? []), run]);
-    }
+    const letGo = [...this.held].filter(([, path]) => !wanted.has(path)).map(([run, path]) => ({ run, by: this.holding.get(path) }));
     this.holding = wanted;
-    for (const w of this.found) this.record(w.q, w.reason, letGo.get(w.q.id));
-    for (const [run, path] of [...this.held]) {
-      if (wanted.has(path)) continue;
+    for (const w of this.found) this.record(w.q, w.reason, letGo.filter((x) => x.by === w.q.id).map((x) => x.run));
+    for (const { run } of letGo) {
       this.held.delete(run);
       try { this.o.release(run, "the merge back it was held for"); } catch { /* it was resumed or paused meanwhile */ }
     }
@@ -121,7 +115,7 @@ export class Merger {
     const claim = (path: string) => { if (!wanted.has(path) || this.holding.get(path) === q.id) wanted.set(path, q.id); };
     const cannotStart = (e: unknown) => {
       this.waits = true; // not now: looked at again (merge.reintegrating)
-      if (mine) this.wait(q, `queue ${q.id}'s integration step cannot run again now (${(e as Error).message.split("\n")[0]}): it runs when it can`);
+      if (mine) this.wait(q, `queue ${q.id}'s integration step cannot run again now (${firstLine(e)}): it runs when it can`);
     };
     // The run again of its integration step goes on: the checkout stays held, for that step only (its checks and its
     // review included). A run that halted, waits (a question, the usage window, a retry) or ended lets it go, told.
@@ -192,10 +186,10 @@ export class Merger {
    * Records what it waits for, told to the user and the orchestrator once per reason, and again when runs held for
    * it go on (`released`).
    */
-  private record(q: QueueView, reason: string, released: string[] | undefined): void {
+  private record(q: QueueView, reason: string, released: string[]): void {
     const merge = this.store.readGit(q.id)?.merge;
-    if (merge?.waiting?.reason === reason && !released?.length) return;
-    this.writeMerge(q, { ...merge, waiting: { reason, since: now(), ...(released?.length ? { released } : {}) } });
+    if (merge?.waiting?.reason === reason && !released.length) return;
+    this.writeMerge(q, { ...merge, waiting: { reason, since: now(), ...(released.length ? { released } : {}) } });
   }
 
   private writeMerge(q: QueueView, merge: NonNullable<NonNullable<QueueView["git"]>["merge"]>): void {
@@ -205,3 +199,5 @@ export class Merger {
 }
 
 const key = (path: string) => normPath(path).toLowerCase();
+
+const firstLine = (e: unknown) => (e as Error).message.split("\n")[0]!;
