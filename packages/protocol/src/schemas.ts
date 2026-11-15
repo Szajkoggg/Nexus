@@ -1098,6 +1098,12 @@ export const RuntimeFile = z.object({
    * hand-over to the orchestrator. The next server goes on with it in the same session, quoting `asked`, and drops it.
    */
   interrupted: z.object({ at: Time, asked: z.array(z.string()), handoff: z.boolean().optional() }).optional(),
+  /**
+   * Whether the runtime has saved the session's conversation (Claude Code only): false from a fresh start until the
+   * process shows it read a message (Claude Code saves the conversation then), true after. The next process resumes
+   * the session unless it is false; a record without it (written before queue RN) is taken as saved.
+   */
+  conversation_saved: z.boolean().optional(),
   updated_at: Time,
 });
 export type RuntimeFile = z.infer<typeof RuntimeFile>;

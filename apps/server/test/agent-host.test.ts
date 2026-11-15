@@ -44,7 +44,7 @@ for (const [role, record] of Object.entries(ROLE_RECORDS)) {
   test(`${role}: the facts go into the runtime record as the role kept them`, () => {
     const { store, s, start, proc } = setup(record);
     start();
-    assert.deepEqual({ ...store.readRuntime(s.id), updated_at: undefined }, { state: "idle", pid: 4242, turns: 0, updated_at: undefined });
+    assert.deepEqual({ ...store.readRuntime(s.id), updated_at: undefined }, { state: "idle", pid: 4242, turns: 0, conversation_saved: false, updated_at: undefined }, "a fresh Claude session: nothing saved yet");
     proc().send();
     proc().emit("facts", { model: "m" });
     assert.equal(store.readRuntime(s.id)?.state, record.workingFromModel ? "working" : "idle", "a turn's start marks the record working for workers only");
@@ -77,11 +77,13 @@ test("the runtime's own session id is recorded once it is known (Codex)", () => 
 });
 
 test("a session that ran before is resumed; the role's handlers run after the record is kept", () => {
-  const { host, s, spawned, events, start, proc } = setup(ROLE_RECORDS.conversation);
+  const { store, host, s, spawned, events, start, proc } = setup(ROLE_RECORDS.conversation);
   start();
   assert.equal((spawned[0]!.launch.options as { resume: boolean }).resume, false);
   assert.equal(host.running(s.id)?.proc, proc());
   proc().send();
+  proc().emit("facts", { saved: true }); // the runtime read the message: it saved the conversation
+  assert.equal(store.readRuntime(s.id)?.conversation_saved, true);
   proc().turn();
   proc().exit(1);
   assert.deepEqual(events, ["turnEnd:idle", "exit:1:false:exited"], "a crash is not ended by Nexus");

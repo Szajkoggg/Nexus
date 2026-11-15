@@ -41,6 +41,9 @@ function shape(r: RuntimeFile | undefined): Record<string, unknown> {
   return Object.fromEntries(Object.entries(rest).sort(([a], [b]) => a.localeCompare(b)));
 }
 
+/** Claude Code saved the conversation (queue RN: the mark a fresh Claude session gets once it reads a message). */
+const SAVED = { claude: { conversation_saved: true }, codex: {} } as const;
+
 const CONTEXT = {
   claude: { context_tokens: 100, context_window: 1000, model: "fake-model" },
   codex: { context_tokens: 120, context_window: 2000, model: "fake-codex-model" },
@@ -55,7 +58,7 @@ for (const runtime of ["claude", "codex"] as const) {
       const run = engine.start("Q", { runtime });
       await until("the run to finish and its process to exit", () => store.readRun("Q")?.state === "finished" && store.readRuntime(run.session)?.state === "exited", LONGER.run);
       assert.deepEqual(shape(store.readRuntime(run.session)), {
-        ...CONTEXT[runtime], ...(runtime === "claude" ? { cost_usd: 0 } : {}), state: "exited", turns: 1,
+        ...CONTEXT[runtime], ...SAVED[runtime], ...(runtime === "claude" ? { cost_usd: 0 } : {}), state: "exited", turns: 1,
       });
     } finally { stop(); }
   });
@@ -67,7 +70,7 @@ test("claude orchestrator: the runtime record keeps the cost and counts no turns
     orchestrator.say("Hello");
     const id = () => store.readProject().orchestrator?.session;
     await until("the reply", () => !!id() && orchestrator.view().chat.some((c) => c.from === "orchestrator") && store.readRuntime(id()!)?.state === "idle");
-    assert.deepEqual(shape(store.readRuntime(id()!)), { ...CONTEXT.claude, cost_usd: 0, state: "idle", turns: 0 });
+    assert.deepEqual(shape(store.readRuntime(id()!)), { ...CONTEXT.claude, ...SAVED.claude, cost_usd: 0, state: "idle", turns: 0 });
   } finally { stop(); }
 });
 
@@ -90,7 +93,7 @@ for (const runtime of ["claude", "codex"] as const) {
       const c = conversations.create({ title: "Talk", runtime });
       conversations.say(c.id, "Hello");
       await until("the reply", () => conversations.view(c.id).chat.some((x) => x.from === "partner") && store.readRuntime(c.id)?.state === "idle");
-      assert.deepEqual(shape(store.readRuntime(c.id)), { ...CONTEXT[runtime], state: "idle", turns: 0 });
+      assert.deepEqual(shape(store.readRuntime(c.id)), { ...CONTEXT[runtime], ...SAVED[runtime], state: "idle", turns: 0 });
     } finally { stop(); }
   });
 }

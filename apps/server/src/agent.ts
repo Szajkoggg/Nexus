@@ -18,6 +18,12 @@ export interface StreamFacts {
   usage?: Record<string, { utilization: number; resets_at?: string; status?: string }>;
   /** The runtime's own id for the session, once it is known (Codex assigns its thread id). */
   nativeId?: string;
+  /**
+   * The runtime has saved the session's conversation (true), or says it has none (false). Claude Code saves it when it
+   * reads the session's first message (probed 2026-11-15): its first turn's start shows that, and the CLI's refusal of
+   * a start names either case (DESIGN.md, "When Claude Code saves a conversation").
+   */
+  saved?: boolean;
 }
 
 /** What the agent did, condensed for the dashboard. `retry`: the runtime retries a request by itself. */
