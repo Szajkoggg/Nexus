@@ -1,7 +1,9 @@
 // A stand-in for `claude -p --input-format stream-json --output-format stream-json`, for testing without a model.
 // What it does is in fake-behaviour.ts.
 import { existsSync, readFileSync } from "node:fs";
-import { BACKGROUND_NOTICE, PARTIAL, actOnRead, contextTokens, interrupt, record, recordArgs, respond, type Fake, type FakeFailure } from "./fake-behaviour.ts";
+import {
+  BACKGROUND_NOTICE, PARTIAL, actOnRead, contextTokens, fakeSaved, interrupt, record, recordArgs, respond, saveFakeConversation, type Fake, type FakeFailure,
+} from "./fake-behaviour.ts";
 
 // The briefing as the CLI reads it at its start (--append-system-prompt-file): the file is rewritten at the next start.
 const argv = process.argv.slice(2);
@@ -10,6 +12,21 @@ const briefingFile = briefingAt >= 0 ? argv[briefingAt + 1] : undefined;
 recordArgs({ argv, briefing: briefingFile && existsSync(briefingFile) ? readFileSync(briefingFile, "utf8") : null });
 
 const out = (m: unknown) => process.stdout.write(JSON.stringify(m) + "\n");
+
+// The session's conversation, as Claude Code 2.1.323 keeps it (probed 2026-11-15): `--resume` of an id it never saved
+// writes an error result and "No conversation found with session ID: <id>" and exits 1; `--session-id` of a saved one
+// writes only "Error: Session ID <id> is already in use." and exits 1. A new session is saved when its first message
+// is read (save, below).
+const resumeId = argv.includes("--resume") ? argv[argv.indexOf("--resume") + 1] : undefined;
+const newId = argv.includes("--session-id") ? argv[argv.indexOf("--session-id") + 1] : undefined;
+const refusal = resumeId && !fakeSaved(resumeId) ? `No conversation found with session ID: ${resumeId}`
+  : newId && fakeSaved(newId) ? `Error: Session ID ${newId} is already in use.` : undefined;
+if (refusal) {
+  if (resumeId) out({ type: "result", subtype: "error_during_execution", is_error: true, num_turns: 0, total_cost_usd: 0, usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }, modelUsage: {}, permission_denials: [] });
+  process.stderr.write(`${refusal}\n`, () => process.exit(1));
+}
+let saved = !newId;
+const save = () => { if (!saved) { saved = true; saveFakeConversation(newId!); } };
 const fake: Fake = { history: [] };
 let busy = false;
 /** `next` messages sent during the running turn, not read yet: read at its end, or run as a turn after an interrupt. */
@@ -147,8 +164,7 @@ async function pump(): Promise<void> {
 }
 
 let buffer = "";
-process.stdin.setEncoding("utf8");
-process.stdin.on("data", (d: string) => {
+function read(d: string): void {
   buffer += d;
   let i: number;
   while ((i = buffer.indexOf("\n")) >= 0) {
@@ -162,12 +178,25 @@ process.stdin.on("data", (d: string) => {
       out({ type: "control_response", response: { subtype: "success", request_id: msg.request_id, response: { still_queued: [] } } });
       continue;
     }
+    // The conversation is saved as its first message is read, before the turn starts.
+    save();
     record(msg.message.content, msg.priority ?? null, busy);
     // A "next" message during a turn is read inside it (as Claude Code does); anything else is a turn of its own.
     if (msg.priority === "next" && busy) { unread.push(msg.message.content); continue; }
     queue.push(msg.message.content);
     void pump();
   }
-});
-// FAKE_EXIT_DELAY_MS: the process lingers that long after its input closed (a CLI flushing its transcript).
-process.stdin.on("end", () => { const wait = () => (busy ? setTimeout(wait, 50) : setTimeout(() => process.exit(0), Number(process.env.FAKE_EXIT_DELAY_MS ?? 0))); wait(); });
+}
+
+function listen(): void {
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", read);
+  // FAKE_EXIT_DELAY_MS: the process lingers that long after its input closed (a CLI flushing its transcript).
+  process.stdin.on("end", () => { const wait = () => (busy ? setTimeout(wait, 50) : setTimeout(() => process.exit(0), Number(process.env.FAKE_EXIT_DELAY_MS ?? 0))); wait(); });
+}
+
+// FAKE_START_MS: the input is read only after that long, as Claude Code reads it once it has started.
+if (!refusal) {
+  if (process.env.FAKE_START_MS) setTimeout(listen, Number(process.env.FAKE_START_MS));
+  else listen();
+}
