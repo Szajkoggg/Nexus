@@ -769,14 +769,14 @@ export const Event = z.discriminatedUnion("type", [
     maintenance: MaintenanceMode.optional(), reason: z.string().optional(),
   }),
   /**
-   * A worker records a value of one of the project's metrics (`nexus metric record`), for its step at work, with the
-   * metric's unit as it was then and the HEAD of its checkout (`commit`; absent outside a git repository).
-   */
-  /**
    * The orchestrator says the user declined the "static analysis setup" template (`nexus static-analysis decline`):
    * the server notes it in .nexus/static-analysis.yaml, and the monthly reminder rests for 90 days.
    */
   z.object({ ...base, type: z.literal("static_analysis.declined"), reason: z.string().min(1) }),
+  /**
+   * A worker records a value of one of the project's metrics (`nexus metric record`), for its step at work, with the
+   * metric's unit as it was then and the HEAD of its checkout (`commit`; absent outside a git repository).
+   */
   z.object({ ...base, type: z.literal("metric.recorded"), ...qs, name: z.string().min(1), value: z.number(), unit: z.string(), commit: z.string().optional() }),
   z.object({ ...base, type: z.literal("log"), level: z.enum(["info", "warn", "error"]), text: z.string() }),
   /**
