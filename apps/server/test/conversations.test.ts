@@ -49,10 +49,7 @@ test("a Claude partner asks nothing and may write only in the notes folder", asy
       "Read", "Grep", "Glob",
       ...["nexus status", "nexus help", "git log", "git status", "git diff", "git show"].flatMap((p) => [`Bash(${p}:*)`, `PowerShell(${p}:*)`]),
       "Edit(Dev/Concepts/Gameplay/**)", "WebSearch",
-    ], "the same commands on Bash and PowerShell, nothing more");
-    assert.ok(allowed.includes("Edit(Dev/Concepts/Gameplay/**)"), "writes go to the notes folder");
-    assert.ok(allowed.includes("Bash(nexus status:*)") && allowed.includes("Bash(nexus help:*)"), "nexus status, and nexus help to read about Nexus");
-    assert.ok(!allowed.some((t) => t === "Edit" || t === "Write" || t.startsWith("Bash(nexus run") || t === "Bash(nexus:*)"), "nothing else is writable, no run can start");
+    ], "nexus status and nexus help (to read about Nexus) and git's reading commands on Bash and PowerShell, writes only to the notes folder: no run can start, nothing else is writable");
     assert.equal(argv[argv.indexOf("--disallowedTools") + 1], "NotebookEdit,WebFetch", "no .nexus deny rules for a partner (those are the workers'); at the default web level no page fetching");
     assert.equal(loadProjectState(conversations["store"]).sessions.find((s) => s.id === c.id)?.role, "conversation");
   } finally { stop(); }
