@@ -16,6 +16,7 @@ import {
 } from "@nexus/protocol";
 import { findStep, sinceThen, stepSeed } from "./step-seed.ts";
 import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Hosted, type Launch } from "./agent-host.ts";
+import { COMPACTS } from "./agent.ts";
 import type { Orchestrator } from "./orchestrator.ts";
 import { partnerBriefing, restartedNotice } from "./prompts.ts";
 import { RESTARTED, STOPPED, chatView } from "./chats.ts";
@@ -44,6 +45,9 @@ function claudeWeb(web: ConversationWeb): { allowed: string[]; denied: string[];
  */
 export const CODEX_WEB_SEARCH: Record<ConversationWeb, string> = { off: "disabled", search: "cached", fetch: "live" };
 
+/** The chat's line once a conversation is compacted (with the tokens before and after, where the runtime says). */
+export const COMPACTED = "The conversation's context was compacted";
+
 const IDLE_MS = 15 * 60_000; // an idle partner's process ends; the next message resumes the conversation
 
 /** What a partner's process keeps beside it: its idle timer, and whether its running turn writes a hand-over. */
@@ -51,7 +55,10 @@ const IDLE_MS = 15 * 60_000; // an idle partner's process ends; the next message
  * `handoff`: the running turn is the hand-over's, its reply the summary. `handoffNext`: the hand-over was asked while
  * another turn ran; its instruction waits as the next turn, and that turn is the hand-over's.
  */
-type Extra = { timer?: NodeJS.Timeout; handoff?: boolean; handoffNext?: boolean };
+/**
+ * `compacting`: the running turn is a compaction the user asked for (compact); `compacted`: the runtime said it is done.
+ */
+type Extra = { timer?: NodeJS.Timeout; handoff?: boolean; handoffNext?: boolean; compacting?: boolean; compacted?: boolean };
 type Live = Hosted<Extra>;
 
 export class Conversations {
@@ -59,6 +66,7 @@ export class Conversations {
   private readonly orchestrator: Orchestrator;
   private readonly changed: () => void;
   private readonly host: AgentHost<Extra>;
+  private readonly compacts: (runtime: "claude" | "codex") => boolean;
   /** Set by shutdown: no idle timer is armed after it. */
   private stopped = false;
 
@@ -68,6 +76,7 @@ export class Conversations {
     this.orchestrator = orchestrator;
     this.changed = changed;
     this.host = new AgentHost(store, ROLE_RECORDS.conversation, host);
+    this.compacts = host.compacts ?? ((r) => COMPACTS[r]);
   }
 
   list() {
@@ -83,7 +92,33 @@ export class Conversations {
 
   view(id: string) {
     const s = this.session(id);
-    return { session: s, state: this.host.get(id)?.proc.state ?? "exited", runtime: this.store.readRuntime(id) ?? null, ...chatView(this.store, id, 400), model: s.model ?? null, effort: s.effort ?? null, notes_dir: this.store.readProject().conversations.notes_dir ?? null };
+    return {
+      session: s, state: this.host.get(id)?.proc.state ?? "exited", runtime: this.store.readRuntime(id) ?? null, ...chatView(this.store, id, 400),
+      model: s.model ?? null, effort: s.effort ?? null, notes_dir: this.store.readProject().conversations.notes_dir ?? null,
+      // Whether its runtime compacts on request: the dashboard offers Compact only then.
+      compact: this.canCompact(s),
+    };
+  }
+
+  private canCompact(s: SessionFile): boolean { return s.runtime !== "external" && this.compacts(s.runtime); }
+
+  /**
+   * The user's Compact (decided 2026-11-15, queue CC3): the runtime compacts the conversation's context, in a turn of
+   * its own, and the chat gets a Nexus line once it is done. The conversation goes on in the same session. Refused
+   * while the partner is at a turn, and for a runtime that cannot.
+   */
+  compact(id: string): void {
+    const s = this.session(id);
+    if (!this.canCompact(s)) throw new ActionError(`a ${s.runtime} conversation cannot be compacted`, 409);
+    if (!this.store.readChat(id).entries.some((c) => c.from === "partner" && c.kind === "message")) throw new ActionError("the conversation has nothing to compact yet", 409);
+    if (this.host.running(id)?.proc.state === "working") throw new ActionError("the partner is answering: compact once its turn is over", 409);
+    const l = this.ensure(s);
+    if (!l.proc.compact) throw new ActionError(`a ${s.runtime} conversation cannot be compacted`, 409);
+    clearTimeout(l.timer);
+    l.compacting = true;
+    l.compacted = false;
+    if (!l.proc.compact()) { l.compacting = false; throw new ActionError("the partner is answering: compact once its turn is over", 409); }
+    this.changed();
   }
 
   /**
@@ -311,8 +346,17 @@ ${text}`;
           else if (a.kind === "error") this.store.appendChat(s.id, { at: now(), from: "nexus", kind: "error", text: a.text });
           else if (a.kind === "turn_start") reply = "";
         },
+        compacted: (c) => {
+          if (!l.compacting) return; // the runtime's own compaction in a turn: not the user's
+          l.compacted = true;
+          const tokens = c.before && c.after ? `: ${c.before.toLocaleString("en-US")} tokens of context became ${c.after.toLocaleString("en-US")}` : ".";
+          this.store.appendChat(s.id, { at: now(), from: "nexus", text: `${COMPACTED}${tokens}` });
+        },
         turnEnd: (end) => {
-          if (l.handoff) {
+          if (l.compacting) {
+            l.compacting = false;
+            if (!l.compacted) this.store.appendChat(s.id, { at: now(), from: "nexus", kind: "error", text: `The conversation was not compacted${end.text === "stopped" ? ": stopped" : end.ok ? "" : `: ${end.text}`}.` });
+          } else if (l.handoff) {
             l.handoff = false;
             // A stopped hand-over hands nothing over.
             const summary = end.text === "stopped" ? "" : reply.trim();

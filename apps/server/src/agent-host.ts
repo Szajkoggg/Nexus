@@ -41,6 +41,8 @@ export interface HostHandlers {
   turnEnd?(end: AgentEvents["turnEnd"][0]): void;
   /** The work the agent left running in the background changed (AgentProcess.background). */
   background?(work: readonly string[]): void;
+  /** The runtime compacted the conversation's context (AgentProcess.compact). */
+  compacted?(c: AgentEvents["compacted"][0]): void;
   /** `byNexus`: the process was ended through AgentHost (retire, close, restartAfterTurn, shutdown). */
   exit?(code: number | null, byNexus: boolean): void;
   /** The queue and step a turn works on, for its record (a worker's run); asked when the turn begins. */
@@ -62,6 +64,8 @@ export type Hosted<E extends object = object> = { readonly session: string; read
 export interface AgentHostOptions {
   /** Makes the process; tests give a stand-in. By default a ClaudeSession or a CodexSession. */
   spawn?: (launch: Launch) => AgentProcess;
+  /** Which runtimes compact a conversation on request; tests name one that does not. By default COMPACTS (agent.ts). */
+  compacts?: (runtime: "claude" | "codex") => boolean;
 }
 
 /** A launch's settings, without what differs between any two starts of one session (see AgentHost.stale). */
@@ -150,6 +154,7 @@ export class AgentHost<E extends object = object> {
     proc.on("activity", (a) => { if (a.kind !== "error") begin(); on.activity?.(a); });
     proc.on("refusal", (r) => on.refusal?.(r));
     proc.on("background", (w) => on.background?.(w));
+    proc.on("compacted", (c) => on.compacted?.(c));
     proc.on("facts", (f) => {
       if (f.model) model = f.model;
       if (f.contextTokens !== undefined) begin();

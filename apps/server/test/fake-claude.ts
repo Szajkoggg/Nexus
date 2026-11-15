@@ -18,6 +18,7 @@ const queue: string[] = [];
 
 async function turn(text: string): Promise<void> {
   out({ type: "system", subtype: "init", model: "fake-model", session_id: "fake" });
+  if (text === "/compact") return compact();
   fake.history!.push(text);
   const denials: unknown[] = [];
   const first = await respond(fake, text, (command) =>
@@ -104,6 +105,18 @@ function interrupted(): void {
   out({ type: "result", subtype: "error_during_execution", is_error: true, result: "", num_turns: 1, total_cost_usd: totalCost, terminal_reason: "aborted_streaming", modelUsage: {}, permission_denials: [] });
   queue.unshift(...unread);
   unread = [];
+}
+
+/**
+ * "/compact" as Claude Code 2.1.323 runs it (probed 2026-11-15): a status, a compact_boundary with the tokens before
+ * and after, the summary replayed as a user message, the command's output, and a result with no text.
+ */
+function compact(): void {
+  out({ type: "system", subtype: "status", status: "compacting", session_id: "fake" });
+  out({ type: "system", subtype: "compact_boundary", session_id: "fake", compact_metadata: { trigger: "manual", pre_tokens: contextTokens(1000, 100), post_tokens: 30 } });
+  out({ type: "user", message: { role: "user", content: "This session is being continued from a previous conversation. Summary: fake." }, isReplay: true, parent_tool_use_id: null });
+  out({ type: "user", message: { role: "user", content: "<local-command-stdout>Compacted </local-command-stdout>" }, isReplay: true, parent_tool_use_id: null });
+  out({ type: "result", subtype: "success", is_error: false, result: "", num_turns: 0, total_cost_usd: totalCost, usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }, modelUsage: { fake: { contextWindow: 1000, ...totals } }, permission_denials: [] });
 }
 
 /** Ends the process as a signal would, before the turn's result: the CLI killed, or closing by itself. */

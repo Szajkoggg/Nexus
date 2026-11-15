@@ -100,6 +100,8 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
   private turnId?: string;
   /** Messages waiting for the running turn to end (or for the thread to be ready). */
   private queue: string[] = [];
+  /** A compaction asked for before the thread was ready (compact): it runs first, as soon as it is. */
+  private compactFirst = false;
   /**
    * Messages steered into the running turn that Codex has not recorded yet (no userMessage item for them): an
    * interrupt drops them (seen with Codex 0.167.2), so a stop carries them into the next turn.
@@ -186,6 +188,27 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
   }
 
   /**
+   * Compacts the thread: thread/compact/start, which Codex 0.167.2 runs as a turn of its own (probed 2026-11-15):
+   * turn/started, a contextCompaction item, turn/completed. While the thread is still starting it waits for it.
+   */
+  compact(): boolean {
+    if (this.state === "exited") throw new Error("the session's process has exited");
+    if (this.state === "working" && this.threadId) return false;
+    this.state = "working";
+    if (!this.threadId) { this.compactFirst = true; return true; }
+    this.startCompact();
+    return true;
+  }
+
+  private startCompact(): void {
+    void this.request("thread/compact/start", { threadId: this.threadId }).catch((err) => {
+      this.emit("activity", { kind: "error", text: `thread/compact/start: ${(err as Error).message}` });
+      this.state = "idle";
+      this.emit("turnEnd", { ok: false, text: (err as Error).message, failure: { kind: "lasting", code: "compactRejected", text: clip((err as Error).message, 300) } });
+    });
+  }
+
+  /**
    * Stops the running turn with turn/interrupt. Messages steered into it that Codex had not recorded, and those
    * waiting for it to end, go in with the next turn (`carry`); one sent during the stop starts that turn at once.
    */
@@ -250,6 +273,7 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
       this.base = { model: (r.model as string | undefined) ?? o.model, effort: (r.reasoningEffort as string | null | undefined) ?? o.effort };
       this.emit("facts", { nativeId: this.threadId, model: r.model });
       void this.request("account/rateLimits/read", {}).then((x) => this.rateLimits(x.rateLimits), () => {});
+      if (this.compactFirst) { this.compactFirst = false; this.startCompact(); return; }
       const first = this.queue.shift();
       if (first !== undefined) this.startTurn(first); else this.state = "idle";
     } catch (err) {
@@ -397,6 +421,10 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
         // A steered message Codex took into the turn: it is in the thread now, whatever happens to the turn.
         if (it.type === "userMessage") { const text = (it.content ?? []).find((c: Json) => c.type === "text")?.text; if (typeof text === "string") this.unsteer(text); }
         if (this.stopping) return; // what a stopped turn still writes is not shown
+        if (it.type === "contextCompaction") {
+          this.emit("activity", { kind: "text", text: "context compacted" });
+          this.emit("compacted", {});
+        }
         if (it.type === "agentMessage" && it.text?.trim()) {
           this.emit("activity", { kind: "text", text: clip(it.text, 600) });
           this.emit("message", it.text);

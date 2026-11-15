@@ -2134,6 +2134,40 @@ change notification, which the watcher sends for it anyway. The rest of a rebuil
 the next step if 120 ms starts to hurt. The engine's own 15 rebuilds are in actions (a start, a resume, a review), not
 on every change, and were left.
 
+## Compacting a conversation (queue CC3)
+
+Decided by the user on 2026-11-15 (docs/ideas/chat-context.md): the Ideas conversations get a **Compact** action; the
+orchestrator does not (it goes on in a fresh session with a summary, see "The orchestrator's context care"). A thinking
+partner's material is the conversation itself, so the runtime's own compaction, which keeps the session, suits it.
+
+Probed on 2026-11-15 with Claude Code 2.1.323 (`haiku`) and Codex 0.167.2 (`gpt-6-luna`), each in a temporary directory:
+a turn ("remember PELICAN"), the compaction, then a turn asking for the word. Cost: about $0.01 of Claude usage (three
+short turns; the first turn and the compaction together $0.0056) and three short Codex turns on the ChatGPT subscription (about 17k input
+tokens each, most of them cached).
+
+- **Claude Code** takes `/compact` as a user message on its stream-json input and runs it as a turn of its own: a
+  system `status` "compacting", then `init`, a `compact_boundary` with `compact_metadata` (`trigger: manual`,
+  `pre_tokens` 32,692, `post_tokens` 9,892, `duration_ms` 3,690), the summary replayed as a user message
+  (`isReplay`), "<local-command-stdout>Compacted </local-command-stdout>", and a `result` `success` with an empty
+  `result` and no usage. About 3.7 s. The next turn still knew the word.
+- **Codex** has `thread/compact/start` (`{ threadId }`, answered `{}` at once), which runs as a turn of its own:
+  `turn/started`, an item of type `contextCompaction` (started, completed), `turn/completed` `completed`. About 1.7 s.
+  It sends no token figures for it, and `thread/compacted` is deprecated (not sent). The next turn still knew the word.
+
+Decisions, building it:
+
+- Both runtimes offer it (`COMPACTS` in agent.ts); a runtime that cannot gets no Compact (the conversation view's
+  `compact` is false, and a request is refused), which a test checks with a stand-in.
+- The compaction is a turn like any: refused while the partner answers, never put into a running turn; the process
+  (`AgentProcess.compact`) emits `compacted` when the runtime says it is done, with Claude Code's tokens before and
+  after, and the context fill takes the after figure.
+- The chat gets one Nexus line once it is done ("The conversation's context was compacted: 32,692 tokens of context
+  became 9,892", or without the figures on Codex); a compaction that ended without it gets an error line. The chat
+  itself keeps every message: compacting changes only what the partner holds.
+- A conversation without a reply yet has nothing to compact: refused.
+- In the ⋯ menu, beside "Hand to orchestrator", with a confirmation that says what it does (details it leaves out are
+  no longer in the partner's context).
+
 ## Open questions
 
 1. **The orchestrator on Codex.** The orchestrator runs on Claude Code only: its read-only guarantee rests on Claude

@@ -854,6 +854,7 @@ app.patch("/api/projects/:id/conversations/:cid", act((_st, b, p, e) => e.conver
 app.post("/api/projects/:id/conversations/:cid/messages", act((_st, b, p, e) => e.conversations.say(p("cid"), b.text)));
 app.post("/api/projects/:id/conversations/:cid/stop", act((_st, _b, p, e) => e.conversations.stop(p("cid"))));
 app.post("/api/projects/:id/conversations/:cid/handoff", act((_st, _b, p, e) => e.conversations.handoff(p("cid"))));
+app.post("/api/projects/:id/conversations/:cid/compact", act((_st, _b, p, e) => e.conversations.compact(p("cid"))));
 app.post("/api/projects/:id/orchestrator/settings", act((_st, b, _p, e) => e.orchestrator.settings(b.model, b.effort)));
 app.patch("/api/projects/:id/settings", act((st, b) => updateSettings(st, b)));
 // Which settings the project has its own value of (the others follow the global ones), and the global values.

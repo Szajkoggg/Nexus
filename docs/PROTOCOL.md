@@ -1502,6 +1502,15 @@ file's Decided section holds decisions, and the summary names the dates of the D
 latest conversation that is not archived (the one with the latest message, or the newest when none has one), or
 `null`.
 
+`POST …/conversations/:cid/compact` (decided 2026-11-15, queue CC3): the partner's runtime compacts the conversation's
+context in a turn of its own (Claude Code: `/compact` as a user message on its stream-json input; Codex:
+`thread/compact/start`), and the conversation goes on in the same session. Once the runtime says it is done (Claude
+Code's `compact_boundary`, Codex's `contextCompaction` item) the chat gets a Nexus line, "The conversation's context
+was compacted: <before> tokens of context became <after>" (the figures only where the runtime gives them: Claude
+Code); a compaction that ends without it gets an error line. Refused (409) while the partner is at a turn, for a
+conversation with no reply yet, and for a runtime that cannot compact. `GET …/conversations/:cid` says which:
+`compact` (true where its runtime compacts on request; the dashboard offers Compact only then).
+
 **A conversation about a step** ("Chat about this"): `queue` and `step` are kept in `session.yaml` as `about`, never as
 `queue` (which makes a session a worker of the queue: `nexus status` would deliver the queue's notes to it and mark
 them read). The default title is `<step>: <step title>`. Creating it starts no model turn and changes nothing in the

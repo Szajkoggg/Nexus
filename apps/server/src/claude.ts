@@ -204,6 +204,17 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
   }
 
   /**
+   * Compacts the conversation: "/compact" as a user message, which Claude Code 2.1.323 runs as a turn of its own
+   * (probed 2026-11-15): a status "compacting", a compact_boundary with the tokens before and after, the summary as a
+   * replayed user message, and a result with no text.
+   */
+  compact(): boolean {
+    if (this.state !== "idle") return false;
+    this.send("/compact");
+    return true;
+  }
+
+  /**
    * Stops the running turn with the CLI's interrupt control request. The CLI still writes what the model had begun
    * (seen with Claude Code 2.1.323: a partial assistant text after the control response), and it runs the `next`
    * messages it had not read as a turn of its own right after the interrupted one; that turn is interrupted as it
@@ -270,6 +281,12 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
           this.emit("activity", { kind: "retry", text: `Claude Code retries a request (${m.attempt} of ${m.max_retries}, in ${Math.round((m.retry_delay_ms ?? 0) / 1000)} s): ${m.error ?? "error"}${m.error_status ? ` (${m.error_status})` : ""}` });
         }
         if (m.subtype === "model_refusal_no_fallback") this.signs.refusal = true;
+        if (m.subtype === "compact_boundary") {
+          const md = (m.compact_metadata ?? {}) as { pre_tokens?: number; post_tokens?: number };
+          if (typeof md.post_tokens === "number") this.emit("facts", { contextTokens: md.post_tokens });
+          this.emit("activity", { kind: "text", text: `context compacted${md.pre_tokens && md.post_tokens ? ` (${md.pre_tokens} to ${md.post_tokens} tokens)` : ""}` });
+          this.emit("compacted", { before: md.pre_tokens, after: md.post_tokens });
+        }
         if (m.subtype === "permission_denied") {
           const call = this.calls.get(m.tool_use_id);
           this.refuse(m.tool_use_id, m.tool_name ?? call?.name ?? "tool", call?.input, m.decision_reason || m.message || m.decision_reason_type);

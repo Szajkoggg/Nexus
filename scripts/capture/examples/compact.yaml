@@ -1,0 +1,33 @@
+# Compact in the Ideas conversations (queue CC3), on the demo project of scripts/capture/seed-compact.ts: an open
+# conversation's ⋯ menu (before -> after), and a conversation's chat after a compaction.
+#   node scripts/capture.ts scripts/capture/examples/compact.yaml --step <queue>/<step>
+seed: scripts/capture/seed-compact.ts
+views:
+  - key: ideas-compact@1440
+    route: "#/demo"
+    label: "Egy Ideas beszélgetés ⋯ menüje"
+    actions:
+      - click: Ideas
+      - wait: 600
+      - click: Mining the cliffs
+      - wait: 800
+      - click: { selector: "button[aria-label='Chat actions']" }
+      - wait: 400
+  - key: ideas-compact@390
+    route: "#/demo"
+    label: "Egy Ideas beszélgetés ⋯ menüje, telefonon"
+    actions:
+      - click: Ideas
+      - wait: 600
+      - click: Mining the cliffs
+      - wait: 800
+      - click: { selector: "button[aria-label='Chat actions']" }
+      - wait: 400
+  - key: ideas-compacted-line@1440
+    route: "#/demo"
+    label: "Egy tömörített beszélgetés chatje a Nexus sorával"
+    actions:
+      - click: Ideas
+      - wait: 600
+      - click: Water table
+      - wait: 800

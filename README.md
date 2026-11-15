@@ -11,7 +11,10 @@ user, a per-project orchestrator agent and the working agents.
 session per topic, for thinking something through (gameplay design, the look, what to build next) without starting
 any work. A partner reads the whole project and writes only in the project's notes folder (settings: "Ideas"), so it
 can record what you decide; "Hand to orchestrator" (under ⋯ in the conversation) has it summarize the conversation
-into the orchestrator's chat, which turns it into queues.
+into the orchestrator's chat, which turns it into queues. **Compact** (also under ⋯) has the partner's runtime
+compact a long conversation: it replaces what the partner holds of the conversation so far with a summary, so it has
+room to go on in the same conversation. The chat keeps every message and says when it was compacted; details the
+summary leaves out are no longer in the partner's context. It waits for the partner's turn to end.
 
 **The web in Ideas.** Settings → "Ideas (conversations)" → **Web** (global, or the project's own): **off**, **web
 search** (the default: partners search and name their sources, but open no page) or **web search and reading pages**.

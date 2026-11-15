@@ -1144,6 +1144,8 @@ export const en = {
   "chat.messages": { one: "{count} message", other: "{count} messages" },
   "chat.handOff": "Hand to orchestrator…",
   "chat.handOffConfirm": "Hand this conversation to the orchestrator? The partner writes a summary (decisions, open questions, proposed work), which goes into the orchestrator's chat.",
+  "chat.compact": "Compact",
+  "chat.compactConfirm": "Compact this conversation? The partner's runtime replaces what it holds of the conversation so far with a summary of it, so it has room to go on; details it leaves out are no longer in its context. The chat here stays as it is.",
   "chat.rename": "Rename…",
   "chat.topic": "Topic",
   "chat.topicPlaceholder": "e.g. Gameplay: mining and defense",

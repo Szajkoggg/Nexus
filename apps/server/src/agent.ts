@@ -82,6 +82,11 @@ export interface AgentEvents {
   turnEnd: [{ ok: boolean; text: string; failure?: TurnFailure; tokens?: TurnTokens; subagentTokens?: TurnTokens; costUsd?: number }];
   /** The work the agent left running in the background changed (see AgentProcess.background); emitted on every change. */
   background: [readonly string[]];
+  /**
+   * The runtime compacted the conversation's context (AgentProcess.compact, or by itself): its tokens before and after,
+   * where the runtime says (Claude Code's compact_boundary does; Codex's contextCompaction item does not).
+   */
+  compacted: [{ before?: number; after?: number }];
   exit: [number | null];
 }
 
@@ -109,8 +114,21 @@ export interface AgentProcess extends EventEmitter<AgentEvents> {
   close(): void;
   /** Another model or effort from the next turn on, where the runtime takes them per turn (Codex). */
   retune?(model?: string, effort?: string): void;
+  /**
+   * Compact the conversation's context now, through the runtime's own compaction (decided 2026-11-15, queue CC3): a
+   * turn of its own, which ends as any turn does and emits `compacted` once done. False when a turn runs. Absent: the
+   * runtime cannot (see COMPACTS).
+   */
+  compact?(): boolean;
   kill(): void;
 }
+
+/**
+ * Which runtimes compact a conversation on request (probed 2026-11-15 with small models, queue CC3): Claude Code 2.1.323
+ * takes "/compact" as a user message on its stream-json input; Codex 0.167.2 has thread/compact/start. A runtime
+ * without it gets no Compact action.
+ */
+export const COMPACTS: Readonly<Record<"claude" | "codex", boolean>> = { claude: true, codex: true };
 
 /** Everything both runtimes are started with. */
 export interface AgentOptions {

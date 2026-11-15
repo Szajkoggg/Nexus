@@ -181,6 +181,20 @@ process.stdin.on("data", (d: string) => {
         else { steered.push(text()); reply({ turnId }); }
         break;
       case "turn/interrupt": record("[interrupt]", null, !!turnId); interrupt(); reply({}); break;
+      // As Codex 0.167.2 runs it (probed 2026-11-15): a turn of its own with a contextCompaction item.
+      case "thread/compact/start": {
+        record("[compact]", null, !!turnId);
+        if (turnId) { fail("a turn is already running"); break; }
+        const id = (turnId = randomUUID());
+        reply({});
+        const item = { type: "contextCompaction", id: randomUUID() };
+        notify("turn/started", { threadId, turn: { id, status: "inProgress", items: [] } });
+        notify("item/started", { threadId, turnId: id, item });
+        notify("item/completed", { threadId, turnId: id, item });
+        turnId = undefined;
+        notify("turn/completed", { threadId, turn: { id, status: "completed", items: [] } });
+        break;
+      }
       default: fail(`fake-codex does not implement ${m.method}`);
     }
   }

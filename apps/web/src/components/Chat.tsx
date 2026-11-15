@@ -595,7 +595,8 @@ export function ChatPanel({ project, name, view, error, inline, desk }: {
 // ---------------------------------------------------------------- conversations
 
 interface ConversationItem extends SessionFile { state: string; last_at: string; messages: number }
-interface ConversationView extends View { notes_dir: string | null }
+/** `compact`: its runtime compacts a conversation on request (apps/server/src/conversations.ts): Compact is offered. */
+interface ConversationView extends View { notes_dir: string | null; compact?: boolean }
 
 /** The step a conversation is about, as a link back to it (it closes the Ideas panel and opens the step). */
 function AboutStep({ project, c, className = "" }: { project: string; c: SessionFile; className?: string }) {
@@ -686,6 +687,14 @@ export function ConversationsPanel({ project, name, defaultRuntime, inline, desk
         }
       },
     },
+    // Compact (queue CC3): only where the partner's runtime compacts on request.
+    ...(view?.session?.id === open && view.compact ? [{
+      label: t("chat.compact"), onSelect: () => {
+        if (confirm(t("chat.compactConfirm"))) {
+          void act(project, "POST", `/conversations/${enc(open)}/compact`).then(onChanged, (e: Error) => alert(e.message));
+        }
+      },
+    }] : []),
     { label: t("chat.rename"), onSelect: () => { const title = prompt(t("chat.topic"), current.title); if (title) void patch({ title }); } },
     { label: t(current.archived ? "chat.unarchive" : "chat.archive"), onSelect: () => void patch({ archived: !current.archived }) },
     { heading: t("chat.effortHeading") },
