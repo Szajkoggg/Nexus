@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { DRAFT_EVENT, DRAFT_FOCUS_EVENT, readDraft, writeDraft } from "../drafts.ts";
 import { usePhone } from "../phone.ts";
 import ReactMarkdown from "react-markdown";
+import { remarkPlugins } from "../markdown.ts";
 import { runTimes, stepTimes } from "@nexus/protocol/times";
 import { formatClock, formatDateTime, formatDuration, rich, t, timeAgo, type Key } from "../i18n.ts";
 import { useAction, type QueueView, type StepView } from "../api.ts";
@@ -58,10 +59,11 @@ export function StatusBadge({ status, label, className = "" }: { status: string;
 
 // ---------------------------------------------------------------- text
 
+/** The dashboard's texts (goals, descriptions, notes) as GitHub's Markdown: tables, task lists, bare URLs as links. */
 export function Markdown({ children, className = "" }: { children: string; className?: string }) {
   return (
     <div className={`md text-sm leading-relaxed text-fg ${className}`}>
-      <ReactMarkdown components={{ a: ({ node: _n, ...p }) => <a {...p} target="_blank" rel="noreferrer" /> }}>
+      <ReactMarkdown remarkPlugins={remarkPlugins} components={{ a: ({ node: _n, ...p }) => <a {...p} target="_blank" rel="noreferrer" /> }}>
         {children}
       </ReactMarkdown>
     </div>

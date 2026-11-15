@@ -10,6 +10,7 @@ import { messageSource, replyTools } from "../messageTools.ts";
 import { ChatMarkdown, RefText } from "./Refs.tsx";
 import { draftKey, putDraftAndFocus, readDraft } from "../drafts.ts";
 import { withQuote } from "../quote.ts";
+import { withLineBreaks } from "../markdown.ts";
 import { QuoteSelection, QuoteTarget } from "./Quote.tsx";
 import { layerValue } from "../layers.ts";
 import { nav, useNav } from "../nav.ts";
@@ -427,7 +428,7 @@ function FreshSessionLine({ project, sw, latest }: { project: string; sw: Earlie
       {open && sw.summary && (
         <div className="mt-2 rounded-lg border border-line bg-surface-2 px-3 py-2 text-left text-sm text-fg">
           {/* Its lines as written (a summary is often one item a line): each line break kept. */}
-          <ChatMarkdown>{sw.summary.text.replace(/\n/g, "  \n")}</ChatMarkdown>
+          <ChatMarkdown>{withLineBreaks(sw.summary.text)}</ChatMarkdown>
           {sw.summary.topics.length > 0 && <div className="mt-1 text-xs text-fg-3">{t("chat.freshTopics", { topics: sw.summary.topics.join(", ") })}</div>}
           {sw.summary.files.length > 0 && <div className="text-xs text-fg-3">{t("chat.freshFiles", { files: sw.summary.files.join(", ") })}</div>}
         </div>

@@ -1,0 +1,28 @@
+# Markdown tables in the chat and in a step's goal (queue MD), on the projects of scripts/capture/seed-tables.ts.
+#   node scripts/capture.ts scripts/capture/examples/tables.yaml --step <queue>/<step>
+seed: scripts/capture/seed-tables.ts
+views:
+  - key: chat-table@1440
+    route: "#/demo"
+    label: "Az orchestrator válasza táblázattal a chatben"
+  - key: chat-table@390
+    route: "#/demo"
+    label: "Az orchestrator válasza táblázattal, telefonon"
+    actions:
+      - click: Orchestrator
+      - wait: 600
+  - key: chat-table-wide@390
+    route: "#/wide"
+    label: "Széles táblázat telefonon: az üzeneten belül görget"
+    actions:
+      - click: Orchestrator
+      - wait: 600
+  - key: chat-table-wide@492
+    route: "#/wide"
+    label: "Széles táblázat a legkeskenyebb ablakban: az üzeneten belül görget"
+    actions:
+      - click: Orchestrator
+      - wait: 600
+  - key: step-goal-table@1440
+    route: "#/demo/TB/TB1"
+    label: "Táblázat egy step céljában, a step részleteiben"

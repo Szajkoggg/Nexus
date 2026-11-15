@@ -6,7 +6,8 @@
 import { createContext, Fragment, useContext, useMemo, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import type { QueueView } from "../api.ts";
-import { refIndex, splitRefs, wholeRef, type CommitRef, type FileRef, type RefIndex, type RefTarget, type Segment } from "../refs.ts";
+import { refIndex, splitRefs, type CommitRef, type FileRef, type RefIndex, type RefTarget, type Segment } from "../refs.ts";
+import { chatRehypePlugins, remarkPlugins, segmentOf } from "../markdown.ts";
 import { queueStatus } from "../queueStatus.ts";
 import { nav } from "../nav.ts";
 import { TONE } from "./QueueRow.tsx";
@@ -86,66 +87,7 @@ export function RefText({ text, highlight = "" }: { text: string; highlight?: st
   return <>{splitRefs(text, refs.index).map((x, i) => (typeof x === "string" ? <Fragment key={i}>{mark(x)}</Fragment> : <SegmentLink key={i} refs={refs} segment={x}>{mark(x.text)}</SegmentLink>))}</>;
 }
 
-/** How a ref travels through Markdown's tree: data-ref on a link ("Q", "Q/S", "file:<line>:<path>", "commit:<hash>"). */
-const dataRefOf = (p: Exclude<Segment, string> | FileRef | CommitRef): string =>
-  p.kind === "file" ? `file:${p.line}:${p.path}` : p.kind === "commit" ? `commit:${p.hash}` : p.step ? `${p.queue}/${p.step}` : p.queue;
-function segmentOf(ref: string): Exclude<Segment, string> {
-  const file = /^file:(\d+):([\s\S]+)$/.exec(ref);
-  if (file) return { kind: "file", line: Number(file[1]), path: file[2]!, text: "" };
-  if (ref.startsWith("commit:")) return { kind: "commit", hash: ref.slice(7), text: "" };
-  const [queue, step] = ref.split("/");
-  return { queue: queue!, ...(step ? { step } : {}), text: "" };
-}
-
 // ---------------------------------------------------------------- in Markdown
-
-interface HastNode { type: string; tagName?: string; value?: string; properties?: Record<string, unknown>; children?: HastNode[] }
-/** Text in these stays text: code, and what is a link already. */
-const SKIP = new Set(["code", "pre", "a"]);
-
-/**
- * A rehype step: the text nodes' refs become links marked data-ref (dataRefOf); an inline code span that is wholly a
- * file or a commit is wrapped in one.
- */
-const rehypeRefs = (index: RefIndex) => () => (tree: HastNode) => {
-  const link = (ref: string, children: HastNode[]): HastNode => ({ type: "element", tagName: "a", properties: { href: "#", dataRef: ref }, children });
-  const walk = (node: HastNode) => {
-    if (!node.children || (node.tagName && SKIP.has(node.tagName))) return;
-    node.children = node.children.flatMap((c): HastNode[] => {
-      if (c.type === "element" && c.tagName === "code" && c.children?.length === 1 && c.children[0]!.type === "text") {
-        const ref = wholeRef(c.children[0]!.value ?? "");
-        return ref ? [link(dataRefOf(ref), [c])] : [c];
-      }
-      if (c.type !== "text" || !c.value) { walk(c); return [c]; }
-      const parts = splitRefs(c.value, index);
-      if (parts.length === 1 && typeof parts[0] === "string") return [c];
-      return parts.map((p) => typeof p === "string" ? { type: "text", value: p } : link(dataRefOf(p), [{ type: "text", value: p.text }]));
-    });
-  };
-  walk(tree);
-};
-
-/** A rehype step: a search's matches in the text (code and links included) wrapped in <mark>. */
-const rehypeMarks = (query: string) => () => (tree: HastNode) => {
-  const walk = (node: HastNode) => {
-    if (!node.children || node.tagName === "mark") return;
-    node.children = node.children.flatMap((c): HastNode[] => {
-      if (c.type !== "text" || !c.value) { walk(c); return [c]; }
-      const ranges = matchRanges(c.value, query);
-      if (!ranges.length) return [c];
-      const out: HastNode[] = [];
-      let at = 0;
-      for (const [a, b] of ranges) {
-        if (a > at) out.push({ type: "text", value: c.value.slice(at, a) });
-        out.push({ type: "element", tagName: "mark", properties: {}, children: [{ type: "text", value: c.value.slice(a, b) }] });
-        at = b;
-      }
-      if (at < c.value.length) out.push({ type: "text", value: c.value.slice(at) });
-      return out;
-    });
-  };
-  walk(tree);
-};
 
 /** Headings marked with their source line (a reply's contents go to them). */
 const HEADINGS = Object.fromEntries((["h1", "h2", "h3", "h4", "h5", "h6"] as const).map((Tag) =>
@@ -154,19 +96,23 @@ const HEADINGS = Object.fromEntries((["h1", "h2", "h3", "h4", "h5", "h6"] as con
 /** A chat message's Markdown, with its refs as links (outside code and links), its paragraphs and items repliable. */
 export function ChatMarkdown({ children, className = "", highlight = "" }: { children: string; className?: string; highlight?: string }) {
   const refs = useContext(RefsContext);
-  const plugins = useMemo(() => [...(refs ? [rehypeRefs(refs.index)] : []), ...(highlight.trim() ? [rehypeMarks(highlight)] : [])], [refs, highlight]);
+  const plugins = useMemo(() => chatRehypePlugins(refs?.index, highlight), [refs, highlight]);
   return (
     <div className={`md text-sm leading-relaxed text-fg ${className}`}>
-      <ReactMarkdown rehypePlugins={plugins} components={{
+      <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={plugins} components={{
         a: ({ node: _n, ...p }) => {
           const ref = (p as Record<string, unknown>)["data-ref"];
           if (refs && typeof ref === "string") return <SegmentLink refs={refs} segment={segmentOf(ref)}>{p.children}</SegmentLink>;
           return <a {...p} target="_blank" rel="noreferrer" />;
         },
-        // "Reply to this" on paragraphs and list items (Quote.tsx): quotes the item's Markdown source. They and the
-        // headings carry their source line, where a reply's contents and "Jump to the questions" go (MessageTools.tsx).
+        // "Reply to this" on paragraphs, list items and tables (Quote.tsx): quotes the item's Markdown source (a table's
+        // rows). They and the headings carry their source line, where a reply's contents and "Jump to the questions" go
+        // (MessageTools.tsx).
         p: ({ node, ...p }) => <Replyable as="p" source={sourceAt(children, node?.position)} data-md-line={node?.position?.start.line} {...p} />,
         li: ({ node, ...p }) => <Replyable as="li" source={sourceAt(children, node?.position)} data-md-line={node?.position?.start.line} {...p} />,
+        table: ({ node, ...p }) => (
+          <Replyable as="div" source={sourceAt(children, node?.position)} data-md-line={node?.position?.start.line}><table {...p} /></Replyable>
+        ),
         ...HEADINGS,
         // A code block has its own copy button, at its top right: on hover on a desktop, always on a phone.
         pre: ({ node, ...p }) => (

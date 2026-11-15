@@ -88,11 +88,12 @@ const QuoteIcon = () => (
 );
 
 /**
- * A paragraph or list item of a message that can be replied to: hovering it (on a phone, tapping it) shows the icon at
- * its right edge; only the innermost hovered item shows one. `source` is its Markdown, for the quote.
+ * A paragraph, list item or table of a message that can be replied to: hovering it (on a phone, tapping it) shows the
+ * icon at its right edge; only the innermost hovered item shows one. `source` is its Markdown, for the quote. A table
+ * comes as the div around it (its icon outside the table, which scrolls sideways and would clip it).
  */
 export function Replyable({ as: Tag, source, children, className = "", ...rest }: {
-  as: "p" | "li"; source: string | undefined; children?: ReactNode; className?: string;
+  as: "p" | "li" | "div"; source: string | undefined; children?: ReactNode; className?: string;
 } & Record<string, unknown>) {
   const quote = useContext(QuoteTarget);
   const inItem = useContext(InItem);

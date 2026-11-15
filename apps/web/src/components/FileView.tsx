@@ -9,7 +9,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { remarkPlugins } from "../markdown.ts";
 import { fileUrl, HttpError, open } from "../api.ts";
 import { fileHref } from "../hash.ts";
 import { baseName, delimiterOf, folderOf, formatJson, formattedKind, languageOf, parseTable, plainLines, relativeTarget, withoutFinalNewline, type Token } from "../fileview.ts";
@@ -253,7 +253,7 @@ function MarkdownFile({ project, path, text, line }: { project: string; path: st
   return (
     <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-5 py-5 lg:px-8">
       <div ref={box} className="md mx-auto max-w-3xl text-sm leading-relaxed text-fg">
-        <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeLines]} components={components}>{text}</ReactMarkdown>
+        <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={[rehypeLines]} components={components}>{text}</ReactMarkdown>
       </div>
     </div>
   );

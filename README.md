@@ -71,8 +71,12 @@ phone the bottom bar) shows what you have not read: "Orchestrator 2", a dot on I
 
 **Quoting.** Select text in a chat and a small **Quote** button appears beside it (on a phone below it); a click, or
 **Alt+Q**, adds it to your message as a quote, after what you had typed, with the cursor below it. Hovering a
-paragraph or a list item of a message shows a **reply** icon at its right edge: one click quotes that item as it was
-written (its Markdown).
+paragraph, a list item or a table of a message shows a **reply** icon at its right edge: one click quotes that item
+as it was written (its Markdown).
+
+**Tables.** The chats and the dashboard's texts (goals, descriptions, notes) show GitHub's Markdown: tables,
+~~strikethrough~~, task lists, and bare web addresses as links; a table wider than the window scrolls sideways on its
+own.
 
 **Long replies and copying.** Every message shows its time. A long reply with headings has **Contents** on its line
 (over it on a desktop, under it on a phone), a menu of its sections; when it asks you to decide, **Jump to the
