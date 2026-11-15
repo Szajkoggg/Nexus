@@ -14,8 +14,8 @@ import { usePhone } from "../phone.ts";
 import { ImageViewer, type ViewerImage } from "./Viewer.tsx";
 import { StepChat } from "./Chat.tsx";
 import { StopBox, StopReason, stopVersion, useContinue, useLeft } from "./Stop.tsx";
-import { AskButton, CompactSteps, SettingsLine, useApprove, useCtrlEnter } from "./Approval.tsx";
-import { needsApproval, levelWords } from "../approval.ts";
+import { AskButton, Checks, CompactSteps, SettingsLine, useApprove, useCtrlEnter } from "./Approval.tsx";
+import { needsApproval, levelWords, queueChecks } from "../approval.ts";
 import { queueStatus } from "../queueStatus.ts";
 import { needsWorkChoice, stopDecision, type LeftState, type LeftView, type WorkChoice } from "../stopDecision.ts";
 import { formatSeconds, rich, t, type Key } from "../i18n.ts";
@@ -1218,10 +1218,8 @@ export function QueueDetail({ project, queue, onChanged, onClose, of, chat = [],
           {queue.stop_conditions.length + inherited.length === 0 && <li className="text-fg-3">{t("approval.none")}</li>}
         </ul>
       </Section>}
-      {!approving && queue.checks.length > 0 && (
-        <Section title={t("approval.checks")}>
-          {queue.checks.map((c, i) => <Markdown key={i}>{c}</Markdown>)}
-        </Section>
+      {!approving && queueChecks(project.project, queue).length > 0 && (
+        <Section title={t("approval.checks")}><Checks project={project} queue={queue} /></Section>
       )}
       {queue.source && (
         <p className="mt-6 text-xs text-fg-3">{rich("details.imported", { path: <span key="path" className="font-mono">{queue.source.path}</span>, time: <TimeAgo key="time" at={queue.source.imported_at} /> })}</p>

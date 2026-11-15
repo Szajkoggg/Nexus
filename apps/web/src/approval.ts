@@ -2,9 +2,20 @@
 // for the user's approval, its run settings on one line, the orchestrator's message that came with its draft, and the
 // reference that "Ask the orchestrator…" puts in the composer. Pure and unit tested (test/approval.test.ts).
 import type { ChatEntry, ProjectFile, QueueView } from "@nexus/protocol";
-import { stepValuesText } from "@nexus/protocol/steps";
+import { stepChecks, stepValuesText } from "@nexus/protocol/steps";
 import { formatClock, t, type Key } from "./i18n.ts";
 import { plannedAfter } from "./queueStatus.ts";
+
+/**
+ * The checks a queue's steps run, the project's first (marked `project`), then the queue's own that the project's do
+ * not already name. The project's are the ones its run fixed while it has a run that has not finished, else the
+ * project's setting now (what its next run will fix).
+ */
+export function queueChecks(project: Pick<ProjectFile, "defaults">, q: Pick<QueueView, "checks" | "run">): { name: string; project: boolean }[] {
+  const fromProject = q.run && q.run.state !== "finished" ? q.run.checks ?? [] : project.defaults.checks;
+  const own = stepChecks(fromProject, []);
+  return stepChecks(own, q.checks).map((name) => ({ name, project: own.includes(name) }));
+}
 
 /** A queue whose current revision waits for the user's approval: not approved, and neither finished nor cancelled. */
 export const needsApproval = (q: Pick<QueueView, "approved" | "status">): boolean =>

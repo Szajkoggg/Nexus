@@ -502,6 +502,12 @@ the queue's provisional acceptances. Turn it on where the project's checks are s
 "Worktree setup" (project only) is a command run once in each new worktree before its first step, for example `npm ci`;
 if it fails, the run stops with the reason.
 
+**Checks for every step** (Settings → Defaults, project only, empty by default): commands every step of every queue
+of the project runs before the queue's own checks, one per line, for example `npm run lint`; a check the queue names
+too runs once. Approving a queue shows them first, marked "(project)". A queue that is running gets a change at its
+next start, not its next step. For Nexus itself set it to `npm run lint` once the static analysis (queue SA) is
+deployed: then every queue, also the ones already approved, runs it.
+
 **Push accepted steps** (Settings, off by default): when a step is accepted, by you or the orchestrator, Nexus pushes
 the commit the step was reviewed at (not later work) to the branch the queue runs on, at its upstream remote or
 origin. Never forced, never with a prompt. The step shows "Pushed: …" or "Push failed: …"; a failed push leaves the

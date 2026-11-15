@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { ChatEntry } from "@nexus/protocol";
-import { draftOf, needsApproval, pinsText, queueReference, runSettings, withReference } from "../src/approval.ts";
+import { draftOf, needsApproval, pinsText, queueChecks, queueReference, runSettings, withReference } from "../src/approval.ts";
 
 const project = {
   defaults: { review_level: 2 },
@@ -68,4 +68,15 @@ test("Ask the orchestrator: the reference once at the start of the composer, bef
 test("what approving pins, said beside the button", () => {
   assert.equal(pinsText(1, false), "Approving pins revision 1: these steps, their acceptance, the checks and stop conditions");
   assert.equal(pinsText(2, true), "Approving pins revision 2: these steps, their acceptance, the checks and stop conditions; it also lifts the stop");
+});
+
+test("a queue's checks: the project's first and marked, the queue's own after them, each once", () => {
+  const p = { defaults: { checks: ["npm run lint", "npm test"] } } as never;
+  assert.deepEqual(queueChecks(p, { checks: ["npm run typecheck", "npm test"] } as never), [
+    { name: "npm run lint", project: true }, { name: "npm test", project: true }, { name: "npm run typecheck", project: false },
+  ]);
+  // A run that has not finished goes by the checks it fixed at its start, not the setting now.
+  assert.deepEqual(queueChecks(p, { checks: [], run: { state: "running", checks: ["npm run knip"] } } as never), [{ name: "npm run knip", project: true }]);
+  assert.deepEqual(queueChecks(p, { checks: ["npm test"], run: { state: "paused" } } as never), [{ name: "npm test", project: false }], "a run from before the setting: none of the project's");
+  assert.deepEqual(queueChecks(p, { checks: [], run: { state: "finished", checks: ["npm run knip"] } } as never).map((c) => c.name), ["npm run lint", "npm test"], "a finished run: the next one takes the setting now");
 });

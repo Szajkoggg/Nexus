@@ -7,7 +7,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { ChatEntry } from "@nexus/protocol";
 import { actResult, enc, type ProjectState, type QueueView, type StepView } from "../api.ts";
-import { draftOf, pinsText, queueReference, runSettings, withReference } from "../approval.ts";
+import { draftOf, pinsText, queueChecks, queueReference, runSettings, withReference } from "../approval.ts";
 import { draftKey, putDraft, readDraft } from "../drafts.ts";
 import { nav } from "../nav.ts";
 import { queueStatus } from "../queueStatus.ts";
@@ -182,9 +182,15 @@ function StopConditions({ project, queue }: { project: ProjectState; queue: Queu
     </ul>
   );
 }
-const Checks = ({ queue }: { queue: QueueView }) => (
-  <ul className="space-y-1 text-sm text-fg">{queue.checks.map((c, i) => <li key={i} className="flex gap-2"><span className="text-ok/80">✓</span><Markdown className="[&_p]:m-0">{c}</Markdown></li>)}</ul>
+/** The checks every step runs: the project's first (as the stop conditions show the project's), then the queue's own. */
+export const Checks = ({ project, queue }: { project: ProjectState; queue: QueueView }) => (
+  <ul className="space-y-1 text-sm text-fg">
+    {queueChecks(project.project, queue).map((c) => c.project
+      ? <li key={`p${c.name}`} className="flex gap-2 text-fg-3"><span>✓</span><span>{c.name} <span className="text-xs">{t("approval.fromProject")}</span></span></li>
+      : <li key={c.name} className="flex gap-2"><span className="text-ok/80">✓</span><Markdown className="[&_p]:m-0">{c.name}</Markdown></li>)}
+  </ul>
 );
+const checkCount = (project: ProjectState, queue: QueueView) => queueChecks(project.project, queue).length;
 const stopCount = (project: ProjectState, queue: QueueView) => queue.stop_conditions.length + project.project.defaults.stop_conditions.length;
 
 // ---------------------------------------------------------------- the compact list (the drawer, the phone)
@@ -244,12 +250,12 @@ export function CompactSteps({ project, queue, chat, onFull, onChanged }: { proj
       <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm">
         {queue.description && fold("description", t("approval.description"))}
         {fold("stops", t("approval.stopConditionsCount", { count: stopCount(project, queue) }))}
-        {queue.checks.length > 0 && fold("checks", t("approval.checksCount", { count: queue.checks.length }))}
+        {checkCount(project, queue) > 0 && fold("checks", t("approval.checksCount", { count: checkCount(project, queue) }))}
         {draft?.message && fold("message", t("approval.message"))}
       </div>
       {open.description && queue.description && <div className="mt-2 text-sm text-fg-2"><Markdown>{queue.description}</Markdown></div>}
       {open.stops && <div className="mt-2"><StopConditions project={project} queue={queue} /></div>}
-      {open.checks && <div className="mt-2"><Checks queue={queue} /></div>}
+      {open.checks && <div className="mt-2"><Checks project={project} queue={queue} /></div>}
       {open.message && <div className="mt-2"><MessageBox queue={queue} chat={chat} /></div>}
     </section>
   );
@@ -284,7 +290,7 @@ export function ApprovalView({ project, queue, chat, sidebar, onClose, onPanel, 
     ...(queue.description ? [{ key: "description", mark: "≡", label: t("approval.description") }] : []),
     ...queue.steps.map((s) => ({ key: `step-${s.id}`, mark: <span className="font-mono text-[11px]" title={s.id}>{stepMark(s)}</span>, label: s.title })),
     { key: "stops", mark: "⚑", label: t("approval.stopConditionsCount", { count: stopCount(project, queue) }) },
-    ...(queue.checks.length ? [{ key: "checks", mark: "✓", label: t("approval.checksCount", { count: queue.checks.length }) }] : []),
+    ...(checkCount(project, queue) ? [{ key: "checks", mark: "✓", label: t("approval.checksCount", { count: checkCount(project, queue) }) }] : []),
   ];
   const [current, setCurrent] = useState(entries[0]?.key);
   // The part picked in the outline stays marked while it shows (the last ones cannot reach the top), until the user
@@ -382,10 +388,10 @@ export function ApprovalView({ project, queue, chat, sidebar, onClose, onPanel, 
               <h2 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-fg-3">{t("approval.stopConditions")}</h2>
               <StopConditions project={project} queue={queue} />
             </section>
-            {queue.checks.length > 0 && (
+            {checkCount(project, queue) > 0 && (
               <section data-part="checks">
                 <h2 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-fg-3">{t("approval.checks")}</h2>
-                <Checks queue={queue} />
+                <Checks project={project} queue={queue} />
               </section>
             )}
           </div>

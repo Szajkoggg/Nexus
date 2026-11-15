@@ -265,6 +265,11 @@ function SettingRows({ form, project }: { form: Form; project?: { values: Record
             <input value={p.values.worktrees} onChange={(e) => p.set("worktrees", e.target.value)} placeholder={`${p.root}/../…worktrees`} className={`${field} font-mono text-xs`} />
           </Row>
         )}
+        {p && (
+          <Row label={t("settings.checks")} hint={t("settings.checksHint")}>
+            <textarea value={p.values.checks} onChange={(e) => p.set("checks", e.target.value)} rows={3} placeholder={t("settings.checksPlaceholder")} className={`${field} font-mono text-xs`} />
+          </Row>
+        )}
       </Section>
 
       <Section title={t("settings.merging")}>
@@ -347,6 +352,7 @@ function ProjectSettingsPage({ project, info, onChanged }: { project: ProjectFil
   const [local, setLocal] = useState({
     name: project.name, tools: project.runtimes.claude.allowed_tools.join("\n"),
     notesDir: project.conversations.notes_dir ?? "", worktrees: project.defaults.worktree_dir ?? "", worktreeSetup: project.defaults.worktree_setup ?? "",
+    checks: project.defaults.checks.join("\n"),
     working: project.languages?.working ?? "en",
   });
   const [busy, setBusy] = useState(false);
@@ -365,7 +371,8 @@ function ProjectSettingsPage({ project, info, onChanged }: { project: ProjectFil
     try {
       const mine = SETTING_KEYS.filter((k) => own.has(k));
       const body = nested(v.values, mine) as { defaults?: Values; runtimes?: { claude?: Values } & Values; conversations?: Values; languages?: Values };
-      body.defaults = { ...body.defaults, worktree_dir: local.worktrees || null, worktree_setup: local.worktreeSetup.trim() || null };
+      body.defaults = { ...body.defaults, worktree_dir: local.worktrees || null, worktree_setup: local.worktreeSetup.trim() || null,
+        checks: local.checks.split("\n").map((x) => x.trim()).filter(Boolean) };
       body.runtimes = { ...body.runtimes, claude: { ...body.runtimes?.claude, allowed_tools: local.tools.split(/\n|,/).map((x) => x.trim()).filter(Boolean) } };
       body.conversations = { ...body.conversations, notes_dir: local.notesDir || null };
       body.languages = { ...body.languages, working: local.working };
