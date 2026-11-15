@@ -1104,6 +1104,11 @@ export const TurnRecord = z.object({
   failure: z.string().optional(),
   /** The turn's own tokens, as the runtime reported them: input not from the cache, output, cache read and written. */
   tokens: z.object({ input: z.number(), output: z.number(), cache_read: z.number(), cache_creation: z.number() }).optional(),
+  /**
+   * What the turn's sub-agents used, apart from `tokens` (the main loop's), in the same four figures: Claude Code turns
+   * only (zeros: none ran); absent where unknown (a Codex turn, the first turn of a resumed process, an older record).
+   */
+  subagent_tokens: z.object({ input: z.number(), output: z.number(), cache_read: z.number(), cache_creation: z.number() }).optional(),
   /** The turn's own cost, where the runtime reports one (Claude Code) and it is known. */
   cost_usd: z.number().optional(),
   /** The account's usage windows of the turn's runtime as the server knew them when the turn began and ended. */

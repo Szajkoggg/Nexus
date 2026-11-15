@@ -76,9 +76,10 @@ export interface AgentEvents {
   /**
    * `tokens` and `costUsd`: this turn's alone (never a running total), when the runtime said; `costUsd` only where it
    * reports one (Claude Code), and not for the first turn of a resumed process (its running total starts with the
-   * earlier turns').
+   * earlier turns'). `subagentTokens`: what its sub-agents used within the turn, apart from `tokens` (the main loop's);
+   * Claude Code only, and not for the first turn of a resumed process (DESIGN.md, "Sub-agent tokens").
    */
-  turnEnd: [{ ok: boolean; text: string; failure?: TurnFailure; tokens?: TurnTokens; costUsd?: number }];
+  turnEnd: [{ ok: boolean; text: string; failure?: TurnFailure; tokens?: TurnTokens; subagentTokens?: TurnTokens; costUsd?: number }];
   /** The work the agent left running in the background changed (see AgentProcess.background); emitted on every change. */
   background: [readonly string[]];
   exit: [number | null];

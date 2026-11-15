@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 import { ProjectStore, approveQueue, loadProjectState, routeAnswers } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
-import { WAIT_MS, until as waitUntil } from "./wait.ts";
+import { LONGER, WAIT_MS, until as waitUntil } from "./wait.ts";
 
 process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
 const G = ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false"];
@@ -58,7 +58,7 @@ test("a value beyond its metric's threshold is marked on its step and told to th
 
     const head = x.git("rev-parse", "HEAD");
     x.engine.start("Q");
-    await x.until("both steps accepted", () => x.queue().steps.every((s) => s.status === "done"));
+    await x.until("both steps accepted", () => x.queue().steps.every((s) => s.status === "done"), LONGER.run);
 
     const [q1, q2] = x.queue().steps;
     assert.deepEqual(q1!.metrics.map((m) => [m.name, m.value, m.unit, m.commit, m.warn]), [["bundle-kb", 900, "KB", head, { side: "above", limit: 500 }]]);

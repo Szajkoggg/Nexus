@@ -254,6 +254,7 @@ export class AgentHost<E extends object = object> {
         outcome: !end ? "interrupted" : end.ok ? "ok" : end.failure ? end.failure.kind : "interrupted",
         failure: end?.failure?.code,
         tokens: end?.tokens ? { input: end.tokens.input, output: end.tokens.output, cache_read: end.tokens.cacheRead, cache_creation: end.tokens.cacheCreation } : undefined,
+        subagent_tokens: end?.subagentTokens ? { input: end.subagentTokens.input, output: end.subagentTokens.output, cache_read: end.subagentTokens.cacheRead, cache_creation: end.subagentTokens.cacheCreation } : undefined,
         cost_usd: end?.costUsd,
         windows_start: turn.windows, windows_end: this.windows(s.runtime),
       });
