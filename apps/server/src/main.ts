@@ -397,7 +397,7 @@ function act(handler: (store: ProjectStore, body: Body, p: (name: string) => str
     const e = c.get("entry");
     const body = (await c.req.json().catch(() => ({}))) as Body;
     try {
-      const result = handler(e.store, body, (n) => c.req.param(n) ?? "", e);
+      const result = await handler(e.store, body, (n) => c.req.param(n) ?? "", e);
       changed(e.id);
       return c.json({ ok: true, result: result ?? null });
     } catch (err) {
@@ -455,8 +455,9 @@ app.post("/api/projects/:id/queues/:queue/run", act((_st, b, p, e) => {
     case "pause": return engine.pause(q);
     case "resume": return engine.resume(q);
     case "stop": return engine.stopNow(q, b.text as string | undefined);
+    case "stop_at_once": return engine.stopAtOnce(q);
     case "cancel_start": return { message: engine.cancelStart(q) };
-    default: throw new ActionError("action is start, pause, resume, stop or cancel_start");
+    default: throw new ActionError("action is start, pause, resume, stop, stop_at_once or cancel_start");
   }
 }));
 // The user's answers about the plan (PROTOCOL.md, "The plan"): accept or decline the orchestrator's proposal for the

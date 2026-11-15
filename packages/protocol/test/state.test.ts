@@ -29,6 +29,25 @@ function setup() {
   return { root, st, q, session, emit };
 }
 
+test("only the user records an interrupted step; its timeline closes the work segment without an outcome", () => {
+  const { st, session, emit } = setup();
+  const w = session("worker"), u = session("user");
+  emit(w, { type: "step.started", queue: "Q", step: "Q1" });
+  emit(w, { type: "step.interrupted", queue: "Q", step: "Q1", text: "forged" });
+  assert.equal(loadProjectState(st).queues[0]!.steps[0]!.timeline.length, 1);
+  emit(u, { type: "step.interrupted", queue: "Q", step: "Q1", text: "Stopped at once" });
+  let step = loadProjectState(st).queues[0]!.steps[0]!;
+  assert.equal(step.status, "running"); // the run record owns the pause
+  assert.equal(step.session, w.id);
+  assert.equal(step.segments[0]!.end, step.timeline.at(-1)!.at);
+  const end = step.segments[0]!.end;
+  emit(w, { type: "step.started", queue: "Q", step: "Q1" });
+  step = loadProjectState(st).queues[0]!.steps[0]!;
+  assert.equal(step.segments.length, 2);
+  assert.equal(step.segments[0]!.end, end);
+  assert.equal(step.segments[1]!.end, undefined);
+});
+
 test("steps advance with events; a waiting review holds the queue", () => {
   const { st, session, emit } = setup();
   const w = session("worker");

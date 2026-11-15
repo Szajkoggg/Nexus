@@ -557,6 +557,8 @@ export const en = {
   "run.pause": "Pause",
   "run.pauseAfterStep": "Pause after this step",
   "run.stopNow": "Stop now",
+  "run.stopAtOnce": "Stop at once",
+  "run.stopAtOnceHint": "Stop at once interrupts the turn and ends the worker process. Uncommitted changes stay; Resume continues in the same session.",
   "run.resume": "Resume",
   "run.field.session": "Session",
   "run.field.runtime": "Runtime",

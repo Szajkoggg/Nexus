@@ -597,6 +597,12 @@ function apply(
       if (!TERMINAL_QUEUE.has(q.status)) { q.status = "running"; q.status_reason = undefined; }
       return;
     }
+    case "step.interrupted": {
+      const st = stepOf(queueOf(e.queue), e.step);
+      const segment = st?.segments.at(-1);
+      if (segment && !segment.end) segment.end = e.at;
+      return;
+    }
     case "step.progress": {
       const st = stepOf(queueOf(e.queue), e.step);
       if (st) st.progress = { text: e.text, pct: e.pct, at: e.at };
