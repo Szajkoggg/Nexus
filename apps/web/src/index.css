@@ -33,6 +33,10 @@
   --color-review: #b18cff;
   --color-info: #5bc0eb;
   --color-danger: #ff6b6b;
+  /* A chart's one series colour (the Stats views): the accent, stepped into the lightness band the dataviz skill's
+     validator allows for the theme's mode, so a mark keeps 3:1 on the cards and reads under colour-vision deficiency
+     (docs/ux/stats-mockups.md, "The colours, validated"). */
+  --color-series: #3f7cf5;
   /* The user's own chat messages; the dimming behind a drawer or menu. */
   --color-user-bubble: #23324f;
   --color-scrim: #000000;
@@ -52,6 +56,7 @@ html[data-theme="paper"] {
   --color-fg: #1d1f23; --color-fg-2: #4f5562; --color-fg-3: #7a808c;
   --color-accent: #2f6fec; --color-accent-strong: #1f5ad1; --color-on-accent: #ffffff;
   --color-ok: #148a5b; --color-warn: #b7791f; --color-stop: #c4501d; --color-review: #7a4fd6; --color-info: #1d7fa8; --color-danger: #c93636;
+  --color-series: #2f6fec;
   --color-user-bubble: #e3ecfd; --color-scrim: #000000;
 }
 html[data-theme="honey"] {
@@ -60,6 +65,7 @@ html[data-theme="honey"] {
   --color-fg: #f2ece3; --color-fg-2: #c2b6a4; --color-fg-3: #8f8371;
   --color-accent: #f0a93a; --color-accent-strong: #e0951f; --color-on-accent: #1a1206;
   --color-ok: #8fd17a; --color-warn: #f0c04a; --color-stop: #ff8b5c; --color-review: #d59cff; --color-info: #7cc7d9; --color-danger: #ff7b6b;
+  --color-series: #c47e14;
   --color-user-bubble: #3a2e1c; --color-scrim: #000000;
 }
 

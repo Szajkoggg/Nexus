@@ -17,6 +17,8 @@ import { Composer, Expandable, Markdown, Section, TimeAgo } from "../ui.tsx";
 import { StepCommits } from "./git.tsx";
 import { Fold, PictureBadges } from "./review.tsx";
 import { usePage } from "../../page.ts";
+import { metricValueText } from "@nexus/protocol/metrics";
+import { stepMetrics } from "../../metrics.ts";
 
 type Pairs = ReturnType<typeof stepPictures>["pairs"];
 interface StepProps { step: StepView }
@@ -194,6 +196,30 @@ export function StepChecks({ step }: StepProps) {
             <span className="text-fg">{c.name}</span>
             {c.duration !== undefined && <span className="tabular-nums text-fg-2">{formatSeconds(c.duration)}</span>}
             {c.summary && <span className="text-fg-3">{c.summary}</span>}
+          </li>
+        ))}
+      </ul>
+    </Section>
+  );
+}
+
+/**
+ * The metrics the step's worker recorded (the latest value of each; a check's time only when it is beyond a
+ * threshold): a value beyond its metric's warning threshold in the warn colour, with ⚠ and the threshold in words.
+ * The project's Stats tab has their course over the steps.
+ */
+export function StepMetrics({ step }: StepProps) {
+  const rows = stepMetrics(step.metrics);
+  if (!rows.length) return null;
+  return (
+    <Section title={t("details.metrics")}>
+      <ul className="space-y-1 text-sm">
+        {rows.map((m) => (
+          <li key={m.name} className="flex flex-wrap items-baseline gap-x-2">
+            <span className="font-mono text-fg">{m.name}</span>
+            <span className={`tabular-nums ${m.warn ? "font-semibold text-warn" : "text-fg-2"}`}>{metricValueText(m.value, m.unit)}</span>
+            {m.warn && <span className="text-xs text-warn">{t("details.metricBeyond", { limit: metricValueText(m.warn.limit, m.unit) })}</span>}
+            {m.commit && <span className="font-mono text-xs text-fg-3">{m.commit.slice(0, 7)}</span>}
           </li>
         ))}
       </ul>

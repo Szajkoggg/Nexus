@@ -1208,6 +1208,7 @@ values are the mockup's; `surface-4` (hover over `surface-3`) and `scrim` (black
 | `accent`, `accent-strong`, `on-accent` | The one accent: actions, links, focus, selection, what is running; a primary button's fill and its text |
 | `ok`, `warn`, `stop`, `review`, `info`, `danger` | Status colours: done; waiting and questions; stopped; in review (and the orchestrator's doings); approval and pending deliveries; failed, rejected and errors |
 | `user-bubble`, `scrim` | The user's own chat messages; the dimming behind a drawer or menu |
+| `series` | A chart's one series colour (the Stats views): the accent stepped into the lightness band the `dataviz` skill's validator allows for the mode (Graphite `#3f7cf5`, Paper `#2f6fec`, Honey `#c47e14`), checked against the cards' surface; a few-data group is `fg-3`, a value beyond a threshold `warn` with ⚠ |
 
 Rules the components keep:
 
@@ -1219,6 +1220,10 @@ Rules the components keep:
 - **One accent** for actions: primary buttons, links, focus, checkboxes. Information that is not an action (a
   pending delivery, a planned start) uses `info`.
 - Opacity modifiers derive tints from tokens (`bg-warn/15`), so a theme defines each colour once.
+- **Charts** (components/charts.tsx, the reasons per form in docs/ux/stats-mockups.md) follow Claude Code's `dataviz`
+  skill: one series colour, never a status colour for a series; thin marks with a 4 px rounded end; hairline solid grid,
+  dashed only for a reference line (a threshold, a target); text in the text tokens; a tooltip on hover and focus;
+  and a table view beside every chart. Two measures of different units are two charts, never two y-axes.
 
 ### The interface texts in one place
 
@@ -1291,9 +1296,9 @@ Opacity modifiers compile to `color-mix()` on the token, with a fixed Graphite f
 Below 1024 px (phones and narrow windows; `PHONE` in `apps/web/src/phone.ts`) the dashboard has a phone layout
 (UX proposals, item 18): a top line and a bottom bar instead of the header. The top line is one row: the project
 picker, what runs in the project ("SF running"), and settings (with "offline" while live updates reconnect). The
-bottom bar has four tabs at the thumb: **Orchestrator** (the chat), **Waiting** (everything that waits in all
-projects, with its count), **Queues** (the project's queues; what waits has its own tab) and **Ideas** (the
-conversations). The header's tools (the update, the usage, notifications, remote access) are in Settings there, at
+bottom bar has five tabs at the thumb: **Orchestrator** (the chat), **Waiting** (everything that waits in all
+projects, with its count), **Queues** (the project's queues; what waits has its own tab), **Ideas** (the
+conversations) and **Stats** (the project's metrics; queue ST3). The header's tools (the update, the usage, notifications, remote access) are in Settings there, at
 the top, under "Nexus on this device". From 1024 px the desktop layout takes over ("Chat-first on a desktop").
 
 The tab is not a layer. It is a field of the history entry (`Nav.tab`), and switching rewrites the entry it is on
@@ -1438,6 +1443,26 @@ both runtimes seeing that file.
   so a file changed after the user looked is never overwritten by a change the user did not see.
 - **Moving `CLAUDE.md` into `AGENTS.md`** leaves the link lines out of the moved text (they would import the file
   itself), and lists the @imports it holds: Codex does not follow them, so the confirmation says so.
+
+### Removing a project (queue PJ)
+
+The user decided (2026-11-15) two levels, both theirs only and only while nothing runs: "Remove from Nexus" (off the
+registry, `.nexus/` kept, `nexus project add` brings it back as it was) and "Delete Nexus's data" (the `.nexus/`
+folder too). Neither touches the project's own files, nor the worktrees and branches Nexus made: those belong to the
+project's git repository. It goes through the server's API and not the CLI, so the write guard keeps it to the
+dashboard's page and no agent can remove a project, its own or another.
+
+"Nothing runs" is what would otherwise be cut off or left behind: a run that started and did not finish (a stopped
+one too: its stop waits for the user's decision), a merge back, a deploy planned after the project's work, an agent in
+a turn, an update. What only waits for a time or an answer (planned and scheduled starts, open questions) goes with
+the project, and comes back with it: the files are the contract, so re-adding rebuilds the same state.
+
+Deleting is the one place Nexus removes a folder by itself, so its target is fixed in code rather than trusted from a
+path: `realpath(root)/.nexus`, a folder of its own (a link or junction there could point at anything, and Node's
+`lstat` sees a Windows junction as a link), holding a `project.yaml`, of a project in this server's own registry. The
+server becomes the registry's second writer; both writers are the user's own actions, each a whole-file rename, and
+the server drops a project the moment it unregisters it, in one synchronous stretch, so no request in between loads
+it again.
 
 ### A closing refactoring step kept by Nexus
 

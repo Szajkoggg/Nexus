@@ -852,7 +852,10 @@ const commands: Record<string, () => void | Promise<void>> = {
     if (sub !== "add") throw new UsageError("nexus project add <path> | nexus project list");
     const root = normPath(need(args[2], "<path>"));
     if (!existsSync(root)) throw new UsageError(`no such directory: ${root}`);
-    const id = o.id ?? basename(root).toLowerCase().replace(/[^a-z0-9-]+/g, "-");
+    // A project removed from Nexus with its .nexus folder kept comes back under the id it had.
+    const kept = ProjectStore.forRoot(root);
+    const keptId = existsSync(kept.projectFile) ? kept.readStoredProject().id : undefined;
+    const id = o.id ?? keptId ?? basename(root).toLowerCase().replace(/[^a-z0-9-]+/g, "-");
     const st = ProjectStore.init(root, { id, name: o.name ?? basename(root), root });
     const reg = readRegistry();
     if (!reg.projects.some((p) => p.id === id)) { reg.projects.push({ id, root }); writeRegistry(reg); }

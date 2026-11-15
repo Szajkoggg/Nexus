@@ -117,7 +117,7 @@ export function projectRunning(state: ProjectState): DigestRunning[] {
 export interface UsageRun { session: string; state: string; updated_at: string }
 
 /** Which window a usage window's name is: Claude's five_hour and seven_day, Codex's codex_<n>h / codex_<n>d. */
-function windowKind(name: string): "5h" | "7d" | undefined {
+export function windowKind(name: string): "5h" | "7d" | undefined {
   if (name === "five_hour" || /^codex_5h$/.test(name)) return "5h";
   if (name === "seven_day" || /^codex_(7d|weekly|week)$/.test(name)) return "7d";
   return undefined;

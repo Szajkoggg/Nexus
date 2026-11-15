@@ -119,6 +119,10 @@ export function formatClock(iso: string, now: Date): string {
 
 /** The full date and time, for a title on hover: "14 Nov 2026, 14:02:05". */
 export const formatDateTime = (iso: string): string => dates(current.locale, { dateStyle: "medium", timeStyle: "medium" }).format(new Date(iso));
+/** A day without its year, for a chart's axis: "14 Nov". */
+export const formatDay = (d: Date): string => dates(current.locale, DAY).format(d);
+/** A day of the week with its date, for a chart's tooltip: "Sat 14 Nov". */
+export const formatWeekday = (d: Date): string => dates(current.locale, { weekday: "short", ...DAY }).format(d);
 /** A date: "14 Nov 2026". */
 export const formatDate = (iso: string): string => dates(current.locale, { dateStyle: "medium" }).format(new Date(iso));
 /** A time of day with seconds: "14:02:05". */

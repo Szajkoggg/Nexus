@@ -35,7 +35,7 @@ switching projects, are not steps for Back. With nothing open it leaves Nexus. E
 you in it and a dot while something runs; any number fit, the list scrolls. At its foot: an update going on, the
 usage, notifications, the project's settings and remote access; "live" at its top says whether updates arrive. The
 middle is the conversation: clicking a project opens its orchestrator chat. The chat's header switches between
-**Orchestrator** and **Ideas** (with how many conversations there are); "Tool calls" shows the tool lines, ⋯ has "New
+**Orchestrator**, **Ideas** (with how many conversations there are) and **Stats** (the project's metrics, below); "Tool calls" shows the tool lines, ⋯ has "New
 conversation". On the right, from 1280 px, a rail lists what waits for you in all projects (a stopped queue with
 Continue right there), what runs in the project with one honest status each ("1/3", "review", "after SF"), and what
 finished today; **All queues of <project>** at its foot shows the project's queues in the middle. In a narrower window
@@ -50,8 +50,8 @@ conversation in the middle with the step still beside it. A queue waiting for ap
 sidebar; "Ask the orchestrator…" there turns it into the panel on the right and puts the queue's reference in the
 chat's box.
 
-**On a phone** (and in any window narrower than 1024 px) a bar at the bottom has four tabs: **Orchestrator** (the
-chat), **Waiting** (what waits for you in all projects, with the count), **Queues** and **Ideas**. One tap switches.
+**On a phone** (and in any window narrower than 1024 px) a bar at the bottom has five tabs: **Orchestrator** (the
+chat), **Waiting** (what waits for you in all projects, with the count), **Queues**, **Ideas** and **Stats**. One tap switches.
 The top line has the project picker, what runs in the project, and the settings gear; the update, the usage,
 notifications and remote access are in Settings there. Switching tabs is not a step for Back: Back closes what is
 open (a step, Settings, a conversation) and then leaves. After switching projects the Waiting tab shows. A step or
@@ -311,6 +311,26 @@ with Accept and Decline (and in the settings panel's Tags section, beside the li
 once you accepted it. A renamed tag reads as its new name everywhere, so what was counted under the old name stays
 together.
 
+**Stats.** "Stats · all projects" under the projects in the sidebar (on a phone at the foot of the project list that
+opens from the project's name) shows, across every project: the **usage windows day by day** (Claude Code's 5-hour
+window as the highest reading of each day, its 7-day window and Codex's weekly window at each day's end, with the
+pause threshold), then **how steps went by model or effort**: the steps, the share accepted in the first round, the
+median working time and the estimated use of the weekly window per step, and per group the same four side by side
+(**Columns**), as a dot per group of first-round rate against working time (**Scatter**), or as a **Table**; the
+choice is kept in that browser. The range (7, 30, 90 days, all) is at the top; the project and the tags (kind,
+activity, area, size, origin) narrow the steps, not the windows. Use is an estimate and says so (≈); a group of fewer
+than 5 steps is marked "few data"; ↺ counts steps with a turn on a fallback. Every chart has a table view beside it.
+
+**A project's Stats** (the **Stats** tab beside Orchestrator and Ideas; on a phone the fifth tab) shows what the
+project measures: the metrics the orchestrator defined (`nexus metric define`) and the checks' times, one card each
+in the form it gave: a line over the steps, bars, or the latest number with its change and a small trend. The target
+is a dashed line, the warning threshold a dashed line marked ⚠; a value beyond it is drawn in the warning colour with
+⚠ and its value. Hovering a value says its step, commit and day; a click (or Enter) opens the step, and "last … ·
+<step> →" under each card opens the latest. A metric no worker has recorded yet says how one is recorded. The range
+(7, 30, 90 days, all) is at the top; every card has a table view. **A step's details** list the metrics its worker
+recorded (the latest of each); one beyond its threshold is in the warning colour with the threshold in words, and the
+step's header says "⚠ 1 metric beyond its threshold".
+
 ## Requirements
 
 Node.js 24 or later (TypeScript runs natively; only the dashboard is built, with Vite).
@@ -337,6 +357,8 @@ reads it) and `CLAUDE.md` pulls them in with the line `@AGENTS.md` (Claude Code 
 would not, the project's page in the dashboard warns and offers the fix: it shows the change to the two files, and
 makes it when you confirm (not while a queue runs in the project's own checkout). Nexus does not commit it: you do.
 The list of registered projects is in `%APPDATA%/Nexus/projects.yaml` (`NEXUS_HOME` overrides the directory).
+`project add` on a folder whose `.nexus/` was kept (a project removed from Nexus) brings the project back under the id
+it had, with everything as it was.
 Pictures added to chat messages are kept in the project's `.nexus/uploads/`, named by the time and a short hash. Nexus
 never deletes them: clear the folder by hand when you no longer need them.
 
