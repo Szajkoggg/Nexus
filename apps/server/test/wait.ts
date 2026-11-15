@@ -64,6 +64,13 @@ export function holdWork(): { release: (step?: string) => void; done: () => void
   return { release: (step) => writeFileSync(step ? `${file}-${step}` : file, ""), done: () => { delete process.env.FAKE_RELEASE; } };
 }
 
+/**
+ * The engine's own fixed waits, short (queue FX): the settle after a turn's end (300 ms in the server; the fake
+ * runtimes write their last events before the turn ends) and the delay after it starts before it resumes held runs and
+ * looks at planned starts (1500 ms in the server). Spread into the EngineOptions of the tests that run the engine.
+ */
+export const QUICK_ENGINE = { turnSettleMs: 50, startupMs: 200 } as const;
+
 export const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /**

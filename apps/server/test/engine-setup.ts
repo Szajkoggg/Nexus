@@ -7,15 +7,15 @@ import { fileURLToPath } from "node:url";
 import { ProjectStore, approveQueue, loadProjectState, routeAnswers, type StepDef } from "@nexus/protocol";
 import { Engine, type EngineOptions } from "../src/engine.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
-import { WAIT_MS, until as waitUntil } from "./wait.ts";
+import { QUICK_ENGINE, WAIT_MS, until as waitUntil } from "./wait.ts";
 
 export const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
 process.env.NEXUS_CODEX = join(here, "fake-codex.ts");
 export const WINDOW = { claude: 1000, codex: 2000 } as const;
 
-/** Short retries and usage margins, so the tests wait milliseconds where the server waits minutes. */
-export const FAST: EngineOptions = { retryBaseMs: 30, usageMarginMs: 100 };
+/** Short retries, usage margins and the engine's own waits, so the tests wait milliseconds where the server waits minutes. */
+export const FAST: EngineOptions = { retryBaseMs: 30, usageMarginMs: 100, ...QUICK_ENGINE };
 
 export function setup(behaviours: string[], options: EngineOptions = FAST) {
   const root = mkdtempSync(join(tmpdir(), "nexus-engine-"));

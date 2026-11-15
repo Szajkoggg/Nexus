@@ -61,6 +61,12 @@ const BACKGROUND_LIMIT_MS = 30 * 60_000;
 /** After background work ends with the session idle, Nexus looks again this much later: Claude Code starts a turn by itself first. */
 const BACKGROUND_SETTLE_MS = 2000;
 
+/** After a turn ends, how long the engine lets the CLI's last events land in the files before it decides. */
+const TURN_SETTLE_MS = 300;
+
+/** After the engine starts, how long before it resumes what an update held, and looks at the planned starts. */
+const STARTUP_MS = 1500;
+
 /** A step with one of these has its outcome: its round of commits ends with the turn that gave it. */
 const OUTCOME: ReadonlySet<string> = new Set(["done", "review", "failed", "stopped"]);
 
@@ -68,6 +74,13 @@ export interface EngineOptions {
   /** The first retry's delay; each further one doubles it. Tests make it short. */
   retryBaseMs?: number;
   usageMarginMs?: number;
+  /**
+   * After a turn ends, how long the engine waits for the CLI's last events before it decides (TURN_SETTLE_MS); tests
+   * make it short: the fake runtimes write theirs before the turn ends.
+   */
+  turnSettleMs?: number;
+  /** After the engine starts, how long before it resumes held runs and looks at planned starts (STARTUP_MS); tests make it short. */
+  startupMs?: number;
   /** How long a turn's end waits for background work (BACKGROUND_LIMIT_MS); tests make it short. */
   backgroundLimitMs?: number;
   /** How the push of accepted steps runs git, and its time limit (tests). */
@@ -132,6 +145,8 @@ export class Engine implements Member {
   private readonly exitedInReview = new Set<string>();
   private readonly retryBaseMs: number;
   private readonly usageMarginMs: number;
+  private readonly turnSettleMs: number;
+  private readonly startupMs: number;
   private readonly backgroundLimitMs: number;
   private readonly boundary?: EngineOptions["boundary"];
   /**
@@ -148,6 +163,8 @@ export class Engine implements Member {
     this.host = new AgentHost(store, ROLE_RECORDS.worker, { spawn: options.spawn });
     this.retryBaseMs = options.retryBaseMs ?? RETRY_BASE_MS;
     this.usageMarginMs = options.usageMarginMs ?? USAGE_MARGIN_MS;
+    this.turnSettleMs = options.turnSettleMs ?? TURN_SETTLE_MS;
+    this.startupMs = options.startupMs ?? STARTUP_MS;
     this.backgroundLimitMs = options.backgroundLimitMs ?? BACKGROUND_LIMIT_MS;
     this.boundary = options.boundary;
     this.clock = options.clock ?? REAL_CLOCK;
@@ -165,7 +182,7 @@ export class Engine implements Member {
     try { this.store.migrateChains(); } catch { /* an unreadable start.yaml shows as a warning in the state */ }
     // Schedules are armed again; what came due while no server ran is looked at once this one is up.
     this.scheduler.armAll();
-    this.timers.set("starts", setTimeout(() => { this.timers.delete("starts"); this.checkStarts(); }, 1500));
+    this.timers.set("starts", setTimeout(() => { this.timers.delete("starts"); this.checkStarts(); }, this.startupMs));
   }
 
   /** Pushes what was accepted (src/accepted.ts). */
@@ -1139,7 +1156,7 @@ export class Engine implements Member {
             this.advance(q.id);
           }
           this.changed();
-        }, 300);
+        }, this.turnSettleMs);
       },
       exit: (code) => {
         // Ended by Nexus (shutdown, the hand-over of an update, an update's drain with `now`, a finished run): no
@@ -1246,7 +1263,7 @@ export class Engine implements Member {
           if (!r?.resume_after_restart) return;
           try { this.resume(q); } catch (e) { this.halt(q, `could not resume after the update: ${(e as Error).message}`); }
           this.changed();
-        }, 1500));
+        }, this.startupMs));
       } else if (run && ["running", "pausing"].includes(run.state)) {
         this.writeRun(q, toPaused(run, "the Nexus server restarted; resume to continue"));
       } else if (run?.state === "approval_wait" && view?.approved) {
@@ -1255,7 +1272,7 @@ export class Engine implements Member {
           this.timers.delete(`recover:${q}`);
           if (this.store.readRun(q)?.state === "approval_wait") this.continueApproved(q);
           this.changed();
-        }, 1500));
+        }, this.startupMs));
       }
       if (run?.state === "usage_wait" && run.resume_at) this.schedule(q, run.resume_at, this.usageMarginMs);
     }

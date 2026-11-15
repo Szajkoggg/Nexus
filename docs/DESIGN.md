@@ -1745,6 +1745,29 @@ The suite runs every file side by side on every core already, so two at once onl
 Measured with two temporary clones started 5 s apart (a busy machine, other work running): the first took 268 s,
 the second waited about 263 s and then took 181 s; both green.
 
+## The engine's own waits in tests, and what sets the slowest files (queue FX)
+
+Measured first (`npm run test:times`, `NEXUS_TEST_WAIT_LOG`): the slowest files (approval-wait, engine-failures,
+lift, merger; accepted further down) spend almost nothing in the tests' own fixed waits (approval-wait about 10 s of
+its 57 s alone, 117 s in the full suite). Their time is work: every step's turn starts or wakes a fake runtime process
+and calls the nexus CLI at least twice (`step start`, `step done`), each a node process of about 270 ms alone (loading
+zod about 85 ms, the schemas 55 ms, yaml 55 ms; Node's compile cache does not change it), and the merger's cases run
+git dozens of times. In the full suite every core is busy, so each file takes about twice its time alone.
+
+- **The engine's fixed waits are options** (`EngineOptions.turnSettleMs`, default 300 ms, the settle after a turn's end
+  before the engine decides; `startupMs`, default 1500 ms, before a new engine resumes held runs and looks at planned
+  starts). The server keeps the defaults; tests spread `QUICK_ENGINE` (wait.ts: 50 and 200 ms) into their options,
+  `FAST` (engine-setup.ts) included. The fakes write their last events before the turn ends, so the shorter settle
+  changes nothing they test.
+- **"Nothing happens" waits are kept, shorter, sized to what would have happened**: twice the timer that would have
+  acted (500 ms past `startupMs`, 200 ms past a retry or a nudge), and a push that would have started is waited for
+  with `pusher.settled()` after twice the test's 150 ms look.
+- Measured back to back on the user's machine (another session's test file running beside them): the four slowest
+  files and accepted went from 443 s to 386 s together (13 %), the slowest file from 118 s to 92 s, the suite from
+  156 s to 147 s. The 25 % the queue asked for is out of reach by waits: what is left is the processes' own CPU work.
+  A faster CLI start (loading zod and yaml only for the commands that need them) would help every test and every
+  agent's call; that is a change to the CLI, for a queue of its own.
+
 ## Findings from the flaky tests (queue FU4)
 
 Four server tests failed now and then on a busy machine. `scripts/load-tests.mjs` brings such failures out (12

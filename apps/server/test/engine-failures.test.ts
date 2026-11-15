@@ -70,7 +70,7 @@ for (const runtime of ["claude", "codex"] as const) {
       engine.start("Q", { runtime });
       await until("the halt", () => queue().run?.state === "halted", LONGER.run);
       assert.match(queue().run!.reason!, /authentication_failed|unauthorized/);
-      await new Promise((r) => setTimeout(r, 400));
+      await new Promise((r) => setTimeout(r, 200)); // past a retry (retryBaseMs) and a nudge (turnSettleMs)
       assert.equal(received().length, 1, "no retry and no nudge");
       assert.ok(!activityOf(store, queue().run!.session).some((a) => a.text.startsWith("Nexus tries")));
     } finally { engine.shutdown(); }

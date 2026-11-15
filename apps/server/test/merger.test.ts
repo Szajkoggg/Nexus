@@ -18,7 +18,7 @@ import { judgeMerge, mergeBack, removeWorktree, withMergeLock } from "../src/mer
 import { judgePlan } from "../src/deploy-plan.ts";
 import { Engine } from "../src/engine.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
-import { LONGER, holdWork, sleep, until as waitUntil } from "./wait.ts";
+import { LONGER, QUICK_ENGINE, holdWork, sleep, until as waitUntil } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -427,7 +427,7 @@ function wired(steps: { W: StepDef[]; M?: StepDef[] }) {
     merger!.onChange(s);
     engine.onChange(loadProjectState(x.store));
   };
-  const engine: Engine = new Engine(x.store, tick, { retryBaseMs: 30, usageMarginMs: 100, boundary: (q, step, state) => merger!.atBoundary(q, step, state) });
+  const engine: Engine = new Engine(x.store, tick, { retryBaseMs: 30, usageMarginMs: 100, ...QUICK_ENGINE, boundary: (q, step, state) => merger!.atBoundary(q, step, state) });
   merger = new Merger(x.store, { start: (q) => void engine.start(q, { runtime: "claude" }), release: (q, why) => engine.releaseHold(q, why), busy: () => engine.draining, serverRoot: join(x.base, "elsewhere"), poke: tick, pollMs: 200 });
   const until = (what: string, pred: () => boolean, ms: number = LONGER.processes) =>
     waitUntil(what, pred, ms, () => `; W ${JSON.stringify(x.queue("W").run)} ${x.queue("W").steps.map((s) => `${s.id}=${s.status}`).join(" ")}; git ${JSON.stringify(x.store.readGit("W")?.merge)}`);
