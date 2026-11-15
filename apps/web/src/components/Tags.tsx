@@ -4,11 +4,9 @@
 import { useState } from "react";
 import { NEXUS_ACTIVITIES, TAG_KINDS, TAG_ORIGINS, activityDifference, tagProposalText } from "@nexus/protocol/tags";
 import type { TagProposal, TagsFile } from "@nexus/protocol";
-import { act, useAction, type AttentionItem, type QueueView, type StepView } from "../api.ts";
+import { act, enc, useAction, type AttentionItem, type QueueView, type StepView } from "../api.ts";
 import { t } from "../i18n.ts";
 import { Button, Section } from "./ui.tsx";
-
-const enc = encodeURIComponent;
 
 /** A tag's name as a small chip: `strong` for the kind, `muted` for one planned but not reported, `added` for one done but not planned. */
 function Chip({ name, tone = "plain", title }: { name: string; tone?: "strong" | "plain" | "muted" | "added"; title?: string }) {

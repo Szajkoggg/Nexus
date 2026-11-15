@@ -69,8 +69,7 @@ export function useAction(): ActionState & { run: Action["run"]; fail: Action["f
  */
 export const attentionKey = (a: AttentionItem) => [a.kind, a.queue, a.lift ? undefined : a.step, a.qid, ...(a.tags ? [a.tags.id] : [])].join("/");
 
-export const fileUrl = (project: string, path: string) =>
-  `/api/projects/${encodeURIComponent(project)}/file?path=${encodeURIComponent(path)}`;
+export const fileUrl = (project: string, path: string) => projectUrl(project, `/file?path=${enc(path)}`);
 
 type Listener = (msg: LiveMessage) => void;
 

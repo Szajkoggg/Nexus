@@ -6,7 +6,7 @@ import type { ModelInfo } from "@nexus/protocol/api";
 import { LANGUAGES } from "@nexus/protocol/languages";
 import { TAG_KINDS } from "@nexus/protocol/tags";
 import { fallbackLine, parseFallback } from "../fallback.ts";
-import { act, HttpError, request, useQuery, type Version } from "../api.ts";
+import { act, HttpError, projectUrl, request, useQuery, type Version } from "../api.ts";
 import { Button, Section } from "./ui.tsx";
 import { rich, t, type Key } from "../i18n.ts";
 import { CHOICES, readChoice, setChoice, type ThemeChoice } from "../theme.ts";
@@ -424,7 +424,7 @@ export function SettingsPanel({ project, tags, server, tools }: {
 }) {
   const { reload: onChanged } = usePage();
   const [tab, setTab] = useState<"project" | "global">("project");
-  const info = useQuery<ProjectSettingsInfo>(`/api/projects/${encodeURIComponent(project.id)}/settings`, usePage().version).data;
+  const info = useQuery<ProjectSettingsInfo>(projectUrl(project.id, "/settings"), usePage().version).data;
   return (
     <div>
       <div className="break-all pr-8 text-xs text-fg-3">{tab === "project" ? project.root : t("settings.globalNote")}</div>

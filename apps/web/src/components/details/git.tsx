@@ -2,7 +2,7 @@
 // worktree's merge and cleanup, the queue's branch, and what became of pushing an accepted step.
 import { useState } from "react";
 import type { BranchView, StepCommitsView } from "@nexus/protocol/api";
-import { act, actResult, enc, HttpError, useAction, useQuery, type ProjectState, type QueueView, type StepView } from "../../api.ts";
+import { act, actResult, enc, HttpError, projectUrl, useAction, useQuery, type ProjectState, type QueueView, type StepView } from "../../api.ts";
 import { integrationState, showsWorktreeActions } from "../../details.ts";
 import { rich, t } from "../../i18n.ts";
 import { Button, Section, TimeAgo } from "../ui.tsx";
@@ -15,7 +15,7 @@ export function StepCommits({ project, queue, step, toggle }: {
   /** The review's one line: "Commits · 3", which opens and closes the list. */
   toggle?: { open: boolean; onToggle: () => void };
 }) {
-  const data = useQuery<StepCommitsView | null>(`/api/projects/${enc(project)}/queues/${enc(queue)}/steps/${enc(step)}/commits`, usePage().version).data;
+  const data = useQuery<StepCommitsView | null>(projectUrl(project, `/queues/${enc(queue)}/steps/${enc(step)}/commits`), usePage().version).data;
   if (!data) return null;
   if (toggle) {
     const n = data.rounds.reduce((k, r) => k + r.commits.length, 0);
@@ -146,7 +146,7 @@ export function WorktreeActions({ project, root, queue }: { project: string; roo
 
 /** The queue's branch: ahead and behind of its base and of its remote-tracking ref (as last fetched: never fetched here). */
 export function BranchLine({ project, queue }: { project: string; queue: string }) {
-  const b = useQuery<BranchView | null>(`/api/projects/${enc(project)}/queues/${enc(queue)}/git`, usePage().version).data;
+  const b = useQuery<BranchView | null>(projectUrl(project, `/queues/${enc(queue)}/git`), usePage().version).data;
   if (!b) return null;
   const counts = (x: { ahead: number; behind: number }) => (
     <span><span className="text-ok">{t("details.branch.ahead", { count: x.ahead })}</span>, <span className={x.behind ? "text-warn" : "text-fg-2"}>{t("details.branch.behind", { count: x.behind })}</span></span>

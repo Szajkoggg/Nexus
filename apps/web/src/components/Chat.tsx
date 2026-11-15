@@ -29,7 +29,7 @@ const chatLines = (project: string, session: string, from: number, to: number) =
   request<{ chat: NumberedEntry[] }>(projectUrl(project, `/sessions/${enc(session)}/chat?from=${from}&to=${to}`));
 /** The chat lines a search finds (with `tools`, also in tool calls). */
 const searchChat = (project: string, session: string, query: string, tools: boolean, signal: AbortSignal) =>
-  request<{ lines?: number[] }>(projectUrl(project, `/sessions/${enc(session)}/chat/search?q=${encodeURIComponent(query)}${tools ? "&tools=1" : ""}`), { signal });
+  request<{ lines?: number[] }>(projectUrl(project, `/sessions/${enc(session)}/chat/search?q=${enc(query)}${tools ? "&tools=1" : ""}`), { signal });
 /** The step's latest conversation that is not archived, if any. */
 const stepConversation = (project: string, queue: string, step: string) =>
   request<{ conversation: { id: string } | null }>(projectUrl(project, `/queues/${enc(queue)}/steps/${enc(step)}/conversation`));
@@ -46,7 +46,7 @@ interface View { session: SessionFile | null; state: "working" | "idle" | "exite
 interface Search { open: boolean; set: (open: boolean) => void }
 
 export function useOrchestrator(project: string | undefined, version: Version) {
-  return useQuery<View>(project ? `/api/projects/${enc(project)}/orchestrator` : undefined, version).data;
+  return useQuery<View>(project ? projectUrl(project, "/orchestrator") : undefined, version).data;
 }
 
 /** A chat: what it is (its header; on a desktop's orchestrator chat, in the middle column's header), the messages, and the composer. */
@@ -546,7 +546,7 @@ function AboutStep({ project, c, className = "" }: { project: string; c: Session
  */
 export function StepChat({ project, queue, step }: { project: string; queue: string; step: string }) {
   const { version } = usePage();
-  const list = useQuery<ConversationItem[]>(`/api/projects/${enc(project)}/conversations`, version).data;
+  const list = useQuery<ConversationItem[]>(projectUrl(project, "/conversations"), version).data;
   const { busy, error, run } = useAction();
   const mine = (list ?? []).filter((c) => !c.archived && c.about?.queue === queue && c.about.step === step);
   const go = (fresh: boolean) => run(async () => {
@@ -589,14 +589,14 @@ export function ConversationsPanel({ project, name, defaultRuntime, inline, desk
   project: string; name: string; defaultRuntime: "claude" | "codex"; inline?: boolean; desk?: Desk;
 }) {
   const { reload: onChanged, version } = usePage();
-  const list = useQuery<ConversationItem[]>(`/api/projects/${enc(project)}/conversations`, version).data;
+  const list = useQuery<ConversationItem[]>(projectUrl(project, "/conversations"), version).data;
   usePlaces(); // the list's unread dots follow each conversation's place
   // The open conversation (or the new-conversation form) is a layer above the panel: Back returns to the list.
   const layer = layerValue(useNav(), "conversation");
   const creating = layer === "new";
   const open = creating ? undefined : layer;
   const [showArchived, setShowArchived] = useState(false);
-  const view = useQuery<ConversationView>(open ? `/api/projects/${enc(project)}/conversations/${enc(open)}` : undefined, version).data;
+  const view = useQuery<ConversationView>(open ? projectUrl(project, `/conversations/${enc(open)}`) : undefined, version).data;
   // On the phone's tab the list or one conversation at a time; on a desktop both, side by side.
   const side = !desk;
   const current = list?.find((c) => c.id === open);

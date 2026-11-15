@@ -2,7 +2,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { retryLine } from "@nexus/protocol/times";
 import { runGoing } from "@nexus/protocol/status-rules";
-import { act, enc, useAction, useQuery, type ActivityEntry, type ProjectState, type QueueView, type SessionView, type Usage } from "../api.ts";
+import { act, enc, projectUrl, useAction, useQuery, type ActivityEntry, type ProjectState, type QueueView, type SessionView, type Usage } from "../api.ts";
 import { Button, RunTimes, Section, TimeAgo } from "./ui.tsx";
 import { formatClock, formatDateTime, formatTime, formatNumber, rich, t, type Key } from "../i18n.ts";
 import { EffortSelect, ModelSelect } from "./Settings.tsx";
@@ -267,7 +267,7 @@ const KIND_ICON: Record<string, string> = { tool: "›", text: "¶", tool_error:
 /** What the agent did during a step, from the runtime's stream. */
 export function Activity({ project, session, queue, step }: { project: string; session: string; queue: string; step: string }) {
   const { version } = usePage();
-  const items = useQuery<ActivityEntry[]>(`/api/projects/${enc(project)}/sessions/${enc(session)}/activity?queue=${enc(queue)}&step=${enc(step)}`, version).data;
+  const items = useQuery<ActivityEntry[]>(projectUrl(project, `/sessions/${enc(session)}/activity?queue=${enc(queue)}&step=${enc(step)}`), version).data;
   const [all, setAll] = useState(false);
   if (!items?.length) return null;
   const shown = all ? items : items.slice(-40);

@@ -1,6 +1,6 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ProjectState, QueueStatus } from "@nexus/protocol";
-import { enc, useLive, useQuery, type AttentionItem, type ProjectSummary, type QueueView } from "./api.ts";
+import { projectUrl, useLive, useQuery, type AttentionItem, type ProjectSummary, type QueueView } from "./api.ts";
 import { bump, noVersions, projectVersion } from "./query.ts";
 import { QueueRow } from "./components/QueueRow.tsx";
 import { QueueDetail } from "./components/details/QueueDetail.tsx";
@@ -67,7 +67,7 @@ export function App() {
   const { data: projects, error: projectsError } = useQuery<ProjectSummary[]>("/api/projects", versions.list);
   const projectId = route.project ?? projects?.[0]?.id;
   const version = projectVersion(versions, projectId);
-  const { data: state, error } = useQuery<ProjectState>(projectId ? `/api/projects/${enc(projectId)}/state` : undefined, version);
+  const { data: state, error } = useQuery<ProjectState>(projectId ? projectUrl(projectId, "/state") : undefined, version);
   /**
    * After the user's own write: the project's reads and what spans projects are asked again (the live notification
    * may come later).
@@ -145,7 +145,7 @@ export function App() {
   const [form, setForm] = useApprovalForm(projectId, queue?.id, queue?.revision);
   const fullApproval = !!(queue && !step && needsApproval(queue) && (form ?? (phone ? "panel" : "full")) === "full");
   // "Ideas · N" in a desktop's switch: the conversations that are not archived.
-  const ideas = useQuery<{ id: string; archived?: boolean; last_at?: string }[]>(projectId ? `/api/projects/${enc(projectId)}/conversations` : undefined, version).data;
+  const ideas = useQuery<{ id: string; archived?: boolean; last_at?: string }[]>(projectId ? projectUrl(projectId, "/conversations") : undefined, version).data;
   // Unread markers on the chat switch and the phone's tabs, from each chat's place (chatPlace.ts).
   usePlaces();
   const unread: Unread = {
