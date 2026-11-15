@@ -192,6 +192,8 @@ export class AttentionWatch {
   private seen = new Map<string, Set<string>>();
   private readonly send: typeof push;
   constructor(send: typeof push = push) { this.send = send; }
+  /** A project removed from Nexus: added again, its first look is a baseline again (nothing old is pushed). */
+  forget(id: string): void { this.seen.delete(id); }
   check(project: { id: string; name: string }, items: AttentionItem[]): void {
     const keys = new Set(items.map(key));
     const before = this.seen.get(project.id);

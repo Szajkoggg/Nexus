@@ -92,6 +92,9 @@ export class Merger {
   /** No more looks (the server shuts down). */
   shutdown(): void { clearTimeout(this.timer); this.timer = undefined; }
 
+  /** The queues whose fast-forward waits on a checkout now: merges back in progress (a removal waits for them). */
+  merging(): string[] { return [...new Set(this.waitingOn.values())]; }
+
   /**
    * The engine at a step's end of `queue`: held when Nexus holds its checkout for a merge back (it goes on after the
    * fast-forward, or as soon as the merge back cannot go). False otherwise.

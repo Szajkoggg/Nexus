@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -32,4 +32,18 @@ test("nexus project add prints whether each runtime would see the project's rule
   assert.match(add({ agents: "x", claude: "# Claude\n" }).out, /warning: Claude Code would not see the rules in AGENTS\.md: CLAUDE\.md does not pull it in/);
   assert.match(add({ agents: "x", claude: "# Claude\n\n@AGENTS.md\n" }).out, /rules: AGENTS\.md, pulled into CLAUDE\.md: both/);
   assert.match(add({}).out, /rules: no AGENTS\.md or CLAUDE\.md/);
+});
+
+test("nexus project add brings a removed project back under the id its kept .nexus folder has", () => {
+  const base = mkdtempSync(join(tmpdir(), "nexus-readd-"));
+  const root = join(base, "Some Folder");
+  mkdirSync(root);
+  const env: NodeJS.ProcessEnv = { ...process.env, NEXUS_HOME: join(base, "home") };
+  delete env.NEXUS_DIR; delete env.NEXUS_SESSION;
+  const run = (...args: string[]) => execFileSync(process.execPath, [CLI, "project", "add", root, ...args], { env, encoding: "utf8" });
+  assert.match(run("--id", "kept"), /^ok: project kept /);
+  // Removed from Nexus (the registry emptied), its .nexus kept: added again without --id, it is "kept" again.
+  writeFileSync(join(base, "home", "projects.yaml"), "protocol: 1\nprojects: []\n");
+  assert.match(run(), /^ok: project kept /);
+  assert.match(readFileSync(join(base, "home", "projects.yaml"), "utf8"), /id: kept/);
 });
