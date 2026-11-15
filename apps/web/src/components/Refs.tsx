@@ -12,7 +12,7 @@ import { queueStatus } from "../queueStatus.ts";
 import { nav } from "../nav.ts";
 import { TONE } from "./QueueRow.tsx";
 import { Replyable } from "./Quote.tsx";
-import { sourceAt } from "../quote.ts";
+import { sourceAt, type SourcePosition } from "../quote.ts";
 import { codeText } from "../messageTools.ts";
 import { CopyButton } from "./MessageTools.tsx";
 import { Marked } from "./ChatTools.tsx";
@@ -93,10 +93,12 @@ export function RefText({ text, highlight = "" }: { text: string; highlight?: st
 const HEADINGS = Object.fromEntries((["h1", "h2", "h3", "h4", "h5", "h6"] as const).map((Tag) =>
   [Tag, ({ node, ...p }: { node?: { position?: { start: { line: number } } } } & Record<string, unknown>) => <Tag data-md-line={node?.position?.start.line} {...p} />]));
 
-/** A chat message's Markdown, with its refs as links (outside code and links), its paragraphs and items repliable. */
+/** A chat message's Markdown, with its refs as links (outside code and links), its paragraphs, items and tables repliable. */
 export function ChatMarkdown({ children, className = "", highlight = "" }: { children: string; className?: string; highlight?: string }) {
   const refs = useContext(RefsContext);
   const plugins = useMemo(() => chatRehypePlugins(refs?.index, highlight), [refs, highlight]);
+  /** What a repliable item carries: its Markdown source (for the quote) and its source line. */
+  const item = (pos: SourcePosition | undefined) => ({ source: sourceAt(children, pos), "data-md-line": pos?.start.line });
   return (
     <div className={`md text-sm leading-relaxed text-fg ${className}`}>
       <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={plugins} components={{
@@ -108,11 +110,9 @@ export function ChatMarkdown({ children, className = "", highlight = "" }: { chi
         // "Reply to this" on paragraphs, list items and tables (Quote.tsx): quotes the item's Markdown source (a table's
         // rows). They and the headings carry their source line, where a reply's contents and "Jump to the questions" go
         // (MessageTools.tsx).
-        p: ({ node, ...p }) => <Replyable as="p" source={sourceAt(children, node?.position)} data-md-line={node?.position?.start.line} {...p} />,
-        li: ({ node, ...p }) => <Replyable as="li" source={sourceAt(children, node?.position)} data-md-line={node?.position?.start.line} {...p} />,
-        table: ({ node, ...p }) => (
-          <Replyable as="div" source={sourceAt(children, node?.position)} data-md-line={node?.position?.start.line}><table {...p} /></Replyable>
-        ),
+        p: ({ node, ...p }) => <Replyable as="p" {...item(node?.position)} {...p} />,
+        li: ({ node, ...p }) => <Replyable as="li" {...item(node?.position)} {...p} />,
+        table: ({ node, ...p }) => <Replyable as="div" {...item(node?.position)}><table {...p} /></Replyable>,
         ...HEADINGS,
         // A code block has its own copy button, at its top right: on hover on a desktop, always on a phone.
         pre: ({ node, ...p }) => (
