@@ -112,17 +112,22 @@ export function SearchPanel({ project, onClose }: { project: string; onClose: ()
   const data = result?.data;
   const searching = !!url && result?.url !== url;
 
-  const go = (h: SearchHit) => {
-    if (h.kind === "chat" && h.session !== undefined && h.line !== undefined) {
-      const conversation = conversations?.some((c) => c.id === h.session);
-      const place = conversation ? placeKey(project, "conversation", h.session) : placeKey(project, "orchestrator");
-      setChatTarget({ place, session: h.session, line: h.line, tool: h.tool });
-      if (conversation) nav.closeThenConversation("search", h.session);
-      else nav.closeThenTab("search", "chat");
-    } else if (h.kind === "report" && h.path) nav.closeThenOpen("search", fileLayer(h.path));
-    else if (h.queue) nav.closeThenItem("search", project, h.queue, h.step);
+  /** What a click on a hit does, or undefined when it has no place to go (a question not about a step). */
+  const destination = (h: SearchHit): (() => void) | undefined => {
+    const { session, line, path, queue } = h;
+    if (h.kind === "chat") {
+      if (session === undefined || line === undefined) return undefined;
+      return () => {
+        const conversation = conversations?.some((c) => c.id === session);
+        const place = conversation ? placeKey(project, "conversation", session) : placeKey(project, "orchestrator");
+        setChatTarget({ place, session, line, tool: h.tool });
+        if (conversation) nav.closeThenConversation("search", session);
+        else nav.closeThenTab("search", "chat");
+      };
+    }
+    if (h.kind === "report") return path ? () => nav.closeThenOpen("search", fileLayer(path)) : undefined;
+    return queue ? () => nav.closeThenItem("search", project, queue, h.step) : undefined;
   };
-  const reachable = (h: SearchHit) => (h.kind === "chat" ? h.session !== undefined : h.kind === "report" ? !!h.path : !!h.queue);
 
   const chip = (k: SearchKind | "all", label: string) => (
     <button key={k} type="button" onClick={() => setKind(k)} aria-pressed={kind === k}
@@ -163,9 +168,10 @@ export function SearchPanel({ project, onClose }: { project: string; onClose: ()
         {url && data && data.hits.length === 0 && !searching && <p className="px-4 py-6 text-center text-sm text-fg-3">{t("search.none")}</p>}
         {url && data && data.hits.length > 0 && (
           <ul className="space-y-0.5 px-2 pb-3">
-            {data.hits.map((h, i) => (
-              <li key={`${h.kind}:${h.session ?? ""}:${h.line ?? ""}:${h.queue ?? ""}:${h.step ?? ""}:${h.at}:${i}`}>
-                <button type="button" onClick={() => go(h)} disabled={!reachable(h)}
+            {data.hits.map((h, i) => {
+              const go = destination(h);
+              return <li key={`${h.kind}:${h.session ?? ""}:${h.line ?? ""}:${h.queue ?? ""}:${h.step ?? ""}:${h.at}:${i}`}>
+                <button type="button" onClick={go} disabled={!go}
                   className="w-full rounded-lg px-3 py-2 text-left hover:bg-surface-3/70 disabled:cursor-default disabled:hover:bg-transparent">
                   <span className="flex items-baseline gap-2 text-xs">
                     <span className="shrink-0 rounded bg-surface-3 px-1.5 py-0.5 font-semibold text-fg-2">{t(KIND_LABEL[h.kind])}</span>
@@ -175,8 +181,8 @@ export function SearchPanel({ project, onClose }: { project: string; onClose: ()
                   </span>
                   <span className="mt-1 line-clamp-2 block text-sm text-fg"><Marked text={h.excerpt} ranges={h.ranges} /></span>
                 </button>
-              </li>
-            ))}
+              </li>;
+            })}
           </ul>
         )}
         {data?.more && limit < MOST && (
