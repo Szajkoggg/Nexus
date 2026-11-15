@@ -184,6 +184,158 @@ export function moveTargets(l: PlanLayout, all: readonly PlanQueue[], queue: str
 /** The phone's list: the columns one after another, each in its order. */
 export const planList = (l: PlanLayout): PlanNode[] => l.columns.flat();
 
+/** The drawing's sizes in CSS pixels (docs/ux/plan-view-options.md, layout A). */
+export const PLAN_SIZES = {
+  /** Between two columns: the room for the lines' tracks. */
+  gap: 36,
+  /** The column titles above the boxes. */
+  head: 24,
+  /** Between two boxes in a column. */
+  vgap: 12,
+  /** The height of a gap kept free in a column for a line that skips it. */
+  slot: 18,
+  /** A column's least width; narrower plans scroll sideways. */
+  minColumn: 160,
+};
+
+export interface PlanBox { left: number; top: number; width: number; height: number }
+
+/** A line from a queue (`from`) to one that waits for it (`to`): its corners, left to right, at right angles. */
+export interface PlanRoute { key: string; from: string; to: string; by: "user" | "orchestrator"; points: [number, number][] }
+
+export interface PlanDrawing {
+  /** Each column's left edge; all are `column` wide. */
+  x: number[];
+  column: number;
+  width: number;
+  height: number;
+  /** Each queue's box. */
+  boxes: Map<string, PlanBox>;
+  /** The gaps kept free for the lines that skip a column, by "<from>><to>@<column>". */
+  gaps: Map<string, PlanBox>;
+  routes: PlanRoute[];
+}
+
+/** Two lines closer than this (px) would read as one: ports and tracks keep them apart. */
+const APART = 3;
+
+/**
+ * Layout A (docs/ux/plan-view-options.md): the columns side by side, each stacked from the top in the plan's order
+ * (planLayout's). A line that skips a column passes through a gap kept free for it there, placed before the first
+ * queue it would otherwise run beside. A queue's lines leave its right edge and arrive at its left edge at ports
+ * 10 px apart, sorted by where they go or come from. Between two columns each line that changes height runs on a
+ * vertical track of its own, so no two lines share a stretch and none runs through a box. `heights` are the boxes'
+ * heights at the column width the drawing gives (the caller measures them there). A line whose target is not to the
+ * right of its source (a cycle) is not drawn: the card's chips still name it.
+ */
+export function drawPlan(l: PlanLayout, heights: ReadonlyMap<string, number>, width: number, s = PLAN_SIZES): PlanDrawing {
+  const n = l.columns.length;
+  const column = Math.max(s.minColumn, (width - Math.max(0, n - 1) * s.gap) / Math.max(1, n));
+  const x = l.columns.map((_, c) => c * (column + s.gap));
+  const col = new Map<string, number>();
+  l.columns.forEach((nodes, c) => nodes.forEach((q) => col.set(q.id, c)));
+  const h = (id: string) => Math.max(0, heights.get(id) ?? 0);
+  const edges = l.edges.filter((e) => col.has(e.from) && col.has(e.to) && col.get(e.from)! < col.get(e.to)!)
+    .map((e) => ({ ...e, key: `${e.from}>${e.to}`, c0: col.get(e.from)!, c1: col.get(e.to)! }));
+
+  // The columns, left to right: each gap goes where its line comes from (the height it had in the column before).
+  const boxes = new Map<string, PlanBox>(), gaps = new Map<string, PlanBox>();
+  const mid = (id: string) => boxes.get(id)!.top + h(id) / 2;
+  const gapKey = (key: string, c: number) => `${key}@${c}`;
+  const gapMid = (key: string, c: number) => gaps.get(gapKey(key, c))!.top + s.slot / 2;
+  let height = s.head;
+  l.columns.forEach((nodes, c) => {
+    const passing = edges.filter((e) => e.c0 < c && c < e.c1)
+      .map((e) => ({ key: e.key, want: e.c0 === c - 1 ? mid(e.from) : gapMid(e.key, c - 1) }))
+      .sort((a, b) => a.want - b.want || a.key.localeCompare(b.key));
+    let y = s.head, qi = 0, gi = 0;
+    while (qi < nodes.length || gi < passing.length) {
+      const q = nodes[qi], g = passing[gi];
+      if (g && (!q || g.want < y + h(q.id))) {
+        gaps.set(gapKey(g.key, c), { left: x[c]!, top: y, width: column, height: s.slot });
+        y += s.slot + s.vgap; gi++;
+      } else if (q) {
+        boxes.set(q.id, { left: x[c]!, top: y, width: column, height: h(q.id) });
+        y += h(q.id) + s.vgap; qi++;
+      }
+    }
+    height = Math.max(height, y - s.vgap);
+  });
+
+  // The heights each line passes at: its port on the source, the gaps' middles, its port on the target.
+  const via = (e: (typeof edges)[number]) => Array.from({ length: e.c1 - e.c0 - 1 }, (_, i) => gapMid(e.key, e.c0 + 1 + i));
+  const ys = new Map(edges.map((e) => [e.key, [0, ...via(e), 0]]));
+  /** The range a line may be moved within at a column: its box's (a port) or its gap's. */
+  const room = new Map<string, [number, number]>();
+  const ports = (id: string, list: { key: string; toward: number }[], at: (key: string) => number) => {
+    list.sort((a, b) => a.toward - b.toward || a.key.localeCompare(b.key));
+    const b = boxes.get(id)!;
+    const step = list.length > 1 ? Math.min(10, Math.max(0, h(id) - 12) / (list.length - 1)) : 0;
+    list.forEach((p, i) => {
+      const v = ys.get(p.key)!;
+      v[at(p.key)] = mid(id) + (i - (list.length - 1) / 2) * step;
+      room.set(`${p.key}#${at(p.key)}`, [b.top + 4, b.top + b.height - 4]);
+    });
+  };
+  for (const id of col.keys()) {
+    ports(id, edges.filter((e) => e.from === id).map((e) => ({ key: e.key, toward: e.c1 - e.c0 > 1 ? gapMid(e.key, e.c0 + 1) : mid(e.to) })), () => 0);
+    ports(id, edges.filter((e) => e.to === id).map((e) => ({ key: e.key, toward: e.c1 - e.c0 > 1 ? gapMid(e.key, e.c1 - 1) : mid(e.from) })), (k) => ys.get(k)!.length - 1);
+  }
+  for (const e of edges) via(e).forEach((m, i) => room.set(`${e.key}#${i + 1}`, [m - s.slot / 2 + APART, m + s.slot / 2 - APART]));
+
+  // Between two columns: a line arriving at the height another leaves at would share its stretch; it moves within
+  // its box or gap. Then each line that changes height gets a track (a vertical run) of its own.
+  const tracks = new Map<string, number>();
+  for (let g = 0; g + 1 < n; g++) {
+    const here = edges.filter((e) => e.c0 <= g && g < e.c1).map((e) => ({ e, i: g - e.c0 }));
+    const left = (e: (typeof edges)[number], i: number) => ys.get(e.key)![i]!;
+    for (const { e, i } of [...here].sort((a, b) => left(a.e, a.i + 1) - left(b.e, b.i + 1))) {
+      const v = ys.get(e.key)!, [lo, hi] = room.get(`${e.key}#${i + 1}`)!;
+      const taken = here.filter((o) => o.e !== e).flatMap((o) => [left(o.e, o.i), left(o.e, o.i + 1)]);
+      const free = (y: number) => y >= lo && y <= hi && taken.every((t) => Math.abs(t - y) >= APART);
+      const y0 = v[i + 1]!;
+      for (let d = 0; d <= hi - lo; d += 2) {
+        const y = [y0 + d, y0 - d].find(free);
+        if (y !== undefined) { v[i + 1] = y; break; }
+      }
+    }
+    const runs = here.filter(({ e, i }) => left(e, i) !== left(e, i + 1))
+      .map(({ e, i }) => ({ key: e.key, lo: Math.min(left(e, i), left(e, i + 1)), hi: Math.max(left(e, i), left(e, i + 1)), t: 0 }))
+      .sort((a, b) => a.lo - b.lo || a.key.localeCompare(b.key));
+    const ends: number[] = [];
+    for (const r of runs) {
+      let t = ends.findIndex((end) => end < r.lo - 2 * APART);
+      if (t < 0) { t = ends.length; ends.push(0); }
+      ends[t] = r.hi; r.t = t;
+    }
+    for (const r of runs) tracks.set(`${r.key}@${g}`, x[g]! + column + (s.gap * (r.t + 1)) / (ends.length + 1));
+  }
+
+  const routes: PlanRoute[] = edges.map((e) => {
+    const v = ys.get(e.key)!, points: [number, number][] = [[x[e.c0]! + column, v[0]!]];
+    for (let g = e.c0; g < e.c1; g++) {
+      const i = g - e.c0, tx = tracks.get(`${e.key}@${g}`);
+      if (tx !== undefined) points.push([tx, v[i]!], [tx, v[i + 1]!]);
+      points.push([g + 1 === e.c1 ? x[g + 1]! - 1 : x[g + 1]! + column, v[i + 1]!]);
+    }
+    return { key: e.key, from: e.from, to: e.to, by: e.by, points };
+  });
+  return { x, column, width: n ? x[n - 1]! + column : 0, height, boxes, gaps, routes };
+}
+
+/** An SVG path through `points` at right angles, its corners rounded (at most `r`, less on a short stretch). */
+export function roundedPath(points: readonly (readonly [number, number])[], r = 6): string {
+  const p = points.filter((q, i) => i === 0 || q[0] !== points[i - 1]![0] || q[1] !== points[i - 1]![1]);
+  if (!p.length) return "";
+  let d = `M${p[0]![0]},${p[0]![1]}`;
+  for (let i = 1; i < p.length - 1; i++) {
+    const [x0, y0] = p[i - 1]!, [x, y] = p[i]!, [x1, y1] = p[i + 1]!;
+    const a = Math.min(r, Math.hypot(x - x0, y - y0) / 2, Math.hypot(x1 - x, y1 - y) / 2);
+    d += ` L${x - a * Math.sign(x - x0)},${y - a * Math.sign(y - y0)} Q${x},${y} ${x + a * Math.sign(x1 - x)},${y + a * Math.sign(y1 - y)}`;
+  }
+  return `${d} L${p.at(-1)![0]},${p.at(-1)![1]}`;
+}
+
 /**
  * A queue's expected time as the card says it (GET /api/projects/:id/estimates): "about 40 min (estimate)" (to 5
  * minutes), "about 2.5 h (estimate)" (to half an hour under 10 h, whole hours above), "no estimate" while too few steps

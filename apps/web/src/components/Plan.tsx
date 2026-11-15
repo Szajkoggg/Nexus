@@ -1,7 +1,8 @@
-// The plan on the Queues view (PROTOCOL.md, "The plan"; layout in ../plan.ts): on a desktop, lanes from the left (what
-// runs now, then what follows), with a line from each queue to those that wait for it, solid where the user set the
-// dependency and dashed where the orchestrator did; on the phone, the same queues as one ordered list. Every planned
-// queue says what it waits for and which of its dependencies are the user's ("set by you").
+// The plan on the Queues view (PROTOCOL.md, "The plan"; layout in ../plan.ts): on a desktop, columns from the left
+// (what runs now, then what follows; layout A of docs/ux/plan-view-options.md), with a line from each queue to those
+// that wait for it, routed at right angles around the cards, solid where the user set the dependency and dashed where
+// the orchestrator did; on the phone, the same queues as one ordered list. Every card has the queue's whole title and
+// says what it waits for and which of its dependencies are the user's ("set by you").
 //
 // The user reorders it as a list (the rule is the server's, plan.ts reorderedFollowers): "After…" on a queue, or
 // dragging it onto another (onto "Next": to the front). The orchestrator's proposals have Accept and Decline on the
@@ -10,7 +11,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { act, enc, projectUrl, useAction, useQuery, type AttentionItem, type QueueView } from "../api.ts";
 import type { EstimatesResponse } from "@nexus/protocol";
 import { t } from "../i18n.ts";
-import { estimateWords, moveTargets, planLayout, planList, type PlanLayout, type PlanNode, type Why } from "../plan.ts";
+import { drawPlan, estimateWords, moveTargets, planLayout, planList, roundedPath, type PlanLayout, type PlanNode, type Why } from "../plan.ts";
 import { Button } from "./ui.tsx";
 import { TONE } from "./QueueRow.tsx";
 import { usePage } from "../page.ts";
@@ -86,38 +87,39 @@ export function PlanView({ project, queues, onOpen }: {
   );
 }
 
-/** The lanes: a column per step of the plan, cards in each, and the lines drawn over them once they are laid out. */
+/** Two measures of the cards' heights are the same. */
+const sameHeights = (a: ReadonlyMap<string, number>, b: ReadonlyMap<string, number>) => a.size === b.size && [...a].every(([k, v]) => b.get(k) === v);
+
+/**
+ * The lanes (layout A, ../plan.ts drawPlan): a column per step of the plan, the cards stacked in each at the column's
+ * width, and the lines routed around them. The cards are measured where they are drawn, then placed; until then the
+ * plan is not shown.
+ */
 function Lanes({ layout, onOpen, actions }: { layout: PlanLayout; onOpen: (queue: string) => void; actions: Actions }) {
   const box = useRef<HTMLDivElement>(null);
   const cards = useRef(new Map<string, HTMLElement>());
-  const [lines, setLines] = useState<{ key: string; d: string; by: "user" | "orchestrator" }[]>([]);
-  const [size, setSize] = useState({ w: 0, h: 0 });
+  const [width, setWidth] = useState(0);
+  const [heights, setHeights] = useState<ReadonlyMap<string, number>>(new Map());
   const [dragged, setDragged] = useState<string>();
   const [over, setOver] = useState<string>();
+  const drawing = useMemo(() => drawPlan(layout, heights, width), [layout, heights, width]);
+  const ready = width > 0 && layout.columns.every((c) => c.every((n) => heights.has(n.id)));
 
   useLayoutEffect(() => {
     const el = box.current;
     if (!el) return;
     const measure = () => {
-      const r = el.getBoundingClientRect();
-      if (!r.width) return; // hidden (the phone's list shows)
-      setSize({ w: el.scrollWidth, h: el.scrollHeight });
-      setLines(layout.edges.flatMap((e) => {
-        const a = cards.current.get(e.from)?.getBoundingClientRect();
-        const b = cards.current.get(e.to)?.getBoundingClientRect();
-        if (!a || !b) return [];
-        const x1 = a.right - r.left + el.scrollLeft, y1 = a.top + a.height / 2 - r.top;
-        const x2 = b.left - r.left + el.scrollLeft, y2 = b.top + b.height / 2 - r.top;
-        const dx = Math.max(14, (x2 - x1) / 2);
-        return [{ key: `${e.from}>${e.to}`, by: e.by, d: `M${x1},${y1} C${x1 + dx},${y1} ${x2 - dx},${y2} ${x2 - 3},${y2}` }];
-      }));
+      if (!el.clientWidth) return; // hidden (the phone's list shows)
+      setWidth(el.clientWidth);
+      const next = new Map([...cards.current].map(([id, c]) => [id, c.offsetHeight]));
+      setHeights((old) => (sameHeights(old, next) ? old : next));
     };
     measure();
     const watch = new ResizeObserver(measure);
     watch.observe(el);
     for (const c of cards.current.values()) watch.observe(c);
     return () => watch.disconnect();
-  }, [layout]);
+  }, [layout, drawing.column]);
 
   /** Where a dragged queue may be dropped: onto another queue (after it), or onto "Next" (to the front). */
   const dropTarget = (target: string | null) => ({
@@ -132,40 +134,42 @@ function Lanes({ layout, onOpen, actions }: { layout: PlanLayout; onOpen: (queue
   });
 
   return (
-    <div ref={box} className="scroll-thin relative overflow-x-auto pb-1">
-      <div className="grid gap-x-10" style={{ gridTemplateColumns: `repeat(${layout.columns.length}, minmax(11.5rem, 1fr))` }}>
+    <div ref={box} className="scroll-thin overflow-x-auto pb-1">
+      <div className={`relative ${ready ? "" : "invisible"}`} style={{ width: drawing.width, height: drawing.height + 8 }}>
         {layout.columns.map((col, c) => (
-          <div key={c} className="min-w-0">
-            <h3 {...(c === 1 ? dropTarget(null) : {})} data-plan-drop={c === 1 ? "first" : undefined}
-              className={`mb-2 rounded text-xs font-medium ${c === 1 && over === "" ? "bg-accent/15 text-accent" : "text-fg-3"} ${c === 1 && dragged ? "outline-1 outline-dashed outline-accent/50" : ""}`}>
-              {columnTitle(c)}{c === 1 && dragged ? ` · ${t("plan.dropFirst")}` : ""}
-            </h3>
-            <div className="space-y-3">
-              {col.map((n) => (
-                <Card key={n.id} node={n} onOpen={onOpen} actions={actions} highlight={over === n.id}
-                  drag={{
-                    draggable: n.movable,
-                    onDragStart: (e: React.DragEvent) => { e.dataTransfer.setData("text/plain", n.id); e.dataTransfer.effectAllowed = "move"; setDragged(n.id); },
-                    onDragEnd: () => { setDragged(undefined); setOver(undefined); },
-                    ...dropTarget(n.id),
-                  }}
-                  cardRef={(el) => { if (el) cards.current.set(n.id, el); else cards.current.delete(n.id); }} />
-              ))}
-              {!col.length && <p className="text-xs text-fg-3">{t("common.nothingHere")}</p>}
-            </div>
-          </div>
+          <h3 key={c} {...(c === 1 ? dropTarget(null) : {})} data-plan-drop={c === 1 ? "first" : undefined} data-box={`column ${c}`}
+            style={{ left: drawing.x[c], maxWidth: drawing.column }}
+            className={`absolute top-0 rounded text-xs font-medium ${c === 1 && over === "" ? "bg-accent/15 text-accent" : "text-fg-3"} ${c === 1 && dragged ? "outline-1 outline-dashed outline-accent/50" : ""}`}>
+            {columnTitle(c)}{c === 1 && dragged ? ` · ${t("plan.dropFirst")}` : ""}
+            {!col.length && <span className="ml-2 font-normal">{t("common.nothingHere")}</span>}
+          </h3>
         ))}
+        {layout.columns.flat().map((n) => {
+          const b = drawing.boxes.get(n.id);
+          return (
+            <Card key={n.id} node={n} onOpen={onOpen} actions={actions} highlight={over === n.id}
+              style={{ position: "absolute", left: b?.left ?? 0, top: b?.top ?? 0, width: drawing.column }}
+              drag={{
+                draggable: n.movable,
+                onDragStart: (e: React.DragEvent) => { e.dataTransfer.setData("text/plain", n.id); e.dataTransfer.effectAllowed = "move"; setDragged(n.id); },
+                onDragEnd: () => { setDragged(undefined); setOver(undefined); },
+                ...dropTarget(n.id),
+              }}
+              cardRef={(el) => { if (el) cards.current.set(n.id, el); else cards.current.delete(n.id); }} />
+          );
+        })}
+        <svg className="pointer-events-none absolute left-0 top-0 overflow-visible" width={drawing.width} height={drawing.height + 8} aria-hidden>
+          <defs>
+            {/* The tip at the line's end, which stops a pixel before the box. */}
+            <marker id="plan-arrow-user" viewBox="0 0 6 6" refX="6" refY="3" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L6,3 L0,6 z" className="fill-accent" /></marker>
+            <marker id="plan-arrow-orchestrator" viewBox="0 0 6 6" refX="6" refY="3" markerUnits="userSpaceOnUse" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L6,3 L0,6 z" className="fill-fg-3" /></marker>
+          </defs>
+          {ready && drawing.routes.map((r) => (
+            <path key={r.key} d={roundedPath(r.points)} fill="none" markerEnd={`url(#plan-arrow-${r.by})`} data-edge={r.key}
+              className={r.by === "user" ? "stroke-accent" : "stroke-fg-3"} strokeWidth={r.by === "user" ? 2 : 1.5} strokeDasharray={r.by === "user" ? undefined : "4 3"} />
+          ))}
+        </svg>
       </div>
-      <svg className="pointer-events-none absolute left-0 top-0" width={size.w} height={size.h} aria-hidden>
-        <defs>
-          <marker id="plan-arrow-user" viewBox="0 0 6 6" refX="3" refY="3" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L6,3 L0,6 z" className="fill-accent" /></marker>
-          <marker id="plan-arrow-orchestrator" viewBox="0 0 6 6" refX="3" refY="3" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L6,3 L0,6 z" className="fill-fg-3" /></marker>
-        </defs>
-        {lines.map((l) => (
-          <path key={l.key} d={l.d} fill="none" markerEnd={`url(#plan-arrow-${l.by})`}
-            className={l.by === "user" ? "stroke-accent" : "stroke-fg-3"} strokeWidth={l.by === "user" ? 2 : 1.5} strokeDasharray={l.by === "user" ? undefined : "4 3"} />
-        ))}
-      </svg>
     </div>
   );
 }
@@ -189,25 +193,25 @@ function PhoneList({ layout, onOpen, actions }: { layout: PlanLayout; onOpen: (q
  * A queue in the plan: its status now, or what it waits for and the queues before it ("set by you", with ↩ to hand it
  * back); the orchestrator's proposal with Accept and Decline; "After…" to move it.
  */
-function Card({ node: n, onOpen, actions, cardRef, drag, highlight }: {
+function Card({ node: n, onOpen, actions, cardRef, drag, highlight, style }: {
   node: PlanNode; onOpen: (queue: string) => void; actions: Actions; cardRef?: (el: HTMLElement | null) => void;
-  drag?: React.HTMLAttributes<HTMLDivElement> & { draggable?: boolean }; highlight?: boolean;
+  drag?: React.HTMLAttributes<HTMLDivElement> & { draggable?: boolean }; highlight?: boolean; style?: React.CSSProperties;
 }) {
   const [dot, word] = TONE[n.status.tone];
+  // The id and "After…" on top, the whole title under them (it wraps, never cut short).
   return (
-    <div ref={cardRef} {...drag} data-plan-card={n.id}
+    <div ref={cardRef} {...drag} data-plan-card={n.id} style={style}
       className={`rounded-lg border bg-surface px-3 py-2 ${highlight ? "border-accent ring-2 ring-accent/30" : n.proposal ? "border-review/50" : "border-line hover:border-line-strong"} ${n.movable && drag ? "cursor-grab active:cursor-grabbing" : ""}`}>
-      <div className="flex items-start gap-2">
-        <button onClick={() => onOpen(n.id)} className="flex min-w-0 flex-1 items-baseline gap-2 text-left hover:text-accent">
-          <span className="font-mono text-xs text-fg-3">{n.id}</span>
-          <span className="min-w-0 truncate text-sm font-medium text-fg">{n.title}</span>
-        </button>
+      <div className="flex min-h-5 items-center gap-2">
+        <span className="font-mono text-xs text-fg-3">{n.id}</span>
+        <span className="flex-1" />
         {n.movable && <AfterMenu queue={n.id} actions={actions} />}
       </div>
+      <button onClick={() => onOpen(n.id)} className="block w-full text-left text-sm font-medium text-fg [overflow-wrap:anywhere] hover:text-accent">{n.title}</button>
       {(n.now || !n.planned) && (
-        <span className="mt-1 flex items-center gap-1.5 text-xs">
-          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dot}`} />
-          <span className={`min-w-0 truncate ${word}`}>{n.now ? n.status.label : `${t("plan.notPlanned")} · ${n.status.label}`}</span>
+        <span className="mt-1 flex items-baseline gap-1.5 text-xs">
+          <span className={`h-1.5 w-1.5 shrink-0 -translate-y-px rounded-full ${dot}`} />
+          <span className={`min-w-0 [overflow-wrap:anywhere] ${word}`}>{n.now ? n.status.label : `${t("plan.notPlanned")} · ${n.status.label}`}</span>
         </span>
       )}
       {!n.now && n.planned && n.why.map((w) => (
@@ -216,7 +220,7 @@ function Card({ node: n, onOpen, actions, cardRef, drag, highlight }: {
       {n.before.length > 0 && (
         <span className="mt-1.5 flex flex-wrap gap-1">
           {n.before.map((b) => (
-            <span key={b.queue} className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] ${b.done ? "bg-surface-3 text-fg-3" : b.by === "user" ? "bg-accent/15 text-accent" : "bg-surface-3 text-fg-2"}`}>
+            <span key={b.queue} className={`inline-flex max-w-full items-center gap-1 rounded px-1.5 py-0.5 text-[11px] ${b.done ? "bg-surface-3 text-fg-3" : b.by === "user" ? "bg-accent/15 text-accent" : "bg-surface-3 text-fg-2"}`}>
               {t("plan.after", { queue: b.queue })}{b.by === "user" ? ` · ${t("plan.setByYou")}` : ""}{b.done ? ` · ${t("plan.done")}` : ""}
               {b.by === "user" && (
                 <button onClick={() => void actions.handBack(n.id, b.queue)} disabled={actions.busy} data-plan-handback={`${n.id}:${b.queue}`}

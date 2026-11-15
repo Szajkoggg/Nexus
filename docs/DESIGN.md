@@ -2282,6 +2282,30 @@ On the plan view of the step's base commit (seed `scripts/capture/seed-plan-nexu
 it found 6 lines through boxes and 15 titles or reasons cut short at 1440 px, and 9 cut texts at 390 px; on the PL1
 mockups (`docs/ux/mockups/22-plan-layout.html`, variants A and B) none.
 
+### The plan view's layout A (queue PB)
+
+The user chose layout A (docs/ux/plan-view-options.md). It is built in `apps/web/src/plan.ts` as a pure function,
+`drawPlan(layout, heights, width)`, with no library; `components/Plan.tsx` renders the cards at the column width,
+measures their heights, and places them and the lines from the drawing. Decisions and findings:
+
+- The order and the columns are `planLayout`'s, unchanged: the drawing only stacks each column from the top and adds
+  gaps, so a queue is where it was.
+- A gap goes before the first queue of its column that the line would otherwise run beside (the line's height in the
+  column before is above that queue's bottom). On Nexus's own plan this reproduces the mockup's hand-placed gaps
+  exactly (MX > RA at the top of Next and Then, ST2 > ST3 before CH, IO > DG before ST3).
+- Ports are 10 px apart (less on a short card), sorted by where each line goes or comes from. Between two columns a
+  line arriving at the height another leaves at would run along it: the arriving end moves within its card or gap
+  (2 px steps) until it is 3 px from every other. Each line that changes height then gets a vertical track of its own
+  in the gap between the columns (interval colouring, the tracks spread evenly).
+- The arrowhead's tip is the line's end, a pixel before the card (`refX` at the tip, `userSpaceOnUse`): the old marker
+  reached into the card.
+- Unit tests check Nexus's plan at several widths and card heights and 300 random plans: no stretch inside a card, no
+  two lines along each other, no slanted stretch, the order planLayout's.
+- Measured with `scripts/layout-faults.ts` on a development instance with `seed-plan-nexus.ts`, the boxes and lines
+  limited to `section[aria-label='The plan']`: 0 lines through boxes, 0 overlaps and no text cut short in the plan at
+  1440 and 390 px (5 crossings at 1440, the mockup 3). Two cut texts outside the plan are older: the rail's "Running in
+  Nexus" title at 1440 and the sessions table at 390.
+
 ## Open questions
 
 1. **The orchestrator on Codex.** The orchestrator runs on Claude Code only: its read-only guarantee rests on Claude
