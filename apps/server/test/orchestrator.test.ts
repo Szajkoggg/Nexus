@@ -11,7 +11,7 @@ import { Engine } from "../src/engine.ts";
 import { Orchestrator, type UserNotice } from "../src/orchestrator.ts";
 import { longReply } from "./fake-behaviour.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
-import { WAIT_MS, until as waitUntil, LONGER, untilAsync, WORK_MS } from "./wait.ts";
+import { WAIT_MS, until as waitUntil, LONGER, untilAsync, holdWork } from "./wait.ts";
 
 process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
 
@@ -293,11 +293,14 @@ test("approving a halted queue's new revision says resume: the run goes on under
 });
 
 test("a requested pause reached is told once with its step; a stop, a restart's and an update's pauses are not", async () => {
-  process.env.FAKE_SLOW_MS = WORK_MS;
+  // Each step is held at work until the test lets the one at work go (a step re-run after the restart holds again).
+  const work = holdWork();
   const first = setup();
   let second: Setup | undefined;
   let third: Setup | undefined;
-  const working = (x: Setup) => runOf(x, "P")?.state === "running" && !x.engine.idle();
+  const stepAtWork = (x: Setup) => x.state().queues.find((q) => q.id === "P")!.steps.find((s) => s.status === "running")?.id;
+  const working = (x: Setup) => runOf(x, "P")?.state === "running" && !x.engine.idle() && !!stepAtWork(x);
+  const atWork = (x: Setup) => stepAtWork(x)!;
   try {
     const { store, engine, orchestrator, until } = first;
     orchestrator.say("Hello");
@@ -307,12 +310,15 @@ test("a requested pause reached is told once with its step; a stop, a restart's 
     engine.start("P");
     await until("step 1 working", () => working(first));
     engine.pause("P");
+    work.release(atWork(first));
     await until("the pause", () => facts(orchestrator).includes("Run of P paused after step P1."), LONGER.run);
 
     // A stop: nothing.
     engine.resume("P");
     await until("step 2 working", () => working(first));
+    const stopped = atWork(first);
     engine.stopNow("P");
+    work.release(stopped);
     await until("stopped", () => runOf(first, "P")?.state === "paused" && engine.idle(), LONGER.run);
     await settle();
     assert.deepEqual(facts(orchestrator).filter((t) => t.startsWith("Run of")), ["Run of P paused after step P1."]);
@@ -332,7 +338,9 @@ test("a requested pause reached is told once with its step; a stop, a restart's 
     // An update: the hold before it is not told; an approval during the drain is told once, after the restart.
     s2.engine.resume("P");
     await s2.until("working for the update", () => working(s2));
+    const drained = atWork(s2);
     s2.engine.drainForUpdate(false);
+    work.release(drained);
     applyDraft(s2.store, queueDef("D", ["done"]));
     approveQueue(s2.store, "D");
     await s2.until("the hold", () => runOf(s2, "P")?.state === "paused" && s2.engine.idle(), LONGER.run);
@@ -347,7 +355,7 @@ test("a requested pause reached is told once with its step; a stop, a restart's 
     const all = facts(s3.orchestrator);
     assert.equal(all.filter((t) => t === "Queue D revision 1 approved.").length, 1);
     assert.deepEqual(all.filter((t) => t.startsWith("Run of")), ["Run of P paused after step P1."], "no pause but the requested one");
-  } finally { first.stop(); second?.stop(); third?.stop(); delete process.env.FAKE_SLOW_MS; }
+  } finally { first.stop(); second?.stop(); third?.stop(); work.done(); }
 });
 
 // ---------------------------------------------------------------- housekeeping: nexus queue set
@@ -386,9 +394,8 @@ test("the orchestrator skips the stopped step a new revision replaced; then a st
 });
 
 test("the orchestrator skips a pending step of a running queue; the engine never opens it", async () => {
-  // P1 works long enough for the orchestrator's turn that skips P2 to land before P1 ends: on a busy machine a 2.5 s
-  // step was over before the skip, or before a look caught it running (queue TS1).
-  process.env.FAKE_SLOW_MS = String(WAIT_MS);
+  // P1 is held at work until the orchestrator's turn that skips P2 has landed.
+  const work = holdWork();
   const x = setup();
   process.env.FAKE_LOG = join(x.root, "fake.log");
   try {
@@ -398,9 +405,10 @@ test("the orchestrator skips a pending step of a running queue; the engine never
     await x.until("the first step to begin", () => x.state().queues.find((q) => q.id === "P")!.steps[0]!.segments.length > 0, LONGER.step);
     x.orchestrator.say(`FAKE-NEXUS: ["queue","set","P","--step","P2","skipped","--reason","done elsewhere: queue M, step M3"]`);
     await x.until("the skip", () => said(x.orchestrator, /step P\/P2 skipped/));
+    work.release();
     await x.until("the run to finish", () => runOf(x, "P")?.state === "finished", LONGER.run);
     assert.deepEqual(await opened("P"), ["P1", "P3"]);
-  } finally { x.stop(); delete process.env.FAKE_SLOW_MS; }
+  } finally { x.stop(); work.done(); }
 });
 
 test("the orchestrator closes a halted run of a queue whose steps are all done or skipped: run.yaml finished, and an entry", async () => {

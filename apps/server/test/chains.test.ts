@@ -10,7 +10,7 @@ import { ProjectStore, applyDraft, approveQueue, loadProjectState, newId, routeA
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
-import { WAIT_MS, until as waitUntil, LONGER, WORK_MS } from "./wait.ts";
+import { WAIT_MS, until as waitUntil, LONGER, holdWork } from "./wait.ts";
 
 process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
 
@@ -36,8 +36,10 @@ function setup(queues: Record<string, string[]>, opts: { orchestrator?: boolean 
   const queue = (id: string) => loadProjectState(store).queues.find((q) => q.id === id)!;
   const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms, () => `; ${Object.keys(queues).map((id) => `${id}: ${queue(id).status} run=${JSON.stringify(queue(id).run?.state)} start=${JSON.stringify(queue(id).start)}`).join("; ")}`);
   const restart = () => { engine.shutdown(); engine = newEngine(); return engine; };
-  const stop = () => { clearInterval(timer); orchestrator?.shutdown(); for (const e of engines) e.shutdown(); delete process.env.FAKE_SLOW_MS; };
-  return { store, get engine() { return engine; }, orchestrator, queue, until, restart, stop };
+  const stop = () => { clearInterval(timer); orchestrator?.shutdown(); for (const e of engines) e.shutdown(); };
+  // `tick` also lets a test see the engine look at the files once, synchronously: what did not start then never would
+  // by itself (the coordinator's pass starts what is due within onChange).
+  return { store, get engine() { return engine; }, orchestrator, queue, until, tick, restart, stop };
 }
 
 /** Marks a queue's steps done as an external worker would, with no engine involved, and accepted. */
@@ -49,8 +51,6 @@ function doneByHand(store: ProjectStore, queue: string, steps: string[]): void {
   }
   acceptReviews(store);
 }
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 test("a chain fires when A is done; it shows on both queues until then; the start uses it up and the plan stays", async () => {
   const x = setup({ A: ["done"], B: ["done"] });
@@ -76,7 +76,8 @@ test("a chain does not fire when A halts: it waits and says why", async () => {
     x.engine.plan("B", { after: ["A"], by: "user" });
     x.engine.start("A");
     await x.until("A to halt", () => x.queue("A").run?.state === "halted", LONGER.run);
-    await sleep(800);
+    await x.until("B blocked", () => x.queue("B").start?.blocked === true);
+    x.tick();
     const b = x.queue("B");
     assert.equal(b.run, undefined, "B did not start");
     assert.equal(b.start?.blocked, true);
@@ -97,7 +98,7 @@ test("a chain set after A is done starts B now", async () => {
 });
 
 test("the orchestrator chains B with --use-session of A's session: B starts in that session when A finishes", async () => {
-  process.env.FAKE_SLOW_MS = WORK_MS;
+  const work = holdWork();
   const x = setup({ A: ["slow"], B: ["done"] }, { orchestrator: true });
   try {
     x.engine.start("A");
@@ -107,6 +108,7 @@ test("the orchestrator chains B with --use-session of A's session: B starts in t
     const plan = x.queue("B").start!;
     assert.deepEqual([x.queue("B").plan?.after.map((e) => [e.queue, e.by]), plan.session, plan.by, plan.reason], [[["A", "orchestrator"]], session, "orchestrator", "B builds on A's context"]);
     assert.equal(x.queue("A").run?.state, "running", "set while A runs");
+    work.release();
     // The orchestrator reviews each step (level 2, the project's default).
     for (const [q, st] of [["A", "A1"], ["B", "B1"]] as const) {
       await x.until(`${st} in the orchestrator's review`, () => x.queue(q).steps[0]!.review_with === "orchestrator", LONGER.step);
@@ -115,11 +117,11 @@ test("the orchestrator chains B with --use-session of A's session: B starts in t
     await x.until("B to finish", () => x.queue("B").run?.state === "finished", LONGER.run);
     assert.equal(x.queue("B").run!.session, session, "B ran in A's session");
     assert.equal(x.queue("B").steps[0]!.session, session);
-  } finally { x.stop(); }
+  } finally { x.stop(); work.done(); }
 });
 
 test("a chain whose session is busy waits for it to free: one session never runs two queues", async () => {
-  process.env.FAKE_SLOW_MS = WORK_MS;
+  const work = holdWork();
   const x = setup({ A: ["done"], B: ["done"], C: ["slow"] });
   try {
     doneByHand(x.store, "A", ["A1"]);
@@ -128,12 +130,13 @@ test("a chain whose session is busy waits for it to free: one session never runs
     await x.until("C to work", () => x.queue("C").steps[0]!.status === "running", LONGER.step);
     assert.match(x.engine.plan("B", { after: ["A"], session, by: "user" }), /^queue B starts when session \S+ is free \(it runs queue C; queue A is done\)$/);
     assert.equal(x.queue("B").start!.waiting, `queue A is done; the session to continue is running queue C`);
-    await sleep(500);
+    x.tick();
     assert.equal(x.queue("B").run, undefined, "not while C runs in the session");
+    work.release();
     await x.until("B to finish", () => x.queue("B").run?.state === "finished", LONGER.run);
     assert.equal(x.queue("B").run!.session, session);
     assert.ok(x.queue("C").run!.ended_at! <= x.queue("B").run!.started_at, "B started after C ended");
-  } finally { x.stop(); }
+  } finally { x.stop(); work.done(); }
 });
 
 test("a planned queue no longer approved waits for its approval when A is done, and starts once approved", async () => {
@@ -149,7 +152,7 @@ test("a planned queue no longer approved waits for its approval when A is done, 
     await x.until("B held for its approval", () => x.queue("B").start?.held?.kind === "approval", LONGER.run);
     assert.deepEqual([x.queue("B").run, x.queue("B").start?.failed, x.queue("B").start?.waiting], [undefined, undefined, "queue A is done; waits for approval of revision 2"]);
     assert.ok(!loadProjectState(x.store).attention.some((a) => a.kind === "start"), "waiting for an approval is no failed start");
-    await sleep(500);
+    x.tick();
     assert.equal(x.queue("B").run, undefined, "not before the approval");
     approveQueue(x.store, "B");
     await x.until("B to finish", () => x.queue("B").run?.state === "finished", LONGER.run);
@@ -170,7 +173,7 @@ test("a planned start that fails (the queue stopped) is an item for the user; ca
     const item = loadProjectState(x.store).attention.find((a) => a.kind === "start");
     assert.ok(item);
     assert.match(item.text, /^Did not start after A: /);
-    await sleep(500);
+    x.tick();
     assert.equal(x.queue("B").run, undefined, "a failed plan is not tried again by itself");
     x.engine.cancelStart("B");
     assert.equal(x.store.readStart("B"), undefined);
@@ -187,7 +190,7 @@ test("a cancelled chain does not fire", async () => {
     assert.throws(() => x.engine.cancelStart("B"), /no planned start/);
     x.engine.start("A");
     await x.until("A to finish", () => x.queue("A").run?.state === "finished", LONGER.run);
-    await sleep(800);
+    x.tick();
     assert.equal(x.queue("B").run, undefined);
   } finally { x.stop(); }
 });
@@ -211,7 +214,7 @@ test("no chain starts while an update drains; it starts when the drain is over",
     x.engine.drainForUpdate(false);
     doneByHand(x.store, "A", ["A1"]);
     assert.match(x.engine.plan("B", { after: ["A"], by: "user" }), /starts after the Nexus update/);
-    await sleep(800);
+    x.tick();
     assert.equal(x.queue("B").run, undefined, "not while draining");
     x.engine.cancelDrain();
     await x.until("B to finish", () => x.queue("B").run?.state === "finished", LONGER.run);

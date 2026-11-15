@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { ProjectStore, approveQueue, loadProjectState, routeAnswers, sendMessage, type StepDef } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
-import { WAIT_MS, until as waitUntil, LONGER, WORK_MS } from "./wait.ts";
+import { WAIT_MS, until as waitUntil, LONGER, holdWork } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -35,7 +35,7 @@ function setup(behaviours: string[], opts: { fill: number; care?: boolean; noSum
   const queue = () => loadProjectState(store).queues.find((q) => q.id === "Q")!;
   const received = (): Received[] => (existsSync(process.env.FAKE_LOG!) ? readFileSync(process.env.FAKE_LOG!, "utf8").trim().split("\n").map((l) => JSON.parse(l) as Received) : []);
   const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms, () => `; run: ${JSON.stringify(queue().run)}; steps: ${queue().steps.map((s) => `${s.id}=${s.status}`).join(" ")}`);
-  const done = () => { engine.shutdown(); delete process.env.FAKE_CONTEXT_FILL; delete process.env.FAKE_NO_SUMMARY; delete process.env.FAKE_SLOW_MS; };
+  const done = () => { engine.shutdown(); delete process.env.FAKE_CONTEXT_FILL; delete process.env.FAKE_NO_SUMMARY; };
   return { store, engine, queue, received, until, done };
 }
 
@@ -117,7 +117,7 @@ for (const runtime of ["claude", "codex"] as const) {
   });
 
   test(`${runtime}: a message unread at the switch reaches the new session's first turn`, async () => {
-    process.env.FAKE_SLOW_MS = WORK_MS;
+    const work = holdWork();
     const { store, engine, queue, received, until, done } = setup(["summaryslow", "done"], { fill: 0.8 });
     try {
       engine.start("Q", { runtime });
@@ -129,6 +129,7 @@ for (const runtime of ["claude", "codex"] as const) {
       // turn ends: unread when the switch comes.
       const old = queue().run!.session;
       sendMessage(store, old, "Use the grassland settings.", { queue: "Q", step: "Q1" });
+      work.release();
       await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
       const q = queue();
       assert.notEqual(q.steps[1]!.session, old);
@@ -139,7 +140,7 @@ for (const runtime of ["claude", "codex"] as const) {
       assert.ok(msg.read_at, "the carried message counts as delivered");
       const delivered = store.readDelivered(old).entries.find((d) => d.id === msg.id);
       assert.deepEqual([delivered?.via, delivered?.to], ["carried", q.steps[1]!.session]);
-    } finally { done(); }
+    } finally { done(); work.done(); }
   });
 
   test(`${runtime}: with context care off a full session goes on`, async () => {

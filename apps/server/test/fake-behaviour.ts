@@ -2,14 +2,14 @@
 // "FAKE: <behaviour>":
 //   done   report the step done              ask     ask a blocking question, then end the turn
 //   noop   end the turn without an outcome   stop    report a stop condition
-//   fail   report the step failed            slow    work for FAKE_SLOW_MS (default 1500), or until FAKE_RELEASE's file exists; then done
+//   fail   report the step failed            slow    work (see work() below: FAKE_SLOW_MS or held by the test); then done
 //   stop1  report a stop condition the first time, done once the stop is lifted
 //   ask1   ask a blocking question the first time (a step turn of this step in any session counts), done after
 //   partial  the first time: a progress line, a commit of <step>-a.txt, then <step>-a.txt changed and <step>-b.txt
 //            written without a commit, and the turn ends without an outcome; after: done if <step>-b.txt is still
 //            there ("kept the uncommitted work"), else failed
-//   slownoop  work for FAKE_SLOW_MS, then end the turn without an outcome (the step stays open)
-//   slowask   work for FAKE_SLOW_MS, then ask a blocking question and end the turn
+//   slownoop  work, then end the turn without an outcome (the step stays open)
+//   slowask   work, then ask a blocking question and end the turn
 //   doneexit  report the step done, then the process exits on a signal before its turn ends
 //   commit    commit a file named after the step in its working directory, then done
 //   commitstop  the same commit, then a stop condition
@@ -32,7 +32,7 @@
 // cloudflare (an HTTP 403 page from Cloudflare, which the runtimes report as an authentication failure: passing).
 // Each fake writes the failure the way its runtime does (fake-claude.ts, fake-codex.ts).
 // "refused": the agent tries actions that are refused (each fake writes them as its runtime does), then done.
-// "summary": done, then the step's context summary (`nexus context`); "summaryslow": the same, then FAKE_SLOW_MS before
+// "summary": done, then the step's context summary (`nexus context`); "summaryslow": the same, then it works (as "slow") before
 // the turn ends. Nexus asking for the summary ("[Nexus] … write your context summary") gets one, unless
 // FAKE_NO_SUMMARY is set. FAKE_CONTEXT_FILL (0 to 1) is the context fill each turn reports (default: claude 10 %,
 // codex 6 %). A step turn may come after a seed (context care's first prompt of a fresh session): it is found at the
@@ -89,14 +89,15 @@ export function actOnRead(read: readonly string[], reply: string): string {
 }
 
 /**
- * A "slow" step's work: FAKE_SLOW_MS; or, with FAKE_RELEASE set, until the file it names exists: the test holds the
- * step at work while it acts, and then lets it go (holdWork in wait.ts; queue TS2), so it neither waits a fixed time
- * nor misses the step at work.
+ * A "slow" step's work: FAKE_SLOW_MS; or, with FAKE_RELEASE set, until the file it names exists, or the file named
+ * after it and this step (`<file>-<step>`): the test holds the step at work while it acts, and then lets every step go,
+ * or only this one (holdWork in wait.ts; queues TS2, MX), so it neither waits a fixed time nor misses the step at work.
  */
-async function work(): Promise<void> {
+async function work(step: string): Promise<void> {
   const release = process.env.FAKE_RELEASE;
   if (!release) return new Promise((r) => setTimeout(r, Number(process.env.FAKE_SLOW_MS ?? 1500)));
-  for (const t = Date.now(); !existsSync(release) && Date.now() - t < 300_000;) await new Promise((r) => setTimeout(r, 20));
+  const released = () => existsSync(release) || existsSync(`${release}-${step}`);
+  for (const t = Date.now(); !released() && Date.now() - t < 300_000;) await new Promise((r) => setTimeout(r, 20));
 }
 
 /** Ends the running turn's FAKE-SLOW wait early (a stop: Claude's interrupt control, Codex's turn/interrupt). */
@@ -223,7 +224,7 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
     const fail = failure(step, behaviour);
     if (fail) return { fail };
     if (/^(overloaded|network|auth|limit|crash|cloudflare)/.test(behaviour)) nexus("step", "done", step, "--summary", `fake finished ${step} after failures`);
-    if (behaviour === "slow" || behaviour === "slownoop" || behaviour === "slowask") await work();
+    if (behaviour === "slow" || behaviour === "slownoop" || behaviour === "slowask") await work(step);
     // "commit": a commit in the working directory (a file named after the step), then done.
     // "commitstop": the same commit, then a stop condition (as the worker briefing asks: commit, then stop).
     if (behaviour === "commit" || behaviour === "commitstop") {
@@ -249,7 +250,7 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
     // A closing refactoring step done finds nothing worth refactoring.
     if (["done", "slow", "summary", "summaryslow"].includes(behaviour)) nexus("step", "done", step, "--summary", closing ? `fake: nothing in ${step} is worth refactoring, the change is too small` : `fake finished ${step}`);
     if (behaviour.startsWith("summary")) nexus("context", `fake summary of ${step}`, "--topics", "fake,context");
-    if (behaviour === "summaryslow") await new Promise((r) => setTimeout(r, Number(process.env.FAKE_SLOW_MS ?? 1500)));
+    if (behaviour === "summaryslow") await work(step);
     if (behaviour === "fail") nexus("step", "failed", step, "--reason", "fake failure");
     if (behaviour === "doneexit") { nexus("step", "done", step, "--summary", `fake finished ${step}, then exits`); return { exit: true }; }
     if (behaviour === "stop") nexus("stop", step, "--condition", "fake condition", "--reason", "fake stop");

@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 import { ProjectStore, applyDraft, approveQueue, confirmProvisional, loadProjectState, newId, routeAnswers, sendBack } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
-import { WAIT_MS, until as waitUntil, LONGER, WORK_MS } from "./wait.ts";
+import { WAIT_MS, until as waitUntil, LONGER, holdWork } from "./wait.ts";
 
 process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
 
@@ -47,7 +47,7 @@ function setup() {
   };
   const inReview = (q: string, s: string) => until(`${s} in the orchestrator's review`, () => step(q, s).status === "review" && step(q, s).review_with === "orchestrator", LONGER.step);
   const say = (...args: string[]) => orchestrator.say(`FAKE-NEXUS: ${JSON.stringify(args)}`);
-  const stop = () => { clearInterval(timer); engine.shutdown(); orchestrator.shutdown(); delete process.env.FAKE_SLOW_MS; };
+  const stop = () => { clearInterval(timer); engine.shutdown(); orchestrator.shutdown(); };
   return { store, engine, orchestrator, state, queue, step, until, facts, said, delivered, run, inReview, say, stop };
 }
 
@@ -132,7 +132,7 @@ test("only the user confirms; a provisional acceptance is for level 3 only", asy
 });
 
 test("Fix it on a provisional step of a queue that went on: the orchestrator drafts a fix, and the run waits for its approval", async () => {
-  process.env.FAKE_SLOW_MS = WORK_MS;
+  const work = holdWork();
   const x = setup();
   try {
     await x.run("G", ["done", "slow"]);
@@ -156,13 +156,14 @@ test("Fix it on a provisional step of a queue that went on: the orchestrator dra
       steps: [1, 2].map((n) => ({ id: `G${n}`, title: `Step ${n}`, goal: `FAKE: ${n === 1 ? "done" : "slow"}`, acceptance: [`Criterion ${n}`] }))
         .concat([{ id: "G1b", title: "Fix the header", goal: "FAKE: done", acceptance: ["The header is blue"] }]),
     });
+    work.release(); // G2 ends after the revision came
     await x.inReview("G", "G2");
     x.say("review", "accept", "G", "G2");
     await x.until("the run waits for the approval", () => x.queue("G").run?.state === "approval_wait");
     assert.equal(x.step("G", "G1b").status, "pending");
     approveQueue(x.store, "G");
     await x.inReview("G", "G1b");
-  } finally { x.stop(); }
+  } finally { x.stop(); work.done(); }
 });
 
 test("Fix it on a provisional step of a finished queue: the orchestrator drafts a revision the user approves and starts", async () => {
