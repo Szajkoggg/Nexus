@@ -2,7 +2,7 @@
 import { z } from "zod";
 import { PICTURE_ROLES, VIEW_KEY } from "./pictures.ts";
 import { DEFAULT_WORKING_LANGUAGE, LANGUAGE_CODES } from "./languages.ts";
-import { TAG_KINDS } from "./tags.ts";
+import { TAG_KINDS, TAG_SIZES } from "./tags.ts";
 
 
 const Id = z.string().min(1);
@@ -405,7 +405,7 @@ const TagFields = {
   kind: z.string().min(1).optional(),
   activities: z.array(z.string().min(1)).optional(),
   area: z.string().min(1).optional(),
-  size: z.enum(["S", "M", "L"]).optional(),
+  size: z.enum(TAG_SIZES).optional(),
   origin: z.string().min(1).optional(),
 };
 

@@ -373,7 +373,8 @@ export function applyDraft(store: ProjectStore, definition: unknown): string {
     const chain = fallbackIssues(st.fallback);
     if (chain.length) throw new ActionError(`step ${st.id}: ${chain.join("; ")}`);
   }
-  const queueIssues = [...(draft.runtime ? [effortIssue(draft.runtime, draft.effort)].filter((x): x is string => !!x) : []), ...fallbackIssues(draft.fallback)];
+  const queueEffort = draft.runtime ? effortIssue(draft.runtime, draft.effort) : undefined;
+  const queueIssues = [...(queueEffort ? [queueEffort] : []), ...fallbackIssues(draft.fallback)];
   if (queueIssues.length) throw new ActionError(`queue ${draft.id}: ${queueIssues.join("; ")}`);
 
   let old: QueueFile | undefined;
