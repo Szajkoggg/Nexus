@@ -20,6 +20,7 @@ import { queueStatus } from "../queueStatus.ts";
 import { needsWorkChoice, stopDecision, type LeftState, type LeftView, type WorkChoice } from "../stopDecision.ts";
 import { formatSeconds, rich, t, type Key } from "../i18n.ts";
 import { StepTags } from "./Tags.tsx";
+import { StepSwitches } from "./Fallback.tsx";
 import { LevelMark, ProvisionalActions, levelShort, levelTitle, pendingProvisional, provisionalWord } from "./Levels.tsx";
 
 interface Props {
@@ -180,6 +181,7 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
     </>
   );
   const tags = <StepTags step={step} />;
+  const switches = <StepSwitches queue={queue} step={step.id} />;
   const goalAcceptance = (
     <>
       {step.goal && <Section title={t("details.goal")}><Markdown>{step.goal}</Markdown></Section>}
@@ -408,11 +410,11 @@ export function StepDetail({ project, queue, step, onChanged, onClose, of }: Pro
       {tags}
       {reviewPictures}
       <div className="mt-6">{chat}</div>
-      {retry}{push}{rejected}{sentBack}{message}{questionsPart}{statusNote}{notes}{messages}{refusals}{changes}{activity}{viewer}
+      {retry}{switches}{push}{rejected}{sentBack}{message}{questionsPart}{statusNote}{notes}{messages}{refusals}{changes}{activity}{viewer}
     </>
   ) : (
     <>
-      {provisionalBox}{integration}{chat}{retry}{summary}{reviewNotes}{push}{rejected}{sentBack}{message}{questionsPart}{statusNote}{goalAcceptance}{material}{viewer}
+      {provisionalBox}{integration}{chat}{retry}{switches}{summary}{reviewNotes}{push}{rejected}{sentBack}{message}{questionsPart}{statusNote}{goalAcceptance}{material}{viewer}
       {checks}{notes}{messages}{refusals}{changes}{activity}{commits}{timeline}
     </>
   );

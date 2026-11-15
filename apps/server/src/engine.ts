@@ -846,7 +846,7 @@ export class Engine implements Member {
     const unread = (loadProjectState(this.store).sessions.find((x) => x.id === old.id)?.inbox ?? []).filter((m) => !m.read_at);
     this.ending.add(old.id);
     live.proc.close();
-    const because = `${RUNTIME_NAME[old.runtime as "claude" | "codex"]} is beyond the usage limit (${reason}), so the step goes on on ${RUNTIME_NAME[want.runtime]}`;
+    const because = `${reason}, so the step goes on on ${RUNTIME_NAME[want.runtime]}`;
     this.writeRun(queueId, {
       ...run, session: fresh.id, summary_asked: undefined,
       switches: [...(run.switches ?? []), { at: now(), from: old.id, to: fresh.id, step: step.id, why: "usage", summary: "fallback" }],
@@ -1207,7 +1207,7 @@ export class Engine implements Member {
       if (last && !last.back && last.step === step && last.runtime === choice.values.runtime) return run;
       entry = { at: now(), step, ...choice.values, from, reason: choice.reason };
     } else if (last && !last.back && (last.step !== step || mid)) {
-      entry = { at: now(), step, ...from, from: { runtime: last.runtime, model: last.model, effort: last.effort }, reason: `the ${RUNTIME_NAME[own.runtime]} usage is below the limit again`, back: true };
+      entry = { at: now(), step, ...from, from: { runtime: last.runtime, model: last.model, effort: last.effort }, reason: "its usage is below the limit again", back: true };
     } else return run;
     const next: RunFile = { ...run, fallbacks: [...list, entry] };
     this.writeRun(queueId, next);

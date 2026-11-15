@@ -76,10 +76,10 @@ test("at a step boundary the next step opens on its fallback: recorded in run.ya
     const f = x.queue().run!.fallbacks!;
     assert.equal(f.length, 1);
     assert.deepEqual([f[0]!.step, f[0]!.runtime, f[0]!.model, f[0]!.effort, f[0]!.from], ["Q2", "codex", "gpt-6-luna", "low", { runtime: "claude", model: "claude-sonnet-5-5", effort: "low" }]);
-    assert.match(f[0]!.reason, /^the 5-hour window is at 95 % \(limit 90 %\)$/);
+    assert.match(f[0]!.reason, /^Claude Code's 5-hour window at 95 % \(limit 90 %\)$/);
     assert.deepEqual(x.queue().steps[1]!.usage_switch, f[0], "the step view carries it");
     const q2 = readTurns().entries.filter((t) => t.role === "worker" && t.step === "Q2");
-    assert.ok(q2.length && q2.every((t) => t.runtime === "codex" && t.fallback?.from === "claude" && /5-hour window is at 95 %/.test(t.fallback.reason)), JSON.stringify(q2));
+    assert.ok(q2.length && q2.every((t) => t.runtime === "codex" && t.fallback?.from === "claude" && /Claude Code's 5-hour window at 95 %/.test(t.fallback.reason)), JSON.stringify(q2));
     assert.ok(readTurns().entries.filter((t) => t.role === "worker" && t.step === "Q1").every((t) => !t.fallback));
     // The orchestrator: Claude Code is full, so the notice waits in its inbox and starts no turn.
     const notice = () => x.store.readInbox(orch).entries.find((m) => m.type === "message" && m.from === "nexus" && /Step Q2 of queue Q runs on its fallback, Codex, gpt-6-luna, low effort, instead of Claude Code/.test(m.text));
@@ -101,7 +101,7 @@ test("a wait rule waits for the window's reset; both runtimes full: the run wait
     usage(claude(0.95));
     a.engine.start("Q");
     await a.until("the usage wait", () => a.queue().run?.state === "usage_wait");
-    assert.match(a.queue().run!.reason!, /5-hour window is at 95 % \(limit 90 %\); its fallback is to wait/);
+    assert.match(a.queue().run!.reason!, /Claude Code's 5-hour window at 95 % \(limit 90 %\); its fallback is to wait/);
     assert.equal(a.queue().run!.resume_at, readUsage()!.windows.five_hour!.resets_at);
     assert.deepEqual([a.queue().steps[0]!.status, a.queue().run!.fallbacks], ["pending", undefined]);
   } finally { a.stop(); }
@@ -127,7 +127,7 @@ test("back on its own runtime at the next boundary once the window reset, withou
     assert.deepEqual(x.runtimes(), ["codex", "claude"]);
     const f = x.queue().run!.fallbacks!;
     assert.deepEqual(f.map((e) => [e.step, e.runtime, !!e.back]), [["Q1", "codex", false], ["Q2", "claude", true]]);
-    assert.match(f[1]!.reason, /Claude Code usage is below the limit again/);
+    assert.match(f[1]!.reason, /^its usage is below the limit again$/);
     const starts = x.args().filter((a) => a.argv).map((a) => (a.argv as string[])[(a.argv as string[]).indexOf("--model") + 1]);
     assert.deepEqual(starts, ["claude-sonnet-5-5"], "the Claude Code session it went back to runs on the kind's model");
   } finally { x.stop(); }
@@ -140,7 +140,7 @@ test("Claude Code's 7-day window counts too", async () => {
     x.engine.start("Q");
     await x.until("the run to finish", () => x.queue().run?.state === "finished", LONGER.run);
     assert.deepEqual(x.runtimes(), ["codex"]);
-    assert.match(x.queue().run!.fallbacks![0]!.reason, /the 7-day window is at 96 %/);
+    assert.match(x.queue().run!.fallbacks![0]!.reason, /Claude Code's 7-day window at 96 %/);
   } finally { x.stop(); }
 });
 

@@ -209,7 +209,7 @@
   ],
   "nudged": false,
   "protocol": 1,
-  "reason": "the 5-hour window is at 100 % (limit 90 %)",
+  "reason": "Claude Code's 5-hour window at 100 % (limit 90 %)",
   "resume_at": "2026-01-01T10:20:00.000Z",
   "revision": 1,
   "runtime": "claude",

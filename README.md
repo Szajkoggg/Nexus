@@ -286,6 +286,15 @@ starting the run (--runtime, --model, --effort), its kind's settings, the projec
 model of your choice keeps it, and a step without a kind runs on the project's defaults. The fallback (where a step
 goes on when its runtime's usage runs out: a runtime with an optional model and effort, or wait) is written as a line,
 e.g. `codex gpt-6-luna low, wait`.
+**When usage runs out.** A step whose runtime is beyond "Pause new steps at" (any of its windows: Claude Code's 5-hour
+and 7-day ones, Codex's) does not wait any more: it goes on on its fallback, at a step boundary, and also in the middle
+of a step before its next turn (a nudge, an answer, a Fix it, a message), in a fresh session that is given the step's
+progress, commits and uncommitted changes; a turn already running is never cut off. Back on its own runtime at the
+next step once that is free again. A fallback of `wait`, or every runtime of the chain full, waits for the window that
+resets first. The step's details and its line on the queue card say where it ran and why ("On Codex (gpt-6-luna, low
+effort): Claude Code's 5-hour window at 96 % (limit 90 %)", "Back on Claude Code: its usage is below the limit
+again"), and a waiting run names the window that is full in the same words. The orchestrator is told; while Claude
+Code itself is full, what it is told (and its reviews) waits until it is free.
 **Tags.** The orchestrator tags every step it plans: one kind (mechanical, code, debugging, design, research or docs),
 its activities, its area of the project, a size (S, M or L) and where the work came from. The step's details show
 them, with the activities planned beside those its worker reported doing (planned and not done struck through, done

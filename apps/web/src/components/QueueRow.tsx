@@ -14,6 +14,7 @@ import { usePhone } from "../phone.ts";
 import { QueueStopReason, STOP_BUTTON, StopActions, stopVersion } from "./Stop.tsx";
 import { LevelMark, pendingProvisional } from "./Levels.tsx";
 import { QueueTags } from "./Tags.tsx";
+import { stepSwitches, switchText } from "./Fallback.tsx";
 
 /** The honest status's colours: a dot and a word. */
 export const TONE: Record<Tone, [string, string]> = {
@@ -140,12 +141,15 @@ function StepLine({ step, queue, current, phone, onStep, onQueue, stop }: {
   const provisional = pendingProvisional(step);
   const word = reviewLabel(step) ?? (provisional ? t("provisional.word") : statusWord(status));
   const unread = step.notes.filter((n) => !n.read_at).length;
+  // Where it ran and why, when its runtime's usage ran out: the latest switch (on its fallback, or back).
+  const switched = stepSwitches(queue, step.id).at(-1);
   const meta = (
     <span className="flex shrink-0 items-center gap-2 text-xs text-fg-3">
       <LevelMark step={step} />
       {step.review_items.length > 0 && <span title={t("queue.reviewMaterial")}>▣ {step.review_items.length}</span>}
       {unread > 0 && <span className="text-info" title={t("queue.unreadNotes", { count: unread })}>✎ {unread}</span>}
       {stepValuesText(step) && <span className="text-review" title={t("queue.runsOn", { values: stepValuesText(step)! })}>⚙</span>}
+      {switched && !current && <span className="text-info" title={switchText(switched)}>⇄</span>}
     </span>
   );
   if (!current) {
@@ -180,6 +184,7 @@ function StepLine({ step, queue, current, phone, onStep, onQueue, stop }: {
         <span className="font-semibold text-fg">{step.title}</span>{(step.closing || step.integration) && <> <KeptTag step={step} className="align-[1px]" /></>} <span className={`whitespace-nowrap text-xs ${tone.text}`}>{word}</span>
         {stopHere && queue.stop ? <QueueStopReason queue={queue} clamp className="mt-0.5 text-xs text-fg-2" />
           : why && <span className="mt-0.5 line-clamp-2 block text-xs text-fg-2">{plain(why)}</span>}
+        {switched && <span className="mt-0.5 line-clamp-2 block text-xs text-info">⇄ {switchText(switched)}</span>}
         {status === "running" && step.progress?.pct !== undefined && (
           <span className="mt-1.5 block h-1 overflow-hidden rounded bg-surface-3"><span className="block h-full bg-accent" style={{ width: `${step.progress.pct}%` }} /></span>
         )}

@@ -206,7 +206,7 @@ test("the worker's texts: briefing, step openings, inbox entries, seeds and nudg
 
   tr.section("a step taken over in its middle on its fallback (usage): with progress, commits and uncommitted files, and without");
   const mq = loadProjectState(store).queues.find((x) => x.id === "Q")!;
-  const because = "Claude Code is beyond the usage limit (the 5-hour window is at 95 % (limit 90 %)), so the step goes on on Codex";
+  const because = "Claude Code's 5-hour window at 95 % (limit 90 %), so the step goes on on Codex";
   tr.add(midStepSeed(mq, mq.steps[1]!, because, {
     progress: ["half way (50 %)", "tests written"], commits: ["1a2b3c4 A2 first half"],
     uncommitted: ["M src/a.ts", "?? src/b.ts"], diffstat: "1 file changed, 2 insertions(+)",

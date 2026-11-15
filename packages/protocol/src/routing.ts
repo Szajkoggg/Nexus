@@ -112,12 +112,24 @@ export function kindIssues(kinds: Partial<Record<string, KindDefaults>>): string
 interface UsageWindow { utilization: number; resets_at?: string }
 
 /**
- * A window's name as a person reads it: Claude Code's "5-hour" and "7-day" (as the usage waits have always said them),
- * Codex's "Codex 5h".
+ * A window as a person reads it, with its runtime: "Claude Code's 5-hour window", "Claude Code's 7-day window",
+ * "Codex's 5-hour window" (Codex's names give the length: codex_5h, codex_7d).
  */
-function windowName(name: string): string {
-  if (name.startsWith("codex_")) return `Codex ${name.slice("codex_".length).replaceAll("_", " ")}`;
-  return { five_hour: "5-hour", seven_day: "7-day" }[name] ?? name.replaceAll("_", " ").replace(/^seven day/, "7-day").replace(/^five hour/, "5-hour");
+function windowLabel(name: string): string {
+  const codex = name.startsWith("codex_");
+  const raw = codex ? name.slice("codex_".length) : name;
+  const span = /^(\d+)h$/.exec(raw) ? `${raw.slice(0, -1)}-hour` : /^(\d+)d$/.exec(raw) ? `${raw.slice(0, -1)}-day`
+    : raw.replaceAll("_", " ").replace(/^five hour/, "5-hour").replace(/^seven day/, "7-day");
+  return `${codex ? "Codex" : "Claude Code"}'s ${span} window`;
+}
+
+/**
+ * Why a runtime counts as full, in the words every view uses (the run's usage wait, a step's fallback, the dashboard's
+ * "On Codex: …" line): "Claude Code's 7-day window at 96 % (limit 90 %)".
+ */
+function windowReason(name: string, utilization: number, threshold: number): string {
+  const pct = (x: number) => `${Math.round(x * 100)} %`;
+  return `${windowLabel(name)} at ${pct(utilization)} (limit ${pct(threshold)})`;
 }
 
 /**
@@ -133,9 +145,8 @@ export function overThreshold(runtime: WorkerRuntime, windows: Readonly<Record<s
     .sort(([, a], [, b]) => Date.parse(a.resets_at!) - Date.parse(b.resets_at!));
   const last = full.at(-1);
   if (!last) return undefined;
-  const pct = (x: number) => `${Math.round(x * 100)} %`;
   const [name, w] = last;
-  return { until: w.resets_at!, reason: `the ${windowName(name)} window is at ${pct(w.utilization)} (limit ${pct(threshold)})` };
+  return { until: w.resets_at!, reason: windowReason(name, w.utilization, threshold) };
 }
 
 /** The values a step runs on. */

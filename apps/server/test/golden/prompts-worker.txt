@@ -288,7 +288,7 @@ Begin with `nexus step start C.refactor`. End with `nexus step done C.refactor -
 
 This is the queue's last step. After it is done, write a short report of the whole queue (what each step achieved against its acceptance, checks, review material, open questions, a proposed next step) to <report file> (a folder for reports outside the working tree and any repository: never write it into the working tree, it would block the cleanup of a worktree) and register it with `nexus report C --file <report file> --summary "…"`, which copies it into the queue's folder and removes it from there.
 == a step taken over in its middle on its fallback (usage): with progress, commits and uncommitted files, and without
-[Nexus] You take over step A2 of queue Q "Prompts under test" in a fresh session, in the middle of the step: Claude Code is beyond the usage limit (the 5-hour window is at 95 % (limit 90 %)), so the step goes on on Codex. You have not seen the work done on it so far, only what follows.
+[Nexus] You take over step A2 of queue Q "Prompts under test" in a fresh session, in the middle of the step: Claude Code's 5-hour window at 95 % (limit 90 %), so the step goes on on Codex. You have not seen the work done on it so far, only what follows.
 
 Its progress so far:
 - half way (50 %)
@@ -305,7 +305,7 @@ Uncommitted changes it left in the checkout (git status): they are the step's wo
 The queue:
 Context the worker needs.
 On two lines.
-[Nexus] You take over step A2 of queue Q "Prompts under test" in a fresh session, in the middle of the step: Claude Code is beyond the usage limit (the 5-hour window is at 95 % (limit 90 %)), so the step goes on on Codex. You have not seen the work done on it so far, only what follows.
+[Nexus] You take over step A2 of queue Q "Prompts under test" in a fresh session, in the middle of the step: Claude Code's 5-hour window at 95 % (limit 90 %), so the step goes on on Codex. You have not seen the work done on it so far, only what follows.
 
 It reported no progress yet.
 

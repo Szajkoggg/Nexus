@@ -69,7 +69,7 @@ test("before a nudge: a fresh session on the fallback, given the goal, the progr
     await x.until("the step done", () => x.queue().steps[0]!.status === "done" || x.queue().steps[0]!.status === "failed", LONGER.run);
     assert.equal(x.queue().steps[0]!.summary, "fake finished Q1: kept the uncommitted work", "the uncommitted changes stayed in the checkout");
     const [first] = assertSwitched(x);
-    assert.match(first!, /^\[Nexus\] You take over step Q1 of queue Q "Queue" in a fresh session, in the middle of the step: Claude Code is beyond the usage limit \(the 5-hour window is at 95 % \(limit 90 %\)\), so the step goes on on Codex\./);
+    assert.match(first!, /^\[Nexus\] You take over step Q1 of queue Q "Queue" in a fresh session, in the middle of the step: Claude Code's 5-hour window at 95 % \(limit 90 %\), so the step goes on on Codex\./);
     assert.match(first!, /Its progress so far:\n- half way \(50 %\)/);
     assert.match(first!, /Its commits so far, oldest first:\n- [0-9a-f]+ Q1 first half/);
     assert.match(first!, /Uncommitted changes it left in the checkout \(git status\)[^\n]*Keep them[^\n]*\n.*Q1-a\.txt\n.*\?\? Q1-b\.txt/);
@@ -129,7 +129,7 @@ test("a wait rule waits in the middle of the step; the same session goes on afte
     x.engine.start("Q");
     await x.until("the usage wait", () => x.queue().run?.state === "usage_wait", LONGER.run);
     const run = x.queue().run!;
-    assert.match(run.reason!, /5-hour window is at 95 % \(limit 90 %\); its fallback is to wait/);
+    assert.match(run.reason!, /Claude Code's 5-hour window at 95 % \(limit 90 %\); its fallback is to wait/);
     assert.deepEqual([x.queue().steps[0]!.status, x.sessions().length, run.switches], ["running", 1, undefined]);
     assert.ok(!x.received().some((r) => /ended without an outcome/.test(r.text)), "no nudge");
     // The window resets (usage.json says so; the fake reports it free from now on): the same session continues.

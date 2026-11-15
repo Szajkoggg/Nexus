@@ -106,7 +106,7 @@ test("an orchestrator's turn's usage windows reach usage.json, the usage pause s
     delete process.env.FAKE_USAGE;
     engine.start("Q", { runtime: "claude" });
     await until("the usage wait", () => queue().run?.state === "usage_wait");
-    assert.match(queue().run!.reason!, /5-hour window is at 95 %/);
+    assert.match(queue().run!.reason!, /Claude Code's 5-hour window at 95 %/);
 
     // A later turn's record has the windows known at its start too.
     orchestrator.say("Again");

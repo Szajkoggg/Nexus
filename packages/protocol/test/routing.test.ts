@@ -126,8 +126,8 @@ test("beyond the threshold: any window of the runtime; a window never reported i
   assert.equal(overThreshold("claude", { five_hour: { utilization: 0.95 } }, 0.9, now), undefined, "no reset time: nothing to wait for");
   assert.equal(overThreshold("claude", { codex_5h: { utilization: 1, resets_at: at(1) } }, 0.9, now), undefined, "Codex's windows are not Claude Code's");
   assert.deepEqual(overThreshold("claude", { five_hour: { utilization: 0.92, resets_at: at(1) }, seven_day: { utilization: 0.97, resets_at: at(30) } }, 0.9, now),
-    { until: at(30), reason: "the 7-day window is at 97 % (limit 90 %)" });
-  assert.deepEqual(overThreshold("codex", { codex_5h: { utilization: 0.9, resets_at: at(2) } }, 0.9, now), { until: at(2), reason: "the Codex 5h window is at 90 % (limit 90 %)" });
+    { until: at(30), reason: "Claude Code's 7-day window at 97 % (limit 90 %)" });
+  assert.deepEqual(overThreshold("codex", { codex_5h: { utilization: 0.9, resets_at: at(2) } }, 0.9, now), { until: at(2), reason: "Codex's 5-hour window at 90 % (limit 90 %)" });
 });
 
 test("the chain: the first free entry, a wait, or the earliest reset when every runtime tried is full", () => {
@@ -138,12 +138,12 @@ test("the chain: the first free entry, a wait, or the earliest reset when every 
   const choose = (fallback: FallbackEntry[], windows: Record<string, { utilization: number; resets_at?: string }>) => chooseRoute({ ...own, fallback }, { windows, threshold: 0.9, nowMs: now, project });
   const claudeFull = { five_hour: { utilization: 0.95, resets_at: at(3) } };
   assert.deepEqual(choose([{ runtime: "codex" }], {}), { kind: "primary", values: own });
-  assert.deepEqual(choose([{ runtime: "codex" }], claudeFull), { kind: "fallback", values: { runtime: "codex", model: "x-default", effort: "medium" }, reason: "the 5-hour window is at 95 % (limit 90 %)" });
-  assert.deepEqual(choose(["wait", { runtime: "codex" }], claudeFull), { kind: "wait", until: at(3), reason: "the 5-hour window is at 95 % (limit 90 %); its fallback is to wait" });
+  assert.deepEqual(choose([{ runtime: "codex" }], claudeFull), { kind: "fallback", values: { runtime: "codex", model: "x-default", effort: "medium" }, reason: "Claude Code's 5-hour window at 95 % (limit 90 %)" });
+  assert.deepEqual(choose(["wait", { runtime: "codex" }], claudeFull), { kind: "wait", until: at(3), reason: "Claude Code's 5-hour window at 95 % (limit 90 %); its fallback is to wait" });
   assert.deepEqual(choose([], claudeFull).kind, "wait", "no chain: wait, as before fallbacks");
   const both = { ...claudeFull, codex_5h: { utilization: 0.99, resets_at: at(1) } };
   const w = choose([{ runtime: "codex", model: "luna", effort: "low" }], both);
   assert.deepEqual([w.kind, w.kind === "wait" && w.until], ["wait", at(1)], "both full: the one that resets first");
   assert.deepEqual(choose([{ runtime: "claude", model: "haiku" }, { runtime: "codex", model: "luna" }], claudeFull),
-    { kind: "fallback", values: { runtime: "codex", model: "luna", effort: "medium" }, reason: "the 5-hour window is at 95 % (limit 90 %)" }, "an entry on the full runtime is passed over");
+    { kind: "fallback", values: { runtime: "codex", model: "luna", effort: "medium" }, reason: "Claude Code's 5-hour window at 95 % (limit 90 %)" }, "an entry on the full runtime is passed over");
 });

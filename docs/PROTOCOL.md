@@ -1752,6 +1752,13 @@ turn as before, and the gate looks only when the session is idle. A turn that fa
 failure with its reset time) goes the same way: its runtime counts as full until that reset, and the step goes on on
 the next entry of its chain instead of waiting (`fallbacks[].reason`: "the usage limit was reached (…)").
 
+**The words**: why a runtime counts as full is said one way everywhere (`windowReason`): "Claude Code's 7-day window at
+96 % (limit 90 %)", "Codex's 5-hour window at 100 % (limit 90 %)"; a run's `usage_wait` reason, a fallback's `reason`
+and the orchestrator's notice use it, and the dashboard shows a step's switches as "On Codex (gpt-6-luna, low effort):
+<reason>" and "Back on Claude Code: its usage is below the limit again" (in its details, and for the step on the
+queue card: a line under the step that matters, a ⇄ with the text as its title on the others). A turn refused for the
+limit keeps its own reason ("the usage limit was reached (…)").
+
 **The record**: each step that opened on its fallback, and the step that opened on its own values again, is an entry
 in `run.yaml` `fallbacks` (once per step), with an activity line; `StepView.usage_switch` is the step's latest entry,
 and each turn of a step on its fallback has `fallback: { from, reason }` in `turns.jsonl`, so statistics can tell them
