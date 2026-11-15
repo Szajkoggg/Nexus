@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockup 20: the global Stats view</title>
+<!-- Queue ST3, step ST3.0. ?v=a (default) or ?v=b: the two forms of the model comparison; ?theme=paper|honey.
+     The data is seeded and made up: two projects, the last 30 days up to 15 Nov 2026. -->
+<link rel="stylesheet" href="stats-mock.css">
+<script src="stats-mock.js"></script>
+</head>
+<body>
+<div class="ptop"><span class="fg3" style="font-size:20px">‹</span><b>Stats</b><span class="fg3" style="font-size:12px">all projects</span></div>
+<div class="app">
+  <aside class="side">
+    <div class="brand">Nexus <span class="live">live</span></div>
+    <h6>PROJECTS</h6>
+    <div class="proj"><span class="av">NX</span>Nexus<span class="badge">2</span></div>
+    <div class="proj"><span class="av b">GA</span>Garden app</div>
+    <div class="nav on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Stats<span class="fg3" style="margin-left:auto;font-size:11px;font-weight:400">all projects</span></div>
+    <div class="foot"><span>Away…</span><span class="row">notify off<span class="grow"></span>settings</span></div>
+  </aside>
+
+  <main class="page">
+    <div class="head">
+      <h1>Stats</h1><span class="sub">all projects · 15 Nov 2026</span>
+      <span class="grow desk-only"></span>
+      <span class="seg"><span>7 days</span><span class="on">30 days</span><span>90 days</span><span>All</span></span>
+    </div>
+
+    <section class="sect" style="margin-top:4px">
+      <div class="row"><h2>Usage windows, per day</h2><span class="note">the subscriptions' windows, shared by all work: the filters below do not narrow them</span></div>
+      <div class="grid3">
+        <div class="card" id="w5"><div class="ttl"><b>Claude Code · 5-hour window</b>${viewToggle}</div><div class="cap">highest each day · 4 days reached the 90 % pause threshold</div><div class="chart"></div><div class="tbl"></div></div>
+        <div class="card" id="w7"><div class="ttl"><b>Claude Code · 7-day window</b>${viewToggle}</div><div class="cap">at each day's end · resets Thursdays</div><div class="chart"></div><div class="tbl"></div></div>
+        <div class="card" id="wc"><div class="ttl"><b>Codex · weekly window</b>${viewToggle}</div><div class="cap">at each day's end · resets Mondays</div><div class="chart"></div><div class="tbl"></div></div>
+      </div>
+    </section>
+
+    <section class="sect">
+      <div class="row"><h2>Models and efforts</h2><span class="note">steps with an outcome in the range; a step is counted under its last worker turn's model and effort</span></div>
+      <div class="filters">
+        <span class="lab">Group by</span><span class="seg"><span class="on">Model</span><span>Effort</span></span>
+        <span class="pick">Project: <b>all</b></span>
+        <span class="pick">Kind: <b>any</b></span>
+        <span class="pick">Activity: <b>any</b></span>
+        <span class="pick">Area: <b>any</b></span>
+        <span class="pick">Size: <b>any</b></span>
+        <span class="pick">Origin: <b>any</b></span>
+      </div>
+      <div class="kpis">
+        <div class="tile"><div class="v">140</div><div class="l">steps</div><div class="d">5 with a turn on a fallback</div></div>
+        <div class="tile"><div class="v">78 %</div><div class="l">accepted in the first round</div><div class="d">99 of 127 decided</div></div>
+        <div class="tile"><div class="v">29 min</div><div class="l">median working time</div><div class="d">accepted steps · half within 19–45 min</div></div>
+        <div class="tile"><div class="v">≈ 0.7 %</div><div class="l">of the weekly window per step</div><div class="d">an estimate · 3 steps without one</div></div>
+      </div>
+      <div class="card" id="cmp"><div class="ttl"><b id="cmpTitle"></b>${viewToggle}</div><div class="cap" id="cmpCap"></div><div class="chart" id="cmpChart"></div><div class="tbl"></div></div>
+      <div class="note" style="margin-top:8px">≈ Use is an estimate: the windows are shared by everything running at once, so each turn gets a share of a window's growth by its tokens. Each runtime's own weekly window. <span class="tag-few">few data</span> fewer than 5 steps: read with care. ↺ steps with a turn on a fallback.</div>
+    </section>
+  </main>
+</div>
+
+<script>
+// The ${viewToggle} placeholders in the static markup.
+document.body.innerHTML = document.body.innerHTML.replaceAll("${viewToggle}", viewToggle());
+
+// ---- seeded usage windows: 30 days up to today ----
+const r = rng(20261115);
+const days = Array.from({ length: 30 }, (_, i) => TODAY - (29 - i) * DAY);
+const wd = (t) => new Date(t).getUTCDay();
+const limitDays = new Set([9, 16, 23, 27]);
+const peak = days.map((t, i) => i === 29 ? 64 : limitDays.has(i) ? 91 + r() * 8 : (wd(t) === 0 || wd(t) === 6) ? 10 + r() * 28 : 42 + r() * 44);
+let lvl = 0, cdx = 0;
+const week = [], codex = [];
+days.forEach((t, i) => {
+  if (wd(t) === 4) lvl = 0;
+  lvl = Math.min(100, lvl + peak[i] * (0.1 + r() * 0.05));
+  week.push(i === 29 ? 41 : lvl);
+  if (wd(t) === 1) cdx = 0;
+  cdx += (wd(t) === 0 || wd(t) === 6) ? r() * 2 : 3 + r() * 7;
+  codex.push(cdx);
+});
+const xl = [[2, dayName(days[2])], [9, dayName(days[9])], [16, dayName(days[16])], [23, dayName(days[23])], [29, "today"]];
+const ticks = [0, 50, 100];
+const pause = { y: 90, text: "⚠ pause 90 %", cls: "ref-warn" };
+const dateLong = (t) => new Date(t).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" });
+
+function windowCard(id, vals, kind, what) {
+  const card = document.getElementById(id);
+  timeChart(card.querySelector(".chart"), {
+    kind, area: kind === "line", height: 128, yMax: 100, ticks, fmt: pct, xLabels: xl, refs: [pause], endRoom: 62,
+    end: kind === "line" ? `now ${pct(vals.at(-1))}` : undefined,
+    pts: vals.map((v, i) => ({ y: v, tip: [[pct(v), "b"], [what, "k"], [dateLong(days[i]), "k"]] })),
+  });
+  card.querySelector(".tbl").appendChild(table(["Day", what], vals.map((v, i) => [dateLong(days[i]), pct(v)]).reverse()));
+}
+windowCard("w5", peak, "col", "highest of the 5-hour window");
+windowCard("w7", week, "line", "7-day window at the day's end");
+windowCard("wc", codex, "line", "weekly window at the day's end");
+
+// ---- the model groups (the shape of StatsReport's StatGroup) ----
+const groups = [
+  { name: "Opus 5.5", rt: "Claude Code", steps: 64, decided: 58, first: 48, rounds: 1.21, med: 34, p25: 22, p75: 51, use: 0.9, stops: 2, fail: 1, fb: 3 },
+  { name: "Sonnet 5.5", rt: "Claude Code", steps: 41, decided: 37, first: 27, rounds: 1.38, med: 21, p25: 14, p75: 33, use: 0.4, stops: 1, fail: 1, fb: 2 },
+  { name: "GPT-6", rt: "Codex", steps: 23, decided: 21, first: 14, rounds: 1.52, med: 27, p25: 18, p75: 44, use: 1.1, stops: 1, fail: 0, fb: 0 },
+  { name: "Fable 5.2", rt: "Claude Code", steps: 9, decided: 8, first: 7, rounds: 1.13, med: 41, p25: 30, p75: 58, use: 1.4, stops: 0, fail: 0, fb: 0 },
+  { name: "Haiku 5.5", rt: "Claude Code", steps: 3, decided: 3, first: 3, rounds: 1.0, med: 6, p25: 4, p75: 9, use: 0.1, stops: 0, fail: 0, fb: 0, few: true },
+];
+const rate = (g) => (g.first / g.decided) * 100;
+const sub = (g) => `${g.steps} steps${g.fb ? ` · ↺ ${g.fb}` : ""}`;
+const tipOf = (g, head) => [[head, "b"], [`${g.name} · ${g.steps} steps${g.few ? " (few data)" : ""}`, "k"]];
+const measures = [
+  { h: "Accepted in the first round", s: "of the decided steps", max: 100, ticks: [0, 50, 100], fmt: pct, pr: 64,
+    draw: (host, g) => cellBar(host, { v: rate(g), max: 100, few: g.few, label: `${pct(rate(g))} · ${g.first}/${g.decided}`, tip: tipOf(g, `${pct(rate(g))} accepted in the first round (${g.first} of ${g.decided})`) }) },
+  { h: "Rounds on average", s: "of the steps reported done; 1 is best", min: 1, max: 2, ticks: [1, 1.5, 2], fmt: (v) => v.toFixed(1), pr: 44,
+    draw: (host, g) => cellDot(host, { v: g.rounds, min: 1, max: 2, few: g.few, label: g.rounds.toFixed(2), tip: tipOf(g, `${g.rounds.toFixed(2)} rounds on average`) }) },
+  { h: "Working time", s: "median, the line: the middle half", min: 0, max: 60, ticks: [0, 30, 60], fmt: (v) => `${v} min`, pr: 44,
+    draw: (host, g) => cellDot(host, { v: g.med, lo: g.p25, hi: g.p75, min: 0, max: 60, few: g.few, label: `${g.med} min`, tip: tipOf(g, `median ${g.med} min · half within ${g.p25}–${g.p75} min`) }) },
+  { h: "≈ Use per step", s: "of its runtime's weekly window, estimated", max: 1.5, ticks: [0, 0.5, 1, 1.5], fmt: (v) => `${v} %`, pr: 64,
+    draw: (host, g) => cellBar(host, { v: g.use, max: 1.5, few: g.few, label: `≈ ${g.use} %`, tip: tipOf(g, `≈ ${g.use} % of the ${g.rt} weekly window per step (estimate)`) }) },
+];
+
+const cmp = document.getElementById("cmp");
+const chart = document.getElementById("cmpChart");
+cmp.querySelector(".tbl").appendChild(table(
+  ["Model", "Steps", "First round", "Rounds", "Median work", "Middle half", "≈ Use / step", "Stops", "Failures", "On a fallback"],
+  groups.map((g) => [g.name + (g.few ? " (few data)" : ""), g.steps, `${pct(rate(g))} (${g.first}/${g.decided})`, g.rounds.toFixed(2), `${g.med} min`, `${g.p25}–${g.p75} min`, `≈ ${g.use} %`, g.stops, g.fail, g.fb])));
+
+function nameCell(parent, g) {
+  const d = document.createElement("div"); d.className = "name";
+  const b = document.createElement("b"); b.textContent = g.name; d.appendChild(b);
+  if (g.few) { const t = document.createElement("span"); t.className = "tag-few"; t.textContent = "few data"; b.appendChild(t); }
+  const s = document.createElement("span"); const rt = document.createElement("span"); rt.className = "rt"; rt.textContent = `${g.rt} · `; s.append(rt, sub(g)); d.appendChild(s);
+  parent.appendChild(d);
+}
+
+if (variant === "a") {
+  document.getElementById("cmpTitle").textContent = "By model: four measures side by side";
+  document.getElementById("cmpCap").textContent = "one row per model, largest group first; each column its own scale";
+  // Desktop: one grid, the rows shared by the four columns.
+  const grid = document.createElement("div"); grid.className = "cmp desk-only"; chart.appendChild(grid);
+  grid.insertAdjacentHTML("beforeend", `<div class="h"></div>`);
+  for (const m of measures) { const h = document.createElement("div"); h.className = "h colhead"; h.textContent = m.h; const s = document.createElement("small"); s.textContent = m.s; h.appendChild(s); grid.appendChild(h); }
+  const cells = [];
+  for (const g of groups) {
+    nameCell(grid, g);
+    for (const m of measures) { const c = document.createElement("div"); c.className = "cell"; grid.appendChild(c); cells.push([c, m, g]); }
+  }
+  grid.insertAdjacentHTML("beforeend", `<div></div>`);
+  const axes = measures.map(() => { const a = document.createElement("div"); a.className = "axis"; grid.appendChild(a); return a; });
+  // Phone: the same four measures one under another, full width, each with every model.
+  const ph = document.createElement("div"); ph.className = "phone-only"; chart.appendChild(ph);
+  const phoneCells = [];
+  for (const m of measures) {
+    const box = document.createElement("div"); box.style.marginTop = "12px";
+    const h = document.createElement("div"); h.className = "h"; h.style.cssText = "font-size:12px;font-weight:600;color:var(--fg-2)"; h.textContent = m.h;
+    const s = document.createElement("div"); s.className = "note"; s.textContent = m.s;
+    box.append(h, s);
+    const g2 = document.createElement("div"); g2.className = "cmp"; box.appendChild(g2);
+    for (const g of groups) { nameCell(g2, g); const c = document.createElement("div"); c.className = "cell"; g2.appendChild(c); phoneCells.push([c, m, g]); }
+    g2.insertAdjacentHTML("beforeend", `<div></div>`);
+    const a = document.createElement("div"); a.className = "axis"; g2.appendChild(a); phoneCells.push([a, m, null]);
+    ph.appendChild(box);
+  }
+  requestAnimationFrame(() => {
+    for (const [c, m, g] of cells) m.draw(c, g);
+    measures.forEach((m, i) => cellAxis(axes[i], m));
+    for (const [c, m, g] of phoneCells) g ? m.draw(c, g) : cellAxis(c, m);
+  });
+} else {
+  document.getElementById("cmpTitle").textContent = "By model: what it gets right against how long it works";
+  document.getElementById("cmpCap").textContent = "each dot a model; up is accepted in the first round more often, left is quicker; the line spans the middle half of the working times";
+  const wrap = document.createElement("div"); wrap.style.cssText = "display:grid;grid-template-columns:minmax(0,5fr) minmax(0,6fr);gap:22px;align-items:start"; wrap.className = "scatwrap"; chart.appendChild(wrap);
+  const sc = document.createElement("div"); wrap.appendChild(sc);
+  const side = document.createElement("div"); side.className = "tbl-inline"; wrap.appendChild(side);
+  side.appendChild(table(["Model", "Steps", "Rounds", "≈ Use / step", "Stops", "Failures", "↺"],
+    groups.map((g) => [g.name + (g.few ? " · few data" : ""), g.steps, g.rounds.toFixed(2), `≈ ${g.use} %`, g.stops, g.fail, g.fb])));
+  const mq = matchMedia("(max-width: 1023px)");
+  if (mq.matches) wrap.style.gridTemplateColumns = "minmax(0,1fr)";
+  requestAnimationFrame(() => {
+    const H = mq.matches ? 250 : 238, m = { l: 40, r: 16, t: 16, b: 30 };
+    const { s, w } = newSvg(sc, H);
+    const X = (v) => m.l + (v / 60) * (w - m.l - m.r), Y = (v) => m.t + (1 - (v - 50) / 50) * (H - m.t - m.b);
+    svgEl("text", { x: 2, y: 6, class: "ax" }, s, "accepted in the first round ↑");
+    for (const t of [50, 75, 100]) { svgEl("line", { x1: m.l, x2: w - m.r, y1: Y(t), y2: Y(t), class: t === 50 ? "base" : "gridl" }, s); svgEl("text", { x: m.l - 6, y: Y(t) + 3, "text-anchor": "end", class: "ax" }, s, pct(t)); }
+    for (const t of [0, 15, 30, 45, 60]) svgEl("text", { x: X(t), y: H - 14, "text-anchor": "middle", class: "ax" }, s, `${t} min`);
+    svgEl("text", { x: w - m.r, y: H - 1, "text-anchor": "end", class: "ax" }, s, "median working time →");
+    for (const g of groups) {
+      const gg = svgEl("g", {}, s);
+      const hit = svgEl("circle", { cx: X(g.med), cy: Y(rate(g)), r: 14, class: "hit" }, gg);
+      svgEl("line", { x1: X(g.p25), x2: X(g.p75), y1: Y(rate(g)), y2: Y(rate(g)), class: "range" }, gg);
+      svgEl("circle", { cx: X(g.med), cy: Y(rate(g)), r: 5, class: g.few ? "dot few" : "dot" }, gg);
+      // The label beside the line's end, clear of the other lines; on the left where the right is the plot's edge.
+      const left = g.p75 > 50;
+      svgEl("text", { x: left ? X(g.p25) - 6 : X(g.p75) + 6, y: Y(rate(g)) + 4, "text-anchor": left ? "end" : "start", class: "lbl" }, gg, `${g.name} · ${g.steps}${g.few ? " · few data" : ""}`);
+      hoverable(hit, [[`${pct(rate(g))} first round · median ${g.med} min`, "b"], [`${g.name} · ${g.steps} steps · ${g.rounds.toFixed(2)} rounds`, "k"], [`≈ ${g.use} % of the ${g.rt} weekly window per step`, "k"]]);
+    }
+  });
+}
+</script>
+</body>
+</html>
