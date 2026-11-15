@@ -53,22 +53,22 @@ test("in a table's cells, refs become links and a search's matches are marked", 
   assert.deepEqual(segmentOf("file:12:apps/web/src/markdown.ts"), { kind: "file", line: 12, path: "apps/web/src/markdown.ts", text: "" });
 });
 
-test("a table's source is its rows, and its line is where it starts", () => {
-  let source: string | undefined, line: number | undefined;
-  const components: Components = {
+/** A chat message's table as its "reply to this" sees it (ChatMarkdown): its Markdown source and its source line. */
+function tableIn(md: string): { source: string | undefined; line: number | undefined } {
+  let found = { source: undefined as string | undefined, line: undefined as number | undefined };
+  chat(md, "", {
     table: ({ node, ...p }) => {
-      source = sourceAt(TABLE, node?.position as SourcePosition | undefined);
-      line = node?.position?.start.line;
+      found = { source: sourceAt(md, node?.position as SourcePosition | undefined), line: node?.position?.start.line };
       return createElement("table", p);
     },
-  };
-  chat(TABLE, "", components);
-  assert.equal(source, TABLE.split("\n").slice(2, 6).join("\n"));
-  assert.equal(line, 3);
+  });
+  return found;
+}
+
+test("a table's source is its rows, and its line is where it starts", () => {
+  assert.deepEqual(tableIn(TABLE), { source: TABLE.split("\n").slice(2, 6).join("\n"), line: 3 });
   // Indented in a list item, it loses the item's indentation, as a nested item does.
-  const nested = "- item\n\n  | a | b |\n  |---|---|\n  | 1 | 2 |";
-  chat(nested, "", { table: ({ node, ...p }) => { source = sourceAt(nested, node?.position as SourcePosition | undefined); return createElement("table", p); } });
-  assert.equal(source, "| a | b |\n|---|---|\n| 1 | 2 |");
+  assert.equal(tableIn("- item\n\n  | a | b |\n  |---|---|\n  | 1 | 2 |").source, "| a | b |\n|---|---|\n| 1 | 2 |");
 });
 
 test("a step summary's line breaks are kept, and its table stays a table", () => {
