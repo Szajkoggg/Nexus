@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { attentionKey, type AttentionItem, type ProjectSummary, type QueueView } from "../api.ts";
-import { mergeAttention, type WaitingItem } from "@nexus/protocol/attention";
+import type { AttentionItem, ProjectSummary, QueueView } from "../api.ts";
+import { attentionKey, mergeAttention, type WaitingItem } from "@nexus/protocol/attention";
 import { TimeAgo } from "./ui.tsx";
 import { t, type Key } from "../i18n.ts";
 import { OPEN_BUTTON, stopVersion, useStopActions } from "./Stop.tsx";

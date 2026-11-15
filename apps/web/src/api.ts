@@ -64,9 +64,6 @@ export function useAction(): ActionState & { run: Action["run"]; fail: Action["f
   return { ...state, run: action.run, fail: action.fail };
 }
 
-/** A waiting item's key within its project, the same as the server's push notifications use. */
-export { attentionKey } from "@nexus/protocol/attention";
-
 export const fileUrl = (project: string, path: string) => projectUrl(project, `/file?path=${enc(path)}`);
 
 type Listener = (msg: LiveMessage) => void;
