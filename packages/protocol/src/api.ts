@@ -54,3 +54,26 @@ export interface CommitDetail {
 
 /** GET /api/models/:runtime: one model the runtime offers, with the efforts it takes. */
 export interface ModelInfo { value: string; label: string; description?: string; efforts?: string[] }
+
+/**
+ * GET /api/projects/:id/removal: whether the project may be removed from Nexus now, and what goes with it or stays
+ * (PROTOCOL.md, "Removing a project"). Neither removal touches the project's own files.
+ */
+export interface RemovalView {
+  /** The project's name: "Delete Nexus's data" asks for it to be typed, and the server checks it. */
+  name: string;
+  /** What keeps the project from being removed now, one sentence each; empty: it may go. */
+  blockers: string[];
+  /** Starts by the plan that have not come yet: they go with the project (and come back with it). */
+  planned: { queue: string; after: string[] }[];
+  /** Scheduled starts: they go with the project too. */
+  scheduled: { queue: string; at: string }[];
+  /** Open questions: they go with the project too. */
+  questions: { qid: string; queue?: string; step?: string; text: string }[];
+  /** Worktrees and branches Nexus made for the project's queues: they belong to its git repository and stay. */
+  worktrees: { queue: string; path: string; branch?: string; exists: boolean }[];
+  /** The folder "Delete Nexus's data" deletes: realpath(<the project's root>)/.nexus. */
+  nexus_dir: string;
+  /** Why that folder may not be deleted (a link or junction, not Nexus's data, a worktree inside it); absent: it may. */
+  delete_refused?: string;
+}

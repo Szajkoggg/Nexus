@@ -897,6 +897,38 @@ refused waits and tells like the merge.
   pruned; then `git branch -d` (never `-D`).
 - Both are recorded in `git.yaml` (`merged` with `by`, `cleaned`) and shown on the queue.
 
+### Removing a project
+
+The user removes a project from Nexus on the server's API, from the dashboard only (`src/removal.ts`); there is no CLI
+command for it, and no agent can do it (the write guard refuses a request without the dashboard's `Origin`, a remote
+request needs the access token). Two levels, neither touching the project's own files:
+
+- **Remove from Nexus**: the project leaves `<NEXUS_HOME>/projects.yaml`; its `.nexus/` stays, so `nexus project add
+  <path>` brings it back as it was (under the id its `project.yaml` has).
+- **Delete Nexus's data**: the same, and its `.nexus/` folder is deleted. The request names the project (`name`, as the
+  user typed it); the server checks it against the project's name.
+
+Either one only while **nothing runs** in the project; else 409 with the reasons (`blockers`): a run that started and
+did not finish (running, pausing, paused, held, waiting for the usage window, a retry or an approval, halted or
+stopped) of a queue that is not done or cancelled; a merge back in progress (Nexus waiting on a checkout for a
+fast-forward, an integration step asked again) or waiting (`merge.waiting` in `git.yaml`); a deploy planned after a
+step or queue of the project; the orchestrator or a thinking partner in a turn; an update under way. Planned and
+scheduled starts and open questions do not keep it: they go with the project (and come back with it), and the
+confirmation lists them. The worktrees and branches Nexus made stay (they belong to the project's git repository);
+the confirmation lists them too.
+
+On a removal the server takes the project off the registry, then out of itself in the same moment (its engine,
+orchestrator, thinking partners and merger shut down, their processes ended and waited for; its watcher closed; the
+coordinator no longer counts it). An entry taken off `projects.yaml` by hand is dropped the same way. The registry
+has two writers, both the user's: `nexus project add` and this removal; each writes the whole file at once (a
+temporary file renamed over it).
+
+What Delete deletes is guarded in code: only `realpath(<the project's root>)/.nexus`, only a folder of its own (not a
+link or junction, found with `lstat` and checked again by its own real path), only one holding a `project.yaml`, only
+of a project registered in this server's NEXUS_HOME under that root, and not when a worktree of one of its queues lies
+inside it. A link or junction inside the folder is removed as a link; what it points to is not touched. The folder is
+checked again right before it is deleted.
+
 ### A project's rules files
 
 Nexus's convention: a project's rules are in its `AGENTS.md` (Codex reads it), and its `CLAUDE.md` pulls them in with
@@ -1034,7 +1066,8 @@ nexus metric define bundle-kb --unit KB [--show line|bar|number] [--target 400] 
                                                # a project metric, or a change to one (see "Project metrics")
 nexus attach                                   # register a hand-started session as external
 # setup (the user)
-nexus project add <path> [--id] [--name]       # creates .nexus/ (self-ignoring), registers the project, prints the rules files' check
+nexus project add <path> [--id] [--name]       # creates .nexus/ (self-ignoring), registers the project, prints the rules files' check;
+                                               # a kept .nexus/ (a project removed from Nexus) brings it back under its id
 nexus import <file.md> [--prefix X]            # one-time import of queues written as Markdown tables
 nexus note <queue> <step> <text>               # until the dashboard can add notes
 nexus server away [on --until <8:00|ISO> | off]  # the user's away mode (refused from any agent session); no argument: its state
@@ -1178,6 +1211,8 @@ from every agent session, and the others from every session but an orchestrator'
 | `GET /api/projects/:id/settings` | | `own` (the keys of the settings the project has its own value of) and `global` (the global settings) |
 | `GET /api/settings`, `PATCH /api/settings` | the global settings, nested as in `settings.yaml` (null or empty clears an optional one) | The global settings (`global`; GET also `keys`, every setting with a global value). PATCH writes `<NEXUS_HOME>/settings.yaml`, checked against the schema; every project that follows a changed value has it at once |
 | `POST /api/projects/:id/uploads` | `data` (the picture, base64, optionally as a `data:` URL) | Saves a picture for a chat message under `.nexus/uploads/` and answers `{ ok, result: { path, type, bytes } }`: `path` absolute (forward slashes), `type` `png`, `jpeg`, `webp` or `gif`. See "Uploads" below |
+| `GET /api/projects/:id/removal` | | Whether the project may be removed now, and what goes with it or stays (`RemovalView`, see "Removing a project"): `name`, `blockers` (one sentence each; empty: it may go), `planned` (`queue`, `after`) and `scheduled` (`queue`, `at`) starts and open `questions` (`qid`, `queue?`, `step?`, `text`), which go with it; `worktrees` (`queue`, `path`, `branch?`, `exists`), which stay; `nexus_dir`, the folder Delete deletes, and `delete_refused?`, why it may not |
+| `POST /api/projects/:id/remove` | `delete_data?` (boolean), `name` (with `delete_data`: the project's name as typed) | Removes the project from Nexus; with `delete_data` its `.nexus/` folder is deleted too (see "Removing a project"). Answers `{ ok, result: { removed, nexus_dir? or deleted?, worktrees } }`. Refused: 409 with `blockers` while anything runs, 409 when the folder may not be deleted (`delete_refused`) or the project is not registered in this server's NEXUS_HOME, 400 without the name. The user's only: no CLI command does it |
 | `POST /api/projects/:id/settings/allow-rule` | `rule` | Adds an allow rule for Claude Code workers to `runtimes.claude.allowed_tools` in `.nexus/project.yaml` (once; a rule already there is left as it is), typically from a refusal. A tool name, optionally with a specifier in parentheses, on one line. Like every write, only from the dashboard's own page: an agent must not widen its own permissions. Nothing else is written, not the project's `.claude/settings.json` or `AGENTS.md` |
 
 Also `GET /api/projects/:id/sessions/:session/activity?queue=&step=&limit=`, `GET /api/projects/:id/refusals?queue=&step=`

@@ -15,7 +15,7 @@ import {
   ensureGlobalSettings, readGlobalSettings, updateGlobalSettings, ownKeys, OVERRIDABLE, settingKey, readRegistry, readUsage, readTurns, commentOnPicture, markPicture, routeAnswers, routeSendBacks, sendBack, sendMessage, setQueueSettings, setStepLevel, confirmProvisional, type ProjectState,
   readAway, writeAway, awayNow, awayUntil, turnAway, expireAway, acceptPlanProposal, declinePlanProposal, handBackPlan, acceptTagProposal, declineTagProposal,
   STAT_DIMENSIONS, STAT_FILTERS, projectMetrics, sinceTime, statDimension, statsReport, stepStats, usageDays, type ProjectMetrics, type StatsReport, type UsageDays,
-  MIN_SAMPLES, queueEstimate, stepSamples, isOpenQuestion, writeCount, type EstimatesResponse, type LeftView, type ProjectSummary,
+  MIN_SAMPLES, queueEstimate, stepSamples, isOpenQuestion, writeCount, type EstimatesResponse, type LeftView, type ProjectSummary, type RemovalView,
 } from "@nexus/protocol";
 import { newestFirst, projectDigest, projectRunning, usageSince, type DigestEvent, type DigestResponse, type DigestRunning, type UsageRun } from "@nexus/protocol/digest";
 import { Engine } from "./engine.ts";
@@ -24,6 +24,7 @@ import { branchState, leftBehind, stepCommits } from "./gitinfo.ts";
 import { cleanUp, mergeBack } from "./mergeback.ts";
 import { Merger } from "./merger.ts";
 import { fixProjectRules, projectRules } from "./rulesfix.ts";
+import { RemovalBlocked, checkRemoval, deleteNexusDir, removalView, stopProject, unregister } from "./removal.ts";
 import { decideStoppedWork, discardRecorded } from "./stopwork.ts";
 import { Orchestrator } from "./orchestrator.ts";
 import { Conversations } from "./conversations.ts";
@@ -112,7 +113,25 @@ function refreshRegistry(): void {
     projects.set(p.id, { id: p.id, root: p.root, store, engine, orchestrator, merger, conversations: new Conversations(store, orchestrator, () => changed(p.id)) });
     watchProject(p.id, store.dir);
   }
-  for (const [id, e] of projects) if (!reg.projects.some((p) => p.id === id)) { coordinator.remove(e.engine); projects.delete(id); }
+  // A project taken off the registry (by the server's removal, or by hand): its agents and timers stop, its watcher
+  // closes, and the coordinator no longer counts it.
+  for (const [id, e] of projects) if (!reg.projects.some((p) => p.id === id)) void stopProject(dropProject(e).parts);
+}
+
+/**
+ * Takes a project out of this server: out of the map and the coordinator, its watcher closed, its pending change
+ * dropped, its push baseline forgotten. Returns its parts that run agents or timers (for stopProject), and the closing
+ * of its watcher (on Windows an open watcher may hold the folder).
+ */
+function dropProject(e: Entry): { parts: Parameters<typeof stopProject>[0]; closed: Promise<void> } {
+  projects.delete(e.id);
+  coordinator.remove(e.engine);
+  clearTimeout(pending.get(e.id));
+  pending.delete(e.id);
+  const w = watchers.get(e.id);
+  watchers.delete(e.id);
+  watch.forget(e.id);
+  return { parts: [e.engine, e.orchestrator, e.conversations, e.merger], closed: (w?.close() ?? Promise.resolve()).catch((err: Error) => console.error(`watch ${e.id}: not closed: ${err.message}`)) };
 }
 
 /**
@@ -174,9 +193,10 @@ function changed(id: string): void {
   }, 150));
 }
 
-const watchers: FSWatcher[] = [];
+/** Each project's watcher of its .nexus folder, by project id. */
+const watchers = new Map<string, FSWatcher>();
 function watchProject(id: string, dir: string): void {
-  watchers.push(chokidar
+  watchers.set(id, chokidar
     // Uploaded pictures change no state: a 10 MB write need not reload the project.
     .watch(dir, { ignoreInitial: true, ignored: (p) => p.endsWith(".tmp") || /^[\\/]uploads([\\/]|$)/.test(p.slice(dir.length)) })
     .on("all", () => changed(id))
@@ -498,6 +518,53 @@ app.post("/api/projects/:id/queues/:queue/steps/:step/reject", act((_st, b, p, e
 // The user confirms a step the orchestrator accepted provisionally (review level 3); Fix it on one is the send-back.
 app.post("/api/projects/:id/queues/:queue/steps/:step/confirm", act((st, _b, p) => ({ message: confirmProvisional(st, p("queue"), p("step")) })));
 app.post("/api/projects/:id/queues/:queue/steps/:step/accept", act((_st, b, p, e) => e.engine.acceptReview(p("queue"), p("step"), b.text, b.note_to)));
+
+// Removing the project from Nexus (src/removal.ts), the user's only: there is no CLI command for it, and the guard above
+// refuses a request that does not come from the dashboard's own page. What the server's live parts say about it:
+function liveParts(e: Entry) {
+  const plan = planner.view()?.after;
+  return {
+    engineIdle: e.engine.idle(), orchestratorIdle: e.orchestrator.idle(), conversationsIdle: e.conversations.idle(),
+    merging: e.merger.merging(), updating: lifecycle.busy,
+    deploy: plan?.project === e.id ? { queue: plan.queue, step: plan.step } : undefined,
+  };
+}
+/** The project's state read again from its files (a write from another process may not have come through yet). */
+function freshState(e: Entry): ProjectState | undefined {
+  e.state = undefined; e.error = undefined;
+  return stateOf(e);
+}
+app.get("/api/projects/:id/removal", (c) => {
+  const e = c.get("entry");
+  const s = freshState(e);
+  return c.json(removalView(e.root, s?.project.name ?? e.id, s, liveParts(e)) satisfies RemovalView);
+});
+// `delete_data: true` (with `name`, the project's name as typed): its .nexus folder is deleted too. Refused (409, with
+// `blockers`) while anything runs in the project.
+app.post("/api/projects/:id/remove", async (c) => {
+  const e = c.get("entry");
+  const body = (await c.req.json().catch(() => ({}))) as Body;
+  try {
+    const s = freshState(e);
+    const view = removalView(e.root, s?.project.name ?? e.id, s, liveParts(e));
+    const { deleteData } = checkRemoval(e.id, e.root, view, body);
+    // Off the registry and out of this server in one go: no request in between may load it again.
+    unregister(e.id, e.root);
+    const dropped = dropProject(e);
+    const [stopped] = await Promise.all([stopProject(dropped.parts), dropped.closed]);
+    broadcast({ type: "projects" });
+    console.log(`project ${e.id} removed from Nexus${deleteData ? "; deleting its .nexus folder" : ""}`);
+    if (!deleteData) return c.json({ ok: true, result: { removed: e.id, nexus_dir: view.nexus_dir, worktrees: view.worktrees } });
+    if (!stopped) return c.json({ error: `project ${e.id} is removed from Nexus, but its agents did not exit in time: its .nexus folder was not deleted` }, 500);
+    try { return c.json({ ok: true, result: { removed: e.id, deleted: deleteNexusDir(e.root), worktrees: view.worktrees } }); }
+    catch (err) { return c.json({ error: `project ${e.id} is removed from Nexus, but its .nexus folder could not be deleted: ${(err as Error).message}` }, 500); }
+  } catch (err) {
+    if (err instanceof RemovalBlocked) return c.json({ error: err.message, blockers: err.blockers }, 409);
+    if (err instanceof ActionError) return c.json({ error: err.message }, err.status as 400);
+    console.error(err);
+    return c.json({ error: (err as Error).message }, 500);
+  }
+});
 
 // A picture for a chat message (src/uploads.ts): the body's size is checked before it is read or parsed (also when it
 // comes without a Content-Length), and the guard above has already taken it as the user's, from the dashboard.
@@ -861,7 +928,9 @@ async function release(): Promise<void> {
   active = false;
   for (const t of pending.values()) clearTimeout(t);
   pending.clear();
-  await Promise.all(watchers.splice(0).map((w) => w.close()));
+  const closing = [...watchers.values()].map((w) => w.close());
+  watchers.clear();
+  await Promise.all(closing);
   planner.shutdown(); // its timers write the plan file: no longer this server's
   for (const e of projects.values()) { e.engine.shutdown(); e.orchestrator.shutdown(); e.conversations.shutdown(); e.merger.shutdown(); }
   // An agent's exit is written to its runtime file: wait for those last writes.
