@@ -11,7 +11,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 import chokidar, { type FSWatcher } from "chokidar";
 import type { Server } from "node:http";
 import {
-  ActionError, Effort, ProjectStore, addNote, closingToSkip, updateSettings, answerAsUser, approveQueue, deleteNote, loadProjectState, nexusHome, withdrawApproval, addAllowRule,
+  ActionError, Effort, ProjectStore, addNote, closingToSkip, closingToSkipAtApproval, updateSettings, answerAsUser, approveQueue, deleteNote, loadProjectState, nexusHome, withdrawApproval, addAllowRule,
   ensureGlobalSettings, readGlobalSettings, updateGlobalSettings, ownKeys, OVERRIDABLE, settingKey, readRegistry, readUsage, readTurns, commentOnPicture, markPicture, routeAnswers, routeSendBacks, sendBack, sendMessage, setQueueSettings, setStepLevel, confirmProvisional, type ProjectState,
   readAway, writeAway, awayNow, awayUntil, turnAway, expireAway, acceptPlanProposal, declinePlanProposal, handBackPlan, acceptTagProposal, declineTagProposal,
   STAT_DIMENSIONS, projectMetrics, sinceTime, statDimension, statsReport, stepStats, type ProjectMetrics, type StatsReport,
@@ -379,10 +379,15 @@ app.delete("/api/projects/:id/queues/:queue/steps/:step/notes/:note", act((st, _
 app.post("/api/projects/:id/sessions/:session/messages", act((st, b, p) =>
   sendMessage(st, p("session"), b.text, { queue: b.queue as string | undefined, step: b.step as string | undefined })));
 // Approving a stopped queue lifts its stop: first the user's choice about the stopped step's work (src/stopwork.ts).
+// `skip_closing: true`: the user skips the queue's closing refactoring step with the approval of a stopped queue's new
+// revision (checked before anything is recorded), as at Continue.
 app.post("/api/projects/:id/queues/:queue/approve", act((st, b, p) => {
+  if (b.skip_closing !== undefined && typeof b.skip_closing !== "boolean") throw new ActionError("skip_closing is true or false");
+  const skipClosing = b.skip_closing === true;
+  if (skipClosing) closingToSkipAtApproval(st, p("queue"));
   const d = decideStoppedWork(st, p("queue"), b.work, "user_approval");
   if (!d.proceed) return { message: d.message };
-  return approveQueue(st, p("queue"), b.words);
+  return approveQueue(st, p("queue"), b.words, { skipClosing });
 }));
 // Withdrawing an approval and adding an allow rule are the user's too, like every write (see the guard above): an agent
 // must not take an approval back or widen its own permissions.

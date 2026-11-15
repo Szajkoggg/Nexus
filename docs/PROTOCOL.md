@@ -432,11 +432,16 @@ the step in the approval view like any other.
 - **It cannot be bypassed by agents.** `nexus queue set Q --step Q.refactor skipped` is refused; `nexus queue set Q
   finished` is refused while it is not done (the refusal names it). A stopped queue gets it when the stop is lifted
   and the run goes on; a cancelled one never.
-- **Only the user skips it, at Continue.** Continue on a stopped queue (`skip_closing: true`; the dashboard's
-  checkbox "Skip the closing refactoring" in the queue's bar, shown while the step has not run) records, after the
-  `lift` and at its time, a `changes` entry `kind: status`, `by: user_continue`, `step: Q.refactor`, `from: pending`,
-  `to: skipped`, with the reason "the user skipped the closing refactoring at Continue; the stop was: <the stop's
-  reason>". Only a closing step that has not run (`pending`, or `stopped` itself) is skipped. The skip holds when the
+- **Only the user skips it, at Continue or with the approval of a stopped queue's new revision.** Continue on a
+  stopped queue (`skip_closing: true`; the dashboard's checkbox "Skip the closing refactoring" in the queue's bar,
+  shown while the step has not run) records, after the `lift` and at its time, a `changes` entry `kind: status`,
+  `by: user_continue`, `step: Q.refactor`, `from: pending`, `to: skipped`, with the reason "the user skipped the
+  closing refactoring at Continue; the stop was: <the stop's reason>". The approval of a stopped queue's new revision
+  (`skip_closing: true` on the approval; the same checkbox beside Approve, in the queue's bar and in the full approval
+  view) records the same entry after its `lift`, `by: user_approval`, with the reason "the user skipped the closing
+  refactoring with the approval of revision <N>; the stop was: <the stop's reason>"; on a queue that is not stopped
+  the skip is refused (409) and nothing is recorded, the approval neither. Only a closing step that has not run
+  (`pending`, or `stopped` itself) is skipped; a request to skip any other is refused before anything is recorded. The skip holds when the
   stopped step goes on (a skipped closing step is not set back to pending by later work); the queue is `done` without
   it. `nexus status` shows it on the step (`Q.refactor skipped (… closing refactoring skipped by the user: <reason>)`)
   and beside a finished queue (`finished: Q (closing refactoring skipped by the user: <reason>)`).
@@ -1124,7 +1129,7 @@ from every agent session, and the others from every session but an orchestrator'
 | `POST /api/projects/:id/queues/:q/steps/:s/notes` | `text` | A note from the user for the step |
 | `DELETE /api/projects/:id/queues/:q/steps/:s/notes/:note` | | Withdraws a note not yet delivered |
 | `POST /api/projects/:id/sessions/:session/messages` | `text`, `queue?`, `step?` | A message to a session's inbox |
-| `POST /api/projects/:id/queues/:q/approve` | `words?`, `work?` (`keep` or `discard`) | Approves the current revision; for a stopped queue it also lifts the stop (see `queue.yaml`). `work` is required when the stopped step left commits of its own and no Discard is recorded; with `discard` nothing is approved (see "The work a stopped step left") |
+| `POST /api/projects/:id/queues/:q/approve` | `words?`, `work?` (`keep` or `discard`), `skip_closing?` (boolean) | Approves the current revision; for a stopped queue it also lifts the stop (see `queue.yaml`). `work` is required when the stopped step left commits of its own and no Discard is recorded; with `discard` nothing is approved (see "The work a stopped step left"). `skip_closing: true` skips the queue's closing refactoring step with the lift; refused (409), before anything is recorded, when the queue is not stopped, has no closing step or it has run (see "The closing refactoring step") |
 | `POST /api/projects/:id/queues/:q/withdraw` | `reason?` | The user takes back the approval of a queue that never ran. There is no CLI command and no event for it |
 | `PATCH /api/projects/:id/queues/:q` | `review_level` (1, 2, 3 or null: the project's) | Queue settings; not pinned by an approval |
 | `PUT /api/projects/:id/queues/:q/steps/:s/level` | `level` (1, 2, 3 or null: the step's drafted level) | The user's review level of a step (`user_levels`); asks for no new approval, and later revisions keep it |

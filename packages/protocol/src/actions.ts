@@ -87,10 +87,11 @@ export function sendMessage(store: ProjectStore, session: string, text: unknown,
  * archived (run.<time>.yaml), so a start begins at the first pending step. Only the user: the server takes it only
  * from the dashboard's page.
  */
-export function approveQueue(store: ProjectStore, queue: string, words?: unknown): void {
+export function approveQueue(store: ProjectStore, queue: string, words?: unknown, o: { skipClosing?: boolean } = {}): void {
   const q = queueOf(store, queue);
   const hash = revisionHash(q);
   if (isApproved(q)) throw new ActionError("this revision is already approved", 409);
+  const closing = o.skipClosing ? closingToSkipAtApproval(store, queue) : undefined;
   const view = loadProjectState(store).queues.find((x) => x.id === queue);
   const at = now();
   const w = typeof words === "string" && words.trim() ? words.trim() : undefined;
@@ -99,7 +100,12 @@ export function approveQueue(store: ProjectStore, queue: string, words?: unknown
     const run = store.readRun(queue);
     if (run && ["running", "pausing"].includes(run.state)) throw new ActionError("the queue's run is still going; stop it first", 409);
     const lift = { at, kind: "lift" as const, by: "user_approval" as const, from: "stopped", to: "approved", reason: view.status_reason, revision: q.revision };
-    store.writeQueue({ ...q, status: "approved", status_note: undefined, approvals, changes: [...q.changes, lift], updated_at: at });
+    // After the lift (the same time; changes apply in their order), as at Continue: the user's skip of the closing step.
+    const skip: StatusChange[] = closing ? [{
+      at, kind: "status", by: "user_approval", step: closing.id, from: "pending", to: "skipped", revision: q.revision,
+      reason: `the user skipped the closing refactoring with the approval of revision ${q.revision}${view.status_reason ? `; the stop was: ${view.status_reason}` : ""}`,
+    }] : [];
+    store.writeQueue({ ...q, status: "approved", status_note: undefined, approvals, changes: [...q.changes, lift, ...skip], updated_at: at });
     store.archiveRun(queue);
     return;
   }
@@ -512,6 +518,19 @@ export function closingToSkip(q: Pick<QueueView, "id" | "steps">): QueueView["st
   if (!c) throw new ActionError(`queue ${q.id} has no closing refactoring step`, 409);
   if (c.status !== "pending" && c.status !== "stopped") throw new ActionError(`the closing refactoring step of queue ${q.id} is ${c.status}: only one that has not run is skipped`, 409);
   return c;
+}
+
+/**
+ * The closing refactoring step the user may skip with the approval of a stopped queue's new revision (`skip_closing` on
+ * the approval; see closingToSkip): only on a stopped queue whose current revision waits for the approval. Checked
+ * before anything is recorded.
+ */
+export function closingToSkipAtApproval(store: ProjectStore, queue: string): QueueView["steps"][number] {
+  const q = queueOf(store, queue);
+  const view = loadProjectState(store).queues.find((x) => x.id === q.id)!;
+  if (view.status !== "stopped") throw new ActionError(`queue ${q.id} is not stopped: the closing refactoring is skipped only with the approval of a stopped queue's new revision, or at Continue`, 409);
+  if (isApproved(q)) throw new ActionError(`revision ${q.revision} of queue ${q.id} is approved already: skip the closing refactoring at Continue`, 409);
+  return closingToSkip(view);
 }
 
 // ---------------------------------------------------------------- housekeeping by the orchestrator

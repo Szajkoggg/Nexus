@@ -23,9 +23,12 @@ process.env.NEXUS_CODEX = join(here, "fake-codex.ts");
 
 const step = (id: string, behaviour: string): StepDef => ({ id, title: `Step ${id}`, goal: `FAKE: ${behaviour}`, acceptance: [] });
 const G = ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false"];
+// The system's temporary folder as it was: each setup points TEMP at a folder of its own inside its base, so a base made
+// in tmpdir() would nest in the previous test's (and outgrow Windows' path length after a few tests).
+const TMP = tmpdir();
 
 function setup(steps: StepDef[], o: { git?: boolean; rules?: boolean } = {}) {
-  const base = mkdtempSync(join(tmpdir(), "nexus-closing-"));
+  const base = mkdtempSync(join(TMP, "nexus-closing-"));
   // A temporary directory of this test's own (the worker inherits it): the report's folder is in it.
   const temp = join(base, "temp");
   mkdirSync(temp);
@@ -199,6 +202,39 @@ for (const skip of [true, false]) {
         assert.match(out, /finished: Q \(closing refactoring skipped by the user: the user skipped the closing refactoring at Continue; the stop was: fake condition: fake stop\)/);
       } else {
         assert.deepEqual(x.openings().map((o) => o.step), ["Q1", "Q2", "Q2", "Q.refactor"]);
+        assert.equal(closing.status, "done");
+      }
+    } finally { x.stop(); }
+  });
+}
+
+for (const skip of [true, false]) {
+  test(`approving a stopped coding queue's new revision ${skip ? "with the user's skip of the closing step closes the queue without it" : "without the skip runs the closing step at the end"}`, async () => {
+    const x = setup([step("Q1", "done"), step("Q2", "stop1")]);
+    try {
+      const e = x.engine();
+      e.start("Q", { runtime: "claude" });
+      await x.until("the queue stopped at Q2", () => x.queue().status === "stopped" && x.queue().run?.state === "halted");
+      // Revision 2: a step after the stopped one; the user approves it, which lifts the stop.
+      applyDraft(x.store, { id: "Q", title: "Queue", coding: true, stop_conditions: [], checks: [],
+        steps: x.store.readQueue("Q").steps.map(({ status: _s, status_note: _n, ...s }) => s).concat(step("Q3", "done")) });
+      approveQueue(x.store, "Q", undefined, { skipClosing: skip });
+      e.start("Q", { runtime: "claude" });
+      await x.until("the run finished", () => x.queue().run?.state === "finished" && x.queue().status === "done");
+      const q = x.queue();
+      const closing = q.steps.at(-1)!;
+      if (skip) {
+        assert.deepEqual(x.openings().map((o) => o.step), ["Q1", "Q2", "Q2", "Q3"], "the closing step is never opened");
+        assert.equal(closing.status, "skipped");
+        assert.match(closing.reason!, /^the user skipped the closing refactoring with the approval of revision 2; the stop was: fake condition: fake stop$/);
+        const change = q.changes.find((c) => c.kind === "status" && c.step === "Q.refactor")!;
+        assert.deepEqual([change.by, change.to, change.revision], ["user_approval", "skipped", 2]);
+        // Shown to the orchestrator in nexus status.
+        x.store.writeSession({ protocol: 1, id: "orch", project: "p", role: "orchestrator", runtime: "external", cwd: x.root, launched_by: "external", created_at: now() });
+        const out = execFileSync(process.execPath, [join(here, "../../../packages/cli/bin/nexus.js"), "status"], { env: { ...process.env, NEXUS_DIR: x.store.dir, NEXUS_SESSION: "orch" }, encoding: "utf8" });
+        assert.match(out, /finished: Q \(closing refactoring skipped by the user: the user skipped the closing refactoring with the approval of revision 2; the stop was: fake condition: fake stop\)/);
+      } else {
+        assert.deepEqual(x.openings().map((o) => o.step), ["Q1", "Q2", "Q2", "Q3", "Q.refactor"]);
         assert.equal(closing.status, "done");
       }
     } finally { x.stop(); }

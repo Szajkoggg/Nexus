@@ -1289,12 +1289,12 @@ function QueueBar({ project, queue, onChanged, left, work, needsChoice }: {
   const opened = (!queue.approved && a.wordsOpen) || (canWithdraw && withdrawOpen) || policyOpen;
   return (
     <ActionBar hint={hint} menu={menu} secondary={!queue.approved && <AskButton project={id} queue={queue} />} primary={primary}
-      left={canSkipClosing && (
+      left={canSkipClosing ? (
         <label className="flex items-center gap-2 text-sm text-fg max-lg:min-h-11">
           <input type="checkbox" checked={skipClosing} onChange={(e) => setSkipClosing(e.target.checked)} className="accent-accent" />
           {t("stop.skipClosing")}
         </label>
-      )}>
+      ) : !queue.approved && a.skipBox}>
       {opened && (
         <div className="space-y-4">
           {!queue.approved && a.wordsBox}
