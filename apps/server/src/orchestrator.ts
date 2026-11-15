@@ -688,7 +688,7 @@ ${n.text}` });
       }
       q.plan?.decisions.forEach((d, i) => {
         if (d.at < since) return;
-        items.push({ key: `notify:plandecision:${q.id}:${i}`, ...planDecisionNotice(q, d) });
+        items.push({ key: `notify:plandecision:${q.id}:${i}`, ...planDecisionNotice(q, d, q.plan!.decisions) });
       });
       // A scheduled start missed because the server was not running at its time: the user has it in their list.
       const missed = q.start?.failed?.missed ? q.start : undefined;

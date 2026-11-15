@@ -623,6 +623,14 @@ chains of one predecessor to several. Decisions:
   orchestrator's changes to the user's dependencies.
 - A plan to continue a session waits while that session runs another queue, rather than failing: one session never
   runs two queues, and planning a queue into the session of the queue before it is the common case.
+- The user's single-dependency changes (queue PB, 2026-11-16): "also after" adds one predecessor, a line's details
+  take one away, and a move, an add or a remove can be undone for a few seconds. Taking a predecessor away, whoever
+  set it, is the user's decision, recorded and told to the orchestrator; it may propose putting it back but not do it
+  (refused in the files, as with the user's own dependencies). What an undo needs is kept in the plan files the
+  change wrote (`undo`: the file before), not in the server's memory, so a restart within the window neither loses
+  the undo nor lets a queue the change freed start early. A later write shows by `updated_at` (every write sets it),
+  so an undo never overwrites a change made since; a start is checked apart (marking `started_at` keeps the rest).
+  The server takes an undo 2 s longer than the dashboard offers it, for the request's way.
 
 A schedule ("at 22:00", "when the usage window resets") is the same kind of plan with a time instead of a queue.
 Decisions:

@@ -4,7 +4,7 @@
 // (src/conversations.ts). Agents rely on them (a change to one carries an `Agents:` line in its commit), so each is
 // covered by a snapshot test: test/prompts.test.ts compares what the agents' processes receive with golden files.
 import {
-  INTEGRATION_CONDITION, formatClock, formatSeconds, isCheckMetric, languageName, levelNow, metricValueText, releasedText, runIsOlder, stepChecks, type MetricValue, type AwayNow, type ConversationWeb, type InboxView, type LanguageCode, type ProjectFile, type ProjectState, type QuestionView, type QueueView, type SessionView, type StepView, type TagProposal, tagsText,
+  INTEGRATION_CONDITION, formatClock, openPlan, formatSeconds, isCheckMetric, languageName, levelNow, metricValueText, releasedText, runIsOlder, stepChecks, type MetricValue, type AwayNow, type PlanDecision, type ConversationWeb, type InboxView, type LanguageCode, type ProjectFile, type ProjectState, type QuestionView, type QueueView, type SessionView, type StepView, type TagProposal, tagsText,
 } from "@nexus/protocol";
 import type { ClosingContext } from "./closing.ts";
 import type { IntegrationContext } from "./integration.ts";
@@ -387,7 +387,7 @@ Review levels: every step is reviewed when it is done; there is no level without
 - 1: the user reviews; the queue waits for them.
 - 2: you review what can be checked (tests, measurements, numbers); what is the user's goes to them (nexus review ask-user), and the queue waits.
 - 3: you judge everything and the queue goes on: accept what has nothing of the user's; accept provisionally (nexus review provisional) what has, so the user confirms it or asks a fix on their return; or send it back (beyond the limit of send-backs, 2 by default, it goes to the user and its queue waits). Do not accept by default.
-The plan: Nexus starts by itself only the queues in the plan (with predecessors, a --next, or a schedule): each once every queue it waits for is done (all its steps closed, the closing step too; where provisional work does not count, confirmed) and its current revision is approved. An approved queue that is not in the plan waits; one in the plan that is not approved shows as needing approval. A planned queue whose predecessor is stopped, cancelled or gone waits, and you and the user are told. Each dependency records who set it. Those you set are yours: change them freely (nexus run <queue> start --after …) and say so in the chat. Those the user set are the user's ("set by you" in the dashboard): build around them (add queues and predecessors) so that what the user ordered stays true, but do not change or remove them, and do not take a queue the user put into the plan out of it; to change one, propose it with nexus plan propose and your reason. The user accepts or declines with one action, or hands a dependency back to you (then it is yours); you are told each. nexus status shows each queue's predecessors, who set them, and what it waits for.
+The plan: Nexus starts by itself only the queues in the plan (with predecessors, a --next, or a schedule): each once every queue it waits for is done (all its steps closed, the closing step too; where provisional work does not count, confirmed) and its current revision is approved. An approved queue that is not in the plan waits; one in the plan that is not approved shows as needing approval. A planned queue whose predecessor is stopped, cancelled or gone waits, and you and the user are told. Each dependency records who set it. Those you set are yours: change them freely (nexus run <queue> start --after …) and say so in the chat. Those the user set are the user's ("set by you" in the dashboard): build around them (add queues and predecessors) so that what the user ordered stays true, but do not change or remove them, and do not take a queue the user put into the plan out of it; to change one, propose it with nexus plan propose and your reason. A predecessor the user took away (yours or theirs) is the user's decision too: do not put it back yourself; propose it. The user accepts or declines with one action, or hands a dependency back to you (then it is yours); you are told each, and each predecessor the user takes away or change they undo. nexus status shows each queue's predecessors, who set them, and what it waits for.
 Away mode: the user may mark that they are away until a time (only the user switches it). Meanwhile level-2 steps are reviewed as level 3 (the review notice says so), and level-1 steps still wait for the user. You are told when it starts and when it ends, and, when a queue waits for the user meanwhile, what the plan starts next. While the user is away, only the plan's next queues start, and Nexus starts them itself: start no queue outside the plan, and put no approved queue into it (Nexus refuses both).
 The default level follows from the step's acceptance criteria: criteria that can be checked give 2; a criterion that is the user's judgement (the look, the feel) gives 1. A step without a level is its queue's, else the project's (2 unless the user set another). At any level you may say you cannot decide and hand the review to the user. A level the user set on a step stays across your later revisions (you do not change it, and changing levels asks for no new approval). Without you (no orchestrator, or your notices off), levels 2 and 3 go to the user as level 1. Older drafts' review_policy and review.policy are read as levels (continue and orchestrator: 2, wait: 1); write levels.
 
@@ -638,9 +638,29 @@ export function planHeldNotice(q: QueueView, e: { queue: string; by: "user" | "o
   };
 }
 
-/** The user answered a proposal about the plan, or handed dependencies back to the orchestrator. */
-export function planDecisionNotice(q: QueueView, d: { kind: "accepted" | "declined" | "handed_back"; after?: string[]; queues?: string[] }): Notice {
+/**
+ * The user answered a proposal about the plan, handed dependencies back to the orchestrator, took a predecessor away,
+ * or undid such a change (`decisions`: the queue's, to name what an undo undid).
+ */
+export function planDecisionNotice(q: QueueView, d: PlanDecision, decisions: readonly PlanDecision[] = []): Notice {
   const list = (ids: string[] = []) => ids.length ? `after ${ids.join(", ")}` : "with no queue before it";
+  if (d.kind === "removed") {
+    const x = d.queues?.join(", ") ?? "";
+    return {
+      fact: `The user took ${x} out of the predecessors of queue ${q.id} (${d.set_by === "user" ? "a dependency the user had set" : "a dependency you had set"}).`,
+      todo: `It is the user's decision: do not put ${x} back yourself (Nexus refuses it); if ${q.id} really needs it, propose it with nexus plan propose ${q.id} --after … --reason "...".`,
+    };
+  }
+  if (d.kind === "undone") {
+    const removed = decisions.find((x) => x.kind === "removed" && x.change === d.change);
+    const now = openPlan(q)?.after.map((e) => e.queue);
+    return {
+      fact: removed
+        ? `The user undid taking ${removed.queues?.join(", ")} out of the predecessors of queue ${q.id}: it waits for ${removed.queues?.join(", ")} again.`
+        : `The user undid a change of theirs to the plan around queue ${q.id}: it is as it was before${now ? `; ${q.id} starts ${list(now)}` : ""}.`,
+      todo: "The plan is as it was; go on from it.",
+    };
+  }
   if (d.kind === "handed_back") {
     return {
       fact: d.queues?.length ? `The user handed back to you whether queue ${q.id} waits for ${d.queues.join(", ")}.` : `The user handed back to you when queue ${q.id} starts.`,

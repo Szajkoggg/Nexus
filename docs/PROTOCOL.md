@@ -1222,7 +1222,7 @@ from every agent session, and the others from every session but an orchestrator'
 | `GET /api/projects/:id/templates` | | The queue templates in effect for the project (`TemplatesResponse`: `templates`, each with `id`, `title`, `description?`, `layer`, `replaces`, `params` and a maintenance template's `maintenance`; `problems`, the files not used with why), for "New queue from template" (see "Queue templates") |
 | `POST /api/projects/:id/recurring/:rid` | `action` (`approve`, `pause`, `resume`) | The user's standing approval of a recurring queue as it is now (its hash), a pause or its end (see "Recurring queues"); only the user: no CLI command or event does it. Already approved, already paused or not, or a recurring that cannot run (its template gone or not filling): 409; unknown: 404 (`{message}`) |
 | `DELETE /api/projects/:id/recurring/:rid` | | The user removes a recurring queue; the queues it made stay (`{message}`) |
-| `POST /api/projects/:id/queues/:q/plan` | `action` (`move`, `accept`, `decline`, `hand_back`), `after?` | The user's plan: `move` the queue after `after` (a queue id; `null`: with no queue before it), as in a list (see "The plan"); accept or decline the orchestrator's proposal; hand a dependency the user set (`after`; without it, all of them) back to the orchestrator (`{message}`) |
+| `POST /api/projects/:id/queues/:q/plan` | `action` (`move`, `add`, `remove`, `undo`, `accept`, `decline`, `hand_back`), `after?`, `change?` | The user's plan: `move` the queue after `after` (a queue id; `null`: with no queue before it), as in a list (see "The plan"); `add` a predecessor `after`, or `remove` one; `undo` the change `change` within its window; accept or decline the orchestrator's proposal; hand a dependency the user set (`after`; without it, all of them) back to the orchestrator. `move`, `add` and `remove` answer `{message, undo: {change, until, queues}}`, the others `{message}` |
 | `POST /api/projects/:id/queues/:q/steps/:s/pictures/mark` | `path`, `accepted` | The user's mark on a review picture (`review.marked`) |
 | `POST /api/projects/:id/queues/:q/steps/:s/pictures/comment` | `path`, `text` | The user's comment on a review picture: a send-back or a note (see "Review pictures"); answers `{ ok, result: { message } }` |
 | `POST /api/projects/:id/queues/:q/steps/:s/reject` | `text?` | Reject (the user's): the step is rejected, the run pauses until a newer revision is approved; answers `{ ok, result: { message } }` |
@@ -1717,8 +1717,13 @@ in `start.yaml`.
   waits for: `queue`, `by` (`user` or `orchestrator`: who set it), `at`, `reason?`), `created_at`, `updated_at`,
   `started_at?` (it started since, by the plan or directly: the plan is used, and stays for the view until the queue is
   planned again; a start of a queue in the plan marks it), `proposal?` (the orchestrator's proposal: `at`, `after`, the
-  whole new list, `reason`), `decisions` (the user's answers, oldest first: `at`, `kind` (`accepted`, `declined`,
-  `handed_back`), `after?` and `reason?` (the proposal's), `queues?` (those handed back)).
+  whole new list, `reason`), `decisions` (the user's decisions, oldest first: `at`, `kind` (`accepted`, `declined`,
+  `handed_back`, `removed`, `undone`), `after?` and `reason?` (the proposal's), `queues?` (those handed back, or the
+  one taken away), `set_by?` (removed: who had set it), `change?` (removed, undone: the change), `undid?` (undone:
+  `move`, `add` or `remove`)), `undo?` (a change of the user's that can still be undone, below: `change`, `kind`,
+  `queue` (the queue it was made to), `at` (when it was written: the file's `updated_at`), `until` (the end of its
+  window), `plan` (the file before it, or null), and on `queue`'s file `files` (every queue whose plan it wrote) and,
+  for a move, `start` (its `start.yaml` before, or null)).
 - It starts when every queue in `after` is done, and its current revision is approved (a revision of the queue
   proposed meanwhile waits for the user: the start is `held` with kind `approval`, "waits for approval of revision N",
   and comes once approved; it is not a failed start). "Done" is the queue's status `done` with every step closed (done
@@ -1742,10 +1747,28 @@ in `start.yaml`.
   dashboard's "After…" or by dragging): moving B after Y makes Y B's only predecessor, and every queue whose unused
   plan waited for B waits for B's old predecessors instead (keeping its other ones; no repeats), those entries the
   user's; `after: null` puts B first, with none before it. B's start options stay; a schedule goes. Refused like a
-  plan (B done, cancelled or running; Y unknown or cancelled; B after itself; a loop in the plan as it will be).
+  plan (B done, cancelled or running; Y unknown or cancelled; B after itself; a loop in the plan as it will be). A
+  move can be undone (below), and B, ready after it, starts once the undo window has ended.
+- The user adds or takes away one predecessor (`POST …/queues/:q/plan` with `add` or `remove` and `after`, from the
+  dashboard's "Also after…" and a line's details): the others stay as they are. An added one is the user's ("set by
+  you"); `add` is refused for a queue not in the plan (put it in with `move`) and for one it waits for already, and
+  like a plan (unknown or cancelled, a loop). `remove` takes away any predecessor, whoever set it, and is the user's
+  decision: recorded as `removed` (with who had set it) and told to the orchestrator once. While the plan counts (not
+  started since), the orchestrator may not put a predecessor the user took away back itself ("the user took A out of
+  the predecessors of queue C: you may not put it back; …"); it proposes it, and a proposal that puts one back counts
+  as changing the user's. With no predecessor left the queue stays in the plan and starts as soon as it may.
+- A `move`, an `add` and a `remove` can be undone for 12 s (the dashboard offers it for 10 s; the rest is the
+  request's way): the answer names the change (`undo.change`), the window's end (`undo.until`) and the queues whose
+  plans it wrote; each of those plan files keeps `undo` with the file as it was before, so the window survives a
+  restart. None of those queues starts before the window ends, even if the change made it ready. `undo` with
+  `change` puts every one of those plan files back as it was (the predecessors with who set each, the orchestrator's
+  too), and a move's `start.yaml` (a schedule armed again); the queue it was made to records `undone` (`undid`), told
+  to the orchestrator once. Refused (409) once the window has ended, when one of those plans changed since (another
+  write: its `updated_at` is not the change's `at`, or its `undo` is another change's), or when one of those queues
+  started since.
 - To change the user's, the orchestrator proposes: `nexus plan propose B [--after X]... --reason …` (event
-  `plan.proposed`), the whole new list; refused when it drops no predecessor the user set ("set it yourself"). A new
-  proposal replaces one waiting. The user gets an item of kind `plan` (`plan.proposal`: `after`, `reason`, `current`)
+  `plan.proposed`), the whole new list; refused when it neither drops a predecessor the user set nor puts back one
+  they took away ("set it yourself"). A new proposal replaces one waiting. The user gets an item of kind `plan` (`plan.proposal`: `after`, `reason`, `current`)
   and answers with one action (`POST …/queues/:q/plan`): `accept` (the list becomes the proposal's; the entries it
   keeps stay as they were, new ones are the orchestrator's), `decline` (the plan stays), or `hand_back` (a predecessor
   the user set, or all of them, becomes the orchestrator's; a proposal that no longer changes anything of the user's

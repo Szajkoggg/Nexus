@@ -465,12 +465,24 @@ app.post("/api/projects/:id/queues/:queue/run", act((_st, b, p, e) => {
 }));
 // The user's answers about the plan (PROTOCOL.md, "The plan"): accept or decline the orchestrator's proposal for the
 // queue, or hand a dependency they set back to the orchestrator (`after`: one predecessor; without it, all of them);
-// and the user's reorder: `move` the queue after `after` (null: with no queue before it), as in a list.
+// the user's reorder: `move` the queue after `after` (null: with no queue before it), as in a list; `add` a
+// predecessor (`after`) or `remove` one; and `undo` (`change`) a move, an add or a remove within its window. The three
+// changes answer `{ message, undo: { change, until, queues } }`.
 app.post("/api/projects/:id/queues/:queue/plan", act((st, b, p, e) => {
+  const one = () => {
+    if (typeof b.after !== "string" || !b.after) throw new ActionError("after is a queue id");
+    return b.after;
+  };
   switch (b.action) {
     case "move": {
       if (b.after !== null && (typeof b.after !== "string" || !b.after)) throw new ActionError("after is a queue id, or null for none before it");
-      return { message: e.engine.move(p("queue"), b.after as string | null) };
+      return e.engine.move(p("queue"), b.after as string | null);
+    }
+    case "add": return e.engine.addPredecessor(p("queue"), one());
+    case "remove": return e.engine.removePredecessor(p("queue"), one());
+    case "undo": {
+      if (typeof b.change !== "string" || !b.change) throw new ActionError("change is the id a change to the plan answered with");
+      return { message: e.engine.undoPlan(p("queue"), b.change) };
     }
     case "accept": return { message: acceptPlanProposal(st, p("queue")) };
     case "decline": return { message: declinePlanProposal(st, p("queue")) };
@@ -478,7 +490,7 @@ app.post("/api/projects/:id/queues/:queue/plan", act((st, b, p, e) => {
       if (b.after !== undefined && (typeof b.after !== "string" || !b.after)) throw new ActionError("after is a queue id");
       return { message: handBackPlan(st, p("queue"), b.after as string | undefined) };
     }
-    default: throw new ActionError("action is move, accept, decline or hand_back");
+    default: throw new ActionError("action is move, add, remove, undo, accept, decline or hand_back");
   }
 }));
 // The user's decision on the orchestrator's proposal for the project's tag lists (PROTOCOL.md, "Tags"): accept or

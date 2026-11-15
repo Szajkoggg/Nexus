@@ -32,7 +32,7 @@ function setup(queues: Record<string, string[]>, opts: { orchestrator?: boolean 
   const engines: Engine[] = [];
   let orchestrator: Orchestrator | undefined;
   const tick = () => { routeAnswers(store); acceptReviews(store); const s = loadProjectState(store); orchestrator?.onChange(s); engines.at(-1)!.onChange(s); };
-  const newEngine = () => { const e = new Engine(store, tick, { retryBaseMs: 30, usageMarginMs: 100 }); engines.push(e); return e; };
+  const newEngine = () => { const e = new Engine(store, tick, { retryBaseMs: 30, usageMarginMs: 100, undoMs: UNDO_MS }); engines.push(e); return e; };
   let engine = newEngine();
   if (opts.orchestrator) orchestrator = new Orchestrator(store, engine, tick);
   const timer = setInterval(tick, 150);
@@ -63,6 +63,8 @@ function doneByHand(store: ProjectStore, queue: string, steps: string[]): void {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** The undo window of the user's changes to the plan, short for the tests. */
+const UNDO_MS = 600;
 
 test("two predecessors: C starts only once both are done; the plan stays after the start", async () => {
   const x = setup({ A: ["done"], B: ["done"], C: ["done"] });
@@ -192,14 +194,121 @@ test("the user's reorder: B after C makes those after B wait for B's predecessor
     x.engine.plan("B", { after: ["A"], by: "orchestrator", model: "m1" });
     x.engine.plan("C", { after: ["B"], by: "orchestrator" });
     x.engine.plan("D", { after: ["B"], by: "user" });
-    assert.match(x.engine.move("B", "C"), /^queue B starts when queue C is done; C now waits for A; D now waits for A$/);
+    const moved = x.engine.move("B", "C");
+    assert.match(moved.message, /^queue B starts when queue C is done; C now waits for A; D now waits for A$/);
+    assert.deepEqual(moved.undo.queues, ["B", "C", "D"], "what its undo restores");
     assert.deepEqual(x.store.readPlan("B")!.after.map((e) => [e.queue, e.by]), [["C", "user"]]);
     assert.deepEqual(x.store.readPlan("C")!.after.map((e) => [e.queue, e.by]), [["A", "user"]]);
     assert.deepEqual(x.store.readPlan("D")!.after.map((e) => [e.queue, e.by]), [["A", "user"]]);
     assert.equal(x.store.readStart("B")!.model, "m1", "the start's options stay");
     assert.throws(() => x.engine.move("B", "B"), /cannot start after itself/);
-    // To the front: nothing before it, so it starts now.
-    assert.match(x.engine.move("B", null), /^queue B started now in session /);
+    // To the front: nothing before it, so it starts, once the move can no longer be undone.
+    assert.equal(x.engine.move("B", null).message, "queue B starts once the change can no longer be undone");
+    await sleep(UNDO_MS / 2);
+    assert.equal(x.queue("B").run, undefined, "not within the undo window");
     await x.until("B to finish", () => x.queue("B").run?.state === "finished", LONGER.run);
+  } finally { x.stop(); }
+});
+
+/** `fn` throws an ActionError with status 409 and a message matching `re`. */
+const conflict = (fn: () => unknown, re: RegExp) => assert.throws(fn, (e: Error & { status?: number }) => e.status === 409 && re.test(e.message));
+
+test("the user adds and removes one predecessor: set by them, the others as they were; with none left the queue stays and starts after the undo window", async () => {
+  const x = setup({ A: ["noop"], B: ["noop"], C: ["done"], D: ["noop"] });
+  try {
+    x.engine.plan("C", { after: ["A", "B"], by: "orchestrator", reason: "both first" });
+    const added = x.engine.addPredecessor("C", "D");
+    assert.equal(added.message, "queue C now waits for A, B, D");
+    assert.deepEqual(added.undo.queues, ["C"]);
+    assert.deepEqual(x.store.readPlan("C")!.after.map((e) => [e.queue, e.by, e.reason]), [["A", "orchestrator", "both first"], ["B", "orchestrator", "both first"], ["D", "user", undefined]]);
+    conflict(() => x.engine.addPredecessor("C", "D"), /waits for D already/);
+    conflict(() => x.engine.addPredecessor("A", "B"), /not in the plan/);
+    conflict(() => x.engine.removePredecessor("C", "X"), /does not wait for X/);
+
+    assert.equal(x.engine.removePredecessor("C", "A").message, "queue C no longer waits for A; it now waits for B, D");
+    const plan = x.store.readPlan("C")!;
+    assert.deepEqual(plan.after.map((e) => [e.queue, e.by]), [["B", "orchestrator"], ["D", "user"]], "only A goes");
+    assert.deepEqual(plan.decisions.map((d) => [d.kind, d.queues, d.set_by]), [["removed", ["A"], "orchestrator"]], "the user's decision");
+    x.engine.removePredecessor("C", "B");
+    assert.equal(x.engine.removePredecessor("C", "D").message, "queue C no longer waits for D; it waits for no other queue: it starts as soon as it may");
+    assert.deepEqual(x.store.readPlan("C")!.after, [], "still in the plan, with none before it");
+    await sleep(UNDO_MS / 2);
+    assert.equal(x.queue("C").run, undefined, "not within the undo window");
+    await x.until("C to finish", () => x.queue("C").run?.state === "finished", LONGER.run);
+  } finally { x.stop(); }
+});
+
+test("undo: every plan file the change wrote as it was, the orchestrator's marks too; refused once changed, started or too late", async () => {
+  const x = setup({ A: ["noop"], B: ["noop"], C: ["noop"], D: ["noop"], E: ["done"] });
+  try {
+    x.engine.plan("B", { after: ["A"], by: "orchestrator", model: "m1", reason: "A first" });
+    x.engine.plan("C", { after: ["B"], by: "orchestrator" });
+    x.engine.plan("D", { after: ["B"], by: "user" });
+    const before = Object.fromEntries(["B", "C", "D"].map((id) => [id, x.store.readPlan(id)]));
+    const start = x.store.readStart("B");
+    const moved = x.engine.move("B", "C");
+    assert.equal(x.engine.undoPlan("B", moved.undo.change), "undone: queue B waits for A again");
+    assert.deepEqual(x.store.readPlan("C"), before.C);
+    assert.deepEqual(x.store.readPlan("D"), before.D);
+    const b = x.store.readPlan("B")!;
+    assert.deepEqual({ ...b, decisions: [] }, { ...before.B, decisions: [] }, "B's plan as it was, by the orchestrator");
+    assert.deepEqual(b.decisions.map((d) => [d.kind, d.undid, d.change]), [["undone", "move", moved.undo.change]], "the undo recorded");
+    assert.deepEqual(x.store.readStart("B"), start, "its start too");
+    conflict(() => x.engine.undoPlan("B", moved.undo.change), /can no longer be undone: the plan changed since/);
+
+    // A removal undone: the predecessor back as it was.
+    const removed = x.engine.removePredecessor("D", "B");
+    x.engine.undoPlan("D", removed.undo.change);
+    assert.deepEqual(x.store.readPlan("D")!.after, before.D!.after);
+    assert.deepEqual(x.store.readPlan("D")!.decisions.map((d) => d.kind), ["removed", "undone"]);
+
+    // Changed since: the orchestrator plans C anew within the window.
+    const again = x.engine.move("B", "C");
+    x.engine.plan("C", { after: ["A", "E"], by: "orchestrator" });
+    conflict(() => x.engine.undoPlan("B", again.undo.change), /the plan of queue C changed since/);
+
+    // Started since: E, left with none before it, is started by hand within the window.
+    x.engine.plan("E", { after: ["A"], by: "user" });
+    const freed = x.engine.removePredecessor("E", "A");
+    x.engine.start("E", {});
+    conflict(() => x.engine.undoPlan("E", freed.undo.change), /queue E started since/);
+
+    // Too late.
+    const late = x.engine.addPredecessor("D", "C");
+    await sleep(UNDO_MS + 100);
+    conflict(() => x.engine.undoPlan("D", late.undo.change), /its time is over/);
+  } finally { x.stop(); }
+});
+
+test("the user takes away the orchestrator's predecessor: their decision, told once; the orchestrator may only propose it back", async () => {
+  const x = setup({ A: ["noop"], B: ["noop"], C: ["noop"] }, { orchestrator: true });
+  try {
+    await x.hello();
+    x.engine.plan("C", { after: ["A", "B"], by: "orchestrator" });
+    x.engine.removePredecessor("C", "A");
+    await x.until("told of the removal", () => x.said(/^The user took A out of the predecessors of queue C \(a dependency you had set\)\.$/));
+    x.say("run", "C", "start", "--after", "A", "--after", "B", "--reason", "A first after all");
+    await x.until("the refusal", () => x.said(/the user took A out of the predecessors of queue C: you may not put it back/));
+    assert.deepEqual(x.store.readPlan("C")!.after.map((e) => e.queue), ["B"], "A stays out");
+    x.say("plan", "propose", "C", "--after", "A", "--after", "B", "--reason", "A builds what C needs");
+    await x.until("the proposal", () => x.store.readPlan("C")?.proposal?.reason === "A builds what C needs");
+
+    // An undo is told too.
+    const removed = x.engine.removePredecessor("C", "B");
+    x.engine.undoPlan("C", removed.undo.change);
+    await x.until("told of the undo", () => x.said(/^The user undid taking B out of the predecessors of queue C: it waits for B again\.$/));
+  } finally { x.stop(); }
+});
+
+test("the undo window holds across a restart: a queue the user freed starts once it has ended, not before", async () => {
+  const x = setup({ A: ["noop"], C: ["done"] });
+  try {
+    x.engine.plan("C", { after: ["A"], by: "user" });
+    x.engine.removePredecessor("C", "A");
+    const engine = x.restart();
+    await sleep(UNDO_MS / 2);
+    assert.equal(x.queue("C").run, undefined, "not within the window");
+    assert.equal(engine, x.engine);
+    await x.until("C to finish", () => x.queue("C").run?.state === "finished", LONGER.run);
   } finally { x.stop(); }
 });

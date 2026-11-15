@@ -24,7 +24,7 @@ import {
 } from "./prompts.ts";
 import { shellRules } from "./shell-rules.ts";
 import {
-  ClockTimers, REAL_CLOCK, Scheduler, type PlanOptions, type Clock, type ScheduleOptions,
+  ClockTimers, REAL_CLOCK, Scheduler, type PlanChange, type PlanOptions, type Clock, type ScheduleOptions,
 } from "./scheduler.ts";
 import { Recurrer, type RecurringSet } from "./recurring.ts";
 import { StaticReminder } from "./static-reminder.ts";
@@ -89,6 +89,8 @@ export interface EngineOptions {
   startupMs?: number;
   /** How long a turn's end waits for background work (BACKGROUND_LIMIT_MS); tests make it short. */
   backgroundLimitMs?: number;
+  /** How long a change of the user's to the plan can be undone (the scheduler's UNDO_MS); tests make it short. */
+  undoMs?: number;
   /** How the push of accepted steps runs git, and its time limit (tests). */
   git?: GitRunner;
   pushTimeoutMs?: number;
@@ -186,7 +188,7 @@ export class Engine implements Member {
     this.coordinator = options.coordinator ?? new Coordinator();
     this.scheduler = new Scheduler(store, this.clockTimers, {
       start: (queueId, opts) => this.start(queueId, opts), draining: () => this.draining, stopped: () => this.stopped,
-      changed: () => this.changed(), usageMarginMs: this.usageMarginMs,
+      changed: () => this.changed(), usageMarginMs: this.usageMarginMs, undoMs: options.undoMs,
       block: (state, q) => this.coordinator.startBlock(state, q), checkStarts: () => this.checkStarts(),
     });
     this.coordinator.add(this);
@@ -550,8 +552,14 @@ export class Engine implements Member {
   /** The user declined the static analysis template (the orchestrator's `nexus static-analysis decline`). */
   declineStaticAnalysis(reason: string, session?: string): string { return this.staticReminder.decline(reason, session); }
 
-  /** The user's reorder: `queueId` after `after` (null: none before it), as in a list (Scheduler.move). */
-  move(queueId: string, after: string | null): string { return this.scheduler.move(queueId, after); }
+  /** The user's reorder: `queueId` after `after` (null: none before it), as in a list (Scheduler.move); undoable. */
+  move(queueId: string, after: string | null): PlanChange { return this.scheduler.move(queueId, after); }
+  /** The user's "also after": `queueId` waits for `after` too (Scheduler.addPredecessor); undoable. */
+  addPredecessor(queueId: string, after: string): PlanChange { return this.scheduler.addPredecessor(queueId, after); }
+  /** The user takes `after` out of the predecessors of `queueId` (Scheduler.removePredecessor); undoable. */
+  removePredecessor(queueId: string, after: string): PlanChange { return this.scheduler.removePredecessor(queueId, after); }
+  /** Undoes the user's change `change` to the plan, made on `queueId` (Scheduler.undo). */
+  undoPlan(queueId: string, change: string): string { return this.scheduler.undo(queueId, change); }
 
   /**
    * Plans to start `queueId` at a time (`o.at`, ISO 8601, in the future), or when the usage window of the runtime it

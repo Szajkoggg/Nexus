@@ -934,16 +934,25 @@ export type PlanBy = z.infer<typeof PlanBy>;
 export const PlanEntry = z.object({ queue: Id, by: PlanBy, at: Time, reason: z.string().optional() });
 export type PlanEntry = z.infer<typeof PlanEntry>;
 
-/**
- * queues/<id>/plan.yaml: the queue's place in the plan (PROTOCOL.md, "The plan"). Written only by the server. Nexus
- * starts a queue by the plan once every queue in `after` is done and its current revision is approved (and its
- * checkout and the limit allow); `after` empty: as soon as it may ("starts now"). `by`: who put it into the plan.
- * `started_at`: it started since (by the plan or directly): the plan is used and stays, for the view, until the queue
- * is planned again. `proposal`: the orchestrator's proposal to change dependencies the user set (the whole new list),
- * until the user accepts or declines it. `decisions`: the user's answers to proposals and the dependencies handed back
- * to the orchestrator, oldest first (each told to the orchestrator once).
- */
-export const PlanFile = z.object({
+/** A decision of the user's about a queue's plan, as plan.yaml keeps it (each told to the orchestrator once). */
+export const PlanDecision = z.object({
+  at: Time,
+  kind: z.enum(["accepted", "declined", "handed_back", "removed", "undone"]),
+  /** accepted, declined: the proposal's list and reason. */
+  after: z.array(Id).optional(),
+  reason: z.string().optional(),
+  /** handed_back: the predecessors handed back; removed: the predecessor taken away. */
+  queues: z.array(Id).optional(),
+  /** removed: who had set the predecessor taken away. */
+  set_by: PlanBy.optional(),
+  /** removed, undone: the user's change (PlanUndo `change`); an undone one names the change it undid. */
+  change: z.string().optional(),
+  /** undone: what the change was. */
+  undid: z.enum(["move", "add", "remove"]).optional(),
+});
+export type PlanDecision = z.infer<typeof PlanDecision>;
+
+const PlanFields = z.object({
   protocol: z.literal(1),
   by: PlanBy,
   reason: z.string().optional(),
@@ -952,16 +961,39 @@ export const PlanFile = z.object({
   updated_at: Time,
   started_at: Time.optional(),
   proposal: z.object({ at: Time, after: z.array(Id), reason: z.string() }).optional(),
-  decisions: z.array(z.object({
-    at: Time,
-    kind: z.enum(["accepted", "declined", "handed_back"]),
-    /** accepted, declined: the proposal's list and reason. */
-    after: z.array(Id).optional(),
-    reason: z.string().optional(),
-    /** handed_back: the predecessors handed back. */
-    queues: z.array(Id).optional(),
-  })).default([]),
+  decisions: z.array(PlanDecision).default([]),
 });
+
+/**
+ * A change of the user's to the plan (a move, an added or a removed predecessor) that can still be undone, on every
+ * plan file it wrote. `change`: its id, the same on each; `at`: when it was written (the file's `updated_at`, so a
+ * later write shows); `until`: the end of the undo window, before which none of these queues starts. `plan`: the file
+ * as it was before (null: there was none). On the queue the change was made to (`queue`), also `files` (every queue
+ * whose plan it wrote) and, for a move, `start`: its start.yaml before (null: none).
+ */
+export const PlanUndo = z.object({
+  change: z.string(),
+  kind: z.enum(["move", "add", "remove"]),
+  queue: Id,
+  at: Time,
+  until: Time,
+  plan: PlanFields.nullable(),
+  files: z.array(Id).optional(),
+  start: StartFile.nullable().optional(),
+});
+export type PlanUndo = z.infer<typeof PlanUndo>;
+
+/**
+ * queues/<id>/plan.yaml: the queue's place in the plan (PROTOCOL.md, "The plan"). Written only by the server. Nexus
+ * starts a queue by the plan once every queue in `after` is done and its current revision is approved (and its
+ * checkout and the limit allow); `after` empty: as soon as it may ("starts now"). `by`: who put it into the plan.
+ * `started_at`: it started since (by the plan or directly): the plan is used and stays, for the view, until the queue
+ * is planned again. `proposal`: the orchestrator's proposal to change dependencies the user set (the whole new list),
+ * until the user accepts or declines it. `decisions`: the user's answers to proposals, the dependencies handed back
+ * to the orchestrator or taken away, and the changes undone, oldest first (each told to the orchestrator once).
+ * `undo`: a change of the user's that can still be undone (PlanUndo).
+ */
+export const PlanFile = PlanFields.extend({ undo: PlanUndo.optional() });
 export type PlanFile = z.infer<typeof PlanFile>;
 
 /** queues/<id>/run.yaml: the engine's intent for a queue. Written only by the server. */
