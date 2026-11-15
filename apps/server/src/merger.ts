@@ -60,7 +60,7 @@ export class Merger {
     for (const q of state.queues) {
       if (!q.steps.some((s) => s.integration)) continue;
       try { this.look(state, q, wanted); }
-      catch (e) { this.wait(q, `merging back failed: ${(e as Error).message.split("\n")[0]}`); }
+      catch (e) { this.wait(q, `queue ${q.id}: merging back failed: ${(e as Error).message.split("\n")[0]}`); }
     }
     for (const path of [...this.waitingOn.keys()]) if (!wanted.has(path)) this.waitingOn.delete(path);
     if (!this.waitingOn.size) this.releaseAll("nothing is merged back into its checkout now");

@@ -22,6 +22,8 @@ export const en = {
   "common.serverAnswered": "The server answered {status}.",
   "common.cancel": "Cancel",
   "common.loading": "Loading…",
+  "common.readFailed": "Could not be read: {reason}",
+  "common.readFailedOf": "{what} could not be read: {reason}",
 
   // ---------------------------------------------------------------- times and durations (i18n.ts)
   /** A time on another day: the date ("11 Nov", "11 Nov 2025") and the clock ("14:02"). */

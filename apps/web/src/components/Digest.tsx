@@ -9,7 +9,7 @@ import { fileUrl, useQuery, type ProjectSummary } from "../api.ts";
 import { digestTiles, hasNews, outcome, usageLine, type Tone } from "../digest.ts";
 import { nav } from "../nav.ts";
 import { formatClock, t } from "../i18n.ts";
-import { Clock } from "./ui.tsx";
+import { Clock, ReadError } from "./ui.tsx";
 import { usePage } from "../page.ts";
 
 const KEY = "nexus.digest.seen";
@@ -29,8 +29,9 @@ export function Digest({ projects, onGoThrough }: { projects: ProjectSummary[]; 
   const version = usePage().all;
   const [seen, setSeen] = useState(storedSeen);
   const [all, setAll] = useState(false);
-  const d = useQuery<DigestResponse>(`/api/digest?since=${encodeURIComponent(seen)}`, version).data;
+  const { data: d, error } = useQuery<DigestResponse>(`/api/digest?since=${encodeURIComponent(seen)}`, version);
   const waiting = mergeAttention(projects);
+  if (!d && error) return <ReadError what={t("digest.label")} error={error} className="rounded-xl border border-line bg-surface-2 p-3" />;
   if (!d || !hasNews(d.events, waiting, seen)) return null;
   const tiles = digestTiles(d.events, waiting, d.running);
   const markSeen = () => {
@@ -93,7 +94,8 @@ function Line({ e }: { e: DigestEvent }) {
     <li>
       <button onClick={open} className="block w-full px-2.5 py-2 text-left hover:bg-surface-3/50">
         <span className="flex items-center gap-2 text-xs text-fg-3">
-          <span className="w-10 shrink-0"><Clock at={e.at} /></span>
+          {/* Its own width: a time of another day ("14 Nov 22:45") is wider than a clock, and must not run into the id. */}
+          <span className="min-w-10 shrink-0"><Clock at={e.at} /></span>
           <span className="min-w-0 truncate font-mono">{e.step ?? e.queue}</span>
           <span className="flex-1" />
           <span className="shrink-0 truncate">{e.project_name}</span>

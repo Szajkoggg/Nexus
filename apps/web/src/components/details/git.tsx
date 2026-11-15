@@ -5,7 +5,7 @@ import type { BranchView, StepCommitsView } from "@nexus/protocol/api";
 import { act, actResult, enc, HttpError, projectUrl, useAction, useQuery, type ProjectState, type QueueView, type StepView } from "../../api.ts";
 import { integrationState, showsWorktreeActions } from "../../details.ts";
 import { rich, t } from "../../i18n.ts";
-import { Button, Section, TimeAgo } from "../ui.tsx";
+import { Button, ReadError, Section, TimeAgo } from "../ui.tsx";
 import { Fold } from "./review.tsx";
 import { usePage } from "../../page.ts";
 
@@ -15,7 +15,12 @@ export function StepCommits({ project, queue, step, toggle }: {
   /** The review's one line: "Commits · 3", which opens and closes the list. */
   toggle?: { open: boolean; onToggle: () => void };
 }) {
-  const data = useQuery<StepCommitsView | null>(projectUrl(project, `/queues/${enc(queue)}/steps/${enc(step)}/commits`), usePage().version).data;
+  const { data, error } = useQuery<StepCommitsView | null>(projectUrl(project, `/queues/${enc(queue)}/steps/${enc(step)}/commits`), usePage().version);
+  if (!data && error) {
+    return toggle
+      ? <span className="text-danger" title={t("common.readFailed", { reason: error })}>{t("details.commits")} ✗</span>
+      : <Section title={t("details.commits")}><ReadError error={error} /></Section>;
+  }
   if (!data) return null;
   if (toggle) {
     const n = data.rounds.reduce((k, r) => k + r.commits.length, 0);
@@ -146,7 +151,8 @@ export function WorktreeActions({ project, root, queue }: { project: string; roo
 
 /** The queue's branch: ahead and behind of its base and of its remote-tracking ref (as last fetched: never fetched here). */
 export function BranchLine({ project, queue }: { project: string; queue: string }) {
-  const b = useQuery<BranchView | null>(projectUrl(project, `/queues/${enc(queue)}/git`), usePage().version).data;
+  const { data: b, error } = useQuery<BranchView | null>(projectUrl(project, `/queues/${enc(queue)}/git`), usePage().version);
+  if (!b && error) return <div className="mt-3 rounded-lg bg-surface-2 p-3"><span className="text-sm text-fg-3">{t("details.branch")} </span><ReadError error={error} className="inline" /></div>;
   if (!b) return null;
   const counts = (x: { ahead: number; behind: number }) => (
     <span><span className="text-ok">{t("details.branch.ahead", { count: x.ahead })}</span>, <span className={x.behind ? "text-warn" : "text-fg-2"}>{t("details.branch.behind", { count: x.behind })}</span></span>

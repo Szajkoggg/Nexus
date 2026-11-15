@@ -82,7 +82,7 @@ export function App() {
   const notify = useNotifications(projects);
   // App provides the page (below): what it reads itself takes the versions directly.
   const page = useMemo<Page>(() => ({ version, all: versions.all, reload, reloaded }), [version, versions.all, reload, reloaded]);
-  const orchestrator = useOrchestrator(projectId, version);
+  const { data: orchestrator, error: orchestratorError } = useOrchestrator(projectId, version);
   const server = useServer(versions.all);
   // Each panel is a layer in the browser history: opening pushes an entry, closing (or Back) pops it.
   const settingsOpen = isOpen(route.nav, "settings");
@@ -274,7 +274,7 @@ export function App() {
           {tab === "waiting" && <WaitingList projects={projects ?? []} onOpen={openWaiting} onChoose={(w, o) => { if (w.qid) chooseOption(w.qid, o); openWaiting(w); }} />}
           {tab === "queues" && queuesPage}
           {tab === "chat" && projectId && (
-            <ChatPanel key={`chat-${projectId}`} inline project={projectId} name={state?.project.name ?? projectId} view={orchestrator} />
+            <ChatPanel key={`chat-${projectId}`} inline project={projectId} name={state?.project.name ?? projectId} view={orchestrator} error={orchestratorError} />
           )}
           {tab === "ideas" && projectId && state && (
             <ConversationsPanel key={`ideas-${projectId}`} inline project={projectId} name={state.project.name} defaultRuntime={state.project.conversations.runtime} />
@@ -326,7 +326,7 @@ export function App() {
       <main className="flex min-w-0 flex-1 flex-col" style={besideShown ? { marginRight: RAIL } : undefined}>
         {view === "chat" && <>
           {alerts}
-          {projectId && <ChatPanel key={`chat-${projectId}`} desk={desk} project={projectId} name={state?.project.name ?? projectId} view={orchestrator} />}
+          {projectId && <ChatPanel key={`chat-${projectId}`} desk={desk} project={projectId} name={state?.project.name ?? projectId} view={orchestrator} error={orchestratorError} />}
         </>}
         {view === "ideas" && <>
           {alerts}

@@ -7,7 +7,7 @@ import { LANGUAGES } from "@nexus/protocol/languages";
 import { TAG_KINDS } from "@nexus/protocol/tags";
 import { fallbackLine, parseFallback } from "../fallback.ts";
 import { act, HttpError, projectUrl, request, useQuery, type Version } from "../api.ts";
-import { Button, Section } from "./ui.tsx";
+import { Button, ReadError, Section } from "./ui.tsx";
 import { rich, t, type Key } from "../i18n.ts";
 import { CHOICES, readChoice, setChoice, type ThemeChoice } from "../theme.ts";
 import { EDITOR_CHOICES, readEditor, setEditor, type Editor } from "../editor.ts";
@@ -424,7 +424,7 @@ export function SettingsPanel({ project, tags, server, tools }: {
 }) {
   const { reload: onChanged } = usePage();
   const [tab, setTab] = useState<"project" | "global">("project");
-  const info = useQuery<ProjectSettingsInfo>(projectUrl(project.id, "/settings"), usePage().version).data;
+  const { data: info, error: infoError } = useQuery<ProjectSettingsInfo>(projectUrl(project.id, "/settings"), usePage().version);
   return (
     <div>
       <div className="break-all pr-8 text-xs text-fg-3">{tab === "project" ? project.root : t("settings.globalNote")}</div>
@@ -440,6 +440,7 @@ export function SettingsPanel({ project, tags, server, tools }: {
       <div className="mt-6">
         {tab === "global" ? <GlobalSettingsPage key="global" server={server} />
           : info ? <ProjectSettingsPage project={project} info={info} />
+          : infoError ? <ReadError error={infoError} />
           : <p className="text-sm text-fg-3">{t("common.loading")}</p>}
         {tab === "project" && tags && <div id="project-tags" className="mt-10"><ProjectTags project={project.id} tags={tags} onChanged={onChanged} /></div>}
       </div>
@@ -510,8 +511,8 @@ function ProjectSettingsPage({ project, info }: { project: ProjectFile; info: Pr
 function GlobalSettingsPage({ server }: { server?: ServerInfo }) {
   // Read when the page opens; the form is built once from it and keeps what it holds after a save (what was saved).
   // Built again from a new read, it would show the values from before the save until that read landed.
-  const data = useQuery<{ global: GlobalSettings }>("/api/settings").data;
-  if (!data) return <p className="text-sm text-fg-3">{t("common.loading")}</p>;
+  const { data, error } = useQuery<{ global: GlobalSettings }>("/api/settings");
+  if (!data) return error ? <ReadError error={error} /> : <p className="text-sm text-fg-3">{t("common.loading")}</p>;
   return <GlobalForm global={data.global} server={server} />;
 }
 

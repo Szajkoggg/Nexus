@@ -71,8 +71,9 @@ function baseCheckout(root: string, base: string, serverRoot = ROOT): { path: st
   // This server's own checkout when it runs as the live instance: never touched by a merge.
   if (samePath(target.path, serverRoot) && git(serverRoot, ["branch", "--show-current"]) === "") return { blocked: "the base is checked out in the live worktree: Nexus does not merge there" };
   const dirty = git(target.path, ["status", "--porcelain", "--untracked-files=no"]);
-  if (dirty === undefined) return { blocked: `cannot read the state of ${target.path}` };
-  if (dirty) return { blocked: `${target.path} has uncommitted changes: commit or stash them, then merge` };
+  // The reason first, the checkout's path (long) last: the dashboard's waiting item shows the start of the text.
+  if (dirty === undefined) return { blocked: `the state of the checkout of ${base} cannot be read (${target.path})` };
+  if (dirty) return { blocked: `the checkout of ${base} has uncommitted changes: commit or stash them, then merge (${target.path})` };
   return { path: target.path };
 }
 
@@ -147,7 +148,7 @@ export function judgeMerge(store: ProjectStore, state: ProjectState, q: QueueVie
   if (!sha) return { kind: "wait", reason: `queue ${q.id}'s integration step has no recorded commit` };
   if (tip !== sha) return { kind: "wait", reason: `queue ${q.id}'s branch ${branch} moved on after its integration step (it ended at ${sha.slice(0, 7)}, the branch is at ${tip.slice(0, 7)}): its work is not merged back` };
   const baseSha = git(root, ["rev-parse", "--verify", "--quiet", `refs/heads/${base.ref}`]);
-  if (!baseSha) return { kind: "wait", reason: `branch ${base.ref} does not exist` };
+  if (!baseSha) return { kind: "wait", reason: `queue ${q.id}'s base branch ${base.ref} does not exist` };
   if (isAncestor(root, sha, baseSha)) return { kind: "merged", sha };
   if (by === "nexus") {
     if (!state.project.defaults.merge_back) return { kind: "none", why: "merging back by itself is off (merge_back): the user merges back" };
@@ -163,7 +164,7 @@ export function judgeMerge(store: ProjectStore, state: ProjectState, q: QueueVie
     return { kind: "reintegrate", base: base.ref, sha: baseSha, count };
   }
   const target = baseCheckout(root, base.ref, serverRoot);
-  if ("blocked" in target) return { kind: "wait", reason: target.blocked };
+  if ("blocked" in target) return { kind: "wait", reason: `queue ${q.id}: ${target.blocked}` };
   const busy = atWorkIn(store, state, target.path).filter((x) => x.id !== q.id);
   if (busy.length) return { kind: "hold", path: target.path, busy: busy.map((x) => x.id) };
   return { kind: "ff", path: target.path, base: base.ref, sha, branch };

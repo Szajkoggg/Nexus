@@ -4,7 +4,7 @@ import type { ChatEntry, RuntimeFile, SessionFile } from "@nexus/protocol";
 import type { NumberedEntry } from "@nexus/protocol/chat";
 import { PinButton, PinsBar, SearchBar, SearchButton, StopButton, type PinView, type SearchState } from "./ChatTools.tsx";
 import { act, actResult, enc, projectUrl, request, useAction, useQuery, type Version } from "../api.ts";
-import { Button, Clock, Composer, Menu, TimeAgo, type MenuEntry } from "./ui.tsx";
+import { Button, Clock, Composer, Menu, ReadError, TimeAgo, type MenuEntry } from "./ui.tsx";
 import { CopyButton, ReplyTools } from "./MessageTools.tsx";
 import { messageSource, replyTools } from "../messageTools.ts";
 import { ChatMarkdown, RefText } from "./Refs.tsx";
@@ -45,17 +45,20 @@ interface View { session: SessionFile | null; state: "working" | "idle" | "exite
 /** A chat's search, open or not: its button is in the chat's header, or in the desktop column's for the orchestrator. */
 interface Search { open: boolean; set: (open: boolean) => void }
 
+/** The orchestrator's chat of a project: its data, and why it could not be read (shown in its place, ChatPanel). */
 export function useOrchestrator(project: string | undefined, version: Version) {
-  return useQuery<View>(project ? projectUrl(project, "/orchestrator") : undefined, version).data;
+  return useQuery<View>(project ? projectUrl(project, "/orchestrator") : undefined, version);
 }
 
 /** A chat: what it is (its header; on a desktop's orchestrator chat, in the middle column's header), the messages, and the composer. */
-function ChatColumn({ project, title, over, who, about, view, ready, place, status, showTools, menu, empty, draft, placeholder, onSend, onStop, onBack, bare, search }: {
+function ChatColumn({ project, title, over, who, about, view, ready, error, place, status, showTools, menu, empty, draft, placeholder, onSend, onStop, onBack, bare, search }: {
   /** The project: where pictures are uploaded, and served from. */
   project: string;
   title: string; over: string;
   /** The view holds this chat (not the one shown before it, still there while this one loads). */
   ready: boolean;
+  /** The chat's read failed (and nothing of it is held): why, where its messages would be. */
+  error?: string;
   /** Where its place is kept (chatPlace.ts, placeKey). */
   place: string;
   /** Who answers, over each of its messages on a desktop: "Orchestrator", "Partner". */
@@ -129,6 +132,7 @@ function ChatColumn({ project, title, over, who, about, view, ready, place, stat
               sticks at the very edge of the view, with no strip of text scrolling past outside it. */}
           <div className={`${measure} ${phone ? "space-y-3 py-4" : "space-y-4 py-6"}`}>
             {ready && shown.length === 0 && <div className="mt-10 text-center text-sm text-fg-3">{empty}</div>}
+            {!ready && error && <ReadError error={error} className="mt-10 text-center" />}
             {shown.map(({ c, i }) => (
               <div key={c.line} data-i={i} data-line={c.line} className={c.line === current ? "search-current" : undefined}>
                 <Entry c={c} flat={!phone} who={who} project={project} highlight={highlight} pinned={pinned.has(c.line)} onPin={(on) => pin(c.line, on)} />
@@ -482,8 +486,8 @@ const stateText = (v: View | undefined) =>
 // ---------------------------------------------------------------- the orchestrator
 
 /** The orchestrator's chat: the phone's Orchestrator tab (`inline`), a desktop's middle column (`desk`). */
-export function ChatPanel({ project, name, view, inline, desk }: {
-  project: string; name: string; view: View | undefined; inline?: boolean; desk?: Desk;
+export function ChatPanel({ project, name, view, error, inline, desk }: {
+  project: string; name: string; view: View | undefined; error?: string; inline?: boolean; desk?: Desk;
 }) {
   const { reload: onChanged } = usePage();
   const [showTools, setShowTools] = useState(false);
@@ -508,7 +512,7 @@ export function ChatPanel({ project, name, view, inline, desk }: {
     <Panel inline={inline} desk={desk} which="chat" head={head}>
       <ChatColumn project={project}
         over={name} title={t("desk.orchestrator")} who={t("desk.orchestrator")} view={view} status={stateText(view)}
-        ready={!!view && (!view.session || view.session.project === project)} place={placeKey(project, "orchestrator")} showTools={showTools} search={{ open: searching, set: setSearching }} menu={inline ? menu : undefined} bare={!!desk}
+        ready={!!view && (!view.session || view.session.project === project)} error={error} place={placeKey(project, "orchestrator")} showTools={showTools} search={{ open: searching, set: setSearching }} menu={inline ? menu : undefined} bare={!!desk}
         empty={<>
           <p>{t("chat.orchestratorEmpty")}</p>
           <p className="mt-1 text-fg-3">{rich("chat.orchestratorEmptyNote", { nexus: <code key="nexus">nexus</code> })}</p>
@@ -589,14 +593,14 @@ export function ConversationsPanel({ project, name, defaultRuntime, inline, desk
   project: string; name: string; defaultRuntime: "claude" | "codex"; inline?: boolean; desk?: Desk;
 }) {
   const { reload: onChanged, version } = usePage();
-  const list = useQuery<ConversationItem[]>(projectUrl(project, "/conversations"), version).data;
+  const { data: list, error: listError } = useQuery<ConversationItem[]>(projectUrl(project, "/conversations"), version);
   usePlaces(); // the list's unread dots follow each conversation's place
   // The open conversation (or the new-conversation form) is a layer above the panel: Back returns to the list.
   const layer = layerValue(useNav(), "conversation");
   const creating = layer === "new";
   const open = creating ? undefined : layer;
   const [showArchived, setShowArchived] = useState(false);
-  const view = useQuery<ConversationView>(open ? projectUrl(project, `/conversations/${enc(open)}`) : undefined, version).data;
+  const { data: view, error: viewError } = useQuery<ConversationView>(open ? projectUrl(project, `/conversations/${enc(open)}`) : undefined, version);
   // On the phone's tab the list or one conversation at a time; on a desktop both, side by side.
   const side = !desk;
   const current = list?.find((c) => c.id === open);
@@ -652,6 +656,7 @@ export function ConversationsPanel({ project, name, defaultRuntime, inline, desk
             </li>
           ))}
           {list && shown.length === 0 && <li className="px-3 py-2 text-sm text-fg-3">{t("chat.noConversation")}</li>}
+          {!list && listError && <li className="px-3 py-2"><ReadError error={listError} /></li>}
         </ul>
         {(list ?? []).some((c) => c.archived) && (
           <label className="flex items-center gap-2 border-t border-line px-4 py-2 text-xs text-fg-3">
@@ -664,7 +669,7 @@ export function ConversationsPanel({ project, name, defaultRuntime, inline, desk
         onCreated={(id) => { nav.open(`conversation:${id}`); onChanged(); }} />}
       {!creating && open && current && (
         <ChatColumn key={open} project={project}
-          ready={view?.session?.id === open} place={placeKey(project, "conversation", open)}
+          ready={view?.session?.id === open} error={viewError} place={placeKey(project, "conversation", open)}
           over={t("chat.ideasOf", { project: name })} title={current.title ?? t("chat.conversation")} who={t("chat.partner")} about={<AboutStep project={project} c={current} className="mt-1" />} view={view} status={stateText(view)} onBack={() => nav.close("conversation")}
           showTools={showTools} menu={menu} search={{ open: searching, set: setSearching }}
           empty={<>

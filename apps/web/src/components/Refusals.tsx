@@ -6,7 +6,7 @@ import type { Refusal } from "@nexus/protocol";
 import { groupRefusals, refusalKind, suggestAllowRule } from "@nexus/protocol/refusals";
 import { act, enc, projectUrl, useQuery, type ProjectState } from "../api.ts";
 import { usePage } from "../page.ts";
-import { Button, Section, TimeAgo } from "./ui.tsx";
+import { Button, ReadError, Section, TimeAgo } from "./ui.tsx";
 import { rich, t, type Key } from "../i18n.ts";
 
 const BY: Record<Refusal["by"], Key> = {
@@ -18,8 +18,9 @@ const BY: Record<Refusal["by"], Key> = {
 /** The refusals of one step. */
 export function StepRefusals({ project, queue, step }: { project: ProjectState; queue: string; step: string }) {
   const id = project.project.id;
-  const list = useQuery<Refusal[]>(projectUrl(id, `/refusals?queue=${enc(queue)}&step=${enc(step)}`), usePage().version).data;
+  const { data: list, error } = useQuery<Refusal[]>(projectUrl(id, `/refusals?queue=${enc(queue)}&step=${enc(step)}`), usePage().version);
   const [open, setOpen] = useState<string>();
+  if (!list && error) return <Section title={t("refusals.title")}><ReadError error={error} /></Section>;
   if (!list?.length) return null;
   return (
     <Section title={t("refusals.title")} aside={<span className="text-xs text-fg-3">{list.length}</span>}>
@@ -47,8 +48,9 @@ export function StepRefusals({ project, queue, step }: { project: ProjectState; 
 /** Every refusal of the project, grouped by kind (tool, command prefix), with counts and the latest time. */
 export function ProjectRefusals({ project }: { project: ProjectState }) {
   const id = project.project.id;
-  const list = useQuery<Refusal[]>(projectUrl(id, "/refusals"), usePage().version).data;
+  const { data: list, error } = useQuery<Refusal[]>(projectUrl(id, "/refusals"), usePage().version);
   const [open, setOpen] = useState<string>();
+  if (!list && error) return <ReadError what={t("refusals.title")} error={error} className="mb-8" />;
   if (!list?.length) return null;
   const groups = groupRefusals(list);
   return (

@@ -235,7 +235,9 @@ test("a dirty main checkout: it waits and tells, never moves over the changes; o
   writeFileSync(join(x.root, ".gitignore"), ".nexus/\nnode_modules/\nedited\n");
   q.look();
   assert.equal(x.main(), before);
-  assert.match(x.store.readGit("Q")!.merge!.waiting!.reason, /has uncommitted changes/);
+  // The queue and the reason first, the checkout's (long) path last: the waiting item shows the start of the text.
+  const reason = x.store.readGit("Q")!.merge!.waiting!.reason;
+  assert.match(reason, /^queue Q: the checkout of main has uncommitted changes: commit or stash them, then merge \(.+\)$/);
   assert.ok(loadProjectState(x.store).attention.some((a) => a.kind === "merge" && a.queue === "Q"));
   git(x.root, "checkout", "--", ".gitignore");
   q.look();

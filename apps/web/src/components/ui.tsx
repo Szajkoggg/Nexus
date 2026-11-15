@@ -150,6 +150,14 @@ export function RunTimes({ run }: { run: NonNullable<QueueView["run"]> }) {
   );
 }
 
+/**
+ * A read that failed, where its data would show (query.ts keeps the reason): why it is missing, never an empty place
+ * that looks like "nothing there". The next read (the next change, or a reload) tries again.
+ */
+export function ReadError({ error, what, className = "" }: { error: string; what?: string; className?: string }) {
+  return <p role="alert" className={`text-sm text-danger ${className}`}>{what ? t("common.readFailedOf", { what, reason: error }) : t("common.readFailed", { reason: error })}</p>;
+}
+
 export function Section({ title, children, aside }: { title: string; children: ReactNode; aside?: ReactNode }) {
   return (
     <section className="mt-6 first:mt-0">

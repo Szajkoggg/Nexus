@@ -1,7 +1,7 @@
 // Remote access: how a phone reaches this dashboard, signs in, and gets notifications.
 import { useEffect, useState } from "react";
 import { request, useQuery } from "../api.ts";
-import { Button, Section } from "./ui.tsx";
+import { Button, ReadError, Section } from "./ui.tsx";
 import { formatDate, rich, t } from "../i18n.ts";
 import { usePage } from "../page.ts";
 
@@ -63,10 +63,10 @@ export function RemotePanel() {
   const version = usePage().all;
   const [base, setBase] = useState("");
   const [bump, setBump] = useState(0);
-  const r = useQuery<Remote>(`/api/remote${base ? `?base=${encodeURIComponent(base)}` : ""}`, `${String(version)}-${bump}`).data;
+  const { data: r, error } = useQuery<Remote>(`/api/remote${base ? `?base=${encodeURIComponent(base)}` : ""}`, `${String(version)}-${bump}`);
   const [reveal, setReveal] = useState(false);
   const [note, setNote] = useState<string>();
-  if (!r) return <p className="text-sm text-fg-3">{t("common.loading")}</p>;
+  if (!r) return error ? <ReadError error={error} /> : <p className="text-sm text-fg-3">{t("common.loading")}</p>;
 
   const post = <T,>(url: string) => request<T>(url, { method: "POST" });
   const failed = (e: Error) => setNote(e.message);
