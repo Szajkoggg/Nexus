@@ -293,3 +293,41 @@ test("the partners' web level: search by default, global with a project override
   updateSettings(store, { follow: ["conversations.web"] });
   assert.equal(store.readProject().conversations.web, "off");
 });
+
+test("the stop conditions and the send-back limit (the settings panel, queue MX): saved globally, overridden by a project, restored by following again", () => {
+  const base = mkdtempSync(join(tmpdir(), "nexus-settings-"));
+  process.env.NEXUS_HOME = join(base, "home");
+  const store = ProjectStore.init(join(base, "p"), { id: "p", name: "P", root: join(base, "p") });
+  const effective = () => store.readProject().defaults;
+  const own = () => ownKeys(store.readStoredProject()).filter((k) => /stop_conditions|send_back/.test(k));
+  assert.deepEqual([effective().stop_conditions, effective().review_send_back_limit], [[], 2], "built in: none, 2");
+
+  // Saved on the global page: every following project has them at once.
+  updateGlobalSettings({ defaults: { stop_conditions: ["Never touch the production database."], review_send_back_limit: 3 } });
+  assert.deepEqual([readGlobalSettings().defaults.stop_conditions, readGlobalSettings().defaults.review_send_back_limit], [["Never touch the production database."], 3]);
+  assert.deepEqual([effective().stop_conditions, effective().review_send_back_limit], [["Never touch the production database."], 3]);
+  assert.deepEqual(own(), []);
+
+  // The project's own: a list that replaces the global one whole, and a limit of 0.
+  const mine = ["Stop before a schema change.", "Stop if a step needs a new dependency."];
+  updateSettings(store, { defaults: { stop_conditions: mine, review_send_back_limit: 0 }, own: ["defaults.stop_conditions", "defaults.review_send_back_limit"] });
+  assert.deepEqual([store.readStoredProject().defaults.stop_conditions, store.readStoredProject().defaults.review_send_back_limit], [mine, 0]);
+  assert.deepEqual(own(), ["defaults.stop_conditions", "defaults.review_send_back_limit"]);
+  updateGlobalSettings({ defaults: { stop_conditions: ["Something else."], review_send_back_limit: 5 } });
+  assert.deepEqual([effective().stop_conditions, effective().review_send_back_limit], [mine, 0], "a global change does not move them");
+  // Its own empty list is its own too: no conditions beyond each queue's.
+  updateSettings(store, { defaults: { stop_conditions: [] }, own: ["defaults.stop_conditions"] });
+  assert.deepEqual(effective().stop_conditions, []);
+
+  // Following again: the global values.
+  updateSettings(store, { follow: ["defaults.stop_conditions", "defaults.review_send_back_limit"] });
+  assert.deepEqual(own(), []);
+  assert.deepEqual([effective().stop_conditions, effective().review_send_back_limit], [["Something else."], 5]);
+
+  // Restored globally: an empty list, the built-in limit; a negative or fractional limit is refused, nothing written.
+  updateGlobalSettings({ defaults: { stop_conditions: [], review_send_back_limit: 2 } });
+  assert.deepEqual([effective().stop_conditions, effective().review_send_back_limit], [[], 2]);
+  for (const n of [-1, 1.5]) assert.throws(() => updateGlobalSettings({ defaults: { review_send_back_limit: n } }), (e: Error) => e instanceof ActionError && /review_send_back_limit/.test(e.message));
+  assert.throws(() => updateSettings(store, { defaults: { review_send_back_limit: -1 }, own: ["defaults.review_send_back_limit"] }), (e: Error) => e instanceof ActionError && /review_send_back_limit/.test(e.message));
+  assert.equal(effective().review_send_back_limit, 2);
+});

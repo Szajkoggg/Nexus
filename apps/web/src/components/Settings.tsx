@@ -13,6 +13,7 @@ import { EDITOR_CHOICES, readEditor, setEditor, type Editor } from "../editor.ts
 import { levelTitle } from "./Levels.tsx";
 import { ProjectTags } from "./Tags.tsx";
 import { PlannedDeployCard, type PlannedDeploy } from "./DeployPlan.tsx";
+import { SEND_BACKS, STOPS, conditionList, savedConditions, settingsProblem, type SettingsProblem } from "../settingsCheck.ts";
 
 const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 
@@ -81,6 +82,7 @@ function nested(values: Values, keys: readonly string[]): Values {
       x[path.at(-1)!] = r.chain;
       continue;
     }
+    if (k === STOPS) { x[path.at(-1)!] = savedConditions(v); continue; }
     x[path.at(-1)!] = v === "" || v === undefined ? null : v;
   }
   return out;
@@ -108,6 +110,8 @@ const SETTING_KEYS = [
 interface Form {
   get: (k: string) => string;
   bool: (k: string) => boolean;
+  /** A list setting's entries (the stop conditions). */
+  list: (k: string) => string[];
   set: (k: string, v: unknown) => void;
   /** On the global page: undefined. On a project's page: whether these settings follow the global values. */
   follows?: (keys: readonly string[]) => boolean;
@@ -265,6 +269,15 @@ function SettingRows({ form, project }: { form: Form; project?: { values: Record
         <Setting form={f} keys={["defaults.review_level"]} label={t("details.level.label")} hint={<>{levelTitle(Number(f.get("defaults.review_level")) || 2)}{f.get("defaults.review_level") !== "1" ? ` ${t("settings.levelHint")}` : ""}</>}>
           {(d) => <Select value={f.get("defaults.review_level")} onChange={(v) => f.set("defaults.review_level", Number(v))} disabled={d} options={[["1", t("details.level.1")], ["2", t("details.level.2")], ["3", t("details.level.3")]]} />}
         </Setting>
+        <Setting form={f} keys={[SEND_BACKS]} label={t("settings.sendBacks")} hint={t("settings.sendBacksHint")}>
+          {(d) => (
+            <input type="number" min={0} step={1} disabled={d} value={f.get(SEND_BACKS)} aria-label={t("settings.sendBacks")}
+              onChange={(e) => f.set(SEND_BACKS, e.target.value === "" ? "" : Number(e.target.value))} className={`${field} w-24`} />
+          )}
+        </Setting>
+        <Setting form={f} keys={[STOPS]} label={t("settings.stops")} hint={t("settings.stopsHint")}>
+          {(d) => <ConditionList value={f.list(STOPS)} onChange={(v) => f.set(STOPS, v)} disabled={d} />}
+        </Setting>
         <Setting form={f} keys={["defaults.push_accepted"]} label={t("settings.push")} hint={t("settings.pushHint")}>
           {(d) => <Check checked={f.bool("defaults.push_accepted")} onChange={(v) => f.set("defaults.push_accepted", v)} disabled={d}>{t("settings.pushCheck")}</Check>}
         </Setting>
@@ -339,6 +352,32 @@ function KindRow({ form: f, kind }: { form: Form; kind: string }) {
   );
 }
 
+/**
+ * The stop conditions every queue gets besides its own: one text box each, removed with ×, one more added with the
+ * button. An empty one cannot be saved (settingsCheck.ts).
+ */
+function ConditionList({ value, onChange, disabled }: { value: string[]; onChange: (v: string[]) => void; disabled: boolean }) {
+  return (
+    <span className="block space-y-1.5">
+      {value.length === 0 && <span className="block pt-1 text-sm text-fg-3">{t("settings.stopsNone")}</span>}
+      {value.map((c, i) => (
+        <span key={i} className="flex items-start gap-1.5">
+          <textarea value={c} rows={2} disabled={disabled} placeholder={t("settings.stopPlaceholder")} aria-label={t("settings.stopNumber", { n: i + 1 })}
+            aria-invalid={!c.trim()} onChange={(e) => onChange(value.map((x, j) => (j === i ? e.target.value : x)))}
+            className={`${c.trim() ? field : field.replace("border-line-strong", "border-danger")} resize-y`} />
+          <button type="button" disabled={disabled} onClick={() => onChange(value.filter((_, j) => j !== i))} title={t("settings.stopRemove", { n: i + 1 })}
+            aria-label={t("settings.stopRemove", { n: i + 1 })} className="mt-0.5 rounded-md px-2 py-1 text-fg-3 hover:bg-surface hover:text-fg disabled:hover:bg-transparent">×</button>
+        </span>
+      ))}
+      <button type="button" disabled={disabled} onClick={() => onChange([...value, ""])}
+        className="rounded-md border border-line-strong px-2 py-1 text-xs text-fg-2 hover:text-fg disabled:hover:text-fg-2">{t("settings.stopAdd")}</button>
+    </span>
+  );
+}
+
+/** What stops a save, in a sentence for the save row. */
+const problemText = (p: SettingsProblem) => (p.kind === "emptyCondition" ? t("settings.problem.emptyCondition", { n: p.n }) : t("settings.problem.badLimit"));
+
 /** A share (0 to 1) shown and typed as a percentage. */
 function Percent({ value, onChange, disabled }: { value: string; onChange: (v: number) => void; disabled: boolean }) {
   return (
@@ -355,6 +394,7 @@ function useValues(initial: Values) {
     values, setValues,
     get: (k: string) => (values[k] === undefined || values[k] === null ? "" : String(values[k])),
     bool: (k: string) => values[k] === true,
+    list: (k: string) => conditionList(values[k]),
     set: (k: string, v: unknown) => setValues((x) => ({ ...x, [k]: v })),
   };
 }
@@ -408,8 +448,9 @@ function ProjectSettingsPage({ project, info, onChanged }: { project: ProjectFil
   });
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string }>();
+  const problem = settingsProblem(v.values, SETTING_KEYS.filter((k) => own.has(k)));
   const form: Form = {
-    get: v.get, bool: v.bool, set: v.set,
+    get: v.get, bool: v.bool, list: v.list, set: v.set,
     follows: (keys) => keys.every((k) => !own.has(k)),
     toggle: (keys, makeOwn) => {
       setOwn((x) => { const n = new Set(x); for (const k of keys) { if (makeOwn) n.add(k); else n.delete(k); } return n; });
@@ -441,8 +482,9 @@ function ProjectSettingsPage({ project, info, onChanged }: { project: ProjectFil
       </p>
       <div className="mt-4"><SettingRows form={form} project={p} /></div>
       <div className="mt-6 flex flex-wrap items-center gap-3">
-        <Button onClick={() => void save()} disabled={busy}>{t(busy ? "settings.saving" : "settings.save")}</Button>
-        {msg && <span className={`text-sm ${msg.ok ? "text-ok" : "text-danger"}`}>{msg.text}</span>}
+        <Button onClick={() => void save()} disabled={busy || !!problem}>{t(busy ? "settings.saving" : "settings.save")}</Button>
+        {problem ? <span className="text-sm text-danger">{problemText(problem)}</span>
+          : msg && <span className={`text-sm ${msg.ok ? "text-ok" : "text-danger"}`}>{msg.text}</span>}
       </div>
     </>
   );
@@ -458,6 +500,7 @@ function GlobalSettingsPage({ onChanged, server }: { onChanged: () => void; serv
 
 function GlobalForm({ global, server, onSaved, onChanged }: { global: GlobalSettings; server?: ServerInfo; onSaved: () => void; onChanged: () => void }) {
   const v = useValues(valuesOf(global));
+  const problem = settingsProblem(v.values, SETTING_KEYS);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string }>();
   const save = async () => {
@@ -471,10 +514,11 @@ function GlobalForm({ global, server, onSaved, onChanged }: { global: GlobalSett
   };
   return (
     <>
-      <SettingRows form={{ get: v.get, bool: v.bool, set: v.set }} />
+      <SettingRows form={{ get: v.get, bool: v.bool, list: v.list, set: v.set }} />
       <div className="mt-6 flex flex-wrap items-center gap-3">
-        <Button onClick={() => void save()} disabled={busy}>{t(busy ? "settings.saving" : "settings.save")}</Button>
-        {msg && <span className={`text-sm ${msg.ok ? "text-ok" : "text-danger"}`}>{msg.text}</span>}
+        <Button onClick={() => void save()} disabled={busy || !!problem}>{t(busy ? "settings.saving" : "settings.save")}</Button>
+        {problem ? <span className="text-sm text-danger">{problemText(problem)}</span>
+          : msg && <span className={`text-sm ${msg.ok ? "text-ok" : "text-danger"}`}>{msg.text}</span>}
       </div>
       <BrowserSection />
       <ServerSection info={server} onChanged={onChanged} />
