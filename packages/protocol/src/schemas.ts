@@ -649,8 +649,22 @@ export const USER_ONLY: ReadonlySet<EventType> = new Set(["review.rejected", "re
 export const GitFile = z.object({
   protocol: z.literal(1),
   base: z.object({ ref: z.string(), sha: z.string(), at: Time, branch: z.boolean().optional() }).optional(),
-  /** The user merged the queue's branch back into its base (in the worktree where the base is checked out). */
-  merged: z.object({ at: Time, into: z.string(), path: z.string(), sha: z.string(), fast_forward: z.boolean() }).optional(),
+  /**
+   * The queue's branch was merged back into its base (in the worktree where the base is checked out). `by`: Nexus by
+   * itself (defaults.merge_back) or the user's Merge back; absent on a record from before it was kept (the user's).
+   */
+  merged: z.object({ at: Time, into: z.string(), path: z.string(), sha: z.string(), fast_forward: z.boolean(), by: z.enum(["nexus", "user"]).optional() }).optional(),
+  /**
+   * Nexus merging back by itself (src/merger.ts). `waiting`: what keeps the fast-forward (or the cleanup) waiting that
+   * the user should know of, since when; told to the user and the orchestrator. `reintegrations`: how many times the
+   * integration step was run again because the base moved on, since the user's last Merge back (at most two).
+   * `reintegrating`: when the last such run was asked for, until its integration step opens.
+   */
+  merge: z.object({
+    waiting: z.object({ reason: z.string(), since: Time }).optional(),
+    reintegrations: z.number().int().min(0).optional(),
+    reintegrating: Time.optional(),
+  }).optional(),
   /** The user cleaned up: the worktree removed and its branch deleted (git branch -d). */
   cleaned: z.object({ at: Time, path: z.string(), branch: z.string() }).optional(),
   /**

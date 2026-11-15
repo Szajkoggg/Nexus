@@ -15,7 +15,7 @@ import type { UpdateNotice } from "./lifecycle.ts";
 import { describeDeployChanges, type DeployChanges } from "./deploy.ts";
 import type { PlanNotice } from "./deploy-plan.ts";
 import {
-  acceptedNoteNotice, approvalNotice, discardNotice, liftNotice, missedStartNotice, noticeText, orchestratorBriefing, pausedNotice,
+  acceptedNoteNotice, approvalNotice, discardNotice, liftNotice, mergedNotice, mergeWaitNotice, missedStartNotice, noticeText, orchestratorBriefing, pausedNotice,
   questionNotice, rejectionNotice, fixAskedNotice, reviewNotice, awayOnNotice, awayEndNotice, awayStuckNotice, planDecisionNotice, planHeldNotice, runEndNotice, stepNoteNotice, userMessage, withdrawalNotice,
 } from "./prompts.ts";
 
@@ -440,6 +440,11 @@ ${n.text}` });
       if (missed && missed.failed!.at >= since) {
         items.push({ key: `notify:missed:${q.id}:${missed.at}`, ...missedStartNotice(q, missed) });
       }
+      // Merging back (src/merger.ts): what keeps Nexus from it, once per reason; a merge back Nexus did by itself.
+      const waiting = q.git?.merge?.waiting;
+      if (waiting && waiting.since >= since) items.push({ key: `notify:mergewait:${q.id}:${waiting.since}`, ...mergeWaitNotice(q, waiting.reason) });
+      const merged = q.git?.merged;
+      if (merged?.by === "nexus" && merged.at >= since) items.push({ key: `notify:merged:${q.id}:${merged.at}`, ...mergedNotice(q, merged) });
       if (!r) continue;
       // A pause someone asked for (the user, or you with nexus run pause), reached at a step's end. Not a stop, and
       // not the pauses of a server restart or an update, whose reasons differ.

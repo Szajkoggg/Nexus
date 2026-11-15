@@ -7,7 +7,8 @@
 //   update starts (src/lifecycle.ts). Its drain holds every running queue at its step's end, so the step's queue opens
 //   no next step: the engine asks at each step boundary (Engine option `boundary`), so nothing of the next step slips
 //   in even when the turn ends before the file watcher looks. After the restart the queue goes on by itself.
-// - After a queue: when the queue is done, every step closed (src/protocol stepClosed), its closing step included.
+// - After a queue: when the queue is done, every step closed (src/protocol stepClosed), its closing step included; a
+//   queue with a worktree of its own once its work is merged back too (the fast-forward after its integration step).
 // - At a time: the update starts then, so from then on no new step starts and the running ones finish. With a
 //   deadline, a drain still waiting then goes on as with `now`: the running steps are interrupted and continue after
 //   the restart (Lifecycle.hurry). Without one it waits.
@@ -141,7 +142,16 @@ export function judgePlan(t: PlanTarget, state: ProjectState): { verdict: "in" }
     return { verdict: "waiting", reason: st.status === "review" ? `step ${t.queue}/${t.step} waits for its review` : `step ${t.queue}/${t.step} is ${st.status}` };
   }
   // A queue is done when every step is closed, its closing step included; a stopped or failed step means it is not.
-  if (q.steps.length && q.steps.every((s) => stepClosed(q, s))) return { verdict: "in" };
+  // One with a worktree of its own (an integration step) is in once its work is merged back into its base: the
+  // fast-forward comes after its last step (src/merger.ts).
+  if (q.steps.length && q.steps.every((s) => stepClosed(q, s))) {
+    const integ = q.steps.find((s) => s.integration);
+    const merged = q.git?.merged;
+    if (integ && !(merged && (!integ.finished_at || merged.at >= integ.finished_at))) {
+      return { verdict: "waiting", reason: `queue ${t.queue} is done; its work is in the deploy once it is merged back into ${q.git?.base?.ref ?? "its base"}` };
+    }
+    return { verdict: "in" };
+  }
   const bad = q.steps.find((s) => s.status === "failed" || s.status === "stopped");
   if (bad) return { verdict: "dropped", reason: `step ${t.queue}/${bad.id} ${bad.status}${bad.reason ? `: ${bad.reason}` : ""}, so queue ${t.queue} is not done` };
   if (q.status === "stopped") return { verdict: "dropped", reason: `queue ${t.queue} stopped${q.status_reason ? `: ${q.status_reason}` : ""}` };

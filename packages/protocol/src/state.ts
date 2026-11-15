@@ -28,9 +28,10 @@ export interface AttentionItem {
    * the return batch, one item for the project: the steps the orchestrator accepted provisionally that wait for the
    * user's confirmation or Fix it (`provisional`, oldest first). `plan`: the plan needs the user: the orchestrator
    * proposes to change a dependency the user set (`plan.proposal`), or a planned queue waits for one that is stopped,
-   * cancelled or does not exist (`plan.predecessor`).
+   * cancelled or does not exist (`plan.predecessor`). `merge`: Nexus cannot merge a worktree queue back by itself
+   * now (git.yaml `merge.waiting`: a dirty checkout, failed checks, the base moving on too often, and the like).
    */
-  kind: "question" | "stopped" | "approval" | "review" | "failed" | "start" | "provisional" | "plan";
+  kind: "question" | "stopped" | "approval" | "review" | "failed" | "start" | "provisional" | "plan" | "merge";
   queue?: string; step?: string; qid?: string;
   text: string; at?: string;
   /** A question's options, as the worker gave them (the waiting list shows them as buttons). */
@@ -410,6 +411,7 @@ function attentionOf(queues: QueueView[], questions: QuestionView[]): AttentionI
       const when = q.start.at ? `at ${formatClock(q.start.at, new Date())}` : after.length ? `after ${after.join(", ")}` : "by the plan";
       out.push({ kind: "start", queue: q.id, text: `Did not start ${when}: ${q.start.failed.reason}`, at: q.start.failed.at });
     }
+    if (q.git?.merge?.waiting && q.status !== "cancelled") out.push({ kind: "merge", queue: q.id, text: q.git.merge.waiting.reason, at: q.git.merge.waiting.since });
     if (q.status === "cancelled" || q.status === "done") continue;
     for (const s of q.steps) {
       // A review the orchestrator does is not the user's (the queue still shows it waiting).
@@ -759,9 +761,15 @@ function applyChange(q: QueueView, c: StatusChange): void {
       if (c.step) {
         const st = q.steps.find((x) => x.id === c.step);
         if (!st) return;
-        // Back to pending (Nexus, after a revision set its run aside): no reason shows on a step still to run.
+        // Back to pending (Nexus, after a revision set its run aside, or to integrate again): no reason shows on a step
+        // still to run, nor what its last round reported; a queue that was done has work again.
         st.status = c.to as StepStatus; st.reason = c.to === "pending" ? undefined : c.reason;
         endSegment(st, c.at);
+        if (c.to === "pending") {
+          st.review_with = undefined; st.asked_user = undefined; st.finished_at = undefined; st.summary = undefined; st.commit = undefined;
+          if (q.status === "done") { q.status = "approved"; q.status_reason = undefined; }
+          return;
+        }
       } else if (c.to === "cancelled") {
         q.status = "cancelled"; q.status_reason = c.reason;
         return;

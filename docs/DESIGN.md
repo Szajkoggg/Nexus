@@ -396,10 +396,46 @@ into individual steps when they want more detail. So the dashboard offers two le
 Nexus creates the worktree and branch for a queue itself when the queue says `worktree: auto`: a new branch from a
 named base commit, in the project's worktree directory (a project setting; default
 `<main checkout>/../<repo name>.worktrees/<queue id>`). The queue engine does this, at the orchestrator's request,
-not the orchestrator by editing files. Nexus never switches, resets or deletes a worktree another session is using;
-removing a finished queue's worktree is a user action. Merging back is a step of a queue (or the user's), not
-something Nexus does on its own. The code is `apps/server/src/worktree.ts` (`worktreeFor`, `gitBranch`), beside
-`gitinfo.ts`, which records what the queue's checkout committed.
+not the orchestrator by editing files. Nexus never switches, resets or deletes a worktree another session is using.
+A new worktree gets the project's setup command once (`defaults.worktree_setup`, `npm ci` in Nexus) before its first
+step. The code is `apps/server/src/worktree.ts` (`worktreeFor`, `gitBranch`, the setup), beside `gitinfo.ts`, which
+records what the queue's checkout committed.
+
+### Merging back
+
+Decided by the user on 2026-11-14 (docs/ideas/parallel-worktrees-and-merge-back.md): independent queues run side by
+side in worktrees of their own, and Nexus may merge them back by itself. Two settings, global with a project
+override and off for a new project, since everything then rests on the project's checks: `merge_back` (Nexus merges
+back by itself) and `resolve_conflicts` (the integration step's worker resolves a conflict).
+
+- **The base only moves forward.** A merge without textual conflicts can still break (each queue passes its checks,
+  together they fail), so the merge happens on the queue's branch, not on the base: the queue's last step, the
+  integration step, merges the current base into the branch in the worktree and runs the checks there; the base then
+  moves to that commit by a fast-forward. Nothing new can arise on the base itself, and the base never gets a merge
+  commit of Nexus's (its history does contain the integration step's merge, which was checked).
+- **The fast-forward** (`apps/server/src/merger.ts`, judged in `mergeback.ts`) waits for every step to be accepted
+  (at its review level; provisional acceptances count as `provisional_counts` says), the integration step's checks to
+  pass, and the base to still be an ancestor of the integrated commit. When the base moved on meanwhile (another queue
+  merged, the user committed), the integration step runs again, at most twice by itself; then it waits for the user,
+  whose Merge back runs it once more.
+- **It never moves files under someone.** It uses the protections of the user's merge (the base checked out somewhere,
+  not detached, not in the live worktree, no uncommitted changes to tracked files) and waits, telling the user and the
+  orchestrator, when one fails. A step at work in the base's checkout (running, or waiting for an answer) is held at its
+  end, the way a planned deploy holds a run, and goes on right after the fast-forward. Nothing moves during an update,
+  a deploy or a hand-over. Git can change what holds it without any file of the project changing (a commit in the
+  checkout), so while something waits it is looked at again every 30 seconds.
+- **One way for both.** The dashboard's Merge back uses the same judgement and the same fast-forward, under one lock
+  per queue, so the button and the server never race; `git.yaml` `merged.by` says who did it.
+- **Cleanup** comes after the merge, once every provisional acceptance of the queue is confirmed: a Fix it until then
+  runs in the worktree and goes through the integration step again. The worktree is removed with git where it can, and
+  by Node where Git for Windows cannot (paths beyond 260 characters); the branch with `git branch -d`, never `-D`.
+- **No push.** The merged base goes to the remote with the next deploy; a deploy planned after such a queue goes
+  after its fast-forward.
+- A queue from before the integration step keeps the user's old merge (which may make a merge commit).
+- Found while building: a scripted run on a development instance first stood still because a project without an
+  orchestrator section has its level-2 reviews done by the user; and a commit in the base's checkout changes nothing
+  under `.nexus`, so without the 30-second look a merge that waited for a clean checkout would wait until some other
+  change came.
 
 ### Usage limits
 

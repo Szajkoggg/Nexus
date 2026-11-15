@@ -548,6 +548,22 @@ export function missedStartNotice(q: QueueView, missed: { at?: string }): Notice
   };
 }
 
+/** Nexus cannot merge a worktree queue back by itself now (git.yaml `merge.waiting`, src/merger.ts). */
+export function mergeWaitNotice(q: QueueView, reason: string): Notice {
+  return {
+    fact: `Queue ${q.id} is not merged back yet: ${reason}`,
+    todo: "Tell the user briefly what keeps it and what they can do (the user's Merge back in the dashboard goes the same way once it is cleared). Do not touch the base's checkout yourself.",
+  };
+}
+
+/** Nexus merged a worktree queue back by itself: its base moved forward to the integrated commit. */
+export function mergedNotice(q: QueueView, m: { into: string; sha: string }): Notice {
+  return {
+    fact: `Queue ${q.id} is merged back: ${m.into} moved forward to its integrated work (${m.sha.slice(0, 7)}), by a fast-forward. Nothing was pushed.`,
+    todo: "Nothing to do unless the user asks; a queue that waited for it in the plan may start now.",
+  };
+}
+
 /** A pause someone asked for was reached at a step's end. */
 export function pausedNotice(q: QueueView, r: { step?: string }): Notice {
   return {

@@ -21,6 +21,7 @@ import { Engine } from "./engine.ts";
 import { Coordinator, readLimits, validLimit, writeLimits } from "./coordinator.ts";
 import { branchState, leftBehind, stepCommits } from "./gitinfo.ts";
 import { cleanUp, mergeBack } from "./mergeback.ts";
+import { Merger } from "./merger.ts";
 import { fixProjectRules, projectRules } from "./rulesfix.ts";
 import { decideStoppedWork, discardRecorded } from "./stopwork.ts";
 import { Orchestrator } from "./orchestrator.ts";
@@ -80,7 +81,7 @@ let standingBy = !!HANDOVER;
 
 // ---------------------------------------------------------------- projects
 
-interface Entry { id: string; root: string; store: ProjectStore; engine: Engine; orchestrator: Orchestrator; conversations: Conversations; state?: ProjectState; error?: string }
+interface Entry { id: string; root: string; store: ProjectStore; engine: Engine; orchestrator: Orchestrator; conversations: Conversations; merger: Merger; state?: ProjectState; error?: string }
 const projects = new Map<string, Entry>();
 /** Over every project's engine: one queue per checkout, and the limit on queues running at once (src/coordinator.ts). */
 const coordinator = new Coordinator();
@@ -99,12 +100,15 @@ function refreshRegistry(): void {
     // Steps done before review levels keep the meaning they had (PROTOCOL.md, "Before review levels").
     try { if (store.markReviewLevels()) console.log(`project ${p.id}: steps done from now on are reviewed by level`); }
     catch (err) { console.error(`project ${p.id}: review levels not marked: ${(err as Error).message}`); }
-    // A deploy planned after a step or queue of this project holds the run at that step's end (src/deploy-plan.ts).
-    const engine = new Engine(store, () => changed(p.id), { coordinator, boundary: (q, step, state) => planner.atBoundary(p.id, q, step, state) });
+    // A deploy planned after a step or queue of this project holds the run at that step's end (src/deploy-plan.ts); so
+    // does Nexus merging a worktree queue back into the run's checkout (src/merger.ts), until its fast-forward.
+    let merger: Merger | undefined;
+    const engine = new Engine(store, () => changed(p.id), { coordinator, boundary: (q, step, state) => planner.atBoundary(p.id, q, step, state) || (merger?.atBoundary(q, step, state) ?? false) });
+    merger = new Merger(store, { start: (q) => void engine.start(q), release: (q, why) => engine.releaseHold(q, why), busy: () => engine.draining || lifecycle.busy, poke: () => changed(p.id) });
     // Through its usual notices it is told the outcome of an update it asked for (lifecycle.notice), and what changed
     // for agents in each deploy since its session began (deploy-changes.jsonl).
     const orchestrator = new Orchestrator(store, engine, () => changed(p.id), { update: () => lifecycle.notice(), plan: () => planner.notices(), changes: readDeployChanges, push: (n) => void push(n) });
-    projects.set(p.id, { id: p.id, root: p.root, store, engine, orchestrator, conversations: new Conversations(store, orchestrator, () => changed(p.id)) });
+    projects.set(p.id, { id: p.id, root: p.root, store, engine, orchestrator, merger, conversations: new Conversations(store, orchestrator, () => changed(p.id)) });
     watchProject(p.id, store.dir);
   }
   for (const [id, e] of projects) if (!reg.projects.some((p) => p.id === id)) { coordinator.remove(e.engine); projects.delete(id); }
@@ -139,6 +143,10 @@ function changed(id: string): void {
         // Send-backs not delivered yet (the action delivers its own at once; this is the backstop).
         try { const fresh = stateOf(e); if (fresh && routeSendBacks(e.store, fresh) > 0) e.state = undefined; }
         catch (err) { console.error(`routing send-backs in ${id}: ${(err as Error).message}`); }
+        // A worktree queue merged back by Nexus (or integrated again, or waiting): before a planned deploy looks.
+        try { const fresh = stateOf(e); if (fresh) e.merger.onChange(fresh); }
+        catch (err) { console.error(`merging back in ${id}: ${(err as Error).message}`); }
+        e.state = undefined;
         // A planned deploy whose target is in starts its update (or is dropped): before the engine goes on.
         try { const fresh = stateOf(e); if (fresh) planner.check(id, fresh); }
         catch (err) { console.error(`deploy plan in ${id}: ${(err as Error).message}`); }
@@ -189,7 +197,7 @@ const lifecycle = new Lifecycle(() => [...projects.values()].map((e) => ({
   drain: (now: boolean) => { e.conversations.draining = true; return e.engine.drainForUpdate(now); },
   cancel: () => { e.conversations.draining = false; e.engine.cancelDrain(); },
   hurry: () => e.engine.hurryDrain(),
-  shutdown: () => { e.engine.shutdown(); e.orchestrator.shutdown(); e.conversations.shutdown(); },
+  shutdown: () => { e.engine.shutdown(); e.orchestrator.shutdown(); e.conversations.shutdown(); e.merger.shutdown(); },
 })), () => { for (const s of sockets) if (s.readyState === s.OPEN) s.send(JSON.stringify({ type: "server" })); }, {
   release, reacquire,
   notify: (text) => void push({ title: "Nexus: update failed", body: text.slice(0, 180), url: "/?settings", tag: "nexus-update" }),
@@ -438,7 +446,7 @@ app.post("/api/projects/:id/queues/:queue/continue", act((st, b, p) => {
 // Fix it: the user sends a step waiting for their review back to its worker, with what they want (required).
 app.post("/api/projects/:id/queues/:queue/steps/:step/send-back", act((st, b, p) => ({ message: sendBack(st, { queue: p("queue"), step: p("step"), from: "user", text: b.text }) })));
 // Merge back and clean up a finished worktree queue: the user's only (no CLI command or event leads here).
-app.post("/api/projects/:id/queues/:queue/merge", act((st, _b, p) => ({ message: mergeBack(st, p("queue")) })));
+app.post("/api/projects/:id/queues/:queue/merge", act((st, _b, p) => ({ message: mergeBack(st, p("queue"), undefined, (q) => void engineOf(st).start(q)) })));
 app.post("/api/projects/:id/queues/:queue/cleanup", act((st, _b, p) => ({ message: cleanUp(st, p("queue")) })));
 // Push again: the last failed push of an accepted step of this queue, tried again.
 // The fix of the rules files, as the user saw it (`version`): it changes the project's own files and commits nothing.
@@ -803,7 +811,7 @@ async function release(): Promise<void> {
   pending.clear();
   await Promise.all(watchers.splice(0).map((w) => w.close()));
   planner.shutdown(); // its timers write the plan file: no longer this server's
-  for (const e of projects.values()) { e.engine.shutdown(); e.orchestrator.shutdown(); e.conversations.shutdown(); }
+  for (const e of projects.values()) { e.engine.shutdown(); e.orchestrator.shutdown(); e.conversations.shutdown(); e.merger.shutdown(); }
   // An agent's exit is written to its runtime file: wait for those last writes.
   const alive = () => [...projects.values()].some((e) => e.engine.alive() || e.orchestrator.alive() || e.conversations.alive());
   for (const until = Date.now() + 10_000; alive() && Date.now() < until;) await new Promise((r) => setTimeout(r, 100));
@@ -866,7 +874,7 @@ server.on("error", (err: NodeJS.ErrnoException) => {
   process.exit(1);
 });
 
-const shutdown = () => { for (const e of projects.values()) { e.engine.shutdown(); e.orchestrator.shutdown(); e.conversations.shutdown(); } process.exit(0); };
+const shutdown = () => { for (const e of projects.values()) { e.engine.shutdown(); e.orchestrator.shutdown(); e.conversations.shutdown(); e.merger.shutdown(); } process.exit(0); };
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
 
