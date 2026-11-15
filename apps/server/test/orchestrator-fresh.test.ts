@@ -98,6 +98,15 @@ test("above its threshold, after an idle turn, it is asked once for a summary an
     assert.match(md, new RegExp(`^# Orchestrator summary\\n\\nWritten by orchestrator session ${old.id} at .*context was 90 % full\\. The fresh session ${fresh.id} started from it\\.\\n\\nfake orchestrator summary\\n\\nTopics: plan, promises\\nFiles: docs/plan\\.md\\n$`));
     assert.ok(x.store.readChat(fresh.id).entries.some((c) => c.from === "nexus" && c.text.startsWith("A fresh orchestrator session: the previous one's context was 90 % full. It starts from the summary")));
 
+    // The chat view: the fresh session's chat, and above it the old one's with its switch (the dashboard's one chat).
+    const view = x.orchestrator.view();
+    assert.equal(view.session?.id, fresh.id);
+    assert.deepEqual(view.earlier.map((b) => b.session), [old.id]);
+    assert.ok(view.earlier[0]!.chat.some((c) => c.from === "user" && c.text === "Hello"));
+    assert.equal(view.earlier[0]!.switch.fill, 0.9);
+    assert.equal(view.earlier[0]!.switch.at, fresh.created_at);
+    assert.deepEqual(view.earlier[0]!.switch.summary && { ...view.earlier[0]!.switch.summary, at: "" }, { text: "fake orchestrator summary", topics: ["plan", "promises"], files: ["docs/plan.md"], at: "" });
+
     // Its first turn ended as full: it is not switched again (another would be no emptier).
     await x.until("the seed's reply", () => x.store.readChat(fresh.id).entries.some((c) => c.from === "orchestrator"));
     x.orchestrator.say("Still there?");
@@ -135,6 +144,7 @@ test("without a summary the fresh session still starts, from nexus status, and a
     assert.ok(!seed.includes("Its summary"));
     assert.match(seed, /The project now \(nexus status\):\nproject P \(p\)/);
     assert.ok(!existsSync(x.store.orchestratorSummaryFile), "no summary.md");
+    assert.deepEqual(x.orchestrator.view().earlier.map((b) => [b.session, b.switch.fill, b.switch.summary]), [[old.id, 0.95, null]]);
     assert.ok(x.store.readChat(fresh.id).entries.some((c) => c.from === "nexus" && c.text.includes("It left no summary, so the fresh session starts from its current briefing and nexus status only.")));
   } finally { x.stop(); }
 });

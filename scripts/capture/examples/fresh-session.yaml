@@ -1,0 +1,20 @@
+# The orchestrator's chat after it went on in a fresh session (its context care, queue CC), on the demo project of
+# scripts/capture/seed-fresh-session.ts: the earlier session's chat, the line at the switch, the fresh session's.
+#   node scripts/capture.ts scripts/capture/examples/fresh-session.yaml --step <queue>/<step> --no-before
+seed: scripts/capture/seed-fresh-session.ts
+views:
+  - key: orchestrator-fresh-session@1440
+    route: "#/demo"
+    label: "Az orchestrator chatje friss session után: az elválasztó sor a váltásnál"
+  - key: orchestrator-fresh-session@390
+    route: "#/demo"
+    label: "Az orchestrator chatje friss session után, telefonon"
+    actions:
+      - click: Orchestrator
+      - wait: 600
+  - key: orchestrator-fresh-session-summary@1440
+    route: "#/demo"
+    label: "A váltás sora kinyitott összefoglalóval"
+    actions:
+      - click: Show its summary
+      - wait: 600

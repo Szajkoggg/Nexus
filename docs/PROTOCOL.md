@@ -1239,7 +1239,10 @@ from every agent session, and the others from every session but an orchestrator'
 Also `GET /api/projects/:id/sessions/:session/activity?queue=&step=&limit=`, `GET /api/projects/:id/refusals?queue=&step=`
 (the refused actions of every session of the project, oldest first; optionally only a queue's or a step's), `GET /api/projects/:id/orchestrator`
 (its session, state, chat: the newest 300 entries, each with its `line`, and `pins`: each pin's `line`, `at` and `entry`,
-wherever in the chat it is; a fresh session has none), `GET /api/digest?since=` (below), `GET /api/usage` and `GET /api/models/:runtime`: the models a runtime offers, asked from the runtime itself
+wherever in the chat it is; a fresh session has none; and `earlier`: the sessions it went on from by its context care,
+oldest first, each `{ session, created_at, chat, switch: { at, fill, summary } }`, its newest entries in what the 300
+leave over, at least 60, `fill` from 0 to 1 or null and `summary` its `{ text, topics, files, at }` or null; the
+dashboard shows them above the current chat, a "Fresh session" line at each switch), `GET /api/digest?since=` (below), `GET /api/usage` and `GET /api/models/:runtime`: the models a runtime offers, asked from the runtime itself
 (Claude Code: an `initialize` control request on its stream-json input; Codex: `model/list`), with each model's
 name, description and effort levels; the dashboard offers only these.
 

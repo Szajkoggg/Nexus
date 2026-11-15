@@ -43,6 +43,21 @@ const FIRST_FILL = "context:first";
 /** The orchestrator's context threshold when the project has none (the setting's default). */
 const DEFAULT_CONTEXT_THRESHOLD = 0.85;
 const pct = (fill: number) => Math.round(fill * 100);
+/** How many chat entries the view sends: the current session's newest, and then the earlier sessions' of its line. */
+const VIEW_ENTRIES = 300;
+/** The earlier sessions' entries the view sends at least, however long the current session's chat. */
+const EARLIER_MIN = 60;
+
+/**
+ * A session the current orchestrator session went on from (context care), as the chat view sends it: its newest
+ * entries, and its switch to the next: when, its context fill then (0 to 1), and the summary it wrote (none: null).
+ */
+interface EarlierSession {
+  session: string;
+  created_at: string;
+  chat: ReturnType<typeof chatView>["chat"];
+  switch: { at: string; fill: number | null; summary: { text: string; topics: string[]; files: string[]; at: string } | null };
+}
 
 /** A push notification for the user's devices (src/remote.ts `push`). */
 export interface UserNotice { title: string; body: string; url: string; tag: string }
@@ -85,15 +100,42 @@ export class Orchestrator {
   view() {
     const s = this.session();
     const o = this.store.readProject().orchestrator;
+    // The newest 300 entries with their lines, and the session's pins (chats.ts); a fresh session has none.
+    const own = s ? chatView(this.store, s.id, VIEW_ENTRIES) : { chat: [], pins: [] };
     return {
       session: s ?? null,
       model: s?.model ?? o?.model ?? null,
       effort: s?.effort ?? o?.effort ?? null,
       state: this.proc?.state ?? "exited",
       runtime: s ? this.store.readRuntime(s.id) ?? null : null,
-      // The newest 300 entries with their lines, and the session's pins (chats.ts); a fresh session has none.
-      ...(s ? chatView(this.store, s.id, 300) : { chat: [], pins: [] }),
+      ...own,
+      earlier: s ? this.earlier(s, own.chat.length) : [],
     };
+  }
+
+  /**
+   * The sessions the current one went on from (context care), oldest first, each with the newest entries of its chat
+   * and how it ended: the dashboard shows them above the current chat, one chat with a line at each switch. They get
+   * what the view has room for after the current session's entries, at least EARLIER_MIN of them.
+   */
+  private earlier(s: SessionFile, shown: number): EarlierSession[] {
+    let room = Math.max(EARLIER_MIN, VIEW_ENTRIES - shown);
+    const out: EarlierSession[] = [];
+    for (const x of this.lineage(s).slice(1)) {
+      const chat = room > 0 ? chatView(this.store, x.id, room).chat : [];
+      room -= chat.length;
+      out.unshift({ session: x.id, created_at: x.created_at, chat, switch: this.switchOf(x) });
+    }
+    return out;
+  }
+
+  /** How a session went on in a fresh one: when, how full its context was, and the summary it wrote (if any). */
+  private switchOf(old: SessionFile): EarlierSession["switch"] {
+    const asked = this.summaryAsked(old);
+    const written = asked && this.store.readEvents(old.id).entries.filter((e) => e.type === "context.summary" && e.at >= asked.at).at(-1);
+    const summary = written && written.type === "context.summary" ? { text: written.text, topics: written.topics, files: written.files, at: written.at } : null;
+    const next = old.continued_by ? (() => { try { return this.store.readSession(old.continued_by!); } catch { return undefined; } })() : undefined;
+    return { at: next?.created_at ?? asked?.at ?? old.created_at, fill: asked ? Number(asked.message) : null, summary };
   }
 
   /** A message from the user in the chat. */

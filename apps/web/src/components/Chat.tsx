@@ -20,6 +20,7 @@ import { rich, t } from "../i18n.ts";
 import { SentPictures, filesOf, usePictures } from "./Pictures.tsx";
 import { splitPictures, withPictures } from "../pictures.ts";
 import { usePage } from "../page.ts";
+import { fileHref } from "../hash.ts";
 
 // ---------------------------------------------------------------- the endpoints this file reads and writes
 
@@ -39,8 +40,23 @@ async function newConversation(project: string, body: { queue: string; step: str
   return made.id;
 }
 
-/** A chat view: the newest entries with their lines in chat.jsonl, and the pinned messages (apps/server/src/chats.ts). */
-interface View { session: SessionFile | null; state: "working" | "idle" | "exited"; runtime: RuntimeFile | null; chat: NumberedEntry[]; pins: PinView[]; model: string | null; effort: string | null }
+/**
+ * A chat view: the newest entries with their lines in chat.jsonl, and the pinned messages (apps/server/src/chats.ts).
+ * The orchestrator's also has the sessions it went on from (`earlier`, its context care: apps/server/src/orchestrator.ts).
+ */
+interface View { session: SessionFile | null; state: "working" | "idle" | "exited"; runtime: RuntimeFile | null; chat: NumberedEntry[]; pins: PinView[]; model: string | null; effort: string | null; earlier?: EarlierSession[] }
+
+/**
+ * A session the orchestrator's current one went on from, oldest first: its newest entries, and its switch to the next
+ * (when, its context fill then from 0 to 1, the summary it wrote or null).
+ */
+interface EarlierSession {
+  session: string; created_at: string; chat: NumberedEntry[];
+  switch: { at: string; fill: number | null; summary: { text: string; topics: string[]; files: string[]; at: string } | null };
+}
+
+/** Where the server keeps the orchestrator's latest summary for a fresh session (PROTOCOL.md, "Layout"). */
+const SUMMARY_FILE = ".nexus/orchestrator/summary.md";
 
 /** A chat's search, open or not: its button is in the chat's header, or in the desktop column's for the orchestrator. */
 interface Search { open: boolean; set: (open: boolean) => void }
@@ -75,6 +91,7 @@ function ChatColumn({ project, title, over, who, about, view, ready, error, plac
   const side = useContext(Side);
   const phone = usePhone();
   const loaded = useMemo(() => (ready ? view?.chat ?? [] : []), [ready, view?.chat]);
+  const earlier = ready ? view?.earlier ?? [] : [];
   const session = ready ? view?.session?.id : undefined;
   // What the view sent, after what is older and was loaded to reach a match or a pin (useOlder).
   const older = useOlder(project, session, loaded);
@@ -131,8 +148,17 @@ function ChatColumn({ project, title, over, who, about, view, ready, error, plac
           {/* The space at the ends is the content's, not the scroller's padding: a long reply's sticky line (Reply) then
               sticks at the very edge of the view, with no strip of text scrolling past outside it. */}
           <div className={`${measure} ${phone ? "space-y-3 py-4" : "space-y-4 py-6"}`}>
-            {ready && shown.length === 0 && <div className="mt-10 text-center text-sm text-fg-3">{empty}</div>}
+            {ready && shown.length === 0 && !earlier.length && <div className="mt-10 text-center text-sm text-fg-3">{empty}</div>}
             {!ready && error && <ReadError error={error} className="mt-10 text-center" />}
+            {/* The sessions it went on from: read-only (their pins and search are their own), a line at each switch. */}
+            {earlier.map((b, k) => (
+              <div key={b.session} className={phone ? "space-y-3" : "space-y-4"}>
+                {b.chat.filter((c) => showTools || c.kind !== "tool").map((c) => (
+                  <div key={`${b.session}:${c.line}`}><Entry c={c} flat={!phone} who={who} project={project} highlight={highlight} /></div>
+                ))}
+                <FreshSessionLine project={project} sw={b.switch} latest={k === earlier.length - 1} />
+              </div>
+            ))}
             {shown.map(({ c, i }) => (
               <div key={c.line} data-i={i} data-line={c.line} className={c.line === current ? "search-current" : undefined}>
                 <Entry c={c} flat={!phone} who={who} project={project} highlight={highlight} pinned={pinned.has(c.line)} onPin={(on) => pin(c.line, on)} />
@@ -333,7 +359,8 @@ function Entry({ c, flat, who, project, highlight, pinned, onPin }: {
   c: ChatEntry; flat?: boolean; who: string; project: string;
   /** A search's query, its matches marked. */
   highlight: string;
-  pinned: boolean; onPin: (pinned: boolean) => void;
+  /** Its pin; none for an entry of an earlier session (read-only). */
+  pinned?: boolean; onPin?: (pinned: boolean) => void;
 }) {
   if (c.kind === "tool") {
     return <div className="truncate pl-1 font-mono text-[11px] text-fg-3" title={c.text}>{flat ? "$" : "›"} {c.text}</div>;
@@ -346,7 +373,7 @@ function Entry({ c, flat, who, project, highlight, pinned, onPin }: {
         {text && <div className={`whitespace-pre-wrap rounded-2xl rounded-br-sm bg-user-bubble px-4 py-2 text-sm text-fg ${flat ? "max-w-[min(85%,37.5rem)]" : "max-w-[85%]"}`}><RefText text={text} highlight={highlight} /></div>}
         {pictures.length > 0 && <div className={flat ? "max-w-[min(85%,37.5rem)]" : "max-w-[85%]"}><SentPictures project={project} paths={pictures} /></div>}
         <div className="mt-0.5 flex items-center gap-0.5 text-[11px] text-fg-3">
-          <PinButton pinned={pinned} onPin={onPin} hoverOnly={flat} />
+          {onPin && <PinButton pinned={!!pinned} onPin={onPin} hoverOnly={flat} />}
           <CopyButton text={messageSource(c)} label={t("chat.copy")} className={flat ? "opacity-0 group-hover/msg:opacity-100" : ""} />
           <Clock at={c.at} />
         </div>
@@ -372,17 +399,55 @@ function Entry({ c, flat, who, project, highlight, pinned, onPin }: {
 }
 
 /**
+ * The line in the orchestrator's chat where it went on in a fresh session (its context care): how full the old
+ * session's context was, and the summary it wrote, shown on demand; at the latest switch also the summary's file
+ * (.nexus/orchestrator/summary.md, which holds the latest one), opened in the file viewer.
+ */
+function FreshSessionLine({ project, sw, latest }: { project: string; sw: EarlierSession["switch"]; latest: boolean }) {
+  const [open, setOpen] = useState(false);
+  const pct = sw.fill === null ? undefined : Math.round(sw.fill * 100);
+  const link = "text-accent underline decoration-dotted underline-offset-2 hover:decoration-solid";
+  return (
+    <div role="separator" aria-label={t("chat.freshSession")} className="py-1 text-xs text-fg-3">
+      <div className="flex items-center gap-3">
+        <span className="h-px flex-1 bg-line-strong" />
+        <span className="text-center font-semibold text-fg-2">{t("chat.freshSession")}</span>
+        <span className="h-px flex-1 bg-line-strong" />
+      </div>
+      <div className="mt-1 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-center">
+        <span>{pct === undefined ? t("chat.freshStarted") : t("chat.freshFull", { pct })} · <Clock at={sw.at} /></span>
+        {sw.summary
+          ? <button onClick={() => setOpen(!open)} aria-expanded={open} className={`${link} max-lg:min-h-11`}>{open ? t("chat.freshHideSummary") : t("chat.freshShowSummary")}</button>
+          : <span>{t("chat.freshNoSummary")}</span>}
+        {sw.summary && latest && (
+          <a href={fileHref(project, SUMMARY_FILE)} title={SUMMARY_FILE} className={`${link} max-lg:inline-flex max-lg:min-h-11 max-lg:items-center`}
+            onClick={(e) => { if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey) return; e.preventDefault(); nav.file(SUMMARY_FILE); }}>{t("chat.freshFile")}</a>
+        )}
+      </div>
+      {open && sw.summary && (
+        <div className="mt-2 rounded-lg border border-line bg-surface-2 px-3 py-2 text-left text-sm text-fg">
+          {/* Its lines as written (a summary is often one item a line): each line break kept. */}
+          <ChatMarkdown>{sw.summary.text.replace(/\n/g, "  \n")}</ChatMarkdown>
+          {sw.summary.topics.length > 0 && <div className="mt-1 text-xs text-fg-3">{t("chat.freshTopics", { topics: sw.summary.topics.join(", ") })}</div>}
+          {sw.summary.files.length > 0 && <div className="text-xs text-fg-3">{t("chat.freshFiles", { files: sw.summary.files.join(", ") })}</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
  * A reply of the agent. A long one (messageTools.ts) has its Contents and "Jump to the questions" on its line: on a
  * desktop the line over it, which stays at the top while the reply is read; on the phone the line under the bubble,
  * which stays at the bottom.
  */
-function Reply({ c, flat, who, highlight, pinned, onPin }: { c: ChatEntry; flat?: boolean; who: string; highlight: string; pinned: boolean; onPin: (pinned: boolean) => void }) {
+function Reply({ c, flat, who, highlight, pinned, onPin }: { c: ChatEntry; flat?: boolean; who: string; highlight: string; pinned?: boolean; onPin?: (pinned: boolean) => void }) {
   const message = useRef<HTMLDivElement>(null);
   const tools = useMemo(() => replyTools(c.text), [c.text]);
   const long = tools.contents.length > 0 || tools.questions !== undefined;
   const copy = <>
     <CopyButton text={messageSource(c)} label={t("chat.copy")} className={flat ? "opacity-0 group-hover/msg:opacity-100" : ""} />
-    <PinButton pinned={pinned} onPin={onPin} hoverOnly={flat} />
+    {onPin && <PinButton pinned={!!pinned} onPin={onPin} hoverOnly={flat} />}
   </>;
   if (flat) {
     return (

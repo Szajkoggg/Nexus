@@ -104,7 +104,7 @@ const SETTING_KEYS = [
   "runtimes.default", "runtimes.claude.model", "runtimes.claude.effort", "runtimes.claude.permission_mode",
   "runtimes.codex.model", "runtimes.codex.effort", "runtimes.codex.sandbox", "runtimes.codex.approval_policy", "runtimes.codex.approvals_reviewer",
   "conversations.runtime", "conversations.model", "conversations.effort", "conversations.web",
-  "orchestrator.runtime", "orchestrator.model", "orchestrator.effort", "orchestrator.notify",
+  "orchestrator.runtime", "orchestrator.model", "orchestrator.effort", "orchestrator.notify", "orchestrator.context_threshold",
   "languages.reader",
   ...TAG_KINDS.flatMap((k) => [`kinds.${k}.runtime`, `kinds.${k}.model`, `kinds.${k}.effort`, `kinds.${k}.fallback`]),
 ];
@@ -263,6 +263,9 @@ function SettingRows({ form, project }: { form: Form; project?: { values: Record
         </Setting>
         <Setting form={f} keys={["orchestrator.notify"]} label={t("settings.tellIt")}>
           {(d) => <Check checked={f.bool("orchestrator.notify")} onChange={(v) => f.set("orchestrator.notify", v)} disabled={d}>{t("settings.tellItCheck")}</Check>}
+        </Setting>
+        <Setting form={f} keys={["orchestrator.context_threshold"]} label={t("settings.orchestratorFresh")} hint={t("settings.orchestratorFreshHint")}>
+          {(d) => <Percent value={f.get("orchestrator.context_threshold")} onChange={(v) => f.set("orchestrator.context_threshold", v)} disabled={d} />}
         </Setting>
       </Section>
 

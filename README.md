@@ -83,6 +83,15 @@ closes. The pin beside a message's copy icon pins it to the top of the chat (on 
 message's pin stays, filled): the two most recently pinned show there, the others behind "N more pinned"; a click goes
 to the message, ✕ unpins it. Pins belong to the conversation: a new orchestrator conversation starts without them.
 
+**A fresh orchestrator session.** The orchestrator's long chat is not compacted. When its context is fuller than its
+threshold (85 % by default: "Fresh session at" in the settings' Orchestrator section) at the end of a turn, Nexus asks
+it for a summary of the decisions, open items, the plan and what it promised you, and goes on in a fresh session that
+starts from that summary, its current briefing and the project's state. You need do nothing: a message you send
+meanwhile waits for the fresh session. The chat stays one chat: the earlier session's messages stay above a **Fresh
+session** line, which says how full the old context was; **Show its summary** opens what it wrote, and **summary.md**
+opens the file it is kept in (`.nexus/orchestrator/summary.md`, the latest one). Search and pins cover the current
+session.
+
 **Stop.** While the orchestrator or a thinking partner is in a turn, **Stop** shows above the message box. It
 interrupts the turn at once: the chat says "Stopped.", nothing more of that turn appears, and the agent waits. What
 you sent during the turn goes in with your next message.
@@ -233,7 +242,7 @@ commits what is consistent and leaves no uncommitted changes behind.
 
 The settings panel (the gear icon) has two tabs. **Global** holds the settings every project follows: the default
 runtime; for Claude Code workers the model, effort and permission mode; for Codex workers the model, effort, sandbox
-and what happens when an agent needs to leave the sandbox; the orchestrator's model, effort and notices; the thinking
+and what happens when an agent needs to leave the sandbox; the orchestrator's model, effort, notices and the context fill at which it goes on in a fresh session; the thinking
 partners' runtime, model and effort; the reader's language; and the defaults, among them the **stop conditions** every
 queue gets besides its own (a list: add, edit, remove; an empty one cannot be saved) and the **send-backs before you**
 (how many times the orchestrator may send a step back to its worker before the step goes to you; 0 or more). It
