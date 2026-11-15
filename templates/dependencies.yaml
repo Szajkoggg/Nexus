@@ -1,0 +1,60 @@
+# Dependency updates: survey what is outdated; in fix_small mode also apply the patch-level updates whose checks pass.
+template:
+  id: dependencies
+  title: Dependency updates
+  description: Survey outdated dependencies (minor and patch) and report them; fix_small applies the patch-level ones whose tests pass.
+maintenance: survey
+params:
+  - name: outdated_command
+    description: "lists the outdated dependencies (Node: npm outdated; .NET and Unity: dotnet list package --outdated, or the Package Manager's list for Unity)"
+  - name: test_command
+    description: "runs the project's tests (Node: npm test; .NET: dotnet test; Unity: the Test Runner in batch mode)"
+title: "Maintenance: dependency updates"
+description: |
+  A survey of the outdated dependencies ({{outdated_command}}), minor and patch updates, each with what the tests say
+  ({{test_command}}). It reports the findings, which become a queue the user approves. In survey mode nothing is
+  changed or committed; in fix_small mode only the patch-level updates whose checks pass are applied (a minor update
+  stays a finding). Major updates are named in the report, never applied.
+  The report ends with a section "Recommended additions" (see the first step).
+coding: true
+origin: maintenance
+stop_conditions:
+  - Surveying would need a change to the project (an install, an update, a commit) in survey mode; report it as a finding instead.
+  - An update needs the network in a way the project's checks do not already (a registry login, a new source); report it instead.
+  - A decision that belongs to the user comes up; ask with nexus ask, with a recommendation.
+  - A file to commit has changes this queue did not make; ask with nexus ask, never commit them.
+steps:
+  - id: "{{id}}1"
+    title: "Survey: outdated dependencies"
+    goal: |
+      Run {{outdated_command}} and list each outdated dependency: its name, current and available version, the kind
+      of update (patch, minor, major), and what a minor or patch update needs (a changelog note that matters, a
+      breaking change risk). To see what the tests say about an update, try it in a temporary copy of the project or
+      with the update undone afterwards ({{test_command}}); the working tree stays as it was. Each finding: what, where,
+      how much it matters, and whether its fix is small (a patch update whose tests pass) or not. Or say there were
+      none. Change nothing, commit nothing.
+      The report ends with "Recommended additions" (not counted among the findings): what the project's stack
+      supports that is not set up here (a tool for outdated or vulnerable dependencies, a parameter left to a
+      default, a cheaper command), each with its reason.
+    acceptance:
+      - Each finding with its weight and whether the fix is small, or that there were none.
+      - The report ends with "Recommended additions", each with its reason (or says there are none).
+      - The working tree as it was (no commit, no leftover files).
+    review:
+      level: 2
+    kind: research
+    activities: [dependency]
+    size: S
+  - id: "{{id}}2"
+    maintenance: fix_small
+    title: "Apply the patch-level updates"
+    goal: |
+      Apply only the patch-level updates of {{id}}1 whose tests pass ({{test_command}}), each in its own commit with
+      the checks passing. A minor update, a major update, or one whose tests fail stays a finding in the report.
+    acceptance:
+      - Each patch update committed with the checks passing; the others listed as findings.
+    review:
+      level: 2
+    kind: code
+    activities: [dependency]
+    size: S

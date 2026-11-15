@@ -338,13 +338,25 @@ once you accepted it. A renamed tag reads as its new name everywhere, so what wa
 together.
 
 **Queue templates.** "New queue from template" at the top of a project's queues (the Queues tab on a phone) lists
-the templates: Nexus's own (bug fix, UI change with pictures, spike, refactor, maintenance), yours for every project
+the templates: Nexus's own (bug fix, UI change with pictures, spike, refactor, maintenance and the six below), yours for every project
 (in `<NEXUS_HOME>/templates/`, `%APPDATA%\Nexus\templates\` by default) and the project's (`nexus-templates/` in its
 repository, versioned with it); a project's template replaces one of yours with the same id, and yours replaces
 Nexus's. Pick one, fill in what it asks (a maintenance template also asks its mode) and add anything else; "Send to
 the orchestrator" sends it as your message, and the orchestrator drafts the queue and fills in the rest. You approve
 it as any queue. A template is a queue's YAML with a `template:` header, `params:` and `{{name}}` placeholders
 (docs/PROTOCOL.md, "Queue templates"); `nexus template list` shows the ones in effect.
+
+**Maintenance templates.** Six templates survey a project and report; none depends on a stack, the commands are
+parameters with Node and .NET/Unity examples. `dependencies` lists the outdated dependencies (minor and patch; in
+fix_small mode it applies the patch-level ones whose tests pass). `security-audit` runs the project's audit and only
+reports. `dead-code` finds unused code and lint findings (fix_small removes what is surely unused).
+`test-health` runs the suite several times for flaky tests, times it for the slow ones and looks for redundant
+tests (duplicates found with a clone finder, `clone_command`, which may be left empty, then compared one by one;
+every candidate with the places of both tests, the reasoning and a degree of certainty); it never changes or deletes
+a test, in any mode. `performance` measures with the project's command and compares with earlier values.
+`docs-freshness` compares the documents with the code (fix_small fixes typos only). Each report ends with
+"Recommended additions": what the project's stack supports but is not set up, for the orchestrator to offer you.
+Nexus's own instances, filled in for this repository, are in `nexus-templates/`.
 
 **Recurring queues.** The orchestrator can set a template to recur, at a time (every day, a weekday or a day of the
 month, the PC's local time) or after every N queues of the project are done; it proposes one in the chat first. Each

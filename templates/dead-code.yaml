@@ -1,0 +1,60 @@
+# Dead code and lint: survey the unused code and the lint findings; in fix_small mode drop what is surely unused.
+template:
+  id: dead-code
+  title: Dead code and lint
+  description: Survey unused exports, files and dependencies and the lint findings; fix_small removes only what is surely unused.
+maintenance: survey
+params:
+  - name: dead_code_command
+    description: "finds the unused code (Node: npx knip; .NET: dotnet build with the IDE0051, IDE0052 and CS8019 analyzers on, or ReSharper's inspections; Unity: the same on the scripts)"
+  - name: lint_command
+    description: "the project's linter (Node: npm run lint; .NET and Unity: dotnet format --verify-no-changes)"
+  - name: test_command
+    description: "runs the project's tests (Node: npm test; .NET: dotnet test; Unity: the Test Runner in batch mode)"
+title: "Maintenance: dead code and lint"
+description: |
+  A survey of the unused code ({{dead_code_command}}) and the lint findings ({{lint_command}}). It reports the
+  findings, which become a queue the user approves. In survey mode nothing is changed or committed; in fix_small mode
+  only the exports and declarations that are surely unused are removed. A finding that is not sure stays a finding.
+  The report ends with a section "Recommended additions" (see the first step).
+coding: true
+origin: maintenance
+stop_conditions:
+  - Surveying would need a change to the project (an install, a fix, a commit) in survey mode; report it as a finding instead.
+  - A decision that belongs to the user comes up; ask with nexus ask, with a recommendation.
+  - A file to commit has changes this queue did not make; ask with nexus ask, never commit them.
+steps:
+  - id: "{{id}}1"
+    title: "Survey: unused code and lint findings"
+    goal: |
+      Run {{dead_code_command}} and {{lint_command}}. List each finding: what it is, where, how sure it is that the
+      code is unused (sure: nothing refers to it, not by name, reflection, configuration or a file loaded only by its
+      path; likely; doubtful), how much it matters and whether the fix is small. A thing the tool cannot see (an entry
+      point, a plugin, a serialised name) is a doubtful finding, with what to check. Or say there were none. Change
+      nothing, commit nothing.
+      The report ends with "Recommended additions" (not counted among the findings): what the stack supports that is
+      not set up (a stricter analyzer rule, a dead-code tool the project lacks), each with its reason.
+    acceptance:
+      - Each finding with its certainty and weight, or that there were none.
+      - The report ends with "Recommended additions", each with its reason (or says there are none).
+      - The working tree as it was (no commit, no leftover files).
+    review:
+      level: 2
+    kind: research
+    activities: [cleanup]
+    size: S
+  - id: "{{id}}2"
+    maintenance: fix_small
+    title: "Remove what is surely unused"
+    goal: |
+      Fix only the findings of {{id}}1 that are sure to be unused (an export or declaration nothing refers to): drop
+      the export keyword where the thing is used only inside its file, remove it where nothing uses it. Each fix in
+      its own commit, with {{lint_command}} and {{test_command}} passing. The likely and doubtful ones, and every lint
+      finding that is not a plain unused thing, stay findings for the report.
+    acceptance:
+      - Each sure removal committed with the checks passing; the others listed as findings.
+    review:
+      level: 2
+    kind: code
+    activities: [cleanup]
+    size: S

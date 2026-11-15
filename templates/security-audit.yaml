@@ -1,0 +1,40 @@
+# Security audit: run the project's audit and report what it finds. It only reports, in every mode.
+template:
+  id: security-audit
+  title: Security audit
+  description: Run the project's dependency audit and report the vulnerabilities, with what each needs; it never fixes anything itself.
+maintenance: survey
+params:
+  - name: audit_command
+    description: "the project's audit (Node: npm audit; .NET: dotnet list package --vulnerable --include-transitive; Unity: the packages' advisories by hand)"
+title: "Maintenance: security audit"
+description: |
+  A security audit with {{audit_command}}. It reports each vulnerability found and what fixing it needs; the fixes
+  become a queue the user approves. Nothing is fixed here, in any mode (an update that fixes a vulnerability is a
+  finding, not a small fix).
+  The report ends with a section "Recommended additions" (see the step).
+coding: false
+origin: maintenance
+stop_conditions:
+  - The audit would change the project (a fix mode, an install, a commit); report it as a finding instead.
+  - A decision that belongs to the user comes up; ask with nexus ask, with a recommendation.
+  - A file to commit has changes this queue did not make; ask with nexus ask, never commit them.
+steps:
+  - id: "{{id}}1"
+    title: "Audit"
+    goal: |
+      Run {{audit_command}}. For each vulnerability: the package and version, its severity, whether it is a direct or
+      a transitive dependency, whether the project's use reaches the vulnerable code (as far as can be told), the
+      fix that exists (an update to which version, or none) and whether that fix is a breaking change. Or say there
+      were none. Change nothing, commit nothing, and apply no automatic fix of the audit tool.
+      The report ends with "Recommended additions" (not counted among the findings): what the project's stack
+      supports that is not set up (a second audit source, secret scanning, a lockfile check), each with its reason.
+    acceptance:
+      - Each vulnerability with its severity, reach and the fix, or that there were none.
+      - The report ends with "Recommended additions", each with its reason (or says there are none).
+      - The working tree as it was (no commit, no leftover files).
+    review:
+      level: 2
+    kind: research
+    activities: [dependency]
+    size: S

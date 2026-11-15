@@ -1,0 +1,63 @@
+# Nexus's instance of the shipped docs-freshness template (templates/docs-freshness.yaml): the parameters' defaults are this repository's commands.
+template:
+  id: nexus-docs-freshness
+  title: Documentation freshness
+  description: Nexus's own instance of the docs-freshness template, filled in for this repository. Compare the documents
+    with the code and report where they differ; fix_small fixes only typos in the documents, never code.
+maintenance: survey
+params:
+  - name: docs
+    description: the documents to check against the code (for example README.md and the docs folder; a protocol or design document)
+    default: README.md, AGENTS.md, docs/DESIGN.md and docs/PROTOCOL.md
+  - name: code
+    description: the code the documents describe (for example src/, or the project's API and command line)
+    default: packages/ and apps/ (the CLI's commands, the schemas, the HTTP API, the briefings)
+title: "Maintenance: documentation freshness"
+description: |
+  A survey of whether {{docs}} are true to {{code}}. It reports the differences, which become a queue the user
+  approves. In survey mode nothing is changed or committed; in fix_small mode only the typos in the documents are
+  fixed (never the code, and never a difference of meaning).
+  The report ends with a section "Recommended additions" (see the first step).
+coding: true
+origin: maintenance
+stop_conditions:
+  - Surveying would need a change to the project (a fix, a commit) in survey mode; report it as a finding instead.
+  - A decision that belongs to the user comes up (which of the two, the document or the code, is right); ask with nexus
+    ask, with a recommendation.
+  - A file to commit has changes this queue did not make; ask with nexus ask, never commit them.
+steps:
+  - id: "{{id}}1"
+    title: "Survey: documents against the code"
+    goal: |
+      Read {{docs}} against {{code}}. List each place where a document says something the code no longer does (a
+      renamed command or option, a changed format, a removed feature, an example that no longer works, a path that
+      does not exist) or leaves out something the code now does: the document and the place, what the code does
+      instead, how much it matters and whether the fix is small (a typo) or not. Or say there were none. Change
+      nothing, commit nothing.
+      The report ends with "Recommended additions" (not counted among the findings): what the project could add to
+      keep documents true (a link checker, a docs build, a test of the examples), each with its reason.
+    acceptance:
+      - Each difference with its weight and whether the fix is small, or that there were none.
+      - The report ends with "Recommended additions", each with its reason (or says there are none).
+      - The working tree as it was (no commit, no leftover files).
+    review:
+      level: 2
+    kind: research
+    activities:
+      - cleanup
+    size: S
+  - id: "{{id}}2"
+    maintenance: fix_small
+    title: Fix the typos in the documents
+    goal: |
+      Fix only the typos among the findings of {{id}}1: spelling and wording slips in {{docs}} that change no
+      meaning. Each fix in its own commit, with the checks passing. Code is not touched; every difference of meaning
+      stays a finding for the report.
+    acceptance:
+      - Each typo fix committed with the checks passing; the others listed as findings.
+    review:
+      level: 2
+    kind: docs
+    activities:
+      - cleanup
+    size: S

@@ -1,0 +1,92 @@
+# The health of the test suite: flaky, slow and redundant tests. It only reports, in every mode; it deletes no test.
+template:
+  id: test-health
+  title: Test suite health
+  description: Find flaky, slow and redundant tests and report them with evidence; it never changes a test, in any mode.
+maintenance: survey
+params:
+  - name: test_command
+    description: "runs the whole test suite (Node: npm test; .NET: dotnet test; Unity: the Test Runner in batch mode)"
+  - name: runs
+    description: how many times the whole suite is run to look for flaky tests
+    default: "3"
+  - name: clone_command
+    description: "finds duplicated code in the test code (Node: npx jscpd on the test folders; .NET: PMD CPD); left empty, the worker reads the tests to find candidates"
+    default: ""
+title: "Maintenance: test suite health"
+description: |
+  A report on the health of the test suite ({{test_command}}), in three parts: flaky tests, slow tests and redundant
+  tests. Nothing is changed or deleted, in any mode (also in fix_small): deleting or merging tests is proposed in the
+  report, and the proposals become a queue the user approves.
+  The report ends with a section "Recommended additions" (see the last step).
+coding: false
+origin: maintenance
+stop_conditions:
+  - Looking would need a change to a test or to the project (a fix, a commit); report it as a finding instead.
+  - A decision that belongs to the user comes up; ask with nexus ask, with a recommendation.
+  - A file to commit has changes this queue did not make; ask with nexus ask, never commit them.
+steps:
+  - id: "{{id}}1"
+    title: "Flaky tests"
+    goal: |
+      Run the whole suite {{runs}} times ({{test_command}}), each run in full, and note for every test whether it
+      always ended the same way. A test that passed in some runs and failed in others is flaky: name it, the runs it
+      failed in, and its failure message each time; if the message points to a cause (time, order, a shared resource,
+      the machine's load), say so. A test that failed every time is a failing test, not a flaky one: report it as such.
+      Change nothing, commit nothing. This is the first part of the report ("Flaky tests"); with none found it says so
+      and that {{runs}} runs were made.
+    acceptance:
+      - "The report's part Flaky tests: each flaky test with its runs and messages and a likely cause, or that none were found in the runs made."
+      - The working tree as it was.
+    review:
+      level: 2
+    kind: research
+    activities: [cleanup]
+    size: S
+  - id: "{{id}}2"
+    title: "Slow tests"
+    goal: |
+      From one run of the whole suite ({{test_command}}; the test runner's own timing, or a reporter that prints the
+      time of each test) take the time of each test: list the 10 slowest with their times and the total time. Say what
+      about each of the slowest could make it faster, if it can be told (a wait, a real timer, a setup repeated for
+      every test), without changing it. If the project records metrics, the total time is a value for a `check:`
+      metric; record it only if `nexus metric list` names one. Change nothing, commit nothing. This is the second
+      part of the report ("Slow tests").
+    acceptance:
+      - "The report's part Slow tests: the 10 slowest tests with their times, the total time, and what could speed up each."
+      - The working tree as it was.
+    review:
+      level: 2
+    kind: research
+    activities: [cleanup]
+    size: S
+  - id: "{{id}}3"
+    title: "Redundant tests and the report"
+    goal: |
+      Find redundant tests in two steps. (1) Candidates: the clone command is "{{clone_command}}" (empty: there is none). Run it on the test code and take the clones it
+      reports as candidates; if that command is empty, read the tests and look for candidates yourself (the same
+      thing called with the same input and the same expectation, in different files or tests). (2) Compare each
+      candidate: what does each of the two tests call, with which input, and what does it expect? Redundant means
+      the same behaviour checked with the same input and expectation. A slower test that faster tests seem to cover
+      completely is a second, weaker kind of candidate: give it only as suspect, never as certain. Do not use the
+      coverage of the code as evidence: two tests reaching the same lines does not mean they check the same thing.
+      Where two tests differ only in their data, the proposal is to merge them into one parameterised test, not to
+      delete one. Where the git history shows which queue or commit brought each test, name it (different pieces of
+      work often test the same behaviour again).
+      The third part of the report ("Redundant tests"): every candidate with the places of the two tests (file and
+      test name), the reasoning (what both call, with which input, what both expect), and the degree of certainty:
+      certain, likely or suspect. Then put the three parts together as the report: "Flaky tests", "Slow tests" and
+      "Redundant tests". Change no test, delete nothing, commit nothing, in any mode.
+      The report ends with "Recommended additions" (not counted among the findings): what the stack supports that is
+      not set up here (a clone finder when the clone command is empty, a mutation testing tool such as Stryker or
+      Stryker.NET to judge whether a faster test covers a slower one, a reporter that prints test times), each with
+      its reason.
+    acceptance:
+      - "The report's part Redundant tests: every candidate with the places of both tests, the reasoning and the certainty (certain, likely, suspect); for tests that differ only in data, a proposal to merge them into a parameterised test."
+      - The report has the three parts, Flaky tests, Slow tests and Redundant tests, and ends with "Recommended additions", each with its reason (or says there are none).
+      - The working tree as it was (no test changed or deleted, no commit).
+    review:
+      level: 2
+    kind: research
+    activities: [cleanup]
+    size: M

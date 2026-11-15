@@ -1,0 +1,47 @@
+# Nexus's instance of the shipped performance template (templates/performance.yaml): the parameters' defaults are this repository's commands.
+template:
+  id: nexus-performance
+  title: Performance measurement
+  description: Nexus's own instance of the performance template, filled in for this repository. Measure the project's
+    performance with its own command and report where it got worse; it never fixes anything itself.
+maintenance: survey
+params:
+  - name: perf_command
+    description: "measures what matters (Node: a benchmark script, or npm run build with its time; .NET: dotnet run -c
+      Release on a BenchmarkDotNet project; Unity: a batch-mode build or a play-mode test that records frame times)"
+    default: npm run build -w @nexus/web, timed
+  - name: compare_with
+    description: where the earlier values are kept, to compare with
+    default: the earlier reports of this template and the project's recorded metrics
+title: "Maintenance: performance measurement"
+description: |
+  A measurement with {{perf_command}}, compared with {{compare_with}}. It reports each value and where it got worse
+  or better; fixing is for a queue the user approves. Nothing is changed or committed, in any mode.
+  The report ends with a section "Recommended additions" (see the step).
+coding: false
+origin: maintenance
+stop_conditions:
+  - Measuring would change the project (an install, a fix, a commit); report it as a finding instead.
+  - A decision that belongs to the user comes up; ask with nexus ask, with a recommendation.
+  - A file to commit has changes this queue did not make; ask with nexus ask, never commit them.
+steps:
+  - id: "{{id}}1"
+    title: Measure
+    goal: |
+      Run {{perf_command}} more than once (the machine's load varies; say how many runs and the spread) and note each
+      value with its unit. Compare with {{compare_with}}: where a value is clearly worse than before, say by how
+      much, and when it began if the history shows it. A value with no earlier one is a first measurement, not a
+      finding. If `nexus metric list` names a metric for a value, record it with `nexus metric record`. Change
+      nothing, commit nothing.
+      The report ends with "Recommended additions" (not counted among the findings): what the stack supports that is
+      not set up (a benchmark tool, a profiler, a size budget), each with its reason.
+    acceptance:
+      - Each measured value with its unit, runs and spread, and each worsening with its size; or that nothing got worse.
+      - The report ends with "Recommended additions", each with its reason (or says there are none).
+      - The working tree as it was (no commit, no leftover files).
+    review:
+      level: 2
+    kind: research
+    activities:
+      - cleanup
+    size: S
