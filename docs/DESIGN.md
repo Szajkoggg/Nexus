@@ -1688,6 +1688,22 @@ alone). Two changes, neither touching what is tested:
 The whole suite went from 277 s to 189 s; its slowest files now are accepted.test.ts (git pushes to bare repositories)
 and approval-wait.test.ts, each about 170 s under the full load.
 
+**The rest held too (queue MX).** Eight more files (chains, context-care, coordinator, global-settings, languages,
+orchestrator, provisional, rollback) let a fake step work `WORK_MS` while they acted; they hold it now, and `WORK_MS`
+is gone. Three things the move needed:
+
+- `release(step)` lets only that step go (the fake reads `<FAKE_RELEASE>-<step>`): a test that needs one queue's step
+  to end while another's stays at work (the limit across projects), or one step after another to end (a pause, a
+  stop, an update's drain), a step re-run after a restart still held.
+- "summaryslow" works as "slow" does (held, or FAKE_SLOW_MS), instead of a timer of its own.
+- A test that checked that nothing started (a chain that must not fire) slept 400 to 800 ms first. It now has the
+  engine look at the files once, synchronously (the test's `tick`, as the server's watcher does): the coordinator's
+  pass starts what is due within `onChange`, so what did not start then never would by itself. A message sent while
+  a step works is handed over the same way (languages.test.ts), where it used to arrive only at the step's end.
+
+Measured back to back on a quiet machine, the eight files went from 606 s to 503 s together; the suite (240 s against
+246 s) is set by its slowest files, which this did not touch.
+
 ## Findings from the flaky tests (queue FU4)
 
 Four server tests failed now and then on a busy machine. `scripts/load-tests.mjs` brings such failures out (12

@@ -223,8 +223,10 @@ commits what is consistent and leaves no uncommitted changes behind.
 The settings panel (the gear icon) has two tabs. **Global** holds the settings every project follows: the default
 runtime; for Claude Code workers the model, effort and permission mode; for Codex workers the model, effort, sandbox
 and what happens when an agent needs to leave the sandbox; the orchestrator's model, effort and notices; the thinking
-partners' runtime, model and effort; the reader's language; and the defaults. It also has what belongs to Nexus as a whole: the server
-section (updates, pushing on deploy, queues at once), this browser's theme and editor, and on the phone this device's
+partners' runtime, model and effort; the reader's language; and the defaults, among them the **stop conditions** every
+queue gets besides its own (a list: add, edit, remove; an empty one cannot be saved) and the **send-backs before you**
+(how many times the orchestrator may send a step back to its worker before the step goes to you; 0 or more). It
+also has what belongs to Nexus as a whole: the server section (updates, pushing on deploy, queues at once), this browser's theme and editor, and on the phone this device's
 notifications and remote access. **The project's tab** shows the same settings, each with a switch: **Global** (the
 global value, greyed and marked "global") or **Own** (a value for this project only); switching back to Global makes
 it follow the global value again. Only the project's tab has what is the project's alone: its name, its extra allowed

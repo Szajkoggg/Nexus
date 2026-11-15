@@ -12,7 +12,7 @@ import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { Conversations } from "../src/conversations.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
-import { WAIT_MS, until as waitUntil, LONGER, WORK_MS } from "./wait.ts";
+import { WAIT_MS, until as waitUntil, LONGER, holdWork } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -25,7 +25,8 @@ function setup(steps: Step[]) {
   process.env.NEXUS_HOME = join(root, "home");
   process.env.FAKE_LOG = join(root, "fake.log");
   process.env.FAKE_ARGS = join(root, "args.log");
-  process.env.FAKE_SLOW_MS = WORK_MS;
+  // A "slow" step works until the test changed the settings it is about (release).
+  const work = holdWork();
   const store = ProjectStore.init(root, { id: "p", name: "P", root });
   store.writeQueue({
     protocol: 1, id: "Q", title: "Queue", revision: 1, status: "proposed", stop_conditions: [], checks: [], approvals: [], withdrawals: [], history: [],
@@ -36,8 +37,8 @@ function setup(steps: Step[]) {
   const queue = () => loadProjectState(store).queues.find((q) => q.id === "Q")!;
   const args = () => (existsSync(process.env.FAKE_ARGS!) ? readFileSync(process.env.FAKE_ARGS!, "utf8").trim().split("\n").map((l) => JSON.parse(l) as Record<string, any>) : []);
   const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms, () => `; run: ${JSON.stringify(queue().run)}; steps: ${queue().steps.map((s) => `${s.id}=${s.status}`).join(" ")}`);
-  const done = () => { engine.shutdown(); delete process.env.FAKE_ARGS; delete process.env.FAKE_SLOW_MS; };
-  return { store, engine, queue, args, until, done };
+  const done = () => { engine.shutdown(); delete process.env.FAKE_ARGS; work.done(); };
+  return { store, engine, queue, args, until, release: work.release, done };
 }
 
 /** Changes the global settings, as the server's global settings page will. */
@@ -58,6 +59,7 @@ test("claude: a changed global model reaches a running queue that took the defau
     assert.deepEqual(x.queue().run!.from_defaults, ["model", "effort"], "the start chose the runtime only");
     await x.until("Q1 to run", () => x.queue().steps[0]!.status === "running", LONGER.step);
     setGlobal((g) => { g.runtimes.claude.model = "fake-new"; });
+    x.release();
     await x.until("the run to finish", () => x.queue().run?.state === "finished", LONGER.run);
     const starts = x.args().filter((a) => a.argv).map(claudeStart);
     assert.deepEqual(starts.map((s) => [s.resume, s.model]), [[false, "fake-old"], [true, "fake-new"]], "the session resumed on the new model for Q2");
@@ -73,6 +75,7 @@ test("codex: a changed global model reaches the next step's turn on the same thr
     x.engine.start("Q", { runtime: "codex" });
     await x.until("Q1 to run", () => x.queue().steps[0]!.status === "running", LONGER.step);
     setGlobal((g) => { g.runtimes.codex.model = "codex-new"; });
+    x.release();
     await x.until("the run to finish", () => x.queue().run?.state === "finished", LONGER.run);
     assert.equal(x.args().filter((a) => a.method === "thread/start" || a.method === "thread/resume").length, 1, "one thread, never restarted");
     assert.deepEqual(x.args().filter((a) => a.method === "turn/start").map((a) => a.model), [null, "codex-new"]);
@@ -86,6 +89,7 @@ test("a run started with an explicit model keeps it when the global model change
     assert.deepEqual(x.queue().run!.from_defaults, ["effort"]);
     await x.until("Q1 to run", () => x.queue().steps[0]!.status === "running", LONGER.step);
     setGlobal((g) => { g.runtimes.claude.model = "fake-new"; });
+    x.release();
     await x.until("the run to finish", () => x.queue().run?.state === "finished", LONGER.run);
     assert.deepEqual(x.args().filter((a) => a.argv).map(claudeStart).map((s) => s.model), ["opus"], "one process, on opus throughout");
   } finally { x.done(); }
@@ -98,6 +102,7 @@ test("a project's own value wins over the global one, also at the next step", as
     x.engine.start("Q", { runtime: "claude" });
     await x.until("Q1 to run", () => x.queue().steps[0]!.status === "running", LONGER.step);
     setGlobal((g) => { g.runtimes.claude.model = "fake-new"; });
+    x.release();
     await x.until("the run to finish", () => x.queue().run?.state === "finished", LONGER.run);
     assert.deepEqual(x.args().filter((a) => a.argv).map(claudeStart).map((s) => s.model), ["project-own"]);
   } finally { x.done(); }
@@ -111,6 +116,7 @@ test("a changed default that makes a step's effort invalid halts the step with t
     assert.deepEqual(x.queue().run!.from_defaults, ["runtime", "model", "effort"]);
     await x.until("Q1 to run", () => x.queue().steps[0]!.status === "running", LONGER.step);
     setGlobal((g) => { g.runtimes.default = "claude"; });
+    x.release();
     await x.until("the halt", () => x.queue().run?.state === "halted", LONGER.run);
     assert.match(x.queue().run!.reason!, /^step Q2: Claude Code takes effort low, medium, high, xhigh, max/);
     assert.equal(x.queue().steps[1]!.status, "pending", "the step did not open");
@@ -123,6 +129,7 @@ test("other changed settings reach a worker at its next step: a new permission m
     x.engine.start("Q", { runtime: "claude", model: "opus" });
     await x.until("Q1 to run", () => x.queue().steps[0]!.status === "running", LONGER.step);
     setGlobal((g) => { g.runtimes.claude.permission_mode = "auto"; });
+    x.release();
     await x.until("the run to finish", () => x.queue().run?.state === "finished", LONGER.run);
     const starts = x.args().filter((a) => a.argv).map(claudeStart);
     assert.deepEqual(starts.map((s) => [s.resume, s.permission, s.model]), [[false, "acceptEdits", "opus"], [true, "auto", "opus"]]);

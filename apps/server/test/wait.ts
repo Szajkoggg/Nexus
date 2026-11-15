@@ -48,22 +48,20 @@ export const LONGER = {
 } as const;
 
 /**
- * How long a fake step works ("FAKE: slow", FAKE_SLOW_MS) when the test acts while it runs (sends a message, revises
- * the queue, pauses or drains): long enough that a late look on a busy machine still finds it at work, where 300 ms
- * to 2.5 s were sometimes over before the test could act (queue TS1).
+ * Holds the fake runtimes' "slow" steps (and "summaryslow") at work until `release()` (FAKE_RELEASE, read by
+ * fake-behaviour.ts): for a test that acts while a step works (sends a message, pauses, drains, revises) and then lets
+ * it end. No fixed time to wait out, and a late look still finds the step at work (queue TS2). `release(step)` lets
+ * only that step go (every run of it), for a test that needs one step to end while another stays at work (queue MX).
+ * Call before the step's process starts; `done()` clears it for the next test.
+ *
+ * The fixed WORK_MS (half of WAIT_MS) it replaced is gone (queue MX): every test that acted while a step worked for it
+ * holds the step now. A test that sets FAKE_SLOW_MS itself wants a step that lasts a time of its own (a usage window's
+ * reset, an update's deadline, a turn's recorded length).
  */
-export const WORK_MS = String(WAIT_MS / 2);
-
-/**
- * Holds the fake runtimes' "slow" steps at work until `release()` (FAKE_RELEASE, read by fake-behaviour.ts): for a
- * test that acts while a step works (sends a message, pauses, drains, revises) and then lets it end. Faster than a
- * fixed WORK_MS, and a late look still finds the step at work (queue TS2). Call before the step's process starts;
- * `done()` clears it for the next test.
- */
-export function holdWork(): { release: () => void; done: () => void } {
+export function holdWork(): { release: (step?: string) => void; done: () => void } {
   const file = join(mkdtempSync(join(tmpdir(), "nexus-hold-")), "release");
   process.env.FAKE_RELEASE = file;
-  return { release: () => writeFileSync(file, ""), done: () => { delete process.env.FAKE_RELEASE; } };
+  return { release: (step) => writeFileSync(step ? `${file}-${step}` : file, ""), done: () => { delete process.env.FAKE_RELEASE; } };
 }
 
 export const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));

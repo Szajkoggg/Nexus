@@ -18,7 +18,7 @@ import { Orchestrator } from "../src/orchestrator.ts";
 import { Conversations } from "../src/conversations.ts";
 import { WORKER_BRIEFING } from "../src/prompts.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
-import { WAIT_MS, until as waitUntil, LONGER, WORK_MS } from "./wait.ts";
+import { WAIT_MS, until as waitUntil, LONGER, holdWork } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -45,7 +45,8 @@ function base() {
 
 function worker(steps: (Partial<StepDef> & { fake: string })[]) {
   const b = base();
-  process.env.FAKE_SLOW_MS = WORK_MS;
+  // A "slow" step works until the test made its change (release).
+  const work = holdWork();
   b.store.writeQueue({
     protocol: 1, id: "Q", title: "Queue", revision: 1, status: "proposed", stop_conditions: [], checks: [], approvals: [], withdrawals: [], history: [],
     steps: steps.map(({ fake, ...s }, i) => ({ id: `Q${i + 1}`, title: `Step ${i + 1}`, goal: `FAKE: ${fake}`, acceptance: [], ...s })),
@@ -53,8 +54,8 @@ function worker(steps: (Partial<StepDef> & { fake: string })[]) {
   approveQueue(b.store, "Q");
   const engine: Engine = new Engine(b.store, () => { routeAnswers(b.store); acceptReviews(b.store); engine.onChange(loadProjectState(b.store)); }, { retryBaseMs: 30, usageMarginMs: 100 });
   const queue = () => loadProjectState(b.store).queues.find((q) => q.id === "Q")!;
-  const done = () => { engine.shutdown(); delete process.env.FAKE_SLOW_MS; };
-  return { ...b, engine, queue, done };
+  const done = () => { engine.shutdown(); work.done(); };
+  return { ...b, engine, queue, release: work.release, done };
 }
 
 const DANISH = "write what is meant for the user in Danish";
@@ -78,8 +79,10 @@ test("claude worker: the briefing, the step's opening and an inbox message carry
     // A change while Q1 runs: the next inbox message carries it at once; the next step's opening and briefing too.
     updateSettings(x.store, { languages: { reader: "fr" } });
     sendMessage(x.store, x.queue().run!.session, "A remark.", { queue: "Q", step: "Q1" });
+    x.engine.onChange(loadProjectState(x.store)); // as the server's file watcher: delivered while the step works
     await until("the message", () => x.heard().some((t) => t.includes("A remark.")));
     const message = x.heard().find((t) => t.includes("A remark."))!;
+    x.release();
     assert.ok(message.endsWith(`${FRENCH}: step summaries, questions, progress lines, stop and failure reasons, labels of review material. Work in German: files, code, comments, commit messages, context summaries (nexus context). Ids, commands and YAML keys stay as they are.`), message);
 
     await until("the run to finish", () => x.queue().run?.state === "finished", LONGER.run);
@@ -99,6 +102,7 @@ test("the global reader's language reaches a project that follows it; following 
     await until("Q1 to run", () => x.queue().steps[0]!.status === "running", LONGER.step);
     setGlobal((g) => { g.languages.reader = "fr"; });
     updateSettings(x.store, { follow: ["languages.reader"] });
+    x.release();
     await until("the run to finish", () => x.queue().run?.state === "finished", LONGER.run);
     const q2 = x.heard().find((t) => t.includes("step Q2 (2 of 2)"))!;
     assert.ok(q2.includes(FRENCH), "follows the global French");
@@ -125,6 +129,9 @@ test("with the defaults the worker gets today's texts: no language line", async 
     x.engine.start("Q", { runtime: "claude" });
     await until("Q1 to run", () => x.queue().steps[0]!.status === "running", LONGER.step);
     sendMessage(x.store, x.queue().run!.session, "A remark.", { queue: "Q", step: "Q1" });
+    x.engine.onChange(loadProjectState(x.store)); // as the server's file watcher: delivered while the step works
+    await until("the message", () => x.heard().some((t) => t.includes("A remark.")));
+    x.release();
     await until("the run to finish", () => x.queue().run?.state === "finished", LONGER.run);
     assert.deepEqual(x.args().filter((a) => a.argv).map((a) => claudeStart(a).briefing), [WORKER_BRIEFING]);
     assert.ok(x.heard().length >= 3 && x.heard().every((t) => !t.includes("Languages (")), "no opening or message names languages");

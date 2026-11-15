@@ -14,7 +14,7 @@ import { Engine } from "../src/engine.ts";
 import { isAlive } from "../src/handover.ts";
 import { Lifecycle } from "../src/lifecycle.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
-import { until, LONGER, WORK_MS } from "./wait.ts";
+import { until, LONGER, holdWork } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -41,11 +41,14 @@ function repo(base: string, live: boolean) {
   return { root, git, a, short: a.slice(0, 7) };
 }
 
-/** A project with queue Q running (first step slow), a Lifecycle around its engine, and everything recorded. */
+/**
+ * A project with queue Q running (its first step held at work until the test calls `release`, once the update began),
+ * a Lifecycle around its engine, and everything recorded.
+ */
 async function setup(opts: { live: boolean; successor: "crash" | "never"; timeoutMs?: number }) {
   const base = mkdtempSync(join(tmpdir(), "nexus-rollback-"));
   process.env.NEXUS_HOME = join(base, "home");
-  process.env.FAKE_SLOW_MS = WORK_MS;
+  const work = holdWork();
   process.env.FAKE_SUCCESSOR = opts.successor;
   process.env.FAKE_LIFE_MS = "60000";
   const r = repo(base, opts.live);
@@ -74,10 +77,10 @@ async function setup(opts: { live: boolean; successor: "crash" | "never"; timeou
     exit: () => { exited = true; },
   });
   const queue = () => loadProjectState(store).queues.find((q) => q.id === "Q")!;
-  const stop = () => { engine.shutdown(); for (const k of ["FAKE_SLOW_MS", "FAKE_SUCCESSOR", "FAKE_LIFE_MS"]) delete process.env[k]; };
+  const stop = () => { engine.shutdown(); work.done(); for (const k of ["FAKE_SUCCESSOR", "FAKE_LIFE_MS"]) delete process.env[k]; };
   engine.start("Q");
   await until("the first step to run", () => queue().steps[0]!.status === "running", LONGER.step);
-  return { r, store, lifecycle, queue, npm, notified, exited: () => exited, stop };
+  return { r, store, lifecycle, queue, npm, notified, exited: () => exited, release: () => work.release(), stop };
 }
 
 const failed = (l: Lifecycle) => () => l.status.phase === "failed";
@@ -87,6 +90,7 @@ test("a successor that crashes at start: the live worktree goes back, is reinsta
   const t = await setup({ live: true, successor: "crash" });
   try {
     t.lifecycle.start({ ref: "next" });
+    t.release(); // the drain holds the queue at its step's end
     assert.deepEqual(t.lifecycle.status.held, ["p/Q"]);
     await until("the rollback", failed(t.lifecycle), LONGER.processes, show(t.lifecycle));
     const s = t.lifecycle.status;
@@ -110,6 +114,7 @@ test("a successor that never signals is stopped after the time limit, and the up
   const t = await setup({ live: true, successor: "never", timeoutMs: 2500 });
   try {
     t.lifecycle.start({ ref: "next" });
+    t.release(); // the drain holds the queue at its step's end
     await until("the rollback", failed(t.lifecycle), LONGER.processes, show(t.lifecycle));
     const s = t.lifecycle.status;
     assert.match(s.error!, new RegExp(`no ready signal within 3 s; rolled back to ${t.r.short}$`));
@@ -125,6 +130,7 @@ test("in a development checkout nothing is moved: the server simply goes on", as
   const t = await setup({ live: false, successor: "crash" });
   try {
     t.lifecycle.start({ ref: "next" });
+    t.release(); // the drain holds the queue at its step's end
     await until("the rollback", failed(t.lifecycle), LONGER.processes, show(t.lifecycle));
     assert.match(t.lifecycle.status.error!, /this server goes on \(a development checkout is not moved\)$/);
     assert.equal(t.r.git("rev-parse", "--abbrev-ref", "HEAD"), "dev", "still on its branch");
