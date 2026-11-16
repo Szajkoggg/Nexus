@@ -140,7 +140,7 @@ test("the processes whose end ends a run: its parent, then the shells and npm ab
  * `gitBash`), with a test file that starts a process of its own and waits long: resolves once the run is at work and
  * its watchdog knows what it watches, with the pids.
  */
-async function longRun(file: string, gitBash?: string): Promise<{ starter: ChildProcess; watched: number[]; pids: { wrapper: number; runner: number; testFile: number; grandchild: number } }> {
+async function longRun(file: string, gitBash?: string): Promise<{ starter: ChildProcess; watched: number[]; end: () => void; pids: { wrapper: number; runner: number; testFile: number; grandchild: number } }> {
   const dir = mkdtempSync(join(tmpdir(), "nexus-test-lock-"));
   const pidsFile = join(dir, "pids.json");
   const watchedFile = join(dir, "watched.json");
@@ -149,8 +149,10 @@ async function longRun(file: string, gitBash?: string): Promise<{ starter: Child
     "import { test } from 'node:test';",
     "import { spawn } from 'node:child_process';",
     "import { writeFileSync } from 'node:fs';",
+    // Everything ends by itself after two minutes, also when a failing test leaves it.
     "test('long', async () => {",
-    "  const g = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });",
+    "  const g = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 120000)'], { stdio: 'ignore' });",
+    "  g.unref();",
     `  writeFileSync(${JSON.stringify(pidsFile)}, JSON.stringify({ testFile: process.pid, runner: process.ppid, grandchild: g.pid }));`,
     "  await new Promise((r) => setTimeout(r, 120000));",
     "});",
@@ -167,43 +169,55 @@ async function longRun(file: string, gitBash?: string): Promise<{ starter: Child
   const starter = gitBash ? spawn(gitBash, ["-c", `bash -c '${line}; true'; true`], { env, stdio: "ignore", windowsHide: true })
     : process.platform === "win32" ? spawn("cmd.exe", ["/d", "/s", "/c", `"${line}"`], { env, stdio: "ignore", windowsHide: true, windowsVerbatimArguments: true })
     : spawn("sh", ["-c", `${line}; true`], { env, stdio: "ignore" });
+  const read = <T>(f: string): T | undefined => { try { return JSON.parse(readFileSync(f, "utf8")) as T; } catch { return undefined; } };
+  const known = () => ({ ...read<{ runner: number; testFile: number; grandchild: number }>(pidsFile), wrapper: read<{ pid: number }>(file)?.pid });
+  /** Ends what is left of the run, by the pids it recorded (all the test's own): for a test that fails half way. */
+  const end = () => {
+    for (const pid of [starter.pid, ...Object.values(known())]) {
+      if (!pid || !alive(pid)) continue;
+      if (process.platform === "win32") spawnSync("taskkill", ["/T", "/F", "/PID", String(pid)], { stdio: "ignore", windowsHide: true });
+      else try { process.kill(pid, "SIGKILL"); } catch { /* gone */ }
+    }
+  };
   for (const until = Date.now() + 60_000; !(existsSync(pidsFile) && existsSync(file) && existsSync(watchedFile));) {
-    if (Date.now() > until) { starter.kill("SIGKILL"); throw new Error("the run did not start"); }
+    if (Date.now() > until) { end(); throw new Error("the run did not start"); }
     await new Promise((r) => setTimeout(r, 50));
   }
-  const pids = { ...(JSON.parse(readFileSync(pidsFile, "utf8")) as { runner: number; testFile: number; grandchild: number }), wrapper: (JSON.parse(readFileSync(file, "utf8")) as { pid: number }).pid };
-  return { starter, pids, watched: JSON.parse(readFileSync(watchedFile, "utf8")) as number[] };
+  const pids = known() as { runner: number; testFile: number; grandchild: number; wrapper: number };
+  return { starter, pids, end, watched: read<number[]>(watchedFile) ?? [] };
 }
 
 /** Git Bash's bash.exe on Windows (the launcher in its bin folder, as a worker's commands run), if it is installed. */
 const gitBash = process.platform === "win32" ? [join(process.env.ProgramFiles ?? "C:\\Program Files", "Git", "bin", "bash.exe")].find(existsSync) : undefined;
 
-/** Waits until none of `pids` is alive and `file` is gone (at most 30 s); then ends what is left (all the test's own). */
+/** Waits until none of `pids` is alive and `file` is gone (at most 30 s). */
 async function allGone(pids: Record<string, number>, file: string): Promise<void> {
   const left = () => Object.entries(pids).filter(([, pid]) => alive(pid)).map(([name]) => name);
   for (const until = Date.now() + 30_000; (left().length || existsSync(file)) && Date.now() < until;) await new Promise((r) => setTimeout(r, 100));
-  const still = left();
-  for (const pid of Object.values(pids)) if (alive(pid)) { try { process.kill(pid, "SIGKILL"); } catch { /* gone */ } }
-  assert.deepEqual(still, [], "every process of the run ended");
+  assert.deepEqual(left(), [], "every process of the run ended");
   assert.ok(!existsSync(file), "the lock is removed");
 }
 
 test("a run ends with its starter: its runner, its test files and what they started exit, and the lock goes", async () => {
   const file = lockFile();
-  const { starter, pids } = await longRun(file);
-  assert.deepEqual(Object.values(pids).map(alive), [true, true, true, true], "the run is at work");
-  starter.kill("SIGKILL"); // the starter ends without a word (a background command's time limit, a killed shell)
-  await allGone({ ...pids, starter: starter.pid! }, file);
+  const { starter, pids, end } = await longRun(file);
+  try {
+    assert.deepEqual(Object.values(pids).map(alive), [true, true, true, true], "the run is at work");
+    starter.kill("SIGKILL"); // the starter ends without a word (a background command's time limit, a killed shell)
+    await allGone({ ...pids, starter: starter.pid! }, file);
+  } finally { end(); }
 });
 
 test("a run started by Git Bash ends with it too, its MSYS processes followed to the bash that started it", { skip: !gitBash && "Windows with Git Bash only" }, async () => {
   const file = lockFile();
-  const { starter, pids, watched } = await longRun(file, gitBash);
-  // Git Bash forks: the shell that runs the command is not the Windows parent of what it started (that one is gone),
-  // only in MSYS's own process table. The watchdog follows it there, up to the launcher this test started.
-  assert.ok(watched.includes(starter.pid!), `the launcher is watched: ${JSON.stringify(watched)}, launcher ${starter.pid}`);
-  starter.kill("SIGKILL");
-  await allGone({ ...pids, starter: starter.pid! }, file);
+  const { starter, pids, watched, end } = await longRun(file, gitBash);
+  try {
+    // Git Bash forks: the shell that runs the command is not the Windows parent of what it started (that one is gone),
+    // only in MSYS's own process table. The watchdog follows it there, up to the launcher this test started.
+    assert.ok(watched.includes(starter.pid!), `the launcher is watched: ${JSON.stringify(watched)}, launcher ${starter.pid}`);
+    starter.kill("SIGKILL");
+    await allGone({ ...pids, starter: starter.pid! }, file);
+  } finally { end(); }
 });
 
 test("MSYS's process table: each process's Windows pid to its parent's", () => {
@@ -221,11 +235,11 @@ test("MSYS's process table: each process's Windows pid to its parent's", () => {
 
 test("a run whose wrapper is killed by itself ends too, and its lock goes", async () => {
   const file = lockFile();
-  const { starter, pids } = await longRun(file);
+  const { pids, end } = await longRun(file);
   try {
     process.kill(pids.wrapper, "SIGKILL");
     await allGone(pids, file);
-  } finally { starter.kill("SIGKILL"); }
+  } finally { end(); }
 });
 
 test("after the longest wait the run goes without the lock, and says so", async () => {
