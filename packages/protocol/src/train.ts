@@ -25,6 +25,13 @@ export interface TrainPlace { base: string; position: number; after?: string }
 /** The base a queue goes back into ("" when unknown: such queues make a train of their own). */
 export const trainBase = (q: Pick<QueueView, "git">): string => q.git?.base?.ref ?? "";
 
+/**
+ * A run on its way to its integration step: at work (running, pausing), or held at a step's end to go on by itself
+ * (paused with resume_after_restart: held for the merge train, or for a merge back).
+ */
+export const runOnTrack = (r: QueueView["run"]): boolean =>
+  !!r && (r.state === "running" || r.state === "pausing" || (r.state === "paused" && !!r.resume_after_restart));
+
 /** When a queue got to its integration step: the latest end of its other steps. */
 function readyAt(q: TrainQueue, integ: QueueView["steps"][number]): string {
   return q.steps.filter((s) => s !== integ).map((s) => s.finished_at ?? "").reduce((a, b) => (b > a ? b : a), "");
@@ -45,9 +52,7 @@ function trainState(project: TrainProject, q: TrainQueue): { kind: "active" | "l
     if (merge?.reintegrating) return { kind: "active", key: since };
     // Every other step closed and its run going (or held there): waiting for its turn.
     if (!q.steps.every((s) => s === integ || stepClosed(q, s))) return undefined;
-    const r = q.run;
-    const going = !!r && (r.state === "running" || r.state === "pausing" || (r.state === "paused" && !!r.resume_after_restart));
-    return going ? { kind: "line", key: readyAt(q, integ) } : undefined;
+    return runOnTrack(q.run) ? { kind: "line", key: readyAt(q, integ) } : undefined;
   }
   if (integ.status !== "done") return undefined;
   // Integrated, not merged back yet: it waits for its fast-forward (holding the base), waits on something the user

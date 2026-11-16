@@ -35,7 +35,7 @@
 // does. Never with --force.
 import { existsSync } from "node:fs";
 import {
-  hasOwnWorktree, mayIntegrate, mayMergeBack, normPath, now, pendingProvisional, stepClosed, runGoing, trainBase, trainPlace, trainText, trainsOf,
+  hasOwnWorktree, mayIntegrate, mayMergeBack, normPath, now, pendingProvisional, stepClosed, runGoing, runOnTrack, trainBase, trainPlace, trainText, trainsOf,
   type ProjectState, type ProjectStore, type QueueView, type Train,
 } from "@nexus/protocol";
 import { checkoutOf, patchGit } from "./gitinfo.ts";
@@ -169,13 +169,11 @@ export class Merger {
   private releaseTrain(state: ProjectState): void {
     for (const id of [...this.trainHeld]) {
       const q = state.queues.find((x) => x.id === id);
-      const r = q?.run;
-      const integ = q?.steps.find((s) => s.integration);
-      if (!q || !r || integ?.status !== "pending" || (r.state !== "running" && r.state !== "pausing" && !(r.state === "paused" && r.resume_after_restart))) {
+      if (!q || q.steps.find((s) => s.integration)?.status !== "pending" || !runOnTrack(q.run)) {
         this.trainHeld.delete(id);
         continue;
       }
-      if (r.state !== "paused" || !mayIntegrate(this.trains.get(trainBase(q)), id)) continue;
+      if (q.run!.state !== "paused" || !mayIntegrate(this.trains.get(trainBase(q)), id)) continue;
       this.trainHeld.delete(id);
       try { this.o.release(id, "its turn to integrate"); } catch { /* it was resumed or paused meanwhile */ }
     }
