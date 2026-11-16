@@ -311,9 +311,16 @@ or cancelled, B waits and it appears under "Waiting for you". What you set in th
 builds around it and may only propose a change, which appears under "Waiting for you" too.
 To change the order, use "After…" on a queue in the plan (or drag it onto another; onto "Next" to put it first): the
 queue then waits for the one you chose, and the queues that waited for it wait for what it waited for before, as when
-you move an item in a list. An approved queue outside the plan is listed under it, with "After…" to put it in. The
-orchestrator's proposal shows on the queue and in "Waiting for you" with Accept and Decline; ↩ on a dependency you set
-("after A · set by you") hands it back to the orchestrator.
+you move an item in a list. Dragging a queue onto another splits the target in two: "After B instead of A" (the move,
+naming every dependency it replaces) and "Also after B (and A)" (one more dependency, the others kept); drop it on the
+half you mean. Click a line (on the phone, tap an "after" chip) to see that dependency: who set it and when, "Remove
+'after A'" (only that dependency goes; if it was the queue's last one, the details say the queue then starts as soon
+as it may) and, for one you set, "Let the orchestrator decide". A dependency you remove is your decision: the
+orchestrator may propose to put it back, not do it. After a move, an "also after" or a removal, a bar under the plan
+says what changed, with Undo for 10 seconds; a queue the change lets start waits until then. An approved queue
+outside the plan is listed under it, with "After…" to put it in. The orchestrator's proposal shows on the queue and in
+"Waiting for you" with Accept and Decline; ↩ on a dependency you set ("after A · set by you") hands it back to the
+orchestrator.
 Queues run side by side only in worktrees of their own (the orchestrator gives independent work one, and runs queues
 that touch the same code one after another): never two in one checkout, and no more at once, across all
 projects, than "Queues running at once" in the settings panel's Nexus section (Global tab) (2 by default; a queue waiting for your
@@ -561,7 +568,8 @@ node scripts/capture.ts views.yaml --no-before                                  
 The view list names a seed script that writes the test projects (`scripts/capture/seed-demo.ts`, a demo project
 with a step waiting for review) and the views: a key such as `viewer-before-after@390` (the width comes from it),
 a route such as `#/demo/UI/UI1`, a label, and a few setup actions (click a button by its text or an element by a CSS
-selector, type, press a key, scroll a heading to the top by its text, wait). A view's `script` (a `.js` file) runs in the page before the dashboard does, for
+selector (an SVG shape too), type, press a key, scroll a heading to the top by its text, drag one element over others
+(HTML5 drag and drop, `drag: {from, to, drop?}`; without `drop` the picture shows the drag in progress), wait). A view's `script` (a `.js` file) runs in the page before the dashboard does, for
 that view only: `scripts/capture/fake-speech.js` stands in for the browser's speech recognition, so a picture can show
 the microphone listening without a microphone. The format is in `nexus help review` and `scripts/capture/views.ts`. The tool builds this checkout's dashboard,
 seeds a development instance (port 4318 and up, its own data in a temporary folder, the fake runtimes, and

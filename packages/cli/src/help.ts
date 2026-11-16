@@ -91,7 +91,8 @@ THE CAPTURE TOOL
         route: "#/demo/UI/UI1"
         label: "The viewer, phone"
         actions:                                # click: <text> | click: {selector}, type: {text, into?},
-          - click: { selector: "img[alt='Waiting tab']" }   # press: <key>, wait: <ms>
+          - click: { selector: "img[alt='Waiting tab']" }   # press: <key>, scroll: <heading text>, wait: <ms>,
+                                                # drag: {from: <css>, to: <css> or a list, drop?: true}
   It writes the pictures to <temp>/nexus-review/<queue>/<step>/ (--out names another folder; never one in the working
   tree) and prints the nexus review add commands for what it took, befores first, and what it could not take, with why.
 `,

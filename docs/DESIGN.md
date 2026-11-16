@@ -2313,6 +2313,17 @@ measures their heights, and places them and the lines from the drawing. Decision
   limited to `section[aria-label='The plan']`: 0 lines through boxes, 0 overlaps and no text cut short in the plan at
   1440 and 390 px (5 crossings at 1440, the mockup 3). Two cut texts outside the plan are older: the rail's "Running in
   Nexus" title at 1440 and the sessions table at 390.
+- A line is clicked through a wider transparent band along it (12 px, `pointer-events: stroke`), drawn after the
+  lines; the measured lines are the drawn ones (`svg path[data-edge]`), since the bands would count as crossings.
+  The line's details open under the card it comes from, and the plan grows to hold them (the plan scrolls sideways,
+  so anything below its box would be cut). On the phone an "after" chip opens them under the card, scrolled into view
+  clear of the bottom bar. Dragging is the desktop's.
+- The drop target splits only while a queue is dragged over it, into "instead" (a move, every dependency it replaces
+  named, done ones too) and "also" (offered only to a queue with a place of its own that does not wait for the
+  target already). A drop elsewhere on the card is a move, as before.
+- The capture tool drags as the plan view takes it: HTML5 drag events dispatched in the page with one DataTransfer
+  (`scripts/capture/drag.ts`), since a headless window cannot be driven to a native drag; React's handlers take them
+  as a user's. Its click dispatches the event where an element has no `click()` (an SVG shape).
 
 ## Open questions
 

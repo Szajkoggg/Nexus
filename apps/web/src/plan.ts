@@ -2,7 +2,7 @@
 // from each queue to those it waits for; on every queue what it waits for. Pure and unit tested; components/Plan.tsx
 // draws it (lanes on a desktop, an ordered list on the phone).
 import { runGoing } from "@nexus/protocol/status-rules";
-import { formatClock, type Key, type Params } from "./i18n.ts";
+import { formatClock, t, type Key, type Params } from "./i18n.ts";
 import { openPlan, queueStatus, type HonestStatus, type QueueLike } from "./queueStatus.ts";
 
 /** What the plan view reads of a queue (a QueueView fits). */
@@ -12,7 +12,7 @@ export interface PlanQueue extends Omit<QueueLike, "plan" | "start"> {
   plan?: {
     used: boolean;
     created_at?: string;
-    after: readonly { queue: string; by: "user" | "orchestrator"; done: boolean; cause?: "stopped" | "cancelled" | "missing" }[];
+    after: readonly { queue: string; by: "user" | "orchestrator"; done: boolean; at?: string; cause?: "stopped" | "cancelled" | "missing" }[];
     /** The orchestrator's proposal to change dependencies the user set, until the user decides. */
     proposal?: { after: readonly string[]; reason: string };
   };
@@ -27,8 +27,8 @@ export interface PlanQueue extends Omit<QueueLike, "plan" | "start"> {
  */
 export interface Why { key: Key; params?: Params; tone: "approval" | "blocked" | "time" | "usage" | "checkout" | "limit" | "failed" | "ready" }
 
-/** A queue it waits for, as the card names it: who set it ("set by you"), done or not. */
-interface Before { queue: string; by: "user" | "orchestrator"; done: boolean }
+/** A queue it waits for, as the card names it: who set it ("set by you") and when, done or not. */
+interface Before { queue: string; by: "user" | "orchestrator"; done: boolean; at?: string }
 
 export interface PlanNode {
   id: string;
@@ -48,6 +48,8 @@ export interface PlanNode {
   proposal?: { after: readonly string[]; reason: string };
   /** The user may move it in the plan: not in progress now. */
   movable: boolean;
+  /** It has a place in the plan of its own (plan.yaml, not only a schedule): a predecessor can be added to it. */
+  placed: boolean;
 }
 
 export interface PlanLayout {
@@ -75,7 +77,7 @@ export const isPlanned = (q: Pick<PlanQueue, "plan" | "start" | "status">): bool
 /** The queues it waits for (an unused plan; a start.yaml from before the plan names one). */
 function beforeOf(q: PlanQueue): Before[] {
   const plan = openPlan(q);
-  if (plan) return plan.after.map((e) => ({ queue: e.queue, by: e.by, done: e.done }));
+  if (plan) return plan.after.map((e) => ({ queue: e.queue, by: e.by, done: e.done, ...(e.at ? { at: e.at } : {}) }));
   return q.start?.after ? [{ queue: q.start.after, by: "user", done: false }] : [];
 }
 
@@ -147,7 +149,7 @@ export function planLayout(all: readonly PlanQueue[], now = new Date()): PlanLay
     nodes.set(id, {
       id, title: q.title, column: column.get(id)!, now: n, planned: isPlanned(q),
       status: queueStatus(q as QueueLike, now), why: n ? [] : whyOf(q, now), before: n ? [] : beforeOf(q),
-      ...(proposal ? { proposal } : {}), movable: !n,
+      ...(proposal ? { proposal } : {}), movable: !n, placed: !n && !!openPlan(q),
     });
   }
   const width = Math.max(0, ...[...nodes.values()].map((n) => n.column)) + 1;
@@ -349,3 +351,61 @@ export function estimateWords(e: { steps: number; ms?: number } | undefined): { 
   const hours = minutes / 60;
   return { key: "plan.estimate.hours", params: { hours: hours < 9.75 ? Math.max(1, Math.round(hours * 2) / 2) : Math.round(hours) } };
 }
+
+/** Words for the page, as the reader's language says them (i18n's t). */
+interface Words { key: Key; params?: Params }
+
+const nodeOf = (l: PlanLayout, id: string): PlanNode | undefined => l.columns.flat().find((n) => n.id === id);
+const names = (ids: readonly string[]) => ids.join(", ");
+
+/**
+ * A line's details (a line clicked, or an "after" chip tapped on the phone): which dependency it is, who set it and
+ * when, what the queue waits for besides, and its actions: "Remove 'after ST2'" (the dependency named, so it does not
+ * read as removing the queue) and, for one the user set, "Let the orchestrator decide" (a hand-back). When nothing else
+ * open would be left, it says before the removal that the queue then starts as soon as it may.
+ */
+export function lineDetails(l: PlanLayout, from: string, to: string, now = new Date()): {
+  title: Words; setBy: Words; effect: Words; remove: Words; handBack: boolean; last: boolean;
+} | undefined {
+  const b = nodeOf(l, to)?.before.find((x) => x.queue === from);
+  if (!b) return undefined;
+  const others = nodeOf(l, to)!.before.filter((x) => x.queue !== from && !x.done);
+  const when = b.at ? formatClock(b.at, now) : undefined;
+  const setBy: Words = b.by === "user"
+    ? (when ? { key: "plan.line.setByYouAt", params: { when } } : { key: "plan.line.setByYou" })
+    : (when ? { key: "plan.line.setByOrchestratorAt", params: { when } } : { key: "plan.line.setByOrchestrator" });
+  const effect: Words = others.length
+    ? { key: "plan.line.effect", params: { queue: to, from, others: others.map((o) => `${o.queue} (${t(o.by === "user" ? "plan.setByYou" : "plan.legend.orchestrator")})`).join(", ") } }
+    : { key: "plan.line.last", params: { queue: to, from } };
+  return {
+    title: { key: "plan.line.title", params: { queue: to, from } }, setBy, effect,
+    remove: { key: "plan.line.remove", params: { from } }, handBack: b.by === "user", last: !others.length,
+  };
+}
+
+/**
+ * What dropping `dragged` onto `target` may do: "After ST2 instead of RX" (a move: the dependencies it replaces named,
+ * done ones too) and "Also after ST2 (and RX)" (one more predecessor), the latter only for a queue with a place in the
+ * plan that does not wait for `target` already. Undefined when it cannot be dropped there.
+ */
+export function dropChoices(l: PlanLayout, dragged: string, target: string): { instead: Words; also?: Words } | undefined {
+  const n = nodeOf(l, dragged);
+  if (!n || !n.movable || dragged === target) return undefined;
+  const replaced = n.before.filter((b) => b.queue !== target).map((b) => b.queue);
+  const instead: Words = replaced.length ? { key: "plan.drop.instead", params: { queue: target, replaced: names(replaced) } } : { key: "plan.drop.after", params: { queue: target } };
+  if (!n.placed || n.before.some((b) => b.queue === target)) return { instead };
+  const open = n.before.filter((b) => !b.done).map((b) => b.queue);
+  return { instead, also: open.length ? { key: "plan.drop.alsoAnd", params: { queue: target, others: names(open) } } : { key: "plan.drop.also", params: { queue: target } } };
+}
+
+/** What the undo bar says a change did: a move (after `target`, or first), an added or a removed predecessor. */
+export function changeWords(c: { kind: "move" | "add" | "remove"; queue: string; target: string | null; replaced?: readonly string[] }): Words {
+  if (c.kind === "add") return { key: "plan.change.add", params: { queue: c.queue, target: c.target ?? "" } };
+  if (c.kind === "remove") return { key: "plan.change.remove", params: { queue: c.queue, target: c.target ?? "" } };
+  if (!c.target) return { key: "plan.change.first", params: { queue: c.queue } };
+  const replaced = (c.replaced ?? []).filter((x) => x !== c.target);
+  return replaced.length ? { key: "plan.change.moveInstead", params: { queue: c.queue, target: c.target, replaced: names(replaced) } } : { key: "plan.change.move", params: { queue: c.queue, target: c.target } };
+}
+
+/** How long the undo bar offers Undo (the server takes it 2 s longer: scheduler.ts UNDO_MS). */
+export const UNDO_SHOWN_MS = 10_000;
