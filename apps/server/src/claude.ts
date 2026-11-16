@@ -117,12 +117,16 @@ export interface ClaudeOptions {
 
 export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentProcess {
   readonly options: ClaudeOptions;
-  private proc: ChildProcessWithoutNullStreams;
+  private proc!: ChildProcessWithoutNullStreams;
+  /** The CLI's arguments after the session flag (`--resume` or `--session-id` and the id, which startProcess adds). */
+  private readonly args: string[];
+  /** Whether the running process resumes the session (`--resume`): options.resume, unless a refused start was retried. */
+  private resume: boolean;
   private buffer = "";
   /** `working` from a sent turn (or a turn the CLI starts itself) until its result. */
   state: "working" | "idle" | "exited" = "idle";
   exitCode: number | null = null;
-  readonly pid?: number;
+  get pid(): number | undefined { return this.proc.pid; }
   private lastStderr = "";
   private signs: ClaudeTurnSigns = {};
   /**
@@ -156,18 +160,28 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
    * A fresh session whose conversation is not saved yet: Claude Code saves it as it reads the first message, and
    * writes nothing before (probed 2026-11-15), so the first turn's start says it is saved (facts `saved`).
    */
-  private unsaved: boolean;
+  private unsaved = false;
   /** The CLI refused the start, naming whether the session has a saved conversation (savedFromRefusal): told once. */
   private refusalTold = false;
+  /**
+   * What was written to the process's input while it wrote nothing (until its first output): a start the CLI refused
+   * (savedFromRefusal) is tried once more with it (exited). Undefined once the process wrote something.
+   */
+  private written: string[] | undefined = [];
+  /** A refused `--resume`'s error result, its first output: held until its exit says whether the start is retried. */
+  private early?: Record<string, any>;
+  /** A refused start was tried again (once per ClaudeSession). */
+  private retried = false;
+  /** Ended by kill(): a refusal then is not retried. */
+  private killed = false;
+  /** close() was called: a retried process gets its input closed too. */
+  private inputClosed = false;
 
   constructor(options: ClaudeOptions) {
     super();
     this.options = options;
-    const args = [
-      "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
-      options.resume ? "--resume" : "--session-id", options.uuid,
-      "--permission-mode", options.permissionMode,
-    ];
+    this.resume = options.resume;
+    const args = ["--permission-mode", options.permissionMode];
     if (options.model) args.push("--model", options.model);
     if (options.effort) args.push("--effort", options.effort);
     if (options.appendSystemPrompt) {
@@ -180,41 +194,96 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
     if (options.settings) args.push("--settings", options.settings);
     if (options.disallowedTools?.length) args.push("--disallowedTools", options.disallowedTools.join(","));
     if (options.allowedTools.length) args.push("--allowedTools", ...options.allowedTools); // variadic: keep last
+    this.args = args;
+    this.startProcess();
+  }
+
+  /** Starts the CLI on the session, resuming it or not (`resume`); only the latest process's events count. */
+  private startProcess(): void {
+    const args = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", this.resume ? "--resume" : "--session-id", this.options.uuid, ...this.args];
     // NEXUS_CLAUDE replaces the binary (tests use a fake written in TypeScript or JavaScript, run by this Node).
     const bin = process.env.NEXUS_CLAUDE ?? "claude";
     const script = /\.(m?[jt]s)$/.test(bin);
-    this.proc = spawn(script ? process.execPath : bin, script ? [bin, ...args] : args, {
-      cwd: options.cwd,
-      env: agentEnv(options.env),
+    const child = spawn(script ? process.execPath : bin, script ? [bin, ...args] : args, {
+      cwd: this.options.cwd,
+      env: agentEnv(this.options.env),
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
     });
-    this.pid = this.proc.pid;
-    this.unsaved = !options.resume;
-    this.costSoFar = options.resume ? undefined : 0;
-    this.modelSoFar = options.resume ? undefined : { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 };
+    this.proc = child;
+    this.buffer = "";
+    this.lastStderr = "";
+    this.refusalTold = false;
+    this.unsaved = !this.resume;
+    this.costSoFar = this.resume ? undefined : 0;
+    this.modelSoFar = this.resume ? undefined : { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 };
     // A write to a process that is exiting (killed, crashed) fails with EPIPE: its exit is handled, the write is moot.
-    this.proc.stdin.on("error", () => {});
-    this.proc.stdout.setEncoding("utf8");
-    this.proc.stdout.on("data", (d: string) => this.read(d));
-    this.proc.stderr.setEncoding("utf8");
-    this.proc.stderr.on("data", (d: string) => {
+    child.stdin.on("error", () => {});
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (d: string) => { if (child === this.proc) this.read(d); });
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (d: string) => {
+      if (child !== this.proc) return;
       this.lastStderr = (this.lastStderr + d).slice(-2000);
       // A refused start names whether the session has a saved conversation; its words may come after the exit event.
       const saved = this.refusalTold ? undefined : savedFromRefusal(this.lastStderr);
       if (saved !== undefined) { this.refusalTold = true; this.emit("facts", { saved }); }
     });
-    this.proc.on("error", (err) => {
-      this.emit("activity", { kind: "error", text: `could not start claude: ${err.message}` });
+    child.on("error", (err) => {
+      if (child === this.proc) this.emit("activity", { kind: "error", text: `could not start claude: ${err.message}` });
     });
-    this.proc.on("exit", (code) => {
-      this.state = "exited";
-      this.background = [];
-      clearTimeout(this.settle);
-      this.exitCode = code;
-      if (code && this.lastStderr.trim()) this.emit("activity", { kind: "error", text: this.lastStderr.trim().slice(-500) });
-      this.emit("exit", code);
+    child.on("exit", (code) => {
+      if (child !== this.proc) return;
+      if (!code || !this.mayRetry()) { this.exited(code); return; }
+      // A start the CLI may have refused: its words on stderr may come after the exit event (a moment at most).
+      let done = false;
+      const settle = () => { if (!done) { done = true; clearTimeout(timer); this.exited(code); } };
+      const timer = setTimeout(settle, 1000);
+      if (child.stderr.readableEnded) settle(); else child.stderr.once("end", settle);
     });
+  }
+
+  /** A refused start may be tried again: once, while the process wrote nothing, unless Nexus ended it. */
+  private mayRetry(): boolean { return !this.retried && !this.killed && this.written !== undefined; }
+
+  /**
+   * The process exited. A start Claude Code refused, naming the session's conversation (`--resume` of one it never
+   * saved, `--session-id` of one it did: savedFromRefusal), is tried once more the other way with what was written to
+   * it (the step's turn, a message), so the session neither stops nor loses its message (queue RN); the record was
+   * corrected meanwhile (facts `saved`). A second refusal ends the process as any exit does.
+   */
+  private exited(code: number | null): void {
+    const saved = code ? savedFromRefusal(this.lastStderr) : undefined;
+    if (saved !== undefined && this.mayRetry()) { this.startAgain(saved); return; }
+    const early = this.early;
+    this.early = undefined;
+    if (early) this.handle(early);
+    this.state = "exited";
+    this.background = [];
+    clearTimeout(this.settle);
+    this.exitCode = code;
+    if (code && this.lastStderr.trim()) this.emit("activity", { kind: "error", text: this.lastStderr.trim().slice(-500) });
+    this.emit("exit", code);
+  }
+
+  /** Starts the refused session again, resuming it if it has a saved conversation, and writes its input again. */
+  private startAgain(saved: boolean): void {
+    this.retried = true;
+    this.resume = saved;
+    const lines = this.written!;
+    this.written = [];
+    this.early = undefined;
+    this.emit("activity", { kind: "retry", text: `Claude Code refused the start (${clip(this.lastStderr.trim(), 200)}); started again, ${saved ? "resuming the saved conversation" : "afresh"}` });
+    this.startProcess();
+    this.emit("facts", { pid: this.proc.pid });
+    for (const l of lines) this.write(l);
+    if (this.inputClosed) this.proc.stdin.end();
+  }
+
+  /** Writes a line to the process's input, kept while the start may still be refused (`written`). */
+  private write(line: string): void {
+    this.written?.push(line);
+    this.proc.stdin.write(line);
   }
 
   /**
@@ -226,7 +295,7 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
     if (this.stopping) { this.held.push(text); return; }
     if (priority === "next" && this.state === "working") this.nextInTurn++;
     const msg = { type: "user", message: { role: "user", content: text }, parent_tool_use_id: null, ...(priority ? { priority } : {}) };
-    this.proc.stdin.write(JSON.stringify(msg) + "\n");
+    this.write(JSON.stringify(msg) + "\n");
     if (priority !== "next" || this.state === "idle") this.state = "working";
   }
 
@@ -254,7 +323,7 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
   }
 
   private interrupt(): void {
-    this.proc.stdin.write(JSON.stringify({ type: "control_request", request_id: `nexus-stop-${++this.stops}`, request: { subtype: "interrupt" } }) + "\n");
+    this.write(JSON.stringify({ type: "control_request", request_id: `nexus-stop-${++this.stops}`, request: { subtype: "interrupt" } }) + "\n");
   }
 
   /**
@@ -276,9 +345,9 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
   }
 
   /** Ends the session after the running turn: closing stdin lets the CLI finish and exit. */
-  close(): void { if (this.state !== "exited") this.proc.stdin.end(); }
+  close(): void { this.inputClosed = true; if (this.state !== "exited") this.proc.stdin.end(); }
 
-  kill(): void { if (this.state !== "exited") this.proc.kill(); }
+  kill(): void { this.killed = true; if (this.state !== "exited") this.proc.kill(); }
 
   /** Reports a refused tool call once (the message and the result's list both name it). */
   private refuse(id: string | undefined, tool: string, input: unknown, reason?: string): void {
@@ -295,6 +364,12 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
       if (!line) continue;
       let m: Record<string, any>;
       try { m = JSON.parse(line); } catch { continue; }
+      if (this.written) {
+        // The process's first output. A resumed one whose first output is an error result was refused (no
+        // conversation): the result waits for the exit, which tells whether the start is tried again.
+        if (this.resume && !this.retried && m.type === "result" && m.is_error) { this.early = m; continue; }
+        this.written = undefined;
+      }
       this.handle(m);
     }
   }

@@ -249,13 +249,31 @@ the run with "No conversation found" after a deploy. Now `runtime.json` keeps `c
 Claude start, true once the process shows it read a message (its first turn's `system init`; Claude Code writes
 nothing to stdout before); only a session whose record does not say false resumes, the others start afresh with the
 same id, and the step or the cut-off message goes to the new process as before. A record without the field (written
-before RN) counts as saved, so the deploy that brought this dropped no conversation. The CLI's own refusal corrects
-the record both ways (`savedFromRefusal` in `src/claude.ts`): "No conversation found" marks it unsaved, "already in
-use" saved, so the next start is right also for a record from before RN whose process never saved anything, and for
-a process ended in the moment between its read and its first output. Why the stream's sign and not the transcript
+before RN) counts as saved, so the deploy that brought this dropped no conversation. Where the record is still wrong
+(one from before RN whose process never saved anything, or a process ended in the moment between its read and its
+first output), the CLI refuses the start, and its words correct the record both ways (`savedFromRefusal` in
+`src/claude.ts`): "No conversation found" marks it unsaved, "already in use" saved. `ClaudeSession` then starts the
+process once more the other way, with what it had written to the refused one (the step's turn, a message, a stop),
+and the role never sees the refusal: the run goes on, the message arrives. The refused `--resume`'s error result,
+its first output, is held until the exit decides. Only once per ClaudeSession, only while the process wrote nothing
+else and Nexus did not end it: a second refusal exits as any process does (the engine's usual failure handling), so
+nothing retries without end. Why the stream's sign and not the transcript
 file: the file's place (`~/.claude/projects/<folder from the path>/<id>.jsonl`) is Claude Code's internal layout,
 the stream is its interface. The fake runtime keeps what it saved across its processes and refuses in both directions
 as Claude Code does (`test/fake-claude.ts`; FAKE_START_MS holds its first read).
+
+**Codex is affected the same way** (step RN2, probed 2026-11-15 with Codex 0.167.2 and gpt-6-luna: four runs, no
+token figures reported; the one turn was ended as it started). `thread/start` saves nothing: three seconds after it,
+and after the process ended, no rollout file of the thread existed, and `thread/resume` of it failed with "no rollout
+found for thread id <id>" (JSON-RPC error -32600). The rollout is written when the thread's first turn starts (it
+was there at `turn/start`'s answer), and a thread ended in its first turn resumes. Nexus records the thread id
+(`native_id`) from `thread/start`'s answer, so a process ended between the two (a deploy, a turn/start not yet
+taken) left an id that cannot be resumed, and the run failed again on every retry. Codex chooses its ids, so there is
+no fresh start with the same id and no mark is needed: Codex's own answer decides. `CodexSession` resumes the
+thread, and on exactly that error starts a new thread, records its id, and sends the session's message into it
+(`resumeThread` in `src/codex.ts`); any other failure stays a failure. A session from before RN with a saved thread
+resumes as before. The fake Codex saves a thread at its first turn and refuses `thread/resume` of one it never saved
+(`test/fake-codex.ts`; FAKE_TURN_START_MS holds its turn/start).
 
 - **Retries**: after 1, 2, 4, 8 and 16 minutes (`RETRY_BASE_MS` 60 000, doubled each time; `RETRY_LIMIT` 5 in a
   row). The sixth failure in a row halts the run with the last failure as its reason. A turn that ends well clears

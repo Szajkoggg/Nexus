@@ -7,8 +7,9 @@ import {
 
 // The briefing as the CLI reads it at its start (--append-system-prompt-file): the file is rewritten at the next start.
 const argv = process.argv.slice(2);
-const briefingAt = argv.indexOf("--append-system-prompt-file");
-const briefingFile = briefingAt >= 0 ? argv[briefingAt + 1] : undefined;
+/** The value after a flag on the command line, if the flag is there. */
+const flag = (name: string) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : undefined; };
+const briefingFile = flag("--append-system-prompt-file");
 recordArgs({ argv, briefing: briefingFile && existsSync(briefingFile) ? readFileSync(briefingFile, "utf8") : null });
 
 const out = (m: unknown) => process.stdout.write(JSON.stringify(m) + "\n");
@@ -17,10 +18,12 @@ const out = (m: unknown) => process.stdout.write(JSON.stringify(m) + "\n");
 // writes an error result and "No conversation found with session ID: <id>" and exits 1; `--session-id` of a saved one
 // writes only "Error: Session ID <id> is already in use." and exits 1. A new session is saved when its first message
 // is read (save, below).
-const resumeId = argv.includes("--resume") ? argv[argv.indexOf("--resume") + 1] : undefined;
-const newId = argv.includes("--session-id") ? argv[argv.indexOf("--session-id") + 1] : undefined;
-const refusal = resumeId && !fakeSaved(resumeId) ? `No conversation found with session ID: ${resumeId}`
-  : newId && fakeSaved(newId) ? `Error: Session ID ${newId} is already in use.` : undefined;
+const resumeId = flag("--resume");
+const newId = flag("--session-id");
+// FAKE_REFUSE: every start is refused so, whatever was saved (a test of a second refusal).
+const always = !!process.env.FAKE_REFUSE;
+const refusal = resumeId && (always || !fakeSaved(resumeId)) ? `No conversation found with session ID: ${resumeId}`
+  : newId && (always || fakeSaved(newId)) ? `Error: Session ID ${newId} is already in use.` : undefined;
 if (refusal) {
   if (resumeId) out({ type: "result", subtype: "error_during_execution", is_error: true, num_turns: 0, total_cost_usd: 0, usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }, modelUsage: {}, permission_denials: [] });
   process.stderr.write(`${refusal}\n`, () => process.exit(1));
