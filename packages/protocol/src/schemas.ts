@@ -1349,8 +1349,11 @@ export const RecurringFile = z.object({
   paused: z.boolean().optional(),
   /** The last time (an occurrence of the schedule) Nexus looked at, started or not: the next comes after it. */
   handled: Time.optional(),
-  /** The last queue it made: its id, when, and for which time. */
-  last: z.object({ queue: Id, at: Time, due: Time }).optional(),
+  /**
+   * The last queue it made: its id, when, and for which time. `caught_up`: the time (the same as `due`) passed while
+   * Nexus was not running, and the run was made up for it when Nexus started again.
+   */
+  last: z.object({ queue: Id, at: Time, due: Time, caught_up: Time.optional() }).optional(),
   /**
    * The last time that passed without a run, and why: `approval` (no standing approval, or its hash differs),
    * `previous` (the previous run had not closed), `missed` (Nexus was not running then), `template` (the template is

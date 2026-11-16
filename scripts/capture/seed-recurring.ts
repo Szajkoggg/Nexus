@@ -1,6 +1,6 @@
 // A seed for the capture tool: templates and recurring queues (PROTOCOL.md, "Queue templates", "Recurring queues").
 // Project "demo" has a template of its own (nexus-templates/), two queues, and three recurring queues the user approved:
-// a weekly survey whose last run is done, one after every 5 queues, and one paused. Project "fresh" has one
+// a weekly survey whose last run is done (made up for a time Nexus missed), one after every 5 queues, and one paused. Project "fresh" has one
 // the orchestrator just set (waiting for the user's approval) and one that changed since the user approved it. Run by
 // scripts/capture.ts as `node <this> <data dir>` with NEXUS_HOME set to the development instance's; it writes only
 // there. Recurring queues are new: there is no base commit to seed.
@@ -14,6 +14,13 @@ import {
 const dir = process.argv[2];
 if (!dir) throw new Error("usage: node seed-recurring.ts <data dir>");
 const ago = (min: number) => new Date(Date.now() - min * 60_000).toISOString();
+/** The last Monday 03:00 (local) at or before `min` minutes ago: a time of the weekly schedule below. */
+const mondayBefore = (min: number) => {
+  const d = new Date(Date.now() - min * 60_000);
+  const t = new Date(d.getFullYear(), d.getMonth(), d.getDate() - ((d.getDay() + 6) % 7), 3, 0);
+  if (t > d) t.setDate(t.getDate() - 7);
+  return t.toISOString();
+};
 
 function project(id: string, name: string): { st: ProjectStore; root: string } {
   const root = join(dir!, id);
@@ -73,7 +80,7 @@ for (const [id, title] of [["SRCH", "Search in the step list"], ["EXP", "Export 
   approveQueue(demo.st, id);
 }
 recurring(demo.st, demo.root, { id: "deps", template: "maintenance", params: { scope: "dependencies (outdated, vulnerable)" }, every: "mon 03:00", maintenance: "survey",
-  last: { queue: run, at: ago(8000), due: ago(8000) } }, "now");
+  last: { queue: run, at: ago(8000), due: mondayBefore(8000), caught_up: mondayBefore(8000) } }, "now");
 recurring(demo.st, demo.root, { id: "notes", template: "maintenance", params: { scope: "AGENTS.md, DESIGN.md and PROTOCOL.md against the code" }, after_queues: 5,
   maintenance: "fix_small", baseline: [] }, "now");
 recurring(demo.st, demo.root, { id: "release", template: "release-notes", params: { version: "the next minor" }, every: "monthly 1 09:00", paused: true }, "now");

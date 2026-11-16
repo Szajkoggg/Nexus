@@ -45,6 +45,22 @@ views:
       - wait: 1000
       - click: { selector: "section[aria-label='Recurring']" }
       - wait: 400
+  - key: recurring-caught-up@1440
+    route: "#/demo"
+    label: "Pótolt futás az Ismétlődő részben (a deps utolsó futása egy kimaradt időpontért)"
+    actions:
+      - click: All queues of Demo app
+      - wait: 1000
+      - click: { selector: "section[aria-label='Recurring']" }
+      - wait: 400
+  - key: recurring-caught-up@492
+    route: "#/demo"
+    label: "Pótolt futás az Ismétlődő részben, a legkeskenyebb ablakban"
+    actions:
+      - click: Queues
+      - wait: 1000
+      - click: { selector: "section[aria-label='Recurring']" }
+      - wait: 400
   - key: recurring-needs-approval@1440
     route: "#/fresh"
     label: "Jóváhagyásra váró ismétlődők (új, és megváltozott), a várakozó elemekkel"

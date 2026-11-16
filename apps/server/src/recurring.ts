@@ -136,19 +136,27 @@ export class Recurrer {
   }
 
   /**
-   * Arms the recurring's next time. Times more than MISSED_MS ago (no server ran then) are missed, each looked at as
-   * at its time but without a run; a time less late comes now.
+   * Arms the recurring's next time. Times more than MISSED_MS ago (no server ran then) are made up for once: the latest
+   * of them is decided as if it came now (`catch-up`: with every reason a time passes without a run), the older ones
+   * are missed, each looked at as at its time but without a run. A time less late than that comes now instead, and then
+   * every older one is missed.
    */
   private arm(id: string): void {
     this.timers.clear(`recurring:${id}`);
-    let r = this.store.readRecurring(id);
+    const r = this.store.readRecurring(id);
     if (!r || this.deps.stopped() || r.every === undefined) return; // after N queues: counted at each change (check)
     const every = parseEvery(r.every);
+    const passed: number[] = [];
     let next = nextOccurrence(every, Date.parse(r.handled ?? r.created_at));
     while (next <= this.now - MISSED_MS) {
-      this.decide(r, next, true);
-      r = this.store.readRecurring(id)!;
+      passed.push(next);
       next = nextOccurrence(every, next);
+    }
+    const catchUp = next > this.now ? passed.pop() : undefined;
+    for (const due of passed) this.decide(this.store.readRecurring(id)!, due, "missed");
+    if (catchUp !== undefined) {
+      this.decide(this.store.readRecurring(id)!, catchUp, "catch-up");
+      this.deps.changed();
     }
     const due = next;
     if (due <= this.now) { this.fire(id, due); return; }
@@ -170,7 +178,7 @@ export class Recurrer {
       if (view.after_queues === undefined || (view.counted ?? 0) < view.after_queues) continue;
       const r = this.store.readRecurring(view.id);
       if (!r || r.after_queues === undefined || countedQueues(r, state.queues) < r.after_queues) continue;
-      this.decide(r, this.now, false);
+      this.decide(r, this.now, "due");
       this.deps.changed();
     }
   }
@@ -179,7 +187,7 @@ export class Recurrer {
     if (this.deps.stopped()) return;
     const r = this.store.readRecurring(id);
     if (!r || (r.handled && Date.parse(r.handled) >= due)) return;
-    this.decide(r, due, false);
+    this.decide(r, due, "due");
     this.deps.changed();
     this.arm(id);
   }
@@ -187,9 +195,11 @@ export class Recurrer {
   /**
    * One time of the schedule: the queue is made and started only when the recurring is not paused, its template
    * resolves, its standing approval pins exactly the hash it has now, the time is not missed, and its previous run has
-   * closed. Every other way the time passes without a run, and the file says why (`skipped`).
+   * closed. Every other way the time passes without a run, and the file says why (`skipped`). `how`: the time came
+   * (`due`), passed while Nexus was not running and is missed, or passed so and is made up for now (`catch-up`: decided
+   * as a time that came, and its run's `last` says so).
    */
-  private decide(r: RecurringFile, due: number, late: boolean): void {
+  private decide(r: RecurringFile, due: number, how: "due" | "missed" | "catch-up"): void {
     const at = iso(this.now);
     // After N queues the count starts again from what is done now (the queue made here is a recurring run: not counted).
     const base: RecurringFile = { ...r, handled: iso(due), ...(r.after_queues !== undefined ? { baseline: this.doneNow() } : {}) };
@@ -200,8 +210,9 @@ export class Recurrer {
     if (!r.approval) { pass("approval", "it has no standing approval"); return; }
     if (r.approval.hash !== resolved.hash) { pass("approval", "it changed since your approval (its template, values or schedule)"); return; }
     const clock = formatClock(iso(due), new Date(this.now));
-    if (late) { pass("missed", `missed: Nexus was not running at ${clock}`); return; }
-    const when = r.every !== undefined ? `its time ${clock} came` : `${r.after_queues} queues were done`;
+    if (how === "missed") { pass("missed", `missed: Nexus was not running at ${clock}`); return; }
+    const when = r.every === undefined ? `${r.after_queues} queues were done`
+      : how === "catch-up" ? `its time ${clock} passed while Nexus was not running: made up for now` : `its time ${clock} came`;
     const state = loadProjectState(this.store);
     const previous = r.last && state.queues.find((q) => q.id === r.last!.queue);
     if (previous && !TERMINAL.has(previous.status)) { pass("previous", `its previous run ${previous.id} is still ${previous.status}`); return; }
@@ -217,7 +228,7 @@ export class Recurrer {
         ...q, status: "approved", updated_at: at,
         approvals: [{ revision: q.revision, at, hash: revisionHash(q), standing: { id: r.id, approved_at: r.approval.at, hash: r.approval.hash } }],
       });
-      this.store.writeRecurring({ ...base, last: { queue, at, due: iso(due) }, skipped: undefined });
+      this.store.writeRecurring({ ...base, last: { queue, at, due: iso(due), ...(how === "catch-up" ? { caught_up: iso(due) } : {}) }, skipped: undefined });
       this.deps.plan(queue, { after: [], by: "user", reason: `recurring ${r.id}: ${when} (standing approval of ${r.approval.at})` });
     } catch (e) {
       const made = queue && this.store.queueIds().includes(queue);

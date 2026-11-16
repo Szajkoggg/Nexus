@@ -408,7 +408,9 @@ once (Approve, also in "Waiting for you"): its runs then start by themselves whi
 changes it (the orchestrator's change, an edited or replaced template, a Nexus update that changes Nexus's template)
 asks for your approval again, and until then nothing runs. Pause and Remove are yours too; the queues it made stay.
 While its previous run is still open (running, waiting or stopped), its next time passes without a run and tells you.
-A time missed while the PC was off (more than 15 minutes) passes too. A maintenance template either only surveys and
+A time missed while the PC (or Nexus) was off is made up for once when Nexus starts again: the latest missed time runs
+then, under the same conditions as on time (your approval, the previous run closed), and its "Last run" says "made up
+for the missed time"; older missed times pass. A maintenance template either only surveys and
 reports (survey: Nexus stops a run that leaves a commit) or also fixes the small findings it names (fix_small); a run
 with findings goes to the orchestrator, which proposes a queue from the report, and one without closes quietly.
 

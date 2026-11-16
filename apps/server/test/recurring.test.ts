@@ -1,7 +1,8 @@
 // Recurring queues against the fake runtimes, with a clock the test moves (PROTOCOL.md, "Recurring queues"): a
 // recurring approved by the user runs at its times by itself; without the standing approval, after a change (the
 // orchestrator's set, a changed shipped or project template) or while its previous run is open it does not; a time
-// missed while no server ran passes. The engine's long timers run on the test's clock; the fakes on the real one.
+// that passed while no server ran is made up for once at the start (the latest; the older are missed). The engine's
+// long timers run on the test's clock; the fakes on the real one.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
@@ -212,25 +213,89 @@ test("while the previous run has not closed no new one starts, and the user is t
   } finally { x.stop(); }
 });
 
-test("a time missed while no server ran passes without a run; one less late than 15 minutes runs", async () => {
+/** Records the kinds of `skipped` the server writes into recurring files (a missed time is overwritten by a later run). */
+function skippedKinds(store: ProjectStore): (string | undefined)[] {
+  const kinds: (string | undefined)[] = [];
+  const write = store.writeRecurring.bind(store);
+  store.writeRecurring = (r) => { kinds.push(r.skipped?.kind); write(r); };
+  return kinds;
+}
+
+test("a weekly time that passed while no server ran is made up for once at the start: the latest of three runs, the older are missed, the next time stays", async () => {
+  const x = setup();
+  try {
+    const t = ahead(x.clock, HOUR);
+    x.engine.setRecurring({ id: "R", template: "tiny", params: {}, every: `${DAYS[t.d.getDay()]} ${t.hhmm}`, by: "orchestrator" });
+    x.engine.approveRecurring("R");
+    x.engine.shutdown();
+    // Down for three of its times; back an hour after the third.
+    x.clock.advance(t.at + 14 * DAY + HOUR - x.clock.now());
+    const kinds = skippedKinds(x.store);
+    await x.restart();
+    const latest = new Date(t.at + 14 * DAY);
+    const id = idOf("R", latest);
+    await x.until(`${id} to be done`, () => x.state().queues.find((q) => q.id === id)?.status === "done");
+    assert.deepEqual(x.runs("R").map((q) => q.id), [id], "one run, for the latest time");
+    assert.deepEqual(kinds.filter(Boolean), ["missed", "missed"], "the two older times are missed");
+    const r = x.store.readRecurring("R")!;
+    assert.deepEqual([r.last?.due, r.last?.caught_up, r.skipped], [latest.toISOString(), latest.toISOString(), undefined]);
+    assert.equal(x.store.readQueue(id).approvals[0]!.standing?.hash, r.approval!.hash, "under the standing approval's hash");
+    assert.equal(x.recurring("R").next_at, new Date(t.at + 21 * DAY).toISOString(), "the next regular time is unchanged");
+    // Its next time runs as usual: not made up for.
+    x.clock.advance(7 * DAY);
+    const next = idOf("R", new Date(t.at + 21 * DAY));
+    await x.until(`${next} to be done`, () => x.state().queues.find((q) => q.id === next)?.status === "done");
+    assert.equal(x.store.readRecurring("R")!.last?.caught_up, undefined);
+  } finally { x.stop(); }
+});
+
+test("a missed time is not made up for without the standing approval, nor while the previous run is open", async () => {
+  const x = setup();
+  try {
+    const t = ahead(x.clock, HOUR);
+    const weekly = `${DAYS[t.d.getDay()]} ${t.hhmm}`;
+    // A: never approved. B: approved, its first run stopped (open).
+    x.engine.setRecurring({ id: "A", template: "tiny", params: {}, every: weekly, by: "orchestrator" });
+    x.engine.setRecurring({ id: "B", template: "tiny", params: { what: "stop" }, every: weekly, by: "orchestrator" });
+    x.engine.approveRecurring("B");
+    x.clock.advance(t.at - x.clock.now());
+    const first = idOf("B", t.d);
+    await x.until(`${first} to stop`, () => x.state().queues.find((q) => q.id === first)?.status === "stopped");
+    x.engine.shutdown();
+    x.clock.advance(7 * DAY + HOUR);
+    await x.restart();
+    await sleep(500);
+    assert.deepEqual(x.runs("A"), []);
+    assert.deepEqual(x.runs("B").map((q) => q.id), [first]);
+    const due = new Date(t.at + 7 * DAY).toISOString();
+    const a = x.store.readRecurring("A")!, b = x.store.readRecurring("B")!;
+    assert.deepEqual([a.skipped?.kind, a.skipped?.due], ["approval", due]);
+    assert.deepEqual([b.skipped?.kind, b.skipped?.due], ["previous", due]);
+    assert.match(b.skipped!.reason, new RegExp(`^its previous run ${first} is still stopped$`));
+    assert.equal(x.recurring("B").next_at, new Date(t.at + 14 * DAY).toISOString());
+  } finally { x.stop(); }
+});
+
+test("a time less late than 15 minutes runs as usual and the older ones are missed; an after-N-queues recurring has no times to make up for", async () => {
   const x = setup();
   try {
     const t = ahead(x.clock, HOUR);
     x.engine.setRecurring({ id: "R", template: "tiny", params: {}, every: `daily ${t.hhmm}`, by: "orchestrator" });
     x.engine.approveRecurring("R");
+    x.engine.setRecurring({ id: "N", template: "tiny", params: {}, after_queues: 2, by: "orchestrator" });
+    x.engine.approveRecurring("N");
     x.engine.shutdown();
-    x.clock.advance(t.at - x.clock.now() + 20 * MIN);
-    await x.restart();
-    await sleep(500);
-    assert.deepEqual(x.runs("R"), [], "missed");
-    assert.equal(x.store.readRecurring("R")!.skipped?.kind, "missed");
-    assert.equal(x.recurring("R").next_at, new Date(t.at + DAY).toISOString(), "the next time comes");
-    // The next day the server is down at the time, and back 5 minutes later: that one runs.
-    x.engine.shutdown();
+    // Down for two of R's times; back 5 minutes after the second, which runs (not made up for).
     x.clock.advance(t.at + DAY - x.clock.now() + 5 * MIN);
+    const kinds = skippedKinds(x.store);
     await x.restart();
     const id = idOf("R", new Date(t.at + DAY));
     await x.until(`${id} to be done`, () => x.state().queues.find((q) => q.id === id)?.status === "done");
+    assert.deepEqual(x.runs("R").map((q) => q.id), [id]);
+    assert.deepEqual(kinds.filter(Boolean), ["missed"]);
+    assert.equal(x.store.readRecurring("R")!.last?.caught_up, undefined);
+    assert.deepEqual(x.runs("N"), [], "counted, not timed: the restart starts nothing");
+    assert.equal(x.store.readRecurring("N")!.skipped, undefined);
   } finally { x.stop(); }
 });
 

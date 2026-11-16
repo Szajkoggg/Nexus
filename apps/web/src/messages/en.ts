@@ -1506,6 +1506,7 @@ export const en = {
   "recurring.values": "Values",
   "recurring.next": "Next run",
   "recurring.last": "Last run",
+  "recurring.caughtUp": "made up for the missed time",
   "recurring.approveNote": "Approve it once: its runs then start by themselves while it stays as it is.",
   "recurring.changedNote": "It changed since your approval (its template, values, schedule or mode): it runs again only once you approve it.",
   "recurring.skipped": "No run last time: {reason}",

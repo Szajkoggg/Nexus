@@ -739,7 +739,7 @@ const commands: Record<string, () => void | Promise<void>> = {
       for (const r of list) {
         const status = r.status === "needs_approval" ? "waits for the user's approval" : r.status === "waiting_previous" ? `waits for its previous run ${r.last?.queue} to close` : r.status === "broken" ? `cannot run: ${r.problem}` : r.status;
         const next = r.next_at && r.status !== "broken" && r.status !== "paused" ? `; next ${r.next_at}` : "";
-        const last = r.last ? `; last ${r.last.queue}` : "";
+        const last = r.last ? `; last ${r.last.queue}${r.last.caught_up ? ` (made up for ${r.last.caught_up}, missed while Nexus was not running)` : ""}` : "";
         const skipped = r.skipped ? `; at ${r.skipped.due} no run: ${r.skipped.reason}` : "";
         const schedule = r.every ?? `after ${r.after_queues} queues (${r.counted ?? 0} counted)`;
         const mode = r.maintenance ? `, maintenance ${r.maintenance}` : "";

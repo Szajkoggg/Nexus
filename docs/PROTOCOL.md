@@ -1993,7 +1993,7 @@ set_by: orchestrator           # or user; with reason
 approval: { hash: sha256:..., at: 2026-11-15T10:00:00Z }   # the user's standing approval
 paused: true                   # the user paused it
 handled: 2026-11-16T02:00:00Z  # the times up to this one have been looked at; the next comes after it
-last: { queue: weekly-20261116-0300, at: ..., due: ... }  # the last queue it made
+last: { queue: weekly-20261116-0300, at: ..., due: ..., caught_up: ... }  # the last queue it made; caught_up: made up for a missed time
 skipped: { due: ..., at: ..., kind: previous, reason: its previous run weekly-20261109-0300 is still stopped }
 created_at: ...
 updated_at: ...
@@ -2042,9 +2042,16 @@ updated_at: ...
   since its round began and no changed tracked file in the queue's checkout (untracked files do not count), and
   otherwise stops the queue with the condition "Nexus: a survey run leaves no commit and no changed tracked file" and
   what it left (a `queue.stop` in the user's session, which the server writes), before the step's review.
-- **Missed times**: once the server is up (with the planned starts) it looks at each recurring's times since
-  `handled`: one more than 15 minutes ago (`MISSED_MS`, as for schedules) passes (`missed`, when it would have run),
-  and the next time comes; one less late comes now.
+- **Missed times are made up for once**: once the server is up (with the planned starts) it looks at each timed
+  recurring's times since `handled`. When the latest of those more than 15 minutes ago (`MISSED_MS`, as for
+  schedules) is also the latest that passed, it is made up for now: it goes the usual way (paused, template, the
+  standing approval's hash, the previous run, each with its own `skipped` reason), as if it had come now, and its run's
+  `last` gets `caught_up` (that time, the same as `due`); the plan's reason says "its time … passed while Nexus was not
+  running: made up for now". Every older one passes (`missed`, when it would have run; the run made up for clears it,
+  as any run does). A time less late than 15 minutes comes now as usual, and every older one is missed. The next
+  regular time is unchanged either way. "After N queues" recurrings have no times: a restart changes nothing for them.
+  The dashboard shows a run made up for on its "Last run" ("made up for the missed time" and the time), `nexus
+  recurring list` too.
 - **The state** (`ProjectState.recurring`, `RecurringView`) adds `status` (`approved`, `needs_approval`, `paused`,
   `waiting_previous`, `broken`), the current `hash`, the template's title and layer, `problem` when broken, and
   `next_at`. Attention items of kind `recurring` (`recurring`: its id): one waits for the user's approval ("Recurring
