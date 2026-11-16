@@ -2753,6 +2753,32 @@ The post-upgrade npm audit no longer reports the Hono advisory. It still reports
 `typescript-eslint -> @typescript-eslint/typescript-estree -> minimatch 10.2.6`: seven moderate affected package
 entries from one underlying advisory, not seven independent vulnerabilities. That dependency change is outside DU1.
 
+## The lint toolchain's minimatch update (queue DU2)
+
+On 2026-11-16, stable [typescript-eslint 8.73.0](https://github.com/typescript-eslint/typescript-eslint/releases/tag/v8.73.0)
+became available with `@typescript-eslint/typescript-estree` depending on `minimatch ^11.0.1`. Nexus upgrades from
+8.72.2 to 8.73.0 and locks that minimatch to 11.0.8. This is the upstream fix, so no override is needed.
+[GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249) lists versions 7 through 11.0.0 as affected.
+ESLint's independent minimatch 3.1.5 branch is unchanged, as are the lint configuration and enabled rules. The lock
+changes only the eleven synchronized TypeScript ESLint packages, their minimatch and its new nonrecursive matcher.
+
+The actual estree call is `minimatch(relativePath, pattern, { dot: true })`, used for `allowDefaultProject` matching.
+Nexus uses `projectService: true` without that allowance; the default path uses TypeScript's project service.
+The [minimatch 11 changelog](https://raw.githubusercontent.com/isaacs/minimatch/main/changelog.md) removes `makeRe`,
+`regexp`, `AST` and internal methods, and replaces regexp entries in `Minimatch.set` with matcher objects. Estree
+uses none of those APIs. Empty trailing path segments no longer match optional/zero-repeat extglobs; those are
+directory forms, not the file paths this call receives. Changes to globstar/partial matching and Windows root/UNC
+normalization do not change the tested relative-file cases. The new matcher requires Node 20 or >=22, within
+Nexus's >=24 requirement. The new optional TypeScript-native backend in 8.73.0 is not enabled or installed.
+
+`scripts/test/lint-dependencies.test.ts` checks the dependency resolved from estree rather than ESLint's 3.x copy.
+Small examples cover dot files/directories, relative and Windows-separated paths, single-level glob boundaries,
+braces and extglobs. The same cases pass with minimatch 10.2.6 and 11.0.8. A temporary TypeScript project verifies
+typed parsing and the actual default-project allowance/rejections (including overly broad patterns); the unchanged
+repository ESLint configuration recognizes TS/TSX files and still reports a deliberately unawaited promise as an
+error. The final lockfile is also installed with `npm ci` in a separate temporary checkout, where the compatibility
+tests and dependency tree are checked again. No access, HTTP or agent protocol changes accompany this update.
+
 ## Open questions
 
 1. **The local HTTP gap.** Any agent with a free shell on this machine (Codex's sandbox leaves loopback open) can
