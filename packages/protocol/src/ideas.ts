@@ -3,10 +3,16 @@
 // their `source`, their finish). Pure: the notes come in as text, the queues and hand-overs as plain records; the
 // files are read in ideas-read.ts. Nothing here is kept by hand: every status is derived again whenever a file changes.
 
-import { NOTE_REF, type ImportSource, type QueueSource, type QueueStatus } from "./schemas.ts";
+import type { ImportSource, QueueSource, QueueStatus } from "./schemas.ts";
 import type { QueueView } from "./state.ts";
 
 // ---------------------------------------------------------------- references
+
+/**
+ * A note reference: a thinking partner's note (a path from the project's root, ending .md) and a Decided entry's date.
+ * schemas.ts checks a queue's source with it; it is kept here so that the dashboard needs no schemas (and no zod).
+ */
+export const NOTE_REF = /^(?!\/)(?![A-Za-z]:)[^#\s\\]*?([^/#\s\\]+\.md)#(\d{4}-\d{2}-\d{2})$/;
 
 /** A note reference taken apart: the note's path from the project's root (forward slashes) and the entry's date. */
 export interface IdeaRef { file: string; date: string }
@@ -66,7 +72,8 @@ export interface IdeaEntry {
 
 /**
  * A thinking partner's note (one topic). `file`: its path from the project's root; `area` and `group` from its
- * `**Area:** <area> [/ <group>]` line; `open`: its Open questions (top-level bullets under an Open heading); `ideas`:
+ * `**Area:** <area> [/ <group>]` line; `open`: its Open questions (top-level bullets under an Open heading), and
+ * `questions` their text (Markdown marks taken out); `ideas`:
  * the bullets under its "Ideas" headings.
  */
 export interface IdeaNote {
@@ -77,6 +84,7 @@ export interface IdeaNote {
   group?: string;
   entries: IdeaEntry[];
   open: number;
+  questions: string[];
   ideas: number;
 }
 
@@ -98,6 +106,9 @@ function leadOf(bullet: string): string {
   const text = (bold ? bold[1]! : bullet).replace(/\*\*|`/g, "").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[.:;,]\s*$/, "").trim();
   return text.length > 120 ? `${text.slice(0, 119).trimEnd()}…` : text;
 }
+
+/** A line's text without its Markdown marks (bold, code, links). */
+const plain = (text: string) => text.replace(/\*\*|`/g, "").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").trim();
 
 /** A field line under the title (`**Summary:** …`, `**Area:** …`) with its continuation lines, as one line. */
 function fieldOf(lines: string[], name: string): string | undefined {
@@ -131,7 +142,8 @@ export function parseNote(file: string, text: string): IdeaNote {
   let decided: number | undefined;                 // the level of the Decided heading we are under
   let entry: { e: IdeaEntry; level: number } | undefined;
   let other: { kind: "open" | "ideas"; level: number } | undefined;
-  let open = 0, ideas = 0;
+  const questions: string[] = [];
+  let ideas = 0;
   let inFence = false;
   for (const raw of lines) {
     if (/^\s*(```|~~~)/.test(raw)) { inFence = !inFence; continue; }
@@ -165,10 +177,11 @@ export function parseNote(file: string, text: string): IdeaNote {
       if (b) { e.decisions++; if (!e.lead) e.lead = leadOf(b[1]!); }
       continue;
     }
-    if (other && BULLET.test(raw)) { if (other.kind === "open") open++; else ideas++; }
+    const b = other && BULLET.exec(raw);
+    if (b) { if (other!.kind === "open") questions.push(plain(b[1]!)); else ideas++; }
   }
   const sorted = [...entries.values()].sort((a, b) => a.date.localeCompare(b.date));
-  return { file, title, summary, area: area || undefined, group: group || undefined, entries: sorted, open, ideas };
+  return { file, title, summary, area: area || undefined, group: group || undefined, entries: sorted, open: questions.length, questions, ideas };
 }
 
 // ---------------------------------------------------------------- statuses
@@ -230,8 +243,14 @@ export interface IdeaNoteView extends Omit<IdeaNote, "entries"> {
   queues: IdeaQueueRef[];
 }
 
-/** What the derivation found that names nothing: a queue's reference to a note or an entry that is not there. */
+/** The overview: the notes, and what names nothing (a queue's reference to a note or an entry that is not there). */
 export interface IdeasView { notes: IdeaNoteView[]; unknown_refs: { queue: string; ref: string }[] }
+
+/** The ideas overview of a project as the dashboard gets it (GET /api/projects/:id/ideas; ideas-read.ts, projectIdeas). */
+export interface IdeasResponse extends IdeasView {
+  /** The project's notes folder (relative to its root), or null when it has none: then there are no notes. */
+  notes_dir: string | null;
+}
 
 const queueRef = (q: IdeaQueue): IdeaQueueRef => ({ id: q.id, title: q.title, status: q.status, ...(q.commit ? { commit: q.commit } : {}) });
 

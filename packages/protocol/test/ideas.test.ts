@@ -83,6 +83,7 @@ test("a note: title, Summary, area and group, entries by date (one per day), dro
   assert.equal(d17!.replaced_by, "docs/ideas/other.md#2026-11-18");
   assert.equal(n.ideas, 2);
   assert.equal(n.open, 1);
+  assert.deepEqual(n.questions, ["A question?"]);
 });
 
 test("a note's other forms: nested Decided, (decided <date>) headings, CRLF, no Summary, nothing open", () => {

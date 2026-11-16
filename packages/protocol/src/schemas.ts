@@ -1,5 +1,6 @@
 // The Nexus file protocol, version 1. See docs/PROTOCOL.md.
 import { z } from "zod";
+import { NOTE_REF } from "./ideas.ts";
 import { PICTURE_ROLES, VIEW_KEY } from "./pictures.ts";
 import { DEFAULT_WORKING_LANGUAGE, LANGUAGE_CODES } from "./languages.ts";
 import { TAG_KINDS, TAG_SIZES } from "./tags.ts";
@@ -524,8 +525,6 @@ export type StatusChange = z.infer<typeof StatusChange>;
 export const MaintenanceMode = z.enum(["survey", "fix_small"]);
 export type MaintenanceMode = z.infer<typeof MaintenanceMode>;
 
-/** A note reference: a thinking partner's note (a path from the project's root, ending .md) and a Decided entry's date. */
-export const NOTE_REF = /^(?!\/)(?![A-Za-z]:)[^#\s\\]*?([^/#\s\\]+\.md)#(\d{4}-\d{2}-\d{2})$/;
 /** The Markdown file a queue was imported from (`nexus import`). */
 export const ImportSource = z.object({ path: z.string(), imported_at: Time });
 export type ImportSource = z.infer<typeof ImportSource>;

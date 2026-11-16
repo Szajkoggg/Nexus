@@ -4,7 +4,7 @@
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { deriveIdeas, ideaQueues, parseNote, type HandOver, type IdeaNote, type IdeasView } from "./ideas.ts";
+import { deriveIdeas, ideaQueues, parseNote, type HandOver, type IdeaNote, type IdeasResponse } from "./ideas.ts";
 import type { ProjectStore } from "./store.ts";
 import type { ProjectState } from "./state.ts";
 
@@ -45,12 +45,6 @@ export function readHandOvers(store: ProjectStore): HandOver[] {
     }
   }
   return out.sort((a, b) => a.at.localeCompare(b.at));
-}
-
-/** The ideas overview of a project as the dashboard gets it (GET /api/projects/:id/ideas). */
-export interface IdeasResponse extends IdeasView {
-  /** The project's notes folder (relative to its root), or null when it has none: then there are no notes. */
-  notes_dir: string | null;
 }
 
 /**

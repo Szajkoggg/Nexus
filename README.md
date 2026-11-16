@@ -16,6 +16,15 @@ compact a long conversation: it replaces what the partner holds of the conversat
 room to go on in the same conversation. The chat keeps every message and says when it was compacted; details the
 summary leaves out are no longer in the partner's context. It waits for the partner's turn to end.
 
+**What became of the ideas.** The Ideas panel's switch at the top (**Conversations** | **Overview**) shows the notes
+the partners keep, grouped by area and the project's sub-groups (each note's `**Area:**` line; a note without one is
+under Unsorted). Each dated decision of a note shows where it stands: **decided**, **handed over** (a hand-over named
+it), **queued** (a queue says it came from it), **built** (every such queue is done), or **dropped** / **replaced**; a
+note shows the least advanced of its decisions, and a note with nothing decided yet is **being worked out**. Filter by
+status, or by words. A click opens the note where a step opens: its Summary, each decision with its history (when it
+was handed over, queued, approved, started, built, with the commit), its open questions and its queues. Nobody keeps
+these by hand: they follow from the notes, the hand-overs and the queues' `source`.
+
 **The web in Ideas.** Settings → "Ideas (conversations)" → **Web** (global, or the project's own): **off**, **web
 search** (the default: partners search and name their sources, but open no page) or **web search and reading pages**.
 Reading pages carries a risk: a page can hide instructions that lead a partner to put something from the project into

@@ -23,6 +23,7 @@ import { usePage } from "../page.ts";
 import { fileHref } from "../hash.ts";
 import { clearChatTarget, useChatTarget } from "../chatTarget.ts";
 import { SearchField } from "./Search.tsx";
+import { IdeasOverview, IdeasSwitch } from "./Ideas.tsx";
 
 // ---------------------------------------------------------------- the endpoints this file reads and writes
 
@@ -683,9 +684,48 @@ export function StepChat({ project, queue, step }: { project: string; queue: str
   );
 }
 
-/** The conversations with a thinking partner: the phone's Ideas tab (`inline`), a desktop's middle column (`desk`). */
-export function ConversationsPanel({ project, name, defaultRuntime, inline, desk }: {
+/** What the Ideas panel shows, kept in the browser across visits: the conversations, or the overview of the notes. */
+type IdeasView = "conversations" | "overview";
+const IDEAS_VIEW = "nexus.ideas.view";
+function useIdeasView(): [IdeasView, (v: IdeasView) => void] {
+  const [view, setView] = useState<IdeasView>(() => { try { return localStorage.getItem(IDEAS_VIEW) === "overview" ? "overview" : "conversations"; } catch { return "conversations"; } });
+  return [view, (v) => { try { localStorage.setItem(IDEAS_VIEW, v); } catch { /* storage blocked: the choice lives as long as the view */ } setView(v); }];
+}
+
+/**
+ * The Ideas panel: the conversations with a thinking partner, or the overview of their notes (components/Ideas.tsx),
+ * on the phone's Ideas tab (`inline`) and a desktop's middle column (`desk`). An open conversation shows the
+ * conversations; an open note (the layer note:<file>) the overview.
+ */
+export function ConversationsPanel({ project, name, defaultRuntime, inline, desk, areas = [] }: {
   project: string; name: string; defaultRuntime: "claude" | "codex"; inline?: boolean; desk?: Desk;
+  /** The project's areas in its order (its tag list): the overview's groups follow it. */
+  areas?: readonly string[];
+}) {
+  const at = useNav();
+  const [stored, setStored] = useIdeasView();
+  const noteOpen = layerValue(at, "note") !== undefined;
+  const conversationOpen = layerValue(at, "conversation") !== undefined;
+  const view: IdeasView = conversationOpen ? "conversations" : noteOpen ? "overview" : stored;
+  const pick = (v: IdeasView) => {
+    setStored(v);
+    if (v === "conversations" && noteOpen) nav.close("note");
+    if (v === "overview" && conversationOpen) nav.close("conversation");
+  };
+  if (view === "overview") {
+    return (
+      <Panel inline={inline} desk={desk} which="ideas" head={desk && <IdeasSwitch view={view} onView={pick} />}>
+        <IdeasOverview project={project} areas={areas} phone={!desk} top={!desk && <div className="mb-3"><IdeasSwitch view={view} onView={pick} wide /></div>} />
+      </Panel>
+    );
+  }
+  return <Conversations project={project} name={name} defaultRuntime={defaultRuntime} inline={inline} desk={desk} switcher={(wide) => <IdeasSwitch view={view} onView={pick} wide={wide} />} />;
+}
+
+function Conversations({ project, name, defaultRuntime, inline, desk, switcher }: {
+  project: string; name: string; defaultRuntime: "claude" | "codex"; inline?: boolean; desk?: Desk;
+  /** The Ideas panel's switch (to the overview), in the column's header on a desktop, atop the list on the phone. */
+  switcher: (wide: boolean) => ReactNode;
 }) {
   const { reload: onChanged, version } = usePage();
   const { data: list, error: listError } = useQuery<ConversationItem[]>(projectUrl(project, "/conversations"), version);
@@ -732,7 +772,7 @@ export function ConversationsPanel({ project, name, defaultRuntime, inline, desk
   ] : undefined;
 
   return (
-    <Panel inline={inline} desk={desk} which="ideas">
+    <Panel inline={inline} desk={desk} which="ideas" head={desk && switcher(false)}>
       <nav className={side
         ? `${open || creating ? "hidden" : "flex"} w-full flex-col`
         : `${open || creating ? "hidden sm:flex" : "flex"} w-full shrink-0 flex-col border-r border-line sm:w-72`}>
@@ -744,6 +784,7 @@ export function ConversationsPanel({ project, name, defaultRuntime, inline, desk
             </div>
           </div>
         )}
+        {side && <div className="px-3 pt-3">{switcher(true)}</div>}
         <div className="p-3"><Button onClick={() => nav.open("conversation:new")}>{t("chat.newConversation")}</Button></div>
         <ul className="scroll-thin flex-1 overflow-y-auto px-2 pb-3">
           {shown.map((c) => (
