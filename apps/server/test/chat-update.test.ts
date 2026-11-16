@@ -135,6 +135,8 @@ for (const now of [false, true]) {
         await until("the update past its drain", () => lifecycle.status.phase === "updating", LONGER.step, show);
       }
       assert.ok(!orchestrator.idle() && !conversations.idle(), "the drain did not wait for the chat turns");
+      // The drain observes the runtime becoming idle; the engine records the queue's pause after its turn settles.
+      await until("the worker's queue to pause", () => store.readRun("Q")?.state === "paused", LONGER.step, show);
       const run = store.readRun("Q")!;
       assert.equal(run.state, "paused");
       assert.equal(run.resume_after_restart, true, "the worker's queue goes on after the restart");

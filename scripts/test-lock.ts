@@ -28,9 +28,9 @@ import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /** Who holds the lock, as its file says. */
-export interface Holder { pid: number; cwd: string; since: string }
+interface Holder { pid: number; cwd: string; since: string }
 
-export interface LockOptions {
+interface LockOptions {
   /** The lock file (default: nexus-full-test.lock in the system's temporary folder, or NEXUS_TEST_LOCK). */
   file?: string;
   /** How long to wait at most before running without the lock (default 15 minutes, or NEXUS_TEST_LOCK_MAX_MS). */
@@ -49,13 +49,13 @@ export interface LockOptions {
 }
 
 /** The lock taken: `release()` removes it, if it is still this run's. */
-export interface Lock { file: string; release: () => void }
+interface Lock { file: string; release: () => void }
 
 const MINUTE = 60_000;
 /** A lock file younger than this that cannot be read is being written: its taker is alive. */
 const WRITING_MS = 5_000;
 
-export function defaultLockFile(): string {
+function defaultLockFile(): string {
   return process.env.NEXUS_TEST_LOCK || join(tmpdir(), "nexus-full-test.lock");
 }
 
@@ -165,7 +165,7 @@ export interface Proc { pid: number; ppid: number; created: number; name: string
 const SHELLS = new Set(["cmd", "bash", "sh", "dash", "zsh", "fish", "powershell", "pwsh"]);
 
 /** A process between a run and whoever started it: a shell, or npm (a node process running npm-cli.js, or titled npm). */
-export function isStarterLink(p: Pick<Proc, "name" | "commandLine">): boolean {
+function isStarterLink(p: Pick<Proc, "name" | "commandLine">): boolean {
   const name = basename(p.name.replaceAll("\\", "/")).toLowerCase().replace(/\.exe$/, "");
   if (SHELLS.has(name) || name === "npm" || name === "npx") return true;
   return name === "node" && /np[mx]-cli\.js|^np[mx](\s|$)/i.test(p.commandLine);
@@ -238,7 +238,18 @@ export async function ancestry(pid: number): Promise<Proc[]> {
  */
 async function windowsWalk(pid: number, max: number): Promise<(Proc & { exe: string })[]> {
   const links = [...SHELLS, "npm", "npx"].map((n) => `'${n}'`).join(",");
-  const script = `$p = ${pid}; for ($i = 0; $i -lt ${max} -and $p -gt 0; $i++) { $x = Get-CimInstance Win32_Process -Filter "ProcessId=$p"; if (-not $x) { break }; "{0}\`t{1}\`t{2}\`t{3}\`t{4}\`t{5}" -f $x.ProcessId, $x.ParentProcessId, $x.CreationDate.ToFileTimeUtc(), $x.Name, $x.ExecutablePath, $x.CommandLine; $n = ($x.Name -replace '\\.exe$', '').ToLower(); if ($i -gt 0 -and -not (@(${links}) -contains $n -or ($n -eq 'node' -and $x.CommandLine -match 'np[mx]-cli\\.js'))) { break }; $p = $x.ParentProcessId }`;
+  const script = `
+$p = ${pid}
+for ($i = 0; $i -lt ${max} -and $p -gt 0; $i++) {
+  $x = Get-CimInstance Win32_Process -Filter "ProcessId=$p"
+  if (-not $x) { break }
+  "{0}\`t{1}\`t{2}\`t{3}\`t{4}\`t{5}" -f $x.ProcessId, $x.ParentProcessId, $x.CreationDate.ToFileTimeUtc(), $x.Name, $x.ExecutablePath, $x.CommandLine
+  $n = ($x.Name -replace '\\.exe$', '').ToLower()
+  if ($i -gt 0 -and -not (@(${links}) -contains $n -or ($n -eq 'node' -and $x.CommandLine -match 'np[mx]-cli\\.js'))) {
+    break
+  }
+  $p = $x.ParentProcessId
+}`;
   const out = await run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script]);
   return (out ?? "").split(/\r?\n/).filter((l) => l.trim()).map((l) => {
     const [id, parent, created, name, exe, ...cmd] = l.split("\t");
@@ -249,10 +260,17 @@ async function windowsWalk(pid: number, max: number): Promise<(Proc & { exe: str
 
 /** From MSYS's `ps -e -l` (PID PPID PGID WINPID ...): each process's Windows pid to its parent's Windows pid. */
 export function msysParents(out: string): Map<number, number> {
-  const rows = out.split(/\r?\n/).map((l) => /^\s*[A-Z]?\s*(\d+)\s+(\d+)\s+\d+\s+(\d+)\s/.exec(l)).filter((m) => !!m).map((m) => ({ pid: Number(m[1]), ppid: Number(m[2]), win: Number(m[3]) }));
-  const win = new Map(rows.map((r) => [r.pid, r.win]));
+  const rows: { pid: number; ppid: number; win: number }[] = [];
+  for (const line of out.split(/\r?\n/)) {
+    const match = /^\s*[A-Z]?\s*(\d+)\s+(\d+)\s+\d+\s+(\d+)\s/.exec(line);
+    if (match) rows.push({ pid: Number(match[1]), ppid: Number(match[2]), win: Number(match[3]) });
+  }
+  const windowsPids = new Map(rows.map((row) => [row.pid, row.win]));
   const parents = new Map<number, number>();
-  for (const r of rows) { const p = win.get(r.ppid); if (p) parents.set(r.win, p); }
+  for (const row of rows) {
+    const parent = windowsPids.get(row.ppid);
+    if (parent) parents.set(row.win, parent);
+  }
   return parents;
 }
 
@@ -314,7 +332,7 @@ function watchdog(wrapper: number, parent: number, file: string, pollMs = 1000):
 }
 
 /** Runs `node <args>` under the lock, ended with its starter (watchdog); resolves with its exit code. */
-export async function runLocked(args: string[], o: LockOptions = {}): Promise<number> {
+async function runLocked(args: string[], o: LockOptions = {}): Promise<number> {
   const file = o.file ?? defaultLockFile();
   const say = o.say ?? ((line: string) => process.stderr.write(`${line}\n`));
   // The watchdog first: a starter that goes while the run waits for the lock ends the wait too. Detached, so that it

@@ -1960,6 +1960,10 @@ process alive). Decided:
   runtimes, which kept starting turns); a timed-out hand-over's successor was not ended either. Several were found
   after a morning of full runs, and they loaded the following ones. Its `finally` now cancels the drain or fails the
   build, waits for the update to settle and ends the successor the update's log names.
+- **The drain and the queue's pause are separate observations (TF.refactor)**: the lifecycle checks whether the
+  worker runtime is idle, while the engine records the queue's `paused` state after its turn-settle delay. Under load
+  the chat-update test observed `updating` while the queue still said `pausing`. It now also waits for `paused` before
+  reading the run, keeping its assertions about the pause, restart flag and interrupted step unchanged.
 
 ## The engine's own waits in tests, and what sets the slowest files (queue FX)
 
