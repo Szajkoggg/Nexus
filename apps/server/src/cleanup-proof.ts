@@ -73,6 +73,18 @@ export function removeVerifiedTree(path: string, proof: Proof, io: RemovalIO = {
   }
 }
 
+/** Never traverse a parent directory that was replaced after preflight. */
+function verifyParents(path: string, child: string, expected: ReadonlyMap<string, Entry>): void {
+  let parent = dirname(child);
+  while (true) {
+    const name = parent === "." ? "" : parent.replaceAll("\\", "/");
+    const actual = entry(join(path, name), name), original = expected.get(name);
+    if (!actual || !original || !equal(actual, original)) cleanupRefusal(path, "a parent directory changed during cleanup");
+    if (!name) return;
+    parent = dirname(name);
+  }
+}
+
 function removeAttempt(path: string, proof: Proof, io: RemovalIO): void {
   if (resolve(path).toLowerCase() !== resolve(proof.path).toLowerCase()
     || cleanupPath(path).toLowerCase() !== proof.path.toLowerCase()) cleanupRefusal(path, "the canonical target path changed");
@@ -84,15 +96,7 @@ function removeAttempt(path: string, proof: Proof, io: RemovalIO): void {
     if (!saved || !equal(item, saved)) cleanupRefusal(join(path, item.path), "new, modified or replaced content since cleanup began");
   }
   for (const saved of current.reverse()) {
-    // Check the parent chain too: never traverse a directory that was replaced after preflight.
-    let parent = dirname(saved.path);
-    while (true) {
-      const name = parent === "." ? "" : parent.replaceAll("\\", "/");
-      const actual = entry(join(path, name), name), original = expected.get(name);
-      if (!actual || !original || !equal(actual, original)) cleanupRefusal(path, "a parent directory changed during cleanup");
-      if (!name) break;
-      parent = dirname(name);
-    }
+    verifyParents(path, saved.path, expected);
     const target = join(path, saved.path);
     const actual = entry(target, saved.path);
     if (!actual) continue;

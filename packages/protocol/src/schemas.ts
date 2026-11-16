@@ -75,7 +75,7 @@ export const Runtime = z.enum(["claude", "codex", "external"]);
 export const Effort = z.enum(["low", "medium", "high", "xhigh", "max", "ultra"]);
 export type Effort = z.infer<typeof Effort>;
 const CLAUDE_EFFORTS: readonly Effort[] = ["low", "medium", "high", "xhigh", "max"];
-export const ClaudeEffort = Effort.exclude(["ultra"]);
+const ClaudeEffort = Effort.exclude(["ultra"]);
 export type Runtime = z.infer<typeof Runtime>;
 
 // ---------------------------------------------------------------- registry (Nexus-level, not per project)
