@@ -577,6 +577,14 @@ usage runs out"). Choices made while building it (FB4):
   session is told what the old one cannot hand over itself: its progress lines, its commits since the round began and
   `git status` of the checkout. The changes are not touched: the seed asks the new session to keep them. Asking the
   full runtime for a context summary first (as at a boundary) would spend the usage that ran out, so none is asked.
+- **An entry during the asking turn is no turn of its own (TF1).** An answer or a message that comes while the turn
+  that asked the question still runs (as Nexus sees it: until the turn's result is read) goes into that turn on the
+  same runtime (`next`), so the gate does not look. The full runtime may then take one more turn: the agent acts on it
+  in its turn, or, when the CLI had already ended the turn and its result was still on the way, starts a turn for it.
+  Accepted: it is one turn, and holding entries back from a running turn would cost every other step its in-turn
+  messages. `fallback-mid.test.ts` once raced exactly this under load (a step left waiting, or done on Claude Code);
+  its answers and messages now wait for the asking turn's end, and the fake lingers after the question
+  (FAKE_ASK_LINGER_MS) so that a test which does not wait fails every time.
 - **A failed turn's reset counts as a window.** A turn refused for the usage limit names its reset; that is added as a
   full window of the runtime for the decision, since usage.json may not show it yet.
 - **Notices wait in the orchestrator's inbox.** The orchestrator runs on Claude Code; a notice that started its turn

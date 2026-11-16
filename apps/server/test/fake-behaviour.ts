@@ -4,7 +4,9 @@
 //   noop   end the turn without an outcome   stop    report a stop condition
 //   fail   report the step failed            slow    work (work() below: FAKE_SLOW_MS or held by the test), then done
 //   stop1  report a stop condition the first time, done once the stop is lifted
-//   ask1   ask a blocking question the first time (a step turn of this step in any session counts), done after
+//   ask1   ask a blocking question the first time (a step turn of this step in any session counts), done after;
+//          with FAKE_ASK_LINGER_MS, the asking turn ends that long after the question (a test that answers or writes
+//          before the turn is over then fails every time, not only under load)
 //   partial  the first time: a progress line, a commit of <step>-a.txt, then <step>-a.txt changed and <step>-b.txt
 //            written without a commit, and the turn ends without an outcome; after: done if <step>-b.txt is still
 //            there ("kept the uncommitted work"), else failed
@@ -325,7 +327,10 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
       return true;
     };
     if (behaviour === "ask1") {
-      if (first("ask1")) nexus("ask", "Which way?", "--step", step);
+      if (first("ask1")) {
+        nexus("ask", "Which way?", "--step", step);
+        if (process.env.FAKE_ASK_LINGER_MS) await new Promise((r) => setTimeout(r, Number(process.env.FAKE_ASK_LINGER_MS)));
+      }
       else nexus("step", "done", step, "--summary", `fake finished ${step} after its question`);
     }
     if (behaviour === "partial") {
