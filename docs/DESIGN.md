@@ -1916,6 +1916,32 @@ The suite runs every file side by side on every core already, so two at once onl
 Measured with two temporary clones started 5 s apart (a busy machine, other work running): the first took 268 s,
 the second waited about 263 s and then took 181 s; both green.
 
+### A run ends with its starter; a lock held too long is stale (queue TF)
+
+The survey TH found a hung run of another worktree holding the lock through a night, so every full run waited 15
+minutes and then ran without it. On Windows a killed parent leaves its children running: a worker's `npm test` ended
+on its background time limit, or a shell closed, could leave the whole test run going and holding the lock (its
+process alive). Decided:
+
+- **A watchdog process** per run (`test-lock.ts --watchdog`, detached, with an IPC channel to the wrapper) watches the
+  run's starter: the wrapper's parent always, then each ancestor while it is a shell (cmd, bash, sh, PowerShell, ...)
+  or npm, so up to the agent or terminal that ran the command and not beyond (not the Nexus server, whose restart is
+  not the run's end). One of them gone: the wrapper ends the run's tree (`taskkill /T`, a process group elsewhere)
+  and removes its lock. The wrapper killed by itself (its channel closed): the watchdog does it. It looks every
+  second; while waiting for the lock too.
+- **Found by asking the system**: on Windows one PowerShell walks the parents with a CIM query per level (about a
+  second; the whole process table takes several, and `wmic` is gone from current Windows). A parent newer than its
+  child is a reused pid and ends the walk. Git Bash breaks the Windows chain where an MSYS process execs another (npm's
+  own shell script does): the exec'd process's Windows parent is a stand-in that is gone, and the walk goes on through
+  MSYS's process table (`ps -e -l` beside its bash.exe: PID, PPID, WINPID). Until the chain is known only the parent is
+  watched; a starter that dies in that second or two is caught only if it is the parent.
+- **Node already does part of it on Windows**: libuv puts a process's children in a job object that ends them with it,
+  so a killed Node parent takes its children along (and a test whose starter is a Node process does not show the
+  problem: the starter in the tests is a shell). That job would end the watchdog too, which is why it is detached.
+- **20 minutes since `since`** (`NEXUS_TEST_LOCK_STALE_MS`), five times a full run, makes a lock stale even if its
+  process lives (a hung run, a pid reused): the next run takes it over at once instead of waiting 15 minutes and
+  running without it. The old run is not ended (not that run's to end); its end leaves the new lock alone.
+
 ## The engine's own waits in tests, and what sets the slowest files (queue FX)
 
 Measured first (`npm run test:times`, `NEXUS_TEST_WAIT_LOG`): the slowest files (approval-wait, engine-failures,
