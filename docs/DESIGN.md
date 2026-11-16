@@ -1685,6 +1685,38 @@ Nexus keeps outside the queue's list of steps.
   read-only carveouts directly; refusing to run unsandboxed". Without that carve-out the CLI could not record events.
   So Codex workers are unchanged.
 
+- **An orchestrator on Codex can be kept to its drafts and its own event log, by a permission profile** (queue OC,
+  decided by the user 2026-11-16). Probes with Codex 0.167.2 on Windows (elevated sandbox), a temporary project
+  outside the temp folder (`:workspace` makes the system temp folder writable, so a project under it proves
+  nothing): first `codex sandbox -P <profile>` with a script that tries every write (no model), then two `gpt-6-luna`
+  turns that tried the same with the file tool (apply_patch) and the shell: `codex exec` (199k input tokens, 191k of
+  them cached, 636 output) and `codex app-server` (118k input, 113k cached, 511 output; Codex reports no cost).
+  - A profile with no writable ancestor works where the carve-out above failed: `extends = ":read-only"` and
+    `filesystem = { "<root>/.nexus/drafts" = "write", "<root>/.nexus/sessions/<orchestrator>/events.jsonl" = "write" }`
+    (a single **file** may be granted), the working directory the project's root. Writable: the drafts and that one
+    file. Refused: the project's root and its files, `project.yaml`, the session's own `session.yaml` (its role) and
+    `inbox.jsonl`, another session's inbox, `sessions/user/events.jsonl`, `queues/*/queue.yaml` (approvals, Continue),
+    anything outside the project (`away.yaml` lives in NEXUS_HOME), and the temp folder. The `nexus` CLI works inside
+    it (`queue draft --template`, an event appended), and `--session user` cannot write in another session's name. Raw
+    lines in its own events.jsonl add nothing: the loader drops events that claim another session and user-only
+    events from a session whose role is not `user`.
+  - Through the app-server, Nexus's way: `thread/start` with `config: { default_permissions, "permissions.<name>.extends",
+    "permissions.<name>.filesystem" }` and no `sandbox` (the older settings would win); the thread then reports
+    `workspaceWrite` with exactly those two roots, and the working directory stays read-only. A turn must not send a
+    `sandboxPolicy` either.
+  - The elevated sandbox leaves its grant on the file as ACL entries (`CodexSandboxUsers` and a per-grant SID); a
+    later `:read-only` or `:workspace` sandbox elsewhere still cannot write the file.
+  - Rejected: `workspace-write` with `.nexus/drafts` as the working directory alone writes only the drafts (verified),
+    but the CLI then needs `.nexus/sessions/<orchestrator>/` writable, and that folder holds `session.yaml`: the
+    orchestrator could rewrite its role to `user` and act as the user.
+  - **Loopback stays open in every Codex sandbox**: with `network.enabled = false`, and with `:read-only`, a public host
+    was refused (EACCES) but `fetch("http://127.0.0.1:<port>/")` reached a test server, and a sandboxed script could
+    send an `Origin` header of its choosing. The server's write guard (Origin's host equal to Host, JSON, no
+    `Sec-Fetch-Site`) lets such a request through (read from the code; the live server was not probed). So any agent
+    with a free shell on this machine (Codex workers, Claude Code workers, an orchestrator on Codex) can do the user's
+    dashboard actions over HTTP; the orchestrator on Claude Code cannot (it runs only `nexus` and read-only git). The
+    user decided: the gap is closed by a queue of its own, and the orchestrator is not switched to Codex until it is.
+
 - **Remote access needs no open port.** The server keeps listening on 127.0.0.1; Tailscale Serve relays the tailnet's
   https requests to it. Requests relayed by a proxy count as remote and need the access token; this machine does
   not. Push works through the browsers' own push services (Web Push with VAPID), so a phone gets notifications with
