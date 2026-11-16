@@ -160,7 +160,7 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
    * A fresh session whose conversation is not saved yet: Claude Code saves it as it reads the first message, and
    * writes nothing before (probed 2026-11-15), so the first turn's start says it is saved (facts `saved`).
    */
-  private unsaved: boolean;
+  private unsaved = false;
   /** The CLI refused the start, naming whether the session has a saved conversation (savedFromRefusal): told once. */
   private refusalTold = false;
   /**
@@ -195,7 +195,6 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
     if (options.disallowedTools?.length) args.push("--disallowedTools", options.disallowedTools.join(","));
     if (options.allowedTools.length) args.push("--allowedTools", ...options.allowedTools); // variadic: keep last
     this.args = args;
-    this.unsaved = !options.resume;
     this.startProcess();
   }
 
@@ -255,19 +254,7 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
    */
   private exited(code: number | null): void {
     const saved = code ? savedFromRefusal(this.lastStderr) : undefined;
-    if (saved !== undefined && this.mayRetry()) {
-      this.retried = true;
-      this.resume = saved;
-      const lines = this.written!;
-      this.written = [];
-      this.early = undefined;
-      this.emit("activity", { kind: "retry", text: `Claude Code refused the start (${clip(this.lastStderr.trim(), 200)}); started again, ${saved ? "resuming the saved conversation" : "afresh"}` });
-      this.startProcess();
-      this.emit("facts", { pid: this.proc.pid });
-      for (const l of lines) this.write(l);
-      if (this.inputClosed) this.proc.stdin.end();
-      return;
-    }
+    if (saved !== undefined && this.mayRetry()) { this.startAgain(saved); return; }
     const early = this.early;
     this.early = undefined;
     if (early) this.handle(early);
@@ -277,6 +264,20 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
     this.exitCode = code;
     if (code && this.lastStderr.trim()) this.emit("activity", { kind: "error", text: this.lastStderr.trim().slice(-500) });
     this.emit("exit", code);
+  }
+
+  /** Starts the refused session again, resuming it if it has a saved conversation, and writes its input again. */
+  private startAgain(saved: boolean): void {
+    this.retried = true;
+    this.resume = saved;
+    const lines = this.written!;
+    this.written = [];
+    this.early = undefined;
+    this.emit("activity", { kind: "retry", text: `Claude Code refused the start (${clip(this.lastStderr.trim(), 200)}); started again, ${saved ? "resuming the saved conversation" : "afresh"}` });
+    this.startProcess();
+    this.emit("facts", { pid: this.proc.pid });
+    for (const l of lines) this.write(l);
+    if (this.inputClosed) this.proc.stdin.end();
   }
 
   /** Writes a line to the process's input, kept while the start may still be refused (`written`). */

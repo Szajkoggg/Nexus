@@ -584,6 +584,17 @@ command copies each picture into `.nexus/queues/<queue>/review/<step>/`. It also
 older code also shows up there. It never stops the step. Views narrower than Edge's 492 px are shown in a frame of
 their width. `NEXUS_CAPTURE_BROWSER` points it to another Edge or Chrome.
 
+`scripts/layout-faults.ts` measures a page's layout faults: lines running through boxes, overlapping boxes and text
+cut short (and counts where lines cross). It takes a mockup file or a development instance's URL, never port 4317:
+
+```sh
+node scripts/layout-faults.ts "docs/ux/mockups/22-plan-layout.html?v=b" --width 390 --shot $TEMP/plan@390.png
+node scripts/layout-faults.ts http://127.0.0.1:4318/#/nexus --click "All queues of Nexus" --lines "section[aria-label='The plan'] svg path"
+```
+
+Exit code 1 when it finds a fault; the list says which line, box or text. Details: [docs/DESIGN.md](docs/DESIGN.md),
+"Layout faults".
+
 ## Remote access
 
 The server listens on this PC only. Everything from this PC works without signing in; anything that comes through a

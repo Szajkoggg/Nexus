@@ -52,12 +52,16 @@ test("Claude Code: two turns in one session report each turn's tokens and cost, 
 test("Codex: two turns in one thread report each turn's tokens (the running total's difference), and no cost", async () => {
   const codex = (threadId?: string) => new CodexSession({ cwd, env: {}, threadId, sandbox: "read-only", approvalPolicy: "never", writableRoots: [] });
   // Turn n: 100n input (60n cached) and 3n output, then 120 input (50 cached) and 2n output (fake-codex.ts).
-  const ends = await turns(codex(), ["hello", "again"]);
+  const first = codex();
+  let thread: string | undefined;
+  first.on("facts", (f) => { thread ??= f.nativeId; });
+  const ends = await turns(first, ["hello", "again"]);
   assert.deepEqual(ends.map((e) => e.tokens), [t(40 + 70, 5, 60 + 50, 0), t(80 + 70, 10, 120 + 50, 0)], "the second turn's own, not the thread's total");
   assert.deepEqual(ends.map((e) => e.costUsd), [undefined, undefined], "Codex reports no cost");
 
   // A resumed thread: the running total starts with turns this process never saw, so the turn's `last` figures are
   // summed instead (both requests of the turn, not only the last one).
-  const resumed = await turns(codex("thread-resumed"), ["hello", "again"]);
+  // The same thread: the fake resumes only a thread it saved (as Codex does).
+  const resumed = await turns(codex(thread), ["hello", "again"]);
   assert.deepEqual(resumed.map((e) => e.tokens), [t(110, 5, 110, 0), t(150, 10, 170, 0)]);
 });

@@ -3,7 +3,8 @@
 // that turns them on and off, with what it says when it did.
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { attentionKey, HttpError, request, type AttentionItem, type ProjectSummary } from "../api.ts";
+import { attentionKey } from "@nexus/protocol/attention";
+import { HttpError, request, type AttentionItem, type ProjectSummary } from "../api.ts";
 import { itemHash } from "../hash.ts";
 import { t } from "../i18n.ts";
 import { attentionTarget, kindLabel, textOf } from "./Attention.tsx";
