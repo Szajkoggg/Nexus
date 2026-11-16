@@ -14,7 +14,7 @@ import {
   lacksStaticAnalysis, projectStaticAnalysis, staticReminderDue,
   TemplateError, fillTemplate, filledTemplateYaml, parseEvery, MaintenanceMode, readTemplates, templateQueueId, unusableTemplate, type MergedTemplates,
   type PictureRole, type ReviewItem, type Role, type Runtime, type SessionFile,
-  noteRefIssue, parseNoteRef, readNotes,
+  noteRefIssue, parseNoteRef, readNotes, ideaMatches,
 } from "@nexus/protocol";
 import { checkRules, describeRules } from "@nexus/protocol/rules";
 import { importMarkdownQueues } from "./import-md.ts";
@@ -50,6 +50,8 @@ Agent commands (session from NEXUS_SESSION or --session):
   nexus report <queue> --file <path> --summary <text> [--findings <n>]   (a maintenance queue: how many findings)
   nexus covers <file>.md#<YYYY-MM-DD>...   (thinking partner only) in a hand-over, before the summary: the Decided
                     entries of the notes it passes on (the notes folder may be left out: tags.md#2026-11-14)
+  nexus ideas matches                 the suggestions for matching earlier queues to the notes' entries, and the
+                                      user's decisions (deciding is the user's, in the dashboard)
   nexus log <text> [--level info|warn|error]
   nexus answer <qid> <text> [--escalate [--recommend <option>]] [--continue|--wait]     (orchestrator only)
   nexus queue draft <file.yaml|->                                 (orchestrator only) create or change a queue
@@ -654,6 +656,21 @@ const commands: Record<string, () => void | Promise<void>> = {
     const removed = !same && inReportFolder(st.readProject().id, file);
     if (removed) rmSync(file, { force: true });
     console.log(`ok: report for queue ${queue} in ${target}${same ? "" : ` (copied from ${file}${removed ? ", which is removed" : ""})`}`);
+  },
+
+  /**
+   * `nexus ideas matches`: the suggestions for matching the project's earlier queues (whose source names no note) to
+   * the notes' entries, and the user's decisions; read only. Deciding is the user's, in the dashboard.
+   */
+  ideas() {
+    const sub = args[1] ?? "matches";
+    if (sub === "accept" || sub === "reject") throw new UsageError("accepting or rejecting a match of a queue to a note is the user's, in the dashboard (Ideas, Overview, To match)");
+    if (sub !== "matches") throw new UsageError("nexus ideas matches");
+    const st = store();
+    const items = ideaMatches(st, loadProjectState(st)).items;
+    const open = items.filter((m) => !m.decision);
+    console.log(`${items.length} suggestion(s) for ${new Set(items.map((m) => m.queue)).size} queue(s); ${open.length} wait for the user`);
+    for (const m of items) console.log([m.queue, m.ref, m.kind, ...(m.decision ? [m.decision.accepted ? "accepted" : "rejected"] : [])].join("\t"));
   },
 
   /**

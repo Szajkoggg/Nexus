@@ -27,6 +27,7 @@ a shell command can take part.
   project.yaml                          server
   tags.yaml                             server: the project's tag lists (areas, own activities, renames, proposals)
   metrics.yaml                          server: the project's metrics (unit, how shown, target, warning threshold)
+  idea-matches.yaml                     server: the user's decisions on matching earlier queues to the notes' entries
   orchestrator/summary.md               server: the orchestrator's latest summary for a fresh session (its context care)
   drafts/<queue-id>.yaml                the orchestrator: its queue drafts (also `nexus queue draft --template`)
   recurring/<id>.yaml                   server: a recurring queue (template, values, schedule, standing approval)
@@ -1105,6 +1106,7 @@ nexus template list | show <id>                # the queue templates in effect (
 nexus recurring list                           # the recurring queues and their state (see "Recurring queues")
 nexus static-analysis [status]                 # the stacks and static analysis Nexus sees, and the reminder's state (see "Static analysis reminder")
 # thinking partner only
+nexus ideas matches                            # the suggestions for matching earlier queues to the notes' entries, and the user's decisions (read only; deciding is the user's, in the dashboard)
 nexus covers tags.md#2026-11-14 docs/ideas/plan.md#2026-11-15   # in a hand-over: the Decided entries it passes on (ideas.covered); the notes folder may be left out; each checked against the notes, a missing note or date refused with the note's dates
 # orchestrator only
 nexus queue draft --file queue.yaml
@@ -1235,7 +1237,9 @@ from every agent session, and the others from every session but an orchestrator'
 | `POST /api/projects/:id/questions/:qid/answer` | `text`, `continue?` | The user's answer, routed to the asker |
 | `POST /api/projects/:id/queues/:q/run` | `action` (`start`, `pause`, `resume`, `stop`, `stop_at_once`, `cancel_start`), `runtime?`, `model?`, `effort?`, `session?`, `after?`, `next?`, `at?` | Runs the queue through a Nexus-launched session (`session` continues an existing one). `start` with `after` (a queue id or a list): the user's place for the queue in the plan, it starts when those are done; with `next: true`: in the plan with none before it (`{message}`; see "The plan"); with `at` (ISO 8601, or `usage-reset`): a schedule (`{message}`); `cancel_start` takes the queue out of the plan (`{message}`). `stop` pauses and sends the existing Stop now message (`text?` supplies the reason). `stop_at_once` pauses, interrupts the turn and kills only this queue's worker process, waiting for its exit before success; keeps uncommitted changes and the session, writes `step.interrupted`. No worker, a finished run, a stop already in progress or a session reused by another queue: 409. Resume during exit: 409; afterwards it continues the step in the same session. No CLI or orchestrator request action exposes `stop_at_once` |
 | `GET /api/projects/:id/estimates` | | Expected times of the project's open queues, as estimates (`{ samples, min, queues: { <id>: { steps, ms? } } }`): `steps` the steps left (not closed), `ms` their expected time, absent while fewer than `min` (5) steps are finished. A finished (done) step's time is the sum of its worker turns' `duration_ms` in `turns.jsonl` (send-back rounds included, the wait for its review not), over every project the server has; a step to come takes the average of those on its model and effort, else its model, else all, each from at least 5 steps |
-| `GET /api/projects/:id/ideas` | | The ideas overview (`IdeasResponse`: `notes_dir`, null without a notes folder; `notes`, each with `file`, `title`, `summary?`, `area?`, `group?`, `area_from?` (`note` or `queues`), `open` and `questions` (its Open questions' text), `ideas`, `status` and `queues`, and its `entries`, each with `ref`, `date`, `headings`, `lead`, `decisions`, `dropped?`, `replaced_by?`, `status`, `queues` and `history`; `unknown_refs`, queues' references to nothing). Derived on each request from the notes, the queues and the hand-over records; the notes are only read (see "Conversations"). Unknown project: 404 |
+| `GET /api/projects/:id/ideas/matches` | | The suggestions for matching the earlier queues to the notes' entries (`IdeaMatchesResponse`: `items`, in the queues' order, each with `queue`, `ref`, `kind`, `quote`, the queue's `title`, `status`, `finished_at?` and `commit?`, the entry's `lead?`, and the user's `decision?` (`accepted`, `at`)); a decided match whose suggestion is gone stays listed (see "Conversations", matching). Unknown project: 404 |
+| `POST /api/projects/:id/ideas/matches` | `items` (`[{ queue, ref }]`), `accept` (true, false, or null to take the decision back) | The user's decision on suggestions, recorded in `idea-matches.yaml`; an item that is no suggestion (nor decided before) is 404. A user's write like every other (same-origin JSON) |
+| `GET /api/projects/:id/ideas` | | The ideas overview (`IdeasResponse`: `notes_dir`, null without a notes folder; `notes`, each with `file`, `title`, `summary?`, `area?`, `group?`, `area_from?` (`note` or `queues`), `open` and `questions` (its Open questions' text), `ideas`, `status` and `queues`, and its `entries`, each with `ref`, `date`, `headings`, `lead`, `decisions`, `dropped?`, `replaced_by?`, `status`, `queues` and `history`; `unknown_refs`, queues' references to nothing; `to_match`, the suggestions for earlier queues still to decide: `suggestions` and `queues`). Derived on each request from the notes, the queues and the hand-over records; the notes are only read (see "Conversations"). Unknown project: 404 |
 | `GET /api/projects/:id/metrics` | | The project's metrics and their values (`ProjectMetrics`: `metrics`, its own definitions and every check's time seen, `check:<name>`; `values`, oldest first, each a `StepView.metrics` entry with its `queue` and `step`); see "Project metrics". Unknown project: 404 |
 | `GET /api/stats?by=&project=&since=&kind=&activity=&area=&size=&origin=` | | The statistics (`StatsReport`, see "Statistics"): every registered project, or one (`project`; unknown: 404), grouped by `by` (`model`, `effort`, `kind`, `activity`, `area`, `size`, `origin`; default `model`; another: 400), the steps whose last outcome is at or after `since` (a date or a time; unreadable: 400), narrowed to the steps under each tag value given (`kind=code`, `area=p/engine` across projects; the value as the groups name it) |
 | `GET /api/usage/days?since=` | | The usage windows day by day for the global Stats view (`UsageDays`, see "Statistics") from `since` (a date or a time; default 30 days ago; unreadable: 400) to today, with `threshold`, the global `defaults.usage_pause_threshold` |
@@ -1565,6 +1569,29 @@ replaced ones: dropped, else replaced). Its history is in time order: decided (t
 naming queue's queued (created), approved, started, finished (with its last commit) or cancelled, then dropped or
 replaced. A note without an Area line takes the area most of its queues' steps carry. A queue's reference to a note or
 an entry that is not there is listed apart (`unknown_refs`).
+
+**Matching the earlier queues** (queue IO4). A queue whose `source` names no note (one from before the field) gets
+suggestions, derived on each request from its title, description and step goals, sentence by sentence: a mention of
+`<notes folder>/<file>.md` (a note; the README and missing files skipped) with `#<date>` of one of its entries is
+`exact`; else the dates of its entries in the same sentence are `dated` (one each); else its latest entry dated on or
+before the queue's creation is `file`. One suggestion per queue and entry, the strongest kind, with the sentence it
+came from; cancelled queues get none. The user decides in the dashboard (Ideas, Overview, "To match"): accept, reject,
+or take back; the decisions go to `.nexus/idea-matches.yaml`, written only by the server from the user's request:
+
+```yaml
+protocol: 1
+matches:
+  - queue: PV
+    ref: docs/ideas/queue-plan-view.md#2026-11-14
+    kind: dated                        # exact | dated | file: how the suggestion was found
+    quote: "A felhasználó 2026-11-14-i döntései: docs/ideas/queue-plan-view.md (csak a Decided rész döntés)."
+    accepted: true                     # false: rejected
+    at: 2026-11-16T08:00:00Z
+```
+
+An accepted match counts like the queue's `source` in the derivation (the entry is queued, or built once the queue is
+done, with its commit); a rejected one does not. The queues themselves are never changed. No agent decides: `nexus
+ideas matches` only lists the suggestions and decisions, and `nexus ideas accept|reject` is refused as the user's.
 
 **The web** (`conversations.web`, global with a project override, decided by the user 2026-11-15): `off`, `search`
 (the default) or `fetch`. A changed level applies from the partner's next message (a new process, resuming the

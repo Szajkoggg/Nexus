@@ -23,7 +23,9 @@ it), **queued** (a queue says it came from it), **built** (every such queue is d
 note shows the least advanced of its decisions, and a note with nothing decided yet is **being worked out**. Filter by
 status, or by words. A click opens the note where a step opens: its Summary, each decision with its history (when it
 was handed over, queued, approved, started, built, with the commit), its open questions and its queues. Nobody keeps
-these by hand: they follow from the notes, the hand-overs and the queues' `source`.
+these by hand: they follow from the notes, the hand-overs and the queues' `source`. Queues from before `source`
+are matched once: **To match** atop the overview lists, queue by queue, the notes their own words name, with the
+sentence; accept or reject each (or the exact and dated ones at once), and an accepted one counts as the queue's source.
 
 **The web in Ideas.** Settings → "Ideas (conversations)" → **Web** (global, or the project's own): **off**, **web
 search** (the default: partners search and name their sources, but open no page) or **web search and reading pages**.

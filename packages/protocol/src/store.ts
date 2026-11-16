@@ -9,7 +9,7 @@ import { monotonicFactory } from "ulid";
 import YAML from "yaml";
 import type { z } from "zod";
 import {
-  Activity, Applied, AwayFile, ChatEntry, PinsFile, RecurringFile, Refusal, Delivery, Event, GlobalSettings, InboxEntry, MaxRunning, MetricsFile, NoteMeta, GitFile, ProjectFile, PushFile, QueueFile, type QueueInput, LegacyReviewPolicy, RegistryFile, RunFile, RuntimeFile, SessionFile, StartFile, StaticAnalysisNote, PlanFile, StoredProject, TagsFile, TurnRecord, UsageFile,
+  Activity, Applied, AwayFile, IdeaMatchesFile, ChatEntry, PinsFile, RecurringFile, Refusal, Delivery, Event, GlobalSettings, InboxEntry, MaxRunning, MetricsFile, NoteMeta, GitFile, ProjectFile, PushFile, QueueFile, type QueueInput, LegacyReviewPolicy, RegistryFile, RunFile, RuntimeFile, SessionFile, StartFile, StaticAnalysisNote, PlanFile, StoredProject, TagsFile, TurnRecord, UsageFile,
   type Note,
 } from "./schemas.ts";
 import { noteRefs } from "./ideas.ts";
@@ -329,6 +329,14 @@ export class ProjectStore {
     return moved;
   }
   /** The project's tag lists (.nexus/tags.yaml); empty lists while the file does not exist. */
+  /** The user's decisions on matching earlier queues to the notes (ideas-read.ts); none when the file is missing. */
+  readIdeaMatches(): IdeaMatchesFile {
+    const f = join(this.dir, "idea-matches.yaml");
+    return existsSync(f) ? readYaml(f, IdeaMatchesFile) : IdeaMatchesFile.parse({ protocol: 1 });
+  }
+  /** Written only by the server, from the user's action (ideas-read.ts, decideIdeaMatches). */
+  writeIdeaMatches(m: IdeaMatchesFile): void { writeYaml(join(this.dir, "idea-matches.yaml"), IdeaMatchesFile.parse(m)); }
+
   readTags(): TagsFile {
     const f = join(this.dir, "tags.yaml");
     return existsSync(f) ? readYaml(f, TagsFile) : TagsFile.parse({ protocol: 1 });

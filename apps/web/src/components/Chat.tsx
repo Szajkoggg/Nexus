@@ -23,7 +23,7 @@ import { usePage } from "../page.ts";
 import { fileHref } from "../hash.ts";
 import { clearChatTarget, useChatTarget } from "../chatTarget.ts";
 import { SearchField } from "./Search.tsx";
-import { IdeasOverview, IdeasSwitch } from "./Ideas.tsx";
+import { IdeasMatching, IdeasOverview, IdeasSwitch } from "./Ideas.tsx";
 
 // ---------------------------------------------------------------- the endpoints this file reads and writes
 
@@ -705,17 +705,21 @@ export function ConversationsPanel({ project, name, defaultRuntime, inline, desk
   const at = useNav();
   const [stored, setStored] = useIdeasView();
   const noteOpen = layerValue(at, "note") !== undefined;
+  const matching = layerValue(at, "matching") !== undefined;
   const conversationOpen = layerValue(at, "conversation") !== undefined;
-  const view: IdeasView = conversationOpen ? "conversations" : noteOpen ? "overview" : stored;
+  const view: IdeasView = conversationOpen ? "conversations" : noteOpen || matching ? "overview" : stored;
   const pick = (v: IdeasView) => {
     setStored(v);
     if (v === "conversations" && noteOpen) nav.close("note");
+    if (v === "conversations" && matching) nav.close("matching");
     if (v === "overview" && conversationOpen) nav.close("conversation");
   };
   if (view === "overview") {
     return (
       <Panel inline={inline} desk={desk} which="ideas" head={desk && <IdeasSwitch view={view} onView={pick} />}>
-        <IdeasOverview project={project} areas={areas} phone={!desk} top={!desk && <div className="mb-3"><IdeasSwitch view={view} onView={pick} wide /></div>} />
+        {matching
+          ? <IdeasMatching project={project} phone={!desk} />
+          : <IdeasOverview project={project} areas={areas} phone={!desk} top={!desk && <div className="mb-3"><IdeasSwitch view={view} onView={pick} wide /></div>} />}
       </Panel>
     );
   }

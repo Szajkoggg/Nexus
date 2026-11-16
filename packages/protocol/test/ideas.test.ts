@@ -11,6 +11,7 @@ import YAML from "yaml";
 import {
   ActionError, ProjectStore, QueueFile, applyDraft, approveQueue, deriveIdeas, ideaQueues, importedFrom, loadProjectState,
   noteRefs, parseNote, parseNoteRef, projectIdeas, readHandOvers, readNotes, revisionHash, topicStatus, type Event, type IdeaQueue,
+  decideIdeaMatches, ideaMatches, newId, suggestMatches, type MatchQueue,
 } from "../src/index.ts";
 
 const NOTE = `# Plan view
@@ -309,4 +310,74 @@ test("a hand-over record counts only from a thinking partner's own events; anoth
   assert.ok(loadProjectState(st).warnings.some((w) => /ideas\.covered is for thinking partners; ignored/.test(w)));
   const plan = projectIdeas(st, loadProjectState(st)).notes.find((n) => n.file === "docs/ideas/plan.md")!;
   assert.equal(plan.entries[0]!.status, "handed_over");
+});
+
+// ---------------------------------------------------------------- matching earlier queues to the notes
+
+const mq = (id: string, description: string, extra: Partial<MatchQueue> = {}): MatchQueue =>
+  ({ id, title: `Queue ${id}`, description, steps: [{ title: "One", goal: "" }], created_at: "2026-11-16T10:00:00Z", status: "done", ...extra });
+
+test("suggestions come from the queues' own references: exact, a date in the same sentence, or the file alone", () => {
+  const s = suggestMatches([
+    mq("A", "Decided: docs/ideas/plan.md#2026-11-15 and more."),
+    mq("B", "A felhasználó 2026-11-14-i döntése (docs/ideas/plan.md, docs/ideas/README.md). Another sentence, 2026-11-16."),
+    mq("C", "The plan is in docs/ideas/plan.md; this queue does items 1 and 2.", { created_at: "2026-11-15T23:00:00Z" }),
+    mq("D", "Named in its source already: docs/ideas/plan.md#2026-11-14.", { source: ["docs/ideas/plan.md#2026-11-14"] }),
+    mq("E", "Cancelled: docs/ideas/plan.md#2026-11-14.", { status: "cancelled" }),
+    mq("F", "Nothing here, docs/ideas/missing.md and docs/ideas."),
+  ], notes, "docs/ideas");
+  assert.deepEqual(s.map((x) => [x.queue, x.ref, x.kind]), [
+    ["A", "docs/ideas/plan.md#2026-11-15", "exact"],
+    ["B", "docs/ideas/plan.md#2026-11-14", "dated"],
+    ["C", "docs/ideas/plan.md#2026-11-15", "file"],
+  ]);
+  assert.equal(s[1]!.quote, "A felhasználó 2026-11-14-i döntése (docs/ideas/plan.md, docs/ideas/README.md).", "the sentence it came from");
+  assert.deepEqual(suggestMatches([mq("A", "docs/ideas/plan.md#2026-11-15")], notes, undefined), [], "no notes folder, no suggestions");
+});
+
+/** A project with the notes and a finished queue that names plan.md in its description, but has no source. */
+function finished() {
+  const p = project();
+  const { st, root } = p;
+  st.writeQueue({
+    protocol: 1, id: "OLD", title: "Old queue", revision: 1, status: "proposed", stop_conditions: [], checks: [], approvals: [], history: [],
+    description: "Decided by the user on 2026-11-14; notes in docs/ideas/plan.md.", steps, created_at: "2026-11-14T20:00:00Z",
+  });
+  approveQueue(st, "OLD");
+  st.writeSession({ protocol: 1, id: "w", project: "p", role: "worker", runtime: "claude", cwd: root, launched_by: "nexus", created_at: "2026-11-14T20:00:00Z", queue: "OLD" });
+  st.writeSession({ protocol: 1, id: "o", project: "p", role: "orchestrator", runtime: "claude", cwd: root, launched_by: "nexus", created_at: "2026-11-14T20:00:00Z" });
+  const ev = (s: string, at: string, body: Record<string, unknown>) => st.appendEvent({ v: 1, id: newId(), at, session: s, queue: "OLD", step: "Q1", ...body } as Event);
+  ev("w", "2026-11-14T21:00:00Z", { type: "step.started" });
+  ev("w", "2026-11-14T22:00:00Z", { type: "step.done", summary: "Done.", commit: "abc1234" });
+  ev("o", "2026-11-14T22:05:00Z", { type: "review.accepted" });
+  const entry = () => projectIdeas(st, loadProjectState(st)).notes.find((n) => n.file === "docs/ideas/plan.md")!.entries[0]!;
+  return { ...p, entry };
+}
+
+test("an accepted match counts as the queue's source: the entry is built, with the queue's commit; rejected, it is not", () => {
+  const { st, entry } = finished();
+  const before = projectIdeas(st, loadProjectState(st));
+  assert.deepEqual(before.to_match, { suggestions: 1, queues: 1 });
+  assert.equal(entry().status, "decided");
+  const m = ideaMatches(st, loadProjectState(st)).items;
+  assert.deepEqual(m.map((x) => [x.queue, x.ref, x.kind, x.status, x.commit, x.lead, x.decision]), [["OLD", "docs/ideas/plan.md#2026-11-14", "dated", "done", "abc1234", "The planned order as a graph", undefined]]);
+
+  decideIdeaMatches(st, [{ queue: "OLD", ref: "docs/ideas/plan.md#2026-11-14" }], true);
+  const built = entry();
+  assert.equal(built.status, "built");
+  assert.deepEqual(built.queues.map((q) => [q.id, q.commit]), [["OLD", "abc1234"]]);
+  assert.equal(built.history.find((h) => h.kind === "finished")?.commit, "abc1234");
+  assert.deepEqual(projectIdeas(st, loadProjectState(st)).to_match, { suggestions: 0, queues: 0 });
+  assert.equal(st.readQueue("OLD").source, undefined, "the closed queue itself is not changed");
+  assert.deepEqual(st.readIdeaMatches().matches.map((x) => [x.queue, x.ref, x.kind, x.accepted]), [["OLD", "docs/ideas/plan.md#2026-11-14", "dated", true]]);
+
+  decideIdeaMatches(st, [{ queue: "OLD", ref: "docs/ideas/plan.md#2026-11-14" }], false);
+  assert.equal(entry().status, "decided", "rejected: not built");
+  assert.equal(ideaMatches(st, loadProjectState(st)).items[0]!.decision?.accepted, false);
+
+  decideIdeaMatches(st, [{ queue: "OLD", ref: "docs/ideas/plan.md#2026-11-14" }], null);
+  assert.deepEqual(st.readIdeaMatches().matches, [], "taken back");
+  assert.throws(() => decideIdeaMatches(st, [{ queue: "OLD", ref: "docs/ideas/plan.md#2026-11-15" }], true), (e: ActionError) => e.status === 404);
+  assert.throws(() => decideIdeaMatches(st, [], true), /items is a list/);
+  assert.throws(() => decideIdeaMatches(st, [{ queue: "OLD", ref: "docs/ideas/plan.md#2026-11-14" }], "yes"), /accept is true, false or null/);
 });

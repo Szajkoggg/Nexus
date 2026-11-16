@@ -250,6 +250,8 @@ export interface IdeasView { notes: IdeaNoteView[]; unknown_refs: { queue: strin
 export interface IdeasResponse extends IdeasView {
   /** The project's notes folder (relative to its root), or null when it has none: then there are no notes. */
   notes_dir: string | null;
+  /** The suggestions for matching earlier queues that wait for the user's decision, and how many queues they are of. */
+  to_match: { suggestions: number; queues: number };
 }
 
 const queueRef = (q: IdeaQueue): IdeaQueueRef => ({ id: q.id, title: q.title, status: q.status, ...(q.commit ? { commit: q.commit } : {}) });
@@ -356,3 +358,94 @@ export function ideaQueues(views: readonly QueueView[], matched: Readonly<Record
     };
   });
 }
+
+// ---------------------------------------------------------------- matching earlier queues to the notes
+
+/**
+ * How a suggestion was found: an `exact` reference (`<file>.md#<date>`), a note named with one of its entries' dates
+ * in the same sentence (`dated`), or a note named alone (`file`: its latest entry dated on or before the queue).
+ */
+export type MatchKind = "exact" | "dated" | "file";
+const MATCH_RANK: Record<MatchKind, number> = { exact: 0, dated: 1, file: 2 };
+
+/** A suggested match of a queue that names no note to a note's entry, with the sentence it came from. */
+export interface MatchSuggestion { queue: string; ref: string; kind: MatchKind; quote: string }
+
+/** What suggestMatches reads of a queue: its words, when it was created, its source and status. */
+export interface MatchQueue {
+  id: string;
+  title: string;
+  description?: string;
+  steps: readonly { title: string; goal?: string }[];
+  created_at?: string;
+  source?: readonly QueueSource[];
+  status: QueueStatus;
+}
+
+/** A queue's words as sentences: paragraphs and list items apart, lines joined, split after . ! or ?. */
+function sentences(text: string): string[] {
+  return text.replace(/\r\n?/g, "\n").split(/\n\s*\n|\n(?=\s*(?:[-*+]|\d+\.)\s)/)
+    .flatMap((p) => p.replace(/\s+/g, " ").trim().split(/(?<=[.!?])\s+(?=\S)/))
+    .map((s) => s.trim()).filter(Boolean);
+}
+
+/**
+ * The suggestions for matching the queues that name no note in their source (the earlier ones; cancelled ones left
+ * out) to the notes' entries, from the references in their title, description and step goals: a mention of
+ * `<notes folder>/<file>.md` (the README and files that are not notes skipped) with `#<date>` of one of its entries
+ * (exact), else with dates of its entries in the same sentence (dated, one each), else the note's latest entry dated
+ * on or before the queue's creation (file). One per queue and entry, the strongest kind, with its first sentence.
+ */
+export function suggestMatches(queues: readonly MatchQueue[], notes: readonly IdeaNote[], notesDir: string | undefined): MatchSuggestion[] {
+  if (!notesDir) return [];
+  const byFile = new Map(notes.map((n) => [n.file, n]));
+  const dir = notesDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const out: MatchSuggestion[] = [];
+  for (const q of queues) {
+    if (q.status === "cancelled" || noteRefs(q.source).length) continue;
+    const found = new Map<string, MatchSuggestion>();
+    const add = (ref: string, kind: MatchKind, quote: string) => {
+      const had = found.get(ref);
+      if (!had || MATCH_RANK[kind] < MATCH_RANK[had.kind]) found.set(ref, { queue: q.id, ref, kind, quote: had && MATCH_RANK[had.kind] === MATCH_RANK[kind] ? had.quote : clip(quote) });
+    };
+    const created = q.created_at?.slice(0, 10);
+    const text = [q.title, q.description ?? "", ...q.steps.flatMap((s) => [s.title, s.goal ?? ""])].join("\n\n");
+    for (const sentence of sentences(text)) {
+      const dates = [...sentence.matchAll(/\d{4}-\d{2}-\d{2}/g)].map((m) => m[0]);
+      for (const m of sentence.matchAll(new RegExp(`${dir}/([^\\s#()\\[\\]\`'",;]+?\\.md)(?:#(\\d{4}-\\d{2}-\\d{2}))?`, "g"))) {
+        const note = byFile.get(`${notesDir}/${m[1]}`);
+        if (!note || !note.entries.length) continue;
+        const has = (d: string) => note.entries.some((e) => e.date === d);
+        if (m[2] && has(m[2])) { add(noteRef(note.file, m[2]), "exact", sentence); continue; }
+        const dated = [...new Set(dates)].filter(has);
+        for (const d of dated) add(noteRef(note.file, d), "dated", sentence);
+        if (dated.length) continue;
+        const before = note.entries.filter((e) => !created || e.date <= created).at(-1);
+        if (before) add(noteRef(note.file, before.date), "file", sentence);
+      }
+    }
+    out.push(...found.values());
+  }
+  return out;
+}
+
+const clip = (s: string) => (s.length > 320 ? `${s.slice(0, 319).trimEnd()}…` : s);
+
+/** The entries the user accepted for each queue (by queue id), from the decisions in idea-matches.yaml. */
+export function acceptedMatches(matches: readonly { queue: string; ref: string; accepted: boolean }[]): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const m of matches) if (m.accepted) (out[m.queue] ??= []).push(m.ref);
+  return out;
+}
+
+/** A suggestion as the dashboard shows it: its queue as it stands, the entry's lead, and the user's decision. */
+export interface MatchItem extends MatchSuggestion {
+  title: string;
+  status: QueueStatus;
+  finished_at?: string;
+  commit?: string;
+  lead?: string;
+  decision?: { accepted: boolean; at: string };
+}
+/** GET /api/projects/:id/ideas/matches: the suggestions and decisions, queue by queue in the queues' order. */
+export interface IdeaMatchesResponse { items: MatchItem[] }

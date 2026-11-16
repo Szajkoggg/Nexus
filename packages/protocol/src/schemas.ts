@@ -1258,6 +1258,30 @@ export const TagsFile = z.object({
 });
 export type TagsFile = z.infer<typeof TagsFile>;
 
+// ---------------------------------------------------------------- idea-matches.yaml (queues matched to notes)
+
+/**
+ * The user's decision on a suggested match of an earlier queue to a note's entry (ideas.ts, suggestMatches): the
+ * queue, the entry (a note reference), how the suggestion was found (`exact` reference, a `dated` file in the same
+ * sentence, or the `file` only), the sentence it came from, and whether the user accepted it, when.
+ */
+export const IdeaMatch = z.object({
+  queue: Id,
+  ref: z.string().regex(NOTE_REF),
+  kind: z.enum(["exact", "dated", "file"]),
+  quote: z.string().optional(),
+  accepted: z.boolean(),
+  at: Time,
+});
+export type IdeaMatch = z.infer<typeof IdeaMatch>;
+/**
+ * .nexus/idea-matches.yaml: the user's decisions on matching the queues that name no note (from before `source`) to
+ * the notes' entries. Written only by the server, from the user's action in the dashboard; an accepted match counts
+ * like the queue's source (ideas-read.ts). The closed queues themselves are never changed. Missing: none decided.
+ */
+export const IdeaMatchesFile = z.object({ protocol: z.literal(1), matches: z.array(IdeaMatch).default([]) });
+export type IdeaMatchesFile = z.infer<typeof IdeaMatchesFile>;
+
 // ---------------------------------------------------------------- metrics.yaml (the project's metrics)
 
 /**

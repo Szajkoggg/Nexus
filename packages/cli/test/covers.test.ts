@@ -63,3 +63,25 @@ test("nexus covers refuses an unknown note or date, a bad reference, and any ses
   assert.match(w.out, /only a thinking partner/);
   assert.equal(store.readEvents("c").entries.length, 0, "nothing recorded");
 });
+
+test("nexus ideas matches lists the suggestions; accepting or rejecting one is refused: it is the user's, in the dashboard", () => {
+  const { store } = setup();
+  const root = store.readProject().root;
+  store.writeQueue({ protocol: 1, id: "OLD", title: "Old", revision: 1, status: "proposed", stop_conditions: [], checks: [], approvals: [], history: [],
+    description: "Decided on 2026-11-14, see docs/ideas/tags.md.", steps: [{ id: "OLD1", title: "One", goal: "", acceptance: [] }], created_at: "2026-11-14T20:00:00Z" });
+  const ideas = (session: string, ...args: string[]) => {
+    try {
+      return { ok: true, out: execFileSync(process.execPath, [CLI, "ideas", ...args], { env: { ...process.env, NEXUS_DIR: store.dir, NEXUS_SESSION: session }, encoding: "utf8", cwd: root, stdio: "pipe" }) };
+    } catch (e) { return { ok: false, out: String((e as { stderr?: string }).stderr ?? e) }; }
+  };
+  const list = ideas("w", "matches");
+  assert.ok(list.ok, list.out);
+  assert.match(list.out, /^1 suggestion\(s\) for 1 queue\(s\); 1 wait for the user$/m);
+  assert.match(list.out, /^OLD\tdocs\/ideas\/tags\.md#2026-11-14\tdated$/m);
+  for (const [session, sub] of [["w", "accept"], ["c", "reject"]] as const) {
+    const r = ideas(session, sub, "OLD", "docs/ideas/tags.md#2026-11-14");
+    assert.ok(!r.ok);
+    assert.match(r.out, /is the user's, in the dashboard/);
+  }
+  assert.deepEqual(store.readIdeaMatches().matches, []);
+});

@@ -1,6 +1,7 @@
 # The ideas overview in the Ideas panel (queue IO), on the demo project of scripts/capture/seed-ideas.ts: the overview
-# on a desktop and on the phone, and an opened note (Queue plan view) in the rail's place with two areas folded, as in
-# the mockup (docs/ux/mockups/22-ideas-overview.html). The mockups are the comparison, so no befores:
+# on a desktop and on the phone, an opened note (Queue plan view) in the rail's place with two areas folded, and the
+# suggestions for matching the earlier queues to the notes, as in the mockup (docs/ux/mockups/22-ideas-overview.html).
+# The mockups are the comparison, so no befores:
 #   node scripts/capture.ts scripts/capture/examples/ideas.yaml --step IO/IO3 --no-before
 seed: scripts/capture/seed-ideas.ts
 views:
@@ -31,4 +32,14 @@ views:
       - click: { selector: "button[aria-label='Fold or unfold lifecycle']" }
       - click: { selector: "button[aria-label='Fold or unfold protocol']" }
       - click: "Queue plan view"
+      - wait: 800
+  - key: ideas-matching@1440
+    route: "#/demo"
+    label: "Hozzárendelési javaslatok queue-nként: idézet, javasolt bejegyzések, elfogadás vagy elvetés"
+    actions:
+      - click: "Ideas"
+      - wait: 300
+      - click: "Overview"
+      - wait: 800
+      - click: "Review"
       - wait: 800

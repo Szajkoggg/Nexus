@@ -4,8 +4,8 @@
 // @nexus/protocol ideas.ts); the notes are only read. A note opens as the layer note:<file>: on a desktop where a step
 // opens (in the rail's place), on the phone over the list.
 import { useState, type ReactNode } from "react";
-import type { HistoryItem, IdeaEntryView, IdeaNoteView, IdeasResponse, TopicStatus } from "@nexus/protocol/ideas";
-import { projectUrl, useQuery } from "../api.ts";
+import type { HistoryItem, IdeaEntryView, IdeaMatchesResponse, IdeaNoteView, IdeasResponse, MatchItem, TopicStatus } from "@nexus/protocol/ideas";
+import { act, projectUrl, useAction, useQuery } from "../api.ts";
 import { formatClock, formatDate, formatDay, rich, t, type Key } from "../i18n.ts";
 import { groupByArea, filterCounts, shownNotes, IDEA_FILTERS, type IdeaFilter, type ShownNote } from "../ideasView.ts";
 import { layerValue } from "../layers.ts";
@@ -90,6 +90,7 @@ export function IdeasOverview({ project, areas, phone, top }: { project: string;
               className="w-40 min-w-0 rounded-lg border border-line-strong bg-canvas px-2.5 py-1 text-xs text-fg placeholder:text-fg-3" />
           )}
         </div>
+        {data.to_match.suggestions > 0 && <ToMatchBanner suggestions={data.to_match.suggestions} queues={data.to_match.queues} />}
         {groups.length === 0 && <p className="text-sm text-fg-3">{t("ideas.nothingShown")}</p>}
         {groups.map((a) => {
           const key = a.area ?? "";
@@ -258,3 +259,100 @@ function HistoryLine({ h }: { h: HistoryItem }) {
 
 /** "15 Nov 2026" for an entry card's date (a day, read as local). */
 const formatDayYear = (date: string) => formatDate(`${date}T00:00:00`);
+// ---------------------------------------------------------------- matching the earlier queues
+
+type MatchFilter = "open" | "accepted" | "rejected";
+const matchFilter = (m: MatchItem): MatchFilter => (!m.decision ? "open" : m.decision.accepted ? "accepted" : "rejected");
+const KIND_TONE: Record<MatchItem["kind"], string> = { exact: "bg-ok/15 text-ok", dated: "bg-accent/15 text-accent", file: "bg-warn/15 text-warn" };
+
+/** "To match · N": the suggestions for the earlier queues that wait for the user, atop the overview. */
+export function ToMatchBanner({ suggestions, queues }: { suggestions: number; queues: number }) {
+  return (
+    <div className="mb-3.5 flex items-center gap-2.5 rounded-xl border border-warn/40 bg-warn/5 px-3 py-2 text-[13px] text-fg">
+      <span className="min-w-0 flex-1"><b className="font-semibold text-warn">{t("ideas.toMatch.title", { count: suggestions })}</b> {t("ideas.toMatch.text", { count: queues })}</span>
+      <button onClick={() => nav.open("matching")} className="shrink-0 rounded-lg border border-line-strong bg-surface-2 px-3 py-1 text-xs font-semibold text-fg hover:bg-surface-3 max-lg:min-h-10">{t("ideas.toMatch.review")}</button>
+    </div>
+  );
+}
+
+/** The quote a suggestion came from, its references and dates marked. */
+function Quote({ text }: { text: string }) {
+  const parts = text.split(/(\S*\.md(?:#\d{4}-\d{2}-\d{2})?|\d{4}-\d{2}-\d{2})/);
+  return (
+    <p className="my-1.5 border-l-2 border-line-strong px-2.5 text-[12.5px] text-fg-2">
+      {parts.map((p, i) => (i % 2 ? <mark key={i} className="rounded bg-accent/20 px-0.5 text-fg">{p}</mark> : p))}
+    </p>
+  );
+}
+
+/**
+ * The suggestions for matching the earlier queues to the notes' entries (the layer "matching" over the overview):
+ * queue by queue with the sentence each came from; the user accepts or rejects each, or the exact and dated ones at
+ * once, and may take a decision back.
+ */
+export function IdeasMatching({ project, phone }: { project: string; phone?: boolean }) {
+  const { version, reload } = usePage();
+  const { data, error } = useQuery<IdeaMatchesResponse>(projectUrl(project, "/ideas/matches"), version);
+  const { busy, error: failed, run } = useAction();
+  const [filter, setFilter] = useState<MatchFilter>("open");
+  const items = data?.items ?? [];
+  const shown = items.filter((m) => matchFilter(m) === filter);
+  const sure = items.filter((m) => !m.decision && m.kind !== "file");
+  const decide = (list: MatchItem[], accept: boolean | null) =>
+    void run(() => act(project, "POST", "/ideas/matches", { items: list.map(({ queue, ref }) => ({ queue, ref })), accept }), reload);
+  const queues = [...new Set(shown.map((m) => m.queue))];
+  return (
+    <div className={`scroll-thin min-h-0 flex-1 overflow-y-auto ${phone ? "px-3 pb-6 pt-3" : "px-6 pb-8 pt-4"}`} data-ideas-matching>
+      <div className="mb-1.5 flex flex-wrap items-center gap-2.5">
+        <button onClick={() => nav.close("matching")} className="rounded-md px-1.5 py-1 text-xs text-fg-2 hover:bg-surface-3 hover:text-fg max-lg:min-h-10">‹ {t("ideas.match.back")}</button>
+        <h2 className="text-[15px] font-semibold text-fg">{t("ideas.match.title")}</h2>
+      </div>
+      <p className="mb-3 text-[12.5px] text-fg-3">{t("ideas.match.note")}</p>
+      <div className="mb-3 flex flex-wrap items-center gap-2.5">
+        <div className="flex overflow-hidden rounded-lg border border-line-strong" role="group" aria-label={t("ideas.match.filterLabel")}>
+          {(["open", "accepted", "rejected"] as const).map((f) => (
+            <button key={f} onClick={() => setFilter(f)} aria-pressed={filter === f}
+              className={`whitespace-nowrap border-l border-line-strong px-2.5 py-1 text-xs first:border-l-0 max-lg:min-h-9 ${filter === f ? "bg-surface-3 font-semibold text-fg" : "text-fg-2 hover:text-fg"}`}>
+              {t(`ideas.match.filter.${f}`)}<span className="ml-1.5 font-normal text-fg-3">{items.filter((m) => matchFilter(m) === f).length}</span>
+            </button>
+          ))}
+        </div>
+        <span className="flex-1" />
+        {filter === "open" && sure.length > 0 && <Button onClick={() => decide(sure, true)} disabled={busy}>{t("ideas.match.acceptAll", { count: sure.length })}</Button>}
+      </div>
+      {failed && <p className="mb-2 text-xs text-danger">{failed}</p>}
+      {!data && error && <ReadError error={error} what={t("ideas.match.readError")} />}
+      {data && queues.length === 0 && <p className="text-sm text-fg-3">{t("ideas.match.none")}</p>}
+      {queues.map((id) => {
+        const own = shown.filter((m) => m.queue === id);
+        const q = own[0]!;
+        return (
+          <div key={id} className="mb-2.5 rounded-xl border border-line bg-surface px-3.5 py-2.5">
+            <div className="flex items-baseline gap-2.5">
+              <span className="font-mono text-xs text-fg-3">{id}</span>
+              <b className="min-w-0 flex-1 truncate text-[13.5px] font-semibold text-fg">{q.title}</b>
+              <span className="shrink-0 whitespace-nowrap text-xs text-fg-3">{statusWord(q.status)}{q.finished_at ? ` ${day(q.finished_at.slice(0, 10))}` : ""}{q.commit ? ` · ${q.commit.slice(0, 7)}` : ""}</span>
+            </div>
+            {q.quote && <Quote text={q.quote} />}
+            {own.map((m) => (
+              <div key={m.ref} className={`grid items-center gap-2.5 border-t border-line py-1.5 text-[12.5px] ${phone ? "grid-cols-[minmax(0,1fr)_auto]" : "grid-cols-[minmax(0,1fr)_6.5rem_auto]"}`}>
+                <span className="truncate font-mono text-xs text-fg">{m.ref.replace(/^.*\//, "")}{m.lead && <span className="ml-1.5 font-sans text-fg-3">{m.lead}</span>}</span>
+                {!phone && <span className={`rounded px-1.5 text-center text-[11px] font-semibold ${KIND_TONE[m.kind]}`}>{t(`ideas.match.kind.${m.kind}`)}</span>}
+                {m.decision ? (
+                  <span className={`whitespace-nowrap text-xs ${m.decision.accepted ? "text-ok" : "text-fg-3"}`}>
+                    {t(m.decision.accepted ? "ideas.match.accepted" : "ideas.match.rejected")} · <button onClick={() => decide([m], null)} disabled={busy} className="underline hover:text-fg">{t("ideas.match.undo")}</button>
+                  </span>
+                ) : (
+                  <span className="flex gap-1.5">
+                    <Button variant="quiet" onClick={() => decide([m], true)} disabled={busy}>{t("ideas.match.accept")}</Button>
+                    <button onClick={() => decide([m], false)} disabled={busy} className="rounded-md px-2.5 py-1.5 text-sm text-fg-2 hover:bg-surface-3 hover:text-fg max-lg:min-h-11">{t("ideas.match.reject")}</button>
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        );
+      })}
+    </div>
+  );
+}

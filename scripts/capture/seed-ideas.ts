@@ -2,7 +2,8 @@
 // (docs/ideas) of made-up notes after the mockup (docs/ux/mockups/22-ideas-overview.html): areas and a sub-group from
 // their Area lines, one note without one (Unsorted), entries that are built, queued (by a running and a proposed
 // queue), handed over (a partner's nexus covers), decided and replaced, and open questions. The queues name the
-// entries in their source; the done ones have every step done and accepted. Run by scripts/capture.ts as
+// entries in their source; the done ones have every step done and accepted. Four earlier queues name notes only in
+// their description (no source): the suggestions to match (queue IO4), one of them accepted and one rejected. Run by scripts/capture.ts as
 // `node <this> <data dir>` with NEXUS_HOME set to the development instance's; it writes only there. No agent runs.
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -86,12 +87,15 @@ let n = 0;
 const hex = () => (0x1a2b3c4 + 0x9e3779 * ++n).toString(16).slice(-7);
 const plus = (at: string, min: number) => new Date(Date.parse(at) + min * 60_000).toISOString();
 
-/** A queue that names `source`: created at `at`, approved, its first `done` steps done and accepted, the next one at work. */
-function queue(id: string, title: string, source: string[], at: string, steps: number, done: number, approve = true) {
+/**
+ * A queue that names `source` (none: an earlier queue, with its notes only in `description`): created at `at`,
+ * approved, its first `done` steps done and accepted, the next one at work.
+ */
+function queue(id: string, title: string, source: string[], at: string, steps: number, done: number, approve = true, description?: string) {
   const q: QueueFile = {
     protocol: 1, id, title, revision: 1, status: "proposed", review_level: 2, stop_conditions: [], checks: ["npm test"], approvals: [], withdrawals: [], history: [], changes: [],
     steps: Array.from({ length: steps }, (_, i) => ({ id: `${id}${i + 1}`, title: `Step ${i + 1}`, goal: "g", acceptance: ["Done"] })),
-    source: source.map((r) => `docs/ideas/${r}`), created_at: at, updated_at: at,
+    ...(source.length ? { source: source.map((r) => `docs/ideas/${r}`) } : {}), ...(description ? { description } : {}), created_at: at, updated_at: at,
   };
   // Approved a few minutes after its upload (approveQueue would date it now, after the seeded history).
   st.writeQueue(approve ? { ...q, status: "approved", approvals: [{ revision: 1, at: plus(at, 7), hash: revisionHash(q) }] } : q);
@@ -120,6 +124,19 @@ queue("PV", "The planned order in the Queues view", ["queue-plan-view.md#2026-11
 queue("PS", "Never two queues in one checkout", ["queue-plan-view.md#2026-11-14"], "2026-11-14T19:00:00.000Z", 2, 2);
 queue("PB", "The plan view, part 1: routes, full titles, line details", ["queue-plan-view.md#2026-11-15"], "2026-11-15T12:58:00.000Z", 5, 2);
 queue("IO", "The ideas overview", ["ideas-overview.md#2026-11-15"], "2026-11-15T11:08:00.000Z", 7, 0);
+// Earlier queues, from before source: their notes only in their words.
+queue("SB", "Side panels: the place in a chat is kept", [], "2026-11-14T16:00:00.000Z", 2, 2, true,
+  'Decided by the user on 2026-11-14; notes in docs/ideas/side-panels-and-waiting-list.md (section "2026-11-14 (later): the place in a chat is kept").');
+queue("PL", "The plan view's design: layouts and features on mockups, the user's choice", [], "2026-11-15T13:30:00.000Z", 2, 2, true,
+  "A felhasználó 2026-11-15-i döntései: docs/ideas/queue-plan-view.md (Decided); a mockupok stílusa: docs/ideas/chat-improvements.md");
+queue("TG", "Tags in queue.yaml and on the cards", [], "2026-11-14T16:30:00.000Z", 2, 2, true,
+  "Decided: docs/ideas/tags.md#2026-11-14, and the cards show them.");
+queue("R1", "Refactoring 1: a behaviour guard, then explicit run state transitions", [], "2026-11-14T17:00:00.000Z", 2, 2, true,
+  "The plan is in docs/ideas/game-dev-features.md; this queue does items 1 and 2.");
+st.writeIdeaMatches({ protocol: 1, matches: [
+  { queue: "TG", ref: "docs/ideas/tags.md#2026-11-14", kind: "exact", quote: "Decided: docs/ideas/tags.md#2026-11-14, and the cards show them.", accepted: true, at: "2026-11-16T08:00:00.000Z" },
+  { queue: "R1", ref: "docs/ideas/game-dev-features.md#2026-11-14", kind: "file", quote: "The plan is in docs/ideas/game-dev-features.md; this queue does items 1 and 2.", accepted: false, at: "2026-11-16T08:01:00.000Z" },
+] });
 
 const partner = (title: string, at: string, refs: string[]) => {
   const s: SessionFile = { protocol: 1, id: newId(), project: "demo", role: "conversation", runtime: "claude", title, cwd: root, launched_by: "nexus", created_at: plus(at, -60) };
