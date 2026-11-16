@@ -653,10 +653,11 @@ export function planDecisionNotice(q: QueueView, d: PlanDecision, decisions: rea
   }
   if (d.kind === "undone") {
     const removed = decisions.find((x) => x.kind === "removed" && x.change === d.change);
+    const ids = removed?.queues?.join(", ");
     const now = openPlan(q)?.after.map((e) => e.queue);
     return {
       fact: removed
-        ? `The user undid taking ${removed.queues?.join(", ")} out of the predecessors of queue ${q.id}: it waits for ${removed.queues?.join(", ")} again.`
+        ? `The user undid taking ${ids} out of the predecessors of queue ${q.id}: it waits for ${ids} again.`
         : `The user undid a change of theirs to the plan around queue ${q.id}: it is as it was before${now ? `; ${q.id} starts ${list(now)}` : ""}.`,
       todo: "The plan is as it was; go on from it.",
     };

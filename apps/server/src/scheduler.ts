@@ -55,6 +55,12 @@ function bare(p: PlanFile | undefined): Omit<PlanFile, "undo"> | null {
 /** The undo window of a plan has not ended: its queue does not start yet. */
 const undoOpen = (p: Pick<PlanFile, "undo"> | undefined, t: number) => !!p?.undo && Date.parse(p.undo.until) > t;
 
+/** What a change answers about its undo: its id, the end of its window, and the queues whose plans it wrote. */
+const undoAnswer = (u: Pick<PlanUndo, "change" | "until">, queues: string[]): PlanChange["undo"] => ({ change: u.change, until: u.until, queues });
+
+/** The queues a plan waits for, as a message lists them. */
+const afterList = (p: { after: readonly { queue: string }[] }) => p.after.map((e) => e.queue).join(", ");
+
 /**
  * When the usage window of a runtime resets, from the latest usage data: Claude Code's 5-hour window; for Codex, of
  * its windows not yet reset, the last to reset among those at or above the pause threshold (the run waits for all of
@@ -221,8 +227,8 @@ export class Scheduler {
       after: after ? [after] : [], by: "user", runtime: start?.runtime, model: start?.model, effort: start?.effort, session: start?.session,
       undo: { ...undo, plan: bare(this.store.readPlan(q.id)), files, start: start ?? null },
     });
-    const moved = [...followers.entries()].map(([id, p]) => `${id} now waits for ${p.after.length ? p.after.map((e) => e.queue).join(", ") : "nothing before it"}`);
-    return { message: moved.length ? `${said}; ${moved.join("; ")}` : said, undo: { change: undo.change, until: undo.until, queues: files } };
+    const moved = [...followers.entries()].map(([id, p]) => `${id} now waits for ${p.after.length ? afterList(p) : "nothing before it"}`);
+    return { message: moved.length ? `${said}; ${moved.join("; ")}` : said, undo: undoAnswer(undo, files) };
   }
 
   /**
@@ -230,22 +236,16 @@ export class Scheduler {
    * its other predecessors stay as they are. Undoable as a move is.
    */
   addPredecessor(queueId: string, after: string): PlanChange {
-    const state = loadProjectState(this.store);
-    const q = queueOf(state, queueId);
-    this.planOptions(state, q, {});
-    const plan = openPlanFile(this.store.readPlan(q.id));
+    const { state, q, plan } = this.plannedQueue(queueId);
     if (!plan) throw new ActionError(`queue ${q.id} is not in the plan: put it in with move`, 409);
     if (plan.after.some((e) => e.queue === after)) throw new ActionError(`queue ${q.id} waits for ${after} already`, 409);
     checkPredecessors(state, q.id, [...plan.after.map((e) => e.queue), after]);
     const undo = this.newUndo("add", q.id);
-    const next: PlanFile = {
+    const next = this.writeOwnChange(q.id, {
       ...plan, after: [...plan.after, { queue: after, by: "user", at: undo.at }], updated_at: undo.at,
       undo: { ...undo, plan: bare(plan), files: [q.id] },
-    };
-    this.store.writePlan(q.id, next);
-    this.armUndo(q.id, Date.parse(undo.until));
-    this.deps.changed();
-    return { message: `queue ${q.id} now waits for ${next.after.map((e) => e.queue).join(", ")}`, undo: { change: undo.change, until: undo.until, queues: [q.id] } };
+    });
+    return { message: `queue ${q.id} now waits for ${afterList(next)}`, undo: undoAnswer(undo, [q.id]) };
   }
 
   /**
@@ -254,25 +254,20 @@ export class Scheduler {
    * none left, the queue stays in the plan and starts as soon as it may, once the undo window has ended.
    */
   removePredecessor(queueId: string, after: string): PlanChange {
-    const state = loadProjectState(this.store);
-    const q = queueOf(state, queueId);
-    this.planOptions(state, q, {});
-    const plan = openPlanFile(this.store.readPlan(q.id));
+    const { q, plan } = this.plannedQueue(queueId);
     const entry = plan?.after.find((e) => e.queue === after);
     if (!plan || !entry) throw new ActionError(`queue ${q.id} does not wait for ${after}`, 409);
     const undo = this.newUndo("remove", q.id);
-    const next: PlanFile = {
+    const next: PlanFile & { undo: PlanUndo } = {
       ...plan, after: plan.after.filter((e) => e.queue !== after), updated_at: undo.at,
       decisions: [...plan.decisions, { at: undo.at, kind: "removed", queues: [after], set_by: entry.by, change: undo.change }],
       undo: { ...undo, plan: bare(plan), files: [q.id] },
     };
     // A proposal that no longer changes anything of the user's is moot.
     if (next.proposal && !changesOfUser(next, next.proposal.after)) next.proposal = undefined;
-    this.store.writePlan(q.id, next);
-    this.armUndo(q.id, Date.parse(undo.until));
-    this.deps.changed();
-    const left = next.after.length ? `now waits for ${next.after.map((e) => e.queue).join(", ")}` : "waits for no other queue: it starts as soon as it may";
-    return { message: `queue ${q.id} no longer waits for ${after}; it ${left}`, undo: { change: undo.change, until: undo.until, queues: [q.id] } };
+    this.writeOwnChange(q.id, next);
+    const left = next.after.length ? `now waits for ${afterList(next)}` : "waits for no other queue: it starts as soon as it may";
+    return { message: `queue ${q.id} no longer waits for ${after}; it ${left}`, undo: undoAnswer(undo, [q.id]) };
   }
 
   /**
@@ -312,8 +307,24 @@ export class Scheduler {
     }
     this.deps.changed();
     const back = this.store.readPlan(queueId);
-    const place = !back || back.started_at ? "is not in the plan" : back.after.length ? `waits for ${back.after.map((e) => e.queue).join(", ")}` : "starts as soon as it may";
+    const place = !back || back.started_at ? "is not in the plan" : back.after.length ? `waits for ${afterList(back)}` : "starts as soon as it may";
     return `undone: queue ${queueId} ${place} again`;
+  }
+
+  /** A queue the user changes the plan of, which may be planned, and its plan file while it is open (none: not in the plan). */
+  private plannedQueue(queueId: string): { state: ProjectState; q: QueueView; plan: PlanFile | undefined } {
+    const state = loadProjectState(this.store);
+    const q = queueOf(state, queueId);
+    this.planOptions(state, q, {});
+    return { state, q, plan: openPlanFile(this.store.readPlan(q.id)) };
+  }
+
+  /** Writes a change of the user's to the plan of `queueId` alone, and arms the end of its undo window. Returns `next`. */
+  private writeOwnChange(queueId: string, next: PlanFile & { undo: PlanUndo }): PlanFile {
+    this.store.writePlan(queueId, next);
+    this.armUndo(queueId, Date.parse(next.undo.until));
+    this.deps.changed();
+    return next;
   }
 
   /** A new change of the user's to the plan of `queue`: its id, time and undo window (each file adds what it was). */
@@ -370,7 +381,7 @@ export class Scheduler {
     this.store.clearStart(queueId);
     this.timers.clear(`start:${queueId}`);
     this.deps.changed();
-    const when = start?.at ? `at ${formatClock(start.at, new Date(this.timers.clock.now()))}` : plan?.after.length ? `after ${plan.after.map((e) => e.queue).join(", ")}` : start?.after ? `after ${start.after}` : "as soon as it may";
+    const when = start?.at ? `at ${formatClock(start.at, new Date(this.timers.clock.now()))}` : plan?.after.length ? `after ${afterList(plan)}` : start?.after ? `after ${start.after}` : "as soon as it may";
     return `the planned start of queue ${queueId} (${when}) is cancelled`;
   }
 
