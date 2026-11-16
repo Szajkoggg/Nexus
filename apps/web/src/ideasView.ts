@@ -67,8 +67,9 @@ export function groupByArea(notes: readonly ShownNote[], order: readonly string[
     const a = n.note.area ?? null;
     byArea.set(a, [...(byArea.get(a) ?? []), n]);
   }
-  const rank = (a: string | null) => (a === null ? [2, ""] : order.includes(a) ? [0, String(order.indexOf(a)).padStart(4, "0")] : [1, a]) as [number, string];
-  const areas = [...byArea.keys()].sort((x, y) => { const [a, b] = [rank(x), rank(y)]; return a[0] - b[0] || a[1].localeCompare(b[1]); });
+  // The project's areas by their place in its list, then the others by name, then Unsorted.
+  const place = (a: string | null) => (a === null ? Infinity : order.includes(a) ? order.indexOf(a) : order.length);
+  const areas = [...byArea.keys()].sort((x, y) => place(x) - place(y) || (x ?? "").localeCompare(y ?? ""));
   const byTitle = (x: ShownNote, y: ShownNote) => x.note.title.localeCompare(y.note.title);
   return areas.map((area) => {
     const own = byArea.get(area)!;
