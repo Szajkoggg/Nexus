@@ -2710,6 +2710,37 @@ give an API-equivalent estimate of $0.00511952, not a measured bill ($0.00126578
 The real turns were necessary because plain helpers cannot model Codex's internal teardown ordering, and the
 model-free command/exec call did not reproduce it. All other probes and automated tests used no model.
 
+## Hono Node adapter 2.x and the public SPA fallback (queue DU1)
+
+The server declares `@hono/node-server ^2.1.8`, locked to 2.1.8, the stable npm `latest` on 2026-11-16.
+[GHSA-rmxm-3fg6-px4f](https://github.com/advisories/GHSA-rmxm-3fg6-px4f) lists 2.1.3 as the first fix for
+`serveStatic` decoding paths a second time. 2.1.8 also includes the later `allowPercentInPath` fix; Nexus does not
+enable that option. The [1.19.19 release](https://github.com/honojs/node-server/releases/tag/v1.19.19) describes a
+backport, although the advisory still lists that version as affected. Moving to the maintained 2.x line removes
+that audit ambiguity. Only this adapter's declaration and lock entry changed; Hono stays at 4.13.18.
+
+The [2.0.0 migration](https://github.com/honojs/node-server/releases/tag/v2.0.0) drops Node 18 and the Vercel adapter.
+Nexus already requires Node >=24 and does not use Vercel. `serve`, `HttpBindings`, `serveStatic` and the returned
+Node HTTP server remain compatible: `main.ts` needs no adjustment, including its `ws` upgrade listener. Checks ran
+on Windows with Node 26.13.1. HTTP tests use a temporary home, a free loopback port above 4317 and fake runtimes.
+They cover API reads/writes, cookies, Origin/JSON guards, WebSocket acceptance/refusal and, when the dashboard is
+built, the actual assets, SPA entry and public installation files. Build first to run the static subtest; it skips
+in source-only checkouts. Encoded, repeated and malformed percent escapes cannot bypass the guard on protected
+API/asset paths in these tests.
+
+**Existing policy gap, left for a separately approved change:** `/icons/` is public. When its static handler finds
+no file (including rejected encodings), the unrestricted `app.get("*", serveStatic({ path: index }))` returns the
+SPA shell without another authorization check. `/icons/missing.png`, `/icons/%252e%252e/index.html` and
+`/icons/%%32%65%%32%65/index.html` return 200 with `index.html`; a double-encoded request aimed at a JS asset also
+gets the shell, not the JS. An isolated comparison reproduced the shell response with both 1.19.19 and 2.1.8.
+The new HTTP test records this limitation rather than claiming that every encoded path is denied. The API still
+requires authorization. Removing this fallback changes the public-route contract, so DU1 stops for a separate
+approved fix; it does not weaken or silently alter the current access rules.
+
+The post-upgrade npm audit no longer reports the Hono advisory. It still reports GHSA-g3hv-75wg-m249 through
+`typescript-eslint -> @typescript-eslint/typescript-estree -> minimatch 10.2.6`: seven moderate affected package
+entries from one underlying advisory, not seven independent vulnerabilities. That dependency change is outside DU1.
+
 ## Open questions
 
 1. **The local HTTP gap.** Any agent with a free shell on this machine (Codex's sandbox leaves loopback open) can
