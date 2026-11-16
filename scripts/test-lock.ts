@@ -192,8 +192,9 @@ const run = (file: string, args: string[]) => new Promise<string | undefined>((d
 });
 
 /**
- * `pid` and its ancestors, nearest first (at most 12), as the system tells them; [] when it cannot. On Windows a pid
- * whose process is newer than the one below is no ancestor (Windows reuses pids), and the walk ends there, or goes on
+ * `pid` and its ancestors, nearest first (at most 12), as the system tells them; [] when it cannot. On Windows only up
+ * to the first ancestor that is no shell or npm (windowsWalk). A pid whose process is newer than the one below is no
+ * ancestor (Windows reuses pids), and the walk ends there, or goes on
  * through MSYS (Git Bash): there a forked and exec'd process's Windows parent is a stand-in that is gone, and its real
  * parent is in MSYS's own process table (its ps, beside its bash.exe), whose ppid it then gets.
  */
@@ -230,9 +231,14 @@ export async function ancestry(pid: number): Promise<Proc[]> {
   return chain.map(({ exe: _, ...p }) => p);
 }
 
-/** Up to `max` processes from `pid` up its Windows parents, in one PowerShell, one CIM query per level (about a second). */
+/**
+ * Up to `max` processes from `pid` up its Windows parents, in one PowerShell, one CIM query per level (a few hundred
+ * ms each), ending after the first one beyond `pid` that is no shell or npm (isStarterLink's rule, roughly: the chain
+ * ends there anyway). WMI is not cheap: a full suite with 12 levels per walk made the slowest load-bound tests slower.
+ */
 async function windowsWalk(pid: number, max: number): Promise<(Proc & { exe: string })[]> {
-  const script = `$p = ${pid}; for ($i = 0; $i -lt ${max} -and $p -gt 0; $i++) { $x = Get-CimInstance Win32_Process -Filter "ProcessId=$p"; if (-not $x) { break }; "{0}\`t{1}\`t{2}\`t{3}\`t{4}\`t{5}" -f $x.ProcessId, $x.ParentProcessId, $x.CreationDate.ToFileTimeUtc(), $x.Name, $x.ExecutablePath, $x.CommandLine; $p = $x.ParentProcessId }`;
+  const links = [...SHELLS, "npm", "npx"].map((n) => `'${n}'`).join(",");
+  const script = `$p = ${pid}; for ($i = 0; $i -lt ${max} -and $p -gt 0; $i++) { $x = Get-CimInstance Win32_Process -Filter "ProcessId=$p"; if (-not $x) { break }; "{0}\`t{1}\`t{2}\`t{3}\`t{4}\`t{5}" -f $x.ProcessId, $x.ParentProcessId, $x.CreationDate.ToFileTimeUtc(), $x.Name, $x.ExecutablePath, $x.CommandLine; $n = ($x.Name -replace '\\.exe$', '').ToLower(); if ($i -gt 0 -and -not (@(${links}) -contains $n -or ($n -eq 'node' -and $x.CommandLine -match 'np[mx]-cli\\.js'))) { break }; $p = $x.ParentProcessId }`;
   const out = await run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script]);
   return (out ?? "").split(/\r?\n/).filter((l) => l.trim()).map((l) => {
     const [id, parent, created, name, exe, ...cmd] = l.split("\t");
