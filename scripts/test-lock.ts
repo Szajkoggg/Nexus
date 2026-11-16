@@ -250,11 +250,25 @@ export function msysParents(out: string): Map<number, number> {
   return parents;
 }
 
-/** Ends a process and everything it started (on Windows its tree; elsewhere its process group: it was detached). */
-function killTree(pid: number | undefined): void {
-  if (!pid || !alive(pid)) return;
+/**
+ * Ends the run (`pid`, spawned by the wrapper) and everything it started: on Windows its tree, elsewhere its process
+ * group (it was detached). Only for a pid known to be the run's: Windows reuses pids at once, and a tree kill of a
+ * reused one ends another program's processes (a parallel test's server, seen while building this).
+ */
+function killTree(pid: number): void {
   if (process.platform === "win32") spawnSync("taskkill", ["/T", "/F", "/PID", String(pid)], { stdio: "ignore", windowsHide: true });
-  else { try { process.kill(-pid, "SIGKILL"); } catch { try { process.kill(pid, "SIGKILL"); } catch { /* gone */ } } }
+  else try { process.kill(-pid, "SIGKILL"); } catch { /* the group is gone */ }
+}
+
+/**
+ * The watchdog's end of a run whose wrapper is gone: on Windows only if `run` is still the wrapper's child (a process
+ * keeps its parent's pid when the parent ends; a reused pid has another); elsewhere its process group, which exists
+ * only while one of its processes lives.
+ */
+async function endOrphanedRun(run: number | undefined, wrapper: number): Promise<void> {
+  if (!run || !alive(run)) return;
+  if (process.platform === "win32" && (await windowsWalk(run, 1))[0]?.ppid !== wrapper) return;
+  killTree(run);
 }
 
 /**
@@ -269,7 +283,12 @@ function watchdog(wrapper: number, parent: number, file: string, pollMs = 1000):
   process.stderr.on("error", () => {}); // the console may be gone with the starter
   let run: number | undefined;
   process.on("message", (m: { run?: number }) => { if (m.run) run = m.run; });
-  const cleanUp = () => { killTree(run); releaseIf(file, wrapper); process.exit(0); };
+  let cleaning = false;
+  const cleanUp = () => {
+    if (cleaning) return;
+    cleaning = true;
+    void endOrphanedRun(run, wrapper).finally(() => { releaseIf(file, wrapper); process.exit(0); });
+  };
   process.on("disconnect", cleanUp);
   let watched = [parent];
   void ancestry(parent).then((chain) => {
@@ -303,7 +322,7 @@ export async function runLocked(args: string[], o: LockOptions = {}): Promise<nu
   guard.on("message", (m: { gone?: number }) => {
     if (!m.gone) return;
     say(`npm test: the process that started this run is gone (pid ${m.gone}); ending the run`);
-    killTree(child?.pid);
+    if (child?.pid && child.exitCode === null && child.signalCode === null) killTree(child.pid); // still running: ours
     releaseIf(file, o.pid ?? process.pid);
     guard.kill();
     process.exit(1);

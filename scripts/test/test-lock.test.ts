@@ -171,14 +171,10 @@ async function longRun(file: string, gitBash?: string): Promise<{ starter: Child
     : spawn("sh", ["-c", `${line}; true`], { env, stdio: "ignore" });
   const read = <T>(f: string): T | undefined => { try { return JSON.parse(readFileSync(f, "utf8")) as T; } catch { return undefined; } };
   const known = () => ({ ...read<{ runner: number; testFile: number; grandchild: number }>(pidsFile), wrapper: read<{ pid: number }>(file)?.pid });
-  /** Ends what is left of the run, by the pids it recorded (all the test's own): for a test that fails half way. */
-  const end = () => {
-    for (const pid of [starter.pid, ...Object.values(known())]) {
-      if (!pid || !alive(pid)) continue;
-      if (process.platform === "win32") spawnSync("taskkill", ["/T", "/F", "/PID", String(pid)], { stdio: "ignore", windowsHide: true });
-      else try { process.kill(pid, "SIGKILL"); } catch { /* gone */ }
-    }
-  };
+  // For a test that fails half way: the starter, through its handle, and so the run with it (or, if that is what
+  // failed, the run ends by itself within two minutes). Never a recorded pid that may have ended: Windows reuses pids at
+  // once, and a tree kill of a reused one ended a parallel test's server (seen while building this).
+  const end = () => { if (starter.exitCode === null && starter.signalCode === null) starter.kill("SIGKILL"); };
   for (const until = Date.now() + 60_000; !(existsSync(pidsFile) && existsSync(file) && existsSync(watchedFile));) {
     if (Date.now() > until) { end(); throw new Error("the run did not start"); }
     await new Promise((r) => setTimeout(r, 50));
