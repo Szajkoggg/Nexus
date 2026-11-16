@@ -686,7 +686,9 @@ const commands: Record<string, () => void | Promise<void>> = {
     const p = st.readProject();
     const dir = p.conversations.notes_dir;
     const notes = readNotes(p.root, dir);
-    const refs = [...new Set(given.map((r) => r.replaceAll("\\", "/")).map((r) => (dir && !r.startsWith(`${dir}/`) && parseNoteRef(`${dir}/${r}`) ? `${dir}/${r}` : r)))];
+    // A reference without the notes folder (tags.md#2026-11-14) gets it.
+    const inFolder = (r: string) => (dir && !r.startsWith(`${dir}/`) && parseNoteRef(`${dir}/${r}`) ? `${dir}/${r}` : r);
+    const refs = [...new Set(given.map((r) => inFolder(r.replaceAll("\\", "/"))))];
     const issues = refs.flatMap((r) => noteRefIssue(r, dir, notes) ?? []);
     if (issues.length) throw new UsageError(issues.join("; "));
     emit(st, s, { type: "ideas.covered", refs });
