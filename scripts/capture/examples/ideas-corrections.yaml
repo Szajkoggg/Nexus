@@ -1,0 +1,26 @@
+# IC1: unchanged application at the step base; register these captures as before.
+seed: scripts/capture/seed-ideas-corrections.ts
+views:
+  - key: ideas-entry-open@1440
+    route: "#/demo"
+    actions: &entry
+      - click: Ideas
+      - click: Overview
+      - click: Chat improvements
+  - key: ideas-entry-open@492
+    route: "#/demo"
+    actions: *entry
+  - key: ideas-entry-open@390
+    route: "#/demo"
+    actions: *entry
+  - key: ideas-matching-empty@1440
+    route: "#/demo"
+    actions: &empty
+      - click: Ideas
+      - click: Overview
+  - key: ideas-matching-empty@492
+    route: "#/demo"
+    actions: *empty
+  - key: ideas-matching-empty@390
+    route: "#/demo"
+    actions: *empty

@@ -2779,6 +2779,15 @@ repository ESLint configuration recognizes TS/TSX files and still reports a deli
 error. The final lockfile is also installed with `npm ci` in a separate temporary checkout, where the compatibility
 tests and dependency tree are checked again. No access, HTTP or agent protocol changes accompany this update.
 
+## Ideas corrections: design boundary (IC1)
+
+[The IC1 design](ux/ideas-corrections.md) specifies origin-specific relationship corrections,
+separate implementation confirmation, precedence over legacy note markers, and scoped conversation/handoff
+actions. The server remains the only writer of Nexus decisions; the partner remains the only writer of notes.
+The current `built` derivation is work completion, not evidence that a whole dated decision is implemented or
+deployed. The user chose a new conversation on each Chat about this action. IC1 records the design and review
+fixtures only; subsequent IC steps implement the approved contract and update the protocol with their changes.
+
 ## Open questions
 
 1. **The local HTTP gap.** Any agent with a free shell on this machine (Codex's sandbox leaves loopback open) can
