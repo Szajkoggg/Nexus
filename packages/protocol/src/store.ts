@@ -328,15 +328,15 @@ export class ProjectStore {
     }
     return moved;
   }
-  /** The project's tag lists (.nexus/tags.yaml); empty lists while the file does not exist. */
   /** The user's decisions on matching earlier queues to the notes (ideas-read.ts); none when the file is missing. */
   readIdeaMatches(): IdeaMatchesFile {
     const f = join(this.dir, "idea-matches.yaml");
     return existsSync(f) ? readYaml(f, IdeaMatchesFile) : IdeaMatchesFile.parse({ protocol: 1 });
   }
-  /** Written only by the server, from the user's action (ideas-read.ts, decideIdeaMatches). */
+  /** Written only by the server, from the user's action (actions.ts, decideIdeaMatches). */
   writeIdeaMatches(m: IdeaMatchesFile): void { writeYaml(join(this.dir, "idea-matches.yaml"), IdeaMatchesFile.parse(m)); }
 
+  /** The project's tag lists (.nexus/tags.yaml); empty lists while the file does not exist. */
   readTags(): TagsFile {
     const f = join(this.dir, "tags.yaml");
     return existsSync(f) ? readYaml(f, TagsFile) : TagsFile.parse({ protocol: 1 });
