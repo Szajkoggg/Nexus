@@ -7,7 +7,7 @@
 // drops a steered message it had not taken in.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,6 +29,12 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** A chat with its agent, whichever role: what the test does with it. */
 interface Chat { say(text: string): void; stop(): void; view(): { state: string; chat: ChatEntry[] } }
 
+function readLog(file: string): { text: string; priority: string | null; busy: boolean }[] {
+  // The runtime may have just created the file or still be appending its last record. A newline commits it;
+  // malformed complete records still fail the test instead of hiding a broken fake.
+  return existsSync(file) ? readFileSync(file, "utf8").split("\n").slice(0, -1).map((line) => JSON.parse(line)) : [];
+}
+
 function setup() {
   const root = mkdtempSync(join(tmpdir(), "nexus-stop-"));
   process.env.NEXUS_HOME = join(root, "home");
@@ -37,7 +43,7 @@ function setup() {
   const engine = new Engine(store, () => {});
   const orchestrator = new Orchestrator(store, engine, () => {});
   const conversations = new Conversations(store, orchestrator, () => {});
-  const log = () => (existsSync(process.env.FAKE_LOG!) ? readFileSync(process.env.FAKE_LOG!, "utf8").trim().split("\n").map((l) => JSON.parse(l) as { text: string; priority: string | null; busy: boolean }) : []);
+  const log = () => readLog(join(root, "fake.log"));
   const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms, () => `; fake log: ${JSON.stringify(log().slice(-6))}`);
   const close = () => { conversations.shutdown(); orchestrator.shutdown(); engine.shutdown(); };
   return { store, orchestrator, conversations, log, until, close };
@@ -85,6 +91,21 @@ test("the orchestrator (Claude Code) stops at once, idles, and takes the message
     const o = s.orchestrator;
     await stopScenario(s, { say: (t) => o.say(t), stop: () => o.stop(), view: () => o.view() }, "orchestrator");
   } finally { s.close(); }
+});
+
+test("the live fake log waits for complete records and rejects malformed completed records", () => {
+  const file = join(mkdtempSync(join(tmpdir(), "nexus-stop-log-")), "fake.log");
+  assert.deepEqual(readLog(file), []);
+  writeFileSync(file, "");
+  assert.deepEqual(readLog(file), []);
+  const entry = { text: "a message", priority: null, busy: true };
+  const line = JSON.stringify(entry);
+  appendFileSync(file, line + "\n" + line.slice(0, 12));
+  assert.deepEqual(readLog(file), [entry]);
+  appendFileSync(file, line.slice(12) + "\n");
+  assert.deepEqual(readLog(file), [entry, entry]);
+  appendFileSync(file, "{broken}\n");
+  assert.throws(() => readLog(file), SyntaxError);
 });
 
 test("a thinking partner on Claude Code stops the same way", async () => {

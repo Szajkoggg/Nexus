@@ -159,8 +159,7 @@ ends its worker, without opening the next step. New inbox delivery waits for the
 resumes, including a cancelled deploy's automatic resume, wait for that acknowledgement too; a later run change
 cancels the deferred request. A runtime exit after a reported step is not retried even if the review was already
 accepted while its exit notice was in flight. The next step starts a fresh runtime in the same session.
-Runtime
-exit cleans descendants before the adapter emits exit. Closing the runtime's input has a five-second grace period;
+Runtime exit cleans descendants before the adapter emits exit. Closing the runtime's input has a five-second grace period;
 an unresponsive control reader is ended after a further fifteen seconds, closing its job. Windows worker recovery
 does not kill a persisted PID: job ownership ends with the old host, and a number alone is not proof of ownership.
 
@@ -169,6 +168,12 @@ its redirected control pipes, and shares that console with the runtime. Creating
 step cleanup to kill its conhost; the runtime survived but its next node child failed with `0xc0000142`. A focused
 probe reproduced that fault, and the fake-runtime test now checks that the same runtime starts work in step two.
 No process is selected or exempted by name or command line. The helper's console ends with the helper.
+
+Full-suite validation exposed test waits that included more work than their names: a chain's start wait also waited
+for its entire run, and a question wait included the preceding step. These now wait separately for each boundary,
+using the existing named step/run budgets, without changing the global waits. The chat-stop fake-log reader also
+waits for a newline before parsing a record, including when a file has just been created; malformed complete records
+still fail. A deterministic partial-write test covers that reader race.
 
 The Windows integration tests use both fake runtimes, actual sleepers, an orphaned grandchild, and a second worker.
 They cover step continuation, review, stops, interruption, shutdown, runtime exit and cleanup failure. No real model

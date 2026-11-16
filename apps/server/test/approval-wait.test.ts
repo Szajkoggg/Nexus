@@ -146,7 +146,8 @@ test("a revision that removes every remaining step: the queue is done only once 
     x.approve(e);
     await x.until("the run to finish", () => x.queue().run?.state === "finished", LONGER.run);
     assert.equal(x.queue().status, "done");
-    await x.until("the chain to fire", () => x.queue("C").run?.state === "finished");
+    await x.until("the chain to fire", () => x.queue("C").run !== undefined);
+    await x.until("the chained run to finish", () => x.queue("C").run?.state === "finished", LONGER.run);
   } finally { x.stop(); }
 });
 
@@ -180,6 +181,7 @@ test("the user's pause wins over approval_wait; a resume before the approval wai
   const e = x.engine();
   try {
     e.start("W");
+    await x.until("W1 to finish", () => x.queue().steps[0]!.status === "done", LONGER.step);
     await x.until("the question", () => x.queue().steps[1]!.status === "waiting", LONGER.step);
     const session = x.queue().run!.session;
     x.revise({ change: { W3: { title: "Step W3, revised" } } });
@@ -289,7 +291,8 @@ test("while a run waits for approval: a start, a session chain onto its session 
 
     x.approve(e);
     await x.until("W to finish", () => x.queue().run?.state === "finished", LONGER.run);
-    await x.until("the chain to fire once the session is free", () => x.queue("O").run?.state === "finished");
+    await x.until("the chain to fire once the session is free", () => x.queue("O").run !== undefined);
+    await x.until("the chained run to finish", () => x.queue("O").run?.state === "finished", LONGER.run);
     assert.equal(x.queue("O").run!.session, session);
   } finally { x.stop(); }
 });
