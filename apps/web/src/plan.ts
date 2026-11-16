@@ -22,10 +22,13 @@ export interface PlanQueue extends Omit<QueueLike, "plan" | "start"> {
   };
 }
 
+/** Words for the page, as the reader's language says them (i18n's t). */
+export interface Words { key: Key; params?: Params }
+
 /**
  * Why a queue has not started, in a word and its colour (`tone`): its approval, a queue before it stopped or gone, its time, the usage window, its checkout, the limit, a failed start; or that it starts now.
  */
-export interface Why { key: Key; params?: Params; tone: "approval" | "blocked" | "time" | "usage" | "checkout" | "limit" | "failed" | "ready" }
+export interface Why extends Words { tone: "approval" | "blocked" | "time" | "usage" | "checkout" | "limit" | "failed" | "ready" }
 
 /** A queue it waits for, as the card names it: who set it ("set by you") and when, done or not. */
 interface Before { queue: string; by: "user" | "orchestrator"; done: boolean; at?: string }
@@ -187,7 +190,7 @@ export function moveTargets(l: PlanLayout, all: readonly PlanQueue[], queue: str
 export const planList = (l: PlanLayout): PlanNode[] => l.columns.flat();
 
 /** The drawing's sizes in CSS pixels (docs/ux/plan-view-options.md, layout A). */
-export const PLAN_SIZES = {
+const PLAN_SIZES = {
   /** Between two columns: the room for the lines' tracks. */
   gap: 36,
   /** The column titles above the boxes. */
@@ -203,7 +206,7 @@ export const PLAN_SIZES = {
 export interface PlanBox { left: number; top: number; width: number; height: number }
 
 /** A line from a queue (`from`) to one that waits for it (`to`): its corners, left to right, at right angles. */
-export interface PlanRoute { key: string; from: string; to: string; by: "user" | "orchestrator"; points: [number, number][] }
+interface PlanRoute { key: string; from: string; to: string; by: "user" | "orchestrator"; points: [number, number][] }
 
 export interface PlanDrawing {
   /** Each column's left edge; all are `column` wide. */
@@ -343,7 +346,7 @@ export function roundedPath(points: readonly (readonly [number, number])[], r = 
  * minutes), "about 2.5 h (estimate)" (to half an hour under 10 h, whole hours above), "no estimate" while too few steps
  * are finished; nothing when no step is left.
  */
-export function estimateWords(e: { steps: number; ms?: number } | undefined): { key: Key; params?: Params } | undefined {
+export function estimateWords(e: { steps: number; ms?: number } | undefined): Words | undefined {
   if (!e || !e.steps) return undefined;
   if (e.ms === undefined) return { key: "plan.estimate.none" };
   const minutes = e.ms / 60_000;
@@ -351,9 +354,6 @@ export function estimateWords(e: { steps: number; ms?: number } | undefined): { 
   const hours = minutes / 60;
   return { key: "plan.estimate.hours", params: { hours: hours < 9.75 ? Math.max(1, Math.round(hours * 2) / 2) : Math.round(hours) } };
 }
-
-/** Words for the page, as the reader's language says them (i18n's t). */
-interface Words { key: Key; params?: Params }
 
 const nodeOf = (l: PlanLayout, id: string): PlanNode | undefined => l.columns.flat().find((n) => n.id === id);
 const names = (ids: readonly string[]) => ids.join(", ");
@@ -367,9 +367,10 @@ const names = (ids: readonly string[]) => ids.join(", ");
 export function lineDetails(l: PlanLayout, from: string, to: string, now = new Date()): {
   title: Words; setBy: Words; effect: Words; remove: Words; handBack: boolean; last: boolean;
 } | undefined {
-  const b = nodeOf(l, to)?.before.find((x) => x.queue === from);
+  const before = nodeOf(l, to)?.before ?? [];
+  const b = before.find((x) => x.queue === from);
   if (!b) return undefined;
-  const others = nodeOf(l, to)!.before.filter((x) => x.queue !== from && !x.done);
+  const others = before.filter((x) => x.queue !== from && !x.done);
   const when = b.at ? formatClock(b.at, now) : undefined;
   const setBy: Words = b.by === "user"
     ? (when ? { key: "plan.line.setByYouAt", params: { when } } : { key: "plan.line.setByYou" })

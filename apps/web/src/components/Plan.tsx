@@ -13,10 +13,10 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { act, actResult, enc, projectUrl, useAction, useQuery, type AttentionItem, type QueueView } from "../api.ts";
 import type { EstimatesResponse } from "@nexus/protocol";
-import { t, type Key, type Params } from "../i18n.ts";
+import { t } from "../i18n.ts";
 import {
   UNDO_SHOWN_MS, changeWords, drawPlan, dropChoices, estimateWords, lineDetails, moveTargets, planLayout, planList, roundedPath,
-  type PlanLayout, type PlanNode, type Why,
+  type PlanLayout, type PlanNode, type Why, type Words,
 } from "../plan.ts";
 import { Button } from "./ui.tsx";
 import { TONE } from "./QueueRow.tsx";
@@ -29,6 +29,8 @@ const WHY: Record<Why["tone"], string> = {
 };
 
 const columnTitle = (c: number) => t(c === 0 ? "plan.column.now" : c === 1 ? "plan.column.next" : "plan.column.then");
+/** Words of ../plan.ts in the reader's language. */
+const say = (w: Words) => t(w.key, w.params);
 const listText = (ids: readonly string[]) => (ids.length ? t("plan.after", { queue: ids.join(", ") }) : t("plan.first"));
 
 /** A change of the user's to the plan that can still be undone: what it did, in words, and its line (lit meanwhile). */
@@ -43,9 +45,9 @@ function usePlanActions(project: string, onChanged: () => void) {
   const dismiss = useCallback(() => setLast(undefined), []);
   const path = (queue: string) => `/queues/${enc(queue)}/plan`;
   const post = (queue: string, body: Record<string, unknown>) => run(() => act(project, "POST", path(queue), body), onChanged);
-  const change = (queue: string, body: Record<string, unknown>, words: { key: Key; params?: Params }, edge?: string) =>
+  const change = (queue: string, body: Record<string, unknown>, words: Words, edge?: string) =>
     run(() => actResult<ChangeAnswer>(project, "POST", path(queue), body), (r) => {
-      if (r?.undo) setLast({ change: r.undo.change, queue, words: t(words.key, words.params), edge, until: Date.now() + UNDO_SHOWN_MS });
+      if (r?.undo) setLast({ change: r.undo.change, queue, words: say(words), edge, until: Date.now() + UNDO_SHOWN_MS });
       onChanged();
     });
   return {
@@ -151,6 +153,9 @@ function Lanes({ layout, onOpen, actions }: { layout: PlanLayout; onOpen: (queue
     return () => document.removeEventListener("keydown", key);
   }, [sel]);
   useEffect(() => { if (sel && ready && !route) setSel(undefined); }, [sel, ready, route]);
+  /** A click on a line or its chip: its details open, or close if they were. */
+  const toggle = (key: string) => setSel(sel === key ? undefined : key);
+  const endDrag = () => { setDragged(undefined); setOver(undefined); setZone(undefined); };
 
   useLayoutEffect(() => {
     const el = box.current;
@@ -183,7 +188,7 @@ function Lanes({ layout, onOpen, actions }: { layout: PlanLayout; onOpen: (queue
       e.preventDefault();
       const q = e.dataTransfer.getData("text/plain") || dragged;
       const also = zone === "also";
-      setOver(undefined); setDragged(undefined); setZone(undefined);
+      endDrag();
       if (!q || q === target) return;
       if (also && target) void actions.add(q, target); else void actions.move(q, target);
     },
@@ -206,11 +211,11 @@ function Lanes({ layout, onOpen, actions }: { layout: PlanLayout; onOpen: (queue
           return (
             <Card key={n.id} node={n} onOpen={onOpen} actions={actions} highlight={over === n.id} moving={dragged === n.id}
               style={{ position: "absolute", left: b?.left ?? 0, top: b?.top ?? 0, width: drawing.column }}
-              chip={(from) => setSel(sel === `${from}>${n.id}` ? undefined : `${from}>${n.id}`)} chosen={route?.to === n.id ? route.from : undefined}
+              chip={(from) => toggle(`${from}>${n.id}`)} chosen={route?.to === n.id ? route.from : undefined}
               drag={{
                 draggable: n.movable,
                 onDragStart: (e: React.DragEvent) => { e.dataTransfer.setData("text/plain", n.id); e.dataTransfer.effectAllowed = "move"; setDragged(n.id); setSel(undefined); },
-                onDragEnd: () => { setDragged(undefined); setOver(undefined); setZone(undefined); },
+                onDragEnd: endDrag,
                 ...dropTarget(n.id),
               }}
               cardRef={(el) => { if (el) cards.current.set(n.id, el); else cards.current.delete(n.id); }}>
@@ -236,7 +241,7 @@ function Lanes({ layout, onOpen, actions }: { layout: PlanLayout; onOpen: (queue
           {/* What a click hits: a wider band along each line, invisible. */}
           {ready && drawing.routes.map((r) => (
             <path key={`hit:${r.key}`} d={roundedPath(r.points)} fill="none" stroke="transparent" strokeWidth={12} data-plan-line={r.key}
-              className="cursor-pointer" style={{ pointerEvents: "stroke" }} onClick={() => setSel(sel === r.key ? undefined : r.key)} />
+              className="cursor-pointer" style={{ pointerEvents: "stroke" }} onClick={() => toggle(r.key)} />
           ))}
         </svg>
         {route && source && (
@@ -252,10 +257,10 @@ function Lanes({ layout, onOpen, actions }: { layout: PlanLayout; onOpen: (queue
 function DropZones({ target, choices, zone, onZone }: {
   target: string; choices: NonNullable<ReturnType<typeof dropChoices>>; zone?: "instead" | "also"; onZone: (z: "instead" | "also") => void;
 }) {
-  const half = (z: "instead" | "also", words: { key: Key; params?: Params }) => (
+  const half = (z: "instead" | "also", words: Words) => (
     <div data-plan-zone={`${target}:${z}`} onDragOver={(e) => { e.preventDefault(); if (zone !== z) onZone(z); }}
       className={`grid place-items-center rounded-md px-2 py-1.5 text-center text-xs ${zone === z ? "border border-accent bg-accent/15 font-semibold text-accent" : "border border-dashed border-line-strong text-fg-2"}`}>
-      {t(words.key, words.params)}
+      {say(words)}
     </div>
   );
   return (
@@ -287,7 +292,6 @@ function LinePanel({ layout, from, to, actions, onClose, onHeight, style }: {
   }, [onHeight]);
   const d = lineDetails(layout, from, to);
   if (!d) return null;
-  const say = (w: { key: Key; params?: Params }) => t(w.key, w.params);
   return (
     <div ref={box} style={style} data-box="line details" role="dialog" aria-label={say(d.title)}
       className="z-20 scroll-mb-24 rounded-lg border border-accent bg-surface-3 px-3 py-2.5 text-xs shadow-lg max-lg:mt-1.5">
@@ -330,17 +334,17 @@ function UndoBar({ change, actions }: { change: Change; actions: Actions }) {
 /** The phone's list: the columns one after another under their titles. */
 function PhoneList({ layout, onOpen, actions }: { layout: PlanLayout; onOpen: (queue: string) => void; actions: Actions }) {
   const list = planList(layout);
-  /** The "after" chip tapped ("<from>><to>"): the line's details under its card. Dragging is the desktop's. */
-  const [open, setOpen] = useState<string>();
+  /** The "after" chip tapped: the line's details under its card (`to`). Dragging is the desktop's. */
+  const [open, setOpen] = useState<{ from: string; to: string }>();
   return (
     <ol className="space-y-2 @3xl:hidden">
       {list.map((n, i) => {
-        const from = open?.endsWith(`>${n.id}`) ? open.slice(0, -n.id.length - 1) : undefined;
+        const from = open?.to === n.id ? open.from : undefined;
         return (
           <li key={n.id}>
             {(i === 0 || list[i - 1]!.column !== n.column) && <h3 className={`mb-1.5 text-xs font-medium text-fg-3 ${i ? "mt-4" : ""}`}>{columnTitle(n.column)}</h3>}
             <Card node={n} onOpen={onOpen} actions={actions} chosen={from} chipsDone
-              chip={(f) => setOpen(open === `${f}>${n.id}` ? undefined : `${f}>${n.id}`)} />
+              chip={(f) => setOpen(from === f ? undefined : { from: f, to: n.id })} />
             {from && <LinePanel layout={layout} from={from} to={n.id} actions={actions} onClose={() => setOpen(undefined)} />}
           </li>
         );
@@ -379,7 +383,7 @@ function Card({ node: n, onOpen, actions, cardRef, drag, highlight, moving, styl
         </span>
       )}
       {!n.now && n.planned && n.why.map((w) => (
-        <span key={w.key} className={`mt-1 block text-xs ${WHY[w.tone]}`}>{t(w.key, w.params)}</span>
+        <span key={w.key} className={`mt-1 block text-xs ${WHY[w.tone]}`}>{say(w)}</span>
       ))}
       {n.before.length > 0 && (
         <span className="mt-1.5 flex flex-wrap gap-1">
@@ -411,7 +415,7 @@ function Estimate({ queue, estimates }: { queue: string; estimates?: EstimatesRe
   const words = estimateWords(estimates?.queues[queue]);
   if (!words || !estimates) return null;
   const title = estimates.samples < estimates.min ? t("plan.estimate.tooFew", { min: estimates.min }) : t("plan.estimate.title", { samples: estimates.samples });
-  return <span className="mt-1 block text-[11px] italic text-fg-3" title={title} data-plan-estimate={queue}>{t(words.key, words.params)}</span>;
+  return <span className="mt-1 block text-[11px] italic text-fg-3" title={title} data-plan-estimate={queue}>{say(words)}</span>;
 }
 
 /** The orchestrator's proposal for a queue, with Accept and Decline. */
