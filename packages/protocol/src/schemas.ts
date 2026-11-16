@@ -185,9 +185,11 @@ const ConversationSettings = z.object({
   web: ConversationWeb.default("search"),
 });
 const OrchestratorSettings = z.object({
+  /** The runtime the orchestrator runs on (Claude Code or Codex; another one counts as Claude Code). */
   runtime: Runtime.default("claude"),
   model: z.string().optional(),
-  effort: ClaudeEffort.optional(),
+  /** By its runtime: Claude Code takes low to max (effortIssue); Codex what its model lists. */
+  effort: Effort.optional(),
   /** Tell the orchestrator when a worker asks, or a run halts or finishes (it starts if needed). */
   notify: z.boolean().default(true),
   /**
@@ -407,7 +409,7 @@ export const StoredProject = z.object({
     session: Id.nullable().default(null),
     runtime: own(Runtime),
     model: ownOrNone(z.string()),
-    effort: ownOrNone(ClaudeEffort),
+    effort: ownOrNone(Effort),
     notify: own(z.boolean()),
     context_threshold: own(Fraction),
   }).optional(),

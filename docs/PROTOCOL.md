@@ -128,9 +128,12 @@ change of a global value reaches every project that follows it at once.
   approval policy and reviewer; a model or effort it took from the defaults) are compared with the effective ones then;
   if they differ, the idle process is ended and the session resumed with them before the step opens (Claude Code
   `--resume`, Codex `thread/resume`). A model or effort of its own changes as in "Runtime, model and effort per step".
-- The orchestrator runs on the project's effective `orchestrator.model` and `effort`; its session records them. Before
-  a message, a process started with other settings is replaced: at once when idle; when working, after its turn (that
-  message still goes into the running turn).
+- The orchestrator runs on the project's effective `orchestrator.runtime` (`codex`, else Claude Code), `model` and
+  `effort`; its session records them. Before a message, a process started with other settings is replaced: at once
+  when idle; when working, after its turn (that message still goes into the running turn). Another runtime starts a
+  fresh session (see "The orchestrator"). An effort Claude Code does not take (`ultra`) is refused by
+  `POST …/orchestrator/settings` on Claude Code; one left from Codex is not passed to Claude Code (it runs at its
+  default, and the chat says so).
 - A thinking partner runs on its own model and effort if its creation named them, else on the project's effective
   `conversations.model` and `effort` (when it runs on `conversations.runtime`). It is replaced before a message in the
   same way. An effort its runtime does not take refuses the message, with the reason.
@@ -1593,7 +1596,8 @@ state. It records the step's status in `about.seeded`. When the step's status di
 ## The orchestrator
 
 `project.yaml` holds `orchestrator: { runtime, session, model?, notify, context_threshold }` (`context_threshold`: see
-"The orchestrator's context care"). The orchestrator is a Claude Code session
+"The orchestrator's context care"). It runs on `orchestrator.runtime`: `codex` starts it on Codex, any other value
+on Claude Code. On Claude Code the orchestrator is a session
 launched in the project's checkout with `--permission-mode dontAsk`, allowed only `Read`, `Grep`, `Glob`, `Agent`,
 `nexus` and read-only git commands (`git log`, `git status`, `git diff`, `git show`, `git branch`, `git worktree list`)
 on both shell tools (`Bash(nexus:*)` and `PowerShell(nexus:*)`, and so on), and `Write(.nexus/drafts/**)` and
@@ -1601,6 +1605,28 @@ on both shell tools (`Bash(nexus:*)` and `PowerShell(nexus:*)`, and so on), and 
 `NotebookEdit` and `MultiEdit` disallowed: anything else, writes outside `.nexus/drafts/` included, is refused without
 a prompt. (`Write` and `Edit` are not disallowed: a disallow rule would beat the drafts rules.) Its briefing
 (appended system prompt) explains its role, the commands and the queue YAML.
+
+On Codex (queue OC, decided by the user 2026-11-16) it is a `codex app-server` thread in the project's checkout, its
+briefing the thread's developer instructions, kept to its drafts by a **permission profile** instead of the older
+sandbox settings: `thread/start` sends no `sandbox`, its `config` has `default_permissions: "nexus_orchestrator"`,
+`permissions.nexus_orchestrator.extends: ":read-only"` and `permissions.nexus_orchestrator.filesystem` granting
+`write` on exactly two paths (absolute, with forward slashes): `<.nexus>/drafts` and
+`<.nexus>/sessions/<its session>/events.jsonl`, the one file the `nexus` CLI writes for it (Codex sandboxes every
+command, the CLI's too). No turn sends a `sandboxPolicy`. So it reads everything and can write neither the project's
+root, nor its own `session.yaml` (its role) or inbox, nor any other `.nexus` file, nor the user's (`away.yaml` lives
+in NEXUS_HOME); the internet is closed to it (this machine's own addresses are not: DESIGN.md, "An orchestrator on
+Codex can be kept to its drafts"). Before its process starts the server creates its `events.jsonl` empty, if missing,
+since the sandbox grants the file by path. Approval policy `never`; web search `disabled`; the user's MCP servers,
+plugins and apps off, every one (see "How the engine runs a Codex session"). It has no helpers (Claude Code's
+subagents): its briefing has it do their work itself. Its thread id is the session's `native_id` once Codex gives it.
+
+The runtime is chosen when a session starts. When `orchestrator.runtime` names another runtime than the current
+session's, the next message or notice (between turns: a message sent while a turn runs goes into it, on the old
+runtime) starts a fresh session on the new one, since a conversation cannot move between the two: the fresh session
+`continues` the old one (which gets `continued_by`), so the dashboard shows the old chat above the new one; a Nexus
+line in each chat says so; the old session's unread messages are carried over (`delivered.jsonl`, `via: carried`);
+and its first message says what happened and gives `nexus status` and the carried messages. A fresh session of the
+context care starts on the runtime set then, too.
 
 - `.nexus/drafts/<queue>.yaml` holds the orchestrator's queue drafts; the orchestrator is its only writer. It writes a
   draft there, uploads it with `nexus queue draft .nexus/drafts/<queue>.yaml` (relative to the project's root, its
@@ -2392,8 +2418,8 @@ Nexus reads the effective config (`config/read` with the working directory) and 
 `features.apps: false`, `features.plugins: false` and `mcp_servers.<name>.enabled: false` for every MCP server it
 names, except those in the project's `runtimes.codex.mcp_servers` (left as the user's config has them). A name that
 is not a bare key is quoted (`mcp_servers."odd.name".enabled`). When the config cannot be read, the thread does not
-start. A thinking partner's thread starts so too, keeping none. The orchestrator always runs on Claude Code (its
-`orchestrator.runtime` counts only for the usage threshold); should it run on Codex, it would keep none either.
+start. A thinking partner's thread starts so too, keeping none, and so does an orchestrator's on Codex (queue OC):
+`runtimes.codex.mcp_servers` is the workers' only.
 
 - a step turn: `turn/start` with `input: [{type: "text", text, text_elements: []}]`, the session's `effort` (and,
   once a step changed them, `model` and `effort`) and, in `workspace-write`, a `sandboxPolicy` whose writable roots include the project's `.nexus/` when the worktree is elsewhere

@@ -562,8 +562,8 @@ usage runs out"). Choices made while building it (FB4):
   full runtime for a context summary first (as at a boundary) would spend the usage that ran out, so none is asked.
 - **A failed turn's reset counts as a window.** A turn refused for the usage limit names its reset; that is added as a
   full window of the runtime for the decision, since usage.json may not show it yet.
-- **Notices wait in the orchestrator's inbox.** The orchestrator runs on Claude Code; a notice that started its turn
-  while Claude Code is full would spend the very usage that ran out. The notice is put into its inbox (seen there, not
+- **Notices wait in the orchestrator's inbox.** A notice that started the orchestrator's turn while its runtime (Claude
+  Code or Codex, `orchestrator.runtime`) is full would spend the very usage that ran out. The notice is put into its inbox (seen there, not
   told) and told once the runtime is free; the reviews it would do wait with it, as decided.
 
 ### Estimating a turn's use
@@ -1716,6 +1716,13 @@ Nexus keeps outside the queue's list of steps.
     with a free shell on this machine (Codex workers, Claude Code workers, an orchestrator on Codex) can do the user's
     dashboard actions over HTTP; the orchestrator on Claude Code cannot (it runs only `nexus` and read-only git). The
     user decided: the gap is closed by a queue of its own, and the orchestrator is not switched to Codex until it is.
+  - Built in OC2: `CodexOptions.permissions` (a profile in place of `sandbox` and `writableRoots`), the orchestrator's
+    launch by `orchestrator.runtime`, its Codex briefing without helpers (it does their work itself, by their own
+    checklists in short), and a fresh session at a runtime switch (no conversation moves between runtimes; the old
+    chat stays above). A switch waits for the turn running then to end: two orchestrator processes at once could act
+    twice. Building it found a lost message in the Codex adapter: a `turn/steer` refused because the turn had just
+    ended came back after `turn/completed` had found the queue empty, so the message waited for a next one; it now
+    starts its own turn.
 
 - **Remote access needs no open port.** The server keeps listening on 127.0.0.1; Tailscale Serve relays the tailnet's
   https requests to it. Requests relayed by a proxy count as remote and need the access token; this machine does
@@ -2070,8 +2077,9 @@ local port without an approval), so a Codex worker could reach this machine's Ne
   `runtimes.codex.mcp_servers` (project only, empty by default: a project whose Codex workers need one, Blender in
   Honeycomb, names it in its settings). Plugins and apps are never kept: a plugin's servers (computer use, Blender)
   come and go with the plugin, and the apps' connectors searched even with web search off.
-- **The orchestrator runs on Claude Code** whatever `orchestrator.runtime` says (it only chooses the usage window the
-  orchestrator's notices wait for); a test guards that, and says that a Codex orchestrator would keep no server.
+- **An orchestrator on Codex keeps no server** (queue OC): its thread starts with every MCP server off, plugins and
+  apps too, whatever `runtimes.codex.mcp_servers` says (that list is the workers'); a test guards it. A server runs
+  outside the sandbox, and could reach the Nexus API for it.
 - **Probed on 2026-11-15** with Codex 0.167.2 and `gpt-6-luna` (effort low, read-only sandbox, approval `never`), in
   a temporary project, through `CodexSession` with the worker's options. The probe's own MCP server (one tool,
   `fx_probe_echo`, noting its start) came in by `-c mcp_servers.fxprobe...` on a wrapper around `codex app-server`,
@@ -2334,5 +2342,7 @@ mockups (`docs/ux/mockups/22-plan-layout.html`, variants A and B) none.
 
 ## Open questions
 
-1. **The orchestrator on Codex.** The orchestrator runs on Claude Code only: its read-only guarantee rests on Claude
-   Code's `dontAsk` mode. Codex's `read-only` sandbox could give the same, with `.nexus/` writable; not built yet.
+1. **The local HTTP gap.** Any agent with a free shell on this machine (Codex's sandbox leaves loopback open) can
+   send the dashboard's writes with a forged `Origin` ("An orchestrator on Codex can be kept to its drafts"). The
+   orchestrator on Codex is built (queue OC), but the user does not switch to it until this is closed, in a queue of
+   its own.
