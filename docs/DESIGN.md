@@ -177,7 +177,12 @@ still fail. A deterministic partial-write test covers that reader race.
 
 The Windows integration tests use both fake runtimes, actual sleepers, an orphaned grandchild, and a second worker.
 They cover step continuation, review, stops, interruption, shutdown, runtime exit and cleanup failure. No real model
-was called. The helper's internal pipe protocol is in PROTOCOL.md. This Windows implementation leaves non-Windows
+was called. The cross-step test holds the first step until a test observer retains Windows process handles, then
+allows cleanup and asserts exit while those handles remain open. A full-suite run failed its old PID-only exit
+assertion; those snapshots cannot distinguish a surviving child from a recycled PID. Retained handles prevent PID
+reuse during the assertions, without weakening the requirement that cleanup precedes the next step. Each worker
+has its own release barrier, so releasing the first cannot finish the isolation sentinel's step.
+The helper's internal pipe protocol is in PROTOCOL.md. This Windows implementation leaves non-Windows
 launching as before. Job membership covers normal process creation, including detached children, not work delegated
 to an unrelated system service (`Win32_Process.Create`, for example); Nexus does not chase such processes with
 heuristics. References: [Job Objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects) and

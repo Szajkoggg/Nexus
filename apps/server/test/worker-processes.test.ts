@@ -1,6 +1,7 @@
 // Real descendants of fake runtimes, never real models or user projects. Windows Job Object integration tests.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { setStepLevel } from "@nexus/protocol";
 import { ClaudeSession } from "../src/claude.ts";
@@ -13,18 +14,51 @@ function alive(pid: number): boolean { try { process.kill(pid, 0); return true; 
 function family(file: string): Family { return JSON.parse(readFileSync(file, "utf8")) as Family; }
 function gone(f: Family): boolean { return !alive(f.direct) && !alive(f.orphan); }
 
+/** Retain the exact Windows process objects so their PIDs cannot be reused during assertions after cleanup. */
+async function retainProcesses(pids: number[]): Promise<() => Promise<void>> {
+  const script = `$ErrorActionPreference = 'Stop'
+$held = @()
+try {
+  foreach ($id in @(${pids.join(",")})) {
+    $p = [Diagnostics.Process]::GetProcessById($id)
+    $null = $p.Handle
+    $held += $p
+  }
+  [Console]::WriteLine('ready')
+  $null = [Console]::ReadLine()
+} finally { foreach ($p in $held) { $p.Dispose() } }`;
+  const observer = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { stdio: "pipe", windowsHide: true });
+  let output = "", errors = "", ended = false;
+  observer.stdin.on("error", () => {});
+  observer.stdout.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+  observer.stderr.on("data", (chunk: Buffer) => { errors += chunk.toString(); });
+  const closed = new Promise<void>((resolve) => observer.once("close", () => { ended = true; resolve(); }));
+  const release = async () => { observer.stdin.end(); await closed; };
+  try {
+    await until("process handles retained", () => { assert.ok(!ended, errors); return output.includes("ready"); }, LONGER.processes, () => errors);
+    return release;
+  } catch (error) { observer.kill(); await closed; throw error; }
+}
+
 for (const runtime of ["claude", "codex"] as const) {
   test(`${runtime}: step cleanup preserves the runtime, interruption ends its tree and leaves another worker alone`, { skip: process.platform !== "win32" }, async () => {
     const work = holdWork();
-    const first = setup(["procdone", "prochold"]);
+    const first = setup(["prochold", "prochold"]);
     const log = process.env.FAKE_LOG!;
     first.engine.start("Q", { runtime });
+    const otherWork = holdWork();
     const other = setup(["prochold"]);
     const otherLog = process.env.FAKE_LOG!;
     other.engine.start("Q", { runtime });
+    const releases: (() => Promise<void>)[] = [];
     try {
-      await until("second step and other worker children", () => existsSync(`${log}.children-Q2`) && existsSync(`${otherLog}.children-Q1`), LONGER.run);
-      const before = family(`${log}.children-Q1`), after = family(`${log}.children-Q2`), separate = family(`${otherLog}.children-Q1`);
+      await until("both workers' first step children", () => existsSync(`${log}.children-Q1`) && existsSync(`${otherLog}.children-Q1`), LONGER.run);
+      const before = family(`${log}.children-Q1`), separate = family(`${otherLog}.children-Q1`);
+      releases.push(await retainProcesses([before.root, before.direct, before.orphan, separate.root, separate.direct, separate.orphan]));
+      work.release("Q1");
+      await until("second step children", () => existsSync(`${log}.children-Q2`), LONGER.step);
+      const after = family(`${log}.children-Q2`);
+      releases.push(await retainProcesses([after.direct, after.orphan]));
       assert.equal(before.root, after.root, "the same runtime takes the next step");
       assert.ok(gone(before), "even the orphaned grandchild is gone before the next step");
       assert.ok(alive(after.root) && alive(after.direct) && alive(after.orphan));
@@ -34,7 +68,8 @@ for (const runtime of ["claude", "codex"] as const) {
       other.engine.shutdown();
       await until("shutdown to end the other worker tree", () => gone(separate) && !alive(separate.root));
     } finally {
-      first.engine.shutdown(); other.engine.shutdown(); work.release(); work.done();
+      first.engine.shutdown(); other.engine.shutdown(); work.release(); otherWork.release(); work.done(); otherWork.done();
+      for (const release of releases) await release();
       await until("both hosts to exit", () => !first.engine.alive() && !other.engine.alive(), LONGER.processes);
     }
   });
