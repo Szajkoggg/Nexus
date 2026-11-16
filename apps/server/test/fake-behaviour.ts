@@ -30,6 +30,8 @@
 //   checks      report each check its opening lists under "Checks for every step" with nexus check, under that exact
 //               name, as the opening asks, then done
 //   shortchecks the same under a short name of its own (the last word: "npm test" as "test"), as workers once did
+//   ownedhold   hold an empty directory with a Windows helper until worker cleanup; work(), then done
+//   owneddeny   the same, but the helper denies PROCESS_TERMINATE on its own process DACL
 // The closing refactoring step's standard goal has no "FAKE:": it does FAKE_CLOSING's behaviour, by default done, with a
 // summary that finds nothing worth refactoring (the valid outcome of a small change).
 // The integration step's has none either: it does FAKE_INTEGRATE's behaviour, by default "merge": it runs the merge its
@@ -274,6 +276,19 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
       if (behaviour === "prochold") await work(step);
       if (behaviour === "proccrash") process.exit(1);
       behaviour = behaviour === "procstop" ? "stop" : "done";
+    }
+    // Own a real Windows directory handle, optionally denying new PROCESS_TERMINATE handles. Held until the test
+    // lets this turn finish; the worker job must release it before the next step. No model or foreign process.
+    if (behaviour === "ownedhold" || behaviour === "owneddeny") {
+      const dir = join(process.cwd(), `.owned-${step}`);
+      mkdirSync(dir, { recursive: true });
+      const ready = `${process.env.FAKE_LOG}.helper-${step}`;
+      const child = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-File", join(dirname(fileURLToPath(import.meta.url)), "worker-helper.ps1"),
+        "-Ready", ready, "-Release", `${ready}.release`, ...(behaviour === "owneddeny" ? ["-DenyTerminate"] : [])],
+      { cwd: dir, stdio: "ignore", windowsHide: true });
+      child.unref();
+      await work(step);
+      behaviour = "done";
     }
     const fail = failure(step, behaviour);
     if (fail) return { fail };

@@ -80,16 +80,30 @@ public static class NexusWorkerJob
         if (handle == IntPtr.Zero) {
             int error = Marshal.GetLastWin32Error();
             if (error == 87) return; // already gone
-            throw new Win32Exception(error);
+            throw new Win32Exception(error, "OpenProcess for worker job member " + pid + ": " + new Win32Exception(error).Message);
         }
         try {
             bool member;
-            Check(IsProcessInJob(handle, job, out member));
+            if (!IsProcessInJob(handle, job, out member)) {
+                int error = Marshal.GetLastWin32Error();
+                throw new Win32Exception(error, "IsProcessInJob for worker job member " + pid + ": " + new Win32Exception(error).Message);
+            }
             if (!member) return;
             if (WaitForSingleObject(handle, 0) == 0) return;
-            if (!TerminateProcess(handle, 1) && WaitForSingleObject(handle, 0) != 0) Check(false);
-            if (WaitForSingleObject(handle, 2000) != 0) throw new TimeoutException("worker child did not exit");
+            bool terminated = TerminateProcess(handle, 1);
+            int terminationError = terminated ? 0 : Marshal.GetLastWin32Error();
+            AwaitExit(handle, terminationError);
         } finally { CloseHandle(handle); }
+    }
+
+    // TerminateProcess can report ACCESS_DENIED while another termination is still completing (observed with
+    // a Codex worker's descendants). A zero-time wait is not proof of failure. Keep the same verified handle until
+    // exit or the existing deadline; an actual refusal that leaves it alive must still fail the cleanup barrier.
+    static void AwaitExit(IntPtr handle, int terminationError) {
+        if (WaitForSingleObject(handle, 2000) == 0) return;
+        if (terminationError != 0) throw new Win32Exception(terminationError,
+            "TerminateProcess did not complete: " + new Win32Exception(terminationError).Message);
+        throw new TimeoutException("worker child did not exit");
     }
 
     static void Clean(bool keepRuntime) {

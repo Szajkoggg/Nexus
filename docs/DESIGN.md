@@ -2572,9 +2572,11 @@ inspection before discarding it; missing branch evidence is restored only from a
 
 ### Worktree handle investigation: negative reproduction (queue WH1)
 
-On 2026-11-16 the user identified a handle referring to the PT remainder in Resource Monitor and matched its
-PID to the live Nexus server. That establishes the process, not the resource's creation site. WH1 did not inspect
-or change that process, its handles, the live checkout, or the real PT/WK folders.
+WH1 initially attributed the PT remainder's handle to the live Nexus server. The user's subsequent exact-path
+screenshot corrected that attribution: `codex-command-runner-0.167.2.exe`, PID 364580, held a File handle named
+`C:\Code\Nexus.worktrees\PT`. The server's earlier matches referred to `.nexus/queues/PT/review`, not the worktree.
+The image establishes ownership at that observation, not the creating session, job membership or safe termination
+of a later process at that PID. Neither WH1 nor WH2 changed that process, the live checkout or the real PT/WK folders.
 
 A Windows probe used separate temporary Git repositories and NEXUS_HOME, fake Claude/Codex runtime paths, and
 development servers on ports 50805 and 62890. The successful extended probe ran a fake Claude worker through its
@@ -2595,12 +2597,75 @@ synchronous child commands with explicit cwd. The probe did not exercise interru
 native handles, so it does not exonerate every file-serving path or establish the historical PT handle's origin.
 
 WH1 stopped without a production fix or a claimed regression test: no before-fix lasting lock was reproduced.
-The review artifacts retain the standalone probe and its PID-tagged observations. The next investigation needs the
-exact original Resource Monitor handle name/type and the server's launch context (or existing observations of what
-preceded the lock), then a matching isolated reproduction. A process match alone is insufficient for choosing a fix.
+The review artifacts retain the standalone probe and its PID-tagged observations. The subsequent image supplies
+the missing handle name/type; the creating session and events preceding the lasting lock remain unestablished.
+A process match alone is insufficient for choosing a fix.
 The real remainder stays untouched until that evidence is available. Any later user-controlled maintenance must
 first let active work finish; legacy recovery still preserves and independently inspects the remainder as described
 above, and must never fabricate a CW proof or force-close a handle.
+
+### A Codex cleanup refusal while termination is completing (queue WH2)
+
+The separate WH1 runtime log contains `Access is denied` at 2026-11-16T17:23:50.655Z, followed by the worker's
+exit. That old message did not name a Windows operation. WH2 reproduced the same cleanup symptom with installed
+Codex 0.167.2 in temporary directories, under a copy of Nexus's Windows worker host with diagnostic logging.
+Three short `gpt-6-luna` turns each ran only `Write-Output`: first reproduction, operation-level diagnosis, then
+verification of the bounded-wait change. MCP servers, plugins, apps and sub-agents were disabled, the sandbox
+remained workspace-write with approval never, and no administrator rights or sandbox weakening were used. A
+model-free `command/exec` attempt cleaned up before the boundary and did not reproduce the unified-exec case.
+
+The diagnostic trace locates the reproduced refusal in `worker-job.cs`, `End`: OpenProcess and IsProcessInJob
+succeeded for an owned job member, TerminateProcess returned false with error 5, and WaitForSingleObject(handle, 0)
+returned 258 (timeout). In the verification trace the same sequence was followed by a wait on the **same retained
+handle**, which returned 0 (signaled); cleanup acknowledged success and the runtime remained available. The old
+code threw before giving that pending exit the two seconds it already allowed after a successful TerminateProcess.
+This is consistent with [Windows' asynchronous termination contract](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-terminateprocess).
+The trace establishes a Codex-created job member, not which executable that member was; it does not identify the
+historical PT process. A worktree deletion attempted while the host/runtime still used it as cwd was EBUSY, which
+alone cannot attribute its handle to a runner. After the owned host exited, each probe's worktree was removable.
+
+`End` now captures the termination error immediately and awaits actual exit on that handle for the existing
+two-second deadline (`AwaitExit`). Only a signaled handle counts as success; an error leaving the process alive
+still fails with the original Windows code, and a successful request that never finishes still times out.
+OpenProcess and IsProcessInJob failures now name their operation. Membership checks, non-inheritable job ownership,
+kill-on-close, the engine's cleanup barrier and CW's deletion proof checks are unchanged. There is no PID/name-based
+fallback, privilege change or new protocol message. The existing `F` error payload simply has more useful text.
+
+The native regression replays the observed error-5 result against a real retained process handle and a real empty
+directory held as its cwd, then permits exit; another case leaves it alive and checks failure. This deterministic
+test models the OS return sequence; it does not pretend a scheduling race will recur on demand. A development-server
+test with fake Codex uses real helpers and Windows jobs, including a helper that adds a deny-PROCESS_TERMINATE ACE
+to **its own** DACL. That distinct, genuine OpenProcess refusal halts the queue before the next step, ends its whole
+worker job and releases its directory; Resume then completes. Normal step cleanup, immediate stop/resume, deletion
+of the completed temporary worktrees while the server lives, and another worker retaining its directory are checked.
+The existing worker tests cover reported stop, Stop now, shutdown, crash and same-runtime continuation too.
+
+One further, explicitly approved turn tested natural app-server exit separately from Nexus cleanup. Its temporary
+host kept the non-inheritable kill-on-close job open after the runtime exited, and used a cwd **outside** the empty
+worktree. Before sending EOF to app-server, it enumerated only its job, opened query/synchronize handles, verified
+membership on those handles, and recorded full executable paths and creation times. Those retained handles pinned
+identity across exit. The captured processes were codex.exe, codex-code-mode-host.exe, codex-computer-use.exe and
+two conhost.exe instances; no codex-command-runner was still present at that snapshot after the shell command.
+All five handles were unsignaled before EOF and signaled after app-server's exit code 0. The worktree changed from
+EBUSY to removable **while the guard still lived, before its cleanup**. A second snapshot after two seconds had no
+new job member and all retained handles remained signaled. The guard then completed cleanup and exited. Its raw
+RPC trace records one successful 303 ms unified-exec PowerShell command. This observes graceful EOF after a short
+command, not abrupt app-server failure or a command runner captured while still executing.
+
+The historical PT runner's continued existence after its owning session remains unexplained: the isolated probes
+did not leave a helper alive after full job shutdown, even before this change, and the final natural-exit probe
+also released the directory. The proven fix addresses a premature cleanup failure, not a proven source of that
+historical orphan. No further runtime probes are implied by this finding. Existing session/version records must
+first establish which launcher and ownership mechanism created that runner; a future failure needs observation
+while the owned runner exists, not selection by an old PID. Legacy PT recovery still requires user-controlled
+maintenance after active work finishes and preservation/inspection of the remainder; no retrospective cleanup
+proof may be fabricated and no historical PID may be used for termination.
+
+The four real turns reported 89,454 input tokens (44,032 cached) and 274 output tokens, 89,728 total. On the ChatGPT
+subscription no dollar charge was reported. The [published GPT-6 Luna API rates](https://developers.openai.com/api/docs/models/gpt-6-luna)
+give an API-equivalent estimate of $0.00511952, not a measured bill ($0.00126578 for the final lifetime probe).
+The real turns were necessary because plain helpers cannot model Codex's internal teardown ordering, and the
+model-free command/exec call did not reproduce it. All other probes and automated tests used no model.
 
 ## Open questions
 
