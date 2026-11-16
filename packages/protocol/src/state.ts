@@ -38,9 +38,10 @@ export interface AttentionItem {
    * `tags`: the orchestrator proposes a change to the project's tag lists (.nexus/tags.yaml), one item per proposal
    * (`tags`); only the user accepts or declines it. `recurring`: a recurring queue needs the user: it waits for their
    * standing approval, or a time passed without a run (its previous run had not closed, its template cannot be used,
-   * making the queue failed); one item per recurring.
+   * making the queue failed); one item per recurring. `cleanup`: Nexus could not remove a done survey run's worktree
+   * (git.yaml `cleanup.waiting`: untracked files left in it, and the like); the user looks, then cleans up.
    */
-  kind: "question" | "stopped" | "approval" | "review" | "failed" | "start" | "provisional" | "plan" | "merge" | "tags" | "recurring";
+  kind: "question" | "stopped" | "approval" | "review" | "failed" | "start" | "provisional" | "plan" | "merge" | "tags" | "recurring" | "cleanup";
   queue?: string;
   /** Kind `recurring`: the recurring queue it is about (its standing approval waits, or a time passed without a run). */
   recurring?: string;
@@ -521,6 +522,8 @@ function attentionOf(queues: QueueView[], questions: QuestionView[], tags: TagsF
       const w = q.git.merge.waiting;
       out.push({ kind: "merge", queue: q.id, step: q.steps.find((s) => s.integration)?.id, text: w.reason + releasedText(w.released), at: w.since });
     }
+    // A done survey run's worktree Nexus could not remove (src/merger.ts): until it is cleaned up.
+    if (q.git?.cleanup?.waiting && !q.git.cleaned) out.push({ kind: "cleanup", queue: q.id, text: q.git.cleanup.waiting.reason, at: q.git.cleanup.waiting.since });
     if (q.status === "cancelled" || q.status === "done") continue;
     for (const s of q.steps) {
       // A review the orchestrator does is not the user's (the queue still shows it waiting).

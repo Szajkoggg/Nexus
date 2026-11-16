@@ -388,7 +388,12 @@ A seventh, `notes`, is meant to recur: it keeps the notes true. It reads the Cla
 `memory_dir` parameter, outside the project), the ideas notes and the project documents against the code, and reports what
 is stale, built but unmarked, or untrue. Only the clear typos in the project documents are fixed in fix_small mode; the
 memory and ideas notes are only reported.
-Nexus's own instances, filled in for this repository, are in `nexus-templates/`.
+Nexus's own instances, filled in for this repository, are in `nexus-templates/`. They run in a worktree of their own
+(`worktree: auto`, which any template or project instance may carry), so a run never holds the main checkout. A survey
+there has nothing to merge back: once it is done Nexus removes its worktree, whether merging back by itself is on or
+not; if files are left in it, the worktree stays and "Waiting for you" gets a "Cleanup" item naming them (look, then
+Clean up on the queue's page). A stopped survey keeps its worktree as evidence. In fix_small mode the run ends with
+the integration step and is merged back like any worktree queue.
 
 **Static analysis setup.** The `static-analysis` template sets up static analysis for any stack (ESLint or Biome
 for Node, the .NET analyzers and `dotnet format` for .NET and Unity): it asks you which tools to use, takes the

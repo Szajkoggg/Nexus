@@ -20,10 +20,19 @@
 // Nothing happens while Nexus updates, deploys or hands over (`busy`). After a merge back the worktree and branch are
 // cleaned up once every provisional acceptance of the queue is confirmed; a Fix it until then runs in the worktree and
 // goes through the integration step again. Nothing is pushed.
+//
+// A survey run in a worktree of its own (`maintenance: survey`, no integration step: it leaves no commit, so there is
+// nothing to merge back) has its worktree and branch cleaned up once it is done, whatever merge_back says: only when
+// every step is done or skipped (a stopped or failed survey keeps its worktree, as evidence), no provisional acceptance
+// waits, and the worktree is clean, untracked files included. One that is not clean stays, and the user is told what is
+// left (git.yaml `cleanup.waiting`, the waiting list's "cleanup" item); Nexus does not try again, the user's Clean up
+// does. Never with --force.
+import { existsSync } from "node:fs";
 import { normPath, now, pendingProvisional, stepClosed, runGoing, type ProjectState, type ProjectStore, type QueueView } from "@nexus/protocol";
 import { checkoutOf, patchGit } from "./gitinfo.ts";
 import { ROOT } from "./lifecycle.ts";
-import { cleanUp, fastForward, judgeMerge, reintegrate, withMergeLock } from "./mergeback.ts";
+import { cleanUp, fastForward, judgeMerge, leftText, reintegrate, stillEnding, withMergeLock, worktreeLeft } from "./mergeback.ts";
+import { samePath } from "./worktree.ts";
 
 export interface MergerOptions {
   /** Starts a queue's run (Engine.start); throws when it cannot start now. */
@@ -71,6 +80,7 @@ export class Merger {
     this.found = [];
     const wanted = new Map<string, string>();
     for (const q of state.queues) {
+      if (ownSurvey(q)) { this.surveyCleanup(state, q); continue; }
       if (!q.steps.some((s) => s.integration)) continue;
       try { this.look(state, q, wanted); }
       catch (e) { this.wait(q, `queue ${q.id}: merging back failed: ${firstLine(e)}`); }
@@ -179,6 +189,27 @@ export class Merger {
     catch (e) { this.wait(q, `queue ${q.id} is merged back, but its cleanup waits: ${(e as Error).message}`); }
   }
 
+  /**
+   * A done survey run's worktree and branch go (see the header). A step whose turn is still ending (its round open)
+   * holds it a moment: looked at again.
+   */
+  private surveyCleanup(state: ProjectState, q: QueueView): void {
+    if (q.status !== "done" || runGoing(q.run) || q.git?.cleaned || q.git?.cleanup) return;
+    if (!q.steps.every((s) => s.status === "done" || s.status === "skipped") || q.steps.some(pendingProvisional)) return;
+    if (q.steps.some((s) => stillEnding(q, s))) { this.waits = true; return; }
+    const path = checkoutOf(this.store, q);
+    if (!path || samePath(path, state.project.root)) return;
+    let reason: string, files: string[] | undefined, more: number | undefined;
+    try {
+      const left = existsSync(path) ? worktreeLeft(path) : { files: [], count: 0 };
+      if (!left.count) { withMergeLock(this.store, q.id, () => cleanUp(this.store, q.id)); return; }
+      reason = `survey run ${q.id} is done, but its worktree stays: ${leftText(left)} left in it; look at them, then clean up (${path})`;
+      files = left.files;
+      if (left.count > left.files.length) more = left.count - left.files.length;
+    } catch (e) { reason = `survey run ${q.id} is done, but its worktree could not be cleaned up: ${firstLine(e)}`; }
+    patchGit(this.store, q.id, { cleanup: { waiting: { reason, since: now(), ...(files ? { files } : {}), ...(more ? { more } : {}) } } });
+  }
+
   /** Something keeps it waiting: recorded at the look's end (record). */
   private wait(q: QueueView, reason: string): void {
     this.waits = true;
@@ -202,5 +233,8 @@ export class Merger {
 }
 
 const key = (path: string) => normPath(path).toLowerCase();
+
+/** A survey run in a worktree of its own: nothing to merge back, its worktree is cleaned up once it is done. */
+const ownSurvey = (q: QueueView) => q.maintenance === "survey" && q.integration === true;
 
 const firstLine = (e: unknown) => (e as Error).message.split("\n")[0]!;

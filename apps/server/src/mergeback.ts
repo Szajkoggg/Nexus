@@ -13,8 +13,9 @@
 // branch in the worktree where the base is checked out, a fast-forward when possible, else a merge commit; on a
 // conflict the merge is aborted, so nothing is left half-done.
 //
-// Cleanup: `git worktree remove` (never --force) and `git branch -d` (never -D). Refused, before anything is removed,
-// when the worktree has uncommitted changes or the branch is not merged. A worktree git cannot remove for paths beyond
+// Cleanup (the user's, after a merge back, or after a survey run: src/merger.ts): `git worktree remove` (never
+// --force) and `git branch -d` (never -D). Refused, before anything is removed, when the worktree has uncommitted
+// changes (untracked files included) or the branch is not merged. A worktree git cannot remove for paths beyond
 // Windows' 260 characters (Git for Windows without core.longpaths) is deleted by Node, and the worktree list pruned.
 import { execFileSync } from "node:child_process";
 import { existsSync, rmSync } from "node:fs";
@@ -131,6 +132,15 @@ export type MergeDecision =
   /** Ready: move the base forward to the integrated commit. */
   | { kind: "ff"; path: string; base: string; sha: string; branch: string };
 
+/**
+ * The step finished (its outcome reported) but the turn that reported it has not ended yet, so its round in git.yaml
+ * is still open (for at most ROUND_SETTLE_MS).
+ */
+export function stillEnding(q: Pick<QueueView, "git">, st: Pick<QueueView["steps"][number], "id" | "finished_at">): boolean {
+  const last = q.git?.steps[st.id]?.at(-1);
+  return !!last && !last.end && Date.parse(st.finished_at ?? "") > Date.now() - ROUND_SETTLE_MS;
+}
+
 /** The integration step's last round's end in git.yaml: the commit its work ended at. */
 function integratedSha(g: GitFile | undefined, step: string): string | undefined {
   return g?.steps[step]?.filter((r) => r.end).at(-1)?.end ?? undefined;
@@ -163,8 +173,7 @@ export function judgeMerge(store: ProjectStore, state: ProjectState, q: QueueVie
   if (!branch || !tip) return { kind: "wait", reason: `queue ${q.id}'s branch${branch ? ` ${branch}` : ""} does not exist` };
   // The run can finish (its review accepted) before the turn in which the step got its outcome ends and closes its
   // round in git.yaml: until then the last closed round is an older one, so nothing is judged yet.
-  const last = q.git?.steps[integ.id]?.at(-1);
-  if (last && !last.end && Date.parse(integ.finished_at ?? "") > Date.now() - ROUND_SETTLE_MS) {
+  if (stillEnding(q, integ)) {
     return { kind: "none", why: `queue ${q.id}'s integration step is still ending (its round is not closed yet)`, ending: true };
   }
   const sha = integratedSha(q.git, integ.id);
@@ -312,19 +321,38 @@ export function removeWorktree(root: string, path: string, o: { tries?: number }
   if (existsSync(path) || listed) throw new ActionError(`the worktree ${path} could not be removed${why ? ` (${why})` : ""}`, 500);
 }
 
-/** The cleanup of a finished worktree queue (the user's, or Nexus's after merging back): the worktree removed, its branch deleted with -d. */
+/** How many of the files that keep a worktree are named. */
+const FILES_SHOWN = 20;
+
+/**
+ * What keeps a worktree from being removed: its uncommitted changes, untracked files included, as git status names
+ * them (?? untracked, M modified, D deleted…; the first FILES_SHOWN), so the user sees what they are; `count`: how many
+ * in all. None when it is clean; throws when its state cannot be read.
+ */
+export function worktreeLeft(path: string): { files: string[]; count: number } {
+  const dirty = git(path, ["status", "--porcelain"]);
+  if (dirty === undefined) throw new ActionError(`cannot read the state of ${path}`, 409);
+  const lines = dirty.split(/\r?\n/).filter(Boolean);
+  // git() of gitinfo.ts trims the output: no fixed columns.
+  return { files: lines.slice(0, FILES_SHOWN).map((l) => l.trim().replace(/^(\S+)\s+/, "$1 ")), count: lines.length };
+}
+
+/** What worktreeLeft found, as a text: "2 files: ?? a.txt, M b.txt", with how many more beyond those named. */
+export function leftText(left: { files: string[]; count: number }): string {
+  const more = left.count - left.files.length;
+  return `${left.count} file${left.count === 1 ? "" : "s"}: ${left.files.join(", ")}${more > 0 ? `, and ${more} more` : ""}`;
+}
+
+/**
+ * The cleanup of a finished worktree queue (the user's, or Nexus's after merging back or after a survey run): the
+ * worktree removed, its branch deleted with -d.
+ */
 export function cleanUp(store: ProjectStore, queueId: string): string {
   const { q, root, path, branch } = finishedWorktreeQueue(store, queueId);
   const here = existsSync(path);
   if (here) {
-    const dirty = git(path, ["status", "--porcelain"]);
-    if (dirty === undefined) throw new ActionError(`cannot read the state of ${path}`, 409);
-    if (dirty) {
-      // The files that block it, as git status names them (?? untracked, M modified, D deleted…), so the user sees what they are.
-      const files = dirty.split(/\r?\n/).filter(Boolean);
-      const shown = files.slice(0, 20).map((l) => l.trim().replace(/^(\S+)\s+/, "$1 ")).join(", "); // the output is trimmed: no fixed columns
-      throw new ActionError(`${path} has uncommitted changes (${files.length} file${files.length === 1 ? "" : "s"}: ${shown}${files.length > 20 ? `, and ${files.length - 20} more` : ""}): commit or discard them first; nothing was removed`, 409);
-    }
+    const left = worktreeLeft(path);
+    if (left.count) throw new ActionError(`${path} has uncommitted changes (${leftText(left)}): commit or discard them first; nothing was removed`, 409);
   }
   // `git branch -d` deletes only a branch merged into its upstream, else into HEAD; checked first, so that a refusal
   // leaves the worktree in place. HEAD is the base's, where it is checked out, else the project's checkout.
@@ -338,6 +366,6 @@ export function cleanUp(store: ProjectStore, queueId: string): string {
   if (here) removeWorktree(root, path);
   else run(root, ["worktree", "prune"]);
   run(cwd, ["branch", "-d", branch]);
-  patchGit(store, q.id, { cleaned: { at: now(), path, branch }, merge: undefined });
+  patchGit(store, q.id, { cleaned: { at: now(), path, branch }, merge: undefined, cleanup: undefined });
   return `the worktree ${path} is removed and branch ${branch} deleted`;
 }
