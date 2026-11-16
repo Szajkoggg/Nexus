@@ -8,7 +8,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ProjectStore, loadProjectState, projectIdeas } from "@nexus/protocol";
+import { ProjectStore, changeIdeaLinks, ideaLinks, loadProjectState, projectIdeas } from "@nexus/protocol";
 
 const CLI = join(dirname(fileURLToPath(import.meta.url)), "../bin/nexus.js");
 
@@ -84,4 +84,8 @@ test("nexus ideas matches lists the suggestions; accepting or rejecting one is r
     assert.match(r.out, /is the user's, in the dashboard/);
   }
   assert.deepEqual(store.readIdeaMatches().matches, []);
+  changeIdeaLinks(store, { request_id: "manual-link", revision: ideaLinks(store, loadProjectState(store)).revision,
+    operation: "add", queue: "OLD", ref: "docs/ideas/tags.md#2026-11-14", reason: "User checked this relationship" });
+  assert.match(ideas("w", "matches").out, /OLD\tdocs\/ideas\/tags\.md#2026-11-14\tmanual\tlinked\teffective/);
+  for (const sub of ["add", "remove", "undo", "confirm"]) assert.equal(ideas("w", sub).ok, false, "CLI cannot write user decisions");
 });

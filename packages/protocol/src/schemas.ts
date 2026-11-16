@@ -1347,7 +1347,28 @@ const IdeaMatch = z.object({
  * the notes' entries. Written only by the server, from the user's action in the dashboard; an accepted match counts
  * like the queue's source (ideas-read.ts). The closed queues themselves are never changed. Missing: none decided.
  */
-export const IdeaMatchesFile = z.object({ protocol: z.literal(1), matches: z.array(IdeaMatch).default([]) });
+/** An origin's last-known identity and evidence. Corrections never rewrite queue definitions. */
+export const IdeaLinkRecord = z.object({
+  id: z.string(), queue: Id, ref: z.string().regex(NOTE_REF),
+  origin: z.enum(["source", "match", "manual"]),
+  state: z.enum(["linked", "rejected", "pending", "removed", "ignored"]),
+  title: z.string(), note_title: z.string().optional(), lead: z.string().optional(),
+  kind: z.enum(["exact", "dated", "file"]).optional(), quote: z.string(), at: Time.optional(),
+  location: z.string().optional(),
+});
+export type IdeaLinkRecord = z.infer<typeof IdeaLinkRecord>;
+export const IdeaLinkAction = z.object({
+  id: z.string(), request: z.string(), at: Time, actor: z.literal("user"), reason: z.string(),
+  operation: z.enum(["add", "replace", "remove", "ignore-source", "correct-source", "decide", "undo"]),
+  undo: z.string().optional(),
+  changes: z.array(z.object({ before: IdeaLinkRecord.nullable(), after: IdeaLinkRecord })),
+});
+export type IdeaLinkAction = z.infer<typeof IdeaLinkAction>;
+export const IdeaMatchesFile = z.object({
+  protocol: z.literal(1), matches: z.array(IdeaMatch).default([]),
+  // Legacy matches remain byte-for-byte values, including rejected decisions and their original timestamps.
+  records: z.array(IdeaLinkRecord).optional(), history: z.array(IdeaLinkAction).optional(),
+});
 export type IdeaMatchesFile = z.infer<typeof IdeaMatchesFile>;
 
 // ---------------------------------------------------------------- metrics.yaml (the project's metrics)

@@ -2,9 +2,11 @@
 // its subfolders, the README, the folder's conventions, left out; only read: the notes are the thinking partner's), the
 // hand-over records in the partners' own events, and its queues.
 
-import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { acceptedMatches, deriveIdeas, ideaQueues, noteRef, parseNote, suggestMatches, type HandOver, type IdeaMatchesResponse, type IdeaNote, type IdeasResponse, type MatchItem } from "./ideas.ts";
+import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import { isAbsolute, join, relative, resolve } from "node:path";
+import { deriveIdeas, ideaQueues, noteRef, parseNote, type HandOver, type IdeaMatchesResponse, type IdeaNote, type IdeasResponse, type MatchItem } from "./ideas.ts";
+import { deriveIdeaLinks } from "./idea-links.ts";
+import { ideaOutcome } from "./idea-outcomes.ts";
 import type { ProjectStore } from "./store.ts";
 import type { ProjectState } from "./state.ts";
 
@@ -12,11 +14,16 @@ import type { ProjectState } from "./state.ts";
 export function readNotes(root: string, notesDir: string | undefined): IdeaNote[] {
   if (!notesDir) return [];
   const base = join(root, notesDir);
+  const inside = (parent: string, child: string) => { const r = relative(parent, child); return r !== ".." && !r.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) && !isAbsolute(r); };
+  if (isAbsolute(notesDir) || notesDir.replaceAll("\\", "/").split("/").includes("..") || !inside(resolve(root), resolve(base))) throw new Error("Notes folder escapes the project");
   if (!existsSync(base)) return [];
+  if (!inside(realpathSync(root), realpathSync(base))) throw new Error("Notes folder resolves outside the project");
   const out: IdeaNote[] = [];
   const walk = (dir: string, rel: string) => {
     for (const d of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
       const path = rel ? `${rel}/${d.name}` : d.name;
+      if (d.isSymbolicLink()) continue;
+      if (!inside(realpathSync(base), realpathSync(join(dir, d.name)))) throw new Error("Note resolves outside the notes folder");
       if (d.isDirectory()) { if (!d.name.startsWith(".")) walk(join(dir, d.name), path); continue; }
       if (!d.isFile() || !d.name.toLowerCase().endsWith(".md") || d.name.toLowerCase() === "readme.md") continue;
       out.push(parseNote(`${notesDir}/${path}`, readFileSync(join(dir, d.name), "utf8")));
@@ -53,28 +60,27 @@ export function readHandOvers(store: ProjectStore): HandOver[] {
  * suggestion is gone (the queue got a source, a note changed) is kept in the list. In the queues' order.
  */
 export function ideaMatches(store: ProjectStore, state: ProjectState, notes = readNotes(state.project.root, state.project.conversations.notes_dir)): IdeaMatchesResponse {
-  const decided = store.readIdeaMatches().matches;
-  const suggested = suggestMatches(state.queues, notes, state.project.conversations.notes_dir);
+  const links = deriveIdeaLinks(store.readIdeaMatches(), state, notes);
   const queues = new Map(ideaQueues(state.queues).map((q) => [q.id, q]));
   const leads = new Map(notes.flatMap((n) => n.entries.map((e) => [noteRef(n.file, e.date), e.lead] as const)));
-  const key = (m: { queue: string; ref: string }) => `${m.queue} ${m.ref}`;
-  const byKey = new Map(decided.map((m) => [key(m), m]));
-  const suggestedKeys = new Set(suggested.map(key));
-  const all = [...suggested, ...decided.filter((m) => !suggestedKeys.has(key(m))).map(({ queue, ref, kind, quote }) => ({ queue, ref, kind, quote: quote ?? "" }))];
   const order = new Map(state.queues.map((q, i) => [q.id, i]));
-  const items = all.flatMap((m): MatchItem[] => {
+  const items = links.items.filter((r) => r.origin === "match").flatMap((m): MatchItem[] => {
     const q = queues.get(m.queue);
-    if (!q) return [];
-    const d = byKey.get(key(m));
     const lead = leads.get(m.ref);
     return [{
-      ...m, title: q.title, status: q.status,
-      ...(q.finished_at ? { finished_at: q.finished_at } : {}), ...(q.commit ? { commit: q.commit } : {}),
+      queue: m.queue, ref: m.ref, kind: m.kind!, quote: m.quote, title: q?.title ?? m.title, status: q?.status ?? "missing",
+      diagnostics: m.diagnostics,
+      ...(m.location ? { location: m.location } : {}),
+      ...(q?.finished_at ? { finished_at: q.finished_at } : {}), ...(q?.commit ? { commit: q.commit } : {}),
       ...(lead ? { lead } : {}),
-      ...(d ? { decision: { accepted: d.accepted, at: d.at } } : {}),
+      ...(m.state !== "pending" ? { decision: { accepted: m.state === "linked", at: m.at ?? "" } } : {}),
     }];
   });
-  return { items: items.sort((a, b) => (order.get(a.queue) ?? 0) - (order.get(b.queue) ?? 0)) };
+  return { revision: links.revision, items: items.sort((a, b) => (order.get(a.queue) ?? 0) - (order.get(b.queue) ?? 0)) };
+}
+
+export function ideaLinks(store: ProjectStore, state: ProjectState) {
+  return deriveIdeaLinks(store.readIdeaMatches(), state, readNotes(state.project.root, state.project.conversations.notes_dir));
 }
 
 /**
@@ -85,8 +91,12 @@ export function ideaMatches(store: ProjectStore, state: ProjectState, notes = re
 export function projectIdeas(store: ProjectStore, state: ProjectState): IdeasResponse {
   const dir = state.project.conversations.notes_dir;
   const notes = readNotes(state.project.root, dir);
-  const matched = acceptedMatches(store.readIdeaMatches().matches);
-  const view = deriveIdeas({ notes, queues: ideaQueues(state.queues, matched), handovers: readHandOvers(store) });
+  const links = deriveIdeaLinks(store.readIdeaMatches(), state, notes);
+  const queues = ideaQueues(state.queues).map((q) => ({ ...q,
+    refs: [...new Set(links.items.filter((r) => r.queue === q.id && r.effective).map((r) => r.ref))],
+    outcome: ideaOutcome(store, state.queues.find((v) => v.id === q.id)!),
+  }));
+  const view = deriveIdeas({ notes, queues, handovers: readHandOvers(store) });
   const open = ideaMatches(store, state, notes).items.filter((m) => !m.decision);
-  return { notes_dir: dir ?? null, ...view, to_match: { suggestions: open.length, queues: new Set(open.map((m) => m.queue)).size } };
+  return { notes_dir: dir ?? null, ...view, links, to_match: { suggestions: open.length, queues: new Set(open.map((m) => m.queue)).size } };
 }

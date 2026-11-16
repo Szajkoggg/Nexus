@@ -1330,7 +1330,9 @@ from every agent session, and the others from every session but an orchestrator'
 | `POST /api/projects/:id/queues/:q/run` | `action` (`start`, `pause`, `resume`, `stop`, `stop_at_once`, `cancel_start`), `runtime?`, `model?`, `effort?`, `session?`, `after?`, `next?`, `at?` | Runs the queue through a Nexus-launched session (`session` continues an existing one). `start` with `after` (a queue id or a list): the user's place for the queue in the plan, it starts when those are done; with `next: true`: in the plan with none before it (`{message}`; see "The plan"); with `at` (ISO 8601, or `usage-reset`): a schedule (`{message}`); `cancel_start` takes the queue out of the plan (`{message}`). `stop` pauses and sends the existing Stop now message (`text?` supplies the reason). `stop_at_once` pauses, interrupts the turn and kills only this queue's worker process, waiting for its exit before success; keeps uncommitted changes and the session, writes `step.interrupted`. No worker, a finished run, a stop already in progress or a session reused by another queue: 409. Resume during exit: 409; afterwards it continues the step in the same session. No CLI or orchestrator request action exposes `stop_at_once` |
 | `GET /api/projects/:id/estimates` | | Expected times of the project's open queues, as estimates (`{ samples, min, queues: { <id>: { steps, ms? } } }`): `steps` the steps left (not closed), `ms` their expected time, absent while fewer than `min` (5) steps are finished. A finished (done) step's time is the sum of its worker turns' `duration_ms` in `turns.jsonl` (send-back rounds included, the wait for its review not), over every project the server has; a step to come takes the average of those on its model and effort, else its model, else all, each from at least 5 steps |
 | `GET /api/projects/:id/ideas/matches` | | The suggestions for matching the earlier queues to the notes' entries (`IdeaMatchesResponse`: `items`, in the queues' order, each with `queue`, `ref`, `kind`, `quote`, the queue's `title`, `status`, `finished_at?` and `commit?`, the entry's `lead?`, and the user's `decision?` (`accepted`, `at`)); a decided match whose suggestion is gone stays listed (see "Conversations", matching). Unknown project: 404 |
-| `POST /api/projects/:id/ideas/matches` | `items` (`[{ queue, ref }]`), `accept` (true, false, or null to take the decision back) | The user's decision on suggestions, recorded in `idea-matches.yaml`; an item that is no suggestion (nor decided before) is 404. A user's write like every other (same-origin JSON) |
+| `POST /api/projects/:id/ideas/matches` | `items` (`[{ queue, ref }]`), `accept` (true, false, or null to return to pending), `revision`, `request_id` | The user's decision on suggestions, recorded with history in `idea-matches.yaml`; an item that is no suggestion (nor decided before) is 404. The revision comes from GET matches or links. Same-origin JSON; stale revision or reused ID with different payload: 409 |
+| `GET /api/projects/:id/ideas/links` | | `IdeaLinksResponse`: `revision`, `items` (each origin, effective state, own evidence and diagnostics), `history` (reasoned before/after actions). Includes missing queues/notes/dates and inactive origins |
+| `POST /api/projects/:id/ideas/links` | `request_id`, `revision`, `reason`, `operation`, operation-specific fields below | Dashboard-only atomic relationship correction. Returns the saved action in `result`; identical retry returns that action, even after restart. Invalid input/target: 400; missing queue/origin/action: 404; stale revision, concurrent save, duplicate edge, newer touched origin or request-ID collision: 409 |
 | `GET /api/projects/:id/ideas` | | The ideas overview (`IdeasResponse`: `notes_dir`, null without a notes folder; `notes`, each with `file`, `title`, `summary?`, `area?`, `group?`, `area_from?` (`note` or `queues`), `open` and `questions` (its Open questions' text), `ideas`, `status` and `queues`, and its `entries`, each with `ref`, `date`, `headings`, `lead`, `decisions`, `dropped?`, `replaced_by?`, `status`, `queues` and `history`; `unknown_refs`, queues' references to nothing; `to_match`, the suggestions for earlier queues still to decide: `suggestions` and `queues`). Derived on each request from the notes, the queues and the hand-over records; the notes are only read (see "Conversations"). Unknown project: 404 |
 | `GET /api/projects/:id/metrics` | | The project's metrics and their values (`ProjectMetrics`: `metrics`, its own definitions and every check's time seen, `check:<name>`; `values`, oldest first, each a `StepView.metrics` entry with its `queue` and `step`); see "Project metrics". Unknown project: 404 |
 | `GET /api/stats?by=&project=&since=&kind=&activity=&area=&size=&origin=` | | The statistics (`StatsReport`, see "Statistics"): every registered project, or one (`project`; unknown: 404), grouped by `by` (`model`, `effort`, `kind`, `activity`, `area`, `size`, `origin`; default `model`; another: 400), the steps whose last outcome is at or after `since` (a date or a time; unreadable: 400), narrowed to the steps under each tag value given (`kind=code`, `area=p/engine` across projects; the value as the groups name it) |
@@ -1692,6 +1694,74 @@ matches:
 An accepted match counts like the queue's `source` in the derivation (the entry is queued, or built once the queue is
 done, with its commit); a rejected one does not. The queues themselves are never changed. No agent decides: `nexus
 ideas matches` only lists the suggestions and decisions, and `nexus ideas accept|reject` is refused as the user's.
+
+**Relationship corrections (IC2).** The legacy `protocol: 1, matches: [...]` format remains readable. Its original
+accepted and rejected records (including quote, kind and time) are retained as the immutable baseline; saves add
+optional `records` and `history` arrays in the same file. There is no destructive migration and no invented old
+undo history. A new source and a historical match of the same queue/date are separate origins. Rejecting the match
+cannot suppress the source. Effective edges are the union of linked origins after overlays, deduplicated by
+queue/date for progress. Queue YAML, approvals, run state and the partner's notes are never written by these actions.
+
+`records` retain each origin's `id`, `queue`, `ref`, `origin` (`source|match|manual`), `state`
+(`linked|rejected|pending|removed|ignored`), last-known queue `title`, optional `note_title` and `lead`, its own
+`quote`, optional `kind`, evidence `location` (`source`, `title`, `description`, `steps/<index>/title|goal`) and `at`.
+Source/match IDs are opaque stable identifiers; manual IDs derive from the request ID. Never construct IDs in a
+client: use those returned by GET links. Historical records without evidence location keep that absence.
+An `exact|dated|file` kind describes reference syntax only, including example and context mentions. It does not
+measure implementation certainty. The API returns each relationship's own sentence, never the queue's first quote.
+
+Each `history` action stores `id` (request ID), `request` (canonical payload hash), `at`, `actor: user`, `reason`,
+`operation`, optional `undo` action ID and `changes: [{ before, after }]`. `before: null` means a new manual origin.
+All known origins are snapshotted on a successful save; removed targets retain the last identity observed there.
+Deleting an unsaved source before any correction cannot reconstruct its vanished title/evidence; legacy matches
+still retain their stored queue/ref/quote. Read errors propagate; they are not an empty successful link list.
+
+Operations (all require a nonempty reason, the current revision token and a stable request ID):
+
+| operation | additional fields | effect |
+|---|---|---|
+| `add` | `queue`, `ref` | Add a manual origin to an existing queue and actual Decided date; reject an already effective edge |
+| `replace` | `origin`, `ref` | Remove one linked match/manual origin and add its queue's manual target atomically |
+| `remove` | `origin` | Remove only that linked match/manual origin, even when its old target disappeared |
+| `ignore-source` | `origin` | Explicitly suppress this source's effective contribution, keeping the original queue source visible |
+| `correct-source` | `origin`, `ref` | Atomically ignore this source and add its queue's manual target |
+| `decide` | `decisions: [{ origin, accept }]` | Match origins only; accept true, reject false, return to pending null; source/manual origins stay independent |
+| `undo` | `action` | Append a compensating action; restore all touched origins atomically, only if none was touched since |
+
+New/restored linked targets must exist in this project's configured notes folder and contain the date. Traversal,
+absolute paths and symlink escapes are refused; symlink entries are not notes. A missing queue/source/note/date is
+returned in `diagnostics`; removal does not need the old target. Undo cannot restore a now unavailable linked target.
+GET matches now also returns `revision`, per-item `diagnostics` and optional `location`; a missing queue has
+`status: missing`. GET ideas adds the same `links` response so the overview and agent reads share the effective edges.
+`nexus ideas matches` also lists each origin's state, effectiveness, diagnostics and history count. It gains no write
+action. The existing dashboard matching client supplies revision/request ID and retains the ID for a failed retry.
+
+The revision hashes the stored file and current relationship inputs (notes and queue identities/sources). Under an
+exclusive `idea-matches.lock`, the server re-reads, checks the revision and writes overlay + history in one atomic
+YAML replacement. Lock contention fails with 409; it never overwrites a concurrent decision. The lock is removed in
+`finally`; an abruptly killed writer may leave it behind. Such a lock fails closed and requires removal only after
+the writer is confirmed stopped; it is never stolen based on elapsed time. A committed request ID is checked before
+locking and again under the lock, before revision/target validation. Retrieving a committed result is read-only, so
+a retry can retrieve it even if the project subsequently changed or a crashed writer left its lock behind.
+
+**Outcome excerpts (IC2).** Each existing queue reference in GET ideas carries `outcome`: `kind`
+(`queue-report|accepted-steps|unavailable`), `text`, `report` (project-relative full-report `path`, `available`, current
+content `hash`, report-event `at` and `event` when present), `excerpts`, all current `accepted` step summaries,
+`historical` reported rounds, `sampled_steps`, `substantive_steps` and `warnings`. QueueView's `report` also retains
+its event ID. A step excerpt identifies step, round (the step.done ordinal), event, commit when supplied and source
+hash. Historical rounds are labelled reported history, not current accepted evidence; their step/event links lead
+to the original review timeline. No second acceptance state is maintained: current StepView status and provisional
+confirmation determine the accepted evidence; reopened or unconfirmed rounds cannot borrow old acceptance.
+
+With an available report and a recorded queue.report summary, quote its first two complete sentences and label it
+as a whole-queue report excerpt. A summary identical to a closing step's, or explicitly beginning with closing
+refactoring/integration/merge wording, uses the substantive fallback. This is deterministic source selection, not
+semantic certification of prose. Otherwise sample one complete sentence from each of up to two distinct accepted
+substantive steps in queue order; closing/integration steps remain separately readable. The counts expose the sample.
+Incomplete/empty summaries produce no invented sentence: `No substantive outcome summary available`. The full report
+path and accepted summaries remain available. Missing reports and unfinished/skipped/provisional evidence produce
+warnings; a report never upgrades acceptance or confirms implementation. Extraction is uncached and source-hashed:
+editing a report changes its hash and regenerates the response. No model or additional session-log writer is involved.
 
 **The web** (`conversations.web`, global with a project override, decided by the user 2026-11-15): `off`, `search`
 (the default) or `fetch`. A changed level applies from the partner's next message (a new process, resuming the

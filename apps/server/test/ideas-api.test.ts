@@ -4,13 +4,13 @@
 // project; no runtime is started.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ProjectStore, approveQueue, writeRegistry, type Event, type IdeaMatchesResponse, type IdeasResponse } from "@nexus/protocol";
+import { ProjectStore, approveQueue, writeRegistry, type Event, type IdeaLinksResponse, type IdeaMatchesResponse, type IdeasResponse } from "@nexus/protocol";
 import { spawnServer } from "./helpers.ts";
-import { serverUp } from "./wait.ts";
+import { serverUp, untilAsync } from "./wait.ts";
 
 const freePort = () => new Promise<number>((resolve) => {
   const s = createServer();
@@ -69,7 +69,8 @@ test("GET /api/projects/:id/ideas: the notes with their entries' statuses and hi
     // The suggestions, and the user's decision on one (a same-origin JSON write, as the dashboard's).
     const matches = (await get("/api/projects/p/ideas/matches")).body as IdeaMatchesResponse;
     assert.deepEqual(matches.items.map((m) => [m.queue, m.ref, m.kind, m.lead]), [["OLD", "docs/ideas/plan.md#2026-11-16", "dated", "Colours"]]);
-    const post = (body: unknown, origin = url) => fetch(url + "/api/projects/p/ideas/matches", { method: "POST", headers: { "content-type": "application/json", origin, "sec-fetch-site": origin === url ? "same-origin" : "cross-site" }, body: JSON.stringify(body) });
+    const post = async (body: object, origin = url) => fetch(url + "/api/projects/p/ideas/matches", { method: "POST", headers: { "content-type": "application/json", origin, "sec-fetch-site": origin === url ? "same-origin" : "cross-site" }, body: JSON.stringify({ ...body,
+      revision: ((await get("/api/projects/p/ideas/matches")).body as IdeaMatchesResponse).revision, request_id: crypto.randomUUID() }) });
     assert.equal((await post({ items: [{ queue: "OLD", ref: "docs/ideas/plan.md#2026-11-16" }], accept: true }, "http://evil.example")).status, 403, "only the dashboard's own page writes");
     assert.equal((await post({ items: [{ queue: "OLD", ref: "docs/ideas/plan.md#2026-11-14" }], accept: true })).status, 404, "not a suggestion");
     assert.equal((await post({ items: [{ queue: "OLD", ref: "docs/ideas/plan.md#2026-11-16" }], accept: true })).status, 200);
@@ -78,6 +79,40 @@ test("GET /api/projects/:id/ideas: the notes with their entries' statuses and hi
     assert.deepEqual(after.notes[0]!.entries[2]!.queues.map((q) => q.id), ["OLD"], "the accepted match counts as its source");
     assert.equal(after.notes[0]!.entries[2]!.status, "queued", "the queue is not done yet");
     assert.equal(((await get("/api/projects/p/ideas/matches")).body as IdeaMatchesResponse).items[0]!.decision?.accepted, true);
+
+    const links = async () => (await get("/api/projects/p/ideas/links")).body as IdeaLinksResponse;
+    const save = (body: object, origin = url, type = "application/json") => fetch(url + "/api/projects/p/ideas/links", {
+      method: "POST", headers: { "content-type": type, origin, "sec-fetch-site": origin === url ? "same-origin" : "cross-site" }, body: JSON.stringify(body),
+    });
+    const before = await links();
+    const source = before.items.find((r) => r.origin === "source")!;
+    const request = { request_id: "api-correction", revision: before.revision, operation: "correct-source", origin: source.id,
+      ref: "docs/ideas/plan.md#2026-11-15", reason: "The source names the wrong date" };
+    const queueBefore = readFileSync(join(store.queueDir("PV"), "queue.yaml"), "utf8");
+    assert.equal((await save(request, "http://evil.example")).status, 403);
+    assert.equal((await save(request, url, "text/plain")).status, 415);
+    assert.equal((await save({ ...request, revision: undefined })).status, 400);
+    assert.equal((await save({ ...request, ref: "docs/ideas/plan.md#2099-01-01" })).status, 400);
+    assert.equal((await save({ ...request, ref: "../other/note.md#2026-11-15" })).status, 400);
+    const responses = await Promise.all([save(request), save({ ...request, request_id: "competing-action" })]);
+    assert.deepEqual(responses.map((r) => r.status).sort(), [200, 409], "one concurrent writer wins; neither silently overwrites");
+    const winner = responses[0]!.status === 200 ? request : { ...request, request_id: "competing-action" };
+    const result = await responses.find((r) => r.status === 200)!.json() as { result: { id: string } };
+    assert.deepEqual(await (await save(winner)).json(), result, "retry returns the saved action");
+    assert.equal((await save({ ...winner, reason: "Different request" })).status, 409);
+    const changed = await links();
+    assert.equal(changed.history.length, before.history.length + 1);
+    assert.equal(changed.items.find((r) => r.id === source.id)!.state, "ignored");
+    assert.equal(readFileSync(join(store.queueDir("PV"), "queue.yaml"), "utf8"), queueBefore);
+    const undo = { request_id: "api-undo", revision: changed.revision, operation: "undo", action: result.result.id, reason: "Restore the previous relationship" };
+    assert.equal((await save(undo)).status, 200);
+    assert.equal((await links()).items.find((r) => r.id === source.id)!.effective, true);
+    assert.equal(new ProjectStore(store.dir).readIdeaMatches().history!.length, before.history.length + 2);
+    rmSync(store.queueDir("PV"), { recursive: true });
+    await untilAsync("deleted queue diagnostics", async () => (await links()).items.find((r) => r.id === source.id)!.diagnostics.some((d) => d.includes("missing")));
+    const missing = await links();
+    assert.match(missing.items.find((r) => r.id === source.id)!.diagnostics.join(), /missing/);
+    assert.equal((await save({ request_id: "remove-missing", revision: missing.revision, operation: "ignore-source", origin: source.id, reason: "Queue disappeared" })).status, 200);
 
     const unknown = await get("/api/projects/nope/ideas");
     assert.deepEqual([unknown.status, (unknown.body as { error: string }).error], [404, "unknown project"]);

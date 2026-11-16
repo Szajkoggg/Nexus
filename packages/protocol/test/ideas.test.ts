@@ -4,15 +4,24 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import YAML from "yaml";
+import { ideaOutcome as ideaOutcomeForTest } from "../src/idea-outcomes.ts";
 import {
   ActionError, ProjectStore, QueueFile, applyDraft, approveQueue, deriveIdeas, ideaQueues, importedFrom, loadProjectState,
   noteRefs, parseNote, parseNoteRef, projectIdeas, readHandOvers, readNotes, revisionHash, topicStatus, type Event, type IdeaQueue,
-  decideIdeaMatches, ideaMatches, newId, suggestMatches, type MatchQueue,
+  decideIdeaMatches as saveIdeaMatches, ideaMatches, ideaLinks, changeIdeaLinks, ideaOriginId, newId, suggestMatches, type MatchQueue,
 } from "../src/index.ts";
+
+const decideIdeaMatches = (st: ProjectStore, items: unknown, accept: unknown) => saveIdeaMatches(st, items, accept,
+  { revision: ideaLinks(st, loadProjectState(st)).revision, request_id: newId() });
+
+const linksOf = (st: ProjectStore) => ideaLinks(st, loadProjectState(st));
+const correct = (st: ProjectStore, body: object) => changeIdeaLinks(st, {
+  revision: linksOf(st).revision, request_id: newId(), reason: "Correct the fixture relationship", ...body,
+});
 
 const NOTE = `# Plan view
 
@@ -369,7 +378,7 @@ test("an accepted match counts as the queue's source: the entry is built, with t
   assert.equal(built.history.find((h) => h.kind === "finished")?.commit, "abc1234");
   assert.deepEqual(projectIdeas(st, loadProjectState(st)).to_match, { suggestions: 0, queues: 0 });
   assert.equal(st.readQueue("OLD").source, undefined, "the closed queue itself is not changed");
-  assert.deepEqual(st.readIdeaMatches().matches.map((x) => [x.queue, x.ref, x.kind, x.accepted]), [["OLD", "docs/ideas/plan.md#2026-11-14", "dated", true]]);
+  assert.deepEqual(ideaMatches(st, loadProjectState(st)).items.map((x) => [x.queue, x.ref, x.kind, x.decision?.accepted]), [["OLD", "docs/ideas/plan.md#2026-11-14", "dated", true]]);
 
   decideIdeaMatches(st, [{ queue: "OLD", ref: "docs/ideas/plan.md#2026-11-14" }], false);
   assert.equal(entry().status, "decided", "rejected: not built");
@@ -377,7 +386,183 @@ test("an accepted match counts as the queue's source: the entry is built, with t
 
   decideIdeaMatches(st, [{ queue: "OLD", ref: "docs/ideas/plan.md#2026-11-14" }], null);
   assert.deepEqual(st.readIdeaMatches().matches, [], "taken back");
+  assert.equal(st.readIdeaMatches().history?.length, 3, "all three decisions survive taking it back");
   assert.throws(() => decideIdeaMatches(st, [{ queue: "OLD", ref: "docs/ideas/plan.md#2026-11-15" }], true), (e: ActionError) => e.status === 404);
   assert.throws(() => decideIdeaMatches(st, [], true), /items is a list/);
   assert.throws(() => decideIdeaMatches(st, [{ queue: "OLD", ref: "docs/ideas/plan.md#2026-11-14" }], "yes"), /accept is true, false or null/);
+});
+
+test("MT/IO/ST2 corrections preserve FB, other MT links, legacy decisions and closed queue approvals", () => {
+  const { st, root } = project();
+  for (const name of ["umbrella", "queue-templates", "tags", "feedback"]) writeFileSync(join(root, `docs/ideas/${name}.md`), "# " + name + "\n\n## Decided\n\n### 2026-11-15\n\n- A decision.\n");
+  const ref = (name: string) => `docs/ideas/${name}.md#2026-11-15`;
+  const legacy = [
+    { queue: "MT", ref: ref("umbrella") }, { queue: "MT", ref: ref("feedback") },
+    { queue: "IO", ref: ref("tags") }, { queue: "ST2", ref: ref("tags") }, { queue: "FB", ref: ref("feedback") },
+  ].map((m) => ({ ...m, kind: "exact" as const, quote: `Original evidence for ${m.queue} ${m.ref}`, accepted: true, at: "2026-11-16T00:00:00Z" }));
+  legacy.push({ queue: "FB", ref: ref("tags"), kind: "exact", quote: "Rejected context reference", accepted: false, at: "2026-11-16T00:00:00Z" });
+  for (const id of ["MT", "IO", "ST2", "FB"]) {
+    st.writeQueue({ protocol: 1, id, title: id, revision: 1, status: "done", stop_conditions: [], checks: [], steps: [], approvals: [], history: [] });
+    approveQueue(st, id);
+  }
+  // An actual old-format file, with no migration fields.
+  writeFileSync(join(st.dir, "idea-matches.yaml"), YAML.stringify({ protocol: 1, matches: legacy }));
+  const definitions = ["MT", "IO", "ST2", "FB"].map((id) => readFileSync(join(st.queueDir(id), "queue.yaml"), "utf8"));
+  const replacement = correct(st, { operation: "replace", origin: ideaOriginId("match", "MT", ref("umbrella")), ref: ref("queue-templates") });
+  for (const queue of ["IO", "ST2"]) correct(st, { operation: "decide", decisions: [{ origin: ideaOriginId("match", queue, ref("tags")), accept: false }] });
+  const reloaded = new ProjectStore(st.dir);
+  assert.deepEqual(reloaded.readIdeaMatches().matches, legacy);
+  const edges = () => linksOf(reloaded).items.filter((r) => r.effective).map((r) => `${r.queue} ${r.ref}`).sort();
+  assert.deepEqual(edges(), [`MT ${ref("queue-templates")}`, `MT ${ref("feedback")}`, `FB ${ref("feedback")}`].sort());
+  assert.deepEqual(["MT", "IO", "ST2", "FB"].map((id) => readFileSync(join(st.queueDir(id), "queue.yaml"), "utf8")), definitions);
+  correct(reloaded, { operation: "undo", action: replacement.id });
+  assert.ok(edges().includes(`MT ${ref("umbrella")}`));
+  assert.ok(!edges().includes(`MT ${ref("queue-templates")}`));
+  assert.equal(linksOf(st).history.length, 4);
+  assert.equal(linksOf(st).history[0]!.changes.length, 2, "replacement and undo are atomic pairs");
+  assert.equal(linksOf(st).history[3]!.changes.length, 2);
+});
+
+test("source rejection is separate, retries are idempotent, stale writes and changed-origin undo conflict", () => {
+  const { st } = finished();
+  const ref = "docs/ideas/plan.md#2026-11-14";
+  decideIdeaMatches(st, [{ queue: "OLD", ref }], true);
+  st.writeQueue({ ...st.readQueue("OLD"), source: [ref] });
+  const request = { request_id: newId(), revision: linksOf(st).revision, reason: "Only reject this historical match", operation: "decide", decisions: [{ origin: ideaOriginId("match", "OLD", ref), accept: false }] };
+  const first = changeIdeaLinks(st, request);
+  assert.deepEqual(changeIdeaLinks(new ProjectStore(st.dir), request), first);
+  writeFileSync(join(st.dir, "idea-matches.lock"), "crashed after committing");
+  assert.deepEqual(changeIdeaLinks(new ProjectStore(st.dir), request), first, "saved retry is a read even with a crash-left lock");
+  rmSync(join(st.dir, "idea-matches.lock"));
+  assert.equal(linksOf(st).history.length, 2);
+  assert.ok(linksOf(st).items.find((r) => r.origin === "source")!.effective);
+  assert.throws(() => changeIdeaLinks(st, { ...request, request_id: newId() }), (e: ActionError) => e.status === 409);
+  assert.throws(() => changeIdeaLinks(st, { ...request, reason: "Changed payload" }), /request_id/);
+  assert.throws(() => correct(st, { operation: "remove", origin: ideaOriginId("source", "OLD", ref) }), /separate/);
+  const source = correct(st, { operation: "correct-source", origin: ideaOriginId("source", "OLD", ref), ref: "docs/ideas/plan.md#2026-11-15" });
+  assert.deepEqual(st.readQueue("OLD").source, [ref]);
+  assert.equal(linksOf(st).items.find((r) => r.origin === "source")!.state, "ignored");
+  assert.deepEqual(projectIdeas(st, loadProjectState(st)).notes[0]!.entries[1]!.queues.map((q) => q.id), ["OLD"]);
+  const manual = source.changes[1]!.after.id;
+  correct(st, { operation: "remove", origin: manual });
+  assert.throws(() => correct(st, { operation: "undo", action: source.id }), /newer action/);
+  // Even an identical later decision counts as a touched record and protects undo.
+  correct(st, { operation: "decide", decisions: [{ origin: ideaOriginId("match", "OLD", ref), accept: true }] });
+  assert.throws(() => correct(st, { operation: "undo", action: first.id }), /newer action/);
+});
+
+test("invalid targets, missing dates/notes/queues, safe removal, restoration checks and write lock", () => {
+  const { st, root } = finished();
+  const ref = "docs/ideas/plan.md#2026-11-14";
+  for (const bad of ["docs/ideas/plan.md#2026-12-30", "docs/ideas/nope.md#2026-11-14", "docs/ideas/../plan.md#2026-11-14", "other/plan.md#2026-11-14", "C:/other/plan.md#2026-11-14"]) {
+    assert.throws(() => correct(st, { operation: "add", queue: "OLD", ref: bad }));
+  }
+  assert.throws(() => correct(st, { operation: "add", queue: "MISSING", ref }), /missing/);
+  // Directory junctions work without Windows symlink privilege; no escape through the configured notes root.
+  const outside = mkdtempSync(join(tmpdir(), "nexus-other-notes-"));
+  writeFileSync(join(outside, "escape.md"), NOTE);
+  symlinkSync(outside, join(root, "docs/ideas/escape"), process.platform === "win32" ? "junction" : "dir");
+  assert.throws(() => correct(st, { operation: "add", queue: "OLD", ref: "docs/ideas/escape/escape.md#2026-11-14" }), /no note/);
+  const add = correct(st, { operation: "add", queue: "OLD", ref });
+  assert.throws(() => correct(st, { operation: "add", queue: "OLD", ref }), /Already linked/);
+  writeFileSync(join(root, "docs/ideas/plan.md"), "# Plan\n\n## Decided\n\n### 2026-11-15\n\n- New.\n");
+  assert.match(linksOf(st).items.find((r) => r.id === add.changes[0]!.after.id)!.diagnostics.join(), /no Decided entry/);
+  correct(st, { operation: "replace", origin: add.changes[0]!.after.id, ref: "docs/ideas/plan.md#2026-11-15" });
+  rmSync(join(root, "docs/ideas/plan.md"));
+  rmSync(st.queueDir("OLD"), { recursive: true });
+  const broken = linksOf(new ProjectStore(st.dir)).items.find((r) => r.origin === "manual" && r.effective)!;
+  assert.match(broken.diagnostics.join(), /Queue OLD is missing/);
+  assert.match(broken.diagnostics.join(), /there is no note/);
+  assert.equal(broken.title, "Old queue");
+  const removed = correct(st, { operation: "remove", origin: broken.id });
+  assert.throws(() => correct(st, { operation: "undo", action: removed.id }), /missing/);
+  assert.equal(linksOf(st).history.length, 3);
+  writeFileSync(join(st.dir, "idea-matches.lock"), "held by another writer");
+  assert.throws(() => correct(st, { operation: "undo", action: removed.id }), (e: ActionError) => e.status === 409);
+  rmSync(join(st.dir, "idea-matches.lock"));
+  assert.equal(linksOf(st).history.length, 3);
+});
+
+test("example and context mentions describe syntax only and keep their own evidence sentence", () => {
+  const suggestions = suggestMatches([mq("CONTEXT", "Example: docs/ideas/plan.md#2026-11-14. Context only: docs/ideas/other.md#2026-11-18.")], notes, "docs/ideas");
+  assert.deepEqual(suggestions.map((s) => [s.kind, s.quote]), [
+    ["exact", "Example: docs/ideas/plan.md#2026-11-14."], ["exact", "Context only: docs/ideas/other.md#2026-11-18."],
+  ]);
+  assert.ok(suggestions.every((s) => s.location === "description"));
+  assert.ok(suggestions.every((s) => !("confidence" in s)), "exact is reference syntax, never implementation certainty");
+});
+
+test("outcomes quote accepted substantive rounds, retain provenance and never use a closing result as the queue", () => {
+  const { st } = finished();
+  const ref = "docs/ideas/plan.md#2026-11-14";
+  decideIdeaMatches(st, [{ queue: "OLD", ref }], true);
+  const outcome = () => projectIdeas(st, loadProjectState(st)).notes[0]!.queues[0]!.outcome!;
+  assert.equal(outcome().kind, "accepted-steps");
+  assert.equal(outcome().text, "Done.");
+  assert.equal(outcome().accepted[0]!.round, 1);
+  assert.equal(outcome().excerpts[0]!.commit, "abc1234");
+  assert.ok(outcome().excerpts[0]!.event);
+  assert.equal(outcome().report.available, false);
+  writeFileSync(join(st.queueDir("OLD"), "report.md"), "# Report\n\nThe feature is available.\n");
+  st.appendEvent({ v: 1, id: newId(), at: "2026-11-14T23:00:00Z", session: "o", queue: "OLD", type: "queue.report", path: join(st.queueDir("OLD"), "report.md"), summary: "The feature is available. It handles errors. Further details." } as Event);
+  assert.equal(outcome().kind, "queue-report");
+  assert.equal(outcome().text, "The feature is available. It handles errors.");
+  assert.ok(outcome().report.event);
+  const hash = outcome().report.hash;
+  writeFileSync(join(st.queueDir("OLD"), "report.md"), "# Updated report\n");
+  assert.notEqual(outcome().report.hash, hash);
+  st.appendEvent({ v: 1, id: newId(), at: "2026-11-14T23:10:00Z", session: "o", queue: "OLD", type: "queue.report", path: join(st.queueDir("OLD"), "report.md"), summary: "Closing refactoring is complete." } as Event);
+  assert.equal(outcome().kind, "accepted-steps");
+  assert.equal(outcome().text, "Done.");
+  const state = loadProjectState(st);
+  // Exercise extraction against the state contract for reopened and provisional current rounds.
+  state.queues[0]!.steps[0]!.status = "running";
+  assert.equal(ideaOutcomeForTest(st, state.queues[0]!).kind, "unavailable");
+  assert.equal(ideaOutcomeForTest(st, state.queues[0]!).historical[0]!.summary, "Done.");
+  state.queues[0]!.steps[0]!.status = "done";
+  state.queues[0]!.steps[0]!.provisional = { at: "2026-11-14T23:20:00Z", event: "p" };
+  assert.equal(ideaOutcomeForTest(st, state.queues[0]!).kind, "unavailable");
+  state.queues[0]!.steps[0]!.provisional!.confirmed = "2026-11-14T23:21:00Z";
+  assert.equal(ideaOutcomeForTest(st, state.queues[0]!).kind, "accepted-steps");
+});
+
+test("outcome fallback samples distinct substantive steps and reports empty, closing-only and stale evidence", () => {
+  const { st } = finished();
+  const q = loadProjectState(st).queues[0]!;
+  const base = q.steps[0]!;
+  q.steps = [
+    { ...base, id: "A", summary: "Files such as plan.md keep their links. Checks passed." },
+    { ...base, id: "B", summary: "History survives reload. Another sentence." },
+    { ...base, id: "C", summary: "A third outcome." },
+    { ...base, id: "OLD.refactor", summary: "Refactored the helpers.", closing: true },
+    { ...base, id: "OLD.integrate", summary: "Integrated the branch.", integration: true },
+  ];
+  const sample = ideaOutcomeForTest(st, q);
+  assert.equal(sample.text, "Files such as plan.md keep their links. History survives reload.");
+  assert.deepEqual(sample.excerpts.map((e) => e.step), ["A", "B"]);
+  assert.equal(sample.sampled_steps, 2);
+  assert.equal(sample.substantive_steps, 3);
+  assert.equal(sample.accepted.length, 5, "full accepted evidence includes closing steps separately");
+  q.steps = q.steps.slice(3);
+  assert.equal(ideaOutcomeForTest(st, q).kind, "unavailable");
+  q.steps = [{ ...base, summary: "" }];
+  assert.equal(ideaOutcomeForTest(st, q).kind, "unavailable");
+  q.steps = [{ ...base, summary: "No complete sentence" }];
+  assert.equal(ideaOutcomeForTest(st, q).kind, "unavailable");
+  q.steps = [{ ...base, status: "review", summary: "Unaccepted outcome." }];
+  writeFileSync(join(st.queueDir("OLD"), "report.md"), "# Report\n");
+  q.report = { path: "report.md", at: "2026-11-16T00:00:00Z", summary: "The whole queue is described here." };
+  const disagreeing = ideaOutcomeForTest(st, q);
+  assert.equal(disagreeing.kind, "queue-report");
+  assert.equal(disagreeing.accepted.length, 0);
+  assert.match(disagreeing.warnings.join(), /unfinished/);
+});
+
+test("read failure never becomes an empty successful list; a notes-root junction cannot leave the project", () => {
+  const { st, root } = project();
+  writeFileSync(join(st.dir, "idea-matches.yaml"), "protocol: 999\nmatches: []\n");
+  assert.throws(() => linksOf(st));
+  const outside = mkdtempSync(join(tmpdir(), "nexus-notes-root-"));
+  symlinkSync(outside, join(root, "escaped-notes"), process.platform === "win32" ? "junction" : "dir");
+  assert.throws(() => readNotes(root, "escaped-notes"), /outside the project/);
 });

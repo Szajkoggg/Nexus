@@ -26,6 +26,11 @@ was handed over, queued, approved, started, built, with the commit), its open qu
 these by hand: they follow from the notes, the hand-overs and the queues' `source`. Queues from before `source`
 are matched once: **To match** atop the overview lists, queue by queue, the notes their own words name, with the
 sentence; accept or reject each (or the exact and dated ones at once), and an accepted one counts as the queue's source.
+The reference labels describe syntax, including example/context references; they do not prove implementation.
+Matching decisions now retain history. If another save changed the relationships, refresh and review the new state
+before retrying; an old screen cannot silently overwrite it. Rejecting a historical match leaves an independent
+queue source intact. `nexus ideas matches` reads the effective origins and their missing-target diagnostics too;
+agents still cannot decide them. The expanded correction controls and outcome display follow in IC4.
 
 **The web in Ideas.** Settings → "Ideas (conversations)" → **Web** (global, or the project's own): **off**, **web
 search** (the default: partners search and name their sources, but open no page) or **web search and reading pages**.

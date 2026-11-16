@@ -35,3 +35,5 @@ export * from "./search.ts";
 export * from "./notify.ts";
 export * from "./ideas.ts";
 export * from "./ideas-read.ts";
+export * from "./idea-links.ts";
+export * from "./idea-link-actions.ts";

@@ -5,6 +5,20 @@
 
 import type { ImportSource, QueueSource, QueueStatus } from "./schemas.ts";
 import type { QueueView } from "./state.ts";
+import type { IdeaLinksResponse } from "./idea-links.ts";
+
+export interface IdeaOutcome {
+  kind: "queue-report" | "accepted-steps" | "unavailable";
+  text: string;
+  report: { path: string; available: boolean; hash?: string; at?: string; event?: string };
+  excerpts: { text: string; step?: string; round?: number; event?: string; commit?: string; hash: string }[];
+  accepted: { step: string; round: number; event: string; summary: string; commit?: string; closing: boolean }[];
+  /** Earlier reported rounds, retained for inspection; not current accepted evidence. */
+  historical: { step: string; round: number; event: string; summary: string; commit?: string }[];
+  sampled_steps: number;
+  substantive_steps: number;
+  warnings: string[];
+}
 
 // ---------------------------------------------------------------- references
 
@@ -210,6 +224,7 @@ export interface IdeaQueue {
   started_at?: string;
   finished_at?: string;
   commit?: string;
+  outcome?: IdeaOutcome;
 }
 
 /** A hand-over's record of an entry it covered (`nexus covers`): when, and from which conversation. */
@@ -227,7 +242,7 @@ export interface HistoryItem {
 }
 
 /** A queue as an entry or a note lists it. */
-interface IdeaQueueRef { id: string; title: string; status: QueueStatus; commit?: string }
+interface IdeaQueueRef { id: string; title: string; status: QueueStatus; commit?: string; outcome?: IdeaOutcome }
 
 export interface IdeaEntryView extends IdeaEntry {
   ref: string;
@@ -253,9 +268,10 @@ export interface IdeasResponse extends IdeasView {
   notes_dir: string | null;
   /** The suggestions for matching earlier queues that wait for the user's decision, and how many queues they are of. */
   to_match: { suggestions: number; queues: number };
+  links: IdeaLinksResponse;
 }
 
-const queueRef = (q: IdeaQueue): IdeaQueueRef => ({ id: q.id, title: q.title, status: q.status, ...(q.commit ? { commit: q.commit } : {}) });
+const queueRef = (q: IdeaQueue): IdeaQueueRef => ({ id: q.id, title: q.title, status: q.status, ...(q.commit ? { commit: q.commit } : {}), ...(q.outcome ? { outcome: q.outcome } : {}) });
 
 /** The history a queue gives an entry that it names. */
 function queueHistory(q: IdeaQueue): HistoryItem[] {
@@ -370,7 +386,7 @@ type MatchKind = "exact" | "dated" | "file";
 const MATCH_RANK: Record<MatchKind, number> = { exact: 0, dated: 1, file: 2 };
 
 /** A suggested match of a queue that names no note to a note's entry, with the sentence it came from. */
-export interface MatchSuggestion { queue: string; ref: string; kind: MatchKind; quote: string }
+export interface MatchSuggestion { queue: string; ref: string; kind: MatchKind; quote: string; location?: string }
 
 /** What suggestMatches reads of a queue: its words, when it was created, its source and status. */
 export interface MatchQueue {
@@ -405,24 +421,25 @@ export function suggestMatches(queues: readonly MatchQueue[], notes: readonly Id
   for (const q of queues) {
     if (q.status === "cancelled" || noteRefs(q.source).length) continue;
     const found = new Map<string, MatchSuggestion>();
-    const add = (ref: string, kind: MatchKind, quote: string) => {
+    const add = (ref: string, kind: MatchKind, quote: string, location: string) => {
       const had = found.get(ref);
-      if (!had || MATCH_RANK[kind] < MATCH_RANK[had.kind]) found.set(ref, { queue: q.id, ref, kind, quote: had && MATCH_RANK[had.kind] === MATCH_RANK[kind] ? had.quote : clip(quote) });
+      if (!had || MATCH_RANK[kind] < MATCH_RANK[had.kind]) found.set(ref, { queue: q.id, ref, kind, quote: clip(quote), location });
     };
     const created = q.created_at?.slice(0, 10);
-    const text = [q.title, q.description ?? "", ...q.steps.flatMap((s) => [s.title, s.goal ?? ""])].join("\n\n");
-    for (const sentence of sentences(text)) {
+    const fields = [{ text: q.title, location: "title" }, { text: q.description ?? "", location: "description" },
+      ...q.steps.flatMap((s, i) => [{ text: s.title, location: `steps/${i}/title` }, { text: s.goal ?? "", location: `steps/${i}/goal` }])];
+    for (const field of fields) for (const sentence of sentences(field.text)) {
       const dates = [...sentence.matchAll(/\d{4}-\d{2}-\d{2}/g)].map((m) => m[0]);
       for (const m of sentence.matchAll(new RegExp(`${dir}/([^\\s#()\\[\\]\`'",;]+?\\.md)(?:#(\\d{4}-\\d{2}-\\d{2}))?`, "g"))) {
         const note = byFile.get(`${notesDir}/${m[1]}`);
         if (!note || !note.entries.length) continue;
         const has = (d: string) => note.entries.some((e) => e.date === d);
-        if (m[2] && has(m[2])) { add(noteRef(note.file, m[2]), "exact", sentence); continue; }
+        if (m[2] && has(m[2])) { add(noteRef(note.file, m[2]), "exact", sentence, field.location); continue; }
         const dated = [...new Set(dates)].filter(has);
-        for (const d of dated) add(noteRef(note.file, d), "dated", sentence);
+        for (const d of dated) add(noteRef(note.file, d), "dated", sentence, field.location);
         if (dated.length) continue;
         const before = note.entries.filter((e) => !created || e.date <= created).at(-1);
-        if (before) add(noteRef(note.file, before.date), "file", sentence);
+        if (before) add(noteRef(note.file, before.date), "file", sentence, field.location);
       }
     }
     out.push(...found.values());
@@ -441,12 +458,13 @@ export function acceptedMatches(matches: readonly { queue: string; ref: string; 
 
 /** A suggestion as the dashboard shows it: its queue as it stands, the entry's lead, and the user's decision. */
 export interface MatchItem extends MatchSuggestion {
+  diagnostics?: string[];
   title: string;
-  status: QueueStatus;
+  status: QueueStatus | "missing";
   finished_at?: string;
   commit?: string;
   lead?: string;
   decision?: { accepted: boolean; at: string };
 }
 /** GET /api/projects/:id/ideas/matches: the suggestions and decisions, queue by queue in the queues' order. */
-export interface IdeaMatchesResponse { items: MatchItem[] }
+export interface IdeaMatchesResponse { items: MatchItem[]; revision: string }

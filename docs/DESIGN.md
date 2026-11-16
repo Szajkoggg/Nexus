@@ -2779,6 +2779,25 @@ repository ESLint configuration recognizes TS/TSX files and still reports a deli
 error. The final lockfile is also installed with `npm ci` in a separate temporary checkout, where the compatibility
 tests and dependency tree are checked again. No access, HTTP or agent protocol changes accompany this update.
 
+## Ideas relationships: persisted corrections (IC2)
+
+The accepted IC1 contract uses origin-level overlays in `idea-matches.yaml`, with append-only logical action
+history and immutable legacy matches. A correction snapshots known identities and keeps inactive records, so a
+missing queue/date does not erase the explanation. A replace and its undo each write one complete file. Source
+overrides are explicit operations; neither a rejected match nor any idea action edits an approved queue.
+
+A revision covers both the stored decisions and current note/queue inputs. The server holds an exclusive file
+lock across re-read, comparison and atomic replacement; request IDs retrieve saved results before revision checks.
+Undo checks touched origin IDs across later history, so unrelated actions do not block it and a newer decision
+cannot be silently reversed. A crash-left lock fails closed; no time-based lock stealing. This preserves the
+one-writer contract across overlapping server requests and accidental overlapping server processes.
+
+Outcome excerpts quote current accepted StepView rounds or the recorded queue-report summary, with source hashes,
+event/round/commit links, sampling counts and missing-evidence warnings. Old reported rounds remain explicitly
+historical; they never supply current acceptance. Closing-only fallback recognizes reused closing summaries and
+explicit closing labels; it makes no semantic promise about arbitrary report prose. No model runs when a page opens.
+The expanded manager/status/chat UI remains in IC3–IC5; IC2 only adapts the existing matching client's save tokens.
+
 ## Ideas corrections: design boundary (IC1)
 
 [The IC1 design](ux/ideas-corrections.md) specifies origin-specific relationship corrections,

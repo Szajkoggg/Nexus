@@ -14,6 +14,8 @@ import { inheritedTags, kindListIssue, tagIssues, type StepTags } from "./tags.t
 import { fallbackIssues, kindIssues } from "./routing.ts";
 import { importedFrom, noteRefIssue, noteRefs } from "./ideas.ts";
 import { ideaMatches, readNotes } from "./ideas-read.ts";
+import { ideaOriginId } from "./idea-links.ts";
+import { changeIdeaLinks } from "./idea-link-actions.ts";
 
 export class ActionError extends Error {
   readonly status: number;
@@ -843,21 +845,17 @@ function notesDir(dir: string): string {
  * agent may: the nexus command has no such action): `accept` true or false records it in idea-matches.yaml, null takes
  * it back. Each item must be one of the project's suggestions (or a match decided before). Returns how many changed.
  */
-export function decideIdeaMatches(store: ProjectStore, items: unknown, accept: unknown): number {
+export function decideIdeaMatches(store: ProjectStore, items: unknown, accept: unknown, guard: { revision: unknown; request_id: unknown }): number {
   if (!Array.isArray(items) || !items.length || !items.every((i) => i && typeof i === "object" && typeof (i as { queue?: unknown }).queue === "string" && typeof (i as { ref?: unknown }).ref === "string")) {
     throw new ActionError("items is a list of { queue, ref }");
   }
   if (accept !== true && accept !== false && accept !== null) throw new ActionError("accept is true, false or null (take the decision back)");
   const known = ideaMatches(store, loadProjectState(store)).items;
-  const at = now();
-  const file = store.readIdeaMatches();
-  let matches = [...file.matches];
   for (const { queue, ref } of items as { queue: string; ref: string }[]) {
     const m = known.find((x) => x.queue === queue && x.ref === ref);
     if (!m) throw new ActionError(`no suggestion matches queue ${queue} to ${ref}`, 404);
-    matches = matches.filter((x) => !(x.queue === queue && x.ref === ref));
-    if (accept !== null) matches.push({ queue, ref, kind: m.kind, ...(m.quote ? { quote: m.quote } : {}), accepted: accept, at });
   }
-  store.writeIdeaMatches({ ...file, matches });
+  changeIdeaLinks(store, { ...guard, operation: "decide", reason: accept === null ? "Return historical match to pending" : accept ? "Accept historical match" : "Reject historical match",
+    decisions: (items as { queue: string; ref: string }[]).map((m) => ({ origin: ideaOriginId("match", m.queue, m.ref), accept })) });
   return items.length;
 }

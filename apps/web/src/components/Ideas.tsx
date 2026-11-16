@@ -3,7 +3,7 @@
 // entries' histories, its open questions and its queues. The derivation is the server's (GET /api/projects/:id/ideas,
 // @nexus/protocol ideas.ts); the notes are only read. A note opens as the layer note:<file>: on a desktop where a step
 // opens (in the rail's place), on the phone over the list.
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import type { HistoryItem, IdeaEntryView, IdeaMatchesResponse, IdeaNoteView, IdeasResponse, MatchItem, TopicStatus } from "@nexus/protocol/ideas";
 import { act, projectUrl, useAction, useQuery } from "../api.ts";
 import { formatClock, formatDate, formatDay, rich, t, type Key } from "../i18n.ts";
@@ -304,8 +304,14 @@ export function IdeasMatching({ project, phone }: { project: string; phone?: boo
   const items = data?.items ?? [];
   const shown = items.filter((m) => matchFilter(m) === filter);
   const sure = items.filter((m) => !m.decision && m.kind !== "file");
-  const decide = (list: MatchItem[], accept: boolean | null) =>
-    void run(() => act(project, "POST", "/ideas/matches", { items: list.map(({ queue, ref }) => ({ queue, ref })), accept }), reload);
+  const pending = useRef<{ key: string; id: string } | null>(null);
+  const decide = (list: MatchItem[], accept: boolean | null) => {
+    const body = { items: list.map(({ queue, ref }) => ({ queue, ref })), accept, revision: data?.revision };
+    const key = JSON.stringify(body);
+    if (pending.current?.key !== key) pending.current = { key, id: crypto.randomUUID() };
+    const request_id = pending.current.id;
+    void run(async () => { await act(project, "POST", "/ideas/matches", { ...body, request_id }); pending.current = null; }, reload);
+  };
   const queues = [...new Set(shown.map((m) => m.queue))];
   return (
     <div className={`scroll-thin min-h-0 flex-1 overflow-y-auto ${phone ? "px-3 pb-6 pt-3" : "px-6 pb-8 pt-4"}`} data-ideas-matching>

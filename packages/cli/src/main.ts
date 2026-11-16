@@ -14,7 +14,7 @@ import {
   lacksStaticAnalysis, projectStaticAnalysis, staticReminderDue,
   TemplateError, fillTemplate, filledTemplateYaml, parseEvery, MaintenanceMode, readTemplates, templateQueueId, unusableTemplate, type MergedTemplates,
   type PictureRole, type ReviewItem, type Role, type Runtime, type SessionFile,
-  noteRefIssue, parseNoteRef, readNotes, ideaMatches,
+  noteRefIssue, parseNoteRef, readNotes, ideaMatches, ideaLinks,
 } from "@nexus/protocol";
 import { checkRules, describeRules } from "@nexus/protocol/rules";
 import { importMarkdownQueues } from "./import-md.ts";
@@ -671,6 +671,9 @@ const commands: Record<string, () => void | Promise<void>> = {
     const open = items.filter((m) => !m.decision);
     console.log(`${items.length} suggestion(s) for ${new Set(items.map((m) => m.queue)).size} queue(s); ${open.length} wait for the user`);
     for (const m of items) console.log([m.queue, m.ref, m.kind, ...(m.decision ? [m.decision.accepted ? "accepted" : "rejected"] : [])].join("\t"));
+    const links = ideaLinks(st, loadProjectState(st));
+    console.log(`Relationship origins (${links.history.length} correction action(s)):`);
+    for (const r of links.items) console.log([r.queue, r.ref, r.origin, r.state, r.effective ? "effective" : "inactive", ...r.diagnostics].join("\t"));
   },
 
   /**
