@@ -11,7 +11,7 @@ const KIND_LABEL: Record<NotifyKind, Key> = {
   question: "notifySettings.kind.question", stopped: "notifySettings.kind.stopped", approval: "notifySettings.kind.approval",
   review: "notifySettings.kind.review", failed: "notifySettings.kind.failed", start: "notifySettings.kind.start",
   provisional: "notifySettings.kind.provisional", plan: "notifySettings.kind.plan", merge: "notifySettings.kind.merge",
-  tags: "notifySettings.kind.tags", recurring: "notifySettings.kind.recurring", update_failed: "notifySettings.kind.updateFailed",
+  tags: "notifySettings.kind.tags", recurring: "notifySettings.kind.recurring", cleanup: "notifySettings.kind.cleanup", update_failed: "notifySettings.kind.updateFailed",
   deploy: "notifySettings.kind.deploy", cancelled: "notifySettings.kind.cancelled",
 };
 

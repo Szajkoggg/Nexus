@@ -6,6 +6,10 @@ template:
     memory notes, the ideas notes and the project documents; report what is stale, unmarked or untrue; fix_small fixes
     only typos in the project documents.
 maintenance: survey
+# A worktree of its own: a survey keeps the main checkout free (nothing to merge back; Nexus removes the worktree once
+# the run is done), fix_small merges its fixes back through the integration step. The ideas notes are not tracked by
+# git, so they are read in the main checkout (ideas_dir).
+worktree: auto
 params:
   - name: memory_dir
     description: "the folder of the Claude sessions' memory notes for this project, outside it (Claude Code keeps them under
@@ -15,8 +19,9 @@ params:
       //c/users/.../memory/**>)"
     default: ~/.claude/projects/C--Code-Nexus/memory
   - name: ideas_dir
-    description: the folder of the ideas notes
-    default: docs/ideas
+    description: "the folder of the ideas notes. Here it is not tracked by git, so a worktree has no copy of it: the
+      folder in the main checkout, by its absolute path, read only"
+    default: C:/Code/Nexus/docs/ideas
   - name: docs
     description: the project documents to check against the code (for example AGENTS.md, a design and a protocol document)
     default: AGENTS.md, README.md, docs/DESIGN.md and docs/PROTOCOL.md

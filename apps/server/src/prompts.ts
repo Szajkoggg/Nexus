@@ -695,6 +695,14 @@ export function mergeWaitNotice(q: QueueView, reason: string, released?: readonl
   };
 }
 
+/** Nexus could not remove a done survey run's worktree (git.yaml `cleanup.waiting`, src/merger.ts). */
+export function cleanupWaitNotice(q: QueueView, reason: string): Notice {
+  return {
+    fact: `The worktree of queue ${q.id} is not cleaned up: ${reason}`,
+    todo: "Tell the user briefly what is left; they look at it and clean up (Clean up on the queue's page). Do not delete anything in the worktree yourself.",
+  };
+}
+
 /** Nexus merged a worktree queue back by itself: its base moved forward to the integrated commit. */
 export function mergedNotice(q: QueueView, m: { into: string; sha: string }): Notice {
   return {

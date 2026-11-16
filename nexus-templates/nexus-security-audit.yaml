@@ -5,6 +5,9 @@ template:
   description: Nexus's own instance of the security-audit template, filled in for this repository. Run the project's
     dependency audit and report the vulnerabilities, with what each needs; it never fixes anything itself.
 maintenance: survey
+# A worktree of its own: a survey keeps the main checkout free (nothing to merge back; Nexus removes the worktree once
+# the run is done), fix_small merges its fixes back through the integration step.
+worktree: auto
 params:
   - name: audit_command
     description: "the project's audit (Node: npm audit; .NET: dotnet list package --vulnerable --include-transitive; Unity:

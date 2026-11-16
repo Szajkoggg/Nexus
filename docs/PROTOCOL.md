@@ -206,7 +206,7 @@ kind: code                             # optional tags, the defaults of its step
 origin: user
 runtime: claude                        # optional: the runtime, model, effort and fallback of its steps that name none
 fallback: [{ runtime: codex, effort: high }, wait]   # (see "Kinds and their defaults")
-integration: true                      # written only by the server: the queue works in a worktree of its own, so it ends with the integration step (below)
+integration: true                      # written only by the server: the queue works in a worktree of its own, so it ends with the integration step (below; a survey run has none)
 user_levels: { W3: 1 }                 # levels the user set on steps; written only by the server (see "Review")
 legacy_policies: { W1: continue }      # each step's review policy from before review levels; written only by the server
 stop_conditions:                       # in addition to the project defaults
@@ -476,6 +476,9 @@ new arises on the base itself.
   first gave the queue its worktree (an auto worktree it made, or a path the queue names that is not the project's
   checkout). The mark is the server's: a draft cannot set it (it is dropped), a revision keeps it, and it is not part
   of what an approval pins. A queue that worked in a worktree before the step existed (a path, no mark) has none.
+- **Not for a survey run.** A queue with `maintenance: survey` has none, even in a worktree of its own: it leaves no
+  commit (Nexus stops one that does), so there is nothing to merge back; its worktree is removed once it is done (see
+  "Cleaning up a survey's worktree"). The same template in `fix_small` mode has one, as any worktree queue.
 - **Kept like the closing step.** Not in `queue.yaml`'s `steps`; derivation adds it last (`stepDefs`), so it stays last
   when a revision adds steps. Its id is reserved: `<queue>.integrate` (a draft with a step of that id is refused); the
   state marks it with `integration: true`. Its text is Nexus's standard (`INTEGRATION_TITLE` "Integration",
@@ -582,7 +585,7 @@ Written only by the server's queue engine; agents never touch them.
 
 | File | What |
 |---|---|
-| `queues/<id>/git.yaml` | The HEAD of the queue's checkout around each step's work (`src/gitinfo.ts`): `base` (an auto worktree's: `ref`, the branch or commit it was made from, its `sha`, `at`), `base.branch` (whether `ref` names a branch: only a branch can be merged back into), `merged` (`at`, `into`, `path`, `sha`, `fast_forward`, `by`: `nexus` or `user`, absent on older records), `cleaned` (`at`, `path`, `branch`), `merge` (Nexus merging back by itself: `waiting` (`reason`, `since`: what keeps it, told to the user and the orchestrator; `released`: the queues whose runs Nexus held for this merge back and let go on when it could not go), `reintegrations` (runs of the integration step again since the user's last Merge back), `reintegrating` (when the last was asked for, until the step opens)), `setup` (the worktree setup command for the worktree Nexus made: `command` (the last one run), `at` (when the worktree was made), `done_at` (once it succeeded), `failed` (`at`, `reason`: its last failure)), `steps.<step>` (rounds, oldest first: `session`, `start` (HEAD when the step opened, or when a send-back reopened it), `started_at`, `end` (HEAD at the end of the turn in which the step got its outcome: done, review, failed or stopped), `ended_at`; a sha is null outside a git repository). A continued step keeps its open round. One writer: the server. See "Git on the dashboard" |
+| `queues/<id>/git.yaml` | The HEAD of the queue's checkout around each step's work (`src/gitinfo.ts`): `base` (an auto worktree's: `ref`, the branch or commit it was made from, its `sha`, `at`), `base.branch` (whether `ref` names a branch: only a branch can be merged back into), `merged` (`at`, `into`, `path`, `sha`, `fast_forward`, `by`: `nexus` or `user`, absent on older records), `cleaned` (`at`, `path`, `branch`), `cleanup` (Nexus's cleanup of a done survey run's worktree could not go: `waiting` (`reason`, `since`, `files` (what is left, at most 20), `more`); see "Cleaning up a survey's worktree"), `merge` (Nexus merging back by itself: `waiting` (`reason`, `since`: what keeps it, told to the user and the orchestrator; `released`: the queues whose runs Nexus held for this merge back and let go on when it could not go), `reintegrations` (runs of the integration step again since the user's last Merge back), `reintegrating` (when the last was asked for, until the step opens)), `setup` (the worktree setup command for the worktree Nexus made: `command` (the last one run), `at` (when the worktree was made), `done_at` (once it succeeded), `failed` (`at`, `reason`: its last failure)), `steps.<step>` (rounds, oldest first: `session`, `start` (HEAD when the step opened, or when a send-back reopened it), `started_at`, `end` (HEAD at the end of the turn in which the step got its outcome: done, review, failed or stopped), `ended_at`; a sha is null outside a git repository). A continued step keeps its open round. One writer: the server. See "Git on the dashboard" |
 | `queues/<id>/push.yaml` | Pushing what was accepted: `review` (per step, the HEAD of the checkout when it entered review: `sha` or null, `finished_at`, `at`), `steps` (per accepted step: `acceptance`, `sha`, `result` (`pushed`, `failed`, `skipped`, `held`), `text`, `at`, `held_by?`), `pushed` (the last success: `sha`, `step`, `at`, `remote`, `branch`), `error` (the last failure until a success). One writer: the server. See "Pushing what was accepted" |
 | `queues/<id>/plan.yaml` | The queue's place in the plan (see "The plan"): `by`, `reason?`, `after` (the queues it waits for, each with `queue`, `by`, `at`, `reason?`), `created_at`, `updated_at`, `started_at?`, `proposal?`, `decisions`. One writer: the server; it stays after the queue starts (marked `started_at`), and taking the queue out of the plan removes it |
 | `queues/<id>/start.yaml` | The queue's next start as planned (see "The plan" and "Schedules"): `at?` (a schedule: the time, ISO 8601; with `usage`, `claude` or `codex`, when that is the usage window's reset plus the margin; without `at`, the options of a start by the plan; `after` only in files from before the plan, moved into `plan.yaml` at the server's start), the start's `runtime?`, `model?`, `effort?`, `session?` (a session to continue), `by` (`user` or `orchestrator`), `reason?`, `revision` (the queue's when planned), `created_at`, `failed?` (`at`, `reason`, `missed?`: it came due and the queue could not start; `missed`: a schedule more than 15 minutes late, the server not running at its time), `held?` (`since`, `kind`: `approval`, `checkout` or `limit`, `reason`: it came due but waits for the approval of the queue's current revision, for its checkout or for a place under the limit, and starts by itself; see "The plan" and "One queue per checkout, and a limit"). One writer: the server; a start of the queue or a cancel removes it |
@@ -922,6 +925,29 @@ refused waits and tells like the merge.
   Windows cannot delete (paths beyond 260 characters without `core.longpaths`) is deleted by Node and the worktree list
   pruned; then `git branch -d` (never `-D`).
 - Both are recorded in `git.yaml` (`merged` with `by`, `cleaned`) and shown on the queue.
+
+### Cleaning up a survey's worktree
+
+A survey run (`maintenance: survey`) in a worktree of its own (`worktree: auto`, or a path: the `integration` mark)
+has no integration step and is never merged back: it leaves no commit. Once it is `done`, the server removes its
+worktree and branch (`apps/server/src/merger.ts`), **whatever `merge_back` says**, the same way the cleanup above goes
+(`cleanUp`: `git worktree remove`, never `--force`; `git branch -d`, never `-D`), recorded as `cleaned` in `git.yaml`.
+Only when:
+
+- every step is done or skipped: a stopped survey (a stop condition, a commit Nexus found) or one with a failed step
+  keeps its worktree, as evidence, until the user cleans it up;
+- no provisional acceptance of it waits for the user (a Fix it runs in the worktree);
+- its run is not going, and no step's last round is still open (the turn that reported the step's end still ending:
+  looked at again a moment later);
+- the worktree is clean, untracked files included (`git status --porcelain`).
+
+When it is not clean, or the cleanup is refused (the branch not merged into the base's checkout, a removal that
+fails), nothing is removed: `git.yaml` gets `cleanup.waiting` (`reason`, `since`; `files`: what is left, as git status
+names it, the first 20, and `more`: how many besides), the user's waiting list an item of kind `cleanup` with the
+reason ("survey run Q is done, but its worktree stays: 1 file: ?? notes.txt left in it; look at them, then clean up
+(<path>)"), and the orchestrator is told once (`notify:cleanupwait:…`). Nexus does not try again; the user's Clean up
+on the queue's page does (refused the same way while something is left), and its success clears `cleanup`. The
+dashboard offers no Merge back for a survey run.
 
 ### Removing a project
 
@@ -1373,7 +1399,7 @@ subscriptions are in `<NEXUS_HOME>/push.json`, written by the server only:
 Whatever newly appears in a project's "waiting for you" list is pushed; the list as found when the server starts is
 the baseline. Every push has a kind, and each device gets it only when its `notify` lets it through
 (`@nexus/protocol` notify.ts, `shouldNotify`): the waiting list's kinds (`question`, `stopped`, `approval`, `review`,
-`failed`, `start`, `provisional`, `plan`, `merge`, `tags`, `recurring`), `update_failed` (an update of Nexus failed),
+`failed`, `start`, `provisional`, `plan`, `merge`, `tags`, `recurring`, `cleanup`), `update_failed` (an update of Nexus failed),
 `deploy` (a planned deploy waits or was dropped), `cancelled` (the orchestrator cancelled a queue), and `test`, which
 always goes. `off` lists the kinds turned off (a kind not listed is on). Within the quiet hours (`quiet.on`; `from` up
 to `to`, `HH:MM` in the device's `timezone`, over midnight when `from` is later; none when they are equal) nothing
@@ -1843,6 +1869,12 @@ steps:
   top-level key, or keeps no step in survey mode. The shipped `maintenance` template surveys `{{scope}}` and, in
   fix_small mode, fixes `{{small_fixes}}` (by default patch-level dependency updates whose checks pass, and typos in
   documentation).
+- **A worktree of its own**: a template may carry `worktree: auto` (passed to the queue as any queue key). A survey
+  run then works beside the project's checkout without holding it, has no integration step, and its worktree is
+  removed once it is done (see "Cleaning up a survey's worktree"); in fix_small mode it ends with the integration step
+  and is merged back as any worktree queue. The shipped templates carry none: a project decides in its own instance.
+  Nexus's own instances (`nexus-templates/nexus-*.yaml`) carry `worktree: auto`; the notes instance reads its ideas
+  folder, which git does not track here, in the main checkout by its absolute path (a worktree has no copy of it).
 
 **Three layers**, weakest first; for the same template id the stronger replaces the weaker:
 

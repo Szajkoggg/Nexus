@@ -863,8 +863,19 @@ export const GitFile = z.object({
     reintegrations: z.number().int().min(0).optional(),
     reintegrating: Time.optional(),
   }).optional(),
-  /** The user cleaned up: the worktree removed and its branch deleted (git branch -d). */
+  /**
+   * The cleanup: the worktree removed and its branch deleted (git branch -d), by the user's Clean up or by Nexus (after
+   * a merge back, or a survey run done).
+   */
   cleaned: z.object({ at: Time, path: z.string(), branch: z.string() }).optional(),
+  /**
+   * Nexus's cleanup of a done survey run's worktree (src/merger.ts) could not go: `waiting.reason` says why (told to the
+   * user and the orchestrator), `files` the untracked files left in it, as git status names them (at most 20, `more`:
+   * how many besides). Nexus does not try again; the user's Clean up does, and clears it.
+   */
+  cleanup: z.object({
+    waiting: z.object({ reason: z.string(), since: Time, files: z.array(z.string()).optional(), more: z.number().int().positive().optional() }),
+  }).optional(),
   /**
    * The project's worktree setup command for the worktree Nexus made (`at`): `done_at` once it succeeded; until then
    * it runs again before the next step opens. `failed`: its last failure (`reason`: the exit code and the output's

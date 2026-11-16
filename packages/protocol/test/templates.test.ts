@@ -257,6 +257,28 @@ test("the shipped templates carry no command of the Nexus repository; its own in
   }
 });
 
+test("Nexus's own maintenance instances run in a worktree of their own, in either mode; the shipped templates leave it to the project", () => {
+  const instances = readTemplateDir(join(shippedTemplatesDir(), "..", "nexus-templates"), "project") as Template[];
+  const root = mkdtempSync(join(tmpdir(), "nexus-instances-"));
+  const store = ProjectStore.init(root, { id: "p", name: "P", root });
+  for (const t of instances) {
+    for (const maintenance of ["survey", "fix_small"] as const) {
+      const queue = fillTemplate(t, {}, `${t.id.replace("nexus-", "N").replaceAll("-", "").toUpperCase()}${maintenance === "survey" ? "S" : "F"}`, { maintenance });
+      assert.equal(queue.worktree, "auto", `${t.id} (${maintenance})`);
+      // Through the YAML the CLI writes, as an orchestrator would upload it.
+      assert.match(applyDraft(store, YAML.parse(filledTemplateYaml(t, queue, `.nexus/drafts/${String(queue.id)}.yaml`))), /created as proposed/, t.id);
+    }
+  }
+  const queues = loadProjectState(store).queues;
+  assert.equal(queues.length, instances.length * 2);
+  assert.ok(queues.every((q) => q.worktree === "auto"));
+  // A worktree of its own: fix_small ends with the integration step (its fixes go back to main), survey does not.
+  for (const q of queues) assert.equal(q.steps.some((s) => s.integration), q.maintenance === "fix_small", q.id);
+  // The notes' ideas folder is not tracked by git: read in the main checkout, which a worktree has no copy of.
+  assert.equal(instances.find((t) => t.id === "nexus-notes")!.params.find((p) => p.name === "ideas_dir")!.default, "C:/Code/Nexus/docs/ideas");
+  for (const t of shipped()) assert.equal(fillTemplate(t, VALUES[t.id]!, "S1").worktree, undefined, t.id);
+});
+
 test("the notes template: needs memory_dir; survey only reads, the fix step touches the project documents alone", () => {
   const t = shippedTemplate("notes");
   assert.throws(() => fillTemplate(t, {}, "N"), /needs memory_dir/);

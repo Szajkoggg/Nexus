@@ -62,6 +62,22 @@ test("no integration step in the project's checkout, nor for a queue that worked
   assert.deepEqual(setup({ worktree: "C:/w/UX", branch: "nexus/UX" }).queue().steps.map((s) => s.id), ["Q1"]);
 });
 
+test("a survey run in a worktree of its own has no integration step (nothing to merge back); fix_small has one", () => {
+  assert.deepEqual(setup({ worktree: "auto", maintenance: "survey" }).queue().steps.map((s) => s.id), ["Q1"]);
+  assert.deepEqual(setup({ worktree: "C:/w/S", integration: true, maintenance: "survey" }).queue().steps.map((s) => s.id), ["Q1"]);
+  assert.deepEqual(setup({ worktree: "auto", maintenance: "fix_small", coding: true }).queue().steps.map((s) => s.id), ["Q1", "Q.refactor", "Q.integrate"]);
+});
+
+test("a survey's worktree Nexus could not clean up waits for the user as a cleanup item, until it is cleaned up", () => {
+  const x = setup({ worktree: "C:/w/S", integration: true, maintenance: "survey" });
+  const reason = "survey run Q is done, but its worktree stays: 1 file: ?? left.txt left in it; look at them, then clean up (C:/w/S)";
+  x.st.writeGit("Q", { protocol: 1, steps: {}, cleanup: { waiting: { reason, since: "2026-11-16T10:00:00.000Z", files: ["?? left.txt"] } } });
+  const items = () => loadProjectState(x.st).attention.filter((a) => a.queue === "Q" && a.kind !== "approval");
+  assert.deepEqual(items().map((a) => [a.kind, a.text, a.at]), [["cleanup", reason, "2026-11-16T10:00:00.000Z"]]);
+  x.st.writeGit("Q", { ...x.st.readGit("Q")!, cleaned: { at: "2026-11-16T11:00:00.000Z", path: "C:/w/S", branch: "nexus/S" } });
+  assert.deepEqual(items(), []);
+});
+
 test("the mark is the server's: a draft does not set it, a revision keeps it, and it is not part of what an approval pins", () => {
   // The server marks an approved queue when it gives it its worktree: the approval still holds.
   const x = setup({ worktree: "auto" });
