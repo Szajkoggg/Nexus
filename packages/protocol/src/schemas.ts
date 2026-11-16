@@ -910,6 +910,15 @@ export const GitFile = z.object({
    * a merge back, or a survey run done).
    */
   cleaned: z.object({ at: Time, path: z.string(), branch: z.string() }).optional(),
+  /** Server-written evidence saved before deleting any part of a verified, merged worktree. */
+  cleanup_proof: z.object({
+    version: z.literal(1), at: Time, path: z.string(), repository: z.string(), repository_identity: z.string(),
+    branch: z.string(), tip: z.string(), into: z.string(),
+    entries: z.array(z.object({
+      path: z.string(), kind: z.enum(["directory", "file", "link"]), identity: z.string(),
+      digest: z.string().optional(), modified: z.string().optional(),
+    })),
+  }).optional(),
   /**
    * Nexus's cleanup of a done survey run's worktree (src/merger.ts) could not go: `waiting.reason` says why (told to the
    * user and the orchestrator), `files` the untracked files left in it, as git status names them (at most 20, `more`:

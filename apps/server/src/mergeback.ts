@@ -13,18 +13,18 @@
 // branch in the worktree where the base is checked out, a fast-forward when possible, else a merge commit; on a
 // conflict the merge is aborted, so nothing is left half-done.
 //
-// Cleanup (the user's, after a merge back, or after a survey run: src/merger.ts): `git worktree remove` (never
-// --force) and `git branch -d` (never -D). Refused, before anything is removed, when the worktree has uncommitted
-// changes (untracked files included) or the branch is not merged. A worktree git cannot remove for paths beyond
-// Windows' 260 characters (Git for Windows without core.longpaths) is deleted by Node, and the worktree list pruned.
+// Cleanup records durable evidence of a clean, merged tree before removing entries individually, then prunes
+// the registration and runs `git branch -d` (never -D). A retry accepts only an unchanged subset of that tree.
 import { execFileSync } from "node:child_process";
-import { existsSync, rmSync } from "node:fs";
+import { existsSync } from "node:fs";
+import { isAbsolute, relative, resolve } from "node:path";
 import {
   ActionError, runGoing, stepAtWork, loadProjectState, normPath, now, pendingProvisional, type GitFile, type ProjectState, type ProjectStore, type QueueView,
 } from "@nexus/protocol";
 import { checkoutOf, git, patchGit } from "./gitinfo.ts";
 import { ROOT } from "./lifecycle.ts";
 import { samePath } from "./worktree.ts";
+import { cleanupIdentity, cleanupPath, cleanupRefusal, cleanupSnapshot, removeVerifiedTree } from "./cleanup-proof.ts";
 
 const ENV = { ...process.env, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never", GIT_EDITOR: "true", GIT_MERGE_AUTOEDIT: "no" };
 
@@ -233,7 +233,7 @@ export function reintegrate(store: ProjectStore, q: QueueView, d: Extract<MergeD
 // ---------------------------------------------------------------- the user's Merge back
 
 /** A finished queue with a worktree of its own, its branch and base. */
-function finishedWorktreeQueue(store: ProjectStore, queueId: string) {
+function finishedWorktreeQueue(store: ProjectStore, queueId: string, cleanup = false) {
   const state = loadProjectState(store);
   const q = state.queues.find((x) => x.id === queueId);
   if (!q) throw new ActionError(`unknown queue ${queueId}`, 404);
@@ -242,10 +242,10 @@ function finishedWorktreeQueue(store: ProjectStore, queueId: string) {
   if (!path || samePath(path, root)) throw new ActionError(`queue ${queueId} works in the project's own checkout, not a worktree of its own`, 409);
   if (q.status !== "done") throw new ActionError(`queue ${queueId} is not finished (it is ${q.status})`, 409);
   if (runGoing(q.run)) throw new ActionError(`queue ${queueId}'s run is still going`, 409);
-  if (q.git?.cleaned) throw new ActionError(`queue ${queueId} was cleaned up already`, 409);
-  const branch = q.branch ?? (existsSync(path) ? git(path, ["branch", "--show-current"]) : undefined);
+  if (q.git?.cleaned && !cleanup) throw new ActionError(`queue ${queueId} was cleaned up already`, 409);
+  const branch = q.branch ?? q.git?.cleanup_proof?.branch ?? q.git?.cleaned?.branch ?? (existsSync(path) ? git(path, ["branch", "--show-current"]) : undefined);
   if (!branch) throw new ActionError(`queue ${queueId} has no branch`, 409);
-  if (git(root, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`]) === undefined) throw new ActionError(`branch ${branch} does not exist`, 409);
+  if (!cleanup && git(root, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`]) === undefined) throw new ActionError(`branch ${branch} does not exist`, 409);
   return { state, q, root, path, branch, base: q.git?.base };
 }
 
@@ -303,24 +303,6 @@ export function mergeBack(store: ProjectStore, queueId: string, serverRoot = ROO
 
 // ---------------------------------------------------------------- cleanup
 
-/**
- * Removes a clean worktree: `git worktree remove` (a few tries), then what git left (paths beyond 260 characters that
- * Git for Windows cannot delete without core.longpaths) deleted by Node, and the worktree list pruned. Throws when the
- * folder or its entry is still there.
- */
-export function removeWorktree(root: string, path: string, o: { tries?: number } = {}): void {
-  let why = "";
-  for (let i = 0; i < (o.tries ?? 3) && existsSync(path); i++) {
-    try { run(root, ["worktree", "remove", path]); } catch (e) { why ||= (e as Error).message.split("\n")[0]!; }
-  }
-  if (existsSync(path)) {
-    try { rmSync(path, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 }); } catch (e) { why += ` / ${(e as Error).message}`; }
-  }
-  git(root, ["worktree", "prune"]);
-  const listed = worktrees(root).some((w) => samePath(w.path, path));
-  if (existsSync(path) || listed) throw new ActionError(`the worktree ${path} could not be removed${why ? ` (${why})` : ""}`, 500);
-}
-
 /** How many of the files that keep a worktree are named. */
 const FILES_SHOWN = 20;
 
@@ -347,25 +329,69 @@ export function leftText(left: { files: string[]; count: number }): string {
  * The cleanup of a finished worktree queue (the user's, or Nexus's after merging back or after a survey run): the
  * worktree removed, its branch deleted with -d.
  */
-export function cleanUp(store: ProjectStore, queueId: string): string {
-  const { q, root, path, branch } = finishedWorktreeQueue(store, queueId);
-  const here = existsSync(path);
-  if (here) {
-    const left = worktreeLeft(path);
-    if (left.count) throw new ActionError(`${path} has uncommitted changes (${leftText(left)}): commit or discard them first; nothing was removed`, 409);
+export function cleanUp(store: ProjectStore, queueId: string, io: Parameters<typeof removeVerifiedTree>[2] = {}): string {
+  return withMergeLock(store, queueId, () => cleanUpLocked(store, queueId, io));
+}
+
+function cleanUpLocked(store: ProjectStore, queueId: string, io: Parameters<typeof removeVerifiedTree>[2]): string {
+  const { q, root, path, branch } = finishedWorktreeQueue(store, queueId, true);
+  if (q.git?.cleaned) return `queue ${queueId} was cleaned up already`;
+  const repository = cleanupPath(run(root, ["rev-parse", "--path-format=absolute", "--git-common-dir"]));
+  const repository_identity = cleanupIdentity(repository);
+  const tip = git(root, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`]);
+  let proof = q.git?.cleanup_proof;
+  if (proof && (proof.repository !== repository || proof.repository_identity !== repository_identity
+    || proof.branch !== branch || !samePath(proof.path, resolve(path)) || (tip && proof.tip !== tip))) {
+    cleanupRefusal(path, "the repository, target or branch no longer matches the saved cleanup");
   }
+  const registered = worktrees(root).find((w) => samePath(w.path, path));
+  if (proof && registered && registered.branch !== branch) cleanupRefusal(path, "the registered worktree now belongs to another branch");
   // `git branch -d` deletes only a branch merged into its upstream, else into HEAD; checked first, so that a refusal
   // leaves the worktree in place. HEAD is the base's, where it is checked out, else the project's checkout.
   const baseTree = q.git?.base ? worktrees(root).find((w) => w.branch === q.git!.base!.ref)?.path : undefined;
   const cwd = baseTree && !samePath(baseTree, path) ? baseTree : root;
   const upstream = git(cwd, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", `${branch}@{upstream}`]);
-  const into = upstream ? `refs/remotes/${upstream}` : "HEAD";
-  if (!isAncestor(cwd, `refs/heads/${branch}`, into)) {
-    throw new ActionError(`${branch} is not merged into ${upstream ?? git(cwd, ["branch", "--show-current"]) ?? "HEAD"}: merge it first; nothing was removed`, 409);
+  const into = proof?.into ?? (upstream ? run(cwd, ["rev-parse", "--symbolic-full-name", `${branch}@{upstream}`])
+    : git(cwd, ["symbolic-ref", "HEAD"]) ?? run(cwd, ["rev-parse", "HEAD"]));
+  if (!tip && !proof) cleanupRefusal(path, `branch ${branch} is missing and no saved cleanup proof identifies its merged commit; first restore that branch at a commit you have independently verified as merged`);
+  const verifyMerged = () => {
+    if (!isAncestor(root, proof?.tip ?? tip!, into)) {
+      throw new ActionError(`${branch} is not merged into ${upstream ?? git(cwd, ["branch", "--show-current"]) ?? "HEAD"}: merge it first; nothing was removed`, 409);
+    }
+  };
+  if (!proof) {
+    const canonical = cleanupPath(path);
+    const relativeRoot = relative(canonical, cleanupPath(root));
+    if (!relativeRoot || (!relativeRoot.startsWith("..") && !isAbsolute(relativeRoot)) || !samePath(canonical, resolve(path))) {
+      cleanupRefusal(path, "the target aliases or contains the project checkout");
+    }
+    const verifyClean = () => {
+      if (!existsSync(path)) return;
+      const listed = worktrees(root).find((w) => samePath(w.path, path));
+      if (listed?.branch !== branch || !samePath(git(path, ["rev-parse", "--show-toplevel"]) ?? "", path)
+        || git(path, ["rev-parse", "HEAD"]) !== tip
+        || !samePath(git(path, ["rev-parse", "--path-format=absolute", "--git-common-dir"]) ?? "", repository)) {
+        cleanupRefusal(path, "a readable registered worktree for this branch and repository is missing, and no pre-deletion identity/content manifest was saved");
+      }
+      const left = worktreeLeft(path);
+      if (left.count) throw new ActionError(`${path} has uncommitted changes (${leftText(left)}): commit or discard them first; nothing was removed`, 409);
+    };
+    verifyClean();
+    verifyMerged();
+    const entries = cleanupSnapshot(path);
+    verifyClean();
+    proof = { version: 1, at: now(), path: canonical, repository, repository_identity, branch, tip: tip!, into, entries };
+    // Persist outside the target, through git.yaml's sole writer, before the first destructive operation.
+    patchGit(store, q.id, { cleanup_proof: proof });
   }
-  if (here) removeWorktree(root, path);
-  else run(root, ["worktree", "prune"]);
-  run(cwd, ["branch", "-d", branch]);
-  patchGit(store, q.id, { cleaned: { at: now(), path, branch }, merge: undefined, cleanup: undefined });
+  verifyMerged();
+  removeVerifiedTree(path, proof, io);
+  // Once the folder is absent, remove only its registration. A global prune could affect unrelated worktrees.
+  if (worktrees(root).some((w) => samePath(w.path, path))) run(root, ["worktree", "remove", path]);
+  if (worktrees(root).some((w) => samePath(w.path, path))) throw new ActionError(`the worktree registration for ${path} remains; inspect its lock before retrying Clean up`, 409);
+  const remaining = git(root, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`]);
+  if (remaining && remaining !== proof.tip) cleanupRefusal(path, "the branch changed during cleanup");
+  if (remaining) run(cwd, ["branch", "-d", branch]);
+  patchGit(store, q.id, { cleaned: { at: now(), path, branch }, merge: undefined, cleanup: undefined, cleanup_proof: undefined });
   return `the worktree ${path} is removed and branch ${branch} deleted`;
 }

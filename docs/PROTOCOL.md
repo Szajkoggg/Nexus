@@ -972,17 +972,51 @@ refused waits and tells like the merge.
   nothing is left half-done. A branch already in the base is reported as such. Nothing is pushed.
 - **Cleanup** checks first, and removes nothing when refused: the worktree must have no uncommitted changes
   (untracked files included), and the branch must be merged (into its upstream if it has one, else into the base's
-  checkout, as `git branch -d` decides). Then `git worktree remove` (never `--force`; a few tries), and what Git for
-  Windows cannot delete (paths beyond 260 characters without `core.longpaths`) is deleted by Node and the worktree list
-  pruned; then `git branch -d` (never `-D`).
+  checkout, as `git branch -d` decides). The server saves `cleanup_proof` before deleting anything, then removes
+  verified entries with Node's unlink/nonrecursive rmdir (including Windows long paths), removes only this
+  worktree's registration with `git worktree remove` once its folder is absent, and runs `git branch -d` (never
+  `-D`). Unrelated registrations are not pruned. A filesystem error can leave a partial deletion; its proof
+  stays for retry, including across server restarts. Cleanup holds the queue's merge lock, for both callers.
 - Both are recorded in `git.yaml` (`merged` with `by`, `cleaned`) and shown on the queue.
+
+**Interrupted cleanup evidence.** The optional `git.yaml` `cleanup_proof` is written only by the server, through
+the existing atomic Git-file writer, in the project's store outside the target worktree. Its version 1 fields are:
+
+- `version: 1`, `at`, canonical absolute `path`, canonical Git common-directory `repository`, and
+  `repository_identity` (device, inode/file ID and birth time in nanoseconds, as a colon-separated string);
+- `branch`, its verified `tip`, and `into` (the full ref checked for ancestry, or a commit for a detached checkout);
+- `entries`: every entry, including ignored files, empty directories and the `.git` pointer. Each has `path`
+  relative to the target (empty for the root), `kind` (`directory`, `file`, `link`) and `identity` in the same form.
+  Files and links also have `digest` (SHA-256 of bytes or link text) and `modified` (mtime nanoseconds, ctime
+  nanoseconds and mode, colon-separated). Integer identity/time fields remain strings to preserve precision.
+
+Before the first snapshot, Git must identify the registered worktree, repository, branch and clean HEAD; Git
+cleanliness is checked again after the snapshot. On retry, remaining entries must be an unchanged subset of the
+saved manifest, the canonical target and repository must still match, the branch (if present) must still name
+`tip`, and `tip` must remain merged into `into`. Directory timestamps are not compared because deleting children
+changes them; directory identity is compared. Links are never traversed. The entire remainder is checked before
+deletion and each entry and its parents again before removal; nonrecursive rmdir refuses new children.
+Transient Windows removal errors get at most eight retries with increasing 250 ms delays, each preceded by a
+fresh proof check; exhaustion leaves the proof for a later Clean up.
+
+Missing files, a missing `.git` pointer or registration, and an entirely absent target are valid subsets. A missing
+branch is accepted only with saved proof; it lets a crash after `branch -d` finish writing `cleaned`. The final
+write sets `cleaned` and clears `cleanup_proof`, `cleanup` and `merge`. An already cleaned queue returns success
+without touching a newly created path or branch. An interrupted automatic merge cleanup resumes before merge
+judgement (which otherwise requires the deleted branch). A survey's recorded wait still requires the user's retry.
+
+Old PT/WK remnants without proof are never inferred clean from failed `git status`. The 409 refusal identifies
+the missing registered Git state and pre-deletion identity/content manifest, and asks the user to preserve and
+inspect the remainder outside the worktree path before retrying with that path absent. If the branch is also
+missing, a verified merged branch tip must first be restored by the user; Nexus cannot reconstruct that evidence.
+No CLI repair command or second writer is added. See README, "Interrupted worktree cleanup".
 
 ### Cleaning up a survey's worktree
 
 A survey run (`maintenance: survey`) in a worktree of its own (`worktree: auto`, or a path: the `integration` mark)
 has no integration step and is never merged back: it leaves no commit. Once it is `done`, the server removes its
 worktree and branch (`apps/server/src/merger.ts`), **whatever `merge_back` says**, the same way the cleanup above goes
-(`cleanUp`: `git worktree remove`, never `--force`; `git branch -d`, never `-D`), recorded as `cleaned` in `git.yaml`.
+(`cleanUp`: durable proof and verified entry removal; `git branch -d`, never `-D`), recorded as `cleaned` in `git.yaml`.
 Only when:
 
 - every step is done or skipped: a stopped survey (a stop condition, a commit Nexus found) or one with a failed step
@@ -992,8 +1026,8 @@ Only when:
   looked at again a moment later);
 - the worktree is clean, untracked files included (`git status --porcelain`).
 
-When it is not clean, or the cleanup is refused (the branch not merged into the base's checkout, a removal that
-fails), nothing is removed: `git.yaml` gets `cleanup.waiting` (`reason`, `since`; `files`: what is left, as git status
+When it is not clean, or the branch is not merged, nothing is removed. A removal failure can leave a partial tree
+and keeps `cleanup_proof`. In either case `git.yaml` gets `cleanup.waiting` (`reason`, `since`; `files`: what is left, as git status
 names it, the first 20, and `more`: how many besides), the user's waiting list an item of kind `cleanup` with the
 reason ("survey run Q is done, but its worktree stays: 1 file: ?? notes.txt left in it; look at them, then clean up
 (<path>)"), and the orchestrator is told once (`notify:cleanupwait:…`). Nexus does not try again; the user's Clean up

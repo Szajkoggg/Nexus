@@ -225,6 +225,8 @@ export class Merger {
     }
     if (q.git?.cleaned) return;
     if (q.status !== "done") return whileGoing();
+    // A crash after branch deletion must finish the recorded cleanup before judging the now absent branch.
+    if (q.git?.cleanup_proof) return this.cleanup(state, q);
     const d = judgeMerge(this.store, state, q, "nexus", this.o.serverRoot ?? ROOT);
     switch (d.kind) {
       case "none":
@@ -259,7 +261,7 @@ export class Merger {
       if (q.git.merge?.waiting) this.writeMerge(q, { ...q.git.merge, waiting: undefined });
       return; // the user's return batch shows it; a Fix it runs in the worktree
     }
-    try { withMergeLock(this.store, q.id, () => cleanUp(this.store, q.id)); }
+    try { cleanUp(this.store, q.id); }
     catch (e) { this.wait(q, `queue ${q.id} is merged back, but its cleanup waits: ${(e as Error).message}`); }
   }
 
@@ -275,14 +277,25 @@ export class Merger {
     if (!path || samePath(path, state.project.root)) return;
     let waiting: CleanupWaiting;
     try {
-      const left = existsSync(path) ? worktreeLeft(path) : { files: [], count: 0 };
-      if (!left.count) { withMergeLock(this.store, q.id, () => cleanUp(this.store, q.id)); return; }
-      const more = left.count - left.files.length;
-      waiting = {
-        reason: `survey run ${q.id} is done, but its worktree stays: ${leftText(left)} left in it; look at them, then clean up (${path})`,
-        since: now(), files: left.files, ...(more ? { more } : {}),
-      };
-    } catch (e) { waiting = { reason: `survey run ${q.id} is done, but its worktree could not be cleaned up: ${firstLine(e)}`, since: now() }; }
+      cleanUp(this.store, q.id);
+      return;
+    } catch (e) {
+      waiting = { reason: `survey run ${q.id} is done, but its worktree could not be cleaned up: ${firstLine(e)}`, since: now() };
+      // Keep the useful status listing for an ordinary dirty tree, but never replace a proof refusal with status
+      // from a partially removed tree (or with another unreadable-status error).
+      if (existsSync(path) && !this.store.readGit(q.id)?.cleanup_proof && (e as Error).message.includes("has uncommitted changes (")) {
+        try {
+          const left = worktreeLeft(path);
+          if (left.count) {
+            const more = left.count - left.files.length;
+            waiting = {
+              reason: `survey run ${q.id} is done, but its worktree stays: ${leftText(left)} left in it; look at them, then clean up (${path})`,
+              since: now(), files: left.files, ...(more ? { more } : {}),
+            };
+          }
+        } catch { /* The cleanup's actionable refusal is already recorded above. */ }
+      }
+    }
     patchGit(this.store, q.id, { cleanup: { waiting } });
   }
 

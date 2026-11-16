@@ -5,16 +5,16 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  ProjectStore, approveQueue, loadProjectState, newId, now, planLines, routeAnswers, updateSettings, type Event, type QueueFile, type SessionFile, type StepDef,
+  ProjectStore, approveQueue, loadProjectState, newId, now, planLines, routeAnswers, updateSettings, type Event, type GitFile, type QueueFile, type SessionFile, type StepDef,
 } from "@nexus/protocol";
 import { recordBase } from "../src/gitinfo.ts";
 import { Merger } from "../src/merger.ts";
-import { judgeMerge, mergeBack, removeWorktree, withMergeLock } from "../src/mergeback.ts";
+import { cleanUp, judgeMerge, mergeBack, withMergeLock } from "../src/mergeback.ts";
 import { judgePlan } from "../src/deploy-plan.ts";
 import { Engine } from "../src/engine.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
@@ -416,9 +416,79 @@ test("a worktree with paths beyond 260 characters is removed completely", () => 
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "index.js"), "module.exports = 1;\n");
   assert.ok(join(dir, "index.js").length > 260);
-  removeWorktree(x.root, q.wt);
+  mergeBack(x.store, "Q");
+  cleanUp(x.store, "Q");
   assert.ok(!existsSync(q.wt));
   assert.ok(!git(x.root, "worktree", "list", "--porcelain").replaceAll("\\", "/").toLowerCase().includes(q.wt.replaceAll("\\", "/").toLowerCase()));
+});
+
+for (const phase of ["partial tree", "removed tree", "deleted branch"] as const) {
+  test(`a new Merger resumes persisted cleanup after ${phase}`, (t) => {
+    const x = project();
+    const q = finished(x);
+    q.look(); // merged, cleanup has not begun
+    if (phase === "partial tree") {
+      assert.throws(() => cleanUp(x.store, "Q", { unlink: () => {
+        unlinkSync(join(q.wt, ".git"));
+        git(x.root, "worktree", "prune", "--expire=now");
+        throw new Error("EPERM: injected");
+      } }), /EPERM/);
+    } else if (phase === "removed tree") {
+      const lock = join(x.root, ".git", "refs", "heads", "nexus", "Q.lock");
+      writeFileSync(lock, "injected");
+      assert.throws(() => cleanUp(x.store, "Q"), /cannot lock ref|could not remove/);
+      unlinkSync(lock);
+    } else {
+      const write = x.store.writeGit.bind(x.store);
+      t.mock.method(x.store, "writeGit", (id: string, record: GitFile) => {
+        if (record.cleaned) throw new Error("interrupted before cleaned record");
+        write(id, record);
+      });
+      assert.throws(() => cleanUp(x.store, "Q"), /interrupted before cleaned/);
+      assert.equal(git(x.root, "branch", "--list", "nexus/Q"), "");
+    }
+    q.merger.shutdown();
+    const store = new ProjectStore(x.store.dir);
+    const restarted = new Merger(store, { start: () => assert.fail("no worker should start"), release: () => {}, busy: () => false });
+    try {
+      restarted.onChange(loadProjectState(store));
+      assert.ok(store.readGit("Q")!.cleaned);
+      assert.equal(store.readGit("Q")!.cleanup_proof, undefined);
+      assert.equal(existsSync(q.wt), false);
+      assert.equal(git(x.root, "branch", "--list", "nexus/Q"), "");
+      assert.equal(x.main(), q.sha);
+      restarted.onChange(loadProjectState(store));
+      assert.equal(store.readGit("Q")!.merge, undefined);
+    } finally { restarted.shutdown(); }
+  });
+}
+
+test("a survey wait preserves cleanup proof and a restarted merger leaves its retry to the user", () => {
+  const x = project();
+  const q = finished(x);
+  q.look();
+  x.store.writeQueue({ ...x.store.readQueue("Q"), maintenance: "survey" });
+  assert.throws(() => cleanUp(x.store, "Q", { unlink: () => {
+    unlinkSync(join(q.wt, ".git"));
+    throw new Error("injected partial removal");
+  } }), /injected/);
+  const proof = x.store.readGit("Q")!.cleanup_proof;
+  writeFileSync(join(q.wt, "foreign.txt"), "keep");
+  q.look();
+  assert.deepEqual(x.store.readGit("Q")!.cleanup_proof, proof);
+  assert.match(x.store.readGit("Q")!.cleanup!.waiting.reason, /new, modified or replaced/);
+  const waiting = x.store.readGit("Q")!.cleanup;
+  q.merger.shutdown();
+  const store = new ProjectStore(x.store.dir);
+  const restarted = new Merger(store, { start: () => assert.fail("no worker"), release: () => {}, busy: () => false });
+  try {
+    restarted.onChange(loadProjectState(store));
+    assert.deepEqual(store.readGit("Q")!.cleanup, waiting);
+    unlinkSync(join(q.wt, "foreign.txt"));
+    cleanUp(store, "Q");
+    assert.ok(store.readGit("Q")!.cleaned);
+    assert.equal(store.readGit("Q")!.cleanup, undefined);
+  } finally { restarted.shutdown(); }
 });
 
 // ---------------------------------------------------------------- with the engine and the fake runtimes

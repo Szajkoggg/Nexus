@@ -728,6 +728,23 @@ removes the worktree and deletes the branch, only if nothing is uncommitted and 
 pushed. (A queue from before the integration step merges as before: a fast-forward when possible, else a merge commit;
 a conflict is aborted.)
 
+**Interrupted worktree cleanup.** Retry Clean up after resolving the reported filesystem error. A cleanup that
+started with this version records the verified folder identity and contents before deletion, so it can continue
+even after `.git` or the worktree registration disappeared, including after a server restart. New, changed or
+replaced contents stop the retry; Nexus never treats unreadable Git state as a clean folder. An already completed
+cleanup is harmless to retry.
+
+For an older partial cleanup (including PT/WK) with no saved proof, the missing evidence cannot be reconstructed
+from a successful merge alone. Preserve the **entire remaining folder at a separate backup path**, leaving the
+original worktree path absent. Inspect that backup against the queue's merged commit in an independent checkout;
+recover modified, untracked and ignored work before deciding whether to discard anything. Then retry Clean up:
+Nexus can prune the old registration and delete the still-merged branch without deleting the backup. If that
+branch is also gone and there is no proof, first identify its original tip from the merge record/reflog and verify
+that it is contained in the intended base, then restore that branch at the verified commit. If its tip cannot be
+established, keep the backup and ask for a repository review; do not guess. Never recreate `.git`, manufacture a
+cleanup proof, or use a forced recursive delete to bypass this refusal. An EPERM identifies a failed operation,
+not the process responsible; identifying a lock or permissions problem may still need separate investigation.
+
 **Merging back by itself** (Settings → Merging back, global with a project override, off by default): Nexus does the
 merge back and the cleanup itself, once every step is accepted and the integration step's checks pass. If the checkout
 of main has uncommitted changes, main is checked out nowhere, the checks failed, or main moved on again after two runs

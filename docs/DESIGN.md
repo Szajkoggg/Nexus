@@ -2521,6 +2521,55 @@ On the plan view of the step's base commit (seed `scripts/capture/seed-plan-nexu
 it found 6 lines through boxes and 15 titles or reasons cut short at 1440 px, and 9 cut texts at 390 px; on the PL1
 mockups (`docs/ux/mockups/22-plan-layout.html`, variants A and B) none.
 
+## Resuming worktree cleanup (queue CW1)
+
+PT exposed a gap between two individually reasonable checks: cleanup checked a clean, merged worktree, then
+`git worktree remove`/recursive removal could remove `.git` or its registration before failing on another file.
+The next Clean up could only report an unreadable Git status. A successful merge does not prove that the remaining
+folder still belongs to that cleanup, nor that someone has not written new work into it.
+
+The server now saves a versioned `cleanup_proof` in the queue's existing `git.yaml` **before deletion**. That file
+already has an atomic writer and belongs to the server; a second journal writer or a marker inside the directory
+being deleted would weaken the contract. A separate top-level field also survives the existing `cleanup.waiting`
+and merge-wait patches in `merger.ts`, and step-round updates in `gitinfo.ts`. No migration invents evidence for old
+queues. The proof lasts until worktree removal, registration cleanup and branch deletion all succeed and `cleaned`
+is recorded together with clearing the proof.
+
+The proof binds the canonical target and Git common directory, filesystem identities (device, file ID and birth
+time), the merged tip and destination ref, and a manifest of all entries. Ignored files and empty directories are
+included: Git alone cannot detect foreign additions to node_modules after cleanup starts. Regular-file bytes and
+link text are hashed; file timestamps and mode also detect rewrites, while directory timestamps are excluded
+because deleting children changes them. Junctions and symlinks are recorded as links, never traversed. An unreadable
+entry or unavailable identity refuses cleanup. This costs a full filesystem walk and content hashing, and the
+manifest makes git.yaml larger while cleanup is pending; that is the cost of proving an unchanged remainder even
+after Git metadata has vanished. A mere boolean "cleanup started" or a root marker would not prove content safety.
+
+Deletion uses unlink and nonrecursive rmdir instead of Git's initial recursive deletion or a recursive Node
+fallback. Each attempt checks the whole remaining tree against the proof before removing anything, then checks
+each entry and its parent identities immediately before deletion. Only an unchanged subset is accepted. A new
+child arriving during removal prevents rmdir; a replacement or changed file prevents unlink at the next check.
+This is recovery from interrupted local operations, not an OS transaction against a hostile process racing the
+final filesystem syscall; users must not keep editing a worktree they are deleting. The queue's shared merge lock
+serializes the dashboard and server callers. No running queue is eligible. Removal retries transient Windows
+errors up to eight times with increasing 250 ms delays, rechecking the proof on each attempt. A fake-runtime
+survey test exposed a short EBUSY while its exiting worker still held the empty directory; keeping the former
+bounded retry behavior handles that without treating a lasting lock as success. Once the directory is gone,
+`git worktree remove` removes only its registration; a global prune would affect unrelated missing worktrees.
+
+A missing target is an empty subset. A missing branch can complete only when the recorded tip is still in the
+recorded destination; a changed branch is refused. The automatic merger checks for pending cleanup before judging
+the branch, so a restart after branch deletion can finish the final record. Completed cleanup is idempotent and
+does not touch a later folder or branch at the old names. Surveys retain their existing manual retry after a
+recorded cleanup wait.
+
+Real temporary Git repositories reproduce partial removal with deterministic EPERM injection, both with and
+without worktree registration, then reload the store and construct a new Merger. Tests cover content and identity
+changes, ignored additions, branch/base movement, missing folders, deletion before/after branch removal, Windows
+long paths, legacy refusal and preservation of the merged commit. The injected error does not identify the cause
+of PT's original EPERM; lock/permission investigation remains separate. No real PT/WK remainder or live server was
+used. The legacy recovery path preserves the entire remainder outside its old path and requires independent
+inspection before discarding it; missing branch evidence is restored only from a verified tip, never guessed.
+
 ## Open questions
 
 1. **The local HTTP gap.** Any agent with a free shell on this machine (Codex's sandbox leaves loopback open) can
