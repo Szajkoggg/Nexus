@@ -2,6 +2,7 @@
 // what a fresh orchestrator session starts from (apps/server/src/orchestrator.ts). Pure: it reads a derived state.
 import { stopPlace } from "./attention.ts";
 import { openPlan } from "./plan.ts";
+import { trainText } from "./train.ts";
 import type { ProjectState, QueueView } from "./state.ts";
 import { isOpenQuestion, runGoing } from "./status-rules.ts";
 import { stepValuesText } from "./steps.ts";
@@ -16,7 +17,7 @@ export function stopLines(q: QueueView): string[] {
 
 /**
  * A queue's place in the plan: the queues it waits for (each with who set it and how it stands), a proposal waiting for
- * the user, its planned start, and why it has not started.
+ * the user, its planned start, and why it has not started; and its place in the merge train (train.ts).
  */
 export function planLines(q: QueueView): string[] {
   const out: string[] = [];
@@ -30,6 +31,7 @@ export function planLines(q: QueueView): string[] {
   if (p?.at) out.push(`  scheduled at ${new Date(p.at).toLocaleString("sv-SE").slice(0, 16)}${p.usage ? " (usage reset)" : ""}${p.session ? `, in session ${p.session}` : ""}`);
   if (p?.failed) out.push(`  the planned start did not happen: ${p.failed.reason} (the user sees it; start the queue or take it out of the plan with nexus run ${q.id} cancel-start)`);
   else if (p || plan) out.push(`  now: ${(p?.waiting || plan?.waiting || "it may start")}${p?.held ? " (it starts by itself)" : ""}`);
+  if (q.train) out.push(`  integration: ${trainText(q.train)}; it goes on by itself`);
   return out;
 }
 

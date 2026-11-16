@@ -40,6 +40,9 @@ Nexus is developed with Nexus. The agents working on this repository are run by 
   suite (`npm test`) runs at the end of a step, as the queue's checks, not before each commit, and may first wait (up
   to 15 minutes) for another checkout's full run to end. If the dashboard changed: `npm run build -w @nexus/web`. Fix a
   lint finding rather than silence it (docs/DESIGN.md, "Static analysis").
+- **Run control and lifecycle code** (after a queue that touched it the orchestrator offers the `lifecycle` template):
+  the engine, the scheduler and the runtime adapters, in `apps/server/src`: `engine.ts`, `scheduler.ts`,
+  `agent-host.ts`, `claude.ts`, `codex.ts`, `recurring.ts`.
 - **Tests**: behaviour in the engine, orchestrator, conversations or lifecycle gets a test against the fake runtimes
   (`apps/server/test/fake-claude.ts`, `fake-codex.ts`, steered by `fake-behaviour.ts`); protocol logic gets a unit
   test. Tests never call a model.

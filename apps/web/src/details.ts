@@ -133,6 +133,8 @@ export function describe(e: Event): string {
     // Recurring queues are shown in their own part of the Queues view (queue TQ4).
     case "recurring.set":
     case "static_analysis.declined":
+    // A partner's hand-over record is shown by the ideas overview (queue IO).
+    case "ideas.covered":
     case "note.read":
     case "plan.proposed":
     case "question.withdrawn":

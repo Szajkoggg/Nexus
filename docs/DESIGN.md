@@ -516,6 +516,23 @@ back by itself) and `resolve_conflicts` (the integration step's worker resolves 
   by Node where Git for Windows cannot (paths beyond 260 characters); the branch with `git branch -d`, never `-D`.
 - **No push.** The merged base goes to the remote with the next deploy; a deploy planned after such a queue goes
   after its fast-forward.
+- **The plan waits for the merge back** (queue MQ, 2026-11-16). With `merge_back` on, a queue planned after one in a
+  worktree of its own starts only once that one's work is merged back (`doneForPlan`, `notMergedBack` in
+  packages/protocol/src/plan.ts), so it starts from a base that has the work, and a chain of worktree queues does not
+  build on a base without its predecessors. The planned deploy already waited the same way; both use one test. With
+  `merge_back` off the user's Merge back may come much later, or never, so finishing stays enough there.
+- **The merge train** (queue MQ, 2026-11-16). Two worktree queues finishing together both used to integrate against
+  the same base; the first fast-forward then moved the base under the second, whose integration step ran again (and,
+  with a third, again, up to the limit). Now, with `merge_back` on, one queue per base integrates at a time: it holds
+  the base from its integration step's start to its fast-forward, and the others are held at the end of the step
+  before their integration step, in the order they got there. Each integration step thus merges a base that already
+  has the queues before it, runs once, and is followed by a fast-forward. A fast-forward that waits on the user (a
+  dirty checkout, failed checks) must not stop the train: it lets the next queue go, and once it could go again it
+  queues up behind those already waiting (by when its wait began). Choices: the rule is derived from the files
+  (`packages/protocol/src/train.ts`), not kept in the server's memory, so a restart finds the same order and the
+  dashboard and `nexus status` show the same place; the hold reuses the engine's step boundary and `releaseHold` (the
+  planned deploy's and the merge back's own hold), so no new run state; a queue's own steps never wait, only its
+  integration step; with `merge_back` off there is no train, since the user's Merge back decides the order anyway.
 - A queue from before the integration step keeps the user's old merge (which may make a merge commit).
 - Found while building: a scripted run on a development instance first stood still because a project without an
   orchestrator section has its level-2 reviews done by the user; and a commit in the base's checkout changes nothing
@@ -560,6 +577,14 @@ usage runs out"). Choices made while building it (FB4):
   session is told what the old one cannot hand over itself: its progress lines, its commits since the round began and
   `git status` of the checkout. The changes are not touched: the seed asks the new session to keep them. Asking the
   full runtime for a context summary first (as at a boundary) would spend the usage that ran out, so none is asked.
+- **An entry during the asking turn is no turn of its own (TF1).** An answer or a message that comes while the turn
+  that asked the question still runs (as Nexus sees it: until the turn's result is read) goes into that turn on the
+  same runtime (`next`), so the gate does not look. The full runtime may then take one more turn: the agent acts on it
+  in its turn, or, when the CLI had already ended the turn and its result was still on the way, starts a turn for it.
+  Accepted: it is one turn, and holding entries back from a running turn would cost every other step its in-turn
+  messages. `fallback-mid.test.ts` once raced exactly this under load (a step left waiting, or done on Claude Code);
+  its answers and messages now wait for the asking turn's end, and the fake lingers after the question
+  (FAKE_ASK_LINGER_MS) so that a test which does not wait fails every time.
 - **A failed turn's reset counts as a window.** A turn refused for the usage limit names its reset; that is added as a
   full window of the runtime for the decision, since usage.json may not show it yet.
 - **Notices wait in the orchestrator's inbox.** A notice that started the orchestrator's turn while its runtime (Claude
@@ -1930,6 +1955,14 @@ is gone. Three things the move needed:
 Measured back to back on a quiet machine, the eight files went from 606 s to 503 s together; the suite (240 s against
 246 s) is set by its slowest files, which this did not touch.
 
+**Remaining fixed work and repeated repositories (queue TF3).** The provisional deploy tests now release Q1 and Q2
+separately after their commits. The scenario tests release Q1 after pausing and Q4 only after the restart; their
+frozen-clock golden files stay unchanged. Neither test needs the work to last a fixed time. The merger tests build
+their initial Git repository once and copy it, including `.git`, into each new project. No objects, branches, index,
+reflogs or worktree registrations are shared, and each copy gets its own ProjectStore. The context-care,
+global-settings and protocol closing/integration pairs use tables of the original cases, retaining their distinct
+inputs and assertions; fewer test registrations do not mean fewer cases.
+
 ## One full test run on the machine (queue FX)
 
 Decided on 2026-11-15: with queues in worktrees side by side, two checkouts often ran `npm test` at once; each run
@@ -1950,6 +1983,47 @@ The suite runs every file side by side on every core already, so two at once onl
 
 Measured with two temporary clones started 5 s apart (a busy machine, other work running): the first took 268 s,
 the second waited about 263 s and then took 181 s; both green.
+
+### A run ends with its starter; a lock held too long is stale (queue TF)
+
+The survey TH found a hung run of another worktree holding the lock through a night, so every full run waited 15
+minutes and then ran without it. On Windows a killed parent leaves its children running: a worker's `npm test` ended
+on its background time limit, or a shell closed, could leave the whole test run going and holding the lock (its
+process alive). Decided:
+
+- **A watchdog process** per run (`test-lock.ts --watchdog`, detached, with an IPC channel to the wrapper) watches the
+  run's starter: the wrapper's parent always, then each ancestor while it is a shell (cmd, bash, sh, PowerShell, ...)
+  or npm, so up to the agent or terminal that ran the command and not beyond (not the Nexus server, whose restart is
+  not the run's end). One of them gone: the wrapper ends the run's tree (`taskkill /T`, a process group elsewhere)
+  and removes its lock. The wrapper killed by itself (its channel closed): the watchdog does it. It looks every
+  second; while waiting for the lock too.
+- **Found by asking the system**: on Windows one PowerShell walks the parents with a CIM query per level (about a
+  second; the whole process table takes several, and `wmic` is gone from current Windows), and stops after the first
+  that is no shell or npm: WMI is not cheap, and twelve levels per walk, about eight walks per suite (the run's and the
+  lock tests'), coincided with the update tests timing out in most full runs. A parent newer than its
+  child is a reused pid and ends the walk. Git Bash breaks the Windows chain where an MSYS process execs another (npm's
+  own shell script does): the exec'd process's Windows parent is a stand-in that is gone, and the walk goes on through
+  MSYS's process table (`ps -e -l` beside its bash.exe: PID, PPID, WINPID). Until the chain is known only the parent is
+  watched; a starter that dies in that second or two is caught only if it is the parent.
+- **Node already does part of it on Windows**: libuv puts a process's children in a job object that ends them with it,
+  so a killed Node parent takes its children along (and a test whose starter is a Node process does not show the
+  problem: the starter in the tests is a shell). That job would end the watchdog too, which is why it is detached.
+- **20 minutes since `since`** (`NEXUS_TEST_LOCK_STALE_MS`), five times a full run, makes a lock stale even if its
+  process lives (a hung run, a pid reused): the next run takes it over at once instead of waiting 15 minutes and
+  running without it. The old run is not ended (not that run's to end); its end leaves the new lock alone.
+- **Never a tree kill by a pid that may have been reused**: Windows gives a pid to a new process at once, and
+  `taskkill /T` of a reused one ends another program's tree. The wrapper ends its run only while the run's handle says
+  it runs; the watchdog ends an orphaned run only after checking it is still the wrapper's child; the tests end only
+  their own starter, through its handle, and their long run ends by itself within two minutes.
+- **Failing tests left servers running**: `chat-update.test.ts`, failing before its hand-over, released its stand-in
+  build in `finally`, so the update went on after the test and started a successor server nobody ended (with its fake
+  runtimes, which kept starting turns); a timed-out hand-over's successor was not ended either. Several were found
+  after a morning of full runs, and they loaded the following ones. Its `finally` now cancels the drain or fails the
+  build, waits for the update to settle and ends the successor the update's log names.
+- **The drain and the queue's pause are separate observations (TF.refactor)**: the lifecycle checks whether the
+  worker runtime is idle, while the engine records the queue's `paused` state after its turn-settle delay. Under load
+  the chat-update test observed `updating` while the queue still said `pausing`. It now also waits for `paused` before
+  reading the run, keeping its assertions about the pause, restart flag and interrupted step unchanged.
 
 ## The engine's own waits in tests, and what sets the slowest files (queue FX)
 

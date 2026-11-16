@@ -27,6 +27,7 @@ a shell command can take part.
   project.yaml                          server
   tags.yaml                             server: the project's tag lists (areas, own activities, renames, proposals)
   metrics.yaml                          server: the project's metrics (unit, how shown, target, warning threshold)
+  idea-matches.yaml                     server: the user's decisions on matching earlier queues to the notes' entries
   orchestrator/summary.md               server: the orchestrator's latest summary for a fresh session (its context care)
   drafts/<queue-id>.yaml                the orchestrator: its queue drafts (also `nexus queue draft --template`)
   recurring/<id>.yaml                   server: a recurring queue (template, values, schedule, standing approval)
@@ -209,7 +210,10 @@ kind: code                             # optional tags, the defaults of its step
 origin: user
 runtime: claude                        # optional: the runtime, model, effort and fallback of its steps that name none
 fallback: [{ runtime: codex, effort: high }, wait]   # (see "Kinds and their defaults")
-integration: true                      # written only by the server: the queue works in a worktree of its own, so it ends with the integration step (below)
+integration: true                      # written only by the server: the queue works in a worktree of its own, so it ends with the integration step (below; a survey run has none)
+source:                                # optional: where it came from (see "Where a queue came from" below)
+  - docs/ideas/queue-plan-view.md#2026-11-15   # a note reference: a thinking partner's dated Decided entry; pinned by the approval
+  - { path: QUEUE.md, imported_at: 2026-11-12T00:00:00Z }   # written by nexus import: the file it was read from; not pinned
 user_levels: { W3: 1 }                 # levels the user set on steps; written only by the server (see "Review")
 legacy_policies: { W1: continue }      # each step's review policy from before review levels; written only by the server
 stop_conditions:                       # in addition to the project defaults
@@ -410,6 +414,20 @@ skipping a step at work, and any other status. The engine reads a step's status 
 skipping a pending step of a running queue takes effect: the step is never opened. A cancelled queue is neither
 started nor resumed.
 
+**Where a queue came from** (`source`, decided by the user 2026-11-15, queue IO; docs/ux/ideas-overview.md). A list:
+note references, set by the orchestrator in a draft, and the record of the Markdown file `nexus import` read the queue
+from. An older file's single `{ path, imported_at }` reads as a list of one. A note reference is
+`<notes folder>/<file>.md#<YYYY-MM-DD>`: a note in the project's `conversations.notes_dir` (subfolders allowed, the
+README is not a note) and the date of one of its Decided entries; every Decided heading of that date in the note is the
+one entry it names (`2026-11-15` and `2026-11-15 (later): …` alike). A queue may name several entries, and an entry may
+be named by several queues. A draft that brings a new reference is refused, with the reason, when it is not one, when
+the project has no notes folder, when the file is outside the folder or missing, or when the note has no entry of that
+date (the refusal lists its dates); a reference the queue already had is not checked again. Left out of a revision's
+draft, the source stays; given, its note references replace the queue's, and the import record stays. The note
+references are part of what an approval pins, in their order, only when there are any: the hash of a queue without
+them (an imported one included) is the one it had before the list, and a revision that changes them needs the user's
+approval again.
+
 **Drafts do not change statuses.** In a draft of an existing queue a step's `status` may be left out or be the one in
 the file; any other value refuses the whole draft, listing the steps. A new step has no status or `skipped`. A draft
 that leaves out a step that has started or stopped (one with a stretch at work, or a status other than `pending` or
@@ -479,6 +497,9 @@ new arises on the base itself.
   first gave the queue its worktree (an auto worktree it made, or a path the queue names that is not the project's
   checkout). The mark is the server's: a draft cannot set it (it is dropped), a revision keeps it, and it is not part
   of what an approval pins. A queue that worked in a worktree before the step existed (a path, no mark) has none.
+- **Not for a survey run.** A queue with `maintenance: survey` has none, even in a worktree of its own: it leaves no
+  commit (Nexus stops one that does), so there is nothing to merge back; its worktree is removed once it is done (see
+  "Cleaning up a survey's worktree"). The same template in `fix_small` mode has one, as any worktree queue.
 - **Kept like the closing step.** Not in `queue.yaml`'s `steps`; derivation adds it last (`stepDefs`), so it stays last
   when a revision adds steps. Its id is reserved: `<queue>.integrate` (a draft with a step of that id is refused); the
   state marks it with `integration: true`. Its text is Nexus's standard (`INTEGRATION_TITLE` "Integration",
@@ -568,6 +589,7 @@ Every line:
 | `review.confirmed` | `queue`, `step` | User only: confirms a provisional acceptance |
 | `review.fix_asked` | `queue`, `step`, `text` | User only: Fix it on a provisional acceptance; the orchestrator drafts a revision with a step that fixes it |
 | `status.set` | `queue`, `step?`, `to` (`skipped`, `finished`, `cancelled`, `propose-lift`), `reason` | Orchestrator only: housekeeping; the server checks it and records an entry in the queue's `changes` (see `queue.yaml`). A worker's is ignored by derivation, and the server applies only the orchestrator's own requests |
+| `ideas.covered` | `refs` (note references, at least one) | Thinking partners only (`nexus covers`): the Decided entries a hand-over passes on; the ideas overview reads them as handed over (see "Conversations"). Another session's is ignored with a warning |
 | `log` | `level`, `text` | Anything else worth keeping |
 
 The server validates every event against the writer's role and ignores (and reports) what that role may not do.
@@ -585,7 +607,7 @@ Written only by the server's queue engine; agents never touch them.
 
 | File | What |
 |---|---|
-| `queues/<id>/git.yaml` | The HEAD of the queue's checkout around each step's work (`src/gitinfo.ts`): `base` (an auto worktree's: `ref`, the branch or commit it was made from, its `sha`, `at`), `base.branch` (whether `ref` names a branch: only a branch can be merged back into), `merged` (`at`, `into`, `path`, `sha`, `fast_forward`, `by`: `nexus` or `user`, absent on older records), `cleaned` (`at`, `path`, `branch`), `merge` (Nexus merging back by itself: `waiting` (`reason`, `since`: what keeps it, told to the user and the orchestrator; `released`: the queues whose runs Nexus held for this merge back and let go on when it could not go), `reintegrations` (runs of the integration step again since the user's last Merge back), `reintegrating` (when the last was asked for, until the step opens)), `setup` (the worktree setup command for the worktree Nexus made: `command` (the last one run), `at` (when the worktree was made), `done_at` (once it succeeded), `failed` (`at`, `reason`: its last failure)), `steps.<step>` (rounds, oldest first: `session`, `start` (HEAD when the step opened, or when a send-back reopened it), `started_at`, `end` (HEAD at the end of the turn in which the step got its outcome: done, review, failed or stopped), `ended_at`; a sha is null outside a git repository). A continued step keeps its open round. One writer: the server. See "Git on the dashboard" |
+| `queues/<id>/git.yaml` | The HEAD of the queue's checkout around each step's work (`src/gitinfo.ts`): `base` (an auto worktree's: `ref`, the branch or commit it was made from, its `sha`, `at`), `base.branch` (whether `ref` names a branch: only a branch can be merged back into), `merged` (`at`, `into`, `path`, `sha`, `fast_forward`, `by`: `nexus` or `user`, absent on older records), `cleaned` (`at`, `path`, `branch`), `cleanup` (Nexus's cleanup of a done survey run's worktree could not go: `waiting` (`reason`, `since`, `files` (what is left, at most 20), `more`); see "Cleaning up a survey's worktree"), `merge` (Nexus merging back by itself: `waiting` (`reason`, `since`: what keeps it, told to the user and the orchestrator; `released`: the queues whose runs Nexus held for this merge back and let go on when it could not go), `reintegrations` (runs of the integration step again since the user's last Merge back), `reintegrating` (when the last was asked for, until the step opens), `queued` (`since`: back from a wait, it could go but another queue holds its base; it waits its turn in the merge train, ordered by when its wait began; see "The merge train")), `setup` (the worktree setup command for the worktree Nexus made: `command` (the last one run), `at` (when the worktree was made), `done_at` (once it succeeded), `failed` (`at`, `reason`: its last failure)), `steps.<step>` (rounds, oldest first: `session`, `start` (HEAD when the step opened, or when a send-back reopened it), `started_at`, `end` (HEAD at the end of the turn in which the step got its outcome: done, review, failed or stopped), `ended_at`; a sha is null outside a git repository). A continued step keeps its open round. One writer: the server. See "Git on the dashboard" |
 | `queues/<id>/push.yaml` | Pushing what was accepted: `review` (per step, the HEAD of the checkout when it entered review: `sha` or null, `finished_at`, `at`), `steps` (per accepted step: `acceptance`, `sha`, `result` (`pushed`, `failed`, `skipped`, `held`), `text`, `at`, `held_by?`), `pushed` (the last success: `sha`, `step`, `at`, `remote`, `branch`), `error` (the last failure until a success). One writer: the server. See "Pushing what was accepted" |
 | `queues/<id>/plan.yaml` | The queue's place in the plan (see "The plan"): `by`, `reason?`, `after` (the queues it waits for, each with `queue`, `by`, `at`, `reason?`), `created_at`, `updated_at`, `started_at?`, `proposal?`, `decisions`. One writer: the server; it stays after the queue starts (marked `started_at`), and taking the queue out of the plan removes it |
 | `queues/<id>/start.yaml` | The queue's next start as planned (see "The plan" and "Schedules"): `at?` (a schedule: the time, ISO 8601; with `usage`, `claude` or `codex`, when that is the usage window's reset plus the margin; without `at`, the options of a start by the plan; `after` only in files from before the plan, moved into `plan.yaml` at the server's start), the start's `runtime?`, `model?`, `effort?`, `session?` (a session to continue), `by` (`user` or `orchestrator`), `reason?`, `revision` (the queue's when planned), `created_at`, `failed?` (`at`, `reason`, `missed?`: it came due and the queue could not start; `missed`: a schedule more than 15 minutes late, the server not running at its time), `held?` (`since`, `kind`: `approval`, `checkout` or `limit`, `reason`: it came due but waits for the approval of the queue's current revision, for its checkout or for a place under the limit, and starts by itself; see "The plan" and "One queue per checkout, and a limit"). One writer: the server; a start of the queue or a cancel removes it |
@@ -904,7 +926,36 @@ reason (and, with `released`, "; the run of queue M, held at its step's end for 
 orchestrator is told the same (`notify:mergewait:…`); a merge back Nexus did is told to it too
 (`notify:merged:…`). While something waits it is looked at again every 30
 seconds, since git can change what holds it without a file of the project changing. Nothing is pushed: the base goes
-out with the next deploy, and a deploy planned after such a queue waits for its merge back (see "Planned deploys").
+out with the next deploy, and a deploy planned after such a queue waits for its merge back (see "Planned deploys"),
+as does, with `merge_back` on, a queue planned after it (see "The plan").
+
+**The merge train** (queue MQ; `packages/protocol/src/train.ts`, held and let go by `merger.ts`). With `merge_back`
+on, the queues that go back into one base integrate one at a time, so that each integration step merges a base that
+already has the queues before it, and a fast-forward never makes the next one run again. Per base, derived from the
+files alone (a restarted server finds the same order):
+
+- **One queue holds the base**: its integration step runs or waits for its review or an answer (unless its run
+  halted), it was asked to run again (`merge.reintegrating`), or it is integrated and waits for its fast-forward (no
+  `merge.waiting`, no `merge.queued`, and no unconfirmed provisional work holding it while `provisional_counts` is off).
+- **The others wait in line**: a queue whose every other step is closed, whose integration step is pending and whose
+  run is going (or held there), ordered by when its own steps ended (the latest `finished_at`); and a queue back from
+  a wait (`merge.queued`), ordered by `since`. At the end of the step before its integration step, the engine asks the
+  merge back (the boundary, as above): while another queue holds the base or is before it in line, the run is held
+  there (`run.yaml` paused, `resume_after_restart`, reason "held at the end of step B2: it waits to integrate after W
+  (one queue at a time merges back into main); it goes on by itself when its turn comes") and goes on by itself when
+  its turn comes (`releaseHold`). A queue's own steps before its integration step never wait.
+- **A fast-forward that waits** on something the user should know of (`merge.waiting`: a dirty checkout, failed checks,
+  the limit of runs again, …) takes its queue out of the train: the next queue in line goes. Once it could go again
+  while another queue holds the base (or one is before it in line), its wait is replaced by `merge.queued` (`since`:
+  when the wait began), so it goes after the queues that were waiting before it got stuck; in its turn it is
+  fast-forwarded, or, the base having moved on, its integration step runs again. One queue moves (or holds the
+  checkout of) a base per look.
+- **Where it shows**: each waiting queue's `train` in the project state (`base`, `position` in the line, `after`: the
+  queue just before it, the one holding the base for the first in line; none when it goes next); `nexus status` says
+  "integration: waits to integrate after W (one queue at a time merges back into main); it goes on by itself"; the
+  dashboard's plan shows "waits to integrate after W" on the queue in progress.
+- With `merge_back` off there is no train: the user merges back with Merge back, in any order, when they choose. The
+  user's Merge back does not wait for the train either.
 
 With `merge_back` on, the cleanup follows the merge (by anyone) once no provisional acceptance of the queue waits for
 the user; a Fix it until then runs in the worktree and goes through the integration step again. A cleanup that is
@@ -925,6 +976,29 @@ refused waits and tells like the merge.
   Windows cannot delete (paths beyond 260 characters without `core.longpaths`) is deleted by Node and the worktree list
   pruned; then `git branch -d` (never `-D`).
 - Both are recorded in `git.yaml` (`merged` with `by`, `cleaned`) and shown on the queue.
+
+### Cleaning up a survey's worktree
+
+A survey run (`maintenance: survey`) in a worktree of its own (`worktree: auto`, or a path: the `integration` mark)
+has no integration step and is never merged back: it leaves no commit. Once it is `done`, the server removes its
+worktree and branch (`apps/server/src/merger.ts`), **whatever `merge_back` says**, the same way the cleanup above goes
+(`cleanUp`: `git worktree remove`, never `--force`; `git branch -d`, never `-D`), recorded as `cleaned` in `git.yaml`.
+Only when:
+
+- every step is done or skipped: a stopped survey (a stop condition, a commit Nexus found) or one with a failed step
+  keeps its worktree, as evidence, until the user cleans it up;
+- no provisional acceptance of it waits for the user (a Fix it runs in the worktree);
+- its run is not going, and no step's last round is still open (the turn that reported the step's end still ending:
+  looked at again a moment later);
+- the worktree is clean, untracked files included (`git status --porcelain`).
+
+When it is not clean, or the cleanup is refused (the branch not merged into the base's checkout, a removal that
+fails), nothing is removed: `git.yaml` gets `cleanup.waiting` (`reason`, `since`; `files`: what is left, as git status
+names it, the first 20, and `more`: how many besides), the user's waiting list an item of kind `cleanup` with the
+reason ("survey run Q is done, but its worktree stays: 1 file: ?? notes.txt left in it; look at them, then clean up
+(<path>)"), and the orchestrator is told once (`notify:cleanupwait:…`). Nexus does not try again; the user's Clean up
+on the queue's page does (refused the same way while something is left), and its success clears `cleanup`. The
+dashboard offers no Merge back for a survey run.
 
 ### Removing a project
 
@@ -1089,6 +1163,9 @@ nexus propose-change W --file patch.yaml --reason "..."
 nexus template list | show <id>                # the queue templates in effect (see "Queue templates")
 nexus recurring list                           # the recurring queues and their state (see "Recurring queues")
 nexus static-analysis [status]                 # the stacks and static analysis Nexus sees, and the reminder's state (see "Static analysis reminder")
+# thinking partner only
+nexus ideas matches                            # the suggestions for matching earlier queues to the notes' entries, and the user's decisions (read only; deciding is the user's, in the dashboard)
+nexus covers tags.md#2026-11-14 docs/ideas/plan.md#2026-11-15   # in a hand-over: the Decided entries it passes on (ideas.covered); the notes folder may be left out; each checked against the notes, a missing note or date refused with the note's dates
 # orchestrator only
 nexus queue draft --file queue.yaml
 nexus queue draft --template bugfix --set issue="..." --set area=engine [--id BF]   # writes .nexus/drafts/BF.yaml to complete and upload
@@ -1218,6 +1295,9 @@ from every agent session, and the others from every session but an orchestrator'
 | `POST /api/projects/:id/questions/:qid/answer` | `text`, `continue?` | The user's answer, routed to the asker |
 | `POST /api/projects/:id/queues/:q/run` | `action` (`start`, `pause`, `resume`, `stop`, `stop_at_once`, `cancel_start`), `runtime?`, `model?`, `effort?`, `session?`, `after?`, `next?`, `at?` | Runs the queue through a Nexus-launched session (`session` continues an existing one). `start` with `after` (a queue id or a list): the user's place for the queue in the plan, it starts when those are done; with `next: true`: in the plan with none before it (`{message}`; see "The plan"); with `at` (ISO 8601, or `usage-reset`): a schedule (`{message}`); `cancel_start` takes the queue out of the plan (`{message}`). `stop` pauses and sends the existing Stop now message (`text?` supplies the reason). `stop_at_once` pauses, interrupts the turn and kills only this queue's worker process, waiting for its exit before success; keeps uncommitted changes and the session, writes `step.interrupted`. No worker, a finished run, a stop already in progress or a session reused by another queue: 409. Resume during exit: 409; afterwards it continues the step in the same session. No CLI or orchestrator request action exposes `stop_at_once` |
 | `GET /api/projects/:id/estimates` | | Expected times of the project's open queues, as estimates (`{ samples, min, queues: { <id>: { steps, ms? } } }`): `steps` the steps left (not closed), `ms` their expected time, absent while fewer than `min` (5) steps are finished. A finished (done) step's time is the sum of its worker turns' `duration_ms` in `turns.jsonl` (send-back rounds included, the wait for its review not), over every project the server has; a step to come takes the average of those on its model and effort, else its model, else all, each from at least 5 steps |
+| `GET /api/projects/:id/ideas/matches` | | The suggestions for matching the earlier queues to the notes' entries (`IdeaMatchesResponse`: `items`, in the queues' order, each with `queue`, `ref`, `kind`, `quote`, the queue's `title`, `status`, `finished_at?` and `commit?`, the entry's `lead?`, and the user's `decision?` (`accepted`, `at`)); a decided match whose suggestion is gone stays listed (see "Conversations", matching). Unknown project: 404 |
+| `POST /api/projects/:id/ideas/matches` | `items` (`[{ queue, ref }]`), `accept` (true, false, or null to take the decision back) | The user's decision on suggestions, recorded in `idea-matches.yaml`; an item that is no suggestion (nor decided before) is 404. A user's write like every other (same-origin JSON) |
+| `GET /api/projects/:id/ideas` | | The ideas overview (`IdeasResponse`: `notes_dir`, null without a notes folder; `notes`, each with `file`, `title`, `summary?`, `area?`, `group?`, `area_from?` (`note` or `queues`), `open` and `questions` (its Open questions' text), `ideas`, `status` and `queues`, and its `entries`, each with `ref`, `date`, `headings`, `lead`, `decisions`, `dropped?`, `replaced_by?`, `status`, `queues` and `history`; `unknown_refs`, queues' references to nothing; `to_match`, the suggestions for earlier queues still to decide: `suggestions` and `queues`). Derived on each request from the notes, the queues and the hand-over records; the notes are only read (see "Conversations"). Unknown project: 404 |
 | `GET /api/projects/:id/metrics` | | The project's metrics and their values (`ProjectMetrics`: `metrics`, its own definitions and every check's time seen, `check:<name>`; `values`, oldest first, each a `StepView.metrics` entry with its `queue` and `step`); see "Project metrics". Unknown project: 404 |
 | `GET /api/stats?by=&project=&since=&kind=&activity=&area=&size=&origin=` | | The statistics (`StatsReport`, see "Statistics"): every registered project, or one (`project`; unknown: 404), grouped by `by` (`model`, `effort`, `kind`, `activity`, `area`, `size`, `origin`; default `model`; another: 400), the steps whose last outcome is at or after `since` (a date or a time; unreadable: 400), narrowed to the steps under each tag value given (`kind=code`, `area=p/engine` across projects; the value as the groups name it) |
 | `GET /api/usage/days?since=` | | The usage windows day by day for the global Stats view (`UsageDays`, see "Statistics") from `since` (a date or a time; default 30 days ago; unreadable: 400) to today, with `threshold`, the global `defaults.usage_pause_threshold` |
@@ -1376,7 +1456,7 @@ subscriptions are in `<NEXUS_HOME>/push.json`, written by the server only:
 Whatever newly appears in a project's "waiting for you" list is pushed; the list as found when the server starts is
 the baseline. Every push has a kind, and each device gets it only when its `notify` lets it through
 (`@nexus/protocol` notify.ts, `shouldNotify`): the waiting list's kinds (`question`, `stopped`, `approval`, `review`,
-`failed`, `start`, `provisional`, `plan`, `merge`, `tags`, `recurring`), `update_failed` (an update of Nexus failed),
+`failed`, `start`, `provisional`, `plan`, `merge`, `tags`, `recurring`, `cleanup`), `update_failed` (an update of Nexus failed),
 `deploy` (a planned deploy waits or was dropped), `cancelled` (the orchestrator cancelled a queue), and `test`, which
 always goes. `off` lists the kinds turned off (a kind not listed is on). Within the quiet hours (`quiet.on`; `from` up
 to `to`, `HH:MM` in the device's `timezone`, over midnight when `from` is later; none when they are equal) nothing
@@ -1522,11 +1602,54 @@ hand-over's again: its reply goes to the orchestrator. Then `interrupted` is dro
 role `conversation`: a thinking partner the user talks with about the project, one session per topic, with its chat
 in `chat.jsonl` (`from: partner` for its replies, whole). It reads the whole project and writes only in `notes_dir`
 (relative to the root, checked to lie inside it): Claude Code runs it in `dontAsk` mode allowed `Read`, `Grep`,
-`Glob`, `nexus status`, `nexus help` and read-only git (`git log`, `git status`, `git diff`, `git show`) on both shell
-tools (`Bash(nexus status:*)` and `PowerShell(nexus status:*)`, and so on), and `Edit(<notes_dir>/**)` only; Codex runs it
-with `notes_dir` as its working directory in a `workspace-write` sandbox (`read-only` without a notes folder), approval
+`Glob`, `nexus status`, `nexus help`, `nexus tags` and read-only git (`git log`, `git status`, `git diff`, `git show`) on both shell
+tools (`Bash(nexus status:*)` and `PowerShell(nexus status:*)`, and so on), and `Edit(<notes_dir>/**)` and `nexus covers`
+(which appends to its own events) only with a notes folder; Codex runs it
+with `notes_dir` as its working directory in a `workspace-write` sandbox whose one other writable root is its own session
+folder, for `nexus covers` (`read-only` without a notes folder), approval
 `never`, where its commands (`nexus help` among them, which only reads) run in the sandbox. Its briefing points it to
 `nexus help` for how Nexus works (decided 2026-11-15, queue OP). It starts no work. An idle partner's process ends after 15 minutes; the next message resumes the conversation.
+
+**The ideas overview** (`ideas.ts`, `ideas-read.ts` in the protocol package; docs/ux/ideas-overview.md). The notes in
+`notes_dir` are read, never written, as topics: the title (the first `# ` heading), the `**Summary:**` line and the
+`**Area:** <area> [/ <sub-group>]` line under it, the Open questions and the Ideas (top-level bullets under headings
+named so), and the dated Decided entries. A Decided section is a heading named "Decided" at any level, up to the next
+heading of its level or above; in it a heading that begins with a date, or ends with `(decided <date>)`, starts that
+date's entry (a heading `… (decided <date>)` is one anywhere), a deeper heading without a date goes on with it, and the
+headings of one date are one entry. An entry's lines `**Dropped:** <date>: <why>` and `**Replaced by:**
+<file>#<date>`, written by the partner, mark it so. The partner's briefing asks for these lines (the Summary, one
+Area from the project's list, dated Decided entries, Dropped and Replaced by instead of deleting an entry); the
+orchestrator's asks it to name the entries a queue carries out in the queue's `source`. Each entry's status is derived, never kept: `decided` (nothing
+since), `handed_over` (a hand-over record covers it), `queued` (a queue that is not cancelled names it in its `source`,
+from the upload on), `built` (every such queue is done), and `dropped` or `replaced`, which win over every other, even
+after a queue built it. A topic shows its least advanced live entry, `worked_out` with no entry at all (only dropped or
+replaced ones: dropped, else replaced). Its history is in time order: decided (the entry's date), handed over, and each
+naming queue's queued (created), approved, started, finished (with its last commit) or cancelled, then dropped or
+replaced. A note without an Area line takes the area most of its queues' steps carry. A queue's reference to a note or
+an entry that is not there is listed apart (`unknown_refs`).
+
+**Matching the earlier queues** (queue IO4). A queue whose `source` names no note (one from before the field) gets
+suggestions, derived on each request from its title, description and step goals, sentence by sentence: a mention of
+`<notes folder>/<file>.md` (a note; the README and missing files skipped) with `#<date>` of one of its entries is
+`exact`; else the dates of its entries in the same sentence are `dated` (one each); else its latest entry dated on or
+before the queue's creation is `file`. One suggestion per queue and entry, the strongest kind, with the sentence it
+came from; cancelled queues get none. The user decides in the dashboard (Ideas, Overview, "To match"): accept, reject,
+or take back; the decisions go to `.nexus/idea-matches.yaml`, written only by the server from the user's request:
+
+```yaml
+protocol: 1
+matches:
+  - queue: PV
+    ref: docs/ideas/queue-plan-view.md#2026-11-14
+    kind: dated                        # exact | dated | file: how the suggestion was found
+    quote: "A felhasználó 2026-11-14-i döntései: docs/ideas/queue-plan-view.md (csak a Decided rész döntés)."
+    accepted: true                     # false: rejected
+    at: 2026-11-16T08:00:00Z
+```
+
+An accepted match counts like the queue's `source` in the derivation (the entry is queued, or built once the queue is
+done, with its commit); a rejected one does not. The queues themselves are never changed. No agent decides: `nexus
+ideas matches` only lists the suggestions and decisions, and `nexus ideas accept|reject` is refused as the user's.
 
 **The web** (`conversations.web`, global with a project override, decided by the user 2026-11-15): `off`, `search`
 (the default) or `fetch`. A changed level applies from the partner's next message (a new process, resuming the
@@ -1569,7 +1692,9 @@ whole into the orchestrator's chat. Asked while the partner is still at a turn, 
 end and runs as a turn of its own (that turn's reply stays the partner's message). The summary covers only the topics discussed in that conversation, unless the
 user asked in it to include others: from a notes file, what this conversation decided or recorded; another topic in
 the notes folder, even a related one, is named at most as "see also" (its file), without its content. Only a notes
-file's Decided section holds decisions, and the summary names the dates of the Decided entries it covers. `GET …/queues/:q/steps/:s/conversation` answers `{ conversation }`: the step's
+file's Decided section holds decisions, and the summary names the dates of the Decided entries it covers. With a notes
+folder the instruction also asks the partner to record those entries first with `nexus covers` (an `ideas.covered`
+event among its own events), for the ideas overview. `GET …/queues/:q/steps/:s/conversation` answers `{ conversation }`: the step's
 latest conversation that is not archived (the one with the latest message, or the newest when none has one), or
 `null`.
 
@@ -1780,8 +1905,17 @@ in `start.yaml`.
   proposed meanwhile waits for the user: the start is `held` with kind `approval`, "waits for approval of revision N",
   and comes once approved; it is not a failed start). "Done" is the queue's status `done` with every step closed (done
   or skipped; the closing refactoring step too) and, in a project whose `provisional_counts` is off, no provisional
-  acceptance waiting for the user's confirmation. A queue whose predecessors are all done already starts at once (if
-  its checkout and the limit allow, see "One queue per checkout, and a limit"; else it waits and starts by itself).
+  acceptance waiting for the user's confirmation. With the project's `merge_back` on, a predecessor in a worktree of
+  its own (one with an integration step; not a survey run) is done only once its work is merged back into its base:
+  `git.yaml` `merged` recorded, and not from before its integration step last finished (a Fix it after the merge back
+  runs it again). So the queue after it starts from the base with that work in it (a worktree of its own is made from
+  the project's checkout). Until then the entry waits with "queue A is done; it waits to be merged back into main",
+  followed by what keeps the merge back (`merge.waiting`, "…: queue A: the checkout of main has uncommitted
+  changes…"), and is `blocked` while such a reason stands (else Nexus is at it); the dashboard's plan and `nexus status`
+  ("now: …") show it. With `merge_back` off the user merges back with Merge back when they choose: such a predecessor is
+  done when it finishes, as one in the project's own checkout always is. A queue whose predecessors are all done
+  already starts at once (if its checkout and the limit allow, see "One queue per checkout, and a limit"; else it waits
+  and starts by itself).
 - A predecessor that halts, pauses or waits for an approval: the queue waits, `blocked` (on the user or the
   orchestrator). One that is stopped, cancelled or does not exist: the queue waits too, the user gets an attention
   item of kind `plan` ("Queue B waits, but queue A is stopped: …"; `plan.predecessor`, `plan.cause`), and the
@@ -1900,12 +2034,25 @@ steps:
   top-level key, or keeps no step in survey mode. The shipped `maintenance` template surveys `{{scope}}` and, in
   fix_small mode, fixes `{{small_fixes}}` (by default patch-level dependency updates whose checks pass, and typos in
   documentation).
+- **A worktree of its own**: a template may carry `worktree: auto` (passed to the queue as any queue key). A survey
+  run then works beside the project's checkout without holding it, has no integration step, and its worktree is
+  removed once it is done (see "Cleaning up a survey's worktree"); in fix_small mode it ends with the integration step
+  and is merged back as any worktree queue. The shipped templates carry none: a project decides in its own instance.
+  Nexus's own instances (`nexus-templates/nexus-*.yaml`) carry `worktree: auto`; the notes instance reads its ideas
+  folder, which git does not track here, in the main checkout by its absolute path (a worktree has no copy of it).
+- **Report-only maintenance templates**: `security-audit`, `test-health`, `performance`, `git-hygiene` and
+  `lifecycle` have no step marked `fix_small`, so their fix_small mode is their survey (with `maintenance: fix_small`
+  on the queue). `git-hygiene` takes the checkouts to look at (`checkouts`, by default the project's root) and the
+  places that are never a finding (`never`); its own worktree and branch are never findings. `lifecycle` needs the
+  change to look at (`change`: commits or a queue); it has no schedule: the orchestrator's briefing tells it to offer
+  the template in one sentence when a queue that touched the project's run control or lifecycle code is done (the
+  project's AGENTS.md may name that code; Nexus's names the engine, the scheduler and the runtime adapters).
 
 **Three layers**, weakest first; for the same template id the stronger replaces the weaker:
 
 | Layer | Folder | |
 |---|---|---|
-| `nexus` | `templates/` in Nexus's repository | shipped with Nexus: `bugfix`, `ui-change`, `spike`, `refactor`, `maintenance`, `static-analysis`, and the maintenance templates `dependencies`, `security-audit`, `dead-code`, `test-health`, `performance`, `docs-freshness`, `notes` |
+| `nexus` | `templates/` in Nexus's repository | shipped with Nexus: `bugfix`, `ui-change`, `spike`, `refactor`, `maintenance`, `static-analysis`, and the maintenance templates `dependencies`, `security-audit`, `dead-code`, `test-health`, `performance`, `docs-freshness`, `notes`, `agent-contract`, `git-hygiene`, `lifecycle` |
 | `global` | `<NEXUS_HOME>/templates/` | the user's own, for every project |
 | `project` | `nexus-templates/` in the project's repository root | versioned with the project and seen by its agents (not under `.nexus/`, which git ignores) |
 
@@ -1919,7 +2066,8 @@ layer with an id already taken there (the first by path is used), is listed as n
   and the file's YAML.
 - `nexus queue draft --template <id> [--set name=value]... [--id <queue-id>]` fills it and writes the result into
   `.nexus/drafts/<queue-id>.yaml`, with a comment at the top naming the template and what to complete (the goals'
-  details, the project's checks, tags such as the area, the texts in the queue's language). It records no event and
+  details, the project's checks, tags such as the area, the texts in the queue's language); a text of several lines
+  is written as a literal block (`|`), as a person writes it, never folded (`>`). It records no event and
   uploads nothing: the orchestrator completes the file and uploads it with `nexus queue draft .nexus/drafts/<id>.yaml`,
   and the queue then goes as any other, through the user's approval. Without `--id` the queue's id is the template's
   id in capitals (letters and digits, at most 12), numbered from 2 when a queue or a draft file has it (`SPIKE2`).
@@ -1948,7 +2096,7 @@ set_by: orchestrator           # or user; with reason
 approval: { hash: sha256:..., at: 2026-11-15T10:00:00Z }   # the user's standing approval
 paused: true                   # the user paused it
 handled: 2026-11-16T02:00:00Z  # the times up to this one have been looked at; the next comes after it
-last: { queue: weekly-20261116-0300, at: ..., due: ... }  # the last queue it made
+last: { queue: weekly-20261116-0300, at: ..., due: ..., caught_up: ... }  # the last queue it made; caught_up: made up for a missed time
 skipped: { due: ..., at: ..., kind: previous, reason: its previous run weekly-20261109-0300 is still stopped }
 created_at: ...
 updated_at: ...
@@ -1997,9 +2145,16 @@ updated_at: ...
   since its round began and no changed tracked file in the queue's checkout (untracked files do not count), and
   otherwise stops the queue with the condition "Nexus: a survey run leaves no commit and no changed tracked file" and
   what it left (a `queue.stop` in the user's session, which the server writes), before the step's review.
-- **Missed times**: once the server is up (with the planned starts) it looks at each recurring's times since
-  `handled`: one more than 15 minutes ago (`MISSED_MS`, as for schedules) passes (`missed`, when it would have run),
-  and the next time comes; one less late comes now.
+- **Missed times are made up for once**: once the server is up (with the planned starts) it looks at each timed
+  recurring's times since `handled`. When the latest of those more than 15 minutes ago (`MISSED_MS`, as for
+  schedules) is also the latest that passed, it is made up for now: it goes the usual way (paused, template, the
+  standing approval's hash, the previous run, each with its own `skipped` reason), as if it had come now, and its run's
+  `last` gets `caught_up` (that time, the same as `due`); the plan's reason says "its time … passed while Nexus was not
+  running: made up for now". Every older one passes (`missed`, when it would have run; the run made up for clears it,
+  as any run does). A time less late than 15 minutes comes now as usual, and every older one is missed. The next
+  regular time is unchanged either way. "After N queues" recurrings have no times: a restart changes nothing for them.
+  The dashboard shows a run made up for on its "Last run" ("made up for the missed time" and the time), `nexus
+  recurring list` too.
 - **The state** (`ProjectState.recurring`, `RecurringView`) adds `status` (`approved`, `needs_approval`, `paused`,
   `waiting_previous`, `broken`), the current `hash`, the template's title and layer, `problem` when broken, and
   `next_at`. Attention items of kind `recurring` (`recurring`: its id): one waits for the user's approval ("Recurring

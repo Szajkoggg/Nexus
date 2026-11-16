@@ -18,7 +18,7 @@ import type { UpdateNotice } from "./lifecycle.ts";
 import { describeDeployChanges, type DeployChanges } from "./deploy.ts";
 import type { PlanNotice } from "./deploy-plan.ts";
 import {
-  acceptedNoteNotice, approvalNotice, discardNotice, liftNotice, mergedNotice, mergeWaitNotice, missedStartNotice, noticeText, orchestratorBriefing, pausedNotice,
+  acceptedNoteNotice, approvalNotice, cleanupWaitNotice, discardNotice, liftNotice, mergedNotice, mergeWaitNotice, missedStartNotice, noticeText, orchestratorBriefing, pausedNotice,
   carriedMessages, formatInbox, orchestratorFreshSeed, orchestratorRuntimeSeed, orchestratorSummaryRequest, summaryLists, questionNotice, rejectionNotice, restartedNotice, fixAskedNotice, levelToUserNotice, reviewNotice, awayOnNotice, awayEndNotice, awayStuckNotice, planDecisionNotice, planHeldNotice, runEndNotice, maintenanceFindingsNotice, staticAnalysisNotice, stepNoteNotice, tagDecisionNotice, fallbackNotice, metricNotice, userMessage, withdrawalNotice,
 } from "./prompts.ts";
 import { shellRules } from "./shell-rules.ts";
@@ -885,6 +885,9 @@ ${n.text}` });
       // Merging back (src/merger.ts): what keeps Nexus from it, once per reason; a merge back Nexus did by itself.
       const waiting = q.git?.merge?.waiting;
       if (waiting && waiting.since >= since) items.push({ key: `notify:mergewait:${q.id}:${waiting.since}`, ...mergeWaitNotice(q, waiting.reason, waiting.released) });
+      // A done survey run's worktree that Nexus could not remove (untracked files left in it): told once.
+      const cleanup = q.git?.cleanup?.waiting;
+      if (cleanup && cleanup.since >= since && !q.git?.cleaned) items.push({ key: `notify:cleanupwait:${q.id}:${cleanup.since}`, ...cleanupWaitNotice(q, cleanup.reason) });
       // A step that opened on its fallback because its runtime's usage ran out, or on its own runtime again: told once.
       for (const f of r?.fallbacks ?? []) {
         if (f.at >= since) items.push({ key: `notify:fallback:${q.id}:${f.step}:${f.at}`, ...fallbackNotice(q, f) });

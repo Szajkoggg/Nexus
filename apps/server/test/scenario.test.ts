@@ -21,7 +21,7 @@ import { performance } from "node:perf_hooks";
 import { ProjectStore, approveQueue, loadProjectState, routeAnswers, writeUsage, type StepDef } from "@nexus/protocol";
 import { Engine, type Clock } from "../src/engine.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
-import { WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
+import { WAIT_MS, until as waitUntil, LONGER, holdWork } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -41,7 +41,7 @@ for (const runtime of ["claude", "codex"] as const) {
   test(`${runtime}: run.yaml and runtime.json at each point of a queue's run match the golden file`, async (t) => {
     t.mock.timers.enable({ apis: ["Date"], now: T0 });
     const later = (ms = 10 * MINUTE) => t.mock.timers.setTime(Date.now() + ms);
-    process.env.FAKE_SLOW_MS = "2000";
+    const work = holdWork();
 
     const root = mkdtempSync(join(tmpdir(), "nexus-scenario-"));
     process.env.NEXUS_HOME = join(root, "home");
@@ -105,6 +105,7 @@ for (const runtime of ["claude", "codex"] as const) {
       engine.pause("Q");
       record("paused by the user during a turn: pausing");
       later();
+      work.release("Q1");
       await until("the pause", () => store.readRun("Q")?.state === "paused" && idleAfter(1), LONGER.run);
       record("the turn ended: paused");
 
@@ -157,11 +158,12 @@ for (const runtime of ["claude", "codex"] as const) {
       engine.resume("Q");
       record("resumed by the user after the restart: the step continued");
       later();
+      work.release("Q4");
 
       // Finishing: the last step done, the process closed.
       await until("the finish", () => store.readRun("Q")?.state === "finished" && runtimeState()?.state === "exited", LONGER.run);
       record("the last step done: finished");
-    } finally { engine.shutdown(); delete process.env.FAKE_SLOW_MS; }
+    } finally { engine.shutdown(); work.done(); }
 
     const golden = join(here, "golden", `scenario-${runtime}.txt`);
     const actual = points.join("\n");

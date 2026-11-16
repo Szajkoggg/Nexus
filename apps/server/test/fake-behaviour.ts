@@ -4,7 +4,9 @@
 //   noop   end the turn without an outcome   stop    report a stop condition
 //   fail   report the step failed            slow    work (work() below: FAKE_SLOW_MS or held by the test), then done
 //   stop1  report a stop condition the first time, done once the stop is lifted
-//   ask1   ask a blocking question the first time (a step turn of this step in any session counts), done after
+//   ask1   ask a blocking question the first time (a step turn of this step in any session counts), done after;
+//          with FAKE_ASK_LINGER_MS, the asking turn ends that long after the question (a test that answers or writes
+//          before the turn is over then fails every time, not only under load)
 //   partial  the first time: a progress line, a commit of <step>-a.txt, then <step>-a.txt changed and <step>-b.txt
 //            written without a commit, and the turn ends without an outcome; after: done if <step>-b.txt is still
 //            there ("kept the uncommitted work"), else failed
@@ -13,6 +15,7 @@
 //   doneexit  report the step done, then the process exits on a signal before its turn ends
 //   commit    commit a file named after the step in its working directory, then done
 //   commitstop  the same commit, then a stop condition
+//   untracked   write <step>-left.txt in its working directory, neither added nor committed, then done
 //   background  start work in the background (a command) and end the turn without an outcome; the work ends after
 //               FAKE_BG_MS (default 1500). Claude's fake then starts a turn by itself with the task's notification,
 //               as Claude Code does; Codex's does not (Nexus nudges). Told of the end either way, it reports done.
@@ -279,6 +282,10 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
       if (behaviour === "commit") nexus("step", "done", step, "--summary", `fake committed ${step}`);
       else nexus("stop", step, "--condition", "fake condition", "--reason", "fake stop after a commit");
     }
+    if (behaviour === "untracked") {
+      writeFileSync(join(process.cwd(), `${step}-left.txt`), "left behind\n");
+      nexus("step", "done", step, "--summary", `fake finished ${step}, leaving ${step}-left.txt`);
+    }
     if (behaviour === "merge") integrate(step, text);
     if (behaviour === "review") {
       const dir = join(tmpdir(), "nexus-review", step);
@@ -321,7 +328,10 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
       return true;
     };
     if (behaviour === "ask1") {
-      if (first("ask1")) nexus("ask", "Which way?", "--step", step);
+      if (first("ask1")) {
+        nexus("ask", "Which way?", "--step", step);
+        if (process.env.FAKE_ASK_LINGER_MS) await new Promise((r) => setTimeout(r, Number(process.env.FAKE_ASK_LINGER_MS)));
+      }
       else nexus("step", "done", step, "--summary", `fake finished ${step} after its question`);
     }
     if (behaviour === "partial") {
@@ -342,7 +352,7 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
     // The queue's last step done: the report, written where the prompt says (refused under a denied folder, as
     // Claude Code refuses a Write its --disallowedTools rule covers), then registered with nexus report.
     const report = /`nexus report (\S+) --file (\S+) --summary/.exec(text);
-    if (report && (behaviour === "done" || (behaviour === "merge" && !stoppedIntegration))) {
+    if (report && (behaviour === "done" || behaviour === "untracked" || (behaviour === "merge" && !stoppedIntegration))) {
       const path = resolve(report[2]!);
       if (!writeDenied(path)) {
         mkdirSync(dirname(path), { recursive: true });

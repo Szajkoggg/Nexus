@@ -32,10 +32,27 @@ export interface PlanView extends Omit<PlanFile, "after"> {
   blocked: boolean;
 }
 
-/** A queue counts as done for the plan: every step closed (the closing step too), its provisional work as the project counts it. */
-export function doneForPlan(project: Pick<ProjectFile, "defaults">, a: Pick<QueueView, "status" | "steps" | "rejection">): boolean {
+/**
+ * A queue counts as done for the plan: every step closed (the closing step too), its provisional work as the project
+ * counts it, and, with the project's merge_back on, a queue in a worktree of its own once its work is merged back into
+ * its base (notMergedBack; Nexus merges it back by itself: src/merger.ts), so that a queue after it starts from the
+ * base with that work in it. With merge_back off the user merges back when they choose: finishing is enough.
+ */
+export function doneForPlan(project: Pick<ProjectFile, "defaults">, a: Pick<QueueView, "status" | "steps" | "rejection" | "git">): boolean {
   if (a.status !== "done" || !a.steps.every((s) => stepClosed(a, s))) return false;
-  return project.defaults.provisional_counts || !a.steps.some(pendingProvisional);
+  if (!project.defaults.provisional_counts && a.steps.some(pendingProvisional)) return false;
+  return !(project.defaults.merge_back && notMergedBack(a));
+}
+
+/**
+ * A queue in a worktree of its own (one with an integration step) whose work is not merged back into its base: no
+ * merge back recorded, or one from before its integration step last finished (a Fix it after the merge back ran it
+ * again). A survey run has no integration step: nothing to merge back.
+ */
+export function notMergedBack(a: Pick<QueueView, "steps" | "git">): boolean {
+  const integ = a.steps.find((s) => s.integration);
+  const merged = a.git?.merged;
+  return !!integ && !(merged && (!integ.finished_at || merged.at >= integ.finished_at));
 }
 
 /** Why a planned queue still waits for its predecessor `id` (`a`, undefined when it does not exist). */
@@ -46,7 +63,13 @@ function predecessorWait(project: Pick<ProjectFile, "defaults">, id: string, a: 
     const open = a.steps.find((s) => !stepClosed(a, s));
     if (open) return { done: false, waiting: `queue ${id} ended with step ${open.id} ${open.status}`, blocked: true };
     const provisional = a.steps.filter(pendingProvisional).map((s) => s.id);
-    return { done: false, waiting: `queue ${id} is done; its provisional work waits for the user's confirmation (${provisional.join(", ")})`, blocked: true };
+    if (!project.defaults.provisional_counts && provisional.length) {
+      return { done: false, waiting: `queue ${id} is done; its provisional work waits for the user's confirmation (${provisional.join(", ")})`, blocked: true };
+    }
+    // Merging back by itself: what keeps it (merge.waiting) needs the user or the orchestrator; otherwise Nexus is at it.
+    const into = a.git?.base?.ref ?? "its base";
+    const held = a.git?.merge?.waiting?.reason;
+    return { done: false, waiting: `queue ${id} is done; it waits to be merged back into ${into}${held ? `: ${held}` : ""}`, blocked: !!held };
   }
   if (a.status === "cancelled") return { done: false, waiting: `queue ${id} is cancelled`, blocked: true, cause: "cancelled" };
   if (a.status === "stopped") return { done: false, waiting: `queue ${id} is stopped${a.status_reason ? `: ${a.status_reason}` : ""}`, blocked: true, cause: "stopped" };

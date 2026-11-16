@@ -5,6 +5,9 @@ template:
   description: Nexus's own instance of the docs-freshness template, filled in for this repository. Compare the documents
     with the code and report where they differ; fix_small fixes only typos in the documents, never code.
 maintenance: survey
+# A worktree of its own: a survey keeps the main checkout free (nothing to merge back; Nexus removes the worktree once
+# the run is done), fix_small merges its fixes back through the integration step.
+worktree: auto
 params:
   - name: docs
     description: the documents to check against the code (for example README.md and the docs folder; a protocol or design document)

@@ -115,7 +115,7 @@ test("provisional work does not count: the plan's step accepted provisionally ho
 
 for (const counts of [false, true]) {
   test(`provisional work ${counts ? "counts" : "does not count"}: a plan after a step accepted for good that builds on unconfirmed provisional work ${counts ? "deploys at once" : "waits for the user's confirmation, then deploys"}`, async () => {
-    process.env.FAKE_SLOW_MS = "2500";
+    const work = holdWork();
     const t = setup(["slow", "slow", "done"], { inRepo: true, reviewer: true, levels: { Q1: 3, Q2: 2 }, provisionalCounts: counts });
     let next: ReturnType<typeof successor> | undefined;
     try {
@@ -123,8 +123,10 @@ for (const counts of [false, true]) {
       t.engine().start("Q");
       await until("Q1 to run", () => t.queue().steps[0]!.status === "running", LONGER.step, t.show);
       t.commit("Q1's work");
+      work.release("Q1");
       await until("Q2 to run", () => t.queue().steps[1]!.status === "running", LONGER.step, t.show);
       t.commit("Q2's work, on top of Q1's");
+      work.release("Q2");
       if (counts) {
         await until("the hand-over", handedOver(t), LONGER.processes, t.show);
         assert.deepEqual(t.statuses(), ["done", "done", "pending"]);
@@ -142,6 +144,6 @@ for (const counts of [false, true]) {
       t.engine().shutdown();
       next = successor(t);
       await until("the held queue to go on after the restart", () => t.queue().run?.state === "finished", LONGER.run, t.show);
-    } finally { t.stop(); next?.stop(); delete process.env.FAKE_SLOW_MS; }
+    } finally { t.stop(); next?.stop(); work.done(); }
   });
 }

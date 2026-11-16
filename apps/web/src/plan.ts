@@ -20,6 +20,8 @@ export interface PlanQueue extends Omit<QueueLike, "plan" | "start"> {
     at?: string; after?: string; usage?: "claude" | "codex"; created_at?: string;
     failed?: { reason: string }; held?: { kind: "approval" | "checkout" | "limit"; reason: string };
   };
+  /** Its place in the merge train: it waits for its turn to integrate, after `after`. */
+  train?: { after?: string };
 }
 
 /**
@@ -40,7 +42,7 @@ export interface PlanNode {
   /** In the plan (planned, or a schedule). A queue only some planned queue waits for may not be. */
   planned: boolean;
   status: HonestStatus;
-  /** Why it has not started (planned queues): first what only the user can do. */
+  /** Why it has not started (planned queues): first what only the user can do. In progress: why it waits (the merge train). */
   why: Why[];
   /** The queues it waits for, in its plan's order (an unused plan). */
   before: Before[];
@@ -101,6 +103,11 @@ export function whyOf(q: PlanQueue, now = new Date()): Why[] {
   return out;
 }
 
+/** Why a queue in progress waits: its turn to integrate (the merge train), after the queue before it. */
+function trainWhy(q: PlanQueue): Why[] {
+  return q.train?.after ? [{ key: "plan.why.train", params: { queue: q.train.after }, tone: "time" }] : [];
+}
+
 /**
  * The plan's layout: the queues in progress in the first column; each planned queue one column right of the latest of
  * the queues it waits for that are shown (those done are not); a queue only some planned queue waits for (approved
@@ -146,7 +153,7 @@ export function planLayout(all: readonly PlanQueue[], now = new Date()): PlanLay
     const proposal = openPlan(q)?.proposal;
     nodes.set(id, {
       id, title: q.title, column: column.get(id)!, now: n, planned: isPlanned(q),
-      status: queueStatus(q as QueueLike, now), why: n ? [] : whyOf(q, now), before: n ? [] : beforeOf(q),
+      status: queueStatus(q as QueueLike, now), why: n ? trainWhy(q) : whyOf(q, now), before: n ? [] : beforeOf(q),
       ...(proposal ? { proposal } : {}), movable: !n,
     });
   }

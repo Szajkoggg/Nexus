@@ -89,3 +89,16 @@ test("the estimate on a card: minutes to five, hours to a half under ten, whole 
   assert.equal(w(13.4 * 3_600_000), "about 13 h (estimate)");
   assert.equal(w(10 * 60_000, 0), undefined, "no step left");
 });
+
+test("a queue in progress waiting for its turn to integrate (the merge train) says after which queue", () => {
+  const l = planLayout([
+    q("A", { status: "running", run: { state: "running" } }),
+    q("B", { status: "paused", run: { state: "paused" }, train: { after: "A" } }),
+    q("C", { status: "paused", run: { state: "paused" }, train: {} }),
+    q("N", { plan: after(["B", "user"]) }),
+  ]);
+  const now = l.columns[0]!;
+  assert.deepEqual(now.find((n) => n.id === "B")!.why.map((w) => t(w.key, w.params)), ["waits to integrate after A"]);
+  assert.deepEqual(now.find((n) => n.id === "C")!.why, [], "the next to integrate waits for nobody");
+  assert.deepEqual(now.find((n) => n.id === "A")!.why, []);
+});

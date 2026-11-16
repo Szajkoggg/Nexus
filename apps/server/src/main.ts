@@ -16,6 +16,7 @@ import {
   readAway, writeAway, awayNow, awayUntil, turnAway, expireAway, acceptPlanProposal, declinePlanProposal, handBackPlan, acceptTagProposal, declineTagProposal,
   STAT_DIMENSIONS, STAT_FILTERS, projectMetrics, sinceTime, statDimension, statsReport, stepStats, usageDays, type ProjectMetrics, type StatsReport, type UsageDays,
   SearchError, parseSearch, MIN_SAMPLES, queueEstimate, stepSamples, isOpenQuestion, writeCount, type EstimatesResponse, type LeftView, type TemplatesResponse, readTemplates, type ProjectSummary, type RemovalView,
+  projectIdeas, ideaMatches, decideIdeaMatches, type IdeasResponse, type IdeaMatchesResponse,
 } from "@nexus/protocol";
 import { newestFirst, projectDigest, projectRunning, usageSince, type DigestEvent, type DigestResponse, type DigestRunning, type UsageRun } from "@nexus/protocol/digest";
 import { Engine } from "./engine.ts";
@@ -346,6 +347,24 @@ app.get("/api/projects/:id/metrics", (c) => {
   return c.json(projectMetrics(s) satisfies ProjectMetrics);
 });
 
+// The ideas overview (docs/ux/ideas-overview.md; @nexus/protocol ideas.ts): the notes as they are now, each Decided
+// entry's status and history from the queues that name it and the hand-over records. The notes are read, never written.
+app.get("/api/projects/:id/ideas", (c) => {
+  const e = c.get("entry");
+  const s = stateOf(e);
+  if (!s) return c.json({ error: e.error }, 500);
+  return c.json(projectIdeas(e.store, s) satisfies IdeasResponse);
+});
+
+// The suggestions for matching the project's earlier queues (whose source names no note) to its notes' entries, with
+// the user's decisions (idea-matches.yaml); the dashboard's "To match" view.
+app.get("/api/projects/:id/ideas/matches", (c) => {
+  const e = c.get("entry");
+  const s = stateOf(e);
+  if (!s) return c.json({ error: e.error }, 500);
+  return c.json(ideaMatches(e.store, s) satisfies IdeaMatchesResponse);
+});
+
 // The queue templates in effect for the project (PROTOCOL.md, "Queue templates"), for "New queue from template".
 app.get("/api/projects/:id/templates", (c) => {
   const e = c.get("entry");
@@ -426,6 +445,9 @@ app.post("/api/projects/:id/queues/:queue/approve", act((st, b, p) => {
   if (!d.proceed) return { message: d.message };
   return approveQueue(st, p("queue"), b.words, { skipClosing });
 }));
+// The user's decision on suggested matches of earlier queues to the notes (accept: true, false, or null to take it back),
+// written to idea-matches.yaml; a user's write like every other (no agent may: the nexus command has no such action).
+app.post("/api/projects/:id/ideas/matches", act((st, b) => decideIdeaMatches(st, b.items, b.accept)));
 // Withdrawing an approval and adding an allow rule are the user's too, like every write (see the guard above): an agent
 // must not take an approval back or widen its own permissions.
 app.post("/api/projects/:id/queues/:queue/withdraw", act((st, b, p) => withdrawApproval(st, p("queue"), b.reason)));

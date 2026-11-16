@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { attentionKey, type AttentionItem, type ProjectSummary, type QueueView } from "../api.ts";
-import { mergeAttention, type WaitingItem } from "@nexus/protocol/attention";
+import type { AttentionItem, ProjectSummary, QueueView } from "../api.ts";
+import { attentionKey, mergeAttention, type WaitingItem } from "@nexus/protocol/attention";
 import { TimeAgo } from "./ui.tsx";
 import { t, type Key } from "../i18n.ts";
 import { OPEN_BUTTON, stopVersion, useStopActions } from "./Stop.tsx";
@@ -23,6 +23,7 @@ const KIND: Record<AttentionItem["kind"], { key: Key; tone: string }> = {
   merge: { key: "waiting.kind.merge", tone: "text-warn bg-warn/15" },
   tags: { key: "waiting.kind.tags", tone: "text-info bg-info/15" },
   recurring: { key: "waiting.kind.recurring", tone: "text-info bg-info/15" },
+  cleanup: { key: "waiting.kind.cleanup", tone: "text-warn bg-warn/15" },
 };
 /** An item's kind in a word and its colour, in the interface language. */
 /** A waiting item's kind as a word, with its colour. */

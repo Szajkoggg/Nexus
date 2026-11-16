@@ -5,6 +5,9 @@ template:
   description: Nexus's own instance of the dead-code template, filled in for this repository. Survey unused exports, files
     and dependencies and the lint findings; fix_small removes only what is surely unused.
 maintenance: survey
+# A worktree of its own: a survey keeps the main checkout free (nothing to merge back; Nexus removes the worktree once
+# the run is done), fix_small merges its fixes back through the integration step.
+worktree: auto
 params:
   - name: dead_code_command
     description: "finds the unused code (Node: npx knip; .NET: dotnet build with the IDE0051, IDE0052 and CS8019 analyzers
