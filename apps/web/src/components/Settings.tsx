@@ -70,7 +70,9 @@ const isChain = (k: string) => k.startsWith("kinds.") && k.endsWith(".fallback")
 /** A list edited as text: its entries, trimmed, without empty ones. */
 const entries = (text: string, separator: string | RegExp = "\n") => text.split(separator).map((x) => x.trim()).filter(Boolean);
 /** The settings that are global with a project override, by key, from a project's (effective) or the global settings. */
-const valuesOf = (o: unknown): Values => Object.fromEntries(SETTING_KEYS.map((k) => [k, isChain(k) ? fallbackLine(at(o, k) as never) : at(o, k)]));
+const valuesOf = (o: unknown): Values => Object.fromEntries(SETTING_KEYS.map((k) => [k,
+  k === "orchestrator.fallback" ? JSON.stringify(at(o, k) ?? null) : isChain(k) ? fallbackLine(at(o, k) as never) : at(o, k),
+]));
 /**
  * Nested settings from keys and values, for a write: an empty optional value is sent as null (none); a fallback
  * chain's line is read back into the list (an entry it cannot read stops the save with its text).
@@ -82,6 +84,7 @@ function nested(values: Values, keys: readonly string[]): Values {
     let x = out;
     for (const p of path.slice(0, -1)) x = (x[p] ??= {}) as Values;
     const v = values[k];
+    if (k === "orchestrator.fallback") { x.fallback = JSON.parse(typeof v === "string" && v ? v : "null"); continue; }
     if (isChain(k)) {
       const r = parseFallback(typeof v === "string" ? v : "");
       if ("bad" in r) throw new Error(t("settings.fallback.bad", { entry: r.bad, kind: path[1]! }));
@@ -105,7 +108,7 @@ const SETTING_KEYS = [
   "runtimes.default", "runtimes.claude.model", "runtimes.claude.effort", "runtimes.claude.permission_mode",
   "runtimes.codex.model", "runtimes.codex.effort", "runtimes.codex.sandbox", "runtimes.codex.approval_policy", "runtimes.codex.approvals_reviewer",
   "conversations.runtime", "conversations.model", "conversations.effort", "conversations.web",
-  "orchestrator.runtime", "orchestrator.model", "orchestrator.effort", "orchestrator.notify", "orchestrator.context_threshold",
+  "orchestrator.runtime", "orchestrator.model", "orchestrator.effort", "orchestrator.fallback", "orchestrator.notify", "orchestrator.context_threshold",
   "languages.reader",
   ...TAG_KINDS.flatMap((k) => [`kinds.${k}.runtime`, `kinds.${k}.model`, `kinds.${k}.effort`, `kinds.${k}.fallback`]),
 ];
@@ -269,6 +272,7 @@ function SettingRows({ form, project }: { form: Form; project?: { values: Record
         <Setting form={f} keys={["orchestrator.effort"]} label={t("settings.effort")}>
           {(d) => <EffortSelect runtime={orchRuntime} model={f.get("orchestrator.model")} value={f.get("orchestrator.effort")} onChange={(v) => f.set("orchestrator.effort", v)} disabled={d} className="w-full" />}
         </Setting>
+        <OrchestratorFallback form={f} />
         <Setting form={f} keys={["orchestrator.notify"]} label={t("settings.tellIt")}>
           {(d) => <Check checked={f.bool("orchestrator.notify")} onChange={(v) => f.set("orchestrator.notify", v)} disabled={d}>{t("settings.tellItCheck")}</Check>}
         </Setting>
@@ -440,6 +444,32 @@ function Percent({ value, onChange, disabled }: { value: string; onChange: (v: n
 }
 
 /** The form's state over the settings with a global value: a key's value as a string for the controls, or a flag. */
+function OrchestratorFallback({ form: f }: { form: Form }) {
+  const key = "orchestrator.fallback";
+  const value = JSON.parse(f.get(key) || "null") as NonNullable<ProjectFile["orchestrator"]>["fallback"] | null;
+  const set = (next: typeof value) => f.set(key, JSON.stringify(next));
+  return <Setting form={f} keys={[key]} label={t("settings.fallback")} hint={<>
+    {t("settings.orchestratorFallbackHint")}
+    {value?.runtime === "codex" && <span className="mt-1 block text-warn">{t("settings.orchestratorCodexHint")}</span>}
+  </>}>
+    {(d) => <span className="grid gap-2">
+      <Select value={value?.runtime ?? ""} disabled={d} empty={t("settings.fallbackNone")}
+        options={[["claude", "Claude Code"], ["codex", "Codex"]]}
+        onChange={(runtime) => set(runtime ? { runtime: runtime as "claude" | "codex" } : null)} />
+      {value && <>
+        <label className="grid gap-1 text-xs text-fg-3">{t("settings.model")}
+          <ModelSelect runtime={value.runtime} value={value.model ?? ""} disabled={d} defaultLabel={t("settings.runtimeDefault")} className="w-full"
+            onChange={(model) => set({ ...value, model: model || undefined })} />
+        </label>
+        <label className="grid gap-1 text-xs text-fg-3">{t("settings.effort")}
+          <EffortSelect runtime={value.runtime} model={value.model ?? ""} value={value.effort ?? ""} disabled={d} className="w-full"
+            onChange={(effort) => set({ ...value, effort: effort ? effort as NonNullable<typeof value>["effort"] : undefined })} />
+        </label>
+      </>}
+    </span>}
+  </Setting>;
+}
+
 function useValues(initial: Values) {
   const [values, setValues] = useState<Values>(initial);
   return {

@@ -147,7 +147,7 @@ one: `null`). The effective settings do not change. It writes only such a file, 
 
 | Kind | Settings |
 |---|---|
-| Global, with a project override | `defaults`: `stop_conditions`, `review_level`, `review_send_back_limit`, `context_reuse_threshold`, `context_care`, `protect_nexus`, `push_accepted`, `provisional_counts`, `merge_back`, `resolve_conflicts`, `usage_pause_threshold`, `max_running` (see "One queue per checkout, and a limit"). `runtimes`: `default`; `claude`: `model`, `effort`, `permission_mode`; `codex`: `model`, `effort`, `sandbox`, `approval_policy`, `approvals_reviewer`. `conversations`: `runtime`, `model`, `effort`, `web`. `orchestrator`: `runtime`, `model`, `effort`, `notify`. `languages`: `reader`. `kinds.<kind>`: `runtime`, `model`, `effort` (a model or effort may be the project's own `null`: the project's for that runtime), `fallback` |
+| Global, with a project override | `defaults`: `stop_conditions`, `review_level`, `review_send_back_limit`, `context_reuse_threshold`, `context_care`, `protect_nexus`, `push_accepted`, `provisional_counts`, `merge_back`, `resolve_conflicts`, `usage_pause_threshold`, `max_running` (see "One queue per checkout, and a limit"). `runtimes`: `default`; `claude`: `model`, `effort`, `permission_mode`; `codex`: `model`, `effort`, `sandbox`, `approval_policy`, `approvals_reviewer`. `conversations`: `runtime`, `model`, `effort`, `web`. `orchestrator`: `runtime`, `model`, `effort`, `fallback`, `notify`, `context_threshold`. `languages`: `reader`. `kinds.<kind>`: `runtime`, `model`, `effort` (a model or effort may be the project's own `null`: the project's for that runtime), `fallback` |
 | Project only | `name`, `defaults.worktree_dir`, `defaults.worktree_setup`, `defaults.checks`, `runtimes.claude.allowed_tools` (the project's own allow rules), `runtimes.codex.mcp_servers` (the user's Codex MCP servers, by name, that Codex workers keep; empty by default), `conversations.notes_dir`, `languages.working` (`id` and `root` identify the project) |
 | Global only | Remote access (`<NEXUS_HOME>/auth.json`, `push.json`), the deploy push (`deploy.json`), the server; each stays in its own file |
 | State, not a setting | `orchestrator.session` |
@@ -1248,7 +1248,7 @@ from every agent session, and the others from every session but an orchestrator'
 | `POST /api/projects/:id/orchestrator/reset` | | The next message starts a new orchestrator session |
 | `POST /api/projects/:id/orchestrator/stop` | | Stops the orchestrator's running turn (see "Stopping a chat agent's turn" under "The orchestrator"); refused (409) when it is not in a turn |
 | `POST /api/projects/:id/orchestrator/settings` | `model`, `effort` (empty: the default) | The orchestrator's model and effort, from its next message on |
-| `PATCH /api/projects/:id/settings` | `name`, `runtimes`, `defaults`, `conversations`, `languages` (`reader`, `working`), `orchestrator` (`runtime`, `notify`, `model`, `effort`, `context_threshold`) (an empty value clears a field), `own?`, `follow?` (lists of setting keys, `runtimes.claude.model`) | Project settings, checked against the schema (see "Global settings"): a setting given another value, or named in `own`, becomes the project's own (in `own` also when it equals the global value); one named in `follow` follows the global value again; naming one in both is refused |
+| `PATCH /api/projects/:id/settings` | `name`, `runtimes`, `defaults`, `conversations`, `languages` (`reader`, `working`), `orchestrator` (`runtime`, `notify`, `model`, `effort`, `fallback`, `context_threshold`) (an empty value clears a field), `own?`, `follow?` (lists of setting keys, `runtimes.claude.model`) | Project settings, checked against the schema (see "Global settings"): a setting given another value, or named in `own`, becomes the project's own (in `own` also when it equals the global value); one named in `follow` follows the global value again; naming one in both is refused |
 | `GET /api/projects/:id/settings` | | `own` (the keys of the settings the project has its own value of) and `global` (the global settings) |
 | `GET /api/settings`, `PATCH /api/settings` | the global settings, nested as in `settings.yaml` (null or empty clears an optional one) | The global settings (`global`; GET also `keys`, every setting with a global value). PATCH writes `<NEXUS_HOME>/settings.yaml`, checked against the schema; every project that follows a changed value has it at once |
 | `POST /api/projects/:id/uploads` | `data` (the picture, base64, optionally as a `data:` URL) | Saves a picture for a chat message under `.nexus/uploads/` and answers `{ ok, result: { path, type, bytes } }`: `path` absolute (forward slashes), `type` `png`, `jpeg`, `webp` or `gif`. See "Uploads" below |
@@ -1595,7 +1595,7 @@ state. It records the step's status in `about.seeded`. When the step's status di
 
 ## The orchestrator
 
-`project.yaml` holds `orchestrator: { runtime, session, model?, notify, context_threshold }` (`context_threshold`: see
+`project.yaml` holds `orchestrator: { runtime, session, model?, effort?, fallback?, notify, context_threshold }` (`context_threshold`: see
 "The orchestrator's context care"). It runs on `orchestrator.runtime`: `codex` starts it on Codex, any other value
 on Claude Code. On Claude Code the orchestrator is a session
 launched in the project's checkout with `--permission-mode dontAsk`, allowed only `Read`, `Grep`, `Glob`, `Agent`,
@@ -1627,7 +1627,37 @@ runtime) starts a fresh session on the new one, since a conversation cannot move
 `continues` the old one (which gets `continued_by`), so the dashboard shows the old chat above the new one; a Nexus
 line in each chat says so; the old session's unread messages are carried over (`delivered.jsonl`, `via: carried`);
 and its first message says what happened and gives `nexus status` and the carried messages. A fresh session of the
-context care starts on the runtime set then, too.
+context care starts on the active runtime then, too.
+
+**Automatic usage fallback (OC4).** `orchestrator.runtime`, `model` and `effort` are the primary settings.
+`orchestrator.fallback` is one optional object `{ runtime: claude | codex, model?, effort? }`, not a chain. Model and
+effort omitted mean the runtime's defaults. It is global with a project override as one whole value: absent follows
+global, the project's own `null` disables it. Global `null` clears it. Replacing it does not retain the old runtime's
+model or effort. Unknown runtimes/keys and unsupported effort values are rejected. Both the global settings API and
+`PATCH /api/projects/:id/settings` accept it; `own` and `follow` accept `orchestrator.fallback`.
+
+Between turns, `overThreshold` checks the primary against `defaults.usage_pause_threshold`. If full and the fallback
+is free, Nexus selects the fallback. The server keeps `session.yaml.orchestrator_fallback` with `settings` (the JSON
+signature of the primary and fallback), `until` (the primary's latest full-window reset), `reason` and `target`
+(`runtime`, optional `model`/`effort`). It survives a restart and context care. Lower usage readings do not switch it
+back before `until`; a later full-window reset extends it. After that reset, once the primary is free, it returns.
+Changing routing settings causes a fresh selection. The primary settings themselves are never overwritten. A timer
+wakes at the earliest relevant reset, including when the fallback is free and no notice is waiting.
+
+A runtime change links sessions with `continues`/`continued_by` and uses the most recent `context.summary` in that
+lineage, written to `.nexus/orchestrator/summary.md`, plus the current briefing and `nexus status`. It does not ask a
+full runtime to spend another turn writing a summary. No summary available: the chat explicitly says so. The seed
+is a durable inbox message (`runtime-seed-<session>`), including the old session's unread non-notice messages; they
+are marked delivered there with `via: carried`. Notices are regenerated for the new session, using lineage-wide
+delivery keys to avoid repetition. With a fallback configured, user messages arriving while the active runtime is
+full wait as `say-<id>` inbox messages too. If the fallback also fills, those messages, answers, notes and notices
+wait; there is no third runtime. The Codex permission profile is identical for primary and fallback. A Nexus chat
+line records both the switch (window, utilization, threshold and reset time) and the return.
+
+The user clarified OC4: two models of one runtime share the same measured quota, so a same-runtime fallback is
+allowed in settings but waits on that quota; it does not bypass the threshold or change the active model. Ordinary
+same-runtime model changes resume the same session. Without a fallback the existing notification wait and direct
+user-message behaviour remain.
 
 - `.nexus/drafts/<queue>.yaml` holds the orchestrator's queue drafts; the orchestrator is its only writer. It writes a
   draft there, uploads it with `nexus queue draft .nexus/drafts/<queue>.yaml` (relative to the project's root, its
@@ -2263,11 +2293,13 @@ and each turn of a step on its fallback has `fallback: { from, reason }` in `tur
 apart.
 
 **The orchestrator** is told of each entry (`notify:fallback:<queue>:<step>:<at>`: "Step Q2 of queue Q runs on its
-fallback, Codex, …, instead of Claude Code: <reason>"; a switch back likewise). While its own runtime (Claude Code) is
+fallback, Codex, …, instead of Claude Code: <reason>"; a switch back likewise). While its active runtime is
 beyond the threshold, no notice starts its turn: each goes into its inbox (`sessions/<id>/inbox.jsonl`, id
 `notice-<key>`, from `nexus`), not told yet; the reviews it would do (levels 2 and 3) wait meanwhile. At the first
 change after that runtime is free (a timer looks again just after the reset), every held notice is told, and its inbox
-entry counts as delivered. The user's own messages to it are not held.
+entry counts as delivered. With `orchestrator.fallback` configured, it may switch to the available backup between
+turns, carrying those notices; user messages also wait while the active runtime is full (see "The orchestrator").
+Without a fallback, the user's own messages to it are not held.
 
 ## Kinds and their defaults
 

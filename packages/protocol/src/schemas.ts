@@ -184,10 +184,17 @@ const ConversationSettings = z.object({
   effort: Effort.optional(),
   web: ConversationWeb.default("search"),
 });
+const OrchestratorTarget = z.object({
+  runtime: WorkerRuntime,
+  model: z.string().min(1).optional(),
+  effort: Effort.optional(),
+}).strict().refine((t) => !effortIssue(t.runtime, t.effort), { message: "effort is not supported by the fallback runtime" });
 const OrchestratorSettings = z.object({
   /** The runtime the orchestrator runs on (Claude Code or Codex; another one counts as Claude Code). */
   runtime: Runtime.default("claude"),
   model: z.string().optional(),
+  /** One optional fallback; its model and effort default to the runtime's own defaults. */
+  fallback: OrchestratorTarget.optional(),
   /** By its runtime: Claude Code takes low to max (effortIssue); Codex what its model lists. */
   effort: Effort.optional(),
   /** Tell the orchestrator when a worker asks, or a run halts or finishes (it starts if needed). */
@@ -408,6 +415,7 @@ export const StoredProject = z.object({
   orchestrator: z.object({
     session: Id.nullable().default(null),
     runtime: own(Runtime),
+    fallback: ownOrNone(OrchestratorTarget),
     model: ownOrNone(z.string()),
     effort: ownOrNone(Effort),
     notify: own(z.boolean()),
@@ -647,6 +655,10 @@ export const SessionFile = z.object({
   continues: Id.optional(),
   /** The session that took over from this one. */
   continued_by: Id.optional(),
+  /** Server-owned routing state: stays on the fallback until the primary's reset, including across restarts. */
+  orchestrator_fallback: z.object({
+    settings: z.string(), until: Time, reason: z.string(), target: OrchestratorTarget,
+  }).optional(),
 });
 export type SessionFile = z.infer<typeof SessionFile>;
 

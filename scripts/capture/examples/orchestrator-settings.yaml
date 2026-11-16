@@ -19,3 +19,11 @@ views:
       - wait: 800
       - scroll: "Orchestrator"
       - wait: 300
+  - key: orchestrator-settings@492
+    route: "#/demo"
+    label: "The orchestrator's primary and fallback settings, narrow window"
+    actions:
+      - click: { selector: "button[title='Project settings']" }
+      - wait: 800
+      - scroll: "Orchestrator"
+      - wait: 300

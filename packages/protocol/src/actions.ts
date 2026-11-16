@@ -756,6 +756,7 @@ export function updateSettings(store: ProjectStore, patch: unknown): void {
         ...(b.orchestrator.notify !== undefined ? { notify: !!b.orchestrator.notify } : {}),
         ...("model" in b.orchestrator ? { model: b.orchestrator.model } : {}),
         ...("effort" in b.orchestrator ? { effort: b.orchestrator.effort } : {}),
+        ...("fallback" in b.orchestrator ? { fallback: b.orchestrator.fallback } : {}),
         ...(b.orchestrator.context_threshold !== undefined ? { context_threshold: b.orchestrator.context_threshold } : {}),
       }),
   };

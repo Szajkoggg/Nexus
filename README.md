@@ -113,6 +113,16 @@ queue drafts and its own event log, but its shell runs any program, and a progra
 do what you do in the dashboard, which Claude Code's orchestrator cannot. Until that gap is closed, keep it on Claude
 Code.
 
+**An orchestrator fallback.** In the same Orchestrator section, **Runtime**, **Model** and **Effort** choose the
+primary. **Fallback** chooses one backup, with its own runtime, model and effort; by default there is none. These
+settings can be global or the project's own. When the primary reaches the project's usage threshold, Nexus switches
+to the backup between turns, then returns after the primary's window resets. The chat says which window caused the
+switch and when it resets. Different runtimes start a fresh session with the latest saved context summary, current
+briefing, project state and waiting messages; earlier chats stay readable. If there is no saved summary, the chat
+says so. If both runtimes are full, messages and notices wait. Two models of the same runtime share its quota, so
+that fallback waits too. Codex has the same protection limits whether primary or backup; selecting a backup does
+not change the primary setting.
+
 **Stop.** While the orchestrator or a thinking partner is in a turn, **Stop** shows above the message box. It
 interrupts the turn at once: the chat says "Stopped.", nothing more of that turn appears, and the agent waits. What
 you sent during the turn goes in with your next message.

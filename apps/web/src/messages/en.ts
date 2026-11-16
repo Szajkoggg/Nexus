@@ -969,6 +969,7 @@ export const en = {
   "settings.leaving.request": "on request (no reviewer: refused)",
   "settings.orchestrator": "Orchestrator",
   "settings.orchestratorModelHint": "Applies from its next message; the conversation goes on.",
+  "settings.orchestratorFallbackHint": "When the primary reaches the usage threshold, switch between turns; return after its window resets. If both share a runtime, they share its quota and wait. None keeps the current behaviour.",
   "settings.orchestratorClaudeHint": "Claude Code: its permissions let it read, run nexus and read-only git, and write only queue drafts. Another runtime starts a fresh orchestrator session; the old chat stays above.",
   "settings.orchestratorCodexHint": "Codex: its sandbox lets it write only queue drafts and its own event log, but its shell runs any program, and a program can reach Nexus on this machine and do what you do in the dashboard; Claude Code cannot. Another runtime starts a fresh orchestrator session; the old chat stays above.",
   "settings.tellIt": "Tell it about",

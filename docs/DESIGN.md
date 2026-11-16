@@ -566,6 +566,15 @@ usage runs out"). Choices made while building it (FB4):
   Code or Codex, `orchestrator.runtime`) is full would spend the very usage that ran out. The notice is put into its inbox (seen there, not
   told) and told once the runtime is free; the reviews it would do wait with it, as decided.
 
+**The orchestrator's own fallback (OC4).** The primary and one optional backup are user settings. Its active fallback
+is server state in the session file, with the primary's reset deadline; lower readings cannot bounce it back early,
+and a server restart cannot forget the choice. Every automatic selection waits for a turn boundary. The existing
+runtime-switch lineage carries unread messages and the latest `nexus context` summary; no extra summary turn is
+requested from a runtime whose quota is already full. A missing summary is stated in the chat. Context care keeps
+the fallback state when it creates another session. The user's clarification on 2026-11-16: an alternative model
+of the same runtime shares the quota and must wait, so it is configurable but cannot provide extra capacity. Tests
+use both fake runtimes, a movable usage clock and a held chat turn, including restart while on the fallback.
+
 ### Estimating a turn's use
 
 A step's use of the usage windows is an estimate, labelled as one (decided 2026-11-14, docs/ideas/statistics.md): the

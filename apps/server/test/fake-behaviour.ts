@@ -51,8 +51,9 @@
 // notice is answered with "fake answer"; with FAKE_REVIEW_ACCEPT set, a notice of a step waiting for its review is
 // answered with `nexus review accept`. "FAKE-LONG" is answered with longReply("Reply"); a hand-over with
 // longReply("SUMMARY"). "FAKE-SLOW" in a chat message: the turn works for FAKE_CHAT_SLOW_MS (default 4000), then
-// replies "slow reply"; a stop (interrupt) ends it early. "FAKE-HISTORY": the reply lists every message the agent took
-// in so far ("history: a | b"): the turns' messages and those read inside a turn (Claude's `next`, Codex's steer).
+// replies "slow reply"; a stop (interrupt) ends it early. "FAKE-HOLD": waits for FAKE_RELEASE (as a slow worker does),
+// so a test can change usage during a chat turn. "FAKE-HISTORY": the reply lists every message the agent took in so
+// far ("history: a | b"): the turns' messages and those read inside a turn (Claude's `next`, Codex's steer).
 // Claude's fake keeps the conversations it saved (fakeSaved below) and refuses, as Claude Code does, to resume one it
 // never saved or to start a saved one anew; FAKE_START_MS: it reads its input only after that long (Claude Code's
 // start-up), so a test can end it before it saved anything; FAKE_REFUSE: it refuses every start, each in its way.
@@ -383,6 +384,11 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
   }
   if (text.includes("hands this conversation to the orchestrator")) return longReply("SUMMARY");
   if (text.includes("FAKE-LONG")) return longReply("Reply");
+  if (text.includes("FAKE-HOLD")) {
+    tool("waiting for release (FAKE-HOLD)");
+    await work("chat");
+    return "held reply";
+  }
   if (text.includes("FAKE-SLOW")) {
     tool("sleep (FAKE-SLOW)");
     return (await interruptible(Number(process.env.FAKE_CHAT_SLOW_MS ?? 4000))) ? { interrupted: true } : "slow reply";

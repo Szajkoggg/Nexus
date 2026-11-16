@@ -44,6 +44,31 @@ orchestrator:
   notify: true
 `;
 
+test("orchestrator fallback: global, atomic project override, explicit none, follow, and validation", () => {
+  const base = mkdtempSync(join(tmpdir(), "nexus-settings-"));
+  process.env.NEXUS_HOME = join(base, "home");
+  const store = ProjectStore.init(join(base, "p"), { id: "p", name: "P", root: join(base, "p") });
+  updateSettings(store, { orchestrator: { runtime: "claude" } });
+  assert.equal(builtInSettings().orchestrator.fallback, undefined);
+  updateGlobalSettings({ orchestrator: { fallback: { runtime: "codex", model: "gpt-6-luna", effort: "low" } } });
+  assert.deepEqual(store.readProject().orchestrator?.fallback, { runtime: "codex", model: "gpt-6-luna", effort: "low" });
+  updateSettings(store, { orchestrator: { fallback: { runtime: "claude", model: "sonnet" } }, own: ["orchestrator.fallback"] });
+  assert.deepEqual(store.readProject().orchestrator?.fallback, { runtime: "claude", model: "sonnet" });
+  updateSettings(store, { orchestrator: { fallback: null } });
+  assert.equal(store.readStoredProject().orchestrator?.fallback, null);
+  assert.equal(store.readProject().orchestrator?.fallback, undefined);
+  updateSettings(store, { follow: ["orchestrator.fallback"] });
+  assert.equal(store.readProject().orchestrator?.fallback?.runtime, "codex");
+  updateGlobalSettings({ orchestrator: { fallback: { runtime: "claude" } } });
+  assert.deepEqual(store.readProject().orchestrator?.fallback, { runtime: "claude" }, "no Codex model/effort carried to Claude");
+  for (const fallback of [{ runtime: "external" }, { runtime: "claude", effort: "ultra" }, [{ runtime: "codex" }]]) {
+    assert.throws(() => updateSettings(store, { orchestrator: { fallback } }));
+    assert.throws(() => updateGlobalSettings({ orchestrator: { fallback } }));
+  }
+  updateGlobalSettings({ orchestrator: { fallback: null } });
+  assert.equal(store.readProject().orchestrator?.fallback, undefined);
+});
+
 const HONEYCOMB_SHAPE = (root: string) => `protocol: 1
 id: honeycomb
 name: Project Honeycomb

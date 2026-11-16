@@ -179,3 +179,4 @@ Back on Claude.
 == the chat lines Nexus wrote: the old session's, then the fresh one's
 nexus: The orchestrator goes on on Claude Code in a fresh session (<fresh session>): its runtime setting changed.
 nexus: A fresh orchestrator session on Claude Code: you switched it from Codex. A conversation cannot move between the two, so it starts from its current briefing and nexus status; the earlier chat stays above.
+nexus: No context summary was available; it starts with its current briefing and nexus status.

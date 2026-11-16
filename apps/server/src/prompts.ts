@@ -256,9 +256,10 @@ export function orchestratorFreshSeed(fill: number, summary: SessionView["contex
  * The first message of a fresh orchestrator session after the user changed the orchestrator's runtime (queue OC): a
  * conversation cannot move between Claude Code and Codex, so it starts from its briefing and the project's state.
  */
-export function orchestratorRuntimeSeed(from: string, to: string, status: string, carried: string | undefined): string {
+export function orchestratorRuntimeSeed(from: string, to: string, status: string, carried: string | undefined, summary?: { text: string; topics: string[]; files: string[]; at: string }, reason?: string): string {
   return [
-    `[Nexus] You go on as the project's orchestrator in a fresh session on ${to}: the user switched the orchestrator from ${from} to ${to}, and a conversation cannot move between the two. You have not seen the previous session's conversation, only what follows; the user still sees it in the chat, above this session.`,
+    `[Nexus] You go on as the project's orchestrator in a fresh session on ${to}: ${reason ?? `the user switched the orchestrator from ${from} to ${to}`}, and a conversation cannot move between the two. You have not seen the previous session's conversation, only what follows; the user still sees it in the chat, above this session.`,
+    summary ? `\nThe latest context summary (${summary.at}; .nexus/orchestrator/summary.md):\n${[summary.text, ...summaryLists(summary)].join("\n")}` : "",
     `\nStart from your briefing and the state below: the files are the truth. Ask the user about anything you need from the earlier conversation, and end your turn when nothing is waiting.`,
     carried ? `\n${carried}` : "",
     `\nThe project now (nexus status):\n${status.trim()}`,
