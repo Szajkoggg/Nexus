@@ -1930,7 +1930,9 @@ process alive). Decided:
   and removes its lock. The wrapper killed by itself (its channel closed): the watchdog does it. It looks every
   second; while waiting for the lock too.
 - **Found by asking the system**: on Windows one PowerShell walks the parents with a CIM query per level (about a
-  second; the whole process table takes several, and `wmic` is gone from current Windows). A parent newer than its
+  second; the whole process table takes several, and `wmic` is gone from current Windows), and stops after the first
+  that is no shell or npm: WMI is not cheap, and twelve levels per walk, about eight walks per suite (the run's and the
+  lock tests'), coincided with the update tests timing out in most full runs. A parent newer than its
   child is a reused pid and ends the walk. Git Bash breaks the Windows chain where an MSYS process execs another (npm's
   own shell script does): the exec'd process's Windows parent is a stand-in that is gone, and the walk goes on through
   MSYS's process table (`ps -e -l` beside its bash.exe: PID, PPID, WINPID). Until the chain is known only the parent is
@@ -1941,6 +1943,15 @@ process alive). Decided:
 - **20 minutes since `since`** (`NEXUS_TEST_LOCK_STALE_MS`), five times a full run, makes a lock stale even if its
   process lives (a hung run, a pid reused): the next run takes it over at once instead of waiting 15 minutes and
   running without it. The old run is not ended (not that run's to end); its end leaves the new lock alone.
+- **Never a tree kill by a pid that may have been reused**: Windows gives a pid to a new process at once, and
+  `taskkill /T` of a reused one ends another program's tree. The wrapper ends its run only while the run's handle says
+  it runs; the watchdog ends an orphaned run only after checking it is still the wrapper's child; the tests end only
+  their own starter, through its handle, and their long run ends by itself within two minutes.
+- **Failing tests left servers running**: `chat-update.test.ts`, failing before its hand-over, released its stand-in
+  build in `finally`, so the update went on after the test and started a successor server nobody ended (with its fake
+  runtimes, which kept starting turns); a timed-out hand-over's successor was not ended either. Several were found
+  after a morning of full runs, and they loaded the following ones. Its `finally` now cancels the drain or fails the
+  build, waits for the update to settle and ends the successor the update's log names.
 
 ## The engine's own waits in tests, and what sets the slowest files (queue FX)
 
