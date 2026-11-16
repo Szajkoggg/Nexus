@@ -32,10 +32,27 @@ export interface PlanView extends Omit<PlanFile, "after"> {
   blocked: boolean;
 }
 
-/** A queue counts as done for the plan: every step closed (the closing step too), its provisional work as the project counts it. */
-export function doneForPlan(project: Pick<ProjectFile, "defaults">, a: Pick<QueueView, "status" | "steps" | "rejection">): boolean {
+/**
+ * A queue counts as done for the plan: every step closed (the closing step too), its provisional work as the project
+ * counts it, and, with the project's merge_back on, a queue in a worktree of its own once its work is merged back into
+ * its base (notMergedBack; Nexus merges it back by itself: src/merger.ts), so that a queue after it starts from the
+ * base with that work in it. With merge_back off the user merges back when they choose: finishing is enough.
+ */
+export function doneForPlan(project: Pick<ProjectFile, "defaults">, a: Pick<QueueView, "status" | "steps" | "rejection" | "git">): boolean {
   if (a.status !== "done" || !a.steps.every((s) => stepClosed(a, s))) return false;
-  return project.defaults.provisional_counts || !a.steps.some(pendingProvisional);
+  if (!project.defaults.provisional_counts && a.steps.some(pendingProvisional)) return false;
+  return !(project.defaults.merge_back && notMergedBack(a));
+}
+
+/**
+ * A queue in a worktree of its own (one with an integration step) whose work is not merged back into its base: no
+ * merge back recorded, or one from before its integration step last finished (a Fix it after the merge back ran it
+ * again). A survey run has no integration step: nothing to merge back.
+ */
+export function notMergedBack(a: Pick<QueueView, "steps" | "git">): boolean {
+  const integ = a.steps.find((s) => s.integration);
+  const merged = a.git?.merged;
+  return !!integ && !(merged && (!integ.finished_at || merged.at >= integ.finished_at));
 }
 
 /** Why a planned queue still waits for its predecessor `id` (`a`, undefined when it does not exist). */
@@ -46,7 +63,13 @@ function predecessorWait(project: Pick<ProjectFile, "defaults">, id: string, a: 
     const open = a.steps.find((s) => !stepClosed(a, s));
     if (open) return { done: false, waiting: `queue ${id} ended with step ${open.id} ${open.status}`, blocked: true };
     const provisional = a.steps.filter(pendingProvisional).map((s) => s.id);
-    return { done: false, waiting: `queue ${id} is done; its provisional work waits for the user's confirmation (${provisional.join(", ")})`, blocked: true };
+    if (!project.defaults.provisional_counts && provisional.length) {
+      return { done: false, waiting: `queue ${id} is done; its provisional work waits for the user's confirmation (${provisional.join(", ")})`, blocked: true };
+    }
+    // Merging back by itself: what keeps it (merge.waiting) needs the user or the orchestrator; otherwise Nexus is at it.
+    const into = a.git?.base?.ref ?? "its base";
+    const held = a.git?.merge?.waiting?.reason;
+    return { done: false, waiting: `queue ${id} is done; it waits to be merged back into ${into}${held ? `: ${held}` : ""}`, blocked: !!held };
   }
   if (a.status === "cancelled") return { done: false, waiting: `queue ${id} is cancelled`, blocked: true, cause: "cancelled" };
   if (a.status === "stopped") return { done: false, waiting: `queue ${id} is stopped${a.status_reason ? `: ${a.status_reason}` : ""}`, blocked: true, cause: "stopped" };
@@ -142,6 +165,29 @@ function droppedUserEntries(plan: Pick<PlanFile, "after" | "started_at"> | undef
 }
 
 /**
+ * The predecessors the user took away from a plan while it counts (a `removed` decision since it was made, not
+ * undone) and that are not back in it: the user's decision, which the orchestrator may only propose to change.
+ */
+export function removedByUser(plan: Pick<PlanFile, "after" | "started_at" | "created_at" | "decisions"> | undefined): string[] {
+  if (!plan || plan.started_at) return [];
+  const undone = new Set(plan.decisions.filter((d) => d.kind === "undone").map((d) => d.change));
+  return [...new Set(plan.decisions
+    .filter((d) => d.kind === "removed" && d.at >= plan.created_at && !undone.has(d.change))
+    .flatMap((d) => d.queues ?? []))].filter((id) => !plan.after.some((e) => e.queue === id));
+}
+
+/** A new list `after` changes a decision of the user's. */
+export const changesOfUser = (plan: PlanFile | undefined, after: readonly string[]): boolean => {
+  const c = userChanges(plan, after);
+  return c.dropped.length + c.readded.length > 0;
+};
+
+/** What a new list `after` changes of the user's decisions: predecessors they set left out, ones they took away put back. */
+function userChanges(plan: PlanFile | undefined, after: readonly string[]): { dropped: string[]; readded: string[] } {
+  return { dropped: droppedUserEntries(plan, after), readded: removedByUser(plan).filter((id) => after.includes(id)) };
+}
+
+/**
  * The entries of a plan whose predecessors `by` sets to `after` (checked already). The user's list is wholly theirs.
  * The orchestrator's must keep every predecessor the user set (refused otherwise: it may only propose that, with
  * `nexus plan propose`); entries it keeps stay as they were, new ones are its own. A used plan (the queue started since)
@@ -150,9 +196,13 @@ function droppedUserEntries(plan: Pick<PlanFile, "after" | "started_at"> | undef
 function planEntries(old: PlanFile | undefined, queue: string, after: readonly string[], by: PlanBy, reason: string | undefined, at: string): PlanEntry[] {
   const live = openPlanFile(old);
   if (by === "orchestrator") {
-    const dropped = droppedUserEntries(live, after);
+    const { dropped, readded } = userChanges(live, after);
+    const propose = `propose the change to the user: nexus plan propose ${queue} ${after.map((x) => `--after ${x} `).join("")}--reason "..."`;
     if (dropped.length) {
-      throw new ActionError(`queue ${queue} waits for ${dropped.join(", ")} by the user's decision: you may not change that; keep ${dropped.length === 1 ? "it" : "them"} (--after ${dropped.join(" --after ")}), or propose the change to the user: nexus plan propose ${queue} ${after.map((x) => `--after ${x} `).join("")}--reason "..."`, 409);
+      throw new ActionError(`queue ${queue} waits for ${dropped.join(", ")} by the user's decision: you may not change that; keep ${dropped.length === 1 ? "it" : "them"} (--after ${dropped.join(" --after ")}), or ${propose}`, 409);
+    }
+    if (readded.length) {
+      throw new ActionError(`the user took ${readded.join(", ")} out of the predecessors of queue ${queue}: you may not put ${readded.length === 1 ? "it" : "them"} back; leave ${readded.length === 1 ? "it" : "them"} out, or ${propose}`, 409);
     }
   }
   return after.map((id) => {
@@ -219,8 +269,8 @@ export function reorderedFollowers(plans: ReadonlyMap<string, PlanFile>, queue: 
 
 /**
  * The orchestrator proposes predecessors `after` for `queue` (the whole list), changing dependencies the user set. The
- * proposal must drop one of those (else the orchestrator sets the list itself), and is checked as a plan would be.
- * Replaces an earlier proposal of the queue. Returns what happened, in a sentence.
+ * proposal must drop one of those or put back one the user took away (else the orchestrator sets the list itself), and
+ * is checked as a plan would be. Replaces an earlier proposal of the queue. Returns what happened, in a sentence.
  */
 export function proposePlan(store: ProjectStore, queue: string, after: readonly string[], reason: string): string {
   const state = loadProjectState(store);
@@ -229,7 +279,8 @@ export function proposePlan(store: ProjectStore, queue: string, after: readonly 
   if (q.status === "done" || q.status === "cancelled") throw new ActionError(`queue ${queue} is ${q.status}`, 409);
   const plan = store.readPlan(queue);
   const list = checkPredecessors(state, queue, after);
-  if (!droppedUserEntries(plan, list).length) {
+  const changes = userChanges(plan, list);
+  if (!changes.dropped.length && !changes.readded.length) {
     throw new ActionError(`this changes no dependency the user set: set it yourself with nexus run ${queue} start ${list.length ? list.map((x) => `--after ${x}`).join(" ") : "--next"} --reason "..."`, 409);
   }
   const at = now();
@@ -293,7 +344,7 @@ export function handBackPlan(store: ProjectStore, queue: string, after?: string)
     decisions: [...plan.decisions, { at, kind: "handed_back", queues }],
   };
   // A proposal that no longer changes a dependency of the user's is moot: the orchestrator decides it itself.
-  if (next.proposal && !droppedUserEntries(next, next.proposal.after).length) next.proposal = undefined;
+  if (next.proposal && !changesOfUser(next, next.proposal.after)) next.proposal = undefined;
   store.writePlan(queue, next);
   return place && !queues.length ? `the orchestrator decides now when queue ${queue} starts`
     : `the orchestrator decides now whether queue ${queue} waits for ${queues.join(", ")}`;

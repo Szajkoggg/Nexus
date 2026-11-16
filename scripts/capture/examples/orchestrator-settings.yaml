@@ -1,0 +1,29 @@
+# The orchestrator's part of a project's settings (Settings.tsx), its runtime set to Codex, on the project of
+# scripts/capture/seed-orchestrator.ts (queue OC).
+#   node scripts/capture.ts scripts/capture/examples/orchestrator-settings.yaml --step <queue>/<step>
+seed: scripts/capture/seed-orchestrator.ts
+views:
+  - key: orchestrator-settings@1440
+    route: "#/demo"
+    label: "The orchestrator's settings of a project whose orchestrator runs on Codex"
+    actions:
+      - click: { selector: "button[title='Project settings']" }
+      - wait: 800
+      - scroll: "Orchestrator"
+      - wait: 300
+  - key: orchestrator-settings@390
+    route: "#/demo"
+    label: "The orchestrator's settings of a project whose orchestrator runs on Codex, phone"
+    actions:
+      - click: { selector: "button[title='Project settings']" }
+      - wait: 800
+      - scroll: "Orchestrator"
+      - wait: 300
+  - key: orchestrator-settings@492
+    route: "#/demo"
+    label: "The orchestrator's primary and fallback settings, narrow window"
+    actions:
+      - click: { selector: "button[title='Project settings']" }
+      - wait: 800
+      - scroll: "Orchestrator"
+      - wait: 300

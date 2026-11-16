@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { captureViews, freePort, startInstance, type Browser } from "../capture/run.ts";
 import { baseOf, instanceEnv, parseViews, report } from "../capture/views.ts";
+import { dragScript } from "../capture/drag.ts";
 
 test("a view list: keys give the width, defaults for height and settle, actions checked", () => {
   const list = parseViews(`
@@ -100,6 +101,7 @@ test("a view's script reaches the browser with that view only; one not read is r
     async type() { return true; },
     async press() { return true; },
     async scroll() { return true; },
+    async drag() { return true; },
     async shot() {},
   };
   const views = parseViews(`
@@ -123,6 +125,7 @@ test("a view that fails is reported with why; the others are taken", async () =>
     async type() { return true; },
     async press() { return true; },
     async scroll(t) { return t !== "Nowhere"; },
+    async drag() { return true; },
     async shot(file) { taken.push(file); },
   };
   const views = parseViews(`
@@ -162,4 +165,59 @@ test("the base commit of a step is its first start in git.yaml", () => {
   assert.equal(baseOf(yaml, "RS3"), "8800a05");
   assert.equal(baseOf(yaml, "RS4"), undefined);
   assert.equal(baseOf(yaml, "RS9"), undefined);
+});
+
+test("drag: a view list takes it (to one element or several, dropped or not); the capture passes it on", async () => {
+  const views = parseViews(`
+views:
+  - key: plan-drag@1440
+    route: "#/nexus"
+    settle: 0
+    actions:
+      - drag: { from: "[data-plan-card='TS']", to: ["[data-plan-card='ST2']", "[data-plan-zone='ST2:also']"] }
+      - drag: { from: "#a", to: "#b", drop: true }
+`).views;
+  assert.deepEqual(views[0]!.actions, [
+    { drag: { from: "[data-plan-card='TS']", to: ["[data-plan-card='ST2']", "[data-plan-zone='ST2:also']"] } },
+    { drag: { from: "#a", to: "#b", drop: true } },
+  ]);
+  for (const bad of ["{ from: '#a' }", "{ from: '#a', to: [] }", "{ from: '', to: '#b' }", "{ from: '#a', to: '#b', drop: yes please }"]) {
+    assert.throws(() => parseViews(`views: [{ key: "a@1440", route: "#/p", actions: [{ drag: ${bad} }] }]`), /drag: \{from: <css>, to: <css> or a list of them, drop\?: true\}/, bad);
+  }
+  const calls: unknown[] = [];
+  const browser: Browser = {
+    async open() {}, async click() { return true; }, async type() { return true; }, async press() { return true; }, async scroll() { return true; },
+    async drag(from, to, drop) { calls.push([from, to, drop]); return from !== "#missing"; },
+    async shot() {},
+  };
+  const shots = await captureViews([...views, ...parseViews(`views: [{ key: "b@1440", route: "#/p", settle: 0, actions: [{ drag: { from: "#missing", to: "#b" } }] }]`).views],
+    browser, { base: "http://127.0.0.1:4318", out: "C:/out", side: "after" });
+  assert.deepEqual(calls, [
+    ["[data-plan-card='TS']", ["[data-plan-card='ST2']", "[data-plan-zone='ST2:also']"], false], ["#a", ["#b"], true], ["#missing", ["#b"], false],
+  ]);
+  assert.equal(shots[1]!.error, "action 1 (drag #missing to #b) found nothing to act on");
+});
+
+test("drag's page script: dragstart on the source, dragenter and dragover on each target with one DataTransfer, drop and dragend if asked", async () => {
+  const events: string[] = [];
+  const transfers = new Set<unknown>();
+  class FakeDataTransfer {}
+  class FakeDragEvent { type: string; dataTransfer: unknown; bubbles: boolean; constructor(type: string, o: { dataTransfer: unknown; bubbles: boolean }) { this.type = type; this.dataTransfer = o.dataTransfer; this.bubbles = o.bubbles; } }
+  const element = (name: string) => ({
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: 10, height: 10 }),
+    scrollIntoView: () => {},
+    dispatchEvent: (e: FakeDragEvent) => { events.push(`${e.type} ${name}`); transfers.add(e.dataTransfer); assert.equal(e.bubbles, true); return true; },
+  });
+  const page = { "#ts": element("TS"), "#st2": element("ST2"), "#also": element("also") } as Record<string, ReturnType<typeof element>>;
+  const document = { querySelector: (s: string) => page[s] ?? null };
+  const run = (script: string) => new Function("document", "DataTransfer", "DragEvent", `return ${script}`)(document, FakeDataTransfer, FakeDragEvent) as Promise<boolean>;
+
+  assert.equal(await run(dragScript("#ts", ["#st2", "#also"], false, 0)), true);
+  assert.deepEqual(events, ["dragstart TS", "dragenter ST2", "dragover ST2", "dragenter also", "dragover also"], "left in the middle of the drag");
+  assert.equal(transfers.size, 1, "one DataTransfer through the drag");
+  events.length = 0;
+  assert.equal(await run(dragScript("#ts", ["#also"], true, 0)), true);
+  assert.deepEqual(events, ["dragstart TS", "dragenter also", "dragover also", "drop also", "dragend TS"]);
+  assert.equal(await run(dragScript("#nowhere", ["#also"], true, 0)), false);
+  assert.equal(await run(dragScript("#ts", ["#nowhere"], true, 0)), false);
 });

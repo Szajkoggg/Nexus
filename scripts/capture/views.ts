@@ -9,6 +9,7 @@ export type Action =
   | { type: { text: string; into?: string } }     // typed into the element matching `into` (a CSS selector), else the focused one
   | { press: string }                             // a key, e.g. Escape, Enter, ArrowRight
   | { scroll: string }                            // the first element with exactly this text (a heading, as written, not as styled) to the top
+  | { drag: { from: string; to: string | string[]; drop?: boolean } } // HTML5 drag and drop (drag.ts): from an element onto one or more in turn, dropped on the last if `drop`
   | { wait: number };                             // milliseconds
 
 /** One picture: its key (subject-state@width), the dashboard route, and the setup. */
@@ -80,7 +81,7 @@ export function parseViews(text: string): ViewList {
 }
 
 function actionProblem(a: unknown): string | undefined {
-  const usage = "one of click: <text> | click: {selector}, type: {text, into?}, press: <key>, scroll: <text>, wait: <ms>";
+  const usage = "one of click: <text> | click: {selector}, type: {text, into?}, press: <key>, scroll: <text>, drag: {from, to, drop?}, wait: <ms>";
   if (typeof a !== "object" || a === null || Array.isArray(a) || Object.keys(a).length !== 1) return usage;
   const [kind, value] = Object.entries(a)[0]!;
   if (kind === "click") {
@@ -94,6 +95,12 @@ function actionProblem(a: unknown): string | undefined {
   }
   if (kind === "press") return typeof value === "string" && value ? undefined : "press: a key name, e.g. Escape";
   if (kind === "scroll") return typeof value === "string" && value ? undefined : "scroll: the text of a heading to bring to the top";
+  if (kind === "drag") {
+    const d = value as { from?: unknown; to?: unknown; drop?: unknown } | null;
+    const to = typeof d?.to === "string" ? [d.to] : d?.to;
+    return d && typeof d === "object" && typeof d.from === "string" && d.from && Array.isArray(to) && to.length && to.every((x) => typeof x === "string" && x)
+      && (d.drop === undefined || typeof d.drop === "boolean") ? undefined : "drag: {from: <css>, to: <css> or a list of them, drop?: true}";
+  }
   if (kind === "wait") return Number.isInteger(value) && (value as number) >= 0 ? undefined : "wait: milliseconds";
   return usage;
 }

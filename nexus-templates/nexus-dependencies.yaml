@@ -5,6 +5,9 @@ template:
   description: Nexus's own instance of the dependencies template, filled in for this repository. Survey outdated
     dependencies (minor and patch) and report them; fix_small applies the patch-level ones whose tests pass.
 maintenance: survey
+# A worktree of its own: a survey keeps the main checkout free (nothing to merge back; Nexus removes the worktree once
+# the run is done), fix_small merges its fixes back through the integration step.
+worktree: auto
 params:
   - name: outdated_command
     description: "lists the outdated dependencies (Node: npm outdated; .NET and Unity: dotnet list package --outdated, or

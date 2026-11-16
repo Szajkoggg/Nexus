@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   ActionError, ProjectStore, acceptPlanProposal, approveQueue, declinePlanProposal, handBackPlan, inPlan, loadProjectState,
-  newId, newPlan, now, planLoop, proposePlan, checkPredecessors, reorderedFollowers, type Event, type PlanFile,
+  newId, newPlan, now, planLoop, proposePlan, checkPredecessors, removedByUser, reorderedFollowers, type Event, type PlanFile,
 } from "../src/index.ts";
 
 function setup(ids: string[]) {
@@ -205,4 +205,22 @@ test("reordering is a list's: the moved queue waits for the one chosen; those th
   // No repeats: one that waited for both the moved queue and its predecessor keeps the latter once.
   assert.deepEqual(reorderedFollowers(new Map([["B", p([["A", "user"]])], ["C", p([["A", "orchestrator"], ["B", "user"]])]]), "B", "X", "t1").get("C")!.after.map((e) => [e.queue, e.by]), [["A", "orchestrator"]]);
   assert.throws(() => reorderedFollowers(plans, "B", "B", "t1"), refused(/cannot start after itself/));
+});
+
+test("a predecessor the user took away is theirs: the orchestrator may not put it back, only propose it; an undo, a re-add or a new plan ends it", () => {
+  const x = setup(["A", "B", "C"]);
+  const t0 = "2026-11-16T10:00:00.000Z";
+  const removed = (queue: string, change: string, at = t0) => ({ at, kind: "removed" as const, queues: [queue], set_by: "orchestrator" as const, change });
+  const plan: PlanFile = { protocol: 1, by: "orchestrator", created_at: t0, updated_at: t0, after: [{ queue: "B", by: "orchestrator", at: t0 }], decisions: [removed("A", "c1")] };
+  assert.deepEqual(removedByUser(plan), ["A"]);
+  assert.throws(() => newPlan(plan, "C", ["A", "B"], { by: "orchestrator" }), refused(/the user took A out of the predecessors of queue C: you may not put it back; leave it out, or propose the change to the user: nexus plan propose C --after A --after B --reason/));
+  assert.deepEqual(newPlan(plan, "C", ["B"], { by: "orchestrator" }).after.map((e) => e.queue), ["B"], "without it, as it likes");
+  assert.deepEqual(newPlan(plan, "C", ["A"], { by: "user" }).after.map((e) => [e.queue, e.by]), [["A", "user"]], "the user may");
+  assert.deepEqual(removedByUser({ ...plan, decisions: [...plan.decisions, { at: t0, kind: "undone", change: "c1", undid: "remove" }] }), [], "undone");
+  assert.deepEqual(removedByUser({ ...plan, after: [...plan.after, { queue: "A", by: "user", at: t0 }] }), [], "back in it");
+  assert.deepEqual(removedByUser({ ...plan, decisions: [removed("A", "c1", "2026-11-16T09:00:00.000Z")] }), [], "from an earlier plan");
+  assert.deepEqual(removedByUser({ ...plan, started_at: t0 }), [], "a used plan");
+  // The proposal to put it back counts as a change of the user's.
+  x.st.writePlan("C", plan);
+  assert.match(proposePlan(x.st, "C", ["A", "B"], "A builds what C needs"), /^proposed to the user: queue C after A, B/);
 });

@@ -1,0 +1,78 @@
+# Nexus's instance of the shipped agent-contract template (templates/agent-contract.yaml): the parameters' defaults are this repository's.
+template:
+  id: nexus-agent-contract
+  title: Agent contract
+  description: Nexus's own instance of the agent-contract template, filled in for this repository. Check the briefings, the
+    nexus CLI and its help, the schemas and PROTOCOL.md against each other; fix_small fixes only clear slips in PROTOCOL.md.
+maintenance: survey
+# A worktree of its own: a survey keeps the main checkout free (nothing to merge back; Nexus removes the worktree once
+# the run is done), fix_small merges its fixes back through the integration step.
+worktree: auto
+params:
+  - name: instructions
+    description: "the agents' instructions: their briefings, system prompts or prompt templates"
+    default: "the briefings and the turns' texts in apps/server/src/prompts.ts (worker, orchestrator, thinking partner; their
+      golden copies in apps/server/test/golden/) and AGENTS.md"
+  - name: cli
+    description: the command line the agents use, and its help
+    default: "the nexus command (packages/cli/src/main.ts) and its help (packages/cli/src/help.ts: nexus help, nexus help
+      <topic>)"
+  - name: schemas
+    description: the formats of the files the agents read and write
+    default: packages/protocol/src/schemas.ts (the .nexus/ files, the events, the inbox)
+  - name: protocol_doc
+    description: the description of the protocol between the agents and the system
+    default: docs/PROTOCOL.md
+title: "Maintenance: agent contract"
+description: |
+  A survey of whether the agents' contract holds together: what {{instructions}} tell the agents, what {{cli}}
+  accepts and its help says, what {{schemas}} allow, and what {{protocol_doc}} describes. It reports each
+  contradiction, which becomes a queue the user approves. In survey mode nothing is changed or committed; in
+  fix_small mode only the clear slips in {{protocol_doc}} are fixed (never the code, the instructions or a difference
+  of meaning).
+  The report ends with a section "Recommended additions" (see the first step).
+coding: true
+origin: maintenance
+stop_conditions:
+  - Surveying would need a change to the project (a fix, a commit) in survey mode; report it as a finding instead.
+  - A decision that belongs to the user comes up (which side of a contradiction is right); ask with nexus ask, with a recommendation.
+  - A file to commit has changes this queue did not make; ask with nexus ask, never commit them.
+steps:
+  - id: "{{id}}1"
+    title: "Survey: instructions, commands, schemas and description against each other"
+    goal: |
+      Read {{instructions}}, {{cli}}, {{schemas}} and {{protocol_doc}} side by side. List each contradiction: an
+      instruction that names a command, an option or a file field that does not exist or works otherwise; a command
+      or option the help leaves out or describes wrongly; a field or value the schema allows or refuses unlike the
+      description; a rule the description states that the instructions or the code do not keep. For each: the places
+      on both sides (file and line or section), what each side says, which side the code bears out, how much it
+      matters to an agent that follows the text (a refused command, a wrong file, a lost report) and whether the fix
+      is a clear slip in the description or not. Or say there were none. Run the commands' help to read it, nothing
+      that writes. Change nothing, commit nothing.
+      The report ends with "Recommended additions" (not counted among the findings): what the project could add to
+      keep the contract together (a test of the instructions' commands against the CLI, the help generated from one
+      source, a golden file of the instructions), each with its reason.
+    acceptance:
+      - Each contradiction with both places, which side the code bears out, its weight and whether it is a clear slip, or that there were none.
+      - The report ends with "Recommended additions", each with its reason (or says there are none).
+      - The working tree as it was (no commit, no leftover files).
+    review:
+      level: 2
+    kind: research
+    activities: [cleanup]
+    size: S
+  - id: "{{id}}2"
+    maintenance: fix_small
+    title: "Fix the clear slips in the description"
+    goal: |
+      Fix only the clear slips among the findings of {{id}}1 in {{protocol_doc}}: a misspelt command, option or field
+      name, a wrong path, a wrong example value, where the code and the instructions agree and the description alone
+      is wrong. Each fix in its own commit, with the checks passing. The code, the instructions, the help and the
+      schemas are not touched; every other contradiction stays a finding for the report.
+    acceptance:
+      - Each clear slip fixed in its own commit with the checks passing; the others listed as findings.
+    review:
+      level: 2
+    kind: docs
+    activities: [cleanup]
+    size: S

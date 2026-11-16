@@ -5,12 +5,15 @@
 // left alone: a test that wants a step held for the user gives it level 1.
 import { ensureUserSession, loadProjectState, newId, now, type ProjectStore } from "@nexus/protocol";
 
-/** Accepts, as the user, every step waiting for the user's review at level 2 or 3. Returns how many it accepted. */
-export function acceptReviews(store: ProjectStore): number {
+/**
+ * Accepts, as the user, every step waiting for the user's review at level 2 or 3 (but those `skip` names, `queue/step`,
+ * which a test holds in review). Returns how many it accepted.
+ */
+export function acceptReviews(store: ProjectStore, skip?: ReadonlySet<string>): number {
   let n = 0;
   for (const q of loadProjectState(store).queues) {
     for (const st of q.steps) {
-      if (st.status !== "review" || st.review_with !== "user" || st.level === 1) continue;
+      if (st.status !== "review" || st.review_with !== "user" || st.level === 1 || skip?.has(`${q.id}/${st.id}`)) continue;
       const user = ensureUserSession(store);
       // After the step's report also under a test's frozen clock (the worker's events carry the real time).
       const at = st.finished_at && st.finished_at >= now() ? new Date(Date.parse(st.finished_at) + 1).toISOString() : now();

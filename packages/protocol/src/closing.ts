@@ -47,6 +47,8 @@ function closingStep(q: Pick<QueueFile, "id" | "coding">): StepDef | undefined {
 // queue with a worktree of its own ends with it, after the closing refactoring step, whatever `coding` says. In the
 // queue's worktree a worker merges the current base into the queue's branch and runs the checks there, so the base
 // later only moves forward to that result. Kept like the closing step: outside the list, a reserved id, Nexus's text.
+// A survey run (`maintenance: survey`) has none: it leaves no commit (Nexus stops one that does), so there is nothing
+// to merge back; its worktree is removed once it is done (src/merger.ts, PROTOCOL.md "Cleaning up a survey's worktree").
 
 /** The integration step's review level: the merge and the checks can be judged, so the orchestrator reviews it. */
 const INTEGRATION_LEVEL: ReviewLevel = 2;
@@ -75,13 +77,13 @@ export const INTEGRATION_CONDITION = "The integration found a conflict that it d
  * The queue has a worktree of its own: `worktree: auto` (made when it starts), or the server marked it when it began
  * to work in one (`integration`). A queue that worked in a worktree before the integration step existed has neither.
  */
-function hasOwnWorktree(q: Pick<QueueFile, "worktree" | "integration">): boolean {
+export function hasOwnWorktree(q: Pick<QueueFile, "worktree" | "integration">): boolean {
   return q.integration === true || q.worktree === "auto";
 }
 
-/** The integration step of a queue with a worktree of its own; undefined for one without. */
-function integrationStep(q: Pick<QueueFile, "id" | "worktree" | "integration">): StepDef | undefined {
-  if (!hasOwnWorktree(q)) return undefined;
+/** The integration step of a queue with a worktree of its own; undefined for one without, and for a survey run. */
+function integrationStep(q: Pick<QueueFile, "id" | "worktree" | "integration" | "maintenance">): StepDef | undefined {
+  if (!hasOwnWorktree(q) || q.maintenance === "survey") return undefined;
   return {
     id: integrationStepId(q.id), title: INTEGRATION_TITLE, goal: INTEGRATION_GOAL, acceptance: [...INTEGRATION_ACCEPTANCE],
     review: { level: INTEGRATION_LEVEL }, ...KEPT_TAGS, activities: ["integration"],
@@ -89,7 +91,7 @@ function integrationStep(q: Pick<QueueFile, "id" | "worktree" | "integration">):
 }
 
 /** Every step the queue runs, in order: its own, then the closing step, then the integration step, each when it has one. */
-export function stepDefs(q: Pick<QueueFile, "id" | "coding" | "steps"> & Partial<Pick<QueueFile, "worktree" | "integration">>): StepDef[] {
+export function stepDefs(q: Pick<QueueFile, "id" | "coding" | "steps"> & Partial<Pick<QueueFile, "worktree" | "integration" | "maintenance">>): StepDef[] {
   return [...q.steps, ...[closingStep(q), integrationStep(q)].filter((s): s is StepDef => !!s)];
 }
 

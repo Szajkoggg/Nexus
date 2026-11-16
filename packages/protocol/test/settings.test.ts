@@ -44,6 +44,31 @@ orchestrator:
   notify: true
 `;
 
+test("orchestrator fallback: global, atomic project override, explicit none, follow, and validation", () => {
+  const base = mkdtempSync(join(tmpdir(), "nexus-settings-"));
+  process.env.NEXUS_HOME = join(base, "home");
+  const store = ProjectStore.init(join(base, "p"), { id: "p", name: "P", root: join(base, "p") });
+  updateSettings(store, { orchestrator: { runtime: "claude" } });
+  assert.equal(builtInSettings().orchestrator.fallback, undefined);
+  updateGlobalSettings({ orchestrator: { fallback: { runtime: "codex", model: "gpt-6-luna", effort: "low" } } });
+  assert.deepEqual(store.readProject().orchestrator?.fallback, { runtime: "codex", model: "gpt-6-luna", effort: "low" });
+  updateSettings(store, { orchestrator: { fallback: { runtime: "claude", model: "sonnet" } }, own: ["orchestrator.fallback"] });
+  assert.deepEqual(store.readProject().orchestrator?.fallback, { runtime: "claude", model: "sonnet" });
+  updateSettings(store, { orchestrator: { fallback: null } });
+  assert.equal(store.readStoredProject().orchestrator?.fallback, null);
+  assert.equal(store.readProject().orchestrator?.fallback, undefined);
+  updateSettings(store, { follow: ["orchestrator.fallback"] });
+  assert.equal(store.readProject().orchestrator?.fallback?.runtime, "codex");
+  updateGlobalSettings({ orchestrator: { fallback: { runtime: "claude" } } });
+  assert.deepEqual(store.readProject().orchestrator?.fallback, { runtime: "claude" }, "no Codex model/effort carried to Claude");
+  for (const fallback of [{ runtime: "external" }, { runtime: "claude", effort: "ultra" }, [{ runtime: "codex" }]]) {
+    assert.throws(() => updateSettings(store, { orchestrator: { fallback } }));
+    assert.throws(() => updateGlobalSettings({ orchestrator: { fallback } }));
+  }
+  updateGlobalSettings({ orchestrator: { fallback: null } });
+  assert.equal(store.readProject().orchestrator?.fallback, undefined);
+});
+
 const HONEYCOMB_SHAPE = (root: string) => `protocol: 1
 id: honeycomb
 name: Project Honeycomb
@@ -163,6 +188,20 @@ test("a changed setting becomes the project's own, an untouched one keeps follow
   // The orchestrator's section made later (its session) follows the global settings too.
   store.updateProject((p) => ({ ...p, orchestrator: { runtime: "claude", notify: true, session: "s1" } }));
   assert.deepEqual(stored().orchestrator, { session: "s1" });
+});
+
+test("the orchestrator's runtime: Claude Code by default, the project's own from its settings page, and following the global one again (queue OC)", () => {
+  const base = mkdtempSync(join(tmpdir(), "nexus-settings-"));
+  process.env.NEXUS_HOME = join(base, "home");
+  const store = ProjectStore.init(join(base, "p"), { id: "p", name: "P", root: join(base, "p") });
+  // As the dashboard's project page sends it: the runtime with the model and effort it clears.
+  updateSettings(store, { orchestrator: { runtime: "codex", model: "", effort: "ultra" }, own: ["orchestrator.runtime"] });
+  assert.equal(store.readProject().orchestrator?.runtime, "codex");
+  assert.equal(store.readProject().orchestrator?.effort, "ultra", "Codex's levels are the orchestrator's too");
+  assert.equal(store.readStoredProject().orchestrator?.runtime, "codex");
+  assert.throws(() => updateSettings(store, { orchestrator: { runtime: "gemini" } }), /orchestrator.runtime/);
+  updateSettings(store, { follow: ["orchestrator.runtime"] });
+  assert.equal(store.readProject().orchestrator?.runtime, "claude", "the global value again");
 });
 
 test("the MCP servers Codex workers keep: none by default, the project's only, kept when other settings change", () => {

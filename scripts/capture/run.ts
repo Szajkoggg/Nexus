@@ -17,6 +17,8 @@ export interface Browser {
   press(key: string): Promise<boolean>;
   /** Scrolls the first element whose own text is exactly `text` (a section's heading) to the top of the window. */
   scroll(text: string): Promise<boolean>;
+  /** Drags the element matching `from` over each of `to` in turn (CSS selectors), dropping it on the last if `drop` (drag.ts). */
+  drag(from: string, to: readonly string[], drop: boolean): Promise<boolean>;
   /** Saves a picture of the window (only the window: a fixed-viewport capture). */
   shot(file: string): Promise<void>;
 }
@@ -26,6 +28,7 @@ const describe = (a: Action): string => {
   if ("type" in a) return `type into ${a.type.into ?? "the focused element"}`;
   if ("press" in a) return `press ${a.press}`;
   if ("scroll" in a) return `scroll to "${a.scroll}"`;
+  if ("drag" in a) return `drag ${a.drag.from} to ${[a.drag.to].flat().join(", then ")}${a.drag.drop ? " and drop" : ""}`;
   return `wait ${a.wait} ms`;
 };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -52,6 +55,7 @@ export async function captureViews(views: View[], browser: Browser, o: {
         else if ("type" in a) done = await browser.type(a.type.text, a.type.into);
         else if ("press" in a) done = await browser.press(a.press);
         else if ("scroll" in a) done = await browser.scroll(a.scroll);
+        else if ("drag" in a) done = await browser.drag(a.drag.from, [a.drag.to].flat(), !!a.drag.drop);
         else await sleep(a.wait);
         if (!done) throw new Error(`action ${i + 1} (${describe(a)}) found nothing to act on`);
         await sleep(400);

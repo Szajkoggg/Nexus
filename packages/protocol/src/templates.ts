@@ -194,7 +194,9 @@ export function filledTemplateYaml(t: Template, queue: Record<string, unknown>, 
     " nexus tags; the texts in the queue's language), then upload it:",
     ` nexus queue draft ${draftPath}`,
   ].join("\n");
-  return doc.toString({ lineWidth: 120 });
+  // Multi-line texts as literal blocks (|), as a person writes them: a folded block (>) needs an empty line for every
+  // line break, which makes a goal of several lines hard to read and edit.
+  return doc.toString({ lineWidth: 120, blockQuote: "literal" });
 }
 
 // ---------------------------------------------------------------- the three folders

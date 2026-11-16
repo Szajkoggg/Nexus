@@ -47,9 +47,9 @@ test("a Claude partner asks nothing and may write only in the notes folder", asy
     const allowed = argv.slice(argv.indexOf("--allowedTools") + 1);
     assert.deepEqual(allowed, [
       "Read", "Grep", "Glob",
-      ...["nexus status", "nexus help", "git log", "git status", "git diff", "git show"].flatMap((p) => [`Bash(${p}:*)`, `PowerShell(${p}:*)`]),
-      "Edit(Dev/Concepts/Gameplay/**)", "WebSearch",
-    ], "nexus status and nexus help (to read about Nexus) and git's reading commands on Bash and PowerShell, writes only to the notes folder: no run can start, nothing else is writable");
+      ...["nexus status", "nexus help", "nexus tags", "git log", "git status", "git diff", "git show"].flatMap((p) => [`Bash(${p}:*)`, `PowerShell(${p}:*)`]),
+      "Edit(Dev/Concepts/Gameplay/**)", "Bash(nexus covers:*)", "PowerShell(nexus covers:*)", "WebSearch",
+    ], "nexus status, nexus help (to read about Nexus), nexus tags (the areas for a note) and git's reading commands on Bash and PowerShell, writes only to the notes folder and, with nexus covers, its own events: no run can start, nothing else is writable");
     assert.equal(argv[argv.indexOf("--disallowedTools") + 1], "NotebookEdit,WebFetch", "no .nexus deny rules for a partner (those are the workers'); at the default web level no page fetching");
     assert.equal(loadProjectState(conversations["store"]).sessions.find((s) => s.id === c.id)?.role, "conversation");
   } finally { stop(); }
@@ -66,6 +66,7 @@ test("a Codex partner works in the notes folder's sandbox, or reads only without
     assert.equal(start.approvalPolicy, "never");
     assert.match(String(start.cwd).replaceAll("\\", "/"), /Dev\/Notes$/);
     assert.ok(existsSync(join(a.root, "Dev/Notes")), "the notes folder is created");
+    assert.deepEqual(start.writableRoots, [a.store.sessionDir(c.id)], "and its own session folder, where nexus covers appends to its events");
   } finally { a.stop(); }
   const b = setup();
   try {
@@ -246,6 +247,8 @@ for (const web of ["off", "search", "fetch"] as const) {
         web_search: { off: "disabled", search: "cached", fetch: "live" }[web],
         "features.apps": false, "features.plugins": false,
         "mcp_servers.node_repl.enabled": false, "mcp_servers.blender.enabled": false, 'mcp_servers."odd.name".enabled': false,
+        // Its own session folder: nexus covers appends to its events there.
+        "sandbox_workspace_write.writable_roots": [store.sessionDir(c.id)],
       });
       assert.equal(CODEX_WEB_SEARCH[web], start.config.web_search);
       assert.ok(args().some((x) => x.method === "config/read"), "the user's servers are read from Codex's own effective config");

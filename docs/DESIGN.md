@@ -137,6 +137,57 @@ it was nudged at once and halted at the next such end (queue TR, 2026-11-14). Tw
   the work still running and says Nexus waits no longer; the next end without an outcome halts the run. The wait is
   kept in the engine's memory only: a restarted server has no process with the work anyway (its runs come back paused).
 
+### Worker process ownership on Windows (queue PT)
+
+The worker's process tree belongs to its session. At a step outcome, after the turn is idle, the engine waits for
+descendant cleanup before opening another step or settling at review or a stop. Questions and turns without an
+outcome retain the existing background-work wait. Stop now cleans when its turn ends; Stop at once, shutdown,
+session completion and unexpected runtime exit end the whole tree. The runtime stays alive between steps.
+
+Each Windows worker has a private Job Object, hosted by `worker-job.ps1` and the repository's `worker-job.cs` through
+PowerShell's Add-Type (approved by the user for PT1; no npm dependency, downloaded binary or installed compiler).
+AgentHost enables it only for worker sessions, never orchestrators or thinking partners. The helper joins the job
+before it starts the runtime: every ordinary descendant inherits membership, even if a short-lived intermediate
+parent exits. This is why snapshots of parent PIDs were rejected: a parent can start and exit between snapshots.
+Breakaway is not enabled. The non-inheritable job handle has kill-on-close; losing the server's pipe or the helper
+also ends the tree. Failure to create or join the job fails the launch instead of silently starting an unowned worker.
+
+At a step boundary, the helper enumerates job members except itself and the runtime, opens each as a process handle,
+verifies its membership on that same handle, terminates it and waits for exit. A reused PID outside the job is
+never terminated. Enumeration repeats until only the two roots remain; failure or a timeout halts the queue and
+ends its worker, without opening the next step. New inbox delivery waits for the cleanup acknowledgement. Runtime
+resumes, including a cancelled deploy's automatic resume, wait for that acknowledgement too; a later run change
+cancels the deferred request. A runtime exit after a reported step is not retried even if the review was already
+accepted while its exit notice was in flight. The next step starts a fresh runtime in the same session.
+Runtime exit cleans descendants before the adapter emits exit. Closing the runtime's input has a five-second grace period;
+an unresponsive control reader is ended after a further fifteen seconds, closing its job. Windows worker recovery
+does not kill a persisted PID: job ownership ends with the old host, and a number alone is not proof of ownership.
+
+**The console is infrastructure.** The helper allocates its own console before joining the job, hides it, restores
+its redirected control pipes, and shares that console with the runtime. Creating the console inside the job caused
+step cleanup to kill its conhost; the runtime survived but its next node child failed with `0xc0000142`. A focused
+probe reproduced that fault, and the fake-runtime test now checks that the same runtime starts work in step two.
+No process is selected or exempted by name or command line. The helper's console ends with the helper.
+
+Full-suite validation exposed test waits that included more work than their names: a chain's start wait also waited
+for its entire run, and a question wait included the preceding step. These now wait separately for each boundary,
+using the existing named step/run budgets, without changing the global waits. The chat-stop fake-log reader also
+waits for a newline before parsing a record, including when a file has just been created; malformed complete records
+still fail. A deterministic partial-write test covers that reader race.
+
+The Windows integration tests use both fake runtimes, actual sleepers, an orphaned grandchild, and a second worker.
+They cover step continuation, review, stops, interruption, shutdown, runtime exit and cleanup failure. No real model
+was called. The cross-step test holds the first step until a test observer retains Windows process handles, then
+allows cleanup and asserts exit while those handles remain open. A full-suite run failed its old PID-only exit
+assertion; those snapshots cannot distinguish a surviving child from a recycled PID. Retained handles prevent PID
+reuse during the assertions, without weakening the requirement that cleanup precedes the next step. Each worker
+has its own release barrier, so releasing the first cannot finish the isolation sentinel's step.
+The helper's internal pipe protocol is in PROTOCOL.md. This Windows implementation leaves non-Windows
+launching as before. Job membership covers normal process creation, including detached children, not work delegated
+to an unrelated system service (`Win32_Process.Create`, for example); Nexus does not chase such processes with
+heuristics. References: [Job Objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects) and
+[AssignProcessToJobObject](https://learn.microsoft.com/en-us/windows/win32/api/jobapi2/nf-jobapi2-assignprocesstojobobject).
+
 ### The run's state transitions
 
 A queue's run record (`run.yaml`) changes state only through the named transitions in `apps/server/src/run-state.ts`.
@@ -516,6 +567,23 @@ back by itself) and `resolve_conflicts` (the integration step's worker resolves 
   by Node where Git for Windows cannot (paths beyond 260 characters); the branch with `git branch -d`, never `-D`.
 - **No push.** The merged base goes to the remote with the next deploy; a deploy planned after such a queue goes
   after its fast-forward.
+- **The plan waits for the merge back** (queue MQ, 2026-11-16). With `merge_back` on, a queue planned after one in a
+  worktree of its own starts only once that one's work is merged back (`doneForPlan`, `notMergedBack` in
+  packages/protocol/src/plan.ts), so it starts from a base that has the work, and a chain of worktree queues does not
+  build on a base without its predecessors. The planned deploy already waited the same way; both use one test. With
+  `merge_back` off the user's Merge back may come much later, or never, so finishing stays enough there.
+- **The merge train** (queue MQ, 2026-11-16). Two worktree queues finishing together both used to integrate against
+  the same base; the first fast-forward then moved the base under the second, whose integration step ran again (and,
+  with a third, again, up to the limit). Now, with `merge_back` on, one queue per base integrates at a time: it holds
+  the base from its integration step's start to its fast-forward, and the others are held at the end of the step
+  before their integration step, in the order they got there. Each integration step thus merges a base that already
+  has the queues before it, runs once, and is followed by a fast-forward. A fast-forward that waits on the user (a
+  dirty checkout, failed checks) must not stop the train: it lets the next queue go, and once it could go again it
+  queues up behind those already waiting (by when its wait began). Choices: the rule is derived from the files
+  (`packages/protocol/src/train.ts`), not kept in the server's memory, so a restart finds the same order and the
+  dashboard and `nexus status` show the same place; the hold reuses the engine's step boundary and `releaseHold` (the
+  planned deploy's and the merge back's own hold), so no new run state; a queue's own steps never wait, only its
+  integration step; with `merge_back` off there is no train, since the user's Merge back decides the order anyway.
 - A queue from before the integration step keeps the user's old merge (which may make a merge commit).
 - Found while building: a scripted run on a development instance first stood still because a project without an
   orchestrator section has its level-2 reviews done by the user; and a commit in the base's checkout changes nothing
@@ -560,11 +628,28 @@ usage runs out"). Choices made while building it (FB4):
   session is told what the old one cannot hand over itself: its progress lines, its commits since the round began and
   `git status` of the checkout. The changes are not touched: the seed asks the new session to keep them. Asking the
   full runtime for a context summary first (as at a boundary) would spend the usage that ran out, so none is asked.
+- **An entry during the asking turn is no turn of its own (TF1).** An answer or a message that comes while the turn
+  that asked the question still runs (as Nexus sees it: until the turn's result is read) goes into that turn on the
+  same runtime (`next`), so the gate does not look. The full runtime may then take one more turn: the agent acts on it
+  in its turn, or, when the CLI had already ended the turn and its result was still on the way, starts a turn for it.
+  Accepted: it is one turn, and holding entries back from a running turn would cost every other step its in-turn
+  messages. `fallback-mid.test.ts` once raced exactly this under load (a step left waiting, or done on Claude Code);
+  its answers and messages now wait for the asking turn's end, and the fake lingers after the question
+  (FAKE_ASK_LINGER_MS) so that a test which does not wait fails every time.
 - **A failed turn's reset counts as a window.** A turn refused for the usage limit names its reset; that is added as a
   full window of the runtime for the decision, since usage.json may not show it yet.
-- **Notices wait in the orchestrator's inbox.** The orchestrator runs on Claude Code; a notice that started its turn
-  while Claude Code is full would spend the very usage that ran out. The notice is put into its inbox (seen there, not
+- **Notices wait in the orchestrator's inbox.** A notice that started the orchestrator's turn while its runtime (Claude
+  Code or Codex, `orchestrator.runtime`) is full would spend the very usage that ran out. The notice is put into its inbox (seen there, not
   told) and told once the runtime is free; the reviews it would do wait with it, as decided.
+
+**The orchestrator's own fallback (OC4).** The primary and one optional backup are user settings. Its active fallback
+is server state in the session file, with the primary's reset deadline; lower readings cannot bounce it back early,
+and a server restart cannot forget the choice. Every automatic selection waits for a turn boundary. The existing
+runtime-switch lineage carries unread messages and the latest `nexus context` summary; no extra summary turn is
+requested from a runtime whose quota is already full. A missing summary is stated in the chat. Context care keeps
+the fallback state when it creates another session. The user's clarification on 2026-11-16: an alternative model
+of the same runtime shares the quota and must wait, so it is configurable but cannot provide extra capacity. Tests
+use both fake runtimes, a movable usage clock and a held chat turn, including restart while on the fallback.
 
 ### Estimating a turn's use
 
@@ -641,6 +726,14 @@ chains of one predecessor to several. Decisions:
   orchestrator's changes to the user's dependencies.
 - A plan to continue a session waits while that session runs another queue, rather than failing: one session never
   runs two queues, and planning a queue into the session of the queue before it is the common case.
+- The user's single-dependency changes (queue PB, 2026-11-16): "also after" adds one predecessor, a line's details
+  take one away, and a move, an add or a remove can be undone for a few seconds. Taking a predecessor away, whoever
+  set it, is the user's decision, recorded and told to the orchestrator; it may propose putting it back but not do it
+  (refused in the files, as with the user's own dependencies). What an undo needs is kept in the plan files the
+  change wrote (`undo`: the file before), not in the server's memory, so a restart within the window neither loses
+  the undo nor lets a queue the change freed start early. A later write shows by `updated_at` (every write sets it),
+  so an undo never overwrites a change made since; a start is checked apart (marking `started_at` keeps the rest).
+  The server takes an undo 2 s longer than the dashboard offers it, for the request's way.
 
 A schedule ("at 22:00", "when the usage window resets") is the same kind of plan with a time instead of a queue.
 Decisions:
@@ -1685,6 +1778,57 @@ Nexus keeps outside the queue's list of steps.
   read-only carveouts directly; refusing to run unsandboxed". Without that carve-out the CLI could not record events.
   So Codex workers are unchanged.
 
+- **An orchestrator on Codex can be kept to its drafts and its own event log, by a permission profile** (queue OC,
+  decided by the user 2026-11-16). Probes with Codex 0.167.2 on Windows (elevated sandbox), a temporary project
+  outside the temp folder (`:workspace` makes the system temp folder writable, so a project under it proves
+  nothing): first `codex sandbox -P <profile>` with a script that tries every write (no model), then two `gpt-6-luna`
+  turns that tried the same with the file tool (apply_patch) and the shell: `codex exec` (199k input tokens, 191k of
+  them cached, 636 output) and `codex app-server` (118k input, 113k cached, 511 output; Codex reports no cost).
+  - A profile with no writable ancestor works where the carve-out above failed: `extends = ":read-only"` and
+    `filesystem = { "<root>/.nexus/drafts" = "write", "<root>/.nexus/sessions/<orchestrator>/events.jsonl" = "write" }`
+    (a single **file** may be granted), the working directory the project's root. Writable: the drafts and that one
+    file. Refused: the project's root and its files, `project.yaml`, the session's own `session.yaml` (its role) and
+    `inbox.jsonl`, another session's inbox, `sessions/user/events.jsonl`, `queues/*/queue.yaml` (approvals, Continue),
+    anything outside the project (`away.yaml` lives in NEXUS_HOME), and the temp folder. The `nexus` CLI works inside
+    it (`queue draft --template`, an event appended), and `--session user` cannot write in another session's name. Raw
+    lines in its own events.jsonl add nothing: the loader drops events that claim another session and user-only
+    events from a session whose role is not `user`.
+  - Through the app-server, Nexus's way: `thread/start` with `config: { default_permissions, "permissions.<name>.extends",
+    "permissions.<name>.filesystem" }` and no `sandbox` (the older settings would win); the thread then reports
+    `workspaceWrite` with exactly those two roots, and the working directory stays read-only. A turn must not send a
+    `sandboxPolicy` either.
+  - The elevated sandbox leaves its grant on the file as ACL entries (`CodexSandboxUsers` and a per-grant SID); a
+    later `:read-only` or `:workspace` sandbox elsewhere still cannot write the file.
+  - Rejected: `workspace-write` with `.nexus/drafts` as the working directory alone writes only the drafts (verified),
+    but the CLI then needs `.nexus/sessions/<orchestrator>/` writable, and that folder holds `session.yaml`: the
+    orchestrator could rewrite its role to `user` and act as the user.
+  - **Loopback stays open in every Codex sandbox**: with `network.enabled = false`, and with `:read-only`, a public host
+    was refused (EACCES) but `fetch("http://127.0.0.1:<port>/")` reached a test server, and a sandboxed script could
+    send an `Origin` header of its choosing. The server's write guard (Origin's host equal to Host, JSON, no
+    `Sec-Fetch-Site`) lets such a request through (read from the code; the live server was not probed). So any agent
+    with a free shell on this machine (Codex workers, Claude Code workers, an orchestrator on Codex) can do the user's
+    dashboard actions over HTTP; the orchestrator on Claude Code cannot (it runs only `nexus` and read-only git). The
+    user decided: the gap is closed by a queue of its own, and the orchestrator is not switched to Codex until it is.
+  - Built in OC2: `CodexOptions.permissions` (a profile in place of `sandbox` and `writableRoots`), the orchestrator's
+    launch by `orchestrator.runtime`, its Codex briefing without helpers (it does their work itself, by their own
+    checklists in short), and a fresh session at a runtime switch (no conversation moves between runtimes; the old
+    chat stays above). A switch waits for the turn running then to end: two orchestrator processes at once could act
+    twice. Building it found a lost message in the Codex adapter: a `turn/steer` refused because the turn had just
+    ended came back after `turn/completed` had found the queue empty, so the message waited for a next one; it now
+    starts its own turn.
+  - **A resumed thread keeps the profile** (probed in OC2's review round, 2026-11-16, Codex 0.167.2, `gpt-6-luna` at
+    effort low, a temporary project outside the temp folder): through Nexus's own `Orchestrator` against the real
+    Codex, a wrapper logging the JSON-RPC lines. A turn on `thread/start`, the process ended, then a new
+    `Orchestrator` (a restarted server) resumed the same session with `thread/resume`, sent with the same `config`
+    and no `sandbox`; both answers reported `activePermissionProfile: nexus_orchestrator` (extends `:read-only`) and
+    a `workspaceWrite` sandbox with exactly the two granted paths. In the resumed thread a file in the project's
+    root (apply_patch: "writing outside of the project; rejected by user approval settings"; and `Add-Content`:
+    access denied) and the session's `session.yaml` (access denied) were refused; the draft was written. The first
+    run found that a fresh project has no `.nexus/drafts` and the sandbox cannot make it ("Failed to create parent
+    directories"), so the server now makes the folder before Codex starts, as it does the events file. Cost: two
+    runs, each a short turn (18.4k input tokens, 5 output) and a turn of four actions (113k input, 93k of them
+    cached, 364 and 445 output); no cost reported.
+
 - **Remote access needs no open port.** The server keeps listening on 127.0.0.1; Tailscale Serve relays the tailnet's
   https requests to it. Requests relayed by a proxy count as remote and need the access token; this machine does
   not. Push works through the browsers' own push services (Web Push with VAPID), so a phone gets notifications with
@@ -1870,6 +2014,14 @@ is gone. Three things the move needed:
 Measured back to back on a quiet machine, the eight files went from 606 s to 503 s together; the suite (240 s against
 246 s) is set by its slowest files, which this did not touch.
 
+**Remaining fixed work and repeated repositories (queue TF3).** The provisional deploy tests now release Q1 and Q2
+separately after their commits. The scenario tests release Q1 after pausing and Q4 only after the restart; their
+frozen-clock golden files stay unchanged. Neither test needs the work to last a fixed time. The merger tests build
+their initial Git repository once and copy it, including `.git`, into each new project. No objects, branches, index,
+reflogs or worktree registrations are shared, and each copy gets its own ProjectStore. The context-care,
+global-settings and protocol closing/integration pairs use tables of the original cases, retaining their distinct
+inputs and assertions; fewer test registrations do not mean fewer cases.
+
 ## One full test run on the machine (queue FX)
 
 Decided on 2026-11-15: with queues in worktrees side by side, two checkouts often ran `npm test` at once; each run
@@ -1890,6 +2042,82 @@ The suite runs every file side by side on every core already, so two at once onl
 
 Measured with two temporary clones started 5 s apart (a busy machine, other work running): the first took 268 s,
 the second waited about 263 s and then took 181 s; both green.
+
+### A run ends with its starter; a lock held too long is stale (queue TF)
+
+The survey TH found a hung run of another worktree holding the lock through a night, so every full run waited 15
+minutes and then ran without it. On Windows a killed parent leaves its children running: a worker's `npm test` ended
+on its background time limit, or a shell closed, could leave the whole test run going and holding the lock (its
+process alive). Decided:
+
+- **A watchdog process** per run (`test-lock.ts --watchdog`, detached, with an IPC channel to the wrapper) watches the
+  run's starter: the wrapper's parent always, then each ancestor while it is a shell (cmd, bash, sh, PowerShell, ...)
+  or npm, so up to the agent or terminal that ran the command and not beyond (not the Nexus server, whose restart is
+  not the run's end). Since PT2 the watchdog starts the runner itself. One of the watched processes gone, or the
+  wrapper's IPC closed: the watchdog ends its own child and removes the lock. On Windows it uses the retained child
+  handle and Node/libuv's job; elsewhere, the runner's process group. It looks every second; while waiting for the
+  lock too. It never needs a second process query to prove ownership of an orphaned runner.
+- **Found by asking the system**: on Windows one PowerShell walks the parents with a CIM query per level (about a
+  second; the whole process table takes several, and `wmic` is gone from current Windows), and stops after the first
+  that is no shell or npm: WMI is not cheap, and twelve levels per walk, about eight walks per suite (the run's and the
+  lock tests'), coincided with the update tests timing out in most full runs. A parent newer than its
+  child is a reused pid and ends the walk. Git Bash breaks the Windows chain where an MSYS process execs another (npm's
+  own shell script does): the exec'd process's Windows parent is a stand-in that is gone, and the walk goes on through
+  MSYS's process table (`ps -e -l` beside its bash.exe: PID, PPID, WINPID). The run waits for this discovery before
+  acquiring its lock. Unknown ancestor PIDs are not used as evidence that a starter has died.
+- **Node already does part of it on Windows**: libuv puts a process's children in a job object that ends them with it,
+  so a killed Node parent takes its children along (and a test whose starter is a Node process does not show the
+  problem: the starter in the tests is a shell). That job would end the watchdog too, which is why it is detached.
+- **20 minutes since `since`** (`NEXUS_TEST_LOCK_STALE_MS`), five times a full run, makes a lock stale even if its
+  process lives (a hung run, a pid reused): the next run takes it over at once instead of waiting 15 minutes and
+  running without it. The old run is not ended (not that run's to end); its end leaves the new lock alone.
+- **Never a tree kill by a pid that may have been reused**: Windows gives a pid to a new process at once, and
+  `taskkill /T` of a reused one ends another program's tree. The watchdog now owns the runner's process handle; no
+  PID from an ancestry snapshot is a cleanup target. The tests end only
+  their own starter, through its handle, and their long run ends by itself within two minutes.
+- **Failing tests left servers running**: `chat-update.test.ts`, failing before its hand-over, released its stand-in
+  build in `finally`, so the update went on after the test and started a successor server nobody ended (with its fake
+  runtimes, which kept starting turns); a timed-out hand-over's successor was not ended either. Several were found
+  after a morning of full runs, and they loaded the following ones. Its `finally` now cancels the drain or fails the
+  build, waits for the update to settle and ends the successor the update's log names.
+- **The drain and the queue's pause are separate observations (TF.refactor)**: the lifecycle checks whether the
+  worker runtime is idle, while the engine records the queue's `paused` state after its turn-settle delay. Under load
+  the chat-update test observed `updating` while the queue still said `pausing`. It now also waits for `paused` before
+  reading the run, keeping its assertions about the pause, restart flag and interrupted step unchanged.
+
+### Without process queries: lifetime IPC and a renewable lease (queue PT2)
+
+When WMI or `ps` cannot report the starter (or `NEXUS_TEST_LOCK_QUERY=off` explicitly disables discovery), the
+wrapper and watchdog still share an IPC channel. The watchdog owns the runner from its launch and can end it when
+the wrapper disappears, without identifying any process from a list. A cooperative caller may also supply a Node
+IPC channel to the wrapper: disconnecting that channel ends the run even if the wrapper itself survives its caller.
+No unavailable ancestor chain is guessed. A plain shell with no such connection cannot be watched beyond the
+sandbox's teardown of the wrapper when queries are denied.
+
+In this mode the lock carries `lease: true` and a random ownership token. Its holder renews its modification time
+through the open file descriptor every second (or one third of a shorter expiry, at least 10 ms). A live renewal
+keeps other runs waiting regardless of the original acquisition time or PID visibility. Without renewal for
+`NEXUS_TEST_LOCK_STALE_MS` (20 minutes by default), another run can take it over. This also handles a sandbox killing
+both wrapper and watchdog: no observer needs to survive to release the lease. Expiry makes the lock reclaimable;
+the next acquirer removes the old file. The normal maximum wait remains 15 minutes.
+
+Renewal uses the original open file, not its pathname, and release checks the ownership token as well as PID. A
+superseded holder cannot renew or remove its replacement, even when the PID is the same. Older records without a
+lease retain the original dead-PID and 20-minute absolute-age behavior; available process queries retain the
+existing ancestor-watch behavior. The private lock and IPC formats are in PROTOCOL.md.
+
+Tests disable queries and remove either the connected starter or the wrapper, then check the watchdog, runner,
+test process, grandchild and lock are gone. They also cover expiry with a still-live recorded PID, renewal beyond
+the initial deadline, and safe replacement under the same PID. The existing shell and Git Bash tests still run
+where system queries are available.
+
+The real probe (Codex 0.167.2, `gpt-6-luna`, effort low, workspace-write, approval never, an isolated temporary
+folder) ran a tiny test without WMI, then started a long test. Interrupting the turn and closing the sandbox ended
+all five observed processes, including the watchdog. Consequently the lock file remained as an unrenewed lease;
+a second real sandbox invocation, without a model call, reclaimed the expired lease and removed it after its tiny
+test passed. No process or lock remained at the end. Usage was 11,185 input tokens (none cached) and 76 output tokens,
+11,261 total; Codex reported no dollar charge. At the [published Luna rates](https://developers.openai.com/api/docs/models/gpt-6-luna)
+the API equivalent is about $0.00116, not a reported bill. The probe used a two-second expiry; production retains twenty minutes.
 
 ## The engine's own waits in tests, and what sets the slowest files (queue FX)
 
@@ -2038,8 +2266,9 @@ local port without an approval), so a Codex worker could reach this machine's Ne
   `runtimes.codex.mcp_servers` (project only, empty by default: a project whose Codex workers need one, Blender in
   Honeycomb, names it in its settings). Plugins and apps are never kept: a plugin's servers (computer use, Blender)
   come and go with the plugin, and the apps' connectors searched even with web search off.
-- **The orchestrator runs on Claude Code** whatever `orchestrator.runtime` says (it only chooses the usage window the
-  orchestrator's notices wait for); a test guards that, and says that a Codex orchestrator would keep no server.
+- **An orchestrator on Codex keeps no server** (queue OC): its thread starts with every MCP server off, plugins and
+  apps too, whatever `runtimes.codex.mcp_servers` says (that list is the workers'); a test guards it. A server runs
+  outside the sandbox, and could reach the Nexus API for it.
 - **Probed on 2026-11-15** with Codex 0.167.2 and `gpt-6-luna` (effort low, read-only sandbox, approval `never`), in
   a temporary project, through `CodexSession` with the worker's options. The probe's own MCP server (one tool,
   `fx_probe_echo`, noting its start) came in by `-c mcp_servers.fxprobe...` on a wrapper around `codex app-server`,
@@ -2300,7 +2529,190 @@ On the plan view of the step's base commit (seed `scripts/capture/seed-plan-nexu
 it found 6 lines through boxes and 15 titles or reasons cut short at 1440 px, and 9 cut texts at 390 px; on the PL1
 mockups (`docs/ux/mockups/22-plan-layout.html`, variants A and B) none.
 
+### The plan view's layout A (queue PB)
+
+The user chose layout A (docs/ux/plan-view-options.md). It is built in `apps/web/src/plan.ts` as a pure function,
+`drawPlan(layout, heights, width)`, with no library; `components/Plan.tsx` renders the cards at the column width,
+measures their heights, and places them and the lines from the drawing. Decisions and findings:
+
+- The order and the columns are `planLayout`'s, unchanged: the drawing only stacks each column from the top and adds
+  gaps, so a queue is where it was.
+- A gap goes before the first queue of its column that the line would otherwise run beside (the line's height in the
+  column before is above that queue's bottom). On Nexus's own plan this reproduces the mockup's hand-placed gaps
+  exactly (MX > RA at the top of Next and Then, ST2 > ST3 before CH, IO > DG before ST3).
+- Ports are 10 px apart (less on a short card), sorted by where each line goes or comes from. Between two columns a
+  line arriving at the height another leaves at would run along it: the arriving end moves within its card or gap
+  (2 px steps) until it is 3 px from every other. Each line that changes height then gets a vertical track of its own
+  in the gap between the columns (interval colouring, the tracks spread evenly).
+- The arrowhead's tip is the line's end, a pixel before the card (`refX` at the tip, `userSpaceOnUse`): the old marker
+  reached into the card.
+- Unit tests check Nexus's plan at several widths and card heights and 300 random plans: no stretch inside a card, no
+  two lines along each other, no slanted stretch, the order planLayout's.
+- Measured with `scripts/layout-faults.ts` on a development instance with `seed-plan-nexus.ts`, the boxes and lines
+  limited to `section[aria-label='The plan']`: 0 lines through boxes, 0 overlaps and no text cut short in the plan at
+  1440 and 390 px (5 crossings at 1440, the mockup 3). Two cut texts outside the plan are older: the rail's "Running in
+  Nexus" title at 1440 and the sessions table at 390.
+- A line is clicked through a wider transparent band along it (12 px, `pointer-events: stroke`), drawn after the
+  lines; the measured lines are the drawn ones (`svg path[data-edge]`), since the bands would count as crossings.
+  The line's details open under the card it comes from, and the plan grows to hold them (the plan scrolls sideways,
+  so anything below its box would be cut). On the phone an "after" chip opens them under the card, scrolled into view
+  clear of the bottom bar. Dragging is the desktop's.
+- The drop target splits only while a queue is dragged over it, into "instead" (a move, every dependency it replaces
+  named, done ones too) and "also" (offered only to a queue with a place of its own that does not wait for the
+  target already). A drop elsewhere on the card is a move, as before.
+- The capture tool drags as the plan view takes it: HTML5 drag events dispatched in the page with one DataTransfer
+  (`scripts/capture/drag.ts`), since a headless window cannot be driven to a native drag; React's handlers take them
+  as a user's. Its click dispatches the event where an element has no `click()` (an SVG shape).
+
+## Resuming worktree cleanup (queue CW1)
+
+PT exposed a gap between two individually reasonable checks: cleanup checked a clean, merged worktree, then
+`git worktree remove`/recursive removal could remove `.git` or its registration before failing on another file.
+The next Clean up could only report an unreadable Git status. A successful merge does not prove that the remaining
+folder still belongs to that cleanup, nor that someone has not written new work into it.
+
+The server now saves a versioned `cleanup_proof` in the queue's existing `git.yaml` **before deletion**. That file
+already has an atomic writer and belongs to the server; a second journal writer or a marker inside the directory
+being deleted would weaken the contract. A separate top-level field also survives the existing `cleanup.waiting`
+and merge-wait patches in `merger.ts`, and step-round updates in `gitinfo.ts`. No migration invents evidence for old
+queues. The proof lasts until worktree removal, registration cleanup and branch deletion all succeed and `cleaned`
+is recorded together with clearing the proof.
+
+The proof binds the canonical target and Git common directory, filesystem identities (device, file ID and birth
+time), the merged tip and destination ref, and a manifest of all entries. Ignored files and empty directories are
+included: Git alone cannot detect foreign additions to node_modules after cleanup starts. Regular-file bytes and
+link text are hashed; file timestamps and mode also detect rewrites, while directory timestamps are excluded
+because deleting children changes them. Junctions and symlinks are recorded as links, never traversed. An unreadable
+entry or unavailable identity refuses cleanup. This costs a full filesystem walk and content hashing, and the
+manifest makes git.yaml larger while cleanup is pending; that is the cost of proving an unchanged remainder even
+after Git metadata has vanished. A mere boolean "cleanup started" or a root marker would not prove content safety.
+
+Deletion uses unlink and nonrecursive rmdir instead of Git's initial recursive deletion or a recursive Node
+fallback. Each attempt checks the whole remaining tree against the proof before removing anything, then checks
+each entry and its parent identities immediately before deletion. Only an unchanged subset is accepted. A new
+child arriving during removal prevents rmdir; a replacement or changed file prevents unlink at the next check.
+This is recovery from interrupted local operations, not an OS transaction against a hostile process racing the
+final filesystem syscall; users must not keep editing a worktree they are deleting. The queue's shared merge lock
+serializes the dashboard and server callers. No running queue is eligible. Removal retries transient Windows
+errors up to eight times with increasing 250 ms delays, rechecking the proof on each attempt. A fake-runtime
+survey test exposed a short EBUSY while its exiting worker still held the empty directory; keeping the former
+bounded retry behavior handles that without treating a lasting lock as success. Once the directory is gone,
+`git worktree remove` removes only its registration; a global prune would affect unrelated missing worktrees.
+
+A missing target is an empty subset. A missing branch can complete only when the recorded tip is still in the
+recorded destination; a changed branch is refused. The automatic merger checks for pending cleanup before judging
+the branch, so a restart after branch deletion can finish the final record. Completed cleanup is idempotent and
+does not touch a later folder or branch at the old names. Surveys retain their existing manual retry after a
+recorded cleanup wait.
+
+Real temporary Git repositories reproduce partial removal with deterministic EPERM injection, both with and
+without worktree registration, then reload the store and construct a new Merger. Tests cover content and identity
+changes, ignored additions, branch/base movement, missing folders, deletion before/after branch removal, Windows
+long paths, legacy refusal and preservation of the merged commit. The injected error does not identify the cause
+of PT's original EPERM; lock/permission investigation remains separate. No real PT/WK remainder or live server was
+used. The legacy recovery path preserves the entire remainder outside its old path and requires independent
+inspection before discarding it; missing branch evidence is restored only from a verified tip, never guessed.
+
+### Worktree handle investigation: negative reproduction (queue WH1)
+
+WH1 initially attributed the PT remainder's handle to the live Nexus server. The user's subsequent exact-path
+screenshot corrected that attribution: `codex-command-runner-0.167.2.exe`, PID 364580, held a File handle named
+`C:\Code\Nexus.worktrees\PT`. The server's earlier matches referred to `.nexus/queues/PT/review`, not the worktree.
+The image establishes ownership at that observation, not the creating session, job membership or safe termination
+of a later process at that PID. Neither WH1 nor WH2 changed that process, the live checkout or the real PT/WK folders.
+
+A Windows probe used separate temporary Git repositories and NEXUS_HOME, fake Claude/Codex runtime paths, and
+development servers on ports 50805 and 62890. The successful extended probe ran a fake Claude worker through its
+work step and integration, accepted reviews with the existing fake reviewer, then called the development server's
+cleanup route. Its worktree was removed while the same server continued answering requests. A separate finished,
+merged queue was also removed. After restarting only that development server, both a partial remainder (without
+`.git`) and an empty remainder with CW cleanup proofs were removed. An empty legacy remainder without a proof was
+refused with HTTP 409 and preserved. The partial-removal fixtures deliberately injected EPERM before startup;
+that injection tests recovery, not the origin of a persistent Windows lock.
+
+A diagnostic preload in those server processes wrapped `fs.watch`, recording PID, path, creation stack and close
+events. The observed paths were the temporary registry file and the project's `.nexus` tree, including newly
+created worker sessions and queues; none pointed into either worktree directory. `main.ts`'s `watchProject` watches
+the store directory, `dropProject` closes its watcher, and the handover release awaits watcher closure. This probe
+therefore does not justify closing a project watcher when one queue ends: other queues still need it. The inspected
+file route uses `files.ts`'s `head` with a finally-close and `Readable.toWeb(createReadStream(...))`; `gitinfo.ts` runs
+synchronous child commands with explicit cwd. The probe did not exercise interrupted HTTP file streams or enumerate
+native handles, so it does not exonerate every file-serving path or establish the historical PT handle's origin.
+
+WH1 stopped without a production fix or a claimed regression test: no before-fix lasting lock was reproduced.
+The review artifacts retain the standalone probe and its PID-tagged observations. The subsequent image supplies
+the missing handle name/type; the creating session and events preceding the lasting lock remain unestablished.
+A process match alone is insufficient for choosing a fix.
+The real remainder stays untouched until that evidence is available. Any later user-controlled maintenance must
+first let active work finish; legacy recovery still preserves and independently inspects the remainder as described
+above, and must never fabricate a CW proof or force-close a handle.
+
+### A Codex cleanup refusal while termination is completing (queue WH2)
+
+The separate WH1 runtime log contains `Access is denied` at 2026-11-16T17:23:50.655Z, followed by the worker's
+exit. That old message did not name a Windows operation. WH2 reproduced the same cleanup symptom with installed
+Codex 0.167.2 in temporary directories, under a copy of Nexus's Windows worker host with diagnostic logging.
+Three short `gpt-6-luna` turns each ran only `Write-Output`: first reproduction, operation-level diagnosis, then
+verification of the bounded-wait change. MCP servers, plugins, apps and sub-agents were disabled, the sandbox
+remained workspace-write with approval never, and no administrator rights or sandbox weakening were used. A
+model-free `command/exec` attempt cleaned up before the boundary and did not reproduce the unified-exec case.
+
+The diagnostic trace locates the reproduced refusal in `worker-job.cs`, `End`: OpenProcess and IsProcessInJob
+succeeded for an owned job member, TerminateProcess returned false with error 5, and WaitForSingleObject(handle, 0)
+returned 258 (timeout). In the verification trace the same sequence was followed by a wait on the **same retained
+handle**, which returned 0 (signaled); cleanup acknowledged success and the runtime remained available. The old
+code threw before giving that pending exit the two seconds it already allowed after a successful TerminateProcess.
+This is consistent with [Windows' asynchronous termination contract](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-terminateprocess).
+The trace establishes a Codex-created job member, not which executable that member was; it does not identify the
+historical PT process. A worktree deletion attempted while the host/runtime still used it as cwd was EBUSY, which
+alone cannot attribute its handle to a runner. After the owned host exited, each probe's worktree was removable.
+
+`End` now captures the termination error immediately and awaits actual exit on that handle for the existing
+two-second deadline (`AwaitExit`). Only a signaled handle counts as success; an error leaving the process alive
+still fails with the original Windows code, and a successful request that never finishes still times out.
+OpenProcess and IsProcessInJob failures now name their operation. Membership checks, non-inheritable job ownership,
+kill-on-close, the engine's cleanup barrier and CW's deletion proof checks are unchanged. There is no PID/name-based
+fallback, privilege change or new protocol message. The existing `F` error payload simply has more useful text.
+
+The native regression replays the observed error-5 result against a real retained process handle and a real empty
+directory held as its cwd, then permits exit; another case leaves it alive and checks failure. This deterministic
+test models the OS return sequence; it does not pretend a scheduling race will recur on demand. A development-server
+test with fake Codex uses real helpers and Windows jobs, including a helper that adds a deny-PROCESS_TERMINATE ACE
+to **its own** DACL. That distinct, genuine OpenProcess refusal halts the queue before the next step, ends its whole
+worker job and releases its directory; Resume then completes. Normal step cleanup, immediate stop/resume, deletion
+of the completed temporary worktrees while the server lives, and another worker retaining its directory are checked.
+The existing worker tests cover reported stop, Stop now, shutdown, crash and same-runtime continuation too.
+
+One further, explicitly approved turn tested natural app-server exit separately from Nexus cleanup. Its temporary
+host kept the non-inheritable kill-on-close job open after the runtime exited, and used a cwd **outside** the empty
+worktree. Before sending EOF to app-server, it enumerated only its job, opened query/synchronize handles, verified
+membership on those handles, and recorded full executable paths and creation times. Those retained handles pinned
+identity across exit. The captured processes were codex.exe, codex-code-mode-host.exe, codex-computer-use.exe and
+two conhost.exe instances; no codex-command-runner was still present at that snapshot after the shell command.
+All five handles were unsignaled before EOF and signaled after app-server's exit code 0. The worktree changed from
+EBUSY to removable **while the guard still lived, before its cleanup**. A second snapshot after two seconds had no
+new job member and all retained handles remained signaled. The guard then completed cleanup and exited. Its raw
+RPC trace records one successful 303 ms unified-exec PowerShell command. This observes graceful EOF after a short
+command, not abrupt app-server failure or a command runner captured while still executing.
+
+The historical PT runner's continued existence after its owning session remains unexplained: the isolated probes
+did not leave a helper alive after full job shutdown, even before this change, and the final natural-exit probe
+also released the directory. The proven fix addresses a premature cleanup failure, not a proven source of that
+historical orphan. No further runtime probes are implied by this finding. Existing session/version records must
+first establish which launcher and ownership mechanism created that runner; a future failure needs observation
+while the owned runner exists, not selection by an old PID. Legacy PT recovery still requires user-controlled
+maintenance after active work finishes and preservation/inspection of the remainder; no retrospective cleanup
+proof may be fabricated and no historical PID may be used for termination.
+
+The four real turns reported 89,454 input tokens (44,032 cached) and 274 output tokens, 89,728 total. On the ChatGPT
+subscription no dollar charge was reported. The [published GPT-6 Luna API rates](https://developers.openai.com/api/docs/models/gpt-6-luna)
+give an API-equivalent estimate of $0.00511952, not a measured bill ($0.00126578 for the final lifetime probe).
+The real turns were necessary because plain helpers cannot model Codex's internal teardown ordering, and the
+model-free command/exec call did not reproduce it. All other probes and automated tests used no model.
+
 ## Open questions
 
-1. **The orchestrator on Codex.** The orchestrator runs on Claude Code only: its read-only guarantee rests on Claude
-   Code's `dontAsk` mode. Codex's `read-only` sandbox could give the same, with `.nexus/` writable; not built yet.
+1. **The local HTTP gap.** Any agent with a free shell on this machine (Codex's sandbox leaves loopback open) can
+   send the dashboard's writes with a forged `Origin` ("An orchestrator on Codex can be kept to its drafts"). The
+   orchestrator on Codex is built (queue OC), but the user does not switch to it until this is closed, in a queue of
+   its own.

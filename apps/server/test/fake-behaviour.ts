@@ -4,15 +4,19 @@
 //   noop   end the turn without an outcome   stop    report a stop condition
 //   fail   report the step failed            slow    work (work() below: FAKE_SLOW_MS or held by the test), then done
 //   stop1  report a stop condition the first time, done once the stop is lifted
-//   ask1   ask a blocking question the first time (a step turn of this step in any session counts), done after
+//   ask1   ask a blocking question the first time (a step turn of this step in any session counts), done after;
+//          with FAKE_ASK_LINGER_MS, the asking turn ends that long after the question (a test that answers or writes
+//          before the turn is over then fails every time, not only under load)
 //   partial  the first time: a progress line, a commit of <step>-a.txt, then <step>-a.txt changed and <step>-b.txt
 //            written without a commit, and the turn ends without an outcome; after: done if <step>-b.txt is still
 //            there ("kept the uncommitted work"), else failed
 //   slownoop  work, then end the turn without an outcome (the step stays open)
 //   slowask   work, then ask a blocking question and end the turn
 //   doneexit  report the step done, then the process exits on a signal before its turn ends
+//   doneexitheld  the same, held by FAKE_RELEASE before exit so a test can accept review first
 //   commit    commit a file named after the step in its working directory, then done
 //   commitstop  the same commit, then a stop condition
+//   untracked   write <step>-left.txt in its working directory, neither added nor committed, then done
 //   background  start work in the background (a command) and end the turn without an outcome; the work ends after
 //               FAKE_BG_MS (default 1500). Claude's fake then starts a turn by itself with the task's notification,
 //               as Claude Code does; Codex's does not (Nexus nudges). Told of the end either way, it reports done.
@@ -26,6 +30,8 @@
 //   checks      report each check its opening lists under "Checks for every step" with nexus check, under that exact
 //               name, as the opening asks, then done
 //   shortchecks the same under a short name of its own (the last word: "npm test" as "test"), as workers once did
+//   ownedhold   hold an empty directory with a Windows helper until worker cleanup; work(), then done
+//   owneddeny   the same, but the helper denies PROCESS_TERMINATE on its own process DACL
 // The closing refactoring step's standard goal has no "FAKE:": it does FAKE_CLOSING's behaviour, by default done, with a
 // summary that finds nothing worth refactoring (the valid outcome of a small change).
 // The integration step's has none either: it does FAKE_INTEGRATE's behaviour, by default "merge": it runs the merge its
@@ -51,12 +57,13 @@
 // notice is answered with "fake answer"; with FAKE_REVIEW_ACCEPT set, a notice of a step waiting for its review is
 // answered with `nexus review accept`. "FAKE-LONG" is answered with longReply("Reply"); a hand-over with
 // longReply("SUMMARY"). "FAKE-SLOW" in a chat message: the turn works for FAKE_CHAT_SLOW_MS (default 4000), then
-// replies "slow reply"; a stop (interrupt) ends it early. "FAKE-HISTORY": the reply lists every message the agent took
-// in so far ("history: a | b"): the turns' messages and those read inside a turn (Claude's `next`, Codex's steer).
+// replies "slow reply"; a stop (interrupt) ends it early. "FAKE-HOLD": waits for FAKE_RELEASE (as a slow worker does),
+// so a test can change usage during a chat turn. "FAKE-HISTORY": the reply lists every message the agent took in so
+// far ("history: a | b"): the turns' messages and those read inside a turn (Claude's `next`, Codex's steer).
 // Claude's fake keeps the conversations it saved (fakeSaved below) and refuses, as Claude Code does, to resume one it
 // never saved or to start a saved one anew; FAKE_START_MS: it reads its input only after that long (Claude Code's
 // start-up), so a test can end it before it saved anything; FAKE_REFUSE: it refuses every start, each in its way.
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -255,9 +262,34 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
     // The closing refactoring step (no FAKE: in its standard goal): FAKE_CLOSING, else done.
     const closing = text.includes("This is the queue's closing refactoring step");
     const integration = text.includes("This is the queue's integration step");
-    const behaviour = /FAKE: (\w+)/.exec(text)?.[1] ?? (closing ? process.env.FAKE_CLOSING : undefined) ?? (integration ? process.env.FAKE_INTEGRATE ?? "merge" : undefined) ?? "done";
+    let behaviour = /FAKE: (\w+)/.exec(text)?.[1] ?? (closing ? process.env.FAKE_CLOSING : undefined) ?? (integration ? process.env.FAKE_INTEGRATE ?? "merge" : undefined) ?? "done";
     nexus("step", "start", step);
     tool(`nexus step start ${step}`);
+    // Real OS descendants under the fake runtime: one direct sleeper and an orphaned grandchild. The intermediate
+    // exits before the turn reports its outcome, which a process-list snapshot cannot reliably reconstruct.
+    if (behaviour.startsWith("proc")) {
+      const file = `${process.env.FAKE_LOG}.children-${step}`;
+      const direct = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore", windowsHide: true });
+      direct.unref();
+      const bridge = spawn(process.execPath, [join(dirname(fileURLToPath(import.meta.url)), "fake-descendant.ts"), file, String(process.pid), String(direct.pid)], { stdio: "ignore", windowsHide: true });
+      await new Promise<void>((resolve, reject) => { bridge.once("error", reject); bridge.once("exit", () => resolve()); });
+      if (behaviour === "prochold") await work(step);
+      if (behaviour === "proccrash") process.exit(1);
+      behaviour = behaviour === "procstop" ? "stop" : "done";
+    }
+    // Own a real Windows directory handle, optionally denying new PROCESS_TERMINATE handles. Held until the test
+    // lets this turn finish; the worker job must release it before the next step. No model or foreign process.
+    if (behaviour === "ownedhold" || behaviour === "owneddeny") {
+      const dir = join(process.cwd(), `.owned-${step}`);
+      mkdirSync(dir, { recursive: true });
+      const ready = `${process.env.FAKE_LOG}.helper-${step}`;
+      const child = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-File", join(dirname(fileURLToPath(import.meta.url)), "worker-helper.ps1"),
+        "-Ready", ready, "-Release", `${ready}.release`, ...(behaviour === "owneddeny" ? ["-DenyTerminate"] : [])],
+      { cwd: dir, stdio: "ignore", windowsHide: true });
+      child.unref();
+      await work(step);
+      behaviour = "done";
+    }
     const fail = failure(step, behaviour);
     if (fail) return { fail };
     if (/^(overloaded|network|auth|limit|crash|cloudflare)/.test(behaviour)) nexus("step", "done", step, "--summary", `fake finished ${step} after failures`);
@@ -277,6 +309,10 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
       execFileSync("git", [...g, "commit", "-q", "-m", `${step} work`], { stdio: "ignore" });
       if (behaviour === "commit") nexus("step", "done", step, "--summary", `fake committed ${step}`);
       else nexus("stop", step, "--condition", "fake condition", "--reason", "fake stop after a commit");
+    }
+    if (behaviour === "untracked") {
+      writeFileSync(join(process.cwd(), `${step}-left.txt`), "left behind\n");
+      nexus("step", "done", step, "--summary", `fake finished ${step}, leaving ${step}-left.txt`);
     }
     if (behaviour === "merge") integrate(step, text);
     if (behaviour === "review") {
@@ -303,7 +339,11 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
     if (behaviour.startsWith("summary")) nexus("context", `fake summary of ${step}`, "--topics", "fake,context");
     if (behaviour === "summaryslow") await work(step);
     if (behaviour === "fail") nexus("step", "failed", step, "--reason", "fake failure");
-    if (behaviour === "doneexit") { nexus("step", "done", step, "--summary", `fake finished ${step}, then exits`); return { exit: true }; }
+    if (behaviour === "doneexit" || behaviour === "doneexitheld") {
+      nexus("step", "done", step, "--summary", `fake finished ${step}, then exits`);
+      if (behaviour === "doneexitheld") await work(step); // accept review before the runtime's exit arrives
+      return { exit: true };
+    }
     if (behaviour === "stop") nexus("stop", step, "--condition", "fake condition", "--reason", "fake stop");
     // stop1: a stop condition on the step's first turn; once the stop is lifted, the step is done.
     if (behaviour === "stop1") {
@@ -320,7 +360,10 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
       return true;
     };
     if (behaviour === "ask1") {
-      if (first("ask1")) nexus("ask", "Which way?", "--step", step);
+      if (first("ask1")) {
+        nexus("ask", "Which way?", "--step", step);
+        if (process.env.FAKE_ASK_LINGER_MS) await new Promise((r) => setTimeout(r, Number(process.env.FAKE_ASK_LINGER_MS)));
+      }
       else nexus("step", "done", step, "--summary", `fake finished ${step} after its question`);
     }
     if (behaviour === "partial") {
@@ -341,7 +384,7 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
     // The queue's last step done: the report, written where the prompt says (refused under a denied folder, as
     // Claude Code refuses a Write its --disallowedTools rule covers), then registered with nexus report.
     const report = /`nexus report (\S+) --file (\S+) --summary/.exec(text);
-    if (report && (behaviour === "done" || (behaviour === "merge" && !stoppedIntegration))) {
+    if (report && (behaviour === "done" || behaviour === "untracked" || (behaviour === "merge" && !stoppedIntegration))) {
       const path = resolve(report[2]!);
       if (!writeDenied(path)) {
         mkdirSync(dirname(path), { recursive: true });
@@ -383,6 +426,11 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
   }
   if (text.includes("hands this conversation to the orchestrator")) return longReply("SUMMARY");
   if (text.includes("FAKE-LONG")) return longReply("Reply");
+  if (text.includes("FAKE-HOLD")) {
+    tool("waiting for release (FAKE-HOLD)");
+    await work("chat");
+    return "held reply";
+  }
   if (text.includes("FAKE-SLOW")) {
     tool("sleep (FAKE-SLOW)");
     return (await interruptible(Number(process.env.FAKE_CHAT_SLOW_MS ?? 4000))) ? { interrupted: true } : "slow reply";

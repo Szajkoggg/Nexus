@@ -16,6 +16,7 @@ import { AwaySign, AwaySwitch } from "./components/Levels.tsx";
 import { PlannedDeployCard } from "./components/DeployPlan.tsx";
 import { ContextBar, UsageMeter } from "./components/Run.tsx";
 import { ChatPanel, ConversationsPanel, DeskHead, useOrchestrator, type Desk, type Unread } from "./components/Chat.tsx";
+import { NotePanel } from "./components/Ideas.tsx";
 import { hasUnread, placeKey, readPlace, unreadCount, usePlaces } from "./chatPlace.ts";
 import { RemoteButton, RemotePanel } from "./components/Remote.tsx";
 import { ProjectPicker, ProjectSidebar } from "./components/Projects.tsx";
@@ -95,6 +96,7 @@ export function App() {
   const waitingOpen = isOpen(route.nav, "waiting");
   // The global Stats view: a page over the project's (the desktop's middle column and rail; the phone's tabs).
   const statsOpen = isOpen(route.nav, "stats");
+  const note = layerValue(route.nav, "note");
   // The search of the project's history (components/Search.tsx): a layer over the page; Ctrl+K opens it.
   const searchOpen = isOpen(route.nav, "search");
   useSearchShortcut(!!projectId && !statsOpen);
@@ -256,6 +258,11 @@ export function App() {
 
     {file && projectId && <Suspense fallback={null}><FileView key={`${file.path}:${file.line ?? ""}`} project={projectId} root={state?.project.root ?? ""} local={!!server?.local && !phone} path={file.path} line={file.line} onClose={() => nav.close("file")} /></Suspense>}
 
+    {/* An opened note of the ideas overview (components/Ideas.tsx): where a step opens. */}
+    <Drawer open={!!note && !!projectId && !itemShown} onClose={() => nav.close("note")} beside={phone ? undefined : RAIL} panel>
+      {note && projectId && <NotePanel key={note} project={projectId} file={note} onClose={() => nav.close("note")} />}
+    </Drawer>
+
     <Drawer open={itemShown && !fullApproval} onClose={close} beside={phone ? undefined : RAIL} panel>
       {state && queue && (step
         ? <StepDetail project={state} queue={queue} step={step} onClose={close} of={of} />
@@ -316,7 +323,7 @@ export function App() {
             <ChatPanel key={`chat-${projectId}`} inline project={projectId} name={state?.project.name ?? projectId} view={orchestrator} error={orchestratorError} />
           )}
           {tab === "ideas" && projectId && state && (
-            <ConversationsPanel key={`ideas-${projectId}`} inline project={projectId} name={state.project.name} defaultRuntime={state.project.conversations.runtime} />
+            <ConversationsPanel key={`ideas-${projectId}`} inline project={projectId} name={state.project.name} defaultRuntime={state.project.conversations.runtime} areas={state.tags.areas.map((x) => x.name)} />
           )}
         </main>
 
@@ -345,7 +352,7 @@ export function App() {
     ),
   };
   const railProps = { projects: projects ?? [], state, queuesShown: view === "queues", onOpenWaiting: openWaiting, digest, plan: server?.plan, onChanged: reload };
-  const besideShown = !wide && ((itemShown && !fullApproval) || waitingOpen);
+  const besideShown = !wide && ((itemShown && !fullApproval) || waitingOpen || !!note);
   const alerts = (projectsError || projects?.length === 0 || error) && <div className="px-6 pt-4">{banners}</div>;
   return (
     <PageProvider value={page}><RefsProvider project={projectId} queues={state?.queues}>
@@ -372,7 +379,7 @@ export function App() {
         {view === "ideas" && <>
           {alerts}
           {projectId && state && (
-            <ConversationsPanel key={`ideas-${projectId}`} desk={desk} project={projectId} name={state.project.name} defaultRuntime={state.project.conversations.runtime} />
+            <ConversationsPanel key={`ideas-${projectId}`} desk={desk} project={projectId} name={state.project.name} defaultRuntime={state.project.conversations.runtime} areas={state.tags.areas.map((x) => x.name)} />
           )}
         </>}
         {view === "stats" && <>

@@ -423,7 +423,37 @@ test("the orchestrator's context care: the summary request, the fresh session's 
   golden("orchestrator-fresh", tr.text([[fresh, "<fresh session>"], [old, "<orchestrator session>"], [root, "<root>"]]));
 });
 
-test("the thinking partner's briefing, with a notes folder and without, at each web level, matches the golden file", (t) => {
+test("the orchestrator on Codex: its briefing without helpers, its sandbox, and the runtime switch's first message match the golden file", (t) => {
+  const { root, store, later, queue } = setup(t, "orchestrator-codex");
+  const p = store.readProject();
+  store.writeProject({ ...p, orchestrator: { notify: true, session: null, runtime: "codex" } });
+  const tr = new Transcript("orchestrator");
+  const orchestrator = new Orchestrator(store, { draining: false } as unknown as Engine, () => {}, {}, { spawn: tr.spawn });
+  t.after(() => orchestrator.shutdown());
+  queue({ id: "QA", title: "The planned work", steps: [{ id: "A1", title: "Step A1", goal: "Goal of A1.", acceptance: ["A1 is done"] }] });
+
+  tr.section("the user's first message starts the orchestrator on Codex");
+  orchestrator.say("Hello.");
+  const first = store.readProject().orchestrator!.session!;
+  const { instructions, ...launch } = tr.stands[0]!.launch.options as unknown as { instructions: string } & Record<string, unknown>;
+  tr.section("its launch (CodexOptions; the environment left out)");
+  tr.add(JSON.stringify({ runtime: tr.stands[0]!.launch.runtime, ...launch, env: undefined }, null, 2));
+  tr.section("its briefing (developer instructions)");
+  tr.add(instructions);
+
+  tr.section("the user switches it to Claude Code and writes: a fresh session starts from the project's state");
+  later();
+  const pr = store.readProject();
+  store.writeProject({ ...pr, orchestrator: { ...pr.orchestrator!, runtime: "claude" } });
+  orchestrator.say("Back on Claude.");
+  const second = store.readProject().orchestrator!.session!;
+  tr.section("the chat lines Nexus wrote: the old session's, then the fresh one's");
+  for (const id of [first, second]) for (const c of store.readChat(id).entries) if (c.from === "nexus") tr.add(`${c.from}: ${c.text}`);
+
+  golden("orchestrator-codex", tr.text([[second, "<fresh session>"], [first, "<orchestrator session>"], [JSON.stringify(root).slice(1, -1), "<root>"], [root.replaceAll("\\", "/"), "<root>"], [root, "<root>"]]));
+});
+
+test("the thinking partner's briefing and hand-over, with a notes folder and without, at each web level, match the golden file", (t) => {
   const { root, store } = setup(t, "partner");
   const tr = new Transcript("partner");
   const orchestrator = new Orchestrator(store, { draining: false } as unknown as Engine, () => {});
@@ -441,6 +471,8 @@ test("the thinking partner's briefing, with a notes folder and without, at each 
     conversations.say(s.id, "Let us think.");
     const o = tr.stands.at(-1)!.launch.options as { appendSystemPrompt?: string; instructions?: string };
     tr.add(o.appendSystemPrompt ?? o.instructions ?? "(none)");
+    // The hand-over's instruction: with a notes folder it asks for the record of the entries covered (nexus covers).
+    if (web !== "fetch") { tr.section(`the hand-over, ${label}`); conversations.handoff(s.id); }
   }
   golden("partner", tr.text([[root.replaceAll("\\", "/"), "<root>"], [root, "<root>"]]));
 });
@@ -501,4 +533,10 @@ test("the static analysis reminder: the notice, the command and the recommended 
   assert.match(n.fact, /^This project has no static analysis set up/);
   assert.match(n.todo, /^In one sentence, recommend the user the template static-analysis/);
   assert.match(n.todo, /nexus static-analysis decline --reason "<their words>" \(no reminder for 90 days\)/);
+});
+
+test("the orchestrator offers the lifecycle template once a queue that touched the run control or lifecycle code is done (queue TP)", async () => {
+  const { orchestratorBriefing } = await import("../src/prompts.ts");
+  const orch = orchestratorBriefing("Pilot", 60);
+  assert.ok(orch.includes("When a queue that touched the project's run control or lifecycle code (its AGENTS.md may name which code that is) is done, offer the user in one sentence the lifecycle template (nexus template show lifecycle)"), orch);
 });

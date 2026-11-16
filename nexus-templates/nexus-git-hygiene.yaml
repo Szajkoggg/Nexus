@@ -1,0 +1,60 @@
+# Nexus's instance of the shipped git-hygiene template (templates/git-hygiene.yaml): the parameters' defaults are this repository's.
+template:
+  id: nexus-git-hygiene
+  title: Git hygiene
+  description: Nexus's own instance of the git-hygiene template, filled in for this repository. Report the worktrees and
+    branches closed queues left behind and the untracked files in the main checkout; it never deletes anything itself.
+maintenance: survey
+# A worktree of its own: the run keeps the main checkout free (nothing to merge back: it only reports, also in
+# fix_small mode; Nexus removes the worktree once a survey is done).
+worktree: auto
+params:
+  - name: checkouts
+    description: the checkouts to look at (a list of paths; the worktrees git lists for them are looked at too)
+    default: C:/Code/Nexus (the main checkout, and the queues' worktrees in C:/Code/Nexus.worktrees that git lists for it)
+  - name: never
+    description: places that are never a finding, and never touched
+    default: "C:/Code/Nexus-live (the live instance's worktree: never a finding, never looked into, never touched) and
+      docs/ideas in the main checkout (the ideas notes, kept out of git on purpose)"
+title: "Maintenance: git hygiene"
+description: |
+  A survey of what is left behind in {{checkouts}}: worktrees and branches of queues that are closed, and untracked
+  files and folders that belong to no work in progress. Never a finding: {{never}}. It reports each with a proposed
+  action; nothing is removed, deleted or cleaned here, in any mode (also in fix_small): the removals become a queue
+  the user approves.
+  The report ends with a section "Recommended additions" (see the step).
+coding: false
+origin: maintenance
+stop_conditions:
+  - Looking would need a change (a removal, a deletion, a git command that writes, a commit); report it as a finding instead.
+  - A decision that belongs to the user comes up; ask with nexus ask, with a recommendation.
+  - A file to commit has changes this queue did not make; ask with nexus ask, never commit them.
+steps:
+  - id: "{{id}}1"
+    title: "Survey: worktrees, branches and untracked files left behind"
+    goal: |
+      In {{checkouts}}, with git commands that only read (git worktree list, git branch -vv, git status --porcelain,
+      git log), and the queues as `nexus status` and their folders show them (done, cancelled, still at work):
+      - Worktrees: each worktree whose queue is closed (done or cancelled) or that belongs to no queue: its path, its
+        branch, whether it has uncommitted or untracked files, and whether its branch is merged into its base.
+      - Branches: each local branch of a closed queue, or of no queue, that is still there: merged or not, how many
+        commits ahead of and behind its base, and its last commit's date.
+      - Untracked files and folders (not ignored) in each checkout that belong to no work in progress: the path, its
+        size, when it last changed and what it looks like it is (a leftover of a run, a build output, a forgotten
+        note).
+      Never a finding, and never looked into: {{never}}, and the worktree this run itself works in (with its
+      branch). For each finding propose an action (remove the worktree, delete the branch, add the path to
+      .gitignore, delete the file, keep it) and say what would be lost; nothing is removed or deleted here. Or say
+      there were none. Commit nothing.
+      The report ends with "Recommended additions" (not counted among the findings): what would keep the checkouts
+      clean (ignore rules for outputs that keep appearing, a cleanup of worktrees after merging, a place outside the
+      repository for scratch files), each with its reason.
+    acceptance:
+      - Each left-behind worktree, branch and untracked file or folder with its facts and a proposed action, or that there were none; nothing from the never-list.
+      - The report ends with "Recommended additions", each with its reason (or says there are none).
+      - Nothing removed, deleted or committed; the working tree as it was.
+    review:
+      level: 2
+    kind: research
+    activities: [cleanup]
+    size: S

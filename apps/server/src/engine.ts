@@ -24,7 +24,7 @@ import {
 } from "./prompts.ts";
 import { shellRules } from "./shell-rules.ts";
 import {
-  ClockTimers, REAL_CLOCK, Scheduler, type PlanOptions, type Clock, type ScheduleOptions,
+  ClockTimers, REAL_CLOCK, Scheduler, type PlanChange, type PlanOptions, type Clock, type ScheduleOptions,
 } from "./scheduler.ts";
 import { Recurrer, type RecurringSet } from "./recurring.ts";
 import { StaticReminder } from "./static-reminder.ts";
@@ -89,6 +89,8 @@ export interface EngineOptions {
   startupMs?: number;
   /** How long a turn's end waits for background work (BACKGROUND_LIMIT_MS); tests make it short. */
   backgroundLimitMs?: number;
+  /** How long a change of the user's to the plan can be undone (the scheduler's UNDO_MS); tests make it short. */
+  undoMs?: number;
   /** How the push of accepted steps runs git, and its time limit (tests). */
   git?: GitRunner;
   pushTimeoutMs?: number;
@@ -151,10 +153,13 @@ export class Engine implements Member {
   private readonly ending = new Set<string>();
   /** A user's immediate stop is waiting for the old process to exit before Resume can open another. */
   private readonly stopping = new Set<string>();
+  /** A boundary is not crossed until the worker's descendants have gone. Reset after every turn. */
+  private readonly cleaned = new WeakSet<Live["proc"]>();
+  private readonly cleaning = new WeakMap<Live["proc"], Promise<void>>();
   /** Sessions whose process Nexus ends to start it again with another model or effort (Claude Code). */
   private readonly restarting = new Set<string>();
-  /** Sessions whose process ended on its own while their run's step waited for its review (advance restarts them). */
-  private readonly exitedInReview = new Set<string>();
+  /** Sessions whose process ended after reporting their step, including an already accepted review. */
+  private readonly exitedAfterOutcome = new Set<string>();
   private readonly retryBaseMs: number;
   private readonly usageMarginMs: number;
   private readonly turnSettleMs: number;
@@ -186,7 +191,7 @@ export class Engine implements Member {
     this.coordinator = options.coordinator ?? new Coordinator();
     this.scheduler = new Scheduler(store, this.clockTimers, {
       start: (queueId, opts) => this.start(queueId, opts), draining: () => this.draining, stopped: () => this.stopped,
-      changed: () => this.changed(), usageMarginMs: this.usageMarginMs,
+      changed: () => this.changed(), usageMarginMs: this.usageMarginMs, undoMs: options.undoMs,
       block: (state, q) => this.coordinator.startBlock(state, q), checkStarts: () => this.checkStarts(),
     });
     this.coordinator.add(this);
@@ -328,6 +333,18 @@ export class Engine implements Member {
   resume(queueId: string, why?: string): void {
     const run = this.run(queueId);
     if (this.stopping.has(run.session)) throw new ActionError("the worker is still exiting; resume once it has stopped", 409);
+    const live = this.host.get(run.session);
+    const cleanup = live && this.cleaning.get(live.proc);
+    if (cleanup) {
+      // Automatic resumes (a cancelled drain, an approval) wait too. A later pause or other run change cancels
+      // this request; cleanup failure already halts the run through cleanWorker.
+      const before = JSON.stringify(run);
+      void cleanup.then(() => {
+        if (this.stopped || JSON.stringify(this.store.readRun(queueId)) !== before) return;
+        try { this.resume(queueId, why); } catch (error) { this.halt(queueId, String(error)); }
+      }, () => {});
+      return;
+    }
     if (run.state === "running") return;
     if (run.state === "finished") throw new ActionError("the run is finished", 409);
     const state = loadProjectState(this.store);
@@ -431,7 +448,7 @@ export class Engine implements Member {
         userStopNow(text),
         "now",
       );
-    }
+    } else if (live) this.cleanWorker(queueId, live);
   }
 
   /** Interrupts and ends this worker's process, keeping its session and all checkout changes for Resume. */
@@ -550,8 +567,14 @@ export class Engine implements Member {
   /** The user declined the static analysis template (the orchestrator's `nexus static-analysis decline`). */
   declineStaticAnalysis(reason: string, session?: string): string { return this.staticReminder.decline(reason, session); }
 
-  /** The user's reorder: `queueId` after `after` (null: none before it), as in a list (Scheduler.move). */
-  move(queueId: string, after: string | null): string { return this.scheduler.move(queueId, after); }
+  /** The user's reorder: `queueId` after `after` (null: none before it), as in a list (Scheduler.move); undoable. */
+  move(queueId: string, after: string | null): PlanChange { return this.scheduler.move(queueId, after); }
+  /** The user's "also after": `queueId` waits for `after` too (Scheduler.addPredecessor); undoable. */
+  addPredecessor(queueId: string, after: string): PlanChange { return this.scheduler.addPredecessor(queueId, after); }
+  /** The user takes `after` out of the predecessors of `queueId` (Scheduler.removePredecessor); undoable. */
+  removePredecessor(queueId: string, after: string): PlanChange { return this.scheduler.removePredecessor(queueId, after); }
+  /** Undoes the user's change `change` to the plan, made on `queueId` (Scheduler.undo). */
+  undoPlan(queueId: string, change: string): string { return this.scheduler.undo(queueId, change); }
 
   /**
    * Plans to start `queueId` at a time (`o.at`, ISO 8601, in the future), or when the usage window of the runtime it
@@ -617,17 +640,18 @@ export class Engine implements Member {
     const current = run.step ? q.steps.find((s) => s.id === run.step) : undefined;
     // A survey step that reported its end is checked at once, while its turn may still be going and before its review.
     if (current && this.surveyLeftWork(queueId, q, current)) return;
-    if ((!live || live.proc.state === "exited") && this.exitedInReview.has(run.session)) {
+    if ((!live || live.proc.state === "exited") && this.exitedAfterOutcome.has(run.session)) {
       // The process ended after the step's report, while the step waited for its review (see the exit handler): the
       // review decides. Still waiting: nothing to run. Then nothing left: the run is finished. Else (the next step, a
       // send-back): a new process resumes the session.
       if (current?.status === "review") return;
-      if (q.steps.every((s) => stepClosed(q, s))) { this.exitedInReview.delete(run.session); return this.finish(queueId); }
-      this.exitedInReview.delete(run.session);
+      if (q.steps.every((s) => stepClosed(q, s))) { this.exitedAfterOutcome.delete(run.session); return this.finish(queueId); }
+      this.exitedAfterOutcome.delete(run.session);
       live = this.ensureProcess(this.sessionFile(state, run.session));
     }
     if (!live || live.proc.state === "exited") return this.halt(queueId, "the session's process is not running");
-    if (live.proc.state === "working") return;
+    if (live.proc.state === "working" || this.cleaning.has(live.proc)) return;
+    if ((q.status === "stopped" || (current && (OUTCOME.has(current.status) || ["skipped", "rejected"].includes(current.status)))) && this.cleanWorker(queueId, live)) return;
 
     // A new revision never stops the step at work: its turns, questions, answers and nudges go on as below, and only
     // the step's end looks at the approval.
@@ -716,6 +740,30 @@ export class Engine implements Member {
     const routedRun = this.recordRoute(queueId, run, next.id, routed, choice);
     if (this.prepareStep(queueId, routedRun, state, q, current, next, want, live)) return;
     this.openStep(queueId, next, q, "start");
+  }
+
+  /** Start one cleanup barrier per idle turn; no inbox or next step may enter while it is pending. */
+  private cleanWorker(queueId: string, live: Live): boolean {
+    const proc = live.proc;
+    if (!proc.cleanup || this.cleaned.has(proc)) return false;
+    if (this.cleaning.has(proc)) return true;
+    const cleanup = proc.cleanup();
+    this.cleaning.set(proc, cleanup);
+    void cleanup.then(() => {
+      this.cleaning.delete(proc);
+      this.cleaned.add(proc);
+      if (this.stopped || this.host.get(live.session)?.proc !== proc) return;
+      this.advance(queueId);
+      this.changed();
+    }, (error: unknown) => {
+      this.cleaning.delete(proc);
+      if (this.stopped || this.host.get(live.session)?.proc !== proc) return;
+      this.halt(queueId, `worker process cleanup failed: ${String(error)}`);
+      this.ending.add(live.session);
+      proc.kill();
+      this.changed();
+    });
+    return true;
   }
 
   /**
@@ -1003,12 +1051,14 @@ export class Engine implements Member {
   /** Hands unread inbox entries to a live session: inside a running turn, or as a new turn when it is idle. */
   private deliverInbox(state: ProjectState, l: Live): void {
     // A process Nexus is ending gets nothing more (a session taken over had its unread entries carried across).
-    if (l.proc.state === "exited" || this.ending.has(l.session)) return;
+    if (l.proc.state === "exited" || this.ending.has(l.session) || this.cleaning.has(l.proc)) return;
     const s = state.sessions.find((x) => x.id === l.session);
     const unread = (s?.inbox ?? []).filter((m) => !m.read_at);
     if (!unread.length) return;
-    const owner = state.queues.find((q) => q.run?.session === l.session);
+    const owner = state.queues.find((q) => q.run?.session === l.session && q.run.state !== "finished");
     const run = owner?.run;
+    const step = owner?.steps.find((st) => st.id === run?.step);
+    if (owner && l.proc.state === "idle" && (owner.status === "stopped" || (step && OUTCOME.has(step.status))) && this.cleanWorker(owner.id, l)) return;
     const idleAllowed = !run || runCounted(run);
     // A new turn of an idle session within its step (an answer, a send-back, a message): its runtime beyond the usage
     // threshold goes on on the step's fallback in a fresh session, which gets these entries (or the run waits). A stop
@@ -1065,11 +1115,12 @@ export class Engine implements Member {
   }
 
   /** The queue has no step left: every step is done or skipped, or rejected by the user and released (stepClosed). */
-  /** The run's step has reported its outcome and waits for its review. */
-  private waitsForReview(queueId: string): boolean {
+  /** A reported outcome is still success when its review was accepted before process exit arrived. */
+  private reportedStep(queueId: string): boolean {
     const run = this.store.readRun(queueId);
     const q = loadProjectState(this.store).queues.find((x) => x.id === queueId);
-    return !!run?.step && q?.steps.find((s) => s.id === run.step)?.status === "review";
+    const status = q?.steps.find((s) => s.id === run?.step)?.status;
+    return status !== undefined && ["review", "done", "skipped", "rejected"].includes(status);
   }
 
   private nothingLeft(queueId: string): boolean {
@@ -1198,7 +1249,7 @@ export class Engine implements Member {
       }
       return existing;
     }
-    this.exitedInReview.delete(session.id);
+    this.exitedAfterOutcome.delete(session.id);
     const launch = this.launcher(session);
     const tag = () => {
       // The run that drives the session now; a session continued from an earlier queue still has that one's run too.
@@ -1234,6 +1285,13 @@ export class Engine implements Member {
         }, BACKGROUND_SETTLE_MS));
       },
       turnEnd: (end) => {
+        const live = this.host.get(session.id);
+        if (live && !this.stopping.has(session.id)) {
+          this.cleaned.delete(live.proc);
+          for (const q of loadProjectState(this.store).queues.filter((q) => q.run?.session === session.id && q.run.state !== "finished")) {
+            if (q.run?.state === "paused" || q.run?.state === "halted") this.cleanWorker(q.id, live);
+          }
+        }
         if (this.stopping.has(session.id)) return;
         // A failed turn is decided at once and is not a turn without an outcome.
         if (end.failure) { for (const q of runsOf()) this.turnFailed(q, end.failure); this.changed(); return; }
@@ -1270,9 +1328,9 @@ export class Engine implements Member {
           // The agent finished the queue's last step and its process then ended (the CLI closing, killed, or crashing
           // after the report): nothing is left to run, so the run is finished, not a failure to retry.
           if (this.nothingLeft(q)) { this.finish(q); continue; }
-          // Its step reported its outcome and waits for its review (every step is reviewed): no failed turn either.
-          // The run waits for the review, and advance takes it from there.
-          if (this.waitsForReview(q)) { this.exitedInReview.add(session.id); continue; }
+          // Its step reported an outcome: no failed turn, even if review acceptance beat the delayed exit notice.
+          // The run waits for review or starts a fresh process for the next step.
+          if (this.reportedStep(q)) { this.exitedAfterOutcome.add(session.id); continue; }
           this.turnFailed(q, { kind: "passing", code: "processExited", text: `the runtime's process exited (${code ?? "signal"})` });
         }
         this.changed();
@@ -1377,9 +1435,10 @@ export class Engine implements Member {
     for (const s of this.store.sessionIds()) {
       const r = this.store.readRuntime(s);
       if (!r || r.state === "exited") continue;
-      // A process the previous server left behind (killed without its shutdown) would write into the same
-      // session as the one a resume starts: end it first.
-      if (r.pid && isAlive(r.pid)) { try { process.kill(r.pid); } catch { /* gone or not ours */ } }
+      // Windows workers belong to their host's job, which closes when the server pipe closes. A persisted PID
+      // alone is not ownership evidence: it may already refer to another program after a restart.
+      const jobOwned = process.platform === "win32" && this.store.readSession(s).role === "worker";
+      if (!jobOwned && r.pid && isAlive(r.pid)) { try { process.kill(r.pid); } catch { /* gone or not ours */ } }
       this.host.write(s, { state: "exited" });
     }
   }

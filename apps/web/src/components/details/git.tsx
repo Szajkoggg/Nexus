@@ -89,7 +89,8 @@ export function IntegrationBox({ project, queue, step }: { project: ProjectState
 
 /**
  * A finished queue with a worktree of its own: merge its branch back into its base, and clean up (the worktree removed,
- * the branch deleted with -d). The user's only; each asks first and tells what it will do.
+ * the branch deleted with -d). The user's only; each asks first and tells what it will do. A survey run has nothing to
+ * merge back (it leaves no commit): only the cleanup, for a worktree Nexus could not remove (git.yaml `cleanup`).
  */
 export function WorktreeActions({ project, root, queue }: { project: string; root: string; queue: QueueView; }) {
   const { reload: onChanged } = usePage();
@@ -117,11 +118,14 @@ export function WorktreeActions({ project, root, queue }: { project: string; roo
         into: <span key="into" className="font-mono">{g.merged.into}</span>,
         how: g.merged.fast_forward ? t("details.worktree.fastForward") : t("details.worktree.mergeCommit", { sha: g.merged.sha.slice(0, 7) }),
       })} <span className="text-xs text-fg-3">· <TimeAgo at={g.merged.at} /></span></p>}
+      {g?.cleanup && !g.cleaned && (
+        <p className="mt-1.5 break-all text-sm text-warn"><span className="text-fg-3">{t("details.worktree.notCleaned")} </span>{g.cleanup.waiting.reason} <span className="text-xs text-fg-3">· <TimeAgo at={g.cleanup.waiting.since} /></span></p>
+      )}
       {g?.cleaned
         ? <p className="mt-1.5 text-sm text-fg">{rich("details.worktree.cleaned", { branch: <span key="branch" className="font-mono">{g.cleaned.branch}</span> })} <span className="text-xs text-fg-3">· <TimeAgo at={g.cleaned.at} /></span></p>
         : (
           <div className="mt-2 flex flex-wrap gap-2">
-            {base && !g?.merged && <Button variant="quiet" onClick={() => { setAsk("merge"); setResult(undefined); }}>{t("details.worktree.mergeInto", { base: base ?? "" })}</Button>}
+            {base && !g?.merged && queue.maintenance !== "survey" && <Button variant="quiet" onClick={() => { setAsk("merge"); setResult(undefined); }}>{t("details.worktree.mergeInto", { base: base ?? "" })}</Button>}
             <Button variant="quiet" onClick={() => { setAsk("cleanup"); setResult(undefined); }}>{t("details.worktree.cleanUpAsk")}</Button>
           </div>
         )}

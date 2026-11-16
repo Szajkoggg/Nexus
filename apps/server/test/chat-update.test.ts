@@ -79,8 +79,12 @@ for (const now of [false, true]) {
     const conversations = new Conversations(store, orchestrator, () => {});
     const conv = conversations.create({ runtime: "claude", title: "Ideas" });
     const part = projectPart({ id: "p", engine, orchestrator, conversations, merger: { shutdown() {} } });
+    // The stand-in build: released by the test before the hand-over, or failed when the test ends first, so that an
+    // update the test left behind stops instead of starting a successor no one ends (seen: several left running).
     let build!: () => void;
-    const built = new Promise<void>((r) => { build = r; });
+    let noBuild!: (e: Error) => void;
+    const built = new Promise<void>((r, j) => { build = r; noBuild = j; });
+    built.catch(() => {}); // the update may never get to it
     let exited = false;
     const lifecycle = new Lifecycle(() => [part], () => {}, {
       root: repo, successor: [process.execPath, MAIN], timeoutMs: LONGER.processes,
@@ -131,6 +135,8 @@ for (const now of [false, true]) {
         await until("the update past its drain", () => lifecycle.status.phase === "updating", LONGER.step, show);
       }
       assert.ok(!orchestrator.idle() && !conversations.idle(), "the drain did not wait for the chat turns");
+      // The drain observes the runtime becoming idle; the engine records the queue's pause after its turn settles.
+      await until("the worker's queue to pause", () => store.readRun("Q")?.state === "paused", LONGER.step, show);
       const run = store.readRun("Q")!;
       assert.equal(run.state, "paused");
       assert.equal(run.resume_after_restart, true, "the worker's queue goes on after the restart");
@@ -163,11 +169,17 @@ for (const now of [false, true]) {
       }
       assert.ok(!received(log).some((m) => m.text.startsWith("[Nexus] The server restarted") && m.text.includes("Hello while it waits")), "only the cut-off turn's message is quoted");
     } finally {
+      // An update the test left behind ends before this process's agents do: a drain is cancelled, the build fails (no
+      // successor starts after the test), and the held queues they let go on are shut down below with the rest.
+      if (lifecycle.status.phase === "draining") lifecycle.cancel();
+      noBuild(new Error("the test is over")); // after build(): no effect
+      await until("the update to settle", () => exited || !["updating", "restarting"].includes(lifecycle.status.phase), LONGER.processes).catch(() => {});
+      // Also a successor whose hand-over timed out: the update's log names it as soon as it starts.
+      successor ??= Number(/the successor runs as pid (\d+)/.exec(lifecycle.status.log.join("\n"))?.[1]) || undefined;
       if (successor && isAlive(successor)) {
         if (process.platform === "win32") { try { execFileSync("taskkill", ["/PID", String(successor), "/T", "/F"], { stdio: "ignore" }); } catch { /* gone */ } }
         else process.kill(successor);
       }
-      build();
       work.done();
       engine.shutdown(); orchestrator.shutdown(); conversations.shutdown();
       await until("this process's agents to exit", () => !engine.alive() && !orchestrator.alive() && !conversations.alive(), LONGER.processes).catch(() => {});

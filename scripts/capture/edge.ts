@@ -7,6 +7,7 @@ import { createServer, type Server } from "node:http";
 import { dirname, join } from "node:path";
 import type { Browser } from "./run.ts";
 import { freePort } from "./run.ts";
+import { dragScript } from "./drag.ts";
 
 const CANDIDATES = [
   "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
@@ -117,7 +118,8 @@ export class EdgeBrowser implements Browser {
     const find = typeof target === "string"
       ? `[...document.querySelectorAll("button, a, [role=button], [role=tab], summary")].find((b) => b.innerText.trim() === ${JSON.stringify(target)}) ?? [...document.querySelectorAll("button, a, [role=button], [role=tab], summary")].find((b) => b.innerText.trim().startsWith(${JSON.stringify(target)}))`
       : `document.querySelector(${JSON.stringify(target.selector)})`;
-    return this.js<boolean>(`(() => { const el = ${find}; if (!el) return false; el.scrollIntoView({ block: "nearest" }); el.click(); return true; })()`);
+    // An SVG shape (a line of the plan) has no click(): it gets the event.
+    return this.js<boolean>(`(() => { const el = ${find}; if (!el) return false; el.scrollIntoView({ block: "nearest" }); if (typeof el.click === "function") el.click(); else el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window })); return true; })()`);
   }
 
   type(text: string, into?: string): Promise<boolean> {
@@ -135,13 +137,19 @@ export class EdgeBrowser implements Browser {
   }
 
   scroll(text: string): Promise<boolean> {
-    // The text as written (textContent): a heading styled in capitals reads in capitals through innerText.
+    // The text as written (textContent): a heading styled in capitals reads in capitals through innerText. A heading
+    // first: a tab or a label earlier in the page may carry the same text (the phone's "Orchestrator" tab, queue OC).
     return this.js<boolean>(`(() => {
-      const el = [...document.querySelectorAll("h1, h2, h3, h4, h5, h6, legend, label, p, span, div")].find((e) => e.textContent.trim() === ${JSON.stringify(text)});
+      const find = (sel) => [...document.querySelectorAll(sel)].find((e) => e.textContent.trim() === ${JSON.stringify(text)});
+      const el = find("h1, h2, h3, h4, h5, h6") ?? find("legend, label, p, span, div");
       if (!el) return false;
       el.scrollIntoView({ block: "start" });
       return true;
     })()`);
+  }
+
+  drag(from: string, to: readonly string[], drop: boolean): Promise<boolean> {
+    return this.js<boolean>(dragScript(from, to, drop));
   }
 
   press(key: string): Promise<boolean> {

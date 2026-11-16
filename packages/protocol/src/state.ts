@@ -1,6 +1,6 @@
 // Derives the dashboard's view of a project from its files. Pure apart from reading through the store;
 // nothing here is ever written back (state.json, if kept, is only a cache of this).
-import { ORCHESTRATOR_ONLY, USER_ONLY, WORKER_ONLY, type MetricsFile, type StatusChange, type Event, type InboxEntry, type Note, type GitFile, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type RecurringFile, type ReviewItem, type ReviewLevel, type LegacyReviewPolicy, type AwayFile, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type PlanFile, type StepDef, type StepStatus, type TagProposal, type TagsFile } from "./schemas.ts";
+import { CONVERSATION_ONLY, ORCHESTRATOR_ONLY, USER_ONLY, WORKER_ONLY, type MetricsFile, type StatusChange, type Event, type InboxEntry, type Note, type GitFile, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type RecurringFile, type ReviewItem, type ReviewLevel, type LegacyReviewPolicy, type AwayFile, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type PlanFile, type StepDef, type StepStatus, type TagProposal, type TagsFile } from "./schemas.ts";
 import { ProjectStore, chainPlan, readAway, revisionHash } from "./store.ts";
 import { awayAt, awayNow, type AwayNow } from "./away.ts";
 import { formatClock, type Segment } from "./times.ts";
@@ -8,6 +8,7 @@ import { isOpenQuestion, reviewedByOrchestrator, runEnded, runGoing, runHoldsChe
 import { stopPlace } from "./attention.ts";
 import { closingStepId, integrationStepId, stepDefs } from "./closing.ts";
 import { openPlan, planView, proposalText, type PlanView } from "./plan.ts";
+import { trainPlace, trainsOf, type TrainPlace } from "./train.ts";
 import { stepTags, tagProposalText, type StepTags } from "./tags.ts";
 import { CHECK_UNIT, checkMetric, metricDef, metricWarning, type MetricValue } from "./metrics.ts";
 import { recurringViews, scheduleText, type RecurringView } from "./recurring.ts";
@@ -38,9 +39,10 @@ export interface AttentionItem {
    * `tags`: the orchestrator proposes a change to the project's tag lists (.nexus/tags.yaml), one item per proposal
    * (`tags`); only the user accepts or declines it. `recurring`: a recurring queue needs the user: it waits for their
    * standing approval, or a time passed without a run (its previous run had not closed, its template cannot be used,
-   * making the queue failed); one item per recurring.
+   * making the queue failed); one item per recurring. `cleanup`: Nexus could not remove a done survey run's worktree
+   * (git.yaml `cleanup.waiting`: untracked files left in it, and the like); the user looks, then cleans up.
    */
-  kind: "question" | "stopped" | "approval" | "review" | "failed" | "start" | "provisional" | "plan" | "merge" | "tags" | "recurring";
+  kind: "question" | "stopped" | "approval" | "review" | "failed" | "start" | "provisional" | "plan" | "merge" | "tags" | "recurring" | "cleanup";
   queue?: string;
   /** Kind `recurring`: the recurring queue it is about (its standing approval waits, or a time passed without a run). */
   recurring?: string;
@@ -180,6 +182,8 @@ export interface QueueView extends Omit<QueueFile, "steps"> {
   plan?: PlanView;
   /** Queues whose plan waits for this one (unused plans only). */
   starts_next?: string[];
+  /** Its place in the line of the merge train (train.ts): it waits for its turn to integrate into its base. */
+  train?: TrainPlace;
   updated?: string;    // time of the latest event about this queue
 }
 /**
@@ -288,6 +292,9 @@ export function loadProjectState(store: ProjectStore): ProjectState {
         if (WORKER_ONLY.has(e.type) && s.role !== "worker") {
           warnings.push(`session ${id}: ${e.type} is for workers; ignored`); continue;
         }
+        if (CONVERSATION_ONLY.has(e.type) && s.role !== "conversation") {
+          warnings.push(`session ${id}: ${e.type} is for thinking partners; ignored`); continue;
+        }
         events.push(e);
       }
     } catch (e) { warnings.push(`session ${id}: ${(e as Error).message}`); }
@@ -387,6 +394,12 @@ export function loadProjectState(store: ProjectStore): ProjectState {
       const a = queues.get(e.queue);
       if (a && !(a.starts_next ??= []).includes(id)) a.starts_next.push(id);
     }
+  }
+  // The merge train: the queues waiting their turn to integrate, with the queue before each.
+  const trains = trainsOf(project, [...queues.values()]);
+  for (const q of queues.values()) {
+    const place = trainPlace(trains, q);
+    if (place) q.train = place;
   }
   // Planned starts, with why each waits.
   for (const q of queues.values()) {
@@ -518,6 +531,8 @@ function attentionOf(queues: QueueView[], questions: QuestionView[], tags: TagsF
       const w = q.git.merge.waiting;
       out.push({ kind: "merge", queue: q.id, step: q.steps.find((s) => s.integration)?.id, text: w.reason + releasedText(w.released), at: w.since });
     }
+    // A done survey run's worktree Nexus could not remove (src/merger.ts): until it is cleaned up.
+    if (q.git?.cleanup?.waiting && !q.git.cleaned) out.push({ kind: "cleanup", queue: q.id, text: q.git.cleanup.waiting.reason, at: q.git.cleanup.waiting.since });
     if (q.status === "cancelled" || q.status === "done") continue;
     for (const s of q.steps) {
       // A review the orchestrator does is not the user's (the queue still shows it waiting).
@@ -870,6 +885,7 @@ function apply(
     case "metric.defined":
     case "recurring.set":
     case "static_analysis.declined":
+    case "ideas.covered":
     default:
       return;
   }

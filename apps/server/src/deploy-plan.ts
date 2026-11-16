@@ -23,7 +23,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { newId, nexusHome, now, pendingProvisional, renameRetrying, stepClosed, type NotifyKind, type ProjectState } from "@nexus/protocol";
+import { newId, nexusHome, notMergedBack, now, pendingProvisional, renameRetrying, stepClosed, type NotifyKind, type ProjectState } from "@nexus/protocol";
 import type { UpdateAsker } from "./handover.ts";
 import type { UpdateStatus } from "./lifecycle.ts";
 
@@ -145,9 +145,7 @@ export function judgePlan(t: PlanTarget, state: ProjectState): { verdict: "in" }
   // One with a worktree of its own (an integration step) is in once its work is merged back into its base: the
   // fast-forward comes after its last step (src/merger.ts).
   if (q.steps.length && q.steps.every((s) => stepClosed(q, s))) {
-    const integ = q.steps.find((s) => s.integration);
-    const merged = q.git?.merged;
-    if (integ && !(merged && (!integ.finished_at || merged.at >= integ.finished_at))) {
+    if (notMergedBack(q)) {
       return { verdict: "waiting", reason: `queue ${t.queue} is done; its work is in the deploy once it is merged back into ${q.git?.base?.ref ?? "its base"}` };
     }
     return { verdict: "in" };

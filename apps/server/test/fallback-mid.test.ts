@@ -46,7 +46,7 @@ function setup(steps: Step[], o: { level?: 1 | 2 } = {}) {
   const sessions = () => loadProjectState(store).sessions.filter((s) => s.role === "worker");
   const received = () => (existsSync(process.env.FAKE_LOG!) ? readFileSync(process.env.FAKE_LOG!, "utf8").trim().split("\n").map((l) => JSON.parse(l) as { text: string; session: string | null }) : []);
   const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms, () => `; run: ${JSON.stringify(queue().run)}; steps: ${queue().steps.map((s) => `${s.id}=${s.status}`).join(" ")}`);
-  const stop = () => { clearInterval(timer); engine.shutdown(); delete process.env.FAKE_USAGE; delete process.env.FAKE_SLOW_MS; delete process.env.FAKE_RESET_MS; };
+  const stop = () => { clearInterval(timer); engine.shutdown(); delete process.env.FAKE_USAGE; delete process.env.FAKE_SLOW_MS; delete process.env.FAKE_RESET_MS; delete process.env.FAKE_ASK_LINGER_MS; };
   return { root, git, store, engine, queue, sessions, received, until, stop };
 }
 
@@ -59,6 +59,17 @@ function assertSwitched(x: ReturnType<typeof setup>, step = "Q1") {
   assert.deepEqual([f.step, f.runtime, f.model, f.from.runtime], [step, "codex", "gpt-6-luna", "claude"]);
   const codex = x.sessions()[1]!;
   return x.received().filter((r) => r.session === codex.id).map((r) => r.text);
+}
+
+/**
+ * The step's question is open and the turn that asked it is over (recorded, the session idle). An answer or a message
+ * that comes while that turn still runs goes into it, on the same runtime, and is no turn of its own: no fallback then
+ * (the test once raced the turn's end under load and found the step still waiting, or done on Claude Code).
+ */
+function askedTurnOver(x: ReturnType<typeof setup>): boolean {
+  const s = x.sessions()[0];
+  return !!s && loadProjectState(x.store).questions.some((q) => q.state === "open")
+    && s.live?.state === "idle" && readTurns().entries.some((t) => t.session === s.id);
 }
 
 test("before a nudge: a fresh session on the fallback, given the goal, the progress, the commits and the uncommitted files, which stay", async () => {
@@ -84,8 +95,9 @@ test("before an answer, and before a message: the waiting step goes on on its fa
   const a = setup([{ fake: "ask1", kind: "mechanical" }]);
   try {
     process.env.FAKE_USAGE = "0.95";
+    process.env.FAKE_ASK_LINGER_MS = "500"; // the question comes well before its turn's end
     a.engine.start("Q");
-    await a.until("the question", () => loadProjectState(a.store).questions.some((q) => q.state === "open"));
+    await a.until("the question, its turn over", () => askedTurnOver(a));
     answerAsUser(a.store, loadProjectState(a.store).questions[0]!.qid, "The left one.");
     await a.until("the step done", () => a.queue().steps[0]!.status === "done", LONGER.run);
     const [first] = assertSwitched(a);
@@ -95,8 +107,9 @@ test("before an answer, and before a message: the waiting step goes on on its fa
   const m = setup([{ fake: "ask1", kind: "mechanical" }]);
   try {
     process.env.FAKE_USAGE = "0.95";
+    process.env.FAKE_ASK_LINGER_MS = "500"; // the question comes well before its turn's end
     m.engine.start("Q");
-    await m.until("the question", () => loadProjectState(m.store).questions.some((q) => q.state === "open"));
+    await m.until("the question, its turn over", () => askedTurnOver(m));
     sendMessage(m.store, m.queue().run!.session, "Use the new colours.", { queue: "Q", step: "Q1" });
     await m.until("the step done", () => m.queue().steps[0]!.status === "done", LONGER.run);
     const [first] = assertSwitched(m);
