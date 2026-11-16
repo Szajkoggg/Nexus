@@ -61,7 +61,7 @@ export function noteRefIssue(ref: string, notesDir: string | undefined, notes: r
  * first bullet (else the bullet's first words); `decisions`: its top-level bullets. `dropped` and `replaced_by` come
  * from the lines `**Dropped:** <date>: <why>` and `**Replaced by:** <file>#<date>` the partner writes under it.
  */
-export interface IdeaEntry {
+interface IdeaEntry {
   date: string;
   headings: string[];
   lead: string;
@@ -187,7 +187,7 @@ export function parseNote(file: string, text: string): IdeaNote {
 // ---------------------------------------------------------------- statuses
 
 /** An entry's status, the least advanced first; dropped and replaced stand apart (and win over the others). */
-export const ENTRY_STATUSES = ["decided", "handed_over", "queued", "built", "dropped", "replaced"] as const;
+const ENTRY_STATUSES = ["decided", "handed_over", "queued", "built", "dropped", "replaced"] as const;
 export type EntryStatus = (typeof ENTRY_STATUSES)[number];
 /** A topic's status: its least advanced entry's (dropped and replaced left out); `worked_out` with no entry at all. */
 export type TopicStatus = "worked_out" | EntryStatus;
@@ -226,7 +226,7 @@ export interface HistoryItem {
 }
 
 /** A queue as an entry or a note lists it. */
-export interface IdeaQueueRef { id: string; title: string; status: QueueStatus; commit?: string }
+interface IdeaQueueRef { id: string; title: string; status: QueueStatus; commit?: string }
 
 export interface IdeaEntryView extends IdeaEntry {
   ref: string;
@@ -365,7 +365,7 @@ export function ideaQueues(views: readonly QueueView[], matched: Readonly<Record
  * How a suggestion was found: an `exact` reference (`<file>.md#<date>`), a note named with one of its entries' dates
  * in the same sentence (`dated`), or a note named alone (`file`: its latest entry dated on or before the queue).
  */
-export type MatchKind = "exact" | "dated" | "file";
+type MatchKind = "exact" | "dated" | "file";
 const MATCH_RANK: Record<MatchKind, number> = { exact: 0, dated: 1, file: 2 };
 
 /** A suggested match of a queue that names no note to a note's entry, with the sentence it came from. */

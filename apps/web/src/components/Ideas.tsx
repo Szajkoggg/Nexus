@@ -24,7 +24,7 @@ const TONE: Record<TopicStatus, { dot: string; text: string }> = {
   replaced: { dot: "bg-fg-3", text: "text-fg-3" },
 };
 
-export function IdeaStatus({ status, className = "" }: { status: TopicStatus; className?: string }) {
+function IdeaStatus({ status, className = "" }: { status: TopicStatus; className?: string }) {
   const tone = TONE[status];
   return (
     <span className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap text-xs ${tone.text} ${className}`}>
@@ -266,7 +266,7 @@ const matchFilter = (m: MatchItem): MatchFilter => (!m.decision ? "open" : m.dec
 const KIND_TONE: Record<MatchItem["kind"], string> = { exact: "bg-ok/15 text-ok", dated: "bg-accent/15 text-accent", file: "bg-warn/15 text-warn" };
 
 /** "To match · N": the suggestions for the earlier queues that wait for the user, atop the overview. */
-export function ToMatchBanner({ suggestions, queues }: { suggestions: number; queues: number }) {
+function ToMatchBanner({ suggestions, queues }: { suggestions: number; queues: number }) {
   return (
     <div className="mb-3.5 flex items-center gap-2.5 rounded-xl border border-warn/40 bg-warn/5 px-3 py-2 text-[13px] text-fg">
       <span className="min-w-0 flex-1"><b className="font-semibold text-warn">{t("ideas.toMatch.title", { count: suggestions })}</b> {t("ideas.toMatch.text", { count: queues })}</span>
