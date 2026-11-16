@@ -881,12 +881,15 @@ export const GitFile = z.object({
    * the user should know of, since when; told to the user and the orchestrator; `released`: the queues whose runs Nexus
    * held at a step's end for this merge back and let go on when it could not go after all. `reintegrations`: how many
    * times the integration step was run again because the base moved on, since the user's last Merge back (at most
-   * two). `reintegrating`: when the last such run was asked for, until its integration step opens.
+   * two). `reintegrating`: when the last such run was asked for, until its integration step opens. `queued`: back from
+   * a wait, it could go now but another queue holds its base (the merge train, src/protocol train.ts): it waits its
+   * turn in line, ordered by `since` (when its wait began).
    */
   merge: z.object({
     waiting: z.object({ reason: z.string(), since: Time, released: z.array(z.string()).optional() }).optional(),
     reintegrations: z.number().int().min(0).optional(),
     reintegrating: Time.optional(),
+    queued: z.object({ since: Time }).optional(),
   }).optional(),
   /**
    * The cleanup: the worktree removed and its branch deleted (git branch -d), by the user's Clean up or by Nexus (after

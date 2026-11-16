@@ -17,6 +17,12 @@
 // checks, the limit, a run again that does not get through), the held runs go on at once, and the wait names them
 // (`merge.waiting.released`), so the user and the orchestrator are told. Nothing stays held.
 //
+// The merge train (protocol train.ts, PROTOCOL.md "The merge train"): the queues that go back into one base integrate
+// one at a time. A queue whose next step is its integration step is held at the end of the step before while another
+// queue holds the base (its integration step runs, or it waits for its fast-forward) or is before it in line; its run
+// goes on when its turn comes. A fast-forward that waits (`merge.waiting`) lets the next queue go; once it could go
+// again while another queue holds the base, it queues up (`merge.queued`) and goes in its turn.
+//
 // Nothing happens while Nexus updates, deploys or hands over (`busy`). After a merge back the worktree and branch are
 // cleaned up once every provisional acceptance of the queue is confirmed; a Fix it until then runs in the worktree and
 // goes through the integration step again. Nothing is pushed.
@@ -28,7 +34,10 @@
 // left (git.yaml `cleanup.waiting`, the waiting list's "cleanup" item); Nexus does not try again, the user's Clean up
 // does. Never with --force.
 import { existsSync } from "node:fs";
-import { hasOwnWorktree, normPath, now, pendingProvisional, stepClosed, runGoing, type ProjectState, type ProjectStore, type QueueView } from "@nexus/protocol";
+import {
+  hasOwnWorktree, mayIntegrate, mayMergeBack, normPath, now, pendingProvisional, stepClosed, runGoing, trainBase, trainPlace, trainText, trainsOf,
+  type ProjectState, type ProjectStore, type QueueView, type Train,
+} from "@nexus/protocol";
 import { checkoutOf, patchGit } from "./gitinfo.ts";
 import { ROOT } from "./lifecycle.ts";
 import { cleanUp, fastForward, judgeMerge, leftText, reintegrate, stillEnding, withMergeLock, worktreeLeft } from "./mergeback.ts";
@@ -69,6 +78,12 @@ export class Merger {
   private timer: NodeJS.Timeout | undefined;
   /** This look left something waiting (or held). */
   private waits = false;
+  /** Runs held before their integration step for the merge train: let go when their turn comes. */
+  private readonly trainHeld = new Set<string>();
+  /** The merge trains at this look's start, by base (protocol train.ts). */
+  private trains = new Map<string, Train>();
+  /** The bases a queue moved, or claimed, in this look: one queue per base and look. */
+  private moved = new Set<string>();
 
   private readonly store: ProjectStore;
   private readonly o: MergerOptions;
@@ -78,6 +93,8 @@ export class Merger {
     if (this.o.busy()) return;
     this.waits = false;
     this.found = [];
+    this.trains = trainsOf(state.project, state.queues);
+    this.moved = new Set();
     const wanted = new Map<string, string>();
     for (const q of state.queues) {
       if (ownSurvey(q)) { this.surveyCleanup(state, q); continue; }
@@ -93,10 +110,15 @@ export class Merger {
       this.held.delete(run);
       try { this.o.release(run, "the merge back it was held for"); } catch { /* it was resumed or paused meanwhile */ }
     }
-    if ((this.waits || this.holding.size) && this.o.poke && !this.timer) {
-      this.timer = setTimeout(() => { this.timer = undefined; this.o.poke!(); }, this.o.pollMs ?? POLL_MS);
-      this.timer.unref?.();
-    }
+    this.releaseTrain(state);
+    if (this.waits || this.holding.size || this.trainHeld.size) this.lookAgain();
+  }
+
+  /** Arms the next look (once), when the server gave a way to ask for one. */
+  private lookAgain(): void {
+    if (!this.o.poke || this.timer) return;
+    this.timer = setTimeout(() => { this.timer = undefined; this.o.poke!(); }, this.o.pollMs ?? POLL_MS);
+    this.timer.unref?.();
   }
 
   /** No more looks (the server shuts down). */
@@ -107,17 +129,68 @@ export class Merger {
 
   /**
    * The engine at a step's end of `queue`: held when Nexus holds its checkout for a merge back (it goes on after the
-   * fast-forward, or as soon as the merge back cannot go). False otherwise.
+   * fast-forward, or as soon as the merge back cannot go); or before its integration step while it is not its turn in
+   * the merge train (it goes on when it is). False otherwise.
    */
   atBoundary(queue: string, step: string, state: ProjectState): false | { hold: string } {
-    if (!this.holding.size || this.o.busy()) return false;
     const q = state.queues.find((x) => x.id === queue);
     if (!q) return false;
-    const path = key(checkoutOf(this.store, q) ?? state.project.root);
-    const merging = this.holding.get(path);
-    if (!merging || merging === queue) return false;
-    this.held.set(queue, path);
-    return { hold: `held at the end of step ${step} while Nexus merges queue ${merging} back into this checkout (a fast-forward); it goes on right after` };
+    if (this.holding.size && !this.o.busy()) {
+      const path = key(checkoutOf(this.store, q) ?? state.project.root);
+      const merging = this.holding.get(path);
+      if (merging && merging !== queue) {
+        this.held.set(queue, path);
+        return { hold: `held at the end of step ${step} while Nexus merges queue ${merging} back into this checkout (a fast-forward); it goes on right after` };
+      }
+    }
+    return this.trainHold(q, step, state);
+  }
+
+  /**
+   * The merge train at a step's end: a queue whose next step is its integration step waits there while another queue
+   * holds its base or is before it in line (protocol train.ts); its own steps before never wait.
+   */
+  private trainHold(q: QueueView, step: string, state: ProjectState): false | { hold: string } {
+    const integ = q.steps.find((s) => s.integration);
+    if (!integ || step === integ.id || q.steps.find((s) => s.status === "pending") !== integ) return false;
+    const trains = trainsOf(state.project, state.queues);
+    if (mayIntegrate(trains.get(trainBase(q)), q.id)) { this.trainHeld.delete(q.id); return false; }
+    this.trainHeld.add(q.id);
+    this.lookAgain(); // looked at again even when nothing else changes meanwhile
+    const place = trainPlace(trains, q);
+    return { hold: `held at the end of step ${step}: it ${place ? trainText(place) : "waits for its turn to integrate"}; it goes on by itself when its turn comes` };
+  }
+
+  /**
+   * The runs held for the merge train whose turn came go on. One that is gone from there (its integration step opened,
+   * its run ended otherwise, the queue gone) is forgotten; a state read just before the hold (the run still running)
+   * keeps it.
+   */
+  private releaseTrain(state: ProjectState): void {
+    for (const id of [...this.trainHeld]) {
+      const q = state.queues.find((x) => x.id === id);
+      const r = q?.run;
+      const integ = q?.steps.find((s) => s.integration);
+      if (!q || !r || integ?.status !== "pending" || (r.state !== "running" && r.state !== "pausing" && !(r.state === "paused" && r.resume_after_restart))) {
+        this.trainHeld.delete(id);
+        continue;
+      }
+      if (r.state !== "paused" || !mayIntegrate(this.trains.get(trainBase(q)), id)) continue;
+      this.trainHeld.delete(id);
+      try { this.o.release(id, "its turn to integrate"); } catch { /* it was resumed or paused meanwhile */ }
+    }
+  }
+
+  /**
+   * The merge train before a queue moves its base (or holds its checkout for that): whether it is its turn. Not yet:
+   * it queues up (`merge.queued`, ordered by when its wait began) and is looked at again.
+   */
+  private turn(q: QueueView, merge: Merge | undefined): boolean {
+    const base = trainBase(q);
+    if (!this.moved.has(base) && mayMergeBack(this.trains.get(base), q.id)) { this.moved.add(base); return true; }
+    this.waits = true;
+    if (!merge?.queued) this.writeMerge(q, { ...merge, waiting: undefined, queued: { since: merge?.waiting?.since ?? now() } });
+    return false;
   }
 
   private look(state: ProjectState, q: QueueView, wanted: Map<string, string>): void {
@@ -160,17 +233,20 @@ export class Merger {
         // Its own run or integration step still ending keeps the hold; anything else lets it go (the user's own
         // doing, as merge_back off).
         if (mine && (going(q) || d.ending)) claim(mine);
-        if (merge?.waiting) this.writeMerge(q, { ...merge, waiting: undefined });
+        if (merge?.waiting || (merge?.queued && !d.ending)) this.writeMerge(q, { ...merge, waiting: undefined, queued: undefined });
         return;
       case "wait":
         return this.wait(q, d.reason);
       case "hold":
+        if (!this.turn(q, merge)) return;
         return claim(key(d.path));
       case "reintegrate":
+        if (!this.turn(q, merge)) return;
         withMergeLock(this.store, q.id, () => reintegrate(this.store, q, d, "nexus"));
         try { this.o.start(q.id); } catch (e) { return cannotStart(e); }
         return claim(key(d.path));
       case "ff":
+        if (!this.turn(q, merge)) return;
         withMergeLock(this.store, q.id, () => fastForward(this.store, q, d, "nexus"));
         return; // its checkout is no longer held: the runs held there go on
       case "merged":
@@ -225,16 +301,19 @@ export class Merger {
   private record(q: QueueView, reason: string, released: string[]): void {
     const merge = this.store.readGit(q.id)?.merge;
     if (merge?.waiting?.reason === reason && !released.length) return;
-    this.writeMerge(q, { ...merge, waiting: { reason, since: now(), ...(released.length ? { released } : {}) } });
+    this.writeMerge(q, { ...merge, queued: undefined, waiting: { reason, since: now(), ...(released.length ? { released } : {}) } });
   }
 
-  private writeMerge(q: QueueView, merge: NonNullable<NonNullable<QueueView["git"]>["merge"]>): void {
-    const empty = !merge.waiting && merge.reintegrations === undefined && !merge.reintegrating;
+  private writeMerge(q: QueueView, merge: Merge): void {
+    const empty = !merge.waiting && merge.reintegrations === undefined && !merge.reintegrating && !merge.queued;
     patchGit(this.store, q.id, { merge: empty ? undefined : merge });
   }
 }
 
 const key = (path: string) => normPath(path).toLowerCase();
+
+/** A queue's merge back as git.yaml records it. */
+type Merge = NonNullable<NonNullable<QueueView["git"]>["merge"]>;
 
 /** What keeps a done survey run's worktree (git.yaml `cleanup.waiting`). */
 type CleanupWaiting = NonNullable<NonNullable<QueueView["git"]>["cleanup"]>["waiting"];

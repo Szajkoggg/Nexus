@@ -430,8 +430,10 @@ function wired(steps: { W: StepDef[]; M?: StepDef[]; B?: StepDef[] }, o: { merge
     approveQueue(x.store, "B");
   }
   let merger: Merger | undefined;
+  /** Steps (`queue/step`) the test holds in review. */
+  const inReview = new Set<string>();
   const tick = () => {
-    routeAnswers(x.store); acceptReviews(x.store);
+    routeAnswers(x.store); acceptReviews(x.store, inReview);
     const s = loadProjectState(x.store);
     merger!.onChange(s);
     engine.onChange(loadProjectState(x.store));
@@ -439,8 +441,8 @@ function wired(steps: { W: StepDef[]; M?: StepDef[]; B?: StepDef[] }, o: { merge
   const engine: Engine = new Engine(x.store, tick, { retryBaseMs: 30, usageMarginMs: 100, ...QUICK_ENGINE, boundary: (q, step, state) => merger!.atBoundary(q, step, state) });
   merger = new Merger(x.store, { start: (q) => void engine.start(q, { runtime: "claude" }), release: (q, why) => engine.releaseHold(q, why), busy: () => engine.draining, serverRoot: join(x.base, "elsewhere"), poke: tick, pollMs: 200 });
   const until = (what: string, pred: () => boolean, ms: number = LONGER.processes) =>
-    waitUntil(what, pred, ms, () => `; W ${JSON.stringify(x.queue("W").run)} ${x.queue("W").steps.map((s) => `${s.id}=${s.status}`).join(" ")}; git ${JSON.stringify(x.store.readGit("W")?.merge)}`);
-  return { ...x, engine, merger, until };
+    waitUntil(what, pred, ms, () => ["W", ...(steps.B ? ["B"] : [])].map((id) => `; ${id} ${JSON.stringify(x.queue(id).run)} ${x.queue(id).steps.map((s) => `${s.id}=${s.status}`).join(" ")}; git ${JSON.stringify(x.store.readGit(id)?.merge)}`).join(""));
+  return { ...x, engine, merger, until, inReview };
 }
 const step = (id: string, behaviour: string): StepDef => ({ id, title: `Step ${id}`, goal: `FAKE: ${behaviour}`, acceptance: [] });
 
@@ -567,5 +569,65 @@ test("engine, merge_back on: a queue planned after one in the main checkout star
     await x.until("B started", () => !!x.queue("B").run);
     assert.equal(x.queue("M").status, "done");
     await x.until("B done", () => x.queue("B").status === "done");
+  } finally { x.merger.shutdown(); x.engine.shutdown(); }
+});
+
+// ---------------------------------------------------------------- the merge train
+
+/** main's reflog has no merge but fast-forwards: it moved only by commits and fast-forwards. */
+const onlyForward = (x: Project) => git(x.root, "reflog", "--format=%gs", "main").split("\n").filter((l) => /^merge/.test(l) && !/Fast-forward/.test(l)).length === 0;
+
+test("engine, merge train: the second worktree queue integrates only after the first's fast-forward, once; its own steps never wait", async () => {
+  const x = wired({ W: [step("W1", "commit")], B: [step("B1", "commit"), step("B2", "commit")] }, { bWorktree: true });
+  x.inReview.add("W/W.integrate"); // W holds main: its integration step waits for its review
+  try {
+    x.engine.start("W", { runtime: "claude" });
+    await x.until("W's integration step in review", () => x.queue("W").steps.find((s) => s.integration)!.status === "review");
+    x.engine.start("B", { runtime: "claude" });
+    await x.until("B held before its integration step", () => x.queue("B").run?.state === "paused" && !!x.queue("B").train);
+    const b = x.queue("B");
+    assert.deepEqual(b.steps.map((s) => s.status), ["done", "done", "pending"], "B1 and B2 ran while W integrated");
+    assert.match(b.run!.reason ?? "", /held at the end of step B2: it waits to integrate after W \(one queue at a time merges back into main\)/);
+    assert.deepEqual(b.train, { base: "main", position: 1, after: "W" });
+    assert.ok(planLines(b).some((l) => /integration: waits to integrate after W/.test(l)), "nexus status says why");
+    assert.equal(x.store.readGit("W")?.merged, undefined);
+    x.inReview.clear();
+    await x.until("B merged back", () => !!x.store.readGit("B")?.merged);
+    const w = x.store.readGit("W")!, g = x.store.readGit("B")!;
+    const bInteg = x.queue("B").steps.find((s) => s.integration)!;
+    assert.ok(w.merged!.at <= bInteg.started_at!, `W's fast-forward (${w.merged!.at}) before B's integration step (${bInteg.started_at})`);
+    assert.equal(g.steps["B.integrate"]!.length, 1, "B's integration step ran once: main did not move meanwhile");
+    assert.equal(g.merge?.reintegrations, undefined);
+    assert.equal(x.main(), g.merged!.sha);
+    assert.ok(ok(() => git(x.root, "merge-base", "--is-ancestor", w.merged!.sha, "main")), "W's work is in main");
+    assert.ok(onlyForward(x), "main only moved forward");
+  } finally { x.merger.shutdown(); x.engine.shutdown(); }
+});
+
+test("engine, merge train: a fast-forward that cannot go lets the next queue go; back from its wait it queues up behind it", async () => {
+  const x = wired({ W: [step("W1", "commit")], B: [step("B1", "commit")] }, { bWorktree: true });
+  try {
+    writeFileSync(join(x.root, ".gitignore"), ".nexus/\nnode_modules/\nlater\n"); // dirty: W's fast-forward waits
+    x.engine.start("W", { runtime: "claude" });
+    await x.until("W's fast-forward waiting", () => /uncommitted changes/.test(x.store.readGit("W")?.merge?.waiting?.reason ?? ""));
+    x.inReview.add("B/B.integrate"); // B holds main: its integration step waits for its review
+    x.engine.start("B", { runtime: "claude" });
+    await x.until("B's integration step in review", () => x.queue("B").steps.find((s) => s.integration)!.status === "review");
+    git(x.root, "checkout", "--", ".gitignore"); // clean again: W could go, but B holds main now
+    await x.until("W queued behind B", () => !!x.store.readGit("W")?.merge?.queued);
+    await sleep(500); // a few looks of the merger's (pollMs 200)
+    const w = x.queue("W");
+    assert.equal(w.git!.merged, undefined, "W does not move main while B holds it");
+    assert.equal(w.git!.merge!.waiting, undefined);
+    assert.deepEqual(w.train, { base: "main", position: 1, after: "B" });
+    assert.ok(planLines(w).some((l) => /integration: waits to integrate after B/.test(l)));
+    x.inReview.clear();
+    await x.until("W merged back", () => !!x.store.readGit("W")?.merged);
+    const g = x.store.readGit("W")!, b = x.store.readGit("B")!;
+    assert.ok(b.merged!.at < g.merged!.at, "B first, then W");
+    assert.equal(g.steps["W.integrate"]!.length, 2, "W's integration step ran again on main with B's work");
+    assert.equal(x.main(), g.merged!.sha);
+    assert.ok(ok(() => git(x.root, "merge-base", "--is-ancestor", b.merged!.sha, "main")));
+    assert.ok(onlyForward(x), "main only moved forward");
   } finally { x.merger.shutdown(); x.engine.shutdown(); }
 });

@@ -521,6 +521,18 @@ back by itself) and `resolve_conflicts` (the integration step's worker resolves 
   packages/protocol/src/plan.ts), so it starts from a base that has the work, and a chain of worktree queues does not
   build on a base without its predecessors. The planned deploy already waited the same way; both use one test. With
   `merge_back` off the user's Merge back may come much later, or never, so finishing stays enough there.
+- **The merge train** (queue MQ, 2026-11-16). Two worktree queues finishing together both used to integrate against
+  the same base; the first fast-forward then moved the base under the second, whose integration step ran again (and,
+  with a third, again, up to the limit). Now, with `merge_back` on, one queue per base integrates at a time: it holds
+  the base from its integration step's start to its fast-forward, and the others are held at the end of the step
+  before their integration step, in the order they got there. Each integration step thus merges a base that already
+  has the queues before it, runs once, and is followed by a fast-forward. A fast-forward that waits on the user (a
+  dirty checkout, failed checks) must not stop the train: it lets the next queue go, and once it could go again it
+  queues up behind those already waiting (by when its wait began). Choices: the rule is derived from the files
+  (`packages/protocol/src/train.ts`), not kept in the server's memory, so a restart finds the same order and the
+  dashboard and `nexus status` show the same place; the hold reuses the engine's step boundary and `releaseHold` (the
+  planned deploy's and the merge back's own hold), so no new run state; a queue's own steps never wait, only its
+  integration step; with `merge_back` off there is no train, since the user's Merge back decides the order anyway.
 - A queue from before the integration step keeps the user's old merge (which may make a merge commit).
 - Found while building: a scripted run on a development instance first stood still because a project without an
   orchestrator section has its level-2 reviews done by the user; and a commit in the base's checkout changes nothing

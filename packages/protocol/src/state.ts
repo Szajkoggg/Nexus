@@ -8,6 +8,7 @@ import { isOpenQuestion, reviewedByOrchestrator, runEnded, runGoing, runHoldsChe
 import { stopPlace } from "./attention.ts";
 import { closingStepId, integrationStepId, stepDefs } from "./closing.ts";
 import { openPlan, planView, proposalText, type PlanView } from "./plan.ts";
+import { trainPlace, trainsOf, type TrainPlace } from "./train.ts";
 import { stepTags, tagProposalText, type StepTags } from "./tags.ts";
 import { CHECK_UNIT, checkMetric, metricDef, metricWarning, type MetricValue } from "./metrics.ts";
 import { recurringViews, scheduleText, type RecurringView } from "./recurring.ts";
@@ -181,6 +182,8 @@ export interface QueueView extends Omit<QueueFile, "steps"> {
   plan?: PlanView;
   /** Queues whose plan waits for this one (unused plans only). */
   starts_next?: string[];
+  /** Its place in the line of the merge train (train.ts): it waits for its turn to integrate into its base. */
+  train?: TrainPlace;
   updated?: string;    // time of the latest event about this queue
 }
 /**
@@ -391,6 +394,12 @@ export function loadProjectState(store: ProjectStore): ProjectState {
       const a = queues.get(e.queue);
       if (a && !(a.starts_next ??= []).includes(id)) a.starts_next.push(id);
     }
+  }
+  // The merge train: the queues waiting their turn to integrate, with the queue before each.
+  const trains = trainsOf(project, [...queues.values()]);
+  for (const q of queues.values()) {
+    const place = trainPlace(trains, q);
+    if (place) q.train = place;
   }
   // Planned starts, with why each waits.
   for (const q of queues.values()) {

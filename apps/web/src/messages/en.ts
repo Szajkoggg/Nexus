@@ -66,6 +66,7 @@ export const en = {
   "plan.why.checkout": "{reason}",
   "plan.why.limit": "{reason}",
   "plan.why.ready": "starts now",
+  "plan.why.train": "waits to integrate after {queue}",
   "plan.estimate.minutes": "about {minutes} min (estimate)",
   "plan.estimate.hours": "about {hours} h (estimate)",
   "plan.estimate.none": "no estimate",

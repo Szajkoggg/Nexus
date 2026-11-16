@@ -604,7 +604,7 @@ Written only by the server's queue engine; agents never touch them.
 
 | File | What |
 |---|---|
-| `queues/<id>/git.yaml` | The HEAD of the queue's checkout around each step's work (`src/gitinfo.ts`): `base` (an auto worktree's: `ref`, the branch or commit it was made from, its `sha`, `at`), `base.branch` (whether `ref` names a branch: only a branch can be merged back into), `merged` (`at`, `into`, `path`, `sha`, `fast_forward`, `by`: `nexus` or `user`, absent on older records), `cleaned` (`at`, `path`, `branch`), `cleanup` (Nexus's cleanup of a done survey run's worktree could not go: `waiting` (`reason`, `since`, `files` (what is left, at most 20), `more`); see "Cleaning up a survey's worktree"), `merge` (Nexus merging back by itself: `waiting` (`reason`, `since`: what keeps it, told to the user and the orchestrator; `released`: the queues whose runs Nexus held for this merge back and let go on when it could not go), `reintegrations` (runs of the integration step again since the user's last Merge back), `reintegrating` (when the last was asked for, until the step opens)), `setup` (the worktree setup command for the worktree Nexus made: `command` (the last one run), `at` (when the worktree was made), `done_at` (once it succeeded), `failed` (`at`, `reason`: its last failure)), `steps.<step>` (rounds, oldest first: `session`, `start` (HEAD when the step opened, or when a send-back reopened it), `started_at`, `end` (HEAD at the end of the turn in which the step got its outcome: done, review, failed or stopped), `ended_at`; a sha is null outside a git repository). A continued step keeps its open round. One writer: the server. See "Git on the dashboard" |
+| `queues/<id>/git.yaml` | The HEAD of the queue's checkout around each step's work (`src/gitinfo.ts`): `base` (an auto worktree's: `ref`, the branch or commit it was made from, its `sha`, `at`), `base.branch` (whether `ref` names a branch: only a branch can be merged back into), `merged` (`at`, `into`, `path`, `sha`, `fast_forward`, `by`: `nexus` or `user`, absent on older records), `cleaned` (`at`, `path`, `branch`), `cleanup` (Nexus's cleanup of a done survey run's worktree could not go: `waiting` (`reason`, `since`, `files` (what is left, at most 20), `more`); see "Cleaning up a survey's worktree"), `merge` (Nexus merging back by itself: `waiting` (`reason`, `since`: what keeps it, told to the user and the orchestrator; `released`: the queues whose runs Nexus held for this merge back and let go on when it could not go), `reintegrations` (runs of the integration step again since the user's last Merge back), `reintegrating` (when the last was asked for, until the step opens), `queued` (`since`: back from a wait, it could go but another queue holds its base; it waits its turn in the merge train, ordered by when its wait began; see "The merge train")), `setup` (the worktree setup command for the worktree Nexus made: `command` (the last one run), `at` (when the worktree was made), `done_at` (once it succeeded), `failed` (`at`, `reason`: its last failure)), `steps.<step>` (rounds, oldest first: `session`, `start` (HEAD when the step opened, or when a send-back reopened it), `started_at`, `end` (HEAD at the end of the turn in which the step got its outcome: done, review, failed or stopped), `ended_at`; a sha is null outside a git repository). A continued step keeps its open round. One writer: the server. See "Git on the dashboard" |
 | `queues/<id>/push.yaml` | Pushing what was accepted: `review` (per step, the HEAD of the checkout when it entered review: `sha` or null, `finished_at`, `at`), `steps` (per accepted step: `acceptance`, `sha`, `result` (`pushed`, `failed`, `skipped`, `held`), `text`, `at`, `held_by?`), `pushed` (the last success: `sha`, `step`, `at`, `remote`, `branch`), `error` (the last failure until a success). One writer: the server. See "Pushing what was accepted" |
 | `queues/<id>/plan.yaml` | The queue's place in the plan (see "The plan"): `by`, `reason?`, `after` (the queues it waits for, each with `queue`, `by`, `at`, `reason?`), `created_at`, `updated_at`, `started_at?`, `proposal?`, `decisions`. One writer: the server; it stays after the queue starts (marked `started_at`), and taking the queue out of the plan removes it |
 | `queues/<id>/start.yaml` | The queue's next start as planned (see "The plan" and "Schedules"): `at?` (a schedule: the time, ISO 8601; with `usage`, `claude` or `codex`, when that is the usage window's reset plus the margin; without `at`, the options of a start by the plan; `after` only in files from before the plan, moved into `plan.yaml` at the server's start), the start's `runtime?`, `model?`, `effort?`, `session?` (a session to continue), `by` (`user` or `orchestrator`), `reason?`, `revision` (the queue's when planned), `created_at`, `failed?` (`at`, `reason`, `missed?`: it came due and the queue could not start; `missed`: a schedule more than 15 minutes late, the server not running at its time), `held?` (`since`, `kind`: `approval`, `checkout` or `limit`, `reason`: it came due but waits for the approval of the queue's current revision, for its checkout or for a place under the limit, and starts by itself; see "The plan" and "One queue per checkout, and a limit"). One writer: the server; a start of the queue or a cancel removes it |
@@ -925,6 +925,34 @@ orchestrator is told the same (`notify:mergewait:…`); a merge back Nexus did i
 seconds, since git can change what holds it without a file of the project changing. Nothing is pushed: the base goes
 out with the next deploy, and a deploy planned after such a queue waits for its merge back (see "Planned deploys"),
 as does, with `merge_back` on, a queue planned after it (see "The plan").
+
+**The merge train** (queue MQ; `packages/protocol/src/train.ts`, held and let go by `merger.ts`). With `merge_back`
+on, the queues that go back into one base integrate one at a time, so that each integration step merges a base that
+already has the queues before it, and a fast-forward never makes the next one run again. Per base, derived from the
+files alone (a restarted server finds the same order):
+
+- **One queue holds the base**: its integration step runs or waits for its review or an answer (unless its run
+  halted), it was asked to run again (`merge.reintegrating`), or it is integrated and waits for its fast-forward (no
+  `merge.waiting`, no `merge.queued`, and no unconfirmed provisional work holding it while `provisional_counts` is off).
+- **The others wait in line**: a queue whose every other step is closed, whose integration step is pending and whose
+  run is going (or held there), ordered by when its own steps ended (the latest `finished_at`); and a queue back from
+  a wait (`merge.queued`), ordered by `since`. At the end of the step before its integration step, the engine asks the
+  merge back (the boundary, as above): while another queue holds the base or is before it in line, the run is held
+  there (`run.yaml` paused, `resume_after_restart`, reason "held at the end of step B2: it waits to integrate after W
+  (one queue at a time merges back into main); it goes on by itself when its turn comes") and goes on by itself when
+  its turn comes (`releaseHold`). A queue's own steps before its integration step never wait.
+- **A fast-forward that waits** on something the user should know of (`merge.waiting`: a dirty checkout, failed checks,
+  the limit of runs again, …) takes its queue out of the train: the next queue in line goes. Once it could go again
+  while another queue holds the base (or one is before it in line), its wait is replaced by `merge.queued` (`since`:
+  when the wait began), so it goes after the queues that were waiting before it got stuck; in its turn it is
+  fast-forwarded, or, the base having moved on, its integration step runs again. One queue moves (or holds the
+  checkout of) a base per look.
+- **Where it shows**: each waiting queue's `train` in the project state (`base`, `position` in the line, `after`: the
+  queue just before it, the one holding the base for the first in line; none when it goes next); `nexus status` says
+  "integration: waits to integrate after W (one queue at a time merges back into main); it goes on by itself"; the
+  dashboard's plan shows "waits to integrate after W" on the queue in progress.
+- With `merge_back` off there is no train: the user merges back with Merge back, in any order, when they choose. The
+  user's Merge back does not wait for the train either.
 
 With `merge_back` on, the cleanup follows the merge (by anyone) once no provisional acceptance of the queue waits for
 the user; a Fix it until then runs in the worktree and goes through the integration step again. A cleanup that is
