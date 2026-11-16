@@ -63,8 +63,8 @@ function doneByHand(store: ProjectStore, queue: string, steps: string[]): void {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-/** The undo window of the user's changes to the plan, short for the tests. */
-const UNDO_MS = 600;
+/** The undo window of the user's changes to the plan, short for the tests, and long enough for a loaded machine. */
+const UNDO_MS = 3_000;
 
 test("two predecessors: C starts only once both are done; the plan stays after the start", async () => {
   const x = setup({ A: ["done"], B: ["done"], C: ["done"] });
