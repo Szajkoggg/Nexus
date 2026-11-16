@@ -9,8 +9,8 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  ActionError, INTEGRATION_ACCEPTANCE, INTEGRATION_GOAL, INTEGRATION_TITLE, ProjectStore, applyDraft, approveQueue, integrationStepId, loadProjectState, newId, now,
-  isApproved, orchestratorStatusChange, type Event, type QueueFile, type SessionFile,
+  INTEGRATION_ACCEPTANCE, INTEGRATION_GOAL, INTEGRATION_TITLE, ProjectStore, applyDraft, approveQueue, integrationStepId, loadProjectState, newId, now,
+  isApproved, type Event, type QueueFile, type SessionFile,
 } from "../src/index.ts";
 
 function setup(q: Partial<QueueFile> = { worktree: "auto" }) {
@@ -94,20 +94,7 @@ test("the mark is the server's: a draft does not set it, a revision keeps it, an
   assert.equal(st.readQueue("N").integration, undefined, "an orchestrator's draft cannot set it");
 });
 
-test("the integration step's id is reserved, it cannot be skipped, and queue set finished waits for it", () => {
-  const x = setup();
-  assert.throws(() => x.draft({ steps: [{ id: "Q1", title: "One" }, { id: "Q.integrate", title: "Mine" }] }), /reserved for the queue's integration step/);
-  approveQueue(x.st, "Q");
-  const w = x.session("worker"), u = x.session("user");
-  x.finish(w, u, "Q1");
-  x.st.writeRun("Q", { protocol: 1, session: w.id, state: "halted", reason: "x", step: "Q1", started_at: now(), updated_at: now() });
-  assert.throws(() => orchestratorStatusChange(x.st, { queue: "Q", step: "Q.integrate", to: "skipped", reason: "nothing to merge" }),
-    (e: ActionError) => e.status === 409 && /integration step: it is not skipped/.test(e.message));
-  assert.throws(() => orchestratorStatusChange(x.st, { queue: "Q", to: "finished", reason: "all done" }),
-    (e: ActionError) => e.status === 409 && /Q\.integrate \(pending, the integration step/.test(e.message));
-  x.finish(w, u, "Q.integrate");
-  assert.equal(x.queue().status, "done");
-});
+// Reserved id, skip refusal and queue set finished are covered with the closing step in closing.test.ts.
 
 test("any other step at work after the integration step ran makes it run again at the end; its own run does not reset the closing step", () => {
   const x = setup({ worktree: "auto", coding: true });

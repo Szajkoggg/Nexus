@@ -5,7 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -30,6 +30,14 @@ const G = ["-c", "user.name=test", "-c", "user.email=test@example.invalid", "-c"
 const git = (cwd: string, ...args: string[]) => execFileSync("git", [...G, ...args], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 const ok = (f: () => unknown) => { try { f(); return true; } catch { return false; } };
 
+// Build the common history once. Copy the whole repository (no shared objects or worktree metadata), so every
+// project's branches, index, config and reflog remain its own. ProjectStore is initialized only in the copies.
+const template = mkdtempSync(join(TMP, "nexus-merger-template-"));
+git(template, "init", "-q", "-b", "main");
+git(template, "config", "user.name", "test"); git(template, "config", "user.email", "test@example.invalid"); git(template, "config", "commit.gpgsign", "false");
+writeFileSync(join(template, ".gitignore"), ".nexus/\nnode_modules/\n");
+git(template, "add", ".gitignore"); git(template, "commit", "-qm", "init");
+
 /** A project in a temporary git repository, with merge_back as given. */
 function project(o: { mergeBack?: boolean; provisionalCounts?: boolean } = {}) {
   const base = mkdtempSync(join(TMP, "nexus-merger-"));
@@ -39,11 +47,7 @@ function project(o: { mergeBack?: boolean; provisionalCounts?: boolean } = {}) {
   process.env.NEXUS_HOME = join(base, "home");
   process.env.FAKE_LOG = join(base, "fake.log");
   const root = join(base, "project");
-  mkdirSync(root);
-  git(root, "init", "-q", "-b", "main");
-  git(root, "config", "user.name", "test"); git(root, "config", "user.email", "test@example.invalid"); git(root, "config", "commit.gpgsign", "false");
-  writeFileSync(join(root, ".gitignore"), ".nexus/\nnode_modules/\n");
-  git(root, "add", "-A"); git(root, "commit", "-qm", "init");
+  cpSync(template, root, { recursive: true });
   const store = ProjectStore.init(root, { id: "p", name: "P", root });
   const defaults: Record<string, unknown> = {};
   if (o.mergeBack !== false) defaults.merge_back = true;

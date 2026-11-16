@@ -13,13 +13,13 @@ import {
   loadProjectState, newId, now, orchestratorStatusChange, revisionHash, setStepLevel, type Event, type QueueFile, type SessionFile,
 } from "../src/index.ts";
 
-function setup(coding: boolean | undefined) {
+function setup(coding: boolean | undefined, overrides: Partial<QueueFile> = {}) {
   const root = mkdtempSync(join(tmpdir(), "nexus-closing-"));
   const st = ProjectStore.init(root, { id: "p", name: "P", root });
   st.writeQueue({
     protocol: 1, id: "Q", title: "Queue", revision: 1, status: "proposed", stop_conditions: [], checks: [],
     steps: [{ id: "Q1", title: "One", goal: "", acceptance: [] }, { id: "Q2", title: "Two", goal: "", acceptance: [] }],
-    approvals: [], history: [], ...(coding === undefined ? {} : { coding }),
+    approvals: [], history: [], ...(coding === undefined ? {} : { coding }), ...overrides,
   });
   const session = (role: SessionFile["role"]): SessionFile => {
     const s: SessionFile = { protocol: 1, id: newId(), project: "p", role, runtime: "external", cwd: root, launched_by: "external", created_at: now(), queue: "Q" };
@@ -121,22 +121,32 @@ test("the closing step's id is reserved", () => {
   assert.throws(() => x.draft({ steps: [{ id: "Q1", title: "One" }, { id: "Q.refactor", title: "Mine" }] }), /reserved for the queue's closing refactoring step/);
 });
 
-test("the closing step cannot be skipped, and queue set finished waits for it", () => {
-  const x = setup(true);
-  approveQueue(x.st, "Q");
-  const w = x.session("worker"), u = x.session("user");
-  x.finish(w, u, "Q1"); x.finish(w, u, "Q2");
-  x.st.writeRun("Q", { protocol: 1, session: w.id, state: "halted", reason: "x", step: "Q2", started_at: now(), updated_at: now() });
-  assert.throws(() => orchestratorStatusChange(x.st, { queue: "Q", step: "Q.refactor", to: "skipped", reason: "small" }),
-    (e: ActionError) => e.status === 409 && /closing refactoring step: it is not skipped/.test(e.message));
-  assert.throws(() => orchestratorStatusChange(x.st, { queue: "Q", to: "finished", reason: "all done" }),
-    (e: ActionError) => e.status === 409 && /Q\.refactor \(pending, the closing refactoring step/.test(e.message));
-  assert.notEqual(x.queue().status, "done");
+test("the closing and integration steps cannot be skipped, and queue set finished waits for them", () => {
+  for (const c of [
+    { kind: "closing", step: "Q.refactor", own: ["Q1", "Q2"], fields: { coding: true }, reason: "small",
+      skip: /closing refactoring step: it is not skipped/, pending: /Q\.refactor \(pending, the closing refactoring step/ },
+    { kind: "integration", step: "Q.integrate", own: ["Q1"], fields: { worktree: "auto" }, reason: "nothing to merge",
+      skip: /integration step: it is not skipped/, pending: /Q\.integrate \(pending, the integration step/ },
+  ]) {
+    const x = setup(undefined, { ...c.fields, steps: c.own.map((id, i) => ({ id, title: i === 0 ? "One" : "Two", goal: "", acceptance: [] })) });
+    if (c.kind === "integration") {
+      assert.throws(() => x.draft({ steps: [{ id: "Q1", title: "One" }, { id: c.step, title: "Mine" }] }), /reserved for the queue's integration step/);
+    }
+    approveQueue(x.st, "Q");
+    const w = x.session("worker"), u = x.session("user");
+    for (const step of c.own) x.finish(w, u, step);
+    x.st.writeRun("Q", { protocol: 1, session: w.id, state: "halted", reason: "x", step: c.own.at(-1)!, started_at: now(), updated_at: now() });
+    assert.throws(() => orchestratorStatusChange(x.st, { queue: "Q", step: c.step, to: "skipped", reason: c.reason }),
+      (e: ActionError) => e.status === 409 && c.skip.test(e.message));
+    assert.throws(() => orchestratorStatusChange(x.st, { queue: "Q", to: "finished", reason: "all done" }),
+      (e: ActionError) => e.status === 409 && c.pending.test(e.message));
+    if (c.kind === "closing") assert.notEqual(x.queue().status, "done");
 
-  // Once it has run, the halted run may be closed.
-  x.finish(w, u, "Q.refactor");
-  assert.equal(x.queue().status, "done");
-  assert.match(orchestratorStatusChange(x.st, { queue: "Q", to: "finished", reason: "all done" }), /closed as finished/);
+    x.finish(w, u, c.step);
+    assert.equal(x.queue().status, "done", c.kind);
+    // Once the closing step has run, the halted run may be closed explicitly too.
+    if (c.kind === "closing") assert.match(orchestratorStatusChange(x.st, { queue: "Q", to: "finished", reason: "all done" }), /closed as finished/);
+  }
 });
 
 test("a step of the queue's own at work after the closing step ran makes it run again at the end", () => {

@@ -1895,6 +1895,14 @@ is gone. Three things the move needed:
 Measured back to back on a quiet machine, the eight files went from 606 s to 503 s together; the suite (240 s against
 246 s) is set by its slowest files, which this did not touch.
 
+**Remaining fixed work and repeated repositories (queue TF3).** The provisional deploy tests now release Q1 and Q2
+separately after their commits. The scenario tests release Q1 after pausing and Q4 only after the restart; their
+frozen-clock golden files stay unchanged. Neither test needs the work to last a fixed time. The merger tests build
+their initial Git repository once and copy it, including `.git`, into each new project. No objects, branches, index,
+reflogs or worktree registrations are shared, and each copy gets its own ProjectStore. The context-care,
+global-settings and protocol closing/integration pairs use tables of the original cases, retaining their distinct
+inputs and assertions; fewer test registrations do not mean fewer cases.
+
 ## One full test run on the machine (queue FX)
 
 Decided on 2026-11-15: with queues in worktrees side by side, two checkouts often ran `npm test` at once; each run

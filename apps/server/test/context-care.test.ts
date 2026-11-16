@@ -72,16 +72,21 @@ for (const runtime of ["claude", "codex"] as const) {
     } finally { done(); }
   });
 
-  test(`${runtime}: below the threshold the next step runs in the same session`, async () => {
-    const { engine, queue, received, until, done } = setup(["summary", "done"], { fill: 0.5 });
-    try {
-      engine.start("Q", { runtime });
-      await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
-      const q = queue();
-      assert.equal(q.steps[0]!.session, q.steps[1]!.session);
-      assert.equal(q.run!.switches, undefined);
-      assert.equal(asks(received()).length, 0);
-    } finally { done(); }
+  test(`${runtime}: below the threshold or with context care off, the next step stays in the same session`, async () => {
+    for (const c of [
+      { name: "below the threshold", first: "summary", fill: 0.5, care: true },
+      { name: "context care off with a full session", first: "done", fill: 0.9, care: false },
+    ]) {
+      const { engine, queue, received, until, done } = setup([c.first, "done"], c);
+      try {
+        engine.start("Q", { runtime });
+        await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
+        const q = queue();
+        assert.equal(q.steps[0]!.session, q.steps[1]!.session, c.name);
+        assert.equal(q.run!.switches, undefined, c.name);
+        assert.equal(asks(received()).length, 0, c.name);
+      } finally { done(); }
+    }
   });
 
   test(`${runtime}: a missing summary is asked for once, and the fresh session gets what was written then`, async () => {
@@ -143,15 +148,4 @@ for (const runtime of ["claude", "codex"] as const) {
     } finally { done(); work.done(); }
   });
 
-  test(`${runtime}: with context care off a full session goes on`, async () => {
-    const { engine, queue, received, until, done } = setup(["done", "done"], { fill: 0.9, care: false });
-    try {
-      engine.start("Q", { runtime });
-      await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
-      const q = queue();
-      assert.equal(q.steps[0]!.session, q.steps[1]!.session);
-      assert.equal(q.run!.switches, undefined);
-      assert.equal(asks(received()).length, 0);
-    } finally { done(); }
-  });
 }

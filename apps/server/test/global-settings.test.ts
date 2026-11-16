@@ -82,30 +82,20 @@ test("codex: a changed global model reaches the next step's turn on the same thr
   } finally { x.done(); }
 });
 
-test("a run started with an explicit model keeps it when the global model changes", async () => {
-  const x = setup([{ fake: "slow" }, { fake: "done" }]);
-  try {
-    x.engine.start("Q", { runtime: "claude", model: "opus" });
-    assert.deepEqual(x.queue().run!.from_defaults, ["effort"]);
-    await x.until("Q1 to run", () => x.queue().steps[0]!.status === "running", LONGER.step);
-    setGlobal((g) => { g.runtimes.claude.model = "fake-new"; });
-    x.release();
-    await x.until("the run to finish", () => x.queue().run?.state === "finished", LONGER.run);
-    assert.deepEqual(x.args().filter((a) => a.argv).map(claudeStart).map((s) => s.model), ["opus"], "one process, on opus throughout");
-  } finally { x.done(); }
-});
-
-test("a project's own value wins over the global one, also at the next step", async () => {
-  const x = setup([{ fake: "slow" }, { fake: "done" }]);
-  try {
-    x.store.updateProject((p) => ({ ...p, runtimes: { ...p.runtimes, claude: { ...p.runtimes.claude, model: "project-own" } } }));
-    x.engine.start("Q", { runtime: "claude" });
-    await x.until("Q1 to run", () => x.queue().steps[0]!.status === "running", LONGER.step);
-    setGlobal((g) => { g.runtimes.claude.model = "fake-new"; });
-    x.release();
-    await x.until("the run to finish", () => x.queue().run?.state === "finished", LONGER.run);
-    assert.deepEqual(x.args().filter((a) => a.argv).map(claudeStart).map((s) => s.model), ["project-own"]);
-  } finally { x.done(); }
+test("a model chosen at the start or by the project wins over a changed global model, also at the next step", async () => {
+  for (const c of [{ source: "start", model: "opus" }, { source: "project", model: "project-own" }] as const) {
+    const x = setup([{ fake: "slow" }, { fake: "done" }]);
+    try {
+      if (c.source === "project") x.store.updateProject((p) => ({ ...p, runtimes: { ...p.runtimes, claude: { ...p.runtimes.claude, model: c.model } } }));
+      x.engine.start("Q", { runtime: "claude", ...(c.source === "start" ? { model: c.model } : {}) });
+      if (c.source === "start") assert.deepEqual(x.queue().run!.from_defaults, ["effort"]);
+      await x.until("Q1 to run", () => x.queue().steps[0]!.status === "running", LONGER.step);
+      setGlobal((g) => { g.runtimes.claude.model = "fake-new"; });
+      x.release();
+      await x.until("the run to finish", () => x.queue().run?.state === "finished", LONGER.run);
+      assert.deepEqual(x.args().filter((a) => a.argv).map(claudeStart).map((s) => s.model), [c.model], `${c.source}: one process, on ${c.model} throughout`);
+    } finally { x.done(); }
+  }
 });
 
 test("a changed default that makes a step's effort invalid halts the step with the reason", async () => {
