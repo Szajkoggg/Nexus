@@ -1474,6 +1474,14 @@ WebSocket alike, needs the `nexus_auth` cookie holding the token from `<NEXUS_HO
 receiving push and, to local requests only, the token, a sign-in link and its QR code; `POST /api/remote/rotate`
 (local only) replaces the token.
 
+The public exceptions are `/login`, `/manifest.webmanifest`, `/sw.js` and paths under `/icons/`, classified using
+Hono's routed path. Public file requests end at the static handler: a missing file or an encoding the adapter
+rejects returns **404**, `text/plain`, body `404 Not Found`, never the dashboard's `index.html`. This also applies
+to signed-in and direct local requests. No extra decoding is performed by Nexus. If normalization instead produces
+a protected path, the access guard still runs first (302 to `/login` for pages, 401 for API requests without a token).
+The authenticated `/`, `/index.html` and other dashboard deep links retain their SPA fallback. Login, token cookies,
+WebSocket authorization and the API's Origin/JSON requirements are unchanged.
+
 **Push.** `GET /api/push/key` (the VAPID public key), `POST /api/push/subscribe` (`subscription`, `label`,
 `timezone?`: the device's IANA time zone), `POST /api/push/unsubscribe` (`endpoint`), `POST /api/push/test`
 (`endpoint?`), `GET /api/push/settings?endpoint=` (a device's notification settings: `{ settings }`, the defaults for

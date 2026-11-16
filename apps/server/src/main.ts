@@ -6,7 +6,6 @@ import { fileURLToPath } from "node:url";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { serve, type HttpBindings } from "@hono/node-server";
-import { serveStatic } from "@hono/node-server/serve-static";
 import { WebSocketServer, type WebSocket } from "ws";
 import chokidar, { type FSWatcher } from "chokidar";
 import type { Server } from "node:http";
@@ -38,6 +37,7 @@ import { MAX_UPLOAD_BODY, UploadError, saveUpload } from "./uploads.ts";
 import { COMMIT_HASH, commitDetail, fileResponse, locate } from "./files.ts";
 import { chatRange, pin, searchLines } from "./chats.ts";
 import { searchProject } from "./search.ts";
+import { dashboardFiles, isPublicFile } from "./web-static.ts";
 import {
   AttentionWatch, allowed, auth, authCookie, isLocal, loginPage, push, pushDevices, pushKey, qrSvg, rotateToken,
   NotSubscribed, deviceNotify, setDeviceNotify, subscribe, tailscaleInfo, tokenMatches, unsubscribe,
@@ -249,9 +249,8 @@ const planner = new DeployPlanner({
 const watch = new AttentionWatch();
 
 // Remote devices sign in once with the access token; this machine needs nothing (src/remote.ts).
-const OPEN = new Set(["/login", "/manifest.webmanifest", "/sw.js"]);
 app.use("*", async (c, next) => {
-  if (OPEN.has(c.req.path) || c.req.path.startsWith("/icons/") || allowed(c.env.incoming)) return next();
+  if (c.req.path === "/login" || isPublicFile(c.req.path) || allowed(c.env.incoming)) return next();
   if (c.req.path.startsWith("/api/")) return c.json({ error: "sign in first" }, 401);
   return c.redirect("/login");
 });
@@ -956,8 +955,7 @@ app.patch("/api/settings", async (c) => {
 });
 
 if (existsSync(WEB_DIST)) {
-  app.use("/*", serveStatic({ root: WEB_DIST.replaceAll("\\", "/") }));
-  app.get("*", serveStatic({ path: join(WEB_DIST, "index.html").replaceAll("\\", "/") }));
+  app.route("/", dashboardFiles(WEB_DIST));
 }
 
 // ---------------------------------------------------------------- start

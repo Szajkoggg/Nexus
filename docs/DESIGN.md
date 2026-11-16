@@ -2721,21 +2721,33 @@ that audit ambiguity. Only this adapter's declaration and lock entry changed; Ho
 
 The [2.0.0 migration](https://github.com/honojs/node-server/releases/tag/v2.0.0) drops Node 18 and the Vercel adapter.
 Nexus already requires Node >=24 and does not use Vercel. `serve`, `HttpBindings`, `serveStatic` and the returned
-Node HTTP server remain compatible: `main.ts` needs no adjustment, including its `ws` upgrade listener. Checks ran
-on Windows with Node 26.13.1. HTTP tests use a temporary home, a free loopback port above 4317 and fake runtimes.
+Node HTTP server remain compatible: the adapter upgrade needed no `main.ts` adjustment, including its `ws` upgrade
+listener. Checks ran on Windows with Node 26.13.1. HTTP tests use a temporary home, a free loopback port above 4317 and fake runtimes.
 They cover API reads/writes, cookies, Origin/JSON guards, WebSocket acceptance/refusal and, when the dashboard is
 built, the actual assets, SPA entry and public installation files. Build first to run the static subtest; it skips
 in source-only checkouts. Encoded, repeated and malformed percent escapes cannot bypass the guard on protected
 API/asset paths in these tests.
 
-**Existing policy gap, left for a separately approved change:** `/icons/` is public. When its static handler finds
-no file (including rejected encodings), the unrestricted `app.get("*", serveStatic({ path: index }))` returns the
+**Policy gap found in DU1, closed by the approved DU1F:** `/icons/` is public. When its static handler found
+no file (including rejected encodings), the unrestricted `app.get("*", serveStatic({ path: index }))` returned the
 SPA shell without another authorization check. `/icons/missing.png`, `/icons/%252e%252e/index.html` and
-`/icons/%%32%65%%32%65/index.html` return 200 with `index.html`; a double-encoded request aimed at a JS asset also
-gets the shell, not the JS. An isolated comparison reproduced the shell response with both 1.19.19 and 2.1.8.
-The new HTTP test records this limitation rather than claiming that every encoded path is denied. The API still
-requires authorization. Removing this fallback changes the public-route contract, so DU1 stops for a separate
-approved fix; it does not weaken or silently alter the current access rules.
+`/icons/%%32%65%%32%65/index.html` returned 200 with `index.html`; a double-encoded request aimed at a JS asset also
+got the shell, not the JS. An isolated comparison reproduced the shell response with both 1.19.19 and 2.1.8.
+DU1 recorded this limitation and stopped for a separate approval; its dependency upgrade is retained.
+
+DU1F moves the static routes into `web-static.ts`, sharing `isPublicFile` with the access guard. The public set is
+unchanged. When `serveStatic` rejects or cannot find a public file, the request terminates in 404 text/plain
+(`404 Not Found`) before the SPA fallback. This holds for local and signed-in requests too. Nexus
+does not decode again: it uses the same routed path at both boundaries and keeps the adapter's default rejection
+of residual percent encodings. Paths normalized into protected routes still meet the original access guard first;
+their unauthenticated 302/401 responses are preserved. Login, API writes and WebSocket authorization are unchanged.
+
+The HTTP regression replaces DU1's explicit 200/SPA baseline with 404 assertions for the same raw requests, then
+adds repeated encodings, encoded separators, malformed escapes and an API target. It checks MIME types and exact
+response bytes in remote, signed-in and local modes, with the real dashboard built first. A separate temporary web
+root mounts the same production static routes through the Node adapter: it has an index, a JS asset, an icon and an
+outside-root sentinel, but no manifest or service worker. Their missing-file responses are proven without deleting
+or changing the real build. Both test servers close before the tests finish.
 
 The post-upgrade npm audit no longer reports the Hono advisory. It still reports GHSA-g3hv-75wg-m249 through
 `typescript-eslint -> @typescript-eslint/typescript-estree -> minimatch 10.2.6`: seven moderate affected package

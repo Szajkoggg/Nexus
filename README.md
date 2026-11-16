@@ -654,6 +654,10 @@ Exit code 1 when it finds a fault; the list says which line, box or text. Detail
 The server listens on this PC only. Everything from this PC works without signing in; anything that comes through a
 proxy or from another address needs the access token once (it sets a cookie for a year).
 
+The sign-in page and the installation files (icons, manifest and service worker) are available before signing in.
+A missing installation file returns 404 instead of opening the dashboard; normal dashboard links still work after
+sign-in.
+
 1. Install Tailscale on the PC and sign in (`winget install tailscale.tailscale`); install the Tailscale app on the
    phone and sign in with the same account.
 2. In the Tailscale admin console, under DNS, turn on MagicDNS and HTTPS certificates.
