@@ -23,7 +23,7 @@ import { usePage } from "../page.ts";
 import { fileHref } from "../hash.ts";
 import { clearChatTarget, useChatTarget } from "../chatTarget.ts";
 import { SearchField } from "./Search.tsx";
-import { IdeasMatching, IdeasOverview, IdeasSwitch } from "./Ideas.tsx";
+import { IdeasMatching, IdeasOverview, IdeasSwitch, type IdeasPanelView } from "./Ideas.tsx";
 
 // ---------------------------------------------------------------- the endpoints this file reads and writes
 
@@ -684,11 +684,10 @@ export function StepChat({ project, queue, step }: { project: string; queue: str
   );
 }
 
-/** What the Ideas panel shows, kept in the browser across visits: the conversations, or the overview of the notes. */
-type IdeasView = "conversations" | "overview";
+/** What the Ideas panel shows (IdeasPanelView), kept in the browser across visits. */
 const IDEAS_VIEW = "nexus.ideas.view";
-function useIdeasView(): [IdeasView, (v: IdeasView) => void] {
-  const [view, setView] = useState<IdeasView>(() => { try { return localStorage.getItem(IDEAS_VIEW) === "overview" ? "overview" : "conversations"; } catch { return "conversations"; } });
+function useIdeasView(): [IdeasPanelView, (v: IdeasPanelView) => void] {
+  const [view, setView] = useState<IdeasPanelView>(() => { try { return localStorage.getItem(IDEAS_VIEW) === "overview" ? "overview" : "conversations"; } catch { return "conversations"; } });
   return [view, (v) => { try { localStorage.setItem(IDEAS_VIEW, v); } catch { /* storage blocked: the choice lives as long as the view */ } setView(v); }];
 }
 
@@ -707,8 +706,8 @@ export function ConversationsPanel({ project, name, defaultRuntime, inline, desk
   const noteOpen = layerValue(at, "note") !== undefined;
   const matching = layerValue(at, "matching") !== undefined;
   const conversationOpen = layerValue(at, "conversation") !== undefined;
-  const view: IdeasView = conversationOpen ? "conversations" : noteOpen || matching ? "overview" : stored;
-  const pick = (v: IdeasView) => {
+  const view: IdeasPanelView = conversationOpen ? "conversations" : noteOpen || matching ? "overview" : stored;
+  const pick = (v: IdeasPanelView) => {
     setStored(v);
     if (v === "conversations" && noteOpen) nav.close("note");
     if (v === "conversations" && matching) nav.close("matching");

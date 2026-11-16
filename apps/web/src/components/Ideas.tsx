@@ -38,12 +38,20 @@ function IdeaStatus({ status, className = "" }: { status: TopicStatus; className
 const day = (date: string) => formatDay(new Date(`${date}T00:00:00`));
 /** A history line's time: a day alone (what the note dates), or a time ("15 Nov 12:40"). */
 const when = (at: string) => (at.length === 10 ? day(at) : formatClock(at, new Date()));
+/** "15 Nov 2026" for an entry card's date (a day, read as local). */
+const formatDayYear = (date: string) => formatDate(`${date}T00:00:00`);
+/** A button of a filter's group (the overview's statuses, the matching's decisions). */
+const filterButton = (on: boolean) =>
+  `whitespace-nowrap border-l border-line-strong px-2.5 py-1 text-xs first:border-l-0 max-lg:min-h-9 ${on ? "bg-surface-3 font-semibold text-fg" : "text-fg-2 hover:text-fg"}`;
 
 const useIdeas = (project: string) => useQuery<IdeasResponse>(projectUrl(project, "/ideas"), usePage().version);
 
-/** The switch of the Ideas panel: its conversations, or the overview of the notes. */
-export function IdeasSwitch({ view, onView, wide }: { view: "conversations" | "overview"; onView: (v: "conversations" | "overview") => void; wide?: boolean }) {
-  const item = (v: "conversations" | "overview") => (
+/** What the Ideas panel shows: its conversations, or the overview of the notes. */
+export type IdeasPanelView = "conversations" | "overview";
+
+/** The switch of the Ideas panel between its two views. */
+export function IdeasSwitch({ view, onView, wide }: { view: IdeasPanelView; onView: (v: IdeasPanelView) => void; wide?: boolean }) {
+  const item = (v: IdeasPanelView) => (
     <button key={v} onClick={() => onView(v)} aria-pressed={view === v}
       className={`rounded-md px-3 py-1 text-[13px] ${wide ? "flex-1 py-1.5 max-lg:min-h-10" : ""} ${view === v ? "bg-surface-3 font-semibold text-fg" : "text-fg-2 hover:text-fg"}`}>
       {t(`ideas.view.${v}`)}
@@ -79,7 +87,7 @@ export function IdeasOverview({ project, areas, phone, top }: { project: string;
           <div className="flex shrink-0 overflow-hidden rounded-lg border border-line-strong" role="group" aria-label={t("ideas.filterLabel")}>
             {IDEA_FILTERS.filter((f) => f === "all" || counts[f] > 0).map((f) => (
               <button key={f} onClick={() => setFilter(f)} aria-pressed={filter === f}
-                className={`whitespace-nowrap border-l border-line-strong px-2.5 py-1 text-xs first:border-l-0 max-lg:min-h-9 ${filter === f ? "bg-surface-3 font-semibold text-fg" : "text-fg-2 hover:text-fg"}`}>
+                className={filterButton(filter === f)}>
                 {t(`ideas.filter.${f}`)}<span className={`ml-1.5 font-normal ${filter === f ? "text-fg-2" : "text-fg-3"}`}>{counts[f]}</span>
               </button>
             ))}
@@ -257,8 +265,6 @@ function HistoryLine({ h }: { h: HistoryItem }) {
   );
 }
 
-/** "15 Nov 2026" for an entry card's date (a day, read as local). */
-const formatDayYear = (date: string) => formatDate(`${date}T00:00:00`);
 // ---------------------------------------------------------------- matching the earlier queues
 
 type MatchFilter = "open" | "accepted" | "rejected";
@@ -312,7 +318,7 @@ export function IdeasMatching({ project, phone }: { project: string; phone?: boo
         <div className="flex overflow-hidden rounded-lg border border-line-strong" role="group" aria-label={t("ideas.match.filterLabel")}>
           {(["open", "accepted", "rejected"] as const).map((f) => (
             <button key={f} onClick={() => setFilter(f)} aria-pressed={filter === f}
-              className={`whitespace-nowrap border-l border-line-strong px-2.5 py-1 text-xs first:border-l-0 max-lg:min-h-9 ${filter === f ? "bg-surface-3 font-semibold text-fg" : "text-fg-2 hover:text-fg"}`}>
+              className={filterButton(filter === f)}>
               {t(`ideas.match.filter.${f}`)}<span className="ml-1.5 font-normal text-fg-3">{items.filter((m) => matchFilter(m) === f).length}</span>
             </button>
           ))}
