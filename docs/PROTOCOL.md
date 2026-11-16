@@ -1616,7 +1616,8 @@ command, the CLI's too). No turn sends a `sandboxPolicy`. So it reads everything
 root, nor its own `session.yaml` (its role) or inbox, nor any other `.nexus` file, nor the user's (`away.yaml` lives
 in NEXUS_HOME); the internet is closed to it (this machine's own addresses are not: DESIGN.md, "An orchestrator on
 Codex can be kept to its drafts"). Before its process starts the server creates its `events.jsonl` empty, if missing,
-since the sandbox grants the file by path. Approval policy `never`; web search `disabled`; the user's MCP servers,
+and the `.nexus/drafts` folder: the sandbox grants paths as they are when it starts, and cannot make them. A resumed
+thread (`thread/resume`) is sent the same `config` and no `sandbox`, and keeps the profile (probed). Approval policy `never`; web search `disabled`; the user's MCP servers,
 plugins and apps off, every one (see "How the engine runs a Codex session"). It has no helpers (Claude Code's
 subagents): its briefing has it do their work itself. Its thread id is the session's `native_id` once Codex gives it.
 

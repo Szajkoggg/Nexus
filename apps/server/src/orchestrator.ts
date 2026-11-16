@@ -3,7 +3,7 @@
 // questions, and is told when a worker asks or a run halts or finishes. It may read everything and write only queue
 // drafts under .nexus/drafts/: permission mode dontAsk with a read-only allow list plus the drafts rules.
 import { randomUUID } from "node:crypto";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   ActionError, Effort, effortIssue, type ProjectFile, reviewedByOrchestrator, runGoing, ProjectStore, applyDraft, defineMetric, inPlan, loadProjectState, metricDef, openPlan, orchestratorOverview, overThreshold, proposePlan, proposeTags, readAway, readUsage, orchestratorStatusChange, newId, now, sendBack, type Applied, type Event, type EventType, type NotifyKind, type ProjectState, type SessionFile, type SessionView,
@@ -444,10 +444,14 @@ ${n.text}` });
     // Its session records the model and effort it runs on (the project's effective ones).
     const o = this.store.readProject().orchestrator;
     if (o && (o.model !== s.model || o.effort !== s.effort)) this.store.writeSession({ ...s, model: o.model, effort: o.effort });
-    // On Codex its sandbox grants its events.jsonl by path, so the file is there before the sandbox starts (empty: the
-    // session alone writes its events, through nexus).
-    const events = join(this.store.sessionDir(s.id), "events.jsonl");
-    if (s.runtime === "codex" && !existsSync(events)) writeFileSync(events, "");
+    // On Codex its sandbox grants its paths as they are when the sandbox starts, so both are there first: its
+    // events.jsonl (empty: the session alone writes its events, through nexus) and the drafts folder, which a project
+    // may not have yet and the sandbox cannot make (probed, OC2: "Failed to create parent directories").
+    if (s.runtime === "codex") {
+      const events = join(this.store.sessionDir(s.id), "events.jsonl");
+      if (!existsSync(events)) writeFileSync(events, "");
+      mkdirSync(join(this.store.dir, "drafts"), { recursive: true });
+    }
     const dropped = o?.effort && effortIssue(s.runtime === "codex" ? "codex" : "claude", o.effort);
     if (dropped) this.store.appendChat(s.id, { at: now(), from: "nexus", text: `The orchestrator's effort ${o.effort} is not one Claude Code takes (${dropped}): it runs at Claude Code's default.` });
     this.host.start(s, this.launcher(s), {}, () => ({

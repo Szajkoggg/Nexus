@@ -94,6 +94,31 @@ test("with orchestrator.runtime codex the orchestrator runs on Codex, in the pro
     assert.match(start.instructions ?? "", /No helpers: on Codex you have no subagents/);
     assert.doesNotMatch(start.instructions ?? "", /queue-reviewer|run-digest|question-triage|Agent tool/);
     assert.ok(existsSync(join(store.sessionDir(s.id), "events.jsonl")), "the file its sandbox grants exists before the sandbox starts");
+    assert.ok(existsSync(join(store.dir, "drafts")), "so does the drafts folder: the sandbox cannot make it (probed, OC2)");
+  } finally { stop(); }
+});
+
+test("on Codex, a resumed thread (a restarted server) gets the same permission profile, and no older sandbox setting", async () => {
+  const { store, engine, orchestrator, until, args, replies, stop } = setup("codex");
+  try {
+    orchestrator.say("Hello");
+    await until("its reply", () => replies() > 0, LONGER.step);
+    await until("the thread id recorded", () => !!orchestrator.session()?.native_id);
+    const s = orchestrator.session()!;
+    const started = args().find((l) => l.method === "thread/start")!;
+    orchestrator.shutdown();
+    await until("its process ended", () => !orchestrator.alive());
+
+    const again = new Orchestrator(store, engine, () => {});
+    try {
+      again.say("Hello again");
+      await until("the thread resumed", () => args().some((l) => l.method === "thread/resume"), LONGER.step);
+      const resumed = args().find((l) => l.method === "thread/resume")! as Args & { threadId?: string };
+      assert.equal(resumed.threadId, s.native_id);
+      assert.equal(again.session()!.id, s.id, "the same session");
+      assert.equal(resumed.sandbox, undefined);
+      assert.deepEqual(resumed.config, started.config, "the profile (and every tool off) again");
+    } finally { again.shutdown(); }
   } finally { stop(); }
 });
 

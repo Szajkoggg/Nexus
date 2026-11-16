@@ -1723,6 +1723,18 @@ Nexus keeps outside the queue's list of steps.
     twice. Building it found a lost message in the Codex adapter: a `turn/steer` refused because the turn had just
     ended came back after `turn/completed` had found the queue empty, so the message waited for a next one; it now
     starts its own turn.
+  - **A resumed thread keeps the profile** (probed in OC2's review round, 2026-11-16, Codex 0.167.2, `gpt-6-luna` at
+    effort low, a temporary project outside the temp folder): through Nexus's own `Orchestrator` against the real
+    Codex, a wrapper logging the JSON-RPC lines. A turn on `thread/start`, the process ended, then a new
+    `Orchestrator` (a restarted server) resumed the same session with `thread/resume`, sent with the same `config`
+    and no `sandbox`; both answers reported `activePermissionProfile: nexus_orchestrator` (extends `:read-only`) and
+    a `workspaceWrite` sandbox with exactly the two granted paths. In the resumed thread a file in the project's
+    root (apply_patch: "writing outside of the project; rejected by user approval settings"; and `Add-Content`:
+    access denied) and the session's `session.yaml` (access denied) were refused; the draft was written. The first
+    run found that a fresh project has no `.nexus/drafts` and the sandbox cannot make it ("Failed to create parent
+    directories"), so the server now makes the folder before Codex starts, as it does the events file. Cost: two
+    runs, each a short turn (18.4k input tokens, 5 output) and a turn of four actions (113k input, 93k of them
+    cached, 364 and 445 output); no cost reported.
 
 - **Remote access needs no open port.** The server keeps listening on 127.0.0.1; Tailscale Serve relays the tailnet's
   https requests to it. Requests relayed by a proxy count as remote and need the access token; this machine does
