@@ -4,7 +4,7 @@
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { acceptedMatches, deriveIdeas, ideaQueues, parseNote, suggestMatches, type HandOver, type IdeaMatchesResponse, type IdeaNote, type IdeasResponse, type MatchItem } from "./ideas.ts";
+import { acceptedMatches, deriveIdeas, ideaQueues, noteRef, parseNote, suggestMatches, type HandOver, type IdeaMatchesResponse, type IdeaNote, type IdeasResponse, type MatchItem } from "./ideas.ts";
 import type { ProjectStore } from "./store.ts";
 import type { ProjectState } from "./state.ts";
 
@@ -55,20 +55,22 @@ export function readHandOvers(store: ProjectStore): HandOver[] {
 export function ideaMatches(store: ProjectStore, state: ProjectState, notes = readNotes(state.project.root, state.project.conversations.notes_dir)): IdeaMatchesResponse {
   const decided = store.readIdeaMatches().matches;
   const suggested = suggestMatches(state.queues, notes, state.project.conversations.notes_dir);
-  const queues = ideaQueues(state.queues);
-  const lead = (ref: string) => notes.flatMap((n) => n.entries.map((e) => [`${n.file}#${e.date}`, e.lead] as const)).find(([r]) => r === ref)?.[1];
+  const queues = new Map(ideaQueues(state.queues).map((q) => [q.id, q]));
+  const leads = new Map(notes.flatMap((n) => n.entries.map((e) => [noteRef(n.file, e.date), e.lead] as const)));
   const key = (m: { queue: string; ref: string }) => `${m.queue} ${m.ref}`;
   const byKey = new Map(decided.map((m) => [key(m), m]));
-  const all = [...suggested, ...decided.filter((m) => !suggested.some((x) => key(x) === key(m))).map(({ queue, ref, kind, quote }) => ({ queue, ref, kind, quote: quote ?? "" }))];
+  const suggestedKeys = new Set(suggested.map(key));
+  const all = [...suggested, ...decided.filter((m) => !suggestedKeys.has(key(m))).map(({ queue, ref, kind, quote }) => ({ queue, ref, kind, quote: quote ?? "" }))];
   const order = new Map(state.queues.map((q, i) => [q.id, i]));
   const items = all.flatMap((m): MatchItem[] => {
-    const q = queues.find((x) => x.id === m.queue);
+    const q = queues.get(m.queue);
     if (!q) return [];
     const d = byKey.get(key(m));
+    const lead = leads.get(m.ref);
     return [{
       ...m, title: q.title, status: q.status,
       ...(q.finished_at ? { finished_at: q.finished_at } : {}), ...(q.commit ? { commit: q.commit } : {}),
-      ...(lead(m.ref) ? { lead: lead(m.ref) } : {}),
+      ...(lead ? { lead } : {}),
       ...(d ? { decision: { accepted: d.accepted, at: d.at } } : {}),
     }];
   });
