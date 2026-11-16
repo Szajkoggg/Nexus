@@ -2570,6 +2570,38 @@ of PT's original EPERM; lock/permission investigation remains separate. No real 
 used. The legacy recovery path preserves the entire remainder outside its old path and requires independent
 inspection before discarding it; missing branch evidence is restored only from a verified tip, never guessed.
 
+### Worktree handle investigation: negative reproduction (queue WH1)
+
+On 2026-11-16 the user identified a handle referring to the PT remainder in Resource Monitor and matched its
+PID to the live Nexus server. That establishes the process, not the resource's creation site. WH1 did not inspect
+or change that process, its handles, the live checkout, or the real PT/WK folders.
+
+A Windows probe used separate temporary Git repositories and NEXUS_HOME, fake Claude/Codex runtime paths, and
+development servers on ports 50805 and 62890. The successful extended probe ran a fake Claude worker through its
+work step and integration, accepted reviews with the existing fake reviewer, then called the development server's
+cleanup route. Its worktree was removed while the same server continued answering requests. A separate finished,
+merged queue was also removed. After restarting only that development server, both a partial remainder (without
+`.git`) and an empty remainder with CW cleanup proofs were removed. An empty legacy remainder without a proof was
+refused with HTTP 409 and preserved. The partial-removal fixtures deliberately injected EPERM before startup;
+that injection tests recovery, not the origin of a persistent Windows lock.
+
+A diagnostic preload in those server processes wrapped `fs.watch`, recording PID, path, creation stack and close
+events. The observed paths were the temporary registry file and the project's `.nexus` tree, including newly
+created worker sessions and queues; none pointed into either worktree directory. `main.ts`'s `watchProject` watches
+the store directory, `dropProject` closes its watcher, and the handover release awaits watcher closure. This probe
+therefore does not justify closing a project watcher when one queue ends: other queues still need it. The inspected
+file route uses `files.ts`'s `head` with a finally-close and `Readable.toWeb(createReadStream(...))`; `gitinfo.ts` runs
+synchronous child commands with explicit cwd. The probe did not exercise interrupted HTTP file streams or enumerate
+native handles, so it does not exonerate every file-serving path or establish the historical PT handle's origin.
+
+WH1 stopped without a production fix or a claimed regression test: no before-fix lasting lock was reproduced.
+The review artifacts retain the standalone probe and its PID-tagged observations. The next investigation needs the
+exact original Resource Monitor handle name/type and the server's launch context (or existing observations of what
+preceded the lock), then a matching isolated reproduction. A process match alone is insufficient for choosing a fix.
+The real remainder stays untouched until that evidence is available. Any later user-controlled maintenance must
+first let active work finish; legacy recovery still preserves and independently inspects the remainder as described
+above, and must never fabricate a CW proof or force-close a handle.
+
 ## Open questions
 
 1. **The local HTTP gap.** Any agent with a free shell on this machine (Codex's sandbox leaves loopback open) can
