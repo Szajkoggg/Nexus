@@ -504,3 +504,9 @@ test("the static analysis reminder: the notice, the command and the recommended 
   assert.match(n.todo, /^In one sentence, recommend the user the template static-analysis/);
   assert.match(n.todo, /nexus static-analysis decline --reason "<their words>" \(no reminder for 90 days\)/);
 });
+
+test("the orchestrator offers the lifecycle template once a queue that touched the run control or lifecycle code is done (queue TP)", async () => {
+  const { orchestratorBriefing } = await import("../src/prompts.ts");
+  const orch = orchestratorBriefing("Pilot", 60);
+  assert.ok(orch.includes("When a queue that touched the project's run control or lifecycle code (its AGENTS.md may name which code that is) is done, offer the user in one sentence the lifecycle template (nexus template show lifecycle)"), orch);
+});

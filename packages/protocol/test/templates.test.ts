@@ -123,12 +123,16 @@ const MAINTENANCE: Record<string, Record<string, string>> = {
   performance: { perf_command: "npm run bench" },
   "docs-freshness": { docs: "README.md and docs/", code: "src/" },
   notes: { memory_dir: "~/.claude/projects/p/memory" },
+  "agent-contract": { instructions: "src/prompts/", cli: "the CLI and its --help", schemas: "src/schemas.ts", protocol_doc: "docs/PROTOCOL.md" },
+  "git-hygiene": {},
+  lifecycle: { change: "abc123..def456" },
 };
 /** The steps each of them has in survey mode and in fix_small mode. */
 const MAINTENANCE_STEPS: Record<string, { survey: number; fix: number }> = {
   dependencies: { survey: 1, fix: 2 }, "security-audit": { survey: 1, fix: 1 }, "dead-code": { survey: 1, fix: 2 },
   "test-health": { survey: 3, fix: 3 }, performance: { survey: 1, fix: 1 }, "docs-freshness": { survey: 1, fix: 2 },
-  notes: { survey: 3, fix: 4 },
+  notes: { survey: 3, fix: 4 }, "agent-contract": { survey: 1, fix: 2 }, "git-hygiene": { survey: 1, fix: 1 },
+  lifecycle: { survey: 1, fix: 1 },
 };
 
 /** Values for each shipped template's required parameters. */
@@ -203,8 +207,9 @@ test("the maintenance templates: survey is coding: false without a fixing step; 
     assert.equal(stepIds(survey).length, MAINTENANCE_STEPS[id]!.survey, id);
     assert.equal(stepIds(fillTemplate(t, MAINTENANCE[id]!, "M", { maintenance: "fix_small" })).length, MAINTENANCE_STEPS[id]!.fix, id);
   }
-  // The suite's health, the audit and the measurement never get a fixing step, not even in fix_small mode.
-  for (const id of ["test-health", "security-audit", "performance"]) {
+  // The suite's health, the audit, the measurement, git hygiene and the lifecycle coverage never get a fixing step,
+  // not even in fix_small mode.
+  for (const id of ["test-health", "security-audit", "performance", "git-hygiene", "lifecycle"]) {
     const fix = fillTemplate(shippedTemplate(id), MAINTENANCE[id]!, "M", { maintenance: "fix_small" });
     assert.deepEqual(stepIds(fix), stepIds(fillTemplate(shippedTemplate(id), MAINTENANCE[id]!, "M")), id);
     assert.equal(fix.coding, false, id);
@@ -215,6 +220,40 @@ test("the maintenance templates: survey is coding: false without a fixing step; 
   assert.match(fixStep("dead-code"), /surely unused/);
   assert.match(fixStep("docs-freshness"), /typos/);
   assert.match(fixStep("notes"), /typos/);
+  assert.match(fixStep("agent-contract"), /Fix only the clear slips among the findings of M1 in docs\/PROTOCOL\.md/);
+});
+
+test("the three templates of queue TP: the agent contract, git hygiene (never deletes) and the lifecycle coverage (needs the change)", () => {
+  const contract = JSON.stringify(fillTemplate(shippedTemplate("agent-contract"), MAINTENANCE["agent-contract"]!, "AC")).replaceAll("\\n", " ");
+  for (const part of ["src/prompts/", "the CLI and its --help", "src/schemas.ts", "docs/PROTOCOL.md", "contradiction"]) assert.ok(contract.includes(part), part);
+  const hygiene = fillTemplate(shippedTemplate("git-hygiene"), {}, "GH");
+  const text = JSON.stringify(hygiene).replaceAll("\\n", " ");
+  assert.match(text, /in the project's root: worktrees and branches of queues that are closed/);
+  assert.match(text, /Never a finding: none\./);
+  assert.match(text, /nothing is removed, deleted or cleaned here, in any mode/);
+  assert.match(text, /the worktree this run itself works in/);
+  assert.throws(() => fillTemplate(shippedTemplate("lifecycle"), {}, "LC"), /needs change/);
+  const lifecycle = JSON.stringify(fillTemplate(shippedTemplate("lifecycle"), MAINTENANCE.lifecycle!, "LC")).replaceAll("\\n", " ");
+  for (const part of ["Interrupting", "Continuing", "Restarting", "Failures", "abc123..def456", "propose a test"]) assert.ok(lifecycle.includes(part), part);
+});
+
+test("Nexus's git-hygiene instance looks at the main checkout and never at the live worktree", () => {
+  const t = (readTemplateDir(join(shippedTemplatesDir(), "..", "nexus-templates"), "project") as Template[]).find((x) => x.id === "nexus-git-hygiene")!;
+  const param = (name: string) => t.params.find((p) => p.name === name)!.default!;
+  assert.match(param("checkouts"), /^C:\/Code\/Nexus \(the main checkout/);
+  assert.match(param("never"), /^C:\/Code\/Nexus-live \(the live instance's worktree: never a finding, never looked into, never touched\)/);
+  const text = JSON.stringify(fillTemplate(t, {}, "GH")).replaceAll("\\n", " ");
+  assert.match(text, /Never a finding, and never looked into: C:\/Code\/Nexus-live/);
+  assert.doesNotMatch(param("checkouts"), /Nexus-live/);
+});
+
+test("the filled draft writes a text of several lines as a literal block (|), not folded (>)", () => {
+  const t = shippedTemplate("test-health");
+  const yaml = filledTemplateYaml(t, fillTemplate(t, MAINTENANCE["test-health"]!, "TH"), ".nexus/drafts/TH.yaml");
+  assert.match(yaml, /\n {4}goal: \|-?\n {6}Run the whole suite 3 times/);
+  assert.doesNotMatch(yaml, /: >-?\n/, "no folded block");
+  // Read back, it is the same queue.
+  assert.deepEqual(YAML.parse(yaml), fillTemplate(t, MAINTENANCE["test-health"]!, "TH"));
 });
 
 test("the test suite health template: three parts, candidates with their evidence and certainty, no coverage method", () => {

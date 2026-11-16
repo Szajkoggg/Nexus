@@ -374,7 +374,7 @@ the orchestrator" sends it as your message, and the orchestrator drafts the queu
 it as any queue. A template is a queue's YAML with a `template:` header, `params:` and `{{name}}` placeholders
 (docs/PROTOCOL.md, "Queue templates"); `nexus template list` shows the ones in effect.
 
-**Maintenance templates.** Seven templates survey a project and report; none depends on a stack, the commands are
+**Maintenance templates.** Ten templates survey a project and report; none depends on a stack, the commands are
 parameters with Node and .NET/Unity examples. `dependencies` lists the outdated dependencies (minor and patch; in
 fix_small mode it applies the patch-level ones whose tests pass). `security-audit` runs the project's audit and only
 reports. `dead-code` finds unused code and lint findings (fix_small removes what is surely unused).
@@ -388,6 +388,13 @@ A seventh, `notes`, is meant to recur: it keeps the notes true. It reads the Cla
 `memory_dir` parameter, outside the project), the ideas notes and the project documents against the code, and reports what
 is stale, built but unmarked, or untrue. Only the clear typos in the project documents are fixed in fix_small mode; the
 memory and ideas notes are only reported.
+`agent-contract` checks that the agents' instructions, the command line and its help, the file schemas and the
+protocol's description agree (fix_small fixes only clear slips in the description). `git-hygiene` reports the
+worktrees and branches that closed queues left behind and untracked files that belong nowhere, in the checkouts you
+name, never in the places you exclude; it deletes nothing, in any mode (removing is yours, as a queue). `lifecycle`
+reports, for a change you name (commits or a queue), how well the tests cover interrupting, continuing, restarting
+and the failures; it has no schedule: the orchestrator offers it in a sentence when a queue that touched the project's
+run control or lifecycle code is done (your AGENTS.md may say which code that is).
 Nexus's own instances, filled in for this repository, are in `nexus-templates/`. They run in a worktree of their own
 (`worktree: auto`, which any template or project instance may carry), so a run never holds the main checkout. A survey
 there has nothing to merge back: once it is done Nexus removes its worktree, whether merging back by itself is on or

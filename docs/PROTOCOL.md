@@ -1945,12 +1945,19 @@ steps:
   and is merged back as any worktree queue. The shipped templates carry none: a project decides in its own instance.
   Nexus's own instances (`nexus-templates/nexus-*.yaml`) carry `worktree: auto`; the notes instance reads its ideas
   folder, which git does not track here, in the main checkout by its absolute path (a worktree has no copy of it).
+- **Report-only maintenance templates**: `security-audit`, `test-health`, `performance`, `git-hygiene` and
+  `lifecycle` have no step marked `fix_small`, so their fix_small mode is their survey (with `maintenance: fix_small`
+  on the queue). `git-hygiene` takes the checkouts to look at (`checkouts`, by default the project's root) and the
+  places that are never a finding (`never`); its own worktree and branch are never findings. `lifecycle` needs the
+  change to look at (`change`: commits or a queue); it has no schedule: the orchestrator's briefing tells it to offer
+  the template in one sentence when a queue that touched the project's run control or lifecycle code is done (the
+  project's AGENTS.md may name that code; Nexus's names the engine, the scheduler and the runtime adapters).
 
 **Three layers**, weakest first; for the same template id the stronger replaces the weaker:
 
 | Layer | Folder | |
 |---|---|---|
-| `nexus` | `templates/` in Nexus's repository | shipped with Nexus: `bugfix`, `ui-change`, `spike`, `refactor`, `maintenance`, `static-analysis`, and the maintenance templates `dependencies`, `security-audit`, `dead-code`, `test-health`, `performance`, `docs-freshness`, `notes` |
+| `nexus` | `templates/` in Nexus's repository | shipped with Nexus: `bugfix`, `ui-change`, `spike`, `refactor`, `maintenance`, `static-analysis`, and the maintenance templates `dependencies`, `security-audit`, `dead-code`, `test-health`, `performance`, `docs-freshness`, `notes`, `agent-contract`, `git-hygiene`, `lifecycle` |
 | `global` | `<NEXUS_HOME>/templates/` | the user's own, for every project |
 | `project` | `nexus-templates/` in the project's repository root | versioned with the project and seen by its agents (not under `.nexus/`, which git ignores) |
 
@@ -1964,7 +1971,8 @@ layer with an id already taken there (the first by path is used), is listed as n
   and the file's YAML.
 - `nexus queue draft --template <id> [--set name=value]... [--id <queue-id>]` fills it and writes the result into
   `.nexus/drafts/<queue-id>.yaml`, with a comment at the top naming the template and what to complete (the goals'
-  details, the project's checks, tags such as the area, the texts in the queue's language). It records no event and
+  details, the project's checks, tags such as the area, the texts in the queue's language); a text of several lines
+  is written as a literal block (`|`), as a person writes it, never folded (`>`). It records no event and
   uploads nothing: the orchestrator completes the file and uploads it with `nexus queue draft .nexus/drafts/<id>.yaml`,
   and the queue then goes as any other, through the user's approval. Without `--id` the queue's id is the template's
   id in capitals (letters and digits, at most 12), numbered from 2 when a queue or a draft file has it (`SPIKE2`).

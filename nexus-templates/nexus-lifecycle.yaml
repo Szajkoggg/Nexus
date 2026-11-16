@@ -1,0 +1,66 @@
+# Nexus's instance of the shipped lifecycle template (templates/lifecycle.yaml): the parameters' defaults are this repository's.
+template:
+  id: nexus-lifecycle
+  title: Lifecycle test coverage
+  description: Nexus's own instance of the lifecycle template, filled in for this repository. After a change to the engine,
+    the scheduler or the runtime adapters, report how well the tests cover interrupting, continuing, restarting and the
+    failures.
+maintenance: survey
+# A worktree of its own: the run keeps the main checkout free (nothing to merge back: it only reports, also in
+# fix_small mode; Nexus removes the worktree once a survey is done).
+worktree: auto
+params:
+  - name: change
+    description: the change to look at (commits, or a queue whose commits they are)
+    default: "the commits of the queue the orchestrator names when it drafts this (its range in .nexus/queues/<queue>/git.yaml,
+      or git log)"
+  - name: lifecycle_code
+    description: the project's run control or lifecycle code
+    default: "the engine, the scheduler and the runtime adapters in apps/server/src: engine.ts, scheduler.ts, agent-host.ts,
+      claude.ts, codex.ts, recurring.ts"
+  - name: tests
+    description: where the tests of that code are, and what they run against
+    default: "apps/server/test, against the fake runtimes (fake-claude.ts, fake-codex.ts, steered by fake-behaviour.ts) and
+      a clock the tests move: among others engine*.test.ts, failures.test.ts, fallback*.test.ts, stop-at-once*.test.ts,
+      lift.test.ts, handover.test.ts and recurring*.test.ts"
+title: "Maintenance: lifecycle test coverage"
+description: |
+  A survey of how well {{tests}} cover the paths of {{lifecycle_code}} that {{change}} touched: interrupting,
+  continuing, restarting and the failures. It reports the paths left uncovered with the tests that would cover them;
+  writing them becomes a queue the user approves. Nothing is changed, in any mode (also in fix_small).
+  The report ends with a section "Recommended additions" (see the step).
+coding: false
+origin: maintenance
+stop_conditions:
+  - Looking would need a change to a test or to the project (a fix, a commit); report it as a finding instead.
+  - A decision that belongs to the user comes up; ask with nexus ask, with a recommendation.
+  - A file to commit has changes this queue did not make; ask with nexus ask, never commit them.
+steps:
+  - id: "{{id}}1"
+    title: "Survey: the change's lifecycle paths and their tests"
+    goal: |
+      Read {{change}} (git log and git diff of its commits) and find what it changed in {{lifecycle_code}}. For each
+      changed behaviour, list its paths in four groups:
+      - Interrupting: a stop, a cancel, a kill or a pause in the middle of the work; what is left and what is told.
+      - Continuing: going on after a pause, an answer, a stop that was lifted, a retry; that nothing is done twice or
+        lost.
+      - Restarting: the process or the server ending and starting again mid-work (a crash, an update); what is
+        rebuilt from the saved state, and that it ends as it would have without the restart.
+      - Failures: an error of an external process or service, a timeout, a refusal, bad or missing saved state; how
+        it is reported and what happens next.
+      For each path: the tests in {{tests}} that cover it (file and test name, and what they assert about it), or
+      that none do; how likely and how costly a fault there would be. For each uncovered path propose a test: what it
+      sets up, what it interrupts or breaks and when, and what it asserts. Read the tests; run them only to see what
+      they do, change none. Or say every path is covered. Commit nothing.
+      The report ends with "Recommended additions" (not counted among the findings): what would make such tests
+      easier to write (a fake of an external process that can be told to fail, a clock the tests move, a helper that
+      restarts mid-work), each with its reason.
+    acceptance:
+      - Each changed behaviour's paths in the four groups, each with its covering tests or marked uncovered with a proposed test, or that every path is covered.
+      - The report ends with "Recommended additions", each with its reason (or says there are none).
+      - The working tree as it was (no commit, no leftover files).
+    review:
+      level: 2
+    kind: research
+    activities: [test]
+    size: S
