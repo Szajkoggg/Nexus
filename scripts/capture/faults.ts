@@ -4,10 +4,10 @@
 // taller, where the overflow is hidden). The judging is here, in plain functions, so it can be tested without a
 // browser. Used by scripts/layout-faults.ts on the mockups (docs/ux/mockups) and on the dashboard itself.
 
-export interface Rect { left: number; top: number; right: number; bottom: number }
+interface Rect { left: number; top: number; right: number; bottom: number }
 export interface Box { name: string; rect: Rect }
 export interface Line { name: string; points: [number, number][] }
-export interface Cut { name: string; axis: "x" | "y"; text: string; scroll: number; client: number }
+interface Cut { name: string; axis: "x" | "y"; text: string; scroll: number; client: number }
 export interface Page { boxes: Box[]; lines: Line[]; cut: Cut[] }
 
 export interface Faults {
