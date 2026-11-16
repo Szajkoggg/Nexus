@@ -5,6 +5,9 @@ template:
   description: Nexus's own instance of the test-health template, filled in for this repository. Find flaky, slow and
     redundant tests and report them with evidence; it never changes a test, in any mode.
 maintenance: survey
+# A worktree of its own: a survey keeps the main checkout free (nothing to merge back; Nexus removes the worktree once
+# the run is done), fix_small merges its fixes back through the integration step.
+worktree: auto
 params:
   - name: test_command
     description: "runs the whole test suite (Node: npm test; .NET: dotnet test; Unity: the Test Runner in batch mode)"

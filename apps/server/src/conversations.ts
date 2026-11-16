@@ -25,9 +25,13 @@ import { shellRules } from "./shell-rules.ts";
 
 // `nexus help` (decided 2026-11-15, queue OP): how Nexus works, its topics; it reads only. A Codex partner runs it in
 // its sandbox, which reads everywhere.
-const READ = ["Read", "Grep", "Glob", ...shellRules(["nexus status", "nexus help", "git log", "git status", "git diff", "git show"])];
+const READ = ["Read", "Grep", "Glob", ...shellRules(["nexus status", "nexus help", "nexus tags", "git log", "git status", "git diff", "git show"])];
+/** With a notes folder the partner also records what its hand-over covers (`nexus covers`, among its own events). */
+const COVERS = shellRules(["nexus covers"]);
 /** What a hand-over covers (decided 2026-11-14): this conversation's topics, and the dates of the decisions it passes on. */
 const HANDOFF_SCOPE = "Summarize only the topics discussed in this conversation, unless the user asked you to include others. From a notes file, pass on what this conversation decided or recorded; another topic in the notes folder, even a related one, is not part of this hand-over: name its file at most, as 'see also', without its content. In every notes file only the Decided section holds decisions. Name the dates of the Decided entries you cover.";
+/** The hand-over's record for the ideas overview (decided 2026-11-15, queue IO): the entries it covers, by command. */
+const HANDOFF_COVERS = "Before you reply, record the Decided entries this hand-over passes on: nexus covers <file>.md#<YYYY-MM-DD> ... (one argument per entry, the notes folder may be left out); if it refuses one, fix the reference and run it again. The ideas overview shows them as handed over.";
 /**
  * What a Claude partner may do on the web, by the `conversations.web` level: its allow and deny rules, and for `fetch`
  * the guard hook that refuses any host resolving to a local or internal address (web-guard.ts). WebSearch runs at
@@ -224,7 +228,9 @@ ${text}`;
     // (queue FU4). Idle, it starts the turn at once.
     clearTimeout(l.timer);
     if (l.proc.state === "working") l.handoffNext = true; else l.handoff = true;
-    this.host.send(l, `[Nexus] The user hands this conversation to the orchestrator, who plans and runs work in queues. Write a summary for it, in ${languageName(this.store.readProject().languages.working)}: what was decided (only what the user decided), the open questions, the work you propose (as steps with what each should achieve), and the files where the notes are. ${HANDOFF_SCOPE} Reply with the summary only.`, { afterTurn: true });
+    const p = this.store.readProject();
+    const covers = p.conversations.notes_dir ? ` ${HANDOFF_COVERS}` : "";
+    this.host.send(l, `[Nexus] The user hands this conversation to the orchestrator, who plans and runs work in queues. Write a summary for it, in ${languageName(p.languages.working)}: what was decided (only what the user decided), the open questions, the work you propose (as steps with what each should achieve), and the files where the notes are. ${HANDOFF_SCOPE}${covers} Reply with the summary only.`, { afterTurn: true });
     this.changed();
   }
 
@@ -314,7 +320,8 @@ ${text}`;
         if (notes) mkdirSync(cwd, { recursive: true });
         return { runtime: "codex", options: {
           cwd, model, effort, instructions, env, threadId: s.native_id,
-          sandbox: notes ? "workspace-write" : "read-only", approvalPolicy: "never", writableRoots: [],
+          // Its own session folder too: `nexus covers` appends to its events there.
+          sandbox: notes ? "workspace-write" : "read-only", approvalPolicy: "never", writableRoots: notes ? [this.store.sessionDir(s.id)] : [],
           config: { web_search: CODEX_WEB_SEARCH[web] }, withoutUserTools: true,
         } };
       }
@@ -322,7 +329,7 @@ ${text}`;
       return { runtime: "claude", options: {
         cwd: p.root, uuid: s.native_id!, resume,
         model, effort, permissionMode: "dontAsk",
-        allowedTools: [...READ, ...(notes ? [`Edit(${notes}/**)`] : []), ...w.allowed],
+        allowedTools: [...READ, ...(notes ? [`Edit(${notes}/**)`, ...COVERS] : []), ...w.allowed],
         disallowedTools: ["NotebookEdit", ...w.denied],
         ...(w.settings ? { settings: w.settings } : {}),
         appendSystemPrompt: instructions, env,

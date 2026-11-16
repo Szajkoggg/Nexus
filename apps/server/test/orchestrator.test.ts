@@ -149,25 +149,6 @@ test("the orchestrator gets Nexus's helper agents, which only read", async () =>
   } finally { stop(); delete process.env.FAKE_ARGS; }
 });
 
-test("the orchestrator runs on Claude Code even with orchestrator.runtime codex: no Codex thread with the user's own tools (queue FX)", async () => {
-  const { store, orchestrator, until, stop } = setup();
-  const pf = store.readProject(); // a project with an orchestrator section: its settings apply
-  store.writeProject({ ...pf, orchestrator: { runtime: "codex", notify: true, session: null } });
-  assert.equal(store.readProject().orchestrator?.runtime, "codex");
-  const args = join(process.env.NEXUS_HOME!, "..", "args.log");
-  process.env.FAKE_ARGS = args;
-  try {
-    orchestrator.say("Hello");
-    await until("the process to start", () => existsSync(args), LONGER.step);
-    const { readFileSync } = await import("node:fs");
-    const lines = readFileSync(args, "utf8").trim().split("\n").map((l) => JSON.parse(l) as { argv?: string[]; method?: string });
-    // Should it ever run on Codex, its launch must turn the user's MCP servers, plugins and apps off without exception
-    // (CodexOptions.withoutUserTools, no keepMcpServers): a server runs outside the sandbox and reaches the Nexus API.
-    assert.ok(lines[0]!.argv, "Claude Code's argv, not a Codex app-server's request");
-    assert.ok(!lines.some((l) => l.method), "no Codex thread");
-  } finally { stop(); delete process.env.FAKE_ARGS; }
-});
-
 test("the orchestrator may write only queue drafts, and its briefing uploads them from files", async () => {
   const { orchestrator, until, stop } = setup();
   const args = join(process.env.NEXUS_HOME!, "..", "args.log");

@@ -26,6 +26,7 @@ export const OVERRIDABLE: readonly { path: readonly string[]; none?: true }[] = 
   { path: ["orchestrator", "runtime"] },
   { path: ["orchestrator", "model"], none: true },
   { path: ["orchestrator", "effort"], none: true },
+  { path: ["orchestrator", "fallback"], none: true },
   { path: ["orchestrator", "notify"] },
   { path: ["orchestrator", "context_threshold"] },
   { path: ["languages", "reader"], none: true },
@@ -70,6 +71,7 @@ export function changedGlobal(global: GlobalSettings, patch: unknown): GlobalSet
     if (!p || typeof p !== "object" || Array.isArray(p)) return;
     for (const [k, v] of Object.entries(p as Tree)) {
       if (v === null || v === "") delete into[k];
+      else if (k === "fallback" && typeof v === "object" && !Array.isArray(v)) into[k] = v;
       else if (typeof v === "object" && !Array.isArray(v)) walk((into[k] ??= {}) as Tree, v);
       else into[k] = v;
     }

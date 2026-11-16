@@ -1,5 +1,6 @@
 // The Nexus file protocol, version 1. See docs/PROTOCOL.md.
 import { z } from "zod";
+import { NOTE_REF } from "./ideas.ts";
 import { PICTURE_ROLES, VIEW_KEY } from "./pictures.ts";
 import { DEFAULT_WORKING_LANGUAGE, LANGUAGE_CODES } from "./languages.ts";
 import { TAG_KINDS, TAG_SIZES } from "./tags.ts";
@@ -74,7 +75,7 @@ export const Runtime = z.enum(["claude", "codex", "external"]);
 export const Effort = z.enum(["low", "medium", "high", "xhigh", "max", "ultra"]);
 export type Effort = z.infer<typeof Effort>;
 const CLAUDE_EFFORTS: readonly Effort[] = ["low", "medium", "high", "xhigh", "max"];
-export const ClaudeEffort = Effort.exclude(["ultra"]);
+const ClaudeEffort = Effort.exclude(["ultra"]);
 export type Runtime = z.infer<typeof Runtime>;
 
 // ---------------------------------------------------------------- registry (Nexus-level, not per project)
@@ -184,10 +185,19 @@ const ConversationSettings = z.object({
   effort: Effort.optional(),
   web: ConversationWeb.default("search"),
 });
+const OrchestratorTarget = z.object({
+  runtime: WorkerRuntime,
+  model: z.string().min(1).optional(),
+  effort: Effort.optional(),
+}).strict().refine((t) => !effortIssue(t.runtime, t.effort), { message: "effort is not supported by the fallback runtime" });
 const OrchestratorSettings = z.object({
+  /** The runtime the orchestrator runs on (Claude Code or Codex; another one counts as Claude Code). */
   runtime: Runtime.default("claude"),
   model: z.string().optional(),
-  effort: ClaudeEffort.optional(),
+  /** One optional fallback; its model and effort default to the runtime's own defaults. */
+  fallback: OrchestratorTarget.optional(),
+  /** By its runtime: Claude Code takes low to max (effortIssue); Codex what its model lists. */
+  effort: Effort.optional(),
   /** Tell the orchestrator when a worker asks, or a run halts or finishes (it starts if needed). */
   notify: z.boolean().default(true),
   /**
@@ -406,8 +416,9 @@ export const StoredProject = z.object({
   orchestrator: z.object({
     session: Id.nullable().default(null),
     runtime: own(Runtime),
+    fallback: ownOrNone(OrchestratorTarget),
     model: ownOrNone(z.string()),
-    effort: ownOrNone(ClaudeEffort),
+    effort: ownOrNone(Effort),
     notify: own(z.boolean()),
     context_threshold: own(Fraction),
   }).optional(),
@@ -524,6 +535,16 @@ export type StatusChange = z.infer<typeof StatusChange>;
 export const MaintenanceMode = z.enum(["survey", "fix_small"]);
 export type MaintenanceMode = z.infer<typeof MaintenanceMode>;
 
+/** The Markdown file a queue was imported from (`nexus import`). */
+export const ImportSource = z.object({ path: z.string(), imported_at: Time });
+export type ImportSource = z.infer<typeof ImportSource>;
+/** One item of a queue's `source`: a note reference, or the file it was imported from. */
+export const QueueSource = z.union([
+  z.string().regex(NOTE_REF, "a note reference: <notes folder>/<file>.md#<YYYY-MM-DD> (for example docs/ideas/tags.md#2026-11-14)"),
+  ImportSource,
+]);
+export type QueueSource = z.infer<typeof QueueSource>;
+
 const QueueShape = z.object({
   protocol: z.literal(1),
   id: Id,
@@ -584,7 +605,13 @@ const QueueShape = z.object({
   history: z.array(z.object({ revision: z.number().int(), hash: z.string(), replaced_at: Time })).default([]),
   /** Status changes made through Nexus (lifts of a stop, for now), oldest first. Written only by the server. */
   changes: z.array(StatusChange).default([]),
-  source: z.object({ path: z.string(), imported_at: Time }).optional(),
+  /**
+   * Where the queue came from (ideas.ts): note references (`docs/ideas/<file>.md#<date>`, a thinking partner's dated
+   * Decided entry; set by the orchestrator, checked against the notes when drafted, and pinned by the approval when
+   * given), and the Markdown file a `nexus import` read it from (`{ path, imported_at }`, not pinned). An older file's
+   * single import object reads as a list of one.
+   */
+  source: z.preprocess((x) => (x && typeof x === "object" && !Array.isArray(x) ? [x] : x), z.array(QueueSource)).optional(),
   created_at: Time.optional(),
   updated_at: Time.optional(),
 });
@@ -645,6 +672,10 @@ export const SessionFile = z.object({
   continues: Id.optional(),
   /** The session that took over from this one. */
   continued_by: Id.optional(),
+  /** Server-owned routing state: stays on the fallback until the primary's reset, including across restarts. */
+  orchestrator_fallback: z.object({
+    settings: z.string(), until: Time, reason: z.string(), target: OrchestratorTarget,
+  }).optional(),
 });
 export type SessionFile = z.infer<typeof SessionFile>;
 
@@ -774,6 +805,11 @@ export const Event = z.discriminatedUnion("type", [
    */
   z.object({ ...base, type: z.literal("static_analysis.declined"), reason: z.string().min(1) }),
   /**
+   * A thinking partner's record of what its hand-over covers (`nexus covers`): the note entries it passes on to the
+   * orchestrator, each a note reference. Conversations only; the ideas overview reads them as handed over (ideas.ts).
+   */
+  z.object({ ...base, type: z.literal("ideas.covered"), refs: z.array(z.string().regex(NOTE_REF, "a note reference: <notes folder>/<file>.md#<YYYY-MM-DD>")).min(1) }),
+  /**
    * A worker records a value of one of the project's metrics (`nexus metric record`), for its step at work, with the
    * metric's unit as it was then and the HEAD of its checkout (`commit`; absent outside a git repository).
    */
@@ -826,6 +862,9 @@ export const ORCHESTRATOR_ONLY: ReadonlySet<EventType> = new Set([
 /** Event types only a worker session may write: a metric's value belongs to a step's work (metrics.ts). */
 export const WORKER_ONLY: ReadonlySet<EventType> = new Set(["metric.recorded"]);
 
+/** Event types only a thinking partner's session (role conversation) may write. */
+export const CONVERSATION_ONLY: ReadonlySet<EventType> = new Set(["ideas.covered"]);
+
 /** Event types only the user's session may write (the server writes them for the dashboard). */
 export const USER_ONLY: ReadonlySet<EventType> = new Set(["step.interrupted", "review.rejected", "review.marked", "review.commented", "review.confirmed", "review.fix_asked"]);
 
@@ -856,15 +895,38 @@ export const GitFile = z.object({
    * the user should know of, since when; told to the user and the orchestrator; `released`: the queues whose runs Nexus
    * held at a step's end for this merge back and let go on when it could not go after all. `reintegrations`: how many
    * times the integration step was run again because the base moved on, since the user's last Merge back (at most
-   * two). `reintegrating`: when the last such run was asked for, until its integration step opens.
+   * two). `reintegrating`: when the last such run was asked for, until its integration step opens. `queued`: back from
+   * a wait, it could go now but another queue holds its base (the merge train, src/protocol train.ts): it waits its
+   * turn in line, ordered by `since` (when its wait began).
    */
   merge: z.object({
     waiting: z.object({ reason: z.string(), since: Time, released: z.array(z.string()).optional() }).optional(),
     reintegrations: z.number().int().min(0).optional(),
     reintegrating: Time.optional(),
+    queued: z.object({ since: Time }).optional(),
   }).optional(),
-  /** The user cleaned up: the worktree removed and its branch deleted (git branch -d). */
+  /**
+   * The cleanup: the worktree removed and its branch deleted (git branch -d), by the user's Clean up or by Nexus (after
+   * a merge back, or a survey run done).
+   */
   cleaned: z.object({ at: Time, path: z.string(), branch: z.string() }).optional(),
+  /** Server-written evidence saved before deleting any part of a verified, merged worktree. */
+  cleanup_proof: z.object({
+    version: z.literal(1), at: Time, path: z.string(), repository: z.string(), repository_identity: z.string(),
+    branch: z.string(), tip: z.string(), into: z.string(),
+    entries: z.array(z.object({
+      path: z.string(), kind: z.enum(["directory", "file", "link"]), identity: z.string(),
+      digest: z.string().optional(), modified: z.string().optional(),
+    })),
+  }).optional(),
+  /**
+   * Nexus's cleanup of a done survey run's worktree (src/merger.ts) could not go: `waiting.reason` says why (told to the
+   * user and the orchestrator), `files` the untracked files left in it, as git status names them (at most 20, `more`:
+   * how many besides). Nexus does not try again; the user's Clean up does, and clears it.
+   */
+  cleanup: z.object({
+    waiting: z.object({ reason: z.string(), since: Time, files: z.array(z.string()).optional(), more: z.number().int().positive().optional() }),
+  }).optional(),
   /**
    * The project's worktree setup command for the worktree Nexus made (`at`): `done_at` once it succeeded; until then
    * it runs again before the next step opens. `failed`: its last failure (`reason`: the exit code and the output's
@@ -1265,6 +1327,29 @@ export const TagsFile = z.object({
 });
 export type TagsFile = z.infer<typeof TagsFile>;
 
+// ---------------------------------------------------------------- idea-matches.yaml (queues matched to notes)
+
+/**
+ * The user's decision on a suggested match of an earlier queue to a note's entry (ideas.ts, suggestMatches): the
+ * queue, the entry (a note reference), how the suggestion was found (`exact` reference, a `dated` file in the same
+ * sentence, or the `file` only), the sentence it came from, and whether the user accepted it, when.
+ */
+const IdeaMatch = z.object({
+  queue: Id,
+  ref: z.string().regex(NOTE_REF),
+  kind: z.enum(["exact", "dated", "file"]),
+  quote: z.string().optional(),
+  accepted: z.boolean(),
+  at: Time,
+});
+/**
+ * .nexus/idea-matches.yaml: the user's decisions on matching the queues that name no note (from before `source`) to
+ * the notes' entries. Written only by the server, from the user's action in the dashboard; an accepted match counts
+ * like the queue's source (ideas-read.ts). The closed queues themselves are never changed. Missing: none decided.
+ */
+export const IdeaMatchesFile = z.object({ protocol: z.literal(1), matches: z.array(IdeaMatch).default([]) });
+export type IdeaMatchesFile = z.infer<typeof IdeaMatchesFile>;
+
 // ---------------------------------------------------------------- metrics.yaml (the project's metrics)
 
 /**
@@ -1322,8 +1407,11 @@ export const RecurringFile = z.object({
   paused: z.boolean().optional(),
   /** The last time (an occurrence of the schedule) Nexus looked at, started or not: the next comes after it. */
   handled: Time.optional(),
-  /** The last queue it made: its id, when, and for which time. */
-  last: z.object({ queue: Id, at: Time, due: Time }).optional(),
+  /**
+   * The last queue it made: its id, when, and for which time. `caught_up`: the time (the same as `due`) passed while
+   * Nexus was not running, and the run was made up for it when Nexus started again.
+   */
+  last: z.object({ queue: Id, at: Time, due: Time, caught_up: Time.optional() }).optional(),
   /**
    * The last time that passed without a run, and why: `approval` (no standing approval, or its hash differs),
    * `previous` (the previous run had not closed), `missed` (Nexus was not running then), `template` (the template is

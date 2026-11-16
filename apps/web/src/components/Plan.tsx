@@ -382,7 +382,7 @@ function Card({ node: n, onOpen, actions, cardRef, drag, highlight, moving, styl
           <span className={`min-w-0 [overflow-wrap:anywhere] ${word}`}>{n.now ? n.status.label : `${t("plan.notPlanned")} · ${n.status.label}`}</span>
         </span>
       )}
-      {!n.now && n.planned && n.why.map((w) => (
+      {(n.now || n.planned) && n.why.map((w) => (
         <span key={w.key} className={`mt-1 block text-xs ${WHY[w.tone]}`}>{say(w)}</span>
       ))}
       {n.before.length > 0 && (

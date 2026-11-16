@@ -2,7 +2,8 @@
 // session, signed in with the user's own ChatGPT login. The app-server is marked experimental: the methods used here
 // (initialize, thread/start, thread/resume, turn/start, turn/steer, turn/interrupt) were checked against Codex CLI
 // 0.167.2 with `codex app-server generate-ts`.
-import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { execFileSync } from "node:child_process";
+import { spawnRuntimeChild, type RuntimeChild } from "./worker-process.ts";
 import { EventEmitter } from "node:events";
 import { existsSync } from "node:fs";
 import { join, relative, resolve, isAbsolute } from "node:path";
@@ -32,6 +33,26 @@ export interface CodexOptions extends AgentOptions {
   withoutUserTools?: boolean;
   /** With withoutUserTools: the user's MCP servers (by name) left as the config has them (a worker's runtimes.codex.mcp_servers). */
   keepMcpServers?: readonly string[];
+  /**
+   * A permission profile (Codex's Beta `[permissions.<name>]`) in place of the older sandbox settings: `sandbox` and
+   * `writableRoots` are then not sent, neither at thread/start nor in a turn's sandbox policy, since Codex lets the
+   * older settings win over a profile. The orchestrator's (decided by the user 2026-11-16, queue OC): extends
+   * `:read-only`, writes only its drafts folder and its own events.jsonl (a single file may be granted). Probed with
+   * Codex 0.167.2 on Windows (DESIGN.md, "An orchestrator on Codex can be kept to its drafts").
+   */
+  permissions?: CodexPermissions;
+}
+
+/** A Codex permission profile: its name, the built-in profile it extends, and its paths with their access. */
+export interface CodexPermissions {
+  name: string;
+  extends: ":read-only" | ":workspace";
+  filesystem: Record<string, "read" | "write" | "deny">;
+}
+
+/** The thread/start config that selects a permission profile. */
+function profileConfig(p: CodexPermissions): Record<string, unknown> {
+  return { default_permissions: p.name, [`permissions.${p.name}.extends`]: p.extends, [`permissions.${p.name}.filesystem`]: p.filesystem };
 }
 
 /** The overrides that turn off the MCP servers a config/read result names (but those kept), the plugins and the apps. */
@@ -93,9 +114,9 @@ export function gitWritableRoots(cwd: string): string[] {
 
 export class CodexSession extends EventEmitter<AgentEvents> implements AgentProcess {
   state: "working" | "idle" | "exited" = "idle";
-  readonly pid?: number;
+  get pid(): number | undefined { return this.proc.pid; }
   private readonly options: CodexOptions;
-  private proc: ChildProcessWithoutNullStreams;
+  private proc: RuntimeChild;
   private buffer = "";
   private nextId = 0;
   private readonly pending = new Map<number, { resolve: (v: Json) => void; reject: (e: Error) => void; method: string }>();
@@ -149,10 +170,10 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
     const bin = process.env.NEXUS_CODEX ?? "codex";
     const script = /\.(m?[jt]s)$/.test(bin);
     const args = ["app-server"];
-    this.proc = spawn(script ? process.execPath : bin, script ? [bin, ...args] : args, {
-      cwd: options.cwd, env: agentEnv(options.env), stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
+    this.proc = spawnRuntimeChild(script ? process.execPath : bin, script ? [bin, ...args] : args, {
+      cwd: options.cwd, env: agentEnv(options.env), owned: options.ownProcesses,
     });
-    this.pid = this.proc.pid;
+    this.proc.on("spawn", () => { if (this.proc.pid) this.emit("facts", { pid: this.proc.pid }); });
     // A write to a process that is exiting (killed, crashed) fails with EPIPE: its exit is handled, the write is moot.
     this.proc.stdin.on("error", () => {});
     this.proc.stdout.setEncoding("utf8");
@@ -179,7 +200,12 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
     if (priority === "next" && this.turnId) {
       this.steered.push(text);
       void this.request("turn/steer", { threadId: this.threadId, expectedTurnId: this.turnId, input: input(text) })
-        .catch(() => { this.unsteer(text); this.queue.push(text); }); // the turn ended meanwhile: it becomes the next turn
+        // The turn ended meanwhile: it becomes the next turn. Its refusal can come after turn/completed, which found the
+        // queue empty and left the session idle: then it starts that turn itself (else it waited for a next message).
+        .catch(() => {
+          this.unsteer(text);
+          if (this.state === "idle") this.startTurn(this.withCarry(text)); else if (this.state !== "exited") this.queue.push(text);
+        });
       return;
     }
     if (priority === "now" && this.turnId) {
@@ -251,6 +277,8 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
 
   kill(): void { if (this.state !== "exited") this.proc.kill(); }
 
+  async cleanup(): Promise<void> { await this.proc.cleanup?.(); this.openCommands.clear(); this.openAgents.clear(); }
+
   // ---------------------------------------------------------------- protocol
 
   private async open(): Promise<void> {
@@ -259,13 +287,14 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
       this.notify("initialized", {});
       const o = this.options;
       const common = {
-        cwd: o.cwd, model: o.model ?? null, sandbox: o.sandbox, approvalPolicy: o.approvalPolicy,
+        cwd: o.cwd, model: o.model ?? null, ...(o.permissions ? {} : { sandbox: o.sandbox }), approvalPolicy: o.approvalPolicy,
         ...(o.approvalsReviewer ? { approvalsReviewer: o.approvalsReviewer } : {}),
         developerInstructions: o.instructions ?? null,
       };
-      // The thread's own sandbox settings carry the roots too; every turn also sends them in its sandbox policy.
+      // The thread's own sandbox settings carry the roots too; every turn also sends them in its sandbox policy. A
+      // permission profile replaces both.
       const config = {
-        ...(o.sandbox === "workspace-write" && o.writableRoots.length ? { "sandbox_workspace_write.writable_roots": o.writableRoots } : {}),
+        ...(o.permissions ? profileConfig(o.permissions) : o.sandbox === "workspace-write" && o.writableRoots.length ? { "sandbox_workspace_write.writable_roots": o.writableRoots } : {}),
         ...o.config,
         ...(o.withoutUserTools ? userToolsOff((await this.request("config/read", { cwd: o.cwd })).config, o.keepMcpServers) : {}),
       };
@@ -304,7 +333,7 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
   private startTurn(text: string): void {
     this.state = "working";
     const o = this.options;
-    const sandboxPolicy = o.sandbox === "workspace-write"
+    const sandboxPolicy = !o.permissions && o.sandbox === "workspace-write"
       ? { type: "workspaceWrite", writableRoots: o.writableRoots, networkAccess: false, excludeTmpdirEnvVar: false, excludeSlashTmp: false }
       : undefined;
     const effort = this.turnValues ? this.turnValues.effort : o.effort;

@@ -1,12 +1,15 @@
-// The project's orchestrator: one long-lived Claude Code session the user talks with in the dashboard. It plans
+// The project's orchestrator: a conversation on Claude Code or Codex, with optional usage fallback. It plans
 // queues and launches runs through `nexus` (queue.drafted, session.request), answers or escalates workers'
 // questions, and is told when a worker asks or a run halts or finishes. It may read everything and write only queue
 // drafts under .nexus/drafts/: permission mode dontAsk with a read-only allow list plus the drafts rules.
 import { randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import {
-  ActionError, ClaudeEffort, reviewedByOrchestrator, runGoing, ProjectStore, applyDraft, defineMetric, inPlan, loadProjectState, metricDef, openPlan, orchestratorOverview, overThreshold, proposePlan, proposeTags, readAway, readUsage, orchestratorStatusChange, newId, now, sendBack, type Applied, type Event, type EventType, type NotifyKind, type ProjectState, type SessionFile, type SessionView,
+  ActionError, Effort, effortIssue, type ProjectFile, reviewedByOrchestrator, runGoing, ProjectStore, applyDraft, defineMetric, inPlan, loadProjectState, metricDef, openPlan, orchestratorOverview, overThreshold, proposePlan, proposeTags, readAway, readUsage, orchestratorStatusChange, newId, now, sendBack, type Applied, type Event, type EventType, type NotifyKind, type ProjectState, type SessionFile, type SessionView,
 } from "@nexus/protocol";
 import type { AgentProcess } from "./agent.ts";
+import type { CodexPermissions } from "./codex.ts";
 import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Hosted, type Launch } from "./agent-host.ts";
 import type { Engine } from "./engine.ts";
 import { orchestratorAgentsFile } from "./helpers.ts";
@@ -15,8 +18,8 @@ import type { UpdateNotice } from "./lifecycle.ts";
 import { describeDeployChanges, type DeployChanges } from "./deploy.ts";
 import type { PlanNotice } from "./deploy-plan.ts";
 import {
-  acceptedNoteNotice, approvalNotice, discardNotice, liftNotice, mergedNotice, mergeWaitNotice, missedStartNotice, noticeText, orchestratorBriefing, pausedNotice,
-  carriedMessages, formatInbox, orchestratorFreshSeed, orchestratorSummaryRequest, summaryLists, questionNotice, rejectionNotice, restartedNotice, fixAskedNotice, levelToUserNotice, reviewNotice, awayOnNotice, awayEndNotice, awayStuckNotice, planDecisionNotice, planHeldNotice, runEndNotice, maintenanceFindingsNotice, staticAnalysisNotice, stepNoteNotice, tagDecisionNotice, fallbackNotice, metricNotice, userMessage, withdrawalNotice,
+  acceptedNoteNotice, approvalNotice, cleanupWaitNotice, discardNotice, liftNotice, mergedNotice, mergeWaitNotice, missedStartNotice, noticeText, orchestratorBriefing, pausedNotice,
+  carriedMessages, formatInbox, orchestratorFreshSeed, orchestratorRuntimeSeed, orchestratorSummaryRequest, summaryLists, questionNotice, rejectionNotice, restartedNotice, fixAskedNotice, levelToUserNotice, reviewNotice, awayOnNotice, awayEndNotice, awayStuckNotice, planDecisionNotice, planHeldNotice, runEndNotice, maintenanceFindingsNotice, staticAnalysisNotice, stepNoteNotice, tagDecisionNotice, fallbackNotice, metricNotice, userMessage, withdrawalNotice,
 } from "./prompts.ts";
 import { shellRules } from "./shell-rules.ts";
 
@@ -31,6 +34,23 @@ const READ_ONLY_TOOLS = [
 const DRAFTS = ".nexus/drafts";
 const DRAFT_TOOLS = [`Write(${DRAFTS}/**)`, `Edit(${DRAFTS}/**)`];
 const NEVER = ["NotebookEdit", "MultiEdit"];
+
+/** The runtimes the orchestrator runs on: its setting's `codex`, else Claude Code (`external` has no process). */
+type OrchestratorRuntime = "claude" | "codex";
+type Target = { runtime: OrchestratorRuntime; model?: string; effort?: Effort };
+const RUNTIME_NAMES: Record<OrchestratorRuntime, string> = { claude: "Claude Code", codex: "Codex" };
+const runtimeOf = (p: ProjectFile): OrchestratorRuntime => (p.orchestrator?.runtime === "codex" ? "codex" : "claude");
+
+/**
+ * The orchestrator's sandbox on Codex (decided by the user 2026-11-16, queue OC1): a permission profile that reads
+ * everything and writes only the drafts folder and the session's own events.jsonl, the one file the nexus CLI writes
+ * for it (Codex sandboxes every command, the CLI's too). Not its session.yaml (its role), not its inbox, nothing of
+ * the user's. Paths with forward slashes, as probed.
+ */
+export function orchestratorPermissions(nexusDir: string, session: string): CodexPermissions {
+  const path = (...p: string[]) => join(nexusDir, ...p).replaceAll("\\", "/");
+  return { name: "nexus_orchestrator", extends: ":read-only", filesystem: { [path("drafts")]: "write", [path("sessions", session, "events.jsonl")]: "write" } };
+}
 
 /** The orchestrator's events the server carries out (applyRequests), each once, its outcome in applied.jsonl. */
 const REQUESTS: ReadonlySet<EventType> = new Set(["queue.drafted", "session.request", "status.set", "review.sent_back", "plan.proposed", "tags.proposed", "metric.defined", "recurring.set", "static_analysis.declined"]);
@@ -73,6 +93,9 @@ export class Orchestrator {
   private readonly changed: () => void;
   /** Wakes the notices held while the orchestrator's runtime is beyond the usage threshold (runtimeFull). */
   private heldTimer: NodeJS.Timeout | undefined;
+  private heldUntil: number | undefined;
+  private readonly nowMs: () => number;
+  private handling = false;
   private applying = false;
   /**
    * News about Nexus itself: the outcome of an update, for the session that asked for it (src/lifecycle.ts), and the
@@ -82,12 +105,13 @@ export class Orchestrator {
   private readonly news: { update: () => UpdateNotice | undefined; plan: () => PlanNotice[]; changes: () => DeployChanges[]; push?: (n: UserNotice) => void };
 
   /** `host`: how its process is made (tests give a stand-in). */
-  constructor(store: ProjectStore, engine: Engine, changed: () => void, news: { update?: () => UpdateNotice | undefined; plan?: () => PlanNotice[]; changes?: () => DeployChanges[]; push?: (n: UserNotice) => void } = {}, host: AgentHostOptions = {}) {
+  constructor(store: ProjectStore, engine: Engine, changed: () => void, news: { update?: () => UpdateNotice | undefined; plan?: () => PlanNotice[]; changes?: () => DeployChanges[]; push?: (n: UserNotice) => void } = {}, host: AgentHostOptions & { nowMs?: () => number } = {}) {
     this.store = store;
     this.engine = engine;
     this.changed = changed;
     this.news = { update: news.update ?? (() => undefined), plan: news.plan ?? (() => []), changes: news.changes ?? (() => []), push: news.push };
     this.host = new AgentHost(store, ROLE_RECORDS.orchestrator, host);
+    this.nowMs = host.nowMs ?? Date.now;
   }
 
   /** The orchestrator's hosted process (one at a time): the latest one started, until it exits or Nexus ends it. */
@@ -112,8 +136,8 @@ export class Orchestrator {
     const own = s ? chatView(this.store, s.id, VIEW_ENTRIES) : { chat: [], pins: [] };
     return {
       session: s ?? null,
-      model: s?.model ?? o?.model ?? null,
-      effort: s?.effort ?? o?.effort ?? null,
+      model: s ? s.model ?? null : o?.model ?? null,
+      effort: s ? s.effort ?? null : o?.effort ?? null,
       state: this.proc?.state ?? "exited",
       runtime: s ? this.store.readRuntime(s.id) ?? null : null,
       ...own,
@@ -140,7 +164,7 @@ export class Orchestrator {
   /** How a session went on in a fresh one: when, how full its context was, and the summary it wrote (if any). */
   private switchOf(old: SessionFile): EarlierSession["switch"] {
     const asked = this.summaryAsked(old);
-    const summary = (asked && this.summaryWritten(old, asked)) ?? null;
+    const summary = this.summaryWritten(old, asked) ?? null;
     const next = this.sessionFile(old.continued_by);
     return { at: next?.created_at ?? asked?.at ?? old.created_at, fill: asked ? Number(asked.message) : null, summary };
   }
@@ -149,14 +173,15 @@ export class Orchestrator {
   say(text: unknown): void {
     if (typeof text !== "string" || !text.trim()) throw new ActionError("the message is empty");
     // While the session writes its summary for a fresh one, the message waits for the fresh session (its first turn).
-    const current = this.session();
-    if (current && this.summaryAsked(current)) {
+    const current = this.ensure(false);
+    if (this.summaryAsked(current) || (this.store.readProject().orchestrator?.fallback && this.runtimeFull(loadProjectState(this.store)))) {
       this.store.appendChat(current.id, { at: now(), from: "user", text: text.trim() });
       this.store.appendInbox(current.id, { v: 1, id: `say-${newId()}`, at: now(), from: "user", type: "message", text: text.trim() });
       this.changed();
       return;
     }
     const s = this.ensure();
+    this.deliverPending(loadProjectState(this.store), s);
     this.store.appendChat(s.id, { at: now(), from: "user", text: text.trim() });
     // Changes for agents held while notices are off go in with this turn (and count as told only now).
     const held = this.pendingChanges(s);
@@ -164,10 +189,11 @@ export class Orchestrator {
     this.deliver(userMessage(text.trim(), held.length ? describeDeployChanges(held) : undefined), [text.trim()]);
   }
 
-  /** Deploys whose changes for agents this session has not been told; none from before it started. */
+  /** Deploys whose changes for agents this session's lineage has not been told; none from before it started. */
   private pendingChanges(s: SessionFile): DeployChanges[] {
-    const told = new Set(this.store.readApplied(s.id).entries.map((a) => a.event));
-    return this.news.changes().filter((d) => d.at >= s.created_at && d.changes.length && !told.has(d.key));
+    const line = this.lineage(s);
+    const told = new Set(line.flatMap((x) => this.store.readApplied(x.id).entries.map((a) => a.event)));
+    return this.news.changes().filter((d) => d.at >= line.at(-1)!.created_at && d.changes.length && !told.has(d.key));
   }
 
   private markTold(s: SessionFile, keys: string[]): void {
@@ -180,11 +206,14 @@ export class Orchestrator {
    */
   settings(model: unknown, effort: unknown): void {
     const m = typeof model === "string" && model.trim() ? model.trim() : undefined;
-    const e = effort === undefined || effort === null || effort === "" ? undefined : ClaudeEffort.safeParse(effort);
-    if (e && !e.success) throw new ActionError(`effort is one of ${ClaudeEffort.options.join(", ")}`);
+    const e = effort === undefined || effort === null || effort === "" ? undefined : Effort.safeParse(effort);
+    if (e && !e.success) throw new ActionError(`effort is one of ${Effort.options.join(", ")}`);
+    // By the runtime it runs on: Claude Code takes low to max; Codex checks its model's own levels.
+    const issue = effortIssue(runtimeOf(this.store.readProject()), e?.data);
+    if (issue) throw new ActionError(`the orchestrator runs on Claude Code: ${issue}`);
     this.store.updateProject((p) => ({ ...p, orchestrator: { runtime: "claude", notify: true, session: null, ...p.orchestrator, model: m, effort: e?.data } }));
     const s = this.session();
-    if (s) this.store.writeSession({ ...s, model: m, effort: e?.data });
+    if (s && !s.orchestrator_fallback) this.store.writeSession({ ...s, model: m, effort: e?.data });
     // New settings wait for a running turn to end; the next message starts a process with them.
     const l = this.hosted;
     if (l) this.host.restartAfterTurn(l.session);
@@ -211,16 +240,28 @@ export class Orchestrator {
 
   /** After every change: carry out the orchestrator's requests and tell it what it should know. */
   onChange(state: ProjectState): void {
-    if (this.stopped) return;
+    if (this.stopped || this.handling) return;
+    this.handling = true;
+    try { this.changedState(state); } finally { this.handling = false; }
+  }
+
+  private changedState(state: ProjectState): void {
     let s = this.session();
     const notes = this.pendingNotes(state);
     if (!s) {
       // A step waiting for its review, or a note or rejection of the user's, starts it (after a reset, or before it ever ran).
       if (this.engine.draining || (!notes.length && !state.queues.some((q) => q.steps.some(reviewedByOrchestrator)))) return;
-      s = this.ensure();
+      s = this.ensure(false);
     }
     this.applyRequests(s);
     if (this.engine.draining) return; // held until the update settles: told after its restart, or once it fails
+    s = this.ensure(false);
+    state = loadProjectState(this.store);
+    if (state.project.orchestrator?.fallback && !this.summaryAsked(s) && this.runtimeFull(state)) {
+      this.notify(state, s, state.project.orchestrator?.notify === false);
+      return;
+    }
+    this.deliverPending(state, s);
     // Its summary for a fresh session asked for, or the switch made: what follows waits for the fresh session.
     if (this.contextCare(state, s)) return;
     // The user's notes on an acceptance are like chat messages of the user: told whatever notify says.
@@ -306,6 +347,14 @@ ${n.text}` });
     const cut = s && this.host.interruption(s.id);
     if (!s || !cut) return;
     this.store.appendChat(s.id, { at: now(), from: "nexus", text: RESTARTED });
+    if (this.store.readProject().orchestrator?.fallback) {
+      // Keep the interrupted work durable when the restart finds a full runtime, or selects another one.
+      const current = this.ensure(false);
+      this.store.appendInbox(current.id, { v: 1, id: `say-${newId()}`, at: now(), from: "nexus", type: "message", text: restartedNotice(cut.asked) });
+      this.host.resumed(s.id);
+      this.changed();
+      return;
+    }
     this.ensure();
     this.deliver(restartedNotice(cut.asked), cut.asked);
     this.host.resumed(s.id);
@@ -322,19 +371,17 @@ ${n.text}` });
 
   // ---------------------------------------------------------------- the session
 
-  private ensure(): SessionFile {
+  private ensure(start = true): SessionFile {
     let s = this.session();
     const project = this.store.readProject();
     if (!s) {
-      s = {
-        protocol: 1, id: newId(), project: project.id, role: "orchestrator", runtime: "claude", native_id: randomUUID(),
-        title: "Orchestrator", cwd: project.root, launched_by: "nexus", created_at: now(),
-        model: project.orchestrator?.model, effort: project.orchestrator?.effort,
-      };
+      s = this.newSession(project);
       this.store.writeSession(s);
       const id = s.id;
       this.store.updateProject((p) => ({ ...p, orchestrator: { runtime: "claude", notify: true, ...p.orchestrator, session: id } }));
     }
+    if (this.idle()) s = this.route(s, project);
+    if (!start) return s;
     // Settings it was started with changed since (its model or effort, global or the project's own; a threshold its
     // briefing names): a new process from this message on (a working one ends after its turn, and this message goes
     // into that turn), resuming the conversation.
@@ -345,25 +392,170 @@ ${n.text}` });
     return s;
   }
 
-  /** How its process is started, from the project's effective settings now (the orchestrator's model and effort). */
+  /** The active target is frozen during a turn; a fallback never changes the user's primary settings. */
+  private target(s: SessionFile): Target {
+    const p = this.store.readProject();
+    if (s.orchestrator_fallback) return s.orchestrator_fallback.target;
+    return s.runtime === runtimeOf(p)
+      ? { runtime: runtimeOf(p), model: p.orchestrator?.model, effort: p.orchestrator?.effort }
+      : { runtime: s.runtime === "codex" ? "codex" : "claude", model: s.model, effort: s.effort };
+  }
+
+  /** Select only between turns. A persisted reset deadline prevents bouncing on stale/lower usage readings. */
+  private route(s: SessionFile, p: ProjectFile): SessionFile {
+    const primary: Target = { runtime: runtimeOf(p), model: p.orchestrator?.model, effort: p.orchestrator?.effort };
+    const fallback = p.orchestrator?.fallback;
+    const settings = JSON.stringify([primary, fallback]);
+    const windows = readUsage()?.windows ?? {};
+    const full = (runtime: OrchestratorRuntime) => overThreshold(runtime, windows, p.defaults.usage_pause_threshold, this.nowMs());
+    const busy = full(primary.runtime);
+    const previous = s.orchestrator_fallback;
+    let active = previous?.settings === settings ? previous : undefined;
+    if (active && this.nowMs() >= Date.parse(active.until) && !busy) active = undefined;
+    if (active && busy && Date.parse(busy.until) > Date.parse(active.until)) active = { ...active, ...busy };
+    if (!active && busy && fallback && !full(fallback.runtime)) active = { settings, ...busy, target: fallback };
+    const target = active?.target ?? primary;
+    this.wakeAt([busy?.until, fallback && full(fallback.runtime)?.until, active?.until]);
+    const switched = !!active !== !!previous || (!!active && active.settings !== previous?.settings);
+    const reason = switched ? active
+      ? `The orchestrator switches to its fallback, ${RUNTIME_NAMES[target.runtime]}${target.model ? ` (${target.model})` : ""}: ${active.reason}; resets at ${active.until}.`
+      : `The orchestrator returns to its primary, ${RUNTIME_NAMES[primary.runtime]}${primary.model ? ` (${primary.model})` : ""}: ${previous?.settings === settings ? "the primary usage window has reset" : "its settings changed"}.`
+      : undefined;
+    if (s.runtime !== target.runtime && (!this.summaryAsked(s) || reason)) {
+      return this.switchRuntime(s, target, active, reason);
+    }
+    if (JSON.stringify(previous) !== JSON.stringify(active)) {
+      s = { ...s, orchestrator_fallback: active };
+      this.store.writeSession(s);
+      if (reason) this.store.appendChat(s.id, { at: now(), from: "nexus", text: reason });
+    }
+    return s;
+  }
+
+  /** Wake for the earliest relevant reset, including while the fallback is free and has no pending notices. */
+  private wakeAt(times: (string | undefined)[]): void {
+    const future = times.filter((t): t is string => !!t).map(Date.parse).filter((t) => t > this.nowMs());
+    const until = future.length ? Math.min(...future) : undefined;
+    if (until === this.heldUntil) return;
+    clearTimeout(this.heldTimer);
+    this.heldTimer = undefined;
+    this.heldUntil = until;
+    if (until === undefined || this.stopped) return;
+    const ms = Math.min(Math.max(until - this.nowMs() + 1000, 1000), 2 ** 31 - 1);
+    this.heldTimer = setTimeout(() => {
+      this.heldTimer = undefined; this.heldUntil = undefined;
+      if (!this.stopped) this.changed();
+    }, ms);
+  }
+
+  /** User messages held for a quota reset, and durable first prompts of a new runtime session. */
+  private deliverPending(state: ProjectState, s: SessionFile): void {
+    if (this.summaryAsked(s) || this.runtimeFull(state)) return;
+    const pending = (state.sessions.find((x) => x.id === s.id)?.inbox ?? [])
+      .filter((m) => m.type === "message" && !m.read_at && (m.id.startsWith("say-") || m.id.startsWith("runtime-seed-")));
+    if (!pending.length) return;
+    this.ensure();
+    for (const m of pending) {
+      this.store.appendDelivered(s.id, { at: now(), kind: "inbox", id: m.id, via: "turn" });
+    }
+    const held = this.pendingChanges(s);
+    if (held.length) this.markTold(s, held.map((d) => d.key));
+    this.deliver([
+      ...pending.map((m) => m.from === "nexus" ? m.text : userMessage(m.text!)),
+      ...(held.length ? [describeDeployChanges(held)] : []),
+    ].join("\n\n"));
+  }
+
+  /**
+   * A new orchestrator session on the runtime the project's settings name now. Claude Code's session id is chosen
+   * here; a Codex thread's id comes from Codex once it starts (facts `nativeId`).
+   */
+  private newSession(project: ProjectFile, more: Partial<SessionFile> = {}): SessionFile {
+    const runtime = more.runtime === "codex" ? "codex" : more.runtime === "claude" ? "claude" : runtimeOf(project);
+    return {
+      protocol: 1, id: newId(), project: project.id, role: "orchestrator", runtime, native_id: runtime === "claude" ? randomUUID() : null,
+      title: "Orchestrator", cwd: project.root, launched_by: "nexus", created_at: now(),
+      model: project.orchestrator?.model, effort: project.orchestrator?.effort, ...more,
+    };
+  }
+
+  /**
+   * The user changed the orchestrator's runtime (queue OC): a conversation cannot move between Claude Code and Codex,
+   * so a fresh session goes on from `old` on `runtime`, from its briefing and the project's state (nexus status), with
+   * the messages `old` had not read. `old` stays in the line (continues), so the dashboard shows its chat above the
+   * new one. Its first message is kept in the new inbox until its runtime can receive it.
+   */
+  private switchRuntime(old: SessionFile, target: Target, fallback: SessionFile["orchestrator_fallback"], reason?: string): SessionFile {
+    const state = loadProjectState(this.store);
+    const unread = (state.sessions.find((x) => x.id === old.id)?.inbox ?? []).filter((m) => !m.read_at && !m.id.startsWith("notice-"));
+    const project = this.store.readProject();
+    const fresh = this.newSession(project, { continues: old.id, ...target, model: target.model, effort: target.effort, orchestrator_fallback: fallback });
+    const summary = this.lineage(old).map((s) => this.summaryWritten(s)).find((x) => x !== undefined);
+    if (summary) this.store.writeOrchestratorSummary(`# Orchestrator summary\n\nCarried from the previous orchestrator at ${summary.at}. The fresh session ${fresh.id} starts from it.\n\n${summary.text}\n${summaryLists(summary).join("\n")}\n`);
+    this.store.writeSession(fresh);
+    const from = RUNTIME_NAMES[old.runtime === "codex" ? "codex" : "claude"], to = RUNTIME_NAMES[target.runtime];
+    const status = `project ${state.project.name} (${state.project.id})\n${orchestratorOverview(state)}`;
+    const seed = orchestratorRuntimeSeed(from, to, status, carriedMessages(unread.map((m) => formatInbox(m, state))), summary, reason);
+    this.store.appendInbox(fresh.id, { v: 1, id: `runtime-seed-${fresh.id}`, at: now(), from: "nexus", type: "message", text: seed });
+    this.store.writeSession({ ...this.store.readSession(old.id), continued_by: fresh.id });
+    for (const m of unread) this.store.appendDelivered(old.id, { at: now(), kind: "inbox", id: m.id, via: "carried", to: fresh.id });
+    const l = this.hosted;
+    if (l) this.host.close(l.session);
+    this.store.updateProject((p) => ({ ...p, orchestrator: { runtime: "claude", notify: true, ...p.orchestrator, session: fresh.id } }));
+    this.store.appendChat(old.id, { at: now(), from: "nexus", text: `The orchestrator goes on on ${to} in a fresh session (${fresh.id}): ${reason ?? "its runtime setting changed."}` });
+    this.store.appendChat(fresh.id, { at: now(), from: "nexus", text: reason ?? `A fresh orchestrator session on ${to}: you switched it from ${from}. A conversation cannot move between the two, so it starts from its current briefing and nexus status; the earlier chat stays above.` });
+    this.store.appendChat(fresh.id, { at: now(), from: "nexus", text: summary ? "It starts with the latest context summary (.nexus/orchestrator/summary.md), its current briefing and nexus status." : "No context summary was available; it starts with its current briefing and nexus status." });
+    return fresh;
+  }
+
+  /**
+   * How its process is started, from the project's effective settings now (the orchestrator's model and effort), on
+   * the session's runtime. An effort Claude Code does not take (one set for Codex) is left out: Claude Code's default.
+   */
   private launcher(s: SessionFile): (resume: boolean) => Launch {
     const project = this.store.readProject();
     const o = project.orchestrator;
+    const runtime: OrchestratorRuntime = s.runtime === "codex" ? "codex" : "claude";
+    const { model, effort: wanted } = this.target(s);
+    const effort = effortIssue(runtime, wanted) ? undefined : wanted;
+    const briefing = orchestratorBriefing(project.name, pct(project.defaults.context_reuse_threshold), project.languages, pct(o?.context_threshold ?? DEFAULT_CONTEXT_THRESHOLD), runtime);
+    const env = this.host.env(s.id);
+    if (runtime === "codex") {
+      // Its working directory is the project's root, which its sandbox keeps read-only (orchestratorPermissions). The
+      // user's MCP servers, plugins and apps are off, every one (they run outside the sandbox and reach the Nexus
+      // API; runtimes.codex.mcp_servers is the workers' only); no web search, as on Claude Code.
+      return (resume) => ({ runtime: "codex", options: {
+        cwd: s.cwd, model, effort, instructions: briefing, env,
+        threadId: resume ? this.sessionFile(s.id)?.native_id ?? null : null,
+        sandbox: "read-only", writableRoots: [], permissions: orchestratorPermissions(this.store.dir, s.id), approvalPolicy: "never",
+        config: { web_search: "disabled" }, withoutUserTools: true,
+      } });
+    }
     return (resume) => ({ runtime: "claude", options: {
-      cwd: s.cwd, uuid: s.native_id!, resume, model: o ? o.model : s.model, effort: o ? o.effort : s.effort,
+      cwd: s.cwd, uuid: s.native_id!, resume, model, effort,
       permissionMode: "dontAsk",
       allowedTools: [...READ_ONLY_TOOLS, ...DRAFT_TOOLS],
       disallowedTools: NEVER,
-      appendSystemPrompt: orchestratorBriefing(project.name, pct(project.defaults.context_reuse_threshold), project.languages, pct(o?.context_threshold ?? DEFAULT_CONTEXT_THRESHOLD)),
+      appendSystemPrompt: briefing,
       agentsFile: orchestratorAgentsFile(),
-      env: this.host.env(s.id),
+      env,
     } });
   }
 
   private spawn(s: SessionFile): void {
     // Its session records the model and effort it runs on (the project's effective ones).
-    const o = this.store.readProject().orchestrator;
+    const o = this.target(s);
     if (o && (o.model !== s.model || o.effort !== s.effort)) this.store.writeSession({ ...s, model: o.model, effort: o.effort });
+    // On Codex its sandbox grants its paths as they are when the sandbox starts, so both are there first: its
+    // events.jsonl (empty: the session alone writes its events, through nexus) and the drafts folder, which a project
+    // may not have yet and the sandbox cannot make (probed, OC2: "Failed to create parent directories").
+    if (s.runtime === "codex") {
+      const events = join(this.store.sessionDir(s.id), "events.jsonl");
+      if (!existsSync(events)) writeFileSync(events, "");
+      mkdirSync(join(this.store.dir, "drafts"), { recursive: true });
+    }
+    const dropped = o?.effort && effortIssue(s.runtime === "codex" ? "codex" : "claude", o.effort);
+    if (dropped) this.store.appendChat(s.id, { at: now(), from: "nexus", text: `The orchestrator's effort ${o.effort} is not one Claude Code takes (${dropped}): it runs at Claude Code's default.` });
     this.host.start(s, this.launcher(s), {}, () => ({
       // The chat gets the orchestrator's texts whole; the activity log keeps them clipped.
       message: (text) => this.store.appendChat(s.id, { at: now(), from: "orchestrator", text }),
@@ -404,8 +596,8 @@ ${n.text}` });
   }
 
   /** The summary the session wrote once Nexus asked for it (`asked`): its last context.summary since, if any. */
-  private summaryWritten(s: SessionFile, asked: Applied): Summary | undefined {
-    const e = this.store.readEvents(s.id).entries.filter((x) => x.type === "context.summary" && x.at >= asked.at).at(-1);
+  private summaryWritten(s: SessionFile, asked?: Applied): Summary | undefined {
+    const e = this.store.readEvents(s.id).entries.filter((x) => x.type === "context.summary" && (!asked || x.at >= asked.at)).at(-1);
     return e?.type === "context.summary" ? { text: e.text, topics: e.topics, files: e.files, at: e.at } : undefined;
   }
 
@@ -422,7 +614,8 @@ ${n.text}` });
     const asked = applied.find((a) => a.event === SUMMARY_ASKED);
     if (asked) {
       // Its summary turn runs; the fresh session's first turn waits while its runtime is beyond the usage threshold.
-      if (!this.idle() || this.runtimeFull(state)) return true;
+      const runtime = s.orchestrator_fallback?.target.runtime ?? runtimeOf(state.project);
+      if (!this.idle() || this.runtimeFull(state, runtime)) return true;
       this.goOnFresh(s, asked);
       return true;
     }
@@ -455,11 +648,9 @@ ${n.text}` });
     const state = loadProjectState(this.store);
     const unread = (state.sessions.find((x) => x.id === old.id)?.inbox ?? []).filter((m) => !m.read_at && !m.id.startsWith("notice-"));
     const project = this.store.readProject();
-    const fresh: SessionFile = {
-      protocol: 1, id: newId(), project: project.id, role: "orchestrator", runtime: "claude", native_id: randomUUID(),
-      title: "Orchestrator", cwd: project.root, launched_by: "nexus", created_at: now(),
-      model: project.orchestrator?.model, effort: project.orchestrator?.effort, continues: old.id,
-    };
+    // On the runtime the settings name now: a runtime switch waiting for the summary is made here, with the summary.
+    const target = old.orchestrator_fallback?.target ?? { runtime: runtimeOf(project), model: project.orchestrator?.model, effort: project.orchestrator?.effort };
+    const fresh = this.newSession(project, { continues: old.id, ...target, model: target.model, effort: target.effort, orchestrator_fallback: old.orchestrator_fallback });
     this.store.writeSession(fresh);
     this.store.writeSession({ ...this.store.readSession(old.id), continued_by: fresh.id });
     if (summary) {
@@ -572,16 +763,12 @@ ${n.text}` });
   // ---------------------------------------------------------------- what the orchestrator is told
 
   /**
-   * The orchestrator's runtime (Claude Code) is beyond the project's usage threshold now (routing.ts, overThreshold).
+   * The orchestrator's active runtime is beyond the project's usage threshold now (routing.ts, overThreshold).
    * While it is, a timer looks again just after the reset, so the held notices go out without waiting for a change.
    */
-  private runtimeFull(state: ProjectState): boolean {
-    const runtime = state.project.orchestrator?.runtime === "codex" ? "codex" : "claude";
-    const full = overThreshold(runtime, readUsage()?.windows ?? {}, state.project.defaults.usage_pause_threshold, Date.now());
-    if (full && !this.heldTimer && !this.stopped) {
-      const ms = Math.min(Math.max(Date.parse(full.until) - Date.now() + 1000, 1000), 2 ** 31 - 1);
-      this.heldTimer = setTimeout(() => { this.heldTimer = undefined; if (!this.stopped) this.changed(); }, ms);
-    }
+  private runtimeFull(state: ProjectState, runtime: OrchestratorRuntime = this.session()?.runtime === "codex" ? "codex" : "claude"): boolean {
+    const full = overThreshold(runtime, readUsage()?.windows ?? {}, state.project.defaults.usage_pause_threshold, this.nowMs());
+    if (full && !this.heldTimer) this.wakeAt([full.until]);
     return !!full;
   }
 
@@ -594,7 +781,7 @@ ${n.text}` });
     // more: further text for the orchestrator only, recorded under its own keys.
     const items: { key: string; fact: string; todo: string; quiet?: boolean; more?: { text: string; keys: string[] } }[] = [];
     const update = this.news.update();
-    const mine = update && update.by.project === state.project.id && update.by.session === s.id && !told.has(update.key) ? update : undefined;
+    const mine = update && update.by.project === state.project.id && line.some((x) => x.id === update.by.session) && !told.has(update.key) ? update : undefined;
     // Changes for agents: with notices on, told now (and they start its turn); with them off, held for its next turn.
     // The orchestrator that ran the update gets them in the same message as its outcome. The user sees none of them.
     const changes = this.pendingChanges(s);
@@ -605,7 +792,7 @@ ${n.text}` });
     // to the session that planned it (also with notices off: it answers its own command), else to this project's
     // orchestrator.
     for (const plan of this.news.plan()) {
-      if (plan.project === state.project.id && plan.at >= since && (plan.session ? plan.session === s.id : !updateOnly)) {
+      if (plan.project === state.project.id && plan.at >= since && (plan.session ? line.some((x) => x.id === plan.session) : !updateOnly)) {
         items.push({ key: plan.key, fact: plan.fact, todo: plan.todo });
       }
     }
@@ -698,6 +885,9 @@ ${n.text}` });
       // Merging back (src/merger.ts): what keeps Nexus from it, once per reason; a merge back Nexus did by itself.
       const waiting = q.git?.merge?.waiting;
       if (waiting && waiting.since >= since) items.push({ key: `notify:mergewait:${q.id}:${waiting.since}`, ...mergeWaitNotice(q, waiting.reason, waiting.released) });
+      // A done survey run's worktree that Nexus could not remove (untracked files left in it): told once.
+      const cleanup = q.git?.cleanup?.waiting;
+      if (cleanup && cleanup.since >= since && !q.git?.cleaned) items.push({ key: `notify:cleanupwait:${q.id}:${cleanup.since}`, ...cleanupWaitNotice(q, cleanup.reason) });
       // A step that opened on its fallback because its runtime's usage ran out, or on its own runtime again: told once.
       for (const f of r?.fallbacks ?? []) {
         if (f.at >= since) items.push({ key: `notify:fallback:${q.id}:${f.step}:${f.at}`, ...fallbackNotice(q, f) });

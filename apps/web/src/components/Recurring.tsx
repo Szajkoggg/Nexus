@@ -163,7 +163,11 @@ function RecurringCard({ r, actions, onOpen }: { r: RecurringView; actions: Retu
         </>}
         {r.last && <>
           <dt className="text-fg-3">{t("recurring.last")}</dt>
-          <dd><button onClick={() => onOpen(r.last!.queue)} className="font-mono text-accent hover:underline">{r.last.queue}</button></dd>
+          <dd>
+            <button onClick={() => onOpen(r.last!.queue)} className="font-mono text-accent hover:underline">{r.last.queue}</button>
+            {/* A run made up for a time that passed while Nexus was not running. */}
+            {r.last.caught_up && <span className="text-fg-3"> · {t("recurring.caughtUp")} <Clock at={r.last.caught_up} /></span>}
+          </dd>
         </>}
       </dl>
       {r.status === "needs_approval" && <p className="mt-2 text-xs text-info">{t(r.approval ? "recurring.changedNote" : "recurring.approveNote")}</p>}

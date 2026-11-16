@@ -9,8 +9,8 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  ActionError, INTEGRATION_ACCEPTANCE, INTEGRATION_GOAL, INTEGRATION_TITLE, ProjectStore, applyDraft, approveQueue, integrationStepId, loadProjectState, newId, now,
-  isApproved, orchestratorStatusChange, type Event, type QueueFile, type SessionFile,
+  INTEGRATION_ACCEPTANCE, INTEGRATION_GOAL, INTEGRATION_TITLE, ProjectStore, applyDraft, approveQueue, integrationStepId, loadProjectState, newId, now,
+  isApproved, type Event, type QueueFile, type SessionFile,
 } from "../src/index.ts";
 
 function setup(q: Partial<QueueFile> = { worktree: "auto" }) {
@@ -62,6 +62,22 @@ test("no integration step in the project's checkout, nor for a queue that worked
   assert.deepEqual(setup({ worktree: "C:/w/UX", branch: "nexus/UX" }).queue().steps.map((s) => s.id), ["Q1"]);
 });
 
+test("a survey run in a worktree of its own has no integration step (nothing to merge back); fix_small has one", () => {
+  assert.deepEqual(setup({ worktree: "auto", maintenance: "survey" }).queue().steps.map((s) => s.id), ["Q1"]);
+  assert.deepEqual(setup({ worktree: "C:/w/S", integration: true, maintenance: "survey" }).queue().steps.map((s) => s.id), ["Q1"]);
+  assert.deepEqual(setup({ worktree: "auto", maintenance: "fix_small", coding: true }).queue().steps.map((s) => s.id), ["Q1", "Q.refactor", "Q.integrate"]);
+});
+
+test("a survey's worktree Nexus could not clean up waits for the user as a cleanup item, until it is cleaned up", () => {
+  const x = setup({ worktree: "C:/w/S", integration: true, maintenance: "survey" });
+  const reason = "survey run Q is done, but its worktree stays: 1 file: ?? left.txt left in it; look at them, then clean up (C:/w/S)";
+  x.st.writeGit("Q", { protocol: 1, steps: {}, cleanup: { waiting: { reason, since: "2026-11-16T10:00:00.000Z", files: ["?? left.txt"] } } });
+  const items = () => loadProjectState(x.st).attention.filter((a) => a.queue === "Q" && a.kind !== "approval");
+  assert.deepEqual(items().map((a) => [a.kind, a.text, a.at]), [["cleanup", reason, "2026-11-16T10:00:00.000Z"]]);
+  x.st.writeGit("Q", { ...x.st.readGit("Q")!, cleaned: { at: "2026-11-16T11:00:00.000Z", path: "C:/w/S", branch: "nexus/S" } });
+  assert.deepEqual(items(), []);
+});
+
 test("the mark is the server's: a draft does not set it, a revision keeps it, and it is not part of what an approval pins", () => {
   // The server marks an approved queue when it gives it its worktree: the approval still holds.
   const x = setup({ worktree: "auto" });
@@ -78,20 +94,7 @@ test("the mark is the server's: a draft does not set it, a revision keeps it, an
   assert.equal(st.readQueue("N").integration, undefined, "an orchestrator's draft cannot set it");
 });
 
-test("the integration step's id is reserved, it cannot be skipped, and queue set finished waits for it", () => {
-  const x = setup();
-  assert.throws(() => x.draft({ steps: [{ id: "Q1", title: "One" }, { id: "Q.integrate", title: "Mine" }] }), /reserved for the queue's integration step/);
-  approveQueue(x.st, "Q");
-  const w = x.session("worker"), u = x.session("user");
-  x.finish(w, u, "Q1");
-  x.st.writeRun("Q", { protocol: 1, session: w.id, state: "halted", reason: "x", step: "Q1", started_at: now(), updated_at: now() });
-  assert.throws(() => orchestratorStatusChange(x.st, { queue: "Q", step: "Q.integrate", to: "skipped", reason: "nothing to merge" }),
-    (e: ActionError) => e.status === 409 && /integration step: it is not skipped/.test(e.message));
-  assert.throws(() => orchestratorStatusChange(x.st, { queue: "Q", to: "finished", reason: "all done" }),
-    (e: ActionError) => e.status === 409 && /Q\.integrate \(pending, the integration step/.test(e.message));
-  x.finish(w, u, "Q.integrate");
-  assert.equal(x.queue().status, "done");
-});
+// Reserved id, skip refusal and queue set finished are covered with the closing step in closing.test.ts.
 
 test("any other step at work after the integration step ran makes it run again at the end; its own run does not reset the closing step", () => {
   const x = setup({ worktree: "auto", coding: true });

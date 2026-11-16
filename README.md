@@ -16,6 +16,17 @@ compact a long conversation: it replaces what the partner holds of the conversat
 room to go on in the same conversation. The chat keeps every message and says when it was compacted; details the
 summary leaves out are no longer in the partner's context. It waits for the partner's turn to end.
 
+**What became of the ideas.** The Ideas panel's switch at the top (**Conversations** | **Overview**) shows the notes
+the partners keep, grouped by area and the project's sub-groups (each note's `**Area:**` line; a note without one is
+under Unsorted). Each dated decision of a note shows where it stands: **decided**, **handed over** (a hand-over named
+it), **queued** (a queue says it came from it), **built** (every such queue is done), or **dropped** / **replaced**; a
+note shows the least advanced of its decisions, and a note with nothing decided yet is **being worked out**. Filter by
+status, or by words. A click opens the note where a step opens: its Summary, each decision with its history (when it
+was handed over, queued, approved, started, built, with the commit), its open questions and its queues. Nobody keeps
+these by hand: they follow from the notes, the hand-overs and the queues' `source`. Queues from before `source`
+are matched once: **To match** atop the overview lists, queue by queue, the notes their own words name, with the
+sentence; accept or reject each (or the exact and dated ones at once), and an accepted one counts as the queue's source.
+
 **The web in Ideas.** Settings → "Ideas (conversations)" → **Web** (global, or the project's own): **off**, **web
 search** (the default: partners search and name their sources, but open no page) or **web search and reading pages**.
 Reading pages carries a risk: a page can hide instructions that lead a partner to put something from the project into
@@ -103,6 +114,25 @@ meanwhile waits for the fresh session. The chat stays one chat: the earlier sess
 session** line, which says how full the old context was; **Show its summary** opens what it wrote, and **summary.md**
 opens the file it is kept in (`.nexus/orchestrator/summary.md`, the latest one). Search and pins cover the current
 session.
+
+**The orchestrator on Codex.** The settings' Orchestrator section (global, or a project's own) chooses its
+**Runtime**: Claude Code (the default) or Codex; the model and effort lists follow it, and a change of runtime clears
+them. A new runtime takes effect with the next message: the orchestrator goes on in a fresh session on it (a
+conversation cannot move between the two), which starts from its briefing and the project's state; the earlier chat
+stays above. The line under the choice says how the protection differs: on Codex a sandbox lets it write only its
+queue drafts and its own event log, but its shell runs any program, and a program can reach Nexus on this machine and
+do what you do in the dashboard, which Claude Code's orchestrator cannot. Until that gap is closed, keep it on Claude
+Code.
+
+**An orchestrator fallback.** In the same Orchestrator section, **Runtime**, **Model** and **Effort** choose the
+primary. **Fallback** chooses one backup, with its own runtime, model and effort; by default there is none. These
+settings can be global or the project's own. When the primary reaches the project's usage threshold, Nexus switches
+to the backup between turns, then returns after the primary's window resets. The chat says which window caused the
+switch and when it resets. Different runtimes start a fresh session with the latest saved context summary, current
+briefing, project state and waiting messages; earlier chats stay readable. If there is no saved summary, the chat
+says so. If both runtimes are full, messages and notices wait. Two models of the same runtime share its quota, so
+that fallback waits too. Codex has the same protection limits whether primary or backup; selecting a backup does
+not change the primary setting.
 
 **Stop.** While the orchestrator or a thinking partner is in a turn, **Stop** shows above the message box. It
 interrupts the turn at once: the chat says "Stopped.", nothing more of that turn appears, and the agent waits. What
@@ -231,6 +261,11 @@ interrupts the turn and ends that worker's process immediately, pausing the run.
 the step's timeline and leaves all uncommitted changes in the checkout or worktree. **Resume** reopens the step in
 the same session after the process has exited. Stop at once is also available while a worker is still working after
 Stop now.
+
+On Windows, Nexus removes a worker's remaining child processes when its step ends, including while the step waits
+for review. The runtime stays for the next step; ending the session or using Stop at once removes its whole process
+tree. Finish commands and collect their results within the step: a worker cannot leave a development server or a
+background command running for the next step. Orchestrators and thinking partners are unaffected.
 
 A new revision of a running queue never stops the step at work: it goes on to its end, questions and answers
 included. A revision may change only steps that have not started. At the step's end the run goes on under the new
@@ -371,7 +406,7 @@ the orchestrator" sends it as your message, and the orchestrator drafts the queu
 it as any queue. A template is a queue's YAML with a `template:` header, `params:` and `{{name}}` placeholders
 (docs/PROTOCOL.md, "Queue templates"); `nexus template list` shows the ones in effect.
 
-**Maintenance templates.** Seven templates survey a project and report; none depends on a stack, the commands are
+**Maintenance templates.** Ten templates survey a project and report; none depends on a stack, the commands are
 parameters with Node and .NET/Unity examples. `dependencies` lists the outdated dependencies (minor and patch; in
 fix_small mode it applies the patch-level ones whose tests pass). `security-audit` runs the project's audit and only
 reports. `dead-code` finds unused code and lint findings (fix_small removes what is surely unused).
@@ -385,7 +420,19 @@ A seventh, `notes`, is meant to recur: it keeps the notes true. It reads the Cla
 `memory_dir` parameter, outside the project), the ideas notes and the project documents against the code, and reports what
 is stale, built but unmarked, or untrue. Only the clear typos in the project documents are fixed in fix_small mode; the
 memory and ideas notes are only reported.
-Nexus's own instances, filled in for this repository, are in `nexus-templates/`.
+`agent-contract` checks that the agents' instructions, the command line and its help, the file schemas and the
+protocol's description agree (fix_small fixes only clear slips in the description). `git-hygiene` reports the
+worktrees and branches that closed queues left behind and untracked files that belong nowhere, in the checkouts you
+name, never in the places you exclude; it deletes nothing, in any mode (removing is yours, as a queue). `lifecycle`
+reports, for a change you name (commits or a queue), how well the tests cover interrupting, continuing, restarting
+and the failures; it has no schedule: the orchestrator offers it in a sentence when a queue that touched the project's
+run control or lifecycle code is done (your AGENTS.md may say which code that is).
+Nexus's own instances, filled in for this repository, are in `nexus-templates/`. They run in a worktree of their own
+(`worktree: auto`, which any template or project instance may carry), so a run never holds the main checkout. A survey
+there has nothing to merge back: once it is done Nexus removes its worktree, whether merging back by itself is on or
+not; if files are left in it, the worktree stays and "Waiting for you" gets a "Cleanup" item naming them (look, then
+Clean up on the queue's page). A stopped survey keeps its worktree as evidence. In fix_small mode the run ends with
+the integration step and is merged back like any worktree queue.
 
 **Static analysis setup.** The `static-analysis` template sets up static analysis for any stack (ESLint or Biome
 for Node, the .NET analyzers and `dotnet format` for .NET and Unity): it asks you which tools to use, takes the
@@ -400,7 +447,9 @@ once (Approve, also in "Waiting for you"): its runs then start by themselves whi
 changes it (the orchestrator's change, an edited or replaced template, a Nexus update that changes Nexus's template)
 asks for your approval again, and until then nothing runs. Pause and Remove are yours too; the queues it made stay.
 While its previous run is still open (running, waiting or stopped), its next time passes without a run and tells you.
-A time missed while the PC was off (more than 15 minutes) passes too. A maintenance template either only surveys and
+A time missed while the PC (or Nexus) was off is made up for once when Nexus starts again: the latest missed time runs
+then, under the same conditions as on time (your approval, the previous run closed), and its "Last run" says "made up
+for the missed time"; older missed times pass. A maintenance template either only surveys and
 reports (survey: Nexus stops a run that leaves a commit) or also fixes the small findings it names (fix_small); a run
 with findings goes to the orchestrator, which proposes a queue from the report, and one without closes quietly.
 
@@ -536,8 +585,11 @@ node scripts/load-tests.mjs --burners 12 --copies 4 --rounds 5 apps/server/test/
 
 One full run at a time on the machine: `npm test` and `npm run test:times` take a lock in the system's temporary
 folder first (`scripts/test-lock.ts`). When another checkout's full run holds it, they wait, saying once a minute
-what for, and after 15 minutes run anyway; a lock left by a run that died is taken over at once. `npm run test:files`
-never waits. `NEXUS_TEST_LOCK` names another lock file, `NEXUS_TEST_LOCK_MAX_MS` another longest wait.
+what for, and after 15 minutes run anyway; a lock left by a run that died, or held for more than 20 minutes (longer
+than a full run takes), is taken over at once. A full run ends with whatever started it: when the shell or the
+command that ran `npm test` is killed (a background command's time limit, a closed terminal), the run's test processes
+end and its lock goes. `npm run test:files` never waits. `NEXUS_TEST_LOCK` names another lock file,
+`NEXUS_TEST_LOCK_MAX_MS` another longest wait, `NEXUS_TEST_LOCK_STALE_MS` another age at which a lock is stale.
 
 The tests that run fake runtimes or servers wait 10 s for what they expect (`NEXUS_TEST_WAIT_MS` sets it, e.g. higher
 on a slow machine; `apps/server/test/wait.ts`), so a change that breaks many of them fails the suite in minutes.
@@ -684,6 +736,23 @@ again instead. It refuses while the checkout of main has uncommitted changes or 
 removes the worktree and deletes the branch, only if nothing is uncommitted and the branch is merged. Nothing is
 pushed. (A queue from before the integration step merges as before: a fast-forward when possible, else a merge commit;
 a conflict is aborted.)
+
+**Interrupted worktree cleanup.** Retry Clean up after resolving the reported filesystem error. A cleanup that
+started with this version records the verified folder identity and contents before deletion, so it can continue
+even after `.git` or the worktree registration disappeared, including after a server restart. New, changed or
+replaced contents stop the retry; Nexus never treats unreadable Git state as a clean folder. An already completed
+cleanup is harmless to retry.
+
+For an older partial cleanup (including PT/WK) with no saved proof, the missing evidence cannot be reconstructed
+from a successful merge alone. Preserve the **entire remaining folder at a separate backup path**, leaving the
+original worktree path absent. Inspect that backup against the queue's merged commit in an independent checkout;
+recover modified, untracked and ignored work before deciding whether to discard anything. Then retry Clean up:
+Nexus can prune the old registration and delete the still-merged branch without deleting the backup. If that
+branch is also gone and there is no proof, first identify its original tip from the merge record/reflog and verify
+that it is contained in the intended base, then restore that branch at the verified commit. If its tip cannot be
+established, keep the backup and ask for a repository review; do not guess. Never recreate `.git`, manufacture a
+cleanup proof, or use a forced recursive delete to bypass this refusal. An EPERM identifies a failed operation,
+not the process responsible; identifying a lock or permissions problem may still need separate investigation.
 
 **Merging back by itself** (Settings → Merging back, global with a project override, off by default): Nexus does the
 merge back and the cleanup itself, once every step is accepted and the integration step's checks pass. If the checkout

@@ -134,3 +134,12 @@ test("close ends the process after its turn and shutdown kills them all, both as
   assert.deepEqual(events, ["exit:0:true:exited", "exit:null:true:exited"]);
   assert.equal(host.alive(), false);
 });
+
+test("only worker sessions get process ownership, regardless of the host's record settings", () => {
+  for (const role of ["worker", "orchestrator", "conversation"] as const) {
+    const { s, start, proc } = setup(ROLE_RECORDS.worker);
+    s.role = role;
+    start();
+    assert.equal(!!proc().launch.options.ownProcesses, role === "worker");
+  }
+});

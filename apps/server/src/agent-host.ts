@@ -143,7 +143,8 @@ export class AgentHost<E extends object = object> {
     const resume = record !== undefined && record.conversation_saved !== false;
     const how = launch(resume);
     // `launched` keeps the launch without the briefing's file: it is no setting (stale).
-    const proc = this.spawn(this.withBriefingFile(session.id, how));
+    const owned = { ...how, options: { ...how.options, ownProcesses: session.role === "worker" ? true : undefined } } as Launch;
+    const proc = this.spawn(this.withBriefingFile(session.id, owned));
     const l = { ...extra, session: session.id, proc } as Hosted<E>;
     this.live.set(session.id, l);
     this.launched.set(proc, how);

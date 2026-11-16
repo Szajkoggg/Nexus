@@ -14,6 +14,7 @@ import {
   lacksStaticAnalysis, projectStaticAnalysis, staticReminderDue,
   TemplateError, fillTemplate, filledTemplateYaml, parseEvery, MaintenanceMode, readTemplates, templateQueueId, unusableTemplate, type MergedTemplates,
   type PictureRole, type ReviewItem, type Role, type Runtime, type SessionFile,
+  noteRefIssue, parseNoteRef, readNotes, ideaMatches,
 } from "@nexus/protocol";
 import { checkRules, describeRules } from "@nexus/protocol/rules";
 import { importMarkdownQueues } from "./import-md.ts";
@@ -47,6 +48,10 @@ Agent commands (session from NEXUS_SESSION or --session):
   nexus withdraw <qid> --reason <text>
   nexus context <text|-> [--topics a,b] [--files a,b] [--step <step>]
   nexus report <queue> --file <path> --summary <text> [--findings <n>]   (a maintenance queue: how many findings)
+  nexus covers <file>.md#<YYYY-MM-DD>...   (thinking partner only) in a hand-over, before the summary: the Decided
+                    entries of the notes it passes on (the notes folder may be left out: tags.md#2026-11-14)
+  nexus ideas matches                 the suggestions for matching earlier queues to the notes' entries, and the
+                                      user's decisions (deciding is the user's, in the dashboard)
   nexus log <text> [--level info|warn|error]
   nexus answer <qid> <text> [--escalate [--recommend <option>]] [--continue|--wait]     (orchestrator only)
   nexus queue draft <file.yaml|->                                 (orchestrator only) create or change a queue
@@ -653,6 +658,43 @@ const commands: Record<string, () => void | Promise<void>> = {
     console.log(`ok: report for queue ${queue} in ${target}${same ? "" : ` (copied from ${file}${removed ? ", which is removed" : ""})`}`);
   },
 
+  /**
+   * `nexus ideas matches`: the suggestions for matching the project's earlier queues (whose source names no note) to
+   * the notes' entries, and the user's decisions; read only. Deciding is the user's, in the dashboard.
+   */
+  ideas() {
+    const sub = args[1] ?? "matches";
+    if (sub === "accept" || sub === "reject") throw new UsageError("accepting or rejecting a match of a queue to a note is the user's, in the dashboard (Ideas, Overview, To match)");
+    if (sub !== "matches") throw new UsageError("nexus ideas matches");
+    const st = store();
+    const items = ideaMatches(st, loadProjectState(st)).items;
+    const open = items.filter((m) => !m.decision);
+    console.log(`${items.length} suggestion(s) for ${new Set(items.map((m) => m.queue)).size} queue(s); ${open.length} wait for the user`);
+    for (const m of items) console.log([m.queue, m.ref, m.kind, ...(m.decision ? [m.decision.accepted ? "accepted" : "rejected"] : [])].join("\t"));
+  },
+
+  /**
+   * `nexus covers <ref>...` (a thinking partner, in a hand-over): the note entries its hand-over passes on, recorded
+   * among its own events (ideas.covered); the ideas overview reads them as handed over. Each is checked against the
+   * notes as they are now; a reference may leave out the notes folder (tags.md#2026-11-14).
+   */
+  covers() {
+    const st = store(); const s = session(st);
+    if (s.role !== "conversation") throw new UsageError("only a thinking partner (a conversation) records what its hand-over covers");
+    const given = args.slice(1);
+    if (!given.length) throw new UsageError("nexus covers <file>.md#<YYYY-MM-DD>... (the Decided entries this hand-over passes on)");
+    const p = st.readProject();
+    const dir = p.conversations.notes_dir;
+    const notes = readNotes(p.root, dir);
+    // A reference without the notes folder (tags.md#2026-11-14) gets it.
+    const inFolder = (r: string) => (dir && !r.startsWith(`${dir}/`) && parseNoteRef(`${dir}/${r}`) ? `${dir}/${r}` : r);
+    const refs = [...new Set(given.map((r) => inFolder(r.replaceAll("\\", "/"))))];
+    const issues = refs.flatMap((r) => noteRefIssue(r, dir, notes) ?? []);
+    if (issues.length) throw new UsageError(issues.join("; "));
+    emit(st, s, { type: "ideas.covered", refs });
+    console.log(`ok: this hand-over covers ${refs.join(", ")}`);
+  },
+
   log() {
     const st = store(); const s = session(st);
     emit(st, s, { type: "log", level: (o.level ?? "info") as "info", text: need(args[1], "<text>") });
@@ -697,7 +739,7 @@ const commands: Record<string, () => void | Promise<void>> = {
       for (const r of list) {
         const status = r.status === "needs_approval" ? "waits for the user's approval" : r.status === "waiting_previous" ? `waits for its previous run ${r.last?.queue} to close` : r.status === "broken" ? `cannot run: ${r.problem}` : r.status;
         const next = r.next_at && r.status !== "broken" && r.status !== "paused" ? `; next ${r.next_at}` : "";
-        const last = r.last ? `; last ${r.last.queue}` : "";
+        const last = r.last ? `; last ${r.last.queue}${r.last.caught_up ? ` (made up for ${r.last.caught_up}, missed while Nexus was not running)` : ""}` : "";
         const skipped = r.skipped ? `; at ${r.skipped.due} no run: ${r.skipped.reason}` : "";
         const schedule = r.every ?? `after ${r.after_queues} queues (${r.counted ?? 0} counted)`;
         const mode = r.maintenance ? `, maintenance ${r.maintenance}` : "";
