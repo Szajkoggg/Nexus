@@ -64,6 +64,9 @@ function project(o: { mergeBack?: boolean; provisionalCounts?: boolean } = {}) {
 }
 type Project = ReturnType<typeof project>;
 
+/** main's reflog has no merge but fast-forwards: it moved only by commits and fast-forwards. */
+const onlyForward = (x: Project) => git(x.root, "reflog", "--format=%gs", "main").split("\n").filter((l) => /^merge/.test(l) && !/Fast-forward/.test(l)).length === 0;
+
 /**
  * A worktree queue Q whose work is finished: its step committed in the worktree, its integration step done (and
  * accepted unless `review`) with its round ending at the worktree's HEAD. `provisional`: Q1 accepted provisionally.
@@ -309,7 +312,7 @@ test("a step at work with uncommitted changes in the main checkout: held first, 
   assert.equal(x.main(), sha, "one run again, then the fast-forward");
   assert.deepEqual(q.releases, ["M"], "then M goes on");
   assert.equal(x.store.readGit("Q")!.merge, undefined);
-  assert.equal(git(x.root, "reflog", "--format=%gs", "main").split("\n").filter((l) => /^merge/.test(l) && !/Fast-forward/.test(l)).length, 0, "main only moved by commits and fast-forwards");
+  assert.ok(onlyForward(x), "main only moved by commits and fast-forwards");
 });
 
 test("held, then the merge back cannot go: a dirty checkout or failed checks let the run go at once, and the user and the orchestrator are told", () => {
@@ -515,7 +518,7 @@ test("engine: a step at work in the main checkout with uncommitted work is held 
     assert.equal(x.main(), g.merged!.sha);
     assert.ok(ok(() => git(x.root, "merge-base", "--is-ancestor", m1, "main")), "M1's work is in main");
     assert.ok(g.merged!.at <= x.queue("M").steps[1]!.started_at!, `the fast-forward (${g.merged!.at}) before M2 opened (${x.queue("M").steps[1]!.started_at})`);
-    assert.equal(git(x.root, "reflog", "--format=%gs", "main").split("\n").filter((l) => /^merge/.test(l) && !/Fast-forward/.test(l)).length, 0, "main only moved by commits and fast-forwards");
+    assert.ok(onlyForward(x), "main only moved by commits and fast-forwards");
   } finally { hold.done(); x.merger.shutdown(); x.engine.shutdown(); }
 });
 
@@ -573,9 +576,6 @@ test("engine, merge_back on: a queue planned after one in the main checkout star
 });
 
 // ---------------------------------------------------------------- the merge train
-
-/** main's reflog has no merge but fast-forwards: it moved only by commits and fast-forwards. */
-const onlyForward = (x: Project) => git(x.root, "reflog", "--format=%gs", "main").split("\n").filter((l) => /^merge/.test(l) && !/Fast-forward/.test(l)).length === 0;
 
 test("engine, merge train: the second worktree queue integrates only after the first's fast-forward, once; its own steps never wait", async () => {
   const x = wired({ W: [step("W1", "commit")], B: [step("B1", "commit"), step("B2", "commit")] }, { bWorktree: true });
