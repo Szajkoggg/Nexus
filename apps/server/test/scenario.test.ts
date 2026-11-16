@@ -62,7 +62,9 @@ for (const runtime of ["claude", "codex"] as const) {
       const file = run ? join(store.sessionDir(run.session), "runtime.json") : undefined;
       const rt = file && existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown> : undefined;
       if (run) replaced.set(run.session, "<session>");
-      if (rt && typeof rt.pid === "number") rt.pid = "<pid>";
+      // Windows job hosts report the runtime PID asynchronously; an immediate launch snapshot has none yet.
+      // runtime-records.test.ts checks the real numeric PID once the runtime is ready.
+      if (rt) rt.pid = "<pid>";
       let text = `== ${label}\n-- run.yaml\n${run ? canonical(run) : "(none)"}\n-- runtime.json\n${rt ? canonical(rt) : "(none)"}\n`;
       for (const [value, name] of replaced) text = text.replaceAll(value, name);
       points.push(text);

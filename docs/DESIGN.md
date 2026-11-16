@@ -137,6 +137,47 @@ it was nudged at once and halted at the next such end (queue TR, 2026-11-14). Tw
   the work still running and says Nexus waits no longer; the next end without an outcome halts the run. The wait is
   kept in the engine's memory only: a restarted server has no process with the work anyway (its runs come back paused).
 
+### Worker process ownership on Windows (queue PT)
+
+The worker's process tree belongs to its session. At a step outcome, after the turn is idle, the engine waits for
+descendant cleanup before opening another step or settling at review or a stop. Questions and turns without an
+outcome retain the existing background-work wait. Stop now cleans when its turn ends; Stop at once, shutdown,
+session completion and unexpected runtime exit end the whole tree. The runtime stays alive between steps.
+
+Each Windows worker has a private Job Object, hosted by `worker-job.ps1` and the repository's `worker-job.cs` through
+PowerShell's Add-Type (approved by the user for PT1; no npm dependency, downloaded binary or installed compiler).
+AgentHost enables it only for worker sessions, never orchestrators or thinking partners. The helper joins the job
+before it starts the runtime: every ordinary descendant inherits membership, even if a short-lived intermediate
+parent exits. This is why snapshots of parent PIDs were rejected: a parent can start and exit between snapshots.
+Breakaway is not enabled. The non-inheritable job handle has kill-on-close; losing the server's pipe or the helper
+also ends the tree. Failure to create or join the job fails the launch instead of silently starting an unowned worker.
+
+At a step boundary, the helper enumerates job members except itself and the runtime, opens each as a process handle,
+verifies its membership on that same handle, terminates it and waits for exit. A reused PID outside the job is
+never terminated. Enumeration repeats until only the two roots remain; failure or a timeout halts the queue and
+ends its worker, without opening the next step. New inbox delivery waits for the cleanup acknowledgement. Runtime
+resumes, including a cancelled deploy's automatic resume, wait for that acknowledgement too; a later run change
+cancels the deferred request. A runtime exit after a reported step is not retried even if the review was already
+accepted while its exit notice was in flight. The next step starts a fresh runtime in the same session.
+Runtime
+exit cleans descendants before the adapter emits exit. Closing the runtime's input has a five-second grace period;
+an unresponsive control reader is ended after a further fifteen seconds, closing its job. Windows worker recovery
+does not kill a persisted PID: job ownership ends with the old host, and a number alone is not proof of ownership.
+
+**The console is infrastructure.** The helper allocates its own console before joining the job, hides it, restores
+its redirected control pipes, and shares that console with the runtime. Creating the console inside the job caused
+step cleanup to kill its conhost; the runtime survived but its next node child failed with `0xc0000142`. A focused
+probe reproduced that fault, and the fake-runtime test now checks that the same runtime starts work in step two.
+No process is selected or exempted by name or command line. The helper's console ends with the helper.
+
+The Windows integration tests use both fake runtimes, actual sleepers, an orphaned grandchild, and a second worker.
+They cover step continuation, review, stops, interruption, shutdown, runtime exit and cleanup failure. No real model
+was called. The helper's internal pipe protocol is in PROTOCOL.md. This Windows implementation leaves non-Windows
+launching as before. Job membership covers normal process creation, including detached children, not work delegated
+to an unrelated system service (`Win32_Process.Create`, for example); Nexus does not chase such processes with
+heuristics. References: [Job Objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects) and
+[AssignProcessToJobObject](https://learn.microsoft.com/en-us/windows/win32/api/jobapi2/nf-jobapi2-assignprocesstojobobject).
+
 ### The run's state transitions
 
 A queue's run record (`run.yaml`) changes state only through the named transitions in `apps/server/src/run-state.ts`.

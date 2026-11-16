@@ -1,6 +1,6 @@
 // A Claude Code session run by Nexus: the unmodified `claude` binary in print mode, stream-json in and out, kept
 // alive across turns. Signed in with the user's own subscription (no API key, no Agent SDK).
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawnRuntimeChild, type RuntimeChild } from "./worker-process.ts";
 import { EventEmitter } from "node:events";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
@@ -91,6 +91,8 @@ function httpCode(status: unknown): string | undefined {
 }
 
 export interface ClaudeOptions {
+  /** Only AgentHost sets this, for worker sessions. */
+  ownProcesses?: boolean;
   cwd: string;
   /** Claude's own session id (a UUID). New sessions are created with it; existing ones resumed. */
   uuid: string;
@@ -117,7 +119,7 @@ export interface ClaudeOptions {
 
 export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentProcess {
   readonly options: ClaudeOptions;
-  private proc!: ChildProcessWithoutNullStreams;
+  private proc!: RuntimeChild;
   /** The CLI's arguments after the session flag (`--resume` or `--session-id` and the id, which startProcess adds). */
   private readonly args: string[];
   /** Whether the running process resumes the session (`--resume`): options.resume, unless a refused start was retried. */
@@ -204,13 +206,13 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
     // NEXUS_CLAUDE replaces the binary (tests use a fake written in TypeScript or JavaScript, run by this Node).
     const bin = process.env.NEXUS_CLAUDE ?? "claude";
     const script = /\.(m?[jt]s)$/.test(bin);
-    const child = spawn(script ? process.execPath : bin, script ? [bin, ...args] : args, {
+    const child = spawnRuntimeChild(script ? process.execPath : bin, script ? [bin, ...args] : args, {
       cwd: this.options.cwd,
       env: agentEnv(this.options.env),
-      stdio: ["pipe", "pipe", "pipe"],
-      windowsHide: true,
+      owned: this.options.ownProcesses,
     });
     this.proc = child;
+    child.on("spawn", () => { if (child === this.proc && child.pid) this.emit("facts", { pid: child.pid }); });
     this.buffer = "";
     this.lastStderr = "";
     this.refusalTold = false;
@@ -348,6 +350,8 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
   close(): void { this.inputClosed = true; if (this.state !== "exited") this.proc.stdin.end(); }
 
   kill(): void { this.killed = true; if (this.state !== "exited") this.proc.kill(); }
+
+  async cleanup(): Promise<void> { await this.proc.cleanup?.(); this.background = []; }
 
   /** Reports a refused tool call once (the message and the result's list both name it). */
   private refuse(id: string | undefined, tool: string, input: unknown, reason?: string): void {

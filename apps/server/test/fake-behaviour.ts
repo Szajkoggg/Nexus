@@ -13,6 +13,7 @@
 //   slownoop  work, then end the turn without an outcome (the step stays open)
 //   slowask   work, then ask a blocking question and end the turn
 //   doneexit  report the step done, then the process exits on a signal before its turn ends
+//   doneexitheld  the same, held by FAKE_RELEASE before exit so a test can accept review first
 //   commit    commit a file named after the step in its working directory, then done
 //   commitstop  the same commit, then a stop condition
 //   untracked   write <step>-left.txt in its working directory, neither added nor committed, then done
@@ -60,7 +61,7 @@
 // Claude's fake keeps the conversations it saved (fakeSaved below) and refuses, as Claude Code does, to resume one it
 // never saved or to start a saved one anew; FAKE_START_MS: it reads its input only after that long (Claude Code's
 // start-up), so a test can end it before it saved anything; FAKE_REFUSE: it refuses every start, each in its way.
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -259,9 +260,21 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
     // The closing refactoring step (no FAKE: in its standard goal): FAKE_CLOSING, else done.
     const closing = text.includes("This is the queue's closing refactoring step");
     const integration = text.includes("This is the queue's integration step");
-    const behaviour = /FAKE: (\w+)/.exec(text)?.[1] ?? (closing ? process.env.FAKE_CLOSING : undefined) ?? (integration ? process.env.FAKE_INTEGRATE ?? "merge" : undefined) ?? "done";
+    let behaviour = /FAKE: (\w+)/.exec(text)?.[1] ?? (closing ? process.env.FAKE_CLOSING : undefined) ?? (integration ? process.env.FAKE_INTEGRATE ?? "merge" : undefined) ?? "done";
     nexus("step", "start", step);
     tool(`nexus step start ${step}`);
+    // Real OS descendants under the fake runtime: one direct sleeper and an orphaned grandchild. The intermediate
+    // exits before the turn reports its outcome, which a process-list snapshot cannot reliably reconstruct.
+    if (behaviour.startsWith("proc")) {
+      const file = `${process.env.FAKE_LOG}.children-${step}`;
+      const direct = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore", windowsHide: true });
+      direct.unref();
+      const bridge = spawn(process.execPath, [join(dirname(fileURLToPath(import.meta.url)), "fake-descendant.ts"), file, String(process.pid), String(direct.pid)], { stdio: "ignore", windowsHide: true });
+      await new Promise<void>((resolve, reject) => { bridge.once("error", reject); bridge.once("exit", () => resolve()); });
+      if (behaviour === "prochold") await work(step);
+      if (behaviour === "proccrash") process.exit(1);
+      behaviour = behaviour === "procstop" ? "stop" : "done";
+    }
     const fail = failure(step, behaviour);
     if (fail) return { fail };
     if (/^(overloaded|network|auth|limit|crash|cloudflare)/.test(behaviour)) nexus("step", "done", step, "--summary", `fake finished ${step} after failures`);
@@ -311,7 +324,11 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
     if (behaviour.startsWith("summary")) nexus("context", `fake summary of ${step}`, "--topics", "fake,context");
     if (behaviour === "summaryslow") await work(step);
     if (behaviour === "fail") nexus("step", "failed", step, "--reason", "fake failure");
-    if (behaviour === "doneexit") { nexus("step", "done", step, "--summary", `fake finished ${step}, then exits`); return { exit: true }; }
+    if (behaviour === "doneexit" || behaviour === "doneexitheld") {
+      nexus("step", "done", step, "--summary", `fake finished ${step}, then exits`);
+      if (behaviour === "doneexitheld") await work(step); // accept review before the runtime's exit arrives
+      return { exit: true };
+    }
     if (behaviour === "stop") nexus("stop", step, "--condition", "fake condition", "--reason", "fake stop");
     // stop1: a stop condition on the step's first turn; once the stop is lifted, the step is done.
     if (behaviour === "stop1") {

@@ -262,6 +262,11 @@ the step's timeline and leaves all uncommitted changes in the checkout or worktr
 the same session after the process has exited. Stop at once is also available while a worker is still working after
 Stop now.
 
+On Windows, Nexus removes a worker's remaining child processes when its step ends, including while the step waits
+for review. The runtime stays for the next step; ending the session or using Stop at once removes its whole process
+tree. Finish commands and collect their results within the step: a worker cannot leave a development server or a
+background command running for the next step. Orchestrators and thinking partners are unaffected.
+
 A new revision of a running queue never stops the step at work: it goes on to its end, questions and answers
 included. A revision may change only steps that have not started. At the step's end the run goes on under the new
 revision in the same session if you have approved it; otherwise it waits for your approval (keeping its session) and

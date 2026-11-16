@@ -129,6 +129,8 @@ export interface AgentProcess extends EventEmitter<AgentEvents> {
    */
   compact?(): boolean;
   kill(): void;
+  /** Worker-only boundary barrier: end descendants while preserving the runtime for the next step. */
+  cleanup?(): Promise<void>;
 }
 
 /**
@@ -140,6 +142,8 @@ export const COMPACTS: Readonly<Record<"claude" | "codex", boolean>> = { claude:
 
 /** Everything both runtimes are started with. */
 export interface AgentOptions {
+  /** Only AgentHost sets this, for worker sessions. */
+  ownProcesses?: boolean;
   cwd: string;
   model?: string;
   /** low, medium, high, xhigh (and max for Claude Code). */

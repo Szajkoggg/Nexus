@@ -2651,3 +2651,43 @@ of background tasks: a Bash command or a sub-agent started with `run_in_backgrou
 turn by itself with its notification) and `result` (the turn ended; the context window from `modelUsage`). After a
 turn ends it decides the next move from the step's state: next step, wait (question, review, background work: see
 DESIGN.md, "Background work"), nudge once if the step has no outcome, or halt.
+
+### Windows worker process host (PT)
+
+Only worker launches use `apps/server/src/worker-process.ts` and the private `worker-job.ps1` / `worker-job.cs`
+host. Other roles keep direct process spawning. No new durable file or event is introduced. The runtime record's
+`pid` is the actual runtime PID, supplied once the helper reports it, never the helper's PID. The existing
+`stop_at_once` action now waits for that worker's whole job to end. Windows recovery never kills a worker by a
+persisted PID; its old host owns the job and closes it when its server pipe closes.
+
+The internal redirected-stdio control channel is line-based UTF-8, separate from the runtime's own protocol. The
+server writes two initial base64 lines: the UTF-8 executable path, then its Windows-quoted argument string. The
+helper inherits the worker environment and working directory. It creates a private hidden console and joins a
+kill-on-close Job Object before launching the runtime. Subsequent frames:
+
+| Direction | Frame | Meaning |
+|---|---|---|
+| Server to helper | `W <base64>` | Write these UTF-8 bytes to runtime stdin |
+| Server to helper | `E` | Close runtime stdin; after five seconds the server requests `K` if still alive |
+| Server to helper | `C <id>` | End descendants, preserve helper and runtime, wait for their exit |
+| Server to helper | `K` | End all job members except the helper; runtime exit ends the helper |
+| Helper to server | `R <pid>` | Runtime launched inside the job |
+| Helper to server | `O <base64>` / `E <base64>` | Runtime stdout / stderr line, including its newline |
+| Helper to server | `C <id>` | Descendant cleanup completed; the engine may cross the boundary |
+| Helper to server | `X <code>` | Runtime exited and descendants were cleaned |
+| Helper to server | `F <base64>` | Cleanup/exit failure text; pending cleanup rejects and the worker is ended |
+
+Helper startup errors go to its own stderr and fail the launch. An EOF on its control input ends the job. The helper
+allows ten seconds for repeated descendant enumeration (each termination waits at most two seconds); the server
+allows fifteen seconds for a cleanup acknowledgement and otherwise halts the run and requests termination. A kill
+not completed in fifteen seconds ends the helper through Node's child handle, closing the job. Only handles whose
+membership in this private job was verified may be terminated, with no name/command-line matching. The helper
+reports exit only after runtime and descendants have gone; helper death also triggers Windows kill-on-job-close.
+
+The worker briefing says that processes cannot be left running for another step. The engine cleans after a step
+outcome and the turn's end, before the next step or while waiting for review, and after Stop now's turn. A question
+or a turn without an outcome keeps the existing background-work policy. Failures halt rather than advancing with
+uncertain cleanup. Resume while cleanup is pending is deferred until its acknowledgement, including automatic
+resumes after a cancelled drain; a subsequent run change cancels that request. Resume while an immediate stop is
+still exiting remains 409. Orchestrator and thinking-partner process ownership is unchanged. The implementation is Windows
+only; its scope and the console-lifetime finding are documented in DESIGN.md, "Worker process ownership on Windows".

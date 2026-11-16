@@ -2,7 +2,8 @@
 // session, signed in with the user's own ChatGPT login. The app-server is marked experimental: the methods used here
 // (initialize, thread/start, thread/resume, turn/start, turn/steer, turn/interrupt) were checked against Codex CLI
 // 0.167.2 with `codex app-server generate-ts`.
-import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { execFileSync } from "node:child_process";
+import { spawnRuntimeChild, type RuntimeChild } from "./worker-process.ts";
 import { EventEmitter } from "node:events";
 import { existsSync } from "node:fs";
 import { join, relative, resolve, isAbsolute } from "node:path";
@@ -113,9 +114,9 @@ export function gitWritableRoots(cwd: string): string[] {
 
 export class CodexSession extends EventEmitter<AgentEvents> implements AgentProcess {
   state: "working" | "idle" | "exited" = "idle";
-  readonly pid?: number;
+  get pid(): number | undefined { return this.proc.pid; }
   private readonly options: CodexOptions;
-  private proc: ChildProcessWithoutNullStreams;
+  private proc: RuntimeChild;
   private buffer = "";
   private nextId = 0;
   private readonly pending = new Map<number, { resolve: (v: Json) => void; reject: (e: Error) => void; method: string }>();
@@ -169,10 +170,10 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
     const bin = process.env.NEXUS_CODEX ?? "codex";
     const script = /\.(m?[jt]s)$/.test(bin);
     const args = ["app-server"];
-    this.proc = spawn(script ? process.execPath : bin, script ? [bin, ...args] : args, {
-      cwd: options.cwd, env: agentEnv(options.env), stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
+    this.proc = spawnRuntimeChild(script ? process.execPath : bin, script ? [bin, ...args] : args, {
+      cwd: options.cwd, env: agentEnv(options.env), owned: options.ownProcesses,
     });
-    this.pid = this.proc.pid;
+    this.proc.on("spawn", () => { if (this.proc.pid) this.emit("facts", { pid: this.proc.pid }); });
     // A write to a process that is exiting (killed, crashed) fails with EPIPE: its exit is handled, the write is moot.
     this.proc.stdin.on("error", () => {});
     this.proc.stdout.setEncoding("utf8");
@@ -275,6 +276,8 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
   }
 
   kill(): void { if (this.state !== "exited") this.proc.kill(); }
+
+  async cleanup(): Promise<void> { await this.proc.cleanup?.(); this.openCommands.clear(); this.openAgents.clear(); }
 
   // ---------------------------------------------------------------- protocol
 
