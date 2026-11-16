@@ -28,7 +28,7 @@
 // left (git.yaml `cleanup.waiting`, the waiting list's "cleanup" item); Nexus does not try again, the user's Clean up
 // does. Never with --force.
 import { existsSync } from "node:fs";
-import { normPath, now, pendingProvisional, stepClosed, runGoing, type ProjectState, type ProjectStore, type QueueView } from "@nexus/protocol";
+import { hasOwnWorktree, normPath, now, pendingProvisional, stepClosed, runGoing, type ProjectState, type ProjectStore, type QueueView } from "@nexus/protocol";
 import { checkoutOf, patchGit } from "./gitinfo.ts";
 import { ROOT } from "./lifecycle.ts";
 import { cleanUp, fastForward, judgeMerge, leftText, reintegrate, stillEnding, withMergeLock, worktreeLeft } from "./mergeback.ts";
@@ -199,15 +199,17 @@ export class Merger {
     if (q.steps.some((s) => stillEnding(q, s))) { this.waits = true; return; }
     const path = checkoutOf(this.store, q);
     if (!path || samePath(path, state.project.root)) return;
-    let reason: string, files: string[] | undefined, more: number | undefined;
+    let waiting: CleanupWaiting;
     try {
       const left = existsSync(path) ? worktreeLeft(path) : { files: [], count: 0 };
       if (!left.count) { withMergeLock(this.store, q.id, () => cleanUp(this.store, q.id)); return; }
-      reason = `survey run ${q.id} is done, but its worktree stays: ${leftText(left)} left in it; look at them, then clean up (${path})`;
-      files = left.files;
-      if (left.count > left.files.length) more = left.count - left.files.length;
-    } catch (e) { reason = `survey run ${q.id} is done, but its worktree could not be cleaned up: ${firstLine(e)}`; }
-    patchGit(this.store, q.id, { cleanup: { waiting: { reason, since: now(), ...(files ? { files } : {}), ...(more ? { more } : {}) } } });
+      const more = left.count - left.files.length;
+      waiting = {
+        reason: `survey run ${q.id} is done, but its worktree stays: ${leftText(left)} left in it; look at them, then clean up (${path})`,
+        since: now(), files: left.files, ...(more ? { more } : {}),
+      };
+    } catch (e) { waiting = { reason: `survey run ${q.id} is done, but its worktree could not be cleaned up: ${firstLine(e)}`, since: now() }; }
+    patchGit(this.store, q.id, { cleanup: { waiting } });
   }
 
   /** Something keeps it waiting: recorded at the look's end (record). */
@@ -234,7 +236,13 @@ export class Merger {
 
 const key = (path: string) => normPath(path).toLowerCase();
 
-/** A survey run in a worktree of its own: nothing to merge back, its worktree is cleaned up once it is done. */
-const ownSurvey = (q: QueueView) => q.maintenance === "survey" && q.integration === true;
+/** What keeps a done survey run's worktree (git.yaml `cleanup.waiting`). */
+type CleanupWaiting = NonNullable<NonNullable<QueueView["git"]>["cleanup"]>["waiting"];
+
+/**
+ * A survey run in a worktree of its own, as closing.ts tells it (and gives it no integration step): nothing to merge
+ * back, its worktree is cleaned up once it is done.
+ */
+const ownSurvey = (q: QueueView) => q.maintenance === "survey" && hasOwnWorktree(q);
 
 const firstLine = (e: unknown) => (e as Error).message.split("\n")[0]!;
