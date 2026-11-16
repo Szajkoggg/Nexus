@@ -16,6 +16,7 @@ import {
   readAway, writeAway, awayNow, awayUntil, turnAway, expireAway, acceptPlanProposal, declinePlanProposal, handBackPlan, acceptTagProposal, declineTagProposal,
   STAT_DIMENSIONS, STAT_FILTERS, projectMetrics, sinceTime, statDimension, statsReport, stepStats, usageDays, type ProjectMetrics, type StatsReport, type UsageDays,
   SearchError, parseSearch, MIN_SAMPLES, queueEstimate, stepSamples, isOpenQuestion, writeCount, type EstimatesResponse, type LeftView, type TemplatesResponse, readTemplates, type ProjectSummary, type RemovalView,
+  projectIdeas, type IdeasResponse,
 } from "@nexus/protocol";
 import { newestFirst, projectDigest, projectRunning, usageSince, type DigestEvent, type DigestResponse, type DigestRunning, type UsageRun } from "@nexus/protocol/digest";
 import { Engine } from "./engine.ts";
@@ -344,6 +345,15 @@ app.get("/api/projects/:id/metrics", (c) => {
   const s = stateOf(e);
   if (!s) return c.json({ error: e.error }, 500);
   return c.json(projectMetrics(s) satisfies ProjectMetrics);
+});
+
+// The ideas overview (docs/ux/ideas-overview.md; @nexus/protocol ideas.ts): the notes as they are now, each Decided
+// entry's status and history from the queues that name it and the hand-over records. The notes are read, never written.
+app.get("/api/projects/:id/ideas", (c) => {
+  const e = c.get("entry");
+  const s = stateOf(e);
+  if (!s) return c.json({ error: e.error }, 500);
+  return c.json(projectIdeas(e.store, s) satisfies IdeasResponse);
 });
 
 // The queue templates in effect for the project (PROTOCOL.md, "Queue templates"), for "New queue from template".

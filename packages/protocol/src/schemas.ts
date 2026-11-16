@@ -792,6 +792,11 @@ export const Event = z.discriminatedUnion("type", [
    */
   z.object({ ...base, type: z.literal("static_analysis.declined"), reason: z.string().min(1) }),
   /**
+   * A thinking partner's record of what its hand-over covers (`nexus covers`): the note entries it passes on to the
+   * orchestrator, each a note reference. Conversations only; the ideas overview reads them as handed over (ideas.ts).
+   */
+  z.object({ ...base, type: z.literal("ideas.covered"), refs: z.array(z.string().regex(NOTE_REF, "a note reference: <notes folder>/<file>.md#<YYYY-MM-DD>")).min(1) }),
+  /**
    * A worker records a value of one of the project's metrics (`nexus metric record`), for its step at work, with the
    * metric's unit as it was then and the HEAD of its checkout (`commit`; absent outside a git repository).
    */
@@ -843,6 +848,9 @@ export const ORCHESTRATOR_ONLY: ReadonlySet<EventType> = new Set([
 
 /** Event types only a worker session may write: a metric's value belongs to a step's work (metrics.ts). */
 export const WORKER_ONLY: ReadonlySet<EventType> = new Set(["metric.recorded"]);
+
+/** Event types only a thinking partner's session (role conversation) may write. */
+export const CONVERSATION_ONLY: ReadonlySet<EventType> = new Set(["ideas.covered"]);
 
 /** Event types only the user's session may write (the server writes them for the dashboard). */
 export const USER_ONLY: ReadonlySet<EventType> = new Set(["step.interrupted", "review.rejected", "review.marked", "review.commented", "review.confirmed", "review.fix_asked"]);

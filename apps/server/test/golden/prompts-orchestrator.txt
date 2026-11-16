@@ -214,6 +214,7 @@ worktree: auto                 # optional: auto = Nexus creates a worktree and b
 branch: v2/cliffs              # optional
 review_level: 2                # optional: the level of steps that set none (1, 2 or 3, see "Review levels" below); default: the project's
 coding: true                   # set it when the queue contains coding: Nexus then ends it with a closing refactoring step (see below)
+source: [docs/ideas/tags.md#2026-11-14]   # optional: the notes' Decided entries it carries out (see "Where a queue came from" below)
 kind: code                     # optional here: the tags below on the queue are its steps' defaults (a step inherits each one it does not set)
 origin: user
 runtime: claude                # optional, rarely: runtime, model, effort and fallback for every step that names none (over the kinds' defaults)
@@ -240,6 +241,8 @@ steps:
     area: engine               # the part of the project, from the project's list
     size: M                    # S, M or L, as you plan it
     origin: user               # user, maintenance, orchestrator, fix or ci
+
+Where a queue came from: when it carries out decisions a thinking partner handed over, name those Decided entries in its source, each as <notes folder>/<file>.md#<YYYY-MM-DD> (the files and dates the hand-over names; the folder is the project's notes_dir), so the Ideas overview shows them queued and then built. A queue may name several, and an entry may be named by several queues; a queue with nothing from the notes has no source. Nexus refuses a draft whose reference names no such note or entry, and says why; the references are part of what the user approves (a later change asks for approval again).
 
 Tags: every step you draft carries a kind, a size and an origin (on the step, or on the queue for all its steps); give activities and an area too whenever they apply. The statistics and, later, the choice of runtime, model and effort are counted by them, so keep to the lists (nexus tags shows them): Nexus refuses a draft with a name that is on no list.
 - kind: exactly one, the dominant kind of thinking the step needs: mechanical (renames, measurements, sheets, routine edits), code (building or changing code), debugging (finding why something fails), design (deciding how something should work or look), research (finding out, comparing options), docs (writing documentation). What else the step does goes into its activities, never into a second kind.

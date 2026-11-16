@@ -423,7 +423,7 @@ test("the orchestrator's context care: the summary request, the fresh session's 
   golden("orchestrator-fresh", tr.text([[fresh, "<fresh session>"], [old, "<orchestrator session>"], [root, "<root>"]]));
 });
 
-test("the thinking partner's briefing, with a notes folder and without, at each web level, matches the golden file", (t) => {
+test("the thinking partner's briefing and hand-over, with a notes folder and without, at each web level, match the golden file", (t) => {
   const { root, store } = setup(t, "partner");
   const tr = new Transcript("partner");
   const orchestrator = new Orchestrator(store, { draining: false } as unknown as Engine, () => {});
@@ -441,6 +441,8 @@ test("the thinking partner's briefing, with a notes folder and without, at each 
     conversations.say(s.id, "Let us think.");
     const o = tr.stands.at(-1)!.launch.options as { appendSystemPrompt?: string; instructions?: string };
     tr.add(o.appendSystemPrompt ?? o.instructions ?? "(none)");
+    // The hand-over's instruction: with a notes folder it asks for the record of the entries covered (nexus covers).
+    if (web !== "fetch") { tr.section(`the hand-over, ${label}`); conversations.handoff(s.id); }
   }
   golden("partner", tr.text([[root.replaceAll("\\", "/"), "<root>"], [root, "<root>"]]));
 });

@@ -347,6 +347,7 @@ worktree: auto                 # optional: auto = Nexus creates a worktree and b
 branch: v2/cliffs              # optional
 review_level: 2                # optional: the level of steps that set none (1, 2 or 3, see "Review levels" below); default: the project's
 coding: true                   # set it when the queue contains coding: Nexus then ends it with a closing refactoring step (see below)
+source: [docs/ideas/tags.md#2026-11-14]   # optional: the notes' Decided entries it carries out (see "Where a queue came from" below)
 kind: code                     # optional here: the tags below on the queue are its steps' defaults (a step inherits each one it does not set)
 origin: user
 runtime: claude                # optional, rarely: runtime, model, effort and fallback for every step that names none (over the kinds' defaults)
@@ -373,6 +374,8 @@ steps:
     area: engine               # the part of the project, from the project's list
     size: M                    # S, M or L, as you plan it
     origin: user               # user, maintenance, orchestrator, fix or ci
+
+Where a queue came from: when it carries out decisions a thinking partner handed over, name those Decided entries in its source, each as <notes folder>/<file>.md#<YYYY-MM-DD> (the files and dates the hand-over names; the folder is the project's notes_dir), so the Ideas overview shows them queued and then built. A queue may name several, and an entry may be named by several queues; a queue with nothing from the notes has no source. Nexus refuses a draft whose reference names no such note or entry, and says why; the references are part of what the user approves (a later change asks for approval again).
 
 Tags: every step you draft carries a kind, a size and an origin (on the step, or on the queue for all its steps); give activities and an area too whenever they apply. The statistics and, later, the choice of runtime, model and effort are counted by them, so keep to the lists (nexus tags shows them): Nexus refuses a draft with a name that is on no list.
 - kind: exactly one, the dominant kind of thinking the step needs: mechanical (renames, measurements, sheets, routine edits), code (building or changing code), debugging (finding why something fails), design (deciding how something should work or look), research (finding out, comparing options), docs (writing documentation). What else the step does goes into its activities, never into a second kind.
@@ -795,7 +798,8 @@ The project's root is ${p.root.replaceAll("\\", "/")}; paths below are relative 
 What you may do:
 - Read anything in the project (and run \`nexus status\` to see its queues and runs, read-only git commands for its history).
 - Read about Nexus itself with \`nexus help\`: it lists its topics (how agents report, review material, questions, refusals, commits, tests); \`nexus help <topic>\` gives one. Use it when the user asks how Nexus works or what its agents are held to.
-${notes ? `- Write only in ${notes}/ (relative to the project's root): notes of what the user decides or asks you to record. Keep to the project's own conventions for that folder (its README or AGENTS.md). One file per topic, dated entries, decisions separate from open ideas.` : `- No notes folder is set for this project, so you cannot write files; the user can set one in the project's settings.`}
+${notes ? `- Write only in ${notes}/ (relative to the project's root): notes of what the user decides or asks you to record. Keep to the project's own conventions for that folder (its README or AGENTS.md). One file per topic, dated entries, decisions separate from open ideas.
+- Nexus's ideas overview reads the notes, so keep these lines in every note: under its title a \`**Summary:**\` line (what the topic is and what is decided so far) and an \`**Area:**\` line with the one area the topic is mostly about, from the project's list (\`nexus tags\` shows it), optionally with a sub-group after a slash (\`**Area:** dashboard / chats\`); the user's decisions under a \`## Decided\` heading in dated entries (\`### YYYY-MM-DD\`). When the user drops a decision, or a later one replaces it, never delete its entry: write \`**Dropped:** <date>: <why>\` or \`**Replaced by:** <file>.md#<date>\` right under its heading.` : `- No notes folder is set for this project, so you cannot write files; the user can set one in the project's settings.`}
 ${partnerWeb(p.conversations?.web ?? "search")}
 - You start no work: no builds, no tests, no code changes, no queues. When the user wants something done, suggest handing the conversation to the orchestrator (the "Hand to orchestrator" button); then you write the summary it asks for.
 - ${SHELL_COMMANDS}

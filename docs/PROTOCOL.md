@@ -582,6 +582,7 @@ Every line:
 | `review.confirmed` | `queue`, `step` | User only: confirms a provisional acceptance |
 | `review.fix_asked` | `queue`, `step`, `text` | User only: Fix it on a provisional acceptance; the orchestrator drafts a revision with a step that fixes it |
 | `status.set` | `queue`, `step?`, `to` (`skipped`, `finished`, `cancelled`, `propose-lift`), `reason` | Orchestrator only: housekeeping; the server checks it and records an entry in the queue's `changes` (see `queue.yaml`). A worker's is ignored by derivation, and the server applies only the orchestrator's own requests |
+| `ideas.covered` | `refs` (note references, at least one) | Thinking partners only (`nexus covers`): the Decided entries a hand-over passes on; the ideas overview reads them as handed over (see "Conversations"). Another session's is ignored with a warning |
 | `log` | `level`, `text` | Anything else worth keeping |
 
 The server validates every event against the writer's role and ignores (and reports) what that role may not do.
@@ -1103,6 +1104,8 @@ nexus propose-change W --file patch.yaml --reason "..."
 nexus template list | show <id>                # the queue templates in effect (see "Queue templates")
 nexus recurring list                           # the recurring queues and their state (see "Recurring queues")
 nexus static-analysis [status]                 # the stacks and static analysis Nexus sees, and the reminder's state (see "Static analysis reminder")
+# thinking partner only
+nexus covers tags.md#2026-11-14 docs/ideas/plan.md#2026-11-15   # in a hand-over: the Decided entries it passes on (ideas.covered); the notes folder may be left out; each checked against the notes, a missing note or date refused with the note's dates
 # orchestrator only
 nexus queue draft --file queue.yaml
 nexus queue draft --template bugfix --set issue="..." --set area=engine [--id BF]   # writes .nexus/drafts/BF.yaml to complete and upload
@@ -1232,6 +1235,7 @@ from every agent session, and the others from every session but an orchestrator'
 | `POST /api/projects/:id/questions/:qid/answer` | `text`, `continue?` | The user's answer, routed to the asker |
 | `POST /api/projects/:id/queues/:q/run` | `action` (`start`, `pause`, `resume`, `stop`, `stop_at_once`, `cancel_start`), `runtime?`, `model?`, `effort?`, `session?`, `after?`, `next?`, `at?` | Runs the queue through a Nexus-launched session (`session` continues an existing one). `start` with `after` (a queue id or a list): the user's place for the queue in the plan, it starts when those are done; with `next: true`: in the plan with none before it (`{message}`; see "The plan"); with `at` (ISO 8601, or `usage-reset`): a schedule (`{message}`); `cancel_start` takes the queue out of the plan (`{message}`). `stop` pauses and sends the existing Stop now message (`text?` supplies the reason). `stop_at_once` pauses, interrupts the turn and kills only this queue's worker process, waiting for its exit before success; keeps uncommitted changes and the session, writes `step.interrupted`. No worker, a finished run, a stop already in progress or a session reused by another queue: 409. Resume during exit: 409; afterwards it continues the step in the same session. No CLI or orchestrator request action exposes `stop_at_once` |
 | `GET /api/projects/:id/estimates` | | Expected times of the project's open queues, as estimates (`{ samples, min, queues: { <id>: { steps, ms? } } }`): `steps` the steps left (not closed), `ms` their expected time, absent while fewer than `min` (5) steps are finished. A finished (done) step's time is the sum of its worker turns' `duration_ms` in `turns.jsonl` (send-back rounds included, the wait for its review not), over every project the server has; a step to come takes the average of those on its model and effort, else its model, else all, each from at least 5 steps |
+| `GET /api/projects/:id/ideas` | | The ideas overview (`IdeasResponse`: `notes_dir`, null without a notes folder; `notes`, each with `file`, `title`, `summary?`, `area?`, `group?`, `area_from?` (`note` or `queues`), `open`, `ideas`, `status` and `queues`, and its `entries`, each with `ref`, `date`, `headings`, `lead`, `decisions`, `dropped?`, `replaced_by?`, `status`, `queues` and `history`; `unknown_refs`, queues' references to nothing). Derived on each request from the notes, the queues and the hand-over records; the notes are only read (see "Conversations"). Unknown project: 404 |
 | `GET /api/projects/:id/metrics` | | The project's metrics and their values (`ProjectMetrics`: `metrics`, its own definitions and every check's time seen, `check:<name>`; `values`, oldest first, each a `StepView.metrics` entry with its `queue` and `step`); see "Project metrics". Unknown project: 404 |
 | `GET /api/stats?by=&project=&since=&kind=&activity=&area=&size=&origin=` | | The statistics (`StatsReport`, see "Statistics"): every registered project, or one (`project`; unknown: 404), grouped by `by` (`model`, `effort`, `kind`, `activity`, `area`, `size`, `origin`; default `model`; another: 400), the steps whose last outcome is at or after `since` (a date or a time; unreadable: 400), narrowed to the steps under each tag value given (`kind=code`, `area=p/engine` across projects; the value as the groups name it) |
 | `GET /api/usage/days?since=` | | The usage windows day by day for the global Stats view (`UsageDays`, see "Statistics") from `since` (a date or a time; default 30 days ago; unreadable: 400) to today, with `threshold`, the global `defaults.usage_pause_threshold` |
@@ -1536,9 +1540,11 @@ hand-over's again: its reply goes to the orchestrator. Then `interrupted` is dro
 role `conversation`: a thinking partner the user talks with about the project, one session per topic, with its chat
 in `chat.jsonl` (`from: partner` for its replies, whole). It reads the whole project and writes only in `notes_dir`
 (relative to the root, checked to lie inside it): Claude Code runs it in `dontAsk` mode allowed `Read`, `Grep`,
-`Glob`, `nexus status`, `nexus help` and read-only git (`git log`, `git status`, `git diff`, `git show`) on both shell
-tools (`Bash(nexus status:*)` and `PowerShell(nexus status:*)`, and so on), and `Edit(<notes_dir>/**)` only; Codex runs it
-with `notes_dir` as its working directory in a `workspace-write` sandbox (`read-only` without a notes folder), approval
+`Glob`, `nexus status`, `nexus help`, `nexus tags` and read-only git (`git log`, `git status`, `git diff`, `git show`) on both shell
+tools (`Bash(nexus status:*)` and `PowerShell(nexus status:*)`, and so on), and `Edit(<notes_dir>/**)` and `nexus covers`
+(which appends to its own events) only with a notes folder; Codex runs it
+with `notes_dir` as its working directory in a `workspace-write` sandbox whose one other writable root is its own session
+folder, for `nexus covers` (`read-only` without a notes folder), approval
 `never`, where its commands (`nexus help` among them, which only reads) run in the sandbox. Its briefing points it to
 `nexus help` for how Nexus works (decided 2026-11-15, queue OP). It starts no work. An idle partner's process ends after 15 minutes; the next message resumes the conversation.
 
@@ -1549,7 +1555,9 @@ named so), and the dated Decided entries. A Decided section is a heading named "
 heading of its level or above; in it a heading that begins with a date, or ends with `(decided <date>)`, starts that
 date's entry (a heading `… (decided <date>)` is one anywhere), a deeper heading without a date goes on with it, and the
 headings of one date are one entry. An entry's lines `**Dropped:** <date>: <why>` and `**Replaced by:**
-<file>#<date>`, written by the partner, mark it so. Each entry's status is derived, never kept: `decided` (nothing
+<file>#<date>`, written by the partner, mark it so. The partner's briefing asks for these lines (the Summary, one
+Area from the project's list, dated Decided entries, Dropped and Replaced by instead of deleting an entry); the
+orchestrator's asks it to name the entries a queue carries out in the queue's `source`. Each entry's status is derived, never kept: `decided` (nothing
 since), `handed_over` (a hand-over record covers it), `queued` (a queue that is not cancelled names it in its `source`,
 from the upload on), `built` (every such queue is done), and `dropped` or `replaced`, which win over every other, even
 after a queue built it. A topic shows its least advanced live entry, `worked_out` with no entry at all (only dropped or
@@ -1599,7 +1607,9 @@ whole into the orchestrator's chat. Asked while the partner is still at a turn, 
 end and runs as a turn of its own (that turn's reply stays the partner's message). The summary covers only the topics discussed in that conversation, unless the
 user asked in it to include others: from a notes file, what this conversation decided or recorded; another topic in
 the notes folder, even a related one, is named at most as "see also" (its file), without its content. Only a notes
-file's Decided section holds decisions, and the summary names the dates of the Decided entries it covers. `GET …/queues/:q/steps/:s/conversation` answers `{ conversation }`: the step's
+file's Decided section holds decisions, and the summary names the dates of the Decided entries it covers. With a notes
+folder the instruction also asks the partner to record those entries first with `nexus covers` (an `ideas.covered`
+event among its own events), for the ideas overview. `GET …/queues/:q/steps/:s/conversation` answers `{ conversation }`: the step's
 latest conversation that is not archived (the one with the latest message, or the newest when none has one), or
 `null`.
 

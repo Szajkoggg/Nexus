@@ -1,6 +1,6 @@
 // Derives the dashboard's view of a project from its files. Pure apart from reading through the store;
 // nothing here is ever written back (state.json, if kept, is only a cache of this).
-import { ORCHESTRATOR_ONLY, USER_ONLY, WORKER_ONLY, type MetricsFile, type StatusChange, type Event, type InboxEntry, type Note, type GitFile, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type RecurringFile, type ReviewItem, type ReviewLevel, type LegacyReviewPolicy, type AwayFile, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type PlanFile, type StepDef, type StepStatus, type TagProposal, type TagsFile } from "./schemas.ts";
+import { CONVERSATION_ONLY, ORCHESTRATOR_ONLY, USER_ONLY, WORKER_ONLY, type MetricsFile, type StatusChange, type Event, type InboxEntry, type Note, type GitFile, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type RecurringFile, type ReviewItem, type ReviewLevel, type LegacyReviewPolicy, type AwayFile, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type PlanFile, type StepDef, type StepStatus, type TagProposal, type TagsFile } from "./schemas.ts";
 import { ProjectStore, chainPlan, readAway, revisionHash } from "./store.ts";
 import { awayAt, awayNow, type AwayNow } from "./away.ts";
 import { formatClock, type Segment } from "./times.ts";
@@ -287,6 +287,9 @@ export function loadProjectState(store: ProjectStore): ProjectState {
         }
         if (WORKER_ONLY.has(e.type) && s.role !== "worker") {
           warnings.push(`session ${id}: ${e.type} is for workers; ignored`); continue;
+        }
+        if (CONVERSATION_ONLY.has(e.type) && s.role !== "conversation") {
+          warnings.push(`session ${id}: ${e.type} is for thinking partners; ignored`); continue;
         }
         events.push(e);
       }
@@ -870,6 +873,7 @@ function apply(
     case "metric.defined":
     case "recurring.set":
     case "static_analysis.declined":
+    case "ideas.covered":
     default:
       return;
   }

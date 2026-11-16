@@ -10,7 +10,7 @@ import { join } from "node:path";
 import YAML from "yaml";
 import {
   ActionError, ProjectStore, QueueFile, applyDraft, approveQueue, deriveIdeas, ideaQueues, importedFrom, loadProjectState,
-  noteRefs, parseNote, parseNoteRef, readNotes, revisionHash, topicStatus, type IdeaQueue,
+  noteRefs, parseNote, parseNoteRef, projectIdeas, readHandOvers, readNotes, revisionHash, topicStatus, type Event, type IdeaQueue,
 } from "../src/index.ts";
 
 const NOTE = `# Plan view
@@ -293,4 +293,19 @@ test("the queues as the derivation reads them: their references, accepted matche
   assert.deepEqual(q!.areas, ["cli"]);
   assert.equal(q!.status, "approved");
   assert.ok(q!.created_at && q!.approved_at && !q!.finished_at);
+});
+
+test("a hand-over record counts only from a thinking partner's own events; another session's is ignored with a warning", () => {
+  const { st, root } = project();
+  const session = (id: string, role: "conversation" | "worker") =>
+    st.writeSession({ protocol: 1, id, project: "p", role, runtime: "claude", cwd: root, launched_by: "nexus", created_at: "2026-11-15T09:00:00Z", title: `Talk ${id}` });
+  session("c", "conversation");
+  session("w", "worker");
+  const covered = (s: string, at: string) => st.appendEvent({ v: 1, id: `${s}-${at}`, at, session: s, type: "ideas.covered", refs: ["docs/ideas/plan.md#2026-11-14"] } as Event);
+  covered("w", "2026-11-15T10:00:00Z");
+  covered("c", "2026-11-15T11:00:00Z");
+  assert.deepEqual(readHandOvers(st), [{ ref: "docs/ideas/plan.md#2026-11-14", at: "2026-11-15T11:00:00Z", session: "c", conversation: "Talk c" }]);
+  assert.ok(loadProjectState(st).warnings.some((w) => /ideas\.covered is for thinking partners; ignored/.test(w)));
+  const plan = projectIdeas(st, loadProjectState(st)).notes.find((n) => n.file === "docs/ideas/plan.md")!;
+  assert.equal(plan.entries[0]!.status, "handed_over");
 });
