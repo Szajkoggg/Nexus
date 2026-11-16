@@ -100,21 +100,22 @@ function headingDate(text: string): string | undefined {
   return decided?.[1];
 }
 
-/** The text of a bullet as a lead: its bold opening, else its first words; Markdown marks taken out. */
-function leadOf(bullet: string): string {
-  const bold = /^\*\*(.+?)\*\*/.exec(bullet);
-  const text = (bold ? bold[1]! : bullet).replace(/\*\*|`/g, "").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[.:;,]\s*$/, "").trim();
-  return text.length > 120 ? `${text.slice(0, 119).trimEnd()}…` : text;
-}
-
 /** A line's text without its Markdown marks (bold, code, links). */
 const plain = (text: string) => text.replace(/\*\*|`/g, "").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").trim();
 
+/** The text of a bullet as a lead: its bold opening, else its first words; Markdown marks taken out. */
+function leadOf(bullet: string): string {
+  const bold = /^\*\*(.+?)\*\*/.exec(bullet);
+  const text = plain(bold ? bold[1]! : bullet).replace(/[.:;,]\s*$/, "").trim();
+  return text.length > 120 ? `${text.slice(0, 119).trimEnd()}…` : text;
+}
+
 /** A field line under the title (`**Summary:** …`, `**Area:** …`) with its continuation lines, as one line. */
 function fieldOf(lines: string[], name: string): string | undefined {
-  const i = lines.findIndex((l) => l.startsWith(`**${name}:**`));
+  const label = `**${name}:**`;
+  const i = lines.findIndex((l) => l.startsWith(label));
   if (i < 0) return undefined;
-  const out = [lines[i]!.slice(name.length + 5).trim()];
+  const out = [lines[i]!.slice(label.length).trim()];
   for (let j = i + 1; j < lines.length; j++) {
     const l = lines[j]!;
     if (!l.trim() || l.startsWith("#") || l.startsWith("**")) break;
