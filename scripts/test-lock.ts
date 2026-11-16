@@ -10,25 +10,25 @@
 //   (killed, crashed) is taken over at once.
 // - A lock held longer than a full run can take (20 minutes since it was taken, NEXUS_TEST_LOCK_STALE_MS) is stale even
 //   if its process lives (a hung run, a pid reused by another process): it is taken over at once (queue TF).
+//   Without process queries, the holder instead renews the lock's mtime; only an unrenewed lease expires (queue PT).
 // - After 15 minutes (NEXUS_TEST_LOCK_MAX_MS) it runs anyway, without the lock: a stuck run, or a pid reused by another
 //   process, never blocks the suite for good.
 // - The lock is removed when the run ends (only if it is still this run's).
 // - The run ends with whoever started it (queue TF): a watchdog process watches the run's starter (this script's
-//   parent, and the shells and npm above it) and this script. When the starter is gone (a worker's background command
-//   ended on its time limit, a shell killed), the run's process tree is ended and the lock removed; when this script is
-//   killed by itself, the watchdog does it. On Windows a shell that is killed (cmd, Git Bash) leaves its children
-//   running, so nothing else would; a killed Node process takes its children along (libuv's job object), but not its
-//   lock.
+//   parent, and the shells and npm above it) and this script. The watchdog owns the runner. A known starter gone or
+//   the wrapper's IPC channel closed: it ends its own child and releases the lock. This needs no process query for
+//   ownership. If a sandbox ends both wrapper and watchdog, the lease expires without renewal.
 //
 // `npm run test:files` takes no lock and never waits: it runs a few files while working, and is short.
-import { execFile, spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { openSync, readFileSync, statSync, unlinkSync, writeFileSync, writeSync, closeSync } from "node:fs";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { openSync, readFileSync, statSync, unlinkSync, writeFileSync, writeSync, closeSync, futimesSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /** Who holds the lock, as its file says. */
-interface Holder { pid: number; cwd: string; since: string }
+interface Holder { pid: number; cwd: string; since: string; token?: string; lease?: boolean }
 
 interface LockOptions {
   /** The lock file (default: nexus-full-test.lock in the system's temporary folder, or NEXUS_TEST_LOCK). */
@@ -46,10 +46,13 @@ interface LockOptions {
   /** This run's pid and checkout, written into the lock (default: this process's). */
   pid?: number;
   cwd?: string;
+  /** Without process queries, renew a lease rather than relying on PID visibility or absolute run age. */
+  lease?: boolean;
+  signal?: AbortSignal;
 }
 
 /** The lock taken: `release()` removes it, if it is still this run's. */
-interface Lock { file: string; release: () => void }
+interface Lock { file: string; token?: string; release: () => void }
 
 const MINUTE = 60_000;
 /** A lock file younger than this that cannot be read is being written: its taker is alive. */
@@ -76,17 +79,28 @@ export function alive(pid: number): boolean {
 function readHolder(file: string): Holder | undefined {
   try {
     const h = JSON.parse(readFileSync(file, "utf8")) as Partial<Holder>;
-    return typeof h.pid === "number" ? { pid: h.pid, cwd: String(h.cwd ?? "?"), since: String(h.since ?? "?") } : undefined;
+    return typeof h.pid === "number" ? { pid: h.pid, cwd: String(h.cwd ?? "?"), since: String(h.since ?? "?"), token: h.token, lease: h.lease } : undefined;
   } catch { return undefined; }
 }
 
-/** Creates the lock file exclusively; false when it exists. */
-function create(file: string, holder: Holder): boolean {
+/** Creates the lock file exclusively, optionally renewing its lease; undefined when it exists. */
+function create(file: string, holder: Holder, staleMs: number): Lock | undefined {
   let fd: number;
   try { fd = openSync(file, "wx"); }
-  catch (e) { if ((e as NodeJS.ErrnoException).code === "EEXIST") return false; throw e; }
-  try { writeSync(fd, JSON.stringify(holder)); } finally { closeSync(fd); }
-  return true;
+  catch (e) { if ((e as NodeJS.ErrnoException).code === "EEXIST") return undefined; throw e; }
+  try { writeSync(fd, JSON.stringify(holder)); } catch (error) { closeSync(fd); throw error; }
+  // Renew through the open file, never its path: a replaced lock belongs to someone else.
+  const timer = holder.lease ? setInterval(() => {
+    try { const now = new Date(); futimesSync(fd, now, now); } catch { /* expiry releases an unrenewable lease */ }
+  }, Math.max(10, Math.min(1000, staleMs / 3))) : undefined;
+  timer?.unref();
+  let released = false;
+  return { file, token: holder.token, release: () => {
+    if (released) return;
+    released = true;
+    clearInterval(timer); closeSync(fd);
+    releaseIf(file, holder.pid, holder.token);
+  } };
 }
 
 /**
@@ -96,6 +110,10 @@ function create(file: string, holder: Holder): boolean {
 function stale(file: string, staleMs: number): { holder?: Holder; heldMs?: number } | undefined {
   const h = readHolder(file);
   if (h) {
+    if (h.lease) {
+      try { const heldMs = Date.now() - statSync(file).mtimeMs; return heldMs > staleMs ? { holder: h, heldMs } : undefined; }
+      catch { return {}; }
+    }
     if (!alive(h.pid)) return { holder: h };
     const heldMs = Date.now() - Date.parse(h.since);
     return heldMs > staleMs ? { holder: h, heldMs } : undefined; // an unreadable `since` (NaN) is never stale
@@ -105,8 +123,9 @@ function stale(file: string, staleMs: number): { holder?: Holder; heldMs?: numbe
 }
 
 /** Removes the lock file if `pid` still holds it. */
-function releaseIf(file: string, pid: number): void {
-  if (readHolder(file)?.pid !== pid) return;
+function releaseIf(file: string, pid: number, token?: string): void {
+  const holder = readHolder(file);
+  if (holder?.pid !== pid || (token !== undefined && holder.token !== token)) return;
   try { unlinkSync(file); } catch { /* gone already */ }
 }
 
@@ -123,22 +142,25 @@ export async function acquire(o: LockOptions = {}): Promise<Lock | undefined> {
   const pollMs = o.pollMs ?? 1000;
   const sayEveryMs = o.sayEveryMs ?? MINUTE;
   const say = o.say ?? ((line: string) => process.stderr.write(`${line}\n`));
-  const me: Holder = { pid: o.pid ?? process.pid, cwd: resolve(o.cwd ?? process.cwd()), since: new Date().toISOString() };
-  const lock: Lock = { file, release: () => releaseIf(file, me.pid) };
+  const me: Holder = { pid: o.pid ?? process.pid, cwd: resolve(o.cwd ?? process.cwd()), since: new Date().toISOString(), token: randomUUID(), ...(o.lease ? { lease: true } : {}) };
   const started = Date.now();
   let lastSaid: number | undefined;
   for (;;) {
-    if (create(file, me)) return lock;
+    if (o.signal?.aborted) return undefined;
+    const fresh = create(file, me, staleMs);
+    if (fresh) return fresh;
     const gone = stale(file, staleMs);
     if (gone) {
       // Taken over: removed, then created exclusively again (of two runs taking it over at once, one gets it). A run
       // that held it too long is left running: it is not this run's to end, and its end leaves the lock alone.
       try { unlinkSync(file); } catch { /* another run removed it */ }
-      if (create(file, me)) {
+      const taken = create(file, me, staleMs);
+      if (taken) {
         const h = gone.holder;
-        if (h && gone.heldMs !== undefined) say(`npm test: took over the full-test lock of a run that has held it for ${Math.round(gone.heldMs / MINUTE)} min, longer than a full run takes (pid ${h.pid}, ${h.cwd})`);
+        if (h?.lease) say(`npm test: took over an expired full-test lease (pid ${h.pid}, ${h.cwd})`);
+        else if (h && gone.heldMs !== undefined) say(`npm test: took over the full-test lock of a run that has held it for ${Math.round(gone.heldMs / MINUTE)} min, longer than a full run takes (pid ${h.pid}, ${h.cwd})`);
         else if (h) say(`npm test: took over the full-test lock of a run that is gone (pid ${h.pid}, ${h.cwd})`);
-        return lock;
+        return taken;
       }
       continue;
     }
@@ -199,6 +221,7 @@ const run = (file: string, args: string[]) => new Promise<string | undefined>((d
  * parent is in MSYS's own process table (its ps, beside its bash.exe), whose ppid it then gets.
  */
 export async function ancestry(pid: number): Promise<Proc[]> {
+  if (process.env.NEXUS_TEST_LOCK_QUERY === "off") return [];
   if (process.platform !== "win32") {
     const out = await run("ps", ["-A", "-o", "pid=", "-o", "ppid=", "-o", "args="]);
     const all = new Map<number, Proc>();
@@ -274,60 +297,50 @@ export function msysParents(out: string): Map<number, number> {
   return parents;
 }
 
-/**
- * Ends the run (`pid`, spawned by the wrapper) and everything it started: on Windows its tree, elsewhere its process
- * group (it was detached). Only for a pid known to be the run's: Windows reuses pids at once, and a tree kill of a
- * reused one ends another program's processes (a parallel test's server, seen while building this).
- */
-function killTree(pid: number): void {
-  if (process.platform === "win32") spawnSync("taskkill", ["/T", "/F", "/PID", String(pid)], { stdio: "ignore", windowsHide: true });
-  else try { process.kill(-pid, "SIGKILL"); } catch { /* the group is gone */ }
-}
+interface Control { args?: string[]; token?: string; stop?: boolean; signal?: NodeJS.Signals }
+interface Notice { ready?: boolean; queried?: boolean; code?: number; gone?: number }
 
-/**
- * The watchdog's end of a run whose wrapper is gone: on Windows only if `run` is still the wrapper's child (a process
- * keeps its parent's pid when the parent ends; a reused pid has another); elsewhere its process group, which exists
- * only while one of its processes lives.
- */
-async function endOrphanedRun(run: number | undefined, wrapper: number): Promise<void> {
-  if (!run || !alive(run)) return;
-  if (process.platform === "win32" && (await windowsWalk(run, 1))[0]?.ppid !== wrapper) return;
-  killTree(run);
-}
-
-/**
- * The watchdog (`node test-lock.ts --watchdog <wrapper> <parent> <lock file>`, started by runLocked with an IPC
- * channel): told the run's pid once it starts, it looks every second whether the starter chain lives. One of it gone:
- * it tells the wrapper, which ends the run and removes its lock (and does it itself if the wrapper has not after 10 s).
- * The channel closed without the watchdog being ended first, as a run's normal end does: the wrapper was killed, so it
- * ends the run's tree and removes the wrapper's lock. Until it knows the chain (a second or two on Windows), it watches
- * the parent alone; NEXUS_TEST_LOCK_WATCHED names a file it then writes the watched pids into (for tests).
- */
+/** The watchdog owns the runner. IPC loss ends its own child; no orphan PID needs to be rediscovered or trusted. */
 function watchdog(wrapper: number, parent: number, file: string, pollMs = 1000): void {
   process.stderr.on("error", () => {}); // the console may be gone with the starter
-  let run: number | undefined;
-  process.on("message", (m: { run?: number }) => { if (m.run) run = m.run; });
-  let cleaning = false;
-  const cleanUp = () => {
-    if (cleaning) return;
-    cleaning = true;
-    void endOrphanedRun(run, wrapper).finally(() => { releaseIf(file, wrapper); process.exit(0); });
+  let child: ChildProcess | undefined, token: string | undefined;
+  let ending = false;
+  const send = (message: Notice) => { if (process.connected) process.send!(message, () => {}); };
+  const finish = (code: number) => {
+    if (token) releaseIf(file, wrapper, token);
+    if (process.connected) process.send!({ code }, () => process.exit(code));
+    else process.exit(code);
   };
-  process.on("disconnect", cleanUp);
-  let watched = [parent];
-  void ancestry(parent).then((chain) => {
-    if (chain[0]?.pid === parent) watched = starterChain(chain);
-    const report = process.env.NEXUS_TEST_LOCK_WATCHED;
-    if (report) writeFileSync(report, JSON.stringify(watched));
+  const stop = () => {
+    if (ending) return;
+    ending = true;
+    if (!child || child.exitCode !== null || child.signalCode !== null) return finish(1);
+    if (process.platform !== "win32" && child.pid) {
+      try { process.kill(-child.pid, "SIGKILL"); } catch { child.kill("SIGKILL"); }
+    } else child.kill("SIGKILL"); // the held child handle; its Node/libuv job ends the descendants
+  };
+  process.on("disconnect", stop);
+  process.on("message", (m: Control) => {
+    if (m.stop) return stop();
+    if (m.signal) { child?.kill(m.signal); return; }
+    if (!m.args || child || ending) return;
+    token = m.token;
+    child = spawn(process.execPath, m.args, { stdio: "inherit", windowsHide: true, detached: process.platform !== "win32" });
+    child.on("error", () => finish(1));
+    child.on("exit", (code, signal) => finish(ending ? 1 : code ?? (signal ? 1 : 0)));
   });
-  let told: number | undefined;
+  let watched: number[] = [];
+  void ancestry(parent).then((chain) => {
+    const queried = chain[0]?.pid === parent;
+    if (queried) watched = starterChain(chain);
+    const report = process.env.NEXUS_TEST_LOCK_WATCHED;
+    if (report) writeFileSync(report, JSON.stringify({ watched, guard: process.pid, queried }));
+    send({ ready: true, queried });
+  });
   setInterval(() => {
     const gone = watched.find((p) => !alive(p));
     if (gone === undefined) return;
-    if (told === undefined) {
-      told = Date.now();
-      try { process.send!({ gone }); } catch { cleanUp(); }
-    } else if (Date.now() - told > 10_000) cleanUp();
+    send({ gone }); stop();
   }, pollMs);
 }
 
@@ -335,40 +348,44 @@ function watchdog(wrapper: number, parent: number, file: string, pollMs = 1000):
 async function runLocked(args: string[], o: LockOptions = {}): Promise<number> {
   const file = o.file ?? defaultLockFile();
   const say = o.say ?? ((line: string) => process.stderr.write(`${line}\n`));
-  // The watchdog first: a starter that goes while the run waits for the lock ends the wait too. Detached, so that it
-  // outlives this process: on Windows Node ends a process's children with it (libuv's job object), which ends the run's
-  // tree when this process is killed, but would end the watchdog too and leave the lock. It keeps this process from
-  // ending neither by itself nor by its channel.
-  const guard = spawn(process.execPath, [fileURLToPath(import.meta.url), "--watchdog", String(process.pid), String(process.ppid), file], { stdio: ["ignore", "ignore", "inherit", "ipc"], windowsHide: true, detached: true });
-  guard.on("error", () => {});
-  guard.unref(); guard.channel?.unref();
-  let child: ChildProcess | undefined;
-  guard.on("message", (m: { gone?: number }) => {
-    if (!m.gone) return;
-    say(`npm test: the process that started this run is gone (pid ${m.gone}); ending the run`);
-    if (child?.pid && child.exitCode === null && child.signalCode === null) killTree(child.pid); // still running: ours
-    releaseIf(file, o.pid ?? process.pid);
-    guard.kill();
-    process.exit(1);
+  // Detached so it can remove the lock when the sandbox kills this wrapper. The IPC channel is the lifetime
+  // connection, including where WMI/ps is denied. If the sandbox kills both, the unrenewed lease expires instead.
+  const guard = spawn(process.execPath, [fileURLToPath(import.meta.url), "--watchdog", String(process.pid), String(process.ppid), file], { stdio: ["ignore", "inherit", "inherit", "ipc"], windowsHide: true, detached: true });
+  const send = (message: Control) => { if (guard.connected) guard.send(message, () => {}); };
+  let lock: Lock | undefined;
+  const ready = new Promise<Notice | undefined>((res) => {
+    guard.on("message", (m: Notice) => { if (m.ready) res(m); });
+    guard.on("exit", () => res(undefined)); guard.on("error", () => res(undefined));
   });
-  const lock = await acquire({ ...o, file, say });
-  // In its own process group elsewhere than on Windows, so that its whole tree can be ended (killTree).
-  const run = spawn(process.execPath, args, { stdio: "inherit", windowsHide: true, detached: process.platform !== "win32" });
-  child = run;
-  if (run.pid && guard.connected) guard.send({ run: run.pid }, () => {});
-  const forward = (sig: NodeJS.Signals) => () => { try { run.kill(sig); } catch { /* ended */ } };
+  const ended = new Promise<number>((res) => {
+    guard.on("exit", (code) => res(code ?? 1)); guard.on("error", () => res(1));
+    guard.on("message", (m: Notice) => {
+      if (m.gone) say(`npm test: the process that started this run is gone (pid ${m.gone}); ending the run`);
+    });
+  });
+  const parentGone = () => send({ stop: true });
+  process.on("disconnect", parentGone); // cooperative callers can supply their own lifetime IPC too
+  const forward = (signal: NodeJS.Signals) => () => send({ signal });
   const onInt = forward("SIGINT"), onTerm = forward("SIGTERM");
   process.on("SIGINT", onInt); process.on("SIGTERM", onTerm);
-  const done = () => { guard.kill(); lock?.release(); };
-  process.on("exit", done); // also when this process is ended some other way it can still run
   try {
-    return await new Promise<number>((res) => {
-      run.on("error", () => res(1));
-      run.on("exit", (code, signal) => res(code ?? (signal ? 1 : 0)));
-    });
+    const mode = await ready;
+    if (!mode) return await ended;
+    if (!mode.queried) say("npm test: process queries unavailable; using lifetime IPC and a renewable lock lease");
+    // A starter lost while waiting for a busy lock ends the wait too.
+    const controller = new AbortController();
+    void ended.then(() => controller.abort());
+    const acquired = acquire({ ...o, file, say, lease: o.lease ?? !mode.queried, signal: controller.signal });
+    const result = await Promise.race([acquired.then((value) => ({ lock: value })), ended.then((code) => ({ code }))]);
+    if ("code" in result) { void acquired.then((value) => value?.release()); return result.code; }
+    lock = result.lock;
+    if (!guard.connected) return await ended;
+    send({ args, token: lock?.token });
+    return await ended;
   } finally {
-    done();
-    process.off("SIGINT", onInt); process.off("SIGTERM", onTerm); process.off("exit", done);
+    lock?.release();
+    process.off("disconnect", parentGone); process.off("SIGINT", onInt); process.off("SIGTERM", onTerm);
+    if (process.connected) process.disconnect();
   }
 }
 

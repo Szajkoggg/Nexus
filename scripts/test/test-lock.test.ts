@@ -5,7 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, statSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -140,7 +140,7 @@ test("the processes whose end ends a run: its parent, then the shells and npm ab
  * `gitBash`), with a test file that starts a process of its own and waits long: resolves once the run is at work and
  * its watchdog knows what it watches, with the pids.
  */
-async function longRun(file: string, gitBash?: string): Promise<{ starter: ChildProcess; watched: number[]; end: () => void; pids: { wrapper: number; runner: number; testFile: number; grandchild: number } }> {
+async function longRun(file: string, gitBash?: string, noQuery = false): Promise<{ starter: ChildProcess; watched: number[]; end: () => void; pids: { wrapper: number; guard: number; runner: number; testFile: number; grandchild: number } }> {
   const dir = mkdtempSync(join(tmpdir(), "nexus-test-lock-"));
   const pidsFile = join(dir, "pids.json");
   const watchedFile = join(dir, "watched.json");
@@ -159,6 +159,7 @@ async function longRun(file: string, gitBash?: string): Promise<{ starter: Child
     "",
   ].join("\n"));
   const env: NodeJS.ProcessEnv = { ...process.env, NEXUS_TEST_LOCK: file, NEXUS_TEST_LOCK_WATCHED: watchedFile };
+  if (noQuery) env.NEXUS_TEST_LOCK_QUERY = "off";
   // Not a test of this run's own: node --test inside a test file would skip its files.
   delete env.NEXUS_DIR; delete env.NEXUS_SESSION; delete env.NEXUS_HANDOVER; delete env.NODE_TEST_CONTEXT;
   // A shell, as npm and a worker's command have: killed, it leaves its children running (a Node process would take its
@@ -166,11 +167,15 @@ async function longRun(file: string, gitBash?: string): Promise<{ starter: Child
   const slash = (p: string) => p.replaceAll("\\", "/");
   const line = `"${slash(process.execPath)}" "${slash(join(scripts, "test-lock.ts"))}" --test "${slash(long)}"`;
   // In Git Bash a bash inside, as npm's own script has (an MSYS program exec'd by a forked MSYS process).
-  const starter = gitBash ? spawn(gitBash, ["-c", `bash -c '${line}; true'; true`], { env, stdio: "ignore", windowsHide: true })
+  // A cooperative starter's IPC closes on death. The detached wrapper survives its parent's Windows job, so this
+  // case proves the lifetime connection ends the run without any process query or inherited job doing it for us.
+  const connected = `const {spawn}=require('node:child_process'); const c=spawn(process.execPath, ${JSON.stringify([join(scripts, "test-lock.ts"), "--test", long])}, {stdio:['ignore','ignore','ignore','ipc'],detached:true,windowsHide:true}); c.on('exit',()=>process.exit()); setTimeout(()=>process.exit(1),120000);`;
+  const starter = noQuery ? spawn(process.execPath, ["-e", connected], { env, stdio: "ignore", windowsHide: true })
+    : gitBash ? spawn(gitBash, ["-c", `bash -c '${line}; true'; true`], { env, stdio: "ignore", windowsHide: true })
     : process.platform === "win32" ? spawn("cmd.exe", ["/d", "/s", "/c", `"${line}"`], { env, stdio: "ignore", windowsHide: true, windowsVerbatimArguments: true })
     : spawn("sh", ["-c", `${line}; true`], { env, stdio: "ignore" });
   const read = <T>(f: string): T | undefined => { try { return JSON.parse(readFileSync(f, "utf8")) as T; } catch { return undefined; } };
-  const known = () => ({ ...read<{ runner: number; testFile: number; grandchild: number }>(pidsFile), wrapper: read<{ pid: number }>(file)?.pid });
+  const known = () => ({ ...read<{ runner: number; testFile: number; grandchild: number }>(pidsFile), wrapper: read<{ pid: number }>(file)?.pid, guard: read<{ guard: number }>(watchedFile)?.guard });
   // For a test that fails half way: the starter, through its handle, and so the run with it (or, if that is what
   // failed, the run ends by itself within two minutes). Never a recorded pid that may have ended: Windows reuses pids at
   // once, and a tree kill of a reused one ended a parallel test's server (seen while building this).
@@ -179,8 +184,8 @@ async function longRun(file: string, gitBash?: string): Promise<{ starter: Child
     if (Date.now() > until) { end(); throw new Error("the run did not start"); }
     await new Promise((r) => setTimeout(r, 50));
   }
-  const pids = known() as { runner: number; testFile: number; grandchild: number; wrapper: number };
-  return { starter, pids, end, watched: read<number[]>(watchedFile) ?? [] };
+  const pids = known() as { runner: number; testFile: number; grandchild: number; wrapper: number; guard: number };
+  return { starter, pids, end, watched: read<{ watched: number[] }>(watchedFile)?.watched ?? [] };
 }
 
 /** Git Bash's bash.exe on Windows (the launcher in its bin folder, as a worker's commands run), if it is installed. */
@@ -198,7 +203,7 @@ test("a run ends with its starter: its runner, its test files and what they star
   const file = lockFile();
   const { starter, pids, end } = await longRun(file);
   try {
-    assert.deepEqual(Object.values(pids).map(alive), [true, true, true, true], "the run is at work");
+    assert.ok(Object.values(pids).every(alive), "the run is at work");
     starter.kill("SIGKILL"); // the starter ends without a word (a background command's time limit, a killed shell)
     await allGone({ ...pids, starter: starter.pid! }, file);
   } finally { end(); }
@@ -236,6 +241,86 @@ test("a run whose wrapper is killed by itself ends too, and its lock goes", asyn
     process.kill(pids.wrapper, "SIGKILL");
     await allGone(pids, file);
   } finally { end(); }
+});
+
+for (const ended of ["starter", "wrapper"] as const) {
+  test(`without process queries, losing the ${ended} closes the lifetime connection and ends the owned tree`, async () => {
+    const file = lockFile();
+    const { starter, pids, watched, end } = await longRun(file, undefined, true);
+    try {
+      assert.deepEqual(watched, [], "no ancestry was queried");
+      assert.equal(JSON.parse(readFileSync(file, "utf8")).lease, true);
+      assert.ok(Object.values(pids).every(alive));
+      if (ended === "starter") starter.kill("SIGKILL");
+      else process.kill(pids.wrapper, "SIGKILL");
+      await allGone(pids, file);
+    } finally { end(); }
+  });
+}
+
+test("an unrenewed lease expires even when its recorded PID is alive", async () => {
+  const file = lockFile();
+  writeFileSync(file, JSON.stringify({ pid: process.pid, cwd: "C:/lost-sandbox", since: new Date().toISOString(), lease: true, token: "lost" }));
+  const lines: string[] = [];
+  const started = Date.now();
+  const lock = await acquire({ file, lease: true, staleMs: 200, pollMs: 20, maxWaitMs: 3000, say: (line) => lines.push(line) });
+  try {
+    assert.ok(lock);
+    assert.ok(Date.now() - started >= 200, "the lease cannot be stolen before expiry");
+    assert.ok(lines.some((line) => line.includes("expired full-test lease")));
+    assert.notEqual(JSON.parse(readFileSync(file, "utf8")).token, "lost");
+  } finally { lock?.release(); }
+});
+
+test("a renewed lease keeps another run waiting beyond the original expiry", async () => {
+  const file = lockFile();
+  const first = await acquire({ file, lease: true, staleMs: 300, say: () => {} });
+  try {
+    assert.ok(first);
+    const second = await acquire({ file, lease: true, staleMs: 300, maxWaitMs: 800, pollMs: 20, say: () => {} });
+    try { assert.equal(second, undefined); }
+    finally { second?.release(); }
+    assert.equal(JSON.parse(readFileSync(file, "utf8")).token, first.token);
+  } finally { first?.release(); }
+});
+
+test("an old holder neither renews nor removes a replacement lease with the same PID", async () => {
+  const file = lockFile();
+  const old = await acquire({ file, lease: true, staleMs: 150, say: () => {} });
+  assert.ok(old);
+  unlinkSync(file);
+  writeFileSync(file, JSON.stringify({ pid: process.pid, cwd: "C:/next", since: new Date().toISOString(), lease: true, token: "replacement" }));
+  const before = statSync(file).mtimeMs;
+  await new Promise((r) => setTimeout(r, 250));
+  old.release();
+  assert.equal(statSync(file).mtimeMs, before, "the old timer only touches its original open file");
+  assert.equal(JSON.parse(readFileSync(file, "utf8")).token, "replacement");
+});
+
+test("lifetime IPC loss while waiting exits without releasing the other holder's lock", async () => {
+  const file = lockFile();
+  const held = await acquire({ file, say: () => {} });
+  const watchedFile = join(dirname(file), "watched.json");
+  const env: NodeJS.ProcessEnv = { ...process.env, NEXUS_TEST_LOCK: file, NEXUS_TEST_LOCK_QUERY: "off", NEXUS_TEST_LOCK_WATCHED: watchedFile };
+  delete env.NODE_TEST_CONTEXT;
+  const child = spawn(process.execPath, [join(scripts, "test-lock.ts"), "--test", tinyTest()], { env, stdio: ["ignore", "ignore", "pipe", "ipc"], windowsHide: true });
+  let output = "";
+  child.stderr!.on("data", (data: Buffer) => { output += data.toString(); });
+  const exited = new Promise<number | null>((resolve) => child.on("exit", resolve));
+  try {
+    for (const deadline = Date.now() + 10_000; !output.includes("npm test: waiting");) {
+      assert.ok(Date.now() < deadline, output);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    const guard = JSON.parse(readFileSync(watchedFile, "utf8")).guard as number;
+    child.disconnect();
+    assert.equal(await exited, 1);
+    assert.equal(alive(guard), false);
+    assert.equal(JSON.parse(readFileSync(file, "utf8")).token, held?.token, "the active holder keeps its lock");
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) child.kill();
+    held?.release();
+  }
 });
 
 test("after the longest wait the run goes without the lock, and says so", async () => {

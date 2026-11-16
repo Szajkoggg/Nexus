@@ -2040,17 +2040,18 @@ process alive). Decided:
 - **A watchdog process** per run (`test-lock.ts --watchdog`, detached, with an IPC channel to the wrapper) watches the
   run's starter: the wrapper's parent always, then each ancestor while it is a shell (cmd, bash, sh, PowerShell, ...)
   or npm, so up to the agent or terminal that ran the command and not beyond (not the Nexus server, whose restart is
-  not the run's end). One of them gone: the wrapper ends the run's tree (`taskkill /T`, a process group elsewhere)
-  and removes its lock. The wrapper killed by itself (its channel closed): the watchdog does it. It looks every
-  second; while waiting for the lock too.
+  not the run's end). Since PT2 the watchdog starts the runner itself. One of the watched processes gone, or the
+  wrapper's IPC closed: the watchdog ends its own child and removes the lock. On Windows it uses the retained child
+  handle and Node/libuv's job; elsewhere, the runner's process group. It looks every second; while waiting for the
+  lock too. It never needs a second process query to prove ownership of an orphaned runner.
 - **Found by asking the system**: on Windows one PowerShell walks the parents with a CIM query per level (about a
   second; the whole process table takes several, and `wmic` is gone from current Windows), and stops after the first
   that is no shell or npm: WMI is not cheap, and twelve levels per walk, about eight walks per suite (the run's and the
   lock tests'), coincided with the update tests timing out in most full runs. A parent newer than its
   child is a reused pid and ends the walk. Git Bash breaks the Windows chain where an MSYS process execs another (npm's
   own shell script does): the exec'd process's Windows parent is a stand-in that is gone, and the walk goes on through
-  MSYS's process table (`ps -e -l` beside its bash.exe: PID, PPID, WINPID). Until the chain is known only the parent is
-  watched; a starter that dies in that second or two is caught only if it is the parent.
+  MSYS's process table (`ps -e -l` beside its bash.exe: PID, PPID, WINPID). The run waits for this discovery before
+  acquiring its lock. Unknown ancestor PIDs are not used as evidence that a starter has died.
 - **Node already does part of it on Windows**: libuv puts a process's children in a job object that ends them with it,
   so a killed Node parent takes its children along (and a test whose starter is a Node process does not show the
   problem: the starter in the tests is a shell). That job would end the watchdog too, which is why it is detached.
@@ -2058,8 +2059,8 @@ process alive). Decided:
   process lives (a hung run, a pid reused): the next run takes it over at once instead of waiting 15 minutes and
   running without it. The old run is not ended (not that run's to end); its end leaves the new lock alone.
 - **Never a tree kill by a pid that may have been reused**: Windows gives a pid to a new process at once, and
-  `taskkill /T` of a reused one ends another program's tree. The wrapper ends its run only while the run's handle says
-  it runs; the watchdog ends an orphaned run only after checking it is still the wrapper's child; the tests end only
+  `taskkill /T` of a reused one ends another program's tree. The watchdog now owns the runner's process handle; no
+  PID from an ancestry snapshot is a cleanup target. The tests end only
   their own starter, through its handle, and their long run ends by itself within two minutes.
 - **Failing tests left servers running**: `chat-update.test.ts`, failing before its hand-over, released its stand-in
   build in `finally`, so the update went on after the test and started a successor server nobody ended (with its fake
@@ -2070,6 +2071,40 @@ process alive). Decided:
   worker runtime is idle, while the engine records the queue's `paused` state after its turn-settle delay. Under load
   the chat-update test observed `updating` while the queue still said `pausing`. It now also waits for `paused` before
   reading the run, keeping its assertions about the pause, restart flag and interrupted step unchanged.
+
+### Without process queries: lifetime IPC and a renewable lease (queue PT2)
+
+When WMI or `ps` cannot report the starter (or `NEXUS_TEST_LOCK_QUERY=off` explicitly disables discovery), the
+wrapper and watchdog still share an IPC channel. The watchdog owns the runner from its launch and can end it when
+the wrapper disappears, without identifying any process from a list. A cooperative caller may also supply a Node
+IPC channel to the wrapper: disconnecting that channel ends the run even if the wrapper itself survives its caller.
+No unavailable ancestor chain is guessed. A plain shell with no such connection cannot be watched beyond the
+sandbox's teardown of the wrapper when queries are denied.
+
+In this mode the lock carries `lease: true` and a random ownership token. Its holder renews its modification time
+through the open file descriptor every second (or one third of a shorter expiry, at least 10 ms). A live renewal
+keeps other runs waiting regardless of the original acquisition time or PID visibility. Without renewal for
+`NEXUS_TEST_LOCK_STALE_MS` (20 minutes by default), another run can take it over. This also handles a sandbox killing
+both wrapper and watchdog: no observer needs to survive to release the lease. Expiry makes the lock reclaimable;
+the next acquirer removes the old file. The normal maximum wait remains 15 minutes.
+
+Renewal uses the original open file, not its pathname, and release checks the ownership token as well as PID. A
+superseded holder cannot renew or remove its replacement, even when the PID is the same. Older records without a
+lease retain the original dead-PID and 20-minute absolute-age behavior; available process queries retain the
+existing ancestor-watch behavior. The private lock and IPC formats are in PROTOCOL.md.
+
+Tests disable queries and remove either the connected starter or the wrapper, then check the watchdog, runner,
+test process, grandchild and lock are gone. They also cover expiry with a still-live recorded PID, renewal beyond
+the initial deadline, and safe replacement under the same PID. The existing shell and Git Bash tests still run
+where system queries are available.
+
+The real probe (Codex 0.167.2, `gpt-6-luna`, effort low, workspace-write, approval never, an isolated temporary
+folder) ran a tiny test without WMI, then started a long test. Interrupting the turn and closing the sandbox ended
+all five observed processes, including the watchdog. Consequently the lock file remained as an unrenewed lease;
+a second real sandbox invocation, without a model call, reclaimed the expired lease and removed it after its tiny
+test passed. No process or lock remained at the end. Usage was 11,185 input tokens (none cached) and 76 output tokens,
+11,261 total; Codex reported no dollar charge. At the [published Luna rates](https://developers.openai.com/api/docs/models/gpt-6-luna)
+the API equivalent is about $0.00116, not a reported bill. The probe used a two-second expiry; production retains twenty minutes.
 
 ## The engine's own waits in tests, and what sets the slowest files (queue FX)
 

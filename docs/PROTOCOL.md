@@ -2691,3 +2691,25 @@ uncertain cleanup. Resume while cleanup is pending is deferred until its acknowl
 resumes after a cancelled drain; a subsequent run change cancels that request. Resume while an immediate stop is
 still exiting remains 409. Orchestrator and thinking-partner process ownership is unchanged. The implementation is Windows
 only; its scope and the console-lifetime finding are documented in DESIGN.md, "Worker process ownership on Windows".
+
+### Full-test lock and lifetime channel (PT2)
+
+`node scripts/test-lock.ts <node arguments...>` uses a machine-local temporary lock, outside project `.nexus` data.
+`NEXUS_TEST_LOCK` overrides its path. The JSON record contains `pid` (the wrapper), `cwd`, `since` (ISO time), and a
+random `token`. When process queries are unavailable it also contains `lease: true`; its file modification time is
+the last renewal. `NEXUS_TEST_LOCK_STALE_MS` is then the maximum gap between renewals (default 20 minutes), rather
+than the maximum age since acquisition. Renewal is every second or one third of a shorter expiry, at least 10 ms.
+Release checks both PID and token. Old records without `lease` retain the original dead-PID/absolute-age rules.
+`NEXUS_TEST_LOCK_MAX_MS` still limits waiting to 15 minutes by default, after which a run proceeds without the lock.
+
+The internal `--watchdog <wrapper pid> <starter pid> <lock path>` child owns the runner. The wrapper's Node IPC sends
+`{args, token}` to start it, `{signal}` to forward a signal, or `{stop:true}` to end it. The watchdog announces
+`{ready:true, queried:boolean}`, reports `{gone:pid}` when a known starter ends, and `{code}` before exit. Its exit
+status is the runner's status, or 1 for interruption/startup failure. Losing the wrapper channel ends the owned run;
+the wrapper also honors a disconnect from a caller-provided IPC channel. No process-list PID is a cleanup target.
+
+`NEXUS_TEST_LOCK_QUERY=off` disables ancestry discovery for tests and restricted environments. Without a query result,
+the watchdog relies on lifetime IPC and the holder renews a lease. If the sandbox ends both, the unrenewed lock is
+reclaimable after expiry. `NEXUS_TEST_LOCK_WATCHED`, when set for diagnostics/tests, names a JSON file written once:
+`{watched:[pid,...], guard:pid, queried:boolean}`. An unavailable ancestry has an empty `watched` array. These are
+private test-runner formats, not project events or server APIs.
