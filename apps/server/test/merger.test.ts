@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  ProjectStore, approveQueue, loadProjectState, newId, now, routeAnswers, updateSettings, type Event, type QueueFile, type SessionFile, type StepDef,
+  ProjectStore, approveQueue, loadProjectState, newId, now, planLines, routeAnswers, updateSettings, type Event, type QueueFile, type SessionFile, type StepDef,
 } from "@nexus/protocol";
 import { recordBase } from "../src/gitinfo.ts";
 import { Merger } from "../src/merger.ts";
@@ -416,12 +416,19 @@ test("a worktree with paths beyond 260 characters is removed completely", () => 
 
 // ---------------------------------------------------------------- with the engine and the fake runtimes
 
-/** A project with a worktree queue W and the engine and Merger wired as the server wires them. */
-function wired(steps: { W: StepDef[]; M?: StepDef[] }) {
-  const x = project();
+/**
+ * A project with a worktree queue W and the engine and Merger wired as the server wires them. `M`: a queue in the main
+ * checkout; `B`: another queue, in a worktree of its own when `bWorktree`.
+ */
+function wired(steps: { W: StepDef[]; M?: StepDef[]; B?: StepDef[] }, o: { mergeBack?: boolean; bWorktree?: boolean } = {}) {
+  const x = project({ mergeBack: o.mergeBack });
   x.store.writeQueue({ protocol: 1, id: "W", title: "Worktree", revision: 1, status: "proposed", worktree: "auto", stop_conditions: [], checks: [], steps: steps.W });
   approveQueue(x.store, "W");
   if (steps.M) { x.store.writeQueue({ protocol: 1, id: "M", title: "Main", revision: 1, status: "proposed", stop_conditions: [], checks: [], steps: steps.M }); approveQueue(x.store, "M"); }
+  if (steps.B) {
+    x.store.writeQueue({ protocol: 1, id: "B", title: "After", revision: 1, status: "proposed", ...(o.bWorktree ? { worktree: "auto" as const } : {}), stop_conditions: [], checks: [], steps: steps.B });
+    approveQueue(x.store, "B");
+  }
   let merger: Merger | undefined;
   const tick = () => {
     routeAnswers(x.store); acceptReviews(x.store);
@@ -508,4 +515,57 @@ test("engine: a step at work in the main checkout with uncommitted work is held 
     assert.ok(g.merged!.at <= x.queue("M").steps[1]!.started_at!, `the fast-forward (${g.merged!.at}) before M2 opened (${x.queue("M").steps[1]!.started_at})`);
     assert.equal(git(x.root, "reflog", "--format=%gs", "main").split("\n").filter((l) => /^merge/.test(l) && !/Fast-forward/.test(l)).length, 0, "main only moved by commits and fast-forwards");
   } finally { hold.done(); x.merger.shutdown(); x.engine.shutdown(); }
+});
+
+// ---------------------------------------------------------------- the plan after a worktree queue
+
+test("engine, merge_back on: a queue planned after a worktree queue starts once its work is merged back, from main with that work in it", async () => {
+  const x = wired({ W: [step("W1", "commit")], B: [step("B1", "done")] }, { bWorktree: true });
+  try {
+    writeFileSync(join(x.root, ".gitignore"), ".nexus/\nnode_modules/\nlater\n"); // dirty: the merge back waits
+    assert.match(x.engine.plan("B", { after: ["W"], by: "user", runtime: "claude" }), /starts when queue W is done/);
+    x.engine.start("W", { runtime: "claude" });
+    await x.until("W done, its merge back waiting", () => x.queue("W").status === "done" && /uncommitted changes/.test(x.store.readGit("W")?.merge?.waiting?.reason ?? ""));
+    await sleep(500); // a few looks of the merger's and the plan's
+    const b = x.queue("B");
+    assert.equal(b.run, undefined, "B does not start while W's work is not in main");
+    assert.equal(b.plan!.ready, false);
+    assert.equal(b.plan!.after[0]!.done, false);
+    assert.equal(b.plan!.after[0]!.blocked, true, "a dirty checkout needs the user");
+    assert.match(b.plan!.waiting, /queue W is done; it waits to be merged back into main: queue W: the checkout of main has uncommitted changes/);
+    assert.ok(planLines(b).some((l) => /now: queue W is done; it waits to be merged back into main/.test(l)), "nexus status says why");
+    git(x.root, "checkout", "--", ".gitignore"); // clean again, main where it was
+    await x.until("B started", () => !!x.queue("B").run);
+    const merged = x.store.readGit("W")!.merged!;
+    assert.equal(merged.by, "nexus");
+    assert.ok(merged.at <= x.queue("B").run!.started_at, `the merge back (${merged.at}) before B started (${x.queue("B").run!.started_at})`);
+    const base = x.store.readGit("B")!.base!;
+    assert.equal(base.ref, "main");
+    assert.ok(ok(() => git(x.root, "merge-base", "--is-ancestor", merged.sha, base.sha)), "B's worktree starts from main with W's work in it");
+    await x.until("B done", () => x.queue("B").status === "done");
+    assert.ok(existsSync(join(x.base, "project.worktrees", "B", "W1.txt")) || ok(() => git(x.root, "cat-file", "-e", `${x.queue("B").branch}:W1.txt`)), "W's file is in B's work");
+  } finally { x.merger.shutdown(); x.engine.shutdown(); }
+});
+
+test("engine, merge_back off: a queue planned after a worktree queue starts when it is done, as before, with nothing merged", async () => {
+  const x = wired({ W: [step("W1", "commit")], B: [step("B1", "done")] }, { mergeBack: false });
+  try {
+    x.engine.plan("B", { after: ["W"], by: "user", runtime: "claude" });
+    x.engine.start("W", { runtime: "claude" });
+    await x.until("B started", () => !!x.queue("B").run);
+    assert.equal(x.queue("W").status, "done");
+    assert.equal(x.store.readGit("W")?.merged, undefined, "the user merges back with Merge back");
+    await x.until("B done", () => x.queue("B").status === "done");
+  } finally { x.merger.shutdown(); x.engine.shutdown(); }
+});
+
+test("engine, merge_back on: a queue planned after one in the main checkout starts when it is done, as before", async () => {
+  const x = wired({ W: [step("W1", "done")], M: [step("M1", "commit")], B: [step("B1", "done")] });
+  try {
+    x.engine.plan("B", { after: ["M"], by: "user", runtime: "claude" });
+    x.engine.start("M", { runtime: "claude" });
+    await x.until("B started", () => !!x.queue("B").run);
+    assert.equal(x.queue("M").status, "done");
+    await x.until("B done", () => x.queue("B").status === "done");
+  } finally { x.merger.shutdown(); x.engine.shutdown(); }
 });

@@ -923,7 +923,8 @@ reason (and, with `released`, "; the run of queue M, held at its step's end for 
 orchestrator is told the same (`notify:mergewait:…`); a merge back Nexus did is told to it too
 (`notify:merged:…`). While something waits it is looked at again every 30
 seconds, since git can change what holds it without a file of the project changing. Nothing is pushed: the base goes
-out with the next deploy, and a deploy planned after such a queue waits for its merge back (see "Planned deploys").
+out with the next deploy, and a deploy planned after such a queue waits for its merge back (see "Planned deploys"),
+as does, with `merge_back` on, a queue planned after it (see "The plan").
 
 With `merge_back` on, the cleanup follows the merge (by anyone) once no provisional acceptance of the queue waits for
 the user; a Fix it until then runs in the worktree and goes through the integration step again. A cleanup that is
@@ -1819,8 +1820,17 @@ in `start.yaml`.
   proposed meanwhile waits for the user: the start is `held` with kind `approval`, "waits for approval of revision N",
   and comes once approved; it is not a failed start). "Done" is the queue's status `done` with every step closed (done
   or skipped; the closing refactoring step too) and, in a project whose `provisional_counts` is off, no provisional
-  acceptance waiting for the user's confirmation. A queue whose predecessors are all done already starts at once (if
-  its checkout and the limit allow, see "One queue per checkout, and a limit"; else it waits and starts by itself).
+  acceptance waiting for the user's confirmation. With the project's `merge_back` on, a predecessor in a worktree of
+  its own (one with an integration step; not a survey run) is done only once its work is merged back into its base:
+  `git.yaml` `merged` recorded, and not from before its integration step last finished (a Fix it after the merge back
+  runs it again). So the queue after it starts from the base with that work in it (a worktree of its own is made from
+  the project's checkout). Until then the entry waits with "queue A is done; it waits to be merged back into main",
+  followed by what keeps the merge back (`merge.waiting`, "…: queue A: the checkout of main has uncommitted
+  changes…"), and is `blocked` while such a reason stands (else Nexus is at it); the dashboard's plan and `nexus status`
+  ("now: …") show it. With `merge_back` off the user merges back with Merge back when they choose: such a predecessor is
+  done when it finishes, as one in the project's own checkout always is. A queue whose predecessors are all done
+  already starts at once (if its checkout and the limit allow, see "One queue per checkout, and a limit"; else it waits
+  and starts by itself).
 - A predecessor that halts, pauses or waits for an approval: the queue waits, `blocked` (on the user or the
   orchestrator). One that is stopped, cancelled or does not exist: the queue waits too, the user gets an attention
   item of kind `plan` ("Queue B waits, but queue A is stopped: …"; `plan.predecessor`, `plan.cause`), and the

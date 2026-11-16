@@ -516,6 +516,11 @@ back by itself) and `resolve_conflicts` (the integration step's worker resolves 
   by Node where Git for Windows cannot (paths beyond 260 characters); the branch with `git branch -d`, never `-D`.
 - **No push.** The merged base goes to the remote with the next deploy; a deploy planned after such a queue goes
   after its fast-forward.
+- **The plan waits for the merge back** (queue MQ, 2026-11-16). With `merge_back` on, a queue planned after one in a
+  worktree of its own starts only once that one's work is merged back (`doneForPlan`, `notMergedBack` in
+  packages/protocol/src/plan.ts), so it starts from a base that has the work, and a chain of worktree queues does not
+  build on a base without its predecessors. The planned deploy already waited the same way; both use one test. With
+  `merge_back` off the user's Merge back may come much later, or never, so finishing stays enough there.
 - A queue from before the integration step keeps the user's old merge (which may make a merge commit).
 - Found while building: a scripted run on a development instance first stood still because a project without an
   orchestrator section has its level-2 reviews done by the user; and a commit in the base's checkout changes nothing
