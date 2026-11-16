@@ -180,6 +180,8 @@ function Check({ checked, onChange, disabled, children }: { checked: boolean; on
 function SettingRows({ form, project }: { form: Form; project?: { values: Record<string, string>; set: (k: string, v: string) => void; root: string } }) {
   const f = form;
   const claudeModel = f.get("runtimes.claude.model"), codexModel = f.get("runtimes.codex.model"), ideasRuntime = f.get("conversations.runtime") as "claude" | "codex";
+  // The orchestrator runs on Codex only when its setting says codex; anything else is Claude Code (as the server reads it).
+  const orchRuntime: "claude" | "codex" = f.get("orchestrator.runtime") === "codex" ? "codex" : "claude";
   const claudeAuto = f.get("runtimes.claude.permission_mode") === "auto";
   const approval = f.get("runtimes.codex.approval_policy"), reviewer = f.get("runtimes.codex.approvals_reviewer");
   const codexAuto = approval === "on-request" && reviewer === "auto_review";
@@ -256,11 +258,16 @@ function SettingRows({ form, project }: { form: Form; project?: { values: Record
       </Section>
 
       <Section title={t("settings.orchestrator")}>
+        {/* Its runtime (queue OC): another one starts a fresh orchestrator session; the model and effort go by it. */}
+        <Setting form={f} keys={["orchestrator.runtime"]} label={t("settings.runtime")}
+          hint={orchRuntime === "codex" ? <span className="text-warn">{t("settings.orchestratorCodexHint")}</span> : t("settings.orchestratorClaudeHint")}>
+          {(d) => <Select value={orchRuntime} disabled={d} onChange={(v) => { f.set("orchestrator.runtime", v); f.set("orchestrator.model", ""); f.set("orchestrator.effort", ""); }} options={[["claude", "Claude Code"], ["codex", "Codex"]]} />}
+        </Setting>
         <Setting form={f} keys={["orchestrator.model"]} label={t("settings.model")} hint={t("settings.orchestratorModelHint")}>
-          {(d) => <ModelSelect runtime="claude" value={f.get("orchestrator.model")} onChange={(v) => f.set("orchestrator.model", v)} disabled={d} defaultLabel={t("settings.claudeDefault")} className="w-full" />}
+          {(d) => <ModelSelect runtime={orchRuntime} value={f.get("orchestrator.model")} onChange={(v) => f.set("orchestrator.model", v)} disabled={d} defaultLabel={t("settings.runtimeDefault")} className="w-full" />}
         </Setting>
         <Setting form={f} keys={["orchestrator.effort"]} label={t("settings.effort")}>
-          {(d) => <EffortSelect runtime="claude" model={f.get("orchestrator.model")} value={f.get("orchestrator.effort")} onChange={(v) => f.set("orchestrator.effort", v)} disabled={d} className="w-full" />}
+          {(d) => <EffortSelect runtime={orchRuntime} model={f.get("orchestrator.model")} value={f.get("orchestrator.effort")} onChange={(v) => f.set("orchestrator.effort", v)} disabled={d} className="w-full" />}
         </Setting>
         <Setting form={f} keys={["orchestrator.notify"]} label={t("settings.tellIt")}>
           {(d) => <Check checked={f.bool("orchestrator.notify")} onChange={(v) => f.set("orchestrator.notify", v)} disabled={d}>{t("settings.tellItCheck")}</Check>}

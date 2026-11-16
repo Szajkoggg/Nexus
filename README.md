@@ -104,6 +104,15 @@ session** line, which says how full the old context was; **Show its summary** op
 opens the file it is kept in (`.nexus/orchestrator/summary.md`, the latest one). Search and pins cover the current
 session.
 
+**The orchestrator on Codex.** The settings' Orchestrator section (global, or a project's own) chooses its
+**Runtime**: Claude Code (the default) or Codex; the model and effort lists follow it, and a change of runtime clears
+them. A new runtime takes effect with the next message: the orchestrator goes on in a fresh session on it (a
+conversation cannot move between the two), which starts from its briefing and the project's state; the earlier chat
+stays above. The line under the choice says how the protection differs: on Codex a sandbox lets it write only its
+queue drafts and its own event log, but its shell runs any program, and a program can reach Nexus on this machine and
+do what you do in the dashboard, which Claude Code's orchestrator cannot. Until that gap is closed, keep it on Claude
+Code.
+
 **Stop.** While the orchestrator or a thinking partner is in a turn, **Stop** shows above the message box. It
 interrupts the turn at once: the chat says "Stopped.", nothing more of that turn appears, and the agent waits. What
 you sent during the turn goes in with your next message.

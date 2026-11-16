@@ -747,11 +747,12 @@ export function updateSettings(store: ProjectStore, patch: unknown): void {
     languages: merged(p.languages, b.languages),
     // Each kind's runtime, model, effort and fallback (a null model or effort: the project's for that runtime).
     kinds: Object.fromEntries(Object.entries(p.kinds).map(([k, d]) => [k, merged(d, b.kinds?.[k])])),
-    // The orchestrator's notices, model, effort and context threshold (its section is made here if the project has had
-    // none yet).
+    // The orchestrator's runtime, notices, model, effort and context threshold (its section is made here if the project
+    // has had none yet).
     orchestrator: b.orchestrator === undefined
       ? p.orchestrator
       : merged({ runtime: "claude" as const, session: null, notify: true, ...p.orchestrator }, {
+        ...(b.orchestrator.runtime !== undefined ? { runtime: b.orchestrator.runtime } : {}),
         ...(b.orchestrator.notify !== undefined ? { notify: !!b.orchestrator.notify } : {}),
         ...("model" in b.orchestrator ? { model: b.orchestrator.model } : {}),
         ...("effort" in b.orchestrator ? { effort: b.orchestrator.effort } : {}),

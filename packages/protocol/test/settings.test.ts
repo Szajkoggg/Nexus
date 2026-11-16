@@ -165,6 +165,20 @@ test("a changed setting becomes the project's own, an untouched one keeps follow
   assert.deepEqual(stored().orchestrator, { session: "s1" });
 });
 
+test("the orchestrator's runtime: Claude Code by default, the project's own from its settings page, and following the global one again (queue OC)", () => {
+  const base = mkdtempSync(join(tmpdir(), "nexus-settings-"));
+  process.env.NEXUS_HOME = join(base, "home");
+  const store = ProjectStore.init(join(base, "p"), { id: "p", name: "P", root: join(base, "p") });
+  // As the dashboard's project page sends it: the runtime with the model and effort it clears.
+  updateSettings(store, { orchestrator: { runtime: "codex", model: "", effort: "ultra" }, own: ["orchestrator.runtime"] });
+  assert.equal(store.readProject().orchestrator?.runtime, "codex");
+  assert.equal(store.readProject().orchestrator?.effort, "ultra", "Codex's levels are the orchestrator's too");
+  assert.equal(store.readStoredProject().orchestrator?.runtime, "codex");
+  assert.throws(() => updateSettings(store, { orchestrator: { runtime: "gemini" } }), /orchestrator.runtime/);
+  updateSettings(store, { follow: ["orchestrator.runtime"] });
+  assert.equal(store.readProject().orchestrator?.runtime, "claude", "the global value again");
+});
+
 test("the MCP servers Codex workers keep: none by default, the project's only, kept when other settings change", () => {
   const base = mkdtempSync(join(tmpdir(), "nexus-settings-"));
   process.env.NEXUS_HOME = join(base, "home");

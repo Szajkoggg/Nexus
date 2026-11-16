@@ -135,9 +135,11 @@ export class EdgeBrowser implements Browser {
   }
 
   scroll(text: string): Promise<boolean> {
-    // The text as written (textContent): a heading styled in capitals reads in capitals through innerText.
+    // The text as written (textContent): a heading styled in capitals reads in capitals through innerText. A heading
+    // first: a tab or a label earlier in the page may carry the same text (the phone's "Orchestrator" tab, queue OC).
     return this.js<boolean>(`(() => {
-      const el = [...document.querySelectorAll("h1, h2, h3, h4, h5, h6, legend, label, p, span, div")].find((e) => e.textContent.trim() === ${JSON.stringify(text)});
+      const find = (sel) => [...document.querySelectorAll(sel)].find((e) => e.textContent.trim() === ${JSON.stringify(text)});
+      const el = find("h1, h2, h3, h4, h5, h6") ?? find("legend, label, p, span, div");
       if (!el) return false;
       el.scrollIntoView({ block: "start" });
       return true;
