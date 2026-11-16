@@ -32,8 +32,7 @@
     },
     "apps/server": {
       "entry": [
-        "test/*.test.ts",
-        "test/fake-descendant.ts"
+        "test/*.test.ts"
       ],
       "project": [
         "src/**/*.ts",

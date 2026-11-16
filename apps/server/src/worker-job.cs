@@ -114,12 +114,8 @@ public static class NexusWorkerJob
         return thread;
     }
 
-    public static void Run() {
-        Console.InputEncoding = new UTF8Encoding(false);
-        Console.OutputEncoding = new UTF8Encoding(false);
-        // The first two lines are the executable and its already Windows-quoted argument string.
-        string executable = Decode(Console.ReadLine());
-        string arguments = Decode(Console.ReadLine());
+    // Keep the console outside the job, then join before any runtime can inherit ownership.
+    static void CreateWorkerJob() {
         // Give the runtime a console whose lifetime belongs to this host, before any job membership. Preserve
         // the server's redirected pipes across allocation. No shared console or user process is a cleanup target.
         IntPtr input = GetStdHandle(-10), outputHandle = GetStdHandle(-11), errorHandle = GetStdHandle(-12);
@@ -137,8 +133,17 @@ public static class NexusWorkerJob
             Marshal.StructureToPtr(limits, data, false);
             Check(SetInformationJobObject(job, 9, data, (uint)size));
         } finally { Marshal.FreeHGlobal(data); }
-        Check(AssignProcessToJobObject(job, Process.GetCurrentProcess().Handle));
         // The job handle is non-inheritable. Closing the host (even a crash) therefore kills the whole job.
+        Check(AssignProcessToJobObject(job, Process.GetCurrentProcess().Handle));
+    }
+
+    public static void Run() {
+        Console.InputEncoding = new UTF8Encoding(false);
+        Console.OutputEncoding = new UTF8Encoding(false);
+        // The first two lines are the executable and its already Windows-quoted argument string.
+        string executable = Decode(Console.ReadLine());
+        string arguments = Decode(Console.ReadLine());
+        CreateWorkerJob();
         runtime = Process.Start(new ProcessStartInfo(executable, arguments) {
             // Share the host's private hidden console, created before job assignment. Creating a console inside
             // the job would make its conhost a cleanup target and break the runtime's next child (0xc0000142).
