@@ -52,7 +52,15 @@ export const stepWaits = (s: Pick<StepLike, "status">): boolean => s.status === 
 /** The question waits for an answer: asked, or passed on to the user by the orchestrator. */
 export const isOpenQuestion = (q: { state: "open" | "answered" | "escalated" | "withdrawn" | (string & {}) }): boolean => q.state === "open" || q.state === "escalated";
 
-/** The step owns the barrier, even when its questions were asked by an earlier session. */
+/** An open question holds a run at `step`: one of that step or of no step; any open one while the run names no step. */
+export const holdsRunStep = (x: { state: string; step?: string }, step: string | undefined): boolean =>
+  isOpenQuestion(x) && (!step || !x.step || x.step === step);
+
+/**
+ * What holds a step's next work turn: its questions still open or escalated (`remaining`), and a last answer that asked
+ * to wait (`wait`) that no explicit Resume released yet (`resumed`: the answer the run's Resume released; `last`: the
+ * latest answer's id). The step owns the barrier, even when its questions were asked by an earlier session.
+ */
 export function questionBarrier(questions: readonly {
   queue?: string; step?: string; state: string;
   answers: readonly { id: string; at: string; escalate?: boolean; continue?: boolean }[];

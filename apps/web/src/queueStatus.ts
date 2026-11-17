@@ -2,7 +2,7 @@
 // steps, its questions and its run together, so that "running" shows only while a run really runs, apart from
 // waiting, and a queue whose steps say running while nothing runs reads as paused. Pure and unit tested; QueueRow
 // shows it as a dot and a word, and the later layouts (the desktop rail, the digest) use it too.
-import { isOpenQuestion, runGoing, waitsForUserReview } from "@nexus/protocol/status-rules";
+import { holdsRunStep, isOpenQuestion, runGoing, waitsForUserReview } from "@nexus/protocol/status-rules";
 import { formatClock, t, type Key, type Params } from "./i18n.ts";
 
 export type Tone = "running" | "waiting" | "review" | "stopped" | "failed" | "approval" | "paused" | "planned" | "done" | "cancelled";
@@ -103,7 +103,7 @@ export function queueStatus(q: QueueLike, now = new Date()): HonestStatus {
   const mine = q.steps.filter(waitsForUserReview);
   if (mine.length === 1) return is("review", "status.yourReview", undefined, mine[0]!.id);
   if (mine.length > 1) return is("review", "status.yourReviews", { count: mine.length }, mine[0]!.id, true);
-  const blocking = questions.find(x => !run?.step || !x.step || x.step === run.step);
+  const blocking = questions.find(x => holdsRunStep(x, run?.step));
   if (blocking) return is("waiting", "status.waitingAnswer", undefined, blocking.step);
   const waiting = q.steps.find(s => s.status === "waiting" && (!run?.step || s.id === run.step));
   if (waiting) return is("waiting", "status.waitingPermission", undefined, waiting.id);

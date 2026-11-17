@@ -3,7 +3,7 @@
 // server serves it across projects (GET /api/digest?since=); this part is pure and unit tested.
 import type { Activity, Event, Refusal, TurnRecord } from "./schemas.ts";
 import type { ProjectState, QueueView } from "./state.ts";
-import { isOpenQuestion } from "./status-rules.ts";
+import { holdsRunStep } from "./status-rules.ts";
 
 type DigestKind = "done" | "failed" | "stopped" | "queue_done" | "queue_cancelled" | "refused" | "retried";
 
@@ -100,7 +100,7 @@ export function runsNow(q: Pick<QueueView, "status" | "approved" | "revision" | 
   if (q.approved === false && q.status !== "done" && q.status !== "draft" && ((q.revision ?? 1) > 1 || q.status !== "proposed")) return false;
   if (q.steps.some((s) => s.status === "review")) return false;
   return !q.steps.some(s => s.id === q.run?.step && s.status === "waiting")
-    && !q.questions.some(x => isOpenQuestion(x) && (!q.run?.step || !x.step || x.step === q.run.step));
+    && !q.questions.some(x => holdsRunStep(x, q.run?.step));
 }
 
 /** The project's queues running now (runsNow), each with its step and since when it has been at it. */
