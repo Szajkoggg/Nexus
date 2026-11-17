@@ -2970,7 +2970,7 @@ additional-answer contract when its first page is stale.
 
 ### Clickable question answers on every layout (QA3)
 
-The phone sheet, desktop answer bar and each remaining question's card share `useAnswer` and `AnswerFields`.
+The phone sheet and every desktop question's card share `useAnswer` and `AnswerFields`.
 Each form has one optional choice, optional words and one explicit send action, bound to its project and qid.
 Recommendations never choose for the user. Choosing again clears the choice; arrow keys, Home and End move it.
 The choice stays in memory while that form is mounted; words keep the existing per-question persisted draft.
@@ -2978,9 +2978,17 @@ A reload restores words without inventing a selection. Failed saves preserve bot
 prevents repeated clicks or keys from sending twice before the busy state renders. The option cannot change
 during a send; words edited during it remain a draft. All forms post only to the question-answer endpoint.
 
-The primary question has its selector in the answer bar, the other questions in their own cards. Closed questions
-keep their option lists. Labels inside option buttons wrap with the text so that long options remain readable.
-Continuation still follows the existing checkbox; the separate QA4 step will require all open questions answered.
+In QA3 round 2 the user replaced the desktop answer bar with complete per-question cards. An explicit question
+link puts that card first and scrolls it into view; the phone keeps its sheet and bottom Answer action. Closed
+questions keep their option lists. Labels inside option buttons wrap so that long options remain readable.
+
+The same round explicitly brought the all-questions prerequisite into this step: partial answers are saved and
+routed durably, but the engine holds their delivery, ordinary messages and subsequent work while any question for
+the current queue and step is open or escalated. The barrier is scoped by queue and step rather than session,
+so it survives a session change without blocking another queue. The last answer releases accumulated answers
+together in one turn. State derivation also keeps the waiting status until the last question closes. A withdrawal
+counts as closure; the existing continuation checkbox instruction remains intact. Fake-runtime tests cover three
+questions, a nonblocking question, another queue, partial saves, Resume and restart with both adapters.
 
 `scripts/question-options.mjs` checks three widths against isolated fake-runtime instances: separate selection and
 send, primary and secondary forms, exact request/event/inbox targets, continuation flags, free text with and without

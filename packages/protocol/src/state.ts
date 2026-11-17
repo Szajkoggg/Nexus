@@ -755,7 +755,7 @@ function apply(
     }
     case "question.withdrawn": {
       const x = questions.get(e.qid);
-      if (x) { x.state = "withdrawn"; resume(x, queues, e); }
+      if (x) { x.state = "withdrawn"; resume(x, queues, questions, e); }
       return;
     }
     case "answer.given": {
@@ -771,7 +771,7 @@ function apply(
         if (x.options?.includes(e.recommended)) x.recommended = e.recommended;
         else warnings.push(`answer ${e.id}: the recommendation "${e.recommended}" is not one of question ${e.qid}'s options; ignored`);
       }
-      if (!e.escalate) resume(x, queues, e);
+      if (!e.escalate) resume(x, queues, questions, e);
       return;
     }
     case "review.asked_user": {
@@ -944,9 +944,10 @@ function endSegment(st: StepView, at: string): void {
   if (open && open.end === undefined) open.end = at;
 }
 
-function resume(x: QuestionView, queues: Map<string, QueueView>, e: Event): void {
+function resume(x: QuestionView, queues: Map<string, QueueView>, questions: Map<string, QuestionView>, e: Event): void {
   const q = x.queue ? queues.get(x.queue) : undefined;
   const st = q?.steps.find((s) => s.id === x.step);
+  if ([...questions.values()].some((other) => other.queue === x.queue && other.step === x.step && isOpenQuestion(other))) return;
   if (st?.status === "waiting") { st.status = "running"; st.timeline.push(e); }
   if (q?.status === "waiting" && !q.steps.some(stepWaits)) q.status = "running";
 }

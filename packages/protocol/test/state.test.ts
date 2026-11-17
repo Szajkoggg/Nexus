@@ -91,6 +91,20 @@ test("a blocking question waits until the orchestrator answers; workers cannot a
   assert.equal(s.queues[0]!.steps[0]!.status, "running");
 });
 
+test("partial answers and escalations keep the step waiting until its last question closes", () => {
+  const { st, session, emit } = setup();
+  const w = session("worker"), o = session("orchestrator"), u = session("user");
+  emit(w, { type: "step.started", queue: "Q", step: "Q1" });
+  for (const qid of ["a", "b", "c"]) emit(w, { type: "question.asked", queue: "Q", step: "Q1", qid, text: qid, can_continue: qid === "c" });
+  emit(o, { type: "answer.given", qid: "b", text: "User decides", escalate: true });
+  emit(u, { type: "answer.given", qid: "a", text: "A", continue: true });
+  assert.equal(loadProjectState(st).queues[0]!.steps[0]!.status, "waiting");
+  emit(u, { type: "answer.given", qid: "b", text: "B", continue: true });
+  assert.equal(loadProjectState(st).queues[0]!.steps[0]!.status, "waiting");
+  emit(w, { type: "question.withdrawn", qid: "c", reason: "No longer needed" });
+  assert.equal(loadProjectState(st).queues[0]!.steps[0]!.status, "running");
+});
+
 test("a question with options carries them to the user's waiting list", () => {
   const { st, session, emit } = setup();
   const w = session("worker");

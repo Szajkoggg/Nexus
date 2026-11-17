@@ -33,7 +33,7 @@ export interface StepLayout {
   orchestratorAsks: string | undefined;
   /** The step waits for the user's review: Accept in the action bar, the summary and the pictures first. */
   reviewing: boolean;
-  /** The open question the action bar answers (the selected one, else the first for a plain step link). */
+  /** The open question the phone sheet answers (the selected one, else the first for a plain step link). */
   asking: QueueView["questions"][number] | undefined;
   /** On the phone a step with an open question is the question's sheet. */
   questionFirst: boolean;

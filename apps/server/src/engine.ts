@@ -23,6 +23,7 @@ import {
   summaryRequest, switchReason, userStopNow,
 } from "./prompts.ts";
 import { shellRules } from "./shell-rules.ts";
+import { isOpenQuestion } from "@nexus/protocol/status-rules";
 import {
   ClockTimers, REAL_CLOCK, Scheduler, type PlanChange, type PlanOptions, type Clock, type ScheduleOptions,
 } from "./scheduler.ts";
@@ -39,6 +40,11 @@ import {
 } from "./run-state.ts";
 
 type Live = Hosted;
+
+/** A step's questions hold its next work, independently of other queues and of the asking session. */
+function hasOpenQuestions(state: ProjectState, queue: string, step: string | undefined): boolean {
+  return !!step && state.questions.some((q) => q.queue === queue && q.step === step && isOpenQuestion(q));
+}
 
 export interface StartOptions {
   model?: string; effort?: Effort; session?: string; runtime?: "claude" | "codex";
@@ -645,6 +651,7 @@ export class Engine implements Member {
       // review decides. Still waiting: nothing to run. Then nothing left: the run is finished. Else (the next step, a
       // send-back): a new process resumes the session.
       if (current?.status === "review") return;
+      if (hasOpenQuestions(state, queueId, run.step)) return;
       if (q.steps.every((s) => stepClosed(q, s))) { this.exitedAfterOutcome.delete(run.session); return this.finish(queueId); }
       this.exitedAfterOutcome.delete(run.session);
       live = this.ensureProcess(this.sessionFile(state, run.session));
@@ -656,6 +663,7 @@ export class Engine implements Member {
     // A new revision never stops the step at work: its turns, questions, answers and nudges go on as below, and only
     // the step's end looks at the approval.
     if (q.status === "stopped") return this.halt(queueId, stoppedMessage(q));
+    if (hasOpenQuestions(state, queueId, run.step)) return;
     if (current) {
       switch (current.status) {
         case "running":
@@ -1024,6 +1032,7 @@ export class Engine implements Member {
     if (!live) return this.halt(queueId, "the session's process is not running");
     const state = loadProjectState(this.store);
     const project = state.project;
+    if (hasOpenQuestions(state, queueId, step.id)) return;
     const notes = step.notes.filter((n) => !n.read_at && n.to !== "orchestrator"); // the orchestrator's are not the worker's
     const answers = state.questions.filter((x) => x.session === run.session && x.step === step.id && x.state === "answered");
     const last = !q.steps.some((s) => s.status === "pending" && s.id !== step.id);
@@ -1058,15 +1067,24 @@ export class Engine implements Member {
     const owner = state.queues.find((q) => q.run?.session === l.session && q.run.state !== "finished");
     const run = owner?.run;
     const step = owner?.steps.find((st) => st.id === run?.step);
+    // Partial answers remain durable in the inbox but cannot start or steer work. Stop messages still reach it.
+    const questionsOpen = !!owner && hasOpenQuestions(state, owner.id, run?.step);
     if (owner && l.proc.state === "idle" && (owner.status === "stopped" || (step && OUTCOME.has(step.status))) && this.cleanWorker(owner.id, l)) return;
     const idleAllowed = !run || runCounted(run);
     // A new turn of an idle session within its step (an answer, a send-back, a message): its runtime beyond the usage
     // threshold goes on on the step's fallback in a fresh session, which gets these entries (or the run waits). A stop
     // is not a turn; an entry for a working session goes into its running turn, which is never cut off.
-    if (owner && run && idleAllowed && l.proc.state !== "working" && unread.some((m) => m.type !== "stop") && this.usageGate(owner.id, state, run, l)) return;
+    if (!questionsOpen && owner && run && idleAllowed && l.proc.state !== "working" && unread.some((m) => m.type !== "stop") && this.usageGate(owner.id, state, run, l)) return;
     // The language line goes with each message, so a changed setting reaches the session with its next message.
     const languages = workerLanguages(state.project.languages);
+    // When the last answer releases a waiting worker, it sees the accumulated answers in one opening turn.
+    const answers = !questionsOpen && idleAllowed && l.proc.state === "idle" ? unread.filter((m) => m.type === "answer") : [];
+    if (answers.length > 1) {
+      l.proc.send(withLanguages(answers.map((m) => formatInbox(m, state)).join("\n\n"), languages));
+      for (const m of answers) this.store.appendDelivered(l.session, { at: now(), kind: "inbox", id: m.id, via: "turn" });
+    }
     for (const m of unread) {
+      if ((questionsOpen && m.type !== "stop") || (answers.length > 1 && m.type === "answer")) continue;
       const text = withLanguages(formatInbox(m, state), languages);
       if (m.type === "stop") l.proc.send(text, "now");
       else if (l.proc.state === "working") l.proc.send(text, "next");

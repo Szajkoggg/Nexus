@@ -2,6 +2,7 @@
 // question's sheet in its action bar. The parts are in stepParts.tsx; what it shows in which form is decided in
 // details.ts (stepLayout).
 import { stepValuesText } from "@nexus/protocol/steps";
+import { useEffect, useRef } from "react";
 import { fileUrl, type StepView } from "../../api.ts";
 import { shownPicture, stepLayout, stepPictures } from "../../details.ts";
 import { t } from "../../i18n.ts";
@@ -21,7 +22,7 @@ import { ImageViewer } from "../Viewer.tsx";
 import { IntegrationBox, PushLine, StepCommits } from "./git.tsx";
 import type { PanelProps } from "./props.ts";
 import { Changes } from "./QueueDetail.tsx";
-import { AnswerBar, Question, QuestionSheet } from "./questions.tsx";
+import { Question, QuestionSheet } from "./questions.tsx";
 import { PictureActions, Rejected, ReviewBar } from "./review.tsx";
 import {
   GoalAcceptance, Material, MessageAgent, Messages, Notes, ProvisionalBox, RetryLine, ReviewNotes, ReviewPictures, SentBack, StatusNote, StepChecks, StepMetrics,
@@ -35,6 +36,10 @@ export function StepDetail({ project, queue, step, onClose, of, qid }: PanelProp
   // A step of a finished or cancelled queue is only read: no level, note, message, review or answer (details.ts).
   const { readOnly, live, forOrchestrator, notesOpen, orchestratorAsks, reviewing, asking, questionFirst } = stepLayout(step, questions, phone, queue, qid);
   const selected = qid ? questions.find((q) => q.qid === qid) : undefined;
+  const selectedCard = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!phone && qid) selectedCard.current?.scrollIntoView({ block: "start" });
+  }, [id, qid, phone]);
   const session = live ? project.sessions.find((s) => s.id === step.session) : undefined;
   // Review images open in the in-app viewer, a layer above the step (Back closes it); other items as links.
   const { pairs, images } = stepPictures(step, (path) => fileUrl(id, path));
@@ -52,7 +57,7 @@ export function StepDetail({ project, queue, step, onClose, of, qid }: PanelProp
   const others = questions.filter((q) => q.qid !== selected?.qid && !(questionFirst && q.qid === asking?.qid));
   const questionsPart = others.length > 0 && (
     <Section title={t(questionFirst ? "details.otherQuestions" : "details.questions")}>
-      {others.map((q) => <Question key={`${id}/${q.qid}`} q={q} project={id} inBar={q.qid === asking?.qid} />)}
+      {others.map((q) => <Question key={`${id}/${q.qid}`} q={q} project={id} readOnly={readOnly} />)}
     </Section>
   );
   const switches = <StepSwitches queue={queue} step={step.id} />;
@@ -125,13 +130,11 @@ export function StepDetail({ project, queue, step, onClose, of, qid }: PanelProp
         ? <QuestionSheet key={`${id}/${asking!.qid}`} q={asking!} project={id}>{body}</QuestionSheet>
         : <PanelBody>
           {qid && (selected
-            ? <Question key={`${id}/${selected.qid}`} q={selected} project={id} inBar={readOnly || selected.qid === asking?.qid} />
+            ? <div ref={selectedCard}><Question key={`${id}/${selected.qid}`} q={selected} project={id} readOnly={readOnly} /></div>
             : <p role="status" className="text-sm text-fg-2">{t("details.question.unavailable")}</p>)}
           {body}
         </PanelBody>}
-      {questionFirst ? null : reviewing
-        ? <ReviewBar key={step.id} project={id} queue={queue.id} step={step.id} next={noteTargets(queue.steps, step.id).next} criteria={step.acceptance} />
-        : asking && <AnswerBar key={`${id}/${asking.qid}`} q={asking} project={id} />}
+      {!questionFirst && reviewing && <ReviewBar key={step.id} project={id} queue={queue.id} step={step.id} next={noteTargets(queue.steps, step.id).next} criteria={step.acceptance} />}
     </>
   );
 }

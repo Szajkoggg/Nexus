@@ -78,11 +78,11 @@ const clickQuestion = async name => {
  await sleep(400);
 };
 const primary = async text => {
- await browser.evaluate(`(() => { const p = [...document.querySelectorAll('aside')].at(-1); const areas = p.querySelectorAll('textarea'); (innerWidth < 1024 ? areas[0] : areas[areas.length-1]).setAttribute('data-qa-primary', 'true'); })()`);
+ await browser.evaluate(`(() => { const p = [...document.querySelectorAll('aside')].at(-1); const areas = p.querySelectorAll('textarea'); (innerWidth < 1024 ? areas[0] : p.querySelector('[data-answer-qid="' + location.hash.split("/").at(-1) + '"] textarea')).setAttribute('data-qa-primary', 'true'); })()`);
  assert.equal(await browser.type(text, '[data-qa-primary]'), true);
 };
 const send = async () => {
- assert.equal(await browser.evaluate(`(() => {const b = [...document.querySelectorAll('aside button')].filter(e => e.innerText === 'Answer').at(-1); if (!b) return false; b.click(); return true;})()`), true);
+ assert.equal(await browser.evaluate(`(() => {const p = [...document.querySelectorAll('aside')].at(-1); const buttons = innerWidth < 1024 ? p.querySelectorAll('button') : p.querySelector('[data-answer-qid="' + location.hash.split("/").at(-1) + '"]').querySelectorAll('button'); const b = [...buttons].filter(e => e.innerText === 'Answer').at(-1); if (!b) return false; b.click(); return true;})()`), true);
 };
 try {
  inst = await startInstance({root, home, port: await freePort()});
@@ -92,7 +92,14 @@ try {
   const ui = await read();
   assert.equal(ui.hash, '#/qa-repro/Q/Q1/q2');
   if (width < 1024) assert.equal(ui.heading, 'BRAVO: choose a layout', 'QA1 regression: clicked q2 must be the shown question');
-  else assert.match(ui.text, /BRAVO: choose a layout/);
+  else {
+   assert.match(ui.text, /BRAVO: choose a layout/);
+   assert.equal(await browser.evaluate(`(() => {
+    const form = document.querySelector('[data-answer-qid=q2]'); const r = form.getBoundingClientRect();
+    const buttons = [...document.querySelectorAll('aside button')].filter(b => b.innerText === 'Answer');
+    return r.top >= 0 && r.top < innerHeight && buttons.every(b => b.closest('[data-answer-qid]'));
+   })()`), true, 'the clicked desktop question is visible and every answer button belongs to its card');
+  }
   await primary('BRAVO draft ' + width);
   await record('second-question-' + width);
   await open(width, '#/qa-repro/Q/Q1/q2');

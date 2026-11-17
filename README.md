@@ -116,11 +116,15 @@ queue opens as a full-screen sheet with ‹ and ✕ at the top and says where it
 options are buttons right in its waiting card: a tap opens the question with that option chosen, and **Answer**
 confirms it (words of your own can go with it). The option the worker, or the orchestrator passing the question to
 you, recommends is marked: ✓ on its button in the card, "recommended" beside it in the question.
-On a desktop, choose an option in the question's answer bar or its own card, optionally
+On a desktop, every question has its own card containing the question, options, text box and **Answer** button.
+Opening a question from Waiting brings its card into view. Choose an option in that card, optionally
 add your own words, then press **Answer**. Choosing an option never sends it; a recommendation is not selected
 automatically. You can also answer with only your own words. Tab to the choices, use the arrow keys to choose, and
 send with **Answer** or Ctrl+Enter in the text box (Command+Enter on macOS). A failed save keeps the choice and words
-for retry. Answering a question does not accept the step's review. The chat's box is one line with a round Send.
+for retry. Partial answers are saved, but the worker receives them and resumes work only after all open questions
+of that step are answered (or withdrawn). Another queue's questions do not hold this step. Answering a question
+does not accept the step's review. The phone keeps its question sheet and separate Answer action.
+The chat's box is one line with a round Send.
 
 **Each chat keeps its place** while the browser is open: switching between the orchestrator, Ideas and other views,
 or between conversations, brings you back where you were. Messages that came meanwhile do not move the view; a

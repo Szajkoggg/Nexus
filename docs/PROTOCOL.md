@@ -1309,8 +1309,18 @@ An answered, withdrawn or absent explicit target is not replaced by another open
 question. A question link selects an answer interaction, never a step review approval.
 
 Answer requests remain `POST /api/projects/:id/questions/:qid/answer` with `text`
-and `continue`; `answer.given` and inbox delivery are unchanged. Additional answers
+and `continue`; the answer event and durable inbox entry are saved immediately. Additional answers
 to an answered question remain supported; withdrawn and unknown targets are rejected.
+
+Before a worker's next work in a step, the engine requires every question for that queue and step to be closed:
+neither `open` nor `escalated`. This includes questions marked `can_continue`: that flag allows independent work
+in the current turn, not a new turn while an answer is outstanding. Partial answers remain unread in the inbox;
+they and ordinary messages cannot start or steer work before the final answer. Stop messages remain deliverable.
+When released, multiple accumulated answers open one turn together. Resume, restart, a no-outcome nudge and a
+step transition obey the same barrier. Questions in other queues or other steps do not block the current step.
+A withdrawal closes its question for this purpose. The derived step stays `waiting` after a partial answer and
+returns to `running` when its last open question closes. The existing `continue: false` wait instruction remains
+part of the delivered answer; the all-questions barrier is an additional server-side prerequisite.
 
 ## Server API
 

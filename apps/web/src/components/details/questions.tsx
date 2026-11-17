@@ -1,5 +1,4 @@
-// Answering a question, in the three places that do it: the phone's question sheet, the drawer's action bar, and the
-// answer box in a question's card. One hook (useAnswer) holds what they share: the draft, "the worker may go on", and
+// Answering a question in the phone's question sheet and each desktop question's card. One hook (useAnswer) holds what they share: the draft, "the worker may go on", and
 // sending the answer.
 import { useRef, useState, type ReactNode } from "react";
 import { act, enc, type QuestionView } from "../../api.ts";
@@ -135,24 +134,8 @@ export function QuestionSheet({ children, ...props }: AnswerProps & { children: 
   );
 }
 
-/** The bar of a step with an open question: the answer box, whether the worker may go on, and Answer. */
-export function AnswerBar(props: AnswerProps) {
-  const answer = useAnswer(props);
-  return (
-    <ActionBar
-      hint={answer.error ? <span className="text-danger">{answer.error}</span> : t("details.answer.ctrlEnter")}
-      primary={<AnswerButton answer={answer} />}
-    >
-      <div data-answer-qid={props.q.qid}>
-        <p className="mb-2 text-sm font-medium text-fg">{props.q.text}</p>
-        <AnswerFields q={props.q} answer={answer} />
-      </div>
-    </ActionBar>
-  );
-}
-
-/** A question and its answers; open, with its answer box, unless the panel's action bar answers it (`inBar`). */
-export function Question({ q, project, inBar }: AnswerProps & { inBar?: boolean }) {
+/** A question and its answers; open, with its answer box, unless the queue is read-only. */
+export function Question({ q, project, readOnly }: AnswerProps & { readOnly?: boolean }) {
   const open = isOpenQuestion(q);
   const tone = q.state === "escalated" ? "border-review/40 bg-review/5" : open ? "border-warn/30 bg-warn/5" : "border-line";
   return (
@@ -164,7 +147,7 @@ export function Question({ q, project, inBar }: AnswerProps & { inBar?: boolean 
         <span className="ml-auto"><TimeAgo at={q.asked_at} /></span>
       </div>
       <p className="text-fg">{q.text}</p>
-      {q.options && (!open || inBar) && (
+      {q.options && (!open || readOnly) && (
         <ul className="mt-1 list-disc pl-5 text-fg-2">
           {q.options.map((o) => <li key={o}>{o}{q.recommended === o && <span className="ml-2 text-xs text-accent">{t("details.question.recommended")}</span>}</li>)}
         </ul>
@@ -175,7 +158,7 @@ export function Question({ q, project, inBar }: AnswerProps & { inBar?: boolean 
           <Markdown className="inline [&_p]:inline [&_p]:m-0">{a.text}</Markdown>
         </div>
       ))}
-      {open && !inBar && (
+      {open && !readOnly && (
         <div className="mt-3">
           <AnswerBox key={draftKey(project, "answer", q.qid)} q={q} project={project} />
         </div>

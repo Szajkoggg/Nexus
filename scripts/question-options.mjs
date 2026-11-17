@@ -56,7 +56,7 @@ const until = async (check,name) => {for(let i=0;i<80;i++){if(await check())retu
 const scope = qid => `[data-answer-qid=${qid}]`;
 const select = async (qid,index) => {assert.equal(await browser.click({selector:scope(qid)+` [role=radio]:nth-child(${index})`}),true);};
 const words = async (qid,text) => {assert.equal(await browser.type(text,scope(qid)+' textarea'),true);};
-const send = async (qid,bar) => {await browser.evaluate(`(() => {const b=${bar ? "[...document.querySelectorAll('aside button')].filter(b=>b.innerText === 'Answer').at(-1)" : `[...document.querySelectorAll('${scope(qid)} button')].find(b=>b.innerText === 'Answer')`}; b.click(); b.click();})()`);};
+const send = async (qid,bar) => {await browser.evaluate(`(() => {const b=${bar ? `innerWidth < 1024 ? [...document.querySelectorAll('aside button')].filter(b=>b.innerText === 'Answer').at(-1) : [...document.querySelectorAll('${scope(qid)} button')].find(b=>b.innerText === 'Answer')` : `[...document.querySelectorAll('${scope(qid)} button')].find(b=>b.innerText === 'Answer')`}; b.click(); b.click();})()`);};
 const route = async (id,qid='') => {await browser.evaluate(`location.hash=${JSON.stringify('#/'+id+'/Q/Q1'+(qid?'/'+qid:''))}`);await sleep(500);};
 const open = async (f,width,qid='q1') => {await browser.open(inst.url+'/#/'+f.id+'/Q/Q1/'+qid,width,width===1440?900:844,preload);await until(()=>browser.evaluate(`!!document.querySelector('${scope(qid)} textarea')`),'question form');};
 try {
@@ -79,7 +79,8 @@ try {
   await route('options-other','q1'); assert.deepEqual((await ui()).choices,[]); assert.equal(await browser.evaluate(`document.querySelector('${scope('q1')} textarea').value`),'');
   await open(f,width); assert.ok((await ui()).words.includes('Keep all descriptions')); assert.deepEqual((await ui()).choices,[],'selection stays in memory, not a persisted decision');
   await record('switch-and-reload-isolation-'+width,f);
-  // The second question's card is independently selectable while q1 owns the primary bar.
+  // Three simultaneous drafts and choices remain independent while the second card is answered.
+  await select('q1',1); await select('q4',2); await words('q4','Quiet chime');
   await select('q2',1); await words('q2','With the readable spacing');
   await browser.click({selector:scope('q2')+' input[type=checkbox]'});
   await browser.evaluate(`document.documentElement.dataset.fail='true'`);
@@ -95,7 +96,10 @@ try {
   const entry=f.st.readInbox(f.session).entries.find(e=>e.id==='answer-'+question('q2').answers.at(-1).id);
   assert.equal(entry.qid,'q2');assert.equal(entry.text,question('q2').answers.at(-1).text);
   assert.ok((await requests()).every(r=>r.url.endsWith('/questions/q2/answer')),'question acceptance never posts a review');
-  await record('second-card-exact-target-and-single-send-'+width,f);
+  assert.equal(await browser.evaluate(`document.querySelector('${scope('q1')} [aria-checked=true]').innerText.includes('compact list')`),true);
+  assert.equal(await browser.evaluate(`document.querySelector('${scope('q4')} textarea').value`),'Quiet chime');
+  assert.equal(await browser.evaluate(`document.querySelector('${scope('q4')} [aria-checked=true]').innerText.includes('Chime')`),true);
+  await record('three-independent-question-cards-'+width,f);
   // Keyboard arrows choose, then Ctrl+Enter submits the primary option without words.
   await words('q1','');
   await browser.evaluate(`document.querySelector('${scope('q1')} [role=radio]').focus()`);await browser.press('ArrowDown');
