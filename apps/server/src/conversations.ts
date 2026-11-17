@@ -12,7 +12,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import {
-  ActionError, Effort, ProjectStore, type ConversationWeb, effortIssue, languageName, loadProjectState, newId, normPath, now, type SessionFile,
+  ActionError, Effort, ProjectStore, type ConversationWeb, effortIssue, ideaContext, ideaHash, languageName, loadProjectState, newId, normPath, now, type SessionFile,
 } from "@nexus/protocol";
 import { findStep, sinceThen, stepSeed } from "./step-seed.ts";
 import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Hosted, type Launch } from "./agent-host.ts";
@@ -102,6 +102,7 @@ export class Conversations {
       model: s.model ?? null, effort: s.effort ?? null, notes_dir: this.store.readProject().conversations.notes_dir ?? null,
       // Whether its runtime compacts on request: the dashboard offers Compact only then.
       compact: this.canCompact(s),
+      idea_context_error: this.ideaContextError(s),
     };
   }
 
@@ -132,9 +133,17 @@ export class Conversations {
    * `queue` and `step` (both or neither) link the conversation to a step ("Chat about this"). Creating it starts no
    * model turn and changes nothing in the run; the step's context goes to the partner with the user's first message.
    */
-  create(body: { title?: unknown; runtime?: unknown; model?: unknown; effort?: unknown; queue?: unknown; step?: unknown }): SessionFile {
+  create(body: { title?: unknown; runtime?: unknown; model?: unknown; effort?: unknown; queue?: unknown; step?: unknown; idea?: unknown; request_id?: unknown }): SessionFile {
     const p = this.store.readProject();
     const c = p.conversations;
+    const request = body.idea !== undefined ? this.creationRequest(body) : undefined;
+    const previous = request && this.list().find((s) => s.creation_request?.id === request.id);
+    if (previous) {
+      if (previous.creation_request!.fingerprint !== request!.fingerprint) throw new ActionError("request_id already names another conversation", 409);
+      return this.session(previous.id);
+    }
+    if (body.idea !== undefined && (body.queue !== undefined || body.step !== undefined)) throw new ActionError("Choose either an idea or a step scope");
+    const idea = body.idea !== undefined ? ideaContext(this.store, body.idea) : undefined;
     const about = this.stepLink(body.queue, body.step);
     const runtime = body.runtime === "codex" || body.runtime === "claude" ? body.runtime : c.runtime;
     // A model or effort the start names is the conversation's own; without one it follows the project's (effective)
@@ -144,12 +153,14 @@ export class Conversations {
     const issue = effortIssue(runtime, effort ?? (runtime === c.runtime ? c.effort : undefined));
     if (issue) throw new ActionError(issue);
     const title = typeof body.title === "string" && body.title.trim() ? body.title.trim().slice(0, 120)
-      : about ? `${about.step}: ${about.title}`.slice(0, 120) : "New conversation";
+      : idea ? `${idea.snapshot.title}${idea.scope.date ? ` / ${idea.scope.date}` : ""}`
+        : about ? `${about.step}: ${about.title}`.slice(0, 120) : "New conversation";
     const s: SessionFile = {
       protocol: 1, id: newId(), project: p.id, role: "conversation", runtime, title,
       native_id: runtime === "claude" ? randomUUID() : null, cwd: normPath(p.root), launched_by: "nexus", created_at: now(),
       model, effort,
       ...(about ? { about: { queue: about.queue, step: about.step } } : {}),
+      ...(idea ? { about: { idea: idea.scope }, creation_request: request } : {}),
     };
     this.store.writeSession(s);
     this.changed();
@@ -188,8 +199,33 @@ export class Conversations {
   say(id: string, text: unknown): void {
     if (typeof text !== "string" || !text.trim()) throw new ActionError("the message is empty");
     const s = this.session(id);
+    if (s.about?.idea && s.archived) throw new ActionError("This idea conversation is archived; restore it before sending a message", 409);
+    // Validate missing context before recording a user message or launching a process.
+    const idea = this.ideaMessage(s, text.trim());
+    const context = idea?.text ?? this.withStepContext(s, text.trim());
     this.store.appendChat(id, { at: now(), from: "user", text: text.trim() });
-    this.deliver(s, this.withStepContext(s, text.trim()), [text.trim()]);
+    this.deliver(s, context, [text.trim()]);
+    if (idea) this.store.writeSession({ ...this.store.readSession(s.id), about: { idea: idea.scope } });
+  }
+
+  private creationRequest(body: Record<string, unknown>) {
+    if (typeof body.request_id !== "string" || !body.request_id.trim() || body.request_id.length > 200) throw new ActionError("Idea conversation creation requires a stable request_id");
+    return { id: body.request_id, fingerprint: ideaHash(body) };
+  }
+
+  private ideaContextError(s: SessionFile): string | undefined {
+    if (!s.about?.idea) return undefined;
+    try { ideaContext(this.store, { file: s.about.idea.file, ...(s.about.idea.date ? { date: s.about.idea.date } : {}) }); }
+    catch (e) { return e instanceof Error ? e.message : String(e); }
+    return undefined;
+  }
+
+  private ideaMessage(s: SessionFile, text: string) {
+    if (!s.about?.idea) return undefined;
+    const { file, date, seeded } = s.about.idea;
+    const context = ideaContext(this.store, { file, ...(date ? { date } : {}) });
+    return { scope: { file, date, seeded: context.revision }, text: context.revision === seeded ? text
+      : `${seeded ? "[Nexus] The scoped idea context changed; use this current snapshot.\n\n" : ""}${context.text}\n\nUser message\n${text}` };
   }
 
   /**
@@ -197,7 +233,7 @@ export class Conversations {
    * "since then" addition when the step changed state since. The chat keeps the user's words only.
    */
   private withStepContext(s: SessionFile, text: string): string {
-    if (!s.about) return text;
+    if (!s.about || s.about.idea) return text;
     const state = loadProjectState(this.store);
     const { queue, step, seeded } = s.about;
     const context = seeded ? sinceThen(state, queue, step, seeded) : stepSeed(state, queue, step);
@@ -221,6 +257,7 @@ ${text}`;
   /** The partner summarizes the conversation; the summary then goes to the orchestrator's chat. */
   handoff(id: string): void {
     const s = this.session(id);
+    if (s.about?.idea) throw new ActionError("Use the idea handoff preview to choose exact dates; an idea chat is not handed over as a conversation-wide summary", 409);
     this.store.appendChat(id, { at: now(), from: "nexus", text: "Summarizing this conversation for the orchestrator…" });
     const l = this.ensure(s);
     // While the partner is still at a turn (its reply on the way), the instruction waits for that turn's end and runs
@@ -256,7 +293,9 @@ ${text}`;
         const l = this.ensure(s);
         clearTimeout(l.timer);
         if (cut.handoff) l.handoff = true;
-        this.host.send(l, restartedNotice(cut.asked), { quote: cut.asked });
+        const idea = this.ideaMessage(s, restartedNotice(cut.asked));
+        this.host.send(l, idea?.text ?? restartedNotice(cut.asked), { quote: cut.asked });
+        if (idea) this.store.writeSession({ ...this.store.readSession(s.id), about: { idea: idea.scope } });
       } catch (e) {
         this.store.appendChat(s.id, { at: now(), from: "nexus", kind: "error", text: `Could not go on after the restart: ${(e as Error).message}` });
       }

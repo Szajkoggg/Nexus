@@ -1,0 +1,33 @@
+seed: scripts/capture/seed-ideas-corrections.ts
+views:
+  - key: ideas-entry-open@1440
+    route: "#/demo"
+    script: scripts/capture/reset-ideas.js
+    actions: &entry
+      - click: Ideas
+      - click: Overview
+      - click: Chat improvements
+  - key: ideas-entry-open@492
+    route: "#/demo"
+    script: scripts/capture/reset-ideas.js
+    actions: *entry
+  - key: ideas-entry-open@390
+    route: "#/demo"
+    script: scripts/capture/reset-ideas.js
+    actions: *entry
+  - key: ideas-conversation@1440
+    route: "#/demo"
+    script: scripts/capture/reset-ideas.js
+    actions: &chat
+      - click: Ideas
+      - click: Overview
+      - click: Chat improvements
+      - click: { selector: '[data-note-actions] button:first-child' }
+  - key: ideas-conversation@492
+    route: "#/demo"
+    script: scripts/capture/reset-ideas.js
+    actions: *chat
+  - key: ideas-conversation@390
+    route: "#/demo"
+    script: scripts/capture/reset-ideas.js
+    actions: *chat

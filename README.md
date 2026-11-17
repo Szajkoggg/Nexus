@@ -43,7 +43,25 @@ response. **Refresh and review** loads concurrent changes before a new decision.
 The [tested MT/IO/ST2 correction guide](docs/ux/ideas-corrections-guide.md) identifies the exact origins and dates
 to review; it changes no real data. `nexus ideas matches` and `nexus ideas status` let agents read effective links,
 dispositions, assessments, conflicts and history as JSON. Server-owned user decisions supplement the note;
-agents read both and cannot make those decisions. Direct idea chat and handoff controls follow in IC5.
+agents read both and cannot make those decisions.
+
+**Continue from an idea.** On a note or one dated decision, **Chat about this** always opens a new, empty
+conversation with that exact scope. Opening it makes no model request. The first message carries the Summary,
+selected Decided content, effective status and separately labelled Open/Ideas; relevant changes refresh that
+context on later messages. Back returns to the note and its saved position. **Conversations and handoff history**
+opens earlier chats individually, including archived ones; restore an archived chat before sending. If its note
+or date disappears, the chat remains readable and shows why a new scoped request cannot be sent.
+
+**Hand to orchestrator** opens a preview without needing a chat. Choose exact dates and **Discuss / plan next
+work**, or deliberately select **Context only**. Fully confirmed, dropped and replaced dates are context only;
+reopen them explicitly before requesting new work. Open/Ideas stay undecided. Add your instruction, refresh the
+preview after changes and inspect **Exact message** before Send. An idea chat's handoff menu opens this same
+scoped preview, independently of any running reply; ordinary unscoped chats retain their summary-based handoff.
+**Delivered to orchestrator** means the exact snapshot is durably queued and visible at **View message**. It does
+not mean read, implemented, approved or started, and does not change a start plan or lift a start prohibition.
+An uncertain response or failed delivery can be retried with the same saved ID, including after reload or restart.
+History retains the payload, selected dates, status at send, time and failed attempts. A delivered message cannot
+be unsent: a correction is a separate, explicitly reviewed handoff.
 
 **The web in Ideas.** Settings → "Ideas (conversations)" → **Web** (global, or the project's own): **off**, **web
 search** (the default: partners search and name their sources, but open no page) or **web search and reading pages**.

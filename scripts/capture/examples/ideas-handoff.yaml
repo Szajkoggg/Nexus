@@ -1,0 +1,21 @@
+seed: scripts/capture/seed-ideas-handoff.ts
+views:
+  - key: ideas-handoff-preview@1440
+    route: "#/demo"
+    script: scripts/capture/reset-ideas.js
+    actions: &handoff
+      - click: Ideas
+      - click: Overview
+      - click: Chat improvements
+      - click: { selector: '[data-note-actions] button:last-child' }
+      - type: { into: '[data-idea-handoff] textarea', text: 'Review the remaining scope before proposing work.' }
+      - click: Refresh preview
+      - wait: 250
+  - key: ideas-handoff-preview@492
+    route: "#/demo"
+    script: scripts/capture/reset-ideas.js
+    actions: *handoff
+  - key: ideas-handoff-preview@390
+    route: "#/demo"
+    script: scripts/capture/reset-ideas.js
+    actions: *handoff

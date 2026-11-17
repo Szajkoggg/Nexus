@@ -2879,3 +2879,33 @@ current target. Original markers remain in the explicitly historical/conflict-la
 decision content already excludes these disposition markers.
 `scripts/verify-idea-replacements.ts` checks the rendered row and assessment after UI Reopen, B-to-C replacement,
 and replacement without a note marker, including reload and Back. All three dates have no linked queues.
+
+### Idea conversations and direct handoffs (IC5)
+
+The accepted always-new-chat choice in IC1 supersedes the queue's earlier latest-chat wording. A stable creation
+request ID distinguishes a retry from a deliberate new click. The session's topic is a compatible union: the old
+queue/step link or an exact idea file/optional date. Context is supplied only on a real message and refreshed by
+its content/status/provenance fingerprint. The existing own model/effort selection is preserved; CM owns further
+model-choice UI. Archived and missing-source conversations remain readable and cannot silently change scope.
+
+Direct handoff uses no partner/model summary. The server composes a preview from one note and explicit dates,
+with effective state and undecided sections separated. Terminal or fully confirmed entries are context only;
+requesting new work first requires an explicit Reopen. The handoff's intent is saved before enqueueing; its stable
+ID joins an immutable snapshot, existing orchestrator inbox entry and visible chat row. Retrying can complete a
+partially persisted delivery without appending another inbox message, even across session switches/restarts.
+Delivery means queued and visible, not read or executed. Pending/failed attempts stay visible and retryable.
+There is no distributed exactly-once claim about model processing: the existing runtime/inbox lifecycle owns
+turn delivery, while this feature guarantees idempotent enqueue and visible delivery identity.
+
+The server alone writes handoff records, session metadata, inbox and chat rows. It never writes a partner's events
+or notes. A delivery contributes historical handover evidence without replacing later user corrections. The
+preview fingerprint is deliberately distinct from implementation confirmation: Open/Summary changes refresh the
+preview/context, while the IC3 confirmation rule remains unchanged. New server messages and briefings repeat the
+no-approval/no-start/no-plan-change boundary. Note/chat/handoff navigation preserves the note and overview's
+position on Back; uncertain creation/delivery requests retain their IDs through browser reload.
+
+IC5 stopped at its three-failed-check limit. The final capture run passed all nine view/size layout measurements,
+but the browser regression failed when checking visible delivery history after a server restart. Earlier runs
+found preformatted payload whitespace overflow, fixed with `white-space: break-spaces`. The unfinished browser
+harness and failure evidence are preserved in IC5 review material, outside the checkout. Its remaining chat,
+reload and Back scenarios and the full suite must pass before this implementation can be accepted.

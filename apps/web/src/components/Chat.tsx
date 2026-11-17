@@ -71,10 +71,11 @@ export function useOrchestrator(project: string | undefined, version: Version) {
 }
 
 /** A chat: what it is (its header; on a desktop's orchestrator chat, in the middle column's header), the messages, and the composer. */
-function ChatColumn({ project, title, over, who, about, view, ready, error, place, status, showTools, onNeedTools, menu, empty, draft, placeholder, onSend, onStop, onBack, bare, search }: {
+function ChatColumn({ project, title, over, who, about, view, ready, error, place, status, showTools, onNeedTools, menu, empty, draft, placeholder, onSend, onStop, onBack, bare, search, wrapTitle }: {
   /** The project: where pictures are uploaded, and served from. */
   project: string;
   title: string; over: string;
+  wrapTitle?: boolean;
   /** The view holds this chat (not the one shown before it, still there while this one loads). */
   ready: boolean;
   /** The chat's read failed (and nothing of it is held): why, where its messages would be. */
@@ -136,7 +137,7 @@ function ChatColumn({ project, title, over, who, about, view, ready, error, plac
           {onBack && <button onClick={onBack} className={`rounded-md px-1.5 text-lg text-fg-2 hover:text-fg ${side ? "" : "sm:hidden"}`} aria-label={t("common.back")}>‹</button>}
           <div className="min-w-0">
             <div className="text-xs text-fg-3">{over}</div>
-            <h2 className="truncate font-semibold text-fg">{title}</h2>
+            <h2 className={`${wrapTitle ? "break-words" : "truncate"} font-semibold text-fg`}>{title}</h2>
             {about}
           </div>
           <span className="text-xs text-fg-3">{statusLine(view, status)}</span>
@@ -626,11 +627,17 @@ export function ChatPanel({ project, name, view, error, inline, desk }: {
 
 interface ConversationItem extends SessionFile { state: string; last_at: string; messages: number }
 /** `compact`: its runtime compacts a conversation on request (apps/server/src/conversations.ts): Compact is offered. */
-interface ConversationView extends View { notes_dir: string | null; compact?: boolean }
+interface ConversationView extends View { notes_dir: string | null; compact?: boolean; idea_context_error?: string }
 
 /** The step a conversation is about, as a link back to it (it closes the Ideas panel and opens the step). */
 function AboutStep({ project, c, className = "" }: { project: string; c: SessionFile; className?: string }) {
   if (!c.about) return null;
+  if (c.about.idea) {
+    const scope = c.about.idea;
+    return <button className={`block max-w-full break-all text-left text-xs text-accent ${className}`} onClick={() => nav.closeThenOpen("conversation", `note:${scope.file}`)}>
+      {t("ideas.chatScope")} · {scope.file}{scope.date ? `#${scope.date}` : ""}
+    </button>;
+  }
   const { queue, step } = c.about;
   return (
     <button onClick={(e) => { e.stopPropagation(); nav.closeThenItem("ideas", project, queue, step); }} title={t("chat.openStep")}
@@ -755,6 +762,11 @@ function Conversations({ project, name, defaultRuntime, inline, desk, switcher }
     { label: t("chat.showTools"), checked: showTools, onSelect: () => setShowTools(!showTools) },
     {
       label: t("chat.handOff"), onSelect: () => {
+        if (current.about?.idea) {
+          const { file, date } = current.about.idea;
+          nav.open(`idea-handoff:${JSON.stringify({ file, ...(date ? { date } : {}) })}`);
+          return;
+        }
         if (confirm(t("chat.handOffConfirm"))) {
           void act(project, "POST", `/conversations/${enc(open)}/handoff`).then(onChanged);
         }
@@ -798,9 +810,9 @@ function Conversations({ project, name, defaultRuntime, inline, desk, switcher }
                 <span className="flex items-center gap-2">
                   {c.state === "working" && <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-accent" />}
                   {c.id !== open && hasUnread(c.last_at, readPlace(placeKey(project, "conversation", c.id))?.seen) && <UnreadMark n={-1} />}
-                  <span className="truncate">{c.title}</span>
+                  <span className={c.about?.idea ? "min-w-0 break-words" : "truncate"}>{c.title}</span>
                 </span>
-                <span className="block text-xs text-fg-3">{c.about && <span className="font-mono text-accent/80">{c.about.queue}/{c.about.step} · </span>}{c.runtime} · {t("chat.messages", { count: c.messages })} · <TimeAgo at={c.last_at} /></span>
+                <span className="block break-all text-xs text-fg-3">{c.about && <span className="font-mono text-accent/80">{c.about.idea ? `${c.about.idea.file}${c.about.idea.date ? `#${c.about.idea.date}` : ""}` : `${c.about.queue}/${c.about.step}`} · </span>}{c.runtime} · {t("chat.messages", { count: c.messages })} · <TimeAgo at={c.last_at} /></span>
               </button>
             </li>
           ))}
@@ -818,8 +830,13 @@ function Conversations({ project, name, defaultRuntime, inline, desk, switcher }
         onCreated={(id) => { nav.open(`conversation:${id}`); onChanged(); }} />}
       {!creating && open && current && (
         <ChatColumn key={open} project={project}
+          wrapTitle={!!current.about?.idea}
           ready={view?.session?.id === open} error={viewError} place={placeKey(project, "conversation", open)}
-          over={t("chat.ideasOf", { project: name })} title={current.title ?? t("chat.conversation")} who={t("chat.partner")} about={<AboutStep project={project} c={current} className="mt-1" />} view={view} status={stateText(view)} onBack={() => nav.close("conversation")}
+          over={t("chat.ideasOf", { project: name })} title={current.title ?? t("chat.conversation")} who={t("chat.partner")} about={<>
+            <AboutStep project={project} c={current} className="mt-1" />
+            {view?.idea_context_error && <p role="alert" className="mt-2 text-xs text-warn">{view.idea_context_error}</p>}
+            {current.about?.idea && current.archived && <p className="mt-2 text-xs text-warn">{t("ideas.chatArchived")}</p>}
+          </>} view={view} status={stateText(view)} onBack={() => nav.close("conversation")}
           showTools={showTools} onNeedTools={showToolCalls} menu={menu} search={{ open: searching, set: setSearching }}
           empty={<>
             <p>{t("chat.ideasEmpty")}</p>

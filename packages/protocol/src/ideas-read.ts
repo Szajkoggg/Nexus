@@ -40,7 +40,8 @@ export function readNotes(root: string, notesDir: string | undefined): IdeaNote[
  * one per entry covered, with the conversation's title. Only a conversation's own events count.
  */
 export function readHandOvers(store: ProjectStore): HandOver[] {
-  const out: HandOver[] = [];
+  const out: HandOver[] = store.readIdeaHandoffs().records.flatMap((r) => r.state === "delivered" && r.delivery
+    ? r.dates.map((date) => ({ ref: noteRef(r.file, date), at: r.delivery!.at })) : []);
   for (const id of store.sessionIds()) {
     let title: string | undefined;
     try {

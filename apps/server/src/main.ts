@@ -16,6 +16,7 @@ import {
   STAT_DIMENSIONS, STAT_FILTERS, projectMetrics, sinceTime, statDimension, statsReport, stepStats, usageDays, type ProjectMetrics, type StatsReport, type UsageDays,
   SearchError, parseSearch, MIN_SAMPLES, queueEstimate, stepSamples, isOpenQuestion, writeCount, type EstimatesResponse, type LeftView, type TemplatesResponse, readTemplates, type ProjectSummary, type RemovalView,
   projectIdeas, ideaMatches, ideaLinks, changeIdeaLinks, decideIdeaMatches, ideaStatuses, changeIdeaStatus, reconcileIdeaStatuses, readNotes, type IdeasResponse, type IdeaMatchesResponse,
+  previewIdeaHandoff, sendIdeaHandoff, retryIdeaHandoff,
 } from "@nexus/protocol";
 import { newestFirst, projectDigest, projectRunning, usageSince, type DigestEvent, type DigestResponse, type DigestRunning, type UsageRun } from "@nexus/protocol/digest";
 import { Engine } from "./engine.ts";
@@ -477,6 +478,10 @@ app.post("/api/projects/:id/queues/:queue/approve", act((st, b, p) => {
 // written to idea-matches.yaml; a user's write like every other (no agent may: the nexus command has no such action).
 app.post("/api/projects/:id/ideas/matches", act((st, b) => decideIdeaMatches(st, b.items, b.accept, { revision: b.revision, request_id: b.request_id })));
 app.post("/api/projects/:id/ideas/statuses", act((st, b) => changeIdeaStatus(st, b)));
+app.get("/api/projects/:id/ideas/handoffs", (c) => c.json(c.get("entry").store.readIdeaHandoffs().records));
+app.post("/api/projects/:id/ideas/handoffs/preview", act((st, b) => previewIdeaHandoff(st, b)));
+app.post("/api/projects/:id/ideas/handoffs", act((st, b, _p, e) => sendIdeaHandoff(st, b, (id, text) => e.orchestrator.enqueueIdea(id, text))));
+app.post("/api/projects/:id/ideas/handoffs/:hid/retry", act((st, _b, p, e) => retryIdeaHandoff(st, p("hid"), (id, text) => e.orchestrator.enqueueIdea(id, text))));
 app.post("/api/projects/:id/ideas/links", act((st, b) => changeIdeaLinks(st, b)));
 // Withdrawing an approval and adding an allow rule are the user's too, like every write (see the guard above): an agent
 // must not take an approval back or widen its own permissions.

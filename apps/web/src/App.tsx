@@ -17,6 +17,7 @@ import { PlannedDeployCard } from "./components/DeployPlan.tsx";
 import { ContextBar, UsageMeter } from "./components/Run.tsx";
 import { ChatPanel, ConversationsPanel, DeskHead, useOrchestrator, type Desk, type Unread } from "./components/Chat.tsx";
 import { NotePanel } from "./components/Ideas.tsx";
+import { IdeaHandoffPanel } from "./components/IdeaOnward.tsx";
 import { hasUnread, placeKey, readPlace, unreadCount, usePlaces } from "./chatPlace.ts";
 import { RemoteButton, RemotePanel } from "./components/Remote.tsx";
 import { ProjectPicker, ProjectSidebar } from "./components/Projects.tsx";
@@ -97,6 +98,7 @@ export function App() {
   // The global Stats view: a page over the project's (the desktop's middle column and rail; the phone's tabs).
   const statsOpen = isOpen(route.nav, "stats");
   const note = layerValue(route.nav, "note");
+  const ideaHandoff = layerValue(route.nav, "idea-handoff");
   // The search of the project's history (components/Search.tsx): a layer over the page; Ctrl+K opens it.
   const searchOpen = isOpen(route.nav, "search");
   useSearchShortcut(!!projectId && !statsOpen);
@@ -259,8 +261,11 @@ export function App() {
     {file && projectId && <Suspense fallback={null}><FileView key={`${file.path}:${file.line ?? ""}`} project={projectId} root={state?.project.root ?? ""} local={!!server?.local && !phone} path={file.path} line={file.line} onClose={() => nav.close("file")} /></Suspense>}
 
     {/* An opened note of the ideas overview (components/Ideas.tsx): where a step opens. */}
-    <Drawer open={!!note && !!projectId && !itemShown && !isOpen(route.nav, "matching")} onClose={() => nav.close("note")} beside={phone ? undefined : RAIL} panel>
+    <Drawer open={!!note && !!projectId && !itemShown && !isOpen(route.nav, "matching") && !isOpen(route.nav, "conversation") && !ideaHandoff} onClose={() => nav.close("note")} beside={phone ? undefined : RAIL} panel>
       {note && projectId && <NotePanel key={note} project={projectId} file={note} onClose={() => nav.close("note")} />}
+    </Drawer>
+    <Drawer open={!!ideaHandoff && !!projectId} onClose={() => nav.close("idea-handoff")} beside={phone ? undefined : RAIL} panel>
+      {ideaHandoff && projectId && <IdeaHandoffPanel key={ideaHandoff} project={projectId} value={ideaHandoff} />}
     </Drawer>
 
     <Drawer open={itemShown && !fullApproval} onClose={close} beside={phone ? undefined : RAIL} panel>

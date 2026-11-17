@@ -189,6 +189,33 @@ export class Orchestrator {
     this.deliver(userMessage(text.trim(), held.length ? describeDeployChanges(held) : undefined), [text.trim()]);
   }
 
+  /** Durable direct idea delivery. Inbox first, then an idempotent visible chat row; the normal inbox path runs it. */
+  enqueueIdea(id: string, text: string): { at: string; session: string; line: number; inbox: string } {
+    const key = `idea-${id}`;
+    // Search all historical orchestrator sessions too: a retry after a session switch must not enqueue again.
+    let destination: { session: string; at: string } | undefined;
+    for (const session of this.store.sessionIds()) {
+      if (this.store.readSession(session).role !== "orchestrator") continue;
+      const previous = this.store.readInbox(session).entries.find((m) => m.id === key);
+      if (!previous) continue;
+      if (previous.type !== "message" || previous.text !== text) throw new ActionError("Handoff identity already has another payload", 409);
+      destination = { session, at: previous.at };
+      break;
+    }
+    if (!destination) {
+      const s = this.ensure(false);
+      destination = { session: s.id, at: now() };
+      this.store.appendInbox(s.id, { v: 1, id: key, at: destination.at, from: "user", type: "message", text });
+    }
+    let line = this.store.readChat(destination.session).entries.findIndex((c) => c.message_id === key);
+    if (line < 0) {
+      line = this.store.readChat(destination.session).entries.length;
+      this.store.appendChat(destination.session, { at: destination.at, from: "user", text, message_id: key });
+    }
+    this.changed();
+    return { ...destination, line, inbox: key };
+  }
+
   /** Deploys whose changes for agents this session's lineage has not been told; none from before it started. */
   private pendingChanges(s: SessionFile): DeployChanges[] {
     const line = this.lineage(s);
@@ -452,7 +479,7 @@ ${n.text}` });
   private deliverPending(state: ProjectState, s: SessionFile): void {
     if (this.summaryAsked(s) || this.runtimeFull(state)) return;
     const pending = (state.sessions.find((x) => x.id === s.id)?.inbox ?? [])
-      .filter((m) => m.type === "message" && !m.read_at && (m.id.startsWith("say-") || m.id.startsWith("runtime-seed-")));
+      .filter((m) => m.type === "message" && !m.read_at && (m.id.startsWith("say-") || m.id.startsWith("runtime-seed-") || m.id.startsWith("idea-")));
     if (!pending.length) return;
     this.ensure();
     for (const m of pending) {

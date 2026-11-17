@@ -639,6 +639,22 @@ export type Note = NoteMeta & { queue: string; body: string };
 
 // ---------------------------------------------------------------- session.yaml
 
+export const IdeaScope = z.object({ file: z.string().min(1), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }).strict();
+export type IdeaScope = z.infer<typeof IdeaScope>;
+
+/** Server-owned immutable handoff snapshots and append-only delivery attempts. */
+export const IdeaHandoff = z.object({
+  id: z.string().min(1), request: z.string(), created_at: Time,
+  file: z.string(), dates: z.array(z.string()), purpose: z.enum(["plan", "context"]), instruction: z.string(),
+  revision: z.string(), payload: z.string(),
+  state: z.enum(["pending", "failed", "delivered"]),
+  attempts: z.array(z.object({ at: Time, error: z.string().optional() })),
+  delivery: z.object({ at: Time, session: Id, line: z.number().int().nonnegative(), inbox: z.string() }).optional(),
+});
+export type IdeaHandoff = z.infer<typeof IdeaHandoff>;
+export const IdeaHandoffsFile = z.object({ protocol: z.literal(1), records: z.array(IdeaHandoff) });
+export type IdeaHandoffsFile = z.infer<typeof IdeaHandoffsFile>;
+
 export const SessionFile = z.object({
   protocol: z.literal(1),
   id: Id,
@@ -664,10 +680,16 @@ export const SessionFile = z.object({
    * apart from `queue`, which makes a session a worker of that queue (`nexus status` would deliver the queue's notes to
    * it). `seeded`: the step's status when the partner last got its context (the seed, or a "since then" addition).
    */
-  about: z.object({
+  about: z.union([z.object({
     queue: Id, step: Id,
     seeded: z.object({ status: StepStatus, at: Time }).optional(),
-  }).optional(),
+    idea: z.never().optional(),
+  }), z.object({
+    idea: IdeaScope.extend({ seeded: z.string().optional() }),
+    queue: z.never().optional(), step: z.never().optional(), seeded: z.never().optional(),
+  })]).optional(),
+  /** Idempotent dashboard creation; a deliberate new click uses another ID. */
+  creation_request: z.object({ id: z.string(), fingerprint: z.string() }).optional(),
   /** The session this one took over from (context care: the earlier one's context was full). */
   continues: Id.optional(),
   /** The session that took over from this one. */
@@ -1212,6 +1234,8 @@ export const ChatEntry = z.object({
   from: z.enum(["user", "orchestrator", "partner", "nexus"]),
   kind: z.enum(["message", "tool", "error"]).default("message"),
   text: z.string(),
+  /** Stable server delivery identity; lets an interrupted inbox/chat write finish without duplicate messages. */
+  message_id: z.string().optional(),
 });
 export type ChatEntry = z.infer<typeof ChatEntry>;
 

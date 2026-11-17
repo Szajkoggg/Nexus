@@ -29,6 +29,7 @@ a shell command can take part.
   metrics.yaml                          server: the project's metrics (unit, how shown, target, warning threshold)
   idea-matches.yaml                     server: the user's decisions on matching earlier queues to the notes' entries
   idea-statuses.yaml                    server: user dispositions, assessments, history and observed invalidations
+  idea-handoffs.yaml                    server: immutable scoped payloads and delivery attempts/receipts
   orchestrator/summary.md               server: the orchestrator's latest summary for a fresh session (its context care)
   drafts/<queue-id>.yaml                the orchestrator: its queue drafts (also `nexus queue draft --template`)
   recurring/<id>.yaml                   server: a recurring queue (template, values, schedule, standing approval)
@@ -1923,6 +1924,59 @@ state. It records the step's status in `about.seeded`. When the step's status di
 "since then" addition (the change, and the outcome or progress of the new state) goes with that message, once.
 
 ## The orchestrator
+
+### Idea conversation scope and direct delivery (IC5)
+
+`POST /api/projects/:id/conversations` also accepts `idea: { file, date? }` and a required stable `request_id`
+for this creation mode, mutually exclusive with `queue`/`step`. The exact file must be a discovered note inside
+the configured notes boundary and the date, if supplied, must exist. The server saves
+`about: { idea: { file, date?, seeded? } }` plus `creation_request: { id, fingerprint }` in `session.yaml`.
+The legacy `about: { queue, step, seeded? }` remains readable and behaves unchanged. An identical creation retry
+returns the same session, even after restart; reusing an ID with different parameters is 409. A new deliberate
+idea click uses a new ID: no automatic latest-chat reuse. Existing and archived chats remain individually readable.
+
+Creation does not launch a process or send a turn. At the first actual message the server includes Summary,
+complete selected Decided dates, effective dispositions/assessments, provenance/conflicts and full Open/Ideas
+sections labelled as undecided. `about.idea.seeded` is the snapshot fingerprint last submitted to the runtime;
+changed context is included again. The visible chat records the user's words only. Missing note/date rejects a
+new message before recording it (404), exposes `idea_context_error` on the conversation view, and leaves old
+messages readable. An archived idea chat refuses new messages until restored (409). Existing own model/effort
+values survive context refresh. Idea-scoped chats reject the old summary-based `/handoff` endpoint (409); their
+dashboard handoff opens the direct preview instead.
+
+The direct handoff endpoints use the normal local/same-origin, JSON-only write guards:
+
+| Endpoint | Input/result |
+| --- | --- |
+| `POST …/ideas/handoffs/preview` | `{ file, dates, purpose: plan\|context, instruction? }`; returns selection, source revision, scoped snapshot and exact payload |
+| `POST …/ideas/handoffs` | `{ request_id, revision, selection }`; saves immutable intent and attempts delivery, returning the durable record |
+| `GET …/ideas/handoffs` | All historical records, including failed/interrupted attempts |
+| `POST …/ideas/handoffs/:hid/retry` | Retries that existing immutable payload/ID; a delivered record is returned unchanged |
+
+Planning requires at least one active date without a current full confirmation. Full/dropped/replaced dates are
+allowed only with `purpose: context`; no dates is also context only. The payload never includes another note's
+body or a chat's unrelated turns. Every payload states that it grants no approval/start permission, changes no
+queue or start plan and lifts no start prohibition. A stale source revision is 409 before saving intent. The
+fingerprint includes selected dated content, summary, undecided sections, effective states and relationship
+provenance. It is separate from implementation-confirmation validity: an Open/Summary edit refreshes chat/handoff
+context without invalidating a dated implementation assessment.
+
+`.nexus/idea-handoffs.yaml` is a server-only atomic YAML file with `protocol: 1` and `records` (absent: empty).
+Each record retains `id`, request fingerprint, `created_at`, exact `file`/`dates`, `purpose`, `instruction`, source
+`revision`, immutable `payload`, `state: pending|failed|delivered`, append-only `attempts: [{ at, error? }]` and an
+optional `delivery: { at, session, line, inbox }`. Failed delivery returns a failed record, not a success receipt.
+An interrupted pending request is explicitly retryable; restart does not silently generate another request.
+Retries of saved intent retain the original snapshot even if its sources have since changed. Corrections are new
+previewed requests; delivered history is never erased or overwritten with newer content.
+
+`Orchestrator.enqueueIdea` uses the existing server-owned inbox and chat: `idea-<request_id>` is the stable inbox ID
+and the chat entry's optional `message_id`. It searches historical orchestrator sessions before appending, writes
+the inbox first and completes a missing chat row on retry. Thus a crash between inbox, chat and handoff receipt
+can be recovered without enqueueing twice, including after an orchestrator session switch. The ordinary pending
+inbox path delivers these messages and existing session continuation carries unread messages. The receipt means
+durably queued **and visible**, not model acknowledgement. Runtime failure after enqueue does not erase the inbox.
+No partner event log is written: delivered dated handoffs are read alongside legacy `ideas.covered` events by the
+Ideas history. Pure context-only handoffs without dates remain in note-level handoff history.
 
 `project.yaml` holds `orchestrator: { runtime, session, model?, effort?, fallback?, notify, context_threshold }` (`context_threshold`: see
 "The orchestrator's context care"). It runs on `orchestrator.runtime`: `codex` starts it on Codex, any other value
