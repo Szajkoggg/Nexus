@@ -2953,13 +2953,17 @@ it answers. Desktop option buttons remain QA3; requiring all answers before work
 resumes remains QA4. No API, answer event or inbox contract changes in QA2, including
 the existing support for additional answers to an answered question.
 
-QA2's browser probe and observations are retained as review material. The probe
-passed selected-question and reload checks at 390/492/1440 px, Back and project
-isolation, reordering, failed-save retention and slow submission with matching
-request/event/inbox qids. Its three consecutive unsuccessful runs met the queue's
-stop condition: fixture selection, injected error shape, then an unsuccessful HTTP
-request in the other-page scenario. The remaining browser scenarios and full suite
-were not completed. Unit regressions cover exact selection, closed/missing targets,
-URL round trips, history, distinct waiting positions and the additional-answer API
-contract. This is a partial implementation awaiting completion and review, not a
-claim that QA2's acceptance criteria have all passed.
+The committed `scripts/question-target.mjs` preserves QA1's clicked-BRAVO regression.
+After building the dashboard, run it with an optional output directory outside the
+checkout. It uses temporary projects, fake-runtime server configuration and external
+fixture workers, with real browser requests. It checks all three widths, reload and
+Back, project isolation, reordered/new questions, failed/slow saves, another browser
+answering the target, withdrawal, missing targets, sequential navigation and the
+desktop action bar. Request, answer event and worker inbox identities are asserted.
+No model is called; answer delivery code has not changed.
+
+The initial QA2 probe stopped after three harness failures; its source and observations
+remain review history. On user-authorized resumption, the second-page scenario uses
+an actual second browser instead of a Node POST without Origin. The server's existing
+same-origin write restriction remains intact. A real browser also preserves the
+additional-answer contract when its first page is stale.
