@@ -2967,3 +2967,23 @@ remain review history. On user-authorized resumption, the second-page scenario u
 an actual second browser instead of a Node POST without Origin. The server's existing
 same-origin write restriction remains intact. A real browser also preserves the
 additional-answer contract when its first page is stale.
+
+### Clickable question answers on every layout (QA3)
+
+The phone sheet, desktop answer bar and each remaining question's card share `useAnswer` and `AnswerFields`.
+Each form has one optional choice, optional words and one explicit send action, bound to its project and qid.
+Recommendations never choose for the user. Choosing again clears the choice; arrow keys, Home and End move it.
+The choice stays in memory while that form is mounted; words keep the existing per-question persisted draft.
+A reload restores words without inventing a selection. Failed saves preserve both; a synchronous submit guard
+prevents repeated clicks or keys from sending twice before the busy state renders. The option cannot change
+during a send; words edited during it remain a draft. All forms post only to the question-answer endpoint.
+
+The primary question has its selector in the answer bar, the other questions in their own cards. Closed questions
+keep their option lists. Labels inside option buttons wrap with the text so that long options remain readable.
+Continuation still follows the existing checkbox; the separate QA4 step will require all open questions answered.
+
+`scripts/question-options.mjs` checks three widths against isolated fake-runtime instances: separate selection and
+send, primary and secondary forms, exact request/event/inbox targets, continuation flags, free text with and without
+options, project/target switches, reload, reordered live data, failed/slow saves, duplicate submission and keyboard
+input. It also runs the layout-faults CLI. The raw collector includes boxes outside their scroll viewport, so the
+probe additionally asserts non-overlap of visible option rectangles and records their clipping geometry.

@@ -1,0 +1,16 @@
+seed: scripts/capture/seed-question-options.ts
+views:
+  - key: questions-options-primary-selected@1440
+    route: "#/options/Q/Q1"
+    script: scripts/capture/question-options.js
+    actions:
+      - click: { selector: "[data-answer-qid=q1] [role=radio]:first-child" }
+      - type: { text: "Keep all descriptions.", into: "[data-answer-qid=q1] textarea" }
+  - key: questions-options-card-selected@1440
+    route: "#/options/Q/Q1"
+    script: scripts/capture/question-options.js
+    actions:
+      - click: { selector: "[data-answer-qid=q2] [role=radio]:first-child" }
+      - type: { text: "With the readable spacing.", into: "[data-answer-qid=q2] textarea" }
+      - click: { selector: "[data-answer-qid=q2] [role=radio]:first-child" }
+      - click: { selector: "[data-answer-qid=q2] [role=radio]:first-child" }

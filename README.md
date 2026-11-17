@@ -115,8 +115,12 @@ open (a step, Settings, a conversation) and then leaves. After switching project
 queue opens as a full-screen sheet with ‹ and ✕ at the top and says where it stands ("2 of 6 waiting"). A question's
 options are buttons right in its waiting card: a tap opens the question with that option chosen, and **Answer**
 confirms it (words of your own can go with it). The option the worker, or the orchestrator passing the question to
-you, recommends is marked: ✓ on its button in the card, "recommended" beside it in the question (on a desktop, in the
-question's list of options). The chat's box is one line with a round Send.
+you, recommends is marked: ✓ on its button in the card, "recommended" beside it in the question.
+On a desktop, choose an option in the question's answer bar or its own card, optionally
+add your own words, then press **Answer**. Choosing an option never sends it; a recommendation is not selected
+automatically. You can also answer with only your own words. Tab to the choices, use the arrow keys to choose, and
+send with **Answer** or Ctrl+Enter in the text box (Command+Enter on macOS). A failed save keeps the choice and words
+for retry. Answering a question does not accept the step's review. The chat's box is one line with a round Send.
 
 **Each chat keeps its place** while the browser is open: switching between the orchestrator, Ideas and other views,
 or between conversations, brings you back where you were. Messages that came meanwhile do not move the view; a

@@ -1,0 +1,11 @@
+seed: scripts/capture/seed-question-options.ts
+views:
+  - key: questions-options@1440
+    route: "#/options/Q/Q1"
+    script: scripts/capture/question-options.js
+  - key: questions-options@492
+    route: "#/options/Q/Q1"
+    script: scripts/capture/question-options.js
+  - key: questions-options@390
+    route: "#/options/Q/Q1"
+    script: scripts/capture/question-options.js
