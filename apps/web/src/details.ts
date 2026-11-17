@@ -33,17 +33,17 @@ export interface StepLayout {
   orchestratorAsks: string | undefined;
   /** The step waits for the user's review: Accept in the action bar, the summary and the pictures first. */
   reviewing: boolean;
-  /** The open question the action bar answers (the first; the others keep their box in their card). */
+  /** The open question the action bar answers (the selected one, else the first for a plain step link). */
   asking: QueueView["questions"][number] | undefined;
   /** On the phone a step with an open question is the question's sheet. */
   questionFirst: boolean;
 }
 
-export function stepLayout(step: StepView, questions: QueueView["questions"], phone: boolean, queue?: Pick<QueueView, "status">): StepLayout {
+export function stepLayout(step: StepView, questions: QueueView["questions"], phone: boolean, queue?: Pick<QueueView, "status">, qid?: string): StepLayout {
   const readOnly = !!queue && queueOver(queue);
   const forOrchestrator = reviewedByOrchestrator(step);
-  const reviewing = !readOnly && showsReviewActions(step);
-  const asking = reviewing || readOnly ? undefined : questions.find(isOpenQuestion);
+  const reviewing = !readOnly && !qid && showsReviewActions(step);
+  const asking = reviewing || readOnly ? undefined : questions.find((q) => isOpenQuestion(q) && (!qid || q.qid === qid));
   return {
     readOnly,
     live: !readOnly && stepAtWork(step) && !!step.session,

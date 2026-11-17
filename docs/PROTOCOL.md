@@ -1298,6 +1298,20 @@ Report with `nexus`. End the step with `nexus step done`, `nexus step failed` or
 
 The template is a project setting, so each project can phrase it in its own terms.
 
+## Dashboard question links
+
+The dashboard hash is `#/<project>[/<queue>[/<step>[/<qid>]]]`, with each part
+URI-encoded. The optional fourth part selects exactly that question within the
+project, queue and step. Waiting cards, sequential navigation, browser notifications
+and push notifications preserve it. Legacy project, queue and step hashes keep their
+meaning; a plain step link uses its first open question when there is no review.
+An answered, withdrawn or absent explicit target is not replaced by another open
+question. A question link selects an answer interaction, never a step review approval.
+
+Answer requests remain `POST /api/projects/:id/questions/:qid/answer` with `text`
+and `continue`; `answer.given` and inbox delivery are unchanged. Additional answers
+to an answered question remain supported; withdrawn and unknown targets are rejected.
+
 ## Server API
 
 The replies the dashboard reads are typed once, in the protocol's types-only module `@nexus/protocol/api`

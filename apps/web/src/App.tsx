@@ -56,7 +56,7 @@ const GROUPS: { title: Key; statuses: QueueStatus[] }[] = [
 ];
 
 /**
- * The selection lives in the URL hash: #/<project>[/<queue>[/<step>]]; what is open over it, and the view (the phone's
+ * The selection lives in the URL hash: #/<project>[/<queue>[/<step>[/<qid>]]]; what is open over it, and the view (the phone's
  * tab, a desktop's middle column), in the history entry (nav.ts), so that Back closes the topmost layer.
  */
 function useRoute() {
@@ -120,7 +120,7 @@ export function App() {
   const queue = state?.queues.find((q) => q.id === route.queue);
   const step = queue?.steps.find((s) => s.id === route.step);
   const close = () => nav.close("item");
-  const openWaiting = (w: WaitingItem) => nav.closeThenItem("waiting", w.project, w.queue, attentionTarget(w));
+  const openWaiting = (w: WaitingItem) => nav.closeThenItem("waiting", w.project, w.queue, attentionTarget(w), w.qid);
   // Below 1024 px: the phone layout, with a tab instead of the chat, Ideas and waiting layers (layers.ts phoneView).
   // From 1024 px: chat-first (UX proposals, 11A), the middle column showing the chat, Ideas or the project's queues.
   const phone = usePhone();
@@ -141,19 +141,19 @@ export function App() {
   useEffect(() => {
     const r = round.current;
     if (!r || !projectId) return;
-    const here: Place = { project: projectId, queue: route.queue, step: route.step };
-    const there = r.place.project === here.project && r.place.queue === here.queue && (r.place.step ?? "") === (here.step ?? "");
+    const here: Place = { project: projectId, queue: route.queue, step: route.step, qid: route.qid };
+    const there = r.place.project === here.project && r.place.queue === here.queue && (r.place.step ?? "") === (here.step ?? "") && r.place.qid === here.qid;
     if (!there) { if (r.opened) round.current = null; return; } // still on its way, or the user went elsewhere
     r.opened = true;
     const next = moveOn(waiting, r.place);
     if (next?.queue) {
       round.current = { place: placeOf(next), opened: false };
-      nav.item(next.project, next.queue, attentionTarget(next));
+      nav.item(next.project, next.queue, attentionTarget(next), next.qid);
     } else if (!waiting.length) round.current = null;
-  }, [waiting, projectId, route.queue, route.step]);
+  }, [waiting, projectId, route.queue, route.step, route.qid]);
   const digest = <Digest projects={projects ?? []} onGoThrough={goThrough} />;
   // On the phone an item that waits for the user says where it stands in the waiting list: "2 of 6".
-  const place = phone && projectId && route.queue ? waitingPosition(waiting, { project: projectId, queue: route.queue, step: route.step }) : undefined;
+  const place = phone && projectId && route.queue ? waitingPosition(waiting, { project: projectId, queue: route.queue, step: route.step, qid: route.qid }) : undefined;
   const of = place?.at ? t("shell.placeInWaiting", { at: place.at, total: place.total }) : undefined;
 
   const itemShown = !!(state && queue);
@@ -270,7 +270,7 @@ export function App() {
 
     <Drawer open={itemShown && !fullApproval} onClose={close} beside={phone ? undefined : RAIL} panel>
       {state && queue && (step
-        ? <StepDetail project={state} queue={queue} step={step} onClose={close} of={of} />
+        ? <StepDetail key={`${state.project.id}/${queue.id}/${step.id}`} project={state} queue={queue} step={step} qid={route.qid} onClose={close} of={of} />
         : <QueueDetail project={state} queue={queue} onClose={close} of={of}
             chat={orchestrator?.chat} onFull={() => setForm("full")} />)}
     </Drawer>
@@ -321,7 +321,7 @@ export function App() {
           {scrolls && banners}
           {tab === "waiting" && server?.plan && <div className="mb-4"><PlannedDeployCard plan={server.plan} projects={projects} /></div>}
           {tab === "waiting" && <div className="mb-4 empty:hidden">{digest}</div>}
-          {tab === "waiting" && <WaitingList projects={projects ?? []} onOpen={openWaiting} onChoose={(w, o) => { if (w.qid) chooseOption(w.qid, o); openWaiting(w); }} />}
+          {tab === "waiting" && <WaitingList projects={projects ?? []} onOpen={openWaiting} onChoose={(w, o) => { if (w.qid) chooseOption(w.project, w.qid, o); openWaiting(w); }} />}
           {tab === "queues" && queuesPage}
           {tab === "stats" && projectId && state && <ProjectStats key={`stats-${projectId}`} project={projectId} queues={state.queues} phone />}
           {tab === "chat" && projectId && (
@@ -407,7 +407,7 @@ export function App() {
                   onOpen={(a: AttentionItem) => {
                     // A tag proposal opens the project's settings, where its lists are.
                     if (a.kind === "tags") nav.open("settings");
-                    else if (projectId && a.queue) nav.item(projectId, a.queue, attentionTarget(a));
+                    else if (projectId && a.queue) nav.item(projectId, a.queue, attentionTarget(a), a.qid);
                   }} />
               )}
               {queuesPage}

@@ -39,7 +39,7 @@ test("the first look at a project is the baseline; only what is new afterwards i
   watch.check({ id: "p", name: "Project" }, [item("a")]);            // baseline: old news
   assert.equal(sent.length, 0);
   watch.check({ id: "p", name: "Project" }, [item("a"), item("b")]); // b is new
-  assert.deepEqual(sent.map((x) => [x.title, x.body, x.url]), [["Project: Question", "W/W3 Question b", "/#/p/W/W3"]]);
+  assert.deepEqual(sent.map((x) => [x.title, x.body, x.url]), [["Project: Question", "W/W3 Question b", "/#/p/W/W3/b"]]);
   watch.check({ id: "p", name: "Project" }, [item("b")]);            // a was answered: nothing to say
   assert.equal(sent.length, 1);
   assert.equal(await remote.push({ title: "t", body: "b", url: "/" }, { kind: "question" }), 0, "no subscribed device: nothing is sent");

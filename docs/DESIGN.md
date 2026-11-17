@@ -1069,7 +1069,7 @@ The user's answers, 2026-11-12:
 Everything the dashboard opens over the queue list is a layer kept in the browser history, so the phone's back
 button, the back gesture, the browser's Back and Escape all close the topmost one, and Back leaves the app only when
 nothing is open. Each history entry Nexus writes carries `{hash, layers, depth}` in `history.state`: the hash is the
-route (`#/<project>[/<queue>[/<step>]]`, the queue or step drawer being the layer `item`), `layers` the open stack
+route (`#/<project>[/<queue>[/<step>[/<qid>]]]`, the queue or step drawer being the layer `item`), `layers` the open stack
 (`chat`, `ideas`, `conversation:<id>`, `settings`, `remote`, `waiting`, `projects`, `viewer:<index>` for a review
 image), `depth` how many entries Nexus
 pushed, and the view (`tab`: the phone's tab, a desktop's middle column; see below). Opening pushes one entry; a close button goes back to it, so Back never reopens what was closed and no dead
@@ -2934,3 +2934,32 @@ loss of identity. The API and inbox route the qid they receive correctly. Preser
 through navigation and refresh; a generic step link can keep its first-open default. Do not infer current
 question state from historical prose. The original incident, isolated browser traces, separate desktop-option
 gap and smallest correction are documented in [the QA1 reproduction](qa/question-target-reproduction.md).
+
+
+### Preserving the selected question (QA2)
+
+An optional qid is now part of the dashboard address, waiting position and sequential
+navigation. StepDetail resolves it within the selected step's questions. Explicit
+question links take precedence over step review controls, show the selected question
+first, and retain an answered/withdrawn target or show an unavailable message. Only
+plain step links keep the first-open fallback. A normal answer leaves the selected
+question visible with its recorded answer and the other questions still present;
+the explicitly requested sequential mode advances to the next distinct waiting item.
+
+Answer components and option handoffs are scoped by project and qid. In-flight sends
+capture their own text, option and continuation flag; existing draft handling retains
+words edited during a send or a failed save. The desktop action bar labels the question
+it answers. Desktop option buttons remain QA3; requiring all answers before work
+resumes remains QA4. No API, answer event or inbox contract changes in QA2, including
+the existing support for additional answers to an answered question.
+
+QA2's browser probe and observations are retained as review material. The probe
+passed selected-question and reload checks at 390/492/1440 px, Back and project
+isolation, reordering, failed-save retention and slow submission with matching
+request/event/inbox qids. Its three consecutive unsuccessful runs met the queue's
+stop condition: fixture selection, injected error shape, then an unsuccessful HTTP
+request in the other-page scenario. The remaining browser scenarios and full suite
+were not completed. Unit regressions cover exact selection, closed/missing targets,
+URL round trips, history, distinct waiting positions and the additional-answer API
+contract. This is a partial implementation awaiting completion and review, not a
+claim that QA2's acceptance criteria have all passed.

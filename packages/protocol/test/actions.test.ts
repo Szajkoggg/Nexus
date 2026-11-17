@@ -171,3 +171,20 @@ test("a queue that has started cannot be withdrawn: a step started, or a run rec
   b.st.writeRun("Q", { protocol: 1, session: "s", state: "paused", started_at: now(), updated_at: now() });
   assert.throws(() => withdrawApproval(b.st, "Q"), (e: ActionError) => e.status === 409);
 });
+
+
+test("additional answers keep their exact qid; withdrawn and missing targets are rejected", () => {
+  const { st, session, emit } = setup();
+  const w = session("worker");
+  for (const qid of ["q1", "q2", "q3"]) emit(w, { type: "question.asked", queue: "Q", step: "Q1", qid, text: qid, can_continue: false });
+  answerAsUser(st, "q2", "List", false);
+  answerAsUser(st, "q2", "List with details", false);
+  assert.deepEqual(loadProjectState(st).questions.map((q) => [q.qid, q.state, q.answers.length]), [
+    ["q1", "open", 0], ["q2", "answered", 2], ["q3", "open", 0],
+  ]);
+  assert.deepEqual(st.readInbox(w.id).entries.filter((e) => e.type === "answer").map((e) => [e.qid, e.text]), [["q2", "List"], ["q2", "List with details"]]);
+  emit(w, { type: "question.withdrawn", qid: "q3", reason: "No longer needed" });
+  assert.throws(() => answerAsUser(st, "q3", "Bell", false), (e: ActionError) => e.status === 409);
+  assert.throws(() => answerAsUser(st, "missing", "Other", false), (e: ActionError) => e.status === 404);
+  assert.equal(st.readInbox(w.id).entries.length, 2);
+});

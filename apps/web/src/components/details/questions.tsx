@@ -31,7 +31,7 @@ function useAnswer({ q, project }: AnswerProps) {
  * there). Kept in memory until the sheet takes it.
  */
 const chosen = new Map<string, string>();
-export const chooseOption = (qid: string, option: string) => { chosen.set(qid, option); };
+export const chooseOption = (project: string, qid: string, option: string) => { chosen.set(draftKey(project, "answer", qid), option); };
 
 /**
  * A question's sheet on the phone: the question first (what kind, whether the worker waits, since when), what the
@@ -40,7 +40,7 @@ export const chooseOption = (qid: string, option: string) => { chosen.set(qid, o
  */
 export function QuestionSheet({ children, ...props }: AnswerProps & { children: ReactNode }) {
   const { q } = props;
-  const [choice, setChoice] = useState<string | undefined>(() => { const c = chosen.get(q.qid); chosen.delete(q.qid); return c; });
+  const [choice, setChoice] = useState<string | undefined>(() => { const key = draftKey(props.project, "answer", q.qid); const c = chosen.get(key); chosen.delete(key); return c; });
   const answer = useAnswer(props);
   const d = useDraftText({
     draft: answer.draft, allowEmpty: true,
@@ -105,6 +105,7 @@ export function AnswerBar(props: AnswerProps) {
       hint={d.error ? <span className="text-danger">{d.error}</span> : t("details.answer.ctrlEnter")}
       primary={<Button onClick={() => void d.submit()} disabled={!d.ready}>{d.busy ? t("ui.sending") : t("details.answer.button")}</Button>}
     >
+      <p className="mb-2 text-sm font-medium text-fg">{props.q.text}</p>
       <textarea value={d.text} rows={2} placeholder={t("details.answer.placeholder")} onChange={(e) => d.change(e.target.value)} onKeyDown={d.onKeyDown} className={TEXTAREA} />
       <label className="mt-1.5 flex items-center gap-1.5 text-xs text-fg-2">
         <input type="checkbox" checked={answer.goOn} onChange={(e) => answer.setGoOn(e.target.checked)} className="accent-accent" />

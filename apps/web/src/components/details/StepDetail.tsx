@@ -28,12 +28,13 @@ import {
   Summary, Timeline,
 } from "./stepParts.tsx";
 
-export function StepDetail({ project, queue, step, onClose, of }: PanelProps & { step: StepView }) {
+export function StepDetail({ project, queue, step, onClose, of, qid }: PanelProps & { step: StepView; qid?: string }) {
   const id = project.project.id;
   const questions = queue.questions.filter((q) => q.step === step.id);
   const phone = usePhone();
   // A step of a finished or cancelled queue is only read: no level, note, message, review or answer (details.ts).
-  const { readOnly, live, forOrchestrator, notesOpen, orchestratorAsks, reviewing, asking, questionFirst } = stepLayout(step, questions, phone, queue);
+  const { readOnly, live, forOrchestrator, notesOpen, orchestratorAsks, reviewing, asking, questionFirst } = stepLayout(step, questions, phone, queue, qid);
+  const selected = qid ? questions.find((q) => q.qid === qid) : undefined;
   const session = live ? project.sessions.find((s) => s.id === step.session) : undefined;
   // Review images open in the in-app viewer, a layer above the step (Back closes it); other items as links.
   const { pairs, images } = stepPictures(step, (path) => fileUrl(id, path));
@@ -48,10 +49,10 @@ export function StepDetail({ project, queue, step, onClose, of }: PanelProps & {
   const push = <PushLine project={id} queue={queue} step={step.id} />;
   const rejected = step.status === "rejected" && <Rejected step={step} holding={queue.rejection?.step === step.id} />;
   const message = live && session && <MessageAgent {...writes} session={session} />;
-  const others = questions.filter((q) => !(questionFirst && q.qid === asking?.qid));
+  const others = questions.filter((q) => q.qid !== selected?.qid && !(questionFirst && q.qid === asking?.qid));
   const questionsPart = others.length > 0 && (
     <Section title={t(questionFirst ? "details.otherQuestions" : "details.questions")}>
-      {others.map((q) => <Question key={q.qid} q={q} project={id} inBar={q.qid === asking?.qid} />)}
+      {others.map((q) => <Question key={`${id}/${q.qid}`} q={q} project={id} inBar={q.qid === asking?.qid} />)}
     </Section>
   );
   const switches = <StepSwitches queue={queue} step={step.id} />;
@@ -121,11 +122,16 @@ export function StepDetail({ project, queue, step, onClose, of }: PanelProps & {
         onClose={onClose}
       />
       {questionFirst
-        ? <QuestionSheet key={asking!.qid} q={asking!} project={id}>{body}</QuestionSheet>
-        : <PanelBody>{body}</PanelBody>}
+        ? <QuestionSheet key={`${id}/${asking!.qid}`} q={asking!} project={id}>{body}</QuestionSheet>
+        : <PanelBody>
+          {qid && (selected
+            ? <Question key={`${id}/${selected.qid}`} q={selected} project={id} inBar={readOnly || selected.qid === asking?.qid} />
+            : <p role="status" className="text-sm text-fg-2">{t("details.question.unavailable")}</p>)}
+          {body}
+        </PanelBody>}
       {questionFirst ? null : reviewing
         ? <ReviewBar key={step.id} project={id} queue={queue.id} step={step.id} next={noteTargets(queue.steps, step.id).next} criteria={step.acceptance} />
-        : asking && <AnswerBar key={asking.qid} q={asking} project={id} />}
+        : asking && <AnswerBar key={`${id}/${asking.qid}`} q={asking} project={id} />}
     </>
   );
 }

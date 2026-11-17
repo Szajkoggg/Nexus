@@ -358,3 +358,22 @@ test("a search hit: the search closes, then the chat or a conversation shows; Ba
   assert.equal(isOpen(navOf(null, "#/p", "?search"), "search"), true);
   assert.equal(layerValue(navOf(null, "#/p", "?conversation=C1&line=3"), "conversation"), "C1");
 });
+
+
+test("a selected question survives reload and Back from an overlaid viewer", () => {
+  const hash = "#/p/Q/Q1/q2";
+  const b = browser(home);
+  b.apply(closeThen(b.cur(), "waiting", hash, "item"));
+  assert.equal(b.cur().hash, hash);
+  const loaded = navOf(null, hash, "");
+  assert.equal(loaded.hash, hash);
+  assert.deepEqual(loaded.layers, ["item"]);
+  b.apply(open(b.cur(), "viewer:0"));
+  b.back();
+  assert.equal(b.cur().hash, hash);
+  b.apply(open(b.cur(), "item", "#/p/Q/Q1/q3"));
+  assert.equal(b.cur().hash, "#/p/Q/Q1/q3");
+  assert.equal(b.length, 3, "switching question replaces the drawer's entry");
+  b.back();
+  assert.deepEqual(b.cur(), home);
+});

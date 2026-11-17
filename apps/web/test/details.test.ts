@@ -130,3 +130,32 @@ test("a finished or cancelled queue is over; its steps open read-only: no level,
   assert.equal(stepLayout(step({ status: "pending", session: undefined }), [], false, { status: "approved" }).notesOpen, true);
   assert.equal(stepLayout(step(), [], false, { status: "running" }).readOnly, false);
 });
+
+
+test("QA1: clicking BRAVO selects q2 on both layouts, regardless of insertion order", () => {
+  const alpha = { ...question("q1", "open"), text: "ALPHA: choose a color" };
+  const bravo = { ...question("q2", "open"), text: "BRAVO: choose a layout" };
+  const charlie = { ...question("q3", "open"), text: "CHARLIE: choose a sound" };
+  for (const phone of [true, false]) {
+    for (const qs of [[alpha, bravo, charlie], [charlie, bravo, alpha], [question("q4", "open"), alpha, bravo, charlie]]) {
+      const layout = stepLayout(step(), qs, phone, undefined, "q2");
+      assert.equal(layout.asking, bravo);
+      assert.equal(layout.questionFirst, phone);
+    }
+  }
+});
+
+test("an explicit answered, withdrawn or absent target never falls back to another question or review", () => {
+  for (const state of ["answered", "withdrawn"] as const) {
+    for (const phone of [true, false]) {
+      const qs = [question("q1", "open"), question("q2", state), question("q3", "open")];
+      for (const qid of ["q2", "missing"]) {
+        const layout = stepLayout(step({ status: "review", review_with: "user" }), qs, phone, undefined, qid);
+        assert.equal(layout.asking, undefined);
+        assert.equal(layout.questionFirst, false);
+        assert.equal(layout.reviewing, false, "answering a question is not accepting the step review");
+      }
+    }
+  }
+  assert.equal(stepLayout(step(), [question("q1", "open")], true, { status: "cancelled" }, "q1").asking, undefined);
+});

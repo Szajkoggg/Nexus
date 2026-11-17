@@ -46,3 +46,13 @@ test("a link to a chat message: the orchestrator's chat or a conversation, at a 
   assert.equal(chatOf("?chat=01ORCH&line=-1"), undefined);
   assert.equal(chatOf("?chat=01ORCH&line=x"), undefined);
 });
+
+
+test("question links preserve the exact encoded qid without changing old step links", () => {
+  const hash = itemHash("my app", "Q/1", "S#2", "question /#%");
+  assert.equal(hash, "#/my%20app/Q%2F1/S%232/question%20%2F%23%25");
+  assert.deepEqual(parseHash(hash), { project: "my app", queue: "Q/1", step: "S#2", qid: "question /#%" });
+  assert.equal(projectPart(hash), "#/my%20app");
+  assert.equal(hasItem(hash), true);
+  assert.equal(itemHash("p", "Q", undefined, "q2"), "#/p/Q", "a question target needs its step");
+});

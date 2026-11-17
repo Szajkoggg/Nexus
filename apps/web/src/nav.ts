@@ -84,7 +84,7 @@ export const nav = {
   /** Closes the layer of this kind and what lies above it. */
   close: (kind: string) => apply(close(current, kind, kind === "item" ? projectHash() : current.hash)),
   /** Opens a queue or step in its drawer; from one already open, it switches in place. */
-  item: (project: string, queue: string, step?: string) => apply(open(current, "item", itemHash(project, queue, step))),
+  item: (project: string, queue: string, step?: string, qid?: string) => apply(open(current, "item", itemHash(project, queue, step, qid))),
   /** Opens a file of the current project in the viewer, at a line; from a file already open, it switches in place. */
   file: (path: string, line?: number) => apply(open(current, fileLayer(path, line))),
   /** Shows a project, in place: switching projects is not a layer, so Back does not walk through them. */
@@ -96,6 +96,6 @@ export const nav = {
   /** Closes a layer, then opens a conversation over the Ideas view (the search's chat hit in a conversation). */
   closeThenConversation: (kind: string, id: string) => { const l = layout(); apply(closeThenStep(current, kind, (at) => openConversation(at, id, l))); },
   /** Closes a layer, then opens a queue or step in another project (the waiting list). */
-  closeThenItem: (kind: string, project: string, queue?: string, step?: string) =>
-    apply(queue ? closeThen(current, kind, itemHash(project, queue, step), "item") : closeThen(current, kind, itemHash(project))),
+  closeThenItem: (kind: string, project: string, queue?: string, step?: string, qid?: string) =>
+    apply(queue ? closeThen(current, kind, itemHash(project, queue, step, qid), "item") : closeThen(current, kind, itemHash(project))),
 };

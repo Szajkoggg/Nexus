@@ -114,7 +114,7 @@ export function useNotifications(projects: ProjectSummary[] | undefined) {
             body: `${a.queue ?? ""}${a.step ? `/${a.step}` : ""} ${textOf(a)}`.trim().slice(0, 200),
             tag: key,
           });
-          n.onclick = () => { window.focus(); location.hash = itemHash(p.id, a.queue, attentionTarget(a)); };
+          n.onclick = () => { window.focus(); location.hash = itemHash(p.id, a.queue, attentionTarget(a), a.qid); };
         } catch { /* a browser that shows notifications only through a service worker */ }
       }
     }

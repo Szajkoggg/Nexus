@@ -847,6 +847,7 @@ export const en = {
   "details.question.stateForYou": "for you",
   "details.question.stateOpen": "open",
   "details.question.stateAnswered": "answered",
+  "details.question.unavailable": "This question is no longer available in this step. Choose another question from the waiting list.",
   "details.question.stateWithdrawn": "withdrawn",
   "details.question.passedBy": "Passed to you by the orchestrator:",
   /** {by} is who answered ("user", "orchestrator"). */

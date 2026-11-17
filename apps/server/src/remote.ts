@@ -253,7 +253,7 @@ export class AttentionWatch {
         title: `${project.name}: ${LABEL[a.kind]}`,
         body: `${where ? where + " " : ""}${a.text.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\*\*|`/g, "")}`.slice(0, 180),
         // A stopped queue's notification opens the queue, whose stop box has Continue.
-        url: `/#/${[project.id, a.queue, a.lift ? undefined : a.step].filter(Boolean).map((x) => encodeURIComponent(x!)).join("/")}`,
+        url: `/#/${[project.id, a.queue, a.lift ? undefined : a.step, !a.lift && a.queue && a.step ? a.qid : undefined].filter(Boolean).map((x) => encodeURIComponent(x!)).join("/")}`,
         tag: `${project.id}:${key}`,
       }, { kind: a.kind satisfies NotifyKind });
     }

@@ -57,3 +57,17 @@ test("one by one: the next item opens once the open one no longer waits, not bef
   assert.equal(moveOn(answered, { project: "honey", queue: "W", step: "W4c" }), undefined);
   assert.equal(moveOn([], at), undefined, "nothing left: the round ends");
 });
+
+
+test("questions on the same step have separate positions, including after one answer", () => {
+  const questions = ["q3", "q2", "q1"].map((qid) => ({ ...w(qid, "p", "Q", "Q1"), qid }));
+  const at = placeOf(questions[1]!);
+  assert.equal(at.qid, "q2");
+  assert.deepEqual(waitingPosition(questions, at), { at: 2, total: 3, next: questions[2] });
+  assert.equal(moveOn(questions, at), undefined);
+  const remaining = [questions[0]!, questions[2]!];
+  assert.deepEqual(waitingPosition(remaining, at), { at: 0, total: 2, next: questions[0] });
+  assert.equal(moveOn(remaining, at), questions[0]);
+  assert.equal(waitingPosition(questions, { ...at, project: "other" }).at, 0);
+  assert.equal(waitingPosition([w("review", "p", "Q", "Q1")], at).at, 0, "a review is a different destination");
+});
