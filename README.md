@@ -63,6 +63,10 @@ An uncertain response or failed delivery can be retried with the same saved ID, 
 History retains the payload, selected dates, status at send, time and failed attempts. A delivered message cannot
 be unsent: a correction is a separate, explicitly reviewed handoff.
 
+For synthetic browser verification, build the web workspace and run
+`node scripts/verify-ideas-onward.ts <temporary report directory>`. It captures the nine idea/chat/handoff scenes,
+checks layout and exercises scoped requests, lost responses, reload, restart and Back using its own fake projects.
+
 **The web in Ideas.** Settings → "Ideas (conversations)" → **Web** (global, or the project's own): **off**, **web
 search** (the default: partners search and name their sources, but open no page) or **web search and reading pages**.
 Reading pages carries a risk: a page can hide instructions that lead a partner to put something from the project into

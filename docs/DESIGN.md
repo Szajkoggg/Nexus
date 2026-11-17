@@ -2904,8 +2904,14 @@ preview/context, while the IC3 confirmation rule remains unchanged. New server m
 no-approval/no-start/no-plan-change boundary. Note/chat/handoff navigation preserves the note and overview's
 position on Back; uncertain creation/delivery requests retain their IDs through browser reload.
 
-IC5 stopped at its three-failed-check limit. The final capture run passed all nine view/size layout measurements,
-but the browser regression failed when checking visible delivery history after a server restart. Earlier runs
-found preformatted payload whitespace overflow, fixed with `white-space: break-spaces`. The unfinished browser
-harness and failure evidence are preserved in IC5 review material, outside the checkout. Its remaining chat,
-reload and Back scenarios and the full suite must pass before this implementation can be accepted.
+`scripts/verify-ideas-onward.ts` checks all nine capture/layout scenes and the browser workflows against isolated
+fake-runtime projects: direct handoff without a chat, exact dates/full-date exclusion, stale preview, uncertain
+delivery and creation responses, reload/restart idempotence, deliberately new chats, changed/missing source,
+and Back with the overview filter preserved. History assertions wait for the asynchronously loaded receipt,
+not merely the mounted details summary. Exact preformatted payloads use `white-space: break-spaces` so preserved
+trailing spaces cannot hang outside the box, including when details are expanded.
+
+The continued IC5 browser run passed, but three full-suite attempts hit unrelated existing timing limits and
+triggered the queue's stop rule again. Isolated failing cases passed unchanged. The attempted concurrency flag
+appended by `npm test -- --test-concurrency=4` did not limit file concurrency: Node needs this option before the
+file patterns. No test-runner configuration or timeout was changed; full-suite acceptance remains outstanding.
