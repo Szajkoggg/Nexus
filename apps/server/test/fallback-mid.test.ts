@@ -91,7 +91,7 @@ test("before a nudge: a fresh session on the fallback, given the goal, the progr
   } finally { x.stop(); }
 });
 
-test("before an answer, and before a message: the waiting step goes on on its fallback with them", async () => {
+test("answers release the waiting step on its fallback; a message alone cannot bypass an open question", async () => {
   const a = setup([{ fake: "ask1", kind: "mechanical" }]);
   try {
     process.env.FAKE_USAGE = "0.95";
@@ -111,9 +111,16 @@ test("before an answer, and before a message: the waiting step goes on on its fa
     m.engine.start("Q");
     await m.until("the question, its turn over", () => askedTurnOver(m));
     sendMessage(m.store, m.queue().run!.session, "Use the new colours.", { queue: "Q", step: "Q1" });
+    const before = m.received().length;
+    await new Promise(r => setTimeout(r, 500));
+    assert.equal(m.received().length, before, "the message waits with the unanswered question");
+    assert.equal(m.sessions().length, 1, "no fallback work starts before the answer");
+    assert.equal(m.queue().steps[0]!.status, "waiting");
+    answerAsUser(m.store, loadProjectState(m.store).questions[0]!.qid, "The right one.");
     await m.until("the step done", () => m.queue().steps[0]!.status === "done", LONGER.run);
     const [first] = assertSwitched(m);
     assert.match(first!, /Message from the user[^\n]*\nUse the new colours\./);
+    assert.match(first!, /The right one\./);
   } finally { m.stop(); }
 });
 
