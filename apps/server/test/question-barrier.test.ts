@@ -130,6 +130,8 @@ for (const runtime of ["claude", "codex"] as const) {
       emit({ type: "question.asked", queue: "Q", step: "Q1", qid: "third", text: "Sound?", can_continue: true });
       // A question elsewhere is not a global hold, even with the same step id and asking session.
       store.writeQueue({ protocol: 1, id: "OTHER", title: "Other", revision: 1, status: "proposed", stop_conditions: [], checks: [], steps: [{ id: "Q1", title: "Other", goal: "", acceptance: [] }] });
+      // Reusing a worker leaves the old queue's run on disk; that halted run must not own this session's inbox.
+      store.writeRun("OTHER", { ...queue().run!, state: "halted", updated_at: "2026-01-01T00:00:00.000Z" });
       emit({ type: "question.asked", queue: "OTHER", step: "Q1", qid: "other", text: "Unrelated?", can_continue: false });
       const before = received().length;
       answerAsUser(store, "second", "Grid", true);

@@ -1083,7 +1083,9 @@ export class Engine implements Member {
     const s = state.sessions.find((x) => x.id === l.session);
     const unread = (s?.inbox ?? []).filter((m) => !m.read_at);
     if (!unread.length) return;
-    const owner = state.queues.find((q) => q.run?.session === l.session && q.run.state !== "finished");
+    const owners = state.queues.filter(q => q.run?.session === l.session && q.run.state !== "finished");
+    // A reused session can still appear in an older halted run. Its current run owns the inbox barrier.
+    const owner = owners.find(q => runGoing(q.run)) ?? owners.find(q => q.id === s?.queue) ?? owners.at(-1);
     const run = owner?.run;
     const step = owner?.steps.find((st) => st.id === run?.step);
     // Partial answers remain durable in the inbox but cannot start or steer work. Stop messages still reach it.

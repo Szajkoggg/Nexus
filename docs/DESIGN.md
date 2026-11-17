@@ -3024,3 +3024,6 @@ saved state separately from actual turns, runtime work markers and delivery trac
 The step panel uses the existing bounded-header option on desktop: this removes the old 8 px negative close-button
 margin reported by layout-faults. The phone header is unchanged; both capture states have zero layout faults at
 all three widths.
+An additional reuse probe found that selecting the first queue with a matching session could pick an older halted
+run and apply its questions to the current queue. Inbox ownership now prefers the going run, then the session's
+current queue. Both fake adapters cover an old halted run and its open question sharing the current session id.
