@@ -2911,7 +2911,12 @@ and Back with the overview filter preserved. History assertions wait for the asy
 not merely the mounted details summary. Exact preformatted payloads use `white-space: break-spaces` so preserved
 trailing spaces cannot hang outside the box, including when details are expanded.
 
-The continued IC5 browser run passed, but three full-suite attempts hit unrelated existing timing limits and
-triggered the queue's stop rule again. Isolated failing cases passed unchanged. The attempted concurrency flag
-appended by `npm test -- --test-concurrency=4` did not limit file concurrency: Node needs this option before the
-file patterns. No test-runner configuration or timeout was changed; full-suite acceptance remains outstanding.
+IC5 validation exposed existing timing-sensitive tests at default file concurrency on a 16-thread host; the
+same cases passed unchanged in isolation. Full-suite verification uses the normal lock runner and complete
+test-file set with bounded file concurrency:
+`node scripts/test-lock.ts --test --test-concurrency=4 packages/*/test/*.test.ts apps/*/test/*.test.ts scripts/test/*.test.ts`.
+All 1,237 tests passed without skips; process inspection confirms four direct test-file children.
+The Node option must precede file patterns:
+appending it with `npm test -- --test-concurrency=4` did not apply the limit. No assertions, per-test timeouts,
+internal concurrency scenarios or repository runner configuration change; review reports retain the failed
+attempts alongside the final verification result.
