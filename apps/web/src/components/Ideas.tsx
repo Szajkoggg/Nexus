@@ -202,7 +202,7 @@ export function NotePanel({ project, file, onClose }: { project: string; file: s
     </PanelBody>
     {entry || !note ? <ActionBar primary={<Button variant="quiet" onClick={() => nav.open("matching")}>{t("ideas.manage")}</Button>}
       secondary={<Button variant="quiet" onClick={() => nav.file(file)}>{t("ideas.openFile")}</Button>} />
-      : <ActionBar primary={<div data-note-actions><IdeaActions project={project} scope={{ file }} /></div>} />}
+      : <ActionBar primary={<div data-note-actions><IdeaActions project={project} file={file} /></div>} />}
   </>;
 }
 
@@ -224,7 +224,7 @@ function NoteBody({ project, note, data }: { project: string; note: IdeaNoteView
       {note.questions.length ? <ul className="list-disc space-y-1 pl-4 text-[12.5px] text-fg-2">{note.questions.map((q, i) => <li key={i}>{q}</li>)}</ul> : <p className="text-xs text-fg-3">{t("ideas.noQuestions")}</p>}
     </section>
     {note.entries.length > 0 && <section><h3 className={label}>{t("ideas.decidedDates", { count: note.entries.length })}</h3>
-      <div className="space-y-2">{[...note.entries].reverse().map((e) => <EntryCard key={e.date} project={project} file={note.file} e={e} data={data} />)}</div></section>}
+      <div className="space-y-2">{[...note.entries].reverse().map((e) => <EntryCard key={e.date} e={e} data={data} />)}</div></section>}
     <RelatedWork project={project} note={note} data={data} />
     {note.ideas > 0 && <p className="text-xs text-fg-3">{t("ideas.ideasInFile", { count: note.ideas })}</p>}
     <IdeaActivity project={project} file={note.file} />
@@ -233,7 +233,7 @@ function NoteBody({ project, note, data }: { project: string; note: IdeaNoteView
   </div>;
 }
 
-function EntryCard({ project, file, e, data }: { project: string; file: string; e: IdeaEntryView; data: IdeasResponse }) {
+function EntryCard({ e, data }: { e: IdeaEntryView; data: IdeasResponse }) {
   const change = (action?: string) => nav.open(`idea-status:${JSON.stringify([e.ref, action])}`);
   return <article className={ideaCard} data-box={`Decision ${e.date}`} data-decision={e.ref}>
     <div className="flex flex-wrap items-baseline justify-between gap-2"><b className="text-[13px]">{formatDayYear(e.date)}</b><EntryState entry={e} compact /></div>
@@ -246,7 +246,6 @@ function EntryCard({ project, file, e, data }: { project: string; file: string; 
         {e.effective && <IdeaStatusHistory data={data} entry={e} onUndo={(action) => change(action.id)} />}
       </details></div>
     <details className="text-xs text-fg-3"><summary>{t("ideas.decisionText")}</summary><pre className="mt-2 whitespace-pre-wrap font-sans leading-relaxed">{e.content}</pre></details>
-    <IdeaActions project={project} scope={{ file, date: e.date }} />
   </article>;
 }
 

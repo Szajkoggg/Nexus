@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ProjectStore, loadProjectState, previewIdeaHandoff, retryIdeaHandoff, sendIdeaHandoff } from "@nexus/protocol";
+import { ProjectStore, changeIdeaStatus, ideaStatuses, loadProjectState, previewIdeaHandoff, retryIdeaHandoff, sendIdeaHandoff } from "@nexus/protocol";
 import { Conversations } from "../src/conversations.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { Engine } from "../src/engine.ts";
@@ -34,6 +34,30 @@ function setup(runtime: "claude" | "codex") {
 }
 
 for (const runtime of ["claude", "codex"] as const) {
+  test(`${runtime}: whole-note chat includes every date, current state and links, and refreshes any changed decision`, async () => {
+    const f = setup(runtime);
+    try {
+      f.store.writeQueue({ protocol: 1, id: "Q", title: "Earlier work", revision: 1, status: "done", source: ["notes/a.md#2026-11-14"],
+        steps: [{ id: "Q1", title: "Work", goal: "Outcome", acceptance: [], status: "done" }], approvals: [], history: [], checks: [], stop_conditions: [] });
+      changeIdeaStatus(f.store, { request_id: "drop-fixture", revision: ideaStatuses(f.store, loadProjectState(f.store)).revision,
+        operation: "drop", ref: "notes/a.md#2026-11-15", reason: "Synthetic user decision" });
+      const c = f.conversations.create({ idea: { file: "notes/a.md" }, request_id: "whole-note" });
+      assert.deepEqual(c.about?.idea, { file: "notes/a.md" });
+      assert.equal(f.received().length, 0); assert.equal(f.store.readRuntime(c.id), undefined);
+      f.conversations.say(c.id, "Discuss the whole idea");
+      await until("whole-note reply", () => f.conversations.view(c.id).state === "idle", LONGER.step);
+      const first = f.received().find((m) => m.text.includes("Discuss the whole idea"))!.text;
+      for (const text of ["Scope: whole note", "Initial summary", "2026-11-14", "2026-11-15", "Exact first decision", "Different date content", "Still a question?", "Maybe something later"])
+        assert(first.includes(text), text);
+      assert.match(first, /"disposition": "dropped"/); assert.match(first, /"queue": "Q"/);
+      writeFileSync(f.note, TEXT.replace("Exact first decision", "Changed older decision"));
+      f.conversations.say(c.id, "Discuss the updated idea");
+      await until("updated whole-note reply", () => f.conversations.view(c.id).state === "idle", LONGER.step);
+      const next = f.received().find((m) => m.text.includes("Discuss the updated idea"))!.text;
+      assert.match(next, /context changed/); assert.match(next, /Changed older decision/); assert.match(next, /Different date content/);
+    } finally { await f.stop(); }
+  });
+
   test(`${runtime}: idea chat creation is idempotent and model-free; first request and changed context keep exact dates and own settings`, async () => {
     const f = setup(runtime);
     try {

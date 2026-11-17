@@ -17,7 +17,9 @@ type Pending = { preview: Preview; request: { request_id: string; revision: stri
 const scopeText = (s: IdeaScope) => `${s.file}${s.date ? `#${s.date}` : ""}`;
 const handoffLayer = (scope: IdeaScope) => `idea-handoff:${JSON.stringify(scope)}`;
 
-export function IdeaActions({ project, scope }: { project: string; scope: IdeaScope }) {
+export function IdeaActions({ project, file }: { project: string; file: string }) {
+  // The note owns the single action pair. Only the handoff preview selects dates.
+  const scope = { file };
   const { busy, error, run } = useAction();
   const key = `idea-chat:${project}:${scopeText(scope)}`;
   const requestId = useRef<string | undefined>(undefined);
@@ -59,7 +61,7 @@ export function IdeaActivity({ project, file }: { project: string; file: string 
   return <details data-idea-activity className="space-y-3 text-xs [overflow-wrap:anywhere]"><summary>{t("ideas.onwardHistory")}</summary>
     {(chats.error || handoffs.error) && <ReadError error={chats.error ?? handoffs.error!} />}
     {chats.data?.filter((c) => c.about?.idea?.file === file).map((c) => <p key={c.id}>
-      <button className="text-left text-accent underline" onClick={() => nav.open(`conversation:${c.id}`)}>{c.title} · {scopeText(c.about!.idea!)}{c.archived ? ` · ${t("ideas.archived")}` : ""}</button>
+      <button data-idea-conversation={c.id} className="text-left text-accent underline" onClick={() => nav.open(`conversation:${c.id}`)}>{c.title} · {scopeText(c.about!.idea!)}{c.archived ? ` · ${t("ideas.archived")}` : ""}</button>
     </p>)}
     {handoffs.data?.filter((h) => h.file === file).slice().reverse().map((h) => <Delivery key={h.id} project={project} record={h} />)}
   </details>;

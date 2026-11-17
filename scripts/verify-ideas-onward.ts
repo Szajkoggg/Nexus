@@ -22,6 +22,13 @@ try {
     throw new Error(`Timed out: ${name}`);
   };
   const exists = (selector: string) => b.evaluate<boolean>(`!!document.querySelector(${JSON.stringify(selector)})`);
+  const noteActions = async () => {
+    await until("note actions loaded", () => exists("[data-note-actions]"));
+    assert.deepEqual(await b.evaluate<number[]>(`['Chat about this', 'Hand to orchestrator'].map(label =>
+      [...document.querySelectorAll('button')].filter(e => e.textContent.trim().startsWith(label)).length)`), [1, 1]);
+    assert.equal(await b.evaluate<number>("document.querySelectorAll('[data-decision] [data-idea-actions]').length"), 0);
+    assert.equal(await b.evaluate<number>("document.querySelectorAll('[data-note-actions] [data-idea-actions]').length"), 1);
+  };
   const click = (label: string | { selector: string }) => until(`click ${JSON.stringify(label)}`, () => b.click(label));
   const fill = async (selector: string, value: string) => { await until(selector, () => exists(selector)); assert(await b.type(value, selector)); };
   const back = async (selector: string) => { await b.evaluate("history.back(); true"); await until(`Back ${selector}`, () => exists(selector)); };
@@ -44,7 +51,10 @@ try {
       const faults = findFaults(await b.evaluate<Page>(collector("[data-box]", "[data-edge]")));
       record(`${view.key}: ${describe(faults).join("; ")}`);
       assert.equal(faults.through.length + faults.overlaps.length + faults.cut.length, 0, JSON.stringify(faults));
-      if (view.key.startsWith("ideas-entry-open")) assert(await b.evaluate<boolean>("document.querySelector('[data-idea-open]').getBoundingClientRect().bottom < innerHeight && !document.querySelector('[data-related-work]').open"));
+      if (view.key.startsWith("ideas-entry-open")) {
+        assert(await b.evaluate<boolean>("document.querySelector('[data-idea-open]').getBoundingClientRect().bottom < innerHeight && !document.querySelector('[data-related-work]').open"));
+        await noteActions();
+      }
     }
     await instance.stop(); instance = undefined;
   }
@@ -63,6 +73,15 @@ try {
   await b.open(`${instance.url}/#/demo`, 1440, 900);
   await b.evaluate("sessionStorage.clear(); true"); await click("Ideas"); await click("Overview");
   await fill('input[aria-label="Filter notes…"]', "Chat improvements"); await click("Chat improvements");
+  await noteActions();
+  // Dates retain status controls, with no chat/handoff actions in their form or operation picker.
+  for (const date of ["2026-11-15", "2026-11-14"]) {
+    await click({ selector: `[data-decision="docs/ideas/chat-improvements.md#${date}"] button` });
+    await until("dated status form", () => exists("[data-idea-status-form]"));
+    assert(await b.evaluate<boolean>("!document.body.innerText.includes('Chat about this') && !document.body.innerText.includes('Hand to orchestrator')"));
+    assert(await b.evaluate<boolean>("!!document.querySelector('[data-idea-status-form] select')"));
+    await back("[data-idea-note]"); await noteActions();
+  }
   assert.equal((await ownChats()).length, 0);
   await click({ selector: "[data-note-actions] button:last-child" });
   await until("preview ready", () => exists("[data-handoff-payload]"));
@@ -103,18 +122,21 @@ try {
   await reload("[data-idea-note]"); await click({ selector: "[data-note-actions] button:first-child" });
   await until("empty idea chat", () => exists("[data-chat-scroll]"));
   assert.equal((await ownChats()).length, 1); const first = (await ownChats())[0]!;
+  assert.deepEqual(first.about?.idea, { file: "docs/ideas/chat-improvements.md" });
   assert.equal(store.readChat(first.id).entries.length, 0); assert.equal(store.readRuntime(first.id), undefined);
   await back("[data-idea-note]"); await click({ selector: "[data-note-actions] button:first-child" });
   await until("another chat", async () => (await ownChats()).length === 2);
   await until("another chat rendered", () => exists("[data-chat-scroll]"));
-  await back("[data-idea-note]");
-  await click({ selector: '[data-decision="docs/ideas/chat-improvements.md#2026-11-15"] [data-idea-actions] button:first-child' });
-  await until("dated chat", () => b.evaluate<boolean>("document.body.innerText.includes('Idea context · docs/ideas/chat-improvements.md#2026-11-15')"));
-  const scoped = (await ownChats()).find((c) => c.about?.idea?.date === "2026-11-15")!;
+  const scoped = (await ownChats()).find((c) => c.id !== first.id)!;
+  assert.deepEqual(scoped.about?.idea, { file: "docs/ideas/chat-improvements.md" });
+  assert.equal(store.readRuntime(scoped.id), undefined);
   await fill("textarea", "First scoped browser request"); await click("Send");
   await until("first reply", async () => store.readChat(scoped.id).entries.some((c) => c.from === "partner"));
   const fakeText = () => existsSync(fakeLog) ? readFileSync(fakeLog, "utf8") : "";
-  assert.match(fakeText(), /Updated summary for the chats/);
+  const firstRequest = fakeText().trim().split("\n").map((line) => JSON.parse(line) as { text: string }).find((m) => m.text.includes("First scoped browser request"))!.text;
+  assert.match(firstRequest, /Updated summary for the chats/);
+  for (const text of ["Quoting a selection", "Pictures in the chats by pasting or dragging", "2026-11-14", "2026-11-15", "CH2", "CI", "Not decided — Open", "Not decided — Ideas"]) assert(firstRequest.includes(text), text);
+  assert.match(firstRequest, /"implementation": "full"/, "whole-note context includes the full date's current assessment");
   writeFileSync(note, readFileSync(note, "utf8").replace("Pictures in the chats by pasting or dragging", "Changed selected decision"));
   await fill("textarea", "Second scoped browser request"); await click("Send");
   await until("fresh context reaches partner", async () => fakeText().includes("Changed selected decision"));
@@ -122,9 +144,24 @@ try {
   await until("missing note warning", () => b.evaluate<boolean>("document.body.innerText.includes('The idea note is missing')"));
   assert(store.readChat(scoped.id).entries.length > 0, "existing chat stays readable");
   writeFileSync(note, original);
-  await back("[data-idea-note]"); await back("[data-ideas-overview]");
+  await back("[data-idea-note]"); await noteActions();
+  const legacy = "ic5-legacy-dated-chat", oldText = "Earlier discussion of only the 15 November decision.";
+  store.writeSession({ protocol: 1, id: legacy, project: "demo", role: "conversation", runtime: "claude", cwd: store.readProject().root,
+    launched_by: "nexus", created_at: "2026-11-16T09:00:00Z", archived: true, title: "Historical dated conversation",
+    about: { idea: { file: "docs/ideas/chat-improvements.md", date: "2026-11-15" } } });
+  store.appendChat(legacy, { at: "2026-11-16T09:00:00Z", from: "partner", text: oldText });
+  await click("Conversations and handoff history");
+  await click({ selector: `[data-idea-conversation="${legacy}"]` });
+  await until("historical dated chat readable", () => b.evaluate<boolean>(`document.body.innerText.includes(${JSON.stringify(oldText)}) && document.body.innerText.includes('docs/ideas/chat-improvements.md#2026-11-15')`));
+  await reload("[data-chat-scroll]");
+  await until("historical chat readable after reload", () => b.evaluate<boolean>(`document.body.innerText.includes(${JSON.stringify(oldText)})`));
+  // Other sessions (including the orchestrator) share FAKE_LOG and may still receive their own messages.
+  assert(!fakeText().trim().split("\n").some((line) => (JSON.parse(line) as { session: string }).session === legacy), "reading the old dated chat sends no request for that session");
+  assert.equal(store.readRuntime(legacy), undefined, "reading old history never launches its runtime");
+  assert.equal(store.readChat(legacy).entries.length, 1, "historical content is preserved");
+  await back("[data-idea-note]"); await noteActions(); await back("[data-ideas-overview]");
   assert.equal(await b.evaluate<string>("document.querySelector('input[aria-label=\"Filter notes…\"]').value"), "Chat improvements");
-  record("PASS: always-new chat, lost creation response/reload idempotence, empty model-free open, exact dated scope, changed and missing context, Back retains overview filter");
+  record("PASS: one note-level action pair, dated status controls without onward actions, always-new whole-note chat with all dates/status/links, lost creation response/reload idempotence, model-free open, changed/missing context, archived dated history remains readable, Back retains overview filter");
   for (const [id, bytes] of queues) assert.equal(readFileSync(join(store.dir, `queues/${id}/queue.yaml`), "utf8"), bytes);
   record("All browser regressions passed. Queue bytes are unchanged; no real project, runtime or start permission was used.");
 } catch (e) {

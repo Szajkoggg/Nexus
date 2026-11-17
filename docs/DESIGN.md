@@ -2882,7 +2882,11 @@ and replacement without a note marker, including reload and Back. All three date
 
 ### Idea conversations and direct handoffs (IC5)
 
-The accepted always-new-chat choice in IC1 supersedes the queue's earlier latest-chat wording. A stable creation
+The accepted always-new-chat choice in IC1 supersedes the queue's earlier latest-chat wording. IC5 round 2 narrows
+the UI to one note-level Chat about this / Hand to orchestrator pair, with neither action on dated entries or
+their operation menus. New chats cover the entire note: Summary, all Decided dates with current states and
+relationships, and undecided Open/Ideas. Date selection belongs only to the handoff preview. Historical dated
+chats keep their scope and readable history; dated status controls remain unchanged. A stable creation
 request ID distinguishes a retry from a deliberate new click. The session's topic is a compatible union: the old
 queue/step link or an exact idea file/optional date. Context is supplied only on a real message and refreshed by
 its content/status/provenance fingerprint. The existing own model/effort selection is preserved; CM owns further

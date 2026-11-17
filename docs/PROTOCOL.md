@@ -1935,6 +1935,12 @@ The legacy `about: { queue, step, seeded? }` remains readable and behaves unchan
 returns the same session, even after restart; reusing an ID with different parameters is 409. A new deliberate
 idea click uses a new ID: no automatic latest-chat reuse. Existing and archived chats remain individually readable.
 
+The dashboard's single note-level action pair always creates a chat with `idea: { file }`, without a date picker:
+all Decided dates, their current states/relationships, Summary and Open/Ideas are included. There are no chat or
+handoff actions under dated entries or in their operation menus; their status actions remain. Optional `date`
+stays compatible for historical scoped sessions/API clients; reading those chats does not migrate their scope.
+The note-level handoff button opens the existing preview, where delivery dates can still be selected.
+
 Creation does not launch a process or send a turn. At the first actual message the server includes Summary,
 complete selected Decided dates, effective dispositions/assessments, provenance/conflicts and full Open/Ideas
 sections labelled as undecided. `about.idea.seeded` is the snapshot fingerprint last submitted to the runtime;

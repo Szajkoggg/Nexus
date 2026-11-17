@@ -123,8 +123,9 @@ automatically reactivate it: require a new user check. Deployment is always an i
 ## The note and its work summaries
 
 Order: header (title/file), **Summary → Open → Decided → Related work (closed)**. Open is expanded;
-each dated entry has its own status and Change status / History. Keep Chat about this and Hand to
-orchestrator in an accessible action area. Manage links remains on both overview and note. Titles,
+each dated entry has its own status and Change status / History. Keep exactly one Chat about this and one Hand to
+orchestrator in the note's accessible action area, neither under dates nor in their operation menus (IC5 round 2
+user correction). Manage links remains on both overview and note. Titles,
 questions, reasons and action labels wrap. At 390/492 × 844 and 1440 × 900 a 1–3 sentence Summary and
 two short questions fit on the initial screen. Long content scrolls naturally; do not promise that
 all questions or all dates fit, and do not hide text with ellipses to make the promise appear true.
@@ -164,15 +165,15 @@ by source hashes, with no extra writer to session logs.
 ## Conversation and direct handoff
 
 **Chat about this always opens a new conversation**, as the user chose for IC1, scoped to the exact
-project/note (or exact note/date for a dated-entry action). Open an empty composer and create a session
+project and entire note, with no date selection (IC5 round 2 supersedes the earlier dated-entry action). Open an empty composer and create a session
 without starting a turn. Disable repeated clicks while creating and use a stable request ID so a retry
 does not create two sessions. A later deliberate click creates another conversation. Existing chats
 remain individually available in the conversation list/history, with their scope shown; no automatic
-reuse of the latest chat. Note-wide and date-specific scopes never substitute for each other. Archived
+reuse of the latest chat. Historical date-specific chats retain their scope and readable history. Archived
 chats are available through history but not auto-reopened. Missing note: keep existing chat readable,
 show the missing-context warning, require fixing the reference before a new idea-context request.
 
-On the first actual user message, give the partner Summary, selected Decided content, Open/Ideas clearly
+On the first actual user message, give the partner Summary, all Decided dates and their relationships, Open/Ideas clearly
 labelled as undecided, effective status, provenance and conflicts. Refresh on relevant changes before
 subsequent messages. Do not reset an existing chat's model/effort selection (CM owns further model UI).
 Back returns to the same note, list filter and scroll position. Opening/closing never calls a model.
@@ -181,7 +182,7 @@ Back returns to the same note, list filter and scroll position. Opening/closing 
 the existing orchestrator inbox, not a conversation-wide model summary. Preview includes:
 
 - One project, exact note path/title; explicit checked dates with full decision text expandable.
-  Entry action preselects that date; note action preselects active unconfirmed dates only. Nothing
+  The note action preselects active unconfirmed dates only; the user selects dates in this preview. Nothing
   chosen is disabled until a date is selected or Context only is deliberately chosen.
 - A purpose: **Discuss / plan next work** (active dates) or **Context only**. Full/dropped/replaced dates
   default unselected and may be included only as context, visibly labelled with their disposition.
