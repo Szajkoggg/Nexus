@@ -119,6 +119,32 @@ test("Codex in a queue's own worktree may write the worktree's git paths, and no
   } finally { engine.shutdown(); delete process.env.FAKE_ARGS; }
 });
 
+/** A ULID (a session's, a queue's): it only identifies, its letters are random. (A UUID is hex: it spells none of these.) */
+const ID = /\b[0-9A-HJKMNP-TV-Z]{26}\b/gi;
+/** An absolute path, Windows or POSIX (also Claude Code's //c/... in rules): it only locates, under a random temporary folder. */
+const PATH = /(?:[A-Za-z]:[\\/]|\/)[^\s,()"']*/g;
+/**
+ * What a Claude Code launch configures: its flags as they are, their values with the ids and paths in them masked, so
+ * a check for a setting matches the flags and config keys, never "MCP" by chance in a session id (queue TT1).
+ */
+const launchSettings = (argv: string[]) => argv.map((a) => (a.startsWith("-") ? a : a.replace(PATH, "<path>").replace(ID, "<id>")));
+/** What Claude Code's launch must not name: MCP servers, plugins, Codex's features. */
+const runtimeSettings = (argv: string[]) => launchSettings(argv).filter((a) => /mcp|plugin|feature/i.test(a));
+
+test("the check on Claude Code's launch ignores ids and paths but sees MCP, plugin and feature flags and keys", () => {
+  const id = "01M7NG9MTY6R22946TMCPMEC5B"; // TM1's session: "MCP" in a ULID
+  const plain = [
+    "-p", "--session-id", "0b7c9e2a-4d1f-4dcb-8a3b-1c2d3e4f5a6b", "--resume", id,
+    "--append-system-prompt-file", `C:\\Users\\u\\AppData\\Local\\Temp\\nexus-MCPx1\\.nexus\\sessions\\${id}\\briefing.md`,
+    "--disallowedTools", "Edit(//c/users/u/temp/nexus-mcp9/.nexus/**),Write(/tmp/nexus-plugin/.nexus/**)",
+    "--allowedTools", "Bash(nexus:*)", `Read(${id})`,
+  ];
+  assert.deepEqual(runtimeSettings(plain), []);
+  for (const extra of [["--mcp-config", "x.json"], ["--strict-mcp-config"], ["--plugin-dir", "C:\\p"], ["--settings", '{"enabledPlugins":{"a":true}}'], ["-c", "mcp_servers.blender.enabled=false"], ["-c", "features.apps=false"]]) {
+    assert.notDeepEqual(runtimeSettings([...plain, ...extra]), [], extra.join(" "));
+  }
+});
+
 test("a Codex worker's thread starts without the user's MCP servers, plugins and apps, but those the project names; Claude Code's launch is as it was", async () => {
   const { store, engine, queue, until } = setup(["done", "done"]);
   process.env.FAKE_ARGS = join(dirname(process.env.FAKE_LOG!), "args.log");
@@ -156,7 +182,7 @@ test("a Codex worker's thread starts without the user's MCP servers, plugins and
     await until("C to finish", () => loadProjectState(store).queues.find((q) => q.id === "C")!.run?.state === "finished", LONGER.run);
     assert.ok(!readFileSync(process.env.FAKE_ARGS!, "utf8").includes("config/read"));
     const argv = readFileSync(process.env.FAKE_ARGS!, "utf8").trim().split("\n").map((l) => JSON.parse(l) as { argv?: string[] }).filter((l) => l.argv).at(-1)!.argv!;
-    assert.doesNotMatch(argv.join(" "),/mcp|plugins|features\./i, "Claude Code's argv names nothing of it");
+    assert.deepEqual(runtimeSettings(argv), [], "Claude Code's argv names nothing of it");
   } finally { engine.shutdown(); delete process.env.FAKE_ARGS; delete process.env.FAKE_CODEX_MCP; }
 });
 
