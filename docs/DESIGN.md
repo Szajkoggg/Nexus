@@ -2872,3 +2872,10 @@ temporary projects. It covers the correction guide, atomic replacement/undo, acc
 reopening, a project never matched, an uncertain response after a committed save, date-specific confirmation and
 stale drafts after a concurrent note change. It verifies all 12 agreed view/size combinations and initial Open
 visibility. The UI keeps chat/handoff for IC5, including the accepted always-new-chat rule.
+
+The overview's replacement arrow, like the status form's current target, reads `effective.replacement` only while
+`effective.disposition` is `replaced`. The legacy `replaced_by` field is source metadata, never a fallback for a
+current target. Original markers remain in the explicitly historical/conflict-labelled details; the API's dated
+decision content already excludes these disposition markers.
+`scripts/verify-idea-replacements.ts` checks the rendered row and assessment after UI Reopen, B-to-C replacement,
+and replacement without a note marker, including reload and Back. All three dates have no linked queues.

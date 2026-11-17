@@ -158,15 +158,16 @@ function NoteRow({ shown, on, phone }: { shown: ShownNote; on: boolean; phone?: 
 
 function EntryLine({ e, phone }: { e: IdeaEntryView; phone?: boolean }) {
   const off = dispositionOf(e) !== "active";
+  const replacement = e.effective?.disposition === "replaced" ? e.effective.replacement : undefined;
   const q = e.queues[0];
   return (
-    <span className={`mt-1 grid items-baseline gap-2.5 text-xs ${phone ? "grid-cols-[2.75rem_minmax(0,1fr)]" : "grid-cols-[3.25rem_minmax(0,1fr)] pl-3"}`}>
+    <span data-idea-entry={e.ref} className={`mt-1 grid items-baseline gap-2.5 text-xs ${phone ? "grid-cols-[2.75rem_minmax(0,1fr)]" : "grid-cols-[3.25rem_minmax(0,1fr)] pl-3"}`}>
       <span className={`tabular-nums text-fg-3 ${off ? "opacity-60" : ""}`}>{day(e.date)}</span>
       <span className={`text-fg-2 ${off ? "opacity-60" : ""}`}>{e.lead}<span className="text-fg-3"> · {e.decisions}</span></span>
       <span className="col-span-2"><EntryState entry={e} /></span>
       {!phone && (
         <span className="col-span-2 font-mono text-[11.5px] text-accent">
-          {q ? <>{e.queues.map((x) => x.id).join(", ")}<span className="font-sans text-fg-3"> · {statusWord(q.status)}</span></> : e.replaced_by ? <span className="font-sans text-fg-3">→ {e.replaced_by.replace(/^.*\//, "")}</span> : null}
+          {q ? <>{e.queues.map((x) => x.id).join(", ")}<span className="font-sans text-fg-3"> · {statusWord(q.status)}</span></> : replacement ? <span className="font-sans text-fg-3">→ {replacement.replace(/^.*\//, "")}</span> : null}
         </span>
       )}
     </span>

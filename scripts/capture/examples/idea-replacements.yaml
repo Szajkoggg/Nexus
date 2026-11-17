@@ -1,0 +1,9 @@
+seed: scripts/capture/seed-idea-replacements-review.ts
+views:
+  - key: ideas-replacements@1440
+    route: "#/demo"
+    script: scripts/capture/reset-ideas.js
+    actions:
+      - click: Ideas
+      - click: Overview
+      - type: { into: 'input[aria-label="Filter notes…"]', text: Replacement examples }

@@ -42,7 +42,7 @@ export function IdeaStatusForm({ project, entry, data, undo, onSaved, onCancel }
     <div className={ideaCard} data-box="Current assessment"><EntryState entry={entry} />
       {e.stale_reasons.map((s) => <p key={s} className="text-xs text-warn">{s}</p>)}
       <p className="text-xs text-fg-3">{t("ideas.currentDisposition", { state: t(`ideas.${e.disposition}`) })}</p>
-      {e.replacement && <code className="block text-xs">{e.replacement}</code>}
+      {e.disposition === "replaced" && e.replacement && <code className="block text-xs">{e.replacement}</code>}
     </div>
     <section><h3 className="text-xs font-semibold text-fg-3">{t("ideas.linkedDetails")}</h3>
       {e.work.queues.map((q) => <p key={q.id} className="mt-1 text-xs">{q.id} · {q.status}{q.issues.map((s) => <span key={s} className="block text-warn">{s}</span>)}</p>)}
