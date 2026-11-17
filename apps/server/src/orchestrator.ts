@@ -47,7 +47,7 @@ const runtimeOf = (p: ProjectFile): OrchestratorRuntime => (p.orchestrator?.runt
  * for it (Codex sandboxes every command, the CLI's too). Not its session.yaml (its role), not its inbox, nothing of
  * the user's. Paths with forward slashes, as probed.
  */
-export function orchestratorPermissions(nexusDir: string, session: string): CodexPermissions {
+function orchestratorPermissions(nexusDir: string, session: string): CodexPermissions {
   const path = (...p: string[]) => join(nexusDir, ...p).replaceAll("\\", "/");
   return { name: "nexus_orchestrator", extends: ":read-only", filesystem: { [path("drafts")]: "write", [path("sessions", session, "events.jsonl")]: "write" } };
 }

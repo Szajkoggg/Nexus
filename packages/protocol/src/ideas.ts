@@ -77,7 +77,7 @@ export function noteRefIssue(ref: string, notesDir: string | undefined, notes: r
  * first bullet (else the bullet's first words); `decisions`: its top-level bullets. `dropped` and `replaced_by` come
  * from the lines `**Dropped:** <date>: <why>` and `**Replaced by:** <file>#<date>` the partner writes under it.
  */
-export interface IdeaEntry {
+interface IdeaEntry {
   date: string;
   headings: string[];
   lead: string;
@@ -467,13 +467,6 @@ export function suggestMatches(queues: readonly MatchQueue[], notes: readonly Id
 }
 
 const clip = (s: string) => (s.length > 320 ? `${s.slice(0, 319).trimEnd()}…` : s);
-
-/** The entries the user accepted for each queue (by queue id), from the decisions in idea-matches.yaml. */
-export function acceptedMatches(matches: readonly { queue: string; ref: string; accepted: boolean }[]): Record<string, string[]> {
-  const out: Record<string, string[]> = {};
-  for (const m of matches) if (m.accepted) (out[m.queue] ??= []).push(m.ref);
-  return out;
-}
 
 /** A suggestion as the dashboard shows it: its queue as it stands, the entry's lead, and the user's decision. */
 export interface MatchItem extends MatchSuggestion {
