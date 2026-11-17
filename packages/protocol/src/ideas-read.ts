@@ -70,6 +70,7 @@ export function ideaMatches(store: ProjectStore, state: ProjectState, notes = re
     return [{
       queue: m.queue, ref: m.ref, kind: m.kind!, quote: m.quote, title: q?.title ?? m.title, status: q?.status ?? "missing",
       diagnostics: m.diagnostics,
+      current_suggestion: m.current_suggestion, recorded_evidence: m.recorded_evidence, evidence_status: m.evidence_status,
       ...(m.location ? { location: m.location } : {}),
       ...(q?.finished_at ? { finished_at: q.finished_at } : {}), ...(q?.commit ? { commit: q.commit } : {}),
       ...(lead ? { lead } : {}),

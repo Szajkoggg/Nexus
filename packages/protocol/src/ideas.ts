@@ -5,12 +5,13 @@
 
 import type { ImportSource, QueueSource, QueueStatus } from "./schemas.ts";
 import type { QueueView } from "./state.ts";
-import type { IdeaLinksResponse } from "./idea-links.ts";
+import type { IdeaLinksResponse, IdeaLinkView } from "./idea-links.ts";
 
 export interface IdeaOutcome {
   kind: "queue-report" | "accepted-steps" | "unavailable";
   text: string;
-  report: { path: string; available: boolean; hash?: string; at?: string; event?: string };
+  report: { path: string; available: boolean; hash?: string; at?: string; event?: string; source_hash?: string;
+    source_status: "current" | "outdated" | "unverifiable" | "missing" };
   excerpts: { text: string; step?: string; round?: number; event?: string; commit?: string; hash: string }[];
   accepted: { step: string; round: number; event: string; summary: string; commit?: string; closing: boolean }[];
   /** Earlier reported rounds, retained for inspection; not current accepted evidence. */
@@ -458,6 +459,9 @@ export function acceptedMatches(matches: readonly { queue: string; ref: string; 
 
 /** A suggestion as the dashboard shows it: its queue as it stands, the entry's lead, and the user's decision. */
 export interface MatchItem extends MatchSuggestion {
+  current_suggestion?: IdeaLinkView["current_suggestion"];
+  recorded_evidence?: IdeaLinkView["recorded_evidence"];
+  evidence_status?: IdeaLinkView["evidence_status"];
   diagnostics?: string[];
   title: string;
   status: QueueStatus | "missing";

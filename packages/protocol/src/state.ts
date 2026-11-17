@@ -150,7 +150,7 @@ export interface QueueView extends Omit<QueueFile, "steps"> {
   approved: boolean;   // the latest approval pins the current revision
   revision_hash: string;
   steps: StepView[];
-  report?: { path: string; summary: string; at: string; event?: string; findings?: number };
+  report?: { path: string; summary: string; at: string; event?: string; source_hash?: string; findings?: number };
   /**
    * The step the queue's stop came from (the latest queue.stop's, or the stopped step of a queue imported as stopped),
    * until a lift. It stays when the orchestrator skips that step: the stop is then the queue's (stopPlace).
@@ -867,7 +867,7 @@ function apply(
     }
     case "queue.report": {
       const q = queueOf(e.queue);
-      if (q) q.report = { path: e.path, summary: e.summary, at: e.at, event: e.id, ...(e.findings !== undefined ? { findings: e.findings } : {}) };
+      if (q) q.report = { path: e.path, summary: e.summary, at: e.at, event: e.id, ...(e.source_hash ? { source_hash: e.source_hash } : {}), ...(e.findings !== undefined ? { findings: e.findings } : {}) };
       return;
     }
     case "context.summary": {

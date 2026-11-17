@@ -4,6 +4,12 @@
 import { mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { createHash } from "node:crypto";
+
+/** Fingerprint of the exact report bytes registered by queue.report, without text normalization. */
+export function reportSourceHash(content: Uint8Array): string {
+  return `sha256:${createHash("sha256").update(content).digest("hex")}`;
+}
 
 /** The project's folder of reports: <temp>/nexus-reports/<project>. */
 export function reportFolder(project: string): string { return join(tmpdir(), "nexus-reports", project); }

@@ -572,7 +572,7 @@ Every line:
 | `note.read` | `note` | A note was received |
 | `message.read` | `message` | An inbox message was received |
 | `context.summary` | `text`, `topics: []`, `files: []` | What a successor or continuation needs to know; written at the end of each step |
-| `queue.report` | `queue`, `path`, `summary`, `findings?` | The worker's report of the whole queue, written when it ends (done or stopped). `path` is the copy in the queue's folder (`.nexus/queues/<queue>/report.md`), which `nexus report` writes. `findings`: a maintenance queue's number of findings (`--findings`, a whole number from 0; see "Recurring queues") |
+| `queue.report` | `queue`, `path`, `summary`, `source_hash?`, `findings?` | The worker's report of the whole queue, written when it ends (done or stopped). `path` is the copy in the queue's folder (`.nexus/queues/<queue>/report.md`), which `nexus report` writes. The CLI records `source_hash` (`sha256:<64 lowercase hex digits>`) from the exact registered bytes, without text normalization; older events may omit it. `findings`: a maintenance queue's number of findings (`--findings`, a whole number from 0; see "Recurring queues") |
 | `change.proposed` | `queue`, `patch`, `reason` | A proposed change to a queue definition (needs a new approval) |
 | `queue.drafted` | `queue`, `definition` | Orchestrator only: a new or changed draft queue |
 | `session.request` | `action` (start, resume, pause, stop, cancel_start), `queue`, `use_session?`, `runtime?`, `model?`, `effort?`, `after?`, `next?`, `start_at?`, `reason` | Orchestrator only: asks the engine to act on a queue's run (`use_session` continues an existing session). `start` with `after` (a list of queue ids; one id from an older CLI): put the queue into the plan, it starts when those are done (see "The plan"); with `next: true`: into the plan with none before it; with `start_at` (ISO 8601, or `usage-reset`): start at that time (a schedule, see "Schedules"); `cancel_start`: take the queue out of the plan (its predecessors and its schedule) |
@@ -1710,6 +1710,18 @@ client: use those returned by GET links. Historical records without evidence loc
 An `exact|dated|file` kind describes reference syntax only, including example and context mentions. It does not
 measure implementation certainty. The API returns each relationship's own sentence, never the queue's first quote.
 
+Match-origin reads (GET links and GET matches) separate live evidence from stored observations:
+`current_suggestion` is the freshly derived suggestion (`queue`, `ref`, `kind`, `quote`, `location?`), or null when
+the queue no longer provides that reference. `recorded_evidence`, when present, is the stored decision or last-known
+snapshot, explicitly historical. For a pending origin with a live suggestion, the top-level quote/kind/location
+come from that live suggestion and `evidence_status` is `current`; a stored snapshot cannot override them. Decided
+origins keep the evidence recorded with their decision and `evidence_status: historical`; the current suggestion
+is separately available. An absent suggestion keeps its last-known quote/identity as historical, with a diagnostic,
+never as current evidence. These read-only fields are not persisted as part of a record. Saves refresh pending
+observations, while decided evidence remains in records and immutable action before/after history. An explicit new
+acceptance uses the current suggestion when one exists; absent references can still be deliberately decided from
+their visibly historical evidence, provided any linked target exists.
+
 Each `history` action stores `id` (request ID), `request` (canonical payload hash), `at`, `actor: user`, `reason`,
 `operation`, optional `undo` action ID and `changes: [{ before, after }]`. `before: null` means a new manual origin.
 All known origins are snapshotted on a successful save; removed targets retain the last identity observed there.
@@ -1736,7 +1748,9 @@ GET matches now also returns `revision`, per-item `diagnostics` and optional `lo
 `nexus ideas matches` also lists each origin's state, effectiveness, diagnostics and history count. It gains no write
 action. The existing dashboard matching client supplies revision/request ID and retains the ID for a failed retry.
 
-The revision hashes the stored file and current relationship inputs (notes and queue identities/sources). Under an
+The revision hashes the stored file and current relationship inputs (notes, queue identities/sources and the freshly
+derived suggestions, including their own quotes and locations). Editing description/goal evidence or removing its
+reference invalidates the old revision even when a stored snapshot or prior decision exists for the same edge. Under an
 exclusive `idea-matches.lock`, the server re-reads, checks the revision and writes overlay + history in one atomic
 YAML replacement. Lock contention fails with 409; it never overwrites a concurrent decision. The lock is removed in
 `finally`; an abruptly killed writer may leave it behind. Such a lock fails closed and requires removal only after
@@ -1746,9 +1760,9 @@ a retry can retrieve it even if the project subsequently changed or a crashed wr
 
 **Outcome excerpts (IC2).** Each existing queue reference in GET ideas carries `outcome`: `kind`
 (`queue-report|accepted-steps|unavailable`), `text`, `report` (project-relative full-report `path`, `available`, current
-content `hash`, report-event `at` and `event` when present), `excerpts`, all current `accepted` step summaries,
+content `hash`, event-bound `source_hash?`, `source_status`, report-event `at` and `event` when present), `excerpts`, all current `accepted` step summaries,
 `historical` reported rounds, `sampled_steps`, `substantive_steps` and `warnings`. QueueView's `report` also retains
-its event ID. A step excerpt identifies step, round (the step.done ordinal), event, commit when supplied and source
+its event ID and optional `source_hash`. A step excerpt identifies step, round (the step.done ordinal), event, commit when supplied and source
 hash. Historical rounds are labelled reported history, not current accepted evidence; their step/event links lead
 to the original review timeline. No second acceptance state is maintained: current StepView status and provisional
 confirmation determine the accepted evidence; reopened or unconfirmed rounds cannot borrow old acceptance.
@@ -1760,8 +1774,19 @@ semantic certification of prose. Otherwise sample one complete sentence from eac
 substantive steps in queue order; closing/integration steps remain separately readable. The counts expose the sample.
 Incomplete/empty summaries produce no invented sentence: `No substantive outcome summary available`. The full report
 path and accepted summaries remain available. Missing reports and unfinished/skipped/provisional evidence produce
-warnings; a report never upgrades acceptance or confirms implementation. Extraction is uncached and source-hashed:
-editing a report changes its hash and regenerates the response. No model or additional session-log writer is involved.
+warnings; a report never upgrades acceptance or confirms implementation.
+
+A queue-report quotation is attributed to the immutable `queue.report` event, not re-extracted from arbitrary file
+edits. Its excerpt hash covers that event's identity, time, summary and registered source hash; changing report.md
+alone never gives the old quotation a new source identity. The response independently fingerprints the current file
+bytes (`report.hash`) and compares them to the event's `source_hash`. `source_status` is `current` only when both
+hashes match, `outdated` when they differ, `unverifiable` when the file exists but no event-bound hash is available,
+or `missing` when the file is absent. Changed and unverifiable sources have explicit warnings. An available old
+summary may still be quoted with that status, as an event quotation, never as a verified current-file excerpt.
+Missing files use the accepted-step fallback. Legacy events are not backfilled with a hash of today's file and
+cannot prove freshness, even on the first read. A fresh `nexus report` records the new bytes, summary and event;
+the next read uses that event and recalculates freshness. `current` proves byte equality to registration only, not
+semantic accuracy or full implementation. No model or additional session-log writer is involved.
 
 **The web** (`conversations.web`, global with a project override, decided by the user 2026-11-15): `off`, `search`
 (the default) or `fetch`. A changed level applies from the partner's next message (a new process, resuming the

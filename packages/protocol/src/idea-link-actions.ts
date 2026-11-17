@@ -48,7 +48,7 @@ export function changeIdeaLinks(store: ProjectStore, input: unknown): IdeaLinkAc
     if (view.revision !== req.revision) throw new ActionError("Changed since you opened this; review the newer decision", 409);
     const at = now();
     const record = (r: IdeaLinkView): IdeaLinkRecord => {
-      const { effective: _effective, diagnostics: _diagnostics, ...value } = r;
+      const { effective: _effective, diagnostics: _diagnostics, current_suggestion: _current, recorded_evidence: _recorded, evidence_status: _status, ...value } = r;
       return value;
     };
     const find = (id: string | undefined) => {
@@ -98,8 +98,11 @@ export function changeIdeaLinks(store: ProjectStore, input: unknown): IdeaLinkAc
       for (const d of req.decisions) {
         const r = find(d.origin);
         if (r.origin !== "match") throw new ActionError("Only a historical match can be accepted or rejected");
-        if (d.accept === true) validate(r.queue, r.ref);
-        change(r, { ...r, state: d.accept === null ? "pending" : d.accept ? "linked" : "rejected", at });
+        const suggestion = view.items.find((v) => v.id === r.id)!.current_suggestion;
+        if (d.accept === true) {
+          validate(r.queue, r.ref);
+        }
+        change(r, { ...r, ...(d.accept === true ? suggestion : {}), state: d.accept === null ? "pending" : d.accept ? "linked" : "rejected", at });
       }
     } else {
       const r = find(req.origin);

@@ -12,7 +12,7 @@ import { ideaOutcome as ideaOutcomeForTest } from "../src/idea-outcomes.ts";
 import {
   ActionError, ProjectStore, QueueFile, applyDraft, approveQueue, deriveIdeas, ideaQueues, importedFrom, loadProjectState,
   noteRefs, parseNote, parseNoteRef, projectIdeas, readHandOvers, readNotes, revisionHash, topicStatus, type Event, type IdeaQueue,
-  decideIdeaMatches as saveIdeaMatches, ideaMatches, ideaLinks, changeIdeaLinks, ideaOriginId, newId, suggestMatches, type MatchQueue,
+  decideIdeaMatches as saveIdeaMatches, ideaMatches, ideaLinks, changeIdeaLinks, ideaOriginId, newId, reportSourceHash, suggestMatches, type MatchQueue,
 } from "../src/index.ts";
 
 const decideIdeaMatches = (st: ProjectStore, items: unknown, accept: unknown) => saveIdeaMatches(st, items, accept,
@@ -492,6 +492,58 @@ test("example and context mentions describe syntax only and keep their own evide
   assert.ok(suggestions.every((s) => !("confidence" in s)), "exact is reference syntax, never implementation certainty");
 });
 
+for (const field of ["description", "goal"] as const) test(`pending ${field} evidence refreshes after an unrelated snapshot; old requests conflict and decided evidence survives`, () => {
+  const { st, root } = finished();
+  const ref = "docs/ideas/plan.md#2026-11-14";
+  const id = ideaOriginId("match", "OLD", ref);
+  const setEvidence = (text: string) => {
+    const q = st.readQueue("OLD");
+    st.writeQueue({ ...q, description: field === "description" ? text : "Unrelated description.",
+      steps: q.steps.map((s) => ({ ...s, goal: field === "goal" ? text : "" })) });
+  };
+  const item = () => linksOf(new ProjectStore(st.dir)).items.find((r) => r.id === id)!;
+  setEvidence(`Original reference: ${ref}.`);
+  correct(st, { operation: "add", queue: "OLD", ref: "docs/ideas/plan.md#2026-11-15" });
+  const saved = st.readIdeaMatches().records!.find((r) => r.id === id)!;
+  const request = { request_id: newId(), revision: linksOf(st).revision, operation: "decide", reason: "Review this reference",
+    decisions: [{ origin: id, accept: true }] };
+  const changed = `Updated context reference: ${ref}.`;
+  setEvidence(changed);
+  assert.notEqual(linksOf(st).revision, request.revision);
+  assert.equal(item().quote, changed);
+  assert.equal(item().current_suggestion!.quote, changed);
+  assert.equal(item().evidence_status, "current");
+  assert.deepEqual(item().recorded_evidence, saved, "the old observation is explicitly historical");
+  assert.equal(ideaMatches(st, loadProjectState(st)).items[0]!.quote, changed);
+  assert.throws(() => changeIdeaLinks(st, request), (e: ActionError) => e.status === 409);
+
+  // Removing the reference while note/date/queue still exist must invalidate the latest screen too.
+  const beforeRemoval = { ...request, request_id: newId(), revision: linksOf(st).revision };
+  setEvidence("The queue no longer mentions a note.");
+  assert.notEqual(linksOf(st).revision, beforeRemoval.revision);
+  assert.equal(item().current_suggestion, null);
+  assert.equal(item().evidence_status, "historical");
+  assert.deepEqual(item().recorded_evidence, saved);
+  assert.match(item().diagnostics.join(), /no longer present/);
+  assert.throws(() => changeIdeaLinks(st, beforeRemoval), (e: ActionError) => e.status === 409);
+
+  setEvidence(changed);
+  const accepted = correct(st, { operation: "decide", decisions: [{ origin: id, accept: true }] });
+  setEvidence(`Later wording: ${ref}.`);
+  const beforeLater = linksOf(st).revision;
+  assert.equal(item().quote, changed, "accepted evidence remains the evidence of that decision");
+  assert.equal(item().evidence_status, "historical");
+  assert.equal(item().current_suggestion!.quote, `Later wording: ${ref}.`);
+  assert.equal(item().recorded_evidence!.quote, changed);
+  setEvidence("No reference remains.");
+  assert.notEqual(linksOf(st).revision, beforeLater);
+  rmSync(join(root, "docs/ideas/plan.md"));
+  assert.equal(item().quote, changed);
+  assert.equal(item().recorded_evidence!.note_title, "Plan view");
+  assert.match(item().diagnostics.join(), /there is no note/);
+  assert.deepEqual(linksOf(st).history.find((a) => a.id === accepted.id), accepted);
+});
+
 test("outcomes quote accepted substantive rounds, retain provenance and never use a closing result as the queue", () => {
   const { st } = finished();
   const ref = "docs/ideas/plan.md#2026-11-14";
@@ -508,9 +560,14 @@ test("outcomes quote accepted substantive rounds, retain provenance and never us
   assert.equal(outcome().kind, "queue-report");
   assert.equal(outcome().text, "The feature is available. It handles errors.");
   assert.ok(outcome().report.event);
+  assert.equal(outcome().report.source_status, "unverifiable", "legacy events do not prove freshness");
+  assert.match(outcome().warnings.join(), /no source fingerprint/);
   const hash = outcome().report.hash;
+  const excerpt = outcome().excerpts[0];
   writeFileSync(join(st.queueDir("OLD"), "report.md"), "# Updated report\n");
   assert.notEqual(outcome().report.hash, hash);
+  assert.equal(outcome().report.source_status, "unverifiable");
+  assert.deepEqual(outcome().excerpts[0], excerpt, "file edits never reattribute an old event quotation to new bytes");
   st.appendEvent({ v: 1, id: newId(), at: "2026-11-14T23:10:00Z", session: "o", queue: "OLD", type: "queue.report", path: join(st.queueDir("OLD"), "report.md"), summary: "Closing refactoring is complete." } as Event);
   assert.equal(outcome().kind, "accepted-steps");
   assert.equal(outcome().text, "Done.");
@@ -524,6 +581,43 @@ test("outcomes quote accepted substantive rounds, retain provenance and never us
   assert.equal(ideaOutcomeForTest(st, state.queues[0]!).kind, "unavailable");
   state.queues[0]!.steps[0]!.provisional!.confirmed = "2026-11-14T23:21:00Z";
   assert.equal(ideaOutcomeForTest(st, state.queues[0]!).kind, "accepted-steps");
+});
+
+test("report event fingerprints distinguish current, changed and missing sources; a new event refreshes the excerpt", () => {
+  const { st } = finished();
+  const path = join(st.queueDir("OLD"), "report.md");
+  const extract = () => ideaOutcomeForTest(st, loadProjectState(new ProjectStore(st.dir)).queues[0]!);
+  const register = (summary: string, at: string) => {
+    const id = newId();
+    st.appendEvent({ v: 1, id, at, session: "o", queue: "OLD", type: "queue.report", path, summary,
+      source_hash: reportSourceHash(readFileSync(path)) } as Event);
+    return id;
+  };
+  writeFileSync(path, "# Report\n\nOriginal outcome.\n");
+  const first = register("Original outcome.", "2026-11-14T23:00:00Z");
+  const original = extract();
+  assert.equal(original.report.source_status, "current");
+  assert.equal(original.report.hash, original.report.source_hash);
+  writeFileSync(path, "# Report\n\nA different outcome after editing.\n");
+  const changed = extract();
+  assert.equal(changed.report.source_status, "outdated");
+  assert.equal(changed.text, "Original outcome.");
+  assert.match(changed.warnings.join(), /changed after queue.report/);
+  assert.notEqual(changed.report.hash, changed.report.source_hash);
+  assert.equal(changed.report.source_hash, original.report.source_hash);
+  assert.equal(changed.report.event, first);
+  assert.deepEqual(changed.excerpts, original.excerpts);
+  const second = register("A different outcome after editing.", "2026-11-14T23:10:00Z");
+  const refreshed = extract();
+  assert.equal(refreshed.text, "A different outcome after editing.");
+  assert.equal(refreshed.report.source_status, "current");
+  assert.equal(refreshed.report.event, second);
+  assert.notEqual(refreshed.excerpts[0]!.hash, original.excerpts[0]!.hash);
+  assert.ok(!refreshed.warnings.some((w) => /changed after|no source fingerprint/.test(w)));
+  rmSync(path);
+  assert.equal(extract().report.source_status, "missing");
+  assert.equal(extract().kind, "accepted-steps");
+  assert.equal(extract().report.source_hash, refreshed.report.source_hash);
 });
 
 test("outcome fallback samples distinct substantive steps and reports empty, closing-only and stale evidence", () => {

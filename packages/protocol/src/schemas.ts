@@ -742,7 +742,7 @@ export const Event = z.discriminatedUnion("type", [
    * The queue's report (`nexus report`), copied into the queue's folder (`path`). `findings`: how many findings a
    * maintenance run's report has (`--findings`); the server tells the orchestrator once when there are any.
    */
-  z.object({ ...base, type: z.literal("queue.report"), queue: Id, path: z.string(), summary: z.string(), findings: z.number().int().nonnegative().optional() }),
+  z.object({ ...base, type: z.literal("queue.report"), queue: Id, path: z.string(), summary: z.string(), source_hash: z.string().regex(/^sha256:[a-f0-9]{64}$/).optional(), findings: z.number().int().nonnegative().optional() }),
   z.object({ ...base, type: z.literal("change.proposed"), queue: Id, patch: z.unknown(), reason: z.string() }),
   z.object({ ...base, type: z.literal("queue.drafted"), queue: Id, definition: z.unknown() }),
   /**

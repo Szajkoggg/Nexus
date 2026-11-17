@@ -114,6 +114,28 @@ test("GET /api/projects/:id/ideas: the notes with their entries' statuses and hi
     assert.match(missing.items.find((r) => r.id === source.id)!.diagnostics.join(), /missing/);
     assert.equal((await save({ request_id: "remove-missing", revision: missing.revision, operation: "ignore-source", origin: source.id, reason: "Queue disappeared" })).status, 200);
 
+    // A save on another edge must not freeze a pending suggestion's evidence.
+    store.writeQueue({ ...store.readQueue("OLD"), id: "PENDING", title: "Pending evidence",
+      description: "Original context: docs/ideas/plan.md#2026-11-16." });
+    await untilAsync("new pending suggestion", async () => (await links()).items.some((r) => r.queue === "PENDING"));
+    assert.equal((await save({ request_id: "snapshot-pending", revision: (await links()).revision, operation: "add", queue: "OLD",
+      ref: "docs/ideas/plan.md#2026-11-14", reason: "An unrelated edge" })).status, 200);
+    const opened = await links();
+    const pending = opened.items.find((r) => r.queue === "PENDING")!;
+    const decide = { request_id: "stale-evidence", revision: opened.revision, operation: "decide", reason: "Review the suggestion",
+      decisions: [{ origin: pending.id, accept: true }] };
+    store.writeQueue({ ...store.readQueue("PENDING"), description: "Changed context: docs/ideas/plan.md#2026-11-16." });
+    await untilAsync("changed suggestion evidence", async () => (await links()).items.find((r) => r.id === pending.id)!.quote.startsWith("Changed context"));
+    assert.equal((await save(decide)).status, 409);
+    const refreshed = await links();
+    assert.equal(refreshed.items.find((r) => r.id === pending.id)!.recorded_evidence!.quote, pending.quote);
+    store.writeQueue({ ...store.readQueue("PENDING"), description: "No note is mentioned now." });
+    await untilAsync("removed suggestion reference", async () => (await links()).items.find((r) => r.id === pending.id)!.current_suggestion === null);
+    assert.equal((await save({ ...decide, request_id: "removed-evidence", revision: refreshed.revision })).status, 409);
+    const historical = (await links()).items.find((r) => r.id === pending.id)!;
+    assert.equal(historical.evidence_status, "historical");
+    assert.match(historical.diagnostics.join(), /no longer present/);
+
     const unknown = await get("/api/projects/nope/ideas");
     assert.deepEqual([unknown.status, (unknown.body as { error: string }).error], [404, "unknown project"]);
   } finally {

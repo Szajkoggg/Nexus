@@ -3,6 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -33,11 +34,18 @@ test("a report written outside .nexus is copied into the queue's folder, and the
   const q = loadProjectState(store).queues.find((x) => x.id === "Q")!;
   assert.equal(q.report?.path, normPath(target));
   assert.equal(q.report?.summary, "all done");
+  const firstHash = `sha256:${createHash("sha256").update(readFileSync(target)).digest("hex")}`;
+  assert.equal(q.report?.source_hash, firstHash, "the event pins the copied bytes");
+  const firstEvent = store.readEvents("w").entries.find((e) => e.type === "queue.report")!;
+  assert.equal(firstEvent.type === "queue.report" && firstEvent.source_hash, firstHash);
 
   // A later report replaces it.
   writeFileSync(join(root, "tmp/reports/Q.md"), "second\n");
   report("Q", "--file", "tmp/reports/Q.md", "--summary", "again");
   assert.equal(readFileSync(target, "utf8"), "second\n");
+  assert.notEqual(loadProjectState(store).queues[0]!.report?.source_hash, firstHash);
+  assert.equal(loadProjectState(store).queues[0]!.report?.source_hash, `sha256:${createHash("sha256").update(readFileSync(target)).digest("hex")}`);
+  assert.deepEqual(store.readEvents("w").entries.find((e) => e.id === firstEvent.id), firstEvent, "registration never rewrites the old event");
   assert.ok(existsSync(join(root, "tmp/reports/Q.md")), "a source outside the folder for reports is kept");
 });
 
@@ -67,6 +75,7 @@ test("a report already in the queue's folder still works; an unknown queue or a 
   assert.doesNotMatch(report("Q", "--file", target, "--summary", "in place"), /copied/);
   assert.equal(readFileSync(target, "utf8"), "written in place\n");
   assert.equal(loadProjectState(store).queues[0]!.report?.path, normPath(target));
+  assert.equal(loadProjectState(store).queues[0]!.report?.source_hash, `sha256:${createHash("sha256").update(readFileSync(target)).digest("hex")}`);
 
   writeFileSync(join(root, "r.md"), "x\n");
   assert.throws(() => report("X", "--file", "r.md", "--summary", "s"), /unknown queue X/);

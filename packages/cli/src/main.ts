@@ -14,7 +14,7 @@ import {
   lacksStaticAnalysis, projectStaticAnalysis, staticReminderDue,
   TemplateError, fillTemplate, filledTemplateYaml, parseEvery, MaintenanceMode, readTemplates, templateQueueId, unusableTemplate, type MergedTemplates,
   type PictureRole, type ReviewItem, type Role, type Runtime, type SessionFile,
-  noteRefIssue, parseNoteRef, readNotes, ideaMatches, ideaLinks,
+  noteRefIssue, parseNoteRef, readNotes, ideaMatches, ideaLinks, reportSourceHash,
 } from "@nexus/protocol";
 import { checkRules, describeRules } from "@nexus/protocol/rules";
 import { importMarkdownQueues } from "./import-md.ts";
@@ -649,8 +649,9 @@ const commands: Record<string, () => void | Promise<void>> = {
     // under .nexus with their file tools, so they write it anywhere and this command (its only writer) copies it in.
     const target = normPath(join(st.queueDir(queue), "report.md"));
     const same = process.platform === "win32" ? target.toLowerCase() === file.toLowerCase() : target === file;
-    if (!same) writeFileSync(target, readFileSync(file));
-    emit(st, s, { type: "queue.report", queue, path: target, summary, findings });
+    const content = readFileSync(file);
+    if (!same) writeFileSync(target, content);
+    emit(st, s, { type: "queue.report", queue, path: target, summary, findings, source_hash: reportSourceHash(content) });
     // A source in the project's folder for reports (outside every working tree) is removed once copied; one anywhere
     // else is the worker's or the user's, and stays.
     const removed = !same && inReportFolder(st.readProject().id, file);

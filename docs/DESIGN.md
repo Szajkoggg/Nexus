@@ -2798,6 +2798,14 @@ historical; they never supply current acceptance. Closing-only fallback recogniz
 explicit closing labels; it makes no semantic promise about arbitrary report prose. No model runs when a page opens.
 The expanded manager/status/chat UI remains in IC3–IC5; IC2 only adapts the existing matching client's save tokens.
 
+IC2 review found two places where an old observation could appear current. Pending relationship snapshots now
+stand apart from freshly derived suggestion evidence, and the revision includes that live evidence even for a
+previously decided edge. Stored decisions keep their original evidence; missing references retain historical
+identity with diagnostics. Queue report excerpts likewise keep their immutable event identity. The CLI records
+the exact registered report bytes' SHA-256 in that event; reads compare the file to it and explicitly distinguish
+current, outdated, unverifiable legacy and missing sources. Hashing only today's file cannot establish that an old
+summary belongs to it, so no historical fingerprint is invented at read time.
+
 ## Ideas corrections: design boundary (IC1)
 
 [The IC1 design](ux/ideas-corrections.md) specifies origin-specific relationship corrections,
