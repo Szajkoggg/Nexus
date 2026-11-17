@@ -334,7 +334,9 @@ export class Engine implements Member {
   /**
    * Goes on with a paused, halted or waiting run in its session, ensuring its process. Also the way an approval_wait
    * run goes on once its revision is approved (onChange, a cancelled drain, the restart). `why`: said to the agent when
-   * the step is continued (a retry after a failed turn, a lifted stop).
+   * the step is continued (a retry after a failed turn, a lifted stop). `explicit`: a Resume asked for (by the user or
+   * the orchestrator), the only kind that releases the wait a step's last answer asked for; Nexus's own go on through
+   * resumeByItself.
    */
   resume(queueId: string, why?: string, explicit = true): void {
     let run = this.run(queueId);
@@ -355,9 +357,11 @@ export class Engine implements Member {
     const state = loadProjectState(this.store);
     const q = this.queue(state, queueId);
     const barrier = questionBarrier(state.questions, queueId, run.step, run.answers_resumed);
-    if (run.state === "running" && !(explicit && barrier.wait && !barrier.remaining)) return;
+    // Every question answered and the last answer asked to wait: an explicit Resume releases it, even of a running run.
+    const releasesWait = explicit && barrier.wait && !barrier.remaining;
+    if (run.state === "running" && !releasesWait) return;
     assertCanResume(q, run);
-    if (explicit && !barrier.remaining && barrier.wait) {
+    if (releasesWait) {
       run = { ...run, answers_resumed: barrier.last };
       this.writeRun(queueId, run);
       if (run.state === "running") { this.changed(); return; }
@@ -380,6 +384,11 @@ export class Engine implements Member {
     if (open?.status === "waiting" || pending) this.changed();
     else if (open) this.openStep(queueId, open, q, "continue", why);
     else this.advance(queueId);
+  }
+
+  /** Nexus goes on with a run by itself (a restart, an approval, a retry): never releasing a last answer's wait. */
+  private resumeByItself(queueId: string, why?: string): void {
+    this.resume(queueId, why, false);
   }
 
   // ---------------------------------------------------------------- updates of Nexus itself
@@ -423,7 +432,7 @@ export class Engine implements Member {
   releaseHold(queueId: string, reason: string): void {
     const run = this.store.readRun(queueId);
     if (run?.state !== "paused" || !run.resume_after_restart || this.draining) return;
-    try { this.resume(queueId, undefined, false); } catch (e) { this.halt(queueId, `could not go on after ${reason}: ${(e as Error).message}`); }
+    try { this.resumeByItself(queueId); } catch (e) { this.halt(queueId, `could not go on after ${reason}: ${(e as Error).message}`); }
   }
 
   /** No agent of this project is in the middle of a turn. */
@@ -445,7 +454,7 @@ export class Engine implements Member {
       if (run?.state === "approval_wait") { if (this.queue(loadProjectState(this.store), id).approved) this.continueApproved(id); continue; }
       if (!run?.resume_after_restart) continue;
       if (run.state === "pausing") this.writeRun(id, toUnheld(run));
-      else if (run.state === "paused") { try { this.resume(id, undefined, false); } catch (e) { this.halt(id, (e as Error).message); } }
+      else if (run.state === "paused") { try { this.resumeByItself(id); } catch (e) { this.halt(id, (e as Error).message); } }
     }
     this.checkStarts();
   }
@@ -559,7 +568,7 @@ export class Engine implements Member {
   /** A run waiting for an approval that came goes on (not while an update drains: the restart or cancelDrain does it). */
   private continueApproved(queueId: string): void {
     if (this.stopped || this.draining) return;
-    try { this.resume(queueId, undefined, false); } catch (e) { this.halt(queueId, `could not go on after the approval: ${(e as Error).message}`); }
+    try { this.resumeByItself(queueId); } catch (e) { this.halt(queueId, `could not go on after the approval: ${(e as Error).message}`); }
   }
 
   // ---------------------------------------------------------------- the plan and schedules (src/scheduler.ts)
@@ -1048,7 +1057,9 @@ export class Engine implements Member {
     if (!live) { this.halt(queueId, "the session's process is not running"); return false; }
     const state = loadProjectState(this.store);
     const project = state.project;
-    if (questionsHold(state, queueId, step.id) || questionsHold(state, queueId, run.step)) return false;
+    // The step to open and the one the run was at: open questions of either hold the turn (checked again before sending).
+    const held = (s: ProjectState) => questionsHold(s, queueId, step.id) || questionsHold(s, queueId, run.step);
+    if (held(state)) return false;
     const notes = step.notes.filter((n) => !n.read_at && n.to !== "orchestrator"); // the orchestrator's are not the worker's
     const answers = state.questions.filter((x) => x.queue === queueId && x.step === step.id && x.state === "answered");
     const last = !q.steps.some((s) => s.status === "pending" && s.id !== step.id);
@@ -1066,8 +1077,7 @@ export class Engine implements Member {
       q, step, mode, why, projectStopConditions: project.defaults.stop_conditions, projectChecks: run.checks, notes, answers, last,
       report: reportFile(project.id, q.id), languages: workerLanguages(project.languages), closing, integration,
     });
-    const latest = loadProjectState(this.store);
-    if (questionsHold(latest, queueId, step.id) || questionsHold(latest, queueId, run.step)) return false;
+    if (held(loadProjectState(this.store))) return false;
     live.proc.send([around.before, opening, around.after].filter(Boolean).join("\n\n"));
     for (const n of notes) this.store.appendDelivered(run.session, { at: now(), kind: "note", id: n.id, via: "turn" });
     this.endBackgroundWait(queueId);
@@ -1111,6 +1121,8 @@ export class Engine implements Member {
         this.store.appendDelivered(l.session, { at: now(), kind: "inbox", id: m.id, via: "turn" });
       }
     }
+    // One by one: a stop always; the rest neither while questions are open nor when the batch took it. A run's answers
+    // go only in the batch, and nothing reaches a run's session while its run may take no turn.
     for (const m of unread) {
       if (m.type !== "stop" && (questionsOpen || batch.includes(m) || (owner && (!idleAllowed || m.type === "answer")))) continue;
       const text = withLanguages(formatInbox(m, state), languages);
@@ -1428,7 +1440,7 @@ export class Engine implements Member {
       const run = this.store.readRun(queueId);
       if (this.stopped || this.draining || (run?.state !== "usage_wait" && run?.state !== "retry_wait")) return;
       const why = run.state === "retry_wait" ? `the last turn failed: ${run.reason ?? "a passing failure"}; this is the retry` : undefined;
-      try { this.resume(queueId, why, false); } catch (e) { this.halt(queueId, `could not go on: ${(e as Error).message}`); }
+      try { this.resumeByItself(queueId, why); } catch (e) { this.halt(queueId, `could not go on: ${(e as Error).message}`); }
       this.changed();
     });
   }
@@ -1465,7 +1477,7 @@ export class Engine implements Member {
           this.timers.delete(`recover:${q}`);
           const r = this.store.readRun(q);
           if (!r?.resume_after_restart) return;
-          try { this.resume(q, undefined, false); } catch (e) { this.halt(q, `could not resume after the update: ${(e as Error).message}`); }
+          try { this.resumeByItself(q); } catch (e) { this.halt(q, `could not resume after the update: ${(e as Error).message}`); }
           this.changed();
         }, this.startupMs));
       } else if (run && ["running", "pausing"].includes(run.state)) {
