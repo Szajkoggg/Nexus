@@ -65,7 +65,6 @@ test("across projects the lines merge newest first; what runs now, with since wh
   assert.deepEqual(projectRunning(s), [
     { project: "p", project_name: "Proj", queue: "SF", step: "SF3", since: T("11:20") },
     { project: "p", project_name: "Proj", queue: "PS", step: "PS1", since: T("09:30") },
-    { project: "p", project_name: "Proj", queue: "QC", step: "QC1", since: T("09:00") },
   ]);
 });
 

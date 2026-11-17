@@ -106,16 +106,17 @@ export const chooseOption = (project: string, qid: string, option: string) => { 
  * orchestrator said passing it on, the options as 48 px buttons, the user's own words, then the step's details
  * (`children`); Answer in the action bar. An option and words go together: the option, then the words.
  */
-export function QuestionSheet({ children, ...props }: AnswerProps & { children: ReactNode }) {
+export function QuestionSheet({ children, waiting, ...props }: AnswerProps & { children: ReactNode; waiting?: ReactNode }) {
   const { q } = props;
   const answer = useAnswer(props);
   const passed = q.answers.filter((a) => a.escalate);
   return (
     <>
       <PanelBody>
+        {waiting}
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
           <StatusBadge status={q.state === "escalated" ? "review" : "waiting"} label={t(q.state === "escalated" ? "details.question.passed" : "details.question.forYou")} className="text-sm" />
-          <span className="text-fg-3">· {t(q.can_continue ? "details.question.goesOn" : "details.question.waits")} · <TimeAgo at={q.asked_at} /></span>
+          <span className="text-fg-3">· {t("details.question.waits")} · <TimeAgo at={q.asked_at} /></span>
         </div>
         <h1 className="mt-3 text-[19px] font-semibold leading-snug text-fg">{q.text}</h1>
         {passed.map((a) => (
@@ -143,7 +144,7 @@ export function Question({ q, project, readOnly }: AnswerProps & { readOnly?: bo
       <div className="mb-1 flex flex-wrap gap-2 text-xs text-fg-3">
         <StatusBadge status={q.state === "open" ? "waiting" : q.state === "escalated" ? "review" : "done"} label={q.state === "escalated" ? t("details.question.stateForYou") : questionState(q.state)} />
         {q.queue && <span className="font-mono">{q.queue}{q.step ? `/${q.step}` : ""}</span>}
-        <span>{t(q.can_continue ? "details.question.goesOn" : "details.question.waits")}</span>
+        {open && <span>{t("details.question.waits")}</span>}
         <span className="ml-auto"><TimeAgo at={q.asked_at} /></span>
       </div>
       <p className="text-fg">{q.text}</p>

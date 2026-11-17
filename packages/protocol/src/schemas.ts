@@ -1097,6 +1097,8 @@ export const RunFile = z.object({
   reason: z.string().optional(),
   step: Id.optional(),        // the step the engine last opened
   nudged: z.boolean().optional(),
+  /** The latest answer explicitly released by Resume; automatic retries/restarts never grant this permission. */
+  answers_resumed: Id.optional(),
   started_at: Time,
   updated_at: Time,
   /** When it last stopped going: became finished, halted or paused. Cleared when it goes on again. */

@@ -51,3 +51,16 @@ export const stepWaits = (s: Pick<StepLike, "status">): boolean => s.status === 
 
 /** The question waits for an answer: asked, or passed on to the user by the orchestrator. */
 export const isOpenQuestion = (q: { state: "open" | "answered" | "escalated" | "withdrawn" | (string & {}) }): boolean => q.state === "open" || q.state === "escalated";
+
+/** The step owns the barrier, even when its questions were asked by an earlier session. */
+export function questionBarrier(questions: readonly {
+  queue?: string; step?: string; state: string;
+  answers: readonly { id: string; at: string; escalate?: boolean; continue?: boolean }[];
+}[], queue: string, step: string | undefined, resumed?: string) {
+  const own = step ? questions.filter(q => q.queue === queue && q.step === step) : [];
+  const remaining = own.filter(isOpenQuestion).length;
+  const last = own.flatMap(q => q.answers).filter(a => !a.escalate)
+    .sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id)).at(-1);
+  const wait = last?.continue === false && last.id !== resumed;
+  return { remaining, wait, blocked: remaining > 0 || wait, last: last?.id };
+}

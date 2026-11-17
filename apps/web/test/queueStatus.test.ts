@@ -19,9 +19,9 @@ test("waiting apart from running: a blocking question, a retry, the usage window
   const asking = q({ status: "waiting", steps: st("Q1:done Q2:waiting"), questions: [{ state: "open", can_continue: false, step: "Q2" }], run: { state: "running", step: "Q2" } });
   assert.deepEqual(pick(queueStatus(asking)), ["waiting", "waiting for an answer · Q2"]);
   assert.equal(queueStatus(asking).questions, 1);
-  // A question the worker goes on past does not make the queue wait.
+  // Independent work in the asking turn does not grant another work turn.
   const goingOn = q({ status: "running", steps: st("Q1:running"), questions: [{ state: "open", can_continue: true, step: "Q1" }], run: { state: "running", step: "Q1" } });
-  assert.deepEqual(pick(queueStatus(goingOn)), ["running", "running · Q1"]);
+  assert.deepEqual(pick(queueStatus(goingOn)), ["waiting", "waiting for an answer · Q1"]);
   assert.equal(queueStatus(goingOn).questions, 1, "still counted");
   assert.deepEqual(pick(queueStatus(q({ status: "running", steps: st("R1:running"), run: { state: "retry_wait", step: "R1" } }))), ["waiting", "waiting to retry · R1"]);
   assert.deepEqual(pick(queueStatus(q({ status: "running", steps: st("R1:running"), run: { state: "usage_wait", step: "R1" } }))), ["waiting", "waiting for the usage window · R1"]);

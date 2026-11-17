@@ -1310,7 +1310,9 @@ question. A question link selects an answer interaction, never a step review app
 
 Answer requests remain `POST /api/projects/:id/questions/:qid/answer` with `text`
 and `continue`; the answer event and durable inbox entry are saved immediately. Additional answers
-to an answered question remain supported; withdrawn and unknown targets are rejected.
+to an answered question remain supported; an identical repeated user answer (same text and continuation flag)
+is idempotent. Withdrawn and unknown targets are rejected. Routing follows a worker's `continued_by` line too:
+undelivered answers move to the current worker's inbox, while already delivered answers are not sent again.
 
 Before a worker's next work in a step, the engine requires every question for that queue and step to be closed:
 neither `open` nor `escalated`. This includes questions marked `can_continue`: that flag allows independent work
@@ -1319,8 +1321,15 @@ they and ordinary messages cannot start or steer work before the final answer. S
 When released, multiple accumulated answers open one turn together. Resume, restart, a no-outcome nudge and a
 step transition obey the same barrier. Questions in other queues or other steps do not block the current step.
 A withdrawal closes its question for this purpose. The derived step stays `waiting` after a partial answer and
-returns to `running` when its last open question closes. The existing `continue: false` wait instruction remains
-part of the delivered answer; the all-questions barrier is an additional server-side prerequisite.
+returns to `running` when its last open question closes and continuation is permitted. The latest final answer,
+ordered by event time and id, controls the answer permission: `continue: false` holds delivery and all new work
+until an explicit Resume, even if earlier partial answers said `continue: true`. The engine records that release
+as `answers_resumed` (the released answer event id) in `run.yaml`; automatic retries, updates and restarts never
+set it. A newer answer is evaluated afresh. Pause, stop, review and revision approval are separate gates.
+Once all gates allow delivery, accumulated answers and ordinary messages open one turn, with each answer's qid.
+Answers wait for the asking turn to end, so it can record more questions. The engine rechecks disk state at the
+delivery boundary. Delivery records are appended only after a send, including fallback handovers; if a new question
+holds a handover, messages remain unread in the replacement session. No previous log is rewritten.
 
 ## Server API
 

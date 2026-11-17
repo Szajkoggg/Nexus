@@ -59,7 +59,7 @@ Report through the \`nexus\` command (on PATH; your session is set in the enviro
 - nexus step done <step> --summary "..." [--commit <sha>] --activities a,b   when the acceptance criteria are met; --activities names what you actually did, whatever was planned (\`nexus tags\` lists the names)
 - nexus step failed <step> --reason "..."                   when the step cannot be done as written
 - nexus stop <step> --condition "<the stop condition met>" --reason "<what happened, short>"   when a stop condition is met (first commit what is consistent, see below); give both: --condition names the condition as the queue words it, --reason says in a sentence or two what happened and what you left out (the user sees the reason first, the condition behind "more")
-- nexus ask "<question>" --step <step> [--option "..."]... [--recommend "<option>"] [--can-continue]   a question for the orchestrator or the user; give the options with --option (one each) and name the one you recommend with --recommend (its text or number); without --can-continue, end your turn after asking: the answer arrives as a message
+- nexus ask "<question>" --step <step> [--option "..."]... [--recommend "<option>"] [--can-continue]   record each question needed for this step, then end the asking turn. With --can-continue, independent work may finish within this turn. Nexus starts no further work turn until every open or escalated question of the step is answered or properly withdrawn, even across sessions. Partial answers, messages, recommendations and drafts do not release this wait. The last answer's --wait, pause, stop and review still hold after all answers arrive. Give options with --option and a recommendation with --recommend; a recommendation is not a decision.
 - nexus context "<what a successor needs to know>" --topics a,b --files x,y   at the end of each step
 Review material follows Nexus's standard: read \`nexus help review\` before you prepare it. In short: every picture has a view key naming what it shows, in which state, at which window width (waiting-tab@492), and a role: before (the old state), mockup (the design), after (the new state), variant-a / variant-b (alternatives), result (a new view with nothing to compare). Only pictures with the same key pair, so a before and its after are taken the same way: fixed-viewport captures with the same window size, data and state. Add befores and mockups before their afters. Nexus refuses a wrong pair and says why; the label is only a caption. Write the files outside the working tree (the system's temporary folder, for example): nexus review add copies them into the queue's folder, and the item names the copy.
 Nexus's standards for the rest (the full texts: \`nexus help summaries\`, \`nexus help questions\`, \`nexus help refusals\`, \`nexus help commits\`, \`nexus help tests\`):
@@ -273,11 +273,11 @@ export function userStopNow(text?: string): string {
 }
 
 /** An inbox entry as it is delivered to the session. */
-export function formatInbox(m: InboxView, state: ProjectState): string {
+export function formatInbox(m: InboxView, state: ProjectState, released = false): string {
   if (m.type === "answer") {
     const q = state.questions.find((x) => x.qid === m.qid);
-    const how = m.continue === false ? " Wait for further word before going on." : "";
-    return `[Nexus] Answer from the ${m.from} to your question${q ? ` "${q.text}"` : ""}:\n${m.text}${how}`;
+    const how = m.continue === false && !released ? " Wait for further word before going on." : "";
+    return `[Nexus] Answer from the ${m.from} to your question${q ? ` "${q.text}"` : ""} (qid ${m.qid}):\n${m.text}${how}`;
   }
   if (m.type === "message") return `[Nexus] Message from the ${m.from}${m.step ? ` about step ${m.step}` : ""}:\n${m.text}`;
   if (m.type === "send_back") {
@@ -339,7 +339,7 @@ Commands (\`nexus\` is on PATH; your session is set in the environment):
 - nexus run <queue> start --at "YYYY-MM-DD HH:MM" --reason "..." [same options]   start it at that local time; --at usage-reset: when the usage window of its runtime resets (refused while Nexus knows no usage data of that runtime). At the time its session must be free, or it does not start and the user is told; not approved yet, it waits for the approval and starts then; if Nexus was down then (more than 15 minutes late) it does not start, and you are told
 - nexus run <queue> cancel-start --reason "..."   take the queue out of the plan (its predecessors and its schedule); not one the user put into it
 - nexus run <queue> pause|resume|stop --reason "..."
-- nexus answer <qid> "<answer>" [--continue|--wait]            answer a worker's question whose answer is already settled
+- nexus answer <qid> "<answer>" [--continue|--wait]            save an answer already settled; the worker waits for every question of its step. The last answer's --wait requires explicit Resume; earlier --continue answers, messages and automatic recovery cannot release it.
 - nexus answer <qid> "<framing, options, recommendation>" --escalate [--recommend "<option>"]   pass it to the user; when the question has options, name the one you recommend with --recommend (one of its options, by text or number): the user sees its button marked
 - nexus review accept <queue> <step> [--note "..."]   accept a step waiting for your review; the run goes on (with the project's push_accepted on, Nexus pushes the commit the step was reviewed at; never push yourself)
 - nexus review send-back <queue> <step> "what to fix"   send it back to its worker, as the step's next round in the same session (beyond the project's limit of send-backs per step, 2 by default, the step goes to the user instead)
@@ -577,7 +577,7 @@ export function acceptedNoteNotice(n: { queue: string; step: string; text: strin
 /** A worker asked a question. */
 export function questionNotice(x: QuestionView): Notice {
   return {
-    fact: `A worker asked a question${x.queue ? ` in queue ${x.queue}${x.step ? `, step ${x.step}` : ""}` : ""} (qid ${x.qid}; ${x.can_continue ? "it goes on meanwhile" : "it waits for the answer"}):
+    fact: `A worker asked a question${x.queue ? ` in queue ${x.queue}${x.step ? `, step ${x.step}` : ""}` : ""} (qid ${x.qid}; ${x.can_continue ? "independent work may finish in this turn" : "it ends the asking turn"}; further work waits for every question of the step):
 ${x.text}${x.options?.length ? `
 Options: ${x.options.map((o, i) => `${i + 1}. ${o}`).join(" / ")}${x.recommended ? `
 The worker recommends: ${x.recommended}` : ""}` : ""}`,

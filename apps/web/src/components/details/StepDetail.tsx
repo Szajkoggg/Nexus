@@ -11,6 +11,7 @@ import { nav, useNav } from "../../nav.ts";
 import { usePhone } from "../../phone.ts";
 import { noteTargets } from "../../review.ts";
 import { StepChat } from "../Chat.tsx";
+import { QuestionWait } from "../QuestionWait.tsx";
 import { StepSwitches } from "../Fallback.tsx";
 import { LevelMark, LevelPicker, levelChangeable, levelShort, levelTitle, pendingProvisional, provisionalWord } from "../Levels.tsx";
 import { StepRefusals } from "../Refusals.tsx";
@@ -37,6 +38,7 @@ export function StepDetail({ project, queue, step, onClose, of, qid }: PanelProp
   const { readOnly, live, forOrchestrator, notesOpen, orchestratorAsks, reviewing, asking, questionFirst } = stepLayout(step, questions, phone, queue, qid);
   const selected = qid ? questions.find((q) => q.qid === qid) : undefined;
   const selectedCard = useRef<HTMLDivElement>(null);
+  const waiting = <QuestionWait queue={queue} step={step.id} />;
   useEffect(() => {
     if (!phone && qid) selectedCard.current?.scrollIntoView({ block: "start" });
   }, [id, qid, phone]);
@@ -98,6 +100,7 @@ export function StepDetail({ project, queue, step, onClose, of, qid }: PanelProp
   return (
     <>
       <PanelHeader
+        wrap={!phone}
         where={phone
           ? <>{project.project.name} · {queue.id} · <span className="text-fg">{step.id}</span> {step.title}</>
           : <><span className="font-mono">{queue.id}</span> · {queue.title}</>}
@@ -127,10 +130,11 @@ export function StepDetail({ project, queue, step, onClose, of, qid }: PanelProp
         onClose={onClose}
       />
       {questionFirst
-        ? <QuestionSheet key={`${id}/${asking!.qid}`} q={asking!} project={id}>{body}</QuestionSheet>
+        ? <QuestionSheet key={`${id}/${asking!.qid}`} q={asking!} project={id} waiting={waiting}>{body}</QuestionSheet>
         : <PanelBody>
+          <div ref={selectedCard}>{waiting}</div>
           {qid && (selected
-            ? <div ref={selectedCard}><Question key={`${id}/${selected.qid}`} q={selected} project={id} readOnly={readOnly} /></div>
+            ? <Question key={`${id}/${selected.qid}`} q={selected} project={id} readOnly={readOnly} />
             : <p role="status" className="text-sm text-fg-2">{t("details.question.unavailable")}</p>)}
           {body}
         </PanelBody>}

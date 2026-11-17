@@ -121,9 +121,13 @@ Opening a question from Waiting brings its card into view. Choose an option in t
 add your own words, then press **Answer**. Choosing an option never sends it; a recommendation is not selected
 automatically. You can also answer with only your own words. Tab to the choices, use the arrow keys to choose, and
 send with **Answer** or Ctrl+Enter in the text box (Command+Enter on macOS). A failed save keeps the choice and words
-for retry. Partial answers are saved, but the worker receives them and resumes work only after all open questions
+for retry. Desktop and phone show the same remaining question count and waiting reason. Partial answers are saved,
+but the worker receives them and resumes work only after all open questions
 of that step are answered (or withdrawn). Another queue's questions do not hold this step. Answering a question
 does not accept the step's review. The phone keeps its question sheet and separate Answer action.
+Clearing **allow continuation once every question is answered** on the last answer saves it and waits for
+**Resume**. Earlier answers cannot override that wait. Pause, stop and review also remain in effect after all
+answers arrive; recommendations, drafts and failed saves do not count as answers.
 The chat's box is one line with a round Send.
 
 **Each chat keeps its place** while the browser is open: switching between the orchestrator, Ideas and other views,

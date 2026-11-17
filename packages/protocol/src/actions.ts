@@ -202,10 +202,14 @@ export function answerAsUser(store: ProjectStore, qid: string, text: unknown, co
   const x = state.questions.find((q) => q.qid === qid);
   if (!x) throw new ActionError("no such question", 404);
   if (x.state === "withdrawn") throw new ActionError("the question was withdrawn", 409);
+  const words = nonEmpty(text, "the answer");
+  const permission = typeof cont === "boolean" ? cont : undefined;
+  const previous = x.answers.at(-1);
+  if (x.state === "answered" && previous?.by === "user" && previous.text === words && previous.continue === permission) return;
   const user = ensureUserSession(store);
   store.appendEvent({
     v: 1, id: newId(), at: now(), session: user.id, type: "answer.given", qid,
-    text: nonEmpty(text, "the answer"), continue: typeof cont === "boolean" ? cont : undefined,
+    text: words, continue: permission,
   });
   routeAnswers(store);
 }
@@ -222,7 +226,7 @@ export function routeAnswers(store: ProjectStore, state: ProjectState = loadProj
     const asker = state.sessions.find((s) => s.id === x.session);
     if (!asker || asker.role === "user") continue;
     const line = [asker];
-    for (let s = asker; s.role === "orchestrator" && s.continued_by;) {
+    for (let s = asker; s.continued_by;) {
       const next = state.sessions.find((y) => y.id === s.continued_by);
       if (!next || line.includes(next)) break;
       line.push((s = next));
@@ -231,7 +235,7 @@ export function routeAnswers(store: ProjectStore, state: ProjectState = loadProj
     for (const a of x.answers) {
       if (a.escalate) continue;
       const id = `answer-${a.id}`;
-      if (line.some((s) => s.inbox.some((m) => m.id === id))) continue;
+      if (line.some((s) => s.inbox.some((m) => m.id === id && (asker.role === "orchestrator" || s.id === to.id || !!m.read_at)))) continue;
       store.appendInbox(to.id, { v: 1, id, at: now(), from: a.by, type: "answer", qid: x.qid, text: a.text, continue: a.continue });
       routed++;
     }

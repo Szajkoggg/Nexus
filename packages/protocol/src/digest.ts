@@ -99,7 +99,8 @@ export function runsNow(q: Pick<QueueView, "status" | "approved" | "revision" | 
   if (q.status === "cancelled" || q.status === "stopped") return false;
   if (q.approved === false && q.status !== "done" && q.status !== "draft" && ((q.revision ?? 1) > 1 || q.status !== "proposed")) return false;
   if (q.steps.some((s) => s.status === "review")) return false;
-  return !q.questions.some((x) => isOpenQuestion(x) && !x.can_continue);
+  return !q.steps.some(s => s.id === q.run?.step && s.status === "waiting")
+    && !q.questions.some(x => isOpenQuestion(x) && (!q.run?.step || !x.step || x.step === q.run.step));
 }
 
 /** The project's queues running now (runsNow), each with its step and since when it has been at it. */

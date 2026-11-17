@@ -30,16 +30,7 @@ Begin with `nexus step start A1`. End with `nexus step done A1 --summary "…"`,
 -- to worker 1
 [Nexus] Your turn ended, but step A1 has no outcome yet. Continue the step if work remains; otherwise report it with `nexus step done A1 --summary "…"`, `nexus step failed`, `nexus stop`, or ask with `nexus ask` and end your turn. Do not end your turn while work you started still runs: run a sub-agent in the foreground and take its result within the turn, or do the work yourself.
 == a blocking question answered by the user, to wait for further word
--- to worker 1
-[Nexus] Answer from the user to your question "Which page first?":
-The second one. Wait for further word before going on.
 == messages from the user: about the step, and not
--- to worker 1
-[Nexus] Message from the user about step A1:
-Use the new colours.
--- to worker 1
-[Nexus] Message from the user:
-A general remark.
 == stops through the inbox: with a text from the user, without one from the orchestrator
 -- to worker 1 (now)
 [Nexus] The user asks you to stop now: The plan changed Leave the work consistent and end your turn.
@@ -52,33 +43,14 @@ A general remark.
 [Nexus] The user asks you to stop now. Leave the work in a consistent state, record where you are with `nexus step progress`, and end your turn. Do not start anything new.
 == resumed with a reason: the step continues
 -- to worker 1
-[Nexus] Queue Q "Prompts under test" (revision 1, approved), step A1 (1 of 4): First step.
-Continue this step where it was left (the user resumed it).
+[Nexus] Answer from the user to your question "Which page first?" (qid q1):
+The second one.
 
-Goal:
-Do the first thing.
-Precisely.
+[Nexus] Message from the user about step A1:
+Use the new colours.
 
-Acceptance:
-- It is done
-- It is tested
-
-Checks for every step:
-- npm run lint
-- npm test
-- npm run typecheck
-
-Review to prepare: Before/after shots of the page
-Prepare it by Nexus's standard: read `nexus help review` first (view keys, roles, the same conditions on both sides of a pair).
-
-Stop conditions (meeting one ends the queue: report it with `nexus stop`):
-- A file outside the repository would change.
-- The project's own stop condition.
-
-Answers to your questions about this step:
-- "Which page first?": The second one.
-
-Begin with `nexus step start A1` (again is fine). End with `nexus step done A1 --summary "…"`, `nexus step failed` or `nexus stop`, then write `nexus context` and end your turn. Do not start another step.
+[Nexus] Message from the user:
+A general remark.
 == the first step done: the second opens
 -- to worker 1
 [Nexus] Queue Q "Prompts under test" (revision 1, approved), step A2 (2 of 4): Second step.
@@ -331,7 +303,7 @@ Report through the `nexus` command (on PATH; your session is set in the environm
 - nexus step done <step> --summary "..." [--commit <sha>] --activities a,b   when the acceptance criteria are met; --activities names what you actually did, whatever was planned (`nexus tags` lists the names)
 - nexus step failed <step> --reason "..."                   when the step cannot be done as written
 - nexus stop <step> --condition "<the stop condition met>" --reason "<what happened, short>"   when a stop condition is met (first commit what is consistent, see below); give both: --condition names the condition as the queue words it, --reason says in a sentence or two what happened and what you left out (the user sees the reason first, the condition behind "more")
-- nexus ask "<question>" --step <step> [--option "..."]... [--recommend "<option>"] [--can-continue]   a question for the orchestrator or the user; give the options with --option (one each) and name the one you recommend with --recommend (its text or number); without --can-continue, end your turn after asking: the answer arrives as a message
+- nexus ask "<question>" --step <step> [--option "..."]... [--recommend "<option>"] [--can-continue]   record each question needed for this step, then end the asking turn. With --can-continue, independent work may finish within this turn. Nexus starts no further work turn until every open or escalated question of the step is answered or properly withdrawn, even across sessions. Partial answers, messages, recommendations and drafts do not release this wait. The last answer's --wait, pause, stop and review still hold after all answers arrive. Give options with --option and a recommendation with --recommend; a recommendation is not a decision.
 - nexus context "<what a successor needs to know>" --topics a,b --files x,y   at the end of each step
 Review material follows Nexus's standard: read `nexus help review` before you prepare it. In short: every picture has a view key naming what it shows, in which state, at which window width (waiting-tab@492), and a role: before (the old state), mockup (the design), after (the new state), variant-a / variant-b (alternatives), result (a new view with nothing to compare). Only pictures with the same key pair, so a before and its after are taken the same way: fixed-viewport captures with the same window size, data and state. Add befores and mockups before their afters. Nexus refuses a wrong pair and says why; the label is only a caption. Write the files outside the working tree (the system's temporary folder, for example): nexus review add copies them into the queue's folder, and the item names the copy.
 Nexus's standards for the rest (the full texts: `nexus help summaries`, `nexus help questions`, `nexus help refusals`, `nexus help commits`, `nexus help tests`):

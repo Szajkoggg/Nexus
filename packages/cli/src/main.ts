@@ -619,7 +619,7 @@ const commands: Record<string, () => void | Promise<void>> = {
     const recommended = o.recommend === undefined ? undefined : recommendation(o.option, o.recommend);
     const qid = newId();
     emit(st, s, { type: "question.asked", queue, step, qid, text, options: o.option, recommended, can_continue: !!o["can-continue"] });
-    console.log(`ok: question ${qid} sent to the orchestrator.${o["can-continue"] ? " Go on with independent work meanwhile." : " Wait for the answer (nexus status shows it)."}`);
+    console.log(`ok: question ${qid} sent to the orchestrator.${o["can-continue"] ? " Independent work may finish in this turn." : " Record any other needed questions, then end this turn."} Further work waits for every question of this step to be answered (nexus status shows them).`);
   },
 
   withdraw() {

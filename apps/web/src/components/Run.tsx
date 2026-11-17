@@ -1,7 +1,8 @@
 // Running queues through Nexus-launched sessions: controls, live activity, sessions and usage.
 import { useEffect, useState, type ReactNode } from "react";
 import { retryLine } from "@nexus/protocol/times";
-import { runGoing } from "@nexus/protocol/status-rules";
+import { questionBarrier, runGoing } from "@nexus/protocol/status-rules";
+import { QuestionWait } from "./QuestionWait.tsx";
 import { act, enc, projectUrl, useAction, useQuery, type ActivityEntry, type ProjectState, type QueueView, type SessionView, type Usage } from "../api.ts";
 import { Button, ReadError, RunTimes, Section, TimeAgo } from "./ui.tsx";
 import { formatClock, formatDateTime, formatTime, formatNumber, rich, t, type Key } from "../i18n.ts";
@@ -142,6 +143,7 @@ export function RunControls({ project, queue }: { project: ProjectState; queue: 
   const [time, setTime] = useState("");
   const { busy, error, run: perform } = useAction();
   const run = queue.run;
+  const questions = questionBarrier(queue.questions, queue.id, run?.step, run?.answers_resumed);
   // A run that holds its session: going on by itself, or waiting for the approval of the queue's new revision.
   const active = runGoing(run);
   const waitsApproval = run?.state === "approval_wait";
@@ -188,13 +190,14 @@ export function RunControls({ project, queue }: { project: ProjectState; queue: 
           {run.state === "usage_wait" && run.resume_at && <p className="mt-1 text-xs text-fg-3">{t("run.resumesAt", { time: formatTime(run.resume_at) })}</p>}
           {waitsApproval && <p className="mt-1 text-xs text-info">{t("run.waitsApproval", { revision: queue.revision })}</p>}
           <RetryNote run={run} />
+          <QuestionWait queue={queue} step={run.step} />
         </div>
       )}
       <div className="flex flex-wrap items-center gap-2">
         {active && run?.state !== "pausing" && <Button variant="quiet" disabled={busy} onClick={() => void call({ action: "pause" })}>{t(waitsApproval ? "run.pause" : "run.pauseAfterStep")}</Button>}
         {active && !waitsApproval && <Button variant="danger" disabled={busy} onClick={() => void call({ action: "stop" })}>{t("run.stopNow")}</Button>}
         {canStopAtOnce && <Button variant="danger" disabled={busy || !runSession.live || runSession.live.state === "exited"} onClick={() => void call({ action: "stop_at_once" })}>{t("run.stopAtOnce")}</Button>}
-        {run && !ended && queue.status !== "stopped" && (run.state === "paused" || run.state === "halted") && <Button disabled={busy || !queue.approved} onClick={() => void call({ action: "resume" })}>{t("run.resume")}</Button>}
+        {run && !ended && queue.status !== "stopped" && (run.state === "paused" || run.state === "halted" || (run.state === "running" && questions.wait)) && <Button disabled={busy || !queue.approved || questions.remaining > 0} onClick={() => void call({ action: "resume" })}>{t("run.resume")}</Button>}
       </div>
       {canStopAtOnce && <p className="mt-2 text-xs text-fg-3">{t("run.stopAtOnceHint")}</p>}
       {canStart && (!run || run.state === "finished" || run.state === "halted" || run.state === "paused") && (

@@ -4,7 +4,7 @@ import { CONVERSATION_ONLY, ORCHESTRATOR_ONLY, USER_ONLY, WORKER_ONLY, type Metr
 import { ProjectStore, chainPlan, readAway, revisionHash } from "./store.ts";
 import { awayAt, awayNow, type AwayNow } from "./away.ts";
 import { formatClock, type Segment } from "./times.ts";
-import { isOpenQuestion, reviewedByOrchestrator, runEnded, runGoing, runHoldsCheckout, stepWaits, waitsForUserReview } from "./status-rules.ts";
+import { isOpenQuestion, questionBarrier, reviewedByOrchestrator, runEnded, runGoing, runHoldsCheckout, stepWaits, waitsForUserReview } from "./status-rules.ts";
 import { stopPlace } from "./attention.ts";
 import { closingStepId, integrationStepId, stepDefs } from "./closing.ts";
 import { openPlan, planView, proposalText, type PlanView } from "./plan.ts";
@@ -371,6 +371,10 @@ export function loadProjectState(store: ProjectStore): ProjectState {
 
   for (const q of queues.values()) {
     q.questions = [...questions.values()].filter((x) => x.queue === q.id);
+    for (const st of q.steps) {
+      if (st.status === "running" && questionBarrier(q.questions, q.id, st.id, q.run?.answers_resumed).blocked) st.status = "waiting";
+    }
+    if (q.status === "running" && q.steps.some(stepWaits)) q.status = "waiting";
     // A run that halted, finished or was stopped ends the stretch of the step it left without an outcome.
     if (q.run && runEnded(q.run)) {
       const ended = q.run.ended_at ?? q.run.updated_at;
@@ -749,8 +753,8 @@ function apply(
         ...(recommended ? { recommended } : {}),
         can_continue: e.can_continue, asked_at: e.at, state: "open", answers: [],
       });
-      if (!e.can_continue && st && st.status === "running") st.status = "waiting";
-      if (!e.can_continue && q && q.status === "running") q.status = "waiting";
+      if (st && st.status === "running") st.status = "waiting";
+      if (q && q.status === "running") q.status = "waiting";
       return;
     }
     case "question.withdrawn": {

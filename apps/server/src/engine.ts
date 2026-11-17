@@ -23,7 +23,7 @@ import {
   summaryRequest, switchReason, userStopNow,
 } from "./prompts.ts";
 import { shellRules } from "./shell-rules.ts";
-import { isOpenQuestion } from "@nexus/protocol/status-rules";
+import { questionBarrier } from "@nexus/protocol/status-rules";
 import {
   ClockTimers, REAL_CLOCK, Scheduler, type PlanChange, type PlanOptions, type Clock, type ScheduleOptions,
 } from "./scheduler.ts";
@@ -42,8 +42,8 @@ import {
 type Live = Hosted;
 
 /** A step's questions hold its next work, independently of other queues and of the asking session. */
-function hasOpenQuestions(state: ProjectState, queue: string, step: string | undefined): boolean {
-  return !!step && state.questions.some((q) => q.queue === queue && q.step === step && isOpenQuestion(q));
+function questionsHold(state: ProjectState, queue: string, step: string | undefined): boolean {
+  return questionBarrier(state.questions, queue, step, state.queues.find(q => q.id === queue)?.run?.answers_resumed).blocked;
 }
 
 export interface StartOptions {
@@ -336,8 +336,8 @@ export class Engine implements Member {
    * run goes on once its revision is approved (onChange, a cancelled drain, the restart). `why`: said to the agent when
    * the step is continued (a retry after a failed turn, a lifted stop).
    */
-  resume(queueId: string, why?: string): void {
-    const run = this.run(queueId);
+  resume(queueId: string, why?: string, explicit = true): void {
+    let run = this.run(queueId);
     if (this.stopping.has(run.session)) throw new ActionError("the worker is still exiting; resume once it has stopped", 409);
     const live = this.host.get(run.session);
     const cleanup = live && this.cleaning.get(live.proc);
@@ -347,15 +347,21 @@ export class Engine implements Member {
       const before = JSON.stringify(run);
       void cleanup.then(() => {
         if (this.stopped || JSON.stringify(this.store.readRun(queueId)) !== before) return;
-        try { this.resume(queueId, why); } catch (error) { this.halt(queueId, String(error)); }
+        try { this.resume(queueId, why, explicit); } catch (error) { this.halt(queueId, String(error)); }
       }, () => {});
       return;
     }
-    if (run.state === "running") return;
     if (run.state === "finished") throw new ActionError("the run is finished", 409);
     const state = loadProjectState(this.store);
     const q = this.queue(state, queueId);
+    const barrier = questionBarrier(state.questions, queueId, run.step, run.answers_resumed);
+    if (run.state === "running" && !(explicit && barrier.wait && !barrier.remaining)) return;
     assertCanResume(q, run);
+    if (explicit && !barrier.remaining && barrier.wait) {
+      run = { ...run, answers_resumed: barrier.last };
+      this.writeRun(queueId, run);
+      if (run.state === "running") { this.changed(); return; }
+    }
     // A halted run holds no checkout: another queue may have started there meanwhile.
     if (!runHoldsCheckout(run)) {
       const block = this.coordinator.checkoutBlock(state, q);
@@ -369,8 +375,9 @@ export class Engine implements Member {
     // answer just waits on (the answer arrives through the inbox). A rejected step is never run again.
     const open = q.steps.find((s) => s.id === run.step && !["done", "skipped", "review", "rejected"].includes(s.status));
     // A step sent back while the run was paused or halted: the send-back, still in the inbox, opens its next turn.
-    const sentBack = open && state.sessions.find((x) => x.id === run.session)?.inbox.some((m) => m.type === "send_back" && m.step === open.id && !m.read_at);
-    if (open?.status === "waiting" || sentBack) this.changed();
+    const pending = open && state.sessions.find((x) => x.id === run.session)?.inbox.some(m => !m.read_at
+      && ((m.type === "send_back" && m.step === open.id) || m.type === "answer"));
+    if (open?.status === "waiting" || pending) this.changed();
     else if (open) this.openStep(queueId, open, q, "continue", why);
     else this.advance(queueId);
   }
@@ -416,7 +423,7 @@ export class Engine implements Member {
   releaseHold(queueId: string, reason: string): void {
     const run = this.store.readRun(queueId);
     if (run?.state !== "paused" || !run.resume_after_restart || this.draining) return;
-    try { this.resume(queueId); } catch (e) { this.halt(queueId, `could not go on after ${reason}: ${(e as Error).message}`); }
+    try { this.resume(queueId, undefined, false); } catch (e) { this.halt(queueId, `could not go on after ${reason}: ${(e as Error).message}`); }
   }
 
   /** No agent of this project is in the middle of a turn. */
@@ -438,7 +445,7 @@ export class Engine implements Member {
       if (run?.state === "approval_wait") { if (this.queue(loadProjectState(this.store), id).approved) this.continueApproved(id); continue; }
       if (!run?.resume_after_restart) continue;
       if (run.state === "pausing") this.writeRun(id, toUnheld(run));
-      else if (run.state === "paused") { try { this.resume(id); } catch (e) { this.halt(id, (e as Error).message); } }
+      else if (run.state === "paused") { try { this.resume(id, undefined, false); } catch (e) { this.halt(id, (e as Error).message); } }
     }
     this.checkStarts();
   }
@@ -552,7 +559,7 @@ export class Engine implements Member {
   /** A run waiting for an approval that came goes on (not while an update drains: the restart or cancelDrain does it). */
   private continueApproved(queueId: string): void {
     if (this.stopped || this.draining) return;
-    try { this.resume(queueId); } catch (e) { this.halt(queueId, `could not go on after the approval: ${(e as Error).message}`); }
+    try { this.resume(queueId, undefined, false); } catch (e) { this.halt(queueId, `could not go on after the approval: ${(e as Error).message}`); }
   }
 
   // ---------------------------------------------------------------- the plan and schedules (src/scheduler.ts)
@@ -651,7 +658,7 @@ export class Engine implements Member {
       // review decides. Still waiting: nothing to run. Then nothing left: the run is finished. Else (the next step, a
       // send-back): a new process resumes the session.
       if (current?.status === "review") return;
-      if (hasOpenQuestions(state, queueId, run.step)) return;
+      if (questionsHold(loadProjectState(this.store), queueId, run.step)) return;
       if (q.steps.every((s) => stepClosed(q, s))) { this.exitedAfterOutcome.delete(run.session); return this.finish(queueId); }
       this.exitedAfterOutcome.delete(run.session);
       live = this.ensureProcess(this.sessionFile(state, run.session));
@@ -663,7 +670,10 @@ export class Engine implements Member {
     // A new revision never stops the step at work: its turns, questions, answers and nudges go on as below, and only
     // the step's end looks at the approval.
     if (q.status === "stopped") return this.halt(queueId, stoppedMessage(q));
-    if (hasOpenQuestions(state, queueId, run.step)) return;
+    if (questionsHold(loadProjectState(this.store), queueId, run.step)) {
+      if (run.state === "pausing") this.writeRun(queueId, toPaused(run));
+      return;
+    }
     if (current) {
       switch (current.status) {
         case "running":
@@ -909,6 +919,7 @@ export class Engine implements Member {
    * runs. True: taken over (the caller sends nothing now).
    */
   private usageGate(queueId: string, state: ProjectState, run: RunFile, live: Live | undefined, failed?: { until: string; reason: string }): boolean {
+    if (questionsHold(state, queueId, run.step)) return true;
     if (!live || live.proc.state === "working" || live.proc.state === "exited" || this.ending.has(live.session)) return false;
     const q = state.queues.find((x) => x.id === queueId);
     const step = q?.steps.find((s) => s.id === run.step);
@@ -962,16 +973,13 @@ export class Engine implements Member {
       switches: [...(run.switches ?? []), { at: now(), from: old.id, to: fresh.id, step: step.id, why: "usage", summary: "fallback" }],
     });
     this.store.appendActivity(old.id, { at: now(), kind: "turn_end", text: `Nexus goes on with step ${step.id} in a fresh session (${fresh.id}): ${because}`, queue: queueId, step: step.id });
-    for (const m of unread) {
-      this.store.appendDelivered(old.id, { at: now(), kind: "inbox", id: m.id, via: "carried", to: fresh.id });
-      if (m.type === "send_back") recordStepStart(this.store, m.queue, m.step, fresh.id); // the next round
-    }
     const state = loadProjectState(this.store);
     this.ensureProcess(fresh);
     const seed = midStepSeed(q, step, because, work);
-    const carried = carriedMessages(unread.map((m) => formatInbox(m, state)));
+    const carried = carriedMessages(unread.map((m) => formatInbox(m, state, true)));
     const view = this.queue(state, queueId);
-    this.openStep(queueId, view.steps.find((s) => s.id === step.id) ?? step, view, "continue", "its earlier session's runtime reached the usage limit", { before: seed, after: carried });
+    const sent = this.openStep(queueId, view.steps.find((s) => s.id === step.id) ?? step, view, "continue", "its earlier session's runtime reached the usage limit", { before: seed, after: carried });
+    this.recordCarried(old.id, fresh.id, unread, sent);
   }
 
   /** Goes on with `next` in a fresh session (with `want`'s runtime, model and effort) that continues `old`. */
@@ -983,12 +991,20 @@ export class Engine implements Member {
       switches: [...(run.switches ?? []), { at: now(), from: old.id, to: fresh.id, step: next.id, why, fill, summary: source }],
     });
     this.store.appendActivity(old.id, { at: now(), kind: "turn_end", text: `Nexus goes on in a fresh session (${fresh.id}): ${because}`, queue: queueId, step: done?.id ?? next.id });
-    for (const m of unread) this.store.appendDelivered(old.id, { at: now(), kind: "inbox", id: m.id, via: "carried", to: fresh.id });
     const state = loadProjectState(this.store);
     this.ensureProcess(fresh);
     const seed = freshSessionSeed(q, because, done, next, source === "fallback" ? undefined : old.context);
     const carried = carriedMessages(unread.map((m) => formatInbox(m, state)));
-    this.openStep(queueId, next, this.queue(state, queueId), "start", undefined, { before: seed, after: carried });
+    const sent = this.openStep(queueId, next, this.queue(state, queueId), "start", undefined, { before: seed, after: carried });
+    this.recordCarried(old.id, fresh.id, unread, sent);
+  }
+
+  /** If a newly arrived question held the opening, preserve the messages without claiming delivery. */
+  private recordCarried(old: string, fresh: string, unread: SessionView["inbox"], sent: boolean): void {
+    for (const m of unread) {
+      if (sent) this.store.appendDelivered(old, { at: now(), kind: "inbox", id: m.id, via: "carried", to: fresh });
+      else this.store.appendInbox(fresh, m);
+    }
   }
 
   /**
@@ -1026,15 +1042,15 @@ export class Engine implements Member {
     return { runtime: s.runtime === "codex" ? "codex" : "claude", model: s.model, effort: s.effort, explicit: START_KEYS };
   }
 
-  private openStep(queueId: string, step: StepView, q: QueueView, mode: "start" | "continue", why?: string, around: { before?: string; after?: string } = {}): void {
+  private openStep(queueId: string, step: StepView, q: QueueView, mode: "start" | "continue", why?: string, around: { before?: string; after?: string } = {}): boolean {
     const run = this.run(queueId);
     const live = this.host.get(run.session);
-    if (!live) return this.halt(queueId, "the session's process is not running");
+    if (!live) { this.halt(queueId, "the session's process is not running"); return false; }
     const state = loadProjectState(this.store);
     const project = state.project;
-    if (hasOpenQuestions(state, queueId, step.id)) return;
+    if (questionsHold(state, queueId, step.id) || questionsHold(state, queueId, run.step)) return false;
     const notes = step.notes.filter((n) => !n.read_at && n.to !== "orchestrator"); // the orchestrator's are not the worker's
-    const answers = state.questions.filter((x) => x.session === run.session && x.step === step.id && x.state === "answered");
+    const answers = state.questions.filter((x) => x.queue === queueId && x.step === step.id && x.state === "answered");
     const last = !q.steps.some((s) => s.status === "pending" && s.id !== step.id);
     // The rounds of commits are recorded before the worker hears of the step: reading HEAD (git) may take a second or
     // two on a busy machine, and a worker told first had committed meanwhile (seen in a full test run, queue TS1). The
@@ -1050,11 +1066,14 @@ export class Engine implements Member {
       q, step, mode, why, projectStopConditions: project.defaults.stop_conditions, projectChecks: run.checks, notes, answers, last,
       report: reportFile(project.id, q.id), languages: workerLanguages(project.languages), closing, integration,
     });
+    const latest = loadProjectState(this.store);
+    if (questionsHold(latest, queueId, step.id) || questionsHold(latest, queueId, run.step)) return false;
     live.proc.send([around.before, opening, around.after].filter(Boolean).join("\n\n"));
     for (const n of notes) this.store.appendDelivered(run.session, { at: now(), kind: "note", id: n.id, via: "turn" });
     this.endBackgroundWait(queueId);
     this.writeRun(queueId, { ...run, step: step.id, nudged: false, ...(mode === "start" ? { retries: undefined, failure: undefined, summary_asked: undefined } : {}) });
     this.store.appendActivity(run.session, { at: now(), kind: "turn_start", text: `Nexus opened step ${step.id}${mode === "continue" ? " (continue)" : ""}${around.before ? " in a fresh session, with what the previous one handed over" : ""}`, queue: queueId, step: step.id });
+    return true;
   }
 
   /** Hands unread inbox entries to a live session: inside a running turn, or as a new turn when it is idle. */
@@ -1068,9 +1087,9 @@ export class Engine implements Member {
     const run = owner?.run;
     const step = owner?.steps.find((st) => st.id === run?.step);
     // Partial answers remain durable in the inbox but cannot start or steer work. Stop messages still reach it.
-    const questionsOpen = !!owner && hasOpenQuestions(state, owner.id, run?.step);
+    const questionsOpen = !!owner && questionsHold(state, owner.id, run?.step);
     if (owner && l.proc.state === "idle" && (owner.status === "stopped" || (step && OUTCOME.has(step.status))) && this.cleanWorker(owner.id, l)) return;
-    const idleAllowed = !run || runCounted(run);
+    const idleAllowed = !run || (run.state === "running" && owner?.status !== "stopped" && !owner?.rejection && step?.status !== "review");
     // A new turn of an idle session within its step (an answer, a send-back, a message): its runtime beyond the usage
     // threshold goes on on the step's fallback in a fresh session, which gets these entries (or the run waits). A stop
     // is not a turn; an entry for a working session goes into its running turn, which is never cut off.
@@ -1078,13 +1097,20 @@ export class Engine implements Member {
     // The language line goes with each message, so a changed setting reaches the session with its next message.
     const languages = workerLanguages(state.project.languages);
     // When the last answer releases a waiting worker, it sees the accumulated answers in one opening turn.
-    const answers = !questionsOpen && idleAllowed && l.proc.state === "idle" ? unread.filter((m) => m.type === "answer") : [];
-    if (answers.length > 1) {
-      l.proc.send(withLanguages(answers.map((m) => formatInbox(m, state)).join("\n\n"), languages));
-      for (const m of answers) this.store.appendDelivered(l.session, { at: now(), kind: "inbox", id: m.id, via: "turn" });
+    const answers = unread.filter(m => m.type === "answer");
+    const batch = !questionsOpen && idleAllowed && l.proc.state === "idle" && answers.length
+      ? [...answers, ...unread.filter(m => m.type !== "answer" && m.type !== "stop")] : [];
+    if (batch.length) {
+      // Re-read at the delivery boundary: another question may have arrived while this change was processed.
+      if (owner && questionsHold(loadProjectState(this.store), owner.id, run?.step)) return;
+      l.proc.send(withLanguages(batch.map(m => formatInbox(m, state, !!owner)).join("\n\n"), languages));
+      for (const m of batch) {
+        if (m.type === "send_back") recordStepStart(this.store, m.queue, m.step, l.session);
+        this.store.appendDelivered(l.session, { at: now(), kind: "inbox", id: m.id, via: "turn" });
+      }
     }
     for (const m of unread) {
-      if ((questionsOpen && m.type !== "stop") || (answers.length > 1 && m.type === "answer")) continue;
+      if (m.type !== "stop" && (questionsOpen || batch.includes(m) || (owner && (!idleAllowed || m.type === "answer")))) continue;
       const text = withLanguages(formatInbox(m, state), languages);
       if (m.type === "stop") l.proc.send(text, "now");
       else if (l.proc.state === "working") l.proc.send(text, "next");
@@ -1142,14 +1168,16 @@ export class Engine implements Member {
   }
 
   private nothingLeft(queueId: string): boolean {
-    const q = loadProjectState(this.store).queues.find((x) => x.id === queueId);
-    return !!q && q.steps.length > 0 && q.steps.every((s) => stepClosed(q, s));
+    const state = loadProjectState(this.store);
+    const q = state.queues.find((x) => x.id === queueId);
+    return !!q && !questionsHold(state, queueId, q.run?.step) && q.steps.length > 0 && q.steps.every((s) => stepClosed(q, s));
   }
 
   /** Ends a going run as finished (its last step is done). */
   private finish(queueId: string): void {
     const run = this.store.readRun(queueId);
     if (!run || (run.state !== "running" && run.state !== "pausing")) return;
+    if (questionsHold(loadProjectState(this.store), queueId, run.step)) return;
     this.clearTimer(queueId);
     this.writeRun(queueId, toFinished(run));
   }
@@ -1398,7 +1426,7 @@ export class Engine implements Member {
       const run = this.store.readRun(queueId);
       if (this.stopped || this.draining || (run?.state !== "usage_wait" && run?.state !== "retry_wait")) return;
       const why = run.state === "retry_wait" ? `the last turn failed: ${run.reason ?? "a passing failure"}; this is the retry` : undefined;
-      try { this.resume(queueId, why); } catch (e) { this.halt(queueId, `could not go on: ${(e as Error).message}`); }
+      try { this.resume(queueId, why, false); } catch (e) { this.halt(queueId, `could not go on: ${(e as Error).message}`); }
       this.changed();
     });
   }
@@ -1421,7 +1449,7 @@ export class Engine implements Member {
     for (const q of this.store.queueIds()) {
       const run = this.store.readRun(q);
       const view = state.queues.find((x) => x.id === q);
-      const left = view?.steps.some((s) => !stepClosed(view, s));
+      const left = view && (questionsHold(state, q, run?.step) || view.steps.some((s) => !stepClosed(view, s)));
       if (run && (["running", "pausing"].includes(run.state) || run.resume_after_restart) && left === false) {
         // Its last step was done before the server stopped: the run is over, whatever stopped the process.
         this.writeRun(q, toFinished(run));
@@ -1435,7 +1463,7 @@ export class Engine implements Member {
           this.timers.delete(`recover:${q}`);
           const r = this.store.readRun(q);
           if (!r?.resume_after_restart) return;
-          try { this.resume(q); } catch (e) { this.halt(q, `could not resume after the update: ${(e as Error).message}`); }
+          try { this.resume(q, undefined, false); } catch (e) { this.halt(q, `could not resume after the update: ${(e as Error).message}`); }
           this.changed();
         }, this.startupMs));
       } else if (run && ["running", "pausing"].includes(run.state)) {

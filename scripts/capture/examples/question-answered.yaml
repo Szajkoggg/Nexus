@@ -1,0 +1,11 @@
+seed: scripts/capture/seed-question-wait.ts
+views:
+  - key: questions-all-answered@1440
+    route: "#/answered/Q/Q1/q3"
+    script: scripts/capture/question-wait.js
+  - key: questions-all-answered@492
+    route: "#/answered/Q/Q1/q3"
+    script: scripts/capture/question-wait.js
+  - key: questions-all-answered@390
+    route: "#/answered/Q/Q1/q3"
+    script: scripts/capture/question-wait.js

@@ -2995,3 +2995,32 @@ send, primary and secondary forms, exact request/event/inbox targets, continuati
 options, project/target switches, reload, reordered live data, failed/slow saves, duplicate submission and keyboard
 input. It also runs the layout-faults CLI. The raw collector includes boxes outside their scroll viewport, so the
 probe additionally asserts non-overlap of visible option rectangles and records their clipping geometry.
+
+### Completing the question barrier (QA4)
+
+The baseline reproduced a second hole: after two `continue:true` partial answers, a final `continue:false`
+still opened a worker turn on both fake runtimes. The old flag was only prompt wording. `questionBarrier` now
+derives both the remaining count and the latest answer's wait decision from durable events, scoped to queue and
+step. `can_continue` only describes independent work inside the asking turn; even those questions show waiting.
+The same predicate gates delivery, nudges, step openings, advancement, fallback and finishing after an exit.
+
+Explicit Resume records the released answer id in `run.yaml.answers_resumed`. Automatic recovery, usage retries
+and approval resumes do not grant it. A later answer is a new decision. The question barrier does not replace
+pause, stop, approval or review. Resume prefers pending answers over a new step-opening prompt: otherwise a
+paused worker asks its questions again instead of seeing the saved replies (reproduced with both fakes).
+
+All accumulated answers and ordinary messages are delivered in one turn after the asking turn ends. Each answer
+names its qid. The server rereads the question state immediately before delivery/opening; a question recorded
+with the last answer keeps the barrier closed. Fallback records delivery after sending, retaining unread entries
+in the replacement inbox if its opening is held. Answer routing follows replacement worker sessions as well as
+orchestrator sessions; no historical log is edited. Repeated identical HTTP user answers are idempotent, while
+different additional answers remain supported.
+
+The desktop cards, phone sheet and run controls share the remaining-count and permission text. Answer remains
+available while questions remain; Resume cannot promise a start with outstanding questions. The honest queue
+status and digest also treat all open questions as waiting. Captures use two saved answers and one open question,
+plus the all-answered state, at 1440/492/390 px. Protocol, fake-runtime, HTTP and browser regressions cover the
+saved state separately from actual turns, runtime work markers and delivery traces.
+The step panel uses the existing bounded-header option on desktop: this removes the old 8 px negative close-button
+margin reported by layout-faults. The phone header is unchanged; both capture states have zero layout faults at
+all three widths.

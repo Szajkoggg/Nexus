@@ -128,8 +128,11 @@ Ask so that either can decide in one go. Three parts:
   2. The options: the ways you see, each with what it means for the work (also with --option <text>, one each).
   3. Your recommendation: which option you would take, and why. Name it with --recommend <option> (its text or its
      number), which must be one of the --option values: the user sees that option's button marked as recommended.
-Ask only what the step, the project's rules and its notes do not settle. Without --can-continue, end your turn
-after asking: the answer arrives as a message. With --can-continue, go on with work the answer does not touch.
+Ask only what the step, the project's rules and its notes do not settle. Record every question needed in the asking
+turn, then end it. With --can-continue, finish independent work within that turn. No further work turn starts until
+all open or escalated questions of this step are answered or properly withdrawn, even across sessions. Partial
+answers and messages wait in the inbox. The last answer's --wait needs an explicit Resume; earlier --continue
+answers cannot override it. Pause, stop and review remain in effect. Recommendations and drafts are not answers.
 
 Example:
   nexus ask --step W3 --option "vertical joints only" --option "vertical and inclined" --recommend 1 "Blocks: the canyon joints of

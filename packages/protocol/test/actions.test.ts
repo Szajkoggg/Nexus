@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   ActionError, ProjectStore, addNote, answerAsUser, approveQueue, deleteNote, loadProjectState, newId, now,
-  routeAnswers, sendMessage, setQueueSettings, withdrawApproval, type Event, type SessionFile,
+  questionBarrier, routeAnswers, sendMessage, setQueueSettings, withdrawApproval, type Event, type SessionFile,
 } from "../src/index.ts";
 
 function setup() {
@@ -72,6 +72,31 @@ test("answers reach the asker's inbox exactly once; escalations go to the user",
   const inbox = s.sessions.find((x) => x.id === w.id)!.inbox;
   assert.equal(inbox.length, 1);
   assert.deepEqual([inbox[0]!.type, inbox[0]!.from], ["answer", "user"]);
+});
+
+test("a worker's answers follow its session line; wait permission and duplicate saves survive reload", () => {
+  const { st, session, emit } = setup();
+  const old = session("worker"), fresh = session("worker");
+  emit(old, { type: "step.started", queue: "Q", step: "Q1" });
+  for (const qid of ["a", "b", "c"]) emit(old, { type: "question.asked", queue: "Q", step: "Q1", qid, text: qid, can_continue: true });
+  assert.equal(loadProjectState(st).queues[0]!.steps[0]!.status, "waiting");
+  answerAsUser(st, "b", "B", true);
+  st.writeSession({ ...old, continued_by: fresh.id }); st.writeSession({ ...fresh, continues: old.id });
+  assert.equal(routeAnswers(st), 1, "an unread answer follows the replacement worker");
+  answerAsUser(st, "c", "C", true);
+  assert.throws(() => answerAsUser(st, "a", "", true), /empty/);
+  assert.equal(questionBarrier(loadProjectState(st).questions, "Q", "Q1").remaining, 1);
+  answerAsUser(st, "a", "A", false); answerAsUser(st, "a", "A", false);
+  const s = loadProjectState(st), b = questionBarrier(s.questions, "Q", "Q1");
+  assert.deepEqual([b.remaining, b.wait, b.blocked], [0, true, true]);
+  assert.equal(questionBarrier(s.questions, "Q", "Q1", b.last).blocked, false);
+  assert.equal(questionBarrier(s.questions, "OTHER", "Q1").blocked, false);
+  assert.equal(s.queues[0]!.steps[0]!.status, "waiting");
+  assert.equal(s.questions.find(q => q.qid === "a")!.answers.length, 1);
+  assert.equal(st.readInbox(fresh.id).entries.length, 3);
+  assert.equal(routeAnswers(st), 0);
+  assert.equal(st.readDelivered(old.id).entries.length, 0, "routing is not delivery");
+  assert.equal(st.readDelivered(fresh.id).entries.length, 0);
 });
 
 test("an answer to an orchestrator session that went on in a fresh one goes to the newest of its line, once", () => {

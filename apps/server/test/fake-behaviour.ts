@@ -352,6 +352,10 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
       else { writeFileSync(file, "1"); nexus("stop", step, "--condition", "fake condition", "--reason", "fake stop"); }
     }
     if (behaviour === "ask" || behaviour === "slowask") nexus("ask", "Which way?", "--step", step);
+    if (behaviour === "askthree") {
+      for (const text of ["Which layout?", "Which colour?", "Which sound?"]) nexus("ask", text, "--step", step, "--can-continue", "--option", "First", "--option", "Second", "--recommend", "First");
+      if (process.env.FAKE_ASK_LINGER_MS) await new Promise(r => setTimeout(r, Number(process.env.FAKE_ASK_LINGER_MS)));
+    }
     // ask1 and partial: what they do the first time, counted in a file beside FAKE_LOG (any session of the step).
     const first = (kind: string) => {
       const file = join(dirname(process.env.FAKE_LOG ?? "."), `fake-${kind}-${step}`);

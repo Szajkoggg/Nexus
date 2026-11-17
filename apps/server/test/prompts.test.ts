@@ -148,6 +148,7 @@ test("the worker's texts: briefing, step openings, inbox entries, seeds and nudg
 
   tr.section("resumed with a reason: the step continues");
   later(); engine.resume("Q", "the user resumed it");
+  change(); // Resume releases the saved answer batch; the watcher delivers it before the next outcome.
 
   tr.section("the first step done: the second opens");
   event(worker(), { type: "step.done", queue: "Q", step: "A1", summary: "The first thing is done." });
