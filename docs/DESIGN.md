@@ -1936,7 +1936,11 @@ minutes, almost all of them "timed out waiting for the run to finish").
   every step starts the fake worker's turn and calls the nexus CLI, each a node process; alone a two-step run takes
   about 2 s, in the full suite, whose files run side by side, such waits took 4 to 8 s. `LONGER.processes` (6×) for
   work made of many processes waited on together: a server's start, an update's hand-over and rollback, a push by
-  git, a run that commits in a worktree; the longest took 12 s (a rollback). A test that waits for a time of its own
+  git, a run that commits in a worktree; the longest took 12 s (a rollback). `LONGER.closingRun` (12×, queue TT2)
+  for a coding queue's whole run in its worktree through its closing refactoring and integration steps: alone 6 s, in
+  a full run 18 s, but 71 s on the user's slower machine (full runs of 700 to 760 s), where the test of two such runs
+  failed in 3 of 4 full runs. That test stays one: a second test from a finished first run would need the run's end
+  (worktree, merge, integration mark, events) made by hand, a copy of what the engine does. A test that waits for a time of its own
   (an away mode that ends in 8 s, a slow fake step of 4 s) waits that time plus `WAIT_MS`. `NEXUS_TEST_WAIT_LOG`
   names a file that gets every wait over 2 s: how these were measured.
 - **10 s, not 5** (decided 2026-11-14 with the orchestrator; the user's 5 s was an example). At 5 s, with the

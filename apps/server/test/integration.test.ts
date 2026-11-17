@@ -167,12 +167,16 @@ test("with resolve_conflicts off, a conflict is not resolved: the merge is abort
   } finally { hold.done(); x.stop(); }
 });
 
+// One test, not two (queue TT2): each wait below is one run to its end, which a split would keep as it is; and a second
+// test starting from a finished first run would need that run's end made by hand (the worktree and its merge, the
+// integration mark, the closing step's first stretch at work in the events, the finished run and its session), a copy
+// of what the engine does, which this test checks. The two runs wait LONGER.closingRun instead.
 test("after the closing step, and again at the end once a revision's new step has run", async () => {
   const x = setup([step("Q1", "done")], { coding: true });
   try {
     const e = x.engine();
     e.start("Q", { runtime: "claude" });
-    await x.until("the first run finished", () => x.queue().run?.state === "finished" && x.queue().status === "done");
+    await x.until("the first run finished", () => x.queue().run?.state === "finished" && x.queue().status === "done", LONGER.closingRun);
     assert.deepEqual(x.openings().map((o) => o.step), ["Q1", "Q.refactor", "Q.integrate"]);
     const first = x.queue().run!.started_at;
 
@@ -182,7 +186,7 @@ test("after the closing step, and again at the end once a revision's new step ha
     assert.deepEqual(x.queue().steps.map((s) => s.id), ["Q1", "Q2", "Q.refactor", "Q.integrate"]);
     assert.notEqual(x.queue().status, "done");
     e.start("Q", { runtime: "claude" });
-    await x.until("the second run finished", () => x.queue().run?.started_at !== first && x.queue().run?.state === "finished");
+    await x.until("the second run finished", () => x.queue().run?.started_at !== first && x.queue().run?.state === "finished", LONGER.closingRun);
     assert.deepEqual(x.openings().map((o) => o.step), ["Q1", "Q.refactor", "Q.integrate", "Q2", "Q.refactor", "Q.integrate"]);
     const q = x.queue();
     assert.equal(q.status, "done");

@@ -45,6 +45,15 @@ export const LONGER = {
    * longest such wait took 12 s (a rollback); on a busy machine more (queue FU4 measured 14 s a step under load).
    */
   processes: WAIT_MS * 6,
+  /**
+   * A coding queue's whole run in its own worktree, through its closing steps: its own step, the closing refactoring
+   * step and the integration step that merges the base, about ten node processes (the fake worker's turns, the nexus
+   * CLI) and the git worktree and merge commands, one after another. Alone it takes about 6 s, in a full run 18 s; on
+   * the user's slower machine (full runs of 700 to 760 s) one took 71 s, past the 60 s of `processes`, and the test of
+   * two such runs failed in 3 of 4 full runs (queue TM1). Twice `processes` leaves room over the worst one measured
+   * and still ends a hung run within two minutes (queue TT2).
+   */
+  closingRun: WAIT_MS * 12,
 } as const;
 
 /**
