@@ -11,6 +11,7 @@ import type { z } from "zod";
 import {
   Activity, Applied, AwayFile, IdeaMatchesFile, ChatEntry, PinsFile, RecurringFile, Refusal, Delivery, Event, GlobalSettings, InboxEntry, MaxRunning, MetricsFile, NoteMeta, GitFile, ProjectFile, PushFile, QueueFile, type QueueInput, LegacyReviewPolicy, RegistryFile, RunFile, RuntimeFile, SessionFile, StartFile, StaticAnalysisNote, PlanFile, StoredProject, TagsFile, TurnRecord, UsageFile,
   type Note,
+  IdeaStatusesFile,
 } from "./schemas.ts";
 import { noteRefs } from "./ideas.ts";
 import { applyChange, builtInSettings, effectiveProject, migrateStored, storedFrom } from "./settings.ts";
@@ -335,6 +336,13 @@ export class ProjectStore {
   }
   /** Written only by the server, from the user's action (actions.ts, decideIdeaMatches). */
   writeIdeaMatches(m: IdeaMatchesFile): void { writeYaml(join(this.dir, "idea-matches.yaml"), IdeaMatchesFile.parse(m)); }
+
+  readIdeaStatuses(): IdeaStatusesFile {
+    const f = join(this.dir, "idea-statuses.yaml");
+    return existsSync(f) ? readYaml(f, IdeaStatusesFile) : IdeaStatusesFile.parse({ protocol: 1 });
+  }
+  /** Only the server writes status decisions and observed assessment invalidations. */
+  writeIdeaStatuses(value: IdeaStatusesFile): void { writeYaml(join(this.dir, "idea-statuses.yaml"), IdeaStatusesFile.parse(value)); }
 
   /** The project's tag lists (.nexus/tags.yaml); empty lists while the file does not exist. */
   readTags(): TagsFile {

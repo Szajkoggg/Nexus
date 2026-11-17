@@ -3,18 +3,80 @@
 // record; an unknown project is 404. A real server process on a free port with a temporary NEXUS_HOME and one made-up
 // project; no runtime is started.
 import { test } from "node:test";
+import { once } from "node:events";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ProjectStore, approveQueue, writeRegistry, type Event, type IdeaLinksResponse, type IdeaMatchesResponse, type IdeasResponse } from "@nexus/protocol";
+import { ProjectStore, approveQueue, writeRegistry, type Event, type IdeaLinksResponse, type IdeaMatchesResponse, type IdeasResponse, type IdeaStatusesResponse } from "@nexus/protocol";
 import { spawnServer } from "./helpers.ts";
 import { serverUp, untilAsync } from "./wait.ts";
 
 const freePort = () => new Promise<number>((resolve) => {
   const s = createServer();
   s.listen(0, "127.0.0.1", () => { const p = (s.address() as { port: number }).port; s.close(() => resolve(p)); });
+});
+
+test("status API guards writes, rejects concurrent/stale decisions, watches note changes and survives server restart", async () => {
+  const base = mkdtempSync(join(tmpdir(), "nexus-ideas-status-api-"));
+  process.env.NEXUS_HOME = join(base, "home");
+  const root = join(base, "p");
+  mkdirSync(join(root, "notes"), { recursive: true });
+  const store = ProjectStore.init(root, { id: "p", name: "P", root });
+  store.updateProject((p) => ({ ...p, conversations: { ...p.conversations, notes_dir: "notes" } }));
+  const note = join(root, "notes/a.md"), ref = "notes/a.md#2026-11-14";
+  const text = "# A\n**Summary:** Summary.\n## Decided\n### 2026-11-14\n- Entire decision.\n## Open\n- Question?\n";
+  writeFileSync(note, text);
+  writeRegistry({ protocol: 1, projects: [{ id: "p", root }] });
+  const port = await freePort(), url = `http://127.0.0.1:${port}`;
+  let child = spawnServer({ NEXUS_PORT: String(port), NEXUS_LOG: "" });
+  const endpoint = url + "/api/projects/p/ideas/statuses";
+  const view = async () => await (await fetch(endpoint)).json() as IdeaStatusesResponse;
+  const save = (body: object, origin = url, type = "application/json") => fetch(endpoint, { method: "POST",
+    headers: { "content-type": type, origin, "sec-fetch-site": origin === url ? "same-origin" : "cross-site" }, body: JSON.stringify(body) });
+  const stop = async () => { if (child.exitCode === null) { const ended = once(child, "exit"); child.kill(); await ended; } };
+  try {
+    await serverUp(url + "/api/projects");
+    const request = { request_id: "drop", revision: (await view()).revision, ref, operation: "drop", reason: "No longer needed" };
+    assert.equal((await save(request, "http://evil.example")).status, 403);
+    assert.equal((await save(request, url, "text/plain")).status, 415);
+    assert.equal((await save({ ...request, reason: " " })).status, 400);
+    assert.equal((await save({ ...request, revision: undefined })).status, 400);
+    assert.equal((await save({ ...request, ref: "../other/a.md#2026-11-14" })).status, 404);
+    const responses = await Promise.all([save(request), save({ ...request, request_id: "competitor" })]);
+    assert.deepEqual(responses.map((r) => r.status).sort(), [200, 409]);
+    const winner = responses[0]!.status === 200 ? request : { ...request, request_id: "competitor" };
+    const saved = await responses.find((r) => r.status === 200)!.json();
+    assert.deepEqual(await (await save(winner)).json(), saved);
+    assert.equal((await save({ ...winner, reason: "Different" })).status, 409);
+    assert.equal((await view()).entries[0]!.disposition, "dropped");
+    assert.equal(readFileSync(note, "utf8"), text, "dashboard never writes the note");
+    assert.equal((await save({ ...request, request_id: "reopen", revision: (await view()).revision, operation: "reopen" })).status, 200);
+    const confirm = { ...request, request_id: "confirm", revision: (await view()).revision, operation: "confirm", evidence_refs: ["release:reviewed-by-user"] };
+    assert.equal((await save(confirm)).status, 200);
+    assert.equal((await view()).entries[0]!.implementation, "full");
+    writeFileSync(note, text.replace("Entire decision", "Changed entire decision"));
+    // Poll only the server-owned file: no Ideas GET may be needed to notice this change.
+    await untilAsync("watcher persists assessment invalidation", async () => store.readIdeaStatuses().invalidations.length === 1);
+    writeFileSync(note, text);
+    assert.equal((await save({ ...confirm, request_id: "stale-confirmation" })).status, 409);
+    await stop();
+    child = spawnServer({ NEXUS_PORT: String(port), NEXUS_LOG: "" });
+    await serverUp(url + "/api/projects");
+    const restored = await view();
+    assert.equal(restored.entries[0]!.implementation, "needs_review");
+    assert.deepEqual(restored.entries[0]!.stale_reasons, ["Decided content changed"]);
+    assert.equal(restored.history.length, 3);
+    assert.equal((await save(confirm)).status, 200, "a retry after restart returns the original result without reconfirming");
+    assert.equal((await view()).entries[0]!.implementation, "needs_review");
+    assert.equal((await save({ ...confirm, request_id: "fresh-confirmation", revision: restored.revision })).status, 200);
+    const overview = await (await fetch(url + "/api/projects/p/ideas")).json() as IdeasResponse;
+    assert.equal(overview.notes[0]!.implementation, "full");
+    assert.equal(overview.notes[0]!.entries[0]!.effective!.implementation, "full");
+    assert.equal((await fetch(url + "/api/projects/nope/ideas/statuses")).status, 404);
+    assert.deepEqual(store.queueIds(), [], "status actions create no queue or work");
+  } finally { await stop(); }
 });
 
 test("GET /api/projects/:id/ideas: the notes with their entries' statuses and histories; unknown project 404", async () => {

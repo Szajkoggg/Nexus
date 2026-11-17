@@ -15,7 +15,7 @@ import {
   readAway, writeAway, awayNow, awayUntil, turnAway, expireAway, acceptPlanProposal, declinePlanProposal, handBackPlan, acceptTagProposal, declineTagProposal,
   STAT_DIMENSIONS, STAT_FILTERS, projectMetrics, sinceTime, statDimension, statsReport, stepStats, usageDays, type ProjectMetrics, type StatsReport, type UsageDays,
   SearchError, parseSearch, MIN_SAMPLES, queueEstimate, stepSamples, isOpenQuestion, writeCount, type EstimatesResponse, type LeftView, type TemplatesResponse, readTemplates, type ProjectSummary, type RemovalView,
-  projectIdeas, ideaMatches, ideaLinks, changeIdeaLinks, decideIdeaMatches, type IdeasResponse, type IdeaMatchesResponse,
+  projectIdeas, ideaMatches, ideaLinks, changeIdeaLinks, decideIdeaMatches, ideaStatuses, changeIdeaStatus, reconcileIdeaStatuses, readNotes, type IdeasResponse, type IdeaMatchesResponse,
 } from "@nexus/protocol";
 import { newestFirst, projectDigest, projectRunning, usageSince, type DigestEvent, type DigestResponse, type DigestRunning, type UsageRun } from "@nexus/protocol/digest";
 import { Engine } from "./engine.ts";
@@ -132,6 +132,7 @@ function dropProject(e: Entry): { parts: Parameters<typeof stopProject>[0]; clos
   pending.delete(e.id);
   const w = watchers.get(e.id);
   watchers.delete(e.id);
+  watchedNotes.delete(e.id);
   watch.forget(e.id);
   return { parts: [e.engine, e.orchestrator, e.conversations, e.merger], closed: (w?.close() ?? Promise.resolve()).catch((err: Error) => console.error(`watch ${e.id}: not closed: ${err.message}`)) };
 }
@@ -172,6 +173,7 @@ function changed(id: string): void {
       // of the decisions before it (stateOf; a change from another process comes back here through the watcher). One
       // that fails is logged and the next goes on.
       const decisions: [string, (s: ProjectState) => unknown][] = [
+        ["idea assessment validity", (s) => { syncNotesWatcher(id, s); reconcileIdeaStatuses(e.store, s); }],
         // Deliver new answers to the sessions that asked. Its own inbox writes come back here and route nothing.
         ["routing answers", (s) => routeAnswers(e.store, s)],
         // Send-backs not delivered yet (the action delivers its own at once; this is the backstop).
@@ -197,10 +199,23 @@ function changed(id: string): void {
 
 /** Each project's watcher of its .nexus folder, by project id. */
 const watchers = new Map<string, FSWatcher>();
+const watchedNotes = new Map<string, string>();
+function syncNotesWatcher(id: string, state: ProjectState): void {
+  const watcher = watchers.get(id);
+  if (!watcher) return;
+  const dir = state.project.conversations.notes_dir;
+  const path = dir ? join(state.project.root, dir) : undefined;
+  if (watchedNotes.get(id) === path) return;
+  // Validate the configured boundary before watching it; never follow symlinks.
+  readNotes(state.project.root, dir);
+  const old = watchedNotes.get(id);
+  if (old) { void watcher.unwatch(old); watchedNotes.delete(id); }
+  if (path) { watcher.add(path); watchedNotes.set(id, path); }
+}
 function watchProject(id: string, dir: string): void {
   watchers.set(id, chokidar
     // Uploaded pictures change no state: a 10 MB write need not reload the project.
-    .watch(dir, { ignoreInitial: true, ignored: (p) => p.endsWith(".tmp") || /^[\\/]uploads([\\/]|$)/.test(p.slice(dir.length)) })
+    .watch(dir, { ignoreInitial: true, followSymlinks: false, ignored: (p) => p.endsWith(".tmp") || p.endsWith(".lock") || /^[\\/]uploads([\\/]|$)/.test(p.slice(dir.length)) })
     .on("all", () => changed(id))
     .on("error", (err) => console.error(`watch ${id}: ${(err as Error).message}`)));
 }
@@ -352,6 +367,7 @@ app.get("/api/projects/:id/ideas", (c) => {
   const e = c.get("entry");
   const s = stateOf(e);
   if (!s) return c.json({ error: e.error }, 500);
+  reconcileIdeaStatuses(e.store, s);
   return c.json(projectIdeas(e.store, s) satisfies IdeasResponse);
 });
 
@@ -368,6 +384,13 @@ app.get("/api/projects/:id/ideas/links", (c) => {
   const s = stateOf(e);
   if (!s) return c.json({ error: e.error }, 500);
   return c.json(ideaLinks(e.store, s));
+});
+app.get("/api/projects/:id/ideas/statuses", (c) => {
+  const e = c.get("entry");
+  const s = stateOf(e);
+  if (!s) return c.json({ error: e.error }, 500);
+  reconcileIdeaStatuses(e.store, s);
+  return c.json(ideaStatuses(e.store, s));
 });
 
 // The queue templates in effect for the project (PROTOCOL.md, "Queue templates"), for "New queue from template".
@@ -453,6 +476,7 @@ app.post("/api/projects/:id/queues/:queue/approve", act((st, b, p) => {
 // The user's decision on suggested matches of earlier queues to the notes (accept: true, false, or null to take it back),
 // written to idea-matches.yaml; a user's write like every other (no agent may: the nexus command has no such action).
 app.post("/api/projects/:id/ideas/matches", act((st, b) => decideIdeaMatches(st, b.items, b.accept, { revision: b.revision, request_id: b.request_id })));
+app.post("/api/projects/:id/ideas/statuses", act((st, b) => changeIdeaStatus(st, b)));
 app.post("/api/projects/:id/ideas/links", act((st, b) => changeIdeaLinks(st, b)));
 // Withdrawing an approval and adding an allow rule are the user's too, like every write (see the guard above): an agent
 // must not take an approval back or widen its own permissions.

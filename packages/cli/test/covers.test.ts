@@ -4,11 +4,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ProjectStore, changeIdeaLinks, ideaLinks, loadProjectState, projectIdeas } from "@nexus/protocol";
+import { ProjectStore, changeIdeaLinks, changeIdeaStatus, ideaLinks, ideaStatuses, loadProjectState, projectIdeas, type IdeaStatusesResponse } from "@nexus/protocol";
 
 const CLI = join(dirname(fileURLToPath(import.meta.url)), "../bin/nexus.js");
 
@@ -88,4 +88,15 @@ test("nexus ideas matches lists the suggestions; accepting or rejecting one is r
     operation: "add", queue: "OLD", ref: "docs/ideas/tags.md#2026-11-14", reason: "User checked this relationship" });
   assert.match(ideas("w", "matches").out, /OLD\tdocs\/ideas\/tags\.md#2026-11-14\tmanual\tlinked\teffective/);
   for (const sub of ["add", "remove", "undo", "confirm"]) assert.equal(ideas("w", sub).ok, false, "CLI cannot write user decisions");
+  changeIdeaStatus(store, { request_id: "drop", revision: ideaStatuses(store, loadProjectState(store)).revision,
+    ref: "docs/ideas/tags.md#2026-11-14", operation: "drop", reason: "User dropped this decision" });
+  const before = readFileSync(join(store.dir, "idea-statuses.yaml"), "utf8");
+  const status = ideas("w", "status");
+  assert.ok(status.ok, status.out);
+  const body = JSON.parse(status.out) as IdeaStatusesResponse;
+  assert.equal(body.entries[0]!.disposition, "dropped");
+  assert.equal(body.entries[0]!.implementation, "unconfirmed");
+  assert.equal(body.history[0]!.reason, "User dropped this decision");
+  assert.equal(readFileSync(join(store.dir, "idea-statuses.yaml"), "utf8"), before, "CLI reads never write observations or decisions");
+  for (const sub of ["drop", "replace", "reopen", "partial", "revoke", "adopt-marker"]) assert.equal(ideas("c", sub).ok, false);
 });

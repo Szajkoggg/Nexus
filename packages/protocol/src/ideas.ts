@@ -6,6 +6,7 @@
 import type { ImportSource, QueueSource, QueueStatus } from "./schemas.ts";
 import type { QueueView } from "./state.ts";
 import type { IdeaLinksResponse, IdeaLinkView } from "./idea-links.ts";
+import type { IdeaStatusesResponse, IdeaStatusView } from "./idea-status.ts";
 
 export interface IdeaOutcome {
   kind: "queue-report" | "accepted-steps" | "unavailable";
@@ -76,11 +77,13 @@ export function noteRefIssue(ref: string, notesDir: string | undefined, notes: r
  * first bullet (else the bullet's first words); `decisions`: its top-level bullets. `dropped` and `replaced_by` come
  * from the lines `**Dropped:** <date>: <why>` and `**Replaced by:** <file>#<date>` the partner writes under it.
  */
-interface IdeaEntry {
+export interface IdeaEntry {
   date: string;
   headings: string[];
   lead: string;
   decisions: number;
+  /** Complete dated content, including code and repeated headings; disposition metadata excluded. */
+  content: string;
   dropped?: { date: string; why: string };
   replaced_by?: string;
 }
@@ -160,10 +163,19 @@ export function parseNote(file: string, text: string): IdeaNote {
   let other: { kind: "open" | "ideas"; level: number } | undefined;
   const questions: string[] = [];
   let ideas = 0;
-  let inFence = false;
+  let fence: { char: string; length: number } | undefined;
   for (const raw of lines) {
-    if (/^\s*(```|~~~)/.test(raw)) { inFence = !inFence; continue; }
-    if (inFence) continue;
+    const delimiter = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(raw);
+    if (fence) {
+      if (entry) entry.e.content += raw.trimEnd() + "\n";
+      if (delimiter && delimiter[1]![0] === fence.char && delimiter[1]!.length >= fence.length && !delimiter[2]!.trim()) fence = undefined;
+      continue;
+    }
+    if (delimiter) {
+      if (entry) entry.e.content += raw.trimEnd() + "\n";
+      fence = { char: delimiter[1]![0]!, length: delimiter[1]!.length };
+      continue;
+    }
     const h = HEADING.exec(raw);
     if (h) {
       const level = h[1]!.length, text = h[2]!;
@@ -177,10 +189,11 @@ export function parseNote(file: string, text: string): IdeaNote {
       const dated = date && (decided !== undefined || /\(decided \d{4}-\d{2}-\d{2}\)\s*$/i.test(text));
       if (dated) {
         let e = entries.get(date);
-        if (!e) { e = { date, headings: [], lead: "", decisions: 0 }; entries.set(date, e); }
+        if (!e) { e = { date, headings: [], lead: "", decisions: 0, content: "" }; entries.set(date, e); }
         e.headings.push(text);
         entry = { e, level };
       }
+      if (entry) entry.e.content += raw.trimEnd() + "\n";
       continue;
     }
     if (entry) {
@@ -189,6 +202,7 @@ export function parseNote(file: string, text: string): IdeaNote {
       if (dropped) { e.dropped = { date: dropped[1]!, why: dropped[2]!.trim() }; continue; }
       const replaced = /^\*\*Replaced by:\*\*\s*(\S+)/.exec(raw);
       if (replaced) { e.replaced_by = replaced[1]!.replace(/^\[([^\]]*)\]\(([^)]*)\)$/, "$2"); continue; }
+      e.content += raw.trimEnd() + "\n";
       const b = BULLET.exec(raw);
       if (b) { e.decisions++; if (!e.lead) e.lead = leadOf(b[1]!); }
       continue;
@@ -246,6 +260,7 @@ export interface HistoryItem {
 interface IdeaQueueRef { id: string; title: string; status: QueueStatus; commit?: string; outcome?: IdeaOutcome }
 
 export interface IdeaEntryView extends IdeaEntry {
+  effective?: IdeaStatusView;
   ref: string;
   status: EntryStatus;
   queues: IdeaQueueRef[];
@@ -253,6 +268,8 @@ export interface IdeaEntryView extends IdeaEntry {
 }
 
 export interface IdeaNoteView extends Omit<IdeaNote, "entries"> {
+  implementation?: "worked_out" | "dropped" | "replaced" | "unconfirmed" | "partial" | "full";
+  needs_attention?: number;
   status: TopicStatus;
   /** Where its area comes from: its Area line, or the areas its queues' steps carry most. */
   area_from?: "note" | "queues";
@@ -270,6 +287,7 @@ export interface IdeasResponse extends IdeasView {
   /** The suggestions for matching earlier queues that wait for the user's decision, and how many queues they are of. */
   to_match: { suggestions: number; queues: number };
   links: IdeaLinksResponse;
+  statuses: IdeaStatusesResponse;
 }
 
 const queueRef = (q: IdeaQueue): IdeaQueueRef => ({ id: q.id, title: q.title, status: q.status, ...(q.commit ? { commit: q.commit } : {}), ...(q.outcome ? { outcome: q.outcome } : {}) });

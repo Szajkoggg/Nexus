@@ -25,11 +25,11 @@ import { shellRules } from "./shell-rules.ts";
 
 // `nexus help` (decided 2026-11-15, queue OP): how Nexus works, its topics; it reads only. A Codex partner runs it in
 // its sandbox, which reads everywhere.
-const READ = ["Read", "Grep", "Glob", ...shellRules(["nexus status", "nexus help", "nexus tags", "git log", "git status", "git diff", "git show"])];
+const READ = ["Read", "Grep", "Glob", ...shellRules(["nexus status", "nexus ideas status", "nexus help", "nexus tags", "git log", "git status", "git diff", "git show"])];
 /** With a notes folder the partner also records what its hand-over covers (`nexus covers`, among its own events). */
 const COVERS = shellRules(["nexus covers"]);
 /** What a hand-over covers (decided 2026-11-14): this conversation's topics, and the dates of the decisions it passes on. */
-const HANDOFF_SCOPE = "Summarize only the topics discussed in this conversation, unless the user asked you to include others. From a notes file, pass on what this conversation decided or recorded; another topic in the notes folder, even a related one, is not part of this hand-over: name its file at most, as 'see also', without its content. In every notes file only the Decided section holds decisions. Name the dates of the Decided entries you cover.";
+const HANDOFF_SCOPE = "Summarize only the topics discussed in this conversation, unless the user asked you to include others. From a notes file, pass on what this conversation decided or recorded; another topic in the notes folder, even a related one, is not part of this hand-over: name its file at most, as 'see also', without its content. Run nexus ideas status for the current effective state. In notes, Decided holds the decision content; read it together with the effective user dispositions and assessment invalidations in .nexus/idea-statuses.yaml and the relationships in .nexus/idea-matches.yaml. Report conflicts; Open/Ideas remain undecided. Historical hand-over does not override a later drop, replacement or reopening, and does not approve or start a queue. Name the dates of the Decided entries you cover.";
 /** The hand-over's record for the ideas overview (decided 2026-11-15, queue IO): the entries it covers, by command. */
 const HANDOFF_COVERS = "Before you reply, record the Decided entries this hand-over passes on: nexus covers <file>.md#<YYYY-MM-DD> ... (one argument per entry, the notes folder may be left out); if it refuses one, fix the reference and run it again. The ideas overview shows them as handed over.";
 /**

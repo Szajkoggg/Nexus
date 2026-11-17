@@ -9,6 +9,8 @@ import { deriveIdeaLinks } from "./idea-links.ts";
 import { ideaOutcome } from "./idea-outcomes.ts";
 import type { ProjectStore } from "./store.ts";
 import type { ProjectState } from "./state.ts";
+import { deriveIdeaStatuses } from "./idea-status.ts";
+import type { IdeaStatusesFile } from "./schemas.ts";
 
 /** The notes of a project: `notesDir` is relative to its root (conversations.notes_dir); none without a folder. */
 export function readNotes(root: string, notesDir: string | undefined): IdeaNote[] {
@@ -84,6 +86,12 @@ export function ideaLinks(store: ProjectStore, state: ProjectState) {
   return deriveIdeaLinks(store.readIdeaMatches(), state, readNotes(state.project.root, state.project.conversations.notes_dir));
 }
 
+export function ideaStatuses(store: ProjectStore, state: ProjectState, file: IdeaStatusesFile = store.readIdeaStatuses()) {
+  const notes = readNotes(state.project.root, state.project.conversations.notes_dir);
+  return deriveIdeaStatuses(file, state, notes, deriveIdeaLinks(store.readIdeaMatches(), state, notes),
+    new Map(state.queues.map((q) => [q.id, ideaOutcome(store, q)])));
+}
+
 /**
  * A project's ideas overview: its notes as they are now, each entry's status from its queues (the derived state) and
  * the hand-over records, with the matches the user accepted (idea-matches.yaml) counted as the queues' source; and how
@@ -98,6 +106,17 @@ export function projectIdeas(store: ProjectStore, state: ProjectState): IdeasRes
     outcome: ideaOutcome(store, state.queues.find((v) => v.id === q.id)!),
   }));
   const view = deriveIdeas({ notes, queues, handovers: readHandOvers(store) });
+  const statuses = deriveIdeaStatuses(store.readIdeaStatuses(), state, notes, links,
+    new Map(queues.map((q) => [q.id, q.outcome])));
+  for (const note of view.notes) {
+    for (const entry of note.entries) entry.effective = statuses.entries.find((s) => s.ref === entry.ref);
+    const active = note.entries.flatMap((e) => e.effective?.disposition === "active" ? [e.effective] : []);
+    note.implementation = !note.entries.length ? "worked_out" : !active.length
+      ? note.entries.some((e) => e.effective?.disposition === "dropped") ? "dropped" : "replaced"
+      : active.some((e) => e.implementation !== "full" && e.implementation !== "partial") ? "unconfirmed"
+        : active.some((e) => e.implementation === "partial") ? "partial" : "full";
+    note.needs_attention = note.entries.filter((e) => e.effective && (e.effective.diagnostics.length || e.effective.blockers.length || e.effective.caveats.length || e.effective.stale_reasons.length)).length;
+  }
   const open = ideaMatches(store, state, notes).items.filter((m) => !m.decision);
-  return { notes_dir: dir ?? null, ...view, links, to_match: { suggestions: open.length, queues: new Set(open.map((m) => m.queue)).size } };
+  return { notes_dir: dir ?? null, ...view, links, statuses, to_match: { suggestions: open.length, queues: new Set(open.map((m) => m.queue)).size } };
 }

@@ -4,7 +4,7 @@ import type { IdeaEntryView, IdeaNoteView } from "@nexus/protocol/ideas";
 import { filterCounts, groupByArea, shownNotes } from "../src/ideasView.ts";
 
 const entry = (date: string, status: IdeaEntryView["status"], lead = `Lead ${date}`): IdeaEntryView =>
-  ({ date, headings: [date], lead, decisions: 1, ref: `n.md#${date}`, status, queues: [], history: [] });
+  ({ date, headings: [date], lead, decisions: 1, content: `### ${date}\n- ${lead}\n`, ref: `n.md#${date}`, status, queues: [], history: [] });
 const note = (title: string, entries: IdeaEntryView[], extra: Partial<IdeaNoteView> = {}): IdeaNoteView =>
   ({ file: `docs/ideas/${title.toLowerCase()}.md`, title, entries, open: 0, questions: [], ideas: 0, status: "decided", queues: [], ...extra });
 

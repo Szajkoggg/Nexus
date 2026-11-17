@@ -28,6 +28,7 @@ a shell command can take part.
   tags.yaml                             server: the project's tag lists (areas, own activities, renames, proposals)
   metrics.yaml                          server: the project's metrics (unit, how shown, target, warning threshold)
   idea-matches.yaml                     server: the user's decisions on matching earlier queues to the notes' entries
+  idea-statuses.yaml                    server: user dispositions, assessments, history and observed invalidations
   orchestrator/summary.md               server: the orchestrator's latest summary for a fresh session (its context care)
   drafts/<queue-id>.yaml                the orchestrator: its queue drafts (also `nexus queue draft --template`)
   recurring/<id>.yaml                   server: a recurring queue (template, values, schedule, standing approval)
@@ -1333,6 +1334,8 @@ from every agent session, and the others from every session but an orchestrator'
 | `POST /api/projects/:id/ideas/matches` | `items` (`[{ queue, ref }]`), `accept` (true, false, or null to return to pending), `revision`, `request_id` | The user's decision on suggestions, recorded with history in `idea-matches.yaml`; an item that is no suggestion (nor decided before) is 404. The revision comes from GET matches or links. Same-origin JSON; stale revision or reused ID with different payload: 409 |
 | `GET /api/projects/:id/ideas/links` | | `IdeaLinksResponse`: `revision`, `items` (each origin, effective state, own evidence and diagnostics), `history` (reasoned before/after actions). Includes missing queues/notes/dates and inactive origins |
 | `POST /api/projects/:id/ideas/links` | `request_id`, `revision`, `reason`, `operation`, operation-specific fields below | Dashboard-only atomic relationship correction. Returns the saved action in `result`; identical retry returns that action, even after restart. Invalid input/target: 400; missing queue/origin/action: 404; stale revision, concurrent save, duplicate edge, newer touched origin or request-ID collision: 409 |
+| `GET /api/projects/:id/ideas/statuses` | | Effective dated-entry dispositions, assessments, work states, diagnostics, snapshots, history, invalidations, missing records and a revision token (`IdeaStatusesResponse`) |
+| `POST /api/projects/:id/ideas/statuses` | `request_id`, `revision`, `ref`, `reason`, `operation`; optional fields below | Dashboard-only reasoned status action, returned in `result`. Same-origin JSON. Invalid input/target/blocker: 400; missing dated entry/action: 404; stale/concurrent save, newer entry action or conflicting request ID: 409. No queue, run, plan or note writes |
 | `GET /api/projects/:id/ideas` | | The ideas overview (`IdeasResponse`: `notes_dir`, null without a notes folder; `notes`, each with `file`, `title`, `summary?`, `area?`, `group?`, `area_from?` (`note` or `queues`), `open` and `questions` (its Open questions' text), `ideas`, `status` and `queues`, and its `entries`, each with `ref`, `date`, `headings`, `lead`, `decisions`, `dropped?`, `replaced_by?`, `status`, `queues` and `history`; `unknown_refs`, queues' references to nothing; `to_match`, the suggestions for earlier queues still to decide: `suggestions` and `queues`). Derived on each request from the notes, the queues and the hand-over records; the notes are only read (see "Conversations"). Unknown project: 404 |
 | `GET /api/projects/:id/metrics` | | The project's metrics and their values (`ProjectMetrics`: `metrics`, its own definitions and every check's time seen, `check:<name>`; `values`, oldest first, each a `StepView.metrics` entry with its `queue` and `step`); see "Project metrics". Unknown project: 404 |
 | `GET /api/stats?by=&project=&since=&kind=&activity=&area=&size=&origin=` | | The statistics (`StatsReport`, see "Statistics"): every registered project, or one (`project`; unknown: 404), grouped by `by` (`model`, `effort`, `kind`, `activity`, `area`, `size`, `origin`; default `model`; another: 400), the steps whose last outcome is at or after `since` (a date or a time; unreadable: 400), narrowed to the steps under each tag value given (`kind=code`, `area=p/engine` across projects; the value as the groups name it) |
@@ -1663,7 +1666,7 @@ date's entry (a heading `… (decided <date>)` is one anywhere), a deeper headin
 headings of one date are one entry. An entry's lines `**Dropped:** <date>: <why>` and `**Replaced by:**
 <file>#<date>`, written by the partner, mark it so. The partner's briefing asks for these lines (the Summary, one
 Area from the project's list, dated Decided entries, Dropped and Replaced by instead of deleting an entry); the
-orchestrator's asks it to name the entries a queue carries out in the queue's `source`. Each entry's status is derived, never kept: `decided` (nothing
+orchestrator's asks it to name the entries a queue carries out in the queue's `source`. The original compatibility `status` field (superseded by IC3's `effective` fields below) is derived: `decided` (nothing
 since), `handed_over` (a hand-over record covers it), `queued` (a queue that is not cancelled names it in its `source`,
 from the upload on), `built` (every such queue is done), and `dropped` or `replaced`, which win over every other, even
 after a queue built it. A topic shows its least advanced live entry, `worked_out` with no entry at all (only dropped or
@@ -1757,6 +1760,70 @@ YAML replacement. Lock contention fails with 409; it never overwrites a concurre
 the writer is confirmed stopped; it is never stolen based on elapsed time. A committed request ID is checked before
 locking and again under the lock, before revision/target validation. Retrieving a committed result is read-only, so
 a retry can retrieve it even if the project subsequently changed or a crashed writer left its lock behind.
+
+**User dispositions and implementation assessments (IC3).** The date remains the unit; there is no
+per-bullet identifier or migration. GET ideas now also returns `statuses` (the statuses endpoint's response),
+`entries[].content` (complete normalized dated content), `entries[].effective` (the matching status view), and each
+note's `implementation` roll-up and `needs_attention` count. Consumers must use `effective.disposition`,
+`effective.implementation` and `effective.work` independently. The compatibility `status: built` means only the
+old linked-work calculation; it is never a user confirmation. No old data creates an assessment.
+
+`.nexus/idea-statuses.yaml` has `protocol: 1`, `records`, `history` and `invalidations` (absent file: empty arrays).
+A record identifies `ref`, an optional `disposition` (`state: active|dropped|replaced`, optional `target`, and the
+legacy `marker` snapshot seen by that user), and an optional `assessment` (`id`, `kind: partial|full`, `at`,
+`reason`, `evidence_refs`, optional `caveat_reason`, and `snapshot`). A snapshot keeps the full normalized
+`content`, sorted unique effective queue IDs in `links`, and deterministic serialized acceptance-relevant
+`evidence` (queue/step states, goals/acceptance, result summaries/commits/review events, merge state and report
+identity/freshness). Exact comparisons are conservative; no model judges semantic equivalence.
+
+Every user history action has `id`, request fingerprint, `at`, `actor: user`, `reason`, `ref`, `operation`,
+nullable `before`/`after`, and optional `undo`. Each invalidation has `assessment`, `ref`, `at` and exact `reasons`.
+A single atomic YAML replacement under `idea-statuses.lock` persists each action. Request-ID retries return the
+original action before revision checking, including after restart; a different payload with that ID is 409.
+The revision fingerprints the complete current status inputs and link revision. A changed screen cannot overwrite
+a newer decision. As with the relationship lock, a crashed writer's lock fails closed; it is never stolen.
+
+| Operation | Extra input | Effect |
+|---|---|---|
+| `drop` | ? | Set Dropped, suspend any assessment, preserve work and handoffs |
+| `replace` | `target` | Set Replaced with an existing note/date; reject self-reference and cycles through UI or legacy replacements |
+| `reopen` | ? | Set Active and remove the current assessment; no queue reopening or new work |
+| `partial` | optional `evidence_refs` | Record the reason describing what exists and remains, with the current snapshot |
+| `confirm` | `evidence_refs` required without linked queues; `caveat_reason` required for cancelled work/skipped steps | Explicit full assessment of the complete date; unavailable with unfinished/stopped/failed work, missing linked queues, provisional review or a required pending/failed merge |
+| `revoke` | ? | Remove the current assessment, preserving it in history |
+| `keep` | ? | Keep the effective disposition and acknowledge the current legacy marker snapshot |
+| `adopt-marker` | ? | Explicitly adopt the current legacy marker, validate its replacement, and clear the current assessment |
+| `undo` | `action` | Append a compensating action restoring before, only if no later action touched this entry; restored assessment validity is rechecked |
+
+All operations require a nonblank reason. Legacy markers remain the fallback until a UI disposition exists;
+Replaced takes precedence over Dropped and conflicting/invalid markers remain visible with diagnostics. A UI
+disposition wins; edits to the marker afterward produce `marker_status: conflict` (Note and decision differ).
+An unchanged overridden marker is historical, not a new alarm. Undo of the first override returns to the current
+legacy fallback. Neither these actions nor their undo remove the historical `ideas.covered` records.
+
+Content includes every heading, list, link and code line under all headings of that date. Normalize CRLF and
+trailing line whitespace; exclude only recognized disposition metadata outside code. Summary/Open/Ideas/Area
+changes do not invalidate assessments. Any other dated-content change does, as do effective edge changes and
+changes to acceptance/results/reports/merge evidence. Origin/reason/order changes with the same edge set do not.
+The server reconciles observed changes at startup, from its `.nexus` and validated notes-folder watchers, before
+Ideas/status GETs and around relationship saves. It records the first divergence for every saved assessment,
+including historical/revoked ones: reverting inputs or undoing revocation cannot resurrect it. A transient edit
+that is made and reverted while no server observes it cannot be reconstructed from files alone. No new agent
+writer is introduced; the CLI read does not persist observations. On observing sources, the server also remembers
+previously unseen queue-source identities in `idea-matches.yaml` so deleted queues remain visible, without accepting
+any suggestion or changing a source override.
+
+Entry `implementation` is `unconfirmed|partial|full|needs_review|suspended`; `assessment` retains the prior
+explanation and snapshot. `stale_reasons`, `diagnostics`, full-confirmation `blockers`, and coverage `caveats` are
+separate. `work.state` is `none|linked|some_finished|finished`, with each queue's exact status (or `missing`) and
+issues. Cancelled work is retained and never counted finished. Notes exclude dropped/replaced dates from progress,
+roll up the least assessment (unconfirmed before partial before full), and retain a separate attention count even
+when all dates are inactive. No dated entries: `worked_out`; no active dates: Dropped if any, otherwise Replaced.
+
+`nexus ideas status` prints the same effective statuses as JSON, read-only from files. There is no CLI status-write
+operation. Partner/orchestrator briefings and conversation handoffs require this effective state together with the
+notes; they do not treat Markdown markers as the only authority or work completion as confirmation. IC4 supplies
+the new dashboard controls and renders these fields.
 
 **Outcome excerpts (IC2).** Each existing queue reference in GET ideas carries `outcome`: `kind`
 (`queue-report|accepted-steps|unavailable`), `text`, `report` (project-relative full-report `path`, `available`, current

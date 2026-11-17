@@ -47,7 +47,7 @@ test("a Claude partner asks nothing and may write only in the notes folder", asy
     const allowed = argv.slice(argv.indexOf("--allowedTools") + 1);
     assert.deepEqual(allowed, [
       "Read", "Grep", "Glob",
-      ...["nexus status", "nexus help", "nexus tags", "git log", "git status", "git diff", "git show"].flatMap((p) => [`Bash(${p}:*)`, `PowerShell(${p}:*)`]),
+      ...["nexus status", "nexus ideas status", "nexus help", "nexus tags", "git log", "git status", "git diff", "git show"].flatMap((p) => [`Bash(${p}:*)`, `PowerShell(${p}:*)`]),
       "Edit(Dev/Concepts/Gameplay/**)", "Bash(nexus covers:*)", "PowerShell(nexus covers:*)", "WebSearch",
     ], "nexus status, nexus help (to read about Nexus), nexus tags (the areas for a note) and git's reading commands on Bash and PowerShell, writes only to the notes folder and, with nexus covers, its own events: no run can start, nothing else is writable");
     assert.equal(argv[argv.indexOf("--disallowedTools") + 1], "NotebookEdit,WebFetch", "no .nexus deny rules for a partner (those are the workers'); at the default web level no page fetching");
@@ -191,7 +191,11 @@ test("the hand-over instruction keeps to this conversation's topics and asks for
       .find((t) => t.startsWith("[Nexus] The user hands this conversation to the orchestrator"))!;
     assert.ok(sent.includes("Summarize only the topics discussed in this conversation, unless the user asked you to include others."), "the scope rule");
     assert.ok(sent.includes("another topic in the notes folder, even a related one, is not part of this hand-over: name its file at most, as 'see also', without its content."));
-    assert.ok(sent.includes("In every notes file only the Decided section holds decisions. Name the dates of the Decided entries you cover."), "the dates rule");
+    assert.ok(sent.includes("Name the dates of the Decided entries you cover."), "the dates rule");
+    assert.ok(sent.includes("Run nexus ideas status for the current effective state."));
+    assert.ok(sent.includes("effective user dispositions and assessment invalidations in .nexus/idea-statuses.yaml"));
+    assert.ok(sent.includes("Report conflicts; Open/Ideas remain undecided."));
+    assert.ok(sent.includes("does not approve or start a queue."));
     assert.ok(sent.includes("what was decided (only what the user decided), the open questions, the work you propose"), "the rest unchanged");
     assert.ok(sent.endsWith("Reply with the summary only."));
   } finally { stop(); delete process.env.FAKE_LOG; }

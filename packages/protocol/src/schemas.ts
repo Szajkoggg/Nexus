@@ -1371,6 +1371,29 @@ export const IdeaMatchesFile = z.object({
 });
 export type IdeaMatchesFile = z.infer<typeof IdeaMatchesFile>;
 
+/** Server-owned user decisions; notes and queue records remain immutable inputs. */
+const IdeaMarker = z.object({ dropped: z.object({ date: z.string(), why: z.string() }).optional(), replaced_by: z.string().optional() });
+export const IdeaAssessmentSnapshot = z.object({ content: z.string(), links: z.array(z.string()), evidence: z.string() });
+export type IdeaAssessmentSnapshot = z.infer<typeof IdeaAssessmentSnapshot>;
+export const IdeaStatusRecord = z.object({
+  ref: z.string().regex(NOTE_REF),
+  disposition: z.object({ state: z.enum(["active", "dropped", "replaced"]), target: z.string().optional(), marker: IdeaMarker }).optional(),
+  assessment: z.object({ id: z.string(), kind: z.enum(["partial", "full"]), at: Time, reason: z.string(),
+    evidence_refs: z.array(z.string()), caveat_reason: z.string().optional(), snapshot: IdeaAssessmentSnapshot }).optional(),
+});
+export type IdeaStatusRecord = z.infer<typeof IdeaStatusRecord>;
+export const IdeaStatusAction = z.object({
+  id: z.string(), request: z.string(), at: Time, actor: z.literal("user"), reason: z.string(), ref: z.string(),
+  operation: z.enum(["drop", "replace", "reopen", "partial", "confirm", "revoke", "keep", "adopt-marker", "undo"]),
+  undo: z.string().optional(), before: IdeaStatusRecord.nullable(), after: IdeaStatusRecord.nullable(),
+});
+export type IdeaStatusAction = z.infer<typeof IdeaStatusAction>;
+export const IdeaStatusesFile = z.object({
+  protocol: z.literal(1), records: z.array(IdeaStatusRecord).default([]), history: z.array(IdeaStatusAction).default([]),
+  invalidations: z.array(z.object({ assessment: z.string(), ref: z.string(), at: Time, reasons: z.array(z.string()) })).default([]),
+});
+export type IdeaStatusesFile = z.infer<typeof IdeaStatusesFile>;
+
 // ---------------------------------------------------------------- metrics.yaml (the project's metrics)
 
 /**

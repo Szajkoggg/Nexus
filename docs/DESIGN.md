@@ -2821,3 +2821,29 @@ fixtures only; subsequent IC steps implement the approved contract and update th
    send the dashboard's writes with a forged `Origin` ("An orchestrator on Codex can be kept to its drafts"). The
    orchestrator on Codex is built (queue OC), but the user does not switch to it until this is closed, in a queue of
    its own.
+
+## Ideas dispositions and assessment validity (IC3)
+
+The server owns `idea-statuses.yaml`; the partner remains the sole note writer. A dated entry has three independent
+axes: effective disposition, explicit user assessment and linked work. The original `built` compatibility field
+never becomes a full assessment. UI dispositions override their observed legacy markers; later marker edits are
+conflicts, with reasoned keep/adopt actions. Restoring the first override restores today's legacy fallback.
+
+Assessments retain complete normalized content and a deterministic work/evidence snapshot. Snapshot equality is
+intentionally stricter than human semantic equality. Source origins and link reasons do not enter the effective
+edge set. The existing queue/step derivation supplies acceptance, including provisional reviews, skipped work,
+reopened results and integration caveats; Ideas does not invent another acceptance state. A full assessment is
+blocked by unfinished work, missing targets or required merge/review, while cancellation and skipped steps require
+an explicit coverage explanation. No work at all requires an external evidence reference.
+
+Invalidation must survive a revert. The server records observed divergence for every assessment in current records
+and history, including ones temporarily revoked or suspended; undo cannot revive an assessment invalidated while
+it was hidden. Notes are watched with symlink following disabled after boundary validation. Reconciliation also runs
+on startup and before reads, and synchronously around link writes so quick remove/undo cannot hide the changed edge.
+Only observed states can be retained: edits reverted entirely while the server is offline leave no recoverable
+intermediate state. Source observations preserve missing queue identity without deciding a match. Status operations
+have revision/request-ID checks and compensating before/after history; they never alter a queue, run or start plan.
+
+The read-only `nexus ideas status` command gives agents the same effective state and conflicts as the API. The
+partner's and orchestrator's instructions now combine that state with dated note content. IC4 owns the controls,
+labels and filters; IC5 owns the new idea conversation and direct handoff workflow.

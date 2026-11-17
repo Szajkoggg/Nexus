@@ -9,6 +9,7 @@ import { noteRefIssue, noteRefs } from "./ideas.ts";
 import { type IdeaLinkAction, type IdeaLinkRecord, type IdeaMatchesFile } from "./schemas.ts";
 import { loadProjectState } from "./state.ts";
 import { now, type ProjectStore } from "./store.ts";
+import { reconcileIdeaStatuses } from "./idea-status-actions.ts";
 
 const Request = z.object({
   request_id: z.string().min(1).max(200), revision: z.string().min(1), reason: z.string().trim().min(1),
@@ -43,6 +44,7 @@ export function changeIdeaLinks(store: ProjectStore, input: unknown): IdeaLinkAc
     const previous = saved(file);
     if (previous) return previous;
     const state = loadProjectState(store);
+    reconcileIdeaStatuses(store, state);
     const notes = readNotes(state.project.root, state.project.conversations.notes_dir);
     const view = deriveIdeaLinks(file, state, notes);
     if (view.revision !== req.revision) throw new ActionError("Changed since you opened this; review the newer decision", 409);
@@ -121,6 +123,7 @@ export function changeIdeaLinks(store: ProjectStore, input: unknown): IdeaLinkAc
     const records = new Map(view.items.map((r) => [r.id, record(r)]));
     for (const c of changes) records.set(c.after.id, c.after);
     store.writeIdeaMatches({ ...file, records: [...records.values()], history: [...(file.history ?? []), action] });
+    reconcileIdeaStatuses(store, state);
     return action;
   } finally { closeSync(fd); unlinkSync(lock); }
 }

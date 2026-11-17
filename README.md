@@ -30,7 +30,10 @@ The reference labels describe syntax, including example/context references; they
 Matching decisions now retain history. If another save changed the relationships, refresh and review the new state
 before retrying; an old screen cannot silently overwrite it. Rejecting a historical match leaves an independent
 queue source intact. `nexus ideas matches` reads the effective origins and their missing-target diagnostics too;
-agents still cannot decide them. The expanded correction controls and outcome display follow in IC4.
+agents still cannot decide them. `nexus ideas status` reads effective dispositions, implementation assessments,
+conflicts and history as JSON. Finished linked work never confirms full implementation by itself. Server-owned
+user decisions and observed invalidations supplement the notes; agents must read both. The expanded correction
+and status controls and outcome display follow in IC4.
 
 **The web in Ideas.** Settings → "Ideas (conversations)" → **Web** (global, or the project's own): **off**, **web
 search** (the default: partners search and name their sources, but open no page) or **web search and reading pages**.

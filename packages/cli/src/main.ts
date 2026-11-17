@@ -14,7 +14,7 @@ import {
   lacksStaticAnalysis, projectStaticAnalysis, staticReminderDue,
   TemplateError, fillTemplate, filledTemplateYaml, parseEvery, MaintenanceMode, readTemplates, templateQueueId, unusableTemplate, type MergedTemplates,
   type PictureRole, type ReviewItem, type Role, type Runtime, type SessionFile,
-  noteRefIssue, parseNoteRef, readNotes, ideaMatches, ideaLinks, reportSourceHash,
+  noteRefIssue, parseNoteRef, readNotes, ideaMatches, ideaLinks, ideaStatuses, reportSourceHash,
 } from "@nexus/protocol";
 import { checkRules, describeRules } from "@nexus/protocol/rules";
 import { importMarkdownQueues } from "./import-md.ts";
@@ -52,6 +52,7 @@ Agent commands (session from NEXUS_SESSION or --session):
                     entries of the notes it passes on (the notes folder may be left out: tags.md#2026-11-14)
   nexus ideas matches                 the suggestions for matching earlier queues to the notes' entries, and the
                                       user's decisions (deciding is the user's, in the dashboard)
+  nexus ideas status                  effective dispositions, implementation assessments, conflicts and history (JSON; read only)
   nexus log <text> [--level info|warn|error]
   nexus answer <qid> <text> [--escalate [--recommend <option>]] [--continue|--wait]     (orchestrator only)
   nexus queue draft <file.yaml|->                                 (orchestrator only) create or change a queue
@@ -666,8 +667,9 @@ const commands: Record<string, () => void | Promise<void>> = {
   ideas() {
     const sub = args[1] ?? "matches";
     if (sub === "accept" || sub === "reject") throw new UsageError("accepting or rejecting a match of a queue to a note is the user's, in the dashboard (Ideas, Overview, To match)");
-    if (sub !== "matches") throw new UsageError("nexus ideas matches");
+    if (sub !== "matches" && sub !== "status") throw new UsageError("nexus ideas matches | status (user decisions are dashboard-only)");
     const st = store();
+    if (sub === "status") { console.log(JSON.stringify(ideaStatuses(st, loadProjectState(st)), null, 2)); return; }
     const items = ideaMatches(st, loadProjectState(st)).items;
     const open = items.filter((m) => !m.decision);
     console.log(`${items.length} suggestion(s) for ${new Set(items.map((m) => m.queue)).size} queue(s); ${open.length} wait for the user`);
