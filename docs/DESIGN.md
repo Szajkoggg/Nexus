@@ -2924,3 +2924,13 @@ The Node option must precede file patterns:
 appending it with `npm test -- --test-concurrency=4` did not apply the limit. No assertions, per-test timeouts,
 internal concurrency scenarios or repository runner configuration change; review reports retain the failed
 attempts alongside the final verification result.
+
+### Question navigation identity (QA1 finding)
+
+Waiting-list identity includes a question's qid, but the baseline navigation address carries only project,
+queue and step. StepDetail consequently chooses the first open question for its main answer form, even
+after the user clicked another question. Existing qid-based React and draft keys do not repair that earlier
+loss of identity. The API and inbox route the qid they receive correctly. Preserve explicit question identity
+through navigation and refresh; a generic step link can keep its first-open default. Do not infer current
+question state from historical prose. The original incident, isolated browser traces, separate desktop-option
+gap and smallest correction are documented in [the QA1 reproduction](qa/question-target-reproduction.md).
