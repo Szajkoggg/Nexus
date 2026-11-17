@@ -1117,6 +1117,8 @@ the chat or Ideas into a view switch on both layouts. So:
   a conversation open shows the list again.
 - **"Chat about this"** on a step shows Ideas and opens the conversation over it with the step still beside it
   (`openConversation`); Back closes the conversation, then the step.
+- The [CM1 proposal for conversation model and effort](ux/conversation-settings.md) puts both settings in one
+  editor inside the opened Ideas chat and applies a saved change at the next turn boundary.
 - A `?chat` or `?ideas` link, or a phone's entry in a window made wide, is read as its view (a phone's Waiting tab
   shows the chat).
 
