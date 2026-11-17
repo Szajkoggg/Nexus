@@ -37,10 +37,11 @@ export function StepDetail({ project, queue, step, onClose, of, qid }: PanelProp
   // A step of a finished or cancelled queue is only read: no level, note, message, review or answer (details.ts).
   const { readOnly, live, forOrchestrator, notesOpen, orchestratorAsks, reviewing, asking, questionFirst } = stepLayout(step, questions, phone, queue, qid);
   const selected = qid ? questions.find((q) => q.qid === qid) : undefined;
-  const selectedCard = useRef<HTMLDivElement>(null);
+  // On the desktop a linked question (#/…/<step>/<qid>) comes into view, with the step's wait line above it.
+  const questionTop = useRef<HTMLDivElement>(null);
   const waiting = <QuestionWait queue={queue} step={step.id} />;
   useEffect(() => {
-    if (!phone && qid) selectedCard.current?.scrollIntoView({ block: "start" });
+    if (!phone && qid) questionTop.current?.scrollIntoView({ block: "start" });
   }, [id, qid, phone]);
   const session = live ? project.sessions.find((s) => s.id === step.session) : undefined;
   // Review images open in the in-app viewer, a layer above the step (Back closes it); other items as links.
@@ -132,7 +133,7 @@ export function StepDetail({ project, queue, step, onClose, of, qid }: PanelProp
       {questionFirst
         ? <QuestionSheet key={`${id}/${asking!.qid}`} q={asking!} project={id} waiting={waiting}>{body}</QuestionSheet>
         : <PanelBody>
-          <div ref={selectedCard}>{waiting}</div>
+          <div ref={questionTop}>{waiting}</div>
           {qid && (selected
             ? <Question key={`${id}/${selected.qid}`} q={selected} project={id} readOnly={readOnly} />
             : <p role="status" className="text-sm text-fg-2">{t("details.question.unavailable")}</p>)}

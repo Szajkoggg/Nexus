@@ -1,5 +1,5 @@
-// Answering a question in the phone's question sheet and each desktop question's card. One hook (useAnswer) holds what they share: the draft, "the worker may go on", and
-// sending the answer.
+// Answering a question, in the two places that do it: the phone's question sheet and each desktop question's card.
+// One hook (useAnswer) holds what they share: the chosen option, the draft, whether the worker may go on, and sending.
 import { useRef, useState, type ReactNode } from "react";
 import { act, enc, type QuestionView } from "../../api.ts";
 import { answerText, questionState } from "../../details.ts";
@@ -10,6 +10,13 @@ import { ActionBar, Button, Markdown, PanelBody, StatusBadge, TEXTAREA, TimeAgo,
 import { usePage } from "../../page.ts";
 
 interface AnswerProps { q: QuestionView; project: string }
+
+/**
+ * An option the user tapped in a waiting card, for the question's sheet to open with it chosen (the user confirms
+ * there). Kept in memory until the sheet takes it.
+ */
+const chosen = new Map<string, string>();
+export const chooseOption = (project: string, qid: string, option: string) => { chosen.set(draftKey(project, "answer", qid), option); };
 
 /** One question's selection, words and send action. Callers key the form by project and qid. */
 function useAnswer({ q, project }: AnswerProps) {
@@ -46,7 +53,7 @@ function useAnswer({ q, project }: AnswerProps) {
 
 type Answer = ReturnType<typeof useAnswer>;
 
-/** The same single choice on the phone, in the action bar and in other questions' cards. */
+/** The options as a single choice, the user's words and the go-on box: the same on the phone's sheet and in a card. */
 function AnswerFields({ q, answer: a }: { q: QuestionView; answer: Answer }) {
   const options = q.options ?? [];
   return (
@@ -93,13 +100,6 @@ function AnswerFields({ q, answer: a }: { q: QuestionView; answer: Answer }) {
 function AnswerButton({ answer: a }: { answer: Answer }) {
   return <Button onClick={() => void a.submit()} disabled={!a.ready}>{a.busy ? t("ui.sending") : t("details.answer.button")}</Button>;
 }
-
-/**
- * An option the user tapped in a waiting card, for the question's sheet to open with it chosen (the user confirms
- * there). Kept in memory until the sheet takes it.
- */
-const chosen = new Map<string, string>();
-export const chooseOption = (project: string, qid: string, option: string) => { chosen.set(draftKey(project, "answer", qid), option); };
 
 /**
  * A question's sheet on the phone: the question first (what kind, whether the worker waits, since when), what the
