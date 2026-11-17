@@ -259,7 +259,7 @@ export function App() {
     {file && projectId && <Suspense fallback={null}><FileView key={`${file.path}:${file.line ?? ""}`} project={projectId} root={state?.project.root ?? ""} local={!!server?.local && !phone} path={file.path} line={file.line} onClose={() => nav.close("file")} /></Suspense>}
 
     {/* An opened note of the ideas overview (components/Ideas.tsx): where a step opens. */}
-    <Drawer open={!!note && !!projectId && !itemShown} onClose={() => nav.close("note")} beside={phone ? undefined : RAIL} panel>
+    <Drawer open={!!note && !!projectId && !itemShown && !isOpen(route.nav, "matching")} onClose={() => nav.close("note")} beside={phone ? undefined : RAIL} panel>
       {note && projectId && <NotePanel key={note} project={projectId} file={note} onClose={() => nav.close("note")} />}
     </Drawer>
 

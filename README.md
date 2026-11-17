@@ -18,22 +18,32 @@ summary leaves out are no longer in the partner's context. It waits for the part
 
 **What became of the ideas.** The Ideas panel's switch at the top (**Conversations** | **Overview**) shows the notes
 the partners keep, grouped by area and the project's sub-groups (each note's `**Area:**` line; a note without one is
-under Unsorted). Each dated decision of a note shows where it stands: **decided**, **handed over** (a hand-over named
-it), **queued** (a queue says it came from it), **built** (every such queue is done), or **dropped** / **replaced**; a
-note shows the least advanced of its decisions, and a note with nothing decided yet is **being worked out**. Filter by
-status, or by words. A click opens the note where a step opens: its Summary, each decision with its history (when it
-was handed over, queued, approved, started, built, with the commit), its open questions and its queues. Nobody keeps
-these by hand: they follow from the notes, the hand-overs and the queues' `source`. Queues from before `source`
-are matched once: **To match** atop the overview lists, queue by queue, the notes their own words name, with the
-sentence; accept or reject each (or the exact and dated ones at once), and an accepted one counts as the queue's source.
-The reference labels describe syntax, including example/context references; they do not prove implementation.
-Matching decisions now retain history. If another save changed the relationships, refresh and review the new state
-before retrying; an old screen cannot silently overwrite it. Rejecting a historical match leaves an independent
-queue source intact. `nexus ideas matches` reads the effective origins and their missing-target diagnostics too;
-agents still cannot decide them. `nexus ideas status` reads effective dispositions, implementation assessments,
-conflicts and history as JSON. Finished linked work never confirms full implementation by itself. Server-owned
-user decisions and observed invalidations supplement the notes; agents must read both. The expanded correction
-and status controls and outcome display follow in IC4.
+under Unsorted). Each dated decision separates its disposition, linked work and your implementation assessment.
+**Linked work finished** means the associated work finished; full implementation still needs your explicit review
+of the entire date. Old **built** data does not supply that confirmation. Filters and counts use the same effective
+state as the entry, including **Needs attention**. The overview keeps its search, filter and scroll position on Back.
+
+Open a note for **Summary**, expanded **Open** questions, **Decided** dates and a closed **Related work** section.
+Each date has **Change status** (or **Review implementation**) and **History**. You can drop, replace, reopen,
+assess partial/full implementation, revoke an assessment and undo an action with a reason. A replacement selects
+an existing note/date. These decisions do not start, stop or approve queues, and do not edit the note. Changes to
+the dated decision, effective links or accepted work make earlier assessments need review; Summary/Open edits
+alone do not. The note shows the least advanced active date; previous decisions and handovers remain in history.
+Expand Related work for short, explicitly scoped outcome excerpts and **Full report**, with provenance below them.
+An outdated or unverifiable report excerpt is labelled; completion and confirmation do not prove deployment.
+
+**Manage links** is always available on the overview and note, even with no pending suggestions. Search for a
+queue or note, add a missing link to a selected date, decide a historical suggestion, change its target or remove
+it. Each operation affects one origin: rejecting a historical match leaves an independent queue source intact;
+use **Ignore source** or **Correct source** for that origin. **Correction history** records before/after, reason
+and undo. Missing targets retain their identity and a visible diagnostic. Reference labels describe syntax, not
+proof of implementation. A failed save retains your draft; **Retry the same save** is safe after an uncertain
+response. **Refresh and review** loads concurrent changes before a new decision.
+
+The [tested MT/IO/ST2 correction guide](docs/ux/ideas-corrections-guide.md) identifies the exact origins and dates
+to review; it changes no real data. `nexus ideas matches` and `nexus ideas status` let agents read effective links,
+dispositions, assessments, conflicts and history as JSON. Server-owned user decisions supplement the note;
+agents read both and cannot make those decisions. Direct idea chat and handoff controls follow in IC5.
 
 **The web in Ideas.** Settings → "Ideas (conversations)" → **Web** (global, or the project's own): **off**, **web
 search** (the default: partners search and name their sources, but open no page) or **web search and reading pages**.

@@ -447,11 +447,13 @@ export function CloseButton({ onClose, className = "" }: { onClose: () => void; 
  * are full-screen sheets, its top row is ‹ (back to what was under the sheet), where it is, its place among what waits
  * ("1 of 6") and ✕; `bare` leaves the title and status to the body (a question sheet puts the question first).
  */
-export function PanelHeader({ where, title, status, onClose, of, bare }: {
+export function PanelHeader({ where, title, status, onClose, of, bare, wrap }: {
   where: ReactNode; title: ReactNode; status?: ReactNode; onClose: () => void;
   /** Where it stands among what waits ("2 of 6"). */
   of?: string;
   bare?: boolean;
+  /** Notes retain full context labels and keep the close control inside the header's measured bounds. */
+  wrap?: boolean;
 }) {
   const phone = usePhone();
   if (phone) {
@@ -461,7 +463,7 @@ export function PanelHeader({ where, title, status, onClose, of, bare }: {
           <button onClick={onClose} aria-label={t("common.back")} className="grid h-11 w-11 shrink-0 place-items-center rounded-md text-fg-2 hover:bg-surface-3 hover:text-fg">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
           </button>
-          <div className="min-w-0 flex-1 truncate text-sm text-fg-2">{where}</div>
+          <div className={`min-w-0 flex-1 text-sm text-fg-2 ${wrap ? "break-words" : "truncate"}`}>{where}</div>
           {of && <span className="shrink-0 whitespace-nowrap px-1 text-sm text-fg-3">{of}</span>}
           <CloseButton onClose={onClose} />
         </div>
@@ -478,7 +480,7 @@ export function PanelHeader({ where, title, status, onClose, of, bare }: {
     <header className="shrink-0 border-b border-line px-5 pb-3 pt-3 sm:px-6">
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1 pt-1.5 text-xs text-fg-3">{where}{of && <span className="ml-2 whitespace-nowrap text-fg-2">· {of}</span>}</div>
-        <CloseButton onClose={onClose} className="-mr-2" />
+        <CloseButton onClose={onClose} className={wrap ? "" : "-mr-2"} />
       </div>
       <h2 className="mt-0.5 text-xl font-semibold text-fg">{title}</h2>
       {status && <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-fg-3">{status}</div>}

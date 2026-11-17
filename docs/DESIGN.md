@@ -2847,3 +2847,28 @@ have revision/request-ID checks and compensating before/after history; they neve
 The read-only `nexus ideas status` command gives agents the same effective state and conflicts as the API. The
 partner's and orchestrator's instructions now combine that state with dated note content. IC4 owns the controls,
 labels and filters; IC5 owns the new idea conversation and direct handoff workflow.
+
+## Ideas correction controls (IC4)
+
+The overview and entry consume the same server `effective` state, never interpreting legacy `built` as a user
+assessment. The note roll-up and Needs attention count come from the server; the pure filter helper selects those
+same dated entries. Open sits below Summary and above Decided, with Related work collapsed. Work excerpts retain
+their scope and report freshness; provenance and historical evidence are secondary details. Manage links remains
+available independently of pending counts and even before the first match decision.
+
+Relationship forms select an origin, not a whole queue, and preview the exact date being changed. Queue and dated
+decision pickers are searchable and show the complete selected text. Status forms act on one complete date. Each
+draft pins the read revision, keeps its fields across errors and explicit refresh, and retries an uncertain write
+with the same request ID. Saving waits for the refreshed Ideas read; failure to read after an acknowledged write
+is labelled separately from a failed write. Undo uses the API's compensating actions with its concurrency checks.
+
+The note and dated status form are navigation layers; Back from the manager or a work/report returns to the note.
+The overview's filter, search and scroll position survive those transitions and reload in this browser session.
+The note header opts into wrapping and keeps its close control inside its measured bounds. Titles, questions and
+action labels are not clamped. The capture fixture clears only its own stored list position for reproducible views.
+
+`scripts/verify-ideas-ui.ts` drives the actual dashboard with the capture browser and layout-faults engine against
+temporary projects. It covers the correction guide, atomic replacement/undo, accepted/rejected undo, zero-pending
+reopening, a project never matched, an uncertain response after a committed save, date-specific confirmation and
+stale drafts after a concurrent note change. It verifies all 12 agreed view/size combinations and initial Open
+visibility. The UI keeps chat/handoff for IC5, including the accepted always-new-chat rule.

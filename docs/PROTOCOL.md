@@ -1680,7 +1680,7 @@ suggestions, derived on each request from its title, description and step goals,
 `<notes folder>/<file>.md` (a note; the README and missing files skipped) with `#<date>` of one of its entries is
 `exact`; else the dates of its entries in the same sentence are `dated` (one each); else its latest entry dated on or
 before the queue's creation is `file`. One suggestion per queue and entry, the strongest kind, with the sentence it
-came from; cancelled queues get none. The user decides in the dashboard (Ideas, Overview, "To match"): accept, reject,
+came from; cancelled queues get none. The user decides in the dashboard (Ideas, Overview, "Manage links"): accept, reject,
 or take back; the decisions go to `.nexus/idea-matches.yaml`, written only by the server from the user's request:
 
 ```yaml

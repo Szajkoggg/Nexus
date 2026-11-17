@@ -1,0 +1,38 @@
+seed: scripts/capture/seed-ideas-ui-review.ts
+views:
+  - key: ideas-matching-correction@1440
+    route: "#/demo"
+    script: scripts/capture/reset-ideas.js
+    actions: &correction
+      - click: Ideas
+      - click: Overview
+      - click: Manage links
+      - type: { into: 'input[aria-label="Find a queue or note"]', text: MT }
+      - click: Change target
+      - type: { into: '[data-link-form] select', text: 'docs/ideas/queue-templates.md#2026-11-15' }
+      - type: { into: '[data-link-form] textarea', text: 'The notes-maintenance decision is in queue-templates, not the umbrella note.' }
+      - scroll: Manage links
+  - key: ideas-matching-correction@492
+    route: "#/demo"
+    script: scripts/capture/reset-ideas.js
+    actions: *correction
+  - key: ideas-matching-correction@390
+    route: "#/demo"
+    script: scripts/capture/reset-ideas.js
+    actions: *correction
+  - key: ideas-entry-status@1440
+    route: "#/demo"
+    script: scripts/capture/reset-ideas.js
+    actions: &status
+      - click: Ideas
+      - click: Overview
+      - click: Chat improvements
+      - click: Review implementation
+  - key: ideas-entry-status@492
+    route: "#/demo"
+    script: scripts/capture/reset-ideas.js
+    actions: *status
+  - key: ideas-entry-status@390
+    route: "#/demo"
+    script: scripts/capture/reset-ideas.js
+    actions: *status

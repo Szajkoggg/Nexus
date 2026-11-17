@@ -45,7 +45,7 @@ export const isOpen = (nav: Nav, kind: string) => nav.layers.some((x) => kindOf(
 /** A hash with a queue in it has the queue or step drawer open. */
 
 /** Layers that belong to another and close with it: a conversation in the Ideas panel, an image of a step. */
-const PARENT: Record<string, string> = { conversation: "ideas", viewer: "item" };
+const PARENT: Record<string, string> = { conversation: "ideas", viewer: "item", "idea-status": "note" };
 const belongsTo = (layer: Layer, kind: string) => kindOf(layer) === kind || PARENT[kindOf(layer)] === kind;
 
 /** Pushes layers one by one from `at` (the drawer at `hash`, the others where they stand), as steps. */

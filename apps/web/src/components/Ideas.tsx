@@ -3,35 +3,29 @@
 // entries' histories, its open questions and its queues. The derivation is the server's (GET /api/projects/:id/ideas,
 // @nexus/protocol ideas.ts); the notes are only read. A note opens as the layer note:<file>: on a desktop where a step
 // opens (in the rail's place), on the phone over the list.
-import { useRef, useState, type ReactNode } from "react";
-import type { HistoryItem, IdeaEntryView, IdeaMatchesResponse, IdeaNoteView, IdeasResponse, MatchItem, TopicStatus } from "@nexus/protocol/ideas";
-import { act, projectUrl, useAction, useQuery } from "../api.ts";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import type { HistoryItem, IdeaEntryView, IdeaNoteView, IdeasResponse } from "@nexus/protocol/ideas";
+import { projectUrl, useQuery } from "../api.ts";
 import { formatClock, formatDate, formatDay, rich, t, type Key } from "../i18n.ts";
-import { groupByArea, filterCounts, shownNotes, IDEA_FILTERS, type IdeaFilter, type ShownNote } from "../ideasView.ts";
+import { groupByArea, filterCounts, shownNotes, dispositionOf, IDEA_FILTERS, type IdeaFilter, type ShownNote } from "../ideasView.ts";
 import { layerValue } from "../layers.ts";
 import { nav, useNav } from "../nav.ts";
 import { usePage } from "../page.ts";
 import { ActionBar, Button, PanelBody, PanelHeader, ReadError, statusWord } from "./ui.tsx";
 
-/** The colour of each status: a dot and a word (an open ring for a topic still being worked out). */
-const TONE: Record<TopicStatus, { dot: string; text: string }> = {
-  worked_out: { dot: "border border-fg-3", text: "text-fg-3" },
-  decided: { dot: "bg-info", text: "text-info" },
-  handed_over: { dot: "bg-review", text: "text-review" },
-  queued: { dot: "bg-accent", text: "text-accent" },
-  built: { dot: "bg-ok", text: "text-ok" },
-  dropped: { dot: "bg-fg-3", text: "text-fg-3" },
-  replaced: { dot: "bg-fg-3", text: "text-fg-3" },
-};
+import { EntryState, IdeaStatusForm, IdeaStatusHistory } from "./IdeaStatus.tsx";
+import { ideaButton, ideaCard } from "./IdeaForms.tsx";
+export { IdeasMatching } from "./IdeaLinks.tsx";
 
-function IdeaStatus({ status, className = "" }: { status: TopicStatus; className?: string }) {
-  const tone = TONE[status];
-  return (
-    <span className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap text-xs ${tone.text} ${className}`}>
-      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tone.dot}`} />
-      {t(`ideas.status.${status}` as Key)}
-    </span>
-  );
+function NoteState({ note }: { note: IdeaNoteView }) {
+  const value = note.implementation ?? (note.entries.length ? "unconfirmed" : "worked_out");
+  const key = value === "worked_out" ? "ideas.status.worked_out" : value === "unconfirmed" ? "ideas.notConfirmed" : `ideas.${value}`;
+  return <span className="text-xs text-fg-3">{t(key as Key)}{note.needs_attention ? ` / ${t("ideas.attention", { count: note.needs_attention })}` : ""}</span>;
+}
+
+function overviewPlace(project: string): { filter: IdeaFilter; text: string; scroll: number } {
+  try { return { filter: "all", text: "", scroll: 0, ...JSON.parse(sessionStorage.getItem(`ideas-overview:${project}`) ?? "{}") }; }
+  catch { return { filter: "all", text: "", scroll: 0 }; }
 }
 
 /** "14 Nov" for an entry's date (a day, read as local). */
@@ -68,37 +62,46 @@ export function IdeasSwitch({ view, onView, wide }: { view: IdeasPanelView; onVi
 export function IdeasOverview({ project, areas, phone, top }: { project: string; areas: readonly string[]; phone?: boolean; top?: ReactNode }) {
   const { data, error } = useIdeas(project);
   const open = layerValue(useNav(), "note");
-  const [filter, setFilter] = useState<IdeaFilter>("all");
-  const [text, setText] = useState("");
+  const [filter, setFilter] = useState<IdeaFilter>(() => overviewPlace(project).filter);
+  const scroll = useRef<HTMLDivElement>(null);
+  const restored = useRef(false);
+  const [text, setText] = useState(() => overviewPlace(project).text);
   const [folded, setFolded] = useState<ReadonlySet<string>>(new Set());
+  useLayoutEffect(() => {
+    if (data && !restored.current && scroll.current) { scroll.current.scrollTop = overviewPlace(project).scroll; restored.current = true; }
+  }, [data, project]);
+  const remember = (patch: object) => sessionStorage.setItem(`ideas-overview:${project}`, JSON.stringify({ ...overviewPlace(project), ...patch }));
   const counts = data ? filterCounts(data.notes) : undefined;
   const groups = data ? groupByArea(shownNotes(data.notes, filter, text), areas) : [];
   const fold = (key: string) => setFolded((f) => { const n = new Set(f); if (n.has(key)) n.delete(key); else n.add(key); return n; });
   return (
-    <div className={`scroll-thin min-h-0 flex-1 overflow-y-auto ${phone ? "px-3 pb-6 pt-3" : "px-6 pb-8 pt-4"}`} data-ideas-overview>
+    <div ref={scroll} onScroll={(e) => remember({ scroll: e.currentTarget.scrollTop })} className={`scroll-thin min-h-0 flex-1 overflow-y-auto ${phone ? "px-3 pb-6 pt-3" : "px-6 pb-8 pt-4"} [overflow-wrap:anywhere]`} data-ideas-overview>
       {top}
-      {!data && error && <ReadError error={error} what={t("ideas.readError")} />}
+      {error && <ReadError error={error} what={t("ideas.readError")} />}
       {data && data.notes_dir === null && <p className="text-sm text-fg-3">{t("ideas.noNotesDir")}</p>}
       {data && data.notes_dir !== null && data.notes.length === 0 && (
         <p className="text-sm text-fg-3">{rich("ideas.noNotes", { folder: <code key="folder">{data.notes_dir}</code> })}</p>
       )}
+      <div className="my-3 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs text-fg-3">{data?.to_match.suggestions ? t("ideas.pendingCount", { count: data.to_match.suggestions }) : t("ideas.noPending")}</p>
+        <button onClick={() => nav.open("matching")} className={ideaButton}>{t("ideas.manage")}</button>
+      </div>
       {data && counts && data.notes.length > 0 && <>
-        <div className={`mb-3 flex items-center gap-2.5 ${phone ? "scroll-thin -mx-3 overflow-x-auto px-3 pb-1" : "flex-wrap"}`}>
-          <div className="flex shrink-0 overflow-hidden rounded-lg border border-line-strong" role="group" aria-label={t("ideas.filterLabel")}>
-            {IDEA_FILTERS.filter((f) => f === "all" || counts[f] > 0).map((f) => (
-              <button key={f} onClick={() => setFilter(f)} aria-pressed={filter === f}
+        <div className={`mb-3 flex items-center gap-2.5 flex-wrap`}>
+          <div className="flex flex-wrap gap-1" role="group" aria-label={t("ideas.filterLabel")}>
+            {IDEA_FILTERS.filter((f) => f === "all" || f === "attention" || counts[f] > 0).map((f) => (
+              <button key={f} onClick={() => { setFilter(f); remember({ filter: f }); }} aria-pressed={filter === f}
                 className={filterButton(filter === f)}>
                 {t(`ideas.filter.${f}`)}<span className={`ml-1.5 font-normal ${filter === f ? "text-fg-2" : "text-fg-3"}`}>{counts[f]}</span>
               </button>
             ))}
           </div>
           {!phone && <span className="flex-1" />}
-          {!phone && (
-            <input value={text} onChange={(e) => setText(e.target.value)} placeholder={t("ideas.filterText")} aria-label={t("ideas.filterText")}
-              className="w-40 min-w-0 rounded-lg border border-line-strong bg-canvas px-2.5 py-1 text-xs text-fg placeholder:text-fg-3" />
+          {(
+            <input value={text} onChange={(e) => { setText(e.target.value); remember({ text: e.target.value }); }} placeholder={t("ideas.filterText")} aria-label={t("ideas.filterText")}
+              className="w-full min-w-0 rounded-lg border border-line-strong bg-canvas px-2.5 py-1 text-xs text-fg placeholder:text-fg-3" />
           )}
         </div>
-        {data.to_match.suggestions > 0 && <ToMatchBanner suggestions={data.to_match.suggestions} queues={data.to_match.queues} />}
         {groups.length === 0 && <p className="text-sm text-fg-3">{t("ideas.nothingShown")}</p>}
         {groups.map((a) => {
           const key = a.area ?? "";
@@ -139,11 +142,11 @@ function NoteRow({ shown, on, phone }: { shown: ShownNote; on: boolean; phone?: 
     <button onClick={() => nav.open(`note:${note.file}`)} aria-current={on || undefined}
       className={`block w-full border-t border-line px-3.5 py-2 text-left first:border-t-0 hover:bg-surface-2 ${on ? "bg-accent/10 shadow-[inset_3px_0_0_var(--color-accent)]" : ""}`}>
       <span className={`flex items-baseline gap-2.5 ${phone ? "flex-wrap" : ""}`}>
-        <span className={`truncate text-[13.5px] font-semibold text-fg ${phone ? "min-w-0 flex-1" : "shrink-0"}`}>{note.title}</span>
-        {note.summary && <span className={`truncate text-xs text-fg-3 ${phone ? "order-3 basis-full" : "min-w-0 flex-1"}`}>{note.summary}</span>}
+        <span className="min-w-0 break-words text-[13.5px] font-semibold text-fg">{note.title}</span>
+        {note.summary && <span className={`text-xs text-fg-3 ${phone ? "order-3 basis-full" : "min-w-0 flex-1"}`}>{note.summary}</span>}
         {!note.summary && !phone && <span className="flex-1" />}
         {note.open > 0 && <span className="shrink-0 rounded border border-warn/45 px-1.5 text-[11px] font-semibold text-warn">{t("ideas.open", { count: note.open })}</span>}
-        <IdeaStatus status={note.status} />
+        <NoteState note={note} />
       </span>
       {entries.map((e) => <EntryLine key={e.date} e={e} phone={phone} />)}
       {note.entries.length === 0 && (
@@ -154,15 +157,15 @@ function NoteRow({ shown, on, phone }: { shown: ShownNote; on: boolean; phone?: 
 }
 
 function EntryLine({ e, phone }: { e: IdeaEntryView; phone?: boolean }) {
-  const off = e.status === "dropped" || e.status === "replaced";
+  const off = dispositionOf(e) !== "active";
   const q = e.queues[0];
   return (
-    <span className={`mt-1 grid items-baseline gap-2.5 text-xs ${phone ? "grid-cols-[2.75rem_minmax(0,1fr)_auto]" : "grid-cols-[3.25rem_minmax(0,1fr)_auto_8rem] pl-3"}`}>
+    <span className={`mt-1 grid items-baseline gap-2.5 text-xs ${phone ? "grid-cols-[2.75rem_minmax(0,1fr)]" : "grid-cols-[3.25rem_minmax(0,1fr)] pl-3"}`}>
       <span className={`tabular-nums text-fg-3 ${off ? "opacity-60" : ""}`}>{day(e.date)}</span>
-      <span className={`truncate text-fg-2 ${off ? "opacity-60" : ""}`}>{e.lead}<span className="text-fg-3"> · {e.decisions}</span></span>
-      <IdeaStatus status={e.status} />
+      <span className={`text-fg-2 ${off ? "opacity-60" : ""}`}>{e.lead}<span className="text-fg-3"> · {e.decisions}</span></span>
+      <span className="col-span-2"><EntryState entry={e} /></span>
       {!phone && (
-        <span className="truncate font-mono text-[11.5px] text-accent">
+        <span className="col-span-2 font-mono text-[11.5px] text-accent">
           {q ? <>{e.queues.map((x) => x.id).join(", ")}<span className="font-sans text-fg-3"> · {statusWord(q.status)}</span></> : e.replaced_by ? <span className="font-sans text-fg-3">→ {e.replaced_by.replace(/^.*\//, "")}</span> : null}
         </span>
       )}
@@ -175,76 +178,83 @@ function EntryLine({ e, phone }: { e: IdeaEntryView; phone?: boolean }) {
 /** An opened note: its Summary, its entries with their histories, its open questions and its queues. */
 export function NotePanel({ project, file, onClose }: { project: string; file: string; onClose: () => void }) {
   const { data, error } = useIdeas(project);
+  const statusLayer = layerValue(useNav(), "idea-status");
+  let selection: [string, string?] | undefined;
+  try { selection = statusLayer ? JSON.parse(statusLayer) : undefined; } catch { /* A stale or malformed navigation layer has no selected date. */ }
   const note = data?.notes.find((n) => n.file === file);
-  const where = note ? (note.area ? `${note.area_from === "queues" ? t("ideas.areaFromQueues", { area: note.area }) : note.area}${note.group ? ` / ${note.group}` : ""}` : t("ideas.unsorted")) : "";
+  const entry = note?.entries.find((e) => e.ref === selection?.[0]);
+  const undo = data?.statuses.history.find((a) => a.id === selection?.[1]);
+  const [saved, setSaved] = useState(false);
+  const where = note?.area ? `${note.area}${note.group ? ` / ${note.group}` : ""}` : t("ideas.unsorted");
   return <>
-    <PanelHeader where={where} title={note?.title ?? file.replace(/^.*\//, "")} onClose={onClose}
-      status={<>
-        <button onClick={() => nav.file(file)} className="truncate font-mono text-[11.5px] text-accent hover:underline">{file}</button>
-        {note && <IdeaStatus status={note.status} />}
-      </>} />
+    <PanelHeader wrap where={where} title={entry ? t("ideas.reviewDecision") : note?.title ?? file.replace(/^.*\//, "")} onClose={statusLayer ? () => nav.close("idea-status") : onClose}
+      status={<button onClick={() => nav.file(file)} className="break-all text-left font-mono text-[11.5px] text-accent hover:underline">{file}</button>} />
     <PanelBody>
-      {!data && error && <ReadError error={error} what={t("ideas.readError")} />}
+      {error && <ReadError error={error} what={t("ideas.readError")} />}
       {data && !note && <p className="text-sm text-fg-3">{t("ideas.notFound")}</p>}
-      {note && <NoteBody project={project} note={note} />}
+      {saved && !entry && <p role="status" className="mb-3 text-xs text-ok">{t("ideas.saved")}</p>}
+      {entry && data ? <div className="space-y-4"><IdeaStatusForm key={statusLayer} project={project} entry={entry} data={data} undo={undo}
+        onSaved={() => { setSaved(true); nav.close("idea-status"); }} onCancel={() => nav.close("idea-status")} />
+        <IdeaStatusHistory data={data} entry={entry} onUndo={(action) => nav.open(`idea-status:${JSON.stringify([entry.ref, action.id])}`)} /></div>
+        : note && data && <NoteBody project={project} note={note} data={data} />}
     </PanelBody>
-    <ActionBar primary={<Button variant="quiet" onClick={() => nav.file(file)}>{t("ideas.openFile")}</Button>} />
+    <ActionBar primary={<Button variant="quiet" onClick={() => nav.open("matching")}>{t("ideas.manage")}</Button>}
+      secondary={<Button variant="quiet" onClick={() => nav.file(file)}>{t("ideas.openFile")}</Button>} />
   </>;
 }
 
-function NoteBody({ project, note }: { project: string; note: IdeaNoteView }) {
+function NoteBody({ project, note, data }: { project: string; note: IdeaNoteView; data: IdeasResponse }) {
   const label = "mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-fg-3";
-  return (
-    <div className="space-y-4">
-      {note.summary && <p className="text-[13px] leading-relaxed text-fg-2">{note.summary}</p>}
-      {note.entries.length > 0 && (
-        <div>
-          <div className={label}>{t("ideas.entries", { count: note.entries.length })}</div>
-          <div className="space-y-2">{[...note.entries].reverse().map((e) => <EntryCard key={e.date} e={e} />)}</div>
-        </div>
-      )}
-      {note.questions.length > 0 && (
-        <div>
-          <div className={label}>{t("ideas.questions", { count: note.questions.length })}</div>
-          <ul className="space-y-1">
-            {note.questions.map((q, i) => <li key={i} className="relative pl-3.5 text-[12.5px] text-fg-2"><span className="absolute left-0 font-bold text-warn">?</span>{q}</li>)}
-          </ul>
-        </div>
-      )}
-      {note.queues.length > 0 && (
-        <div>
-          <div className={label}>{t("ideas.queues")}</div>
-          {note.queues.map((q) => (
-            <button key={q.id} onClick={() => nav.closeThenItem("note", project, q.id)} className="flex w-full items-baseline gap-2 py-0.5 text-left text-[12.5px] hover:text-fg">
-              <span className="font-mono text-[11.5px] text-accent">{q.id}</span>
-              <span className="min-w-0 flex-1 truncate text-fg-2">{q.title}</span>
-              <span className={`shrink-0 text-xs ${q.status === "done" ? "text-ok" : q.status === "cancelled" ? "text-fg-3" : "text-accent"}`}>{statusWord(q.status)}</span>
-            </button>
-          ))}
-        </div>
-      )}
-      {note.ideas > 0 && <p className="text-xs text-fg-3">{t("ideas.ideasInFile", { count: note.ideas })}</p>}
-    </div>
-  );
+  return <div className="space-y-4 [overflow-wrap:anywhere]" data-idea-note>
+    {note.summary && <section data-box="Summary"><h3 className={label}>{t("ideas.summary")}</h3><p className="text-[13px] leading-relaxed text-fg-2">{note.summary}</p></section>}
+    <section data-box="Open" data-idea-open><h3 className={label}>{t("ideas.questions", { count: note.questions.length })}</h3>
+      {note.questions.length ? <ul className="list-disc space-y-1 pl-4 text-[12.5px] text-fg-2">{note.questions.map((q, i) => <li key={i}>{q}</li>)}</ul> : <p className="text-xs text-fg-3">{t("ideas.noQuestions")}</p>}
+    </section>
+    {note.entries.length > 0 && <section><h3 className={label}>{t("ideas.decidedDates", { count: note.entries.length })}</h3>
+      <div className="space-y-2">{[...note.entries].reverse().map((e) => <EntryCard key={e.date} e={e} data={data} />)}</div></section>}
+    <RelatedWork project={project} note={note} data={data} />
+    {note.ideas > 0 && <p className="text-xs text-fg-3">{t("ideas.ideasInFile", { count: note.ideas })}</p>}
+  </div>;
 }
 
-function EntryCard({ e }: { e: IdeaEntryView }) {
-  const others = e.headings.filter((h) => h !== e.date);
-  return (
-    <div className="rounded-lg border border-line bg-canvas px-3 py-2">
-      <div className="flex items-baseline gap-2">
-        <b className="text-[13px] font-semibold text-fg">{formatDayYear(e.date)}</b>
-        <span className="text-xs text-fg-3">{e.headings.length > 1 ? `${t("ideas.headings", { count: e.headings.length })} · ` : ""}{t("ideas.decisions", { count: e.decisions })}</span>
-        <span className="flex-1" />
-        <IdeaStatus status={e.status} />
-      </div>
-      {e.lead && <p className="mt-0.5 text-[12.5px] text-fg-2">{e.lead}{others.length > 0 && <span className="text-fg-3"> · {others.join(" · ")}</span>}</p>}
-      {e.dropped?.why && <p className="mt-0.5 text-xs text-fg-3">{e.dropped.why}</p>}
-      <ol className="relative mt-1.5 before:absolute before:bottom-1.5 before:left-[3px] before:top-1.5 before:w-px before:bg-line-strong">
-        {e.history.map((h, i) => <HistoryLine key={i} h={h} />)}
-      </ol>
-    </div>
-  );
+function EntryCard({ e, data }: { e: IdeaEntryView; data: IdeasResponse }) {
+  const change = (action?: string) => nav.open(`idea-status:${JSON.stringify([e.ref, action])}`);
+  return <article className={ideaCard} data-box={`Decision ${e.date}`} data-decision={e.ref}>
+    <div className="flex flex-wrap items-baseline justify-between gap-2"><b className="text-[13px]">{formatDayYear(e.date)}</b><EntryState entry={e} compact /></div>
+    <p className="text-[12.5px] text-fg-2">{e.lead} / {t("ideas.decisions", { count: e.decisions })}</p>
+    <EntryState entry={e} />
+    {e.effective?.diagnostics.map((d) => <p key={d} className="text-xs text-warn">{d}</p>)}
+    <div className="flex flex-wrap gap-3 text-xs"><button className="text-accent underline" onClick={() => change()}>{t(e.effective?.work.state === "finished" ? "ideas.reviewImplementation" : "ideas.changeStatus")}</button>
+      <details className="min-w-0 flex-1"><summary className="text-accent">{t("ideas.history")}</summary>
+        <ol className="mt-2 space-y-1">{e.history.map((h, i) => <HistoryLine key={i} h={h} />)}</ol>
+        {e.effective && <IdeaStatusHistory data={data} entry={e} onUndo={(action) => change(action.id)} />}
+      </details></div>
+    <details className="text-xs text-fg-3"><summary>{t("ideas.decisionText")}</summary><pre className="mt-2 whitespace-pre-wrap font-sans leading-relaxed">{e.content}</pre></details>
+  </article>;
+}
+
+function RelatedWork({ project, note, data }: { project: string; note: IdeaNoteView; data: IdeasResponse }) {
+  const links = data.links.items.filter((r) => r.effective && note.entries.some((e) => e.ref === r.ref));
+  const ids = [...new Set(links.map((r) => r.queue))];
+  return <details className="border-t border-line pt-3" data-related-work><summary className="text-sm font-semibold">{t("ideas.related", { count: ids.length })}</summary>
+    <div className="mt-3 space-y-3">{ids.map((id) => {
+      const q = note.queues.find((q) => q.id === id), origins = links.filter((r) => r.queue === id), outcome = q?.outcome;
+      return <article key={id} className={ideaCard}><button className="text-left text-sm font-semibold text-accent" disabled={!q} onClick={() => nav.item(project, id)}>{id} / {q?.title ?? origins[0]?.title}</button>
+        <p className="text-xs text-fg-3">{q ? statusWord(q.status) : t("ideas.link.missing")}</p>
+        <p className="text-[13px] leading-relaxed">{outcome?.text ?? t("ideas.reportUnavailable")}</p>
+        {outcome && outcome.report.source_status !== "current" && outcome.kind === "queue-report" && <p className="text-xs text-warn">{t("ideas.reportSource", { status: outcome.report.source_status })}</p>}
+        {outcome && <p className="text-xs text-fg-3">{outcome.kind === "queue-report" ? t("ideas.reportScope") : outcome.kind === "accepted-steps" ? t("ideas.stepsScope", { sampled: outcome.sampled_steps, total: outcome.substantive_steps }) : ""}</p>}
+        {q && <button className="text-xs text-accent underline" onClick={() => outcome?.report.available ? nav.file(outcome.report.path) : nav.item(project, id)}>{t("ideas.report")}</button>}
+        {outcome && <details className="text-xs text-fg-3"><summary>{t("ideas.acceptedEvidence")}</summary>
+          <p className="mt-2">{t("ideas.reportSource", { status: outcome.report.source_status })}</p>
+          {outcome.warnings.map((w) => <p key={w} className="mt-1 text-warn">{w}</p>)}
+          {outcome.accepted.map((a) => <div key={a.event} className="mt-3"><button className="text-accent underline" onClick={() => nav.item(project, id, a.step)}>{a.step} / {a.round}</button><p>{a.summary}</p><code>{a.commit}</code></div>)}
+          {!!outcome.historical.length && <details className="mt-3"><summary>{t("ideas.historicalEvidence")}</summary>{outcome.historical.map((a) => <p key={a.event}>{a.step} / {a.round} / {a.summary}</p>)}</details>}
+        </details>}
+        <details className="text-xs text-fg-3"><summary>{t("ideas.linkedDetails")}</summary>{origins.map((r) => <div key={r.id} className="mt-2"><p>{r.origin} / {r.ref}</p><p>{r.quote}</p>{r.diagnostics.map((d) => <p key={d} className="text-warn">{d}</p>)}</div>)}</details>
+      </article>;
+    })}</div>
+  </details>;
 }
 
 const HISTORY_DOT: Partial<Record<HistoryItem["kind"], string>> = {
@@ -262,109 +272,5 @@ function HistoryLine({ h }: { h: HistoryItem }) {
       <span className="w-[5.5rem] shrink-0 tabular-nums text-fg-3">{when(h.at)}</span>
       <span className="min-w-0">{text}{h.commit && <span className="ml-1 font-mono text-[11px] text-accent">{h.commit.slice(0, 7)}</span>}</span>
     </li>
-  );
-}
-
-// ---------------------------------------------------------------- matching the earlier queues
-
-type MatchFilter = "open" | "accepted" | "rejected";
-const matchFilter = (m: MatchItem): MatchFilter => (!m.decision ? "open" : m.decision.accepted ? "accepted" : "rejected");
-const KIND_TONE: Record<MatchItem["kind"], string> = { exact: "bg-ok/15 text-ok", dated: "bg-accent/15 text-accent", file: "bg-warn/15 text-warn" };
-
-/** "To match · N": the suggestions for the earlier queues that wait for the user, atop the overview. */
-function ToMatchBanner({ suggestions, queues }: { suggestions: number; queues: number }) {
-  return (
-    <div className="mb-3.5 flex items-center gap-2.5 rounded-xl border border-warn/40 bg-warn/5 px-3 py-2 text-[13px] text-fg">
-      <span className="min-w-0 flex-1"><b className="font-semibold text-warn">{t("ideas.toMatch.title", { count: suggestions })}</b> {t("ideas.toMatch.text", { count: queues })}</span>
-      <button onClick={() => nav.open("matching")} className="shrink-0 rounded-lg border border-line-strong bg-surface-2 px-3 py-1 text-xs font-semibold text-fg hover:bg-surface-3 max-lg:min-h-10">{t("ideas.toMatch.review")}</button>
-    </div>
-  );
-}
-
-/** The quote a suggestion came from, its references and dates marked. */
-function Quote({ text }: { text: string }) {
-  const parts = text.split(/(\S*\.md(?:#\d{4}-\d{2}-\d{2})?|\d{4}-\d{2}-\d{2})/);
-  return (
-    <p className="my-1.5 border-l-2 border-line-strong px-2.5 text-[12.5px] text-fg-2">
-      {parts.map((p, i) => (i % 2 ? <mark key={i} className="rounded bg-accent/20 px-0.5 text-fg">{p}</mark> : p))}
-    </p>
-  );
-}
-
-/**
- * The suggestions for matching the earlier queues to the notes' entries (the layer "matching" over the overview):
- * queue by queue with the sentence each came from; the user accepts or rejects each, or the exact and dated ones at
- * once, and may take a decision back.
- */
-export function IdeasMatching({ project, phone }: { project: string; phone?: boolean }) {
-  const { version, reload } = usePage();
-  const { data, error } = useQuery<IdeaMatchesResponse>(projectUrl(project, "/ideas/matches"), version);
-  const { busy, error: failed, run } = useAction();
-  const [filter, setFilter] = useState<MatchFilter>("open");
-  const items = data?.items ?? [];
-  const shown = items.filter((m) => matchFilter(m) === filter);
-  const sure = items.filter((m) => !m.decision && m.kind !== "file");
-  const pending = useRef<{ key: string; id: string } | null>(null);
-  const decide = (list: MatchItem[], accept: boolean | null) => {
-    const body = { items: list.map(({ queue, ref }) => ({ queue, ref })), accept, revision: data?.revision };
-    const key = JSON.stringify(body);
-    if (pending.current?.key !== key) pending.current = { key, id: crypto.randomUUID() };
-    const request_id = pending.current.id;
-    void run(async () => { await act(project, "POST", "/ideas/matches", { ...body, request_id }); pending.current = null; }, reload);
-  };
-  const queues = [...new Set(shown.map((m) => m.queue))];
-  return (
-    <div className={`scroll-thin min-h-0 flex-1 overflow-y-auto ${phone ? "px-3 pb-6 pt-3" : "px-6 pb-8 pt-4"}`} data-ideas-matching>
-      <div className="mb-1.5 flex flex-wrap items-center gap-2.5">
-        <button onClick={() => nav.close("matching")} className="rounded-md px-1.5 py-1 text-xs text-fg-2 hover:bg-surface-3 hover:text-fg max-lg:min-h-10">‹ {t("ideas.match.back")}</button>
-        <h2 className="text-[15px] font-semibold text-fg">{t("ideas.match.title")}</h2>
-      </div>
-      <p className="mb-3 text-[12.5px] text-fg-3">{t("ideas.match.note")}</p>
-      <div className="mb-3 flex flex-wrap items-center gap-2.5">
-        <div className="flex overflow-hidden rounded-lg border border-line-strong" role="group" aria-label={t("ideas.match.filterLabel")}>
-          {(["open", "accepted", "rejected"] as const).map((f) => (
-            <button key={f} onClick={() => setFilter(f)} aria-pressed={filter === f}
-              className={filterButton(filter === f)}>
-              {t(`ideas.match.filter.${f}`)}<span className="ml-1.5 font-normal text-fg-3">{items.filter((m) => matchFilter(m) === f).length}</span>
-            </button>
-          ))}
-        </div>
-        <span className="flex-1" />
-        {filter === "open" && sure.length > 0 && <Button onClick={() => decide(sure, true)} disabled={busy}>{t("ideas.match.acceptAll", { count: sure.length })}</Button>}
-      </div>
-      {failed && <p className="mb-2 text-xs text-danger">{failed}</p>}
-      {!data && error && <ReadError error={error} what={t("ideas.match.readError")} />}
-      {data && queues.length === 0 && <p className="text-sm text-fg-3">{t("ideas.match.none")}</p>}
-      {queues.map((id) => {
-        const own = shown.filter((m) => m.queue === id);
-        const q = own[0]!;
-        return (
-          <div key={id} className="mb-2.5 rounded-xl border border-line bg-surface px-3.5 py-2.5">
-            <div className="flex items-baseline gap-2.5">
-              <span className="font-mono text-xs text-fg-3">{id}</span>
-              <b className="min-w-0 flex-1 truncate text-[13.5px] font-semibold text-fg">{q.title}</b>
-              <span className="shrink-0 whitespace-nowrap text-xs text-fg-3">{statusWord(q.status)}{q.finished_at ? ` ${day(q.finished_at.slice(0, 10))}` : ""}{q.commit ? ` · ${q.commit.slice(0, 7)}` : ""}</span>
-            </div>
-            {q.quote && <Quote text={q.quote} />}
-            {own.map((m) => (
-              <div key={m.ref} className={`grid items-center gap-2.5 border-t border-line py-1.5 text-[12.5px] ${phone ? "grid-cols-[minmax(0,1fr)_auto]" : "grid-cols-[minmax(0,1fr)_6.5rem_auto]"}`}>
-                <span className="truncate font-mono text-xs text-fg">{m.ref.replace(/^.*\//, "")}{m.lead && <span className="ml-1.5 font-sans text-fg-3">{m.lead}</span>}</span>
-                {!phone && <span className={`rounded px-1.5 text-center text-[11px] font-semibold ${KIND_TONE[m.kind]}`}>{t(`ideas.match.kind.${m.kind}`)}</span>}
-                {m.decision ? (
-                  <span className={`whitespace-nowrap text-xs ${m.decision.accepted ? "text-ok" : "text-fg-3"}`}>
-                    {t(m.decision.accepted ? "ideas.match.accepted" : "ideas.match.rejected")} · <button onClick={() => decide([m], null)} disabled={busy} className="underline hover:text-fg">{t("ideas.match.undo")}</button>
-                  </span>
-                ) : (
-                  <span className="flex gap-1.5">
-                    <Button variant="quiet" onClick={() => decide([m], true)} disabled={busy}>{t("ideas.match.accept")}</Button>
-                    <button onClick={() => decide([m], false)} disabled={busy} className="rounded-md px-2.5 py-1.5 text-sm text-fg-2 hover:bg-surface-3 hover:text-fg max-lg:min-h-11">{t("ideas.match.reject")}</button>
-                  </span>
-                )}
-              </div>
-            ))}
-          </div>
-        );
-      })}
-    </div>
   );
 }

@@ -4,10 +4,25 @@
 import type { IdeaEntryView, IdeaNoteView } from "@nexus/protocol/ideas";
 
 /** A status filter of the list: all, one status of an entry (dropped with replaced), or the topics with no entry yet. */
-export const IDEA_FILTERS = ["all", "worked_out", "decided", "handed_over", "queued", "built", "dropped"] as const;
+export const IDEA_FILTERS = ["all", "worked_out", "unconfirmed", "partial", "full", "decided", "handed_over", "queued", "built", "dropped", "attention"] as const;
 export type IdeaFilter = (typeof IDEA_FILTERS)[number];
 
-const inFilter = (e: IdeaEntryView, f: IdeaFilter) => f === "all" || e.status === f || (f === "dropped" && e.status === "replaced");
+const needsAttention = (e: IdeaEntryView) => !!e.effective && !!(e.effective.diagnostics.length || e.effective.blockers.length || e.effective.caveats.length || e.effective.stale_reasons.length);
+export const dispositionOf = (e: IdeaEntryView) => e.effective?.disposition ?? (e.status === "dropped" || e.status === "replaced" ? e.status : "active");
+export const implementationOf = (e: IdeaEntryView) => e.effective?.implementation ?? "unconfirmed";
+export const workOf = (e: IdeaEntryView) => e.effective?.work.state ?? (e.status === "built" ? "finished" : e.queues.length ? "linked" : "none");
+const inFilter = (e: IdeaEntryView, f: IdeaFilter) => {
+  if (f === "all") return true;
+  if (f === "attention") return needsAttention(e);
+  if (f === "dropped") return dispositionOf(e) !== "active";
+  if (dispositionOf(e) !== "active") return false;
+  if (f === "full" || f === "partial") return implementationOf(e) === f;
+  if (f === "unconfirmed") return !["full", "partial"].includes(implementationOf(e));
+  if (f === "built") return workOf(e) === "finished";
+  if (f === "queued") return ["linked", "some_finished"].includes(workOf(e));
+  if (f === "handed_over" || f === "decided") return workOf(e) === "none" && e.history.some((h) => h.kind === "handed_over") === (f === "handed_over");
+  return false;
+};
 
 /** How many each filter shows: entries for a status, topics for `worked_out`, entries and empty topics for `all`. */
 export function filterCounts(notes: readonly IdeaNoteView[]): Record<IdeaFilter, number> {

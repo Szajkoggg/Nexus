@@ -18,6 +18,16 @@ function browser(start: Nav) {
 }
 const home: Nav = { hash: "#/p", layers: [], depth: 0 };
 
+test("a dated idea action belongs to its note; Back from links returns to the same note and date", () => {
+  const b = browser(home);
+  b.apply(open(b.cur(), "note:docs/ideas/a.md"));
+  b.apply(open(b.cur(), 'idea-status:["docs/ideas/a.md#2026-11-14"]'));
+  b.apply(open(b.cur(), "matching")); b.back();
+  assert.equal(layerValue(b.cur(), "idea-status"), '["docs/ideas/a.md#2026-11-14"]');
+  b.apply(close(b.cur(), "note"));
+  assert.deepEqual(b.cur().layers, []);
+});
+
 test("opening pushes one entry; Back closes the topmost layer and leaves the rest", () => {
   const b = browser(home);
   b.apply(open(b.cur(), "item", "#/p/Q/Q1"));
