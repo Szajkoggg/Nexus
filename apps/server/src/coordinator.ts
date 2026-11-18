@@ -182,26 +182,24 @@ export class Coordinator {
       for (let round = 0; round < 5; round++) {
         this.again = false;
         this.cache = undefined;
-        const held = [...this.members].filter((m) => m.accepting())
-          .flatMap((m) => m.heldRuns().map((h) => ({ m, ...h })))
-          .sort((a, b) => a.since.localeCompare(b.since) || a.m.store.dir.localeCompare(b.m.store.dir) || a.queue.localeCompare(b.queue));
-        for (const h of held) {
-          if (!h.m.accepting()) continue;
-          if (h.m.releaseHeld(h.queue)) this.cache = undefined;
-        }
-        if (!this.startsToo) { if (!this.again) break; continue; }
-        const due = [...this.members].filter((m) => m.accepting())
-          .flatMap((m) => m.duePlans().map((d) => ({ m, ...d })))
-          .sort((a, b) => a.created_at.localeCompare(b.created_at) || a.m.store.dir.localeCompare(b.m.store.dir) || a.queue.localeCompare(b.queue));
-        for (const d of due) {
-          if (!d.m.accepting()) continue;
-          if (d.m.startDue(d.queue)) this.cache = undefined;
-        }
+        this.inOrder((m) => m.heldRuns().map((h) => ({ queue: h.queue, at: h.since })), (m, queue) => m.releaseHeld(queue));
+        if (this.startsToo) this.inOrder((m) => m.duePlans().map((d) => ({ queue: d.queue, at: d.created_at })), (m, queue) => m.startDue(queue));
         if (!this.again) break;
       }
     } finally {
       this.passing = false;
       this.cache = undefined;
     }
+  }
+
+  /**
+   * The accepting members' queues `of` lists, in the order of their `at`, across the projects (then by project and
+   * queue): each `go`es while its member still accepts, and one that went is followed by a fresh look at the holders.
+   */
+  private inOrder(of: (m: Member) => { queue: string; at: string }[], go: (m: Member, queue: string) => boolean): void {
+    const all = [...this.members].filter((m) => m.accepting())
+      .flatMap((m) => of(m).map((x) => ({ m, ...x })))
+      .sort((a, b) => a.at.localeCompare(b.at) || a.m.store.dir.localeCompare(b.m.store.dir) || a.queue.localeCompare(b.queue));
+    for (const x of all) if (x.m.accepting() && go(x.m, x.queue)) this.cache = undefined;
   }
 }
