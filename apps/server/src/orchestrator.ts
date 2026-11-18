@@ -18,7 +18,7 @@ import type { UpdateNotice } from "./lifecycle.ts";
 import { describeDeployChanges, type DeployChanges } from "./deploy.ts";
 import type { PlanNotice } from "./deploy-plan.ts";
 import {
-  acceptedNoteNotice, approvalNotice, cleanupWaitNotice, discardNotice, liftNotice, mergedNotice, mergeWaitNotice, missedStartNotice, noticeText, orchestratorBriefing, pausedNotice,
+  acceptedNoteNotice, approvalNotice, checkAcceptedNotice, checkDecisionNotice, cleanupWaitNotice, discardNotice, liftNotice, mergedNotice, mergeWaitNotice, missedStartNotice, noticeText, orchestratorBriefing, pausedNotice,
   carriedMessages, formatInbox, orchestratorFreshSeed, orchestratorRuntimeSeed, orchestratorSummaryRequest, summaryLists, questionNotice, rejectionNotice, restartedNotice, fixAskedNotice, levelToUserNotice, reviewNotice, awayOnNotice, awayEndNotice, awayStuckNotice, planDecisionNotice, planHeldNotice, runEndNotice, maintenanceFindingsNotice, staticAnalysisNotice, stepNoteNotice, tagDecisionNotice, fallbackNotice, metricNotice, userMessage, withdrawalNotice,
 } from "./prompts.ts";
 import { shellRules } from "./shell-rules.ts";
@@ -874,6 +874,18 @@ ${n.text}` });
       for (const st of q.steps) {
         if (!reviewedByOrchestrator(st)) continue;
         items.push({ key: `notify:review:${q.id}:${st.id}:${st.finished_at}`, ...reviewNotice(q, st, state.away) });
+      }
+      // The checks Nexus ran (src/check-runs.ts): a failure accepted (and its fix queue), and a disputed failure that
+      // waits for the orchestrator's decision. Each told once.
+      for (const [step, entry] of Object.entries(q.check_runs?.steps ?? {})) {
+        const st = q.steps.find((x) => x.id === step);
+        if (!st) continue;
+        for (const set of entry.sets) {
+          const d = set.dispute;
+          if (!d || d.at < since) continue;
+          if (set.state === "accepted") items.push({ key: `notify:checkaccepted:${q.id}:${step}:${set.done}`, ...checkAcceptedNotice(q, st, set) });
+          else if (d.base?.state === "unrunnable" && !d.decided) items.push({ key: `notify:checkdecision:${q.id}:${step}:${set.done}`, ...checkDecisionNotice(q, st, set) });
+        }
       }
       // A metric's value beyond its warning threshold: told once, if it came after the threshold was set.
       for (const st of q.steps) for (const m of st.metrics) {

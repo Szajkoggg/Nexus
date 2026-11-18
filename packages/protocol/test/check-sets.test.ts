@@ -1,0 +1,85 @@
+// The checks Nexus runs, as the derivation reads them (checks.ts, applyCheckSets): a step.done whose checks have not
+// passed is no review yet; a failed set is a check-fix round, apart from the review rounds; a disputed failure runs on
+// the base or waits for the orchestrator's decision; an accepted one goes to review.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { ProjectStore, approveQueue, loadProjectState, newId, type CheckSet, type Event } from "../src/index.ts";
+
+process.env.NEXUS_HOME ??= mkdtempSync(join(tmpdir(), "nexus-checks-home-"));
+const T0 = Date.parse("2026-11-18T10:00:00Z");
+const at = (s: number) => new Date(T0 + s * 1000).toISOString();
+
+function setup() {
+  const root = mkdtempSync(join(tmpdir(), "nexus-checks-state-"));
+  const store = ProjectStore.init(root, { id: "p", name: "P", root });
+  store.writeSession({ protocol: 1, id: "w", project: "p", role: "worker", runtime: "claude", cwd: root, launched_by: "nexus", created_at: at(0), queue: "Q" });
+  store.writeQueue({ protocol: 1, id: "Q", title: "Q", revision: 1, status: "proposed", stop_conditions: [], checks: ["npm test"], steps: [{ id: "Q1", title: "One", goal: "", acceptance: [] }] });
+  approveQueue(store, "Q");
+  const emit = (s: number, body: Record<string, unknown>) => { const e = { v: 1, id: newId(), at: at(s), session: "w", ...body } as Event; store.appendEvent(e); return e; };
+  const done = (s: number) => emit(s, { type: "step.done", queue: "Q", step: "Q1", summary: "done" }).id;
+  const sets = (list: CheckSet[]) => store.writeChecks("Q", { protocol: 1, steps: { Q1: { by: "nexus", sets: list } } });
+  const set = (d: string, o: Partial<CheckSet>): CheckSet => ({ done: d, round: 1, fix: 0, requested_at: at(1), state: "queued", checks: [], ...o });
+  const step = () => loadProjectState(store).queues[0]!.steps[0]!;
+  emit(0, { type: "step.started", queue: "Q", step: "Q1" });
+  return { store, emit, done, sets, set, step };
+}
+
+const failedRun = { name: "npm test", command: "npm test", ok: false, runs: [{ started_at: at(2), ended_at: at(3), exit_code: 1, duration: 1, log: "checks/Q1/x.log", failed_tests: ["a"] }] };
+
+test("a step.done with no set yet, or a set waiting or running, is checking", () => {
+  const x = setup();
+  const d = x.done(1);
+  x.sets([]);
+  assert.deepEqual([x.step().status, x.step().checking?.phase], ["checking", "queued"]);
+  x.sets([x.set(d, { state: "running", granted_at: at(2), checks: [{ name: "npm test", command: "npm test", runs: [{ started_at: at(2), log: "l" }] }] })]);
+  assert.deepEqual([x.step().status, x.step().checking], ["checking", { phase: "running", since: at(2), check: "npm test" }]);
+  assert.equal(loadProjectState(x.store).queues[0]!.status, "running", "the queue waits for nothing but its checks");
+  x.sets([x.set(d, { state: "interrupted" })]);
+  assert.deepEqual([x.step().status, x.step().checking?.phase], ["checking", "queued"]);
+});
+
+test("passed: its review; failed: a check-fix round that is no review round; the next done's pass counts one round", () => {
+  const x = setup();
+  const d1 = x.done(1);
+  x.sets([x.set(d1, { state: "failed", checks: [failedRun] })]);
+  assert.deepEqual([x.step().status, x.step().check_fix, x.step().review_with], ["running", 1, undefined]);
+  assert.deepEqual(x.step().checks.map((c) => [c.ok, c.by]), [[false, "nexus"]], "the result joins the step's checks");
+  x.emit(10, { type: "step.started", queue: "Q", step: "Q1" });
+  const d2 = x.done(11);
+  x.sets([x.set(d1, { state: "failed", checks: [failedRun] }), x.set(d2, { state: "passed", fix: 1 })]);
+  assert.equal(x.step().status, "review");
+  // A send-back now opens round 2, not 3: the fix round's done does not count.
+  const worker = x.store.readSession("w");
+  x.store.writeSession({ ...worker, id: "o", role: "orchestrator", queue: undefined });
+  x.store.appendEvent({ v: 1, id: newId(), at: at(20), session: "o", type: "review.sent_back", queue: "Q", step: "Q1", text: "again" } as Event);
+  assert.equal(x.step().sent_back[0]!.round, 2);
+});
+
+test("a dispute: the base run to come or running is checking; not runnable there, it waits for the decision; accepted: review", () => {
+  const x = setup();
+  const d = x.done(1);
+  x.sets([x.set(d, { state: "failed", checks: [failedRun] })]);
+  x.emit(5, { type: "check.disputed", queue: "Q", step: "Q1", name: "npm test", evidence: "fails on main" });
+  assert.deepEqual([x.step().status, x.step().checking?.phase], ["checking", "base"], "taken up by the engine next");
+  const dispute = { event: "e", name: "npm test", evidence: "fails on main", at: at(5) };
+  x.sets([x.set(d, { state: "failed", checks: [failedRun], dispute: { ...dispute, base: { state: "running" } } })]);
+  assert.deepEqual([x.step().status, x.step().checking?.phase, x.step().checking?.check], ["checking", "base", "npm test"]);
+  x.sets([x.set(d, { state: "failed", checks: [failedRun], dispute: { ...dispute, base: { state: "unrunnable", reason: "Missing script" } } })]);
+  assert.deepEqual([x.step().status, x.step().checking?.phase], ["waiting", "decision"]);
+  assert.equal(loadProjectState(x.store).queues[0]!.status, "waiting");
+  x.sets([x.set(d, { state: "failed", checks: [failedRun], dispute: { ...dispute, base: { state: "passed" }, outcome: "fix" } })]);
+  assert.deepEqual([x.step().status, x.step().check_fix], ["running", 1], "passing on the base: the queue's to fix");
+  x.sets([x.set(d, { state: "accepted", checks: [failedRun], dispute: { ...dispute, base: { state: "failed" }, outcome: "accepted" } })]);
+  assert.equal(x.step().status, "review");
+});
+
+test("a step whose checks the worker reports (by: worker, or no entry) goes to review at its done as before", () => {
+  const x = setup();
+  x.done(1);
+  assert.equal(x.step().status, "review");
+  x.store.writeChecks("Q", { protocol: 1, steps: { Q1: { by: "worker", sets: [] } } });
+  assert.equal(x.step().status, "review");
+});

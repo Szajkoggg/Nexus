@@ -4,7 +4,7 @@
 // (src/conversations.ts). Agents rely on them (a change to one carries an `Agents:` line in its commit), so each is
 // covered by a snapshot test: test/prompts.test.ts compares what the agents' processes receive with golden files.
 import {
-  INTEGRATION_CONDITION, formatClock, openPlan, formatSeconds, isCheckMetric, languageName, levelNow, metricValueText, releasedText, runIsOlder, stepChecks, type MetricValue, type AwayNow, type PlanDecision, type ConversationWeb, type InboxView, type LanguageCode, type ProjectFile, type ProjectState, type QuestionView, type QueueView, type SessionView, type StepView, type TagProposal, tagsText,
+  INTEGRATION_CONDITION, formatClock, reviewRound, openPlan, formatSeconds, isCheckMetric, languageName, levelNow, metricValueText, releasedText, runIsOlder, stepChecks, type CheckSet, type MetricValue, type AwayNow, type PlanDecision, type ConversationWeb, type InboxView, type LanguageCode, type ProjectFile, type ProjectState, type QuestionView, type QueueView, type SessionView, type StepView, type TagProposal, tagsText,
 } from "@nexus/protocol";
 import type { ClosingContext } from "./closing.ts";
 import type { IntegrationContext } from "./integration.ts";
@@ -84,6 +84,9 @@ export function workerBriefing(l: Languages): string {
  * the step is the queue's closing refactoring step, and this is what it is given (src/closing.ts). `integration`: the
  * step is the queue's integration step, and this is what it is given (src/integration.ts).
  */
+/** Said under the checks of a step whose checks Nexus runs (PROTOCOL.md, "Checks run by Nexus"; EC4 rewrites the briefings). */
+const CHECKS_BY_NEXUS = "Nexus runs these itself after your `nexus step done` and sends you their output only if one fails; do not run or report them yourself (`nexus check` refuses them). While you work, run only the tests of what you change.";
+
 export function stepOpening(o: {
   q: QueueView; step: StepView; mode: "start" | "continue"; why?: string; projectStopConditions: string[];
   /** The project's checks as the run fixed them (run.yaml `checks`): listed before the queue's own. */
@@ -93,6 +96,8 @@ export function stepOpening(o: {
   languages?: string;
   closing?: ClosingContext;
   integration?: IntegrationContext;
+  /** Nexus runs the step's checks after its `nexus step done` (PROTOCOL.md, "Checks run by Nexus"). */
+  checksByNexus?: boolean;
 }): string {
   const { q, step, mode, why, projectStopConditions, notes, answers, last, report, languages, closing, integration } = o;
   const index = q.steps.findIndex((s) => s.id === step.id);
@@ -105,7 +110,7 @@ export function stepOpening(o: {
     tagsText(step.tags) ? `\nTags as planned: ${tagsText(step.tags)}. At the end name what you actually did with \`nexus step done --activities\`.` : "",
     closing ? closingText(closing) : "",
     integration ? integrationText(step.id, integration) : "",
-    checks.length ? `\nChecks for every step:\n${checks.map((c) => `- ${c}`).join("\n")}` : "",
+    checks.length ? `\nChecks for every step:\n${checks.map((c) => `- ${c}`).join("\n")}${o.checksByNexus ? `\n${CHECKS_BY_NEXUS}` : ""}` : "",
     step.review?.prepare ? `\nReview to prepare: ${step.review.prepare}\nPrepare it by Nexus's standard: read \`nexus help review\` first (view keys, roles, the same conditions on both sides of a pair).` : "",
     `\nStop conditions (meeting one ends the queue: report it with \`nexus stop\`):\n${[...q.stop_conditions, ...projectStopConditions].map((c) => `- ${c}`).join("\n") || "- none beyond your judgement"}`,
     notes.length ? `\nNotes from the user for this step:\n${notes.map((n) => `- ${n.body}`).join("\n")}` : "",
@@ -294,6 +299,16 @@ export function formatInbox(m: InboxView, state: ProjectState, released = false)
       step?.acceptance.length ? `\nAcceptance criteria of the step:\n${step.acceptance.map((a) => `- ${a}`).join("\n")}` : "",
       `\nWork on it in this step: \`nexus step start ${m.step}\`, then the checks, review material for this round (\`nexus review add ${m.step} … --round ${m.round}\`, pictures with the same keys as before: \`nexus help review\`), and \`nexus step done ${m.step} --summary "…"\` (or \`nexus step failed\` / \`nexus stop\`), then \`nexus context\`, and end your turn.`,
     ].filter(Boolean).join("\n");
+  }
+  if (m.type === "check_failed") {
+    const limit = state.project.defaults.check_fix_limit;
+    return [
+      `[Nexus] The checks Nexus ran for step ${m.step} of queue ${m.queue}: check-fix round ${m.fix} of ${limit}${m.fix > limit ? " (beyond the limit: the orchestrator gave one more)" : ""}. What failed:`,
+      m.text,
+      `\nFix it at its cause and commit; after your next \`nexus step done\` Nexus runs every check again, the ones that passed too. While you work, run only the tests of what you change.`,
+      `If a failure is not from your work (it fails on the base too, a test you did not touch), do not patch around it: say so with your evidence, \`nexus check ${m.step} "<check>" --unrelated --evidence "<what shows it>"\`, and end your turn without \`nexus step done\`; Nexus runs that check on the queue's base commit and decides by it.`,
+      `Work on it in this step: \`nexus step start ${m.step}\`, the fix, then \`nexus step done ${m.step} --summary "…"\` (or \`nexus step failed\` / \`nexus stop\`), then \`nexus context\`, and end your turn.`,
+    ].join("\n");
   }
   return `[Nexus] The ${m.from} asks you to stop now${m.text ? `: ${m.text}` : "."} Leave the work consistent and end your turn.`;
 }
@@ -753,6 +768,38 @@ export function mergeWaitNotice(q: QueueView, reason: string, released?: readonl
   };
 }
 
+/**
+ * A failure of a check Nexus ran was accepted (it failed on the queue's base too, or the orchestrator accepted it), and
+ * Nexus proposed a fix queue for it, or added the occurrence to an open one (src/check-runs.ts).
+ */
+export function checkAcceptedNotice(q: QueueView, st: StepView, set: CheckSet): Notice {
+  const d = set.dispute!;
+  const how = d.decided?.verdict === "accept" ? "you accepted it" : `it fails on the queue's base commit ${d.base?.commit ?? ""} too`;
+  const fix = set.fix_queue;
+  return {
+    fact: `The check ${d.name} of step ${q.id}/${st.id} failed, and the failure is accepted: ${how}. The step goes to its review.${fix ? ` ${fix.created ? `Nexus proposed queue ${fix.id} to find and fix it` : `Nexus added this occurrence to queue ${fix.id}, open for the same tests`}.` : ""}`,
+    todo: fix
+      ? `Complete queue ${fix.id} (nexus status ${fix.id}; the project's checks, tags such as the area, the texts in the queue's language) with nexus queue draft, and put it into the plan; tell the user in one sentence. The worker's evidence: ${d.evidence}`
+      : `Nexus could not propose a fix queue for it: draft one yourself from the template check-failure (nexus template show check-failure). The worker's evidence: ${d.evidence}`,
+  };
+}
+
+/** A disputed failure could not be run on the queue's base: the orchestrator decides (`nexus check decide`). */
+export function checkDecisionNotice(q: QueueView, st: StepView, set: CheckSet): Notice {
+  const d = set.dispute!;
+  const c = set.checks.find((x) => x.name === d.name);
+  const last = c?.runs.at(-1);
+  return {
+    fact: `The worker of ${q.id}/${st.id} says the failing check ${d.name} is not its work's, and Nexus could not run it on the queue's base: ${d.base?.reason ?? "unknown"}.`,
+    todo: [
+      `Decide: nexus check decide ${q.id} ${st.id} accept --reason "…" (the step goes to its review, the failure is recorded and a fix queue is proposed) or nexus check decide ${q.id} ${st.id} fix --reason "…" (a check-fix round).`,
+      `The worker's evidence: ${d.evidence}`,
+      last?.failed_tests?.length ? `Failing tests: ${last.failed_tests.join("; ")}` : "",
+      last ? `Log: ${last.log} (in the queue's folder)${last.tail ? `; it ends: ${last.tail.split("\n").slice(-8).join(" | ")}` : ""}` : "",
+    ].filter(Boolean).join("\n"),
+  };
+}
+
 /** Nexus could not remove a done survey run's worktree (git.yaml `cleanup.waiting`, src/merger.ts). */
 export function cleanupWaitNotice(q: QueueView, reason: string): Notice {
   return {
@@ -810,8 +857,11 @@ export function staticAnalysisNotice(): Notice {
 /** What the orchestrator needs to review a step: its acceptance, the checks and material of this round, its commits. */
 function reviewBrief(q: QueueView, st: StepView, away: AwayNow = { on: false }): string {
   const since = st.segments.at(-1)?.start ?? "";
-  const round = st.timeline.filter((e) => e.type === "step.done").length;
+  const round = reviewRound(q, st);
   const checks = st.checks.filter((c) => c.at >= since);
+  // A failure of Nexus's checks accepted this round (it fails on the base too, or the orchestrator accepted it).
+  const lastDone = st.timeline.findLast((e) => e.type === "step.done");
+  const accepted = lastDone && q.check_runs?.steps[st.id]?.sets.find((x) => x.done === lastDone.id && x.state === "accepted");
   const missing = stepChecks(q.run?.checks, q.checks).filter((name) => !checks.some((c) => c.name === name));
   const items = st.review_items.filter((i) => i.at >= since);
   const metrics = st.metrics.filter((m) => m.at >= since && !isCheckMetric(m.name));
@@ -823,6 +873,7 @@ function reviewBrief(q: QueueView, st: StepView, away: AwayNow = { on: false }):
     `Acceptance:\n${list(st.acceptance)}`,
     `Checks reported this round:\n${list(checks.map((c) => `${c.name}: ${c.ok ? "ok" : "FAILED"}${c.duration !== undefined ? `, ${formatSeconds(c.duration)}` : ""}${c.summary ? ` (${c.summary})` : ""}`))}`,
     ...(missing.length ? [`Checks of the queue not reported this round: ${missing.join("; ")}`] : []),
+    ...(accepted?.dispute ? [`Accepted failure: ${accepted.dispute.name} ${accepted.dispute.decided ? `(accepted by you: ${accepted.dispute.decided.reason})` : `(it fails on the queue's base commit ${accepted.dispute.base?.commit ?? ""} too)`}; not this step's to fix${accepted.fix_queue ? `, queue ${accepted.fix_queue.id} is for it` : ""}. The worker's evidence: ${accepted.dispute.evidence}`] : []),
     ...(metrics.length ? [`Metrics recorded this round:
 ${list(metrics.map((m) => `${m.name}: ${metricValueText(m.value, m.unit)}${m.warn ? ` (${m.warn.side} its warning threshold of ${metricValueText(m.warn.limit, m.unit)})` : ""}`))}`] : []),
     `Review material:\n${list(items.map((i) => `${i.label ?? i.kind ?? "item"}: ${i.path ?? i.url ?? ""}`))}`,

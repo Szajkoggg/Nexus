@@ -33,6 +33,8 @@ import { gitBranch, recordSetup, runSetup, setupPending, worktreeFor } from "./w
 import { closingContext } from "./closing.ts";
 import { integrationContext } from "./integration.ts";
 import { Coordinator, bringsBack, refusalText, waitingText, type Member } from "./coordinator.ts";
+import type { Capacity } from "./capacity.ts";
+import { CHECK_DRAIN_WAIT_MS, CheckRunner } from "./check-runs.ts";
 import { gitWritableRoots } from "./codex.ts";
 import {
   assertCanResume, assertCanStart, startedRun, stoppedMessage, toFinished, toHalted, toHeldForUpdate,
@@ -80,7 +82,7 @@ const STARTUP_MS = 1500;
 export const SURVEY_CONDITION = "Nexus: a survey run leaves no commit and no changed tracked file";
 
 /** A step with one of these has its outcome: its round of commits ends with the turn that gave it. */
-const OUTCOME: ReadonlySet<string> = new Set(["done", "review", "failed", "stopped"]);
+const OUTCOME: ReadonlySet<string> = new Set(["done", "review", "checking", "failed", "stopped"]);
 
 export interface EngineOptions {
   /** The first retry's delay; each further one doubles it. Tests make it short. */
@@ -117,6 +119,14 @@ export interface EngineOptions {
    * looks at the run again.
    */
   boundary?: (queueId: string, step: string, state: ProjectState) => boolean | { hold: string };
+  /**
+   * The workstation's capacity coordinator (src/capacity.ts). With it, Nexus runs each step's checks after the worker's
+   * `nexus step done` (src/check-runs.ts); without it (an engine of an older kind of test), the worker reports them.
+   */
+  capacity?: Capacity;
+  /** A check's time limit (CHECK_LIMIT_MS) and how long an update's drain waits for running checks; tests make them short. */
+  checkLimitMs?: number;
+  checkDrainWaitMs?: number;
 }
 
 /** A process asked to end for a restart (another model or effort) is killed if it has not exited by then. */
@@ -187,6 +197,9 @@ export class Engine implements Member {
   private readonly liveAnswerIds = new Set<string>();
   /** Worktree setup commands running, by queue (src/worktree.ts, runSetup). */
   private readonly setups = new Map<string, ChildProcess | null>();
+  /** The checks Nexus runs (src/check-runs.ts): only with the capacity coordinator. */
+  private readonly checks?: CheckRunner;
+  private readonly checkDrainWaitMs: number;
 
   constructor(store: ProjectStore, changed: () => void, options: EngineOptions = {}) {
     this.store = store;
@@ -208,6 +221,15 @@ export class Engine implements Member {
     });
     this.coordinator.add(this);
     this.pusher = new AcceptedPusher(store, changed, { run: options.git, timeout: options.pushTimeoutMs });
+    this.checkDrainWaitMs = options.checkDrainWaitMs ?? CHECK_DRAIN_WAIT_MS;
+    // Before the runs are recovered: what the old server left running is marked interrupted, to run again.
+    if (options.capacity) {
+      this.checks = new CheckRunner(store, options.capacity, {
+        project: store.readProject().id,
+        ended: (queue) => { if (this.stopped) return; this.advance(queue); this.changed(); },
+        halt: (queue, reason) => { this.halt(queue, reason); this.changed(); },
+      }, { limitMs: options.checkLimitMs });
+    }
     this.recoverAfterRestart();
     // Chains from before the plan move into it (start.yaml's `after` becomes plan.yaml).
     try { this.store.migrateChains(); } catch { /* an unreadable start.yaml shows as a warning in the state */ }
@@ -385,10 +407,12 @@ export class Engine implements Member {
     this.writeRun(queueId, toResumed(run, q.revision));
     // A step left unfinished (stopped, failed, interrupted) is continued rather than skipped; one waiting for an
     // answer just waits on (the answer arrives through the inbox). A rejected step is never run again.
-    const open = q.steps.find((s) => s.id === run.step && !["done", "skipped", "review", "rejected"].includes(s.status));
-    // A step sent back while the run was paused or halted: the send-back, still in the inbox, opens its next turn.
-    const pending = open && state.sessions.find((x) => x.id === run.session)?.inbox.some(m => !m.read_at
-      && ((m.type === "send_back" && m.step === open.id) || m.type === "answer"));
+    const open = q.steps.find((s) => s.id === run.step && !["done", "skipped", "review", "checking", "rejected"].includes(s.status));
+    // A step sent back while the run was paused or halted: the send-back, still in the inbox, opens its next turn. So
+    // does a check-fix round (one more after the limit is given here: src/check-runs.ts).
+    const pending = open && (state.sessions.find((x) => x.id === run.session)?.inbox.some(m => !m.read_at
+      && ((m.type === "send_back" && m.step === open.id) || m.type === "answer"))
+      || !!this.checks?.fixRound(q, open, run.session, state));
     if (open?.status === "waiting" || pending) this.changed();
     else if (open) this.openStep(queueId, open, q, "continue", why);
     else this.advance(queueId);
@@ -420,6 +444,8 @@ export class Engine implements Member {
       held.push(id);
     }
     if (now) for (const l of this.host.all()) if (l.proc.state === "working") { this.ending.add(l.session); l.proc.kill(); }
+    // Running checks get a while, then are ended and run again after the restart; none start meanwhile.
+    this.checks?.drain(now ? 0 : this.checkDrainWaitMs);
     return held;
   }
 
@@ -433,6 +459,7 @@ export class Engine implements Member {
       const run = this.store.readRun(id);
       if (run?.state === "pausing" && run.resume_after_restart) this.writeRun(id, toHeldForUpdate(run, run.reason ?? "the Nexus server is updating; it goes on by itself afterwards"));
     }
+    this.checks?.drain(0);
     for (const l of this.host.all()) if (l.proc.state === "working") { this.ending.add(l.session); l.proc.kill(); }
   }
 
@@ -443,14 +470,15 @@ export class Engine implements Member {
     try { this.resumeByItself(queueId); } catch (e) { this.halt(queueId, `could not go on after ${reason}: ${(e as Error).message}`); }
   }
 
-  /** No agent of this project is in the middle of a turn. */
+  /** No agent of this project is in the middle of a turn, and none of its checks runs. */
   idle(): boolean {
-    return this.host.idle();
+    return this.host.idle() && !this.checks?.running();
   }
 
   /** The update did not happen: the queues it held go on now. */
   cancelDrain(): void {
     this.draining = false;
+    this.checks?.undrain();
     for (const id of this.store.queueIds()) {
       const run = this.store.readRun(id);
       if (run?.state === "retry_wait" || run?.state === "usage_wait") {
@@ -473,6 +501,7 @@ export class Engine implements Member {
     const live = this.host.get(run.session);
     this.clearTimer(queueId);
     this.writeRun(queueId, toPausedByUser(run, "stopped by the user"));
+    this.checks?.stop(queueId);
     if (live && live.proc.state === "working") {
       live.proc.send(
         userStopNow(text),
@@ -494,6 +523,7 @@ export class Engine implements Member {
     this.clearTimer(queueId);
     this.endBackgroundWait(queueId);
     this.writeRun(queueId, toPausedByUser(run, "stopped at once by the user; uncommitted changes kept"));
+    this.checks?.stop(queueId);
     if (run.step) {
       const user = ensureUserSession(this.store);
       this.store.appendEvent({ v: 1, id: newId(), at: now(), session: user.id, type: "step.interrupted", queue: queueId, step: run.step,
@@ -673,6 +703,7 @@ export class Engine implements Member {
     this.clockTimers.clearAll();
     for (const l of this.host.all()) l.proc.kill();
     for (const p of this.setups.values()) p?.kill();
+    this.checks?.shutdown();
   }
 
   /** A process of this engine's is still running (after shutdown: not yet exited). */
@@ -710,6 +741,8 @@ export class Engine implements Member {
       // review decides. Still waiting: nothing to run. Then nothing left: the run is finished. Else (the next step, a
       // send-back): a new process resumes the session.
       if (current?.status === "review") return;
+      // Its checks run without it; a fix round, if they fail, starts the process again (below, at the next look).
+      if (current?.status === "checking") { if (this.checks) this.checks.step(run, q, current, state); return; }
       if (questionsHold(loadProjectState(this.store), queueId, run.step)) return;
       if (q.steps.every((s) => stepClosed(q, s))) { this.exitedAfterOutcome.delete(run.session); return this.finish(queueId); }
       this.exitedAfterOutcome.delete(run.session);
@@ -725,6 +758,12 @@ export class Engine implements Member {
     if (questionsHold(loadProjectState(this.store), queueId, run.step)) {
       if (run.state === "pausing") this.writeRun(queueId, toPaused(run));
       return;
+    }
+    // The checks Nexus runs after the step's done: while they wait for the machine, run, or wait for the orchestrator's
+    // decision on a disputed failure, they have the step (src/check-runs.ts). A pause reaches a fix round before it opens.
+    if (current && this.checks) {
+      if (this.checks.step(run, q, current, state)) return;
+      if (run.state === "pausing" && this.checks.fixRound(q, current, run.session, state)) return this.writeRun(queueId, toPaused(run));
     }
     if (current) {
       switch (current.status) {
@@ -750,6 +789,8 @@ export class Engine implements Member {
         }
         case "waiting":
           return; // a blocking question: its answer arrives through the inbox and starts the next turn
+        case "checking":
+          return; // the checks Nexus runs have it (above); a step checked by an older server waits for the next look
         case "review":
           // Waits for its review: the user's (level 1) or the orchestrator's (2 and 3). The step's turn is over, so a
           // pause asked for (by the user, or an update's drain) takes effect now; the review goes on meanwhile.
@@ -1142,9 +1183,12 @@ export class Engine implements Member {
     // The integration step is given the base to merge, where it is now, and whether it may resolve a conflict.
     const integration = step.integration ? integrationContext(this.store, state, q) : undefined;
     recordStepStart(this.store, queueId, step.id, run.session);
+    // A step this engine opens has its checks run by Nexus; one opened by an older server keeps the worker's.
+    if (mode === "start") this.checks?.opened(queueId, step.id);
+    const checksByNexus = !!this.checks && this.store.readChecks(queueId)?.steps[step.id]?.by === "nexus";
     const opening = stepOpening({
       q, step, mode, why, projectStopConditions: project.defaults.stop_conditions, projectChecks: run.checks, notes, answers, last,
-      report: reportFile(project.id, q.id), languages: workerLanguages(project.languages), closing, integration,
+      report: reportFile(project.id, q.id), languages: workerLanguages(project.languages), closing, integration, checksByNexus,
     });
     if (held(loadProjectState(this.store))) return false;
     live.proc.send([around.before, opening, around.after].filter(Boolean).join("\n\n"));
@@ -1188,7 +1232,7 @@ export class Engine implements Member {
       if (owner && questionsHold(loadProjectState(this.store), owner.id, run?.step)) return;
       l.proc.send(withLanguages(batch.map(m => formatInbox(m, state, !!owner)).join("\n\n"), languages));
       for (const m of batch) {
-        if (m.type === "send_back") recordStepStart(this.store, m.queue, m.step, l.session);
+        if (m.type === "send_back" || m.type === "check_failed") recordStepStart(this.store, m.queue, m.step, l.session);
         this.store.appendDelivered(l.session, { at: now(), kind: "inbox", id: m.id, via: "turn" });
         this.liveAnswerIds.delete(m.id);
       }
@@ -1202,7 +1246,7 @@ export class Engine implements Member {
       else if (l.proc.state === "working") l.proc.send(text, "next");
       else if (idleAllowed) l.proc.send(text);
       else continue; // a paused run: keep it for later
-      if (m.type === "send_back") recordStepStart(this.store, m.queue, m.step, l.session); // the next round
+      if (m.type === "send_back" || m.type === "check_failed") recordStepStart(this.store, m.queue, m.step, l.session); // the next round
       this.store.appendDelivered(l.session, { at: now(), kind: "inbox", id: m.id, via: l.proc.state === "working" ? "inject" : "turn" });
     }
   }
@@ -1236,7 +1280,7 @@ export class Engine implements Member {
    * step's review; the run halts as at any stop. True when it stopped it.
    */
   private surveyLeftWork(queueId: string, q: QueueView, step: StepView): boolean {
-    if (q.maintenance !== "survey" || (step.status !== "done" && step.status !== "review")) return false;
+    if (q.maintenance !== "survey" || (step.status !== "done" && step.status !== "review" && step.status !== "checking")) return false;
     const key = `${queueId}:${step.id}:${step.finished_at ?? ""}`;
     if (this.surveyChecked.has(key)) return false;
     this.surveyChecked.add(key);
@@ -1263,7 +1307,7 @@ export class Engine implements Member {
     const run = this.store.readRun(queueId);
     const q = loadProjectState(this.store).queues.find((x) => x.id === queueId);
     const status = q?.steps.find((s) => s.id === run?.step)?.status;
-    return status !== undefined && ["review", "done", "skipped", "rejected"].includes(status);
+    return status !== undefined && ["review", "checking", "done", "skipped", "rejected"].includes(status);
   }
 
   private nothingLeft(queueId: string): boolean {

@@ -17,6 +17,7 @@ export * from "./chat.ts";
 export * from "./rules.ts";
 export * from "./away.ts";
 export * from "./capacity.ts";
+export * from "./checks.ts";
 export * from "./closing.ts";
 export * from "./plan.ts";
 export * from "./train.ts";

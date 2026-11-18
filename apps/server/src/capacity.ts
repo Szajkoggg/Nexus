@@ -57,6 +57,11 @@ interface CapacityOptions {
   testLockStaleMs?: number;
   /** How often a request kept only by a full run outside Nexus looks again (1 s). */
   pollMs?: number;
+  /**
+   * Windows: each process in a Job Object of its own (the default), so its end is its whole tree's. Off only in tests
+   * whose subject is not the tree (the job host starts a PowerShell that compiles it, a second or two a process).
+   */
+  jobs?: boolean;
 }
 
 interface Entry {
@@ -74,6 +79,7 @@ export class Capacity {
   private readonly testLock: string;
   private readonly testLockStaleMs: number;
   private readonly pollMs: number;
+  private readonly jobs: boolean;
   private readonly waiting: Entry[] = [];
   private readonly held: Entry[] = [];
   private outside: CapacityFile["outside"];
@@ -87,6 +93,7 @@ export class Capacity {
     this.testLock = o.testLock ?? fullTestLockFile();
     this.testLockStaleMs = o.testLockStaleMs ?? fullTestStaleMs();
     this.pollMs = o.pollMs ?? 1000;
+    this.jobs = o.jobs ?? true;
     this.write();
   }
 
@@ -162,7 +169,7 @@ export class Capacity {
       id: entry.request.id,
       spawn: (bin, args, o) => {
         if (entry.ended) throw new Error("this grant has ended");
-        const p = track(bin, args, o);
+        const p = track(bin, args, o, this.jobs);
         entry.live!.add(p);
         void p.done.then(() => { entry.live!.delete(p); this.settle(entry); });
         return p;
@@ -201,18 +208,23 @@ export class Capacity {
 }
 
 /** Starts a process whose `done` follows its whole tree (see Grant.spawn). */
-function track(bin: string, args: string[], o: { cwd: string; env?: NodeJS.ProcessEnv }): HeavyProcess {
+function track(bin: string, args: string[], o: { cwd: string; env?: NodeJS.ProcessEnv }, jobs: boolean): HeavyProcess {
   const env = o.env ?? process.env;
-  if (process.platform === "win32") {
+  if (process.platform === "win32" && jobs) {
     // Its input stays open: closing it would have the job host end the job five seconds later.
     const child = spawnRuntimeChild(bin, args, { cwd: o.cwd, env, owned: true });
     // The job host closes once the root has exited and the job is empty (worker-job.cs), or when it failed to start.
     const done = new Promise<number | null>((res) => { child.on("close", (code: number | null) => res(code)); child.on("error", () => res(null)); });
     return { child, done, kill: () => { child.kill(); } };
   }
-  const child = spawn(bin, args, { cwd: o.cwd, env, detached: true, stdio: ["pipe", "pipe", "pipe"] });
+  // Elsewhere a process group of its own; on Windows without a job (tests), only the root is known.
+  const windows = process.platform === "win32";
+  const child = spawn(bin, args, { cwd: o.cwd, env, detached: !windows, windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
   child.stdin.end();
-  const group = () => { try { if (child.pid) process.kill(-child.pid, "SIGKILL"); } catch { /* the group is gone */ } };
+  const group = () => {
+    if (windows) { if (child.exitCode === null && child.signalCode === null) child.kill(); return; }
+    try { if (child.pid) process.kill(-child.pid, "SIGKILL"); } catch { /* the group is gone */ }
+  };
   const done = new Promise<number | null>((res) => {
     child.on("error", () => res(null));
     // The root's end ends what it left in its group; its streams close after that.

@@ -9,7 +9,7 @@ import { monotonicFactory } from "ulid";
 import YAML from "yaml";
 import type { z } from "zod";
 import {
-  Activity, Applied, AwayFile, CapacityFile, IdeaMatchesFile, ChatEntry, PinsFile, RecurringFile, Refusal, Delivery, Event, GlobalSettings, InboxEntry, MaxRunning, MetricsFile, NoteMeta, GitFile, ProjectFile, PushFile, QueueFile, type QueueInput, LegacyReviewPolicy, RegistryFile, RunFile, RuntimeFile, SessionFile, StartFile, StaticAnalysisNote, PlanFile, StoredProject, TagsFile, TurnRecord, UsageFile,
+  Activity, Applied, AwayFile, CapacityFile, ChecksFile, IdeaMatchesFile, ChatEntry, PinsFile, RecurringFile, Refusal, Delivery, Event, GlobalSettings, InboxEntry, MaxRunning, MetricsFile, NoteMeta, GitFile, ProjectFile, PushFile, QueueFile, type QueueInput, LegacyReviewPolicy, RegistryFile, RunFile, RuntimeFile, SessionFile, StartFile, StaticAnalysisNote, PlanFile, StoredProject, TagsFile, TurnRecord, UsageFile,
   type Note,
   IdeaStatusesFile, IdeaHandoffsFile,
 } from "./schemas.ts";
@@ -292,6 +292,12 @@ export class ProjectStore {
     return existsSync(f) ? readYaml(f, PushFile) : undefined;
   }
   writePush(queueId: string, p: PushFile): void { writeYaml(join(this.queueDir(queueId), "push.yaml"), PushFile.parse(p)); }
+  /** The checks Nexus ran (checks.yaml; one writer: the server's engine). */
+  readChecks(queueId: string): ChecksFile | undefined {
+    const f = join(this.queueDir(queueId), "checks.yaml");
+    return existsSync(f) ? readYaml(f, ChecksFile) : undefined;
+  }
+  writeChecks(queueId: string, c: ChecksFile): void { writeYaml(join(this.queueDir(queueId), "checks.yaml"), ChecksFile.parse(c)); }
   readStart(queueId: string): StartFile | undefined {
     const f = join(this.queueDir(queueId), "start.yaml");
     return existsSync(f) ? readYaml(f, StartFile) : undefined;

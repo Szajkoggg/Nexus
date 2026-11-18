@@ -143,6 +143,7 @@ const VALUES: Record<string, Record<string, string>> = {
   refactor: { target: "store.ts", reason: "smaller functions" },
   maintenance: {},
   "static-analysis": { test_command: "npm test" },
+  "check-failure": { check: "npm test", tests: "- test: engine › halts", occurrence: "- queue EC, step EC3: log queues/EC/checks/EC3/r1f0-3-npm-test.1.log" },
   ...MAINTENANCE,
 };
 

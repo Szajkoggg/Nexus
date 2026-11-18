@@ -415,6 +415,24 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
     nexus("step", "done", fake.step, "--summary", `fake finished ${fake.step} after an answer`);
     return "answered";
   }
+  // A check-fix round (the checks Nexus ran failed): with FAKE_CHECK_DISPUTE naming a check that failed, say once (per
+  // step) that its failure is not this work's and end the turn; otherwise "fix" it and report the step done again.
+  const fix = /^\[Nexus\] The checks Nexus ran for step (\S+) of queue \S+: check-fix round (\d+)/.exec(text);
+  if (fix) {
+    const step = fix[1]!;
+    const dispute = process.env.FAKE_CHECK_DISPUTE;
+    const marker = join(dirname(process.env.FAKE_LOG ?? "."), `fake-disputed-${step}`);
+    // "*": the first check the message says failed.
+    const name = dispute === "*" ? /Check "(.+)" failed/.exec(text)?.[1] : dispute;
+    if (name && !existsSync(marker) && text.includes(`Check "${name}" failed`)) {
+      writeFileSync(marker, "1");
+      const out = nexusOut(["check", step, name, "--unrelated", "--evidence", "it fails on the base too"]);
+      return `disputed: ${out}`;
+    }
+    nexus("step", "start", step);
+    nexus("step", "done", step, "--summary", `fake fixed ${step} in check-fix round ${fix[2]}`);
+    return `check-fix round ${fix[2]}`;
+  }
   // A step sent back (by the orchestrator or the user's Fix it): work on it again and report it done.
   const back = /^\[Nexus\] The (?:orchestrator reviewed|user sent) step (\S+) of queue \S+ .*\(round (\d+)\)/.exec(text);
   if (back) {

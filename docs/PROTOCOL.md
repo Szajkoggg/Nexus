@@ -150,7 +150,7 @@ one: `null`). The effective settings do not change. It writes only such a file, 
 
 | Kind | Settings |
 |---|---|
-| Global, with a project override | `defaults`: `stop_conditions`, `review_level`, `review_send_back_limit`, `context_reuse_threshold`, `context_care`, `protect_nexus`, `push_accepted`, `provisional_counts`, `merge_back`, `resolve_conflicts`, `usage_pause_threshold`, `max_running` (see "One queue per checkout, and a limit"). `runtimes`: `default`; `claude`: `model`, `effort`, `permission_mode`; `codex`: `model`, `effort`, `sandbox`, `approval_policy`, `approvals_reviewer`. `conversations`: `runtime`, `model`, `effort`, `web`. `orchestrator`: `runtime`, `model`, `effort`, `fallback`, `notify`, `context_threshold`. `languages`: `reader`. `kinds.<kind>`: `runtime`, `model`, `effort` (a model or effort may be the project's own `null`: the project's for that runtime), `fallback` |
+| Global, with a project override | `defaults`: `stop_conditions`, `review_level`, `review_send_back_limit`, `context_reuse_threshold`, `context_care`, `protect_nexus`, `push_accepted`, `provisional_counts`, `merge_back`, `resolve_conflicts`, `usage_pause_threshold`, `max_running` (see "One queue per checkout, and a limit"), `check_fix_limit` (see "Checks run by Nexus"). `runtimes`: `default`; `claude`: `model`, `effort`, `permission_mode`; `codex`: `model`, `effort`, `sandbox`, `approval_policy`, `approvals_reviewer`. `conversations`: `runtime`, `model`, `effort`, `web`. `orchestrator`: `runtime`, `model`, `effort`, `fallback`, `notify`, `context_threshold`. `languages`: `reader`. `kinds.<kind>`: `runtime`, `model`, `effort` (a model or effort may be the project's own `null`: the project's for that runtime), `fallback` |
 | Project only | `name`, `defaults.worktree_dir`, `defaults.worktree_setup`, `defaults.checks`, `runtimes.claude.allowed_tools` (the project's own allow rules), `runtimes.codex.mcp_servers` (the user's Codex MCP servers, by name, that Codex workers keep; empty by default), `conversations.notes_dir`, `languages.working` (`id` and `root` identify the project) |
 | Global only | Remote access (`<NEXUS_HOME>/auth.json`, `push.json`), the deploy push (`deploy.json`), the server; each stays in its own file |
 | State, not a setting | `orchestrator.session` |
@@ -564,7 +564,9 @@ Every line:
 | `review.added` | `queue`, `step`, `items: [{path or url, label, kind?, before?, key?, role?, size?}]`, `round?` | Review material, `kind` = image, sheet, doc, data, link; `before`: the path of the picture this one is compared with; `key` (a view key), `role` (before, mockup, after, variant-a, variant-b, result) and `size` (`width`, `height` in pixels): a keyed picture, always with its `round` (see "Review pictures") |
 | `review.marked` | `queue`, `step`, `path`, `accepted` | User only: a review picture marked accepted (or the mark taken back). A mark only: it does not accept the step |
 | `review.commented` | `queue`, `step`, `path`, `text`, `to` (`send_back`, `note`, `orchestrator`), `note_step?` | User only: a comment on a review picture, and where it went (see "Review pictures") |
-| `check.result` | `queue`, `step`, `name`, `ok`, `summary`, `duration`, `commit?` | One check's outcome; `duration`: how long it ran, in seconds (optional, non-negative), which is also the metric `check:<name>`; `commit`: the HEAD of the session's checkout when it was reported (see "Project metrics") |
+| `check.result` | `queue`, `step`, `name`, `ok`, `summary`, `duration`, `commit?` | One check's outcome; `duration`: how long it ran, in seconds (optional, non-negative), which is also the metric `check:<name>`; `commit`: the HEAD of the session's checkout when it was reported (see "Project metrics"). For a step whose checks Nexus runs, the CLI refuses it (see "Checks run by Nexus") |
+| `check.disputed` | `queue`, `step`, `name`, `evidence` | Worker only: a check Nexus ran fails not because of the worker's work, with its evidence (`nexus check <step> <name> --unrelated`); Nexus runs it on the queue's base commit (see "Checks run by Nexus") |
+| `check.decided` | `queue`, `step`, `verdict` (`accept`, `fix`), `reason` | Orchestrator only: its decision on a disputed check Nexus could not run on the base (`nexus check decide`) |
 | `step.done` | `queue`, `step`, `summary`, `commit?`, `warning?`, `activities?` | Acceptance met; the step's work is finished. `warning`: what `nexus step done` warned about at the step's end (see the CLI). `activities`: what the worker actually did (`--activities`), from the same lists as a draft (see "Tags") |
 | `step.failed` | `queue`, `step`, `reason` | The step cannot be finished as written |
 | `queue.stop` | `queue`, `step`, `condition`, `reason` | A stop condition was met; the engine halts the queue. `condition`: the condition met, as the queue words it; `reason`: what happened, short. The derived queue keeps them apart in `stop` (`{ condition, reason }`, until a lift) besides `status_reason` ("<condition>: <reason>"); the stopped waiting item's `text` is the reason and its `condition` the condition. A stop known only as one text (a queue imported as stopped) has no `stop`, and shows its `status_reason` |
@@ -610,6 +612,7 @@ Written only by the server's queue engine; agents never touch them.
 | File | What |
 |---|---|
 | `queues/<id>/git.yaml` | The HEAD of the queue's checkout around each step's work (`src/gitinfo.ts`): `base` (an auto worktree's: `ref`, the branch or commit it was made from, its `sha`, `at`), `base.branch` (whether `ref` names a branch: only a branch can be merged back into), `merged` (`at`, `into`, `path`, `sha`, `fast_forward`, `by`: `nexus` or `user`, absent on older records), `cleaned` (`at`, `path`, `branch`), `cleanup` (Nexus's cleanup of a done survey run's worktree could not go: `waiting` (`reason`, `since`, `files` (what is left, at most 20), `more`); see "Cleaning up a survey's worktree"), `merge` (Nexus merging back by itself: `waiting` (`reason`, `since`: what keeps it, told to the user and the orchestrator; `released`: the queues whose runs Nexus held for this merge back and let go on when it could not go), `reintegrations` (runs of the integration step again since the user's last Merge back), `reintegrating` (when the last was asked for, until the step opens), `queued` (`since`: back from a wait, it could go but another queue holds its base; it waits its turn in the merge train, ordered by when its wait began; see "The merge train")), `setup` (the worktree setup command for the worktree Nexus made: `command` (the last one run), `at` (when the worktree was made), `done_at` (once it succeeded), `failed` (`at`, `reason`: its last failure)), `steps.<step>` (rounds, oldest first: `session`, `start` (HEAD when the step opened, or when a send-back reopened it), `started_at`, `end` (HEAD at the end of the turn in which the step got its outcome: done, review, failed or stopped), `ended_at`; a sha is null outside a git repository). A continued step keeps its open round. One writer: the server. See "Git on the dashboard" |
+| `queues/<id>/checks.yaml` | The checks Nexus runs after each `step.done` (`by` per step, its sets of checks with their runs, a dispute and its base run, the fix queue of an accepted failure); the logs under `queues/<id>/checks/<step>/`. One writer: the server's engine. See "Checks run by Nexus" |
 | `queues/<id>/push.yaml` | Pushing what was accepted: `review` (per step, the HEAD of the checkout when it entered review: `sha` or null, `finished_at`, `at`), `steps` (per accepted step: `acceptance`, `sha`, `result` (`pushed`, `failed`, `skipped`, `held`), `text`, `at`, `held_by?`), `pushed` (the last success: `sha`, `step`, `at`, `remote`, `branch`), `error` (the last failure until a success). One writer: the server. See "Pushing what was accepted" |
 | `queues/<id>/plan.yaml` | The queue's place in the plan (see "The plan"): `by`, `reason?`, `after` (the queues it waits for, each with `queue`, `by`, `at`, `reason?`), `created_at`, `updated_at`, `started_at?`, `proposal?`, `decisions`. One writer: the server; it stays after the queue starts (marked `started_at`), and taking the queue out of the plan removes it |
 | `queues/<id>/start.yaml` | The queue's next start as planned (see "The plan" and "Schedules"): `at?` (a schedule: the time, ISO 8601; with `usage`, `claude` or `codex`, when that is the usage window's reset plus the margin; without `at`, the options of a start by the plan; `after` only in files from before the plan, moved into `plan.yaml` at the server's start), the start's `runtime?`, `model?`, `effort?`, `session?` (a session to continue), `by` (`user` or `orchestrator`), `reason?`, `revision` (the queue's when planned), `created_at`, `failed?` (`at`, `reason`, `missed?`: it came due and the queue could not start; `missed`: a schedule more than 15 minutes late, the server not running at its time), `held?` (`since`, `kind`: `approval`, `checkout` or `limit`, `reason`: it came due but waits for the approval of the queue's current revision, for its checkout or for a place under the limit, and starts by itself; see "The plan" and "One queue per checkout, and a limit"). One writer: the server; a start of the queue or a cancel removes it |
@@ -1134,7 +1137,7 @@ about, so the dashboard shows it on that step. The server **routes answers**: ev
 escalation), from the orchestrator or the user, is appended to the asking session's inbox once, with the id
 `answer-<event id>`. An orchestrator session that went on in a fresh one (`continued_by`, see "The orchestrator's
 context care") has its answers appended to the newest session of that line instead, unless one of them has it already.
-The orchestrator gets an answer in its inbox as a turn of its own (or into the running one), once; the chat shows it. It routes send-backs the same way (`send_back`, see "Sending a step back"). The session records
+The orchestrator gets an answer in its inbox as a turn of its own (or into the running one), once; the chat shows it. It routes send-backs the same way (`send_back`, see "Sending a step back"). A check-fix round of the checks Nexus runs is an entry from Nexus (`check_failed`, see "Checks run by Nexus"). The session records
 each entry it has seen with `message.read`; `nexus status` shows the unread ones and records them.
 
 ```json
@@ -1142,6 +1145,7 @@ each entry it has seen with `message.read`; `nexus status` shows the unread ones
 {"v":1,"id":"01JD...","at":"...","type":"answer","qid":"01JD...","from":"orchestrator","text":"...","continue":true}
 {"v":1,"id":"01JD...","at":"...","type":"stop","from":"user","text":"Stop after this check."}
 {"v":1,"id":"send-back-01JD...","at":"...","type":"send_back","from":"user","ref":"01JD...","queue":"W","step":"W2","text":"Blue, not red.","round":2}
+{"v":1,"id":"check-failed-01JD...","at":"...","type":"check_failed","from":"nexus","ref":"01JD...","queue":"W","step":"W2","fix":1,"text":"Check \"npm test\" failed twice (exit code 1). ..."}
 ```
 
 `delivered_at` is recorded by the server in `state.json` once the runtime has accepted the message (stdin write,
@@ -1185,7 +1189,8 @@ nexus review add W3 $TEMP/nexus-review/W3/cliff@1280.png --key cliff-lit@1280 --
 nexus review add W3 $TEMP/nexus-review/W3/lit.png --before $TEMP/nexus-review/W3/unlit.png --label "Lighting"   # older: no key
 nexus help review                              # the standard for review material (nexus help: the topics)
 nexus help summaries|questions|refusals|commits|tests   # the other standards
-nexus check W3 "npm test" --ok --summary "548 passed" --duration 190   # the name exactly as "Checks for every step" lists it (another counts as not reported); how long it ran, in seconds: the metric check:npm test
+nexus check W3 "npm test" --ok --summary "548 passed" --duration 190   # the name exactly as "Checks for every step" lists it (another counts as not reported); how long it ran, in seconds: the metric check:npm test. Refused where Nexus runs the step's checks
+nexus check W3 "npm test" --unrelated --evidence "it fails on main too"   # a check Nexus ran fails not because of your work: Nexus runs it on the queue's base commit (see "Checks run by Nexus")
 nexus metric record bundle-kb 512 [--step W3]  # worker only: a value of a project metric for the step at work, with HEAD
 nexus metric list                              # the project's metrics (any session)
 nexus stats [--by model|effort|kind|activity|area|size|origin] [--project <id>] [--since <date>]   # see "Statistics"
@@ -1209,6 +1214,7 @@ nexus queue draft <file.yaml|->                # a new queue, or a change to one
 nexus queue draft --template bugfix --set issue="..." --set area=engine [--id BF]   # writes .nexus/drafts/BF.yaml to complete and upload
 nexus recurring set weekly --template maintenance [--set scope=...] (--every "mon 03:00" | --after-queues 5) [--maintenance survey|fix_small] [--reason ...]   # through the server; the user approves it
 nexus static-analysis decline --reason "..."  # the user's no to the static-analysis template: no reminder for 90 days
+nexus check decide W W3 accept|fix --reason "..."   # a disputed check Nexus could not run on the base (see "Checks run by Nexus")
 nexus answer <qid> "..." [--escalate [--recommend <option>]] [--continue|--wait]
                                                # --recommend only with --escalate: one of the question's options
 nexus run <queue> start|pause|resume|stop --reason "..." [--use-session <id>] [--runtime claude|codex] [--model <m>] [--effort <e>] [--after <queue>... | --next | --at "YYYY-MM-DD HH:MM" | --at usage-reset]   # see "The orchestrator" and "The plan"
@@ -1303,116 +1309,170 @@ The template is a project setting, so each project can phrase it in its own term
 
 ## Checks run by Nexus
 
-**Status: designed (queue EC, step EC1), built in EC2–EC4.** Until then the worker runs the checks and reports them
-with `nexus check`, as the sections above say; this section is what replaces that. The reasons and the decisions are
-in DESIGN.md, "Nexus runs the checks"; the marks **(P1)**…**(P17)** are proposals the user decides on (EC1's report),
-and the formats below follow them as proposed.
+**Status: built (queue EC, steps EC2 and EC3); the briefings and the dashboard follow in EC4.** The reasons and the
+decisions are in DESIGN.md, "Nexus runs the checks"; the marks **(P1)**…**(P17)** are EC1's proposals, accepted by the
+user on 2026-11-18, with P3 and P6 as the user changed them. The engine runs the checks only with the server's
+capacity coordinator (`EngineOptions.capacity`; the server always gives it): an engine without one (older tests)
+leaves them to the worker, as below for `by: worker`.
 
 **Which steps.** Whether Nexus runs a step's checks is fixed when the step opens: the engine records it on the step's
-entry in `checks.yaml` (`by: nexus`). A step opened before (by an older server) keeps the worker's reporting until it
-ends. Every check, the project's (`defaults.checks`, as the run fixed them) and the queue's own, each once, is a shell
-command run in the queue's checkout **(P1)**; the draft path and the queue reviewer ask for commands, and what only an
-agent can verify goes into the acceptance or `review.prepare`.
+entry in `checks.yaml` (`by: nexus`). A step opened before (by an older server) has no entry, and its worker reports the
+checks with `nexus check` until the step ends. Every check, the project's (`defaults.checks`, as the run fixed them)
+and the queue's own, each once (`stepChecks`), is a shell command run in the queue's checkout **(P1)**; what only an
+agent can verify goes into the acceptance or `review.prepare`. The step's opening says under "Checks for every step"
+that Nexus runs them after `nexus step done`, that the worker neither runs nor reports them, and runs only the tests
+of what it changes.
 
-**The sequence.**
+**The sequence** (`apps/server/src/check-runs.ts`).
 
-1. The worker ends its turn with `nexus step done`. After the worker's descendants are cleaned (Windows, queue PT),
-   the engine adds a check set to the step's entry in `checks.yaml` (`state: queued`) and asks the coordinator for the
-   `heavy` slot. The step is `checking` (phase `queued`).
-2. Granted (`state: running`), the checks run one after another in the order the step's opening lists them, each
-   through the shell, in its own Job Object on Windows, stdout and stderr appended to its log. Before a check starts
-   the server writes its `started_at`, `command` and `log`; after its tree has ended, `ended_at`, `exit_code` (or
-   `signal`), `duration`. A failing check does not end the set **(P3)**.
-3. The checks that failed run once more, in the same grant. A check that passes then is `flaky` on this set.
-4. The grant is released once the last check's tree has ended.
-5. Every check passed (on the first or the second run): the set is `passed`, and the step goes on as a `step.done`
-   did before: to review, with the step's end handled there (the next step, context care, a plan or a deploy waiting
-   for it). A check failed twice: the set is `failed`, and the worker gets a check-fix round (below), unless the step
-   has had `defaults.check_fix_limit` of them already: then the run halts for the orchestrator **(P5)**.
+1. The worker ends its turn with `nexus step done`. After the worker's descendants are cleaned (Windows, queue PT), the
+   engine adds a set to the step's entry (`state: queued`) and asks the coordinator for the `heavy` slot. The step is
+   `checking` (phase `queued`). A step without checks passes at once.
+2. Granted (`state: running`), the checks run one after another in the order the opening lists them, all of them even
+   after one has failed **(P2, P3)**: each through the system's shell (`cmd.exe` or `sh`, as Node's `shell: true`, in a
+   small Node launcher), in a Job Object of its own on Windows, in the queue's checkout, with the server's environment
+   less `NEXUS_SESSION`, `NEXUS_DIR`, `NEXUS_HANDOVER`, `NEXUS_HOME` and `NODE_TEST_CONTEXT`. Its stdout and stderr go
+   to its log. The server writes the run (`started_at`, `log`) before it starts and its end (`ended_at`, `exit_code`,
+   `duration`) after its tree has ended.
+3. The checks that failed run once more, in the same grant: the code has not changed. One that passes then is `ok`
+   and `flaky` **(P3)**.
+4. The grant ends; the slot is free once the last tree has ended.
+5. Every check passed: the set is `passed`, and the step goes to its review as a `step.done` did before, with the
+   step's end handled there (the next step, context care, a plan or a deploy waiting for it). A check failed twice: the
+   set is `failed`, and the worker gets a check-fix round (below), unless the set's `fix` has reached
+   `defaults.check_fix_limit`: then the set gets `limit: true` and the run halts for the orchestrator **(P4, P5)**.
 
 `nexus step failed` and `nexus stop` run no checks. A check longer than `CHECK_LIMIT_MS` (60 minutes) **(P10)** is
-ended (its tree) and counts as failed, its output tail saying so.
+ended with its tree and counts as failed (`timed_out`). After a check-fix round or a send-back (any new `step.done`)
+every check runs again, the ones that passed before too: an earlier result does not hold for new code **(P3)**.
 
-**`queues/<id>/checks.yaml`** (server-owned, one writer: the server):
+**`queues/<id>/checks.yaml`** (server-owned, one writer: the engine's `CheckRunner`; `ChecksFile` in schemas.ts):
 
 ```yaml
+protocol: 1
 steps:
   W3:
-    by: nexus                      # fixed when the step opened; `worker` for a step whose checks the worker reports
-    sets:                          # one per `step.done` of the step, oldest first
-      - done: 01JD...              # the id of the `step.done` event it checks
-        round: 1                   # the step's review round (send-backs), as today
+    by: nexus                      # fixed when the step opened (worker: an older server opened it)
+    sets:                          # one per step.done of the step, oldest first
+      - done: 01JD...              # the step.done event it checks
+        round: 1                   # the step's review round (send-backs)
         fix: 0                     # check-fix rounds before it within that round (0: the step's own done)
         commit: 3f2a...            # HEAD of the queue's checkout when the set started (null outside git)
-        dirty: false               # tracked files had uncommitted changes
-        requested_at: ...          # queued
+        dirty: true                # only when tracked files had uncommitted changes
+        requested_at: ...
         granted_at: ...
         ended_at: ...
-        state: passed              # queued, running, passed, failed, interrupted, disputed, accepted
+        state: failed              # queued, running, passed, failed, interrupted, accepted
+        limit: true                # failed with the check-fix rounds used up: the run halted
         checks:
-          - name: npm test         # as the step's opening lists it
+          - name: npm test         # as the step's opening lists it (and the command run)
             command: npm test
             runs:                  # the first, and the one run again after a failure
-              - { started_at: ..., ended_at: ..., exit_code: 1, duration: 212, log: checks/W3/r1f0-3-npm-test.1.log,
+              - { started_at: ..., ended_at: ..., exit_code: 1, duration: 212, log: checks/W3/r1f0-1-npm-test.1.log,
                   failed_tests: ["engine › halts after the fix limit"], tail: "..." }
-              - { started_at: ..., ended_at: ..., exit_code: 0, duration: 205, log: checks/W3/r1f0-3-npm-test.2.log }
-            ok: true
-            flaky: true            # failed, then passed
-        disputed?: { check, evidence, at }      # the worker's evidence of an unrelated failure (P6)
-        decided?: { by: orchestrator, verdict: accept | fix, reason, at }
+              - { started_at: ..., ended_at: ..., exit_code: 1, duration: 205, log: checks/W3/r1f0-1-npm-test.2.log }
+            ok: false              # its outcome in the set; flaky: true when it failed, then passed
+        dispute:                   # the worker's word that a failure is not its work's (below)
+          event: 01JD...           # its check.disputed
+          name: npm test
+          evidence: it fails on main too
+          at: ...
+          base: { state: failed, commit: 9c1e... }   # queued, running, failed, passed, unrunnable (with reason); run
+          decided: { verdict: accept, reason: ..., at: ..., event: ... }   # the orchestrator's, when it was not runnable
+          outcome: accepted        # accepted, or fix
+        fix_queue: { id: CI, created: true }   # an accepted failure's fix queue (created, or an open one it joined)
 ```
 
-`tail`: the output's last 80 lines, at most 6000 characters **(P15)**; `failed_tests`: the failing tests' names where
-the output's format is known (node:test's spec and TAP reporters), else left out. The logs are under the queue's folder,
-`queues/<id>/checks/<step>/r<round>f<fix>-<n>-<name as a file name>.<run>.log`, and stay with the queue (cleaned with
-it). A run with `started_at` and no `ended_at` found by a starting server is marked `interrupted` (with the set), and
-the set is queued again when its run goes on: at once after an update's hand-over (`resume_after_restart`), at Resume
-after any other restart, where the run comes back paused **(P9)**.
+A run's `tail` is the output's last 80 lines, at most 6000 characters, and `failed_tests` the failing tests' names where
+the output's format is known (node:test's spec and TAP reporters), both only for a failed run **(P15)**. `exit_code`
+is null for a run that was ended (`timed_out`, or `interrupted` by a restart, a drain or a stop). The logs are
+`queues/<id>/checks/<step>/r<round>f<fix>-<n>-<name as a file name>.<run>.log` (a base run's: `…-base.1.log`), and
+stay with the queue.
 
-**The step's state** (derivation, `packages/protocol`): a `step.done` of a step whose entry says `by: nexus` makes it
-`checking` until the set for that done has an outcome; `passed` and `accepted` make it `review` as the `step.done`
-did; `failed` reopens it `running` as a check-fix round (the inbox entry below), `round` unchanged, `check_fix` set to
-the set's `fix` + 1 **(P13)**; `disputed` makes it `waiting` for the orchestrator. The derived step carries `checks`:
-`{ phase: queued | running, since, check?, behind? }` while `checking` (`behind`: the requests ahead of it and what
-holds the slot), and the latest result of each check, as `check.result` gives today (with `by: nexus`, `flaky`), so
-`nexus status`, the dashboard, the review notice and the metric `check:<name>` read both alike. `check.result` events
-still count for steps whose checks the worker reports. `nexus status` prints a checking step as `W3 checking (queued
-since 10:02, behind HC/W5 of Honeycomb)` or `W3 checking (npm test since 10:14)`, and a fix round as `W3 running
-(check fix 1 of 3)`.
+**Restarts** **(P9)**. A starting engine marks what the old server left `queued` or `running` as `interrupted` (its
+runs without an end: `interrupted`, with an end now; a base run back to `queued`): the old processes ended with their
+Job Objects. The set runs again, from the start, when its run goes on: at once after an update's hand-over
+(`resume_after_restart`), at Resume after any other restart (the run comes back paused).
 
-**The check-fix round** is an inbox entry `check_failed` to the session that worked on the step (`id`
-`check-failed-<set's done id>`, `queue`, `step`, `round`, `fix`, `checks`: per failed check `name`, `exit_code`,
-`failed_tests?`, `tail`, `log`: the log's absolute path). The engine hands it to the session as the next turn; its
-prompt names the round and the fix round of the limit, the failures, and the way to report an unrelated failure. The
-worker ends the round with `nexus step done` again; the checks then run again, all of them. A run halted at the limit
-gives the orchestrator a halt notice naming the checks and the rounds; `nexus run <queue> resume` gives one more fix
-round, and the user's Continue the same **(P5)**.
+**The step's state** (`applyCheckSets`, `packages/protocol/src/checks.ts`). A `step.done` of a step with `by: nexus`
+leaves it `review` only when the set for that done is `passed` or `accepted`. Otherwise:
 
-**An unrelated failure** **(P6)**: the worker reports `nexus check <step> "<name>" --unrelated --evidence "<what
-shows it>"` (event `check.disputed`: `queue`, `step`, `name`, `evidence`) and ends its turn without `nexus step done`.
-The server records it on the set (`state: disputed`) and the orchestrator is notified with the evidence, the tail and
-the log. It answers `nexus check decide <queue> <step> accept|fix --reason "…"` (event `check.decided`, orchestrator
-only): `accept` sends the step to review with the failure marked accepted (and recorded for a maintenance queue), `fix`
-gives a check-fix round with the reason as its text, counted toward the limit. A dispute is not a fix round.
+| The set for the latest step.done | The step | `checking` |
+|---|---|---|
+| none yet, `queued`, `interrupted` | `checking` | `{ phase: queued, since }` |
+| `running` | `checking` | `{ phase: running, since, check }` |
+| `failed`, no dispute | `running`: a check-fix round, `check_fix` = `fix` + 1, `check_limit` with `limit` | |
+| `failed`, disputed, the base run to come or running | `checking` | `{ phase: base, since, check }` |
+| `failed`, disputed, the base `unrunnable`, not decided | `waiting` | `{ phase: decision, since }` |
+| `failed`, the dispute's `outcome: fix` | `running` (the same check-fix round) | |
 
-**`nexus check`** **(P7)**: refused (exit 2) for a check Nexus runs in the step, with "Nexus runs this check after
-`nexus step done`"; unchanged for a step with `by: worker`; with `--unrelated --evidence` as above.
+The review round (`reviewRound`) counts only the step.dones that reached review, so a check-fix round is no send-back
+round, and the review pictures keep their round **(P13)**. The engine's results join the step's `checks` (`by:
+"nexus"`, `flaky`; the summary "passed", "failed, then passed on the second run (flaky)", "exit code 1; 2 tests
+failed, twice") and its metrics (`check:<name>`), so `nexus status`, the dashboard, the review notice and the
+statistics read both kinds alike. `nexus status` adds a line under a checking step (`checks by Nexus: waiting for the
+machine since …`, `running <check>`, `running <check> on the queue's base commit`, `a disputed failure waits for the
+orchestrator's decision`) and under a fix round (`check-fix round 1 of 3`).
+
+**The check-fix round** is an inbox entry from Nexus, `check_failed` (`ref`: the set's done, `queue`, `step`, `fix`:
+the round it opens, `text`: per failed check its exit code, failing tests, full log path and the end of its output),
+id `check-failed-<done>` (`…-base` and `…-decided` for the rounds a dispute gives). Its being in the inbox reopens the
+step; the engine hands it to the session as the next turn ("[Nexus] The checks Nexus ran for step W3 of queue W:
+check-fix round 1 of 3. What failed: …"), which asks for the fix at its cause, says every check runs again after the
+next `nexus step done`, and how to say a failure is not the work's. A run halted at the limit gets the orchestrator's
+halt notice with the reason (`step W3: the checks failed after 3 check-fix rounds (the limit, check_fix_limit 3): …`);
+`nexus run <queue> resume` (or the user's Resume) gives one more round, the entry written then, its text saying so.
+
+**An unrelated failure** **(P6, as the user decided on 2026-11-18)**. In a check-fix round the worker says a failed
+check is not its work's with its evidence: `nexus check <step> "<name>" --unrelated --evidence "<what shows it>"`
+(event `check.disputed`, worker only: `queue`, `step`, `name`, `evidence`; refused unless the step is in a check-fix
+round, the check is one that failed, and the round has no dispute yet), and ends its turn without `nexus step done`.
+The step is `checking` (phase `base`): Nexus runs that check on the queue's base commit (git.yaml's `base.sha`, else
+the HEAD of the checkout when the queue's first step opened), in a detached worktree of its own in the system's
+temporary folder, with the project's worktree setup first when it has one, under the same coordinator; the worktree is
+removed after.
+
+- **It fails there too**: the failure is accepted (`outcome: accepted`, the set `accepted`): the step goes to its
+  review, and Nexus proposes a fix queue for it at once (below); the orchestrator is told.
+- **It passes there**: the failure is the queue's (`outcome: fix`): the worker gets the round's entry
+  (`check-failed-<done>-base`) saying so; it counts in the round it is in, without a decision.
+- **It cannot run there** (the worktree cannot be made, the setup fails, or the command is not there: exit code 127
+  or 9009, "Missing script:", "is not recognized as an internal or external command", "command not found"; also a
+  name that is not one of the failed checks): the base is `unrunnable` with the reason, the step `waiting` for the
+  orchestrator, which is told with the evidence, the failing tests and the log, and answers `nexus check decide
+  <queue> <step> accept|fix --reason "…"` (event `check.decided`, orchestrator only; refused unless the step waits for
+  that decision). `accept`: as a failure on the base, with the reason recorded; `fix`: a round
+  (`check-failed-<done>-decided`) with the reason as its text. A dispute itself is no round.
+
+**The fix queue of an accepted failure** (the user's decision of 2026-11-18). For every accepted failure, by either
+way, Nexus proposes a queue at once, from the shipped template `check-failure` (`templates/check-failure.yaml`; a
+global or project template of that id replaces it): id `CI` (`CI2`, … when taken), origin `ci`, `coding: true`, the
+failed check as its check, two steps, the first (kind `debugging`) reproducing the failure on the base and finding its
+cause, the second (kind `code`) fixing it so the full run passes under load too. Its description lists the tests
+(`- test: <name>`, or `- check: <name>` when their names are unknown) and the occurrence: the time, queue, step,
+rounds, commit, how it was accepted, the log's path, the worker's evidence and the end of the output. When an open
+queue of origin `ci` (not done or cancelled) lists one of the same tests, no second one is made: the occurrence is
+added to its description (no new revision: the description is not pinned). The set records it (`fix_queue`), and the
+orchestrator is told once (`notify:checkaccepted:<queue>:<step>:<done>`), to complete it and put it into the plan; a
+disputed failure waiting for its decision is told once too (`notify:checkdecision:…`). The review notice of the step
+names an accepted failure of its round, and a flaky check's summary says so.
+
+**`nexus check`** **(P7)**: refused (exit 2) for a step whose checks Nexus runs, naming the way to dispute a failure;
+unchanged for a step without an entry or with `by: worker`; with `--unrelated --evidence`, and `decide`, as above.
 
 **Settings.** `defaults.check_fix_limit` (global, with a project override; an integer from 0; default 3) **(P4)**.
 
-**The step's opening** keeps the list under "Checks for every step" and says instead of "report them": "Nexus runs
-these after your `nexus step done`, and sends you their output only if one fails; while you work, run only the tests
-of what you change." The closing refactoring step's opening drops "Run the checks before you change anything", naming
-the HEAD on which the previous step's checks passed **(P12)**.
+**The step's opening** keeps the list under "Checks for every step" and adds that Nexus runs them. The closing
+refactoring step's "Run the checks before you change anything" goes in EC4, with the rest of the briefings **(P12)**.
 
-**Updates and Pause.** An update's drain waits for running check sets at most `CHECK_DRAIN_WAIT_MS` (15 minutes)
-**(P8)**, then ends them (`interrupted`), and the held run queues them again after the hand-over; with `--now`, or at a
-planned deploy's deadline, it ends them at once. A queued set is not granted while an update drains. Pause lets a
-running set finish and takes effect at the review or before the fix round; Stop now and Stop at once end it
-(`interrupted`), and it runs again when the run goes on **(P16)**.
+**Updates, Pause and Stop.** An update's drain withdraws the requests still waiting for the machine and lets running
+checks go on at most `CHECK_DRAIN_WAIT_MS` (15 minutes) **(P8)**; `Engine.idle()` is false meanwhile, so the drain
+waits. Then, or at once with `--now` or at a planned deploy's deadline, it ends them (`interrupted`), and the held run
+runs them again after the hand-over; a cancelled drain lets them start again as their runs go on. A Pause lets
+running checks finish and takes effect at the review, or before a fix round's turn; Stop now and Stop at once end
+them (`interrupted`), and they run again when the run goes on **(P16)**.
 
-The checks ask the capacity coordinator for the machine (next section); after a server's start, the requests of check
-sets `queued` or `interrupted` whose runs go on are asked again, by their `requested_at`.
+The checks ask the capacity coordinator for the machine (next section), one request per set or base run.
 
 ## The capacity coordinator
 
@@ -2542,7 +2602,7 @@ steps:
 
 | Layer | Folder | |
 |---|---|---|
-| `nexus` | `templates/` in Nexus's repository | shipped with Nexus: `bugfix`, `ui-change`, `spike`, `refactor`, `maintenance`, `static-analysis`, and the maintenance templates `dependencies`, `security-audit`, `dead-code`, `test-health`, `performance`, `docs-freshness`, `notes`, `agent-contract`, `git-hygiene`, `lifecycle` |
+| `nexus` | `templates/` in Nexus's repository | shipped with Nexus: `bugfix`, `ui-change`, `spike`, `refactor`, `maintenance`, `static-analysis`, `check-failure` (the fix queue Nexus proposes for an accepted check failure, see "Checks run by Nexus"), and the maintenance templates `dependencies`, `security-audit`, `dead-code`, `test-health`, `performance`, `docs-freshness`, `notes`, `agent-contract`, `git-hygiene`, `lifecycle` |
 | `global` | `<NEXUS_HOME>/templates/` | the user's own, for every project |
 | `project` | `nexus-templates/` in the project's repository root | versioned with the project and seen by its agents (not under `.nexus/`, which git ignores) |
 

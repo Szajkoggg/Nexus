@@ -191,10 +191,11 @@ heuristics. References: [Job Objects](https://learn.microsoft.com/en-us/windows/
 ### Nexus runs the checks (queue EC)
 
 Designed in EC1 from the user's decisions of 2026-11-17 (docs/ideas/token-costs.md) and 2026-11-16
-(docs/ideas/worker-phases-and-resources.md); built in EC2 (the capacity coordinator), EC3 (the engine) and EC4 (the
-briefings, AGENTS.md, the dashboard). Until then a worker runs the checks and reports them with `nexus check`. The
-file formats are in PROTOCOL.md, "Checks run by Nexus". Points marked **(P1)**…**(P17)** go beyond the decisions: they
-are proposals for the user to decide, listed in EC1's report.
+(docs/ideas/worker-phases-and-resources.md); built in EC2 (the capacity coordinator, `apps/server/src/capacity.ts`) and
+EC3 (the engine, `apps/server/src/check-runs.ts`, and the derivation, `packages/protocol/src/checks.ts`); EC4 brings
+the briefings, AGENTS.md and the dashboard. The file formats are in PROTOCOL.md, "Checks run by Nexus". Points marked
+**(P1)**…**(P17)** went beyond the decisions: EC1's proposals, which the user accepted on 2026-11-18, P3 made more
+precise and P6 changed (below).
 
 **Why.** A worker ran the full suite at every step's end, and every call around it (starting it, polling it, waiting
 for the full-test lock, reading the output) re-read the worker's whole context: about 16% of the cost of the analysed
@@ -221,7 +222,9 @@ failed **(P10)**. The checks run on the checkout as it is; the result records it
 uncommitted changes (`nexus step done` already warns about those).
 
 **A failing check is run once more.** Only the failed ones, within the same grant of the machine, right after the
-set. Passing the second time, the step goes on and the check is recorded as flaky for that step: the statistics count
+set, where the code has not changed (P3 as the user made it precise on 2026-11-18). After a check-fix round or a
+send-back, any new code, every check runs again, the ones that passed before too: a green result does not carry over
+to new code. Passing the second time, the step goes on and the check is recorded as flaky for that step: the statistics count
 it, and the orchestrator hears of it with its next notice, so it can propose a maintenance queue **(P14)**. Failing
 twice, the worker gets a check-fix round: a message to its session with the failing tests' names (where the output's
 format is known), the end of the output and the full log's path **(P15)**. It fixes, commits and ends with `nexus
@@ -230,10 +233,24 @@ step done` again, and the checks run again, all of them.
 **The check-fix round is not a send-back.** It has its own limit, 3 by default (decided "like
 `review_send_back_limit`") **(P4)**, and is counted apart: the step's review round (send-backs, the round of
 its review pictures) stays as it is, and the fix round is numbered within it **(P13)**. After the limit the run halts
-for the orchestrator, which decides what comes next **(P5)**. A worker that finds a failure unrelated to its work (it
-fails on the base too, a test it did not touch that fails now and then) does not patch around it: it says so with its
-evidence, and the orchestrator decides whether the step goes to review with the failure accepted or gets another fix
-round **(P6)**.
+for the orchestrator, which decides what comes next **(P5)**: a Resume gives one more round.
+
+**A failure that is not the work's** (P6 as the user changed it on 2026-11-18). A worker that finds a failure unrelated
+to its work (it fails on the base too, a test it did not touch that fails now and then) does not patch around it: it
+says so with its evidence (`nexus check --unrelated`), and Nexus itself runs that check on the queue's base commit, in
+a worktree of its own, through the same coordinator. Failing there too, the failure is accepted: the step goes to its
+review, and the failure is recorded for the statistics and a fix queue. Passing there, the failure is the queue's: a
+fix round, counted toward the limit, without a dispute. Only when the check cannot run on the base (the command or
+script is not there, the setup fails) does the orchestrator decide (accept or fix), its reason recorded. The evidence
+is checked by a run, not by a judgement, wherever a run can tell.
+
+**Every accepted failure gets a fix queue at once** (the user's decision of 2026-11-18), without exception: Nexus
+proposes it itself, origin `ci`, from a shipped template (`check-failure`): the first step (debugging) reproduces the
+failure on the base and finds its cause, the second (code) fixes it so the full run passes under load too. Its
+description carries the check, the tests' names, the log's path, the step and the worker's evidence. While one is open
+for the same test, a new occurrence is added to its description instead of a second queue. The orchestrator is told,
+to complete it and put it into the plan. A flaky failure, which passed on its second run, gets no queue of its own: it
+is in the statistics and in the step's review notice **(P14)**.
 
 **Restarts and updates.** After a restart, a check that was running is run again, not re-attached: the old server's
 check processes ended with its Job Objects (kill-on-close), and a log half written says nothing certain. A server that
@@ -259,9 +276,27 @@ worker still commits several times in a step); its second half becomes: the whol
 Nexus as the queue's checks, not by the worker, and the 15 minutes' wait goes (EC4).
 
 **The step's states.** A step gets one new status, `checking`, between `running` and `review`, with a phase:
-`queued` (waiting for the machine, with what it waits behind) or `running` (which check, since when). A step in a
-check-fix round is `running` with its fix round number, shown apart from a send-back's round. The queue stays
-`running` and the run holds its checkout throughout.
+`queued` (waiting for the machine; what it waits behind is the machine's line in `nexus status`), `running` (which
+check, since when) or `base` (a disputed check on the base commit). A disputed failure waiting for the orchestrator's
+decision is `waiting` (phase `decision`). A step in a check-fix round is `running` with its fix round number, shown
+apart from a send-back's round. The queue stays `running` and the run holds its checkout throughout.
+
+**Findings from building it (EC3).**
+
+- **The engine runs the checks only with the capacity coordinator.** The server always gives one; an engine without
+  (most engine tests, which use the fake runtimes for other subjects) leaves the checks to the worker as before. So the
+  existing tests keep their behaviour, and only the tests about the checks run commands.
+- **cmd.exe's switches cannot be quoted**, and the worker's job host quotes every argument for CreateProcess. A check
+  runs as `node -e <launcher> <command>`, the launcher calling `spawnSync(command, { shell: true })`, which builds
+  cmd.exe's line as Node always does.
+- **The output may arrive after the job host has closed**: the log is closed only once both streams have ended (at
+  most two seconds after the tree), else the end of the output was lost.
+- **A Job Object per check costs a second or two on Windows** (the host's PowerShell compiles its helper). The tests of
+  the engine's logic run their stand-in checks without one (`Capacity`'s `jobs: false`); the tests of a restart and a
+  drain, which end a check mid-run, use one: without it, ending the launcher leaves its child running, holding the
+  output pipe open.
+- **Events the derivation does not handle never reach a step's timeline.** `check.disputed` and `check.decided` are
+  listed there explicitly, since the checks' derivation and the engine read them from the timeline.
 
 #### The capacity coordinator, first slice
 

@@ -53,7 +53,7 @@ export const QueueStatus = z.enum([
 export type QueueStatus = z.infer<typeof QueueStatus>;
 
 export const StepStatus = z.enum([
-  "pending", "running", "waiting", "review", "done", "failed", "skipped", "stopped", "rejected",
+  "pending", "running", "waiting", "checking", "review", "done", "failed", "skipped", "stopped", "rejected",
 ]);
 export type StepStatus = z.infer<typeof StepStatus>;
 
@@ -156,6 +156,11 @@ const DefaultsShape = z.object({
    * a project's own value limits its own queues as well, and both hold (src/coordinator.ts).
    */
   max_running: MaxRunning.default(DEFAULT_MAX_RUNNING),
+  /**
+   * How many check-fix rounds a step gets when the checks Nexus runs fail (PROTOCOL.md, "Checks run by Nexus"); after
+   * them the run halts for the orchestrator. Counted apart from the send-backs.
+   */
+  check_fix_limit: z.number().int().min(0).default(3),
 });
 /** `defaults` as read: an old `review_policy` becomes its `review_level`. */
 const legacyDefaults = (x: unknown) => withLevel(x, "review_policy", "review_level");
@@ -385,6 +390,7 @@ export const StoredProject = z.object({
     resolve_conflicts: own(z.boolean()),
     usage_pause_threshold: own(Fraction),
     max_running: own(MaxRunning),
+    check_fix_limit: own(z.number().int().min(0)),
     worktree_dir: z.string().optional(),
     worktree_setup: z.string().optional(),
     checks: z.array(z.string()).optional(),
@@ -870,6 +876,17 @@ export const Event = z.discriminatedUnion("type", [
    * drafts a revision with a step that fixes it. User only.
    */
   z.object({ ...base, type: z.literal("review.fix_asked"), ...qs, text: z.string().min(1) }),
+  /**
+   * The worker says a check Nexus ran fails not because of its work (`nexus check <step> <name> --unrelated`), with its
+   * evidence; it ends its turn without `nexus step done`. Nexus runs the check on the queue's base commit (PROTOCOL.md,
+   * "An unrelated failure"). Worker only.
+   */
+  z.object({ ...base, type: z.literal("check.disputed"), ...qs, name: z.string().min(1), evidence: z.string().min(1) }),
+  /**
+   * The orchestrator's decision on a disputed check that could not be run on the base (`nexus check decide`):
+   * `accept` sends the step to review with the failure accepted, `fix` gives the worker a fix round. Orchestrator only.
+   */
+  z.object({ ...base, type: z.literal("check.decided"), ...qs, verdict: z.enum(["accept", "fix"]), reason: z.string().min(1) }),
 ]);
 export type Event = z.infer<typeof Event>;
 export type EventType = Event["type"];
@@ -878,11 +895,11 @@ export type EventType = Event["type"];
 export const ORCHESTRATOR_ONLY: ReadonlySet<EventType> = new Set([
   "answer.given", "queue.drafted", "session.request", "review.accepted", "review.sent_back", "review.asked_user", "status.set",
   "review.provisional", "plan.proposed", "tags.proposed", "metric.defined", "recurring.set",
-  "static_analysis.declined",
+  "static_analysis.declined", "check.decided",
 ]);
 
 /** Event types only a worker session may write: a metric's value belongs to a step's work (metrics.ts). */
-export const WORKER_ONLY: ReadonlySet<EventType> = new Set(["metric.recorded"]);
+export const WORKER_ONLY: ReadonlySet<EventType> = new Set(["metric.recorded", "check.disputed"]);
 
 /** Event types only a thinking partner's session (role conversation) may write. */
 export const CONVERSATION_ONLY: ReadonlySet<EventType> = new Set(["ideas.covered"]);
@@ -1273,6 +1290,90 @@ export const AwayFile = z.object({
 });
 export type AwayFile = z.infer<typeof AwayFile>;
 
+/** One run of a check: the first, or the one run again after a failure (`queues/<id>/checks.yaml`). */
+const CheckAttempt = z.object({
+  started_at: Time,
+  ended_at: Time.optional(),
+  /** The root's exit code; null: it was ended (a time limit, a stop). */
+  exit_code: z.number().int().nullable().optional(),
+  /** In seconds. */
+  duration: z.number().nonnegative().optional(),
+  /** The log file, relative to the queue's folder. */
+  log: z.string(),
+  failed_tests: z.array(z.string()).optional(),
+  /** The end of its output. */
+  tail: z.string().optional(),
+  /** Ended at CHECK_LIMIT_MS: counted as failed. */
+  timed_out: z.boolean().optional(),
+  /** Ended by a restart, an update's drain or a stop: neither passed nor failed; the set runs again. */
+  interrupted: z.boolean().optional(),
+});
+export type CheckAttempt = z.infer<typeof CheckAttempt>;
+
+const CheckRun = z.object({
+  name: z.string(),
+  command: z.string(),
+  runs: z.array(CheckAttempt).default([]),
+  /** Its outcome in the set: passed on the first run or the second (then also `flaky`). */
+  ok: z.boolean().optional(),
+  flaky: z.boolean().optional(),
+});
+export type CheckRun = z.infer<typeof CheckRun>;
+
+/**
+ * A worker's word that a failure is not its work's (`check.disputed`), and what came of it: Nexus ran the check on the
+ * queue's base commit (`base`): failing there too, the failure is accepted; passing, it is the queue's (a fix round).
+ * Not runnable there (`unrunnable`): the orchestrator decides (`decided`).
+ */
+const CheckDispute = z.object({
+  event: z.string(),
+  name: z.string(),
+  evidence: z.string(),
+  at: Time,
+  base: z.object({
+    state: z.enum(["queued", "running", "failed", "passed", "unrunnable"]),
+    commit: z.string().optional(),
+    reason: z.string().optional(),
+    run: CheckAttempt.optional(),
+  }).optional(),
+  decided: z.object({ verdict: z.enum(["accept", "fix"]), reason: z.string(), at: Time, event: z.string() }).optional(),
+  outcome: z.enum(["accepted", "fix"]).optional(),
+});
+export type CheckDispute = z.infer<typeof CheckDispute>;
+
+/** The checks Nexus ran after one `step.done` of a step. */
+const CheckSet = z.object({
+  /** The step.done event it checks. */
+  done: z.string(),
+  /** The step's review round (send-backs) and the check-fix rounds before this set within it (0: none). */
+  round: z.number().int().positive(),
+  fix: z.number().int().nonnegative(),
+  commit: z.string().nullable().optional(),
+  dirty: z.boolean().optional(),
+  requested_at: Time,
+  granted_at: Time.optional(),
+  ended_at: Time.optional(),
+  state: z.enum(["queued", "running", "passed", "failed", "interrupted", "accepted"]),
+  checks: z.array(CheckRun).default([]),
+  /** Failed with the step's check-fix rounds used up: the run halted for the orchestrator. */
+  limit: z.boolean().optional(),
+  dispute: CheckDispute.optional(),
+  /** The fix queue an accepted failure went to: `created` by it, or one open for the same tests it was added to. */
+  fix_queue: z.object({ id: z.string(), created: z.boolean() }).optional(),
+});
+export type CheckSet = z.infer<typeof CheckSet>;
+
+/**
+ * queues/<id>/checks.yaml: the checks Nexus runs after a worker's `nexus step done` (PROTOCOL.md, "Checks run by
+ * Nexus"). Per step: `by`, fixed when the step opened (`nexus`: the engine runs them; `worker`: an older server opened
+ * it, and the worker reports them); `sets`, one per step.done, oldest first. One writer: the server.
+ */
+export const ChecksFile = z.object({
+  protocol: z.literal(1),
+  steps: z.record(z.string(), z.object({ by: z.enum(["nexus", "worker"]), sets: z.array(CheckSet).default([]) })).default({}),
+});
+export type ChecksFile = z.infer<typeof ChecksFile>;
+
 /** One heavy operation asked for, granted or waiting (`<NEXUS_HOME>/capacity.yaml`). */
 const CapacityRequest = z.object({
   id: z.string(),
@@ -1566,6 +1667,13 @@ export const InboxEntry = z.discriminatedUnion("type", [
    * review.sent_back event's id (`ref`); `round` is the round it opens. Its being in the inbox reopens the step.
    */
   z.object({ ...ibase, type: z.literal("send_back"), ref: Id, queue: Id, step: Id, text: z.string(), round: z.number().int().positive() }),
+  /**
+   * The checks Nexus ran after the worker's `nexus step done` failed twice (PROTOCOL.md, "Checks run by Nexus"): `id` is
+   * "check-failed-" + the step.done event's id (`ref`); `fix`: the check-fix round it opens; `text`: what failed (each
+   * check's failing tests, the end of its output, its log's path), or the reason a disputed failure is the queue's.
+   * Its being in the inbox reopens the step for the fix round. From Nexus.
+   */
+  z.object({ ...ibase, type: z.literal("check_failed"), ref: Id, queue: Id, step: Id, fix: z.number().int().positive(), text: z.string() }),
 ]);
 export type InboxEntry = z.infer<typeof InboxEntry>;
 

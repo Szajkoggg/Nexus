@@ -1,6 +1,7 @@
 // Derives the dashboard's view of a project from its files. Pure apart from reading through the store;
 // nothing here is ever written back (state.json, if kept, is only a cache of this).
-import { CONVERSATION_ONLY, ORCHESTRATOR_ONLY, USER_ONLY, WORKER_ONLY, type MetricsFile, type StatusChange, type Event, type InboxEntry, type Note, type GitFile, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type RecurringFile, type ReviewItem, type ReviewLevel, type LegacyReviewPolicy, type AwayFile, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type PlanFile, type StepDef, type StepStatus, type TagProposal, type TagsFile } from "./schemas.ts";
+import { applyCheckSets, reviewRound } from "./checks.ts";
+import { CONVERSATION_ONLY, ORCHESTRATOR_ONLY, USER_ONLY, WORKER_ONLY, type MetricsFile, type StatusChange, type Event, type InboxEntry, type Note, type GitFile, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type RecurringFile, type ReviewItem, type ReviewLevel, type LegacyReviewPolicy, type AwayFile, type ChecksFile, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type PlanFile, type StepDef, type StepStatus, type TagProposal, type TagsFile } from "./schemas.ts";
 import { ProjectStore, chainPlan, readAway, revisionHash } from "./store.ts";
 import { awayAt, awayNow, type AwayNow } from "./away.ts";
 import { formatClock, type Segment } from "./times.ts";
@@ -134,6 +135,20 @@ export interface StepView extends StepDef {
   pictures: Record<string, { accepted?: string; comments: { text: string; at: string; to: "send_back" | "note" | "orchestrator"; note_step?: string }[] }>;
   checks: CheckView[];
   /**
+   * Who runs the step's checks (checks.yaml, fixed when the step opened): `nexus`, the engine after each
+   * `nexus step done`; `worker` (or absent), the worker reports them (PROTOCOL.md, "Checks run by Nexus").
+   */
+  checks_by?: "nexus" | "worker";
+  /**
+   * While `checking` (or `waiting` for the orchestrator's decision on a disputed failure): `queued` for the machine,
+   * `running` (which `check`), `base` (a disputed check run on the queue's base commit), `decision`; since when.
+   */
+  checking?: { phase: "queued" | "running" | "base" | "decision"; since: string; check?: string };
+  /** The check-fix round at work, or the last one (1 for the first), counted apart from the review rounds. */
+  check_fix?: number;
+  /** The latest checks failed with the step's check-fix rounds used up: the run halted for the orchestrator. */
+  check_limit?: boolean;
+  /**
    * The step's metric values, oldest first, over every round (metrics.ts): what its workers recorded, and its checks'
    * times as `check:<name>`; each with its commit, and `warn` when beyond its metric's warning threshold.
    */
@@ -176,6 +191,8 @@ export interface QueueView extends Omit<QueueFile, "steps"> {
   push?: PushFile;
   /** Git records of the queue (queues/<id>/git.yaml): its base, and a merge back and cleanup by the user. */
   git?: GitFile;
+  /** The checks Nexus ran for its steps (queues/<id>/checks.yaml). */
+  check_runs?: ChecksFile;
   /** The queue's next start as planned (queues/<id>/start.yaml): its options, a schedule; why it has not come yet. */
   start?: StartView;
   /** The queue's place in the plan (queues/<id>/plan.yaml): the queues it waits for, each as it stands. */
@@ -250,6 +267,7 @@ export function loadProjectState(store: ProjectStore): ProjectState {
       try { view.run = store.readRun(id); } catch (e) { warnings.push(`queue ${id} run: ${(e as Error).message}`); }
       try { view.push = store.readPush(id); } catch (e) { warnings.push(`queue ${id} push: ${(e as Error).message}`); }
       try { view.git = store.readGit(id); } catch (e) { warnings.push(`queue ${id} git: ${(e as Error).message}`); }
+      try { view.check_runs = store.readChecks(id); } catch (e) { warnings.push(`queue ${id} checks: ${(e as Error).message}`); }
       try {
         const plan = store.readStart(id);
         if (plan) view.start = { ...plan, waiting: "", blocked: false };
@@ -320,6 +338,8 @@ export function loadProjectState(store: ProjectStore): ProjectState {
     apply(e, queues, sessions, questions, warnings, project, delivered, away);
   }
   for (; next < changes.length; next++) applyChange(changes[next]!.q, changes[next]!.c);
+  // The checks Nexus ran: a step.done whose checks have not passed is no review yet (checks.ts).
+  for (const q of queues.values()) for (const st of q.steps) applyCheckSets(q, st);
   // What the workers reported doing, as the names read now; where the run opened a step on its fallback.
   for (const q of queues.values()) for (const st of q.steps) {
     const f = q.run?.fallbacks?.findLast((x) => x.step === st.id);
@@ -700,6 +720,11 @@ function apply(
       if (e.duration !== undefined) st.metrics.push({ name: checkMetric(e.name), value: e.duration, unit: CHECK_UNIT, at: e.at, event: e.id, session: e.session, commit: e.commit });
       return;
     }
+    case "check.disputed":
+    case "check.decided":
+      // On the step's timeline: the checks Nexus ran read them there (checks.ts, applyCheckSets).
+      stepOf(queueOf(e.queue), e.step);
+      return;
     case "metric.recorded": {
       const st = stepOf(queueOf(e.queue), e.step);
       if (st) st.metrics.push({ name: e.name, value: e.value, unit: e.unit, at: e.at, event: e.id, session: e.session, commit: e.commit });
@@ -805,7 +830,7 @@ function apply(
       if (!q || !st) return;
       const by = s?.role === "user" ? "user" : "orchestrator";
       if (st.status !== "review" || st.review_with !== by) { warnings.push(`event ${e.id}: step ${e.queue}/${e.step} is not waiting for the ${by}'s review; the send-back is ignored`); return; }
-      const round = st.timeline.filter((x) => x.type === "step.done").length + 1;
+      const round = reviewRound(q, st) + 1;
       const limit = project.defaults.review_send_back_limit;
       if (by === "orchestrator" && st.sent_back.filter((x) => x.by === "orchestrator" && !x.to_user).length >= limit) {
         st.sent_back.push({ id: e.id, text: e.text, at: e.at, by, round, delivered: false, to_user: true });
