@@ -4,9 +4,11 @@
 
 export const STOPS = "defaults.stop_conditions";
 export const SEND_BACKS = "defaults.review_send_back_limit";
+/** How many check-fix rounds a step gets when the checks Nexus runs fail (queue EF). */
+export const FIX_LIMIT = "defaults.check_fix_limit";
 
 /** Why the form cannot be saved: the first empty stop condition (1-based), or the send-back limit. */
-export type SettingsProblem = { kind: "emptyCondition"; n: number } | { kind: "badLimit" };
+export type SettingsProblem = { kind: "emptyCondition"; n: number } | { kind: "badLimit" } | { kind: "badFixLimit" };
 
 /** A stop condition list as the form holds it: the texts, whatever came (a missing list is none). */
 export const conditionList = (v: unknown): string[] => (Array.isArray(v) ? v.map((x) => (typeof x === "string" ? x : String(x))) : []);
@@ -26,6 +28,10 @@ export function settingsProblem(values: Record<string, unknown>, keys: readonly 
   if (keys.includes(SEND_BACKS)) {
     const n = values[SEND_BACKS];
     if (typeof n !== "number" || !Number.isInteger(n) || n < 0) return { kind: "badLimit" };
+  }
+  if (keys.includes(FIX_LIMIT)) {
+    const n = values[FIX_LIMIT];
+    if (typeof n !== "number" || !Number.isInteger(n) || n < 0) return { kind: "badFixLimit" };
   }
   return undefined;
 }

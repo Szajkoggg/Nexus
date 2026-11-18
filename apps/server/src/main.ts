@@ -10,7 +10,7 @@ import chokidar, { type FSWatcher } from "chokidar";
 import type { Server } from "node:http";
 import {
   ActionError, Effort, ProjectStore, addNote, closingToSkip, closingToSkipAtApproval, updateSettings, answerAsUser, approveQueue, deleteNote, loadProjectState, nexusHome, withdrawApproval, addAllowRule,
-  ensureGlobalSettings, readGlobalSettings, updateGlobalSettings, MaxRunning, ownKeys, OVERRIDABLE, settingKey, readRegistry, readUsage, readTurns, commentOnPicture, markPicture, routeAnswers, routeSendBacks, sendBack, sendMessage, setQueueSettings, setStepLevel, confirmProvisional, type ProjectState,
+  ensureGlobalSettings, readGlobalSettings, updateGlobalSettings, MaxRunning, ownKeys, OVERRIDABLE, settingKey, readRegistry, readCapacity, readUsage, readTurns, commentOnPicture, markPicture, routeAnswers, routeSendBacks, sendBack, sendMessage, setQueueSettings, setStepLevel, confirmProvisional, type ProjectState,
   readAway, writeAway, awayNow, awayUntil, turnAway, expireAway, acceptPlanProposal, declinePlanProposal, handBackPlan, acceptTagProposal, declineTagProposal,
   STAT_DIMENSIONS, STAT_FILTERS, projectMetrics, sinceTime, statDimension, statsReport, stepStats, usageDays, type ProjectMetrics, type StatsReport, type UsageDays,
   SearchError, parseSearch, MIN_SAMPLES, queueEstimate, stepSamples, isOpenQuestion, writeCount, type EstimatesResponse, type LeftView, type TemplatesResponse, readTemplates, type ProjectSummary, type RemovalView,
@@ -98,7 +98,7 @@ let capacity: Capacity | undefined;
 
 function refreshRegistry(): void {
   if (!active) return;
-  capacity ??= new Capacity();
+  capacity ??= new Capacity({ onChange: () => broadcast({ type: "server" }) });
   // Global settings (PROTOCOL.md): the file exists from the first start on, with the built-in defaults; each project's
   // project.yaml from before them is migrated once, before anything reads it (effective values unchanged).
   ensureGlobalSettings();
@@ -797,6 +797,8 @@ app.get("/api/digest", (c) => {
 });
 
 app.get("/api/usage", (c) => c.json(readUsage() ?? null));
+// The workstation's heavy slot (<NEXUS_HOME>/capacity.yaml): what a step whose checks are queued waits behind.
+app.get("/api/capacity", (c) => c.json(readCapacity() ?? null));
 
 // Nexus itself: its version, and updating it without cutting off running work (src/lifecycle.ts).
 // `local`: whether this request comes straight from this machine (src/remote.ts isLocal), so the dashboard shows what

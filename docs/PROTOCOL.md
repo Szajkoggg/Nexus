@@ -1681,6 +1681,12 @@ machine DESKTOP-1234 (one heavy operation at a time, across projects):
   outside Nexus: a full test run in C:\Code\Other (pid 4242, since 09:58); nothing is granted until it ends
 ```
 
+**The dashboard** (queue EF) reads the same file through `GET /api/capacity` (the file as it is, or null when there is
+none); the server broadcasts a `server` change whenever the coordinator writes it. A step whose checks are queued says
+in its **Checks by Nexus** box what it waits behind (`capacityWait`, `packages/protocol/src/capacity.ts`): its place in
+line (`position` of `waiting`), the operations holding the slot (another queue's checks, named with their project when
+it is another one), a full test run outside Nexus (`outside`, its folder and pid), and the requests ahead of it.
+
 **The full-test lock** **(P11)**. `scripts/test-lock.ts` stays the guard of `npm test` and `npm run test:times` for
 every starter (by hand, an agent, and the engine's checks, inside their grant). It no longer starts a run without the
 lock after a time (`NEXUS_TEST_LOCK_MAX_MS` is gone): a waiting run keeps waiting, saying once a minute what for (`npm
@@ -1809,7 +1815,7 @@ Also `GET /api/projects/:id/sessions/:session/activity?queue=&step=&limit=`, `GE
 wherever in the chat it is; a fresh session has none; and `earlier`: the sessions it went on from by its context care,
 oldest first, each `{ session, created_at, chat, switch: { at, fill, summary } }`, its newest entries in what the 300
 leave over, at least 60, `fill` from 0 to 1 or null and `summary` its `{ text, topics, files, at }` or null; the
-dashboard shows them above the current chat, a "Fresh session" line at each switch), `GET /api/digest?since=` (below), `GET /api/usage` and `GET /api/models/:runtime`: the models a runtime offers, asked from the runtime itself
+dashboard shows them above the current chat, a "Fresh session" line at each switch), `GET /api/digest?since=` (below), `GET /api/usage`, `GET /api/capacity` (the capacity coordinator's file, see "The capacity coordinator") and `GET /api/models/:runtime`: the models a runtime offers, asked from the runtime itself
 (Claude Code: an `initialize` control request on its stream-json input; Codex: `model/list`), with each model's
 name, description and effort levels; the dashboard offers only these.
 

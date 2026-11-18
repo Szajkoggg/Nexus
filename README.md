@@ -221,11 +221,11 @@ finished steps before it and the steps after the next three are folded into one 
 **Checks run by Nexus.** When a worker reports a step done, Nexus runs the queue's checks itself (the project's and the
 queue's, one after another) before the step goes to its review; the worker does not run the whole suite. Meanwhile the
 step reads **checks running** (with the check and since when under it), or **checks queued** while another project's
-checks have the machine (one heavy operation at a time on the computer), and the queue says the same ("checks running ·
+checks have the machine (one heavy operation at a time on the computer; its box says what it waits behind: which project's queue and step holds the machine, or a full test run outside Nexus, and its place in line), and the queue says the same ("checks running ·
 SF3"). The step's panel has a **Checks by Nexus** box listing each check: passed, flaky (failed, then passed on its
 second run), failed, running, or waiting its turn. A check that fails twice goes back to the same worker with its
 output: the step reads **check fix 1 of 3**, a round of its own and no send-back, so the review round and its pictures
-keep their number. After the last round (`defaults.check_fix_limit` in the settings file, 3 by default) the run halts
+keep their number. After the last round (**Check-fix rounds** in Settings, under Defaults: global, or a project's own; 3 by default) the run halts
 for the orchestrator; Resume gives one more. A failure the worker says is not its work's is run on the queue's base
 commit: failing there too, the step goes to its review, and Nexus proposes a fix queue (CI) for the failing test. A step
 started by an older Nexus keeps having its checks run by its worker.

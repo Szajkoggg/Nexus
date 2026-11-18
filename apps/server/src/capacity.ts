@@ -55,6 +55,8 @@ interface CapacityOptions {
   /** The machine's full-test lock (scripts/test-lock.ts's file, NEXUS_TEST_LOCK) and when it counts as stale. */
   testLock?: string;
   testLockStaleMs?: number;
+  /** Called after the file changed (the dashboard shows what a queued step waits behind). */
+  onChange?: () => void;
   /** How often a request kept only by a full run outside Nexus looks again (1 s). */
   pollMs?: number;
   /**
@@ -80,6 +82,7 @@ export class Capacity {
   private readonly testLockStaleMs: number;
   private readonly pollMs: number;
   private readonly jobs: boolean;
+  private readonly onChange?: () => void;
   private readonly waiting: Entry[] = [];
   private readonly held: Entry[] = [];
   private outside: CapacityFile["outside"];
@@ -94,6 +97,7 @@ export class Capacity {
     this.testLockStaleMs = o.testLockStaleMs ?? fullTestStaleMs();
     this.pollMs = o.pollMs ?? 1000;
     this.jobs = o.jobs ?? true;
+    this.onChange = o.onChange;
     this.write();
   }
 
@@ -204,6 +208,7 @@ export class Capacity {
     this.lastWritten = key;
     try { writeCapacity(v); }
     catch (err) { console.error(`capacity.yaml not written: ${(err as Error).message}`); }
+    this.onChange?.();
   }
 }
 

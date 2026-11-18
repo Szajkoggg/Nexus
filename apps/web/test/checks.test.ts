@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { CheckSet } from "@nexus/protocol";
-import { checkLine, checkRows, checkTone, checkWord } from "../src/checks.ts";
+import { checkLine, checkRows, checkTone, checkWord, queuedText } from "../src/checks.ts";
 
 const SINCE = "2026-11-18T10:02:00.000Z";
 const NOW = new Date("2026-11-18T10:05:00.000Z");
@@ -55,4 +55,17 @@ test("an older queue's check in words is shown as not a command, not as waiting 
     checks: [{ name: "All tests green", command: "All tests green", runs: [], not_command: true }],
   };
   assert.deepEqual(checkRows(set, ["All tests green"]), [{ name: "All tests green", state: "notCommand", tests: [] }]);
+});
+
+test("what queued checks wait behind (queue EF): the slot's holder, a run outside Nexus, those ahead, and the place in line", () => {
+  const holder = (project: string, queue: string, step: string) => ({ project, queue, step, since: SINCE });
+  const at = clock(SINCE);
+  assert.equal(queuedText(undefined, "shop", SINCE, NOW), undefined, "not in the file: the plain text");
+  assert.equal(
+    queuedText({ position: 2, waiting: 2, held: [holder("demo", "CK", "CK1")], ahead: [holder("shop", "AB", "AB1")] }, "shop", SINCE, NOW),
+    `Waiting for the machine since ${at}, 2 of 2 in line, behind the checks of CK/CK1 (project demo), running since ${at}; the checks of AB/AB1. One heavy operation runs at a time, across projects; the checks start by themselves.`,
+  );
+  assert.match(queuedText({ position: 1, waiting: 1, held: [], ahead: [], outside: { cwd: "C:\Code\Nexus", pid: 42, since: SINCE } }, "shop", SINCE, NOW)!,
+    /the only one in line, behind a full test run outside Nexus in C:\Code\Nexus \(pid 42\)/);
+  assert.match(queuedText({ position: 1, waiting: 1, held: [], ahead: [] }, "shop", SINCE, NOW)!, /the only one in line: next when the slot is free/);
 });
