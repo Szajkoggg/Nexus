@@ -655,6 +655,13 @@ on a slow machine; `apps/server/test/wait.ts`), so a change that breaks many of 
 A test that fails only now and then usually fails on a busy machine: `scripts/load-tests.mjs` runs the files given
 several times at once beside busy-loop processes and reports each run, its failures and its slow tests.
 
+On the user's machine (full runs of 550 to 630 s) 15000 is the value measured to be enough: in two full runs at 15000 and two at 20000 no wait ran over 27 s (a 45 s limit at 15000, so the longest took 60 % of it), and a hung run still fails within a minute or two. To keep it, set it as a user environment variable, once:
+`setx NEXUS_TEST_WAIT_MS 15000` (or System Properties, Environment Variables, a new user variable). `setx` changes only
+processes started afterwards: the Nexus live instance reads its environment when it starts, so it sees the value only
+after it is restarted, and the checks its workers run (`npm test`) use it only from then on. A terminal opened before
+the change keeps the old value. `NEXUS_TEST_WAIT_LOG` names a file that gets every wait over 2 s, to see what a value
+should be.
+
 `npm run lint` checks what the compiler does not: a promise nobody awaits, an async function where a void callback is
 expected, a `switch` over a union that leaves a member out (a `default` does not count), the rules of React hooks, and
 the module boundaries (the protocol imports nothing from `apps/`, neither the dashboard nor the CLI imports the
