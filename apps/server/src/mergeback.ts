@@ -98,8 +98,9 @@ function runningIn(store: ProjectStore, state: ProjectState, path: string): Queu
 }
 
 /**
- * Queues with a step at work in checkout `path`: its step running or waiting for an answer, or a pause asked for that
- * waits for the step's end. A run between steps, held, paused, or with its step in review is not at work there.
+ * Queues with a step at work in checkout `path`: its step running, waiting for an answer or its checks running, or a
+ * pause asked for that waits for the step's end. A run between steps, held, paused, or with its step in review is not
+ * at work there.
  */
 function atWorkIn(store: ProjectStore, state: ProjectState, path: string): QueueView[] {
   return runningIn(store, state, path).filter((x) => {
