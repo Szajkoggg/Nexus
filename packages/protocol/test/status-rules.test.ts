@@ -126,5 +126,5 @@ test("a step is worked on only while running with its run going, in every run st
   assert.deepEqual(going, RUN_STATES.filter((s) => runGoing({ state: s })));
   assert.ok(!going.includes("paused") && !going.includes("halted") && !going.includes("finished"));
   for (const status of ["waiting", "review", "checking", "done", "pending"] as StepStatus[]) assert.equal(stepWorkedOn({ state: "running" }, { status }), false, status);
-  assert.equal(stepWorkedOn(undefined, { status: "running" }), false, "no run");
+  assert.equal(stepWorkedOn(undefined, { status: "running" }), true, "no run of Nexus's: a session it did not start works on it");
 });

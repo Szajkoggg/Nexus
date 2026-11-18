@@ -1961,7 +1961,7 @@ successor, `up` (`commit`, `subject`, `previous?`). It also gives `push_on_deplo
 running at once), `away` (the away mode now: `on`, `since?`, `until?`), `plan` (the planned deploy, as in
 `deploy-plan.json`, with `waiting?`: what it waits for, in a sentence; null when none) and `running`: the steps running
 now, per project (`project`, `name`, `steps`: `queue`, `step`, `title`, `session`, `run`), which `nexus server status`
-prints. A step is running now when the derivation says `running` and its queue's run is going (`stepWorkedOn`,
+prints. A step is running now when the derivation says `running` and its queue's run is going, or it has none (a session Nexus did not start works on it) (`stepWorkedOn`,
 status-rules.ts; queue EF): a run the user stopped (paused, "stopped by the user") keeps its step `running` in the
 derivation, as the step it goes on with at Resume, and its queue `running` too, but no agent works on it, so it is
 not listed here, an update neither holds nor waits for it, and `GET /api/projects` does not count it in `running`
