@@ -32,7 +32,7 @@ import { StaticReminder } from "./static-reminder.ts";
 import { gitBranch, recordSetup, runSetup, setupPending, worktreeFor } from "./worktree.ts";
 import { closingContext } from "./closing.ts";
 import { integrationContext } from "./integration.ts";
-import { Coordinator, refusalText, waitingText, type Member } from "./coordinator.ts";
+import { Coordinator, bringsBack, refusalText, waitingText, type Member } from "./coordinator.ts";
 import { gitWritableRoots } from "./codex.ts";
 import {
   assertCanResume, assertCanStart, startedRun, stoppedMessage, toFinished, toHalted, toHeldForUpdate,
@@ -1172,14 +1172,7 @@ export class Engine implements Member {
     const questionsOpen = !!owner && questionsHold(state, owner.id, run?.step);
     if (owner && l.proc.state === "idle" && (owner.status === "stopped" || (step && OUTCOME.has(step.status))) && this.cleanWorker(owner.id, l)) return;
     const allowed = !run || (run.state === "running" && owner?.status !== "stopped" && !owner?.rejection && step?.status !== "review");
-    // A run held at the limit opens no turn: its entries wait in the inbox (a stop still reaches it). One back from
-    // waiting (its answers, a send-back) to an idle session asks for a place first, and may be held now. Read from the
-    // file: the state given may be older than the coordinator's last hold or release.
-    const latest = owner && run && allowed ? this.store.readRun(owner.id) : undefined;
-    const returning = unread.some((m) => m.type === "send_back" || (m.type === "answer" && !this.liveAnswerIds.has(m.id)));
-    const held = !!latest?.held || (!!latest && !questionsOpen && returning && l.proc.state === "idle"
-      && this.heldAtLimit(owner!.id, latest, "the turn its answers or send-back open"));
-    const idleAllowed = allowed && !held;
+    const idleAllowed = allowed && !(owner && this.inboxHeld(owner.id, unread, l.proc.state === "idle" && !questionsOpen));
     // A new turn of an idle session within its step (an answer, a send-back, a message): its runtime beyond the usage
     // threshold goes on on the step's fallback in a fresh session, which gets these entries (or the run waits). A stop
     // is not a turn; an entry for a working session goes into its running turn, which is never cut off.
@@ -1212,6 +1205,19 @@ export class Engine implements Member {
       if (m.type === "send_back") recordStepStart(this.store, m.queue, m.step, l.session); // the next round
       this.store.appendDelivered(l.session, { at: now(), kind: "inbox", id: m.id, via: l.proc.state === "working" ? "inject" : "turn" });
     }
+  }
+
+  /**
+   * A run held at the limit opens no turn: its entries wait in the inbox (a stop still reaches it). One back from
+   * waiting (its answers, a send-back: bringsBack) to an idle session with no question open (`asks`) asks for a place
+   * first, and may be held now. Read from the file: the state given may be older than the coordinator's last hold or
+   * release.
+   */
+  private inboxHeld(queueId: string, unread: readonly { type: string; id: string }[], asks: boolean): boolean {
+    const run = this.store.readRun(queueId);
+    if (!run) return false;
+    if (run.held) return true;
+    return asks && unread.some((m) => bringsBack(m, this.liveAnswerIds)) && this.heldAtLimit(queueId, run, "the turn its answers or send-back open");
   }
 
   /** Halts a run that is not halted yet; `failure`: the runtime's failure that halted it. */

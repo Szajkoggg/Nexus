@@ -56,18 +56,32 @@ export const refusalText = (queue: string, verb: string, b: Block): string =>
 function holdersOf(state: ProjectState, live: ReadonlySet<string> = new Set()): Holder[] {
   return state.queues.filter((q) => runHoldsCheckout(q.run)).map((q) => ({
     project: state.project.id, name: state.project.name, queue: q.id, state: q.run!.state, checkout: checkoutPath(state, q),
-    // A queue waiting for a review or an answer does not count, nor one waiting for the usage window, a retry or an
-    // approval, nor one held at the limit, nor one whose steps are all done (its run is about to finish): only a run at
-    // work. A worker that asked with --can-continue and works on in its live turn is at work; one back from waiting
-    // counts from when its engine lets it go on (returning).
-    counts: runCounted(q.run) && q.status !== "done" && (q.status === "waiting" ? workingOn(state, q) : !returning(state, q, live)),
+    counts: atWork(state, q, live),
   }));
 }
 
 /**
+ * The queue's run is at work, so it counts toward the limit. A queue waiting for a review or an answer is not, nor one
+ * waiting for the usage window, a retry or an approval, nor one held at the limit, nor one whose steps are all done
+ * (its run is about to finish). A worker that asked with --can-continue and works on in its live turn is at work; one
+ * back from waiting is from when its engine lets it go on (returning).
+ */
+function atWork(state: ProjectState, q: QueueView, live: ReadonlySet<string>): boolean {
+  if (!runCounted(q.run) || q.status === "done") return false;
+  return q.status === "waiting" ? workingOn(state, q) : !returning(state, q, live);
+}
+
+/**
+ * An inbox entry that brings an idle worker back from waiting, so its turn asks for a place under the limit first: a
+ * send-back, or an answer that did not reach the worker's live turn (`live`: those that did are part of its work).
+ */
+export const bringsBack = (m: { type: string; id: string }, live: ReadonlySet<string>): boolean =>
+  m.type === "send_back" || (m.type === "answer" && !live.has(m.id));
+
+/**
  * The queue is back from waiting but its engine has not let it go on yet (it asks for a place first, heldAtLimit): its
- * worker idle, with an answer (but one that reached its live turn, `live`) or a send-back not yet delivered, an answer
- * not yet in its inbox, or between a step whose review ended and the next one.
+ * worker idle, with an unread entry that brings it back (bringsBack), an answer not yet in its inbox, or between a
+ * step whose review ended and the next one.
  */
 function returning(state: ProjectState, q: QueueView, live: ReadonlySet<string>): boolean {
   const run = q.run!;
@@ -75,7 +89,7 @@ function returning(state: ProjectState, q: QueueView, live: ReadonlySet<string>)
   if (s?.live?.state !== "idle") return false;
   const current = q.steps.find((x) => x.id === run.step);
   if (current && (current.status === "done" || current.status === "skipped") && q.steps.some((x) => x.status === "pending")) return true;
-  if (s.inbox.some((m) => !m.read_at && (m.type === "send_back" || (m.type === "answer" && !live.has(m.id))))) return true;
+  if (s.inbox.some((m) => !m.read_at && bringsBack(m, live))) return true;
   return state.questions.some((x) => x.session === run.session && x.state === "answered" && !s.inbox.some((m) => m.type === "answer" && m.qid === x.qid));
 }
 
