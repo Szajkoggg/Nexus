@@ -122,7 +122,7 @@ test("a third queue over the limit waits and starts when one ends, also across t
     assert.equal(r.queue("Z").start!.waiting, "queue Z0 is done; waits: 2 queues run, the limit is 2");
     assert.equal(r.queue("Z").start!.held!.kind, "limit");
     work.release("A1"); // B stays at work
-    await w.until("A to finish", () => p.queue("A").run?.state === "finished", LONGER.run);
+    await w.until("A to finish", () => p.queue("A").run?.state === "finished", LONGER.processes);
     await w.until("Z to start once A ended", () => !!r.queue("Z").run, LONGER.step);
     assert.ok(going(p.queue("B").run?.state), "B was still at work: Z took A's place");
     await w.until("Z to finish", () => r.queue("Z").run?.state === "finished", LONGER.run);
@@ -186,7 +186,7 @@ test("a project's own limit holds beside the global one: one of its queues at a 
     assert.equal(p.engine.plan("B", { after: ["B0"], by: "user" }), "queue B0 is done; queue B waits: 1 queue of Project p runs, its limit is 1; it starts by itself then");
     assert.equal(p.queue("B").start!.held!.kind, "limit");
     work.release("A1"); // Z stays at work
-    await w.until("B to finish once A ended", () => p.queue("B").run?.state === "finished", LONGER.run);
+    await w.until("B to finish once A ended", () => p.queue("B").run?.state === "finished", LONGER.processes);
     assert.ok(going(r.queue("Z").run?.state), "Z still at work: B waited for its project's limit, not the global one");
   } finally { w.stop(); work.done(); }
 });
@@ -203,7 +203,7 @@ test("the global limit holds whatever the projects' own limits are", async () =>
     assert.throws(() => p.engine.start("C"), /^Error: queue C cannot start: 2 queues run, the limit is 2$/, "its own limit of 5 does not lift the global one");
     assert.throws(() => r.engine.start("Z"), /queue Z cannot start: 2 queues run, the limit is 2/);
     work.release();
-    await w.until("A and B to finish", () => p.queue("A").run?.state === "finished" && p.queue("B").run?.state === "finished", LONGER.run);
+    await w.until("A and B to finish", () => p.queue("A").run?.state === "finished" && p.queue("B").run?.state === "finished", LONGER.processes);
     r.engine.start("Z");
     await w.until("Z to finish", () => r.queue("Z").run?.state === "finished", LONGER.run);
   } finally { w.stop(); work.done(); }
