@@ -27,6 +27,7 @@ public static class NexusWorkerJob
     [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr window, int show);
     [DllImport("kernel32.dll")] static extern IntPtr GetStdHandle(int kind);
     [DllImport("kernel32.dll")] static extern bool SetStdHandle(int kind, IntPtr handle);
+    [DllImport("kernel32.dll")] static extern void ExitProcess(uint code);
 
     [StructLayout(LayoutKind.Sequential)] struct BasicLimits {
         public long PerProcessUserTime, PerJobUserTime;
@@ -53,6 +54,11 @@ public static class NexusWorkerJob
     static string Decode(string value) { return Encoding.UTF8.GetString(Convert.FromBase64String(value)); }
     static void Send(string value) { lock (output) { Console.Out.WriteLine(value); Console.Out.Flush(); } }
     static void Check(bool ok) { if (!ok) throw new Win32Exception(Marshal.GetLastWin32Error()); }
+    // Leave at once. Environment.Exit shuts the PowerShell and .NET host down first, which took 2.3 s after the runtime
+    // had ended, and the server sees the exit only when this process is gone (queue FL, FL3/FL8). Every frame is
+    // already flushed (Send), and the job members are already ended (Clean); ending the process closes the job handle,
+    // so KILL_ON_JOB_CLOSE stays the backstop for anything left.
+    static void Quit(uint code) { lock (output) { Console.Out.Flush(); ExitProcess(code); } }
 
     static List<uint> Members() {
         for (int capacity = 64; capacity <= 1048576; capacity *= 2) {
@@ -187,8 +193,8 @@ public static class NexusWorkerJob
                 Clean(false);
                 stdout.Join(2000); stderr.Join(2000);
                 Send("X " + runtime.ExitCode);
-                Environment.Exit(0);
-            } catch (Exception e) { Send("F " + Encode(e.Message)); Environment.Exit(1); }
+                Quit(0);
+            } catch (Exception e) { Send("F " + Encode(e.Message)); Quit(1); }
         });
         monitor.IsBackground = true;
         monitor.Start();
@@ -203,6 +209,6 @@ public static class NexusWorkerJob
         }
         // The server's pipe closed: do not depend on it being able to send a final kill command.
         Clean(false);
-        Environment.Exit(0);
+        Quit(0);
     }
 }

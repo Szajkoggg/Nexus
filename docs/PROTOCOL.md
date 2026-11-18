@@ -3026,7 +3026,10 @@ allows ten seconds for repeated descendant enumeration (each termination waits a
 allows fifteen seconds for a cleanup acknowledgement and otherwise halts the run and requests termination. A kill
 not completed in fifteen seconds ends the helper through Node's child handle, closing the job. Only handles whose
 membership in this private job was verified may be terminated, with no name/command-line matching. The helper
-reports exit only after runtime and descendants have gone; helper death also triggers Windows kill-on-job-close.
+reports exit only after runtime and descendants have gone; helper death also triggers Windows kill-on-job-close. After
+`X` (and `F`) the helper leaves through the native `ExitProcess`, not through the PowerShell/.NET shutdown, which took
+2.3 s: the server still signals the runtime's exit when the helper process closes, now some 20 to 45 ms after the
+runtime ended.
 
 The worker briefing says that processes cannot be left running for another step. The engine cleans after a step
 outcome and the turn's end, before the next step or while waiting for review, and after Stop now's turn. A question
