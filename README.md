@@ -218,6 +218,18 @@ computer. "Running" means a run is really at work; a queue whose run is paused s
 highlighted with why and its action (**Continue…**, **Review…**, its questions). On a phone the list is one column, the
 finished steps before it and the steps after the next three are folded into one line each; a tap unfolds them.
 
+**Checks run by Nexus.** When a worker reports a step done, Nexus runs the queue's checks itself (the project's and the
+queue's, one after another) before the step goes to its review; the worker does not run the whole suite. Meanwhile the
+step reads **checks running** (with the check and since when under it), or **checks queued** while another project's
+checks have the machine (one heavy operation at a time on the computer), and the queue says the same ("checks running ·
+SF3"). The step's panel has a **Checks by Nexus** box listing each check: passed, flaky (failed, then passed on its
+second run), failed, running, or waiting its turn. A check that fails twice goes back to the same worker with its
+output: the step reads **check fix 1 of 3**, a round of its own and no send-back, so the review round and its pictures
+keep their number. After the last round (`defaults.check_fix_limit` in the settings file, 3 by default) the run halts
+for the orchestrator; Resume gives one more. A failure the worker says is not its work's is run on the queue's base
+commit: failing there too, the step goes to its review, and Nexus proposes a fix queue (CI) for the failing test. A step
+started by an older Nexus keeps having its checks run by its worker.
+
 **One action bar.** Every queue and step panel ends with the same bar, always in sight however long the panel is:
 the main action on the right (Accept and go on, Approve revision N, Continue, Answer), the second left of it (Fix
 it…), and everything else under ⋯ (Reject, a note with the acceptance, your words with an approval, Withdraw
@@ -644,11 +656,13 @@ node scripts/load-tests.mjs --burners 12 --copies 4 --rounds 5 apps/server/test/
 
 One full run at a time on the machine: `npm test` and `npm run test:times` take a lock in the system's temporary
 folder first (`scripts/test-lock.ts`). When another checkout's full run holds it, they wait, saying once a minute
-what for, and after 15 minutes run anyway; a lock left by a run that died, or held for more than 20 minutes (longer
-than a full run takes), is taken over at once. A full run ends with whatever started it: when the shell or the
-command that ran `npm test` is killed (a background command's time limit, a closed terminal), the run's test processes
-end and its lock goes. `npm run test:files` never waits. `NEXUS_TEST_LOCK` names another lock file,
-`NEXUS_TEST_LOCK_MAX_MS` another longest wait, `NEXUS_TEST_LOCK_STALE_MS` another age at which a lock is stale.
+what for, as long as it takes: a full run never starts beside another; a lock left by a run that died, or held
+for more than 20 minutes (longer than a full run takes), is taken over at once. A full run ends with whatever started
+it: when the shell or the command that ran `npm test` is killed (a background command's time limit, a closed
+terminal), the run's test processes end and its lock goes. `npm run test:files` never waits. `NEXUS_TEST_LOCK`
+names another lock file, `NEXUS_TEST_LOCK_STALE_MS` another age at which a lock is stale. The Nexus server reads the
+same lock: while a full run started outside Nexus holds it, Nexus starts no heavy operation of its own, and `nexus
+status` says so (the machine's line, "The capacity coordinator" in docs/PROTOCOL.md).
 
 The tests that run fake runtimes or servers wait 10 s for what they expect (`NEXUS_TEST_WAIT_MS` sets it, e.g. higher
 on a slow machine; `apps/server/test/wait.ts`), so a change that breaks many of them fails the suite in minutes.
@@ -660,7 +674,7 @@ and two at 20000 no wait ran over 27 s (a 45 s limit at 15000, so the longest to
 fails within a minute or two. To keep it, set it as a user environment variable, once: `setx NEXUS_TEST_WAIT_MS 15000`
 (or System Properties, Environment Variables, a new user variable). `setx` changes only processes started afterwards:
 the Nexus live instance reads its environment when it starts, so it sees the value only after it is restarted, and the
-checks its workers run (`npm test`) use it only from then on. A terminal opened before the change keeps the old value.
+checks it runs (`npm test`) use it only from then on. A terminal opened before the change keeps the old value.
 `NEXUS_TEST_WAIT_LOG` names a file that gets every wait over 2 s, to see what a value should be.
 
 `npm run lint` checks what the compiler does not: a promise nobody awaits, an async function where a void callback is
@@ -893,8 +907,8 @@ the queue's provisional acceptances. Turn it on where the project's checks are s
 "Worktree setup" (project only) is a command run once in each new worktree before its first step, for example `npm ci`;
 if it fails, the run stops with the reason.
 
-**Checks for every step** (Settings → Defaults, project only, empty by default): commands every step of every queue
-of the project runs before the queue's own checks, one per line, for example `npm run lint`; a check the queue names
+**Checks for every step** (Settings → Defaults, project only, empty by default): commands Nexus runs after every step of
+every queue of the project, before the queue's own checks, one per line, for example `npm run lint`; a check the queue names
 too runs once. Approving a queue shows them first, marked "(project)". A queue that is running gets a change at its
 next start, not its next step. For Nexus itself set it to `npm run lint` once the static analysis (queue SA) is
 deployed: then every queue, also the ones already approved, runs it.

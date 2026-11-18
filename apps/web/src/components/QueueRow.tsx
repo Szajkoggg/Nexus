@@ -3,7 +3,8 @@
 // and the steps after the third folded. The step that matters is highlighted with its action.
 import { useState, type ReactNode } from "react";
 import type { QueueView, StepView } from "../api.ts";
-import { TimeAgo, reviewLabel, statusWord, toneOf } from "./ui.tsx";
+import { TimeAgo, stepLabel, statusWord, toneOf } from "./ui.tsx";
+import { checkLine, checkTone } from "../checks.ts";
 import { t } from "../i18n.ts";
 import { KeptTag, stepMark } from "./Closing.tsx";
 import { retryLine } from "@nexus/protocol/times";
@@ -27,18 +28,20 @@ export const TONE: Record<Tone, [string, string]> = {
 /** A step's segment of the progress line, and the tint of the step that matters, by its status. */
 const SEGMENT: Record<string, string> = {
   done: "bg-ok", skipped: "bg-fg-3", running: "bg-accent", waiting: "bg-warn", review: "bg-review", stopped: "bg-stop",
-  failed: "bg-danger", rejected: "bg-danger", pending: "bg-surface-3", paused: "bg-fg-2",
+  failed: "bg-danger", rejected: "bg-danger", pending: "bg-surface-3", paused: "bg-fg-2", checking: "bg-accent", queued: "bg-accent/40",
 };
 const TINT: Record<string, string> = {
   running: "bg-accent/10", waiting: "bg-warn/10", review: "bg-review/10", stopped: "bg-stop/10", failed: "bg-danger/10", rejected: "bg-danger/10",
+  checking: "bg-accent/10", queued: "bg-accent/5",
 };
 
 /**
  * A step's status as the list shows it: a step whose events say it runs while its queue's run does not (after a
- * restart, a pause) reads "paused", like its queue, not "running".
+ * restart, a pause) reads "paused", like its queue, not "running"; so do checks that cannot go on without the run. Checks
+ * waiting for the machine read `queued` (checks.ts).
  */
 const shownStatus = (step: StepView, queue: QueueView) =>
-  step.status === "running" && !runGoing(queue.run) ? "paused" : step.status;
+  (step.status === "running" || step.status === "checking") && !runGoing(queue.run) ? "paused" : checkTone(step);
 
 const plain = (s: string) => s.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\*\*|`/g, "");
 
@@ -132,7 +135,7 @@ function stepLook(step: StepView, queue: QueueView, current: boolean) {
   const tone = toneOf(status);
   // A provisional acceptance waiting for the user reads so, in the review colour (the step is done, the user still decides).
   const provisional = pendingProvisional(step);
-  const word = reviewLabel(step) ?? (provisional ? t("provisional.word") : statusWord(status));
+  const word = (status === "paused" ? undefined : stepLabel(step)) ?? (provisional ? t("provisional.word") : statusWord(status));
   const unread = step.notes.filter((n) => !n.read_at).length;
   // Where it ran and why, when its runtime's usage ran out: the latest switch (on its fallback, or back).
   const switched = stepSwitches(queue, step.id).at(-1);
@@ -183,7 +186,7 @@ function StepLine({ step, queue, current, phone, onStep, onQueue, stop }: {
   const stopHere = queue.status === "stopped";
   const retry = queue.run?.step === step.id ? retryLine(queue.run, new Date()) : undefined;
   const why = stopHere ? queue.status_reason
-    : questions[0]?.text ?? retry ?? (status === "paused" ? queue.status_reason ?? queue.run?.reason : undefined) ?? (status === "running" ? step.progress?.text : undefined) ?? step.reason ?? step.summary ?? step.status_note;
+    : questions[0]?.text ?? retry ?? (status === "paused" ? queue.status_reason ?? queue.run?.reason : undefined) ?? checkLine(step) ?? (status === "running" ? step.progress?.text : undefined) ?? step.reason ?? step.summary ?? step.status_note;
   const action = stopHere ? undefined
     : waitsForUserReview(step) ? { label: t("queue.reviewAction"), go: onStep }
     : questions.length ? { label: t("queue.questions", { count: questions.length }), go: onStep }

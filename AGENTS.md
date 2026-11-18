@@ -39,13 +39,19 @@ Nexus is developed with Nexus. The agents working on this repository are run by 
   checkout; a queue with its own worktree commits on its own branch in that worktree, its integration step merges the
   base into that branch, and the base then only moves to the result by a fast-forward. A survey-only run commits
   nothing. Agents never rebase and never push.
-- **Before every commit**: `npm run typecheck`, `npm run lint` and the tests of the files you changed pass; the whole
-  suite (`npm test`) runs at the end of a step, as the queue's checks, not before each commit, and may first wait (up
-  to 15 minutes) for another checkout's full run to end. If the dashboard changed: `npm run build -w @nexus/web`. Fix a
-  lint finding rather than silence it (docs/DESIGN.md, "Static analysis").
+- **Before every commit**: `npm run typecheck`, `npm run lint` and the tests of the files you changed pass
+  (`npm run test:files -- <files>`). If the dashboard changed: `npm run build -w @nexus/web`. Fix a lint finding rather
+  than silence it (docs/DESIGN.md, "Static analysis"). The whole suite (`npm test`) is no commit's check: it runs at the
+  end of a step, as the queue's checks, and Nexus runs them itself after the worker's `nexus step done`, waiting for the
+  machine as long as another full run takes; the worker neither runs nor waits for them, and gets their output only when
+  one fails (a check-fix round, docs/PROTOCOL.md "Checks run by Nexus"). Only where a step's opening does not say Nexus
+  runs its checks (a step an older server opened, work started by hand) does the worker run them at the step's end and
+  report them with `nexus check`; its full run waits for another checkout's to end, never starting beside it.
 - **Run control and lifecycle code** (after a queue that touched it the orchestrator offers the `lifecycle` template):
   the engine, the scheduler and the runtime adapters, in `apps/server/src`: `engine.ts`, `scheduler.ts`,
   `agent-host.ts`, `claude.ts`, `codex.ts`, `recurring.ts`, `lifecycle.ts` (updates, restarts, the hand-over).
+- **Load tool**: `node scripts/load-tests.mjs` runs test files repeatedly beside busy-loop processes (README.md, "Running");
+  it is Nexus's tool for reproducing a failure under load, and the one Nexus's own fix queues use.
 - **Tests**: behaviour in the engine, orchestrator, conversations or lifecycle gets a test against the fake runtimes
   (`apps/server/test/fake-claude.ts`, `fake-codex.ts`, steered by `fake-behaviour.ts`); protocol logic gets a unit
   test. Tests never call a model.

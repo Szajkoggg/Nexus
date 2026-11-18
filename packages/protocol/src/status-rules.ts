@@ -48,8 +48,11 @@ type StepLike = { status: StepStatus | (string & {}); review_with?: string };
 export const waitsForUserReview = (s: StepLike): boolean => s.status === "review" && s.review_with !== "orchestrator";
 /** The step's review is the orchestrator's (review levels 2 and 3). */
 export const reviewedByOrchestrator = (s: StepLike): boolean => s.status === "review" && s.review_with === "orchestrator";
-/** The step is at work: running, or waiting for an answer within its turn. */
-export const stepAtWork = (s: Pick<StepLike, "status">): boolean => s.status === "running" || s.status === "waiting";
+/**
+ * The step is at work: running, waiting for an answer within its turn, or its checks running in its checkout (Nexus
+ * runs them after its done: a merge back into that checkout waits for them too).
+ */
+export const stepAtWork = (s: Pick<StepLike, "status">): boolean => s.status === "running" || s.status === "waiting" || s.status === "checking";
 /** The step holds its queue in `waiting`: a question or a review is open on it. */
 export const stepWaits = (s: Pick<StepLike, "status">): boolean => s.status === "waiting" || s.status === "review";
 

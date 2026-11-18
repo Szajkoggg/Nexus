@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  ActionError, Effort, effortIssue, type ProjectFile, reviewedByOrchestrator, runGoing, ProjectStore, applyDraft, defineMetric, inPlan, loadProjectState, metricDef, openPlan, orchestratorOverview, overThreshold, proposePlan, proposeTags, readAway, readUsage, orchestratorStatusChange, newId, now, sendBack, type Applied, type Event, type EventType, type NotifyKind, type ProjectState, type SessionFile, type SessionView,
+  ActionError, Effort, acceptedByNexus, effortIssue, type ProjectFile, reviewedByOrchestrator, runGoing, ProjectStore, applyDraft, defineMetric, inPlan, loadProjectState, metricDef, openPlan, orchestratorOverview, overThreshold, proposePlan, proposeTags, readAway, readUsage, orchestratorStatusChange, newId, now, sendBack, type Applied, type Event, type EventType, type NotifyKind, type ProjectState, type SessionFile, type SessionView,
 } from "@nexus/protocol";
 import type { AgentProcess } from "./agent.ts";
 import type { CodexPermissions } from "./codex.ts";
@@ -18,7 +18,7 @@ import type { UpdateNotice } from "./lifecycle.ts";
 import { describeDeployChanges, type DeployChanges } from "./deploy.ts";
 import type { PlanNotice } from "./deploy-plan.ts";
 import {
-  acceptedNoteNotice, approvalNotice, cleanupWaitNotice, discardNotice, liftNotice, mergedNotice, mergeWaitNotice, missedStartNotice, noticeText, orchestratorBriefing, pausedNotice,
+  acceptedNoteNotice, approvalNotice, checkAcceptedNotice, checkDecisionNotice, cleanupWaitNotice, discardNotice, liftNotice, mergedNotice, mergeWaitNotice, missedStartNotice, noticeText, orchestratorBriefing, pausedNotice,
   carriedMessages, formatInbox, orchestratorFreshSeed, orchestratorRuntimeSeed, orchestratorSummaryRequest, summaryLists, questionNotice, rejectionNotice, restartedNotice, fixAskedNotice, levelToUserNotice, reviewNotice, awayOnNotice, awayEndNotice, awayStuckNotice, planDecisionNotice, planHeldNotice, runEndNotice, maintenanceFindingsNotice, staticAnalysisNotice, stepNoteNotice, tagDecisionNotice, fallbackNotice, metricNotice, userMessage, withdrawalNotice,
 } from "./prompts.ts";
 import { shellRules } from "./shell-rules.ts";
@@ -277,7 +277,7 @@ export class Orchestrator {
     const notes = this.pendingNotes(state);
     if (!s) {
       // A step waiting for its review, or a note or rejection of the user's, starts it (after a reset, or before it ever ran).
-      if (this.engine.draining || (!notes.length && !state.queues.some((q) => q.steps.some(reviewedByOrchestrator)))) return;
+      if (this.engine.draining || (!notes.length && !state.queues.some((q) => q.steps.some((st) => reviewedByOrchestrator(st) && !acceptedByNexus(q, st))))) return;
       s = this.ensure(false);
     }
     this.applyRequests(s);
@@ -872,8 +872,21 @@ ${n.text}` });
       // A step waiting for its review: told whenever it entered review (also to a session started after that), once
       // per round.
       for (const st of q.steps) {
-        if (!reviewedByOrchestrator(st)) continue;
+        // Not the integration step Nexus ran without a model and accepts itself (queue MI).
+        if (!reviewedByOrchestrator(st) || acceptedByNexus(q, st)) continue;
         items.push({ key: `notify:review:${q.id}:${st.id}:${st.finished_at}`, ...reviewNotice(q, st, state.away) });
+      }
+      // The checks Nexus ran (src/check-runs.ts): a failure accepted (and its fix queue), and a disputed failure that
+      // waits for the orchestrator's decision. Each told once.
+      for (const [step, entry] of Object.entries(q.check_runs?.steps ?? {})) {
+        const st = q.steps.find((x) => x.id === step);
+        if (!st) continue;
+        for (const set of entry.sets) {
+          const d = set.dispute;
+          if (!d || d.at < since) continue;
+          if (set.state === "accepted") items.push({ key: `notify:checkaccepted:${q.id}:${step}:${set.done}`, ...checkAcceptedNotice(q, st, set) });
+          else if (d.base?.state === "unrunnable" && !d.decided) items.push({ key: `notify:checkdecision:${q.id}:${step}:${set.done}`, ...checkDecisionNotice(q, st, set) });
+        }
       }
       // A metric's value beyond its warning threshold: told once, if it came after the threshold was set.
       for (const st of q.steps) for (const m of st.metrics) {

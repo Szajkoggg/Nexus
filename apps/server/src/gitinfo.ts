@@ -26,6 +26,16 @@ export function checkoutOf(store: ProjectStore, q: Pick<QueueView, "worktree">):
   return normPath(q.worktree ?? store.readProject().root);
 }
 
+/** The queue's own worktree, once made: undefined for a queue in the project's checkout, or one `auto` has not made. */
+export function ownWorktree(q: Pick<QueueView, "worktree">): string | undefined {
+  return q.worktree && q.worktree !== "auto" ? normPath(q.worktree) : undefined;
+}
+
+/** The files changed between two commits in `cwd` (git diff --name-only); empty when git cannot tell. */
+export function changedFiles(cwd: string, from: string, to: string): string[] {
+  return (git(cwd, ["diff", "--name-only", from, to]) ?? "").split(/\r?\n/).filter(Boolean);
+}
+
 /** The queue works in the project's own checkout (not a worktree of its own). */
 function inMainCheckout(store: ProjectStore, q: Pick<QueueView, "worktree">): boolean {
   return !q.worktree || normPath(q.worktree).toLowerCase() === normPath(store.readProject().root).toLowerCase();

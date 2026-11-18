@@ -396,7 +396,7 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
     // The queue's last step done: the report, written where the prompt says (refused under a denied folder, as
     // Claude Code refuses a Write its --disallowedTools rule covers), then registered with nexus report.
     const report = /`nexus report (\S+) --file (\S+) --summary/.exec(text);
-    if (report && (behaviour === "done" || behaviour === "untracked" || (behaviour === "merge" && !stoppedIntegration))) {
+    if (report && (["done", "untracked", "slow", "commit"].includes(behaviour) || (behaviour === "merge" && !stoppedIntegration))) {
       const path = resolve(report[2]!);
       if (!writeDenied(path)) {
         mkdirSync(dirname(path), { recursive: true });
@@ -420,6 +420,27 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
     if (fake.answerWork) await work(fake.step);
     nexus("step", "done", fake.step, "--summary", `fake finished ${fake.step} after an answer`);
     return "answered";
+  }
+  // A check-fix round (the checks Nexus ran failed): with FAKE_CHECK_DISPUTE naming a check that failed, say once (per
+  // step) that its failure is not this work's and end the turn; otherwise "fix" it (FAKE_CHECK_FIX_MS long) and report
+  // the step done again.
+  const fix = /^\[Nexus\] The checks Nexus ran for step (\S+) of queue \S+: check-fix round (\d+)/.exec(text);
+  if (fix) {
+    const step = fix[1]!;
+    const dispute = process.env.FAKE_CHECK_DISPUTE;
+    const marker = join(dirname(process.env.FAKE_LOG ?? "."), `fake-disputed-${step}`);
+    // "*": the first check the message says failed.
+    const name = dispute === "*" ? /Check "(.+)" failed/.exec(text)?.[1] : dispute;
+    if (name && !existsSync(marker) && text.includes(`Check "${name}" failed`)) {
+      writeFileSync(marker, "1");
+      const out = nexusOut(["check", step, name, "--unrelated", "--evidence", "it fails on the base too"]);
+      return `disputed: ${out}`;
+    }
+    nexus("step", "start", step);
+    // FAKE_CHECK_FIX_MS: the fix takes that long (a picture of the round at work; a stop ends it early).
+    if (process.env.FAKE_CHECK_FIX_MS && await interruptible(Number(process.env.FAKE_CHECK_FIX_MS))) return { interrupted: true };
+    nexus("step", "done", step, "--summary", `fake fixed ${step} in check-fix round ${fix[2]}`);
+    return `check-fix round ${fix[2]}`;
   }
   // A step sent back (by the orchestrator or the user's Fix it): work on it again and report it done.
   const back = /^\[Nexus\] The (?:orchestrator reviewed|user sent) step (\S+) of queue \S+ .*\(round (\d+)\)/.exec(text);

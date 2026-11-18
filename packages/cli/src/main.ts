@@ -15,6 +15,7 @@ import {
   TemplateError, fillTemplate, filledTemplateYaml, parseEvery, MaintenanceMode, readTemplates, templateQueueId, unusableTemplate, type MergedTemplates,
   type PictureRole, type ReviewItem, type Role, type Runtime, type SessionFile,
   noteRefIssue, parseNoteRef, readNotes, ideaMatches, ideaLinks, ideaStatuses, reportSourceHash,
+  capacityLines, latestCheckSet, readCapacity,
 } from "@nexus/protocol";
 import { checkRules, describeRules } from "@nexus/protocol/rules";
 import { importMarkdownQueues } from "./import-md.ts";
@@ -35,7 +36,11 @@ Agent commands (session from NEXUS_SESSION or --session):
                     Files are copied into .nexus/queues/<queue>/review/<step>/ (write them outside the working tree).
                     Read nexus help review before preparing review material.
   nexus check <step> <name> --ok|--fail [--summary <text>] [--duration <seconds>]   (how long the check ran; it is
-                    the metric check:<name>)
+                    the metric check:<name>); refused for a check Nexus runs itself (its step's opening says so)
+  nexus check <step> <name> --unrelated --evidence <text>   a check Nexus ran fails, not because of your work: Nexus
+                    runs it on the queue's base commit (end your turn without nexus step done)
+  nexus check decide <queue> <step> accept|fix --reason <text>   (orchestrator only) a disputed failure Nexus could not
+                    run on the base: accept (the step goes to its review) or fix (a check-fix round)
   nexus metric record <name> <value> [--step <step>]   (worker only) a value of one of the project's metrics, for your
                     step at work, with the HEAD commit; a negative value goes after --: nexus metric record delta -- -5
   nexus metric list                   the project's metrics: unit, how shown, target, warning threshold
@@ -144,6 +149,7 @@ const { values: o, positionals: args } = parseArgs({
     "use-session": { type: "string" }, model: { type: "string" }, effort: { type: "string" }, after: { type: "string", multiple: true }, next: { type: "boolean" }, at: { type: "string" }, deadline: { type: "string" },
     topics: { type: "string" }, files: { type: "string" }, file: { type: "string" }, level: { type: "string" },
     escalate: { type: "boolean" }, continue: { type: "boolean" }, wait: { type: "boolean" },
+    unrelated: { type: "boolean" }, evidence: { type: "string" },
     id: { type: "string" }, name: { type: "string" }, prefix: { type: "string" },
     "dry-run": { type: "boolean" }, replace: { type: "boolean" },
     role: { type: "string" }, runtime: { type: "string" }, title: { type: "string" }, from: { type: "string" },
@@ -206,6 +212,45 @@ function emit(st: ProjectStore, s: SessionFile, body: Record<string, unknown>): 
   if (!r.success) throw new UsageError(r.error.issues.map((i) => `${i.path.join(".") || "event"}: ${i.message}`).join("; "));
   st.appendEvent(r.data);
   return r.data;
+}
+
+/**
+ * `nexus check <step> <name> --unrelated --evidence`: the worker says a check Nexus ran fails not because of its work;
+ * Nexus runs it on the queue's base commit (check.disputed). Only in a check-fix round, for a check that failed.
+ */
+function checkUnrelated(): void {
+  const st = store(); const s = session(st);
+  const step = need(args[1], "<step>"); const name = need(args[2], "<name>");
+  const evidence = o.evidence?.trim();
+  if (!evidence) throw new UsageError("--evidence says what shows the failure is not your work's (for example: it fails on the base too)");
+  const queue = queueFor(st, s, step);
+  checkStep(st, queue, step);
+  const q = loadProjectState(st).queues.find((x) => x.id === queue);
+  const view = q?.steps.find((x) => x.id === step);
+  const set = q && view && latestCheckSet(q, view);
+  if (view?.checks_by !== "nexus" || view.status !== "running" || !set || set.state !== "failed") {
+    throw new UsageError(`step ${step} has no failed checks of Nexus's to dispute now (it is ${view?.status ?? "unknown"}): --unrelated is for a check-fix round`);
+  }
+  const failed = set.checks.filter((c) => c.ok === false).map((c) => c.name);
+  if (!failed.includes(name)) throw new UsageError(`"${name}" is not one of the checks that failed (${failed.map((n) => `"${n}"`).join(", ")})`);
+  if (set.dispute) throw new UsageError(`a failure of this round was disputed already (${set.dispute.name}); fix what fails`);
+  emit(st, s, { type: "check.disputed", queue, step, name, evidence });
+  console.log(`ok: check.disputed ${queue}/${step}: Nexus runs "${name}" on the queue's base commit; end your turn now, without nexus step done`);
+}
+
+/** `nexus check decide <queue> <step> accept|fix --reason`: the orchestrator's decision on a disputed failure (check.decided). */
+function checkDecide(): void {
+  const st = store(); const s = session(st);
+  if (s.role !== "orchestrator") throw new UsageError("only the orchestrator decides a disputed check");
+  const queue = need(args[2], "<queue>"); const step = need(args[3], "<step>"); const verdict = need(args[4], "accept|fix");
+  if (verdict !== "accept" && verdict !== "fix") throw new UsageError(`the decision is accept or fix, not ${verdict}`);
+  const reason = o.reason?.trim();
+  if (!reason) throw new UsageError("--reason says why (it is recorded with the decision)");
+  checkStep(st, queue, step);
+  const view = loadProjectState(st).queues.find((q) => q.id === queue)?.steps.find((x) => x.id === step);
+  if (view?.checking?.phase !== "decision") throw new UsageError(`step ${queue}/${step} has no disputed check waiting for your decision`);
+  emit(st, s, { type: "check.decided", queue, step, verdict, reason });
+  console.log(`ok: check.decided ${queue}/${step}: ${verdict}`);
 }
 
 function stepEvent(type: string, step: string | undefined, extra: (s: SessionFile) => Record<string, unknown> = () => ({})): void {
@@ -523,12 +568,19 @@ const commands: Record<string, () => void | Promise<void>> = {
         console.log(`  ${step.id.padEnd(5)} ${step.status.padEnd(8)} ${step.title}${own ? `  [on ${own}]` : ""}${unread.length ? `  (${unread.length} unread note${unread.length > 1 ? "s" : ""})` : ""}`);
         const tags = tagsText(step.tags);
         if (tags) console.log(`        tags: ${tags}`);
+        // The checks Nexus runs: where they are, and a fix round apart from the review rounds.
+        const c = step.checking;
+        if (c) console.log(`        checks by Nexus: ${c.phase === "queued" ? "waiting for the machine" : c.phase === "running" ? `running${c.check ? ` ${c.check}` : ""}` : c.phase === "base" ? `running ${c.check ?? "the disputed check"} on the queue's base commit` : "a disputed failure waits for the orchestrator's decision"} since ${shownTime(c.since)}`);
+        else if (step.status === "running" && step.check_fix) console.log(`        check-fix round ${step.check_fix} of ${state.project.defaults.check_fix_limit}${step.check_limit ? " (beyond the limit)" : ""}`);
         const checks = checksLine(step.checks);
         if (checks) console.log(`        checks: ${checks}`);
       }
       const open = q.questions.filter(isOpenQuestion);
       for (const x of open) console.log(`  question ${x.qid} [${x.state}]: ${x.text}`);
     }
+    // The workstation's heavy slot, across projects (the server's capacity.yaml): what runs, what waits and behind what.
+    const machine = capacityLines(readCapacity(), new Date());
+    if (machine.length) console.log(`\n${machine.join("\n")}`);
     // The session's inbox: messages and answers not yet seen. Shown here is delivered, so each is recorded as read.
     for (const m of s?.inbox.filter((x) => !x.read_at) ?? []) {
       if (m.type === "answer") {
@@ -537,6 +589,8 @@ const commands: Record<string, () => void | Promise<void>> = {
         console.log(`\nanswer from the ${m.from} to ${m.qid}${q ? ` ("${q.text}")` : ""}${how}:\n${m.text}`);
       } else if (m.type === "message") {
         console.log(`\nmessage from the ${m.from}${m.step ? ` about ${m.queue}/${m.step}` : ""} (${m.at}):\n${m.text}`);
+      } else if (m.type === "check_failed") {
+        console.log(`\n${m.queue}/${m.step}: the checks Nexus ran failed (check-fix round ${m.fix}):\n${m.text}`);
       } else if (m.type === "send_back") {
         console.log(`\n${m.queue}/${m.step} sent back by the ${m.from} (round ${m.round}):\n${m.text}${m.from === "user" ? "\n(The user's words win over the step's acceptance criteria where they conflict.)" : ""}`);
       } else {
@@ -601,8 +655,16 @@ const commands: Record<string, () => void | Promise<void>> = {
   },
 
   check() {
+    if (args[1] === "decide") return checkDecide();
+    if (o.unrelated) return checkUnrelated();
     if (o.ok === o.fail) throw new UsageError("give exactly one of --ok or --fail");
     const name = need(args[2], "<name>");
+    // A check Nexus runs itself after the step's done is not the worker's to report (PROTOCOL.md, "Checks run by Nexus").
+    const st = store(); const step = need(args[1], "<step>");
+    const queue = queueFor(st, session(st), step);
+    if (st.readChecks(queue)?.steps[step]?.by === "nexus") {
+      throw new UsageError(`Nexus runs the checks of step ${step} itself after your nexus step done, and sends you their output only if one fails; do not report them. A failure that is not your work's: nexus check ${step} "<name>" --unrelated --evidence "<what shows it>"`);
+    }
     const duration = o.duration === undefined ? undefined : Number(o.duration);
     if (duration !== undefined && (o.duration!.trim() === "" || !Number.isFinite(duration) || duration < 0)) {
       throw new UsageError(`--duration takes the check's time in seconds (for example 12 or 3.5), not "${o.duration}"`);

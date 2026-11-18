@@ -53,7 +53,7 @@ export const QueueStatus = z.enum([
 export type QueueStatus = z.infer<typeof QueueStatus>;
 
 export const StepStatus = z.enum([
-  "pending", "running", "waiting", "review", "done", "failed", "skipped", "stopped", "rejected",
+  "pending", "running", "waiting", "checking", "review", "done", "failed", "skipped", "stopped", "rejected",
 ]);
 export type StepStatus = z.infer<typeof StepStatus>;
 
@@ -61,9 +61,12 @@ export type StepStatus = z.infer<typeof StepStatus>;
  * `user` is the one session the server keeps for what the user does in the dashboard (answers, for now).
  * `conversation` is a thinking partner the user talks with about the project (design, ideas): it reads the project
  * and writes only in the project's notes folder; it starts no work.
+ * `nexus` is the one session the server keeps for the steps the engine runs itself, without a model (the integration
+ * step without a model, queue MI): its events are written only by the server; it has no process and no inbox.
  */
-export const Role = z.enum(["worker", "orchestrator", "user", "conversation"]);
+export const Role = z.enum(["worker", "orchestrator", "user", "conversation", "nexus"]);
 export const USER_SESSION = "user";
+export const NEXUS_SESSION = "nexus";
 export type Role = z.infer<typeof Role>;
 
 export const Runtime = z.enum(["claude", "codex", "external"]);
@@ -156,6 +159,11 @@ const DefaultsShape = z.object({
    * a project's own value limits its own queues as well, and both hold (src/coordinator.ts).
    */
   max_running: MaxRunning.default(DEFAULT_MAX_RUNNING),
+  /**
+   * How many check-fix rounds a step gets when the checks Nexus runs fail (PROTOCOL.md, "Checks run by Nexus"); after
+   * them the run halts for the orchestrator. Counted apart from the send-backs.
+   */
+  check_fix_limit: z.number().int().min(0).default(3),
 });
 /** `defaults` as read: an old `review_policy` becomes its `review_level`. */
 const legacyDefaults = (x: unknown) => withLevel(x, "review_policy", "review_level");
@@ -296,6 +304,13 @@ export const ProjectFile = z.object({
      */
     worktree_setup: z.string().optional(),
     /**
+     * The files whose change makes the worktree setup run again (project only; paths or globs relative to the
+     * worktree's root, `**` for any folders): before a check set, and after a merge of the base at a step boundary,
+     * when one differs between the commit the setup last ran on and HEAD. Default: the common lockfiles
+     * (WORKTREE_SETUP_INPUTS).
+     */
+    worktree_setup_inputs: z.array(z.string()).optional(),
+    /**
      * The project's checks (project only): run in every step of every queue, before the queue's own checks (a check
      * both name runs once). A run fixes them when it starts (`checks` in run.yaml), so a change reaches a queue at its
      * next run. Empty (the default): only the queue's checks.
@@ -385,8 +400,10 @@ export const StoredProject = z.object({
     resolve_conflicts: own(z.boolean()),
     usage_pause_threshold: own(Fraction),
     max_running: own(MaxRunning),
+    check_fix_limit: own(z.number().int().min(0)),
     worktree_dir: z.string().optional(),
     worktree_setup: z.string().optional(),
+    worktree_setup_inputs: z.array(z.string()).optional(),
     checks: z.array(z.string()).optional(),
   })).prefault({}),
   runtimes: z.object({
@@ -870,6 +887,17 @@ export const Event = z.discriminatedUnion("type", [
    * drafts a revision with a step that fixes it. User only.
    */
   z.object({ ...base, type: z.literal("review.fix_asked"), ...qs, text: z.string().min(1) }),
+  /**
+   * The worker says a check Nexus ran fails not because of its work (`nexus check <step> <name> --unrelated`), with its
+   * evidence; it ends its turn without `nexus step done`. Nexus runs the check on the queue's base commit (PROTOCOL.md,
+   * "An unrelated failure"). Worker only.
+   */
+  z.object({ ...base, type: z.literal("check.disputed"), ...qs, name: z.string().min(1), evidence: z.string().min(1) }),
+  /**
+   * The orchestrator's decision on a disputed check that could not be run on the base (`nexus check decide`):
+   * `accept` sends the step to review with the failure accepted, `fix` gives the worker a fix round. Orchestrator only.
+   */
+  z.object({ ...base, type: z.literal("check.decided"), ...qs, verdict: z.enum(["accept", "fix"]), reason: z.string().min(1) }),
 ]);
 export type Event = z.infer<typeof Event>;
 export type EventType = Event["type"];
@@ -878,11 +906,11 @@ export type EventType = Event["type"];
 export const ORCHESTRATOR_ONLY: ReadonlySet<EventType> = new Set([
   "answer.given", "queue.drafted", "session.request", "review.accepted", "review.sent_back", "review.asked_user", "status.set",
   "review.provisional", "plan.proposed", "tags.proposed", "metric.defined", "recurring.set",
-  "static_analysis.declined",
+  "static_analysis.declined", "check.decided",
 ]);
 
 /** Event types only a worker session may write: a metric's value belongs to a step's work (metrics.ts). */
-export const WORKER_ONLY: ReadonlySet<EventType> = new Set(["metric.recorded"]);
+export const WORKER_ONLY: ReadonlySet<EventType> = new Set(["metric.recorded", "check.disputed"]);
 
 /** Event types only a thinking partner's session (role conversation) may write. */
 export const CONVERSATION_ONLY: ReadonlySet<EventType> = new Set(["ideas.covered"]);
@@ -952,12 +980,24 @@ export const GitFile = z.object({
   /**
    * The project's worktree setup command for the worktree Nexus made (`at`): `done_at` once it succeeded; until then
    * it runs again before the next step opens. `failed`: its last failure (`reason`: the exit code and the output's
-   * end).
+   * end). `sha`: the HEAD on which it last succeeded (the first setup: the worktree's base commit); `reason`: why it
+   * ran last ("first setup", "package-lock.json changed"). A change of its inputs since `sha` runs it again (queue MI).
    */
   setup: z.object({
     command: z.string(), at: Time, done_at: Time.optional(),
     failed: z.object({ at: Time, reason: z.string() }).optional(),
+    sha: z.string().optional(),
+    reason: z.string().optional(),
   }).optional(),
+  /**
+   * The base merged into the queue's branch at a step boundary (queue MI), oldest first: `before` the step about to
+   * open, `base` the branch, `sha` its commit, `from` HEAD before, `to` HEAD after (absent: not merged, it conflicts in
+   * `conflicts`), `setup` when the setup ran after it.
+   */
+  pulls: z.array(z.object({
+    at: Time, before: z.string(), base: z.string(), sha: z.string(), from: z.string(),
+    to: z.string().optional(), conflicts: z.array(z.string()).optional(), setup: z.boolean().optional(),
+  })).optional(),
   steps: z.record(z.string(), z.array(z.object({
     session: Id,
     start: z.string().nullable(), started_at: Time,
@@ -971,6 +1011,8 @@ export const GitFile = z.object({
   }))).default({}),
 });
 export type GitFile = z.infer<typeof GitFile>;
+/** One merge of the base at a step boundary, as git.yaml records it (`pulls`). */
+export type BasePull = NonNullable<GitFile["pulls"]>[number];
 
 export const PushFile = z.object({
   protocol: z.literal(1),
@@ -1279,6 +1321,128 @@ export const AwayFile = z.object({
 });
 export type AwayFile = z.infer<typeof AwayFile>;
 
+/** One run of a check: the first, or the one run again after a failure (`queues/<id>/checks.yaml`). */
+const CheckAttempt = z.object({
+  started_at: Time,
+  ended_at: Time.optional(),
+  /** The root's exit code; null: it was ended (a time limit, a stop). */
+  exit_code: z.number().int().nullable().optional(),
+  /** In seconds. */
+  duration: z.number().nonnegative().optional(),
+  /** The log file, relative to the queue's folder. */
+  log: z.string(),
+  failed_tests: z.array(z.string()).optional(),
+  /** The end of its output. */
+  tail: z.string().optional(),
+  /** Ended at CHECK_LIMIT_MS: counted as failed. */
+  timed_out: z.boolean().optional(),
+  /** Ended by a restart, an update's drain or a stop: neither passed nor failed; the set runs again. */
+  interrupted: z.boolean().optional(),
+});
+export type CheckAttempt = z.infer<typeof CheckAttempt>;
+
+const CheckRun = z.object({
+  name: z.string(),
+  command: z.string(),
+  runs: z.array(CheckAttempt).default([]),
+  /** Its outcome in the set: passed on the first run or the second (then also `flaky`). */
+  ok: z.boolean().optional(),
+  flaky: z.boolean().optional(),
+});
+export type CheckRun = z.infer<typeof CheckRun>;
+
+/**
+ * A worker's word that a failure is not its work's (`check.disputed`), and what came of it: Nexus ran the check on the
+ * queue's base commit (`base`): failing there too, the failure is accepted; passing, it is the queue's (a fix round).
+ * Not runnable there (`unrunnable`): the orchestrator decides (`decided`).
+ */
+const CheckDispute = z.object({
+  event: z.string(),
+  name: z.string(),
+  evidence: z.string(),
+  at: Time,
+  base: z.object({
+    state: z.enum(["queued", "running", "failed", "passed", "unrunnable"]),
+    commit: z.string().optional(),
+    reason: z.string().optional(),
+    run: CheckAttempt.optional(),
+  }).optional(),
+  decided: z.object({ verdict: z.enum(["accept", "fix"]), reason: z.string(), at: Time, event: z.string() }).optional(),
+  outcome: z.enum(["accepted", "fix"]).optional(),
+});
+export type CheckDispute = z.infer<typeof CheckDispute>;
+
+/** The checks Nexus ran after one `step.done` of a step. */
+const CheckSet = z.object({
+  /** The step.done event it checks. */
+  done: z.string(),
+  /** The step's review round (send-backs) and the check-fix rounds before this set within it (0: none). */
+  round: z.number().int().positive(),
+  fix: z.number().int().nonnegative(),
+  commit: z.string().nullable().optional(),
+  dirty: z.boolean().optional(),
+  requested_at: Time,
+  granted_at: Time.optional(),
+  ended_at: Time.optional(),
+  state: z.enum(["queued", "running", "passed", "failed", "interrupted", "accepted"]),
+  checks: z.array(CheckRun).default([]),
+  /** Failed with the step's check-fix rounds used up: the run halted for the orchestrator. */
+  limit: z.boolean().optional(),
+  dispute: CheckDispute.optional(),
+  /** The fix queue an accepted failure went to: `created` by it, or one open for the same tests it was added to. */
+  fix_queue: z.object({ id: z.string(), created: z.boolean() }).optional(),
+  /**
+   * The worktree setup, run first in the set's grant because its inputs changed since it last ran (queue MI): like a
+   * check (run once more after a failure; failing twice, the set fails and its checks do not run); `reason`: what
+   * changed.
+   */
+  setup: CheckRun.extend({ reason: z.string() }).optional(),
+});
+export type CheckSet = z.infer<typeof CheckSet>;
+
+/**
+ * queues/<id>/checks.yaml: the checks Nexus runs after a worker's `nexus step done` (PROTOCOL.md, "Checks run by
+ * Nexus"). Per step: `by`, fixed when the step opened (`nexus`: the engine runs them; `worker`: an older server opened
+ * it, and the worker reports them); `sets`, one per step.done, oldest first. One writer: the server.
+ */
+export const ChecksFile = z.object({
+  protocol: z.literal(1),
+  steps: z.record(z.string(), z.object({ by: z.enum(["nexus", "worker"]), sets: z.array(CheckSet).default([]) })).default({}),
+});
+export type ChecksFile = z.infer<typeof ChecksFile>;
+
+/** One heavy operation asked for, granted or waiting (`<NEXUS_HOME>/capacity.yaml`). */
+const CapacityRequest = z.object({
+  id: z.string(),
+  /** What it is: a step's checks (queue EC), the first user. */
+  kind: z.literal("checks"),
+  project: z.string(),
+  queue: z.string(),
+  step: z.string(),
+  requested_at: Time,
+  granted_at: Time.optional(),
+});
+export type CapacityRequest = z.infer<typeof CapacityRequest>;
+
+/**
+ * <NEXUS_HOME>/capacity.yaml: the capacity coordinator's state (PROTOCOL.md, "The capacity coordinator"). One slot,
+ * `heavy`: one heavy operation on the workstation at a time, across projects. `held`: granted, until the operation's
+ * processes have ended; `waiting`: in the order they came; `outside`: the machine's full-test lock held by a run
+ * outside Nexus (scripts/test-lock.ts), which grants nothing meanwhile. Written only by the server, anew when it
+ * becomes active (the old server's grants ended with its processes).
+ */
+export const CapacityFile = z.object({
+  protocol: z.literal(1),
+  /** The workstation (its host name), for the later model of several machines. */
+  workstation: z.string(),
+  slots: z.object({ heavy: z.number().int().positive() }),
+  held: z.array(CapacityRequest).default([]),
+  waiting: z.array(CapacityRequest).default([]),
+  outside: z.object({ cwd: z.string(), pid: z.number().int(), since: z.string() }).optional(),
+  updated_at: Time,
+});
+export type CapacityFile = z.infer<typeof CapacityFile>;
+
 /** <NEXUS_HOME>/usage.json: the subscription's windows, from the last report of any session. */
 export const UsageFile = z.object({
   updated_at: Time,
@@ -1540,6 +1704,13 @@ export const InboxEntry = z.discriminatedUnion("type", [
    * review.sent_back event's id (`ref`); `round` is the round it opens. Its being in the inbox reopens the step.
    */
   z.object({ ...ibase, type: z.literal("send_back"), ref: Id, queue: Id, step: Id, text: z.string(), round: z.number().int().positive() }),
+  /**
+   * The checks Nexus ran after the worker's `nexus step done` failed twice (PROTOCOL.md, "Checks run by Nexus"): `id` is
+   * "check-failed-" + the step.done event's id (`ref`); `fix`: the check-fix round it opens; `text`: what failed (each
+   * check's failing tests, the end of its output, its log's path), or the reason a disputed failure is the queue's.
+   * Its being in the inbox reopens the step for the fix round. From Nexus.
+   */
+  z.object({ ...ibase, type: z.literal("check_failed"), ref: Id, queue: Id, step: Id, fix: z.number().int().positive(), text: z.string() }),
 ]);
 export type InboxEntry = z.infer<typeof InboxEntry>;
 

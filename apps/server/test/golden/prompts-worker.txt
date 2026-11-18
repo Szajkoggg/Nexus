@@ -259,6 +259,137 @@ Stop conditions (meeting one ends the queue: report it with `nexus stop`):
 Begin with `nexus step start C.refactor`. End with `nexus step done C.refactor --summary "…"`, `nexus step failed` or `nexus stop`, then write `nexus context` and end your turn. Do not start another step.
 
 This is the queue's last step. After it is done, write a short report of the whole queue (what each step achieved against its acceptance, checks, review material, open questions, a proposed next step) to <report file> (a folder for reports outside the working tree and any repository: never write it into the working tree, it would block the cleanup of a worktree) and register it with `nexus report C --file <report file> --summary "…"`, which copies it into the queue's folder and removes it from there.
+== the closing refactoring step whose checks Nexus runs (P12): with the commit they last passed on, and without
+[Nexus] Queue C "Coding queue" (revision 1, approved), step C.refactor (2 of 2): Closing refactoring.
+
+Goal:
+Refactor what this queue changed, and the code closely tied to it, so that it reads simpler and clearer, with the same behaviour. Scope: the queue's commits (the range Nexus gives when the step opens) and the code right around them, never the codebase at large. If the project's AGENTS.md has a "Refactoring" section, follow it; without one, this text alone applies. A change too small to be worth refactoring is a valid outcome: say so, with your reasons, in the step's summary.
+
+Acceptance:
+- Behaviour stays the same: no new features; the queue's checks pass before and after.
+- Small commits, each saying in its message what it simplified; or none, with the reasons in the summary why nothing was worth refactoring.
+- Only what the queue changed, or code closely tied to it.
+
+Tags as planned: code; refactor; from maintenance. At the end name what you actually did with `nexus step done --activities`.
+
+This is the queue's closing refactoring step, kept by Nexus: it runs after the queue's own steps, in a fresh session, so that their work is read with fresh eyes.
+The queue's work: commits 1111111111111111111111111111111111111111..2222222222222222222222222222222222222222 in this checkout (git log 1111111111111111111111111111111111111111..2222222222222222222222222222222222222222, git diff 1111111111111111111111111111111111111111..2222222222222222222222222222222222222222). They change no file.
+The project's AGENTS.md has a "Refactoring" section: follow it too; it adds the project's own rules to this text.
+Do not run the checks before you change anything: they passed on 2222222222222222222222222222222222222222, where the queue's last step ended. While you refactor, run only the tests of what you change; after your `nexus step done` Nexus runs the checks on the result, and sends you their output only if one fails. If nothing is worth refactoring, make no commit and report the step done with your reasons in the summary: that is a valid outcome.
+
+Checks for every step:
+- npm test
+Nexus runs these itself after your `nexus step done` and sends you their output only if one fails; do not run or report them yourself (`nexus check` refuses them). While you work, run only the tests of what you change.
+
+Stop conditions (meeting one ends the queue: report it with `nexus stop`):
+- none beyond your judgement
+
+Begin with `nexus step start C.refactor`. End with `nexus step done C.refactor --summary "…"`, `nexus step failed` or `nexus stop`, then write `nexus context` and end your turn. Do not start another step.
+
+This is the queue's last step. After it is done, write a short report of the whole queue (what each step achieved against its acceptance, checks, review material, open questions, a proposed next step) to <report file> (a folder for reports outside the working tree and any repository: never write it into the working tree, it would block the cleanup of a worktree) and register it with `nexus report C --file <report file> --summary "…"`, which copies it into the queue's folder and removes it from there.
+[Nexus] Queue C "Coding queue" (revision 1, approved), step C.refactor (2 of 2): Closing refactoring.
+
+Goal:
+Refactor what this queue changed, and the code closely tied to it, so that it reads simpler and clearer, with the same behaviour. Scope: the queue's commits (the range Nexus gives when the step opens) and the code right around them, never the codebase at large. If the project's AGENTS.md has a "Refactoring" section, follow it; without one, this text alone applies. A change too small to be worth refactoring is a valid outcome: say so, with your reasons, in the step's summary.
+
+Acceptance:
+- Behaviour stays the same: no new features; the queue's checks pass before and after.
+- Small commits, each saying in its message what it simplified; or none, with the reasons in the summary why nothing was worth refactoring.
+- Only what the queue changed, or code closely tied to it.
+
+Tags as planned: code; refactor; from maintenance. At the end name what you actually did with `nexus step done --activities`.
+
+This is the queue's closing refactoring step, kept by Nexus: it runs after the queue's own steps, in a fresh session, so that their work is read with fresh eyes.
+Nexus has no commit range of the queue's work (no git records of its steps): find its commits from the steps' summaries and git log.
+The project's AGENTS.md has no "Refactoring" section: this text alone applies.
+Do not run the checks before you change anything: Nexus ran them when the queue's last step ended. While you refactor, run only the tests of what you change; after your `nexus step done` Nexus runs the checks on the result, and sends you their output only if one fails. If nothing is worth refactoring, make no commit and report the step done with your reasons in the summary: that is a valid outcome.
+
+Checks for every step:
+- npm test
+Nexus runs these itself after your `nexus step done` and sends you their output only if one fails; do not run or report them yourself (`nexus check` refuses them). While you work, run only the tests of what you change.
+
+Stop conditions (meeting one ends the queue: report it with `nexus stop`):
+- none beyond your judgement
+
+Begin with `nexus step start C.refactor`. End with `nexus step done C.refactor --summary "…"`, `nexus step failed` or `nexus stop`, then write `nexus context` and end your turn. Do not start another step.
+
+This is the queue's last step. After it is done, write a short report of the whole queue (what each step achieved against its acceptance, checks, review material, open questions, a proposed next step) to <report file> (a folder for reports outside the working tree and any repository: never write it into the working tree, it would block the cleanup of a worktree) and register it with `nexus report C --file <report file> --summary "…"`, which copies it into the queue's folder and removes it from there.
+== checks run by Nexus (PROTOCOL.md, "Checks run by Nexus"): a step's opening, the integration step's (no conflict to resolve, one it may resolve)
+[Nexus] Queue Q "Prompts under test" (revision 1, approved), step A3 (3 of 4): Third step.
+
+Acceptance:
+- Third acceptance
+
+Checks for every step:
+- npm run lint
+- npm test
+- npm run typecheck
+Nexus runs these itself after your `nexus step done` and sends you their output only if one fails; do not run or report them yourself (`nexus check` refuses them). While you work, run only the tests of what you change.
+
+Stop conditions (meeting one ends the queue: report it with `nexus stop`):
+- A file outside the repository would change.
+
+Begin with `nexus step start A3`. End with `nexus step done A3 --summary "…"`, `nexus step failed` or `nexus stop`, then write `nexus context` and end your turn. Do not start another step.
+[Nexus] Queue Q "Prompts under test" (revision 1, approved), step A3 (3 of 4): Third step.
+
+Acceptance:
+- Third acceptance
+
+This is the queue's integration step, kept by Nexus: it runs last, in the queue's worktree, on the queue's branch nexus/Q.
+Merge the base into it: git merge --no-edit main (the base branch main is at 4444444444444444444444444444444444444444 now). Never rebase, never push, and change neither the base branch nor any other checkout: the base moves forward to this step's result later, by Nexus or the user.
+Nexus runs the checks on the result after your `nexus step done`, and sends you their output only if one fails: then fix what the two sides do together on this branch, in small commits that say why, and end with `nexus step done` again.
+- No conflict (or the branch already contains the base): report the step done with the resulting HEAD as its commit, and say in the summary what the merge brought in.
+- A conflict: do not resolve it (the project's resolve_conflicts setting is off). Abort the merge (git merge --abort), so the branch is as it was, and stop: nexus stop A3 --condition "The integration found a conflict that it does not resolve" --reason "<the conflicting files, and why they are not resolved>"
+After such a stop the queue waits for the user, who resolves the conflict (in this worktree, or with a new revision) and goes on with Continue; this step then runs again.
+
+Checks for every step:
+- npm run lint
+- npm test
+- npm run typecheck
+Nexus runs these itself after your `nexus step done` and sends you their output only if one fails; do not run or report them yourself (`nexus check` refuses them). While you work, run only the tests of what you change.
+
+Stop conditions (meeting one ends the queue: report it with `nexus stop`):
+- A file outside the repository would change.
+
+Begin with `nexus step start A3`. End with `nexus step done A3 --summary "…"`, `nexus step failed` or `nexus stop`, then write `nexus context` and end your turn. Do not start another step.
+[Nexus] Queue Q "Prompts under test" (revision 1, approved), step A3 (3 of 4): Third step.
+
+Acceptance:
+- Third acceptance
+
+This is the queue's integration step, kept by Nexus: it runs last, in the queue's worktree, on the queue's branch nexus/Q.
+Merge the base into it: git merge --no-edit main (the base branch main is at 4444444444444444444444444444444444444444 now). Never rebase, never push, and change neither the base branch nor any other checkout: the base moves forward to this step's result later, by Nexus or the user.
+Nexus runs the checks on the result after your `nexus step done`, and sends you their output only if one fails: then fix what the two sides do together on this branch, in small commits that say why, and end with `nexus step done` again.
+- No conflict (or the branch already contains the base): report the step done with the resulting HEAD as its commit, and say in the summary what the merge brought in.
+- A conflict: resolve it (the project lets you: its resolve_conflicts setting is on). Keep what both sides meant, commit the merge, run the tests of the files that conflicted, and say in the summary which files conflicted and how you resolved each; the step's review judges it. If you cannot resolve one with confidence (the two sides want different things, and choosing is the user's), abort the merge (git merge --abort) and stop: nexus stop A3 --condition "The integration found a conflict that it does not resolve" --reason "<the conflicting files, and why they are not resolved>"
+After such a stop the queue waits for the user, who resolves the conflict (in this worktree, or with a new revision) and goes on with Continue; this step then runs again.
+
+Checks for every step:
+- npm run lint
+- npm test
+- npm run typecheck
+Nexus runs these itself after your `nexus step done` and sends you their output only if one fails; do not run or report them yourself (`nexus check` refuses them). While you work, run only the tests of what you change.
+
+Stop conditions (meeting one ends the queue: report it with `nexus stop`):
+- A file outside the repository would change.
+
+Begin with `nexus step start A3`. End with `nexus step done A3 --summary "…"`, `nexus step failed` or `nexus stop`, then write `nexus context` and end your turn. Do not start another step.
+== a step whose checks Nexus runs: a check-fix round, and a send-back (inbox entries)
+[Nexus] The checks Nexus ran for step C1 of queue C: check-fix round 1 of 3. What failed:
+Check "npm test" failed twice (exit code 1).
+Failing tests:
+- engine › halts after the fix limit
+Full log: <root>/.nexus/queues/C/checks/C1/r1f0-1-npm-test.2.log
+The end of its output:
+not ok 12 - halts after the fix limit
+
+Fix it at its cause and commit. Work from this output and the log it names (read the part you need there), and run only the failing tests and the tests of what you change, not the whole suite: after your next `nexus step done` Nexus runs every check again, the ones that passed too.
+If a failure is not from your work (it fails on the base too, a test you did not touch), do not patch around it: say so with your evidence, `nexus check C1 "<check>" --unrelated --evidence "<what shows it>"`, and end your turn without `nexus step done`; Nexus runs that check on the queue's base commit and decides by it.
+Work on it in this step: `nexus step start C1`, the fix, then `nexus step done C1 --summary "…"` (or `nexus step failed` / `nexus stop`), then `nexus context`, and end your turn.
+[Nexus] The orchestrator reviewed step C1 of queue C and sent it back to you (round 2). What to fix:
+The test is missing.
+
+Work on it in this step: `nexus step start C1`, then the fix (Nexus runs the checks again after your `nexus step done`), review material for this round (`nexus review add C1 … --round 2`, pictures with the same keys as before: `nexus help review`), and `nexus step done C1 --summary "…"` (or `nexus step failed` / `nexus stop`), then `nexus context`, and end your turn.
 == a step taken over in its middle on its fallback (usage): with progress, commits and uncommitted files, and without
 [Nexus] You take over step A2 of queue Q "Prompts under test" in a fresh session, in the middle of the step: Claude Code's 5-hour window at 95 % (limit 90 %), so the step goes on on Codex. You have not seen the work done on it so far, only what follows.
 
@@ -298,7 +429,8 @@ Report through the `nexus` command (on PATH; your session is set in the environm
 - nexus step progress <step> "<short status>" [--pct N]     at milestones, so the user sees where you are
 - nexus review add <step> <picture> --key <view@width> --role <role> --label "..."   a review picture, one per command
 - nexus review add <step> <file|url>... --label "..."       other review material (documents, data, links)
-- nexus check <step> <name> --ok|--fail --summary "..." --duration <seconds>   results of the step's checks, with how long each ran (the times show when a check grows slower); <name> is the check exactly as the step's opening lists it under "Checks for every step" (`nexus check <step> "npm test" --ok …`, not "test"): a check reported under another name counts as not reported
+- nexus check <step> <name> --ok|--fail --summary "..." --duration <seconds>   results of the step's checks, only where you run them: where the step's opening says Nexus runs them, it runs and records them itself after your `nexus step done`, and this is refused. Otherwise report each with how long it ran (the times show when a check grows slower); <name> is the check exactly as the step's opening lists it under "Checks for every step" (`nexus check <step> "npm test" --ok …`, not "test"): a check reported under another name counts as not reported
+- nexus check <step> <name> --unrelated --evidence "..."   in a check-fix round, a failed check that is not your work's failure (it fails on the base too, a test you did not touch): Nexus runs it on the queue's base commit and decides by it; end your turn without `nexus step done`
 - nexus metric record <name> <value>                        a value of one of the project's metrics, when the step asks you to measure one (`nexus metric list` shows them); it is kept with your step and HEAD commit
 - nexus step done <step> --summary "..." [--commit <sha>] --activities a,b   when the acceptance criteria are met; --activities names what you actually did, whatever was planned (`nexus tags` lists the names)
 - nexus step failed <step> --reason "..."                   when the step cannot be done as written
@@ -311,7 +443,7 @@ Nexus's standards for the rest (the full texts: `nexus help summaries`, `nexus h
 - A question (nexus ask) has three: what it blocks; the options (--option, one each); your recommendation (--recommend names the option, the text says why).
 - Run nexus and git commands on their own, one per call, with nothing before the command name and no option before its subcommand: no cd, no &&, no pipes, not git -C <path> (they run in your working directory already). If one is refused, you may retry the same command once on its own (without chaining or -C), not in another shell.
 - When an action is refused, do not work around it through another tool or command that reaches the same end (PowerShell after Bash, the shell after the edit tool); retry once in a simpler form at most (without chaining, for example), otherwise report what you needed and why.
-- Tests: while you work, run only the tests of what you changed and stop at the first failure (the project's way is in its AGENTS.md; in Nexus's own repository `npm run test:files -- <files>`); the whole suite runs at the step's end, as the queue's checks.
+- Tests: while you work, run only the tests of what you changed and stop at the first failure (the project's way is in its AGENTS.md; in Nexus's own repository `npm run test:files -- <files>`); the whole suite runs at the step's end, as the queue's checks. Where Nexus runs them, you do not start the whole suite or wait for it: Nexus runs it after your `nexus step done` and sends you its output only when a check fails (a check-fix round): fix from that output and the log it names, running only the failing tests.
 - Leave the working tree clean at every step's end, not only at a stop: commit everything the step did (only its own files, by name) and name the commit with nexus step done --commit, so every commit belongs to exactly one step.
 Messages from the user may arrive while you work, marked [Nexus]; follow them.
 Before you stop (nexus stop, or a stop condition you meet): commit what is in a consistent state, with a message that says so, and leave the working tree clean (no uncommitted changes); what is not consistent, set aside or undo, and say in the reason what you left out. The user then decides whether the stopped step's commits are kept or reverted; changes nobody committed cannot be attributed to the step.

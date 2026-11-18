@@ -18,7 +18,8 @@ import { StepRefusals } from "../Refusals.tsx";
 import { Activity } from "../Run.tsx";
 import { stepMetrics } from "../../metrics.ts";
 import { StepTags } from "../Tags.tsx";
-import { PanelBody, PanelHeader, Section, StatusBadge, StepTimes, reviewLabel } from "../ui.tsx";
+import { PanelBody, PanelHeader, Section, StatusBadge, StepTimes, stepLabel } from "../ui.tsx";
+import { checkTone } from "../../checks.ts";
 import { ImageViewer } from "../Viewer.tsx";
 import { IntegrationBox, PushLine, StepCommits } from "./git.tsx";
 import type { PanelProps } from "./props.ts";
@@ -26,7 +27,7 @@ import { Changes } from "./QueueDetail.tsx";
 import { Question, QuestionSheet } from "./questions.tsx";
 import { PictureActions, Rejected, ReviewBar } from "./review.tsx";
 import {
-  GoalAcceptance, Material, MessageAgent, Messages, Notes, ProvisionalBox, RetryLine, ReviewNotes, ReviewPictures, SentBack, StatusNote, StepChecks, StepMetrics,
+  CheckRunBox, GoalAcceptance, Material, MessageAgent, Messages, Notes, ProvisionalBox, RetryLine, ReviewNotes, ReviewPictures, SentBack, StatusNote, StepChecks, StepMetrics,
   Summary, Timeline,
 } from "./stepParts.tsx";
 
@@ -52,7 +53,7 @@ export function StepDetail({ project, queue, step, onClose, of, qid }: PanelProp
   // The step's parts. While it waits for the user's review the summary and the pictures come first (UX proposals,
   // 13 and 14); otherwise the usual order.
   const chat = <StepChat project={id} queue={queue.id} step={step.id} />;
-  const retry = <RetryLine queue={queue} step={step} />;
+  const retry = <><RetryLine queue={queue} step={step} /><CheckRunBox queue={queue} step={step} /></>;
   const summary = <Summary queue={queue} step={step} />;
   const push = <PushLine project={id} queue={queue} step={step.id} />;
   const rejected = step.status === "rejected" && <Rejected step={step} holding={queue.rejection?.step === step.id} />;
@@ -108,7 +109,7 @@ export function StepDetail({ project, queue, step, onClose, of, qid }: PanelProp
         of={of} bare={questionFirst}
         title={<><span className="mr-2 font-mono text-fg-3">{step.id}</span>{step.title}</>}
         status={<>
-          <StatusBadge status={pendingProvisional(step) ? "review" : step.status} label={reviewLabel(step) ?? provisionalWord(step)} />
+          <StatusBadge status={pendingProvisional(step) ? "review" : checkTone(step)} label={stepLabel(step) ?? provisionalWord(step)} />
           {/* Until its review is over the user may change the step's level, also after approval (no new approval). */}
           {levelChangeable(step) && !readOnly
             ? <LevelPicker project={id} queue={queue.id} step={step} away={project.away} />

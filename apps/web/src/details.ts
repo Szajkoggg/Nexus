@@ -123,6 +123,9 @@ export function describe(e: Event): string {
     case "review.rejected": return e.text ?? "";
     case "review.provisional": return e.text ?? "";
     case "review.fix_asked": return e.text;
+    // The checks Nexus runs (queue EC): a worker's dispute of a failure, and the orchestrator's decision on it.
+    case "check.disputed": return `${e.name}: ${e.evidence}`;
+    case "check.decided": return `${e.verdict}: ${e.reason}`;
     // Events this line shows no text for.
     case "change.proposed":
     case "log":

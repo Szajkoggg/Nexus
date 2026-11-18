@@ -3,6 +3,7 @@
 import { stopPlace } from "./attention.ts";
 import { openPlan } from "./plan.ts";
 import { trainText } from "./train.ts";
+import type { BasePull } from "./schemas.ts";
 import type { ProjectState, QueueView } from "./state.ts";
 import { isOpenQuestion, runGoing } from "./status-rules.ts";
 import { stepValuesText } from "./steps.ts";
@@ -32,7 +33,23 @@ export function planLines(q: QueueView): string[] {
   if (p?.failed) out.push(`  the planned start did not happen: ${p.failed.reason} (the user sees it; start the queue or take it out of the plan with nexus run ${q.id} cancel-start)`);
   else if (p || plan) out.push(`  now: ${(p?.waiting || plan?.waiting || "it may start")}${p?.held ? " (it starts by itself)" : ""}`);
   if (q.train) out.push(`  integration: ${trainText(q.train)}; it goes on by itself`);
+  const pull = conflictingPull(q);
+  if (pull) out.push(`  base: ${pull.base} (${pull.sha.slice(0, 12)}) conflicts with the queue's branch in ${fileList(pull.conflicts ?? [], 5)} (found before step ${pull.before}, ${pull.at.slice(0, 16).replace("T", " ")}); Nexus did not merge it, the integration step will`);
   return out;
+}
+
+/**
+ * The base Nexus did not merge into the queue's branch at its last step boundary because it conflicts (git.yaml
+ * `pulls`, queue MI): the last pull, while it is a conflict and the queue is not over.
+ */
+function conflictingPull(q: Pick<QueueView, "git" | "status">): BasePull | undefined {
+  const last = q.git?.pulls?.at(-1);
+  return last && !last.to && q.status !== "done" && q.status !== "cancelled" ? last : undefined;
+}
+
+/** A short list of files: the first `most`, and how many more. */
+export function fileList(files: readonly string[], most = 8): string {
+  return files.length > most ? `${files.slice(0, most).join(", ")} and ${files.length - most} more` : files.join(", ");
 }
 
 /** A provisional acceptance in the overview: waiting for the user, confirmed, or sent to a fix. */

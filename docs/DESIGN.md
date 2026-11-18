@@ -188,6 +188,157 @@ to an unrelated system service (`Win32_Process.Create`, for example); Nexus does
 heuristics. References: [Job Objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects) and
 [AssignProcessToJobObject](https://learn.microsoft.com/en-us/windows/win32/api/jobapi2/nf-jobapi2-assignprocesstojobobject).
 
+### Nexus runs the checks (queue EC)
+
+Designed in EC1 from the user's decisions of 2026-11-17 (docs/ideas/token-costs.md) and 2026-11-16
+(docs/ideas/worker-phases-and-resources.md); built in EC2 (the capacity coordinator, `apps/server/src/capacity.ts`) and
+EC3 (the engine, `apps/server/src/check-runs.ts`, and the derivation, `packages/protocol/src/checks.ts`) and EC4 (the
+briefings, AGENTS.md and the dashboard, `apps/web/src/checks.ts`). The file formats are in PROTOCOL.md, "Checks run by Nexus". Points marked
+**(P1)**…**(P17)** went beyond the decisions: EC1's proposals, which the user accepted on 2026-11-18, P3 made more
+precise and P6 changed (below).
+
+**Why.** A worker ran the full suite at every step's end, and every call around it (starting it, polling it, waiting
+for the full-test lock, reading the output) re-read the worker's whole context: about 16% of the cost of the analysed
+transcripts, 563 full runs and 512 polls of the lock. The engine runs the same commands without a model; the worker
+sees output only when something fails. While working, the worker still runs the targeted tests
+(`npm run test:files -- <files>` in Nexus).
+
+**When.** The worker's turn ends with `nexus step done`; the engine cleans the worker's descendants as today (queue
+PT), then runs the checks, then sends the step to review. The step is not in review, and nothing of the step's end
+happens yet (the next step, the closing step, context care's switch, a plan or a deploy waiting for the step), until
+the checks have passed: a failure goes back to the same session, which holds the context the fix needs. `nexus step
+failed` and `nexus stop` run no checks. Which checks: the project's and the queue's, each once, as the step's opening
+lists them, every one a shell command run in the queue's checkout **(P1)**. Steps opened before the change keep the
+worker's reporting: whether Nexus runs a step's checks is fixed when the step opens.
+
+**How.** Each check is a child process outside the event loop (`spawn` through the shell, never `execSync`), in the
+queue's checkout, its stdout and stderr to a log file under the queue's folder, nothing of it kept in memory but the
+tail. On Windows it runs in a Job Object of its own, as a worker does (queue PT), so the check's whole tree, detached
+children included, ends with it and its end can be observed. The server writes the check's state (command, start,
+end, exit code, the log's path) to a file before it starts the process and after it ends, so a restart finds what was
+running. The checks of a step run one after another, as one heavy operation **(P2)**, all of them even after one has
+failed, so one fix round sees every failure **(P3)**. A check has a time limit, past which it is ended and counts as
+failed **(P10)**. The checks run on the checkout as it is; the result records its HEAD and whether tracked files had
+uncommitted changes (`nexus step done` already warns about those).
+
+**A failing check is run once more.** Only the failed ones, within the same grant of the machine, right after the
+set, where the code has not changed (P3 as the user made it precise on 2026-11-18). After a check-fix round or a
+send-back, any new code, every check runs again, the ones that passed before too: a green result does not carry over
+to new code. Passing the second time, the step goes on and the check is recorded as flaky for that step: the statistics count
+it, and the orchestrator hears of it with its next notice, so it can propose a maintenance queue **(P14)**. Failing
+twice, the worker gets a check-fix round: a message to its session with the failing tests' names (where the output's
+format is known), the end of the output and the full log's path **(P15)**. It fixes, commits and ends with `nexus
+step done` again, and the checks run again, all of them.
+
+**The check-fix round is not a send-back.** It has its own limit, 3 by default (decided "like
+`review_send_back_limit`") **(P4)**, and is counted apart: the step's review round (send-backs, the round of
+its review pictures) stays as it is, and the fix round is numbered within it **(P13)**. After the limit the run halts
+for the orchestrator, which decides what comes next **(P5)**: a Resume gives one more round.
+
+**A failure that is not the work's** (P6 as the user changed it on 2026-11-18). A worker that finds a failure unrelated
+to its work (it fails on the base too, a test it did not touch that fails now and then) does not patch around it: it
+says so with its evidence (`nexus check --unrelated`), and Nexus itself runs that check on the queue's base commit, in
+a worktree of its own, through the same coordinator. Failing there too, the failure is accepted: the step goes to its
+review, and the failure is recorded for the statistics and a fix queue. Passing there, the failure is the queue's: a
+fix round, counted toward the limit, without a dispute. Only when the check cannot run on the base (the command or
+script is not there, the setup fails) does the orchestrator decide (accept or fix), its reason recorded. The evidence
+is checked by a run, not by a judgement, wherever a run can tell.
+
+**Every accepted failure gets a fix queue at once** (the user's decision of 2026-11-18), without exception: Nexus
+proposes it itself, origin `ci`, from a shipped template (`check-failure`): the first step (debugging) reproduces the
+failure on the base and finds its cause, the second (code) fixes it so the full run passes under load too. Its
+description carries the check, the tests' names, the log's path, the step and the worker's evidence. While one is open
+for the same test, a new occurrence is added to its description instead of a second queue. The orchestrator is told,
+to complete it and put it into the plan. A flaky failure, which passed on its second run, gets no queue of its own: it
+is in the statistics and in the step's review notice **(P14)**.
+
+**Restarts and updates.** After a restart, a check that was running is run again, not re-attached: the old server's
+check processes ended with its Job Objects (kill-on-close), and a log half written says nothing certain. A server that
+stopped mid-check brings its run back paused like any; the check runs again when the run goes on **(P9)**. An update's
+drain waits for running checks for a while **(P8)**, then stops them (recorded as interrupted, not failed), and they
+run again after the hand-over with the held run. Checks waiting for the machine do not start while an update drains.
+A Pause lets running checks finish and takes effect before the review or the fix round; Stop now and Stop at once end
+them, and they run again when the run goes on **(P16)**.
+
+**What the worker, the orchestrator and the review see.** The step's opening says that Nexus runs the listed checks
+after `nexus step done` and that the worker runs only the tests of what it changes. `nexus check` no longer reports a
+check Nexus runs **(P7)**; it remains for the evidence of an unrelated failure and for steps whose checks the worker
+runs. The review (the orchestrator's notice, later the review helper) gets the engine's results, with flaky checks
+marked: a step reaches review only with its checks passed, or with a failure the orchestrator accepted. The review
+levels, the merge train and the merge back's condition ("the integration step's checks in its last round passed") do
+not change; they read the engine's results. The closing refactoring step no longer runs the checks before it starts:
+it starts at the HEAD on which the last step's checks passed, and its opening says so **(P12)**. The integration step
+works as before (merge, `nexus step done`), and its checks are Nexus's like any step's; that it runs without a model
+when the merge is clean is queue MI's (see "The integration step without a model").
+
+**AGENTS.md "Before every commit"** keeps typecheck, lint and the tests of the changed files before each commit (the
+worker still commits several times in a step); its second half says (EC4): the whole suite is no commit's check, it
+runs at the step's end as the queue's checks, run by Nexus, which waits for the machine; only a step whose opening does
+not say so (an older server's, work started by hand) has its worker run and report them.
+
+**The step's states.** A step gets one new status, `checking`, between `running` and `review`, with a phase:
+`queued` (waiting for the machine; what it waits behind is the machine's line in `nexus status`), `running` (which
+check, since when) or `base` (a disputed check on the base commit). A disputed failure waiting for the orchestrator's
+decision is `waiting` (phase `decision`). A step in a check-fix round is `running` with its fix round number, shown
+apart from a send-back's round. The queue stays `running` and the run holds its checkout throughout.
+
+**Findings from building it (EC3).**
+
+- **The engine runs the checks only with the capacity coordinator.** The server always gives one; an engine without
+  (most engine tests, which use the fake runtimes for other subjects) leaves the checks to the worker as before. So the
+  existing tests keep their behaviour, and only the tests about the checks run commands.
+- **cmd.exe's switches cannot be quoted**, and the worker's job host quotes every argument for CreateProcess. A check
+  runs as `node -e <launcher> <command>`, the launcher calling `spawnSync(command, { shell: true })`, which builds
+  cmd.exe's line as Node always does.
+- **The output may arrive after the job host has closed**: the log is closed only once both streams have ended (at
+  most two seconds after the tree), else the end of the output was lost.
+- **A Job Object per check costs a second or two on Windows** (the host's PowerShell compiles its helper). The tests of
+  the engine's logic run their stand-in checks without one (`Capacity`'s `jobs: false`); the tests of a restart and a
+  drain, which end a check mid-run, use one: without it, ending the launcher leaves its child running, holding the
+  output pipe open.
+- **Events the derivation does not handle never reach a step's timeline.** `check.disputed` and `check.decided` are
+  listed there explicitly, since the checks' derivation and the engine read them from the timeline.
+
+**Findings from EC4.**
+
+- **A check-fix round the worker took up was lost.** The derivation read the checks only for a step in `review`; a
+  worker that opened its round with `nexus step start`, as its turn asks, made the step plain `running`: no round
+  number on the dashboard or in `nexus status`, and a dispute said after it never ran on the base (the CLI took it,
+  the engine never saw `checking`). Seen in the dashboard's pictures of a fix round on the fake runtimes. The
+  derivation now reads a step `running` after a failed (or accepted) set's done as in that round, and an accepted
+  dispute sends it to its review as of the done.
+- **The dashboard's pictures run the real engine.** The capture seed (`scripts/capture/seed-check-runs.ts`) gives the
+  test projects a `package.json` whose scripts are the checks (a ten-minute `npm test`, or one failing in TAP), and a
+  start due at once: the fake worker reports its step done, and the engine runs, queues or fails the checks as it
+  would. `NEXUS_TEST_LOCK` must name a file of the capture's own, else a full run elsewhere on the machine holds the
+  coordinator, and every check reads "queued".
+- **What a queued check waits behind is not on the dashboard yet**: the machine's line (`capacity.yaml`) is read by
+  `nexus status` only; the step says it waits for the machine and since when.
+
+#### The capacity coordinator, first slice
+
+The checks are the coordinator's first user (decided 2026-11-16 and 2026-11-17): one heavy operation per workstation,
+across projects, granted atomically or queued, the queue shown, released when the operation's processes have ended,
+and never a start without the grant after a time. Built in EC2 (`apps/server/src/capacity.ts`; PROTOCOL.md, "The
+capacity coordinator"), with no user yet until EC3. In this slice:
+
+- **It lives in the server**, which serves every project of the workstation, and keeps its state in a file of its own
+  (`<NEXUS_HOME>/capacity.yaml`, the server its one writer), so the dashboard and `nexus status` show the queue and a
+  restart finds it. The workstation has an id (its host name) from the start, for the later model of several machines
+  **(P17)**.
+- **One slot, `heavy`**: one step's checks at a time on the machine. Requests are served in the order they came (by
+  `requested_at`); a waiting request shows what holds the slot and since when, and what is ahead of it.
+- **Release follows the process**: the grant ends when the check set's last process tree is gone (the Job Object is
+  empty), not when a worker or the engine says it is done. A check ended at its time limit releases only once its tree
+  is gone.
+- **No time bypass**: waiting long gives status, never a start beside another heavy operation.
+- **After a restart** the old server's grants are void (their processes ended with it), and the queue is rebuilt from
+  the checks files: the requests not finished, in their order.
+- **Outside Nexus**: a full test run started by hand (or by an agent against its briefing) is not Nexus's to control.
+  `scripts/test-lock.ts` stays the machine-wide guard of `npm test` and `npm run test:times`, whoever starts them, the
+  engine's checks included; the coordinator shows a lock held by a run outside it as what occupies the machine, and
+  grants nothing meanwhile. What changes in test-lock.ts: **(P11)**. `npm run test:files` takes neither.
+
 ### The run's state transitions
 
 A queue's run record (`run.yaml`) changes state only through the named transitions in `apps/server/src/run-state.ts`.
@@ -598,6 +749,143 @@ back by itself) and `resolve_conflicts` (the integration step's worker resolves 
   was the older one, so the merge back waited ("the branch moved on after its integration step") and told the user
   for nothing; with a hold, it let the held run go. A round that is still open within a minute of the step's end
   now counts as still ending, and is judged once it closes.
+
+### The integration step without a model (queue MI)
+
+Decided by the user on 2026-11-17 (docs/ideas/token-costs.md): the integration step runs without a model when the
+merge is clean and the checks pass, as a CI pipeline does; a worker is started only for a conflict or a failing check.
+When the merge changes the lockfile, the worktree setup runs again before the checks. At the step boundaries the
+engine may merge the base into the queue's worktree when it merges cleanly, so conflicts show up small and early.
+Designed in MI1, built in MI2; the file formats are in PROTOCOL.md, "The integration step", "Without a model". Points
+marked **(M1)**…**(M13)** go beyond the decision: MI1's proposals, which the user accepted on 2026-11-18 as written.
+
+**Why.** Most integration steps find a clean merge (or nothing to merge) and passing checks: the worker's whole turn
+(reading its briefing and the opening, `git merge`, `nexus step done`, the context summary) only repeats what git and
+the checks say. Since queue EC the engine runs the checks itself, so the one thing left for a model is what a model is
+needed for: a conflict to resolve, a failure to fix.
+
+**Who writes the queue's report (M1).** Today the last step's opening asks for the report, and the integration step is
+the last. Without a worker nobody would write it. The report moves to **the last step that runs with a model before
+the integration step**: the closing refactoring step when the queue has one, else the queue's last own step. Its
+opening's "last" becomes "no step is pending but this one and the integration step". That step is the right author:
+the closing step runs in a fresh session whose seed already holds the queue's description and every step's summary,
+it read the queue's whole diff, and the report's judgement (each step against its acceptance, a proposed next step) is
+a model's work. The integration's own outcome is not in the report: it is the integration step's summary (the
+engine's, or its worker's), which the dashboard shows beside the report and the run-finished notice adds to the
+report's summary ("Integration: …"). The engine never writes `report.md`: `nexus report` stays its one writer. The
+integration step's opening asks for a report only when the queue has none yet (its closing step skipped by the user, a
+report never written); a model-free integration of such a queue finishes without one, and the run-finished notice says
+so. Alternatives weighed: the engine compiling the report from the steps' summaries (no model, but no judgement and no
+proposed next step, a summary that is no substantive outcome for the ideas' excerpts (IC2), and a second writer of
+`report.md`); the closing step writing it and the engine appending an integration section (the same second writer).
+
+**The engine's own session (M2).** A model-free step still needs its events (`step.started`, `step.progress`,
+`step.done`, a `queue.stop`, an acceptance) so that the derivation, the checks (their sets are keyed by the
+`step.done`), the merge back, the train, `nexus status` and the dashboard read it as any step. A session appends only
+to its own log, so the worker's log cannot take them. The server keeps one more session of its own, as it keeps the
+user's: id `nexus`, role `nexus`, no runtime, its events written only by the server. The step's rounds in `git.yaml`
+name it as their session.
+
+**When the step goes without a model (M3).** Only when everything is plain; anything else goes the way it goes today
+(a worker opens the step), so the model-free path never has to judge: Nexus runs the step's checks (the server's
+capacity coordinator, `by: nexus`); the worktree has no uncommitted changes to tracked files; a base branch can be
+named. The engine then merges (`git merge --no-edit <base>`), and on a clean merge (or nothing to merge) runs the setup
+when needed and records `step.done` with a summary built from facts (the base and its commit, how many commits and
+files the merge brought in, the resulting HEAD as its commit); the checks run as after any `step.done`.
+
+**A conflict (M4).** The engine aborts its merge (`git merge --abort`), so the branch is as it was. With
+`resolve_conflicts` off, it stops the step itself with the integration's condition and the conflicting files as the
+reason: no worker, since today's worker would only do the same. With it on, a worker opens the step as today, its
+opening naming the files Nexus found in conflict. No base branch to name: the engine stops the same way.
+
+**A failing check (M5).** A set that fails twice after the engine's `step.done` is a check-fix round as for any step,
+but the step has no worker yet: the engine opens the integration step in the run's session (started again when its
+process has ended, as a resume does), with the integration's opening in its "continue" form, saying that Nexus did the
+merge (the HEAD) and what failed (the round's text). The round counts toward `check_fix_limit` as usual (the engine's
+own set is fix 0), and the worker may dispute a failure as in any round.
+
+**Accepted by Nexus (M6).** A model-free integration whose checks all passed has nothing a review could judge beyond
+them: git made the merge, the checks judged it. At review level 2 or 3 the engine accepts it itself (`review.accepted`
+from the `nexus` session, its text saying so); the orchestrator is told with its next notice, as the routine reviews'
+helper's verdicts will be. A level the user set to 1 still goes to the user. This narrows "every step is reviewed"
+(PROTOCOL.md, "Review") for this one case, which is why it is a proposal. A queue without any check gets the merge
+without a model too, but not the acceptance: its summary and the review notice say the merge is untested, and the step
+goes to its review at its level. An integration a worker took part in (a conflict resolved, a failure fixed) is
+reviewed as today.
+
+**The setup after a lockfile change (M7, M8).** The decision names the integration's merge; the rule is made general,
+since it is the same question everywhere: is the worktree's setup current for its HEAD? `git.yaml` records the commit
+on which the setup last succeeded (`setup.sha`; the worktree's first setup: the base commit). Before a check set (any
+step's, the integration's included) and after a step-boundary merge, when a file of the setup's inputs differs between
+that commit and HEAD, the setup runs again first. The inputs are a project setting (`defaults.worktree_setup_inputs`,
+project only), by default the lockfiles of the common package managers anywhere in the tree (`package-lock.json`,
+`npm-shrinkwrap.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lockb`, `bun.lock`), so a project with another kind of
+setup can name its own (a `requirements.txt`). Before a check set the setup runs inside the set's grant of the machine,
+recorded on the set, and counts as the set's first check: a failure runs once more (`npm ci` fails on the network now
+and then), and failing twice it fails the set like a check, the checks after it not run (they would fail for it), so
+the worker of a check-fix round sees it (a lockfile the merge broke is the queue's to fix). A worker that changed the
+lockfile itself (and ran its install) gets one run too many, about half a minute, a price for one rule instead of two.
+
+**Merging the base at the step boundaries (M9, M10).** When the engine opens a step of a queue with an integration
+step (one of the queue's own steps, or the closing step; never the integration step itself, which merges anyway, and
+never a step that goes on: a continue, a send-back, a check-fix round), it first tries to merge the base into the
+queue's branch. It does so whatever `merge_back` says: with `merge_back` off the base still only moves by a
+fast-forward to the integration's result. The pull only reads the base branch, so it neither waits for the merge train
+nor holds the base. It needs a clean worktree (tracked files) and a base branch to name, and something to bring (the
+base not already in HEAD). The engine first tests the merge without touching the worktree (`git merge-tree
+--write-tree`; where git is too old for it, a real merge aborted on a conflict); a clean one is made (`git merge
+--no-edit <base>`), then the setup when its inputs changed. A conflicting one is not made: it is recorded, shown on the
+queue and in `nexus status`, and the next step's opening says which files of the base conflict with the branch, so the
+worker knows what is coming; resolving it remains the integration step's. The orchestrator is not told separately: it
+sees it with the step's review. No checks run at a pull: the next step's checks run on the result. Its opening says
+what the pull brought in (the base's commit, how many commits, the files).
+
+Three things change with it: the pull's merge commit falls between two steps' rounds, so it is no step's work; the
+closing step's commit range starts at the last base commit merged in (else the first round's start, as today), so its
+diff shows the queue's own work, not what the base brought; and a disputed check runs on the last base commit merged
+into the branch (else `base.sha`), so the comparison is with what the branch contains.
+
+**Run control (M11).** The merge and the setup are the engine's own work in the queue's run: `Engine.idle()` is false
+while they run, so an update's drain waits for them; the setup is a child process ended and run again like a check
+(interrupted by a Stop now, a drain's end or a restart). A server that stopped in the middle of a model-free step finds
+the step `running` from the `nexus` session: it aborts a merge left half done (`MERGE_HEAD` present) and runs the step
+again from its start, which finds the merge commit already there when it was made. A Pause during the step takes effect
+at its review, as during the checks.
+
+**The merge train and the merge back do not change (M12).** The train's hold is taken where it is taken today (the end
+of the step before the integration step), and the integration step holds the base while it runs or waits, whoever
+runs it; it only holds it for less time. The merge back's conditions read the integration step's last round and its
+check set, which a model-free step records the same way. A run again because the base moved on costs no model now,
+but the limit of two by itself stays: it guards against a loop, and the checks cost the machine.
+
+**Measuring it (M13).** The decision wants the effect measured, as its own deploy. A model-free step is marked on the
+derived step (`model_free: true`), so the statistics count model-free and worker integrations apart, and the steps
+without a turn do not pull the per-step averages of tokens and time down unseen.
+
+The orchestrator's briefing asks that the checks of a queue with a worktree of its own cover the typecheck, the tests
+and, where the work touches it, the build: a model-free integration is exactly as safe as its list of checks (MI2).
+
+**Built, and where it differs from the design (MI2).**
+
+- The `nexus` session's `runtime` is `external`, as the user's session's is, not a new value `none`: no reader needs to
+  tell the two apart, and a new runtime value would reach every switch over runtimes.
+- The orchestrator is not told of Nexus's acceptance in its next notice, as M6 said: no notice lists "the steps
+  accepted since" yet (that comes with the routine reviews' helper). It learns of it from the run-finished notice
+  ("Integration (run and accepted by Nexus, without a model): …"), and gets no review notice for such a step: the step
+  is in `review` for the moment between its passed checks and Nexus's acceptance, and the notice skips it
+  (`acceptedByNexus`, one predicate for the engine and the notice).
+- A conflicting pull is shown in `nexus status` and the orchestrator's overview (round 2 of MI2), not yet on the
+  dashboard (M9 said both): that is left for a later queue.
+- The merge is made within one look of the engine (git merge-tree, then git merge, then the events), so a drain or a
+  Pause cannot fall between the step's start and its done; only a server that stops in that moment leaves it open,
+  which the next look repairs (M11). Found while testing it: a Resume after the restart continued the open step the
+  usual way, by opening it for the worker; it now goes to the engine's look, which runs the step again without a model.
+- The update's drain did not wait for a worktree setup run outside the checks (a new worktree's, or one after a merge
+  at a step boundary): `Engine.idle()` looked only at the agents and the checks. It waits for it now, and a drain that
+  cannot wait ends it without counting a failure.
+- Found while testing: test temporary folders that nest (each test pointing TEMP inside the last one's) made worktree
+  paths long enough that git commands failed on Windows; the new tests take their folders from the system's temporary
+  folder as it was at the start.
 
 ### Usage limits
 
@@ -1840,6 +2128,11 @@ Nexus keeps outside the queue's list of steps.
   to do, but it explains extra turns in the activity.
 - **A killed server takes its `claude` children with it** (their stdin closes). On restart, any session process still
   alive is ended before a resume, and running queues come back paused.
+- **Every write to a child's input needs an error listener** (queue CR). A process that has exited while the server
+  has not yet seen its exit (the server busy) fails the next write with EPIPE, also a short line on Windows, emitted as
+  an error event of its input; unheard, it ends the server. On 2026-11-18 the model list's `initialized` to a Codex
+  that had answered and exited did so. Once the exit is seen, Node has destroyed the input and a write fails only to
+  its callback; reading the output of an exited process ends it, no error.
 
 - **Codex has the same moves.** `turn/steer` reaches a running turn (checked live), `thread/resume` continues a
   thread with its context (checked: the agent recalled the previous queue), token usage and the context window
@@ -2143,9 +2436,10 @@ The suite runs every file side by side on every core already, so two at once onl
 - **The other waits**, saying once a minute on stderr what for (the checkout, the pid, since when), so a worker's
   check does not look stuck. A lock whose process is not alive is taken over at once (a run killed with its tree,
   a crash); one that cannot be read is being written while it is young, and is taken over once it is not.
-- **At most 15 minutes**, then the run goes on without the lock: a run stuck for longer, or a pid that Windows gave to
-  another process, never blocks the suite for good. Two runs taking over the same dead lock in the same moment could
-  both run; that is today's behaviour, not worse.
+- **At most 15 minutes**, then the run went on without the lock: a run stuck for longer, or a pid that Windows gave to
+  another process, would never block the suite for good. Two runs taking over the same dead lock in the same moment
+  could both run; that is today's behaviour, not worse. *Gone since queue EC (EC2, the user's acceptance of EC1's
+  P11): a run waits until it has the lock; the staleness of queue TF below handles a hung holder or a reused pid.*
 - **`npm run test:files` never waits**: a few files while working, short, and run often.
 - Only branches that contain the lock take it: an older branch's run neither waits nor is waited for.
 
@@ -2208,7 +2502,7 @@ through the open file descriptor every second (or one third of a shorter expiry,
 keeps other runs waiting regardless of the original acquisition time or PID visibility. Without renewal for
 `NEXUS_TEST_LOCK_STALE_MS` (20 minutes by default), another run can take it over. This also handles a sandbox killing
 both wrapper and watchdog: no observer needs to survive to release the lease. Expiry makes the lock reclaimable;
-the next acquirer removes the old file. The normal maximum wait remains 15 minutes.
+the next acquirer removes the old file. (The 15 minutes' maximum wait went in queue EC, EC2.)
 
 Renewal uses the original open file, not its pathname, and release checks the ownership token as well as PID. A
 superseded holder cannot renew or remove its replacement, even when the PID is the same. Older records without a

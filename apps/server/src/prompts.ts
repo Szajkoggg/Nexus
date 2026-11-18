@@ -4,7 +4,7 @@
 // (src/conversations.ts). Agents rely on them (a change to one carries an `Agents:` line in its commit), so each is
 // covered by a snapshot test: test/prompts.test.ts compares what the agents' processes receive with golden files.
 import {
-  INTEGRATION_CONDITION, formatClock, openPlan, formatSeconds, isCheckMetric, languageName, levelNow, metricValueText, releasedText, runIsOlder, stepChecks, type MetricValue, type AwayNow, type PlanDecision, type ConversationWeb, type InboxView, type LanguageCode, type ProjectFile, type ProjectState, type QuestionView, type QueueView, type SessionView, type StepView, type TagProposal, tagsText,
+  INTEGRATION_CONDITION, fileList, formatClock, latestCheckSet, reviewRound, openPlan, formatSeconds, isCheckMetric, languageName, levelNow, metricValueText, releasedText, runIsOlder, stepChecks, type CheckSet, type MetricValue, type AwayNow, type PlanDecision, type ConversationWeb, type InboxView, type LanguageCode, type ProjectFile, type ProjectState, type QuestionView, type QueueView, type SessionView, type StepView, type TagProposal, tagsText,
 } from "@nexus/protocol";
 import type { ClosingContext } from "./closing.ts";
 import type { IntegrationContext } from "./integration.ts";
@@ -54,7 +54,8 @@ Report through the \`nexus\` command (on PATH; your session is set in the enviro
 - nexus step progress <step> "<short status>" [--pct N]     at milestones, so the user sees where you are
 - nexus review add <step> <picture> --key <view@width> --role <role> --label "..."   a review picture, one per command
 - nexus review add <step> <file|url>... --label "..."       other review material (documents, data, links)
-- nexus check <step> <name> --ok|--fail --summary "..." --duration <seconds>   results of the step's checks, with how long each ran (the times show when a check grows slower); <name> is the check exactly as the step's opening lists it under "Checks for every step" (\`nexus check <step> "npm test" --ok …\`, not "test"): a check reported under another name counts as not reported
+- nexus check <step> <name> --ok|--fail --summary "..." --duration <seconds>   results of the step's checks, only where you run them: where the step's opening says Nexus runs them, it runs and records them itself after your \`nexus step done\`, and this is refused. Otherwise report each with how long it ran (the times show when a check grows slower); <name> is the check exactly as the step's opening lists it under "Checks for every step" (\`nexus check <step> "npm test" --ok …\`, not "test"): a check reported under another name counts as not reported
+- nexus check <step> <name> --unrelated --evidence "..."   in a check-fix round, a failed check that is not your work's failure (it fails on the base too, a test you did not touch): Nexus runs it on the queue's base commit and decides by it; end your turn without \`nexus step done\`
 - nexus metric record <name> <value>                        a value of one of the project's metrics, when the step asks you to measure one (\`nexus metric list\` shows them); it is kept with your step and HEAD commit
 - nexus step done <step> --summary "..." [--commit <sha>] --activities a,b   when the acceptance criteria are met; --activities names what you actually did, whatever was planned (\`nexus tags\` lists the names)
 - nexus step failed <step> --reason "..."                   when the step cannot be done as written
@@ -67,7 +68,7 @@ Nexus's standards for the rest (the full texts: \`nexus help summaries\`, \`nexu
 - A question (nexus ask) has three: what it blocks; the options (--option, one each); your recommendation (--recommend names the option, the text says why).
 - ${SHELL_COMMANDS}
 - When an action is refused, do not work around it through another tool or command that reaches the same end (PowerShell after Bash, the shell after the edit tool); retry once in a simpler form at most (without chaining, for example), otherwise report what you needed and why.
-- Tests: while you work, run only the tests of what you changed and stop at the first failure (the project's way is in its AGENTS.md; in Nexus's own repository \`npm run test:files -- <files>\`); the whole suite runs at the step's end, as the queue's checks.
+- Tests: while you work, run only the tests of what you changed and stop at the first failure (the project's way is in its AGENTS.md; in Nexus's own repository \`npm run test:files -- <files>\`); the whole suite runs at the step's end, as the queue's checks. Where Nexus runs them, you do not start the whole suite or wait for it: Nexus runs it after your \`nexus step done\` and sends you its output only when a check fails (a check-fix round): fix from that output and the log it names, running only the failing tests.
 - Leave the working tree clean at every step's end, not only at a stop: commit everything the step did (only its own files, by name) and name the commit with nexus step done --commit, so every commit belongs to exactly one step.
 Messages from the user may arrive while you work, marked [Nexus]; follow them.
 Before you stop (nexus stop, or a stop condition you meet): commit what is in a consistent state, with a message that says so, and leave the working tree clean (no uncommitted changes); what is not consistent, set aside or undo, and say in the reason what you left out. The user then decides whether the stopped step's commits are kept or reverted; changes nobody committed cannot be attributed to the step.`;
@@ -84,6 +85,9 @@ export function workerBriefing(l: Languages): string {
  * the step is the queue's closing refactoring step, and this is what it is given (src/closing.ts). `integration`: the
  * step is the queue's integration step, and this is what it is given (src/integration.ts).
  */
+/** Said under the checks of a step whose checks Nexus runs (PROTOCOL.md, "Checks run by Nexus"). */
+const CHECKS_BY_NEXUS = "Nexus runs these itself after your `nexus step done` and sends you their output only if one fails; do not run or report them yourself (`nexus check` refuses them). While you work, run only the tests of what you change.";
+
 export function stepOpening(o: {
   q: QueueView; step: StepView; mode: "start" | "continue"; why?: string; projectStopConditions: string[];
   /** The project's checks as the run fixed them (run.yaml `checks`): listed before the queue's own. */
@@ -93,6 +97,10 @@ export function stepOpening(o: {
   languages?: string;
   closing?: ClosingContext;
   integration?: IntegrationContext;
+  /** Nexus runs the step's checks after its `nexus step done` (PROTOCOL.md, "Checks run by Nexus"). */
+  checksByNexus?: boolean;
+  /** Nexus merged the base into the queue's branch right before this step, or found it conflicting (queue MI). */
+  pull?: PullText;
 }): string {
   const { q, step, mode, why, projectStopConditions, notes, answers, last, report, languages, closing, integration } = o;
   const index = q.steps.findIndex((s) => s.id === step.id);
@@ -103,22 +111,51 @@ export function stepOpening(o: {
     step.goal ? `\nGoal:\n${step.goal}` : "",
     step.acceptance.length ? `\nAcceptance:\n${step.acceptance.map((a) => `- ${a}`).join("\n")}` : "",
     tagsText(step.tags) ? `\nTags as planned: ${tagsText(step.tags)}. At the end name what you actually did with \`nexus step done --activities\`.` : "",
-    closing ? closingText(closing) : "",
-    integration ? integrationText(step.id, integration) : "",
-    checks.length ? `\nChecks for every step:\n${checks.map((c) => `- ${c}`).join("\n")}` : "",
+    o.pull ? pullText(o.pull) : "",
+    closing ? closingText(closing, !!o.checksByNexus) : "",
+    integration ? integrationText(step.id, integration, !!o.checksByNexus) : "",
+    checks.length ? `\nChecks for every step:\n${checks.map((c) => `- ${c}`).join("\n")}${o.checksByNexus ? `\n${CHECKS_BY_NEXUS}` : ""}` : "",
     step.review?.prepare ? `\nReview to prepare: ${step.review.prepare}\nPrepare it by Nexus's standard: read \`nexus help review\` first (view keys, roles, the same conditions on both sides of a pair).` : "",
     `\nStop conditions (meeting one ends the queue: report it with \`nexus stop\`):\n${[...q.stop_conditions, ...projectStopConditions].map((c) => `- ${c}`).join("\n") || "- none beyond your judgement"}`,
     notes.length ? `\nNotes from the user for this step:\n${notes.map((n) => `- ${n.body}`).join("\n")}` : "",
     answers.length ? `\nAnswers to your questions about this step:\n${answers.map((x) => `- "${x.text}": ${x.answers.at(-1)?.text}`).join("\n")}` : "",
     languages ? `\n${languages}` : "",
     `\nBegin with \`nexus step start ${step.id}\`${mode === "continue" ? " (again is fine)" : ""}. End with \`nexus step done ${step.id} --summary "…"\`, \`nexus step failed\` or \`nexus stop\`, then write \`nexus context\` and end your turn. Do not start another step.`,
-    last ? `\nThis is the queue's last step. After it is done, write a short report of the whole queue (what each step achieved against its acceptance, checks, review material, open questions, a proposed next step) to ${report} (a folder for reports outside the working tree and any repository: never write it into the working tree, it would block the cleanup of a worktree) and register it with \`nexus report ${q.id} --file ${report} --summary "…"${q.maintenance ? " --findings <the number of findings>" : ""}\`, which copies it into the queue's folder and removes it from there.${q.maintenance ? ` This is a maintenance queue (${q.maintenance}): give the number of findings with --findings (0 when there were none); Nexus tells the orchestrator only when there are some.` : ""}` : "",
+    last ? `\nThis is the queue's last step${!step.integration && q.steps.some((x) => x.integration) ? " before its integration step, which Nexus runs after it (without a model when the merge is clean)" : ""}. After it is done, write a short report of the whole queue (what each step achieved against its acceptance, checks, review material, open questions, a proposed next step) to ${report} (a folder for reports outside the working tree and any repository: never write it into the working tree, it would block the cleanup of a worktree) and register it with \`nexus report ${q.id} --file ${report} --summary "…"${q.maintenance ? " --findings <the number of findings>" : ""}\`, which copies it into the queue's folder and removes it from there.${q.maintenance ? ` This is a maintenance queue (${q.maintenance}): give the number of findings with --findings (0 when there were none); Nexus tells the orchestrator only when there are some.` : ""}` : "",
     q.maintenance === "survey" ? "\nThis is a survey: change nothing and commit nothing. When a step ends, Nexus checks that it left no commit and no changed tracked file, and stops the queue otherwise." : "",
   ].filter(Boolean).join("\n");
 }
 
-/** What the closing refactoring step is told of the queue's work and of the project's rules for refactoring. */
-function closingText(c: ClosingContext): string {
+/** A merge of the base at a step boundary, as the next step's opening tells it (queue MI). */
+export interface PullText { base: string; sha: string; merged?: { commits: number; files: string[] }; conflicts?: string[] }
+
+function pullText(p: PullText): string {
+  const sha = p.sha.slice(0, 12);
+  if (p.merged) return `\nBefore this step Nexus merged ${p.base} (${sha}) into this branch: ${p.merged.commits} commit${p.merged.commits === 1 ? "" : "s"}${p.merged.files.length ? `, changing ${fileList(p.merged.files)}` : ""}.`;
+  return `\n${p.base} (${sha}) conflicts with this branch in ${fileList(p.conflicts ?? [])}; Nexus did not merge it. Do not resolve it here: the queue's integration step will.`;
+}
+
+/** What the integration step may not do, in both its opening and a check-fix round of the step Nexus ran without a model. */
+const INTEGRATION_LIMITS = "Never rebase, never push, and change neither the base branch nor any other checkout: the base moves forward to this step's result later, by Nexus or the user.";
+
+const queueBranch = (c: IntegrationContext) => (c.branch ? `the queue's branch ${c.branch}` : "the queue's branch");
+
+/**
+ * The beginning of a check-fix round for the integration step Nexus ran without a model (queue MI): the worker has not
+ * opened the step, so it is told what the step is and what Nexus did.
+ */
+export function modelFreeFixPreface(q: Pick<QueueView, "id">, step: string, c: IntegrationContext, head: string | undefined): string {
+  return [
+    `This is queue ${q.id}'s integration step (${step}), kept by Nexus. Nexus merged ${c.base ?? "the base"}${c.sha ? ` (${c.sha.slice(0, 12)})` : ""} into ${queueBranch(c)} in this worktree without a model${head ? ` (HEAD ${head.slice(0, 12)})` : ""}, and the checks failed on the result: the step is yours now.`,
+    `Fix on this branch what the two sides break together, in small commits that say why. ${INTEGRATION_LIMITS}`,
+  ].join("\n");
+}
+
+/**
+ * What the closing refactoring step is told of the queue's work and of the project's rules for refactoring. `byNexus`:
+ * Nexus runs its checks, so it starts where the last step's checks passed and runs none before it changes anything (P12).
+ */
+function closingText(c: ClosingContext, byNexus: boolean): string {
   return [
     `\nThis is the queue's closing refactoring step, kept by Nexus: it runs after the queue's own steps, in a fresh session, so that their work is read with fresh eyes.`,
     c.range
@@ -127,15 +164,19 @@ function closingText(c: ClosingContext): string {
     c.rules
       ? `The project's AGENTS.md has a "Refactoring" section: follow it too; it adds the project's own rules to this text.`
       : `The project's AGENTS.md has no "Refactoring" section: this text alone applies.`,
-    `Run the checks before you change anything, and again after. Report the run after your change with nexus check, one per check under its exact name in "Checks for every step" below (for example \`nexus check <step> "npm test" --ok …\`), never under a name of your own; mention the run before only in the summary. If nothing is worth refactoring, make no commit and report the step done with your reasons in the summary (the checks of that one run reported the same way): that is a valid outcome.`,
+    byNexus
+      ? `Do not run the checks before you change anything: ${c.checked ? `they passed on ${c.checked}, where the queue's last step ended` : "Nexus ran them when the queue's last step ended"}. While you refactor, run only the tests of what you change; after your \`nexus step done\` Nexus runs the checks on the result, and sends you their output only if one fails. If nothing is worth refactoring, make no commit and report the step done with your reasons in the summary: that is a valid outcome.`
+      : `Run the checks before you change anything, and again after. Report the run after your change with nexus check, one per check under its exact name in "Checks for every step" below (for example \`nexus check <step> "npm test" --ok …\`), never under a name of your own; mention the run before only in the summary. If nothing is worth refactoring, make no commit and report the step done with your reasons in the summary (the checks of that one run reported the same way): that is a valid outcome.`,
   ].join("\n");
 }
 
-/** What the integration step is told: the base to merge, what to do on a conflict, and how to stop for the user. */
-function integrationText(step: string, c: IntegrationContext): string {
+/**
+ * What the integration step is told: the base to merge, what to do on a conflict, and how to stop for the user.
+ * `byNexus`: Nexus runs its checks on the result after `nexus step done`.
+ */
+function integrationText(step: string, c: IntegrationContext, byNexus: boolean): string {
   const stop = `nexus stop ${step} --condition "${INTEGRATION_CONDITION}" --reason "<the conflicting files, and why they are not resolved>"`;
-  const branch = c.branch ? `the queue's branch ${c.branch}` : "the queue's branch";
-  const intro = `\nThis is the queue's integration step, kept by Nexus: it runs last, in the queue's worktree, on ${branch}.`;
+  const intro = `\nThis is the queue's integration step, kept by Nexus: it runs last, in the queue's worktree, on ${queueBranch(c)}.`;
   if (!c.base) {
     return [
       intro,
@@ -144,14 +185,19 @@ function integrationText(step: string, c: IntegrationContext): string {
   }
   return [
     intro,
-    `Merge the base into it: git merge --no-edit ${c.base} (the base branch ${c.base} is at ${c.sha} now). Never rebase, never push, and change neither the base branch nor any other checkout: the base moves forward to this step's result later, by Nexus or the user.`,
-    `Report the checks you run on the result with nexus check, one per check under its exact name in "Checks for every step" below (for example \`nexus check <step> "npm test" --ok …\`), never under a short name of your own; report the last run of each.`,
-    `- No conflict (or the branch already contains the base): run the checks on the result. If a check fails because of what the two sides do together, fix it on this branch in small commits that say why, and run the checks again. Report the step done with the resulting HEAD as its commit, and say in the summary what the merge brought in.`,
+    c.conflicts?.length ? `Nexus tried the merge first: ${fileList(c.conflicts)} conflict${c.conflicts.length === 1 ? "s" : ""}.` : "",
+    `Merge the base into it: git merge --no-edit ${c.base} (the base branch ${c.base} is at ${c.sha} now). ${INTEGRATION_LIMITS}`,
+    byNexus
+      ? `Nexus runs the checks on the result after your \`nexus step done\`, and sends you their output only if one fails: then fix what the two sides do together on this branch, in small commits that say why, and end with \`nexus step done\` again.`
+      : `Report the checks you run on the result with nexus check, one per check under its exact name in "Checks for every step" below (for example \`nexus check <step> "npm test" --ok …\`), never under a short name of your own; report the last run of each.`,
+    byNexus
+      ? `- No conflict (or the branch already contains the base): report the step done with the resulting HEAD as its commit, and say in the summary what the merge brought in.`
+      : `- No conflict (or the branch already contains the base): run the checks on the result. If a check fails because of what the two sides do together, fix it on this branch in small commits that say why, and run the checks again. Report the step done with the resulting HEAD as its commit, and say in the summary what the merge brought in.`,
     c.resolve
-      ? `- A conflict: resolve it (the project lets you: its resolve_conflicts setting is on). Keep what both sides meant, commit the merge, run the checks, and say in the summary which files conflicted and how you resolved each; the step's review judges it. If you cannot resolve one with confidence (the two sides want different things, and choosing is the user's), abort the merge (git merge --abort) and stop: ${stop}`
+      ? `- A conflict: resolve it (the project lets you: its resolve_conflicts setting is on). Keep what both sides meant, commit the merge, ${byNexus ? "run the tests of the files that conflicted" : "run the checks"}, and say in the summary which files conflicted and how you resolved each; the step's review judges it. If you cannot resolve one with confidence (the two sides want different things, and choosing is the user's), abort the merge (git merge --abort) and stop: ${stop}`
       : `- A conflict: do not resolve it (the project's resolve_conflicts setting is off). Abort the merge (git merge --abort), so the branch is as it was, and stop: ${stop}`,
     `After such a stop the queue waits for the user, who resolves the conflict (in this worktree, or with a new revision) and goes on with Continue; this step then runs again.`,
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 }
 
 /**
@@ -292,8 +338,18 @@ export function formatInbox(m: InboxView, state: ProjectState, released = false)
     return [
       ...lines,
       step?.acceptance.length ? `\nAcceptance criteria of the step:\n${step.acceptance.map((a) => `- ${a}`).join("\n")}` : "",
-      `\nWork on it in this step: \`nexus step start ${m.step}\`, then the checks, review material for this round (\`nexus review add ${m.step} … --round ${m.round}\`, pictures with the same keys as before: \`nexus help review\`), and \`nexus step done ${m.step} --summary "…"\` (or \`nexus step failed\` / \`nexus stop\`), then \`nexus context\`, and end your turn.`,
+      `\nWork on it in this step: \`nexus step start ${m.step}\`, then ${step?.checks_by === "nexus" ? "the fix (Nexus runs the checks again after your `nexus step done`)" : "the checks"}, review material for this round (\`nexus review add ${m.step} … --round ${m.round}\`, pictures with the same keys as before: \`nexus help review\`), and \`nexus step done ${m.step} --summary "…"\` (or \`nexus step failed\` / \`nexus stop\`), then \`nexus context\`, and end your turn.`,
     ].filter(Boolean).join("\n");
+  }
+  if (m.type === "check_failed") {
+    const limit = state.project.defaults.check_fix_limit;
+    return [
+      `[Nexus] The checks Nexus ran for step ${m.step} of queue ${m.queue}: check-fix round ${m.fix} of ${limit}${m.fix > limit ? " (beyond the limit: the orchestrator gave one more)" : ""}. What failed:`,
+      m.text,
+      `\nFix it at its cause and commit. Work from this output and the log it names (read the part you need there), and run only the failing tests and the tests of what you change, not the whole suite: after your next \`nexus step done\` Nexus runs every check again, the ones that passed too.`,
+      `If a failure is not from your work (it fails on the base too, a test you did not touch), do not patch around it: say so with your evidence, \`nexus check ${m.step} "<check>" --unrelated --evidence "<what shows it>"\`, and end your turn without \`nexus step done\`; Nexus runs that check on the queue's base commit and decides by it.`,
+      `Work on it in this step: \`nexus step start ${m.step}\`, the fix, then \`nexus step done ${m.step} --summary "…"\` (or \`nexus step failed\` / \`nexus stop\`), then \`nexus context\`, and end your turn.`,
+    ].join("\n");
   }
   return `[Nexus] The ${m.from} asks you to stop now${m.text ? `: ${m.text}` : "."} Leave the work consistent and end your turn.`;
 }
@@ -418,7 +474,7 @@ The default level follows from the step's acceptance criteria: criteria that can
 
 The closing refactoring step: set coding: true on every queue that contains coding, that is, a step that writes or changes code (tests and scripts count; a queue that only plans, measures, documents or reviews does not). Nexus then ends the queue with a step of its own, outside your list of steps: id <queue>.refactor, review level 2, its goal and acceptance Nexus's standard text (refactor what the queue changed and the code closely tied to it; behaviour unchanged, the checks pass before and after; small commits; the project's AGENTS.md "Refactoring" section applies if there is one). It always runs last, also after steps a later revision adds (once it has run, it runs again after them), in a fresh session given the queue's commit range; it writes the queue's report (unless an integration step follows it, below). Do not draft such a step yourself, and do not use its id. Review it as any level-2 step; a "nothing worth refactoring" with its reasons is a valid outcome. You cannot skip it, and nexus queue set finished waits for it; only the user may skip it, with Continue on a stopped queue or with the approval of a stopped queue's new revision (nexus status then shows it skipped, with the reason). Once the queue has started, coding: true stays (a draft cannot take it back).
 
-Parallel work and merging back: give a queue a worktree of its own (worktree: auto) when its work is independent of the queues running or planned beside it (another part of the code), so they can run side by side; queues that touch the same code run one after another (put them in the plan in order), never side by side. A queue with a worktree of its own ends with a second step of Nexus's, after the closing step: id <queue>.integrate, review level 2. In the queue's worktree its worker merges the current main into the queue's branch and runs the checks there; it resolves a conflict only where the project's resolve_conflicts setting allows it, and one it does not resolve stops the queue for the user (only the user's Continue goes on). It writes the queue's report. Do not draft such a step, do not use its id, and you cannot skip it; review it on the merge and the checks. Merging the queue back into main is Nexus's own only where the project's merge_back setting is on: then main moves forward to the integrated commit by a fast-forward once every step is accepted, and you are told when that waits (a dirty checkout, failed checks, main moving on again) and when it is done; with the setting off it is the user's (Merge back in the dashboard). Never merge, rebase or move main yourself. With merge_back on, such queues integrate one at a time (the merge train): a queue whose next step is its integration step waits before it while another queue integrates or waits for its fast-forward, in the order they got there, and goes on by itself in its turn (nexus status: "waits to integrate after <queue>"); its own steps before never wait, and one whose fast-forward waits lets the next go.
+Parallel work and merging back: give a queue a worktree of its own (worktree: auto) when its work is independent of the queues running or planned beside it (another part of the code), so they can run side by side; queues that touch the same code run one after another (put them in the plan in order), never side by side. A queue with a worktree of its own ends with a second step of Nexus's, after the closing step: id <queue>.integrate, review level 2. In the queue's worktree Nexus merges the current main into the queue's branch and runs the checks there, without a model when the merge is clean, and accepts the step itself when every check passes (at review level 1, or with no checks, it goes to its review as any step); a worker is started only for a conflict the project's resolve_conflicts setting lets it resolve, or for a failing check. A conflict not resolved stops the queue for the user (only the user's Continue goes on). At each step boundary before it, Nexus also merges main into the branch when it merges cleanly, so conflicts show up early. The queue's report is written by the step before the integration step (the closing step, else the queue's last own step). A merge without a model is exactly as safe as the queue's checks: give such a queue checks that cover the typecheck, the tests and, where the work touches it, the build. Do not draft such a step, do not use its id, and you cannot skip it; review it, when it comes to you, on the merge and the checks. Merging the queue back into main is Nexus's own only where the project's merge_back setting is on: then main moves forward to the integrated commit by a fast-forward once every step is accepted, and you are told when that waits (a dirty checkout, failed checks, main moving on again) and when it is done; with the setting off it is the user's (Merge back in the dashboard). Never merge, rebase or move main yourself. With merge_back on, such queues integrate one at a time (the merge train): a queue whose next step is its integration step waits before it while another queue integrates or waits for its fast-forward, in the order they got there, and goes on by itself in its turn (nexus status: "waits to integrate after <queue>"); its own steps before never wait, and one whose fast-forward waits lets the next go.
 
 Review material follows Nexus's standard, \`nexus help review\` (read it before you write a review.prepare): every picture has a view key (subject, state, window width: waiting-tab@492) and a role (before, mockup, after, variant-a, variant-b, result); only the same key pairs, and Nexus refuses a wrong pair. In review.prepare name the views with their keys and roles, and what each is compared with (the old screen: before; a design: mockup; a new screen: result). The project's own conventions (its AGENTS.md) come on top.
 
@@ -753,6 +809,38 @@ export function mergeWaitNotice(q: QueueView, reason: string, released?: readonl
   };
 }
 
+/**
+ * A failure of a check Nexus ran was accepted (it failed on the queue's base too, or the orchestrator accepted it), and
+ * Nexus proposed a fix queue for it, or added the occurrence to an open one (src/check-runs.ts).
+ */
+export function checkAcceptedNotice(q: QueueView, st: StepView, set: CheckSet): Notice {
+  const d = set.dispute!;
+  const how = d.decided?.verdict === "accept" ? "you accepted it" : `it fails on the queue's base commit ${d.base?.commit ?? ""} too`;
+  const fix = set.fix_queue;
+  return {
+    fact: `The check ${d.name} of step ${q.id}/${st.id} failed, and the failure is accepted: ${how}. The step goes to its review.${fix ? ` ${fix.created ? `Nexus proposed queue ${fix.id} to find and fix it` : `Nexus added this occurrence to queue ${fix.id}, open for the same tests`}.` : ""}`,
+    todo: fix
+      ? `Complete queue ${fix.id} (nexus status ${fix.id}; the project's checks, tags such as the area, the texts in the queue's language) with nexus queue draft, and put it into the plan; tell the user in one sentence. The worker's evidence: ${d.evidence}`
+      : `Nexus could not propose a fix queue for it: draft one yourself from the template check-failure (nexus template show check-failure). The worker's evidence: ${d.evidence}`,
+  };
+}
+
+/** A disputed failure could not be run on the queue's base: the orchestrator decides (`nexus check decide`). */
+export function checkDecisionNotice(q: QueueView, st: StepView, set: CheckSet): Notice {
+  const d = set.dispute!;
+  const c = set.checks.find((x) => x.name === d.name);
+  const last = c?.runs.at(-1);
+  return {
+    fact: `The worker of ${q.id}/${st.id} says the failing check ${d.name} is not its work's, and Nexus could not run it on the queue's base: ${d.base?.reason ?? "unknown"}.`,
+    todo: [
+      `Decide: nexus check decide ${q.id} ${st.id} accept --reason "…" (the step goes to its review, the failure is recorded and a fix queue is proposed) or nexus check decide ${q.id} ${st.id} fix --reason "…" (a check-fix round).`,
+      `The worker's evidence: ${d.evidence}`,
+      last?.failed_tests?.length ? `Failing tests: ${last.failed_tests.join("; ")}` : "",
+      last ? `Log: ${last.log} (in the queue's folder)${last.tail ? `; it ends: ${last.tail.split("\n").slice(-8).join(" | ")}` : ""}` : "",
+    ].filter(Boolean).join("\n"),
+  };
+}
+
 /** Nexus could not remove a done survey run's worktree (git.yaml `cleanup.waiting`, src/merger.ts). */
 export function cleanupWaitNotice(q: QueueView, reason: string): Notice {
   return {
@@ -781,7 +869,15 @@ export function pausedNotice(q: QueueView, r: { step?: string }): Notice {
 export function runEndNotice(q: QueueView, r: { state: string; step?: string; reason?: string }): Notice {
   return r.state === "halted"
     ? { fact: `The run of queue ${q.id} halted ${r.step ? `at step ${r.step}` : "before it opened a step"}: ${r.reason ?? "no reason given"}.`, todo: "Tell the user briefly, with what you propose." }
-    : { fact: `Queue ${q.id} finished.${q.report ? ` Report: ${q.report.summary}` : ""}`, todo: "Tell the user briefly, with what you propose next." };
+    : { fact: `Queue ${q.id} finished.${q.report ? ` Report: ${q.report.summary}` : " It has no report."}${integrationLine(q)}`, todo: "Tell the user briefly, with what you propose next." };
+}
+
+/** The integration step's outcome, after the report (its summary; whether Nexus ran it without a model and accepted it). */
+function integrationLine(q: QueueView): string {
+  const st = q.steps.find((s) => s.integration);
+  if (!st?.summary || st.status !== "done") return "";
+  const nexus = st.model_free ? " (run and accepted by Nexus, without a model)" : "";
+  return ` Integration${nexus}: ${st.summary}`;
 }
 
 /**
@@ -810,8 +906,11 @@ export function staticAnalysisNotice(): Notice {
 /** What the orchestrator needs to review a step: its acceptance, the checks and material of this round, its commits. */
 function reviewBrief(q: QueueView, st: StepView, away: AwayNow = { on: false }): string {
   const since = st.segments.at(-1)?.start ?? "";
-  const round = st.timeline.filter((e) => e.type === "step.done").length;
+  const round = reviewRound(q, st);
   const checks = st.checks.filter((c) => c.at >= since);
+  // A failure of Nexus's checks accepted this round (it fails on the base too, or the orchestrator accepted it).
+  const latest = latestCheckSet(q, st);
+  const accepted = latest?.state === "accepted" ? latest : undefined;
   const missing = stepChecks(q.run?.checks, q.checks).filter((name) => !checks.some((c) => c.name === name));
   const items = st.review_items.filter((i) => i.at >= since);
   const metrics = st.metrics.filter((m) => m.at >= since && !isCheckMetric(m.name));
@@ -823,6 +922,7 @@ function reviewBrief(q: QueueView, st: StepView, away: AwayNow = { on: false }):
     `Acceptance:\n${list(st.acceptance)}`,
     `Checks reported this round:\n${list(checks.map((c) => `${c.name}: ${c.ok ? "ok" : "FAILED"}${c.duration !== undefined ? `, ${formatSeconds(c.duration)}` : ""}${c.summary ? ` (${c.summary})` : ""}`))}`,
     ...(missing.length ? [`Checks of the queue not reported this round: ${missing.join("; ")}`] : []),
+    ...(accepted?.dispute ? [`Accepted failure: ${accepted.dispute.name} ${accepted.dispute.decided ? `(accepted by you: ${accepted.dispute.decided.reason})` : `(it fails on the queue's base commit ${accepted.dispute.base?.commit ?? ""} too)`}; not this step's to fix${accepted.fix_queue ? `, queue ${accepted.fix_queue.id} is for it` : ""}. The worker's evidence: ${accepted.dispute.evidence}`] : []),
     ...(metrics.length ? [`Metrics recorded this round:
 ${list(metrics.map((m) => `${m.name}: ${metricValueText(m.value, m.unit)}${m.warn ? ` (${m.warn.side} its warning threshold of ${metricValueText(m.warn.limit, m.unit)})` : ""}`))}`] : []),
     `Review material:\n${list(items.map((i) => `${i.label ?? i.kind ?? "item"}: ${i.path ?? i.url ?? ""}`))}`,

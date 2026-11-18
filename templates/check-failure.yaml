@@ -1,0 +1,59 @@
+# A check that fails on the base too: Nexus proposes this queue by itself for every failure it accepted (queue EC; the
+# user's decision of 2026-11-18). Reproduce the failure on the base, find its cause, fix it so the full run passes
+# under load too. The orchestrator completes it (the project's checks, tags such as the area, the texts in the queue's
+# language) and puts it into the plan.
+template:
+  id: check-failure
+  title: A failing check
+  description: Reproduce a check that fails on the base, find its cause and fix it; Nexus proposes it for an accepted failure.
+params:
+  - name: check
+    description: the check that failed (its name as the queue lists it)
+  - name: tests
+    description: "the failing tests' names, one per line ('- test: <name>'), or the check alone when the names are unknown"
+  - name: occurrence
+    description: "where it failed (queue, step, commit), the path of its log, the end of its output and the worker's evidence"
+title: "Failing check: {{check}}"
+description: |
+  Nexus accepted a failure of the check {{check}}: it failed on the queue's base commit too, or the orchestrator
+  accepted it, so it does not come from the work that met it.
+  Tests:
+  {{tests}}
+  Occurrences (Nexus adds each later one here):
+  {{occurrence}}
+coding: true
+origin: ci
+stop_conditions:
+  - The failure cannot be reproduced on the base in five runs, under load included; report what was tried.
+  - Fixing it needs a decision that belongs to the user (behaviour as the user sees it); ask with nexus ask.
+checks:
+  - "{{check}}"
+steps:
+  - id: "{{id}}1"
+    title: "Reproduce and find the cause: {{check}}"
+    goal: |
+      Reproduce the failure of {{check}} on the base (the tests named in the description; the log and the evidence
+      there show how it failed), alone and under load, and find its cause. Under load means the project's own load
+      tool where it has one (its AGENTS.md or README names it); otherwise run the whole check again and again with
+      several other busy processes beside it (as many as the machine has cores). Say in the summary where the cause is and why it happens, with the evidence; change nothing yet.
+    acceptance:
+      - The failure reproduced (how often, under which load), or the attempts named when it is not.
+      - The cause named in the summary, with the code and the evidence that shows it.
+    review:
+      level: 2
+    kind: debugging
+    activities: [bugfix, test]
+    size: S
+  - id: "{{id}}2"
+    title: "Fix: {{check}}"
+    goal: |
+      Fix the cause found in {{id}}1, at its cause, not by waiting longer or running it again. The failing tests pass
+      alone and in a full run under load; nothing else changes behaviour.
+    acceptance:
+      - The tests of the description pass alone, and in a full run under load.
+      - The summary says what the fix changes and why it removes the cause.
+    review:
+      level: 2
+    kind: code
+    activities: [bugfix, test]
+    size: S

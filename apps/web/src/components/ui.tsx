@@ -7,6 +7,7 @@ import { runTimes, stepTimes } from "@nexus/protocol/times";
 import { formatClock, formatDateTime, formatDuration, rich, t, timeAgo, type Key } from "../i18n.ts";
 import { useAction, type QueueView, type StepView } from "../api.ts";
 import { AttachButton, PictureStrip, filesOf, type Pictures } from "./Pictures.tsx";
+import { checkWord } from "../checks.ts";
 import { MicButton, VoiceLine, useVoice } from "./Voice.tsx";
 import { withHeard } from "../voice.ts";
 
@@ -22,6 +23,9 @@ const TONES: Record<string, Tone> = {
   approved: { dot: "bg-info", text: "text-info" },
   running: { dot: "bg-accent animate-pulse", text: "text-accent" },
   waiting: { dot: "bg-warn", text: "text-warn" },
+  // The checks Nexus runs after a step's done (checks.ts): at work, or quieter while they wait for the machine.
+  checking: { dot: "bg-accent animate-pulse", text: "text-accent" },
+  queued: { dot: "bg-accent/40", text: "text-fg-2" },
   review: { dot: "bg-review", text: "text-review" },
   paused: { dot: "bg-fg-2", text: "text-fg-2" },
   stopped: { dot: "bg-stop", text: "text-stop" },
@@ -37,6 +41,7 @@ const STATE_WORDS: Record<string, Key> = {
   pending: "state.pending", draft: "state.draft", proposed: "state.proposed", approved: "state.approved", running: "state.running",
   waiting: "state.waiting", review: "state.review", paused: "state.paused", stopped: "state.stopped", failed: "state.failed",
   rejected: "state.rejected", done: "state.done", skipped: "state.skipped", cancelled: "state.cancelled",
+  checking: "state.checksRunning", queued: "state.checksQueued",
 };
 /** A queue's or step's status as a word in the interface language; one the dashboard does not know, as it is. */
 export const statusWord = (status: string): string => (STATE_WORDS[status] ? t(STATE_WORDS[status]) : status);
@@ -45,6 +50,11 @@ export const statusWord = (status: string): string => (STATE_WORDS[status] ? t(S
 export function reviewLabel(step: { status: string; review_with?: "orchestrator" | "user" }): string | undefined {
   if (step.status !== "review") return undefined;
   return t(step.review_with === "orchestrator" ? "state.reviewOrchestrator" : "state.reviewYou");
+}
+
+/** A step's word where its review or the checks Nexus runs say more than its status ("review: you", "check fix 1 of 3"). */
+export function stepLabel(step: Parameters<typeof reviewLabel>[0] & Parameters<typeof checkWord>[0]): string | undefined {
+  return reviewLabel(step) ?? checkWord(step);
 }
 
 export function StatusBadge({ status, label, className = "" }: { status: string; label?: string; className?: string }) {

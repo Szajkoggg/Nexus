@@ -25,7 +25,7 @@ import {
 import type { AgentEvents, AgentProcess, Priority } from "../src/agent.ts";
 import type { Launch } from "../src/agent-host.ts";
 import { Engine } from "../src/engine.ts";
-import { freshSessionSeed, midStepSeed, noOutcomeNudge, stepOpening, switchReason } from "../src/prompts.ts";
+import { formatInbox, freshSessionSeed, midStepSeed, noOutcomeNudge, stepOpening, switchReason } from "../src/prompts.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { Conversations } from "../src/conversations.ts";
 import type { DeployChanges } from "../src/deploy.ts";
@@ -205,6 +205,30 @@ test("the worker's texts: briefing, step openings, inbox entries, seeds and nudg
   tr.add(open({ range: { from: "1111111111111111111111111111111111111111", to: "2222222222222222222222222222222222222222" }, stat: [" src/code.ts | 12 +++++++-----", " 1 file changed, 7 insertions(+), 5 deletions(-)"].join("\n"), rules: true }));
   tr.section("the closing refactoring step without git records, and without a Refactoring section");
   tr.add(open({ rules: false }));
+
+  tr.section("the closing refactoring step whose checks Nexus runs (P12): with the commit they last passed on, and without");
+  const byNexus = (c: Parameters<typeof stepOpening>[0]["closing"]) => stepOpening({
+    q: cq, step: closing, mode: "start", projectStopConditions: [], notes: [], answers: [], last: true, report: "<report file>", closing: c, checksByNexus: true,
+  });
+  tr.add(byNexus({ range: { from: "1111111111111111111111111111111111111111", to: "2222222222222222222222222222222222222222" }, rules: true, checked: "2222222222222222222222222222222222222222" }));
+  tr.add(byNexus({ rules: false }));
+
+  tr.section("checks run by Nexus (PROTOCOL.md, \"Checks run by Nexus\"): a step's opening, the integration step's (no conflict to resolve, one it may resolve)");
+  const nq = loadProjectState(store).queues.find((x) => x.id === "Q")!;
+  const opening = (integration?: Parameters<typeof stepOpening>[0]["integration"]) => stepOpening({
+    q: nq, step: nq.steps[2]!, mode: "start", projectStopConditions: [], projectChecks: ["npm run lint", "npm test"], notes: [], answers: [], last: false,
+    report: "<report file>", integration, checksByNexus: true,
+  });
+  tr.add(opening());
+  tr.add(opening({ base: "main", sha: "4444444444444444444444444444444444444444", branch: "nexus/Q", resolve: false }));
+  tr.add(opening({ base: "main", sha: "4444444444444444444444444444444444444444", branch: "nexus/Q", resolve: true }));
+
+  tr.section("a step whose checks Nexus runs: a check-fix round, and a send-back (inbox entries)");
+  store.writeChecks("C", { protocol: 1, steps: { C1: { by: "nexus", sets: [] } } });
+  const ns = loadProjectState(store);
+  tr.add(formatInbox({ v: 1, id: "check-failed-d1", at: now(), from: "nexus", type: "check_failed", ref: "d1", queue: "C", step: "C1", fix: 1,
+    text: "Check \"npm test\" failed twice (exit code 1).\nFailing tests:\n- engine › halts after the fix limit\nFull log: <root>/.nexus/queues/C/checks/C1/r1f0-1-npm-test.2.log\nThe end of its output:\nnot ok 12 - halts after the fix limit" }, ns));
+  tr.add(formatInbox({ v: 1, id: newId(), at: now(), from: "orchestrator", type: "send_back", ref: "r3", queue: "C", step: "C1", text: "The test is missing.", round: 2 }, ns));
 
   tr.section("a step taken over in its middle on its fallback (usage): with progress, commits and uncommitted files, and without");
   const mq = loadProjectState(store).queues.find((x) => x.id === "Q")!;
@@ -509,7 +533,11 @@ test("the orchestrator's briefing and notices on parallel worktrees and merging 
     "give a queue a worktree of its own (worktree: auto) when its work is independent",
     "queues that touch the same code run one after another (put them in the plan in order), never side by side",
     "id <queue>.integrate, review level 2",
-    "it resolves a conflict only where the project's resolve_conflicts setting allows it",
+    "a worker is started only for a conflict the project's resolve_conflicts setting lets it resolve, or for a failing check",
+    // Queue MI: the integration step without a model, the report's writer, and the checks it rests on.
+    "without a model when the merge is clean, and accepts the step itself when every check passes",
+    "The queue's report is written by the step before the integration step",
+    "give such a queue checks that cover the typecheck, the tests and, where the work touches it, the build",
     "Merging the queue back into main is Nexus's own only where the project's merge_back setting is on",
     "with the setting off it is the user's (Merge back in the dashboard). Never merge, rebase or move main yourself.",
   ]) assert.ok(orch.includes(part), `the orchestrator's briefing has ${JSON.stringify(part)}`);

@@ -28,7 +28,8 @@ export function stepChecks(project: readonly string[] | undefined, queue: readon
 }
 
 /** One check's outcome as reported; `duration`: how long it ran, in seconds, when the reporter gave it. */
-export interface CheckView { name: string; ok: boolean; summary?: string; duration?: number; at: string }
+/** A check's outcome: reported by the worker (`check.result`), or run by Nexus (`by: "nexus"`; `flaky`: it failed, then passed). */
+export interface CheckView { name: string; ok: boolean; summary?: string; duration?: number; at: string; by?: "nexus"; flaky?: boolean }
 /** The latest outcome of each check, in the order the checks were first reported (a check run again replaces its earlier outcome). */
 export function latestChecks(checks: readonly CheckView[]): CheckView[] {
   const byName = new Map<string, CheckView>();

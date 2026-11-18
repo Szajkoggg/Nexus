@@ -19,16 +19,25 @@ export async function listModels(runtime: "claude" | "codex"): Promise<ModelInfo
   return models.length ? models : FALLBACK[runtime];
 }
 
-/** Runs a runtime's process, writes the given lines, and resolves with the first answer `pick` accepts. */
+/**
+ * Runs a runtime's process, writes the given lines, and resolves with the first answer `pick` accepts. A process that
+ * cannot start, exits before it answers or does not answer in time resolves with no models (the caller's fixed list).
+ */
 function ask(bin: string, args: string[], lines: unknown[], pick: (msg: Record<string, any>, write: (m: unknown) => void) => ModelInfo[] | undefined): Promise<ModelInfo[]> {
   const script = /\.(m?[jt]s)$/.test(bin);
   const proc = spawn(script ? process.execPath : bin, script ? [bin, ...args] : args, { stdio: ["pipe", "pipe", "ignore"], windowsHide: true });
   return new Promise<ModelInfo[]>((resolve) => {
     let buffer = "";
-    const done = (m: ModelInfo[]) => { clearTimeout(timer); proc.kill(); resolve(m); };
+    let settled = false;
+    const done = (m: ModelInfo[]) => { if (settled) return; settled = true; clearTimeout(timer); proc.kill(); resolve(m); };
     const timer = setTimeout(() => done([]), 20_000);
-    const write = (m: unknown) => proc.stdin.write(JSON.stringify(m) + "\n");
+    // A process that exits (or is killed) while lines are on their way fails the write with EPIPE: an error event
+    // nobody listened to would end the server. Its exit settles the answer; the write is moot.
+    proc.stdin.on("error", () => {});
+    const write = (m: unknown) => { if (!settled && proc.stdin.writable) proc.stdin.write(JSON.stringify(m) + "\n"); };
     proc.on("error", () => done([]));
+    // Its output is read to the end before "close": an answer written just before the exit still counts.
+    proc.on("close", () => done([]));
     proc.stdout.setEncoding("utf8");
     proc.stdout.on("data", (d: string) => {
       buffer += d;

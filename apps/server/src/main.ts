@@ -20,6 +20,7 @@ import {
 import { newestFirst, projectDigest, projectRunning, usageSince, type DigestEvent, type DigestResponse, type DigestRunning, type UsageRun } from "@nexus/protocol/digest";
 import { Engine } from "./engine.ts";
 import { Coordinator } from "./coordinator.ts";
+import { Capacity } from "./capacity.ts";
 import { branchState, leftBehind, stepCommits } from "./gitinfo.ts";
 import { cleanUp, mergeBack } from "./mergeback.ts";
 import { Merger } from "./merger.ts";
@@ -89,9 +90,15 @@ interface Entry { id: string; root: string; store: ProjectStore; engine: Engine;
 const projects = new Map<string, Entry>();
 /** Over every project's engine: one queue per checkout, and the limit on queues running at once (src/coordinator.ts). */
 const coordinator = new Coordinator();
+/**
+ * One heavy operation on the workstation at a time, across projects (src/capacity.ts). Made when this server becomes
+ * active, which writes <NEXUS_HOME>/capacity.yaml anew: the grants of a server before it ended with its processes.
+ */
+let capacity: Capacity | undefined;
 
 function refreshRegistry(): void {
   if (!active) return;
+  capacity ??= new Capacity();
   // Global settings (PROTOCOL.md): the file exists from the first start on, with the built-in defaults; each project's
   // project.yaml from before them is migrated once, before anything reads it (effective values unchanged).
   ensureGlobalSettings();
@@ -107,7 +114,7 @@ function refreshRegistry(): void {
     // A deploy planned after a step or queue of this project holds the run at that step's end (src/deploy-plan.ts); so
     // does Nexus merging a worktree queue back into the run's checkout (src/merger.ts), until its fast-forward.
     let merger: Merger | undefined;
-    const engine = new Engine(store, () => changed(p.id), { coordinator, boundary: (q, step, state) => planner.atBoundary(p.id, q, step, state) || (merger?.atBoundary(q, step, state) ?? false) });
+    const engine = new Engine(store, () => changed(p.id), { coordinator, capacity, boundary: (q, step, state) => planner.atBoundary(p.id, q, step, state) || (merger?.atBoundary(q, step, state) ?? false) });
     merger = new Merger(store, { start: (q) => void engine.start(q), release: (q, why) => engine.releaseHold(q, why), busy: () => engine.draining || lifecycle.busy, poke: () => changed(p.id) });
     // Through its usual notices it is told the outcome of an update it asked for (lifecycle.notice), and what changed
     // for agents in each deploy since its session began (deploy-changes.jsonl).
@@ -1045,6 +1052,8 @@ async function release(): Promise<void> {
   watchers.clear();
   await Promise.all(closing);
   planner.shutdown(); // its timers write the plan file: no longer this server's
+  capacity?.shutdown(); // so does the coordinator: the successor writes capacity.yaml anew
+  capacity = undefined;
   // Chat turns still running are cut off first and recorded: the successor goes on with them (src/lifecycle.ts).
   for (const e of projects.values()) projectPart(e).shutdown();
   // An agent's exit is written to its runtime file: wait for those last writes.
@@ -1109,7 +1118,7 @@ server.on("error", (err: NodeJS.ErrnoException) => {
   process.exit(1);
 });
 
-const shutdown = () => { for (const e of projects.values()) { e.engine.shutdown(); e.orchestrator.shutdown(); e.conversations.shutdown(); e.merger.shutdown(); } process.exit(0); };
+const shutdown = () => { capacity?.shutdown(); for (const e of projects.values()) { e.engine.shutdown(); e.orchestrator.shutdown(); e.conversations.shutdown(); e.merger.shutdown(); } process.exit(0); };
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
 

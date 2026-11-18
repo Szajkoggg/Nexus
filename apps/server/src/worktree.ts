@@ -4,8 +4,8 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { ActionError, normPath, now, type ProjectState, type ProjectStore, type QueueView } from "@nexus/protocol";
-import { patchGit, recordBase } from "./gitinfo.ts";
+import { ActionError, fileList, normPath, now, type ProjectState, type ProjectStore, type QueueView } from "@nexus/protocol";
+import { changedFiles, ownWorktree, patchGit, recordBase } from "./gitinfo.ts";
 
 /** Two paths name the same folder (Windows: case does not matter, nor the kind of slash). */
 export const samePath = (a: string, b: string): boolean => normPath(a).toLowerCase() === normPath(b).toLowerCase();
@@ -70,14 +70,53 @@ export function setupPending(store: ProjectStore, queueId: string): string | und
 }
 
 /**
- * Records how a run of the setup command ended: done, or its failure with the reason (it runs again before the next
- * step).
+ * Records how a run of the setup command ended: done (on `sha`, the worktree's HEAD then; `reason`: why it ran), or
+ * its failure with the reason (it runs again before the next step).
  */
-export function recordSetup(store: ProjectStore, queueId: string, command: string, failure?: string): void {
+export function recordSetup(store: ProjectStore, queueId: string, command: string, failure?: string, sha?: string, reason?: string): void {
   const git = store.readGit(queueId);
   if (!git?.setup) return;
-  const setup = failure ? { ...git.setup, command, failed: { at: now(), reason: failure } } : { ...git.setup, command, done_at: now() };
+  const setup = failure ? { ...git.setup, command, failed: { at: now(), reason: failure } }
+    : { ...git.setup, command, done_at: now(), failed: undefined, ...(sha ? { sha } : {}), reason: reason ?? git.setup.reason ?? "first setup" };
   store.writeGit(queueId, { ...git, setup });
+}
+
+/** The lockfiles of the common package managers, anywhere in the tree: the setup's inputs by default (queue MI, M8). */
+const WORKTREE_SETUP_INPUTS: readonly string[] = ["**/package-lock.json", "**/npm-shrinkwrap.json", "**/yarn.lock", "**/pnpm-lock.yaml", "**/bun.lockb", "**/bun.lock"];
+
+/** A glob of the setup's inputs as a pattern: `**` any folders, `*` and `?` within one name; `/` separates. */
+function globPattern(glob: string): RegExp {
+  let out = "";
+  const g = glob.replaceAll("\\", "/").replace(/^\.\//, "");
+  for (let i = 0; i < g.length; i++) {
+    const c = g[i]!;
+    if (c === "*" && g[i + 1] === "*") { out += g[i + 2] === "/" ? "(?:.*/)?" : ".*"; i += g[i + 2] === "/" ? 2 : 1; }
+    else if (c === "*") out += "[^/]*";
+    else if (c === "?") out += "[^/]";
+    else out += c.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+  }
+  return new RegExp(`^${out}$`, "i");
+}
+
+/** The setup's inputs (the project's, else the default lockfiles) among the files changed from `from` to `to` in `cwd`. */
+export function setupInputsChanged(cwd: string, inputs: readonly string[] | undefined, from: string, to = "HEAD"): string[] {
+  const patterns = (inputs ?? WORKTREE_SETUP_INPUTS).map(globPattern);
+  return changedFiles(cwd, from, to).filter((f) => patterns.some((p) => p.test(f)));
+}
+
+/**
+ * The setup to run again before a check set in the queue's worktree, because its inputs changed between the commit it
+ * last ran on and HEAD (queue MI, M7): the command and why; undefined when it is current, never ran, or there is none.
+ */
+export function setupStale(store: ProjectStore, q: Pick<QueueView, "id" | "worktree">): { command: string; reason: string } | undefined {
+  const g = store.readGit(q.id);
+  const project = store.readProject();
+  const command = project.defaults.worktree_setup?.trim();
+  const from = g?.setup?.sha ?? g?.base?.sha;
+  const cwd = ownWorktree(q);
+  if (!command || !g?.setup?.done_at || !from || !cwd) return undefined;
+  const changed = setupInputsChanged(cwd, project.defaults.worktree_setup_inputs, from);
+  return changed.length ? { command, reason: `${fileList(changed, 3)} changed` } : undefined;
 }
 
 /** How long the setup command may run before it counts as failed. */

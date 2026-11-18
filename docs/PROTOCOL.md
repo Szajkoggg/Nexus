@@ -76,6 +76,7 @@ defaults:
   usage_pause_threshold: 0.85          # share of the 5-hour window at which no new step turn starts
   worktree_dir: C:/Code/GameDev/ProjectHoneycomb.worktrees   # project only
   worktree_setup: npm ci               # project only: run once in each new worktree Nexus makes (see "Worktree setup")
+  worktree_setup_inputs: ["**/package-lock.json"]   # project only: their change runs the setup again (default: the common lockfiles)
   checks: [npm run lint]               # project only: every step of every queue runs them first (see "The project's checks")
 runtimes:
   claude: { permission_mode: auto, allowed_tools: [] }       # allowed_tools: project only
@@ -151,8 +152,8 @@ one: `null`). The effective settings do not change. It writes only such a file, 
 
 | Kind | Settings |
 |---|---|
-| Global, with a project override | `defaults`: `stop_conditions`, `review_level`, `review_send_back_limit`, `context_reuse_threshold`, `context_care`, `protect_nexus`, `push_accepted`, `provisional_counts`, `merge_back`, `resolve_conflicts`, `usage_pause_threshold`, `max_running` (see "One queue per checkout, and a limit"). `runtimes`: `default`; `claude`: `model`, `effort`, `permission_mode`; `codex`: `model`, `effort`, `sandbox`, `approval_policy`, `approvals_reviewer`. `conversations`: `runtime`, `model`, `effort`, `web`. `orchestrator`: `runtime`, `model`, `effort`, `fallback`, `notify`, `context_threshold`. `languages`: `reader`. `kinds.<kind>`: `runtime`, `model`, `effort` (a model or effort may be the project's own `null`: the project's for that runtime), `fallback` |
-| Project only | `name`, `defaults.worktree_dir`, `defaults.worktree_setup`, `defaults.checks`, `runtimes.claude.allowed_tools` (the project's own allow rules), `runtimes.codex.mcp_servers` (the user's Codex MCP servers, by name, that Codex workers keep; empty by default), `conversations.notes_dir`, `languages.working` (`id` and `root` identify the project) |
+| Global, with a project override | `defaults`: `stop_conditions`, `review_level`, `review_send_back_limit`, `context_reuse_threshold`, `context_care`, `protect_nexus`, `push_accepted`, `provisional_counts`, `merge_back`, `resolve_conflicts`, `usage_pause_threshold`, `max_running` (see "One queue per checkout, and a limit"), `check_fix_limit` (see "Checks run by Nexus"). `runtimes`: `default`; `claude`: `model`, `effort`, `permission_mode`; `codex`: `model`, `effort`, `sandbox`, `approval_policy`, `approvals_reviewer`. `conversations`: `runtime`, `model`, `effort`, `web`. `orchestrator`: `runtime`, `model`, `effort`, `fallback`, `notify`, `context_threshold`. `languages`: `reader`. `kinds.<kind>`: `runtime`, `model`, `effort` (a model or effort may be the project's own `null`: the project's for that runtime), `fallback` |
+| Project only | `name`, `defaults.worktree_dir`, `defaults.worktree_setup`, `defaults.worktree_setup_inputs` (see "Without a model"), `defaults.checks`, `runtimes.claude.allowed_tools` (the project's own allow rules), `runtimes.codex.mcp_servers` (the user's Codex MCP servers, by name, that Codex workers keep; empty by default), `conversations.notes_dir`, `languages.working` (`id` and `root` identify the project) |
 | Global only | Remote access (`<NEXUS_HOME>/auth.json`, `push.json`), the deploy push (`deploy.json`), the server; each stays in its own file |
 | State, not a setting | `orchestrator.session` |
 
@@ -478,8 +479,8 @@ the step in the approval view like any other.
 - **Runs again after new work.** Once it has run, a step of the queue's own that starts afterwards (a revision added
   it) sets it back to `pending` (derivation, at that `step.started`): it runs again at the end, over the queue's
   whole work. New steps that are only skipped leave it as it was, and so does the user's skip.
-- **It is the last step**, so its opening asks for the queue's report (see "The step turn"), the queue is `done` and
-  the run `finished` only after it, and the orchestrator's notices that speak of a queue's last step mean it.
+- **It is the last step** (in a queue with a worktree of its own, the last before the integration step), so its
+  opening asks for the queue's report (see "The step turn"), the queue is `done` and the run `finished` only after it, and the orchestrator's notices that speak of a queue's last step mean it.
 - **A fresh session with the queue's commit range.** When it is next and the run's session has worked before (any
   event of its own), the engine goes on in a fresh session the way context care does (see "Context care"), with
   `switches[].why: refactor`, no summary asked for, and a seed that gives the queue's description and its steps'
@@ -509,8 +510,9 @@ new arises on the base itself.
   `INTEGRATION_GOAL`, `INTEGRATION_ACCEPTANCE`). Review level 2, as if drafted so; the user may set another.
 - **It cannot be bypassed by agents.** `nexus queue set Q --step Q.integrate skipped` is refused; `nexus queue set Q
   finished` is refused while it is not done.
-- **It is the last step**: its opening asks for the queue's report, the queue is `done` and the run `finished` only
-  after it, and the orchestrator's notices that speak of a queue's last step mean it.
+- **It is the last step**: the queue is `done` and the run `finished` only after it, and the orchestrator's notices
+  that speak of a queue's last step mean it. The queue's report is the step's before it (queue MI, "Without a model");
+  its opening asks for one only when the queue has none.
 - **Runs again after new work.** Once it has run, any other step that starts afterwards (a revision's new step, or the
   closing step running again) sets it back to `pending`: the base is merged again into what the branch has become. Its
   own start leaves the closing step as it is.
@@ -525,6 +527,101 @@ new arises on the base itself.
   integration found a conflict that it does not resolve" --reason "<files, why>"` (`INTEGRATION_CONDITION`). The queue
   then waits for the user, who resolves it (in the worktree, or with a new revision) and goes on with Continue; the
   step runs again. Without a base branch to name, the opening says so and the worker stops the same way.
+
+#### Without a model
+
+**Status: built (queue MI, step MI2).** The reasons are in DESIGN.md, "The integration step without a model"; the
+marks **(M1)**…**(M13)** are MI1's proposals, which the user accepted on 2026-11-18 as written. The engine's part is in
+`apps/server/src/engine.ts` (`integrateWithoutModel`), the git part in `apps/server/src/integration.ts`.
+
+- **The queue's report (M1)** is asked of the last step that runs with a model before the integration step: the
+  closing refactoring step, or, in a queue without `coding`, its last own step. The opening's `last` means "no step is
+  pending but this one and the integration step", and its text says "This is the queue's last step before its
+  integration step, which Nexus runs after it (without a model when the merge is clean)."; the `nexus report` command
+  is unchanged. The integration step's worker is asked for it only when the queue has no `queue.report` yet. The engine
+  never writes `report.md`. The run-finished notice to the orchestrator gives the report's summary, or "It has no
+  report.", and then the integration step's summary ("Integration (run and accepted by Nexus, without a model): …").
+- **The `nexus` session (M2).** The server keeps a session with id `nexus` (`NEXUS_SESSION`) and role `nexus`
+  (`session.yaml` `runtime: external`, `launched_by: nexus`, title "Nexus (without a model)"; `ensureNexusSession`), one
+  per project, whose `events.jsonl` and `activity.jsonl` only the server writes: `step.started`, `step.progress`,
+  `step.done` (`summary`, `commit`, `activities: [integration]`), `queue.stop` and `review.accepted`, each only for an
+  integration step it runs. The derivation takes them as any session's; of the orchestrator's events it takes
+  `review.accepted` only. A step whose latest `step.started` is the `nexus` session's has `model_free: true` and
+  `session: nexus` **(M13)**; a worker's `step.started` clears it. The step's round in `git.yaml` has `session: nexus`.
+  The session has no process and no inbox.
+- **When (M3).** When the integration step is next (after the merge train's hold, as before), the engine goes without
+  a model when Nexus runs the checks (the engine has the capacity coordinator), the queue has a worktree of its own
+  without uncommitted changes to tracked files, and the merge is plain; else a worker opens the step as above (the
+  worktree dirty, a conflict to resolve, an engine without the checks). A step that goes on (Continue after a stop, a
+  send-back) is opened by a worker as above.
+- **The sequence**, in one look of the engine: the merge is tested (`git merge-tree --write-tree --name-only HEAD
+  <base>`); `step.started` from `nexus`, the round's start; `step.progress` "Nexus merges main into nexus/W without a
+  model"; `git merge --no-edit <sha of the base>` (with Nexus's name as the committer only where git has no identity
+  configured); `step.done` with the resulting HEAD as `commit` and a summary of facts, "Nexus merged main (3f2a1c9e04b1)
+  into nexus/W without a model: 7 commits, 12 files changed, 340 insertions(+), 85 deletions(-); no conflict." or
+  "nexus/W already contains main (3f2a1c9e04b1): nothing to merge."; the round's end. The checks then run as after any
+  `step.done` ("Checks run by Nexus"), the setup first when its inputs changed (below).
+- **A conflict (M4).** No merge is made (a merge that conflicts after all is aborted). With `resolve_conflicts` off,
+  `queue.stop` from `nexus` with `INTEGRATION_CONDITION` and the reason "<files>: Nexus does not resolve conflicts (the
+  project's resolve_conflicts setting is off)"; with it on, a worker opens the step as above, its opening adding "Nexus
+  tried the merge first: <files> conflict(s)." Without a base branch to name: `queue.stop` from `nexus`, reason "no base
+  branch to merge".
+- **A failing check (M5).** A set of the `nexus` session's `step.done` that fails twice gives the check-fix round as any
+  (`check_fix` 1, the limit and disputes unchanged), but its `check_failed` entry goes to the run's worker session (the
+  one that ran the step before), and its text begins with what the step is: "This is queue W's integration step
+  (W.integrate), kept by Nexus. Nexus merged main (<sha>) into the queue's branch nexus/W in this worktree without a
+  model (HEAD <sha>), and the checks failed on the result: the step is yours now." and the integration's rules (fix on
+  the branch in small commits, never rebase or push, change neither the base nor another checkout). From the worker's
+  `nexus step start` the step is the worker's, as above.
+- **Accepted by Nexus (M6).** When the step is `model_free`, every check of its latest set passed (flaky ones included),
+  the set has at least one check, its review level is 2 or 3 and the review was not handed to the user, the engine
+  writes `review.accepted` from `nexus` with the text "accepted by Nexus: a clean merge without a model, and every
+  check passed" (`acceptedByNexus`, `packages/protocol/src/checks.ts`). The orchestrator gets no review notice for such
+  a step; it learns of it from the run-finished notice. At level 1, and when the queue has no check at all (the summary
+  then ends "No check ran: the merge is untested."), the step goes to its review at its level.
+- **Restart, drain, Pause, Stop (M11).** The merge is made within one look of the engine, so a drain or a Pause does
+  not fall between its start and its done; a Pause takes effect at the review, as during the checks. `Engine.idle()` is
+  false while a worktree setup runs (a new worktree's, or one after a merge at a step boundary), as while checks run,
+  so an update's drain waits for it; a drain with `--now`, or one whose deadline came, ends it instead, which counts as
+  neither success nor failure: it runs again when the held run goes on. A setup inside a check set is the check set's
+  (drained, stopped and run again like a check). A server that stopped between the step's start and its done leaves
+  the step `running` from `nexus` with no `step.done` after its start: when the run goes on (Resume after the restart,
+  or by itself after an update), the engine runs `git merge --abort` where `MERGE_HEAD` exists, closes the open round,
+  and runs the step again from its start (a merge already committed is found as nothing to merge); no worker opens it.
+
+**The setup again after a change of its inputs (M7, M8).** `git.yaml` `setup` has `sha`: the HEAD on which the setup
+last succeeded (the first setup: the worktree's base commit), and `reason` (why it ran last: "first setup",
+"package-lock.json changed"). The project-only setting `defaults.worktree_setup_inputs` (a list of paths or globs
+relative to the worktree's root: `**` any folders, `*` and `?` within a name) names the files whose change makes the
+setup run again; by default (`WORKTREE_SETUP_INPUTS`) `**/package-lock.json`, `**/npm-shrinkwrap.json`, `**/yarn.lock`,
+`**/pnpm-lock.yaml`, `**/bun.lockb`, `**/bun.lock`. In a worktree whose setup has succeeded once, when `git diff
+--name-only <setup.sha, else base.sha> HEAD` names one of them:
+
+- before a check set (any step's), the setup runs first within the set's grant, recorded on the set (`setup`: `name`
+  "worktree setup", `command`, `reason`, `runs` as a check's, logs `checks/<step>/r<round>f<fix>-0-setup.<run>.log`,
+  `ok`, `flaky`); it fails like a check (run once more; failing twice the set is `failed`, its checks are not run, and
+  the check-fix round's text begins "The worktree setup (<command>) ran first, because <reason>, and failed twice; the
+  checks did not run."). Passing, `setup.sha` becomes HEAD;
+- after a merge at a step boundary (below), before the step opens: `setup` loses its `done_at` and gets the reason, so
+  the engine runs it as a first setup (a failure halts the run, and it runs again when the run goes on).
+
+**Merging the base at a step boundary (M9, M10).** In a queue with an integration step, when the engine is about to
+open the next step after another (one of the queue's own steps, or the closing step; never the integration step, and
+never the same step going on), it merges the base when the worktree has no uncommitted changes to tracked files,
+`integrationContext` names a base branch, and the base's commit is not already in HEAD. It tests the merge first (as
+above); clean: `git merge --no-edit <sha>`, then the setup when its inputs changed. A conflict: no merge. `git.yaml`
+records it under `pulls` (oldest first; a conflict only once per base commit and step): `at`, `before` (the step about
+to open), `base` (the branch), `sha` (its commit), `from` (HEAD before), `to` (HEAD after; absent on a conflict),
+`conflicts` (the files; only on a conflict), `setup` (true when the setup was to run again). The step's opening then
+says "Before this step Nexus merged main (<sha>) into this branch: <n> commits, changing <files>." or "main (<sha>)
+conflicts with this branch in <files>; Nexus did not merge it. Do not resolve it here: the queue's integration step
+will." While the last pull is a conflict and the queue is not done, `nexus status` (and the orchestrator's overview)
+shows it under the queue: "base: main (<sha>) conflicts with the queue's branch in <files> (found before step <step>,
+<time>); Nexus did not merge it, the integration step will". The dashboard does not show the pulls yet. With the pulls:
+
+- the closing step's commit range starts at the last `pulls[].sha` merged in (`to` present), and ends at the latest of
+  the own steps' round ends and that pull's `to`; else as above;
+- a disputed check's base run uses that same commit, else `base.sha`.
 
 ## Notes: `notes/<step-id>/<note-id>.md`
 
@@ -579,7 +676,9 @@ re-reads the system time once a minute), so the server, a `nexus` call and git m
 | `review.added` | `queue`, `step`, `items: [{path or url, label, kind?, before?, key?, role?, size?}]`, `round?` | Review material, `kind` = image, sheet, doc, data, link; `before`: the path of the picture this one is compared with; `key` (a view key), `role` (before, mockup, after, variant-a, variant-b, result) and `size` (`width`, `height` in pixels): a keyed picture, always with its `round` (see "Review pictures") |
 | `review.marked` | `queue`, `step`, `path`, `accepted` | User only: a review picture marked accepted (or the mark taken back). A mark only: it does not accept the step |
 | `review.commented` | `queue`, `step`, `path`, `text`, `to` (`send_back`, `note`, `orchestrator`), `note_step?` | User only: a comment on a review picture, and where it went (see "Review pictures") |
-| `check.result` | `queue`, `step`, `name`, `ok`, `summary`, `duration`, `commit?` | One check's outcome; `duration`: how long it ran, in seconds (optional, non-negative), which is also the metric `check:<name>`; `commit`: the HEAD of the session's checkout when it was reported (see "Project metrics") |
+| `check.result` | `queue`, `step`, `name`, `ok`, `summary`, `duration`, `commit?` | One check's outcome; `duration`: how long it ran, in seconds (optional, non-negative), which is also the metric `check:<name>`; `commit`: the HEAD of the session's checkout when it was reported (see "Project metrics"). For a step whose checks Nexus runs, the CLI refuses it (see "Checks run by Nexus") |
+| `check.disputed` | `queue`, `step`, `name`, `evidence` | Worker only: a check Nexus ran fails not because of the worker's work, with its evidence (`nexus check <step> <name> --unrelated`); Nexus runs it on the queue's base commit (see "Checks run by Nexus") |
+| `check.decided` | `queue`, `step`, `verdict` (`accept`, `fix`), `reason` | Orchestrator only: its decision on a disputed check Nexus could not run on the base (`nexus check decide`) |
 | `step.done` | `queue`, `step`, `summary`, `commit?`, `warning?`, `activities?` | Acceptance met; the step's work is finished. `warning`: what `nexus step done` warned about at the step's end (see the CLI). `activities`: what the worker actually did (`--activities`), from the same lists as a draft (see "Tags") |
 | `step.failed` | `queue`, `step`, `reason` | The step cannot be finished as written |
 | `queue.stop` | `queue`, `step`, `condition`, `reason` | A stop condition was met; the engine halts the queue. `condition`: the condition met, as the queue words it; `reason`: what happened, short. The derived queue keeps them apart in `stop` (`{ condition, reason }`, until a lift) besides `status_reason` ("<condition>: <reason>"); the stopped waiting item's `text` is the reason and its `condition` the condition. A stop known only as one text (a queue imported as stopped) has no `stop`, and shows its `status_reason` |
@@ -624,7 +723,8 @@ Written only by the server's queue engine; agents never touch them.
 
 | File | What |
 |---|---|
-| `queues/<id>/git.yaml` | The HEAD of the queue's checkout around each step's work (`src/gitinfo.ts`): `base` (an auto worktree's: `ref`, the branch or commit it was made from, its `sha`, `at`), `base.branch` (whether `ref` names a branch: only a branch can be merged back into), `merged` (`at`, `into`, `path`, `sha`, `fast_forward`, `by`: `nexus` or `user`, absent on older records), `cleaned` (`at`, `path`, `branch`), `cleanup` (Nexus's cleanup of a done survey run's worktree could not go: `waiting` (`reason`, `since`, `files` (what is left, at most 20), `more`); see "Cleaning up a survey's worktree"), `merge` (Nexus merging back by itself: `waiting` (`reason`, `since`: what keeps it, told to the user and the orchestrator; `released`: the queues whose runs Nexus held for this merge back and let go on when it could not go), `reintegrations` (runs of the integration step again since the user's last Merge back), `reintegrating` (when the last was asked for, until the step opens), `queued` (`since`: back from a wait, it could go but another queue holds its base; it waits its turn in the merge train, ordered by when its wait began; see "The merge train")), `setup` (the worktree setup command for the worktree Nexus made: `command` (the last one run), `at` (when the worktree was made), `done_at` (once it succeeded), `failed` (`at`, `reason`: its last failure)), `steps.<step>` (rounds, oldest first: `session`, `start` (HEAD when the step opened, or when a send-back reopened it), `started_at`, `end` (HEAD at the end of the turn in which the step got its outcome: done, review, failed or stopped), `ended_at`, `turns` (the HEAD at the start and the end of each turn of the session on the step in this round: `start`, `end`, absent while the turn is open; a turn still open when the round ends ends with it; absent on rounds recorded before, which keep the time windows; see "Git on the dashboard"); a sha is null outside a git repository). A continued step keeps its open round. One writer: the server. See "Git on the dashboard" |
+| `queues/<id>/git.yaml` | The HEAD of the queue's checkout around each step's work (`src/gitinfo.ts`): `base` (an auto worktree's: `ref`, the branch or commit it was made from, its `sha`, `at`), `base.branch` (whether `ref` names a branch: only a branch can be merged back into), `merged` (`at`, `into`, `path`, `sha`, `fast_forward`, `by`: `nexus` or `user`, absent on older records), `cleaned` (`at`, `path`, `branch`), `cleanup` (Nexus's cleanup of a done survey run's worktree could not go: `waiting` (`reason`, `since`, `files` (what is left, at most 20), `more`); see "Cleaning up a survey's worktree"), `merge` (Nexus merging back by itself: `waiting` (`reason`, `since`: what keeps it, told to the user and the orchestrator; `released`: the queues whose runs Nexus held for this merge back and let go on when it could not go), `reintegrations` (runs of the integration step again since the user's last Merge back), `reintegrating` (when the last was asked for, until the step opens), `queued` (`since`: back from a wait, it could go but another queue holds its base; it waits its turn in the merge train, ordered by when its wait began; see "The merge train")), `setup` (the worktree setup command for the worktree Nexus made: `command` (the last one run), `at` (when the worktree was made), `done_at` (once it succeeded), `failed` (`at`, `reason`: its last failure), `sha` (the HEAD it last succeeded on), `reason` (why it ran last)), `pulls` (the base merged into the queue's branch at step boundaries: `at`, `before`, `base`, `sha`, `from`, `to`, `conflicts`, `setup`; see "Without a model"), `steps.<step>` (rounds, oldest first: `session`, `start` (HEAD when the step opened, or when a send-back reopened it), `started_at`, `end` (HEAD at the end of the turn in which the step got its outcome: done, review, failed or stopped), `ended_at`, `turns` (the HEAD at the start and the end of each turn of the session on the step in this round: `start`, `end`, absent while the turn is open; a turn still open when the round ends ends with it; absent on rounds recorded before, which keep the time windows; see "Git on the dashboard"); a sha is null outside a git repository). A continued step keeps its open round. One writer: the server. See "Git on the dashboard" |
+| `queues/<id>/checks.yaml` | The checks Nexus runs after each `step.done` (`by` per step, its sets of checks with their runs, a dispute and its base run, the fix queue of an accepted failure); the logs under `queues/<id>/checks/<step>/`. One writer: the server's engine. See "Checks run by Nexus" |
 | `queues/<id>/push.yaml` | Pushing what was accepted: `review` (per step, the HEAD of the checkout when it entered review: `sha` or null, `finished_at`, `at`), `steps` (per accepted step: `acceptance`, `sha`, `result` (`pushed`, `failed`, `skipped`, `held`), `text`, `at`, `held_by?`), `pushed` (the last success: `sha`, `step`, `at`, `remote`, `branch`), `error` (the last failure until a success). One writer: the server. See "Pushing what was accepted" |
 | `queues/<id>/plan.yaml` | The queue's place in the plan (see "The plan"): `by`, `reason?`, `after` (the queues it waits for, each with `queue`, `by`, `at`, `reason?`), `created_at`, `updated_at`, `started_at?`, `proposal?`, `decisions`. One writer: the server; it stays after the queue starts (marked `started_at`), and taking the queue out of the plan removes it |
 | `queues/<id>/start.yaml` | The queue's next start as planned (see "The plan" and "Schedules"): `at?` (a schedule: the time, ISO 8601; with `usage`, `claude` or `codex`, when that is the usage window's reset plus the margin; without `at`, the options of a start by the plan; `after` only in files from before the plan, moved into `plan.yaml` at the server's start), the start's `runtime?`, `model?`, `effort?`, `session?` (a session to continue), `by` (`user` or `orchestrator`), `reason?`, `revision` (the queue's when planned), `created_at`, `failed?` (`at`, `reason`, `missed?`: it came due and the queue could not start; `missed`: a schedule more than 15 minutes late, the server not running at its time), `held?` (`since`, `kind`: `approval`, `checkout` or `limit`, `reason`: it came due but waits for the approval of the queue's current revision, for its checkout or for a place under the limit, and starts by itself; see "The plan" and "One queue per checkout, and a limit"). One writer: the server; a start of the queue or a cancel removes it |
@@ -641,6 +741,7 @@ Written only by the server's queue engine; agents never touch them.
 | `<NEXUS_HOME>/usage.json` | The subscription's windows (5-hour, 7-day: utilization and reset time) from the latest `rate_limit_event` (Codex: `account/rateLimits`) of any session. Every session's turns count toward usage, workers', orchestrators' and thinking partners' alike (one subscription), so the usage display and the usage pause see them all |
 | `<NEXUS_HOME>/turns.jsonl` | One line per agent turn of every project and role, appended by the server (AgentHost, its one writer) when the turn ends, or when its process ends first: `v`, `at` (the end), `started_at` (the runtime's turn start, or the first thing it streamed after the previous turn's end), `duration_ms`, `project`, `session`, `role` (`worker`, `orchestrator`, `conversation`), `runtime`, `model`, `effort`, `queue` and `step` (a worker's run, when any), `tags` (that step's tags as planned when the turn ended: its own over its queue's, renamed names read as the new ones; absent when it has none, see "Tags"), `fallback` (a turn of a step that runs on its fallback: `from`, the runtime it would have run on, and `reason`, its full window; see "Fallback when usage runs out"), `outcome` (`ok`; a failure's kind `passing`, `lasting` or `usage`, with `failure`, the runtime's code; `interrupted`: no result, because Nexus interrupted the turn or its process ended: a kill, an update's drain, a crash), `tokens` (the turn's own, its main loop's: `input` not from the cache, `output`, `cache_read`, `cache_creation`), `subagent_tokens` (what the turn's sub-agents used, in the same four figures, apart from `tokens`: Claude Code turns only, zeros when none ran; absent where unknown: a Codex turn, the first turn of a resumed process, an older record; read from the growth of `result.modelUsage`, the process's running total, less `result.usage`, see DESIGN.md "Sub-agent tokens"), `cost_usd` (the turn's own, where the runtime reports cost and it is known: Claude Code, not the first turn of a resumed process), `windows_start` and `windows_end` (the turn's runtime's usage windows, `utilization` and `resets_at`, as the server knew them when the turn began and ended; left out when none was known). In one file because the windows are the account's, across projects; statistics are computed from it when read. A turn's use of the windows is estimated when read (`usageEstimates`, `packages/protocol/src/usage-estimate.ts`, free of Node): per window, the window's growth between the turn's two readings times the turn's weighted tokens (sub-agents' included) over the weighted tokens of every turn of the same runtime within that stretch, each overlapping turn with the part of its tokens spent within it; `{ share }` (in utilization, 0 to 1) or `{ none }`: `missing` (no reading at the start or the end), `reset` (the window reset between them), `tokens` (the turn's tokens unknown). The token weights (`TOKEN_WEIGHTS`, by the turn's runtime; any other runtime's `PRICE_WEIGHTS`) and the method: DESIGN.md, "Estimating a turn's use" |
 | `<NEXUS_HOME>/away.yaml` | The user's away mode: `current` (`since`, `until`) while on, `past` periods (`since`, `until`, `ended`, `why`: `expired` or `off`). One writer: the server, on `POST /api/server/away` and when a period's time comes. See "Away mode" under "Review" |
+| `<NEXUS_HOME>/capacity.yaml` | The capacity coordinator: the workstation, its `heavy` slot, the operations `held` and `waiting` for it, and a full test run `outside` Nexus that keeps it. One writer: the server, anew when it becomes active. See "The capacity coordinator" |
 | `<NEXUS_HOME>/limits.json` | `{ max_running: number }`: where the limit on queues running at once was kept before it became the global setting `defaults.max_running` (decided 2026-11-15, queue OP). A server whose `settings.yaml` has no `defaults.max_running` (from before it, or rewritten by an older server) takes a valid value from here into it at its start. The file stays: the server writes the global limit into it with every write of the global settings, so an older server (an update rolled back) reads the current limit. One writer: the server |
 | `<NEXUS_HOME>/deploy.json` | `{ push_on_deploy: boolean }` (default `true` when the file is missing). One writer: the server, on `POST /api/server/settings` from the dashboard |
 | `<NEXUS_HOME>/deploy-plan.json` | The planned deploy, if any: `plan?` (`id`, either `after` (`project`, `queue`, `step?`: none, the whole queue) or `at` (ISO 8601) with `deadline?`, `ref?`, `by?` (`project`, `session`: the orchestrator that planned it), `created_at`, `warning?`, `waiting_for?` (`queue/step`: the unconfirmed provisional work it waits for), `held?` (`project`, `queue`: the run it holds while it waits), `started?` (`at`, `update`: the id of the update it started)), and the last plan that ended, `ended?` (`plan`, `at`, `why`: `carried-out`, `dropped`, `update-failed` or `cancelled`, `reason`, `by?`). One writer: the server. See "Planned deploys" |
@@ -666,7 +767,10 @@ engine runs the command through the shell in the worktree before the run's first
 runs, at most 30 minutes) and records `done_at`. A failure (an exit code other than 0, or the time limit) halts the run
 with the reason, `the worktree setup command (<command>) failed: exit code <n>; its output ends: <output>`, and records
 it under `failed`; when the run goes on (Continue, resume), the project's command as it is then runs again in the same
-worktree. A worktree the queue names by path, an existing one, and the project's own checkout get no setup.
+worktree. A worktree the queue names by path, an existing one, and the project's own checkout get no setup. A success
+records the commit it ran on (`sha`); a change of its inputs (`defaults.worktree_setup_inputs`) since then runs it again
+before a check set or after a merge of the base at a step boundary (queue MI): "The integration step", "Without a
+model".
 
 **Merging back by itself and resolving conflicts** (`defaults.merge_back`, `defaults.resolve_conflicts`; global, with a
 project override; both off by default, so a new project merges back only by the user's hand until the user turns
@@ -708,7 +812,9 @@ the reason, `rejected: <step>`). Nothing is reverted.
 
 ### Review
 
-Every step is reviewed when it is done; there is no level without review. A step's **review level** says who:
+Every step is reviewed when it is done; there is no level without review, with one exception: the integration step
+Nexus ran without a model, every check passed, at level 2 or 3, is accepted by Nexus itself (queue MI; "The integration
+step", "Without a model"). A step's **review level** says who:
 
 - `1`: the user reviews. The step is held in `review` for the user; the queue is `waiting`.
 - `2`: the orchestrator reviews what can be checked; what is the user's (the look, the feel, what the project's rules
@@ -1145,6 +1251,9 @@ With `defaults.push_accepted` on, an accepted step's work is pushed by the serve
 The server keeps one session with id `user` and role `user` for what the user does in the dashboard. Its event log
 holds the user's answers (`answer.given`). Like an orchestrator, it may write the events workers may not.
 
+The server keeps one more, id `nexus` and role `nexus`, for the steps the engine runs itself without a model (the
+integration step, queue MI): see "The integration step", "Without a model".
+
 ## Inbox: `sessions/<id>/inbox.jsonl`
 
 Written by the server, read by the session's adapter or hook. A `message` may name the `queue` and `step` it is
@@ -1152,7 +1261,7 @@ about, so the dashboard shows it on that step. The server **routes answers**: ev
 escalation), from the orchestrator or the user, is appended to the asking session's inbox once, with the id
 `answer-<event id>`. An orchestrator session that went on in a fresh one (`continued_by`, see "The orchestrator's
 context care") has its answers appended to the newest session of that line instead, unless one of them has it already.
-The orchestrator gets an answer in its inbox as a turn of its own (or into the running one), once; the chat shows it. It routes send-backs the same way (`send_back`, see "Sending a step back"). The session records
+The orchestrator gets an answer in its inbox as a turn of its own (or into the running one), once; the chat shows it. It routes send-backs the same way (`send_back`, see "Sending a step back"). A check-fix round of the checks Nexus runs is an entry from Nexus (`check_failed`, see "Checks run by Nexus"). The session records
 each entry it has seen with `message.read`; `nexus status` shows the unread ones and records them.
 
 ```json
@@ -1160,6 +1269,7 @@ each entry it has seen with `message.read`; `nexus status` shows the unread ones
 {"v":1,"id":"01JD...","at":"...","type":"answer","qid":"01JD...","from":"orchestrator","text":"...","continue":true}
 {"v":1,"id":"01JD...","at":"...","type":"stop","from":"user","text":"Stop after this check."}
 {"v":1,"id":"send-back-01JD...","at":"...","type":"send_back","from":"user","ref":"01JD...","queue":"W","step":"W2","text":"Blue, not red.","round":2}
+{"v":1,"id":"check-failed-01JD...","at":"...","type":"check_failed","from":"nexus","ref":"01JD...","queue":"W","step":"W2","fix":1,"text":"Check \"npm test\" failed twice (exit code 1). ..."}
 ```
 
 `delivered_at` is recorded by the server in `state.json` once the runtime has accepted the message (stdin write,
@@ -1171,7 +1281,7 @@ each entry it has seen with `message.read`; `nexus status` shows the unread ones
 protocol: 1
 id: 01JD...
 project: honeycomb
-role: worker                           # worker | orchestrator | conversation | user
+role: worker                           # worker | orchestrator | conversation | user | nexus
 runtime: claude                        # claude | codex | external
 native_id: 6f1c...                     # Claude session uuid / Codex thread id
 cwd: C:/Code/GameDev/ProjectHoneycomb
@@ -1203,7 +1313,8 @@ nexus review add W3 $TEMP/nexus-review/W3/cliff@1280.png --key cliff-lit@1280 --
 nexus review add W3 $TEMP/nexus-review/W3/lit.png --before $TEMP/nexus-review/W3/unlit.png --label "Lighting"   # older: no key
 nexus help review                              # the standard for review material (nexus help: the topics)
 nexus help summaries|questions|refusals|commits|tests   # the other standards
-nexus check W3 "npm test" --ok --summary "548 passed" --duration 190   # the name exactly as "Checks for every step" lists it (another counts as not reported); how long it ran, in seconds: the metric check:npm test
+nexus check W3 "npm test" --ok --summary "548 passed" --duration 190   # the name exactly as "Checks for every step" lists it (another counts as not reported); how long it ran, in seconds: the metric check:npm test. Refused where Nexus runs the step's checks
+nexus check W3 "npm test" --unrelated --evidence "it fails on main too"   # a check Nexus ran fails not because of your work: Nexus runs it on the queue's base commit (see "Checks run by Nexus")
 nexus metric record bundle-kb 512 [--step W3]  # worker only: a value of a project metric for the step at work, with HEAD
 nexus metric list                              # the project's metrics (any session)
 nexus stats [--by model|effort|kind|activity|area|size|origin] [--project <id>] [--since <date>]   # see "Statistics"
@@ -1227,6 +1338,7 @@ nexus queue draft <file.yaml|->                # a new queue, or a change to one
 nexus queue draft --template bugfix --set issue="..." --set area=engine [--id BF]   # writes .nexus/drafts/BF.yaml to complete and upload
 nexus recurring set weekly --template maintenance [--set scope=...] (--every "mon 03:00" | --after-queues 5) [--maintenance survey|fix_small] [--reason ...]   # through the server; the user approves it
 nexus static-analysis decline --reason "..."  # the user's no to the static-analysis template: no reminder for 90 days
+nexus check decide W W3 accept|fix --reason "..."   # a disputed check Nexus could not run on the base (see "Checks run by Nexus")
 nexus answer <qid> "..." [--escalate [--recommend <option>]] [--continue|--wait]
                                                # --recommend only with --escalate: one of the question's options
 nexus run <queue> start|pause|resume|stop --reason "..." [--use-session <id>] [--runtime claude|codex] [--model <m>] [--effort <e>] [--after <queue>... | --next | --at "YYYY-MM-DD HH:MM" | --at usage-reset]   # see "The orchestrator" and "The plan"
@@ -1318,6 +1430,249 @@ Report with `nexus`. End the step with `nexus step done`, `nexus step failed` or
 ```
 
 The template is a project setting, so each project can phrase it in its own terms.
+
+## Checks run by Nexus
+
+**Status: built (queue EC, steps EC2 to EC4).** The reasons and the
+decisions are in DESIGN.md, "Nexus runs the checks"; the marks **(P1)**…**(P17)** are EC1's proposals, accepted by the
+user on 2026-11-18, with P3 and P6 as the user changed them. The engine runs the checks only with the server's
+capacity coordinator (`EngineOptions.capacity`; the server always gives it): an engine without one (older tests)
+leaves them to the worker, as below for `by: worker`.
+
+**Which steps.** Whether Nexus runs a step's checks is fixed when the step opens: the engine records it on the step's
+entry in `checks.yaml` (`by: nexus`). A step opened before (by an older server) has no entry, and its worker reports the
+checks with `nexus check` until the step ends. Every check, the project's (`defaults.checks`, as the run fixed them)
+and the queue's own, each once (`stepChecks`), is a shell command run in the queue's checkout **(P1)**; what only an
+agent can verify goes into the acceptance or `review.prepare`. The step's opening says under "Checks for every step"
+that Nexus runs them after `nexus step done`, that the worker neither runs nor reports them, and runs only the tests
+of what it changes.
+
+**The sequence** (`apps/server/src/check-runs.ts`).
+
+1. The worker ends its turn with `nexus step done`. After the worker's descendants are cleaned (Windows, queue PT), the
+   engine adds a set to the step's entry (`state: queued`) and asks the coordinator for the `heavy` slot. The step is
+   `checking` (phase `queued`). A step without checks passes at once.
+2. Granted (`state: running`), the checks run one after another in the order the opening lists them, all of them even
+   after one has failed **(P2, P3)**: each through the system's shell (`cmd.exe` or `sh`, as Node's `shell: true`, in a
+   small Node launcher), in a Job Object of its own on Windows, in the queue's checkout, with the server's environment
+   less `NEXUS_SESSION`, `NEXUS_DIR`, `NEXUS_HANDOVER`, `NEXUS_HOME` and `NODE_TEST_CONTEXT`. Its stdout and stderr go
+   to its log. The server writes the run (`started_at`, `log`) before it starts and its end (`ended_at`, `exit_code`,
+   `duration`) after its tree has ended.
+3. The checks that failed run once more, in the same grant: the code has not changed. One that passes then is `ok`
+   and `flaky` **(P3)**.
+4. The grant ends; the slot is free once the last tree has ended.
+5. Every check passed: the set is `passed`, and the step goes to its review as a `step.done` did before, with the
+   step's end handled there (the next step, context care, a plan or a deploy waiting for it). A check failed twice: the
+   set is `failed`, and the worker gets a check-fix round (below), unless the set's `fix` has reached
+   `defaults.check_fix_limit`: then the set gets `limit: true` and the run halts for the orchestrator **(P4, P5)**.
+
+`nexus step failed` and `nexus stop` run no checks. A check longer than `CHECK_LIMIT_MS` (60 minutes) **(P10)** is
+ended with its tree and counts as failed (`timed_out`). After a check-fix round or a send-back (any new `step.done`)
+every check runs again, the ones that passed before too: an earlier result does not hold for new code **(P3)**.
+
+**`queues/<id>/checks.yaml`** (server-owned, one writer: the engine's `CheckRunner`; `ChecksFile` in schemas.ts):
+
+```yaml
+protocol: 1
+steps:
+  W3:
+    by: nexus                      # fixed when the step opened (worker: an older server opened it)
+    sets:                          # one per step.done of the step, oldest first
+      - done: 01JD...              # the step.done event it checks
+        round: 1                   # the step's review round (send-backs)
+        fix: 0                     # check-fix rounds before it within that round (0: the step's own done)
+        commit: 3f2a...            # HEAD of the queue's checkout when the set started (null outside git)
+        dirty: true                # only when tracked files had uncommitted changes
+        requested_at: ...
+        granted_at: ...
+        ended_at: ...
+        state: failed              # queued, running, passed, failed, interrupted, accepted
+        limit: true                # failed with the check-fix rounds used up: the run halted
+        checks:
+          - name: npm test         # as the step's opening lists it (and the command run)
+            command: npm test
+            runs:                  # the first, and the one run again after a failure
+              - { started_at: ..., ended_at: ..., exit_code: 1, duration: 212, log: checks/W3/r1f0-1-npm-test.1.log,
+                  failed_tests: ["engine › halts after the fix limit"], tail: "..." }
+              - { started_at: ..., ended_at: ..., exit_code: 1, duration: 205, log: checks/W3/r1f0-1-npm-test.2.log }
+            ok: false              # its outcome in the set; flaky: true when it failed, then passed
+        dispute:                   # the worker's word that a failure is not its work's (below)
+          event: 01JD...           # its check.disputed
+          name: npm test
+          evidence: it fails on main too
+          at: ...
+          base: { state: failed, commit: 9c1e... }   # queued, running, failed, passed, unrunnable (with reason); run
+          decided: { verdict: accept, reason: ..., at: ..., event: ... }   # the orchestrator's, when it was not runnable
+          outcome: accepted        # accepted, or fix
+        fix_queue: { id: CI, created: true }   # an accepted failure's fix queue (created, or an open one it joined)
+        setup:                     # the worktree setup, run first because its inputs changed (queue MI)
+          { name: worktree setup, command: npm ci, reason: package-lock.json changed, runs: [...], ok: true }
+```
+
+A run's `tail` is the output's last 80 lines, at most 6000 characters, and `failed_tests` the failing tests' names where
+the output's format is known (node:test's spec and TAP reporters), both only for a failed run **(P15)**. `exit_code`
+is null for a run that was ended (`timed_out`, or `interrupted` by a restart, a drain or a stop). The logs are
+`queues/<id>/checks/<step>/r<round>f<fix>-<n>-<name as a file name>.<run>.log` (a base run's: `…-base.1.log`), and
+stay with the queue.
+
+**Restarts** **(P9)**. A starting engine marks what the old server left `queued` or `running` as `interrupted` (its
+runs without an end: `interrupted`, with an end now; a base run back to `queued`): the old processes ended with their
+Job Objects. The set runs again, from the start, when its run goes on: at once after an update's hand-over
+(`resume_after_restart`), at Resume after any other restart (the run comes back paused).
+
+**The step's state** (`applyCheckSets`, `packages/protocol/src/checks.ts`). A `step.done` of a step with `by: nexus`
+leaves it `review` only when the set for that done is `passed` or `accepted`. Otherwise:
+
+| The set for the latest step.done | The step | `checking` |
+|---|---|---|
+| none yet, `queued`, `interrupted` | `checking` | `{ phase: queued, since }` |
+| `running` | `checking` | `{ phase: running, since, check }` |
+| `failed`, no dispute | `running`: a check-fix round, `check_fix` = `fix` + 1, `check_fix_limit` (the project's `defaults.check_fix_limit`), `check_limit` with `limit` | |
+| `failed`, disputed, the base run to come or running | `checking` | `{ phase: base, since, check }` |
+| `failed`, disputed, the base `unrunnable`, not decided | `waiting` | `{ phase: decision, since }` |
+| `failed`, the dispute's `outcome: fix` | `running` (the same check-fix round) | |
+
+The same holds once the worker took up its check-fix round with `nexus step start` (the step `running` after the failed
+set's done): it stays in that round (`check_fix`), a dispute it says there runs on the base as above, and an accepted
+one sends the step to its review as of the done (its `finished_at` and `review_with` the done's).
+
+The review round (`reviewRound`) counts only the step.dones that reached review, so a check-fix round is no send-back
+round, and the review pictures keep their round **(P13)**. The engine's results join the step's `checks` (`by:
+"nexus"`, `flaky`; the summary "passed", "failed, then passed on the second run (flaky)", "exit code 1; 2 tests
+failed, twice") and its metrics (`check:<name>`), so `nexus status`, the dashboard, the review notice and the
+statistics read both kinds alike. `nexus status` adds a line under a checking step (`checks by Nexus: waiting for the
+machine since …`, `running <check>`, `running <check> on the queue's base commit`, `a disputed failure waits for the
+orchestrator's decision`) and under a fix round (`check-fix round 1 of 3`).
+
+**The check-fix round** is an inbox entry from Nexus, `check_failed` (`ref`: the set's done, `queue`, `step`, `fix`:
+the round it opens, `text`: per failed check its exit code, failing tests, full log path and the end of its output),
+id `check-failed-<done>` (`…-base` and `…-decided` for the rounds a dispute gives). Its being in the inbox reopens the
+step; the engine hands it to the session as the next turn ("[Nexus] The checks Nexus ran for step W3 of queue W:
+check-fix round 1 of 3. What failed: …"), which asks for the fix at its cause, says every check runs again after the
+next `nexus step done`, and how to say a failure is not the work's. A run halted at the limit gets the orchestrator's
+halt notice with the reason (`step W3: the checks failed after 3 check-fix rounds (the limit, check_fix_limit 3): …`);
+`nexus run <queue> resume` (or the user's Resume) gives one more round, the entry written then, its text saying so.
+
+**An unrelated failure** **(P6, as the user decided on 2026-11-18)**. In a check-fix round the worker says a failed
+check is not its work's with its evidence: `nexus check <step> "<name>" --unrelated --evidence "<what shows it>"`
+(event `check.disputed`, worker only: `queue`, `step`, `name`, `evidence`; refused unless the step is in a check-fix
+round, the check is one that failed, and the round has no dispute yet), and ends its turn without `nexus step done`.
+The step is `checking` (phase `base`): Nexus runs that check on the queue's base commit (git.yaml's `base.sha`, else
+the HEAD of the checkout when the queue's first step opened), in a detached worktree of its own in the system's
+temporary folder, with the project's worktree setup first when it has one, under the same coordinator; the worktree is
+removed after.
+
+- **It fails there too**: the failure is accepted (`outcome: accepted`, the set `accepted`): the step goes to its
+  review, and Nexus proposes a fix queue for it at once (below); the orchestrator is told.
+- **It passes there**: the failure is the queue's (`outcome: fix`): the worker gets the round's entry
+  (`check-failed-<done>-base`) saying so; it counts in the round it is in, without a decision.
+- **It cannot run there** (the worktree cannot be made, the setup fails, or the command is not there: exit code 127
+  or 9009, "Missing script:", "is not recognized as an internal or external command", "command not found"; also a
+  name that is not one of the failed checks): the base is `unrunnable` with the reason, the step `waiting` for the
+  orchestrator, which is told with the evidence, the failing tests and the log, and answers `nexus check decide
+  <queue> <step> accept|fix --reason "…"` (event `check.decided`, orchestrator only; refused unless the step waits for
+  that decision). `accept`: as a failure on the base, with the reason recorded; `fix`: a round
+  (`check-failed-<done>-decided`) with the reason as its text. A dispute itself is no round.
+
+**The fix queue of an accepted failure** (the user's decision of 2026-11-18). For every accepted failure, by either
+way, Nexus proposes a queue at once, from the shipped template `check-failure` (`templates/check-failure.yaml`; a
+global or project template of that id replaces it): id `CI` (`CI2`, … when taken), origin `ci`, `coding: true`, the
+failed check as its check, two steps, the first (kind `debugging`) reproducing the failure on the base and finding its
+cause, the second (kind `code`) fixing it so the full run passes under load too. Its description lists the tests
+(`- test: <name>`, or `- check: <name>` when their names are unknown) and the occurrence: the time, queue, step,
+rounds, commit, how it was accepted, the log's path, the worker's evidence and the end of the output. When an open
+queue of origin `ci` (not done or cancelled) lists one of the same tests, no second one is made: the occurrence is
+added to its description (no new revision: the description is not pinned). The set records it (`fix_queue`), and the
+orchestrator is told once (`notify:checkaccepted:<queue>:<step>:<done>`), to complete it and put it into the plan; a
+disputed failure waiting for its decision is told once too (`notify:checkdecision:…`). The review notice of the step
+names an accepted failure of its round, and a flaky check's summary says so.
+
+**`nexus check`** **(P7)**: refused (exit 2) for a step whose checks Nexus runs, naming the way to dispute a failure;
+unchanged for a step without an entry or with `by: worker`; with `--unrelated --evidence`, and `decide`, as above.
+
+**Settings.** `defaults.check_fix_limit` (global, with a project override; an integer from 0; default 3) **(P4)**.
+
+**The briefings** (EC4, `apps/server/src/prompts.ts`). The step's opening keeps the list under "Checks for every step"
+and adds that Nexus runs them. The worker's briefing says `nexus check --ok|--fail` is refused where Nexus runs the
+checks, lists `nexus check --unrelated --evidence`, and that the worker neither starts nor waits for the whole suite
+there. The check-fix round's turn asks the worker to work from the output and the log it names, running only the failing
+tests. A send-back of such a step asks for the fix, not for the checks. The closing refactoring step whose checks Nexus
+runs no longer runs them before it changes anything: its opening says they passed on the commit where the queue's last
+step ended (`ClosingContext.checked`: the latest set of the queue's own steps, when it passed) **(P12)**. The
+integration step's says Nexus runs the checks on the merge's result after its `nexus step done`, and a conflict it
+resolves is followed by the tests of the files that conflicted.
+
+**The dashboard** (EC4, `apps/web/src/checks.ts`). A `checking` step reads "checks running", "checks queued" (quieter:
+it waits for the machine) or "checks on the base", with a line under it in the queue list (`npm test since 14:02`,
+`waiting for the machine since 14:01`); one waiting for the decision reads "waiting: orchestrator decides"; a check-fix
+round reads "check fix 1 of 3", never as a review round. The queue's one status says it too ("checks running · W3",
+"checks wait for the machine · W3", "check fix 1 of 3 · W3", "a check dispute waits for the orchestrator · W3"). The
+step's panel has a "Checks by Nexus" box while they decide the step: what they do and since when, the round apart from
+the review round, and the latest set's checks one by one (passed, flaky, failed twice with the failing tests and the
+log, running, waiting their turn); its "Checks" list marks the engine's results "by Nexus".
+
+**Updates, Pause and Stop.** An update's drain withdraws the requests still waiting for the machine and lets running
+checks go on at most `CHECK_DRAIN_WAIT_MS` (15 minutes) **(P8)**; `Engine.idle()` is false meanwhile, so the drain
+waits. Then, or at once with `--now` or at a planned deploy's deadline, it ends them (`interrupted`), and the held run
+runs them again after the hand-over; a cancelled drain lets them start again as their runs go on. A Pause lets
+running checks finish and takes effect at the review, or before a fix round's turn; Stop now and Stop at once end
+them (`interrupted`), and they run again when the run goes on **(P16)**.
+
+The checks ask the capacity coordinator for the machine (next section), one request per set or base run.
+
+## The capacity coordinator
+
+**Status: built (queue EC, step EC2); its first user, the engine's checks, comes with EC3.** One heavy operation on the
+workstation at a time, across projects (decided 2026-11-16, docs/ideas/worker-phases-and-resources.md; EC1's P2, P11
+and P17). It is the server's (`apps/server/src/capacity.ts`, one per server, made when the server becomes active):
+
+- **A request** (`kind: checks`, `project`, `queue`, `step`) is granted at once when the `heavy` slot is free and no
+  full test run outside Nexus holds the machine (below), else it waits in line; requests are granted in the order
+  they came. A waiting request may be cancelled; a granted one is ended by its owner.
+- **The slot follows the processes.** The owner starts the operation's processes through its grant: on Windows each
+  in a Job Object of its own (the worker's job host, `worker-process.ts`), so its end is the end of its whole tree,
+  detached descendants included (the host ends what the root left, then closes); elsewhere in a process group of its
+  own, ended with its root. The slot is free once the owner has ended the grant **and** every process started under
+  it has ended: a process still running holds it however the owner sees the work, and a process killed (by its owner,
+  by hand, by a crash) frees it once its tree is gone.
+- **No time bypass.** Nothing is granted beside a held slot or a run outside Nexus, however long a request has waited.
+- **Restarts and hand-overs.** A server becoming active writes the file anew (no grants: the old server's processes
+  ended with it). A server that hands over or shuts down grants and writes nothing more; its waiting requests fail.
+
+**`<NEXUS_HOME>/capacity.yaml`** (one writer: the server; written when what it says changes):
+
+```yaml
+protocol: 1
+workstation: DESKTOP-1234          # the host name (P17)
+slots: { heavy: 1 }
+held:                              # granted, until the owner ended it and its processes have ended
+  - { id: ..., kind: checks, project: nexus, queue: EC, step: EC3, requested_at: ..., granted_at: ... }
+waiting:                           # in the order they came
+  - { id: ..., kind: checks, project: honeycomb, queue: W, step: W5, requested_at: ... }
+outside: { cwd: ..., pid: ..., since: ... }   # while requests wait: a full test run holding the lock outside Nexus
+updated_at: ...
+```
+
+**`nexus status`** (any session, any project) prints the file's line after the queues, while anything holds or waits
+for the slot (`capacityLines`, `packages/protocol/src/capacity.ts`):
+
+```
+machine DESKTOP-1234 (one heavy operation at a time, across projects):
+  running: checks of EC/EC3 (project nexus), since 10:02
+  waiting: checks of W/W5 (project honeycomb), since 10:03, 1st in line, behind checks of EC/EC3 (project nexus)
+  outside Nexus: a full test run in C:\Code\Other (pid 4242, since 09:58); nothing is granted until it ends
+```
+
+**The full-test lock** **(P11)**. `scripts/test-lock.ts` stays the guard of `npm test` and `npm run test:times` for
+every starter (by hand, an agent, and the engine's checks, inside their grant). It no longer starts a run without the
+lock after a time (`NEXUS_TEST_LOCK_MAX_MS` is gone): a waiting run keeps waiting, saying once a minute what for (`npm
+test: waiting for the full test run in <cwd> (pid <pid>, since <HH:MM>) to end (<n> min so far; it never runs without
+the lock)`); a lock whose holder is gone, or that is stale (held, or unrenewed, longer than
+`NEXUS_TEST_LOCK_STALE_MS`, 20 minutes), is still taken over at once. The coordinator reads the same file
+(`NEXUS_TEST_LOCK`, else `nexus-full-test.lock` in the system's temporary folder) by the same rules
+(`packages/protocol/src/full-test-lock.ts`, which test-lock.ts imports): a lock held by a live run, while the slot is
+free, is a run outside Nexus, recorded as `outside`; the coordinator looks again every second and grants once it is
+gone. It never takes the lock itself.
 
 ## Dashboard question links
 
@@ -2397,7 +2752,7 @@ steps:
 
 | Layer | Folder | |
 |---|---|---|
-| `nexus` | `templates/` in Nexus's repository | shipped with Nexus: `bugfix`, `ui-change`, `spike`, `refactor`, `maintenance`, `static-analysis`, and the maintenance templates `dependencies`, `security-audit`, `dead-code`, `test-health`, `performance`, `docs-freshness`, `notes`, `agent-contract`, `git-hygiene`, `lifecycle` |
+| `nexus` | `templates/` in Nexus's repository | shipped with Nexus: `bugfix`, `ui-change`, `spike`, `refactor`, `maintenance`, `static-analysis`, `check-failure` (the fix queue Nexus proposes for an accepted check failure, see "Checks run by Nexus"), and the maintenance templates `dependencies`, `security-audit`, `dead-code`, `test-health`, `performance`, `docs-freshness`, `notes`, `agent-contract`, `git-hygiene`, `lifecycle` |
 | `global` | `<NEXUS_HOME>/templates/` | the user's own, for every project |
 | `project` | `nexus-templates/` in the project's repository root | versioned with the project and seen by its agents (not under `.nexus/`, which git ignores) |
 
@@ -3066,7 +3421,9 @@ random `token`. When process queries are unavailable it also contains `lease: tr
 the last renewal. `NEXUS_TEST_LOCK_STALE_MS` is then the maximum gap between renewals (default 20 minutes), rather
 than the maximum age since acquisition. Renewal is every second or one third of a shorter expiry, at least 10 ms.
 Release checks both PID and token. Old records without `lease` retain the original dead-PID/absolute-age rules.
-`NEXUS_TEST_LOCK_MAX_MS` still limits waiting to 15 minutes by default, after which a run proceeds without the lock.
+A waiting run waits until it has the lock; since queue EC (EC2) no time lets it proceed without it, and
+`NEXUS_TEST_LOCK_MAX_MS` is gone (see "The capacity coordinator"). The rules for when a lock counts as held are in
+`packages/protocol/src/full-test-lock.ts`, shared with the server's capacity coordinator.
 
 The internal `--watchdog <wrapper pid> <starter pid> <lock path>` child owns the runner. The wrapper's Node IPC sends
 `{args, token}` to start it, `{signal}` to forward a signal, or `{stop:true}` to end it. The watchdog announces

@@ -58,6 +58,7 @@ test("the step rules for every step status (review with no reviewer named counts
     //        user   orch   atWork waits
     pending: [false, false, false, false],
     running: [false, false, true, false],
+    checking: [false, false, true, false],
     waiting: [false, false, true, true],
     review: [true, false, false, true],
     done: [false, false, false, false],
