@@ -54,7 +54,9 @@ function splitTopLevel(s: string): string[] {
   return parts;
 }
 
+/** A word of a usage or a line (`run`, `start|pause`); anything else (`<step>`, `W3`, `"..."`) stands for a value. */
 const LITERAL = /^[a-z][a-z0-9-]*(\|[a-z][a-z0-9-]*)*$/;
+const isPlaceholder = (t: string) => !LITERAL.test(t);
 
 /**
  * The positional head of a command line: the tokens after `nexus` up to the first flag, bracket, parenthesis or
@@ -105,8 +107,6 @@ function readHelp(help: string): Cli {
 
 // ---------------------------------------------------------------- checking a line
 
-const isPlaceholder = (t: string) => !LITERAL.test(t);
-
 /** Why a usage does not fit a command line's head, or undefined when it fits. */
 function headMismatch(u: Usage, h: string[]): string | undefined {
   const lastLiteral = u.head.reduce((n, t, i) => (isPlaceholder(t) ? n : i), -1);
@@ -114,7 +114,7 @@ function headMismatch(u: Usage, h: string[]): string | undefined {
   for (let i = 0; i < Math.min(h.length, u.head.length); i++) {
     const want = u.head[i]!, got = h[i]!;
     if (isPlaceholder(want)) continue;
-    if (!LITERAL.test(got)) return `"${got}" where "${u.text}" has ${want}`;
+    if (isPlaceholder(got)) return `"${got}" where "${u.text}" has ${want}`;
     const allowed = new Set(want.split("|"));
     const bad = got.split("|").filter((a) => !allowed.has(a));
     if (bad.length) return `${bad.join(", ")} where "${u.text}" has ${want}`;
@@ -134,18 +134,19 @@ function check(cli: Cli, cmd: string): string[] {
   const candidates = cli.usages.filter((u) => u.head[0] === name);
   if (!candidates.length) return [`unknown command "nexus ${name}"`];
   const used = flags(cmd);
-  let best: string[] | undefined;
+  // Reported when nothing fits: the usage whose head fits with the fewest problems, else the first head that does not fit.
+  let fewest: string[] | undefined, mismatch: string | undefined;
   for (const u of candidates) {
     const why = headMismatch(u, h);
-    if (why) { best ??= [why]; continue; }
+    if (why) { mismatch ??= why; continue; }
     const problems = [...used].filter((f) => !u.flags.has(f) && !cli.global.has(f)).map((f) => `${f} is not a flag of "${u.text}"`);
     if (name === "help") {
       for (const t of h.slice(1).flatMap((x) => x.split("|"))) if (!cli.topics.has(t)) problems.push(`"${t}" is not a help topic`);
     }
     if (!problems.length) return [];
-    if (!best || best.length > problems.length || !best.some((p) => p.includes(" is not "))) best = problems;
+    if (!fewest || problems.length < fewest.length) fewest = problems;
   }
-  return best ?? [`no usage of "nexus ${name}" fits`];
+  return fewest ?? [mismatch ?? `no usage of "nexus ${name}" fits`];
 }
 
 /** The fenced block under "## The `nexus` CLI". */
@@ -178,10 +179,10 @@ function checkBlock(cli: Cli, block: string[]): Result {
     // `nexus template list | show <id>`: an alternative that starts with a word is another subcommand of the same command
     const [first, ...alts] = splitTopLevel(cmd);
     const name = tokens(first!)[1] ?? "";
-    let variants = [first!];
+    const variants = [first!];
     for (const a of alts) {
       if (/^[a-z]/.test(a)) variants.push(`nexus ${name} ${a}`);
-      else variants = [...variants.slice(0, -1), `${variants.at(-1)!} | ${a}`];
+      else variants[variants.length - 1] += ` | ${a}`;
     }
     const problems = variants.flatMap((v) => check(cli, v));
     if (problems.length) res.failures.push(`${cmd}\n    ${problems.join("\n    ")}`);
