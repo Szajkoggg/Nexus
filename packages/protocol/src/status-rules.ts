@@ -1,7 +1,7 @@
 // The status rules every part reads the same way: when a run is going, when a step waits for the user's review (or the
 // orchestrator's), and when a question is open. Pure and free of Node: the dashboard imports this module directly
-// (`@nexus/protocol/status-rules`), so it imports nothing at run time but the equally pure ids.ts; the server, the CLI and the state derivation use
-// it too, so a rule changes in one place.
+// (`@nexus/protocol/status-rules`), so it imports nothing at run time but the equally pure ids.ts; the server, the CLI
+// and the state derivation use it too, so a rule changes in one place.
 import type { RunFile, StepStatus } from "./schemas.ts";
 import { compareIds } from "./ids.ts";
 
