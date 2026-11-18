@@ -4,7 +4,6 @@ import { createWriteStream, existsSync, mkdirSync, type WriteStream } from "node
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Hono } from "hono";
-import { bodyLimit } from "hono/body-limit";
 import { serve, type HttpBindings } from "@hono/node-server";
 import { WebSocketServer, type WebSocket } from "ws";
 import chokidar, { type FSWatcher } from "chokidar";
@@ -34,7 +33,7 @@ import { readDeployChanges, readDeploySettings, writeDeploySettings } from "./de
 import { Standby, refuseHandoverDir, smokeCheck, takeHandoverEnv } from "./handover.ts";
 import { Lifecycle, ROOT, projectPart, version } from "./lifecycle.ts";
 import { DeployPlanner, PlanError, planTime } from "./deploy-plan.ts";
-import { MAX_UPLOAD_BODY, UploadError, saveUpload } from "./uploads.ts";
+import { UploadError, readLimited, saveUpload } from "./uploads.ts";
 import { COMMIT_HASH, commitDetail, fileResponse, locate } from "./files.ts";
 import { chatRange, pin, searchLines } from "./chats.ts";
 import { searchProject } from "./search.ts";
@@ -646,14 +645,19 @@ app.post("/api/projects/:id/remove", async (c) => {
   }
 });
 
-// A picture for a chat message (src/uploads.ts): the body's size is checked before it is read or parsed (also when it
-// comes without a Content-Length), and the guard above has already taken it as the user's, from the dashboard.
-app.post("/api/projects/:id/uploads", bodyLimit({
-  maxSize: MAX_UPLOAD_BODY,
-  // The rest of the body is not read, so the connection is not reused: a client would send its next request on a
-  // socket the server is about to close.
-  onError: (c) => c.json({ error: "only PNG, JPEG, WebP or GIF up to 10 MB" }, 413, { connection: "close" }),
-}), async (c) => {
+// A picture for a chat message (src/uploads.ts): the body's size is checked before it is parsed (from its
+// Content-Length, or while it streams in), and the guard above has already taken it as the user's, from the dashboard.
+// A body over the limit is read on and thrown away (up to MAX_UPLOAD_DRAIN, for UPLOAD_DRAIN_MS) before the 413, so the
+// socket closes with nothing unread on it: Windows resets one that has, and the client loses the answer.
+app.post("/api/projects/:id/uploads", async (c, next) => {
+  const length = c.req.header("content-length");
+  const declared = length !== undefined && !c.req.header("transfer-encoding") ? Number(length) : undefined;
+  const read = await readLimited(c.req.raw.body, declared).catch(() => undefined);
+  if (!read) return c.json({ error: "the body could not be read" }, 400, { connection: "close" });
+  if ("body" in read) { c.req.raw = new Request(c.req.raw, { body: read.body }); return next(); }
+  // Closed even when drained: the drain may have stopped at its bound, and a refused upload ends its connection.
+  return c.json({ error: "only PNG, JPEG, WebP or GIF up to 10 MB" }, 413, { connection: "close" });
+}, async (c) => {
   const e = c.get("entry");
   const body = (await c.req.json().catch(() => undefined)) as Body | undefined;
   if (!body || typeof body !== "object") return c.json({ error: "not a JSON object" }, 400);

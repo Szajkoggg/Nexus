@@ -1472,7 +1472,11 @@ every kind took 120 to 200 ms, of the chats alone 45 ms.
 **Uploads.** A browser does not reveal a file's path, so a picture added to a chat message travels in the request,
 base64 in a JSON body like every other write (and behind the same rules: the dashboard's own `Origin`, the token for
 a request not from this machine). The body may be at most 14 MiB, checked before anything is read or parsed (from
-`Content-Length`, or while a body without one streams in); a larger one gets 413 and the connection is closed. The
+`Content-Length`, or while a body without one streams in); a larger one gets 413 and the connection is closed. Before
+it answers, the server reads the rest of a refused body and throws it away (RFC 9112, 9.6), so that the close is clean
+and the client receives the 413 rather than a reset: at most 64 MiB in all (a body declared larger is answered at
+once) and for at most 5 s from the refusal; past either bound it answers and closes, and the client may then see a
+reset instead. The
 picture itself may be at most 10 MiB once decoded (413). Its type is judged from its first bytes, never from a name
 or a declared type: PNG, JPEG, WebP and GIF only; anything else (an iPhone HEIC photo, SVG) gets 415. Both refusals
 say `only PNG, JPEG, WebP or GIF up to 10 MB`. The server names the file: the UTC time it was taken
