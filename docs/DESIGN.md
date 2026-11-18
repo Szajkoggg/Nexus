@@ -574,6 +574,114 @@ It may not edit project files, approve queues, or answer a question that is the 
 runtime's permissions (for Claude: read-only tools plus `Bash(nexus *)`, and writes only under `.nexus/drafts/`, where
 it keeps its queue drafts), not only by instruction.
 
+### Routine reviews by a helper (queue RH)
+
+**Status: designed in RH1, not built yet** (RH2 the helper's run and verdicts, RH3 the orchestrator's notices, the
+audit and the statistics, RH4 the dashboard). From the user's decision of 2026-11-17 (docs/ideas/token-costs.md,
+"Routine reviews leave the orchestrator's big chat" and "The review helper"). The formats are in PROTOCOL.md, "The
+review helper". Points marked **(H1)**…**(H17)** go beyond the decision: RH1's proposals, each for the user's approval.
+
+**Why.** The orchestrator handled every review in its big chat: 176 of its 586 turns in the analysed transcripts were
+`nexus review accept`, each on a context of 400–800k tokens. Most of them are routine: the checks passed, the criteria
+can be checked from what the step left behind. A short-lived helper on a cheaper model reads only that, decides, and
+ends; the orchestrator gets the result and the exceptions. The engine's checks (queue EC) are what makes this
+possible: the helper gets their results and runs nothing.
+
+**Who it is.** A session of its own role, `helper` **(H1)**, started by the engine for one review round of one step
+and ended with its verdict: no chat, no resume, no context care. Its model and effort are a setting of their own
+(`review_helper`), global with a project override, Claude Code's Sonnet at medium effort by default **(H13)**; Codex
+runs it too, and Claude Code is the default runtime **(H14)**.
+
+**When it runs** **(H2)**. Only where the orchestrator would review: a step at level 2 or 3 that waits for the
+orchestrator's review (the project has an orchestrator and its notices are on), once per review round. Not for a step
+that waits for the user (level 1, beyond the send-back limit, handed to the user, after a Fix it), and not for the
+integration step Nexus accepts itself (queue MI). With the setting off, the orchestrator reviews as before. What the
+engine can tell without a model it passes on at once, without a helper **(H3)**: a question the worker asked during
+the step, and the send-back limit reached (the next send-back would go to the user).
+
+**The packet.** The helper gets a fixed packet, nothing else to look for: the step's goal, acceptance and review notes
+(`review.prepare`), the engine's check results of the round (each check's outcome, flaky ones marked, the time, the
+log's path), the step's diff, the round's review material, the worker's summary, and the step's earlier send-backs
+(round, who, text). What the orchestrator wants a review to weigh (a promise to the user, an earlier decision) goes
+into the step's acceptance or review notes when it drafts the queue: that keeps it in the files, where the helper
+reads it. The packet is the helper's first and only prompt; the diff is a file beside it, the step's whole change from
+its first round's start to the reported commit, with the latest round's range named and the `--stat` inline, so a
+large diff costs only the parts the helper reads **(H4)**. It may read the checkout to check a criterion (a document
+that should say something, a test that should exist); it never runs a build or a test.
+
+**The verdicts.** Accept, send back, or pass to the orchestrator. It passes on when:
+
+- a criterion cannot be checked from the packet (the look, the feel, the user's judgement, a measurement nobody took);
+- the worker's summary reports a deviation from the plan (its "what was left out or differs" part says so);
+- a question was asked during the step (normally the engine passes these on before the helper starts, H3);
+- the send-back limit is reached (likewise);
+- it doubts its own verdict.
+
+At levels 2 and 3 it judges the checkable criteria. At level 2 that is the review: it accepts, or sends back with what
+to fix. At level 3 judgement stays with the orchestrator: the helper never accepts a level-3 step; with the checkable
+criteria met it passes the step on with its findings, and the orchestrator decides as today (accept, accept
+provisionally, send back, ask the user) without re-checking what the helper found **(H5)**. A failing checkable
+criterion is sent back at either level. A send-back of the helper's counts toward `review_send_back_limit` like the
+orchestrator's **(H7)**: the limit is about the worker and the step going round, not about who reviews. A pass-on
+names its reasons and the helper's findings, and the orchestrator's review notice carries both, so it starts where the
+helper stopped. If more than about a quarter of the reviews are passed on, the packet lacks something: the statistics
+show the share (below).
+
+**The existing rules stay.** Review levels, away mode and provisional acceptances do not change; the helper takes a
+part of the orchestrator's work within them:
+
+- A provisional acceptance stays the orchestrator's alone: the helper has no command for it.
+- Away mode reviews a level-2 step as level 3 so that the orchestrator may accept provisionally what is the user's.
+  The helper goes by the step's own level **(H6)**: a level-2 step whose criteria are all checkable and met it accepts
+  for good, which is what the orchestrator does at level 3 with what has nothing of the user's (RL2); everything it
+  passes on reaches the orchestrator with the level-3 choices, as away mode says.
+- A step that goes to the user because its level changed to 1, or for any other reason, is no longer the helper's: the
+  engine ends a helper still running, and a verdict that arrives later is ignored with a warning, as an orchestrator's
+  is.
+
+**When it has no verdict** **(H8)**. The helper has a time limit (20 minutes). Past it, or when its process ends
+without a verdict, or when its runtime is beyond the usage threshold or fails, Nexus passes the step on itself (reason
+`no_verdict` or `unavailable`) and the orchestrator reviews it as before; there is no fallback chain, since the
+orchestrator is the fallback. A helper running at a restart or an update's hand-over is started again once after it,
+with the packet built again; a second one without a verdict passes on.
+
+**Its rights.** It only reads **(H15)**: Claude Code in `dontAsk` mode with `Read`, `Grep`, `Glob`, read-only git and
+`nexus status` and `nexus help`, plus three review commands, `nexus review accept`, `nexus review send-back` and
+`nexus review pass-on`, which the CLI takes from a helper only for the step and round it was started for; no
+`Edit`, no `Write`, not the project's own allow rules. On Codex the same as a thinking partner without a notes folder,
+but with its own session folder as the working directory and only writable root, for the CLI's events. As AGENTS.md
+asks of every agent: it never calls the server (the CLI writes its events), writes nothing but its own session's files,
+and an action its permissions refuse is refused, not asked about: recorded in its `refusals.jsonl`, and reported in its
+verdict (it passes on with `doubt`, naming what it could not do). The dashboard shows a helper's refusals but offers no
+"Add rule": its rights are Nexus's, not the project's.
+
+**What the orchestrator learns.** The verdicts are in the files: the review events of the helper's session, and the
+step shows who accepted it and on which model (`nexus status`, the dashboard) **(H17)**. The orchestrator's chat gets
+no line per accepted step and no turn for it. The next notice it gets anyway (a step that needs it, a question, a halt,
+the run's end) lists the steps accepted since its last notice, each with who accepted it: the helper (runtime, model,
+effort), Nexus (the integration without a model) or the user **(H9)**, and the helper's send-backs since, one line each
+**(H10)**. This is not batching: no notice that needs action waits for another, and an acceptance alone starts no turn.
+
+**The random audit.** A lax helper is what the other signals miss: the user does not see most level-2 steps, and a
+laxer helper even lowers the send-back rate. So the orchestrator reviews again about one in ten of the helper's
+acceptances (`review_helper.audit_rate`, 0.1) and records whether it agrees. Which ones is decided by a hash of the
+acceptance's event id, so it needs no state, survives a restart, and a test can steer it by the id **(H11)**; the first
+five acceptances after the helper's model or effort changed are always audited **(H12)**. An audit rides with the next
+notice like the list above, with the packet's path, and the orchestrator answers with `nexus review audit`. A
+disagreement does not reopen the step (later steps may build on it, as with a provisional acceptance's Fix it): it is
+counted, and when the work needs a fix the orchestrator drafts it as a revision.
+
+**Quality on three levels** (`nexus stats --reviews`, the Stats view) **(H16)**:
+
+1. The user's signals: Fix it, Reject, a provisional acceptance returned.
+2. The cost signals: send-backs (the helper's, the orchestrator's), check-fix rounds after failed checks, and the
+   helper's passed-on share by reason, marked above about a quarter.
+3. The audit: how many acceptances were audited, how many the orchestrator disagreed with, by the helper's model and
+   effort.
+
+The helper's turns are records of their own in `turns.jsonl` (role `helper`), so its use of the windows is measured
+like any other.
+
 ### Context management
 
 Every session has a **context card**, kept by Nexus:

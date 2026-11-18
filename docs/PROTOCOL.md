@@ -812,6 +812,9 @@ step", "Without a model"). A step's **review level** says who:
   send-backs the step goes to the user as at level 2, and its queue waits at that step. It may still hand the review
   to the user (`review.asked_user`) when it cannot decide.
 
+Designed but not built yet (queue RH): a short-lived review helper takes the orchestrator's routine reviews at levels 2
+and 3 within these rules; see "The review helper".
+
 **Provisional acceptances.** A `review.provisional` (only the orchestrator's, only of a level-3 step waiting for its
 review; any other is ignored with a warning) makes the step `done` with `provisional` (`at`, `event`, `text?`) on the
 derived step, and the run goes on. Until the user deals with it, it is in the **return batch**: one item of kind
@@ -919,6 +922,128 @@ text verbatim (it must not be empty). Picture comments (N8.3) are a user's Fix i
   step goes to the user (`review_with: user`, `asked_user` saying so with the text), and the entry is `to_user`. The
   user's Fix it does not count toward the limit.
 - After a Fix it the step's next round waits for the user, whatever the level (`user_fix` on the derived step).
+
+### The review helper
+
+**Status: designed (queue RH, step RH1), not built yet: nothing of this section is in effect** until RH2 (the helper's
+run and verdicts), RH3 (the orchestrator's notices, the audit, the statistics) and RH4 (the dashboard). The reasons are
+in DESIGN.md, "Routine reviews by a helper"; the marks **(H1)**…**(H17)** are RH1's proposals beyond the user's
+decision of 2026-11-17, each waiting for the user's approval. The other sections (settings, `session.yaml`, the CLI
+list, `turns.jsonl`, the orchestrator's notices) take these entries when they are built.
+
+A short-lived session, role `helper` **(H1)**, reviews a step in the orchestrator's place: it accepts it, sends it back,
+or passes it on to the orchestrator. Review levels, away mode and provisional acceptances keep their rules (above).
+
+**Which reviews** **(H2)**. When a step enters `review` with `review_with: orchestrator` (level 2 or 3, the project has
+an orchestrator, `orchestrator.notify` on) and `review_helper.enabled` is on, the engine starts one helper for that
+review round, instead of the orchestrator's review notice. None for a step waiting for the user, nor for the
+integration step accepted by Nexus (queue MI). Before starting one, the engine passes the step on itself (a
+`review.passed_on` from the `nexus` session) when **(H3)**: the worker asked a question during the step (any
+`question.asked` of its session at that step), reason `question`; or the step's send-backs that count toward the limit
+already number `defaults.review_send_back_limit`, reason `limit`.
+
+**The helper's session.** `session.yaml` with `role: helper` and `about` (`queue`, `step`, `round`, `level`: the step's
+own level, not the one away mode reads it at **(H6)**). The server writes two files into its session folder before it
+starts, their only writer:
+
+- `packet.md`, the helper's first and only prompt, as given: the step's id, title and level; its goal, acceptance and
+  `review.prepare`; the checks of the round's latest set from `checks.yaml` (each name, `ok`, `flaky`, `duration`, the
+  summary, the log's path; a check accepted as unrelated marked so); the round's review material (label, key, role,
+  the copy's path under `.nexus/queues/<q>/review/<step>/`, the pair it belongs to); the worker's summary of the
+  round; the step's earlier send-backs (round, `by`, text); the diff's `--stat` and the path of `diff.patch`.
+- `diff.patch`: `git diff` from the step's first round's `start` (`git.yaml`) to the commit the round's `step.done`
+  named (else the checkout's HEAD), with the latest round's own range named in the packet **(H4)**.
+
+It runs in the queue's checkout (Claude Code) or in its session folder (Codex, see below), with no resume, no context
+care and no chat, and its process ends after its verdict.
+
+**Settings** (global, with a project override; checked like a kind's runtime, model and effort) **(H13, H14)**:
+
+```yaml
+review_helper: { enabled: true, runtime: claude, model: claude-sonnet-5-5, effort: medium, audit_rate: 0.1 }
+```
+
+`runtime` is `claude` or `codex`; a model or effort left out (or the project's own `null`) is the project's for that
+runtime (`runtimes.<runtime>`); an effort the runtime does not take is refused where it is written. On Codex the
+model left out is the project's Codex model, at `medium`. `audit_rate` is a fraction from 0 to 1 (below). There is no
+fallback chain: the orchestrator is the fallback (H8).
+
+**Rights** **(H15)**. Claude Code: `--permission-mode dontAsk`, allowed `Read`, `Grep`, `Glob`, read-only git
+(`git log`, `git status`, `git diff`, `git show`), `nexus status`, `nexus help`, `nexus review accept`, `nexus review
+send-back` and `nexus review pass-on`, each on both shell tools (`Bash(nexus review accept:*)` and
+`PowerShell(nexus review accept:*)`, and so on); not the project's `runtimes.claude.allowed_tools`; `Edit` and `Write`
+never. Codex: its session folder as the working directory in a `workspace-write` sandbox whose only writable root it
+is (for the CLI's events), approval `never`; it reads the checkout by absolute path. The CLI takes the three review
+commands from a helper session only for the step and round in its `about`, and refuses it every other command that
+writes (`nexus review ask-user`, `provisional`, `add`, `audit`, `nexus ask`, `nexus step …`). A refused action is
+recorded in its `refusals.jsonl` like any session's; its briefing asks it to report the refusal in its verdict (pass on
+with `doubt`, naming what it could not do), never to work around it. The dashboard lists a helper's refusals without
+"Add rule".
+
+**Verdicts** (events of the helper's session):
+
+- `review.accepted` (`queue`, `step`, `text`: its findings): valid only from the helper started for that step's current
+  round, on a step at its own level 2 that still waits for the orchestrator's review. At level 3 it is ignored with a
+  warning **(H5)**. It accepts the step as the orchestrator's would (pushing included, see "Pushing what was accepted").
+- `review.sent_back` (`queue`, `step`, `text`): carried out by `sendBack` with `by: helper`; it counts toward
+  `review_send_back_limit` together with the orchestrator's **(H7)**, so `sent_back[].by` may be `helper`.
+- `review.passed_on` (`queue`, `step`, `round`, `reasons`, `text`: its findings, what it checked and what it could
+  not): the step keeps waiting for the orchestrator's review, and the orchestrator gets the review notice now. Each
+  reason one of `criterion` (a criterion the packet cannot settle), `deviation` (the summary reports a deviation from
+  the plan), `question`, `limit`, `doubt`, `level` (level 3: the checkable criteria met, judgement is the
+  orchestrator's) and, from the `nexus` session only, `no_verdict` and `unavailable`.
+
+**No verdict** **(H8)**. A helper still without a verdict after `HELPER_LIMIT_MS` (20 minutes) is ended; Nexus writes
+`review.passed_on` (`no_verdict`) from the `nexus` session, as it does when the process ends without a verdict. When
+the helper's runtime is beyond `defaults.usage_pause_threshold`, or its start or turn fails, the step is passed on
+(`unavailable`) without waiting. A helper running at a restart or an update's hand-over is started again once after
+it (a new session, the packet written again); a second one without a verdict passes on. A verdict that comes after the
+step stopped waiting for the orchestrator (the user set its level to 1, a pass-on by Nexus) is ignored with a warning,
+and the engine ends a helper whose step left that wait.
+
+**The derived step** **(H17)**: `accepted` (`by`: `user`, `orchestrator`, `helper` or `nexus`; `at`, `event`, and for
+an agent `session`, `runtime`, `model`, `effort`) once its review is accepted; while a helper has the review, `helper`
+(`session`, `state`: `running`, `passed_on`; `reasons` and `findings` after a pass-on). `nexus status` ends an accepted
+step's line with who accepted it (`accepted by the review helper, claude-sonnet-5-5, medium`), and the orchestrator's
+overview the same; a step with a running helper reads `review: the helper reviews`.
+
+**The orchestrator's notices.**
+
+- The review notice ("Step S of queue X is done and waits for your review", key `notify:review:<queue>:<step>:<finished_at>`
+  as before) comes when the step is passed on, or at once where no helper runs; after a pass-on it adds the reasons
+  and the findings ("The review helper passed it to you: a criterion it cannot check (…). Its findings: …").
+- **Accepted since** **(H9, H10)**: every notice that is told anyway (a review, a question, a halt, the run's end, an
+  approval, …) starts with the steps accepted since by anyone but the orchestrator itself, oldest first, each with who
+  accepted it ("W2 of W: accepted by the review helper (Claude Code, claude-sonnet-5-5, medium)", "W4 of W: accepted
+  by Nexus, a clean merge without a model", "V1 of V: accepted by the user"), and the helper's send-backs since ("W3
+  of W: sent back by the review helper, round 2: <first line>"). Each is listed once per orchestrator session, key
+  `notify:accepted:<event id>` (`notify:helpersentback:<event id>`), recorded when the notice carrying it is told. None
+  of them starts a turn, and none is shown in the chat as a line of its own.
+- **Audits** **(H11, H12)**: a helper's acceptance is audited when `hash(event id)` (the first 8 hexadecimal digits of
+  its SHA-256, read as a fraction of 2³²) is below `review_helper.audit_rate`, and always when it is among the first
+  five acceptances since the helper's runtime, model or effort changed in the project. An audit rides with the next
+  notice like the list above (key `notify:audit:<event id>`): "Audit: review again step S of queue X, accepted by the
+  review helper: packet <path>". The orchestrator answers with `nexus review audit <queue> <step> agree|disagree
+  --reason <text>`, which writes `review.audited` (`queue`, `step`, `accepted`: the acceptance's event id, `verdict`,
+  `text`); the CLI takes it only from an orchestrator, only for an audit it was given. A disagreement does not reopen
+  the step: the orchestrator drafts a fix as a revision when the work needs one, as after a provisional acceptance's
+  Fix it.
+
+**The CLI** (to be added to "The `nexus` CLI"):
+
+```
+nexus review pass-on <queue> <step> --why criterion,doubt --findings "<what it checked and what it could not>"   # helper only
+nexus review audit <queue> <step> agree|disagree --reason "..."   # orchestrator only, for an audit it was given
+```
+
+`nexus review accept` and `send-back` also take a helper session, as above.
+
+**Records and statistics** **(H16)**. Each helper turn is a record in `turns.jsonl` with `role: helper`, its `queue`
+and `step`. `nexus stats --reviews` (and `reviews` in `GET /api/stats`) reports, for the range and project, grouped by
+who reviewed (the helper by model and effort, the orchestrator, the user): the user's signals (Fix it, Reject,
+provisional acceptances returned); the cost signals (send-backs by who sent them, check-fix rounds, the helper's
+reviews passed on by reason and as a share, marked when above 25%); the audit (acceptances audited, disagreements,
+their share).
 
 ### Git on the dashboard
 
