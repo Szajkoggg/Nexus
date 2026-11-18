@@ -1300,6 +1300,138 @@ Report with `nexus`. End the step with `nexus step done`, `nexus step failed` or
 
 The template is a project setting, so each project can phrase it in its own terms.
 
+## Checks run by Nexus
+
+**Status: designed (queue EC, step EC1), built in EC2–EC4.** Until then the worker runs the checks and reports them
+with `nexus check`, as the sections above say; this section is what replaces that. The reasons and the decisions are
+in DESIGN.md, "Nexus runs the checks"; the marks **(P1)**…**(P17)** are proposals the user decides on (EC1's report),
+and the formats below follow them as proposed.
+
+**Which steps.** Whether Nexus runs a step's checks is fixed when the step opens: the engine records it on the step's
+entry in `checks.yaml` (`by: nexus`). A step opened before (by an older server) keeps the worker's reporting until it
+ends. Every check, the project's (`defaults.checks`, as the run fixed them) and the queue's own, each once, is a shell
+command run in the queue's checkout **(P1)**; the draft path and the queue reviewer ask for commands, and what only an
+agent can verify goes into the acceptance or `review.prepare`.
+
+**The sequence.**
+
+1. The worker ends its turn with `nexus step done`. After the worker's descendants are cleaned (Windows, queue PT),
+   the engine adds a check set to the step's entry in `checks.yaml` (`state: queued`) and asks the coordinator for the
+   `heavy` slot. The step is `checking` (phase `queued`).
+2. Granted (`state: running`), the checks run one after another in the order the step's opening lists them, each
+   through the shell, in its own Job Object on Windows, stdout and stderr appended to its log. Before a check starts
+   the server writes its `started_at`, `command` and `log`; after its tree has ended, `ended_at`, `exit_code` (or
+   `signal`), `duration`. A failing check does not end the set **(P3)**.
+3. The checks that failed run once more, in the same grant. A check that passes then is `flaky` on this set.
+4. The grant is released once the last check's tree has ended.
+5. Every check passed (on the first or the second run): the set is `passed`, and the step goes on as a `step.done`
+   did before: to review, with the step's end handled there (the next step, context care, a plan or a deploy waiting
+   for it). A check failed twice: the set is `failed`, and the worker gets a check-fix round (below), unless the step
+   has had `defaults.check_fix_limit` of them already: then the run halts for the orchestrator **(P5)**.
+
+`nexus step failed` and `nexus stop` run no checks. A check longer than `CHECK_LIMIT_MS` (60 minutes) **(P10)** is
+ended (its tree) and counts as failed, its output tail saying so.
+
+**`queues/<id>/checks.yaml`** (server-owned, one writer: the server):
+
+```yaml
+steps:
+  W3:
+    by: nexus                      # fixed when the step opened; `worker` for a step whose checks the worker reports
+    sets:                          # one per `step.done` of the step, oldest first
+      - done: 01JD...              # the id of the `step.done` event it checks
+        round: 1                   # the step's review round (send-backs), as today
+        fix: 0                     # check-fix rounds before it within that round (0: the step's own done)
+        commit: 3f2a...            # HEAD of the queue's checkout when the set started (null outside git)
+        dirty: false               # tracked files had uncommitted changes
+        requested_at: ...          # queued
+        granted_at: ...
+        ended_at: ...
+        state: passed              # queued, running, passed, failed, interrupted, disputed, accepted
+        checks:
+          - name: npm test         # as the step's opening lists it
+            command: npm test
+            runs:                  # the first, and the one run again after a failure
+              - { started_at: ..., ended_at: ..., exit_code: 1, duration: 212, log: checks/W3/r1f0-3-npm-test.1.log,
+                  failed_tests: ["engine › halts after the fix limit"], tail: "..." }
+              - { started_at: ..., ended_at: ..., exit_code: 0, duration: 205, log: checks/W3/r1f0-3-npm-test.2.log }
+            ok: true
+            flaky: true            # failed, then passed
+        disputed?: { check, evidence, at }      # the worker's evidence of an unrelated failure (P6)
+        decided?: { by: orchestrator, verdict: accept | fix, reason, at }
+```
+
+`tail`: the output's last 80 lines, at most 6000 characters **(P15)**; `failed_tests`: the failing tests' names where
+the output's format is known (node:test's spec and TAP reporters), else left out. The logs are under the queue's folder,
+`queues/<id>/checks/<step>/r<round>f<fix>-<n>-<name as a file name>.<run>.log`, and stay with the queue (cleaned with
+it). A run with `started_at` and no `ended_at` found by a starting server is marked `interrupted` (with the set), and
+the set is queued again when its run goes on: at once after an update's hand-over (`resume_after_restart`), at Resume
+after any other restart, where the run comes back paused **(P9)**.
+
+**The step's state** (derivation, `packages/protocol`): a `step.done` of a step whose entry says `by: nexus` makes it
+`checking` until the set for that done has an outcome; `passed` and `accepted` make it `review` as the `step.done`
+did; `failed` reopens it `running` as a check-fix round (the inbox entry below), `round` unchanged, `check_fix` set to
+the set's `fix` + 1 **(P13)**; `disputed` makes it `waiting` for the orchestrator. The derived step carries `checks`:
+`{ phase: queued | running, since, check?, behind? }` while `checking` (`behind`: the requests ahead of it and what
+holds the slot), and the latest result of each check, as `check.result` gives today (with `by: nexus`, `flaky`), so
+`nexus status`, the dashboard, the review notice and the metric `check:<name>` read both alike. `check.result` events
+still count for steps whose checks the worker reports. `nexus status` prints a checking step as `W3 checking (queued
+since 10:02, behind HC/W5 of Honeycomb)` or `W3 checking (npm test since 10:14)`, and a fix round as `W3 running
+(check fix 1 of 3)`.
+
+**The check-fix round** is an inbox entry `check_failed` to the session that worked on the step (`id`
+`check-failed-<set's done id>`, `queue`, `step`, `round`, `fix`, `checks`: per failed check `name`, `exit_code`,
+`failed_tests?`, `tail`, `log`: the log's absolute path). The engine hands it to the session as the next turn; its
+prompt names the round and the fix round of the limit, the failures, and the way to report an unrelated failure. The
+worker ends the round with `nexus step done` again; the checks then run again, all of them. A run halted at the limit
+gives the orchestrator a halt notice naming the checks and the rounds; `nexus run <queue> resume` gives one more fix
+round, and the user's Continue the same **(P5)**.
+
+**An unrelated failure** **(P6)**: the worker reports `nexus check <step> "<name>" --unrelated --evidence "<what
+shows it>"` (event `check.disputed`: `queue`, `step`, `name`, `evidence`) and ends its turn without `nexus step done`.
+The server records it on the set (`state: disputed`) and the orchestrator is notified with the evidence, the tail and
+the log. It answers `nexus check decide <queue> <step> accept|fix --reason "…"` (event `check.decided`, orchestrator
+only): `accept` sends the step to review with the failure marked accepted (and recorded for a maintenance queue), `fix`
+gives a check-fix round with the reason as its text, counted toward the limit. A dispute is not a fix round.
+
+**`nexus check`** **(P7)**: refused (exit 2) for a check Nexus runs in the step, with "Nexus runs this check after
+`nexus step done`"; unchanged for a step with `by: worker`; with `--unrelated --evidence` as above.
+
+**Settings.** `defaults.check_fix_limit` (global, with a project override; an integer from 0; default 3) **(P4)**.
+
+**The step's opening** keeps the list under "Checks for every step" and says instead of "report them": "Nexus runs
+these after your `nexus step done`, and sends you their output only if one fails; while you work, run only the tests
+of what you change." The closing refactoring step's opening drops "Run the checks before you change anything", naming
+the HEAD on which the previous step's checks passed **(P12)**.
+
+**Updates and Pause.** An update's drain waits for running check sets at most `CHECK_DRAIN_WAIT_MS` (15 minutes)
+**(P8)**, then ends them (`interrupted`), and the held run queues them again after the hand-over; with `--now`, or at a
+planned deploy's deadline, it ends them at once. A queued set is not granted while an update drains. Pause lets a
+running set finish and takes effect at the review or before the fix round; Stop now and Stop at once end it
+(`interrupted`), and it runs again when the run goes on **(P16)**.
+
+**`<NEXUS_HOME>/capacity.yaml`** (server-owned, one writer: the server; the capacity coordinator, EC2):
+
+```yaml
+workstation: DESKTOP-1234          # the host name (P17)
+slots: { heavy: 1 }
+held:                              # granted, until the operation's processes have ended
+  - { id: ..., kind: checks, project: nexus, queue: EC, step: EC3, requested_at: ..., granted_at: ... }
+waiting:                           # in the order they came
+  - { id: ..., kind: checks, project: honeycomb, queue: W, step: W5, requested_at: ... }
+outside: { cwd: ..., pid: ..., since: ... }   # a full test run holding scripts/test-lock.ts's lock outside Nexus
+```
+
+A request is granted when the slot is free and nothing holds the test lock outside Nexus; there is no time after which
+one starts without it. A starting server writes the file anew: the old grants are void (their processes ended with the
+old server), and the waiting requests are rebuilt from the queues' `checks.yaml` (sets `queued` or `interrupted` whose
+runs go on), by `requested_at`.
+
+**`scripts/test-lock.ts`** **(P11)**: stays the guard of `npm test` and `npm run test:times` for every starter. Its
+start without the lock after `NEXUS_TEST_LOCK_MAX_MS` goes: a waiting run keeps waiting, saying once a minute what it
+waits for; a stale lock (no renewal or a dead holder, 20 minutes) is still taken over. The engine's own `npm test` takes
+the lock too, inside its grant.
+
 ## Dashboard question links
 
 The dashboard hash is `#/<project>[/<queue>[/<step>[/<qid>]]]`, with each part

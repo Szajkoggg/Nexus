@@ -188,6 +188,104 @@ to an unrelated system service (`Win32_Process.Create`, for example); Nexus does
 heuristics. References: [Job Objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects) and
 [AssignProcessToJobObject](https://learn.microsoft.com/en-us/windows/win32/api/jobapi2/nf-jobapi2-assignprocesstojobobject).
 
+### Nexus runs the checks (queue EC)
+
+Designed in EC1 from the user's decisions of 2026-11-17 (docs/ideas/token-costs.md) and 2026-11-16
+(docs/ideas/worker-phases-and-resources.md); built in EC2 (the capacity coordinator), EC3 (the engine) and EC4 (the
+briefings, AGENTS.md, the dashboard). Until then a worker runs the checks and reports them with `nexus check`. The
+file formats are in PROTOCOL.md, "Checks run by Nexus". Points marked **(P1)**…**(P17)** go beyond the decisions: they
+are proposals for the user to decide, listed in EC1's report.
+
+**Why.** A worker ran the full suite at every step's end, and every call around it (starting it, polling it, waiting
+for the full-test lock, reading the output) re-read the worker's whole context: about 16% of the cost of the analysed
+transcripts, 563 full runs and 512 polls of the lock. The engine runs the same commands without a model; the worker
+sees output only when something fails. While working, the worker still runs the targeted tests
+(`npm run test:files -- <files>` in Nexus).
+
+**When.** The worker's turn ends with `nexus step done`; the engine cleans the worker's descendants as today (queue
+PT), then runs the checks, then sends the step to review. The step is not in review, and nothing of the step's end
+happens yet (the next step, the closing step, context care's switch, a plan or a deploy waiting for the step), until
+the checks have passed: a failure goes back to the same session, which holds the context the fix needs. `nexus step
+failed` and `nexus stop` run no checks. Which checks: the project's and the queue's, each once, as the step's opening
+lists them, every one a shell command run in the queue's checkout **(P1)**. Steps opened before the change keep the
+worker's reporting: whether Nexus runs a step's checks is fixed when the step opens.
+
+**How.** Each check is a child process outside the event loop (`spawn` through the shell, never `execSync`), in the
+queue's checkout, its stdout and stderr to a log file under the queue's folder, nothing of it kept in memory but the
+tail. On Windows it runs in a Job Object of its own, as a worker does (queue PT), so the check's whole tree, detached
+children included, ends with it and its end can be observed. The server writes the check's state (command, start,
+end, exit code, the log's path) to a file before it starts the process and after it ends, so a restart finds what was
+running. The checks of a step run one after another, as one heavy operation **(P2)**, all of them even after one has
+failed, so one fix round sees every failure **(P3)**. A check has a time limit, past which it is ended and counts as
+failed **(P10)**. The checks run on the checkout as it is; the result records its HEAD and whether tracked files had
+uncommitted changes (`nexus step done` already warns about those).
+
+**A failing check is run once more.** Only the failed ones, within the same grant of the machine, right after the
+set. Passing the second time, the step goes on and the check is recorded as flaky for that step: the statistics count
+it, and the orchestrator hears of it with its next notice, so it can propose a maintenance queue **(P14)**. Failing
+twice, the worker gets a check-fix round: a message to its session with the failing tests' names (where the output's
+format is known), the end of the output and the full log's path **(P15)**. It fixes, commits and ends with `nexus
+step done` again, and the checks run again, all of them.
+
+**The check-fix round is not a send-back.** It has its own limit, 3 by default (decided "like
+`review_send_back_limit`") **(P4)**, and is counted apart: the step's review round (send-backs, the round of
+its review pictures) stays as it is, and the fix round is numbered within it **(P13)**. After the limit the run halts
+for the orchestrator, which decides what comes next **(P5)**. A worker that finds a failure unrelated to its work (it
+fails on the base too, a test it did not touch that fails now and then) does not patch around it: it says so with its
+evidence, and the orchestrator decides whether the step goes to review with the failure accepted or gets another fix
+round **(P6)**.
+
+**Restarts and updates.** After a restart, a check that was running is run again, not re-attached: the old server's
+check processes ended with its Job Objects (kill-on-close), and a log half written says nothing certain. A server that
+stopped mid-check brings its run back paused like any; the check runs again when the run goes on **(P9)**. An update's
+drain waits for running checks for a while **(P8)**, then stops them (recorded as interrupted, not failed), and they
+run again after the hand-over with the held run. Checks waiting for the machine do not start while an update drains.
+A Pause lets running checks finish and takes effect before the review or the fix round; Stop now and Stop at once end
+them, and they run again when the run goes on **(P16)**.
+
+**What the worker, the orchestrator and the review see.** The step's opening says that Nexus runs the listed checks
+after `nexus step done` and that the worker runs only the tests of what it changes. `nexus check` no longer reports a
+check Nexus runs **(P7)**; it remains for the evidence of an unrelated failure and for steps whose checks the worker
+runs. The review (the orchestrator's notice, later the review helper) gets the engine's results, with flaky checks
+marked: a step reaches review only with its checks passed, or with a failure the orchestrator accepted. The review
+levels, the merge train and the merge back's condition ("the integration step's checks in its last round passed") do
+not change; they read the engine's results. The closing refactoring step no longer runs the checks before it starts:
+it starts at the HEAD on which the last step's checks passed, and its opening says so **(P12)**. The integration step
+works as before (merge, `nexus step done`), and its checks are Nexus's like any step's; that it runs without a model
+when the merge is clean is queue MI's.
+
+**AGENTS.md "Before every commit"** keeps typecheck, lint and the tests of the changed files before each commit (the
+worker still commits several times in a step); its second half becomes: the whole suite runs at the step's end, run by
+Nexus as the queue's checks, not by the worker, and the 15 minutes' wait goes (EC4).
+
+**The step's states.** A step gets one new status, `checking`, between `running` and `review`, with a phase:
+`queued` (waiting for the machine, with what it waits behind) or `running` (which check, since when). A step in a
+check-fix round is `running` with its fix round number, shown apart from a send-back's round. The queue stays
+`running` and the run holds its checkout throughout.
+
+#### The capacity coordinator, first slice
+
+The checks are the coordinator's first user (decided 2026-11-16 and 2026-11-17): one heavy operation per workstation,
+across projects, granted atomically or queued, the queue shown, released when the operation's processes have ended,
+and never a start without the grant after a time. In this slice:
+
+- **It lives in the server**, which serves every project of the workstation, and keeps its state in a file of its own
+  (`<NEXUS_HOME>/capacity.yaml`, the server its one writer), so the dashboard and `nexus status` show the queue and a
+  restart finds it. The workstation has an id (its host name) from the start, for the later model of several machines
+  **(P17)**.
+- **One slot, `heavy`**: one step's checks at a time on the machine. Requests are served in the order they came (by
+  `requested_at`); a waiting request shows what holds the slot and since when, and what is ahead of it.
+- **Release follows the process**: the grant ends when the check set's last process tree is gone (the Job Object is
+  empty), not when a worker or the engine says it is done. A check ended at its time limit releases only once its tree
+  is gone.
+- **No time bypass**: waiting long gives status, never a start beside another heavy operation.
+- **After a restart** the old server's grants are void (their processes ended with it), and the queue is rebuilt from
+  the checks files: the requests not finished, in their order.
+- **Outside Nexus**: a full test run started by hand (or by an agent against its briefing) is not Nexus's to control.
+  `scripts/test-lock.ts` stays the machine-wide guard of `npm test` and `npm run test:times`, whoever starts them, the
+  engine's checks included; the coordinator shows a lock held by a run outside it as what occupies the machine, and
+  grants nothing meanwhile. What changes in test-lock.ts: **(P11)**. `npm run test:files` takes neither.
+
 ### The run's state transitions
 
 A queue's run record (`run.yaml`) changes state only through the named transitions in `apps/server/src/run-state.ts`.
