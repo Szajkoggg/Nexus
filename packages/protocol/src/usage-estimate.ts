@@ -6,17 +6,39 @@
 import type { TokenCounts, TurnRecord } from "./schemas.ts";
 
 /**
- * How much each kind of token counts toward the windows, relative to an input token not read from the cache: the
- * ratios of the API's prices (output 5×, a cache write 1.25×, a cache read 0.1×), the best public proxy for what the
- * windows meter. Only ratios matter: a turn's share compares turns of one runtime.
+ * How much each kind of token counts toward the windows, relative to an input token not read from the cache, for a
+ * runtime without weights of its own (and Codex's): the ratios of the API's prices (output 5×, a cache write 1.25×, a
+ * cache read 0.1×), the best public proxy for what the windows meter. Only ratios matter: a turn's share compares
+ * turns of one runtime.
  */
-export const TOKEN_WEIGHTS: Readonly<TokenCounts> = { input: 1, output: 5, cache_read: 0.1, cache_creation: 1.25 };
+export const PRICE_WEIGHTS: Readonly<TokenCounts> = Object.freeze({ input: 1, output: 5, cache_read: 0.1, cache_creation: 1.25 });
 
-/** A turn's weighted tokens, its sub-agents' included; undefined when the turn's tokens are unknown. */
-export function weightedTokens(t: Pick<TurnRecord, "tokens" | "subagent_tokens">): number | undefined {
+/**
+ * The token weights by runtime (decided 2026-11-18, queue TW). Claude Code: the price ratios but a cache read at 0.02,
+ * measured on 2026-11-18 from its 5-hour window over the turns to 2026-11-17 (queue TB, step TB2: 0.022, 95%
+ * 0.014-0.028; DESIGN.md, "Measuring token use"). Codex: the price ratios, its own window could not tell the cache
+ * read's weight yet. Any other runtime: PRICE_WEIGHTS (tokenWeights).
+ */
+export const TOKEN_WEIGHTS: Readonly<Record<"claude" | "codex", Readonly<TokenCounts>>> = Object.freeze({
+  claude: Object.freeze({ input: 1, output: 5, cache_read: 0.02, cache_creation: 1.25 }),
+  codex: PRICE_WEIGHTS,
+});
+
+/** A runtime's token weights: its own in TOKEN_WEIGHTS, else the price ratios (PRICE_WEIGHTS). */
+export function tokenWeights(runtime: string): Readonly<TokenCounts> {
+  return Object.hasOwn(TOKEN_WEIGHTS, runtime) ? TOKEN_WEIGHTS[runtime as keyof typeof TOKEN_WEIGHTS] : PRICE_WEIGHTS;
+}
+
+/** Tokens weighted with a runtime's weights (an uncached input token = 1). */
+export function weighTokens(t: TokenCounts, w: Readonly<TokenCounts>): number {
+  return t.input * w.input + t.output * w.output + t.cache_read * w.cache_read + t.cache_creation * w.cache_creation;
+}
+
+/** A turn's weighted tokens with its runtime's weights, its sub-agents' included; undefined when the turn's tokens are unknown. */
+export function weightedTokens(t: { runtime: string } & Pick<TurnRecord, "tokens" | "subagent_tokens">): number | undefined {
   if (!t.tokens) return undefined;
-  const w = (x: TokenCounts | undefined) => (x ? x.input * TOKEN_WEIGHTS.input + x.output * TOKEN_WEIGHTS.output + x.cache_read * TOKEN_WEIGHTS.cache_read + x.cache_creation * TOKEN_WEIGHTS.cache_creation : 0);
-  return w(t.tokens) + w(t.subagent_tokens);
+  const w = tokenWeights(t.runtime);
+  return weighTokens(t.tokens, w) + (t.subagent_tokens ? weighTokens(t.subagent_tokens, w) : 0);
 }
 
 /**
