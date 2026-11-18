@@ -1,9 +1,8 @@
 // Reading Claude Code's and Codex's transcripts into one shape: the model calls, each with its tokens and the tool calls
 // it made (and what came back to them). Pure functions of a transcript's text, so the tests feed made-up transcripts;
 // scripts/token-report.ts finds the files. The method is in docs/DESIGN.md, "Measuring token use".
-
-/** A call's tokens in four figures, as turns.jsonl keeps them: input not from the cache, output, cache read and written. */
-export interface Tokens { input: number; output: number; cache_read: number; cache_creation: number }
+import type { TokenCounts } from "@nexus/protocol";
+import { zeroTokens } from "./tokens.ts";
 
 /** One tool call of a model call, with what came back to it. */
 export interface ToolUse {
@@ -26,7 +25,8 @@ export interface Call {
   id?: string;
   at: string;
   model?: string;
-  tokens: Tokens;
+  /** As turns.jsonl keeps them: input not from the cache, output, cache read and written. */
+  tokens: TokenCounts;
   tools: ToolUse[];
 }
 
@@ -42,7 +42,6 @@ export interface Transcript {
 }
 
 const LOCK_WAIT = /npm test: waiting for /;
-const zero = (): Tokens => ({ input: 0, output: 0, cache_read: 0, cache_creation: 0 });
 /** Parsed JSON read loosely: the transcripts are not ours, and their fields come and go between versions. */
 type Loose = any;
 
@@ -104,7 +103,7 @@ export function parseClaude(source: Source, o: { session: string; subagent: bool
       const u = r.message.usage;
       let c = calls.get(r.message.id);
       if (!c) {
-        c = { id: r.message.id, at: String(r.timestamp ?? ""), model: r.message.model, tokens: zero(), tools: [] };
+        c = { id: r.message.id, at: String(r.timestamp ?? ""), model: r.message.model, tokens: zeroTokens(), tools: [] };
         calls.set(r.message.id, c);
       }
       // The lines of one response repeat its usage (the output may grow while it streams): the largest of each.

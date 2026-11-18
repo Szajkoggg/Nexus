@@ -6,8 +6,7 @@
 // "Measuring token use".
 import type { TokenCounts, TurnRecord } from "@nexus/protocol";
 import { TOKEN_WEIGHTS } from "@nexus/protocol/usage-estimate";
-
-const KINDS = ["input", "output", "cache_read", "cache_creation"] as const;
+import { addTokens, KINDS, weigh, zeroTokens } from "./tokens.ts";
 
 /** Readings whose reset times differ by more than this belong to different windows (Codex's drift; usage-estimate.ts). */
 const RESET_SLACK_MS = 5 * 60 * 1000;
@@ -25,15 +24,14 @@ export interface Sample {
 
 interface Reading { t: number; u: number; reset?: number }
 
-const tokensOf = (t: TurnRecord): TokenCounts | undefined => {
+/** A turn's tokens, its sub-agents' included, times `f`; undefined when the turn has none. */
+const tokensOf = (t: TurnRecord, f = 1): TokenCounts | undefined => {
   if (!t.tokens) return undefined;
-  const s = t.subagent_tokens;
-  return {
-    input: t.tokens.input + (s?.input ?? 0), output: t.tokens.output + (s?.output ?? 0),
-    cache_read: t.tokens.cache_read + (s?.cache_read ?? 0), cache_creation: t.tokens.cache_creation + (s?.cache_creation ?? 0),
-  };
+  const sum = zeroTokens();
+  addTokens(sum, t.tokens, f);
+  if (t.subagent_tokens) addTokens(sum, t.subagent_tokens, f);
+  return sum;
 };
-const zero = (): TokenCounts => ({ input: 0, output: 0, cache_read: 0, cache_creation: 0 });
 const span = (t: TurnRecord) => ({ s: Date.parse(t.started_at ?? t.at), e: Date.parse(t.at) });
 
 /** The second reading continues the first's window: no fall, the same reset (within slack), the reset not passed. */
@@ -64,17 +62,15 @@ export function soloSamples(turns: readonly TurnRecord[], runtime: string, windo
   const mine = turns.filter((t) => t.runtime === runtime).map((t) => ({ t, ...span(t) }));
   const out: Sample[] = [];
   for (const a of mine) {
-    const tokens = tokensOf(a.t);
+    const tokens = tokensOf(a.t, 1e-6);
     const r0 = reading(a.s, a.t.windows_start?.[window]);
     const r1 = reading(a.e, a.t.windows_end?.[window]);
     if (!tokens || !r0 || !r1 || !sameWindow(r0, r1)) continue;
     if (mine.some((b) => b !== a && b.s < a.e && b.e > a.s)) continue;
-    out.push({ from: a.s, to: a.e, growth: (r1.u - r0.u) * 100, tokens: scale(tokens, 1e-6), turns: 1 });
+    out.push({ from: a.s, to: a.e, growth: (r1.u - r0.u) * 100, tokens, turns: 1 });
   }
   return out;
 }
-
-const scale = (x: TokenCounts, f: number): TokenCounts => ({ input: x.input * f, output: x.output * f, cache_read: x.cache_read * f, cache_creation: x.cache_creation * f });
 
 /**
  * Stretches between readings of one window at least `minMinutes` long, every turn of the runtime counted with the part
@@ -94,7 +90,7 @@ export function stretchSamples(turns: readonly TurnRecord[], runtime: string, wi
   const samples: Sample[] = [];
   let dropped = 0;
   const close = (a: Reading, b: Reading) => {
-    const tokens = zero();
+    const tokens = zeroTokens();
     let n = 0;
     let unknown = false;
     for (const m of mine) {
@@ -102,8 +98,7 @@ export function stretchSamples(turns: readonly TurnRecord[], runtime: string, wi
       const inside = m.e === m.s ? m.s >= a.t && m.s < b.t : overlap > 0;
       if (!inside) continue;
       if (!m.tokens) { unknown = true; continue; }
-      const f = m.e === m.s ? 1 : overlap / (m.e - m.s);
-      for (const k of KINDS) tokens[k] += m.tokens[k] * f * 1e-6;
+      addTokens(tokens, m.tokens, (m.e === m.s ? 1 : overlap / (m.e - m.s)) * 1e-6);
       n++;
     }
     if (unknown) { dropped++; return; }
@@ -132,7 +127,7 @@ export interface Fit {
   r2: number;
 }
 
-/** Solves A x = b (A square) by Gauss-Jordan elimination with partial pivoting; undefined when singular. */
+/** The inverse of a square matrix, by Gauss-Jordan elimination with partial pivoting; undefined when singular. */
 function inverse(a: number[][]): number[][] | undefined {
   const n = a.length;
   const m = a.map((row, i) => [...row, ...Array.from({ length: n }, (_, j) => (i === j ? 1 : 0))]);
@@ -172,11 +167,14 @@ export function leastSquares(names: string[], x: number[][], y: number[]): Fit |
 
 /** The tokens other than cache reads, weighted with TOKEN_WEIGHTS: the yardstick the cache read is measured against. */
 const rest = (t: TokenCounts) => t.input * TOKEN_WEIGHTS.input + t.output * TOKEN_WEIGHTS.output + t.cache_creation * TOKEN_WEIGHTS.cache_creation;
-const priced = (t: TokenCounts) => rest(t) + t.cache_read * TOKEN_WEIGHTS.cache_read;
 
-/** The cache read's weight in TOKEN_WEIGHTS units (an uncached input token = 1): b / a of growth ≈ a·rest + b·read. */
+/** Growth ≈ a·rest + b·cache read. */
+const readFit = (samples: readonly Sample[]) =>
+  leastSquares(["rest", "cache_read"], samples.map((s) => [rest(s.tokens), s.tokens.cache_read]), samples.map((s) => s.growth));
+
+/** The cache read's weight in TOKEN_WEIGHTS units (an uncached input token = 1): b / a of the read fit. */
 function readRatio(samples: readonly Sample[]): number | undefined {
-  const f = leastSquares(["rest", "cache_read"], samples.map((s) => [rest(s.tokens), s.tokens.cache_read]), samples.map((s) => s.growth));
+  const f = readFit(samples);
   return f && f.beta[0]! > 0 ? f.beta[1]! / f.beta[0]! : undefined;
 }
 
@@ -229,15 +227,15 @@ const HALF_WIDTH = 0.025;
 const MIN_GROWTH = 20;
 
 function estimate(runtime: string, window: string, method: WindowEstimate["method"], samples: Sample[], dropped: number): WindowEstimate {
-  const tokens = zero();
-  for (const s of samples) for (const k of KINDS) tokens[k] += s.tokens[k];
+  const tokens = zeroTokens();
+  for (const s of samples) addTokens(tokens, s.tokens);
   const growth = samples.reduce((a, s) => a + s.growth, 0);
   const days = samples.length ? (Math.max(...samples.map((s) => s.to)) - Math.min(...samples.map((s) => s.from))) / 86_400_000 : 0;
   const e: WindowEstimate = { runtime, window, method, n: samples.length, dropped, growth, tokens, days, coarse: growth < MIN_GROWTH };
   const y = samples.map((s) => s.growth);
   const kinds = KINDS.filter((k) => tokens[k] > 0);
   e.free = leastSquares([...kinds], samples.map((s) => kinds.map((k) => s.tokens[k])), y);
-  e.read = leastSquares(["rest", "cache_read"], samples.map((s) => [rest(s.tokens), s.tokens.cache_read]), y);
+  e.read = readFit(samples);
   if (e.read && e.read.beta[0]! > 0) {
     const [a, b] = e.read.beta as [number, number];
     const c = e.read.cov;
@@ -251,7 +249,7 @@ function estimate(runtime: string, window: string, method: WindowEstimate["metho
   const hours = samples.map((s) => (s.to - s.from) / 3_600_000);
   e.background = leastSquares(["rest", "cache_read", "hours"], samples.map((s, i) => [rest(s.tokens), s.tokens.cache_read, hours[i]!]), y);
   if (e.background && e.background.beta[0]! > 0) e.background_ratio = e.background.beta[1]! / e.background.beta[0]!;
-  e.price = leastSquares(["priced"], samples.map((s) => [priced(s.tokens)]), y);
+  e.price = leastSquares(["priced"], samples.map((s) => [weigh(s.tokens)]), y);
   return e;
 }
 

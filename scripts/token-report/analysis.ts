@@ -3,8 +3,9 @@
 // over a period. Pure: the tests give made-up transcripts, turns and events. The method, and what each figure counts,
 // is in docs/DESIGN.md, "Measuring token use"; how to run it in README.md.
 import { TOKEN_WEIGHTS, weightedTokens } from "@nexus/protocol/usage-estimate";
-import type { TurnRecord } from "@nexus/protocol";
-import type { Call, Tokens, ToolUse, Transcript } from "./transcripts.ts";
+import type { TokenCounts, TurnRecord } from "@nexus/protocol";
+import { addTokens, weigh, zeroTokens } from "./tokens.ts";
+import type { Call, ToolUse, Transcript } from "./transcripts.ts";
 
 /** A Nexus session as its session.yaml names it (only what the report needs). */
 export interface SessionInfo { id: string; project: string; role: string; runtime: string; native_id?: string | null }
@@ -44,7 +45,7 @@ interface RoleRow {
   calls: number;
   /** Weighted tokens (TOKEN_WEIGHTS) and their share of every role's. */
   weighted: number; share: number;
-  tokens: Tokens;
+  tokens: TokenCounts;
   /** The cache reads' part of the role's weighted tokens. */
   cache_read_share: number;
   /** A call's average context: input + cache read + cache written. */
@@ -188,12 +189,8 @@ const shellCommands = (c: Call) => c.tools.filter((t) => SHELLS.has(t.name) && t
 
 // ---------------------------------------------------------------- figures
 
-const weigh = (t: Tokens) =>
-  t.input * TOKEN_WEIGHTS.input + t.output * TOKEN_WEIGHTS.output + t.cache_read * TOKEN_WEIGHTS.cache_read + t.cache_creation * TOKEN_WEIGHTS.cache_creation;
-const context = (t: Tokens) => t.input + t.cache_read + t.cache_creation;
-const add = (a: Tokens, b: Tokens) => { a.input += b.input; a.output += b.output; a.cache_read += b.cache_read; a.cache_creation += b.cache_creation; };
+const context = (t: TokenCounts) => t.input + t.cache_read + t.cache_creation;
 const ratio = (a: number, b: number) => (b > 0 ? a / b : 0);
-const zero = (): Tokens => ({ input: 0, output: 0, cache_read: 0, cache_creation: 0 });
 
 /** A path as the project knows it: relative to its root or worktree, slashes forward. */
 export function relativePath(path: string, roots: readonly string[]): string {
@@ -349,8 +346,8 @@ export function analyze(input: Input): Report {
   for (const role of ROLES) {
     const list = rows.filter((r) => r.role === role);
     if (!list.length) continue;
-    const tokens = zero();
-    for (const r of list) add(tokens, r.c.tokens);
+    const tokens = zeroTokens();
+    for (const r of list) addTokens(tokens, r.c.tokens);
     const weighted = list.reduce((a, r) => a + r.w, 0);
     const ctx = list.reduce((a, r) => a + context(r.c.tokens), 0);
     const above = Object.fromEntries(THRESHOLDS.map((th) => [`${th}`, ratio(list.filter((r) => context(r.c.tokens) > th).reduce((a, r) => a + context(r.c.tokens), 0), ctx)])) as RoleRow["above"];
