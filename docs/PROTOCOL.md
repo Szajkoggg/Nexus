@@ -1152,7 +1152,7 @@ each entry it has seen with `message.read`; `nexus status` shows the unread ones
 protocol: 1
 id: 01JD...
 project: honeycomb
-role: worker                           # worker | orchestrator
+role: worker                           # worker | orchestrator | conversation | user
 runtime: claude                        # claude | codex | external
 native_id: 6f1c...                     # Claude session uuid / Codex thread id
 cwd: C:/Code/GameDev/ProjectHoneycomb
@@ -1183,7 +1183,7 @@ nexus review add W3 $TEMP/nexus-review/W3/cliff@1280.before.png --key cliff-lit@
 nexus review add W3 $TEMP/nexus-review/W3/cliff@1280.png --key cliff-lit@1280 --role after --label "Cliff, lit"   # pairs by key
 nexus review add W3 $TEMP/nexus-review/W3/lit.png --before $TEMP/nexus-review/W3/unlit.png --label "Lighting"   # older: no key
 nexus help review                              # the standard for review material (nexus help: the topics)
-nexus help summaries|questions|refusals|commits   # the other standards
+nexus help summaries|questions|refusals|commits|tests   # the other standards
 nexus check W3 "npm test" --ok --summary "548 passed" --duration 190   # the name exactly as "Checks for every step" lists it (another counts as not reported); how long it ran, in seconds: the metric check:npm test
 nexus metric record bundle-kb 512 [--step W3]  # worker only: a value of a project metric for the step at work, with HEAD
 nexus metric list                              # the project's metrics (any session)
@@ -1195,7 +1195,8 @@ nexus ask "Canyon joints: vertical only, or also inclined?" [--option ...] [--re
                                                # --recommend: one of the --option values, by text or number (1 = first)
 nexus context --topics rock,support --files Runtime/Core/Rock/* <<< "summary text"
 nexus report W --file <temp>/nexus-reports/<project>/W.md --summary "..." [--findings 3]   # copied to .nexus/queues/W/report.md; --findings: a maintenance queue's
-nexus propose-change W --file patch.yaml --reason "..."
+nexus withdraw <qid> --reason "..."            # a question no longer needed (question.withdrawn)
+nexus log "Retrying the probe" [--level info|warn|error]   # a line into the session's own log
 nexus template list | show <id>                # the queue templates in effect (see "Queue templates")
 nexus recurring list                           # the recurring queues and their state (see "Recurring queues")
 nexus static-analysis [status]                 # the stacks and static analysis Nexus sees, and the reminder's state (see "Static analysis reminder")
@@ -1203,19 +1204,20 @@ nexus static-analysis [status]                 # the stacks and static analysis 
 nexus ideas matches                            # the suggestions for matching earlier queues to the notes' entries, and the user's decisions (read only; deciding is the user's, in the dashboard)
 nexus covers tags.md#2026-11-14 docs/ideas/plan.md#2026-11-15   # in a hand-over: the Decided entries it passes on (ideas.covered); the notes folder may be left out; each checked against the notes, a missing note or date refused with the note's dates
 # orchestrator only
-nexus queue draft --file queue.yaml
+nexus queue draft <file.yaml|->                # a new queue, or a change to one: a new revision
 nexus queue draft --template bugfix --set issue="..." --set area=engine [--id BF]   # writes .nexus/drafts/BF.yaml to complete and upload
 nexus recurring set weekly --template maintenance [--set scope=...] (--every "mon 03:00" | --after-queues 5) [--maintenance survey|fix_small] [--reason ...]   # through the server; the user approves it
 nexus static-analysis decline --reason "..."  # the user's no to the static-analysis template: no reminder for 90 days
 nexus answer <qid> "..." [--escalate [--recommend <option>]] [--continue|--wait]
                                                # --recommend only with --escalate: one of the question's options
-nexus session start|resume|fork|pause|stop ...
+nexus run <queue> start|pause|resume|stop --reason "..." [--use-session <id>] [--runtime claude|codex] [--model <m>] [--effort <e>] [--after <queue>... | --next | --at "YYYY-MM-DD HH:MM" | --at usage-reset]   # see "The orchestrator" and "The plan"
 nexus tags propose --area <name> | --activity <prefix:name> [--reason ...]   # a proposal for the project's tag lists
 nexus tags rename <old> <new> [--reason ...]    # the user accepts it (see "Tags"); `nexus tags` lists them (any session)
 nexus metric define bundle-kb --unit KB [--show line|bar|number] [--target 400] [--warn-above 500 | --warn-below=-1]
                                                # a project metric, or a change to one (see "Project metrics")
 nexus attach                                   # register a hand-started session as external
 # setup (the user)
+nexus project list                             # the registered projects
 nexus project add <path> [--id] [--name]       # creates .nexus/ (self-ignoring), registers the project, prints the rules files' check;
                                                # a kept .nexus/ (a project removed from Nexus) brings it back under its id
 nexus import <file.md> [--prefix X]            # one-time import of queues written as Markdown tables

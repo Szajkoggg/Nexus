@@ -673,6 +673,26 @@ and their reasons: [docs/DESIGN.md](docs/DESIGN.md), "Static analysis".
 
 `NEXUS_PORT` and `NEXUS_HOST` change where the server listens (default `127.0.0.1:4317`, this machine only).
 
+#### Environment variables
+
+| Variable | What it sets | Default |
+|---|---|---|
+| `NEXUS_HOME` | The directory of Nexus's own data (`projects.yaml`, global settings, templates) | `%APPDATA%\Nexus` (`~/.config/Nexus` without `APPDATA`) |
+| `NEXUS_PORT` | The port the server listens on (the CLI's `nexus server …` calls it too) | `4317` |
+| `NEXUS_HOST` | The address the server listens on | `127.0.0.1` |
+| `NEXUS_WAIT_PORT` | Seconds a starting server waits for a port its predecessor still holds (set by an update) | `0` |
+| `NEXUS_CLAUDE` | The Claude Code binary the server runs | `claude` |
+| `NEXUS_CODEX` | The Codex binary the server runs | `codex` |
+| `NEXUS_LOG` | Writes the server's log to a file: `1` means `server.log` in `NEXUS_HOME`, any other value is the file | unset (no log file) |
+| `NEXUS_SHIPPED_TEMPLATES` | The folder of the templates Nexus ships | `templates/` in the Nexus checkout |
+| `NEXUS_VAPID_SUBJECT` | The contact (`mailto:` or URL) in the VAPID claim of web push messages | `mailto:nexus@example.com` |
+| `NEXUS_SESSION` | The session the `nexus` command reports as (set by Nexus in agents; `--session` overrides) | unset |
+| `NEXUS_DIR` | The project's `.nexus` folder the `nexus` command uses (set by Nexus in agents) | found by looking upwards from the working directory |
+| `NEXUS_HANDOVER` | The folder a successor server reads at an update (set by the predecessor; the server removes it from its environment at start) | unset |
+
+The variables of the test runner and of the capture script (`NEXUS_TEST_*`, `NEXUS_CAPTURE_BROWSER`) are described where
+they are used, above and below.
+
 ### Pictures of the dashboard for review
 
 `scripts/capture.ts` takes the review pictures of a change to the dashboard: one fixed-viewport picture per view (the
