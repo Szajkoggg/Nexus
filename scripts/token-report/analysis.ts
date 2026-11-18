@@ -192,12 +192,16 @@ const shellCommands = (c: Call) => c.tools.filter((t) => SHELLS.has(t.name) && t
 const context = (t: TokenCounts) => t.input + t.cache_read + t.cache_creation;
 const ratio = (a: number, b: number) => (b > 0 ? a / b : 0);
 
+/** A path with forward slashes, Git Bash's `/c/` as `C:/`. */
+const forward = (path: string) => path.replace(/\\/g, "/").replace(/^\/([a-zA-Z])\//, (_, d: string) => `${d}:/`);
+/** A project's root as paths are compared with it: forward slashes, no trailing one, lower case. */
+const rootKey = (root: string) => root.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+
 /** A path as the project knows it: relative to its root or worktree, slashes forward. */
 export function relativePath(path: string, roots: readonly string[]): string {
-  let s = path.trim().replace(/^["']|["']$/g, "").replace(/\\/g, "/").replace(/^\/([a-zA-Z])\//, (_, d: string) => `${d}:/`);
+  const s = forward(path.trim().replace(/^["']|["']$/g, ""));
   const low = s.toLowerCase();
-  for (const root of roots) {
-    const r = root.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+  for (const r of roots.map(rootKey)) {
     if (low.startsWith(`${r}/`)) return s.slice(r.length + 1);
     if (low.startsWith(`${r}.worktrees/`)) {
       const rest = s.slice(r.length + ".worktrees/".length);
@@ -205,18 +209,14 @@ export function relativePath(path: string, roots: readonly string[]): string {
       return slash < 0 ? rest : rest.slice(slash + 1);
     }
   }
-  s = s.replace(/^\.\//, "");
-  return s;
+  return s.replace(/^\.\//, "");
 }
 
 /** The path lies in one of the projects (its root or a worktree of it). */
 export const inside = (path: string | undefined, roots: readonly string[]) => {
   if (!path) return false;
-  const p = path.replace(/\\/g, "/").replace(/^\/([a-zA-Z])\//, (_, d: string) => `${d}:/`).toLowerCase();
-  return roots.some((root) => {
-    const r = root.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
-    return p === r || p.startsWith(`${r}/`) || p.startsWith(`${r}.worktrees/`);
-  });
+  const p = forward(path).toLowerCase();
+  return roots.map(rootKey).some((r) => p === r || p.startsWith(`${r}/`) || p.startsWith(`${r}.worktrees/`));
 };
 
 const between = (at: string, since?: string, until?: string) => {
@@ -311,11 +311,10 @@ export function analyze(input: Input): Report {
   }
 
   // Per call, with the idle gap before it (over the whole transcript, so a call just inside the period knows its gap).
-  interface Row { c: Call; role: Role; key: string; idle: boolean; w: number }
+  interface Row { c: Call; role: Role; /** Its transcript's index in `mine`. */ transcript: number; idle: boolean; w: number }
   const rows: Row[] = [];
-  const perTranscript = new Map<string, Row[]>();
   const seen = new Set<string>();
-  mine.forEach(({ t, role }, i) => {
+  const perTranscript = mine.map(({ t, role }, i) => {
     const sorted = [...t.calls].sort((a, b) => a.at.localeCompare(b.at));
     const list: Row[] = [];
     sorted.forEach((c, j) => {
@@ -325,19 +324,20 @@ export function analyze(input: Input): Report {
       // A forked transcript repeats its parent's calls: each counts once.
       if (c.id && seen.has(c.id)) return;
       if (c.id) seen.add(c.id);
-      const r = { c, role, key: `${i}`, idle, w: weigh(c.tokens) };
+      const r = { c, role, transcript: i, idle, w: weigh(c.tokens) };
       rows.push(r);
       list.push(r);
     });
-    perTranscript.set(`${i}`, list);
+    return list;
   });
-  const total = rows.reduce((a, r) => a + r.w, 0);
+  const weightOf = (list: Row[]) => list.reduce((a, r) => a + r.w, 0);
+  const total = weightOf(rows);
   if (unnamed.size) {
-    const own = rows.filter((r) => unnamed.has(Number(r.key)));
-    gaps.push(`${[...unnamed].filter((i) => !mine[i]!.t.subagent).length} transcript(s) in the projects' folders belong to no Nexus session (sessions started by hand, or no longer listed): ${own.length} call(s), ${pct(ratio(own.reduce((a, r) => a + r.w, 0), total))} of the weighted tokens, counted under role "other".`);
+    const own = rows.filter((r) => unnamed.has(r.transcript));
+    gaps.push(`${[...unnamed].filter((i) => !mine[i]!.t.subagent).length} transcript(s) in the projects' folders belong to no Nexus session (sessions started by hand, or no longer listed): ${own.length} call(s), ${pct(ratio(weightOf(own), total))} of the weighted tokens, counted under role "other".`);
   }
   const bucket = (list: Row[]): Bucket => {
-    const weighted = list.reduce((a, r) => a + r.w, 0);
+    const weighted = weightOf(list);
     return { calls: list.length, weighted, share: ratio(weighted, total) };
   };
 
@@ -348,10 +348,10 @@ export function analyze(input: Input): Report {
     if (!list.length) continue;
     const tokens = zeroTokens();
     for (const r of list) addTokens(tokens, r.c.tokens);
-    const weighted = list.reduce((a, r) => a + r.w, 0);
+    const weighted = weightOf(list);
     const ctx = list.reduce((a, r) => a + context(r.c.tokens), 0);
     const above = Object.fromEntries(THRESHOLDS.map((th) => [`${th}`, ratio(list.filter((r) => context(r.c.tokens) > th).reduce((a, r) => a + context(r.c.tokens), 0), ctx)])) as RoleRow["above"];
-    const transcripts = new Set(list.filter((r) => !mine[Number(r.key)]!.t.subagent).map((r) => r.key));
+    const transcripts = new Set(list.filter((r) => !mine[r.transcript]!.t.subagent).map((r) => r.transcript));
     roles.push({
       role, sessions: transcripts.size, calls: list.length, weighted, share: ratio(weighted, total), tokens,
       cache_read_share: ratio(tokens.cache_read * TOKEN_WEIGHTS.cache_read, weighted), avg_context: ratio(ctx, list.length), above,
@@ -408,8 +408,8 @@ export function analyze(input: Input): Report {
     const ro = (r: Row) => r.c.tools.length > 0 && r.c.tools.every(readOnly);
     const readOnlyRows = list.filter(ro);
     const runs = { "2": 0, "3": 0, "4-5": 0, "6+": 0 };
-    for (const [key, trows] of perTranscript) {
-      if (mine[Number(key)]!.role !== role) continue;
+    for (const [i, trows] of perTranscript.entries()) {
+      if (mine[i]!.role !== role) continue;
       let run = 0;
       const close = () => {
         if (run === 2) runs["2"]++; else if (run === 3) runs["3"]++; else if (run >= 4 && run <= 5) runs["4-5"]++; else if (run >= 6) runs["6+"]++;
@@ -419,8 +419,8 @@ export function analyze(input: Input): Report {
       close();
     }
     const multi = list.filter((r) => r.c.tools.length >= 2).length;
-    const roWeighted = readOnlyRows.reduce((a, r) => a + r.w, 0);
-    const roleWeighted = list.reduce((a, r) => a + r.w, 0);
+    const roWeighted = weightOf(readOnlyRows);
+    const roleWeighted = weightOf(list);
     shapes.push({
       role, calls: list.length, multi_tool: multi, multi_share: ratio(multi, list.length),
       read_only: readOnlyRows.length, read_only_share: ratio(readOnlyRows.length, list.length), read_only_weighted_share: ratio(roWeighted, roleWeighted), runs,
@@ -477,7 +477,7 @@ export function analyze(input: Input): Report {
   const callSpan = span(rows.map((r) => r.c.at));
   const turnSpan = span(turns.map((t) => t.at));
   if (callSpan && turnSpan && callSpan[0] < turnSpan[0]) gaps.push(`Transcripts reach back to ${callSpan[0]}, turns.jsonl only to ${turnSpan[0]}: the per-turn figures cover less time than the per-call ones.`);
-  if (!rows.some((r) => mine[Number(r.key)]!.t.runtime === "codex")) gaps.push("No Codex call in the period: the per-call figures are Claude Code's only.");
+  if (!rows.some((r) => mine[r.transcript]!.t.runtime === "codex")) gaps.push("No Codex call in the period: the per-call figures are Claude Code's only.");
   const events = input.events.filter((e) => between(e.at, since, until));
 
   return {
@@ -490,7 +490,7 @@ export function analyze(input: Input): Report {
       turns: turns.length, events: events.length,
     },
     total_weighted: total, roles,
-    idle: { calls: idleRows.length, transcripts: new Set(idleRows.map((r) => r.key)).size, weighted: idleW, share: ratio(idleW, total), by_role: idleByRole },
+    idle: { calls: idleRows.length, transcripts: new Set(idleRows.map((r) => r.transcript)).size, weighted: idleW, share: ratio(idleW, total), by_role: idleByRole },
     routine: {
       tests: bucket(routine.tests), checks: bucket(routine.checks), build: bucket(routine.build), lock_wait: bucket(routine.lock_wait),
       full_test_runs: fullTests, lock_queries: routine.lock_wait.length,
