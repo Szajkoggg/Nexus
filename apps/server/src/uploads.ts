@@ -40,24 +40,28 @@ export async function readLimited(body: ReadableStream<Uint8Array> | null, decla
   const chunks: Uint8Array[] = [];
   let size = 0;
   let deadline = declared !== undefined && declared > o.max ? Date.now() + o.ms : undefined;
-  let timer: NodeJS.Timeout | undefined;
-  try {
-    for (;;) {
-      const next = reader.read();
-      const r = deadline === undefined ? await next : await Promise.race([next,
-        new Promise<"late">((resolve) => { timer = setTimeout(() => resolve("late"), Math.max(0, deadline! - Date.now())); })]);
-      clearTimeout(timer);
-      if (r === "late") { next.catch(() => {}); return { tooLarge: true, drained: false }; }
-      if (r.done) break;
-      size += r.value.length;
-      if (size <= o.max) { chunks.push(r.value); continue; }
-      chunks.length = 0;
-      deadline ??= Date.now() + o.ms;
-      if (size > o.drain) return { tooLarge: true, drained: false };
-    }
-  } finally { clearTimeout(timer); }
+  for (;;) {
+    const r = await readBy(reader, deadline);
+    if (r === "late") return { tooLarge: true, drained: false };
+    if (r.done) break;
+    size += r.value.length;
+    if (size <= o.max) { chunks.push(r.value); continue; }
+    chunks.length = 0;
+    deadline ??= Date.now() + o.ms;
+    if (size > o.drain) return { tooLarge: true, drained: false };
+  }
   if (size > o.max) return { tooLarge: true, drained: true };
   return { body: Buffer.concat(chunks, size) };
+}
+
+/** The reader's next chunk, or "late" once `deadline` (epoch ms) has passed first; no deadline: just the next chunk. */
+function readBy(reader: ReadableStreamDefaultReader<Uint8Array>, deadline: number | undefined): Promise<ReadableStreamReadResult<Uint8Array> | "late"> {
+  const next = reader.read();
+  if (deadline === undefined) return next;
+  next.catch(() => {}); // a read that fails after it lost the race is no unhandled rejection
+  let timer: NodeJS.Timeout | undefined;
+  const late = new Promise<"late">((resolve) => { timer = setTimeout(() => resolve("late"), Math.max(0, deadline - Date.now())); });
+  return Promise.race([next, late]).finally(() => clearTimeout(timer));
 }
 
 export type ImageType = "png" | "jpeg" | "webp" | "gif";
