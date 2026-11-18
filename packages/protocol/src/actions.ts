@@ -39,14 +39,7 @@ const nonEmpty = (text: unknown, what: string): string => {
 
 /** The session that records what the user does in the dashboard. */
 export function ensureUserSession(store: ProjectStore): SessionFile {
-  try { return store.readSession(USER_SESSION); } catch { /* create it */ }
-  const p = store.readProject();
-  const s: SessionFile = {
-    protocol: 1, id: USER_SESSION, project: p.id, role: "user", runtime: "external", title: "You (dashboard)",
-    cwd: p.root, launched_by: "nexus", created_at: now(),
-  };
-  store.writeSession(s);
-  return s;
+  return ensureServerSession(store, USER_SESSION, "user", "You (dashboard)");
 }
 
 /**
@@ -54,12 +47,14 @@ export function ensureUserSession(store: ProjectStore): SessionFile {
  * no process and no inbox.
  */
 export function ensureNexusSession(store: ProjectStore): SessionFile {
-  try { return store.readSession(NEXUS_SESSION); } catch { /* create it */ }
+  return ensureServerSession(store, NEXUS_SESSION, "nexus", "Nexus (without a model)");
+}
+
+/** A session the server keeps itself (no process): read, or made the first time it is needed. */
+function ensureServerSession(store: ProjectStore, id: string, role: SessionFile["role"], title: string): SessionFile {
+  try { return store.readSession(id); } catch { /* create it */ }
   const p = store.readProject();
-  const s: SessionFile = {
-    protocol: 1, id: NEXUS_SESSION, project: p.id, role: "nexus", runtime: "external", title: "Nexus (without a model)",
-    cwd: p.root, launched_by: "nexus", created_at: now(),
-  };
+  const s: SessionFile = { protocol: 1, id, project: p.id, role, runtime: "external", title, cwd: p.root, launched_by: "nexus", created_at: now() };
   store.writeSession(s);
   return s;
 }
