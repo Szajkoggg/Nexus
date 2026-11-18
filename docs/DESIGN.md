@@ -795,6 +795,19 @@ once is the user's setting, not something each project decides alone.
   under it.
 - The limit counts only runs at work (running or pausing, not waiting for a review or an answer): a queue waiting for
   the user costs nothing, and counting it would let one unanswered review stop every project.
+- A queue back from waiting waits for a place too (decided by the user on 2026-11-15, queue LQ, after five queues ran
+  under a limit of four: two waited for answers, two others started in their places, and the answers came). Its
+  engine asks the coordinator before it opens the turn of its answers or a send-back, or its next step; with the limit
+  full the run is held (`held` in run.yaml) rather than paused, so nothing of it changes but that it opens nothing,
+  and the coordinator lets the held runs go on first when a place frees, in the order they became ready: what has
+  begun goes ahead of what has not. The hold is written on the run, not kept in memory, because the coordinator and
+  the dashboard read it across projects; the only thing kept in memory is which answers reached a live turn, which a
+  restart (pausing every run) loses harmlessly. Counting follows the same line: a queue counts from when its engine
+  lets it go on, not from when its derived status turns back to running (an answer recorded, a review accepted), else
+  the queue on its way back would fill the place it is about to ask for.
+- What reaches a live turn is never held: an answer to a worker that works on beside its question (`--can-continue`),
+  a message to a working worker. Holding it would cut into a turn at work; and such a worker counts while it works,
+  so no other queue takes its place meanwhile.
 - A direct start is refused with the reason (the user or the orchestrator asked now, and should know at once); a
   planned start waits and says why on its plan, and starts by itself. Waiting starts go in the order the plans were
   made, across projects.

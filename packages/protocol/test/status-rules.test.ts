@@ -81,3 +81,11 @@ test("a review is the user's or the orchestrator's, never both", () => {
 test("a question is open when asked or passed on to the user; answered and withdrawn are closed", () => {
   assert.deepEqual((["open", "escalated", "answered", "withdrawn"] as const).map((state) => isOpenQuestion({ state })), [true, true, false, false]);
 });
+
+test("a run held at the limit does not count, and still goes on and holds its checkout", () => {
+  const held = { state: "running", held: { since: "2026-01-01T09:00:00.000Z", kind: "limit", reason: "waits: 2 queues run, the limit is 2" } };
+  assert.equal(runCounted(held), false);
+  assert.equal(runGoing(held), true);
+  assert.equal(runHoldsCheckout(held), true);
+  assert.equal(runEnded(held), false);
+});

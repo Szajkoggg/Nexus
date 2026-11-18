@@ -6,11 +6,16 @@
 // itself once it may. Waiting starts go in the order their plans were made, across projects; every start inside a
 // pass is followed by a fresh look, so a pass never starts two queues into one checkout or past a limit.
 //
+// A queue coming back from waiting (an answer, a review: it counted no more meanwhile) asks too before it opens a new
+// turn or its next step: with a limit full, its engine holds the run (`held` in run.yaml, decided 2026-11-15, queue
+// LQ). Each pass first lets the held runs go on, in the order they became ready, and only then the planned starts: what
+// has begun goes ahead of what has not.
+//
 // The limits are settings: the global `defaults.max_running` (<NEXUS_HOME>/settings.yaml, changed from the dashboard's
 // server panel; limits.json, where it was kept before, is its copy for an older server) and a project's own value of it
 // (its effective `defaults.max_running`: the global one when it has none of its own).
 import {
-  runHoldsCheckout, runCounted, loadProjectState, readGlobalSettings,
+  isOpenQuestion, runHoldsCheckout, runCounted, loadProjectState, readGlobalSettings,
   type ProjectState, type ProjectStore, type QueueView,
 } from "@nexus/protocol";
 import { checkoutPath, samePath } from "./worktree.ts";
@@ -26,6 +31,12 @@ export interface Member {
   duePlans(): { queue: string; created_at: string }[];
   /** Starts the queue of a due plan, or records why it waits; whether it started. */
   startDue(queue: string): boolean;
+  /** Its runs held at the limit, each with since when (run.yaml `held`). */
+  heldRuns(): { queue: string; since: string }[];
+  /** The answers (inbox entry ids) that reached a worker while its turn was live: part of the work it is at. */
+  liveAnswers(): ReadonlySet<string>;
+  /** Lets a held run go on if a place is free now, or records why it still waits; whether it went on. */
+  releaseHeld(queue: string): boolean;
 }
 
 /** A queue whose run holds its checkout. `counts`: it is running (not waiting), so it counts toward the limit. */
@@ -42,13 +53,39 @@ export const refusalText = (queue: string, verb: string, b: Block): string =>
   b.kind === "checkout" ? `queue ${queue} cannot ${verb}: its checkout is in use, ${b.detail}` : `queue ${queue} cannot ${verb}: ${b.detail}`;
 
 /** The queues of a project whose runs hold their checkouts. */
-function holdersOf(state: ProjectState): Holder[] {
+function holdersOf(state: ProjectState, live: ReadonlySet<string> = new Set()): Holder[] {
   return state.queues.filter((q) => runHoldsCheckout(q.run)).map((q) => ({
     project: state.project.id, name: state.project.name, queue: q.id, state: q.run!.state, checkout: checkoutPath(state, q),
     // A queue waiting for a review or an answer does not count, nor one waiting for the usage window, a retry or an
-    // approval: only a run at work.
-    counts: runCounted(q.run) && q.status !== "waiting",
+    // approval, nor one held at the limit, nor one whose steps are all done (its run is about to finish): only a run at
+    // work. A worker that asked with --can-continue and works on in its live turn is at work; one back from waiting
+    // counts from when its engine lets it go on (returning).
+    counts: runCounted(q.run) && q.status !== "done" && (q.status === "waiting" ? workingOn(state, q) : !returning(state, q, live)),
   }));
+}
+
+/**
+ * The queue is back from waiting but its engine has not let it go on yet (it asks for a place first, heldAtLimit): its
+ * worker idle, with an answer (but one that reached its live turn, `live`) or a send-back not yet delivered, an answer
+ * not yet in its inbox, or between a step whose review ended and the next one.
+ */
+function returning(state: ProjectState, q: QueueView, live: ReadonlySet<string>): boolean {
+  const run = q.run!;
+  const s = state.sessions.find((x) => x.id === run.session);
+  if (s?.live?.state !== "idle") return false;
+  const current = q.steps.find((x) => x.id === run.step);
+  if (current && (current.status === "done" || current.status === "skipped") && q.steps.some((x) => x.status === "pending")) return true;
+  if (s.inbox.some((m) => !m.read_at && (m.type === "send_back" || (m.type === "answer" && !live.has(m.id))))) return true;
+  return state.questions.some((x) => x.session === run.session && x.state === "answered" && !s.inbox.some((m) => m.type === "answer" && m.qid === x.qid));
+}
+
+/** The queue's worker works on in a live turn beside its open question (asked with --can-continue). */
+function workingOn(state: ProjectState, q: QueueView): boolean {
+  const run = q.run!;
+  if (state.sessions.find((s) => s.id === run.session)?.live?.state !== "working") return false;
+  if (q.steps.some((s) => s.status === "review")) return false;
+  const open = q.questions.filter((x) => isOpenQuestion(x) && (!x.step || x.step === run.step));
+  return open.length > 0 && open.every((x) => x.can_continue);
 }
 
 export class Coordinator {
@@ -57,6 +94,8 @@ export class Coordinator {
   /** Set while a pass runs; a look asked for meanwhile makes it look once more. */
   private passing = false;
   private again = false;
+  /** The pass running (or one asked for meanwhile) starts the due plans too, not only the held runs. */
+  private startsToo = false;
   /** The holders, kept within a pass until a start changes them. */
   private cache?: Holder[];
   private wakeTimer?: NodeJS.Timeout;
@@ -77,7 +116,7 @@ export class Coordinator {
     const out: Holder[] = [];
     for (const m of this.members) {
       if (m.isStopped()) continue;
-      try { out.push(...holdersOf(loadProjectState(m.store))); } catch { /* a project that cannot be read holds nothing */ }
+      try { out.push(...holdersOf(loadProjectState(m.store), m.liveAnswers())); } catch { /* a project that cannot be read holds nothing */ }
     }
     if (this.passing) this.cache = out;
     return out;
@@ -111,6 +150,9 @@ export class Coordinator {
     return this.checkoutBlock(state, q) ?? this.limitBlock(state, q);
   }
 
+  /** A run was written: the holders kept within a pass are read again. */
+  runChanged(): void { this.cache = undefined; }
+
   /** A look at the planned starts soon (after a run ended, paused, or went waiting; after the limit changed). */
   wake(): void {
     if (this.wakeTimer) return;
@@ -118,17 +160,36 @@ export class Coordinator {
   }
 
   /**
-   * Starts the planned starts that came due, in the order their plans were made, across the projects. Each start is
-   * followed by a fresh look at the holders, so the next one sees it. One that may not start yet records why.
+   * Lets the runs held at the limit go on, then starts the planned starts that came due, in the order their plans
+   * were made, across the projects. Each that goes is followed by a fresh look at the holders, so the next one sees
+   * it. One that may not go on or start yet records why.
    */
-  checkStarts(): void {
-    if (this.passing) { this.again = true; return; }
+  checkStarts(): void { this.pass(true); }
+
+  /**
+   * Lets the runs held at the limit go on, as far as places are free, in the order they became ready (across the
+   * projects): before a queue back from waiting asks for a place of its own, so the runs held before it go first.
+   */
+  releaseHeld(): void { this.pass(false); }
+
+  private pass(starts: boolean): void {
+    // Within a pass, the held runs had their turn already this round: only a look at the starts is asked for again.
+    if (this.passing) { if (starts) { this.again = true; this.startsToo = true; } return; }
     this.passing = true;
+    this.startsToo = starts;
     try {
       // A start inside the pass may ask for another look (its change notices); a few rounds settle it.
       for (let round = 0; round < 5; round++) {
         this.again = false;
         this.cache = undefined;
+        const held = [...this.members].filter((m) => m.accepting())
+          .flatMap((m) => m.heldRuns().map((h) => ({ m, ...h })))
+          .sort((a, b) => a.since.localeCompare(b.since) || a.m.store.dir.localeCompare(b.m.store.dir) || a.queue.localeCompare(b.queue));
+        for (const h of held) {
+          if (!h.m.accepting()) continue;
+          if (h.m.releaseHeld(h.queue)) this.cache = undefined;
+        }
+        if (!this.startsToo) { if (!this.again) break; continue; }
         const due = [...this.members].filter((m) => m.accepting())
           .flatMap((m) => m.duePlans().map((d) => ({ m, ...d })))
           .sort((a, b) => a.created_at.localeCompare(b.created_at) || a.m.store.dir.localeCompare(b.m.store.dir) || a.queue.localeCompare(b.queue));

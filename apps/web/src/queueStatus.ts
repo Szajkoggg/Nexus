@@ -28,7 +28,8 @@ export interface QueueLike {
   status: string;
   steps: readonly { id: string; status: string; review_with?: "orchestrator" | "user" }[];
   questions: readonly { state: string; can_continue: boolean; step?: string }[];
-  run?: { state: string; step?: string };
+  /** `held`: a running run held at the limit on queues running at once (it goes on by itself once a place frees). */
+  run?: { state: string; step?: string; held?: { reason: string } };
   stop_step?: string;
   current_step?: string;
   /**
@@ -110,6 +111,8 @@ export function queueStatus(q: QueueLike, now = new Date()): HonestStatus {
   const theirs = q.steps.find((s) => s.status === "review");
   if (theirs) return is("review", "status.orchestratorReviews", undefined, theirs.id);
   if (run) {
+    // Back from waiting, it would open a turn or its next step, but as many queues run as the limit allows.
+    if (run.state === "running" && run.held) return is("waiting", "status.heldLimit", undefined, run.step);
     switch (run.state) {
       case "running": return is("running", "status.running", undefined, run.step);
       case "pausing": return run.step ? is("running", "status.pausingAfter", { step: run.step }, run.step, true) : is("running", "status.pausingThisStep");

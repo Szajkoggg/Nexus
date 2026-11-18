@@ -1113,6 +1113,14 @@ export const RunFile = z.object({
   /** Stopped only for a Nexus update: the server resumes it by itself when it starts again. */
   resume_after_restart: z.boolean().optional(),
   /**
+   * A running run held at the limit on queues running at once (PROTOCOL.md, "One queue per checkout, and a limit"): it
+   * came back from waiting (an answer, a review) to open a new turn or its next step while as many queues ran as a
+   * limit allows. It opens nothing and does not count; the coordinator lets it go on by itself once a place frees,
+   * before any planned start, in the order the held runs became ready (`since`). `reason` (also the run's `reason`
+   * while held): "waits: 2 queues run, the limit is 2". Only on a running run: any other state drops it.
+   */
+  held: z.object({ since: Time, kind: z.literal("limit"), reason: z.string() }).optional(),
+  /**
    * The queue's revision the run goes by: the one it was started on, moved to a newer approved one at the end of a
    * step (a revision changes only steps that have not started, so a run of an older revision may go on).
    */

@@ -6,7 +6,7 @@ import type { RunFile, StepStatus } from "./schemas.ts";
 
 type RunState = RunFile["state"];
 /** A run, as the state derivation, the server and the dashboard each hold it (the dashboard as plain text). */
-type RunLike = { state: RunState | (string & {}) } | null | undefined;
+type RunLike = { state: RunState | (string & {}); held?: unknown } | null | undefined;
 
 /**
  * Run states in which the run holds its session and its checkout: it goes on by itself (running, pausing, a usage or
@@ -32,8 +32,11 @@ const ENDED_RUN_STATES: readonly RunState[] = ["finished", "halted", "paused"];
 export const runGoing = (run: RunLike): boolean => !!run && HOLDING_RUN_STATES.includes(run.state as RunState);
 /** The run holds its checkout: going, or paused there (CHECKOUT_RUN_STATES). */
 export const runHoldsCheckout = (run: RunLike): boolean => !!run && CHECKOUT_RUN_STATES.includes(run.state as RunState);
-/** The run is at work now and counts toward the limit on queues running at once (COUNTED_RUN_STATES). */
-export const runCounted = (run: RunLike): boolean => !!run && COUNTED_RUN_STATES.includes(run.state as RunState);
+/**
+ * The run is at work now and counts toward the limit on queues running at once (COUNTED_RUN_STATES): not one held at
+ * the limit (`held`), which waits for a place.
+ */
+export const runCounted = (run: RunLike): boolean => !!run && COUNTED_RUN_STATES.includes(run.state as RunState) && !run.held;
 /** The run is not going: finished, halted or paused (ENDED_RUN_STATES). */
 export const runEnded = (run: RunLike): boolean => !!run && ENDED_RUN_STATES.includes(run.state as RunState);
 

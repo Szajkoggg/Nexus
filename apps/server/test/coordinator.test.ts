@@ -2,23 +2,14 @@
 // (src/coordinator.ts), against the fake runtimes: projects whose engines share one coordinator, as the server's do.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import {
-  DEFAULT_MAX_RUNNING, ProjectStore, approveQueue, ensureGlobalSettings, loadProjectState, newId, readGlobalSettings, routeAnswers, updateGlobalSettings, updateSettings,
-  type Event, type StepDef,
-} from "@nexus/protocol";
-import { Engine, type Clock } from "../src/engine.ts";
+import { join } from "node:path";
+import { DEFAULT_MAX_RUNNING, ensureGlobalSettings, loadProjectState, readGlobalSettings, updateGlobalSettings } from "@nexus/protocol";
+import type { Clock } from "../src/engine.ts";
 import { Coordinator } from "../src/coordinator.ts";
-import { acceptReviews } from "./fake-reviewer.ts";
-import { WAIT_MS, until as waitUntil, LONGER, holdWork } from "./wait.ts";
-
-process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
-// Queues in checkouts of their own (plain folders here, no git) end with the integration step, which is not this
-// file's subject: its fake reports it done.
-process.env.FAKE_INTEGRATE = "done";
+import { doneByHand, going, world } from "./coordinator-world.ts";
+import { LONGER, holdWork } from "./wait.ts";
 
 const MIN = 60_000;
 
@@ -42,69 +33,7 @@ class TestClock implements Clock {
   }
 }
 
-/** A queue: its steps' fake behaviours; `own`: in a worktree of its own (a folder), else the project's checkout. */
-type Spec = string[] | { steps: string[]; own?: boolean; level?: 1 | 2 | 3 };
-
-/**
- * Projects sharing one coordinator, each with its engine, under one NEXUS_HOME whose global limit is `limit` (as the
- * server's coordinator, it reads it from the global settings).
- */
-function world(opts: { limit?: number; clock?: Clock } = {}) {
-  const base = mkdtempSync(join(tmpdir(), "nexus-coord-"));
-  process.env.NEXUS_HOME = join(base, "home");
-  process.env.FAKE_LOG = join(base, "fake.log");
-  updateGlobalSettings({ defaults: { max_running: opts.limit ?? 2 } });
-  const coordinator = new Coordinator();
-  const ticks: (() => void)[] = [];
-  const engines: Engine[] = [];
-
-  /** `own`: the project's own limit on its queues running at once (else it follows the global one). */
-  const add = (id: string, queues: Record<string, Spec>, own?: number) => {
-    const root = join(base, id);
-    mkdirSync(root, { recursive: true });
-    const store = ProjectStore.init(root, { id, name: `Project ${id}`, root, orchestrator: { notify: false } });
-    if (own !== undefined) updateSettings(store, { defaults: { max_running: own } });
-    for (const [qid, spec] of Object.entries(queues)) {
-      const s = Array.isArray(spec) ? { steps: spec } : spec;
-      const steps: StepDef[] = s.steps.map((b, i) => ({ id: `${qid}${i + 1}`, title: `Step ${i + 1}`, goal: `FAKE: ${b}`, acceptance: [] }));
-      const worktree = s.own ? join(base, `${id}-${qid}`) : undefined;
-      if (worktree) mkdirSync(worktree, { recursive: true });
-      store.writeQueue({
-        protocol: 1, id: qid, title: `Queue ${qid}`, revision: 1, status: "proposed", stop_conditions: [], checks: [], steps,
-        approvals: [], withdrawals: [], history: [], ...(worktree ? { worktree } : {}), ...(s.level ? { review_level: s.level } : {}),
-      });
-      approveQueue(store, qid);
-    }
-    let engine: Engine | undefined;
-    // Stands in for the server's file watcher.
-    const tick = () => { routeAnswers(store); acceptReviews(store); engine?.onChange(loadProjectState(store)); };
-    engine = new Engine(store, tick, { retryBaseMs: 30, usageMarginMs: 100, coordinator, clock: opts.clock });
-    ticks.push(tick);
-    engines.push(engine);
-    const queue = (q: string) => loadProjectState(store).queues.find((x) => x.id === q)!;
-    return { store, engine, queue };
-  };
-
-  const timer = setInterval(() => { for (const t of ticks) t(); }, 150);
-  const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms);
-  const stop = () => { clearInterval(timer); for (const e of engines) e.shutdown(); };
-  // Every project's engine looks at its files once, synchronously: what did not start then never would by itself.
-  const tick = () => { for (const t of ticks) t(); };
-  return { coordinator, add, until, tick, stop };
-}
-
-/** Marks a queue's steps done as an external worker would, with no engine involved, and accepted. */
-function doneByHand(store: ProjectStore, queue: string, steps: string[]): void {
-  const session = newId();
-  store.writeSession({ protocol: 1, id: session, project: store.readProject().id, role: "worker", runtime: "external", cwd: ".", launched_by: "external", created_at: new Date().toISOString() });
-  for (const step of steps) for (const type of ["step.started", "step.done"] as const) {
-    store.appendEvent({ v: 1, id: newId(), at: new Date().toISOString(), session, type, queue, step, ...(type === "step.done" ? { summary: "by hand" } : {}) } as Event);
-  }
-  acceptReviews(store);
-}
-
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const going = (state: string | undefined) => state === "running" || state === "pausing";
 
 test("two queues chained after the same queue in the project's checkout run one after the other, in plan order", async () => {
   const work = holdWork();

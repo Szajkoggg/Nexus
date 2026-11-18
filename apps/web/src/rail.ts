@@ -35,7 +35,8 @@ export function shortStatus(s: HonestStatus): string {
         : key === "status.needsApprovalRevision" ? t("rail.short.needsApproval")
         : key === "status.needsApprovalThen" ? t("rail.short.needsApprovalThen", { start: start(p.startKind) })
         : s.label;
-    case "waiting": return key === "status.waitingAnswer" ? t("rail.short.question") : key === "status.usage" ? t("rail.short.usage") : t("rail.short.retry");
+    case "waiting": return key === "status.waitingAnswer" ? t("rail.short.question") : key === "status.usage" ? t("rail.short.usage")
+      : key === "status.heldLimit" ? t("rail.short.heldLimit") : t("rail.short.retry");
     case "paused":
     case "stopped":
     case "failed":

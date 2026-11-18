@@ -32,11 +32,11 @@ import { StaticReminder } from "./static-reminder.ts";
 import { gitBranch, recordSetup, runSetup, setupPending, worktreeFor } from "./worktree.ts";
 import { closingContext } from "./closing.ts";
 import { integrationContext } from "./integration.ts";
-import { Coordinator, refusalText, type Member } from "./coordinator.ts";
+import { Coordinator, refusalText, waitingText, type Member } from "./coordinator.ts";
 import { gitWritableRoots } from "./codex.ts";
 import {
   assertCanResume, assertCanStart, startedRun, stoppedMessage, toFinished, toHalted, toHeldForUpdate,
-  toApprovalWait, toPaused, toPausedByUser, toResumed, toRetryWait, toRevision, toUnheld, toUsageWait,
+  toApprovalWait, toLimitHeld, toLimitReleased, toPaused, toPausedByUser, toResumed, toRetryWait, toRevision, toUnheld, toUsageWait,
 } from "./run-state.ts";
 
 type Live = Hosted;
@@ -179,6 +179,12 @@ export class Engine implements Member {
   private readonly backgroundWaits = new Map<string, { step: string; since: number; expired?: boolean }>();
   /** The steps of survey runs checked for left work (surveyLeftWork), by queue, step and the time it ended. */
   private readonly surveyChecked = new Set<string>();
+  /**
+   * The answers (inbox entry ids) that reached a worker while its turn was live, until they are delivered: the turn
+   * they open after it is no return from waiting, so it is never held at the limit (the queue was at work, and counted).
+   * Lost with a restart, which pauses the runs anyway.
+   */
+  private readonly liveAnswerIds = new Set<string>();
   /** Worktree setup commands running, by queue (src/worktree.ts, runSetup). */
   private readonly setups = new Map<string, ChildProcess | null>();
 
@@ -236,7 +242,9 @@ export class Engine implements Member {
     let state = loadProjectState(this.store);
     let q = this.queue(state, queueId);
     assertCanStart(q);
-    // Never two queues in one checkout, and no more queues at once than the limit (a planned start waits instead).
+    // Never two queues in one checkout, and no more queues at once than the limit (a planned start waits instead). The
+    // runs held at the limit take a free place first.
+    this.coordinator.releaseHeld();
     const block = this.coordinator.startBlock(state, q);
     if (block) throw new ActionError(refusalText(queueId, "start", block), 409);
     // The new run replaces the run record: a step an earlier run left open goes back to pending, so it runs again
@@ -558,7 +566,8 @@ export class Engine implements Member {
   onChange(state: ProjectState): void {
     if (!this.stopped) this.pusher.onChange(state);
     for (const l of this.host.all()) this.deliverInbox(state, l);
-    for (const q of state.queues) if (runCounted(q.run)) this.advance(q.id, state);
+    // Also a run held at the limit: a stop or a pause still reaches it.
+    for (const q of state.queues) if (q.run?.state === "running" || q.run?.state === "pausing") this.advance(q.id, state);
     for (const q of state.queues) if (q.run?.state === "approval_wait" && q.approved) this.continueApproved(q.id);
     // Recurring queues after N queues: a queue that got done may complete a count.
     if (!this.stopped && !this.draining) this.recurrer.check(state);
@@ -615,6 +624,40 @@ export class Engine implements Member {
   accepting(): boolean { return !this.stopped && !this.draining; }
   duePlans(): { queue: string; created_at: string }[] { return this.scheduler.duePlans(); }
   startDue(queueId: string): boolean { return this.scheduler.startDue(queueId); }
+  liveAnswers(): ReadonlySet<string> { return this.liveAnswerIds; }
+  heldRuns(): { queue: string; since: string }[] {
+    if (!this.accepting()) return [];
+    return this.store.queueIds().flatMap((q) => {
+      const run = this.store.readRun(q);
+      return run?.state === "running" && run.held ? [{ queue: q, since: run.held.since }] : [];
+    });
+  }
+
+  /**
+   * A run held at the limit goes on once a place is free (the coordinator's pass, which takes the held runs in the
+   * order they became ready, before any planned start): what it held goes on, the next step or the turn its inbox
+   * opens (the answers, a send-back, the messages that came meanwhile). Still full: it records the reason now.
+   */
+  releaseHeld(queueId: string): boolean {
+    if (!this.accepting()) return false;
+    const run = this.store.readRun(queueId);
+    if (run?.state !== "running" || !run.held) return false;
+    const state = loadProjectState(this.store);
+    const q = state.queues.find((x) => x.id === queueId);
+    if (!q) return false;
+    const block = this.coordinator.limitBlock(state, q);
+    if (block) {
+      if (waitingText(block) !== run.held.reason) this.writeRun(queueId, toLimitHeld(run, waitingText(block), now()));
+      return false;
+    }
+    this.writeRun(queueId, toLimitReleased(run));
+    this.store.appendActivity(run.session, { at: now(), kind: "text", text: `Nexus lets queue ${queueId} go on: a place under the limit is free (it waited since ${formatClock(run.held.since, new Date())})`, queue: queueId, step: run.step });
+    this.advance(queueId);
+    const live = this.host.get(run.session);
+    if (live) this.deliverInbox(loadProjectState(this.store), live);
+    this.changed();
+    return true;
+  }
 
   /** Activity of a session, optionally only what was tagged with a step. */
   activity(session: string, queue?: string, step?: string, limit = 300) {
@@ -748,6 +791,9 @@ export class Engine implements Member {
       return;
     }
     if (run.state === "pausing") return this.writeRun(queueId, toPaused(run));
+    // After a step (which waited for its review, so the queue counted no more): the next one opens only with a place
+    // under the limit, else the run is held until one frees. Also the closing and the integration step.
+    if (current && this.heldAtLimit(queueId, run, `step ${next.id}`)) return;
     if (this.worktreeSetup(queueId, run, q)) return;
     // The step's own values; beyond the usage threshold, the first free entry of its fallback chain, or a wait for the
     // earliest reset (routing.ts, chooseRoute). Back on its own values at the first step boundary after its runtime
@@ -767,6 +813,29 @@ export class Engine implements Member {
     const routedRun = this.recordRoute(queueId, run, next.id, routed, choice);
     if (this.prepareStep(queueId, routedRun, state, q, current, next, want, live)) return;
     this.openStep(queueId, next, q, "start");
+  }
+
+  /**
+   * A queue back from waiting (an answer, a review: it counted no more meanwhile) would open a new turn or its next
+   * step (`what`): with as many queues running as a limit allows, the run is held (run.yaml `held`, with the reason)
+   * and goes on by itself once a place frees, through the coordinator's pass (releaseHeld), which lets the runs held
+   * before it go first. A run held already stays so until that pass. True: held, nothing opens now. Never a live turn:
+   * what reaches a working session goes into its turn.
+   */
+  private heldAtLimit(queueId: string, run: RunFile, what: string): boolean {
+    if (run.held) return true;
+    this.coordinator.releaseHeld();
+    const state = loadProjectState(this.store);
+    const q = state.queues.find((x) => x.id === queueId);
+    const block = q && this.coordinator.limitBlock(state, q);
+    if (!block) return false;
+    const latest = this.store.readRun(queueId);
+    if (latest?.state !== "running") return true;
+    const reason = waitingText(block);
+    this.writeRun(queueId, toLimitHeld(latest, reason, now()));
+    this.store.appendActivity(latest.session, { at: now(), kind: "turn_end", text: `Nexus holds queue ${queueId} before ${what}: it ${reason}; it goes on by itself once a place frees`, queue: queueId, step: latest.step });
+    this.changed();
+    return true;
   }
 
   /** Start one cleanup barrier per idle turn; no inbox or next step may enter while it is pending. */
@@ -1093,6 +1162,7 @@ export class Engine implements Member {
     const s = state.sessions.find((x) => x.id === l.session);
     const unread = (s?.inbox ?? []).filter((m) => !m.read_at);
     if (!unread.length) return;
+    if (l.proc.state === "working") for (const m of unread) if (m.type === "answer") this.liveAnswerIds.add(m.id);
     const owners = state.queues.filter(q => q.run?.session === l.session && q.run.state !== "finished");
     // A reused session can still appear in an older halted run. Its current run owns the inbox barrier.
     const owner = owners.find(q => runGoing(q.run)) ?? owners.find(q => q.id === s?.queue) ?? owners.at(-1);
@@ -1101,7 +1171,15 @@ export class Engine implements Member {
     // Partial answers remain durable in the inbox but cannot start or steer work. Stop messages still reach it.
     const questionsOpen = !!owner && questionsHold(state, owner.id, run?.step);
     if (owner && l.proc.state === "idle" && (owner.status === "stopped" || (step && OUTCOME.has(step.status))) && this.cleanWorker(owner.id, l)) return;
-    const idleAllowed = !run || (run.state === "running" && owner?.status !== "stopped" && !owner?.rejection && step?.status !== "review");
+    const allowed = !run || (run.state === "running" && owner?.status !== "stopped" && !owner?.rejection && step?.status !== "review");
+    // A run held at the limit opens no turn: its entries wait in the inbox (a stop still reaches it). One back from
+    // waiting (its answers, a send-back) to an idle session asks for a place first, and may be held now. Read from the
+    // file: the state given may be older than the coordinator's last hold or release.
+    const latest = owner && run && allowed ? this.store.readRun(owner.id) : undefined;
+    const returning = unread.some((m) => m.type === "send_back" || (m.type === "answer" && !this.liveAnswerIds.has(m.id)));
+    const held = !!latest?.held || (!!latest && !questionsOpen && returning && l.proc.state === "idle"
+      && this.heldAtLimit(owner!.id, latest, "the turn its answers or send-back open"));
+    const idleAllowed = allowed && !held;
     // A new turn of an idle session within its step (an answer, a send-back, a message): its runtime beyond the usage
     // threshold goes on on the step's fallback in a fresh session, which gets these entries (or the run waits). A stop
     // is not a turn; an entry for a working session goes into its running turn, which is never cut off.
@@ -1119,6 +1197,7 @@ export class Engine implements Member {
       for (const m of batch) {
         if (m.type === "send_back") recordStepStart(this.store, m.queue, m.step, l.session);
         this.store.appendDelivered(l.session, { at: now(), kind: "inbox", id: m.id, via: "turn" });
+        this.liveAnswerIds.delete(m.id);
       }
     }
     // One by one: a stop always; the rest neither while questions are open nor when the batch took it. A run's answers
@@ -1517,6 +1596,7 @@ export class Engine implements Member {
       ? (old && runEnded(old) && old.ended_at ? old.ended_at : now())
       : undefined;
     this.store.writeRun(queueId, { ...run, ended_at: ended, updated_at: now() });
+    this.coordinator.runChanged();
     // A run that stopped going may free its checkout or a place under the limit, for a waiting start in any project.
     if (old?.state !== run.state && !this.stopped) this.coordinator.wake();
   }

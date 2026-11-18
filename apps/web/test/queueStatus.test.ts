@@ -91,3 +91,9 @@ test("a run waiting for the approval at a step's end says so, after which step; 
   // Mid-step a newer revision waits: the queue needs approval, the step goes on.
   assert.deepEqual(pick(queueStatus(q({ ...waiting, steps: st("S1:running S2:pending"), run: { state: "running", step: "S1" }, approved: false }))), ["approval", "needs approval (revision 3)"]);
 });
+
+test("a run held at the limit, back from waiting, shows the planned start's words for it: waits: limit", () => {
+  const held = queueStatus(q({ status: "running", steps: st("H1:done H2:pending"), run: { state: "running", step: "H1", held: { reason: "waits: 2 queues run, the limit is 2" } } }));
+  assert.deepEqual(pick(held), ["waiting", "waits: limit reached · H1"]);
+  assert.equal(shortStatus(held), "waits: limit");
+});

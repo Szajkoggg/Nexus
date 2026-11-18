@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { ActionError, runIsOlder, type QueueView, type RunFile } from "@nexus/protocol";
 import {
   assertCanResume, assertCanStart, startedRun, toFinished, toHalted, toHeldForUpdate, toPaused, toPausedByUser, toResumed,
-  toApprovalWait, toRetryWait, toRevision, toUnheld, toUsageWait,
+  toApprovalWait, toLimitHeld, toLimitReleased, toRetryWait, toRevision, toUnheld, toUsageWait,
 } from "../src/run-state.ts";
 
 /** A run with every field a transition may touch set, so what each one clears shows. */
@@ -177,4 +177,22 @@ test("runIsOlder: by the run's revision against the one given, else by a revisio
   assert.equal(runIsOlder(old, 5, []), false, "no revision and no history: not older");
   assert.equal(runIsOlder(old, 5, [{ revision: 4, replaced_at: "2026-01-01T08:00:00.000Z" } as never]), false, "replaced before the run started");
   assert.equal(runIsOlder(old, 5, [{ revision: 4, replaced_at: "2026-01-01T10:00:00.000Z" } as never]), true, "replaced after it started");
+});
+
+test("toLimitHeld and toLimitReleased: held with its reason, keeping when it became ready; released, both cleared", () => {
+  const running: RunFile = { ...FULL, reason: undefined, resume_after_restart: undefined, resume_at: undefined };
+  const held = toLimitHeld(running, "waits: 2 queues run, the limit is 2", "2026-01-01T10:00:00.000Z");
+  assert.deepEqual(delta(held, running), {
+    set: { reason: "waits: 2 queues run, the limit is 2", held: { since: "2026-01-01T10:00:00.000Z", kind: "limit", reason: "waits: 2 queues run, the limit is 2" } },
+    cleared: [],
+  });
+  assert.equal(held.state, "running");
+  const again = toLimitHeld(held, "waits: 1 queue of P runs, its limit is 1", "2026-01-01T10:05:00.000Z");
+  assert.deepEqual(again.held, { since: "2026-01-01T10:00:00.000Z", kind: "limit", reason: "waits: 1 queue of P runs, its limit is 1" }, "its place in the order kept");
+  assert.deepEqual(delta(toLimitReleased(held), held), { set: {}, cleared: ["held", "reason"] });
+  // Any other state drops the hold: going on from it asks for a place again.
+  for (const next of [toPausedByUser(held, "p"), toHeldForUpdate(held, "u"), toPaused(held), toHalted(held, "h"), toFinished(held),
+    toApprovalWait(held, 3), toUsageWait(held, "w", "2026-01-01T11:00:00.000Z"), toRetryWait(held, { tries: 1, failure: "f", reason: "r", at: "2026-01-01T11:00:00.000Z" })]) {
+    assert.equal(next.held, undefined, next.state);
+  }
 });

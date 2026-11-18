@@ -12,6 +12,8 @@
 //            there ("kept the uncommitted work"), else failed
 //   slownoop  work, then end the turn without an outcome (the step stays open)
 //   slowask   work, then ask a blocking question and end the turn
+//   askwork   ask a question with --can-continue, work on (work() below) in the same turn, then end it without an
+//             outcome; the answer's turn reports the step done
 //   doneexit  report the step done, then the process exits on a signal before its turn ends
 //   doneexitheld  the same, held by FAKE_RELEASE before exit so a test can accept review first
 //   commit    commit a file named after the step in its working directory, then done
@@ -352,6 +354,7 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
       else { writeFileSync(file, "1"); nexus("stop", step, "--condition", "fake condition", "--reason", "fake stop"); }
     }
     if (behaviour === "ask" || behaviour === "slowask") nexus("ask", "Which way?", "--step", step);
+    if (behaviour === "askwork") { nexus("ask", "Which way?", "--step", step, "--can-continue"); await work(step); }
     if (behaviour === "askthree") {
       for (const text of ["Which layout?", "Which colour?", "Which sound?"]) nexus("ask", text, "--step", step, "--can-continue", "--option", "First", "--option", "Second", "--recommend", "First");
       if (process.env.FAKE_ASK_LINGER_MS) await new Promise(r => setTimeout(r, Number(process.env.FAKE_ASK_LINGER_MS)));
