@@ -416,7 +416,8 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
     return "answered";
   }
   // A check-fix round (the checks Nexus ran failed): with FAKE_CHECK_DISPUTE naming a check that failed, say once (per
-  // step) that its failure is not this work's and end the turn; otherwise "fix" it and report the step done again.
+  // step) that its failure is not this work's and end the turn; otherwise "fix" it (FAKE_CHECK_FIX_MS long) and report
+  // the step done again.
   const fix = /^\[Nexus\] The checks Nexus ran for step (\S+) of queue \S+: check-fix round (\d+)/.exec(text);
   if (fix) {
     const step = fix[1]!;
@@ -430,6 +431,8 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
       return `disputed: ${out}`;
     }
     nexus("step", "start", step);
+    // FAKE_CHECK_FIX_MS: the fix takes that long (a picture of the round at work; a stop ends it early).
+    if (process.env.FAKE_CHECK_FIX_MS && await interruptible(Number(process.env.FAKE_CHECK_FIX_MS))) return { interrupted: true };
     nexus("step", "done", step, "--summary", `fake fixed ${step} in check-fix round ${fix[2]}`);
     return `check-fix round ${fix[2]}`;
   }

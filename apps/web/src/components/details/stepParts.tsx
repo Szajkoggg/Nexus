@@ -1,12 +1,12 @@
 // The parts of a step's panel, each drawn from the step (StepDetail.tsx puts them in order: one order while the step
 // waits for the user's review, another otherwise).
 import { useState } from "react";
-import { latestChecks } from "@nexus/protocol/steps";
+import { latestChecks, stepChecks } from "@nexus/protocol/steps";
 import { act, enc, fileUrl, type QueueView, type SessionView, type StepView } from "../../api.ts";
 import { describe, isImage, type stepPictures } from "../../details.ts";
 import { draftKey } from "../../drafts.ts";
 import { fileHref } from "../../hash.ts";
-import { formatSeconds, rich, t } from "../../i18n.ts";
+import { formatClock, formatSeconds, rich, t } from "../../i18n.ts";
 import { nav } from "../../nav.ts";
 import { reviewedByOrchestrator } from "@nexus/protocol/status-rules";
 import { pendingProvisional, ProvisionalActions } from "../Levels.tsx";
@@ -19,6 +19,7 @@ import { Fold, PictureBadges } from "./review.tsx";
 import { usePage } from "../../page.ts";
 import { metricValueText } from "@nexus/protocol/metrics";
 import { stepMetrics } from "../../metrics.ts";
+import { checkRows, latestSet, type CheckRowState } from "../../checks.ts";
 
 type Pairs = ReturnType<typeof stepPictures>["pairs"];
 interface StepProps { step: StepView }
@@ -32,6 +33,60 @@ export function RetryLine({ queue, step }: InQueue) {
     <div className="mt-4 rounded-lg border border-warn/30 bg-warn/10 p-3 text-sm">
       <RetryNote run={queue.run} className="text-sm" />
       {queue.run.reason && <p className="mt-1 text-xs text-fg-2">{queue.run.reason}</p>}
+    </div>
+  );
+}
+
+const ROW: Record<CheckRowState, { mark: string; tone: string }> = {
+  passed: { mark: "✓", tone: "text-ok" }, flaky: { mark: "✓", tone: "text-warn" }, failed: { mark: "✗", tone: "text-danger" },
+  running: { mark: "●", tone: "text-accent" }, waiting: { mark: "○", tone: "text-fg-3" }, interrupted: { mark: "–", tone: "text-fg-3" },
+};
+
+/**
+ * The checks Nexus runs after the step's done (docs/PROTOCOL.md, "Checks run by Nexus"), while they decide the step:
+ * waiting for the machine, running, on the queue's base commit, a dispute for the orchestrator, or a check-fix round
+ * (said apart from the review rounds: a fix round is no send-back), with the latest set's checks one by one.
+ */
+export function CheckRunBox({ queue, step }: InQueue) {
+  const set = latestSet(queue, step);
+  const c = step.checking;
+  const fixing = step.status === "running" && !!step.check_fix;
+  if (!c && !fixing) return null;
+  const disputed = set?.dispute;
+  const time = c && formatClock(c.since, new Date());
+  const text = c?.phase === "queued" ? t("checks.queued", { time: time! })
+    : c?.phase === "running" ? t("checks.running", { time: time! })
+    : c?.phase === "base" ? t("checks.base", { check: c.check ?? disputed?.name ?? t("checks.disputed"), evidence: disputed?.evidence ?? "…", time: time! })
+    : c?.phase === "decision" ? t("checks.decision", { check: disputed?.name ?? t("checks.disputed"), evidence: disputed?.evidence ?? "…" })
+    : t("checks.fix", { fix: step.check_fix!, limit: step.check_fix_limit ?? "?", round: set?.round ?? 1 });
+  const rows = set ? checkRows(set, stepChecks(queue.run?.checks, queue.checks)) : [];
+  const warn = c?.phase === "decision" || fixing;
+  return (
+    <div className={`mt-4 rounded-lg border p-3 text-sm ${warn ? "border-warn/30 bg-warn/10" : "border-accent/30 bg-accent/5"}`}>
+      <p className="text-xs font-semibold uppercase tracking-wider text-fg-3">{t("checks.title")}</p>
+      <p className="mt-1 text-fg">{text}</p>
+      {step.check_limit && fixing && <p className="mt-1 text-stop">{t("checks.limit", { limit: step.check_fix_limit ?? step.check_fix! - 1 })}</p>}
+      {rows.length > 0 && (
+        <ul className="mt-2 space-y-1">
+          {rows.map((r) => (
+            <li key={r.name}>
+              <div className="flex flex-wrap items-baseline gap-x-2">
+                <span className={`${ROW[r.state].tone} ${r.state === "running" ? "animate-pulse" : ""}`}>{ROW[r.state].mark}</span>
+                <span className="text-fg">{r.name}</span>
+                <span className={`text-xs ${ROW[r.state].tone}`}>{t(`checks.row.${r.state}`)}</span>
+                {r.duration !== undefined && <span className="text-xs tabular-nums text-fg-3">{formatSeconds(r.duration)}</span>}
+              </div>
+              {r.tests.length > 0 && (
+                <ul className="ml-5 mt-0.5 space-y-0.5 text-xs text-fg-2">
+                  {r.tests.slice(0, 5).map((x) => <li key={x} className="truncate font-mono" title={x}>{x}</li>)}
+                  {r.tests.length > 5 && <li>+{r.tests.length - 5}</li>}
+                </ul>
+              )}
+              {r.log && <p className="ml-5 truncate font-mono text-xs text-fg-3" title={r.log}>{r.log}</p>}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
@@ -196,6 +251,7 @@ export function StepChecks({ step }: StepProps) {
             <span className="text-fg">{c.name}</span>
             {c.duration !== undefined && <span className="tabular-nums text-fg-2">{formatSeconds(c.duration)}</span>}
             {c.summary && <span className="text-fg-3">{c.summary}</span>}
+            {c.by === "nexus" && <span className="text-xs text-fg-3">{t("details.checks.byNexus")}</span>}
           </li>
         ))}
       </ul>

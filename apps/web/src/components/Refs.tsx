@@ -32,7 +32,7 @@ export function RefsProvider({ project, queues, children }: { project: string | 
 
 /** A step's status as a dot colour, for the ones worth a dot. */
 const STEP_DOT: Record<string, string> = {
-  running: "bg-accent animate-pulse", waiting: "bg-warn", review: "bg-review", stopped: "bg-stop", failed: "bg-danger", rejected: "bg-danger",
+  running: "bg-accent animate-pulse", checking: "bg-accent animate-pulse", waiting: "bg-warn", review: "bg-review", stopped: "bg-stop", failed: "bg-danger", rejected: "bg-danger",
 };
 const QUEUE_DOT = new Set(["running", "waiting", "review", "stopped", "failed"]);
 

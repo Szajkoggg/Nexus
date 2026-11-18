@@ -1309,7 +1309,7 @@ The template is a project setting, so each project can phrase it in its own term
 
 ## Checks run by Nexus
 
-**Status: built (queue EC, steps EC2 and EC3); the briefings and the dashboard follow in EC4.** The reasons and the
+**Status: built (queue EC, steps EC2 to EC4).** The reasons and the
 decisions are in DESIGN.md, "Nexus runs the checks"; the marks **(P1)**…**(P17)** are EC1's proposals, accepted by the
 user on 2026-11-18, with P3 and P6 as the user changed them. The engine runs the checks only with the server's
 capacity coordinator (`EngineOptions.capacity`; the server always gives it): an engine without one (older tests)
@@ -1401,10 +1401,14 @@ leaves it `review` only when the set for that done is `passed` or `accepted`. Ot
 |---|---|---|
 | none yet, `queued`, `interrupted` | `checking` | `{ phase: queued, since }` |
 | `running` | `checking` | `{ phase: running, since, check }` |
-| `failed`, no dispute | `running`: a check-fix round, `check_fix` = `fix` + 1, `check_limit` with `limit` | |
+| `failed`, no dispute | `running`: a check-fix round, `check_fix` = `fix` + 1, `check_fix_limit` (the project's `defaults.check_fix_limit`), `check_limit` with `limit` | |
 | `failed`, disputed, the base run to come or running | `checking` | `{ phase: base, since, check }` |
 | `failed`, disputed, the base `unrunnable`, not decided | `waiting` | `{ phase: decision, since }` |
 | `failed`, the dispute's `outcome: fix` | `running` (the same check-fix round) | |
+
+The same holds once the worker took up its check-fix round with `nexus step start` (the step `running` after the failed
+set's done): it stays in that round (`check_fix`), a dispute it says there runs on the base as above, and an accepted
+one sends the step to its review as of the done (its `finished_at` and `review_with` the done's).
 
 The review round (`reviewRound`) counts only the step.dones that reached review, so a check-fix round is no send-back
 round, and the review pictures keep their round **(P13)**. The engine's results join the step's `checks` (`by:
@@ -1462,8 +1466,24 @@ unchanged for a step without an entry or with `by: worker`; with `--unrelated --
 
 **Settings.** `defaults.check_fix_limit` (global, with a project override; an integer from 0; default 3) **(P4)**.
 
-**The step's opening** keeps the list under "Checks for every step" and adds that Nexus runs them. The closing
-refactoring step's "Run the checks before you change anything" goes in EC4, with the rest of the briefings **(P12)**.
+**The briefings** (EC4, `apps/server/src/prompts.ts`). The step's opening keeps the list under "Checks for every step"
+and adds that Nexus runs them. The worker's briefing says `nexus check --ok|--fail` is refused where Nexus runs the
+checks, lists `nexus check --unrelated --evidence`, and that the worker neither starts nor waits for the whole suite
+there. The check-fix round's turn asks the worker to work from the output and the log it names, running only the failing
+tests. A send-back of such a step asks for the fix, not for the checks. The closing refactoring step whose checks Nexus
+runs no longer runs them before it changes anything: its opening says they passed on the commit where the queue's last
+step ended (`ClosingContext.checked`: the latest set of the queue's own steps, when it passed) **(P12)**. The
+integration step's says Nexus runs the checks on the merge's result after its `nexus step done`, and a conflict it
+resolves is followed by the tests of the files that conflicted.
+
+**The dashboard** (EC4, `apps/web/src/checks.ts`). A `checking` step reads "checks running", "checks queued" (quieter:
+it waits for the machine) or "checks on the base", with a line under it in the queue list (`npm test since 14:02`,
+`waiting for the machine since 14:01`); one waiting for the decision reads "waiting: orchestrator decides"; a check-fix
+round reads "check fix 1 of 3", never as a review round. The queue's one status says it too ("checks running · W3",
+"checks wait for the machine · W3", "check fix 1 of 3 · W3", "a check dispute waits for the orchestrator · W3"). The
+step's panel has a "Checks by Nexus" box while they decide the step: what they do and since when, the round apart from
+the review round, and the latest set's checks one by one (passed, flaky, failed twice with the failing tests and the
+log, running, waiting their turn); its "Checks" list marks the engine's results "by Nexus".
 
 **Updates, Pause and Stop.** An update's drain withdraws the requests still waiting for the machine and lets running
 checks go on at most `CHECK_DRAIN_WAIT_MS` (15 minutes) **(P8)**; `Engine.idle()` is false meanwhile, so the drain

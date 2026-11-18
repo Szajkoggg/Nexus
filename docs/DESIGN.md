@@ -192,8 +192,8 @@ heuristics. References: [Job Objects](https://learn.microsoft.com/en-us/windows/
 
 Designed in EC1 from the user's decisions of 2026-11-17 (docs/ideas/token-costs.md) and 2026-11-16
 (docs/ideas/worker-phases-and-resources.md); built in EC2 (the capacity coordinator, `apps/server/src/capacity.ts`) and
-EC3 (the engine, `apps/server/src/check-runs.ts`, and the derivation, `packages/protocol/src/checks.ts`); EC4 brings
-the briefings, AGENTS.md and the dashboard. The file formats are in PROTOCOL.md, "Checks run by Nexus". Points marked
+EC3 (the engine, `apps/server/src/check-runs.ts`, and the derivation, `packages/protocol/src/checks.ts`) and EC4 (the
+briefings, AGENTS.md and the dashboard, `apps/web/src/checks.ts`). The file formats are in PROTOCOL.md, "Checks run by Nexus". Points marked
 **(P1)**…**(P17)** went beyond the decisions: EC1's proposals, which the user accepted on 2026-11-18, P3 made more
 precise and P6 changed (below).
 
@@ -272,8 +272,9 @@ works as before (merge, `nexus step done`), and its checks are Nexus's like any 
 when the merge is clean is queue MI's.
 
 **AGENTS.md "Before every commit"** keeps typecheck, lint and the tests of the changed files before each commit (the
-worker still commits several times in a step); its second half becomes: the whole suite runs at the step's end, run by
-Nexus as the queue's checks, not by the worker, and the 15 minutes' wait goes (EC4).
+worker still commits several times in a step); its second half says (EC4): the whole suite is no commit's check, it
+runs at the step's end as the queue's checks, run by Nexus, which waits for the machine; only a step whose opening does
+not say so (an older server's, work started by hand) has its worker run and report them.
 
 **The step's states.** A step gets one new status, `checking`, between `running` and `review`, with a phase:
 `queued` (waiting for the machine; what it waits behind is the machine's line in `nexus status`), `running` (which
@@ -297,6 +298,22 @@ apart from a send-back's round. The queue stays `running` and the run holds its 
   output pipe open.
 - **Events the derivation does not handle never reach a step's timeline.** `check.disputed` and `check.decided` are
   listed there explicitly, since the checks' derivation and the engine read them from the timeline.
+
+**Findings from EC4.**
+
+- **A check-fix round the worker took up was lost.** The derivation read the checks only for a step in `review`; a
+  worker that opened its round with `nexus step start`, as its turn asks, made the step plain `running`: no round
+  number on the dashboard or in `nexus status`, and a dispute said after it never ran on the base (the CLI took it,
+  the engine never saw `checking`). Seen in the dashboard's pictures of a fix round on the fake runtimes. The
+  derivation now reads a step `running` after a failed (or accepted) set's done as in that round, and an accepted
+  dispute sends it to its review as of the done.
+- **The dashboard's pictures run the real engine.** The capture seed (`scripts/capture/seed-check-runs.ts`) gives the
+  test projects a `package.json` whose scripts are the checks (a ten-minute `npm test`, or one failing in TAP), and a
+  start due at once: the fake worker reports its step done, and the engine runs, queues or fails the checks as it
+  would. `NEXUS_TEST_LOCK` must name a file of the capture's own, else a full run elsewhere on the machine holds the
+  coordinator, and every check reads "queued".
+- **What a queued check waits behind is not on the dashboard yet**: the machine's line (`capacity.yaml`) is read by
+  `nexus status` only; the step says it waits for the machine and since when.
 
 #### The capacity coordinator, first slice
 
