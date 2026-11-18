@@ -140,7 +140,15 @@ test("the check on Claude Code's launch ignores ids and paths but sees MCP, plug
     "--allowedTools", "Bash(nexus:*)", `Read(${id})`,
   ];
   assert.deepEqual(runtimeSettings(plain), []);
-  for (const extra of [["--mcp-config", "x.json"], ["--strict-mcp-config"], ["--plugin-dir", "C:\\p"], ["--settings", '{"enabledPlugins":{"a":true}}'], ["-c", "mcp_servers.blender.enabled=false"], ["-c", "features.apps=false"]]) {
+  const named = [
+    ["--mcp-config", "x.json"],
+    ["--strict-mcp-config"],
+    ["--plugin-dir", "C:\\p"],
+    ["--settings", '{"enabledPlugins":{"a":true}}'],
+    ["-c", "mcp_servers.blender.enabled=false"],
+    ["-c", "features.apps=false"],
+  ];
+  for (const extra of named) {
     assert.notDeepEqual(runtimeSettings([...plain, ...extra]), [], extra.join(" "));
   }
 });
