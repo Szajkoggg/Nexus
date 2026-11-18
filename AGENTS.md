@@ -40,9 +40,9 @@ Nexus is developed with Nexus. The agents working on this repository are run by 
   base into that branch, and the base then only moves to the result by a fast-forward. A survey-only run commits
   nothing. Agents never rebase and never push.
 - **Before every commit**: `npm run typecheck`, `npm run lint` and the tests of the files you changed pass; the whole
-  suite (`npm test`) runs at the end of a step, as the queue's checks, not before each commit, and may first wait (up
-  to 15 minutes) for another checkout's full run to end. If the dashboard changed: `npm run build -w @nexus/web`. Fix a
-  lint finding rather than silence it (docs/DESIGN.md, "Static analysis").
+  suite (`npm test`) runs at the end of a step, as the queue's checks, not before each commit, and may first wait for
+  another checkout's full run to end (as long as that run takes: it never starts beside it). If the dashboard changed:
+  `npm run build -w @nexus/web`. Fix a lint finding rather than silence it (docs/DESIGN.md, "Static analysis").
 - **Run control and lifecycle code** (after a queue that touched it the orchestrator offers the `lifecycle` template):
   the engine, the scheduler and the runtime adapters, in `apps/server/src`: `engine.ts`, `scheduler.ts`,
   `agent-host.ts`, `claude.ts`, `codex.ts`, `recurring.ts`, `lifecycle.ts` (updates, restarts, the hand-over).

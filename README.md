@@ -644,11 +644,13 @@ node scripts/load-tests.mjs --burners 12 --copies 4 --rounds 5 apps/server/test/
 
 One full run at a time on the machine: `npm test` and `npm run test:times` take a lock in the system's temporary
 folder first (`scripts/test-lock.ts`). When another checkout's full run holds it, they wait, saying once a minute
-what for, and after 15 minutes run anyway; a lock left by a run that died, or held for more than 20 minutes (longer
-than a full run takes), is taken over at once. A full run ends with whatever started it: when the shell or the
-command that ran `npm test` is killed (a background command's time limit, a closed terminal), the run's test processes
-end and its lock goes. `npm run test:files` never waits. `NEXUS_TEST_LOCK` names another lock file,
-`NEXUS_TEST_LOCK_MAX_MS` another longest wait, `NEXUS_TEST_LOCK_STALE_MS` another age at which a lock is stale.
+what for, as long as it takes: a full run never starts beside another; a lock left by a run that died, or held
+for more than 20 minutes (longer than a full run takes), is taken over at once. A full run ends with whatever started
+it: when the shell or the command that ran `npm test` is killed (a background command's time limit, a closed
+terminal), the run's test processes end and its lock goes. `npm run test:files` never waits. `NEXUS_TEST_LOCK`
+names another lock file, `NEXUS_TEST_LOCK_STALE_MS` another age at which a lock is stale. The Nexus server reads the
+same lock: while a full run started outside Nexus holds it, Nexus starts no heavy operation of its own, and `nexus
+status` says so (the machine's line, "The capacity coordinator" in docs/PROTOCOL.md).
 
 The tests that run fake runtimes or servers wait 10 s for what they expect (`NEXUS_TEST_WAIT_MS` sets it, e.g. higher
 on a slow machine; `apps/server/test/wait.ts`), so a change that breaks many of them fails the suite in minutes.

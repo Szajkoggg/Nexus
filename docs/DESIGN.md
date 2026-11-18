@@ -267,7 +267,8 @@ check-fix round is `running` with its fix round number, shown apart from a send-
 
 The checks are the coordinator's first user (decided 2026-11-16 and 2026-11-17): one heavy operation per workstation,
 across projects, granted atomically or queued, the queue shown, released when the operation's processes have ended,
-and never a start without the grant after a time. In this slice:
+and never a start without the grant after a time. Built in EC2 (`apps/server/src/capacity.ts`; PROTOCOL.md, "The
+capacity coordinator"), with no user yet until EC3. In this slice:
 
 - **It lives in the server**, which serves every project of the workstation, and keeps its state in a file of its own
   (`<NEXUS_HOME>/capacity.yaml`, the server its one writer), so the dashboard and `nexus status` show the queue and a
@@ -2224,9 +2225,10 @@ The suite runs every file side by side on every core already, so two at once onl
 - **The other waits**, saying once a minute on stderr what for (the checkout, the pid, since when), so a worker's
   check does not look stuck. A lock whose process is not alive is taken over at once (a run killed with its tree,
   a crash); one that cannot be read is being written while it is young, and is taken over once it is not.
-- **At most 15 minutes**, then the run goes on without the lock: a run stuck for longer, or a pid that Windows gave to
-  another process, never blocks the suite for good. Two runs taking over the same dead lock in the same moment could
-  both run; that is today's behaviour, not worse.
+- **At most 15 minutes**, then the run went on without the lock: a run stuck for longer, or a pid that Windows gave to
+  another process, would never block the suite for good. Two runs taking over the same dead lock in the same moment
+  could both run; that is today's behaviour, not worse. *Gone since queue EC (EC2, the user's acceptance of EC1's
+  P11): a run waits until it has the lock; the staleness of queue TF below handles a hung holder or a reused pid.*
 - **`npm run test:files` never waits**: a few files while working, short, and run often.
 - Only branches that contain the lock take it: an older branch's run neither waits nor is waited for.
 
@@ -2289,7 +2291,7 @@ through the open file descriptor every second (or one third of a shorter expiry,
 keeps other runs waiting regardless of the original acquisition time or PID visibility. Without renewal for
 `NEXUS_TEST_LOCK_STALE_MS` (20 minutes by default), another run can take it over. This also handles a sandbox killing
 both wrapper and watchdog: no observer needs to survive to release the lease. Expiry makes the lock reclaimable;
-the next acquirer removes the old file. The normal maximum wait remains 15 minutes.
+the next acquirer removes the old file. (The 15 minutes' maximum wait went in queue EC, EC2.)
 
 Renewal uses the original open file, not its pathname, and release checks the ownership token as well as PID. A
 superseded holder cannot renew or remove its replacement, even when the PID is the same. Older records without a

@@ -626,6 +626,7 @@ Written only by the server's queue engine; agents never touch them.
 | `<NEXUS_HOME>/usage.json` | The subscription's windows (5-hour, 7-day: utilization and reset time) from the latest `rate_limit_event` (Codex: `account/rateLimits`) of any session. Every session's turns count toward usage, workers', orchestrators' and thinking partners' alike (one subscription), so the usage display and the usage pause see them all |
 | `<NEXUS_HOME>/turns.jsonl` | One line per agent turn of every project and role, appended by the server (AgentHost, its one writer) when the turn ends, or when its process ends first: `v`, `at` (the end), `started_at` (the runtime's turn start, or the first thing it streamed after the previous turn's end), `duration_ms`, `project`, `session`, `role` (`worker`, `orchestrator`, `conversation`), `runtime`, `model`, `effort`, `queue` and `step` (a worker's run, when any), `tags` (that step's tags as planned when the turn ended: its own over its queue's, renamed names read as the new ones; absent when it has none, see "Tags"), `fallback` (a turn of a step that runs on its fallback: `from`, the runtime it would have run on, and `reason`, its full window; see "Fallback when usage runs out"), `outcome` (`ok`; a failure's kind `passing`, `lasting` or `usage`, with `failure`, the runtime's code; `interrupted`: no result, because Nexus interrupted the turn or its process ended: a kill, an update's drain, a crash), `tokens` (the turn's own, its main loop's: `input` not from the cache, `output`, `cache_read`, `cache_creation`), `subagent_tokens` (what the turn's sub-agents used, in the same four figures, apart from `tokens`: Claude Code turns only, zeros when none ran; absent where unknown: a Codex turn, the first turn of a resumed process, an older record; read from the growth of `result.modelUsage`, the process's running total, less `result.usage`, see DESIGN.md "Sub-agent tokens"), `cost_usd` (the turn's own, where the runtime reports cost and it is known: Claude Code, not the first turn of a resumed process), `windows_start` and `windows_end` (the turn's runtime's usage windows, `utilization` and `resets_at`, as the server knew them when the turn began and ended; left out when none was known). In one file because the windows are the account's, across projects; statistics are computed from it when read. A turn's use of the windows is estimated when read (`usageEstimates`, `packages/protocol/src/usage-estimate.ts`, free of Node): per window, the window's growth between the turn's two readings times the turn's weighted tokens (sub-agents' included) over the weighted tokens of every turn of the same runtime within that stretch, each overlapping turn with the part of its tokens spent within it; `{ share }` (in utilization, 0 to 1) or `{ none }`: `missing` (no reading at the start or the end), `reset` (the window reset between them), `tokens` (the turn's tokens unknown). The token weights (`TOKEN_WEIGHTS`) and the method: DESIGN.md, "Estimating a turn's use" |
 | `<NEXUS_HOME>/away.yaml` | The user's away mode: `current` (`since`, `until`) while on, `past` periods (`since`, `until`, `ended`, `why`: `expired` or `off`). One writer: the server, on `POST /api/server/away` and when a period's time comes. See "Away mode" under "Review" |
+| `<NEXUS_HOME>/capacity.yaml` | The capacity coordinator: the workstation, its `heavy` slot, the operations `held` and `waiting` for it, and a full test run `outside` Nexus that keeps it. One writer: the server, anew when it becomes active. See "The capacity coordinator" |
 | `<NEXUS_HOME>/limits.json` | `{ max_running: number }`: where the limit on queues running at once was kept before it became the global setting `defaults.max_running` (decided 2026-11-15, queue OP). A server whose `settings.yaml` has no `defaults.max_running` (from before it, or rewritten by an older server) takes a valid value from here into it at its start. The file stays: the server writes the global limit into it with every write of the global settings, so an older server (an update rolled back) reads the current limit. One writer: the server |
 | `<NEXUS_HOME>/deploy.json` | `{ push_on_deploy: boolean }` (default `true` when the file is missing). One writer: the server, on `POST /api/server/settings` from the dashboard |
 | `<NEXUS_HOME>/deploy-plan.json` | The planned deploy, if any: `plan?` (`id`, either `after` (`project`, `queue`, `step?`: none, the whole queue) or `at` (ISO 8601) with `deadline?`, `ref?`, `by?` (`project`, `session`: the orchestrator that planned it), `created_at`, `warning?`, `waiting_for?` (`queue/step`: the unconfirmed provisional work it waits for), `held?` (`project`, `queue`: the run it holds while it waits), `started?` (`at`, `update`: the id of the update it started)), and the last plan that ended, `ended?` (`plan`, `at`, `why`: `carried-out`, `dropped`, `update-failed` or `cancelled`, `reason`, `by?`). One writer: the server. See "Planned deploys" |
@@ -1410,27 +1411,62 @@ planned deploy's deadline, it ends them at once. A queued set is not granted whi
 running set finish and takes effect at the review or before the fix round; Stop now and Stop at once end it
 (`interrupted`), and it runs again when the run goes on **(P16)**.
 
-**`<NEXUS_HOME>/capacity.yaml`** (server-owned, one writer: the server; the capacity coordinator, EC2):
+The checks ask the capacity coordinator for the machine (next section); after a server's start, the requests of check
+sets `queued` or `interrupted` whose runs go on are asked again, by their `requested_at`.
+
+## The capacity coordinator
+
+**Status: built (queue EC, step EC2); its first user, the engine's checks, comes with EC3.** One heavy operation on the
+workstation at a time, across projects (decided 2026-11-16, docs/ideas/worker-phases-and-resources.md; EC1's P2, P11
+and P17). It is the server's (`apps/server/src/capacity.ts`, one per server, made when the server becomes active):
+
+- **A request** (`kind: checks`, `project`, `queue`, `step`) is granted at once when the `heavy` slot is free and no
+  full test run outside Nexus holds the machine (below), else it waits in line; requests are granted in the order
+  they came. A waiting request may be cancelled; a granted one is ended by its owner.
+- **The slot follows the processes.** The owner starts the operation's processes through its grant: on Windows each
+  in a Job Object of its own (the worker's job host, `worker-process.ts`), so its end is the end of its whole tree,
+  detached descendants included (the host ends what the root left, then closes); elsewhere in a process group of its
+  own, ended with its root. The slot is free once the owner has ended the grant **and** every process started under
+  it has ended: a process still running holds it however the owner sees the work, and a process killed (by its owner,
+  by hand, by a crash) frees it once its tree is gone.
+- **No time bypass.** Nothing is granted beside a held slot or a run outside Nexus, however long a request has waited.
+- **Restarts and hand-overs.** A server becoming active writes the file anew (no grants: the old server's processes
+  ended with it). A server that hands over or shuts down grants and writes nothing more; its waiting requests fail.
+
+**`<NEXUS_HOME>/capacity.yaml`** (one writer: the server; written when what it says changes):
 
 ```yaml
+protocol: 1
 workstation: DESKTOP-1234          # the host name (P17)
 slots: { heavy: 1 }
-held:                              # granted, until the operation's processes have ended
+held:                              # granted, until the owner ended it and its processes have ended
   - { id: ..., kind: checks, project: nexus, queue: EC, step: EC3, requested_at: ..., granted_at: ... }
 waiting:                           # in the order they came
   - { id: ..., kind: checks, project: honeycomb, queue: W, step: W5, requested_at: ... }
-outside: { cwd: ..., pid: ..., since: ... }   # a full test run holding scripts/test-lock.ts's lock outside Nexus
+outside: { cwd: ..., pid: ..., since: ... }   # while requests wait: a full test run holding the lock outside Nexus
+updated_at: ...
 ```
 
-A request is granted when the slot is free and nothing holds the test lock outside Nexus; there is no time after which
-one starts without it. A starting server writes the file anew: the old grants are void (their processes ended with the
-old server), and the waiting requests are rebuilt from the queues' `checks.yaml` (sets `queued` or `interrupted` whose
-runs go on), by `requested_at`.
+**`nexus status`** (any session, any project) prints the file's line after the queues, while anything holds or waits
+for the slot (`capacityLines`, `packages/protocol/src/capacity.ts`):
 
-**`scripts/test-lock.ts`** **(P11)**: stays the guard of `npm test` and `npm run test:times` for every starter. Its
-start without the lock after `NEXUS_TEST_LOCK_MAX_MS` goes: a waiting run keeps waiting, saying once a minute what it
-waits for; a stale lock (no renewal or a dead holder, 20 minutes) is still taken over. The engine's own `npm test` takes
-the lock too, inside its grant.
+```
+machine DESKTOP-1234 (one heavy operation at a time, across projects):
+  running: checks of EC/EC3 (project nexus), since 10:02
+  waiting: checks of W/W5 (project honeycomb), since 10:03, 1st in line, behind checks of EC/EC3 (project nexus)
+  outside Nexus: a full test run in C:\Code\Other (pid 4242, since 09:58); nothing is granted until it ends
+```
+
+**The full-test lock** **(P11)**. `scripts/test-lock.ts` stays the guard of `npm test` and `npm run test:times` for
+every starter (by hand, an agent, and the engine's checks, inside their grant). It no longer starts a run without the
+lock after a time (`NEXUS_TEST_LOCK_MAX_MS` is gone): a waiting run keeps waiting, saying once a minute what for (`npm
+test: waiting for the full test run in <cwd> (pid <pid>, since <HH:MM>) to end (<n> min so far; it never runs without
+the lock)`); a lock whose holder is gone, or that is stale (held, or unrenewed, longer than
+`NEXUS_TEST_LOCK_STALE_MS`, 20 minutes), is still taken over at once. The coordinator reads the same file
+(`NEXUS_TEST_LOCK`, else `nexus-full-test.lock` in the system's temporary folder) by the same rules
+(`packages/protocol/src/full-test-lock.ts`, which test-lock.ts imports): a lock held by a live run, while the slot is
+free, is a run outside Nexus, recorded as `outside`; the coordinator looks again every second and grants once it is
+gone. It never takes the lock itself.
 
 ## Dashboard question links
 
@@ -3172,7 +3208,9 @@ random `token`. When process queries are unavailable it also contains `lease: tr
 the last renewal. `NEXUS_TEST_LOCK_STALE_MS` is then the maximum gap between renewals (default 20 minutes), rather
 than the maximum age since acquisition. Renewal is every second or one third of a shorter expiry, at least 10 ms.
 Release checks both PID and token. Old records without `lease` retain the original dead-PID/absolute-age rules.
-`NEXUS_TEST_LOCK_MAX_MS` still limits waiting to 15 minutes by default, after which a run proceeds without the lock.
+A waiting run waits until it has the lock; since queue EC (EC2) no time lets it proceed without it, and
+`NEXUS_TEST_LOCK_MAX_MS` is gone (see "The capacity coordinator"). The rules for when a lock counts as held are in
+`packages/protocol/src/full-test-lock.ts`, shared with the server's capacity coordinator.
 
 The internal `--watchdog <wrapper pid> <starter pid> <lock path>` child owns the runner. The wrapper's Node IPC sends
 `{args, token}` to start it, `{signal}` to forward a signal, or `{stop:true}` to end it. The watchdog announces

@@ -9,7 +9,7 @@ import { monotonicFactory } from "ulid";
 import YAML from "yaml";
 import type { z } from "zod";
 import {
-  Activity, Applied, AwayFile, IdeaMatchesFile, ChatEntry, PinsFile, RecurringFile, Refusal, Delivery, Event, GlobalSettings, InboxEntry, MaxRunning, MetricsFile, NoteMeta, GitFile, ProjectFile, PushFile, QueueFile, type QueueInput, LegacyReviewPolicy, RegistryFile, RunFile, RuntimeFile, SessionFile, StartFile, StaticAnalysisNote, PlanFile, StoredProject, TagsFile, TurnRecord, UsageFile,
+  Activity, Applied, AwayFile, CapacityFile, IdeaMatchesFile, ChatEntry, PinsFile, RecurringFile, Refusal, Delivery, Event, GlobalSettings, InboxEntry, MaxRunning, MetricsFile, NoteMeta, GitFile, ProjectFile, PushFile, QueueFile, type QueueInput, LegacyReviewPolicy, RegistryFile, RunFile, RuntimeFile, SessionFile, StartFile, StaticAnalysisNote, PlanFile, StoredProject, TagsFile, TurnRecord, UsageFile,
   type Note,
   IdeaStatusesFile, IdeaHandoffsFile,
 } from "./schemas.ts";
@@ -509,6 +509,17 @@ export function readAway(): AwayFile {
 export function writeAway(a: AwayFile): void {
   mkdirSync(nexusHome(), { recursive: true });
   writeYaml(awayFile(), AwayFile.parse(a));
+}
+
+const capacityFile = () => join(nexusHome(), "capacity.yaml");
+/** The capacity coordinator's state; undefined when there is none, or it cannot be read (nothing is shown then). */
+export function readCapacity(): CapacityFile | undefined {
+  try { return existsSync(capacityFile()) ? readYaml(capacityFile(), CapacityFile) : undefined; } catch { return undefined; }
+}
+/** Only the server writes it (apps/server/src/capacity.ts). */
+export function writeCapacity(c: CapacityFile): void {
+  mkdirSync(nexusHome(), { recursive: true });
+  writeYaml(capacityFile(), CapacityFile.parse(c));
 }
 
 const usageFile = () => join(nexusHome(), "usage.json");

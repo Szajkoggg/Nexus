@@ -1273,6 +1273,38 @@ export const AwayFile = z.object({
 });
 export type AwayFile = z.infer<typeof AwayFile>;
 
+/** One heavy operation asked for, granted or waiting (`<NEXUS_HOME>/capacity.yaml`). */
+const CapacityRequest = z.object({
+  id: z.string(),
+  /** What it is: a step's checks (queue EC), the first user. */
+  kind: z.literal("checks"),
+  project: z.string(),
+  queue: z.string(),
+  step: z.string(),
+  requested_at: Time,
+  granted_at: Time.optional(),
+});
+export type CapacityRequest = z.infer<typeof CapacityRequest>;
+
+/**
+ * <NEXUS_HOME>/capacity.yaml: the capacity coordinator's state (PROTOCOL.md, "The capacity coordinator"). One slot,
+ * `heavy`: one heavy operation on the workstation at a time, across projects. `held`: granted, until the operation's
+ * processes have ended; `waiting`: in the order they came; `outside`: the machine's full-test lock held by a run
+ * outside Nexus (scripts/test-lock.ts), which grants nothing meanwhile. Written only by the server, anew when it
+ * becomes active (the old server's grants ended with its processes).
+ */
+export const CapacityFile = z.object({
+  protocol: z.literal(1),
+  /** The workstation (its host name), for the later model of several machines. */
+  workstation: z.string(),
+  slots: z.object({ heavy: z.number().int().positive() }),
+  held: z.array(CapacityRequest).default([]),
+  waiting: z.array(CapacityRequest).default([]),
+  outside: z.object({ cwd: z.string(), pid: z.number().int(), since: z.string() }).optional(),
+  updated_at: Time,
+});
+export type CapacityFile = z.infer<typeof CapacityFile>;
+
 /** <NEXUS_HOME>/usage.json: the subscription's windows, from the last report of any session. */
 export const UsageFile = z.object({
   updated_at: Time,

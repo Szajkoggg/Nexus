@@ -15,6 +15,7 @@ import {
   TemplateError, fillTemplate, filledTemplateYaml, parseEvery, MaintenanceMode, readTemplates, templateQueueId, unusableTemplate, type MergedTemplates,
   type PictureRole, type ReviewItem, type Role, type Runtime, type SessionFile,
   noteRefIssue, parseNoteRef, readNotes, ideaMatches, ideaLinks, ideaStatuses, reportSourceHash,
+  capacityLines, readCapacity,
 } from "@nexus/protocol";
 import { checkRules, describeRules } from "@nexus/protocol/rules";
 import { importMarkdownQueues } from "./import-md.ts";
@@ -524,6 +525,9 @@ const commands: Record<string, () => void | Promise<void>> = {
       const open = q.questions.filter(isOpenQuestion);
       for (const x of open) console.log(`  question ${x.qid} [${x.state}]: ${x.text}`);
     }
+    // The workstation's heavy slot, across projects (the server's capacity.yaml): what runs, what waits and behind what.
+    const machine = capacityLines(readCapacity(), new Date());
+    if (machine.length) console.log(`\n${machine.join("\n")}`);
     // The session's inbox: messages and answers not yet seen. Shown here is delivered, so each is recorded as read.
     for (const m of s?.inbox.filter((x) => !x.read_at) ?? []) {
       if (m.type === "answer") {

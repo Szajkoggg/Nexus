@@ -1,5 +1,5 @@
 // The machine's full-test lock (scripts/test-lock.ts): a second run waits for the first, a lock whose process is gone
-// or that was held longer than a full run takes is taken over, after the longest wait the run goes without the lock,
+// or that was held longer than a full run takes is taken over, a run never goes without the lock however long it waits,
 // a run ends with its starter (its process tree and its lock gone), and test:files never waits. Each test has a lock
 // file of its own in a temporary folder, never the machine's real one, and ends only processes it started.
 import { test } from "node:test";
@@ -44,11 +44,11 @@ test("the second run waits for the first, saying what it waits for, and takes th
   assert.equal(JSON.parse(readFileSync(file, "utf8")).pid, process.pid);
   const lines: string[] = [];
   let second: Awaited<ReturnType<typeof acquire>> | "waiting" = "waiting";
-  const waiting = acquire({ file, pid: process.pid + 1_000_000, cwd: "C:/other", maxWaitMs: 60_000, pollMs: 20, sayEveryMs: 100, say: (l) => lines.push(l) })
+  const waiting = acquire({ file, pid: process.pid + 1_000_000, cwd: "C:/other", signal: AbortSignal.timeout(60_000), pollMs: 20, sayEveryMs: 100, say: (l) => lines.push(l) })
     .then((l) => { second = l; });
   await new Promise((r) => setTimeout(r, 350));
   assert.equal(second, "waiting", "the first still holds it");
-  assert.match(lines[0]!, new RegExp(`^npm test: waiting for the full test run in .* \\(pid ${process.pid}, since \\d\\d:\\d\\d\\) to end \\(0 of at most 1 min\\)$`));
+  assert.match(lines[0]!, new RegExp(`^npm test: waiting for the full test run in .* \\(pid ${process.pid}, since \\d\\d:\\d\\d\\) to end \\(0 min so far; it never runs without the lock\\)$`));
   assert.ok(lines.length >= 2, "and says it again while it waits");
   first.release();
   await waiting;
@@ -67,7 +67,7 @@ test("a lock whose process is gone is taken over at once", async () => {
   writeFileSync(file, JSON.stringify({ pid, cwd: "C:/crashed", since: new Date().toISOString() }));
   const lines: string[] = [];
   const started = performance.now();
-  const lock = await acquire({ file, maxWaitMs: 60_000, pollMs: 20, say: (l) => lines.push(l) });
+  const lock = await acquire({ file, signal: AbortSignal.timeout(60_000), pollMs: 20, say: (l) => lines.push(l) });
   assert.ok(lock);
   assert.ok(performance.now() - started < 1000, "no waiting");
   assert.deepEqual(lines, [`npm test: took over the full-test lock of a run that is gone (pid ${pid}, C:/crashed)`]);
@@ -75,10 +75,10 @@ test("a lock whose process is gone is taken over at once", async () => {
   lock.release();
   // An unreadable lock file is being written while it is young; an old one is taken over too.
   writeFileSync(file, "");
-  assert.equal(await acquire({ file, maxWaitMs: 100, pollMs: 20, say: () => {} }), undefined, "a young, empty file: its taker is alive");
+  assert.equal(await acquire({ file, signal: AbortSignal.timeout(100), pollMs: 20, say: () => {} }), undefined, "a young, empty file: its taker is alive");
   const old = new Date(Date.now() - 60_000);
   utimesSync(file, old, old);
-  const taken = await acquire({ file, maxWaitMs: 100, pollMs: 20, say: () => {} });
+  const taken = await acquire({ file, signal: AbortSignal.timeout(100), pollMs: 20, say: () => {} });
   assert.ok(taken, "an old one that cannot be read is taken over");
   taken.release();
 });
@@ -89,7 +89,7 @@ test("a lock held longer than a full run takes is taken over at once, its holder
   writeFileSync(file, JSON.stringify({ pid: process.pid, cwd: "C:/hung", since: new Date(Date.now() - 25 * 60_000).toISOString() }));
   const lines: string[] = [];
   const started = performance.now();
-  const lock = await acquire({ file, pid: process.pid + 1_000_000, cwd: "C:/next", maxWaitMs: 60_000, pollMs: 20, say: (l) => lines.push(l) });
+  const lock = await acquire({ file, pid: process.pid + 1_000_000, cwd: "C:/next", signal: AbortSignal.timeout(60_000), pollMs: 20, say: (l) => lines.push(l) });
   assert.ok(lock, "taken over");
   assert.ok(performance.now() - started < 1000, "no waiting");
   assert.deepEqual(lines, [`npm test: took over the full-test lock of a run that has held it for 25 min, longer than a full run takes (pid ${process.pid}, C:/hung)`]);
@@ -98,10 +98,10 @@ test("a lock held longer than a full run takes is taken over at once, its holder
   // The limit is a setting of its own; a lock younger than it, held by a live process, makes the run wait.
   writeFileSync(file, JSON.stringify({ pid: process.pid, cwd: "C:/busy", since: new Date(Date.now() - 2 * 60_000).toISOString() }));
   const waited: string[] = [];
-  assert.equal(await acquire({ file, pid: process.pid + 1_000_000, staleMs: 3 * 60_000, maxWaitMs: 300, pollMs: 20, say: (l) => waited.push(l) }), undefined);
+  assert.equal(await acquire({ file, pid: process.pid + 1_000_000, staleMs: 3 * 60_000, signal: AbortSignal.timeout(300), pollMs: 20, say: (l) => waited.push(l) }), undefined);
   assert.match(waited[0]!, /^npm test: waiting for the full test run in C:\/busy/);
   assert.equal(JSON.parse(readFileSync(file, "utf8")).cwd, "C:/busy", "left as it is");
-  const taken = await acquire({ file, pid: process.pid + 1_000_000, staleMs: 60_000, maxWaitMs: 300, pollMs: 20, say: () => {} });
+  const taken = await acquire({ file, pid: process.pid + 1_000_000, staleMs: 60_000, signal: AbortSignal.timeout(300), pollMs: 20, say: () => {} });
   assert.ok(taken, "the same lock is stale under a shorter limit");
   taken.release();
 });
@@ -263,7 +263,7 @@ test("an unrenewed lease expires even when its recorded PID is alive", async () 
   writeFileSync(file, JSON.stringify({ pid: process.pid, cwd: "C:/lost-sandbox", since: new Date().toISOString(), lease: true, token: "lost" }));
   const lines: string[] = [];
   const started = Date.now();
-  const lock = await acquire({ file, lease: true, staleMs: 200, pollMs: 20, maxWaitMs: 3000, say: (line) => lines.push(line) });
+  const lock = await acquire({ file, lease: true, staleMs: 200, pollMs: 20, signal: AbortSignal.timeout(3000), say: (line) => lines.push(line) });
   try {
     assert.ok(lock);
     assert.ok(Date.now() - started >= 200, "the lease cannot be stolen before expiry");
@@ -277,7 +277,7 @@ test("a renewed lease keeps another run waiting beyond the original expiry", asy
   const first = await acquire({ file, lease: true, staleMs: 300, say: () => {} });
   try {
     assert.ok(first);
-    const second = await acquire({ file, lease: true, staleMs: 300, maxWaitMs: 800, pollMs: 20, say: () => {} });
+    const second = await acquire({ file, lease: true, staleMs: 300, signal: AbortSignal.timeout(800), pollMs: 20, say: () => {} });
     try { assert.equal(second, undefined); }
     finally { second?.release(); }
     assert.equal(JSON.parse(readFileSync(file, "utf8")).token, first.token);
@@ -323,19 +323,20 @@ test("lifetime IPC loss while waiting exits without releasing the other holder's
   }
 });
 
-test("after the longest wait the run goes without the lock, and says so", async () => {
+test("a long wait never ends in a run without the lock: it keeps waiting and keeps saying so (EC1's P11)", async () => {
   const file = lockFile();
-  // Taken a minute ago (an older lock would be stale) by a live process: this one.
-  const since = new Date(Date.now() - 60_000).toISOString();
+  // Taken 19 minutes ago, just short of stale, by a live process: this one. It used to be given up after 15 minutes.
+  const since = new Date(Date.now() - 19 * 60_000).toISOString();
   writeFileSync(file, JSON.stringify({ pid: process.pid, cwd: "C:/stuck", since }));
   const lines: string[] = [];
-  const lock = await acquire({ file, pid: process.pid + 1_000_000, maxWaitMs: 200, pollMs: 20, say: (l) => lines.push(l) });
-  assert.equal(lock, undefined);
-  assert.equal(lines.at(-1), `npm test: waited 0 min for the full test run in C:/stuck (pid ${process.pid}, since ${since.slice(11, 16)}); running now without the lock`);
+  const lock = await acquire({ file, pid: process.pid + 1_000_000, signal: AbortSignal.timeout(400), pollMs: 20, sayEveryMs: 50, say: (l) => lines.push(l) });
+  assert.equal(lock, undefined, "only the signal ends the wait");
+  assert.ok(lines.length >= 2, "it said so more than once");
+  for (const l of lines) assert.equal(l, `npm test: waiting for the full test run in C:/stuck (pid ${process.pid}, since ${since.slice(11, 16)}) to end (0 min so far; it never runs without the lock)`);
   assert.equal(JSON.parse(readFileSync(file, "utf8")).cwd, "C:/stuck", "the other run's lock is left as it is");
 });
 
-test("the script runs node --test under the lock and removes it after; held by a live run, it waits at most the longest wait", async () => {
+test("the script runs node --test under the lock and removes it after; held by a live run, it waits until the lock is free", async () => {
   const tiny = tinyTest();
   const file = lockFile();
   const free = await node([join(scripts, "test-lock.ts"), "--test", tiny], { NEXUS_TEST_LOCK: file });
@@ -344,12 +345,20 @@ test("the script runs node --test under the lock and removes it after; held by a
   assert.ok(!existsSync(file), "the lock is removed after the run");
 
   writeFileSync(file, JSON.stringify({ pid: process.pid, cwd: "C:/busy", since: new Date().toISOString() }));
-  const held = await node([join(scripts, "test-lock.ts"), "--test", tiny], { NEXUS_TEST_LOCK: file, NEXUS_TEST_LOCK_MAX_MS: "1500" });
+  // The old limit's variable no longer lets it run beside the live run.
+  let finished = false;
+  const pending = node([join(scripts, "test-lock.ts"), "--test", tiny], { NEXUS_TEST_LOCK: file, NEXUS_TEST_LOCK_MAX_MS: "500" })
+    .then((r) => { finished = true; return r; });
+  await new Promise((r) => setTimeout(r, 3000));
+  assert.equal(finished, false, "still waiting, well past the old limit");
+  assert.equal(JSON.parse(readFileSync(file, "utf8")).cwd, "C:/busy", "the live run's lock stays");
+  unlinkSync(file); // the live run ends
+  const held = await pending;
   assert.equal(held.code, 0, held.out);
   assert.match(held.out, /npm test: waiting for the full test run in C:\/busy/);
-  assert.match(held.out, /running now without the lock/);
-  assert.ok(held.ms >= 1500, `it waited (${Math.round(held.ms)} ms)`);
-  assert.equal(JSON.parse(readFileSync(file, "utf8")).cwd, "C:/busy", "the live run's lock stays");
+  assert.doesNotMatch(held.out, /without the lock;|running now/);
+  assert.match(held.out, /pass 1/);
+  assert.ok(!existsSync(file), "its own lock is removed after the run");
 
   // A failing run's exit code comes through.
   const failing = join(dirname(tiny), "failing.test.mjs");
