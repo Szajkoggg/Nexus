@@ -6,8 +6,8 @@
 // Pure: scripts/token-report.ts reads the file (--weights), the tests give made-up turns. Method: docs/DESIGN.md,
 // "Measuring token use".
 import type { TokenCounts, TurnRecord } from "@nexus/protocol";
-import { tokenWeights } from "@nexus/protocol/usage-estimate";
-import { addTokens, KINDS, weigh, weightsLine, zeroTokens } from "./tokens.ts";
+import { tokenWeights, weighTokens } from "@nexus/protocol/usage-estimate";
+import { addTokens, KINDS, weightsLine, zeroTokens } from "./tokens.ts";
 
 /** Readings whose reset times differ by more than this belong to different windows (Codex's drift; usage-estimate.ts). */
 const RESET_SLACK_MS = 5 * 60 * 1000;
@@ -167,22 +167,19 @@ export function leastSquares(names: string[], x: number[][], y: number[]): Fit |
 }
 
 /**
- * The tokens other than cache reads, weighted with the runtime's TOKEN_WEIGHTS: the yardstick the cache read is
- * measured against (input 1, output 5, cache write 1.25 for every runtime so far, so the cache read's weight is in the
- * same units whatever its own weight now is).
+ * The tokens other than cache reads, weighted with the runtime's weights (TOKEN_WEIGHTS): the yardstick the cache read
+ * is measured against (input 1, output 5, cache write 1.25 for every runtime so far, so the cache read's weight is in
+ * the same units whatever its own weight now is).
  */
-const rest = (t: TokenCounts, runtime: string) => {
-  const w = tokenWeights(runtime);
-  return t.input * w.input + t.output * w.output + t.cache_creation * w.cache_creation;
-};
+const rest = (t: TokenCounts, w: Readonly<TokenCounts>) => t.input * w.input + t.output * w.output + t.cache_creation * w.cache_creation;
 
 /** Growth ≈ a·rest + b·cache read. */
-const readFit = (samples: readonly Sample[], runtime: string) =>
-  leastSquares(["rest", "cache_read"], samples.map((s) => [rest(s.tokens, runtime), s.tokens.cache_read]), samples.map((s) => s.growth));
+const readFit = (samples: readonly Sample[], w: Readonly<TokenCounts>) =>
+  leastSquares(["rest", "cache_read"], samples.map((s) => [rest(s.tokens, w), s.tokens.cache_read]), samples.map((s) => s.growth));
 
 /** The cache read's weight in TOKEN_WEIGHTS units (an uncached input token = 1): b / a of the read fit. */
-function readRatio(samples: readonly Sample[], runtime: string): number | undefined {
-  const f = readFit(samples, runtime);
+function readRatio(samples: readonly Sample[], w: Readonly<TokenCounts>): number | undefined {
+  const f = readFit(samples, w);
   return f && f.beta[0]! > 0 ? f.beta[1]! / f.beta[0]! : undefined;
 }
 
@@ -192,15 +189,18 @@ function random(seed: number): () => number {
   return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 2 ** 32; };
 }
 
-/** The 2.5th and 97.5th percentiles of the ratio over resamplings of the samples (undefined fits left out). */
-export function bootstrap(samples: readonly Sample[], runtime: string, rounds = 1000, seed = 1): { low: number; high: number; failed: number } | undefined {
+/**
+ * The 2.5th and 97.5th percentiles of the ratio over resamplings of the samples (undefined fits left out), against the
+ * runtime's weights `w`.
+ */
+export function bootstrap(samples: readonly Sample[], w: Readonly<TokenCounts>, rounds = 1000, seed = 1): { low: number; high: number; failed: number } | undefined {
   if (samples.length < 3) return undefined;
   const next = random(seed);
   const ratios: number[] = [];
   let failed = 0;
   for (let r = 0; r < rounds; r++) {
     const pick = samples.map(() => samples[Math.floor(next() * samples.length)]!);
-    const v = readRatio(pick, runtime);
+    const v = readRatio(pick, w);
     if (v === undefined) failed++; else ratios.push(v);
   }
   if (ratios.length < rounds / 2) return undefined;
@@ -243,21 +243,22 @@ function estimate(runtime: string, window: string, method: WindowEstimate["metho
   const y = samples.map((s) => s.growth);
   const kinds = KINDS.filter((k) => tokens[k] > 0);
   e.free = leastSquares([...kinds], samples.map((s) => kinds.map((k) => s.tokens[k])), y);
-  e.read = readFit(samples, runtime);
+  const w = tokenWeights(runtime);
+  e.read = readFit(samples, w);
   if (e.read && e.read.beta[0]! > 0) {
     const [a, b] = e.read.beta as [number, number];
     const c = e.read.cov;
     e.ratio = b / a;
     // The delta method: var(b/a) ≈ (b/a)²·(var b / b² + var a / a² − 2 cov / (a b)), written to stay finite at b = 0.
     e.ratio_se = Math.sqrt(Math.max(0, (c[1]![1]! + e.ratio * e.ratio * c[0]![0]! - 2 * e.ratio * c[0]![1]!) / (a * a)));
-    e.ci = bootstrap(samples, runtime);
+    e.ci = bootstrap(samples, w);
     const half = e.ci ? (e.ci.high - e.ci.low) / 2 : 1.96 * e.ratio_se;
     e.needed = Math.ceil(samples.length * (half / HALF_WIDTH) ** 2);
   }
   const hours = samples.map((s) => (s.to - s.from) / 3_600_000);
-  e.background = leastSquares(["rest", "cache_read", "hours"], samples.map((s, i) => [rest(s.tokens, runtime), s.tokens.cache_read, hours[i]!]), y);
+  e.background = leastSquares(["rest", "cache_read", "hours"], samples.map((s, i) => [rest(s.tokens, w), s.tokens.cache_read, hours[i]!]), y);
   if (e.background && e.background.beta[0]! > 0) e.background_ratio = e.background.beta[1]! / e.background.beta[0]!;
-  e.price = leastSquares(["priced"], samples.map((s) => [weigh(s.tokens, runtime)]), y);
+  e.price = leastSquares(["priced"], samples.map((s) => [weighTokens(s.tokens, w)]), y);
   return e;
 }
 

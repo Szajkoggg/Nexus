@@ -4,6 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { TokenCounts, TurnRecord } from "@nexus/protocol";
+import { tokenWeights } from "@nexus/protocol/usage-estimate";
 import { bootstrap, leastSquares, renderWeights, soloSamples, stretchSamples, weightEstimates } from "../token-report/weights.ts";
 
 const RESET = "2026-11-17T20:00:00.000Z";
@@ -125,7 +126,7 @@ test("the period keeps only its turns; too little growth is said so; the bootstr
   const tiny = turns.map((t) => ({ ...t, windows_start: { five_hour: { utilization: 0.01, resets_at: RESET } }, windows_end: { five_hour: { utilization: 0.01, resets_at: RESET } } }));
   assert.equal(weightEstimates(tiny, {}).find((x) => x.method === "solo")!.coarse, true);
   const samples = soloSamples(turns, "claude", "five_hour").map((s, i) => ({ ...s, growth: s.growth * (1 + (i % 2 ? 0.1 : -0.1)) }));
-  assert.deepEqual(bootstrap(samples, "claude", 200, 7), bootstrap(samples, "claude", 200, 7));
+  assert.deepEqual(bootstrap(samples, tokenWeights("claude"), 200, 7), bootstrap(samples, tokenWeights("claude"), 200, 7));
   const md = renderWeights(weightEstimates(turns, {}), { minMinutes: 60, turns: turns.length });
   assert.match(md, /\| claude \| five_hour \(stretch\) \| 6 \| 0 \| .* \| 0\.020 \|/);
   assert.match(md, /\| enough \|/);
