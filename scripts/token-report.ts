@@ -19,6 +19,7 @@ import type { TurnRecord } from "@nexus/protocol";
 import { sinceTime } from "@nexus/protocol/stats";
 import { analyze, inside, render, type EventLine, type Report, type SessionInfo } from "./token-report/analysis.ts";
 import { parseClaude, parseCodex, type Transcript } from "./token-report/transcripts.ts";
+import { renderWeights, weightEstimates } from "./token-report/weights.ts";
 
 export interface Options {
   since?: string; until?: string; projects?: string[]; top?: number;
@@ -144,13 +145,13 @@ function main(): void {
   const { values } = parseArgs({
     options: {
       since: { type: "string" }, until: { type: "string" }, project: { type: "string", multiple: true },
-      out: { type: "string" }, top: { type: "string" },
+      out: { type: "string" }, top: { type: "string" }, weights: { type: "boolean" }, "stretch-minutes": { type: "string" },
       "claude-dir": { type: "string" }, "codex-dir": { type: "string" }, "nexus-home": { type: "string" },
       help: { type: "boolean", short: "h" },
     },
   });
   if (values.help) {
-    console.log("usage: node scripts/token-report.ts [--since <date|time>] [--until <date|time>] [--project <id>]... [--out <file>] [--top <n>] [--claude-dir <dir>] [--codex-dir <dir>] [--nexus-home <dir>]");
+    console.log("usage: node scripts/token-report.ts [--since <date|time>] [--until <date|time>] [--project <id>]... [--out <file>] [--top <n>] [--claude-dir <dir>] [--codex-dir <dir>] [--nexus-home <dir>]\n       node scripts/token-report.ts --weights [--since …] [--until …] [--stretch-minutes <n>] [--out <file>] [--nexus-home <dir>]");
     return;
   }
   const time = (name: string, v: string | undefined) => {
@@ -161,13 +162,25 @@ function main(): void {
   };
   const top = values.top === undefined ? undefined : Number(values.top);
   if (top !== undefined && !(Number.isInteger(top) && top > 0)) { console.error(`--top: not a positive whole number: ${values.top}`); process.exit(2); }
-  const { report, sources } = load({
-    since: time("since", values.since), until: time("until", values.until), projects: values.project, top,
-    claudeDir: values["claude-dir"] ?? join(homedir(), ".claude", "projects"),
-    codexDir: values["codex-dir"] ?? join(process.env.CODEX_HOME ?? join(homedir(), ".codex"), "sessions"),
-    nexusHome: values["nexus-home"] ?? process.env.NEXUS_HOME ?? join(process.env.APPDATA ?? join(homedir(), ".config"), "Nexus"),
-  });
-  const text = render(report, sources);
+  const since = time("since", values.since);
+  const until = time("until", values.until);
+  const nexusHome = values["nexus-home"] ?? process.env.NEXUS_HOME ?? join(process.env.APPDATA ?? join(homedir(), ".config"), "Nexus");
+  let text: string;
+  if (values.weights) {
+    // The usage windows' weights (weights.ts): turns.jsonl alone, every project's turns.
+    const minMinutes = values["stretch-minutes"] === undefined ? 60 : Number(values["stretch-minutes"]);
+    if (!(minMinutes > 0)) { console.error(`--stretch-minutes: not a positive number: ${values["stretch-minutes"]}`); process.exit(2); }
+    const turns = jsonLines<TurnRecord>(join(nexusHome, "turns.jsonl"));
+    const inPeriod = turns.filter((t) => (!since || t.at >= since) && (!until || t.at < until)).length;
+    text = renderWeights(weightEstimates(turns, { since, until, minMinutes }), { since, until, minMinutes, turns: inPeriod });
+  } else {
+    const { report, sources } = load({
+      since, until, projects: values.project, top, nexusHome,
+      claudeDir: values["claude-dir"] ?? join(homedir(), ".claude", "projects"),
+      codexDir: values["codex-dir"] ?? join(process.env.CODEX_HOME ?? join(homedir(), ".codex"), "sessions"),
+    });
+    text = render(report, sources);
+  }
   if (values.out) writeFileSync(values.out, text);
   else process.stdout.write(text);
 }

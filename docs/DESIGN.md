@@ -749,6 +749,33 @@ made-up transcripts (`scripts/test/token-report.test.ts`).
 The baseline (`--until 2026-11-18`: Nexus's transcripts from 2026-11-12, turns.jsonl from 2026-11-14) was measured on
 this machine only; it counts Codex too, which the user's first analysis left out, so their figures differ in scope.
 
+**The tokens' weights in the usage windows** (`--weights`, `scripts/token-report/weights.ts`; queue TB, step TB2): what
+the windows meter is not published, so it is estimated from turns.jsonl, every project's turns (the windows are the
+account's). The readings are the windows as the server last knew them at a turn's start and end, in whole percents.
+
+- **Samples.** `solo`: a turn no other turn of the same runtime overlapped, its growth between its own two readings.
+  `stretch`: consecutive readings at least an hour apart (`--stretch-minutes`), every turn's tokens prorated over its
+  duration, sub-agents' included. A reset between readings (a fall, another reset time, the reset time passed) ends a
+  stretch; a stretch a turn without tokens touches is left out, its tokens being unknown.
+- **Fits**, least squares through the origin (no use, no growth), in percentage points per million tokens: the four
+  kinds freely; growth ≈ a·(input + 5·output + 1.25·cache write) + b·cache read, whose b/a is the cache read's weight
+  in TOKEN_WEIGHTS units (one number, so a cache read is measured against the rest at its price ratios); the same with a
+  constant use per hour beside (the account's use outside these turns: the user's own chats, sessions started by hand);
+  and one scale on the TOKEN_WEIGHTS-weighted sum. The uncertainty is the standard error (delta method) and a seeded
+  bootstrap over the samples (1000 rounds, 95%). With the spread seen, it says how many samples a 95% interval of
+  ±0.025 would take (enough to tell the price ratio from half of it) and how many days that is at the same pace; under
+  20 points of growth in all it says the whole-percent steps are the signal.
+- **Known limits.** A reading may be older than its turn (the last report of any session), so a stretch of an hour or
+  more is the main sample; the account's use outside the turns adds growth the tokens do not explain; a Claude Code
+  turn's cache writes are written for an hour (twice an input token at list price, not 1.25); and Claude Code's
+  uncached input is a few tokens a call, so its own weight cannot be told apart.
+- **Found (2026-11-18, data to 2026-11-17).** Claude Code's 5-hour window: a cache read weighs about 0.02 of an input
+  token (0.022, 95% 0.014–0.028, 42 stretches, 556 points of growth; 0.012–0.023 for stretches of 30 minutes to 4
+  hours; the weekly window and the solo turns agree within their wider intervals), a fifth of the price ratio; output
+  to cache write came out at about 4.4, ± about 1 (TOKEN_WEIGHTS: 4). Nearly every Claude turn ran on Opus. Codex's weekly window
+  could not tell (30 stretches, an interval of −0.01 to 0.22, unstable with the stretch length); about 650 stretches, or
+  some 45 days at this pace, would. TOKEN_WEIGHTS was not changed: a proposal is the user's to decide.
+
 ### The plan
 
 "When queues A and C are done, start B" is a place in the plan kept in a file of B's (`plan.yaml`, with the start's

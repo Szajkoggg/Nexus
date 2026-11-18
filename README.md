@@ -757,6 +757,18 @@ and the quality signals (Fix it, Reject, a provisional acceptance returned, send
 check), by queue and step. It ends with what is missing (sessions without a transcript on this machine, transcripts no
 session names). How each figure is counted: [docs/DESIGN.md](docs/DESIGN.md), "Measuring token use".
 
+`--weights` answers another question from the same turn records: how much each kind of token weighs in your
+subscription's usage windows (Claude Code's 5-hour and weekly, Codex's), above all a cache read against the price ratio
+Nexus assumes (0.1 of an input token). It sets each window's growth between readings against the tokens spent meanwhile,
+and says how sure the estimate is and, when it is not, how many more days of data it would take:
+
+```sh
+node scripts/token-report.ts --weights --until 2026-11-18 --out $TEMP/weights.md
+node scripts/token-report.ts --weights --since 2026-11-18 --stretch-minutes 30   # shorter stretches, more of them
+```
+
+It counts every project's turns (the windows are the account's), not only `--project`'s.
+
 ## Remote access
 
 The server listens on this PC only. Everything from this PC works without signing in; anything that comes through a
