@@ -701,6 +701,54 @@ The adapter keeps the previous total like the cost's (unknown in a resumed proce
 no `subagent_tokens`), clamps each figure at zero, and the record keeps the field apart from `tokens`; zeros mean no
 sub-agent ran.
 
+### Measuring token use
+
+The token savings of docs/ideas/token-costs.md go out in separate deploys, each measured against the time before it
+(decided 2026-11-17). The user's two analyses of the transcripts were made outside Nexus; `scripts/token-report.ts`
+(queue TB) repeats them from the files, over a period (`--since`, `--until`), so the figures before and after a deploy
+are counted the same way. It only reads, and its report holds totals only (README.md, "Where the tokens went"). The
+readers (`scripts/token-report/transcripts.ts`) and the breakdowns (`analysis.ts`) are pure functions, tested on
+made-up transcripts (`scripts/test/token-report.test.ts`).
+
+- **The unit is a model call**, one API response: Claude Code writes one line per content block with the same message
+  id (one call; the largest usage of its lines), Codex one `token_usage_record` per response (older transcripts: a
+  `token_count` event whose total changed). A call's tools are its tool_use blocks (Claude Code) or the tools its exec
+  cells run (`tools.exec_command({cmd})` and the like, read from the cell's JavaScript; Codex); the results come back by
+  tool id. A Codex cell's output is shared evenly among its tools. A forked transcript repeats its parent's calls: a
+  response id counts once.
+- **Whose call it is**: a transcript's id is a Nexus session's `native_id` (session.yaml), which gives the role; a
+  sub-agent's transcript is its parent's (Claude Code's `<session>/subagents/`, Codex's `parent_thread_id`: the
+  guardian that reviews approvals, for instance). A transcript of a project folder no session names (one started by
+  hand) counts as role `other`. A session's earlier native ids are not kept, so a session whose native id changed
+  shows up as `other` too.
+- **Cost** is weighted tokens with `TOKEN_WEIGHTS` (input 1, output 5, cache write 1.25, cache read 0.1), the same
+  proxy as the estimates above: not a bill, and the subscription's windows may weigh cache reads differently (TB2
+  measures it). A call's context is input + cache read + cache written; "context above 300k / 500k" is the share of a
+  role's context tokens spent in calls above that size (the thresholds decided for workers and the orchestrator).
+- **Cache written after an idle hour** (the cache lives an hour): the cache writes of the first call after a gap of more
+  than an hour since the transcript's previous call (also when that call lies before the period). From turns.jsonl the
+  same for a turn that began over an hour after its session's previous turn ended.
+- **Routine work** is told by a shell command's simple commands (split at `;`, `&&`, `||`, `|`), matched at their
+  start, so a grep for "npm test" is none: tests (`npm test`, `npm run test:files`, `node … --test`), checks (typecheck,
+  lint, knip, tsc, eslint), build. A call counts once, in the first that applies, with its whole weighted tokens; the
+  call that reads the output afterwards is not counted. "Waiting for the lock" is a call whose tool result says
+  `npm test: waiting for …` (scripts/test-lock.ts): a poll that saw nothing new is not caught.
+- **Images read back** are image blocks in tool results; **files read** are Read's file and the files of `cat`,
+  `head`, `tail`, `sed`, `Get-Content` and the like, paths made relative to the project's root or worktree; a read's
+  tokens are its result's characters / 4, an estimate.
+- **Read-only calls**: every tool call reads (Read, Grep, Glob, or a shell command each part of which is a reading
+  command: cat, sed without -i, grep, ls, git log/diff/show/status, `nexus status`/`help`/`doc`…). The share is of all
+  the role's calls; a run is consecutive read-only calls in one transcript.
+- **Quality**, from the projects' events in the period: Fix it (`review.sent_back` by the user, a picture comment sent
+  back), Reject (`review.rejected`), provisional acceptances and those returned (`review.provisional`,
+  `review.fix_asked`), send-backs by the orchestrator, and fix rounds after a failed check (a failing `check.result`
+  followed by another result of the same check in the step). Done steps count once however many rounds they had.
+- **Gaps** are listed, not guessed at: sessions with turns but no transcript on this machine, transcripts no session
+  names, turns without tokens, and transcripts reaching back further than turns.jsonl.
+
+The baseline (`--until 2026-11-18`: Nexus's transcripts from 2026-11-12, turns.jsonl from 2026-11-14) was measured on
+this machine only; it counts Codex too, which the user's first analysis left out, so their figures differ in scope.
+
 ### The plan
 
 "When queues A and C are done, start B" is a place in the plan kept in a file of B's (`plan.yaml`, with the start's

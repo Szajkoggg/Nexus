@@ -732,6 +732,31 @@ node scripts/layout-faults.ts http://127.0.0.1:4318/#/nexus --click "All queues 
 Exit code 1 when it finds a fault; the list says which line, box or text. Details: [docs/DESIGN.md](docs/DESIGN.md),
 "Layout faults".
 
+### Where the tokens went
+
+`scripts/token-report.ts` measures where your agents' tokens went over a period, so the effect of a change (a deploy
+that cuts calls or context) can be compared with the time before it. It only reads, and the report holds totals only:
+
+```sh
+node scripts/token-report.ts --until 2026-11-18 --out $TEMP/baseline.md          # everything up to that day
+node scripts/token-report.ts --since 2026-11-20 --until 2026-11-27 --project nexus # a week after a deploy, one project
+```
+
+It reads Claude Code's transcripts (`~/.claude/projects`, sub-agents' too), Codex's (`~/.codex/sessions`, or
+`CODEX_HOME`), `<NEXUS_HOME>/turns.jsonl` and the registered projects' `.nexus/sessions` (who each session is, and the
+review and check events). `--since` and `--until` take a date (from that day's start on this machine) or a time; since
+is inclusive, until exclusive. `--project` (repeatable) narrows it to registered projects; `--top` sets how many of the
+most read files it lists (15); `--claude-dir`, `--codex-dir` and `--nexus-home` read other folders (for example a copy
+from another machine). Without `--out` it prints the report.
+
+The report gives: the cost by role (worker, orchestrator, thinking partner) in weighted tokens, with the share of cache
+reads and a call's average context; the cache written again after an idle hour; the share of tests, typecheck and
+lint, builds and waiting for the full-test lock, with the number of full `npm test` runs; images read back and
+`nexus step progress` calls; the files read most often; how many calls made several tool calls at once or only read;
+and the quality signals (Fix it, Reject, a provisional acceptance returned, send-backs, fix rounds after a failed
+check), by queue and step. It ends with what is missing (sessions without a transcript on this machine, transcripts no
+session names). How each figure is counted: [docs/DESIGN.md](docs/DESIGN.md), "Measuring token use".
+
 ## Remote access
 
 The server listens on this PC only. Everything from this PC works without signing in; anything that comes through a
