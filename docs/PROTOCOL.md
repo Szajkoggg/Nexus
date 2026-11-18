@@ -1323,7 +1323,7 @@ nexus step failed W3 --reason "..."
 nexus stop W3 --condition "user decision" --reason "..."   # the condition as the queue words it; the reason short (shown first)
 nexus ask "Canyon joints: vertical only, or also inclined?" [--option ...] [--recommend <option>] [--can-continue]
                                                # --recommend: one of the --option values, by text or number (1 = first)
-nexus context --topics rock,support --files Runtime/Core/Rock/* <<< "summary text"
+nexus context "summary text" --topics rock,support --files Runtime/Core/Rock/*   # the text as the argument, or - to read it from stdin (... <<< "text")
 nexus report W --file <temp>/nexus-reports/<project>/W.md --summary "..." [--findings 3]   # copied to .nexus/queues/W/report.md; --findings: a maintenance queue's
 nexus withdraw <qid> --reason "..."            # a question no longer needed (question.withdrawn)
 nexus log "Retrying the probe" [--level info|warn|error]   # a line into the session's own log

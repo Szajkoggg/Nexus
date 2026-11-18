@@ -179,11 +179,17 @@ commit an accepted step was reviewed at. So:
     text: `nexus help tests: running tests while working on a step
 
 While you work, run only the tests that cover what you changed, and stop at the first failure: a run of the whole
-suite after a change that breaks many tests takes long and says little. The whole suite runs once, at the step's end,
-as the queue's checks (nexus check, each under its name exactly as the step's opening lists it under "Checks for every
-step", e.g. nexus check <step> "npm test", since a check reported under another name counts as not reported; with
---duration: how long each ran, in seconds, so a check that grows slower shows), and its result goes into the step
-summary.
+suite after a change that breaks many tests takes long and says little. Before a commit, run the tests of the files you
+changed (plus typecheck and lint, as the project says). The whole suite runs once, at the step's end, as the queue's
+checks, and who runs them depends on the step's opening:
+  - Where it says Nexus runs the checks: do not run the whole suite and do not report it; Nexus runs it after your
+    nexus step done and sends you its output only if a check fails (a check-fix round: fix from that output, running
+    only the failing tests). nexus check is refused there (except nexus check <step> <name> --unrelated --evidence "..."
+    in a check-fix round, for a failure that is not your work).
+  - Where it does not (an older server's step, work started by hand): you run the checks at the step's end and report
+    each with nexus check, under its name exactly as the step's opening lists it under "Checks for every step", e.g.
+    nexus check <step> "npm test" --ok --summary "..." --duration <seconds> (a check reported under another name
+    counts as not reported; the duration shows a check that grows slower), and its result goes into the step summary.
   - The project's own way is in its AGENTS.md or README (a script that runs given files, a watch mode).
   - Nexus's own repository: npm run test:files -- <test file>... [--pattern TEXT] runs the files one after another
     and stops at the first failing test; npm test runs the whole suite; npm run test:times lists how long each file
