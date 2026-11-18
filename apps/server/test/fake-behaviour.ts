@@ -12,6 +12,8 @@
 //            there ("kept the uncommitted work"), else failed
 //   slownoop  work, then end the turn without an outcome (the step stays open)
 //   slowask   work, then ask a blocking question and end the turn
+//   askslow   ask a blocking question and end the turn; the answer's turn works (work() below) before it reports the
+//             step done, so a test sees the queue at work after its answer (queue FL1)
 //   askwork   ask a question with --can-continue, work on (work() below) in the same turn, then end it without an
 //             outcome; the answer's turn reports the step done
 //   doneexit  report the step done, then the process exits on a signal before its turn ends
@@ -97,6 +99,8 @@ export interface Fake {
   background?: { kind: "command" | "agent"; ms: number };
   /** This turn ran a sub-agent in the foreground (FAKE: subagent), for the runtime's fake to report its tokens. */
   subagent?: boolean;
+  /** The step asked with FAKE: askslow: the answer's turn works before it reports the step done. */
+  answerWork?: boolean;
   /** Every message the agent took in, in order (FAKE-HISTORY shows them). */
   history?: string[];
 }
@@ -353,7 +357,8 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
       if (existsSync(file)) nexus("step", "done", step, "--summary", `fake finished ${step} after the stop was lifted`);
       else { writeFileSync(file, "1"); nexus("stop", step, "--condition", "fake condition", "--reason", "fake stop"); }
     }
-    if (behaviour === "ask" || behaviour === "slowask") nexus("ask", "Which way?", "--step", step);
+    if (behaviour === "ask" || behaviour === "slowask" || behaviour === "askslow") nexus("ask", "Which way?", "--step", step);
+    if (behaviour === "askslow") fake.answerWork = true;
     if (behaviour === "askwork") { nexus("ask", "Which way?", "--step", step, "--can-continue"); await work(step); }
     if (behaviour === "askthree") {
       for (const text of ["Which layout?", "Which colour?", "Which sound?"]) nexus("ask", text, "--step", step, "--can-continue", "--option", "First", "--option", "Second", "--recommend", "First");
@@ -412,6 +417,7 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
     return "background done";
   }
   if (text.startsWith("[Nexus] Answer") && fake.step) {
+    if (fake.answerWork) await work(fake.step);
     nexus("step", "done", fake.step, "--summary", `fake finished ${fake.step} after an answer`);
     return "answered";
   }

@@ -143,8 +143,8 @@ test("a push that hangs counts as failed once the time limit is over", async () 
   const silent = createServer((s) => { sockets.add(s); s.on("error", () => {}); });
   await new Promise<void>((r) => silent.listen(0, "127.0.0.1", () => r()));
   const port = (silent.address() as { port: number }).port;
-  git(t.work, "remote", "set-url", "origin", `http://127.0.0.1:${port}/never.git`);
   try {
+    git(t.work, "remote", "set-url", "origin", `http://127.0.0.1:${port}/never.git`);
     const started = Date.now();
     const res = await pushDeployed({ root: t.work, ref: "main", live: true, settings: { push_on_deploy: true }, timeout: 2000 });
     assert.equal(res.result, "failed");

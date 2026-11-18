@@ -2,7 +2,7 @@
 // next step (src/coordinator.ts, src/engine.ts heldAtLimit; decided 2026-11-15, queue LQ): with the limit full it is
 // held (run.yaml `held`), and the first place that frees goes to it, before a planned start. What reaches a live turn is
 // never held. Against the fake runtimes, a limit of 2, each queue in a project of its own (so in a checkout of its own).
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { answerAsUser, isOpenQuestion, loadProjectState, type ProjectStore } from "@nexus/protocol";
 import { world, type Received } from "./coordinator-world.ts";
@@ -13,9 +13,11 @@ type Project = ReturnType<World["add"]>;
 
 /**
  * Watches the projects while a test runs, every 20 ms: never more queues counted toward the limit than it allows, and
- * no worker of a held run at work. `check()` stops watching and fails with what it saw.
+ * no worker of a held run at work. `check()` stops watching and fails with what it saw. The watching stops with the
+ * test `t` on every path too: a test that failed before `check()` would otherwise leave the interval running, and the
+ * file (run with --test-timeout=0 in the suite) would never exit (queue FL1).
  */
-function watchLimit(w: World, stores: ProjectStore[], limit: number) {
+function watchLimit(t: TestContext, w: World, stores: ProjectStore[], limit: number) {
   const faults: string[] = [];
   let worst = 0;
   const timer = setInterval(() => {
@@ -30,6 +32,7 @@ function watchLimit(w: World, stores: ProjectStore[], limit: number) {
       }
     }
   }, 20);
+  t.after(() => clearInterval(timer));
   return {
     check() {
       clearInterval(timer);
@@ -55,11 +58,11 @@ const toWorker = (w: World, p: Project, queue: string): Received[] => {
 const activity = (p: Project, queue: string): string[] =>
   loadProjectState(p.store).sessions.filter((s) => s.queue === queue).flatMap((s) => p.store.readActivity(s.id).entries.map((a) => a.text));
 
-test("a queue back from its answer waits for a place, gets the first one before a planned start, and then its answer", async () => {
+test("a queue back from its answer waits for a place, gets the first one before a planned start, and then its answer", async (t) => {
   const work = holdWork();
   const w = world({ limit: 2 });
-  const a = w.add("a", { A: ["slow"] }), b = w.add("b", { B: ["slow"] }), c = w.add("c", { C: ["ask"] }), d = w.add("d", { D: ["done"] });
-  const watch = watchLimit(w, [a.store, b.store, c.store, d.store], 2);
+  const a = w.add("a", { A: ["slow"] }), b = w.add("b", { B: ["slow"] }), c = w.add("c", { C: ["askslow"] }), d = w.add("d", { D: ["done"] });
+  const watch = watchLimit(t, w, [a.store, b.store, c.store, d.store], 2);
   try {
     c.engine.start("C");
     await w.until("C to ask and end its turn", () => c.queue("C").questions.some(isOpenQuestion) && worker(c, "C") === "idle", LONGER.step);
@@ -87,11 +90,15 @@ test("a queue back from its answer waits for a place, gets the first one before 
     assert.equal(toWorker(w, c, "C").filter((r) => r.text.includes("[Nexus] Answer")).length, 0, "no answer delivered yet");
     assert.equal(worker(c, "C"), "idle");
 
-    // A's place frees: C takes it, before D's planned start.
+    // A's place frees: C takes it, before D's planned start. C's answer turn is held at work (askslow): a turn that
+    // ended at once would put C1 into review and free the place again, and under load the test looked only after D
+    // had rightly taken it (queue FL1).
     work.release("A1");
-    await w.until("C to go on", () => !c.queue("C").run?.held, LONGER.run);
+    await w.until("C to go on and work on its answer", () => !c.queue("C").run?.held && worker(c, "C") === "working", LONGER.run);
     assert.equal(d.queue("D").run, undefined, "the place went to the held queue, not to the planned start");
+    assert.equal(d.queue("D").start?.held?.kind, "limit", "the planned start still waits");
     assert.ok(activity(c, "C").some((t) => t.startsWith("Nexus lets queue C go on: a place under the limit is free")));
+    work.release("C1");
     await w.until("C to finish", () => c.queue("C").run?.state === "finished", LONGER.run);
     assert.equal(c.queue("C").run!.reason, undefined);
     const answers = toWorker(w, c, "C").filter((r) => r.text.includes("[Nexus] Answer"));
@@ -107,11 +114,11 @@ test("a queue back from its answer waits for a place, gets the first one before 
   } finally { work.release(); w.stop(); work.done(); }
 });
 
-test("the next step after an accepted review waits for a place, and opens by itself once one frees", async () => {
+test("the next step after an accepted review waits for a place, and opens by itself once one frees", async (t) => {
   const work = holdWork();
   const w = world({ limit: 2 });
   const a = w.add("a", { A: ["slow"] }), b = w.add("b", { B: ["slow"] }), c = w.add("c", { C: { steps: ["done", "done"], level: 1 } });
-  const watch = watchLimit(w, [a.store, b.store, c.store], 2);
+  const watch = watchLimit(t, w, [a.store, b.store, c.store], 2);
   try {
     c.engine.start("C");
     await w.until("C1 in review", () => status(c, "C", "C1") === "review" && worker(c, "C") === "idle", LONGER.step);
@@ -138,11 +145,11 @@ test("the next step after an accepted review waits for a place, and opens by its
   } finally { work.release(); w.stop(); work.done(); }
 });
 
-test("the closing refactoring step after an accepted review waits for a place too", async () => {
+test("the closing refactoring step after an accepted review waits for a place too", async (t) => {
   const work = holdWork();
   const w = world({ limit: 2 });
   const a = w.add("a", { A: ["slow"] }), b = w.add("b", { B: ["slow"] }), c = w.add("c", { C: { steps: ["done"], level: 1, coding: true } });
-  const watch = watchLimit(w, [a.store, b.store, c.store], 2);
+  const watch = watchLimit(t, w, [a.store, b.store, c.store], 2);
   try {
     c.engine.start("C");
     await w.until("C1 in review", () => status(c, "C", "C1") === "review" && worker(c, "C") === "idle", LONGER.step);
@@ -171,11 +178,11 @@ test("the closing refactoring step after an accepted review waits for a place to
   } finally { work.release(); w.stop(); work.done(); }
 });
 
-test("an answer that reaches a live turn is not held: the worker working on beside its question counts", async () => {
+test("an answer that reaches a live turn is not held: the worker working on beside its question counts", async (t) => {
   const work = holdWork();
   const w = world({ limit: 2 });
   const a = w.add("a", { A: ["slow"] }), c = w.add("c", { C: ["askwork"] }), d = w.add("d", { D: ["done"] });
-  const watch = watchLimit(w, [a.store, c.store, d.store], 2);
+  const watch = watchLimit(t, w, [a.store, c.store, d.store], 2);
   try {
     c.engine.start("C");
     a.engine.start("A");

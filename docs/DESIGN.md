@@ -2278,6 +2278,21 @@ busy-loop processes on the user's 16 logical cores and 4 to 6 copies of the test
   cleanup comes. Its other failure was time: two steps and a report start about eight node processes, a step took 14 s
   under that load, and the 20 s wait was shorter than the work: now a named longer wait (see "The tests' waits").
 
+## Findings from the tests that failed or hung in full runs (queue FL)
+
+- **A failed test must not keep its file running** (limit-hold.test.ts). The suite runs with `--test-timeout=0`, so
+  a file ends only when nothing keeps Node up. A watcher's `setInterval` cleared only on the success path, or an
+  `Engine` never shut down (its startup timer arms the recurring and reminder timers, which re-arm forever; tried: a
+  file whose only test made one and passed did not exit in 40 s), held the whole run until someone killed it. Every
+  timer, engine or server a test starts is stopped on every path: `t.after`, or a `try` that begins right after it
+  with the stop in `finally`, and no assertion or `await` between the two.
+- **"Not yet" after a wait for something else races the code under test** (limit-hold.test.ts, "a queue back from
+  its answer"). The test waited for the held queue to go on, then asserted that the planned start had not started.
+  But a fake answer turn ends at once: under load the test looked 1.5 s late, the queue had already used its place
+  and gone to review, and the planned start had rightly taken the place it freed (9 of 12 load runs failed). The
+  engine kept the limit throughout. A test that asserts something has not happened yet holds the state it relies on:
+  the answer's turn now works until the test releases it (fake behaviour `askslow`).
+
 ## Findings from review levels (queue RL1)
 
 - **Every step is reviewed now, so the last step of every queue ends in review.** Before, `continue` ended a queue's
