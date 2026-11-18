@@ -79,3 +79,19 @@ export function questionBarrier(questions: readonly {
   const wait = last?.continue === false && last.id !== resumed;
   return { remaining, wait, blocked: remaining > 0 || wait, last: last?.id };
 }
+
+/**
+ * The step is at work now: the derivation says `running` and its queue's run is going (queue EF). A run the user
+ * stopped (paused, "stopped by the user") leaves its step `running` in the derivation, as the step it goes on with at
+ * Continue (the dashboard reads such a queue as paused); no agent works on it, so it is no step at work: not in the
+ * server's running steps, nothing an update waits for, no queue running in the projects' list.
+ */
+export const stepWorkedOn = (run: RunLike, step: { status: StepStatus | (string & {}) }): boolean => step.status === "running" && runGoing(run);
+
+/** The queue is at work now: `running` in the derivation and its run going (see stepWorkedOn). */
+export const queueWorkedOn = (q: { status: string; run?: RunLike }): boolean => q.status === "running" && runGoing(q.run);
+
+/** The steps at work in a project's state (stepWorkedOn), each with its queue: what `nexus server status` lists. */
+export function stepsWorkedOn<Q extends { run?: RunLike; steps: readonly { status: StepStatus | (string & {}) }[] }>(queues: readonly Q[]): { queue: Q; step: Q["steps"][number] }[] {
+  return queues.flatMap((queue) => queue.steps.filter((step) => stepWorkedOn(queue.run, step)).map((step) => ({ queue, step })));
+}
