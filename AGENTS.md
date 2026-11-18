@@ -34,15 +34,18 @@ Nexus is developed with Nexus. The agents working on this repository are run by 
   ids and YAML keys stay English. What agents write to the user (chat, step summaries, questions, progress lines)
   follows the reader's language too. The user talks in Hungarian; with no reader's language set, agents that talk with
   the user reply in the language the user writes in.
-- **Commits**: on `main` in this checkout, one or more per step, each with a subject line and a body that says why.
-  Stage explicit paths (never `git add -A`). Do not push.
+- **Commits**: one or more per step, each with a subject line and a body that says why. Stage explicit paths (never
+  `git add -A`). Where they go depends on the queue: a queue without a worktree of its own commits on `main` in this
+  checkout; a queue with its own worktree commits on its own branch in that worktree, its integration step merges the
+  base into that branch, and the base then only moves to the result by a fast-forward. A survey-only run commits
+  nothing. Agents never rebase and never push.
 - **Before every commit**: `npm run typecheck`, `npm run lint` and the tests of the files you changed pass; the whole
   suite (`npm test`) runs at the end of a step, as the queue's checks, not before each commit, and may first wait (up
   to 15 minutes) for another checkout's full run to end. If the dashboard changed: `npm run build -w @nexus/web`. Fix a
   lint finding rather than silence it (docs/DESIGN.md, "Static analysis").
 - **Run control and lifecycle code** (after a queue that touched it the orchestrator offers the `lifecycle` template):
   the engine, the scheduler and the runtime adapters, in `apps/server/src`: `engine.ts`, `scheduler.ts`,
-  `agent-host.ts`, `claude.ts`, `codex.ts`, `recurring.ts`.
+  `agent-host.ts`, `claude.ts`, `codex.ts`, `recurring.ts`, `lifecycle.ts` (updates, restarts, the hand-over).
 - **Tests**: behaviour in the engine, orchestrator, conversations or lifecycle gets a test against the fake runtimes
   (`apps/server/test/fake-claude.ts`, `fake-codex.ts`, steered by `fake-behaviour.ts`); protocol logic gets a unit
   test. Tests never call a model.
