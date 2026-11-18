@@ -2128,6 +2128,11 @@ Nexus keeps outside the queue's list of steps.
   to do, but it explains extra turns in the activity.
 - **A killed server takes its `claude` children with it** (their stdin closes). On restart, any session process still
   alive is ended before a resume, and running queues come back paused.
+- **Every write to a child's input needs an error listener** (queue CR). A process that has exited while the server
+  has not yet seen its exit (the server busy) fails the next write with EPIPE, also a short line on Windows, emitted as
+  an error event of its input; unheard, it ends the server. On 2026-11-18 the model list's `initialized` to a Codex
+  that had answered and exited did so. Once the exit is seen, Node has destroyed the input and a write fails only to
+  its callback; reading the output of an exited process ends it, no error.
 
 - **Codex has the same moves.** `turn/steer` reaches a running turn (checked live), `thread/resume` continues a
   thread with its context (checked: the agent recalled the previous queue), token usage and the context window
