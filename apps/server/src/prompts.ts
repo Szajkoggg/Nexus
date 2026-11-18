@@ -54,7 +54,8 @@ Report through the \`nexus\` command (on PATH; your session is set in the enviro
 - nexus step progress <step> "<short status>" [--pct N]     at milestones, so the user sees where you are
 - nexus review add <step> <picture> --key <view@width> --role <role> --label "..."   a review picture, one per command
 - nexus review add <step> <file|url>... --label "..."       other review material (documents, data, links)
-- nexus check <step> <name> --ok|--fail --summary "..." --duration <seconds>   results of the step's checks, with how long each ran (the times show when a check grows slower); <name> is the check exactly as the step's opening lists it under "Checks for every step" (\`nexus check <step> "npm test" --ok …\`, not "test"): a check reported under another name counts as not reported
+- nexus check <step> <name> --ok|--fail --summary "..." --duration <seconds>   results of the step's checks, only where you run them: where the step's opening says Nexus runs them, it runs and records them itself after your \`nexus step done\`, and this is refused. Otherwise report each with how long it ran (the times show when a check grows slower); <name> is the check exactly as the step's opening lists it under "Checks for every step" (\`nexus check <step> "npm test" --ok …\`, not "test"): a check reported under another name counts as not reported
+- nexus check <step> <name> --unrelated --evidence "..."   in a check-fix round, a failed check that is not your work's failure (it fails on the base too, a test you did not touch): Nexus runs it on the queue's base commit and decides by it; end your turn without \`nexus step done\`
 - nexus metric record <name> <value>                        a value of one of the project's metrics, when the step asks you to measure one (\`nexus metric list\` shows them); it is kept with your step and HEAD commit
 - nexus step done <step> --summary "..." [--commit <sha>] --activities a,b   when the acceptance criteria are met; --activities names what you actually did, whatever was planned (\`nexus tags\` lists the names)
 - nexus step failed <step> --reason "..."                   when the step cannot be done as written
@@ -67,7 +68,7 @@ Nexus's standards for the rest (the full texts: \`nexus help summaries\`, \`nexu
 - A question (nexus ask) has three: what it blocks; the options (--option, one each); your recommendation (--recommend names the option, the text says why).
 - ${SHELL_COMMANDS}
 - When an action is refused, do not work around it through another tool or command that reaches the same end (PowerShell after Bash, the shell after the edit tool); retry once in a simpler form at most (without chaining, for example), otherwise report what you needed and why.
-- Tests: while you work, run only the tests of what you changed and stop at the first failure (the project's way is in its AGENTS.md; in Nexus's own repository \`npm run test:files -- <files>\`); the whole suite runs at the step's end, as the queue's checks.
+- Tests: while you work, run only the tests of what you changed and stop at the first failure (the project's way is in its AGENTS.md; in Nexus's own repository \`npm run test:files -- <files>\`); the whole suite runs at the step's end, as the queue's checks. Where Nexus runs them, you do not start the whole suite or wait for it: Nexus runs it after your \`nexus step done\` and sends you its output only when a check fails (a check-fix round): fix from that output and the log it names, running only the failing tests.
 - Leave the working tree clean at every step's end, not only at a stop: commit everything the step did (only its own files, by name) and name the commit with nexus step done --commit, so every commit belongs to exactly one step.
 Messages from the user may arrive while you work, marked [Nexus]; follow them.
 Before you stop (nexus stop, or a stop condition you meet): commit what is in a consistent state, with a message that says so, and leave the working tree clean (no uncommitted changes); what is not consistent, set aside or undo, and say in the reason what you left out. The user then decides whether the stopped step's commits are kept or reverted; changes nobody committed cannot be attributed to the step.`;
@@ -84,7 +85,7 @@ export function workerBriefing(l: Languages): string {
  * the step is the queue's closing refactoring step, and this is what it is given (src/closing.ts). `integration`: the
  * step is the queue's integration step, and this is what it is given (src/integration.ts).
  */
-/** Said under the checks of a step whose checks Nexus runs (PROTOCOL.md, "Checks run by Nexus"; EC4 rewrites the briefings). */
+/** Said under the checks of a step whose checks Nexus runs (PROTOCOL.md, "Checks run by Nexus"). */
 const CHECKS_BY_NEXUS = "Nexus runs these itself after your `nexus step done` and sends you their output only if one fails; do not run or report them yourself (`nexus check` refuses them). While you work, run only the tests of what you change.";
 
 export function stepOpening(o: {
@@ -108,8 +109,8 @@ export function stepOpening(o: {
     step.goal ? `\nGoal:\n${step.goal}` : "",
     step.acceptance.length ? `\nAcceptance:\n${step.acceptance.map((a) => `- ${a}`).join("\n")}` : "",
     tagsText(step.tags) ? `\nTags as planned: ${tagsText(step.tags)}. At the end name what you actually did with \`nexus step done --activities\`.` : "",
-    closing ? closingText(closing) : "",
-    integration ? integrationText(step.id, integration) : "",
+    closing ? closingText(closing, !!o.checksByNexus) : "",
+    integration ? integrationText(step.id, integration, !!o.checksByNexus) : "",
     checks.length ? `\nChecks for every step:\n${checks.map((c) => `- ${c}`).join("\n")}${o.checksByNexus ? `\n${CHECKS_BY_NEXUS}` : ""}` : "",
     step.review?.prepare ? `\nReview to prepare: ${step.review.prepare}\nPrepare it by Nexus's standard: read \`nexus help review\` first (view keys, roles, the same conditions on both sides of a pair).` : "",
     `\nStop conditions (meeting one ends the queue: report it with \`nexus stop\`):\n${[...q.stop_conditions, ...projectStopConditions].map((c) => `- ${c}`).join("\n") || "- none beyond your judgement"}`,
@@ -122,8 +123,11 @@ export function stepOpening(o: {
   ].filter(Boolean).join("\n");
 }
 
-/** What the closing refactoring step is told of the queue's work and of the project's rules for refactoring. */
-function closingText(c: ClosingContext): string {
+/**
+ * What the closing refactoring step is told of the queue's work and of the project's rules for refactoring. `byNexus`:
+ * Nexus runs its checks, so it starts where the last step's checks passed and runs none before it changes anything (P12).
+ */
+function closingText(c: ClosingContext, byNexus: boolean): string {
   return [
     `\nThis is the queue's closing refactoring step, kept by Nexus: it runs after the queue's own steps, in a fresh session, so that their work is read with fresh eyes.`,
     c.range
@@ -132,12 +136,17 @@ function closingText(c: ClosingContext): string {
     c.rules
       ? `The project's AGENTS.md has a "Refactoring" section: follow it too; it adds the project's own rules to this text.`
       : `The project's AGENTS.md has no "Refactoring" section: this text alone applies.`,
-    `Run the checks before you change anything, and again after. Report the run after your change with nexus check, one per check under its exact name in "Checks for every step" below (for example \`nexus check <step> "npm test" --ok …\`), never under a name of your own; mention the run before only in the summary. If nothing is worth refactoring, make no commit and report the step done with your reasons in the summary (the checks of that one run reported the same way): that is a valid outcome.`,
+    byNexus
+      ? `Do not run the checks before you change anything: ${c.checked ? `they passed on ${c.checked}, where the queue's last step ended` : "Nexus ran them when the queue's last step ended"}. While you refactor, run only the tests of what you change; after your \`nexus step done\` Nexus runs the checks on the result, and sends you their output only if one fails. If nothing is worth refactoring, make no commit and report the step done with your reasons in the summary: that is a valid outcome.`
+      : `Run the checks before you change anything, and again after. Report the run after your change with nexus check, one per check under its exact name in "Checks for every step" below (for example \`nexus check <step> "npm test" --ok …\`), never under a name of your own; mention the run before only in the summary. If nothing is worth refactoring, make no commit and report the step done with your reasons in the summary (the checks of that one run reported the same way): that is a valid outcome.`,
   ].join("\n");
 }
 
-/** What the integration step is told: the base to merge, what to do on a conflict, and how to stop for the user. */
-function integrationText(step: string, c: IntegrationContext): string {
+/**
+ * What the integration step is told: the base to merge, what to do on a conflict, and how to stop for the user.
+ * `byNexus`: Nexus runs its checks on the result after `nexus step done`.
+ */
+function integrationText(step: string, c: IntegrationContext, byNexus: boolean): string {
   const stop = `nexus stop ${step} --condition "${INTEGRATION_CONDITION}" --reason "<the conflicting files, and why they are not resolved>"`;
   const branch = c.branch ? `the queue's branch ${c.branch}` : "the queue's branch";
   const intro = `\nThis is the queue's integration step, kept by Nexus: it runs last, in the queue's worktree, on ${branch}.`;
@@ -150,10 +159,14 @@ function integrationText(step: string, c: IntegrationContext): string {
   return [
     intro,
     `Merge the base into it: git merge --no-edit ${c.base} (the base branch ${c.base} is at ${c.sha} now). Never rebase, never push, and change neither the base branch nor any other checkout: the base moves forward to this step's result later, by Nexus or the user.`,
-    `Report the checks you run on the result with nexus check, one per check under its exact name in "Checks for every step" below (for example \`nexus check <step> "npm test" --ok …\`), never under a short name of your own; report the last run of each.`,
-    `- No conflict (or the branch already contains the base): run the checks on the result. If a check fails because of what the two sides do together, fix it on this branch in small commits that say why, and run the checks again. Report the step done with the resulting HEAD as its commit, and say in the summary what the merge brought in.`,
+    byNexus
+      ? `Nexus runs the checks on the result after your \`nexus step done\`, and sends you their output only if one fails: then fix what the two sides do together on this branch, in small commits that say why, and end with \`nexus step done\` again.`
+      : `Report the checks you run on the result with nexus check, one per check under its exact name in "Checks for every step" below (for example \`nexus check <step> "npm test" --ok …\`), never under a short name of your own; report the last run of each.`,
+    byNexus
+      ? `- No conflict (or the branch already contains the base): report the step done with the resulting HEAD as its commit, and say in the summary what the merge brought in.`
+      : `- No conflict (or the branch already contains the base): run the checks on the result. If a check fails because of what the two sides do together, fix it on this branch in small commits that say why, and run the checks again. Report the step done with the resulting HEAD as its commit, and say in the summary what the merge brought in.`,
     c.resolve
-      ? `- A conflict: resolve it (the project lets you: its resolve_conflicts setting is on). Keep what both sides meant, commit the merge, run the checks, and say in the summary which files conflicted and how you resolved each; the step's review judges it. If you cannot resolve one with confidence (the two sides want different things, and choosing is the user's), abort the merge (git merge --abort) and stop: ${stop}`
+      ? `- A conflict: resolve it (the project lets you: its resolve_conflicts setting is on). Keep what both sides meant, commit the merge, ${byNexus ? "run the tests of the files that conflicted" : "run the checks"}, and say in the summary which files conflicted and how you resolved each; the step's review judges it. If you cannot resolve one with confidence (the two sides want different things, and choosing is the user's), abort the merge (git merge --abort) and stop: ${stop}`
       : `- A conflict: do not resolve it (the project's resolve_conflicts setting is off). Abort the merge (git merge --abort), so the branch is as it was, and stop: ${stop}`,
     `After such a stop the queue waits for the user, who resolves the conflict (in this worktree, or with a new revision) and goes on with Continue; this step then runs again.`,
   ].join("\n");
@@ -297,7 +310,7 @@ export function formatInbox(m: InboxView, state: ProjectState, released = false)
     return [
       ...lines,
       step?.acceptance.length ? `\nAcceptance criteria of the step:\n${step.acceptance.map((a) => `- ${a}`).join("\n")}` : "",
-      `\nWork on it in this step: \`nexus step start ${m.step}\`, then the checks, review material for this round (\`nexus review add ${m.step} … --round ${m.round}\`, pictures with the same keys as before: \`nexus help review\`), and \`nexus step done ${m.step} --summary "…"\` (or \`nexus step failed\` / \`nexus stop\`), then \`nexus context\`, and end your turn.`,
+      `\nWork on it in this step: \`nexus step start ${m.step}\`, then ${step?.checks_by === "nexus" ? "the fix (Nexus runs the checks again after your `nexus step done`)" : "the checks"}, review material for this round (\`nexus review add ${m.step} … --round ${m.round}\`, pictures with the same keys as before: \`nexus help review\`), and \`nexus step done ${m.step} --summary "…"\` (or \`nexus step failed\` / \`nexus stop\`), then \`nexus context\`, and end your turn.`,
     ].filter(Boolean).join("\n");
   }
   if (m.type === "check_failed") {
@@ -305,7 +318,7 @@ export function formatInbox(m: InboxView, state: ProjectState, released = false)
     return [
       `[Nexus] The checks Nexus ran for step ${m.step} of queue ${m.queue}: check-fix round ${m.fix} of ${limit}${m.fix > limit ? " (beyond the limit: the orchestrator gave one more)" : ""}. What failed:`,
       m.text,
-      `\nFix it at its cause and commit; after your next \`nexus step done\` Nexus runs every check again, the ones that passed too. While you work, run only the tests of what you change.`,
+      `\nFix it at its cause and commit. Work from this output and the log it names (read the part you need there), and run only the failing tests and the tests of what you change, not the whole suite: after your next \`nexus step done\` Nexus runs every check again, the ones that passed too.`,
       `If a failure is not from your work (it fails on the base too, a test you did not touch), do not patch around it: say so with your evidence, \`nexus check ${m.step} "<check>" --unrelated --evidence "<what shows it>"\`, and end your turn without \`nexus step done\`; Nexus runs that check on the queue's base commit and decides by it.`,
       `Work on it in this step: \`nexus step start ${m.step}\`, the fix, then \`nexus step done ${m.step} --summary "…"\` (or \`nexus step failed\` / \`nexus stop\`), then \`nexus context\`, and end your turn.`,
     ].join("\n");

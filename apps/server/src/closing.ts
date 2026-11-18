@@ -18,6 +18,8 @@ export interface ClosingContext {
   stat?: string;
   /** The project's AGENTS.md (in the queue's checkout) has a "Refactoring" section. */
   rules: boolean;
+  /** The commit on which the checks Nexus ran for the queue's own steps last passed (checks.yaml), when known. */
+  checked?: string;
 }
 
 /** The range of the queue's own steps' rounds of work, from git.yaml; the rounds of the steps Nexus keeps (the closing
@@ -28,6 +30,17 @@ function queueRange(store: ProjectStore, q: Pick<QueueView, "id">): { from: stri
   const from = own.filter((r) => r.start).sort((a, b) => a.started_at.localeCompare(b.started_at))[0]?.start;
   const to = own.filter((r) => r.end && r.ended_at).sort((a, b) => a.ended_at!.localeCompare(b.ended_at!)).at(-1)?.end;
   return from && to ? { from, to } : undefined;
+}
+
+/**
+ * The commit on which the latest set of checks Nexus ran on the queue's own steps passed: none when that set did not
+ * pass (a failure accepted), or there is none.
+ */
+function lastChecked(store: ProjectStore, q: Pick<QueueView, "id">): string | undefined {
+  const sets = Object.entries(store.readChecks(q.id)?.steps ?? {}).filter(([step]) => !isKeptStep(q.id, step)).flatMap(([, e]) => e.sets);
+  const last = sets.filter((x) => x.ended_at && (x.state === "passed" || x.state === "accepted"))
+    .sort((a, b) => a.ended_at!.localeCompare(b.ended_at!)).at(-1);
+  return last?.state === "passed" ? last.commit ?? undefined : undefined;
 }
 
 /** The project's rules file has a "Refactoring" section (a Markdown heading of any level). */
@@ -48,12 +61,14 @@ export function closingContext(store: ProjectStore, q: Pick<QueueView, "id" | "w
   const dir = checkoutOf(store, q);
   const range = queueRange(store, q);
   const rules = hasRefactoringSection(dir);
-  if (!range || !dir) return { rules };
+  const checked = lastChecked(store, q);
+  const base = { rules, ...(checked ? { checked } : {}) };
+  if (!range || !dir) return base;
   const out = diffStat(dir, range);
-  if (out === undefined) return { range, rules };
+  if (out === undefined) return { range, ...base };
   const lines = out.split(/\r?\n/).filter((l) => l.trim());
   const stat = lines.length > STAT_LINES + 1
     ? [...lines.slice(0, STAT_LINES), ` ... ${lines.length - 1 - STAT_LINES} more files`, lines.at(-1)!].join("\n")
     : lines.join("\n");
-  return { range, stat, rules };
+  return { range, stat, ...base };
 }
