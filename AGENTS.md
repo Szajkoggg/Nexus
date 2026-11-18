@@ -50,6 +50,8 @@ Nexus is developed with Nexus. The agents working on this repository are run by 
 - **Run control and lifecycle code** (after a queue that touched it the orchestrator offers the `lifecycle` template):
   the engine, the scheduler and the runtime adapters, in `apps/server/src`: `engine.ts`, `scheduler.ts`,
   `agent-host.ts`, `claude.ts`, `codex.ts`, `recurring.ts`, `lifecycle.ts` (updates, restarts, the hand-over).
+- **Load tool**: `node scripts/load-tests.mjs` runs test files repeatedly beside busy-loop processes (README.md, "Running");
+  it is Nexus's tool for reproducing a failure under load, and the one Nexus's own fix queues use.
 - **Tests**: behaviour in the engine, orchestrator, conversations or lifecycle gets a test against the fake runtimes
   (`apps/server/test/fake-claude.ts`, `fake-codex.ts`, steered by `fake-behaviour.ts`); protocol logic gets a unit
   test. Tests never call a model.

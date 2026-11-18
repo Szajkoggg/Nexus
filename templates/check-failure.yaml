@@ -33,8 +33,9 @@ steps:
     title: "Reproduce and find the cause: {{check}}"
     goal: |
       Reproduce the failure of {{check}} on the base (the tests named in the description; the log and the evidence
-      there show how it failed), alone and under load (in Nexus's repository: node scripts/load-tests.mjs), and find
-      its cause. Say in the summary where the cause is and why it happens, with the evidence; change nothing yet.
+      there show how it failed), alone and under load, and find its cause. Under load means the project's own load
+      tool where it has one (its AGENTS.md or README names it); otherwise run the whole check again and again with
+      several other busy processes beside it (as many as the machine has cores). Say in the summary where the cause is and why it happens, with the evidence; change nothing yet.
     acceptance:
       - The failure reproduced (how often, under which load), or the attempts named when it is not.
       - The cause named in the summary, with the code and the evidence that shows it.
