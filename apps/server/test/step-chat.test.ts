@@ -35,15 +35,18 @@ function setup() {
   store.writeQueue({ protocol: 1, id: "Q", title: "Queue", revision: 1, status: "proposed", review_level: 1, stop_conditions: [], checks: [], steps: IDS.map(step) });
   approveQueue(store, "Q");
   ensureUserSession(store);
-  const emit = (min: number, body: Record<string, unknown>, session = "w") => store.appendEvent({ v: 1, id: newId(), at: at(min), session, ...body } as Event);
+  const emit = (min: number, body: Record<string, unknown>, session = "w", id = newId()) => store.appendEvent({ v: 1, id, at: at(min), session, ...body } as Event);
   store.writeNote("Q", { id: newId(), step: "P1", from: "user", at: at(1) }, "Use the grassland settings.");
   emit(2, { type: "step.started", queue: "Q", step: "R1" });
   emit(3, { type: "step.progress", queue: "Q", step: "R1", text: "Half of the fixtures pass", pct: 50 });
+  // Four events of one millisecond each, with fixed ids whose code unit order is the order they were written in. A
+  // locale's order would swap them (in hu-HU "ZS" sorts after "ZW"), and the step would stay running.
   for (const [i, id] of (["V1", "D1", "J1"] as const).entries()) {
-    emit(10 + i, { type: "step.started", queue: "Q", step: id });
-    emit(10 + i, { type: "check.result", queue: "Q", step: id, name: "npm test", ok: true, summary: "212 passed" });
-    emit(10 + i, { type: "review.added", queue: "Q", step: id, items: [{ path: `tmp/review/${id}.png`, label: `${id} sheet` }] });
-    emit(10 + i, { type: "step.done", queue: "Q", step: id, summary: `${id} built`, commit: `c0ffee${i}` });
+    const fixed = (end: string) => `01JAAAAAAAAAAAAAAAAAAAA${i}${end}`;
+    emit(10 + i, { type: "step.started", queue: "Q", step: id }, "w", fixed("ZS"));
+    emit(10 + i, { type: "check.result", queue: "Q", step: id, name: "npm test", ok: true, summary: "212 passed" }, "w", fixed("ZT"));
+    emit(10 + i, { type: "review.added", queue: "Q", step: id, items: [{ path: `tmp/review/${id}.png`, label: `${id} sheet` }] }, "w", fixed("ZV"));
+    emit(10 + i, { type: "step.done", queue: "Q", step: id, summary: `${id} built`, commit: `c0ffee${i}` }, "w", fixed("ZW"));
   }
   emit(20, { type: "review.accepted", queue: "Q", step: "D1" }, "user");
   emit(21, { type: "review.rejected", queue: "Q", step: "J1", text: "not this way" }, "user");

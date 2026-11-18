@@ -4,6 +4,7 @@ import { CONVERSATION_ONLY, ORCHESTRATOR_ONLY, USER_ONLY, WORKER_ONLY, type Metr
 import { ProjectStore, chainPlan, readAway, revisionHash } from "./store.ts";
 import { awayAt, awayNow, type AwayNow } from "./away.ts";
 import { formatClock, type Segment } from "./times.ts";
+import { compareIds } from "./ids.ts";
 import { isOpenQuestion, questionBarrier, reviewedByOrchestrator, runEnded, runGoing, runHoldsCheckout, stepWaits, waitsForUserReview } from "./status-rules.ts";
 import { stopPlace } from "./attention.ts";
 import { closingStepId, integrationStepId, stepDefs } from "./closing.ts";
@@ -299,7 +300,7 @@ export function loadProjectState(store: ProjectStore): ProjectState {
       }
     } catch (e) { warnings.push(`session ${id}: ${(e as Error).message}`); }
   }
-  events.sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id));
+  events.sort((a, b) => a.at.localeCompare(b.at) || compareIds(a.id, b.id));
 
   // Send-backs the server delivered to a worker, by the review.sent_back event they carry out.
   const delivered = new Set<string>();

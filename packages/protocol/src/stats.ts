@@ -11,6 +11,7 @@ import { PROJECT_ACTIVITY, type StepTags } from "./tags.ts";
 import { usageEstimates } from "./usage-estimate.ts";
 import { metricDef, type MetricValue } from "./metrics.ts";
 import { formatSeconds } from "./times.ts";
+import { compareIds } from "./ids.ts";
 import { windowKind } from "./digest.ts";
 
 /** What a report groups by: the step's model or effort (from its worker turns), or one of its tag facets. */
@@ -343,7 +344,7 @@ export interface ProjectMetrics { metrics: MetricDef[]; values: MetricPoint[] }
 
 export function projectMetrics(state: Pick<ProjectState, "metrics" | "queues">): ProjectMetrics {
   const values = state.queues.flatMap((q) => q.steps.flatMap((st) => st.metrics.map((m) => ({ ...m, queue: q.id, step: st.id }))))
-    .sort((a, b) => a.at.localeCompare(b.at) || a.event.localeCompare(b.event));
+    .sort((a, b) => a.at.localeCompare(b.at) || compareIds(a.event, b.event));
   const names = [...state.metrics.metrics.map((m) => m.name), ...values.map((v) => v.name)];
   const metrics = [...new Set(names)].map((n) => metricDef(state.metrics, n)).filter((d): d is MetricDef => !!d);
   return { metrics, values };

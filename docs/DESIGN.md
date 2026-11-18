@@ -2422,6 +2422,12 @@ rules, and every rule an error (a warning nobody has to fix is noise):
 - `react-hooks/rules-of-hooks` and `react-hooks/exhaustive-deps` on the dashboard: a hook called conditionally breaks
   React's bookkeeping; a missing dependency leaves an effect working on stale values. Only these two of the plugin:
   its React Compiler rules are about a compiler Nexus does not use.
+- `no-restricted-syntax` against `localeCompare` on an id (a name `id`, `ids`, `event`, `queue`, `step`, `dir` or
+  ending in `Id`, on either side of the call): ids compare with `compareIds` (`packages/protocol/src/ids.ts`), by code
+  unit. Found in queue FL: Node and the browser take the machine's locale, and in hu-HU CS, GY, LY, NY, TY, ZS (and DZ,
+  DZS) are letters of their own, so `"…ZS"` sorts after `"…ZT"`; two monotonic ULIDs of one millisecond came out
+  reversed, and a step whose `step.started` sorted after its `step.done` stayed `running` (about 3 % of the step-chat
+  seed test's runs). Timestamps (`at`) may keep `localeCompare`: ISO times hold no letter pairs.
 - Unused `eslint-disable` comments are errors, so a suppression cannot outlive its reason.
 
 No `--cache`: ESLint's cache is per file, and with type information a change in one file (a function becoming async)

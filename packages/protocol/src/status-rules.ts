@@ -1,8 +1,9 @@
 // The status rules every part reads the same way: when a run is going, when a step waits for the user's review (or the
 // orchestrator's), and when a question is open. Pure and free of Node: the dashboard imports this module directly
-// (`@nexus/protocol/status-rules`), so it imports nothing at run time; the server, the CLI and the state derivation use
+// (`@nexus/protocol/status-rules`), so it imports nothing at run time but the equally pure ids.ts; the server, the CLI and the state derivation use
 // it too, so a rule changes in one place.
 import type { RunFile, StepStatus } from "./schemas.ts";
+import { compareIds } from "./ids.ts";
 
 type RunState = RunFile["state"];
 /** A run, as the state derivation, the server and the dashboard each hold it (the dashboard as plain text). */
@@ -71,7 +72,7 @@ export function questionBarrier(questions: readonly {
   const own = step ? questions.filter(q => q.queue === queue && q.step === step) : [];
   const remaining = own.filter(isOpenQuestion).length;
   const last = own.flatMap(q => q.answers).filter(a => !a.escalate)
-    .sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id)).at(-1);
+    .sort((a, b) => a.at.localeCompare(b.at) || compareIds(a.id, b.id)).at(-1);
   const wait = last?.continue === false && last.id !== resumed;
   return { remaining, wait, blocked: remaining > 0 || wait, last: last?.id };
 }

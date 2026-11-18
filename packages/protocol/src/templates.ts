@@ -8,6 +8,7 @@ import YAML from "yaml";
 import { z } from "zod";
 import { MaintenanceMode, QueueFile } from "./schemas.ts";
 import { nexusHome } from "./store.ts";
+import { compareIds } from "./ids.ts";
 
 /** The layers, weakest first: a template of a later layer replaces one of an earlier layer with the same id. */
 const TEMPLATE_LAYERS = ["nexus", "global", "project"] as const;
@@ -119,7 +120,7 @@ export function mergeTemplates(read: readonly (Template | TemplateProblem)[]): M
     }
     byId.set(t.id, { ...t, replaces: before ? [...before.replaces, before.layer] : [] });
   }
-  return { templates: [...byId.values()].sort((a, b) => a.id.localeCompare(b.id)), problems };
+  return { templates: [...byId.values()].sort((a, b) => compareIds(a.id, b.id)), problems };
 }
 
 /** The files named like template `id` (`<id>.yaml`) that could not be read as one: why a template is missing. */
