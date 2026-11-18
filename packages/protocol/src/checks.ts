@@ -46,9 +46,10 @@ function lastDone(st: Pick<StepView, "timeline">): StepDone | undefined {
 
 /**
  * Reads the engine's checks of the step into the derived step (after its events): their results among the step's
- * checks and metrics, and its status where the latest step.done's checks have not passed.
+ * checks and metrics, and its status where the latest step.done's checks have not passed. `limit`: the project's
+ * `defaults.check_fix_limit`, given to a step in a check-fix round.
  */
-export function applyCheckSets(q: QueueView, st: StepView): void {
+export function applyCheckSets(q: QueueView, st: StepView, limit?: number): void {
   const entry = q.check_runs?.steps[st.id];
   if (!entry) return;
   st.checks_by = entry.by;
@@ -59,10 +60,20 @@ export function applyCheckSets(q: QueueView, st: StepView): void {
     if (last.duration !== undefined) st.metrics.push({ name: checkMetric(c.name), value: last.duration, unit: CHECK_UNIT, at: last.ended_at, event: `check:${set.done}:${c.name}`, session: st.session ?? "nexus", commit: set.commit ?? undefined });
   }
   st.checks.sort((a, b) => a.at.localeCompare(b.at));
-  if (entry.by !== "nexus" || st.status !== "review") return;
+  if (entry.by !== "nexus") return;
   const done = lastDone(st);
   if (!done) return;
   const set = checkSetOf(q.check_runs, st.id, done.id);
+  // The worker took up its check-fix round (`nexus step start` after the failed set's done): the step runs in that
+  // round, a dispute it says there is read as from the round's start, and an accepted one sends it to its review after
+  // all (as of the done: the step.started kept the done's review_with).
+  const takenUp = st.status === "running" && (set?.state === "failed" || set?.state === "accepted");
+  if (st.status !== "review" && !takenUp) return;
+  const toReview = () => {
+    if (!takenUp) return;
+    st.status = "review"; st.finished_at = done.at;
+    if (q.status === "running") q.status = "waiting";
+  };
   const reopen = (status: "checking" | "running" | "waiting") => {
     st.status = status;
     st.review_with = undefined;
@@ -74,11 +85,12 @@ export function applyCheckSets(q: QueueView, st: StepView): void {
     st.checking = { phase: set?.state === "running" ? "running" : "queued", since: (set?.state === "running" ? set.granted_at : undefined) ?? set?.requested_at ?? done.at, ...(running ? { check: running.name } : {}) };
     return reopen("checking");
   }
-  if (set.state !== "failed") return; // passed or accepted: its review
+  if (set.state !== "failed") return toReview(); // passed or accepted: its review
   st.check_fix = set.fix + 1;
+  if (limit !== undefined) st.check_fix_limit = limit;
   if (set.limit) st.check_limit = true;
   const d = set.dispute;
-  if (d?.outcome === "accepted") return;
+  if (d?.outcome === "accepted") return toReview();
   const disputed = st.timeline.findLast((e) => e.type === "check.disputed" && e.at >= done.at);
   if (d && !d.outcome) {
     if (d.base?.state === "unrunnable") { st.checking = { phase: "decision", since: d.at }; return reopen("waiting"); }

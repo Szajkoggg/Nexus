@@ -83,3 +83,29 @@ test("a step whose checks the worker reports (by: worker, or no entry) goes to r
   x.store.writeChecks("Q", { protocol: 1, steps: { Q1: { by: "worker", sets: [] } } });
   assert.equal(x.step().status, "review");
 });
+
+test("a check-fix round the worker took up with nexus step start stays that round; its dispute is read; accepted, it goes to review", () => {
+  const x = setup();
+  const d = x.done(1);
+  x.sets([x.set(d, { state: "failed", checks: [failedRun] })]);
+  x.emit(5, { type: "step.started", queue: "Q", step: "Q1" });
+  assert.deepEqual([x.step().status, x.step().check_fix, x.step().check_fix_limit], ["running", 1, 3], "the round, with the project's limit");
+  x.emit(6, { type: "check.disputed", queue: "Q", step: "Q1", name: "npm test", evidence: "fails on main" });
+  assert.deepEqual([x.step().status, x.step().checking?.phase], ["checking", "base"], "the engine runs it on the base next");
+  const dispute = { event: "e", name: "npm test", evidence: "fails on main", at: at(6) };
+  x.sets([x.set(d, { state: "failed", checks: [failedRun], dispute: { ...dispute, base: { state: "unrunnable", reason: "Missing script" } } })]);
+  assert.deepEqual([x.step().status, x.step().checking?.phase], ["waiting", "decision"]);
+  x.sets([x.set(d, { state: "accepted", checks: [failedRun], dispute: { ...dispute, base: { state: "failed" }, outcome: "accepted" } })]);
+  const st = x.step();
+  assert.deepEqual([st.status, st.finished_at], ["review", at(1)], "its review, as of the done");
+  assert.equal(st.review_with, "user", "whose review the done made it (level 1 here), kept");
+  assert.equal(loadProjectState(x.store).queues[0]!.status, "waiting");
+});
+
+test("a step started again after a passed set (a send-back) is no check-fix round", () => {
+  const x = setup();
+  const d = x.done(1);
+  x.sets([x.set(d, { state: "passed" })]);
+  x.emit(5, { type: "step.started", queue: "Q", step: "Q1" });
+  assert.deepEqual([x.step().status, x.step().check_fix], ["running", undefined]);
+});

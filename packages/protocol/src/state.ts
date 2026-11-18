@@ -146,6 +146,8 @@ export interface StepView extends StepDef {
   checking?: { phase: "queued" | "running" | "base" | "decision"; since: string; check?: string };
   /** The check-fix round at work, or the last one (1 for the first), counted apart from the review rounds. */
   check_fix?: number;
+  /** With `check_fix`: the project's `defaults.check_fix_limit`, so a view can say "check-fix round 1 of 3". */
+  check_fix_limit?: number;
   /** The latest checks failed with the step's check-fix rounds used up: the run halted for the orchestrator. */
   check_limit?: boolean;
   /**
@@ -339,7 +341,7 @@ export function loadProjectState(store: ProjectStore): ProjectState {
   }
   for (; next < changes.length; next++) applyChange(changes[next]!.q, changes[next]!.c);
   // The checks Nexus ran: a step.done whose checks have not passed is no review yet (checks.ts).
-  for (const q of queues.values()) for (const st of q.steps) applyCheckSets(q, st);
+  for (const q of queues.values()) for (const st of q.steps) applyCheckSets(q, st, project.defaults.check_fix_limit);
   // What the workers reported doing, as the names read now; where the run opened a step on its fallback.
   for (const q of queues.values()) for (const st of q.steps) {
     const f = q.run?.fallbacks?.findLast((x) => x.step === st.id);
