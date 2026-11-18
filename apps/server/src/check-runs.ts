@@ -81,7 +81,7 @@ export interface CheckHost {
 }
 
 /** A queue's checks in hand: the request, then the grant and the process running; `lastBase`: a base run's result. */
-interface Active { ticket?: Ticket; grant?: Grant; proc?: HeavyProcess; stopped?: boolean; lastBase?: { attempt: CheckAttempt; output: string } }
+interface Active { ticket: Ticket; grant?: Grant; proc?: HeavyProcess; stopped?: boolean; lastBase?: { attempt: CheckAttempt; output: string } }
 
 export class CheckRunner {
   private readonly active = new Map<string, Active>();
@@ -159,7 +159,7 @@ export class CheckRunner {
     const a = this.active.get(queue);
     if (!a) return;
     a.stopped = true;
-    a.ticket?.cancel();
+    a.ticket.cancel();
     a.proc?.kill();
   }
 
@@ -205,10 +205,7 @@ export class CheckRunner {
     if (i >= 0) sets[i] = set; else sets.push(set);
     this.write(q.id, file);
     if (!defs.length || !cwd) { this.finishSet(q.id, st.id, done.id, state, []); this.host.ended(q.id); return; }
-    const a: Active = {};
-    this.active.set(q.id, a);
-    a.ticket = this.capacity.request({ kind: "checks", project: this.host.project, queue: q.id, step: st.id });
-    this.host.ended(q.id);
+    const a = this.ask(q.id, st.id);
     a.ticket.granted.then((grant) => this.runSet(a, grant, q.id, st.id, done.id, cwd, state), () => {
       this.active.delete(q.id);
       this.update(q.id, st.id, done.id, (s) => { s.state = "interrupted"; });
@@ -240,9 +237,7 @@ export class CheckRunner {
       }
       this.finishSet(queue, step, done, state, twice);
     } finally {
-      grant.end();
-      this.active.delete(queue);
-      if (!this.closed) this.host.ended(queue);
+      this.release(grant, queue);
     }
   }
 
@@ -323,10 +318,7 @@ export class CheckRunner {
     const base = baseCommit(this.store, q);
     if (!check || check.ok !== false) return this.endBase(q.id, st.id, done.id, state, "unrunnable", `${ev.name} is not one of the checks that failed`);
     if (!cwd || !base) return this.endBase(q.id, st.id, done.id, state, "unrunnable", "no base commit of the queue is known");
-    const a: Active = {};
-    this.active.set(q.id, a);
-    a.ticket = this.capacity.request({ kind: "checks", project: this.host.project, queue: q.id, step: st.id });
-    this.host.ended(q.id);
+    const a = this.ask(q.id, st.id);
     a.ticket.granted.then((grant) => this.runBase(a, grant, q.id, st.id, done.id, check, set.checks.indexOf(check), cwd, base, state), () => {
       this.active.delete(q.id); // withdrawn (a drain, a stop): asked again when the run goes on
     });
@@ -359,9 +351,7 @@ export class CheckRunner {
       if (a.stopped && !this.closed) this.update(queue, step, done, (s) => { if (s.dispute?.base?.state === "running") s.dispute.base = { state: "queued" }; });
       if (added) await run("git", ["worktree", "remove", "--force", dir], { cwd, windowsHide: true }).catch(() => {});
       rmSync(dir, { recursive: true, force: true });
-      grant.end();
-      this.active.delete(queue);
-      if (!this.closed) this.host.ended(queue);
+      this.release(grant, queue);
     }
   }
 
@@ -406,6 +396,23 @@ export class CheckRunner {
     catch (e) { console.error(`queue ${queue} step ${step}: the fix queue for the accepted failure was not proposed: ${(e as Error).message}`); }
     this.update(queue, step, done, (s) => { s.state = "accepted"; s.dispute!.outcome = "accepted"; if (fixQueue) s.fix_queue = fixQueue; });
     this.host.ended(queue);
+  }
+
+  // ---------------------------------------------------------------- the machine
+
+  /** Asks the capacity coordinator for the queue's checks; the engine looks again (the step waits for the machine). */
+  private ask(queue: string, step: string): Active {
+    const a: Active = { ticket: this.capacity.request({ kind: "checks", project: this.host.project, queue, step }) };
+    this.active.set(queue, a);
+    this.host.ended(queue);
+    return a;
+  }
+
+  /** The checks' grant is over: the slot goes once its processes have ended, and the engine looks at the run again. */
+  private release(grant: Grant, queue: string): void {
+    grant.end();
+    this.active.delete(queue);
+    if (!this.closed) this.host.ended(queue);
   }
 
   // ---------------------------------------------------------------- the file
