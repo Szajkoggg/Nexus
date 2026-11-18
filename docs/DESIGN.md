@@ -269,7 +269,7 @@ levels, the merge train and the merge back's condition ("the integration step's 
 not change; they read the engine's results. The closing refactoring step no longer runs the checks before it starts:
 it starts at the HEAD on which the last step's checks passed, and its opening says so **(P12)**. The integration step
 works as before (merge, `nexus step done`), and its checks are Nexus's like any step's; that it runs without a model
-when the merge is clean is queue MI's.
+when the merge is clean is queue MI's (see "The integration step without a model").
 
 **AGENTS.md "Before every commit"** keeps typecheck, lint and the tests of the changed files before each commit (the
 worker still commits several times in a step); its second half says (EC4): the whole suite is no commit's check, it
@@ -749,6 +749,121 @@ back by itself) and `resolve_conflicts` (the integration step's worker resolves 
   was the older one, so the merge back waited ("the branch moved on after its integration step") and told the user
   for nothing; with a hold, it let the held run go. A round that is still open within a minute of the step's end
   now counts as still ending, and is judged once it closes.
+
+### The integration step without a model (queue MI)
+
+Decided by the user on 2026-11-17 (docs/ideas/token-costs.md): the integration step runs without a model when the
+merge is clean and the checks pass, as a CI pipeline does; a worker is started only for a conflict or a failing check.
+When the merge changes the lockfile, the worktree setup runs again before the checks. At the step boundaries the
+engine may merge the base into the queue's worktree when it merges cleanly, so conflicts show up small and early.
+Designed in MI1, to be built in MI2; the file formats are in PROTOCOL.md, "The integration step", "Without a model".
+Points marked **(M1)**…**(M13)** go beyond the decision: MI1's proposals, for the user to accept one by one.
+
+**Why.** Most integration steps find a clean merge (or nothing to merge) and passing checks: the worker's whole turn
+(reading its briefing and the opening, `git merge`, `nexus step done`, the context summary) only repeats what git and
+the checks say. Since queue EC the engine runs the checks itself, so the one thing left for a model is what a model is
+needed for: a conflict to resolve, a failure to fix.
+
+**Who writes the queue's report (M1).** Today the last step's opening asks for the report, and the integration step is
+the last. Without a worker nobody would write it. The report moves to **the last step that runs with a model before
+the integration step**: the closing refactoring step when the queue has one, else the queue's last own step. Its
+opening's "last" becomes "no step is pending but this one and the integration step". That step is the right author:
+the closing step runs in a fresh session whose seed already holds the queue's description and every step's summary,
+it read the queue's whole diff, and the report's judgement (each step against its acceptance, a proposed next step) is
+a model's work. The integration's own outcome is not in the report: it is the integration step's summary (the
+engine's, or its worker's), which the dashboard shows beside the report and the run-finished notice adds to the
+report's summary ("Integration: …"). The engine never writes `report.md`: `nexus report` stays its one writer. The
+integration step's opening asks for a report only when the queue has none yet (its closing step skipped by the user, a
+report never written); a model-free integration of such a queue finishes without one, and the run-finished notice says
+so. Alternatives weighed: the engine compiling the report from the steps' summaries (no model, but no judgement and no
+proposed next step, a summary that is no substantive outcome for the ideas' excerpts (IC2), and a second writer of
+`report.md`); the closing step writing it and the engine appending an integration section (the same second writer).
+
+**The engine's own session (M2).** A model-free step still needs its events (`step.started`, `step.progress`,
+`step.done`, a `queue.stop`, an acceptance) so that the derivation, the checks (their sets are keyed by the
+`step.done`), the merge back, the train, `nexus status` and the dashboard read it as any step. A session appends only
+to its own log, so the worker's log cannot take them. The server keeps one more session of its own, as it keeps the
+user's: id `nexus`, role `nexus`, no runtime, its events written only by the server. The step's rounds in `git.yaml`
+name it as their session.
+
+**When the step goes without a model (M3).** Only when everything is plain; anything else goes the way it goes today
+(a worker opens the step), so the model-free path never has to judge: Nexus runs the step's checks (the server's
+capacity coordinator, `by: nexus`); the worktree has no uncommitted changes to tracked files; a base branch can be
+named. The engine then merges (`git merge --no-edit <base>`), and on a clean merge (or nothing to merge) runs the setup
+when needed and records `step.done` with a summary built from facts (the base and its commit, how many commits and
+files the merge brought in, the resulting HEAD as its commit); the checks run as after any `step.done`.
+
+**A conflict (M4).** The engine aborts its merge (`git merge --abort`), so the branch is as it was. With
+`resolve_conflicts` off, it stops the step itself with the integration's condition and the conflicting files as the
+reason: no worker, since today's worker would only do the same. With it on, a worker opens the step as today, its
+opening naming the files Nexus found in conflict. No base branch to name: the engine stops the same way.
+
+**A failing check (M5).** A set that fails twice after the engine's `step.done` is a check-fix round as for any step,
+but the step has no worker yet: the engine opens the integration step in the run's session (started again when its
+process has ended, as a resume does), with the integration's opening in its "continue" form, saying that Nexus did the
+merge (the HEAD) and what failed (the round's text). The round counts toward `check_fix_limit` as usual (the engine's
+own set is fix 0), and the worker may dispute a failure as in any round.
+
+**Accepted by Nexus (M6).** A model-free integration whose checks all passed has nothing a review could judge beyond
+them: git made the merge, the checks judged it. At review level 2 or 3 the engine accepts it itself (`review.accepted`
+from the `nexus` session, its text saying so); the orchestrator is told with its next notice, as the routine reviews'
+helper's verdicts will be. A level the user set to 1 still goes to the user. This narrows "every step is reviewed"
+(PROTOCOL.md, "Review") for this one case, which is why it is a proposal. A queue without any check gets the merge
+without a model too, but not the acceptance: its summary and the review notice say the merge is untested, and the step
+goes to its review at its level. An integration a worker took part in (a conflict resolved, a failure fixed) is
+reviewed as today.
+
+**The setup after a lockfile change (M7, M8).** The decision names the integration's merge; the rule is made general,
+since it is the same question everywhere: is the worktree's setup current for its HEAD? `git.yaml` records the commit
+on which the setup last succeeded (`setup.sha`; the worktree's first setup: the base commit). Before a check set (any
+step's, the integration's included) and after a step-boundary merge, when a file of the setup's inputs differs between
+that commit and HEAD, the setup runs again first. The inputs are a project setting (`defaults.worktree_setup_inputs`,
+project only), by default the lockfiles of the common package managers anywhere in the tree (`package-lock.json`,
+`npm-shrinkwrap.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lockb`, `bun.lock`), so a project with another kind of
+setup can name its own (a `requirements.txt`). Before a check set the setup runs inside the set's grant of the machine,
+recorded on the set, and counts as the set's first check: a failure runs once more (`npm ci` fails on the network now
+and then), and failing twice it fails the set like a check, the checks after it not run (they would fail for it), so
+the worker of a check-fix round sees it (a lockfile the merge broke is the queue's to fix). A worker that changed the
+lockfile itself (and ran its install) gets one run too many, about half a minute, a price for one rule instead of two.
+
+**Merging the base at the step boundaries (M9, M10).** When the engine opens a step of a queue with an integration
+step (one of the queue's own steps, or the closing step; never the integration step itself, which merges anyway, and
+never a step that goes on: a continue, a send-back, a check-fix round), it first tries to merge the base into the
+queue's branch. It does so whatever `merge_back` says: with `merge_back` off the base still only moves by a
+fast-forward to the integration's result. The pull only reads the base branch, so it neither waits for the merge train
+nor holds the base. It needs a clean worktree (tracked files) and a base branch to name, and something to bring (the
+base not already in HEAD). The engine first tests the merge without touching the worktree (`git merge-tree
+--write-tree`; where git is too old for it, a real merge aborted on a conflict); a clean one is made (`git merge
+--no-edit <base>`), then the setup when its inputs changed. A conflicting one is not made: it is recorded, shown on the
+queue and in `nexus status`, and the next step's opening says which files of the base conflict with the branch, so the
+worker knows what is coming; resolving it remains the integration step's. The orchestrator is not told separately: it
+sees it with the step's review. No checks run at a pull: the next step's checks run on the result. Its opening says
+what the pull brought in (the base's commit, how many commits, the files).
+
+Three things change with it: the pull's merge commit falls between two steps' rounds, so it is no step's work; the
+closing step's commit range starts at the last base commit merged in (else the first round's start, as today), so its
+diff shows the queue's own work, not what the base brought; and a disputed check runs on the last base commit merged
+into the branch (else `base.sha`), so the comparison is with what the branch contains.
+
+**Run control (M11).** The merge and the setup are the engine's own work in the queue's run: `Engine.idle()` is false
+while they run, so an update's drain waits for them; the setup is a child process ended and run again like a check
+(interrupted by a Stop now, a drain's end or a restart). A server that stopped in the middle of a model-free step finds
+the step `running` from the `nexus` session: it aborts a merge left half done (`MERGE_HEAD` present) and runs the step
+again from its start, which finds the merge commit already there when it was made. A Pause during the step takes effect
+at its review, as during the checks.
+
+**The merge train and the merge back do not change (M12).** The train's hold is taken where it is taken today (the end
+of the step before the integration step), and the integration step holds the base while it runs or waits, whoever
+runs it; it only holds it for less time. The merge back's conditions read the integration step's last round and its
+check set, which a model-free step records the same way. A run again because the base moved on costs no model now,
+but the limit of two by itself stays: it guards against a loop, and the checks cost the machine.
+
+**Measuring it (M13).** The decision wants the effect measured, as its own deploy. A model-free step is marked on the
+derived step (`model_free: true`), so the statistics count model-free and worker integrations apart, and the steps
+without a turn do not pull the per-step averages of tokens and time down unseen.
+
+The orchestrator's briefing asks that the checks of a queue with a worktree of its own cover the typecheck, the tests
+and, where the dashboard changes, its build: a model-free integration is exactly as safe as its list of checks (MI2).
 
 ### Usage limits
 

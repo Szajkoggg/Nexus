@@ -508,8 +508,9 @@ new arises on the base itself.
   `INTEGRATION_GOAL`, `INTEGRATION_ACCEPTANCE`). Review level 2, as if drafted so; the user may set another.
 - **It cannot be bypassed by agents.** `nexus queue set Q --step Q.integrate skipped` is refused; `nexus queue set Q
   finished` is refused while it is not done.
-- **It is the last step**: its opening asks for the queue's report, the queue is `done` and the run `finished` only
-  after it, and the orchestrator's notices that speak of a queue's last step mean it.
+- **It is the last step**: its opening asks for the queue's report (queue MI moves it to the step before: "Without a
+  model"), the queue is `done` and the run `finished` only after it, and the orchestrator's notices that speak of a
+  queue's last step mean it.
 - **Runs again after new work.** Once it has run, any other step that starts afterwards (a revision's new step, or the
   closing step running again) sets it back to `pending`: the base is merged again into what the branch has become. Its
   own start leaves the closing step as it is.
@@ -524,6 +525,80 @@ new arises on the base itself.
   integration found a conflict that it does not resolve" --reason "<files, why>"` (`INTEGRATION_CONDITION`). The queue
   then waits for the user, who resolves it (in the worktree, or with a new revision) and goes on with Continue; the
   step runs again. Without a base branch to name, the opening says so and the worker stops the same way.
+
+#### Without a model
+
+**Status: designed (queue MI, step MI1); built in MI2, which brings the rest of this file in line with it.** Until
+then the integration step runs as above. The reasons are in DESIGN.md, "The integration step without a model"; the
+marks **(M1)**…**(M13)** are MI1's proposals, each still for the user to accept.
+
+- **The queue's report (M1)** is asked of the last step that runs with a model before the integration step: the
+  closing refactoring step, or, in a queue without `coding`, its last own step. The opening's `last` becomes "no step
+  is pending but this one and the integration step"; the text and the `nexus report` command stay as they are. The
+  integration step's opening asks for it only when the queue has no `queue.report` yet. The engine never writes
+  `report.md`. The run-finished notice to the orchestrator gives the report's summary and the integration step's
+  ("Queue W finished. Report: … Integration: …"), or says that there is no report.
+- **The `nexus` session (M2).** The server keeps a session with id `nexus` and role `nexus` (`session.yaml` `runtime:
+  none`, `launched_by: nexus`), one per project, whose `events.jsonl` only the server writes: `step.started`,
+  `step.progress`, `step.done` (`summary`, `commit`, `activities: [integration]`), `queue.stop` and `review.accepted`,
+  each only for an integration step it runs. The derivation takes them as a worker's (`WORKER_ONLY` events excepted)
+  and `review.accepted` as an orchestrator's. The step's round in `git.yaml` has `session: nexus`. It has no inbox and
+  no process.
+- **When (M3).** At the integration step's opening the engine goes without a model when Nexus runs the step's checks
+  (`checks.yaml` `by: nexus`), the queue's worktree has no uncommitted changes to tracked files, and
+  `integrationContext` names a base branch; else a worker opens the step as above. A step that goes on (Continue after a
+  stop, a send-back) opens with a worker as above.
+- **The sequence.** `step.started` (from `nexus`) and the round's start; `git merge --no-edit <base>` in the worktree.
+  Clean, or nothing to merge: the setup when its inputs changed (below, inside the check set), then `step.done` with
+  the resulting HEAD as `commit` and a summary of facts: "Nexus merged main (3f2a1c9) into nexus/W without a model: 7
+  commits, 12 files (+340 −85); no conflict." or "nexus/W already contains main (3f2a1c9): nothing to merge." The
+  checks then run as after any `step.done` ("Checks run by Nexus"). The derived step has `model_free: true` **(M13)**.
+- **A conflict (M4).** `git merge --abort`, then: with `resolve_conflicts` off, `queue.stop` from `nexus` with
+  `INTEGRATION_CONDITION` and the reason "<files>: Nexus does not resolve conflicts (resolve_conflicts is off)"; with it
+  on, a worker opens the step as above, its opening adding "Nexus tried the merge: <files> conflict." Without a base
+  branch to name: `queue.stop` from `nexus`, reason "no base branch to merge".
+- **A failing check (M5).** A set of the `nexus` session's `step.done` that fails twice gives the check-fix round as
+  any (`check_fix` 1, limits and disputes unchanged), but its `check_failed` entry goes to the run's worker session,
+  which the engine starts again when its process has ended (as a resume does), and the turn is the integration step's
+  opening in its continue form, "Nexus merged <base> (<sha>) into this branch without a model (HEAD <sha>), and the
+  checks failed:", followed by the round's text. From there the step is the worker's, as above.
+- **Accepted by Nexus (M6).** When every check of the set passed (flaky ones included) and the step's review level is
+  2 or 3, the engine writes `review.accepted` from `nexus` with the text "accepted by Nexus: a clean merge without a
+  model, and every check passed"; the orchestrator's next notice lists it among the steps accepted since. At level 1,
+  and when the queue has no check at all (the summary then adds "No check ran: the merge is untested."), the step goes
+  to its review at its level.
+- **Restart, drain, Pause, Stop (M11).** While the engine merges or runs the setup, `Engine.idle()` is false. A
+  starting engine that finds an integration step `running` from `nexus` without its `step.done` runs `git merge
+  --abort` when `MERGE_HEAD` exists and runs the step again from its start (a merge already committed is found as
+  nothing to merge). A Pause takes effect at the review; Stop now and Stop at once end a running setup like a check.
+
+**The setup again after a change of its inputs (M7, M8).** `git.yaml` `setup` gets `sha`: the HEAD on which the setup
+last succeeded (the first setup: the worktree's base commit), and `reason` (why it ran last: "first setup",
+"package-lock.json changed"). A new project-only setting, `defaults.worktree_setup_inputs` (a list of paths or globs
+relative to the worktree's root), names the files whose change makes the setup run again; by default
+`**/package-lock.json`, `**/npm-shrinkwrap.json`, `**/yarn.lock`, `**/pnpm-lock.yaml`, `**/bun.lockb`, `**/bun.lock`.
+In a worktree with a recorded `setup`, when `git diff --name-only <setup.sha> HEAD` names one of them:
+
+- before a check set (any step's), the setup runs first within the set's grant, recorded on the set (`setup`:
+  `command`, `reason`, `runs` as a check's, `ok`); it fails like a check (run once more; failing twice the set is
+  `failed`, its checks not run, and the check-fix round's text names the setup);
+- after a merge at a step boundary (below), before the step opens, under the capacity coordinator; a failure halts
+  the run as a first setup's does today.
+
+**Merging the base at a step boundary (M9, M10).** In a queue with an integration step, before the engine opens one of
+the queue's own steps or its closing step (`mode: start`, never the integration step), it merges the base when: the
+worktree has no uncommitted changes to tracked files, `integrationContext` names a base branch, and the base's commit
+is not already in HEAD. It tests the merge first (`git merge-tree --write-tree --name-only HEAD <base>`; without
+support, a real merge aborted on a conflict). Clean: `git merge --no-edit <base>`, then the setup when its inputs
+changed. A conflict: no merge. Either way `git.yaml` records it under `pulls` (oldest first): `at`, `before` (the step
+about to open), `base` (the branch), `sha` (its commit), `from` (HEAD before), `to` (HEAD after; absent on a conflict),
+`conflicts` (the files; only on a conflict), `setup` (true when it ran). The step's opening then says "Before this step
+Nexus merged main (<sha>) into this branch: <n> commits, <files>." or "main (<sha>) conflicts with this branch in
+<files>; Nexus did not merge it, the integration step will." `nexus status` and the queue on the dashboard show the
+last conflicting one. With the pulls:
+
+- the closing step's commit range starts at the last `pulls[].sha` merged in (`to` present), else as above;
+- a disputed check's base run uses that same commit, else `base.sha`.
 
 ## Notes: `notes/<step-id>/<note-id>.md`
 
@@ -655,7 +730,8 @@ engine runs the command through the shell in the worktree before the run's first
 runs, at most 30 minutes) and records `done_at`. A failure (an exit code other than 0, or the time limit) halts the run
 with the reason, `the worktree setup command (<command>) failed: exit code <n>; its output ends: <output>`, and records
 it under `failed`; when the run goes on (Continue, resume), the project's command as it is then runs again in the same
-worktree. A worktree the queue names by path, an existing one, and the project's own checkout get no setup.
+worktree. A worktree the queue names by path, an existing one, and the project's own checkout get no setup. When the
+setup runs again (a change of its inputs, queue MI): "The integration step", "Without a model".
 
 **Merging back by itself and resolving conflicts** (`defaults.merge_back`, `defaults.resolve_conflicts`; global, with a
 project override; both off by default, so a new project merges back only by the user's hand until the user turns
