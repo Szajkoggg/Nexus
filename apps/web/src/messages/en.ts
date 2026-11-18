@@ -744,6 +744,7 @@ export const en = {
   "checks.row.running": "running",
   "checks.row.waiting": "waits its turn",
   "checks.row.interrupted": "interrupted",
+  "checks.row.notCommand": "not a command: not run",
   "details.notes": "Notes",
   "details.notesToOrchestrator": "go to the orchestrator, which weighs them in its review",
   "details.notesDelivered": "delivered when the step starts",

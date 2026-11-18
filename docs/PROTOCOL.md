@@ -223,7 +223,7 @@ legacy_policies: { W1: continue }      # each step's review policy from before r
 stop_conditions:                       # in addition to the project defaults
   - The climb probe finds a way up a wall of two levels or more that two attempts within the step do not remove.
 checks:                                # run for every step
-  - Core tests (v1 fingerprints unchanged), rock tests, climb probe, bench pictures.
+  - npm test                         # a command only (see "Checks run by Nexus"); a check in words is refused
 steps:
   - id: W1
     title: Voronoi fracture
@@ -1443,7 +1443,22 @@ leaves them to the worker, as below for `by: worker`.
 entry in `checks.yaml` (`by: nexus`). A step opened before (by an older server) has no entry, and its worker reports the
 checks with `nexus check` until the step ends. Every check, the project's (`defaults.checks`, as the run fixed them)
 and the queue's own, each once (`stepChecks`), is a shell command run in the queue's checkout **(P1)**; what only an
-agent can verify goes into the acceptance or `review.prepare`. The step's opening says under "Checks for every step"
+agent can verify goes into the acceptance or `review.prepare`.
+
+**Only a command can be a check** (queue EF, P1; `packages/protocol/src/commands.ts`). A check looks like a command
+when its first word (after any leading `NAME=value` assignments, without quotes) can run: one of the few shell
+built-ins a check uses (`echo`, `exit`, `cd`, `pushd`, `call`, `set`, `export`, `true`, `false`, `:`, `.`, `source`,
+`env`), a file given as a path (relative to the project's root, or absolute), a file in the project's root by its name,
+or a program on the PATH (on Windows with the `PATHEXT` extensions; a word with a capital letter must match the file's
+name as written, so "Az összes teszt zöld" is no call of `az.cmd`). `queue.drafted` (`applyDraft`) refuses a draft
+with a check that does not, every check of it, also one an older queue already had, and says that the text belongs in
+a step's acceptance or its `review.prepare`. A check of a queue approved before the rule, run by Nexus, is looked at
+the same way in the queue's checkout before it would run: one that is no command is recorded with `not_command: true`
+and no runs, neither passed nor failed, so it starts no check-fix round and no fix queue, and the set goes on without
+it. The orchestrator is told once per queue and check (`notify:checknotcommand:<queue>:<check>`) to convert it with a
+revision. The step's checks show it as `not a command` (`CheckView.not_command`, `ok: true`).
+
+The step's opening says under "Checks for every step"
 that Nexus runs them after `nexus step done`, that the worker neither runs nor reports them, and runs only the tests
 of what it changes.
 
@@ -1496,6 +1511,9 @@ steps:
                   failed_tests: ["engine › halts after the fix limit"], tail: "..." }
               - { started_at: ..., ended_at: ..., exit_code: 1, duration: 205, log: checks/W3/r1f0-1-npm-test.2.log }
             ok: false              # its outcome in the set; flaky: true when it failed, then passed
+          - name: All tests green  # an older queue's check in words: not_command: true, no runs, neither ok nor failed
+            command: All tests green
+            not_command: true
         dispute:                   # the worker's word that a failure is not its work's (below)
           event: 01JD...           # its check.disputed
           name: npm test

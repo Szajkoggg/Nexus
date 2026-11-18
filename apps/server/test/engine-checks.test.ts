@@ -282,6 +282,31 @@ test("a disputed failure that fails on the base too is accepted: the step goes t
   } finally { x.stop(); }
 });
 
+test("an older queue's check in words is not a command: not run, no check-fix round, no fix queue, and the orchestrator is told to convert it (queue EF)", async () => {
+  const x = withOrchestrator(["Q"]);
+  // Approved before the rule: written into the queue directly, as the draft path now refuses it.
+  const q = x.store.readQueue("Q");
+  x.store.writeQueue({ ...q, checks: [...q.checks, "Az összes teszt zöld"] });
+  approveQueue(x.store, "Q");
+  x.plan("Q-unit", [0]);
+  try {
+    await x.hello();
+    x.engine.start("Q", { runtime: "claude" });
+    await x.until("Q to finish", () => x.queue("Q").run?.state === "finished");
+    const [set, more] = x.sets("Q");
+    assert.equal(more, undefined, "one set: no check-fix round");
+    assert.equal(set!.state, "passed");
+    assert.deepEqual(set!.checks.map((c) => [c.name.split(" ").at(-1), c.ok, c.not_command, c.runs.length]), [["shared", true, undefined, 1], ["zöld", undefined, true, 0]]);
+    assert.deepEqual(x.runs(), ["Q-unit"], "the check in words was not run");
+    const state = loadProjectState(x.store);
+    assert.equal(state.sessions.flatMap((s) => s.inbox).filter((m) => m.type === "check_failed").length, 0, "no check-fix round");
+    assert.equal(state.queues.filter((x) => x.origin === "ci").length, 0, "no fix queue");
+    const shown = x.queue("Q").steps[0]!.checks.find((c) => c.name === "Az összes teszt zöld");
+    assert.deepEqual([shown?.ok, shown?.not_command], [true, true]);
+    await x.until("the orchestrator to be told", () => x.said(/The check "Az összes teszt zöld" of queue Q is not a command .*Nexus did not run it at step Q1/));
+  } finally { x.stop(); }
+});
+
 test("a disputed failure that passes on the base is the queue's: a check-fix round, without a decision (P6)", async () => {
   const x = withOrchestrator(["Q"]);
   x.plan("Q-unit", [1, 1, 0]); x.plan("Q-unit", [0], true);

@@ -41,6 +41,7 @@ export function RetryLine({ queue, step }: InQueue) {
 const ROW: Record<CheckRowState, { mark: string; tone: string }> = {
   passed: { mark: "✓", tone: "text-ok" }, flaky: { mark: "✓", tone: "text-warn" }, failed: { mark: "✗", tone: "text-danger" },
   running: { mark: "●", tone: "text-accent" }, waiting: { mark: "○", tone: "text-fg-3" }, interrupted: { mark: "–", tone: "text-fg-3" },
+  notCommand: { mark: "–", tone: "text-warn" },
 };
 
 /**
@@ -248,7 +249,7 @@ export function StepChecks({ step }: StepProps) {
       <ul className="space-y-1 text-sm">
         {step.checks.map((c, i) => (
           <li key={i} className="flex gap-2">
-            <span className={c.ok ? "text-ok" : "text-danger"}>{c.ok ? "✓" : "✗"}</span>
+            <span className={c.not_command ? "text-warn" : c.ok ? "text-ok" : "text-danger"}>{c.not_command ? "–" : c.ok ? "✓" : "✗"}</span>
             <span className="text-fg">{c.name}</span>
             {c.duration !== undefined && <span className="tabular-nums text-fg-2">{formatSeconds(c.duration)}</span>}
             {c.summary && <span className="text-fg-3">{c.summary}</span>}
@@ -412,7 +413,7 @@ export function ReviewPictures({ project, queue, step, pairs, orchestratorAsks }
         </div>
       )}
       <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-        {latestChecks(step.checks).map((c, i) => <span key={i} title={c.summary} className={c.ok ? "text-ok" : "text-danger"}>{c.ok ? "✓" : "✗"} {c.name}{c.duration !== undefined && <span className="tabular-nums text-fg-3"> {formatSeconds(c.duration)}</span>}</span>)}
+        {latestChecks(step.checks).map((c, i) => <span key={i} title={c.summary} className={c.not_command ? "text-warn" : c.ok ? "text-ok" : "text-danger"}>{c.not_command ? "–" : c.ok ? "✓" : "✗"} {c.name}{c.duration !== undefined && <span className="tabular-nums text-fg-3"> {formatSeconds(c.duration)}</span>}</span>)}
         {(step.goal || step.acceptance.length > 0 || step.review?.prepare) && <Fold label={t("details.goalAcceptance")} open={!!fold.goal} onToggle={() => setFold((f) => ({ ...f, goal: !f.goal }))} />}
         <StepCommits project={project} queue={queue.id} step={step.id} toggle={{ open: !!fold.commits, onToggle: () => setFold((f) => ({ ...f, commits: !f.commits })) }} />
         {step.timeline.length > 0 && <Fold label={t("details.timeline")} open={!!fold.timeline} onToggle={() => setFold((f) => ({ ...f, timeline: !f.timeline }))} />}

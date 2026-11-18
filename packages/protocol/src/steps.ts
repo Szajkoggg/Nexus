@@ -29,7 +29,11 @@ export function stepChecks(project: readonly string[] | undefined, queue: readon
 
 /** One check's outcome as reported; `duration`: how long it ran, in seconds, when the reporter gave it. */
 /** A check's outcome: reported by the worker (`check.result`), or run by Nexus (`by: "nexus"`; `flaky`: it failed, then passed). */
-export interface CheckView { name: string; ok: boolean; summary?: string; duration?: number; at: string; by?: "nexus"; flaky?: boolean }
+export interface CheckView {
+  name: string; ok: boolean; summary?: string; duration?: number; at: string; by?: "nexus"; flaky?: boolean;
+  /** Not a command, so Nexus did not run it (an older queue's check in words, queue EF): `ok`, as it holds nothing up. */
+  not_command?: boolean;
+}
 /** The latest outcome of each check, in the order the checks were first reported (a check run again replaces its earlier outcome). */
 export function latestChecks(checks: readonly CheckView[]): CheckView[] {
   const byName = new Map<string, CheckView>();
@@ -38,5 +42,5 @@ export function latestChecks(checks: readonly CheckView[]): CheckView[] {
 }
 /** The latest outcome of each check on one line: "typecheck ok (12 s), test FAILED (3 min 10 s)"; empty without checks. */
 export function checksLine(checks: readonly CheckView[]): string {
-  return latestChecks(checks).map((c) => `${c.name} ${c.ok ? "ok" : "FAILED"}${c.duration !== undefined ? ` (${formatSeconds(c.duration)})` : ""}`).join(", ");
+  return latestChecks(checks).map((c) => `${c.name} ${c.not_command ? "not a command" : c.ok ? "ok" : "FAILED"}${c.duration !== undefined ? ` (${formatSeconds(c.duration)})` : ""}`).join(", ");
 }

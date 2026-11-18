@@ -48,3 +48,11 @@ test("the latest set's checks one by one: passed, flaky, failed with its tests a
   ]);
   assert.deepEqual(rows[2], { name: "npm test", state: "failed", duration: 200, tests: ["engine › halts"], log: "checks/A2/r1f0-3-npm-test.2.log" });
 });
+
+test("an older queue's check in words is shown as not a command, not as waiting its turn (queue EF)", () => {
+  const set: CheckSet = {
+    done: "d1", round: 1, fix: 0, requested_at: SINCE, state: "passed",
+    checks: [{ name: "All tests green", command: "All tests green", runs: [], not_command: true }],
+  };
+  assert.deepEqual(checkRows(set, ["All tests green"]), [{ name: "All tests green", state: "notCommand", tests: [] }]);
+});
