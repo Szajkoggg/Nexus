@@ -4,19 +4,22 @@
 // conflict the project lets a worker resolve opens the step for the worker, one it does not stops the queue without a
 // worker; a failing check gives the worker the step as a check-fix round; a merge that changes a lockfile runs the
 // worktree setup before the checks; at a step boundary a base that merges cleanly is merged into the queue's branch, one
-// that conflicts is not.
+// that conflicts is not, and `nexus status` says so. A server that stopped between the step's start and its done runs it
+// again from its start (a half-done merge aborted, a merge already made found as nothing to merge); an update's drain
+// waits for a running setup.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { orchestratorOverview } from "@nexus/protocol";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { INTEGRATION_CONDITION, NEXUS_SESSION, ProjectStore, approveQueue, loadProjectState, routeAnswers, updateSettings, type StepDef } from "@nexus/protocol";
+import { INTEGRATION_CONDITION, NEXUS_SESSION, ProjectStore, approveQueue, loadProjectState, routeAnswers, setStepLevel, updateSettings, type StepDef } from "@nexus/protocol";
 import { Capacity } from "../src/capacity.ts";
 import { Engine } from "../src/engine.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
-import { LONGER, holdWork, until as waitUntil } from "./wait.ts";
+import { LONGER, QUICK_ENGINE, holdWork, until as waitUntil } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -29,7 +32,7 @@ const G = ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "com
 
 /**
  * Stand-in checks (and setup): `node check.cjs <name>` logs its name and exits with the next planned code of <name>
- * (`plan`; the last one stays; none planned: 0).
+ * (`plan`; the last one stays; none planned: 0), after an optional wait ("<ms>ms:<code>").
  */
 function standIns() {
   const dir = mkdtempSync(join(TMP, "nexus-free-checks-"));
@@ -42,18 +45,20 @@ if (!fs.existsSync(plan)) process.exit(0);
 const lines = fs.readFileSync(plan, "utf8").split("\\n").filter(Boolean);
 const next = lines.length > 1 ? lines.shift() : lines[0];
 fs.writeFileSync(plan, lines.join("\\n") + "\\n");
-const code = Number(next);
-if (code) { console.log("✖ " + name + " breaks (2ms)"); process.exit(code); }
-console.log("✔ " + name + " works (1ms)");
+const [wait, code] = next.includes("ms:") ? next.split("ms:").map(Number) : [0, Number(next)];
+setTimeout(() => {
+  if (code) { console.log("✖ " + name + " breaks (2ms)"); process.exit(code); }
+  console.log("✔ " + name + " works (1ms)");
+}, wait);
 `);
   return {
     cmd: (name: string) => `"${process.execPath}" "${script}" ${name}`,
-    plan: (name: string, outcomes: number[]) => writeFileSync(join(dir, name), outcomes.join("\n") + "\n"),
+    plan: (name: string, outcomes: (number | string)[]) => writeFileSync(join(dir, name), outcomes.join("\n") + "\n"),
     runs: () => (existsSync(join(dir, "runs.log")) ? readFileSync(join(dir, "runs.log"), "utf8").trim().split("\n") : []),
   };
 }
 
-function setup(steps: StepDef[], o: { resolve?: boolean; checks?: boolean } = {}) {
+function setup(steps: StepDef[], o: { resolve?: boolean; checks?: boolean; jobs?: boolean } = {}) {
   const base = mkdtempSync(join(TMP, "nexus-free-"));
   const temp = join(base, "temp");
   mkdirSync(temp);
@@ -75,10 +80,16 @@ function setup(steps: StepDef[], o: { resolve?: boolean; checks?: boolean } = {}
     checks: o.checks === false ? [] : [s.cmd("unit")], steps,
   });
   approveQueue(store, "Q");
-  const cap = new Capacity({ testLock: join(mkdtempSync(join(TMP, "nexus-free-lock-")), "full-test.lock"), pollMs: 20, jobs: false });
   // The fake reviewer stands in for the user, but leaves the integration step Nexus ran without a model to Nexus.
   const free = () => new Set(loadProjectState(store).queues.flatMap((q) => q.steps.filter((x) => x.model_free).map((x) => `${q.id}/${x.id}`)));
-  const engine: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store, free()); engine.onChange(loadProjectState(store)); }, { retryBaseMs: 30, usageMarginMs: 100, capacity: cap });
+  // The server (an engine and its capacity coordinator); `restart` is the next server on the same files. With Job
+  // Objects where a test ends a check mid-run (else its child keeps running).
+  const server = () => {
+    const cap = new Capacity({ testLock: join(mkdtempSync(join(TMP, "nexus-free-lock-")), "full-test.lock"), pollMs: 20, jobs: !!o.jobs });
+    const engine: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store, free()); engine.onChange(loadProjectState(store)); }, { retryBaseMs: 30, usageMarginMs: 100, ...QUICK_ENGINE, checkDrainWaitMs: 300, capacity: cap });
+    return { engine, cap };
+  };
+  let now = server();
   const queue = () => loadProjectState(store).queues.find((q) => q.id === "Q")!;
   const received = () => (existsSync(process.env.FAKE_LOG!) ? readFileSync(process.env.FAKE_LOG!, "utf8").trim().split("\n") : [])
     .map((l) => JSON.parse(l) as { text: string; session: string | null });
@@ -88,8 +99,27 @@ function setup(steps: StepDef[], o: { resolve?: boolean; checks?: boolean } = {}
   const wt = () => store.readQueue("Q").worktree!;
   const onMain = (file: string, text: string) => { writeFileSync(join(root, file), text); git(root, "add", file); git(root, "commit", "-qm", `main: ${file}`); return git(root, "rev-parse", "HEAD"); };
   const integ = () => queue().steps.find((x) => x.id === "Q.integrate")!;
-  const stop = () => { engine.shutdown(); cap.shutdown(); };
-  return { root, store, git, engine, queue, received, openings, until, wt, onMain, integ, stop, ...s };
+  const stop = () => { now.engine.shutdown(); now.cap.shutdown(); };
+  const restart = () => { stop(); now = server(); };
+  /**
+   * What a server stopping between the integration step's start and its done leaves: the `nexus` session's step.done
+   * (and what came after it) not written, the round not ended.
+   */
+  const crashBeforeDone = () => {
+    const file = join(store.sessionDir(NEXUS_SESSION), "events.jsonl");
+    const lines = readFileSync(file, "utf8").split("\n").filter(Boolean);
+    const at = lines.findIndex((l) => l.includes('"type":"step.done"') && l.includes('"step":"Q.integrate"'));
+    assert.ok(at >= 0, "the step.done is there to take away");
+    writeFileSync(file, lines.slice(0, at).map((l) => `${l}\n`).join(""));
+    const g = store.readGit("Q")!;
+    const round = g.steps["Q.integrate"]!.at(-1)!;
+    round.end = undefined; round.ended_at = undefined;
+    store.writeGit("Q", g);
+    return round.start!;
+  };
+  return {
+    root, store, git, get engine() { return now.engine; }, queue, received, openings, until, wt, onMain, integ, stop, restart, crashBeforeDone, ...s,
+  };
 }
 
 test("a clean merge with green checks: the integration step is done and accepted by Nexus without a model, and the queue has its report", async () => {
@@ -215,5 +245,120 @@ test("at a step boundary a base that merges cleanly is merged into the branch, o
     const pulls = x.store.readGit("Q")!.pulls!;
     assert.deepEqual(pulls.map((p) => [p.before, p.sha, !!p.to, p.conflicts ?? []]), [["Q2", clean, true, []], ["Q3", conflicting, false, ["main.txt"]]]);
     assert.equal(x.git(x.wt(), "status", "--porcelain", "--untracked-files=no"), "", "nothing left half merged");
+  } finally { hold.release(); hold.done(); x.stop(); }
+});
+
+test("nexus status names a base Nexus did not merge at a step boundary because it conflicts", async () => {
+  const hold = holdWork();
+  const x = setup([step("Q1", "slow"), step("Q2", "slow")]);
+  try {
+    x.engine.start("Q", { runtime: "claude" });
+    await x.until("Q1 at work", () => x.queue().steps[0]!.status === "running");
+    // Q1's work and main's change the same file: the merge before Q2 conflicts.
+    writeFileSync(join(x.wt(), "Q1.txt"), "the queue's Q1\n"); x.git(x.wt(), "add", "Q1.txt"); x.git(x.wt(), "commit", "-qm", "Q1");
+    const main = x.onMain("Q1.txt", "main's own Q1\n");
+    hold.release("Q1");
+    await x.until("Q2 at work", () => x.queue().steps[1]!.status === "running");
+    const line = `  base: main (${main.slice(0, 12)}) conflicts with the queue's branch in Q1.txt (found before step Q2, `;
+    const env: NodeJS.ProcessEnv = { ...process.env, NEXUS_DIR: x.store.dir };
+    delete env.NEXUS_SESSION;
+    const cli = join(here, "../../../packages/cli/bin/nexus.js");
+    const out = execFileSync(process.execPath, [cli, "status"], { env, encoding: "utf8" });
+    assert.ok(out.includes(line), out);
+    assert.ok(out.includes("Nexus did not merge it, the integration step will"), out);
+    assert.ok(orchestratorOverview(loadProjectState(x.store)).includes(line), "the orchestrator's overview too");
+  } finally { hold.release(); hold.done(); x.stop(); }
+});
+
+test("a server that stopped in the middle of the merge: the half-done merge is aborted and the step runs again from its start", async () => {
+  const hold = holdWork();
+  const x = setup([step("Q1", "slow")]);
+  // At level 1 the step waits for the user after its checks: a still point at which the server is stopped.
+  setStepLevel(x.store, "Q", "Q.integrate", 1);
+  try {
+    x.engine.start("Q", { runtime: "claude" });
+    await x.until("Q1 at work", () => x.queue().steps[0]!.status === "running");
+    const main = x.onMain("main.txt", "from main\n");
+    hold.release();
+    await x.until("the integration step's review", () => x.integ().status === "review");
+    x.stop();
+    // The server stopped right after the step's start, in the middle of its merge.
+    const start = x.crashBeforeDone();
+    x.git(x.wt(), "reset", "-q", "--hard", start);
+    x.git(x.wt(), "merge", "--no-commit", "--no-ff", "main");
+    const mergeHead = () => existsSync(join(x.git(x.wt(), "rev-parse", "--absolute-git-dir"), "MERGE_HEAD"));
+    assert.ok(mergeHead(), "a merge under way");
+    x.restart();
+    assert.equal(x.queue().run?.state, "paused", "a restart brings the run back paused");
+    assert.equal(x.integ().status, "running");
+    x.engine.resume("Q");
+    const started = () => x.integ().timeline.filter((e) => e.type === "step.started" && e.session === NEXUS_SESSION).length;
+    await x.until("the step run again to its review", () => started() === 2 && x.integ().status === "review");
+    assert.ok(!mergeHead(), "the half-done merge was aborted");
+    const st = x.integ();
+    assert.equal(st.model_free, true);
+    assert.match(st.summary!, /^Nexus merged main \(\w{12}\) into nexus\/Q without a model: 1 commit/);
+    assert.ok(!x.openings().some((o) => o.step === "Q.integrate"), "no worker opened it");
+    assert.equal(st.commit, x.git(x.wt(), "rev-parse", "HEAD"));
+    x.git(x.wt(), "merge-base", "--is-ancestor", main, "HEAD");
+  } finally { hold.done(); x.stop(); }
+});
+
+test("a server that stopped after the merge commit, before the step's done: the step runs again and finds nothing to merge", async () => {
+  const hold = holdWork();
+  const x = setup([step("Q1", "slow")]);
+  setStepLevel(x.store, "Q", "Q.integrate", 1);
+  try {
+    x.engine.start("Q", { runtime: "claude" });
+    await x.until("Q1 at work", () => x.queue().steps[0]!.status === "running");
+    x.onMain("main.txt", "from main\n");
+    hold.release();
+    await x.until("the integration step's review", () => x.integ().status === "review");
+    x.stop();
+    x.crashBeforeDone();
+    const merged = x.git(x.wt(), "rev-parse", "HEAD");
+    x.restart();
+    x.engine.resume("Q");
+    const started = () => x.integ().timeline.filter((e) => e.type === "step.started" && e.session === NEXUS_SESSION).length;
+    await x.until("the step run again to its review", () => started() === 2 && x.integ().status === "review");
+    const st = x.integ();
+    assert.equal(st.model_free, true);
+    assert.match(st.summary!, /^nexus\/Q already contains main \(\w{12}\): nothing to merge\.$/);
+    assert.equal(st.commit, merged, "the merge commit made before the stop");
+    assert.equal(x.git(x.wt(), "rev-parse", "HEAD"), merged, "no second merge");
+  } finally { hold.done(); x.stop(); }
+});
+
+test("an update's drain waits for the setup that runs before the checks, and for the setup after a merge at a step boundary", async () => {
+  const hold = holdWork();
+  const x = setup([step("Q1", "slow"), step("Q2", "slow")], { jobs: true });
+  // The first setup; the one after the merge before Q2 (slow); the one before the integration's checks (very slow:
+  // the drain ends it); the same again after the restart.
+  x.plan("setup", [0, "1500ms:0", "60000ms:0", 0]);
+  try {
+    x.engine.start("Q", { runtime: "claude" });
+    await x.until("Q1 at work", () => x.queue().steps[0]!.status === "running");
+    x.onMain("package-lock.json", "{ \"lockfileVersion\": 3 }\n");
+    hold.release("Q1");
+    // The merge before Q2 changed the lockfile: the setup runs before Q2 opens.
+    await x.until("the setup after the merge", () => x.runs().filter((r) => r === "setup").length === 2);
+    x.engine.drainForUpdate(false);
+    assert.equal(x.engine.idle(), false, "the drain waits for the running setup");
+    await x.until("the setup to end", () => x.engine.idle(), LONGER.step);
+    assert.ok(x.store.readGit("Q")?.setup?.done_at, "it ended as a success, not cut off");
+    assert.equal(x.queue().steps[1]!.status, "pending", "the held run opened nothing");
+    x.restart(); // the successor resumes the held run
+    await x.until("Q2 at work", () => x.queue().steps[1]!.status === "running");
+    x.onMain("package-lock.json", "{ \"lockfileVersion\": 4 }\n");
+    hold.release("Q2");
+    // The integration's merge changes the lockfile again: the setup runs first in the check set.
+    await x.until("the setup before the integration's checks", () => x.store.readChecks("Q")?.steps["Q.integrate"]?.sets[0]?.setup?.runs[0]?.started_at !== undefined && x.runs().filter((r) => r === "setup").length === 3);
+    x.engine.drainForUpdate(false);
+    assert.equal(x.engine.idle(), false, "the drain waits for the setup in the check set");
+    await x.until("the drain to end it", () => x.engine.idle() && x.store.readChecks("Q")?.steps["Q.integrate"]?.sets[0]?.state === "interrupted", LONGER.step);
+    x.restart();
+    await x.until("the run finished", () => x.queue().run?.state === "finished");
+    assert.equal(x.integ().status, "done");
+    assert.equal(x.runs().filter((r) => r === "setup").length, 4, "the setup ran again after the restart");
   } finally { hold.release(); hold.done(); x.stop(); }
 });

@@ -578,12 +578,15 @@ marks **(M1)**…**(M13)** are MI1's proposals, which the user accepted on 2026-
   check passed" (`acceptedByNexus`, `packages/protocol/src/checks.ts`). The orchestrator gets no review notice for such
   a step; it learns of it from the run-finished notice. At level 1, and when the queue has no check at all (the summary
   then ends "No check ran: the merge is untested."), the step goes to its review at its level.
-- **Restart (M11).** The merge is made within one look of the engine, so a drain or a Pause does not fall between its
-  start and its done; a Pause takes effect at the review, as during the checks, and a setup run inside the check set
-  ends with a Stop like a check. A server that stopped between the two leaves the step `running` from `nexus` with no
-  `step.done` after its start: when the run goes on, the engine runs `git merge --abort` where `MERGE_HEAD` exists,
-  closes the open round, and runs the step again from its start (a merge already committed is found as nothing to
-  merge).
+- **Restart, drain, Pause, Stop (M11).** The merge is made within one look of the engine, so a drain or a Pause does
+  not fall between its start and its done; a Pause takes effect at the review, as during the checks. `Engine.idle()` is
+  false while a worktree setup runs (a new worktree's, or one after a merge at a step boundary), as while checks run,
+  so an update's drain waits for it; a drain with `--now`, or one whose deadline came, ends it instead, which counts as
+  neither success nor failure: it runs again when the held run goes on. A setup inside a check set is the check set's
+  (drained, stopped and run again like a check). A server that stopped between the step's start and its done leaves
+  the step `running` from `nexus` with no `step.done` after its start: when the run goes on (Resume after the restart,
+  or by itself after an update), the engine runs `git merge --abort` where `MERGE_HEAD` exists, closes the open round,
+  and runs the step again from its start (a merge already committed is found as nothing to merge); no worker opens it.
 
 **The setup again after a change of its inputs (M7, M8).** `git.yaml` `setup` has `sha`: the HEAD on which the setup
 last succeeded (the first setup: the worktree's base commit), and `reason` (why it ran last: "first setup",
@@ -611,7 +614,9 @@ to open), `base` (the branch), `sha` (its commit), `from` (HEAD before), `to` (H
 `conflicts` (the files; only on a conflict), `setup` (true when the setup was to run again). The step's opening then
 says "Before this step Nexus merged main (<sha>) into this branch: <n> commits, changing <files>." or "main (<sha>)
 conflicts with this branch in <files>; Nexus did not merge it. Do not resolve it here: the queue's integration step
-will." The pulls are not shown on the dashboard or in `nexus status` yet. With the pulls:
+will." While the last pull is a conflict and the queue is not done, `nexus status` (and the orchestrator's overview)
+shows it under the queue: "base: main (<sha>) conflicts with the queue's branch in <files> (found before step <step>,
+<time>); Nexus did not merge it, the integration step will". The dashboard does not show the pulls yet. With the pulls:
 
 - the closing step's commit range starts at the last `pulls[].sha` merged in (`to` present), and ends at the latest of
   the own steps' round ends and that pull's `to`; else as above;

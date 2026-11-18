@@ -874,11 +874,15 @@ and, where the work touches it, the build: a model-free integration is exactly a
   ("Integration (run and accepted by Nexus, without a model): …"), and gets no review notice for such a step: the step
   is in `review` for the moment between its passed checks and Nexus's acceptance, and the notice skips it
   (`acceptedByNexus`, one predicate for the engine and the notice).
-- The pulls are recorded and told to the next step's worker, but not shown on the dashboard or in `nexus status` yet
-  (M9 said both). A conflicting pull reaches the user through the integration step that meets it.
+- A conflicting pull is shown in `nexus status` and the orchestrator's overview (round 2 of MI2), not yet on the
+  dashboard (M9 said both): that is left for a later queue.
 - The merge is made within one look of the engine (git merge-tree, then git merge, then the events), so a drain or a
   Pause cannot fall between the step's start and its done; only a server that stops in that moment leaves it open,
-  which the next look repairs (M11).
+  which the next look repairs (M11). Found while testing it: a Resume after the restart continued the open step the
+  usual way, by opening it for the worker; it now goes to the engine's look, which runs the step again without a model.
+- The update's drain did not wait for a worktree setup run outside the checks (a new worktree's, or one after a merge
+  at a step boundary): `Engine.idle()` looked only at the agents and the checks. It waits for it now, and a drain that
+  cannot wait ends it without counting a failure.
 - Found while testing: test temporary folders that nest (each test pointing TEMP inside the last one's) made worktree
   paths long enough that git commands failed on Windows; the new tests take their folders from the system's temporary
   folder as it was at the start.

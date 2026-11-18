@@ -32,8 +32,21 @@ export function planLines(q: QueueView): string[] {
   if (p?.failed) out.push(`  the planned start did not happen: ${p.failed.reason} (the user sees it; start the queue or take it out of the plan with nexus run ${q.id} cancel-start)`);
   else if (p || plan) out.push(`  now: ${(p?.waiting || plan?.waiting || "it may start")}${p?.held ? " (it starts by itself)" : ""}`);
   if (q.train) out.push(`  integration: ${trainText(q.train)}; it goes on by itself`);
+  const pull = conflictingPull(q);
+  if (pull) out.push(`  base: ${pull.base} (${pull.sha.slice(0, 12)}) conflicts with the queue's branch in ${files(pull.conflicts ?? [])} (found before step ${pull.before}, ${pull.at.slice(0, 16).replace("T", " ")}); Nexus did not merge it, the integration step will`);
   return out;
 }
+
+/**
+ * The base Nexus did not merge into the queue's branch at its last step boundary because it conflicts (git.yaml
+ * `pulls`, queue MI): the last pull, while it is a conflict and the queue is not over.
+ */
+function conflictingPull(q: Pick<QueueView, "git" | "status">): NonNullable<NonNullable<QueueView["git"]>["pulls"]>[number] | undefined {
+  const last = q.git?.pulls?.at(-1);
+  return last && !last.to && q.status !== "done" && q.status !== "cancelled" ? last : undefined;
+}
+
+const files = (list: readonly string[]) => (list.length > 5 ? `${list.slice(0, 5).join(", ")} and ${list.length - 5} more` : list.join(", "));
 
 /** A provisional acceptance in the overview: waiting for the user, confirmed, or sent to a fix. */
 function provisionalText(x: { provisional?: { confirmed?: string; fix?: { text: string } } }): string {

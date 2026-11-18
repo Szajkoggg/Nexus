@@ -208,6 +208,8 @@ export class Engine implements Member {
   private readonly liveAnswerIds = new Set<string>();
   /** Worktree setup commands running, by queue (src/worktree.ts, runSetup). */
   private readonly setups = new Map<string, ChildProcess | null>();
+  /** Setups an update's drain ended: their end is neither a success nor a failure. */
+  private readonly setupsEnded = new Set<string>();
   /** The checks Nexus runs (src/check-runs.ts): only with the capacity coordinator. */
   private readonly checks?: CheckRunner;
   private readonly checkDrainWaitMs: number;
@@ -426,6 +428,8 @@ export class Engine implements Member {
       && ((m.type === "send_back" && m.step === open.id) || m.type === "answer"))
       || !!this.checks?.fixRound(q, open, run.session, state));
     if (open?.status === "waiting" || pending) this.changed();
+    // The integration step Nexus ran without a model, left between its start and its done: it runs again (advance).
+    else if (open && interruptedWithoutModel(open)) this.advance(queueId);
     else if (open) this.openStep(queueId, open, q, "continue", why);
     else this.advance(queueId);
   }
@@ -456,6 +460,7 @@ export class Engine implements Member {
       held.push(id);
     }
     if (now) for (const l of this.host.all()) if (l.proc.state === "working") { this.ending.add(l.session); l.proc.kill(); }
+    if (now) this.endSetups();
     // Running checks get a while, then are ended and run again after the restart; none start meanwhile.
     this.checks?.drain(now ? 0 : this.checkDrainWaitMs);
     return held;
@@ -473,6 +478,15 @@ export class Engine implements Member {
     }
     this.checks?.drain(0);
     for (const l of this.host.all()) if (l.proc.state === "working") { this.ending.add(l.session); l.proc.kill(); }
+    this.endSetups();
+  }
+
+  /**
+   * An update that cannot wait (now, or its deadline came) ends the worktree setups running: not a failure, the setup
+   * stays to run (no done_at) and runs again when the held run goes on after the restart.
+   */
+  private endSetups(): void {
+    for (const [queue, p] of this.setups) { this.setupsEnded.add(queue); p?.kill(); }
   }
 
   /** A run the planned deploy held at its step's end (boundary `hold`) goes on: the plan ended without its deploy. */
@@ -484,7 +498,8 @@ export class Engine implements Member {
 
   /** No agent of this project is in the middle of a turn, and none of its checks runs. */
   idle(): boolean {
-    return this.host.idle() && !this.checks?.running();
+    // A worktree setup running (a new worktree's, or after a merge of the base changed its inputs) is waited for too.
+    return this.host.idle() && !this.checks?.running() && !this.setups.size;
   }
 
   /** The update did not happen: the queues it held go on now. */
@@ -939,7 +954,7 @@ export class Engine implements Member {
     this.store.appendActivity(run.session, { at: now(), kind: "text", text: `Nexus runs the worktree setup command in ${cwd}: ${command}`, queue: queueId });
     void runSetup(command, cwd, { started: (p) => { if (this.setups.has(queueId)) this.setups.set(queueId, p); } }).then((failure) => {
       this.setups.delete(queueId);
-      if (this.stopped) return;
+      if (this.setupsEnded.delete(queueId) || this.stopped) return;
       recordSetup(this.store, queueId, command, failure, failure ? undefined : gitRead(cwd, ["rev-parse", "HEAD"]));
       const latest = this.store.readRun(queueId);
       this.store.appendActivity(run.session, { at: now(), kind: failure ? "error" : "text", text: failure ? `The worktree setup command failed: ${failure}` : "The worktree setup command succeeded", queue: queueId });
