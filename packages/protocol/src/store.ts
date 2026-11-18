@@ -14,13 +14,14 @@ import {
   IdeaStatusesFile, IdeaHandoffsFile,
 } from "./schemas.ts";
 import { noteRefs } from "./ideas.ts";
+import { clockMark, now, observe } from "./clock.ts";
 import { applyChange, builtInSettings, effectiveProject, migrateStored, storedFrom } from "./settings.ts";
 
 const NEXUS_DIRNAME = ".nexus";
 
 const nextUlid = monotonicFactory();
 export const newId = (): string => nextUlid();
-export const now = (): string => new Date().toISOString();
+export { now };
 
 /** Forward slashes, absolute. Every path stored in protocol files uses this form. */
 export function normPath(p: string, base = process.cwd()): string {
@@ -95,6 +96,12 @@ export function readJsonl<S extends z.ZodType>(file: string, schema: S): JsonlRe
     }
   });
   return out;
+}
+
+/** A log's read whose times this process has now seen (clock.ts). */
+function observed<T extends { at: string }>(r: JsonlRead<T>): JsonlRead<T> {
+  for (const e of r.entries) observe(e.at);
+  return r;
 }
 
 /** One complete line in a single write. */
@@ -273,10 +280,12 @@ export class ProjectStore {
   readSession(id: string): SessionFile { return readYaml(join(this.sessionDir(id), "session.yaml"), SessionFile); }
   writeSession(s: SessionFile): void { writeYaml(join(this.sessionDir(s.id), "session.yaml"), SessionFile.parse(s)); }
 
-  readEvents(sessionId: string): JsonlRead<Event> { return readJsonl(join(this.sessionDir(sessionId), "events.jsonl"), Event); }
+  // The logs other writers append to and this process reads: what it stamps afterwards comes after their times
+  // (clock.ts). Within a log, a reader keeps the order the lines were written in (state.ts, inFileOrder).
+  readEvents(sessionId: string): JsonlRead<Event> { return observed(readJsonl(join(this.sessionDir(sessionId), "events.jsonl"), Event)); }
   appendEvent(e: Event): void { appendJsonl(join(this.sessionDir(e.session), "events.jsonl"), Event.parse(e)); }
 
-  readInbox(sessionId: string): JsonlRead<InboxEntry> { return readJsonl(join(this.sessionDir(sessionId), "inbox.jsonl"), InboxEntry); }
+  readInbox(sessionId: string): JsonlRead<InboxEntry> { return observed(readJsonl(join(this.sessionDir(sessionId), "inbox.jsonl"), InboxEntry)); }
   appendInbox(sessionId: string, entry: InboxEntry): void {
     appendJsonl(join(this.sessionDir(sessionId), "inbox.jsonl"), InboxEntry.parse(entry));
   }
@@ -418,7 +427,24 @@ export class ProjectStore {
   readRefusals(sessionId: string): JsonlRead<Refusal> { return readJsonl(join(this.sessionDir(sessionId), "refusals.jsonl"), Refusal); }
   appendRefusal(r: Refusal): void { appendJsonl(join(this.sessionDir(r.session), "refusals.jsonl"), Refusal.parse(r)); }
 
-  readApplied(sessionId: string): JsonlRead<Applied> { return readJsonl(join(this.sessionDir(sessionId), "applied.jsonl"), Applied); }
+  readApplied(sessionId: string): JsonlRead<Applied> { return observed(readJsonl(join(this.sessionDir(sessionId), "applied.jsonl"), Applied)); }
+
+  /**
+   * The server's clock mark for the CLI (`.nexus/clock.json`, one writer: the server), written before the server hands
+   * an agent anything to act on: the agent's `nexus` then stamps its records after everything the server had seen.
+   */
+  writeClock(): void {
+    const at = clockMark();
+    if (!at) return;
+    const file = join(this.dir, "clock.json");
+    const tmp = `${file}.${process.pid}.tmp`;
+    writeFileSync(tmp, `${JSON.stringify({ protocol: 1, at })}\n`, "utf8");
+    renameRetrying(tmp, file);
+  }
+  /** Takes up the server's clock mark (a missing or unreadable file: none, as before the file existed). */
+  observeClock(): void {
+    try { observe((JSON.parse(readFileSync(join(this.dir, "clock.json"), "utf8")) as { at?: string }).at); } catch { /* none */ }
+  }
   appendApplied(sessionId: string, a: Applied): void { appendJsonl(join(this.sessionDir(sessionId), "applied.jsonl"), Applied.parse(a)); }
 
   readChat(sessionId: string): JsonlRead<ChatEntry> { return readJsonl(join(this.sessionDir(sessionId), "chat.jsonl"), ChatEntry); }

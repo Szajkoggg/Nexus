@@ -2305,7 +2305,8 @@ every process at once. FL2 reproduced it (`FL2-cause.md`, a preload that makes t
 never closes; a stopped step's commits (git, new clock) fall outside every turn window of the worker's activity
 (server, old clock), count as foreign, and the Keep/Discard choice is never offered (a Discard would revert nothing).
 
-**The rules** (to be built in FL5; nothing below changes a file that exists today in a way an older reader minds):
+**The rules** (built in FL5, see "As built" below; nothing changes a file that existed before in a way an older reader
+minds):
 
 1. **One file keeps the order it was written in.** Every file has one writer, so its lines are in causal order. A
    reader that merges files never reorders the lines of one file: it sorts by an *effective* time, the line's `at`
@@ -2322,9 +2323,8 @@ never closes; a stopped step's commits (git, new clock) fall outside every turn 
    the `step.started` it interrupts because the engine had read that event. The watcher may not have delivered a line
    written a moment ago, so before the server writes a record about a step it raises the mark from that step's
    session log (one read of a file it reads anyway). A missing `clock.json` (an older server)
-   leaves the CLI with its own files, as today. The server logs a warning when its high-water mark is more than
-   10 minutes ahead of its wall clock (a clock that ran ahead and was corrected): times then show up to that much
-   late, but order holds. No cap: order matters more than the shown time.
+   leaves the CLI with its own files, as before. A time read more than `CLOCK_AHEAD_MS` (15 min) ahead of the
+   reader's wall clock is not taken up (see "As built").
 3. **A step's commits come from the HEADs around its turns, not from time windows.** The server records, per round in
    `git.yaml`, the HEAD at the start and the end of every turn of the worker's session on the step (`turns: [{ start,
    end }]`, a sha or null; an open turn has no `end` and uses the HEAD of now, as an open round does). A commit of the
@@ -2367,9 +2367,32 @@ server ignores it, an older CLI never reads it. An older server that rewrites `g
 strips unknown keys), which only brings that round back to the time windows. PROTOCOL.md changes with FL5, in the
 same commits as the formats (`turns`, `clock.json`, the stamp rule, the reader's order).
 
-**Tests for FL5.** FL2's lag preload (a test process whose `Date.now()` lags by `FL2_LAG_MS`, its children not)
-becomes part of the tests, both directions: stop-at-once.test.ts and stopwork.test.ts with 5 s and 240 s forward and
-60 s backward; and old `.nexus/` files (events across a backward step, rounds without `turns`) read right.
+**As built (FL5).** `packages/protocol/src/clock.ts`: `now()` (re-exported by the store, so every `at: now()` is a
+stamp), `observe()`, `inFileOrder()` (a heap merge of the logs), `resetClock()`. The store observes what it reads of
+events, inbox and applied; the CLI reads its session's events and inbox and `clock.json` when it resolves its session;
+`AgentHost` writes `clock.json` before every `send` to a runtime (the server's file watcher ignores it); the engine
+reads the worker's log before it stamps a run that stops going (`writeRun`), so `ended_at` and the
+`step.interrupted` written right after come after the step's last event. `gitinfo.ts` `recordTurn` takes the HEAD at
+the runtime's turn start and end (the engine's activity handler); `inTurns` asks `git rev-list` once per run of turns
+with no commit between them. The turn record's `duration_ms` comes from `performance.now()`. Differences from the
+plan:
+
+- *A cap instead of a warning.* Times read more than 15 minutes ahead are not taken up (`CLOCK_AHEAD_MS`): with no
+  cap one record stamped by a clock set far ahead (by hand, or a test's fixture) would hold every later stamp of the
+  process there until the wall clock caught up. The steps Nexus meets are minutes.
+- *The "since" filters were left as they are* (`reviewBrief`, `failedChecks`, the context summary's freshness,
+  `summaryWritten`, `discardRecorded`, the orchestrator's notices): with rule 2 the records they compare are stamped
+  after their cause, which was the failure. `stillEnding` still compares an agent's `finished_at` with the server's
+  clock: after a forward step that the server sees late, a merge back may wait up to the step longer (no wrong state).
+- *A test that sets its clock back on purpose* (node:test's mock timers, each case starting at the same time) calls
+  `resetClock()`; Nexus itself never does.
+
+**Tests.** `apps/server/test/clock-steps.test.ts` runs stop-at-once.test.ts and stopwork.test.ts again in one process
+each (no isolation) with the preload `clock-lag.mjs`: the engine's clock 5 s and 240 s behind the system clock and
+60 s ahead, its children (CLI, fake runtimes, git) on the system clock. Without the fix 6 of 11 failed at 5 s
+behind (as at 240 s in FL2); with rules 1 and 2 alone, the two Keep/Discard tests still failed at 60 s ahead (a
+commit's time behind the turn windows), until rule 3. `packages/protocol/test/clock.test.ts` covers the stamps, the merge, and old logs (a
+worker's log across a backward step, an interruption between); stopwork.test.ts covers a round without `turns`.
 
 ## Findings from review levels (queue RL1)
 

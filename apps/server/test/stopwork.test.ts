@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { ProjectStore, applyDraft, approveQueue, loadProjectState, newId, routeAnswers, updateSettings } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
-import { leftBehind, recordStepEnd, recordStepStart, UNCOMMITTED_NOTE } from "../src/gitinfo.ts";
+import { leftBehind, recordStepEnd, recordStepStart, recordTurn, UNCOMMITTED_NOTE } from "../src/gitinfo.ts";
 import { decideStoppedWork } from "../src/stopwork.ts";
 import { WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
 
@@ -116,7 +116,9 @@ test("no commits of its own: nothing is asked", async () => {
   } finally { x.stop(); }
 });
 
-test("foreign commits are not listed among a stopped step's work", () => {
+// The HEADs around the worker's turns say which commits are the step's (recordTurn); a round recorded before them
+// (no `turns` in git.yaml) still goes by the turns' times in the activity.
+for (const how of ["the HEADs around its turns", "the turns' times, for a round recorded before"] as const) test(`foreign commits are not listed among a stopped step's work: ${how}`, () => {
   const base = mkdtempSync(join(tmpdir(), "nexus-stopwork-"));
   process.env.NEXUS_HOME = join(base, "home");
   const root = join(base, "project");
@@ -137,12 +139,21 @@ test("foreign commits are not listed among a stopped step's work", () => {
   const w = "S1";
   store.writeSession({ protocol: 1, id: w, project: "p", role: "worker", runtime: "external", cwd: root, launched_by: "external", created_at: at(-120_000).toISOString() });
   recordStepStart(store, "Q", "Q1", w);
+  const old = how !== "the HEADs around its turns";
+  if (old) {
+    const g = store.readGit("Q")!;
+    for (const r of g.steps.Q1!) delete r.turns;
+    store.writeGit("Q", g);
+  }
   store.appendActivity(w, { at: at(-60_000).toISOString(), kind: "turn_start", text: "turn started", queue: "Q", step: "Q1" });
-  commit("mine.txt", at(-40_000));
+  if (!old) recordTurn(store, "Q", "Q1", "start");
+  // With the HEADs the commits' times do not count: here they say the opposite (a clock that stepped).
+  commit("mine.txt", at(old ? -40_000 : -100_000));
   store.appendEvent({ v: 1, id: newId(), at: at(-35_000).toISOString(), session: w, type: "step.started", queue: "Q", step: "Q1" });
   store.appendEvent({ v: 1, id: newId(), at: at(-30_000).toISOString(), session: w, type: "queue.stop", queue: "Q", step: "Q1", condition: "c", reason: "r" });
   store.appendActivity(w, { at: at(-25_000).toISOString(), kind: "turn_end", text: "turn ended", queue: "Q", step: "Q1" });
-  commit("theirs.txt", at(-10_000)); // the user's, after the turn
+  if (!old) recordTurn(store, "Q", "Q1", "end");
+  commit("theirs.txt", at(old ? -10_000 : -50_000)); // the user's, after the turn
   recordStepEnd(store, "Q", "Q1");
   const q = loadProjectState(store).queues[0]!;
   assert.equal(q.status, "stopped");

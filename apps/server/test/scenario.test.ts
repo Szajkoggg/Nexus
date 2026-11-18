@@ -18,7 +18,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { performance } from "node:perf_hooks";
-import { ProjectStore, approveQueue, loadProjectState, routeAnswers, writeUsage, type StepDef } from "@nexus/protocol";
+import { ProjectStore, approveQueue, loadProjectState, resetClock, routeAnswers, writeUsage, type StepDef } from "@nexus/protocol";
 import { Engine, type Clock } from "../src/engine.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
 import { WAIT_MS, until as waitUntil, LONGER, holdWork } from "./wait.ts";
@@ -40,6 +40,7 @@ function canonical(value: unknown): string {
 for (const runtime of ["claude", "codex"] as const) {
   test(`${runtime}: run.yaml and runtime.json at each point of a queue's run match the golden file`, async (t) => {
     t.mock.timers.enable({ apis: ["Date"], now: T0 });
+    resetClock(); // each case starts again at T0: a clock set back on purpose (clock.ts)
     const later = (ms = 10 * MINUTE) => t.mock.timers.setTime(Date.now() + ms);
     const work = holdWork();
 

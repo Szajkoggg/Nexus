@@ -34,6 +34,7 @@ a shell command can take part.
   drafts/<queue-id>.yaml                the orchestrator: its queue drafts (also `nexus queue draft --template`)
   recurring/<id>.yaml                   server: a recurring queue (template, values, schedule, standing approval)
   static-analysis.yaml                  server: the static analysis reminder's last time and the user's last no
+  clock.json                            server: its latest time, read by `nexus` before it writes (see "Times and order")
   queues/
     <queue-id>/
       queue.yaml                        server: definition, revisions, approvals
@@ -556,6 +557,20 @@ Every line:
 {"v":1,"id":"01JD...","at":"2026-11-12T10:05:00Z","session":"01JD...","type":"step.started","queue":"W","step":"W3", ...}
 ```
 
+**Times and order.** Clocks step (an NTP sync, a correction), and a long-lived process may see it late (V8 on Windows
+re-reads the system time once a minute), so the server, a `nexus` call and git may disagree for a while
+(docs/DESIGN.md, "Clock steps"). Two rules keep the order of what happened:
+
+- *A writer never stamps a time earlier than one it has read.* A record's `at` is the wall clock raised to the latest
+  `at` the writing process has read in another writer's log (events, inbox, applied) or stamped itself. A time more
+  than 15 minutes ahead of the writer's wall clock is not taken up. The server keeps `.nexus/clock.json`
+  (`{"protocol":1,"at":"…"}`, its latest time; one writer: the server), written before it hands an agent anything to
+  act on; a `nexus` call reads it, and its session's events and inbox, before it writes. A missing file is no error.
+- *A reader keeps each log in the order it was written* (one writer per log). Logs merged into one order (the
+  sessions' events; the queues' `changes` among them) are sorted by an effective time, each line's `at` raised to the
+  previous line's effective time in the same log, then by id (by code unit). Logs written without a clock step sort
+  as by (`at`, `id`); one written across a backward step keeps its order. The `at` shown stays as written.
+
 | Type | Fields | Meaning |
 |---|---|---|
 | `step.started` | `queue`, `step` | The worker begins the step |
@@ -609,7 +624,7 @@ Written only by the server's queue engine; agents never touch them.
 
 | File | What |
 |---|---|
-| `queues/<id>/git.yaml` | The HEAD of the queue's checkout around each step's work (`src/gitinfo.ts`): `base` (an auto worktree's: `ref`, the branch or commit it was made from, its `sha`, `at`), `base.branch` (whether `ref` names a branch: only a branch can be merged back into), `merged` (`at`, `into`, `path`, `sha`, `fast_forward`, `by`: `nexus` or `user`, absent on older records), `cleaned` (`at`, `path`, `branch`), `cleanup` (Nexus's cleanup of a done survey run's worktree could not go: `waiting` (`reason`, `since`, `files` (what is left, at most 20), `more`); see "Cleaning up a survey's worktree"), `merge` (Nexus merging back by itself: `waiting` (`reason`, `since`: what keeps it, told to the user and the orchestrator; `released`: the queues whose runs Nexus held for this merge back and let go on when it could not go), `reintegrations` (runs of the integration step again since the user's last Merge back), `reintegrating` (when the last was asked for, until the step opens), `queued` (`since`: back from a wait, it could go but another queue holds its base; it waits its turn in the merge train, ordered by when its wait began; see "The merge train")), `setup` (the worktree setup command for the worktree Nexus made: `command` (the last one run), `at` (when the worktree was made), `done_at` (once it succeeded), `failed` (`at`, `reason`: its last failure)), `steps.<step>` (rounds, oldest first: `session`, `start` (HEAD when the step opened, or when a send-back reopened it), `started_at`, `end` (HEAD at the end of the turn in which the step got its outcome: done, review, failed or stopped), `ended_at`; a sha is null outside a git repository). A continued step keeps its open round. One writer: the server. See "Git on the dashboard" |
+| `queues/<id>/git.yaml` | The HEAD of the queue's checkout around each step's work (`src/gitinfo.ts`): `base` (an auto worktree's: `ref`, the branch or commit it was made from, its `sha`, `at`), `base.branch` (whether `ref` names a branch: only a branch can be merged back into), `merged` (`at`, `into`, `path`, `sha`, `fast_forward`, `by`: `nexus` or `user`, absent on older records), `cleaned` (`at`, `path`, `branch`), `cleanup` (Nexus's cleanup of a done survey run's worktree could not go: `waiting` (`reason`, `since`, `files` (what is left, at most 20), `more`); see "Cleaning up a survey's worktree"), `merge` (Nexus merging back by itself: `waiting` (`reason`, `since`: what keeps it, told to the user and the orchestrator; `released`: the queues whose runs Nexus held for this merge back and let go on when it could not go), `reintegrations` (runs of the integration step again since the user's last Merge back), `reintegrating` (when the last was asked for, until the step opens), `queued` (`since`: back from a wait, it could go but another queue holds its base; it waits its turn in the merge train, ordered by when its wait began; see "The merge train")), `setup` (the worktree setup command for the worktree Nexus made: `command` (the last one run), `at` (when the worktree was made), `done_at` (once it succeeded), `failed` (`at`, `reason`: its last failure)), `steps.<step>` (rounds, oldest first: `session`, `start` (HEAD when the step opened, or when a send-back reopened it), `started_at`, `end` (HEAD at the end of the turn in which the step got its outcome: done, review, failed or stopped), `ended_at`, `turns` (the HEAD at the start and the end of each turn of the session on the step in this round: `start`, `end`, absent while the turn is open; a turn still open when the round ends ends with it; absent on rounds recorded before, which keep the time windows; see "Git on the dashboard"); a sha is null outside a git repository). A continued step keeps its open round. One writer: the server. See "Git on the dashboard" |
 | `queues/<id>/push.yaml` | Pushing what was accepted: `review` (per step, the HEAD of the checkout when it entered review: `sha` or null, `finished_at`, `at`), `steps` (per accepted step: `acceptance`, `sha`, `result` (`pushed`, `failed`, `skipped`, `held`), `text`, `at`, `held_by?`), `pushed` (the last success: `sha`, `step`, `at`, `remote`, `branch`), `error` (the last failure until a success). One writer: the server. See "Pushing what was accepted" |
 | `queues/<id>/plan.yaml` | The queue's place in the plan (see "The plan"): `by`, `reason?`, `after` (the queues it waits for, each with `queue`, `by`, `at`, `reason?`), `created_at`, `updated_at`, `started_at?`, `proposal?`, `decisions`. One writer: the server; it stays after the queue starts (marked `started_at`), and taking the queue out of the plan removes it |
 | `queues/<id>/start.yaml` | The queue's next start as planned (see "The plan" and "Schedules"): `at?` (a schedule: the time, ISO 8601; with `usage`, `claude` or `codex`, when that is the usage window's reset plus the margin; without `at`, the options of a start by the plan; `after` only in files from before the plan, moved into `plan.yaml` at the server's start), the start's `runtime?`, `model?`, `effort?`, `session?` (a session to continue), `by` (`user` or `orchestrator`), `reason?`, `revision` (the queue's when planned), `created_at`, `failed?` (`at`, `reason`, `missed?`: it came due and the queue could not start; `missed`: a schedule more than 15 minutes late, the server not running at its time), `held?` (`since`, `kind`: `approval`, `checkout` or `limit`, `reason`: it came due but waits for the approval of the queue's current revision, for its checkout or for a place under the limit, and starts by itself; see "The plan" and "One queue per checkout, and a limit"). One writer: the server; a start of the queue or a cancel removes it |
@@ -823,9 +838,13 @@ The server reads git for the dashboard (`apps/server/src/gitinfo.ts`), only loca
   it), before its worker is told of it, and at the end of the turn in which it got its outcome (at the latest when the
   next step opens); the step's commits are those between (`start..end`), with
   their subject, author, time, and files and lines changed. A round still at work runs to the present HEAD.
-- **Foreign commits.** In the project's main checkout others may commit too. A commit whose time lies outside every
-  turn of the worker's session on that step (its runtime's `turn_start` .. `turn_end` in `activity.jsonl`, with two
-  seconds' slack) is marked `foreign`. In a worktree of the queue's own nothing is marked.
+- **Foreign commits.** In the project's main checkout others may commit too. A commit made outside every turn of the
+  worker's session on that step is marked `foreign`: the server records the HEAD at each of the runtime's `turn_start`
+  and `turn_end` in the round's `turns`, and a commit of the round is the step's when it is in some turn's
+  `start..end` (an open turn runs to the round's end, else the present HEAD). Commit times do not count: git, the CLI
+  and the server may disagree about the time after a clock step (see "Times and order" under Events). A round recorded
+  before `turns` existed goes by the commit's time against the turns in `activity.jsonl` (`turn_start` .. `turn_end`,
+  with two seconds' slack). In a worktree of the queue's own nothing is marked.
 - **The branch.** The queue's `branch` (else the checkout's current one): ahead and behind of its base (an auto
   worktree's recorded `base`, else the queue's `base`) and of its remote-tracking ref (its upstream, else
   `origin/<branch>`), with `at`, when that ref last changed (its newest reflog entry).

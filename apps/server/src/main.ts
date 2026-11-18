@@ -214,8 +214,9 @@ function syncNotesWatcher(id: string, state: ProjectState): void {
 }
 function watchProject(id: string, dir: string): void {
   watchers.set(id, chokidar
-    // Uploaded pictures change no state: a 10 MB write need not reload the project.
-    .watch(dir, { ignoreInitial: true, followSymlinks: false, ignored: (p) => p.endsWith(".tmp") || p.endsWith(".lock") || /^[\\/]uploads([\\/]|$)/.test(p.slice(dir.length)) })
+    // Uploaded pictures change no state: a 10 MB write need not reload the project. Nor does the server's own clock
+    // mark for the CLI (clock.json).
+    .watch(dir, { ignoreInitial: true, followSymlinks: false, ignored: (p) => p.endsWith(".tmp") || p.endsWith(".lock") || /^[\\/](uploads([\\/]|$)|clock\.json$)/.test(p.slice(dir.length)) })
     .on("all", () => changed(id))
     .on("error", (err) => console.error(`watch ${id}: ${(err as Error).message}`)));
 }

@@ -54,7 +54,8 @@ export interface HostHandlers {
 }
 
 /** A turn in progress, for its record: when it began, the windows then, what it works on. */
-interface OpenTurn { started: string; windows?: TurnRecord["windows_start"]; tag: TurnTag }
+/** `startedMs`: the monotonic clock at the start, for the turn's duration (a clock step does not change it). */
+interface OpenTurn { started: string; startedMs: number; windows?: TurnRecord["windows_start"]; tag: TurnTag }
 /** What a turn works on, for its record: the queue and step, and the fallback the step runs on, if it does. */
 type TurnTag = { queue?: string; step?: string; fallback?: TurnRecord["fallback"] };
 
@@ -145,6 +146,13 @@ export class AgentHost<E extends object = object> {
     // `launched` keeps the launch without the briefing's file: it is no setting (stale).
     const owned = { ...how, options: { ...how.options, ownProcesses: session.role === "worker" ? true : undefined } } as Launch;
     const proc = this.spawn(this.withBriefingFile(session.id, owned));
+    // Whatever the agent is given to act on comes with the server's clock mark in .nexus/clock.json, so its `nexus`
+    // calls stamp their records after everything the server had seen (docs/DESIGN.md, "Clock steps").
+    const send = proc.send.bind(proc);
+    proc.send = (text, priority) => {
+      try { this.store.writeClock(); } catch (e) { console.error(`clock.json: ${(e as Error).message}`); }
+      send(text, priority);
+    };
     const l = { ...extra, session: session.id, proc } as Hosted<E>;
     this.live.set(session.id, l);
     this.launched.set(proc, how);
@@ -159,7 +167,7 @@ export class AgentHost<E extends object = object> {
     // before its token figures, and a record still `idle` from the start then read as a turn already over (queue FU4).
     const begin = (mark = true) => {
       if (open) return;
-      open = { started: now(), windows: this.windows(session.runtime), tag: on.tag?.() ?? {} };
+      open = { started: now(), startedMs: performance.now(), windows: this.windows(session.runtime), tag: on.tag?.() ?? {} };
       if (mark) this.write(session.id, { state: "working" });
     };
     proc.on("message", (text) => { begin(); on.message?.(text); });
@@ -325,7 +333,7 @@ export class AgentHost<E extends object = object> {
       const s = this.store.readSession(session.id);
       const at = now();
       appendTurn({
-        v: 1, at, started_at: turn.started, duration_ms: Math.max(0, Date.parse(at) - Date.parse(turn.started)),
+        v: 1, at, started_at: turn.started, duration_ms: Math.round(performance.now() - turn.startedMs),
         project: s.project, session: s.id, role: s.role as TurnRecord["role"], runtime: s.runtime as TurnRecord["runtime"],
         model: model ?? s.model ?? undefined, effort: s.effort ?? undefined, ...turn.tag, tags: this.tagsOf(turn.tag),
         outcome: !end ? "interrupted" : end.ok ? "ok" : end.failure ? end.failure.kind : "interrupted",

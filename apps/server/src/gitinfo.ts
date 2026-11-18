@@ -5,7 +5,10 @@
 // The server records the HEAD of the queue's checkout around each step's work in queues/<id>/git.yaml (one writer:
 // the server): when the step opens (or a send-back reopens it) and at the end of the turn in which it got its outcome.
 // The commits of a step are those between. In the project's main checkout others may commit too (the user, another
-// queue): a commit whose time falls outside every turn of the worker's session on that step is marked foreign.
+// queue): a commit made outside every turn of the worker's session on that step is marked foreign. Which turn a commit
+// was made in comes from the HEADs the server records at each turn's start and end (a round's `turns`), not from the
+// commit's time: git, the CLI and the server may disagree about the time after a clock step (docs/DESIGN.md, "Clock
+// steps"). Rounds recorded before keep the time windows.
 import { execFileSync } from "node:child_process";
 import { normPath, now, type BranchView, type CommitView, type GitFile, type LeftBehind, type ProjectStore, type QueueView, type RoundView, type StepCommitsView } from "@nexus/protocol";
 
@@ -45,7 +48,7 @@ export function recordStepStart(store: ProjectStore, queue: string, step: string
   const rounds = g.steps[step] ?? [];
   const last = rounds.at(-1);
   if (last && last.end === undefined) return;
-  rounds.push({ session, start: head(checkoutOf(store, q)), started_at: now() });
+  rounds.push({ session, start: head(checkoutOf(store, q)), started_at: now(), turns: [] });
   g.steps[step] = rounds;
   store.writeGit(q.id, g);
 }
@@ -58,7 +61,25 @@ export function recordStepEnd(store: ProjectStore, queue: string, step: string):
   if (!g || !last || last.end !== undefined) return;
   last.end = head(checkoutOf(store, q));
   last.ended_at = now();
+  const open = last.turns?.at(-1);
+  if (open && open.end === undefined) open.end = last.end;
   store.writeGit(q.id, g);
+}
+
+/**
+ * A turn of the step's session began or ended (the runtime's turn start and end): the HEAD of now goes in the open
+ * round's `turns`. A start while a turn is still open (its end never came: a crash) closes that one here.
+ */
+export function recordTurn(store: ProjectStore, queue: string, step: string, edge: "start" | "end"): void {
+  const g = store.readGit(queue);
+  const last = g?.steps[step]?.at(-1);
+  if (!g || !last || last.end !== undefined || !last.turns) return;
+  const open = last.turns.at(-1);
+  if (edge === "end" && (!open || open.end !== undefined)) return;
+  const sha = head(checkoutOf(store, store.readQueue(queue)));
+  if (open && open.end === undefined) open.end = sha;
+  if (edge === "start") last.turns.push({ start: sha });
+  store.writeGit(queue, g);
 }
 
 /** An auto worktree was made: what from (the named base, else the branch the project's checkout was on). */
@@ -84,10 +105,13 @@ export function stepCommits(store: ProjectStore, q: QueueView, step: string): St
     rounds: rounds.map((r) => {
       const end = r.end === undefined ? head(dir) : r.end;
       const commits = r.start && end ? commitsBetween(dir, r.start, end) : [];
-      const windows = main ? turnWindows(store, r.session, q.id, step) : [];
+      const own = main && r.turns ? inTurns(dir, r.turns, end) : undefined;
+      const windows = main && !r.turns ? turnWindows(store, r.session, q.id, step) : [];
+      const foreign = (c: { sha: string; time: number }) => main
+        && (own ? !own.has(c.sha) : !windows.some(([a, b]) => c.time >= a - 2000 && c.time <= b + 2000));
       return {
         session: r.session, start: r.start, end: end ?? null, open: r.end === undefined,
-        commits: commits.map((c) => ({ ...c, foreign: main && !windows.some(([a, b]) => c.time >= a - 2000 && c.time <= b + 2000) })),
+        commits: commits.map((c) => ({ ...c, foreign: foreign(c) })),
       };
     }),
   };
@@ -111,6 +135,23 @@ function commitsBetween(dir: string, start: string, end: string): (Omit<CommitVi
     if (m && c) { c.files++; c.insertions += m[1] === "-" ? 0 : Number(m[1]); c.deletions += m[2] === "-" ? 0 : Number(m[2]); }
   }
   return list;
+}
+
+/**
+ * The commits made in the round's turns: each turn's start..end (an open turn's end is the round's end, or the HEAD of
+ * now). Turns that follow on without a commit between them are one range, one git call.
+ */
+function inTurns(dir: string, turns: readonly { start: string | null; end?: string | null }[], roundEnd: string | null | undefined): Set<string> {
+  const ranges: [string, string][] = [];
+  for (const t of turns) {
+    const end = t.end === undefined ? roundEnd : t.end;
+    if (!t.start || !end) continue;
+    const prev = ranges.at(-1);
+    if (prev && prev[1] === t.start) prev[1] = end; else ranges.push([t.start, end]);
+  }
+  const out = new Set<string>();
+  for (const [a, b] of ranges) for (const sha of git(dir, ["rev-list", `${a}..${b}`])?.match(/[0-9a-f]{40,64}/g) ?? []) out.add(sha);
+  return out;
 }
 
 /** The worker session's turns on this step, from its activity (the runtime's turn_start .. turn_end), in ms. */

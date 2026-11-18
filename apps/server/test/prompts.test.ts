@@ -19,7 +19,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  ProjectStore, addNote, answerAsUser, approveQueue, ensureUserSession, loadProjectState, newId, now, reportFile, sendMessage,
+  ProjectStore, addNote, answerAsUser, approveQueue, ensureUserSession, loadProjectState, newId, now, reportFile, resetClock, sendMessage,
   type Event, type QueueFile, type SessionFile, type StepDef,
 } from "@nexus/protocol";
 import type { AgentEvents, AgentProcess, Priority } from "../src/agent.ts";
@@ -79,6 +79,7 @@ function golden(name: string, actual: string): void {
 
 function setup(t: TestContext, name: string) {
   t.mock.timers.enable({ apis: ["Date"], now: T0 });
+  resetClock(); // each case starts again at T0: a clock set back on purpose (clock.ts)
   const root = mkdtempSync(join(tmpdir(), `nexus-prompts-${name}-`));
   process.env.NEXUS_HOME = join(root, "home");
   const store = ProjectStore.init(root, { id: "p", name: "Pilot", root });

@@ -174,7 +174,12 @@ function store(): ProjectStore {
 
 function session(st: ProjectStore): SessionFile {
   const id = need(o.session ?? process.env.NEXUS_SESSION, "session (NEXUS_SESSION or --session; `nexus attach` creates one)");
-  try { return st.readSession(id); } catch { throw new UsageError(`unknown session ${id}`); }
+  let s: SessionFile;
+  try { s = st.readSession(id); } catch { throw new UsageError(`unknown session ${id}`); }
+  // What this call writes is stamped after what its session wrote and was told, and after what the server had seen
+  // when it handed the agent its work (docs/DESIGN.md, "Clock steps"): reading them takes their times up.
+  st.readEvents(id); st.readInbox(id); st.observeClock();
+  return s;
 }
 
 /** The queue a step belongs to: --queue, else the session's queue, else the only queue with that step. */
