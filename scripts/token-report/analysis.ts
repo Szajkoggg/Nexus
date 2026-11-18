@@ -2,9 +2,9 @@
 // runtimes' transcripts (per model call) and turns.jsonl (per turn), and the quality signals from the project's events,
 // over a period. Pure: the tests give made-up transcripts, turns and events. The method, and what each figure counts,
 // is in docs/DESIGN.md, "Measuring token use"; how to run it in README.md.
-import { tokenWeights, weightedTokens } from "@nexus/protocol/usage-estimate";
+import { tokenWeights, weighTokens, weightedTokens } from "@nexus/protocol/usage-estimate";
 import type { TokenCounts, TurnRecord } from "@nexus/protocol";
-import { addTokens, weigh, weightsLine, zeroTokens } from "./tokens.ts";
+import { addTokens, weightsLine, zeroTokens } from "./tokens.ts";
 import type { Call, ToolUse, Transcript } from "./transcripts.ts";
 
 /** A Nexus session as its session.yaml names it (only what the report needs). */
@@ -316,6 +316,7 @@ export function analyze(input: Input): Report {
   const seen = new Set<string>();
   const perTranscript = mine.map(({ t, role }, i) => {
     const sorted = [...t.calls].sort((a, b) => a.at.localeCompare(b.at));
+    const tw = tokenWeights(t.runtime);
     const list: Row[] = [];
     sorted.forEach((c, j) => {
       const prev = sorted[j - 1];
@@ -324,7 +325,7 @@ export function analyze(input: Input): Report {
       // A forked transcript repeats its parent's calls: each counts once.
       if (c.id && seen.has(c.id)) return;
       if (c.id) seen.add(c.id);
-      const r = { c, role, transcript: i, idle, w: weigh(c.tokens, t.runtime), tw: tokenWeights(t.runtime) };
+      const r = { c, role, transcript: i, idle, w: weighTokens(c.tokens, tw), tw };
       rows.push(r);
       list.push(r);
     });
