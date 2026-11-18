@@ -4,6 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { TokenCounts, TurnRecord } from "@nexus/protocol";
+import { tokenWeights } from "@nexus/protocol/usage-estimate";
 import { bootstrap, leastSquares, renderWeights, soloSamples, stretchSamples, weightEstimates } from "../token-report/weights.ts";
 
 const RESET = "2026-11-17T20:00:00.000Z";
@@ -58,6 +59,16 @@ test("turns that ran alone give back the true weights, the cache read's at 0.02 
   close(e.ci!.low, 0.02);
   close(e.ci!.high, 0.02);
   assert.ok(e.needed! <= e.n);
+  // The one-number fit weighs with Claude Code's own weights (a cache read at 0.02): one scale explains the growth whole.
+  close(e.price!.beta[0], 10);
+  close(e.price!.r2, 1);
+});
+
+test("a Codex turn is weighed with Codex's weights: the one-number fit misses a cache read weighed at 0.02", () => {
+  const turns = sequence().map((t) => ({ ...t, runtime: "codex" as const, windows_start: { primary: t.windows_start!.five_hour! }, windows_end: { primary: t.windows_end!.five_hour! } }));
+  const e = weightEstimates(turns, {}).find((x) => x.runtime === "codex" && x.method === "solo")!;
+  close(e.ratio, 0.02);
+  assert.ok(e.price!.r2 < 0.999, `R² ${e.price!.r2}`);
 });
 
 test("stretches of an hour or more join the turns within, and give back the same weights", () => {
@@ -115,8 +126,9 @@ test("the period keeps only its turns; too little growth is said so; the bootstr
   const tiny = turns.map((t) => ({ ...t, windows_start: { five_hour: { utilization: 0.01, resets_at: RESET } }, windows_end: { five_hour: { utilization: 0.01, resets_at: RESET } } }));
   assert.equal(weightEstimates(tiny, {}).find((x) => x.method === "solo")!.coarse, true);
   const samples = soloSamples(turns, "claude", "five_hour").map((s, i) => ({ ...s, growth: s.growth * (1 + (i % 2 ? 0.1 : -0.1)) }));
-  assert.deepEqual(bootstrap(samples, 200, 7), bootstrap(samples, 200, 7));
+  assert.deepEqual(bootstrap(samples, tokenWeights("claude"), 200, 7), bootstrap(samples, tokenWeights("claude"), 200, 7));
   const md = renderWeights(weightEstimates(turns, {}), { minMinutes: 60, turns: turns.length });
   assert.match(md, /\| claude \| five_hour \(stretch\) \| 6 \| 0 \| .* \| 0\.020 \|/);
   assert.match(md, /\| enough \|/);
+  assert.match(md, /TOKEN_WEIGHTS now, by runtime: claude: input 1, output 5, cache write 1\.25, cache read 0\.02; codex: .* cache read 0\.1; any other runtime: .* cache read 0\.1\./);
 });

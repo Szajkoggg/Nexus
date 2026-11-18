@@ -822,11 +822,16 @@ windows are the account's, measured only as a utilization now and then, and seve
   reading's reset time passed before the turn ended, or the reset times differ by more than five minutes: Codex's is
   computed from a countdown and drifts) gives `reset`; a reading missing at either end gives `missing`; a turn whose
   tokens are unknown (interrupted, no result) gives `tokens`, and counts with no tokens in its neighbours' shares.
-- **The token weights are the API's price ratios.** What the windows meter is not published; the prices are the best
-  public proxy for the compute a token costs, and only ratios matter, since a share compares turns of one runtime:
-  input not from the cache 1, output 5 (thinking is billed as output), a cache write 1.25, a cache read 0.1
-  (`TOKEN_WEIGHTS`). The same weights for Codex (its cached input is priced near a tenth too). Sub-agent tokens count
-  with the same weights, added to the turn's.
+- **The token weights are the runtime's** (`TOKEN_WEIGHTS`, by runtime; queue TW, 2026-11-18). What the windows meter
+  is not published; the API's prices are the best public proxy for the compute a token costs, and only ratios matter,
+  since a share compares turns of one runtime: input not from the cache 1, output 5 (thinking is billed as output), a
+  cache write 1.25, a cache read 0.1 (`PRICE_WEIGHTS`). Claude Code's cache read weighs 0.02 instead, as measured in its
+  5-hour window (TB2, below: 0.022, 95% 0.014–0.028, a fifth of the price ratio); its other weights stay the price
+  ratios (output to cache write came out near the ratio's 4). Codex keeps the price ratios (its cached input is priced
+  near a tenth too; its window could not tell the cache read's weight yet), and so does any other runtime
+  (`tokenWeights`). A turn's tokens and its sub-agents' are weighed with its runtime's weights. Since a share only
+  compares turns of one runtime, the change moves Claude Code turns' shares toward the turns with more uncached input,
+  output and cache writes, and leaves Codex's as they were.
 - **Known limits.** The starting reading is the last the server had, possibly from a turn that ended before this one
   began, so growth from before the turn can land in it; a window that moves only in whole percents makes a short
   turn's growth 0 or a percent. Summed over a step's turns these even out; one turn's estimate is coarse.
@@ -872,9 +877,11 @@ made-up transcripts (`scripts/test/token-report.test.ts`).
   guardian that reviews approvals, for instance). A transcript of a project folder no session names (one started by
   hand) counts as role `other`. A session's earlier native ids are not kept, so a session whose native id changed
   shows up as `other` too.
-- **Cost** is weighted tokens with `TOKEN_WEIGHTS` (input 1, output 5, cache write 1.25, cache read 0.1), the same
-  proxy as the estimates above: not a bill, and the subscription's windows may weigh cache reads differently (TB2
-  measures it). A call's context is input + cache read + cache written; "context above 300k / 500k" is the share of a
+- **Cost** is weighted tokens with the call's or turn's runtime's `TOKEN_WEIGHTS`, the same as the estimates above
+  (Claude Code: input 1, output 5, cache write 1.25, cache read 0.02; Codex and any other runtime: cache read 0.1), and
+  the report's head says which: not a bill. Claude Code's and Codex's figures are summed into one total and share,
+  though their windows are apart; a share across runtimes says where the weighted tokens went, not which window they
+  filled. A call's context is input + cache read + cache written; "context above 300k / 500k" is the share of a
   role's context tokens spent in calls above that size (the thresholds decided for workers and the orchestrator).
 - **Cache written after an idle hour** (the cache lives an hour): the cache writes of the first call after a gap of more
   than an hour since the transcript's previous call (also when that call lies before the period). From turns.jsonl the
@@ -899,6 +906,13 @@ made-up transcripts (`scripts/test/token-report.test.ts`).
 
 The baseline (`--until 2026-11-18`: Nexus's transcripts from 2026-11-12, turns.jsonl from 2026-11-14) was measured on
 this machine only; it counts Codex too, which the user's first analysis left out, so their figures differ in scope.
+Measured again with the runtimes' weights (queue TW, step TW1; price ratios → Claude Code's cache read at 0.02), the
+same data: per call, the worker's share of the weighted tokens 76.0% → 76.6%, the orchestrator's 17.3% → 16.7%; the
+cache reads' part of the worker's and the orchestrator's weighted tokens fell from about 77% to about 48% (76.5% → 49.0%,
+76.8% → 47.6%); per turn, Codex's part rose from 17.2% to 35.8% (its tokens weighed as before, Claude Code's lighter);
+the cache written after an idle hour 3.6% → 7.9% of all, the routine checks (typecheck, lint, knip) 8.4% → 7.1% and the
+tests 5.3% → 4.8%. Later reports count with the new weights, so a before-and-after compares like with like only when
+both are made with one version of the weights.
 
 **The tokens' weights in the usage windows** (`--weights`, `scripts/token-report/weights.ts`; queue TB, step TB2): what
 the windows meter is not published, so it is estimated from turns.jsonl, every project's turns (the windows are the
@@ -925,7 +939,10 @@ account's). The readings are the windows as the server last knew them at a turn'
   hours; the weekly window and the solo turns agree within their wider intervals), a fifth of the price ratio; output
   to cache write came out at about 4.4, ± about 1 (TOKEN_WEIGHTS: 4). Nearly every Claude turn ran on Opus. Codex's weekly window
   could not tell (30 stretches, an interval of −0.01 to 0.22, unstable with the stretch length); about 650 stretches, or
-  some 45 days at this pace, would. TOKEN_WEIGHTS was not changed: a proposal is the user's to decide.
+  some 45 days at this pace, would. The user decided (queue TW) to take the 0.02 for Claude Code's cache read and keep
+  Codex at the price ratio; with it, the one-number fit on Claude Code's 5-hour stretches explains a little more
+  (R² 0.98 → 0.99), as it should. The fits for the cache read's weight measure it against input, output and cache write
+  at their weights (the same for both runtimes), so they do not depend on the cache read's own weight.
 
 ### The plan
 

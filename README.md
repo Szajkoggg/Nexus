@@ -763,8 +763,9 @@ is inclusive, until exclusive. `--project` (repeatable) narrows it to registered
 most read files it lists (15); `--claude-dir`, `--codex-dir` and `--nexus-home` read other folders (for example a copy
 from another machine). Without `--out` it prints the report.
 
-The report gives: the cost by role (worker, orchestrator, thinking partner) in weighted tokens, with the share of cache
-reads and a call's average context; the cache written again after an idle hour; the share of tests, typecheck and
+The report gives: the cost by role (worker, orchestrator, thinking partner) in weighted tokens (each runtime's token
+weights, listed at the report's head: Claude Code's cache read at 0.02 of an input token as measured in its usage
+windows, Codex's at the price ratio 0.1), with the share of cache reads and a call's average context; the cache written again after an idle hour; the share of tests, typecheck and
 lint, builds and waiting for the full-test lock, with the number of full `npm test` runs; images read back and
 `nexus step progress` calls; the files read most often; how many calls made several tool calls at once or only read;
 and the quality signals (Fix it, Reject, a provisional acceptance returned, send-backs, fix rounds after a failed
@@ -772,8 +773,8 @@ check), by queue and step. It ends with what is missing (sessions without a tran
 session names). How each figure is counted: [docs/DESIGN.md](docs/DESIGN.md), "Measuring token use".
 
 `--weights` answers another question from the same turn records: how much each kind of token weighs in your
-subscription's usage windows (Claude Code's 5-hour and weekly, Codex's), above all a cache read against the price ratio
-Nexus assumes (0.1 of an input token). It sets each window's growth between readings against the tokens spent meanwhile,
+subscription's usage windows (Claude Code's 5-hour and weekly, Codex's), above all a cache read against an uncached
+input token (the price ratio is 0.1; Nexus counts Claude Code's at the 0.02 this measured, Codex's at 0.1). It sets each window's growth between readings against the tokens spent meanwhile,
 and says how sure the estimate is and, when it is not, how many more days of data it would take:
 
 ```sh

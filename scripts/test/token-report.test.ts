@@ -180,34 +180,35 @@ test("what a tool call reads, and whether it only reads", () => {
 
 test("every breakdown over the whole data comes out at the values worked out by hand", () => {
   const r = analyze(input());
-  // Weighted: worker 10,000 + 40,000 + 10,000 + 1,000 + Codex 1,000; orchestrator 65,000 + 0 + sub-agent 2,000; other 3,000.
-  close(r.total_weighted, 132_000);
+  // Weighted, each call with its runtime's weights (a Claude Code cache read 0.02, a Codex one 0.1): worker 2,000 + 8,000
+  // + 10,000 + 1,000 + Codex 1,000; orchestrator 5,000 + 12,000 + 0 + sub-agent 2,000; other 3,000.
+  close(r.total_weighted, 44_000);
   const role = (x: string) => r.roles.find((y) => y.role === x)!;
   assert.deepEqual(r.roles.map((x) => x.role), ["worker", "orchestrator", "other"]);
   const w = role("worker");
   assert.equal(w.calls, 5);
   assert.equal(w.sessions, 2);
-  close(w.weighted, 62_000);
-  close(w.share, 62_000 / 132_000);
-  close(w.cache_read_share, 51_000 / 62_000);
+  close(w.weighted, 22_000);
+  close(w.share, 22_000 / 44_000);
+  close(w.cache_read_share, (500_000 * 0.02 + 10_000 * 0.1) / 22_000);
   close(w.avg_context, 519_000 / 5);
   close(w.above["300000"], 400_000 / 519_000);
   close(w.above["500000"], 0);
   const o = role("orchestrator");
   assert.deepEqual([o.calls, o.sessions], [3, 1]);
-  close(o.weighted, 67_000);
+  close(o.weighted, 19_000);
   close(o.above["500000"], 600_000 / 602_000);
   close(role("other").weighted, 3_000);
 
   // The idle hour: call C's cache writes, 8,000 × 1.25.
   assert.deepEqual([r.idle.calls, r.idle.transcripts], [1, 1]);
   close(r.idle.weighted, 10_000);
-  close(r.idle.share, 10_000 / 132_000);
+  close(r.idle.share, 10_000 / 44_000);
   assert.deepEqual(Object.keys(r.idle.by_role), ["worker"]);
 
   // Routine work: B tests, H's lint, D waited for the lock.
   assert.deepEqual([r.routine.tests.calls, r.routine.checks.calls, r.routine.build.calls, r.routine.lock_wait.calls], [1, 1, 0, 1]);
-  close(r.routine.tests.share, 40_000 / 132_000);
+  close(r.routine.tests.share, 8_000 / 44_000);
   close(r.routine.checks.weighted, 3_000);
   close(r.routine.lock_wait.weighted, 1_000);
   assert.deepEqual([r.routine.full_test_runs, r.routine.lock_queries], [1, 1]);
@@ -228,13 +229,13 @@ test("every breakdown over the whole data comes out at the values worked out by 
   assert.deepEqual([ws.calls, ws.multi_tool, ws.read_only], [5, 3, 2]);
   close(ws.multi_share, 0.6);
   close(ws.read_only_share, 0.4);
-  close(ws.read_only_weighted_share, 11_000 / 62_000);
+  close(ws.read_only_weighted_share, 3_000 / 22_000);
   const os = r.shapes.find((s) => s.role === "orchestrator")!;
   assert.deepEqual([os.multi_tool, os.read_only, os.runs], [0, 3, { "2": 1, "3": 0, "4-5": 0, "6+": 0 }]);
 
   // Turns: project q's left out; the second worker turn began over an hour after the first ended.
-  assert.deepEqual(r.turns.rows.map((x) => [x.role, x.runtime, x.turns, x.weighted]), [["worker", "claude", 2, 60_000], ["orchestrator", "codex", 1, 1_000]]);
-  close(r.turns.rows[0]!.cache_read_share, 50_000 / 60_000);
+  assert.deepEqual(r.turns.rows.map((x) => [x.role, x.runtime, x.turns, x.weighted]), [["worker", "claude", 2, 20_000], ["orchestrator", "codex", 1, 1_000]]);
+  close(r.turns.rows[0]!.cache_read_share, 10_000 / 20_000);
   assert.deepEqual([r.turns.idle.turns, r.turns.idle.weighted], [1, 10_000]);
 
   // Quality.
@@ -245,20 +246,21 @@ test("every breakdown over the whole data comes out at the values worked out by 
   // Gaps: the unnamed transcript, the Codex orchestrator with turns but no transcript, the calls before the turns.
   assert.equal(r.gaps.length, 3);
   assert.match(r.gaps[0]!, /^1 transcript\(s\) .* 1 call\(s\)/);
-  assert.match(r.gaps[1]!, /^1 orchestrator \(codex\) session\(s\) .* 1\.6% /);
+  assert.match(r.gaps[1]!, /^1 orchestrator \(codex\) session\(s\) .* 4\.8% /);
   assert.match(r.gaps[2]!, /^Transcripts reach back to 2026-11-17T09:00:00Z, turns\.jsonl only to 2026-11-17T10:05:00Z/);
   assert.deepEqual(r.sources, { claude_transcripts: 3, codex_transcripts: 1, subagents: 1, turns: 3, events: 13 });
 
   const md = render(r, ["somewhere"]);
-  assert.match(md, /\| worker \| 2 \| 5 \| 62\.0k \| 47\.0% \|/);
+  assert.match(md, /\| worker \| 2 \| 5 \| 22\.0k \| 50\.0% \|/);
+  assert.match(md, /TOKEN_WEIGHTS: claude: input 1, output 5, cache write 1\.25, cache read 0\.02; codex: input 1, output 5, cache write 1\.25, cache read 0\.1; any other runtime: input 1, output 5, cache write 1\.25, cache read 0\.1\)/);
   assert.match(md, /## Gaps/);
 });
 
 test("the period: only its calls, turns and events count, an idle gap that began before it still counts", () => {
   const r = analyze(input({ since: at("10:30:00"), until: at("12:40:00") }));
   // In it: the worker's C and D, the orchestrator's F, F2 and G; not A, B (before), E (09:00) or H (13:00).
-  assert.deepEqual(r.roles.map((x) => [x.role, x.calls, x.weighted]), [["worker", 2, 11_000], ["orchestrator", 3, 67_000]]);
-  close(r.total_weighted, 78_000);
+  assert.deepEqual(r.roles.map((x) => [x.role, x.calls, x.weighted]), [["worker", 2, 11_000], ["orchestrator", 3, 19_000]]);
+  close(r.total_weighted, 30_000);
   assert.equal(r.idle.calls, 1);
   assert.deepEqual([r.routine.tests.calls, r.routine.full_test_runs, r.routine.lock_queries], [0, 0, 1]);
   assert.deepEqual(r.reads.map((f) => f.path), ["AGENTS.md", "C:/tmp/shot.png"]);
@@ -301,7 +303,7 @@ test("the files on disk: the project's transcripts and their sub-agents, not ano
   const { report, sources } = load({ claudeDir: claude, codexDir: codex, nexusHome: home });
   assert.deepEqual(report.projects, ["p"]);
   assert.deepEqual(report.sources, { claude_transcripts: 2, codex_transcripts: 1, subagents: 2, turns: 3, events: 13 });
-  close(report.total_weighted, 62_000 + 67_000 + 500);
+  close(report.total_weighted, 22_000 + 19_000 + 500);
   assert.match(sources[0]!, /\(3 transcript files/);
   assert.match(sources[1]!, /\(2 transcript files/);
 });

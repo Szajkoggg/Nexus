@@ -2,9 +2,9 @@
 // runtimes' transcripts (per model call) and turns.jsonl (per turn), and the quality signals from the project's events,
 // over a period. Pure: the tests give made-up transcripts, turns and events. The method, and what each figure counts,
 // is in docs/DESIGN.md, "Measuring token use"; how to run it in README.md.
-import { TOKEN_WEIGHTS, weightedTokens } from "@nexus/protocol/usage-estimate";
+import { tokenWeights, weighTokens, weightedTokens } from "@nexus/protocol/usage-estimate";
 import type { TokenCounts, TurnRecord } from "@nexus/protocol";
-import { addTokens, weigh, zeroTokens } from "./tokens.ts";
+import { addTokens, weightsLine, zeroTokens } from "./tokens.ts";
 import type { Call, ToolUse, Transcript } from "./transcripts.ts";
 
 /** A Nexus session as its session.yaml names it (only what the report needs). */
@@ -43,7 +43,7 @@ interface RoleRow {
   /** Transcripts (sub-agents' apart) with a call in the period. */
   sessions: number;
   calls: number;
-  /** Weighted tokens (TOKEN_WEIGHTS) and their share of every role's. */
+  /** Weighted tokens (each runtime's TOKEN_WEIGHTS) and their share of every role's. */
   weighted: number; share: number;
   tokens: TokenCounts;
   /** The cache reads' part of the role's weighted tokens. */
@@ -311,11 +311,12 @@ export function analyze(input: Input): Report {
   }
 
   // Per call, with the idle gap before it (over the whole transcript, so a call just inside the period knows its gap).
-  interface Row { c: Call; role: Role; /** Its transcript's index in `mine`. */ transcript: number; idle: boolean; w: number }
+  interface Row { c: Call; role: Role; /** Its transcript's index in `mine`. */ transcript: number; idle: boolean; w: number; /** Its runtime's token weights. */ tw: Readonly<TokenCounts> }
   const rows: Row[] = [];
   const seen = new Set<string>();
   const perTranscript = mine.map(({ t, role }, i) => {
     const sorted = [...t.calls].sort((a, b) => a.at.localeCompare(b.at));
+    const tw = tokenWeights(t.runtime);
     const list: Row[] = [];
     sorted.forEach((c, j) => {
       const prev = sorted[j - 1];
@@ -324,7 +325,7 @@ export function analyze(input: Input): Report {
       // A forked transcript repeats its parent's calls: each counts once.
       if (c.id && seen.has(c.id)) return;
       if (c.id) seen.add(c.id);
-      const r = { c, role, transcript: i, idle, w: weigh(c.tokens) };
+      const r = { c, role, transcript: i, idle, w: weighTokens(c.tokens, tw), tw };
       rows.push(r);
       list.push(r);
     });
@@ -354,13 +355,13 @@ export function analyze(input: Input): Report {
     const transcripts = new Set(list.filter((r) => !mine[r.transcript]!.t.subagent).map((r) => r.transcript));
     roles.push({
       role, sessions: transcripts.size, calls: list.length, weighted, share: ratio(weighted, total), tokens,
-      cache_read_share: ratio(tokens.cache_read * TOKEN_WEIGHTS.cache_read, weighted), avg_context: ratio(ctx, list.length), above,
+      cache_read_share: ratio(list.reduce((a, r) => a + r.c.tokens.cache_read * r.tw.cache_read, 0), weighted), avg_context: ratio(ctx, list.length), above,
     });
   }
 
   // Cache rewritten after an idle hour: the first call after the gap, its cache writes.
   const idleRows = rows.filter((r) => r.idle && r.c.tokens.cache_creation > 0);
-  const idleWeighted = (list: Row[]) => list.reduce((a, r) => a + r.c.tokens.cache_creation * TOKEN_WEIGHTS.cache_creation, 0);
+  const idleWeighted = (list: Row[]) => list.reduce((a, r) => a + r.c.tokens.cache_creation * r.tw.cache_creation, 0);
   const idleW = idleWeighted(idleRows);
   const idleByRole: Partial<Record<Role, Bucket>> = {};
   for (const role of ROLES) {
@@ -437,7 +438,7 @@ export function analyze(input: Input): Report {
     const row = turnRows.get(key) ?? { role: t.role, runtime: t.runtime, turns: 0, weighted: 0, share: 0, cache_read_share: 0 };
     row.turns++;
     row.weighted += turnW(t);
-    row.cache_read_share += ((t.tokens?.cache_read ?? 0) + (t.subagent_tokens?.cache_read ?? 0)) * TOKEN_WEIGHTS.cache_read;
+    row.cache_read_share += ((t.tokens?.cache_read ?? 0) + (t.subagent_tokens?.cache_read ?? 0)) * tokenWeights(t.runtime).cache_read;
     turnRows.set(key, row);
   }
   for (const row of turnRows.values()) { row.cache_read_share = ratio(row.cache_read_share, row.weighted); row.share = ratio(row.weighted, turnTotal); }
@@ -449,7 +450,7 @@ export function analyze(input: Input): Report {
     const prev = lastEnd.get(t.session);
     if (prev !== undefined && start - prev > IDLE_MS && between(t.at, since, until) && (t.tokens?.cache_creation ?? 0) > 0) {
       idleTurns++;
-      idleTurnW += t.tokens!.cache_creation * TOKEN_WEIGHTS.cache_creation;
+      idleTurnW += t.tokens!.cache_creation * tokenWeights(t.runtime).cache_creation;
     }
     lastEnd.set(t.session, Math.max(prev ?? 0, Date.parse(t.at)));
   }
@@ -529,7 +530,7 @@ export function render(r: Report, sources: string[]): string {
   if (r.span.events) out.push(`- Events found from ${r.span.events[0]} to ${r.span.events[1]}.`);
   out.push(`- Read: ${r.sources.claude_transcripts} Claude Code and ${r.sources.codex_transcripts} Codex transcripts (+${r.sources.subagents} of their sub-agents), ${r.sources.turns} turn records, ${r.sources.events} events.`);
   for (const s of sources) out.push(`- Source: ${s}`);
-  out.push("- Cost is weighted tokens (TOKEN_WEIGHTS: input 1, output 5, cache write 1.25, cache read 0.1), the API's price ratios; not the subscription's bill.", "");
+  out.push(`- Cost is weighted tokens, each with its runtime's weights (TOKEN_WEIGHTS: ${weightsLine()}): the API's price ratios, Claude Code's cache read as measured in its usage windows (TB2); not the subscription's bill.`, "");
 
   out.push("## Cost by role (per model call, transcripts)", "");
   out.push(table(
