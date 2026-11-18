@@ -756,8 +756,8 @@ Decided by the user on 2026-11-17 (docs/ideas/token-costs.md): the integration s
 merge is clean and the checks pass, as a CI pipeline does; a worker is started only for a conflict or a failing check.
 When the merge changes the lockfile, the worktree setup runs again before the checks. At the step boundaries the
 engine may merge the base into the queue's worktree when it merges cleanly, so conflicts show up small and early.
-Designed in MI1, to be built in MI2; the file formats are in PROTOCOL.md, "The integration step", "Without a model".
-Points marked **(M1)**…**(M13)** go beyond the decision: MI1's proposals, for the user to accept one by one.
+Designed in MI1, built in MI2; the file formats are in PROTOCOL.md, "The integration step", "Without a model". Points
+marked **(M1)**…**(M13)** go beyond the decision: MI1's proposals, which the user accepted on 2026-11-18 as written.
 
 **Why.** Most integration steps find a clean merge (or nothing to merge) and passing checks: the worker's whole turn
 (reading its briefing and the opening, `git merge`, `nexus step done`, the context summary) only repeats what git and
@@ -863,7 +863,25 @@ derived step (`model_free: true`), so the statistics count model-free and worker
 without a turn do not pull the per-step averages of tokens and time down unseen.
 
 The orchestrator's briefing asks that the checks of a queue with a worktree of its own cover the typecheck, the tests
-and, where the dashboard changes, its build: a model-free integration is exactly as safe as its list of checks (MI2).
+and, where the work touches it, the build: a model-free integration is exactly as safe as its list of checks (MI2).
+
+**Built, and where it differs from the design (MI2).**
+
+- The `nexus` session's `runtime` is `external`, as the user's session's is, not a new value `none`: no reader needs to
+  tell the two apart, and a new runtime value would reach every switch over runtimes.
+- The orchestrator is not told of Nexus's acceptance in its next notice, as M6 said: no notice lists "the steps
+  accepted since" yet (that comes with the routine reviews' helper). It learns of it from the run-finished notice
+  ("Integration (run and accepted by Nexus, without a model): …"), and gets no review notice for such a step: the step
+  is in `review` for the moment between its passed checks and Nexus's acceptance, and the notice skips it
+  (`acceptedByNexus`, one predicate for the engine and the notice).
+- The pulls are recorded and told to the next step's worker, but not shown on the dashboard or in `nexus status` yet
+  (M9 said both). A conflicting pull reaches the user through the integration step that meets it.
+- The merge is made within one look of the engine (git merge-tree, then git merge, then the events), so a drain or a
+  Pause cannot fall between the step's start and its done; only a server that stops in that moment leaves it open,
+  which the next look repairs (M11).
+- Found while testing: test temporary folders that nest (each test pointing TEMP inside the last one's) made worktree
+  paths long enough that git commands failed on Windows; the new tests take their folders from the system's temporary
+  folder as it was at the start.
 
 ### Usage limits
 

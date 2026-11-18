@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  ActionError, Effort, effortIssue, type ProjectFile, reviewedByOrchestrator, runGoing, ProjectStore, applyDraft, defineMetric, inPlan, loadProjectState, metricDef, openPlan, orchestratorOverview, overThreshold, proposePlan, proposeTags, readAway, readUsage, orchestratorStatusChange, newId, now, sendBack, type Applied, type Event, type EventType, type NotifyKind, type ProjectState, type SessionFile, type SessionView,
+  ActionError, Effort, acceptedByNexus, effortIssue, type ProjectFile, reviewedByOrchestrator, runGoing, ProjectStore, applyDraft, defineMetric, inPlan, loadProjectState, metricDef, openPlan, orchestratorOverview, overThreshold, proposePlan, proposeTags, readAway, readUsage, orchestratorStatusChange, newId, now, sendBack, type Applied, type Event, type EventType, type NotifyKind, type ProjectState, type SessionFile, type SessionView,
 } from "@nexus/protocol";
 import type { AgentProcess } from "./agent.ts";
 import type { CodexPermissions } from "./codex.ts";
@@ -277,7 +277,7 @@ export class Orchestrator {
     const notes = this.pendingNotes(state);
     if (!s) {
       // A step waiting for its review, or a note or rejection of the user's, starts it (after a reset, or before it ever ran).
-      if (this.engine.draining || (!notes.length && !state.queues.some((q) => q.steps.some(reviewedByOrchestrator)))) return;
+      if (this.engine.draining || (!notes.length && !state.queues.some((q) => q.steps.some((st) => reviewedByOrchestrator(st) && !acceptedByNexus(q, st))))) return;
       s = this.ensure(false);
     }
     this.applyRequests(s);
@@ -872,7 +872,8 @@ ${n.text}` });
       // A step waiting for its review: told whenever it entered review (also to a session started after that), once
       // per round.
       for (const st of q.steps) {
-        if (!reviewedByOrchestrator(st)) continue;
+        // Not the integration step Nexus ran without a model and accepts itself (queue MI).
+        if (!reviewedByOrchestrator(st) || acceptedByNexus(q, st)) continue;
         items.push({ key: `notify:review:${q.id}:${st.id}:${st.finished_at}`, ...reviewNotice(q, st, state.away) });
       }
       // The checks Nexus ran (src/check-runs.ts): a failure accepted (and its fix queue), and a disputed failure that

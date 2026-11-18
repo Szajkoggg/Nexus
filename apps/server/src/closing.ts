@@ -7,6 +7,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { isKeptStep, type ProjectStore, type QueueView } from "@nexus/protocol";
 import { checkoutOf } from "./gitinfo.ts";
+import { lastPulled } from "./integration.ts";
 
 /** How many lines of git's --stat the opening shows at most (the summary line is always kept). */
 const STAT_LINES = 60;
@@ -22,13 +23,22 @@ export interface ClosingContext {
   checked?: string;
 }
 
-/** The range of the queue's own steps' rounds of work, from git.yaml; the rounds of the steps Nexus keeps (the closing
- * and the integration step) are left out. */
+/**
+ * The range of the queue's own steps' rounds of work, from git.yaml; the rounds of the steps Nexus keeps (the closing
+ * and the integration step) are left out. When Nexus merged the base into the branch at a step boundary (queue MI,
+ * M10), the range starts at the last base commit merged in (and ends no earlier than that merge), so its diff is the
+ * queue's own work, not what the base brought.
+ */
 function queueRange(store: ProjectStore, q: Pick<QueueView, "id">): { from: string; to: string } | undefined {
   const g = store.readGit(q.id);
   const own = Object.entries(g?.steps ?? {}).filter(([step]) => !isKeptStep(q.id, step)).flatMap(([, rounds]) => rounds);
-  const from = own.filter((r) => r.start).sort((a, b) => a.started_at.localeCompare(b.started_at))[0]?.start;
-  const to = own.filter((r) => r.end && r.ended_at).sort((a, b) => a.ended_at!.localeCompare(b.ended_at!)).at(-1)?.end;
+  const pulled = lastPulled(g);
+  const ends = [
+    ...own.filter((r) => r.end && r.ended_at).map((r) => ({ sha: r.end!, at: r.ended_at! })),
+    ...(pulled ? [{ sha: pulled.to, at: pulled.at }] : []),
+  ];
+  const from = pulled?.sha ?? own.filter((r) => r.start).sort((a, b) => a.started_at.localeCompare(b.started_at))[0]?.start;
+  const to = ends.sort((a, b) => a.at.localeCompare(b.at)).at(-1)?.sha;
   return from && to ? { from, to } : undefined;
 }
 

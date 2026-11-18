@@ -81,8 +81,10 @@ test("a worktree queue without coding ends with the integration step: a clean me
     assert.ok(opening.includes(`git merge --no-edit main (the base branch main is at ${main} now)`), opening);
     assert.ok(opening.includes("- A conflict: do not resolve it (the project's resolve_conflicts setting is off)"), "off by default");
     assert.ok(opening.includes(`--condition "${INTEGRATION_CONDITION}"`), opening);
-    assert.ok(opening.includes("This is the queue's last step."), "the report is the integration step's");
-    assert.ok(!x.openings().find((o) => o.step === "Q2")!.text.includes("This is the queue's last step."));
+    // The report is the last step's before the integration step (queue MI): the integration step's worker writes none.
+    assert.ok(!opening.includes("This is the queue's last step"), opening);
+    assert.ok(x.openings().find((o) => o.step === "Q2")!.text.includes("This is the queue's last step before its integration step"));
+    assert.ok(q.report, "the queue has its report");
 
     // The merge is on the queue's branch, with both sides; main has not moved (the fast-forward is not this step's).
     const head = x.git(x.wt(), "rev-parse", "HEAD");

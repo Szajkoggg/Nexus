@@ -1,7 +1,7 @@
 // Derives the dashboard's view of a project from its files. Pure apart from reading through the store;
 // nothing here is ever written back (state.json, if kept, is only a cache of this).
 import { applyCheckSets, reviewRound } from "./checks.ts";
-import { CONVERSATION_ONLY, ORCHESTRATOR_ONLY, USER_ONLY, WORKER_ONLY, type MetricsFile, type StatusChange, type Event, type InboxEntry, type Note, type GitFile, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type RecurringFile, type ReviewItem, type ReviewLevel, type LegacyReviewPolicy, type AwayFile, type ChecksFile, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type PlanFile, type StepDef, type StepStatus, type TagProposal, type TagsFile } from "./schemas.ts";
+import { CONVERSATION_ONLY, NEXUS_SESSION, ORCHESTRATOR_ONLY, USER_ONLY, WORKER_ONLY, type MetricsFile, type StatusChange, type Event, type InboxEntry, type Note, type GitFile, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type RecurringFile, type ReviewItem, type ReviewLevel, type LegacyReviewPolicy, type AwayFile, type ChecksFile, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type PlanFile, type StepDef, type StepStatus, type TagProposal, type TagsFile } from "./schemas.ts";
 import { ProjectStore, chainPlan, readAway, revisionHash } from "./store.ts";
 import { awayAt, awayNow, type AwayNow } from "./away.ts";
 import { formatClock, type Segment } from "./times.ts";
@@ -139,6 +139,11 @@ export interface StepView extends StepDef {
    * `nexus step done`; `worker` (or absent), the worker reports them (PROTOCOL.md, "Checks run by Nexus").
    */
   checks_by?: "nexus" | "worker";
+  /**
+   * The step is the integration step the engine runs itself, without a model (its latest step.started is the `nexus`
+   * session's; queue MI): a worker that takes it up (a failing check) clears it.
+   */
+  model_free?: boolean;
   /**
    * While `checking` (or `waiting` for the orchestrator's decision on a disputed failure): `queued` for the machine,
    * `running` (which `check`), `base` (a disputed check run on the queue's base commit), `decision`; since when.
@@ -303,7 +308,8 @@ export function loadProjectState(store: ProjectStore): ProjectState {
       });
       for (const e of r.entries) {
         if (e.session !== id) { warnings.push(`session ${id}: event ${e.id} claims session ${e.session}; ignored`); continue; }
-        if (ORCHESTRATOR_ONLY.has(e.type) && s.role !== "orchestrator" && s.role !== "user") {
+        // The server's own session (queue MI) accepts the integration steps it ran without a model.
+        if (ORCHESTRATOR_ONLY.has(e.type) && s.role !== "orchestrator" && s.role !== "user" && !(s.role === "nexus" && e.type === "review.accepted")) {
           warnings.push(`session ${id}: ${e.type} is for orchestrators; ignored`); continue;
         }
         if (USER_ONLY.has(e.type) && s.role !== "user") {
@@ -686,6 +692,7 @@ function apply(
         if (kept && kept.status !== "pending" && kept.status !== "skipped") toPending(kept);
       }
       st.status = "running"; st.started_at ??= e.at; st.session = e.session;
+      st.model_free = e.session === NEXUS_SESSION ? true : undefined;
       st.finished_at = undefined; st.reason = undefined;
       if (!TERMINAL_QUEUE.has(q.status)) { q.status = "running"; q.status_reason = undefined; }
       return;

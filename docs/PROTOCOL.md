@@ -75,6 +75,7 @@ defaults:
   usage_pause_threshold: 0.85          # share of the 5-hour window at which no new step turn starts
   worktree_dir: C:/Code/GameDev/ProjectHoneycomb.worktrees   # project only
   worktree_setup: npm ci               # project only: run once in each new worktree Nexus makes (see "Worktree setup")
+  worktree_setup_inputs: ["**/package-lock.json"]   # project only: their change runs the setup again (default: the common lockfiles)
   checks: [npm run lint]               # project only: every step of every queue runs them first (see "The project's checks")
 runtimes:
   claude: { permission_mode: auto, allowed_tools: [] }       # allowed_tools: project only
@@ -151,7 +152,7 @@ one: `null`). The effective settings do not change. It writes only such a file, 
 | Kind | Settings |
 |---|---|
 | Global, with a project override | `defaults`: `stop_conditions`, `review_level`, `review_send_back_limit`, `context_reuse_threshold`, `context_care`, `protect_nexus`, `push_accepted`, `provisional_counts`, `merge_back`, `resolve_conflicts`, `usage_pause_threshold`, `max_running` (see "One queue per checkout, and a limit"), `check_fix_limit` (see "Checks run by Nexus"). `runtimes`: `default`; `claude`: `model`, `effort`, `permission_mode`; `codex`: `model`, `effort`, `sandbox`, `approval_policy`, `approvals_reviewer`. `conversations`: `runtime`, `model`, `effort`, `web`. `orchestrator`: `runtime`, `model`, `effort`, `fallback`, `notify`, `context_threshold`. `languages`: `reader`. `kinds.<kind>`: `runtime`, `model`, `effort` (a model or effort may be the project's own `null`: the project's for that runtime), `fallback` |
-| Project only | `name`, `defaults.worktree_dir`, `defaults.worktree_setup`, `defaults.checks`, `runtimes.claude.allowed_tools` (the project's own allow rules), `runtimes.codex.mcp_servers` (the user's Codex MCP servers, by name, that Codex workers keep; empty by default), `conversations.notes_dir`, `languages.working` (`id` and `root` identify the project) |
+| Project only | `name`, `defaults.worktree_dir`, `defaults.worktree_setup`, `defaults.worktree_setup_inputs` (see "Without a model"), `defaults.checks`, `runtimes.claude.allowed_tools` (the project's own allow rules), `runtimes.codex.mcp_servers` (the user's Codex MCP servers, by name, that Codex workers keep; empty by default), `conversations.notes_dir`, `languages.working` (`id` and `root` identify the project) |
 | Global only | Remote access (`<NEXUS_HOME>/auth.json`, `push.json`), the deploy push (`deploy.json`), the server; each stays in its own file |
 | State, not a setting | `orchestrator.session` |
 
@@ -477,8 +478,8 @@ the step in the approval view like any other.
 - **Runs again after new work.** Once it has run, a step of the queue's own that starts afterwards (a revision added
   it) sets it back to `pending` (derivation, at that `step.started`): it runs again at the end, over the queue's
   whole work. New steps that are only skipped leave it as it was, and so does the user's skip.
-- **It is the last step**, so its opening asks for the queue's report (see "The step turn"), the queue is `done` and
-  the run `finished` only after it, and the orchestrator's notices that speak of a queue's last step mean it.
+- **It is the last step** (in a queue with a worktree of its own, the last before the integration step), so its
+  opening asks for the queue's report (see "The step turn"), the queue is `done` and the run `finished` only after it, and the orchestrator's notices that speak of a queue's last step mean it.
 - **A fresh session with the queue's commit range.** When it is next and the run's session has worked before (any
   event of its own), the engine goes on in a fresh session the way context care does (see "Context care"), with
   `switches[].why: refactor`, no summary asked for, and a seed that gives the queue's description and its steps'
@@ -508,9 +509,9 @@ new arises on the base itself.
   `INTEGRATION_GOAL`, `INTEGRATION_ACCEPTANCE`). Review level 2, as if drafted so; the user may set another.
 - **It cannot be bypassed by agents.** `nexus queue set Q --step Q.integrate skipped` is refused; `nexus queue set Q
   finished` is refused while it is not done.
-- **It is the last step**: its opening asks for the queue's report (queue MI moves it to the step before: "Without a
-  model"), the queue is `done` and the run `finished` only after it, and the orchestrator's notices that speak of a
-  queue's last step mean it.
+- **It is the last step**: the queue is `done` and the run `finished` only after it, and the orchestrator's notices
+  that speak of a queue's last step mean it. The queue's report is the step's before it (queue MI, "Without a model");
+  its opening asks for one only when the queue has none.
 - **Runs again after new work.** Once it has run, any other step that starts afterwards (a revision's new step, or the
   closing step running again) sets it back to `pending`: the base is merged again into what the branch has become. Its
   own start leaves the closing step as it is.
@@ -528,76 +529,92 @@ new arises on the base itself.
 
 #### Without a model
 
-**Status: designed (queue MI, step MI1); built in MI2, which brings the rest of this file in line with it.** Until
-then the integration step runs as above. The reasons are in DESIGN.md, "The integration step without a model"; the
-marks **(M1)**…**(M13)** are MI1's proposals, each still for the user to accept.
+**Status: built (queue MI, step MI2).** The reasons are in DESIGN.md, "The integration step without a model"; the
+marks **(M1)**…**(M13)** are MI1's proposals, which the user accepted on 2026-11-18 as written. The engine's part is in
+`apps/server/src/engine.ts` (`integrateWithoutModel`), the git part in `apps/server/src/integration.ts`.
 
 - **The queue's report (M1)** is asked of the last step that runs with a model before the integration step: the
-  closing refactoring step, or, in a queue without `coding`, its last own step. The opening's `last` becomes "no step
-  is pending but this one and the integration step"; the text and the `nexus report` command stay as they are. The
-  integration step's opening asks for it only when the queue has no `queue.report` yet. The engine never writes
-  `report.md`. The run-finished notice to the orchestrator gives the report's summary and the integration step's
-  ("Queue W finished. Report: … Integration: …"), or says that there is no report.
-- **The `nexus` session (M2).** The server keeps a session with id `nexus` and role `nexus` (`session.yaml` `runtime:
-  none`, `launched_by: nexus`), one per project, whose `events.jsonl` only the server writes: `step.started`,
-  `step.progress`, `step.done` (`summary`, `commit`, `activities: [integration]`), `queue.stop` and `review.accepted`,
-  each only for an integration step it runs. The derivation takes them as a worker's (`WORKER_ONLY` events excepted)
-  and `review.accepted` as an orchestrator's. The step's round in `git.yaml` has `session: nexus`. It has no inbox and
-  no process.
-- **When (M3).** At the integration step's opening the engine goes without a model when Nexus runs the step's checks
-  (`checks.yaml` `by: nexus`), the queue's worktree has no uncommitted changes to tracked files, and
-  `integrationContext` names a base branch; else a worker opens the step as above. A step that goes on (Continue after a
-  stop, a send-back) opens with a worker as above.
-- **The sequence.** `step.started` (from `nexus`) and the round's start; `git merge --no-edit <base>` in the worktree.
-  Clean, or nothing to merge: the setup when its inputs changed (below, inside the check set), then `step.done` with
-  the resulting HEAD as `commit` and a summary of facts: "Nexus merged main (3f2a1c9) into nexus/W without a model: 7
-  commits, 12 files (+340 −85); no conflict." or "nexus/W already contains main (3f2a1c9): nothing to merge." The
-  checks then run as after any `step.done` ("Checks run by Nexus"). The derived step has `model_free: true` **(M13)**.
-- **A conflict (M4).** `git merge --abort`, then: with `resolve_conflicts` off, `queue.stop` from `nexus` with
-  `INTEGRATION_CONDITION` and the reason "<files>: Nexus does not resolve conflicts (resolve_conflicts is off)"; with it
-  on, a worker opens the step as above, its opening adding "Nexus tried the merge: <files> conflict." Without a base
-  branch to name: `queue.stop` from `nexus`, reason "no base branch to merge".
-- **A failing check (M5).** A set of the `nexus` session's `step.done` that fails twice gives the check-fix round as
-  any (`check_fix` 1, limits and disputes unchanged), but its `check_failed` entry goes to the run's worker session,
-  which the engine starts again when its process has ended (as a resume does), and the turn is the integration step's
-  opening in its continue form, "Nexus merged <base> (<sha>) into this branch without a model (HEAD <sha>), and the
-  checks failed:", followed by the round's text. From there the step is the worker's, as above.
-- **Accepted by Nexus (M6).** When every check of the set passed (flaky ones included) and the step's review level is
-  2 or 3, the engine writes `review.accepted` from `nexus` with the text "accepted by Nexus: a clean merge without a
-  model, and every check passed"; the orchestrator's next notice lists it among the steps accepted since. At level 1,
-  and when the queue has no check at all (the summary then adds "No check ran: the merge is untested."), the step goes
-  to its review at its level.
-- **Restart, drain, Pause, Stop (M11).** While the engine merges or runs the setup, `Engine.idle()` is false. A
-  starting engine that finds an integration step `running` from `nexus` without its `step.done` runs `git merge
-  --abort` when `MERGE_HEAD` exists and runs the step again from its start (a merge already committed is found as
-  nothing to merge). A Pause takes effect at the review; Stop now and Stop at once end a running setup like a check.
+  closing refactoring step, or, in a queue without `coding`, its last own step. The opening's `last` means "no step is
+  pending but this one and the integration step", and its text says "This is the queue's last step before its
+  integration step, which Nexus runs after it (without a model when the merge is clean)."; the `nexus report` command
+  is unchanged. The integration step's worker is asked for it only when the queue has no `queue.report` yet. The engine
+  never writes `report.md`. The run-finished notice to the orchestrator gives the report's summary, or "It has no
+  report.", and then the integration step's summary ("Integration (run and accepted by Nexus, without a model): …").
+- **The `nexus` session (M2).** The server keeps a session with id `nexus` (`NEXUS_SESSION`) and role `nexus`
+  (`session.yaml` `runtime: external`, `launched_by: nexus`, title "Nexus (without a model)"; `ensureNexusSession`), one
+  per project, whose `events.jsonl` and `activity.jsonl` only the server writes: `step.started`, `step.progress`,
+  `step.done` (`summary`, `commit`, `activities: [integration]`), `queue.stop` and `review.accepted`, each only for an
+  integration step it runs. The derivation takes them as any session's; of the orchestrator's events it takes
+  `review.accepted` only. A step whose latest `step.started` is the `nexus` session's has `model_free: true` and
+  `session: nexus` **(M13)**; a worker's `step.started` clears it. The step's round in `git.yaml` has `session: nexus`.
+  The session has no process and no inbox.
+- **When (M3).** When the integration step is next (after the merge train's hold, as before), the engine goes without
+  a model when Nexus runs the checks (the engine has the capacity coordinator), the queue has a worktree of its own
+  without uncommitted changes to tracked files, and the merge is plain; else a worker opens the step as above (the
+  worktree dirty, a conflict to resolve, an engine without the checks). A step that goes on (Continue after a stop, a
+  send-back) is opened by a worker as above.
+- **The sequence**, in one look of the engine: the merge is tested (`git merge-tree --write-tree --name-only HEAD
+  <base>`); `step.started` from `nexus`, the round's start; `step.progress` "Nexus merges main into nexus/W without a
+  model"; `git merge --no-edit <sha of the base>` (with Nexus's name as the committer only where git has no identity
+  configured); `step.done` with the resulting HEAD as `commit` and a summary of facts, "Nexus merged main (3f2a1c9e04b1)
+  into nexus/W without a model: 7 commits, 12 files changed, 340 insertions(+), 85 deletions(-); no conflict." or
+  "nexus/W already contains main (3f2a1c9e04b1): nothing to merge."; the round's end. The checks then run as after any
+  `step.done` ("Checks run by Nexus"), the setup first when its inputs changed (below).
+- **A conflict (M4).** No merge is made (a merge that conflicts after all is aborted). With `resolve_conflicts` off,
+  `queue.stop` from `nexus` with `INTEGRATION_CONDITION` and the reason "<files>: Nexus does not resolve conflicts (the
+  project's resolve_conflicts setting is off)"; with it on, a worker opens the step as above, its opening adding "Nexus
+  tried the merge first: <files> conflict(s)." Without a base branch to name: `queue.stop` from `nexus`, reason "no base
+  branch to merge".
+- **A failing check (M5).** A set of the `nexus` session's `step.done` that fails twice gives the check-fix round as any
+  (`check_fix` 1, the limit and disputes unchanged), but its `check_failed` entry goes to the run's worker session (the
+  one that ran the step before), and its text begins with what the step is: "This is queue W's integration step
+  (W.integrate), kept by Nexus. Nexus merged main (<sha>) into the queue's branch nexus/W in this worktree without a
+  model (HEAD <sha>), and the checks failed on the result: the step is yours now." and the integration's rules (fix on
+  the branch in small commits, never rebase or push, change neither the base nor another checkout). From the worker's
+  `nexus step start` the step is the worker's, as above.
+- **Accepted by Nexus (M6).** When the step is `model_free`, every check of its latest set passed (flaky ones included),
+  the set has at least one check, its review level is 2 or 3 and the review was not handed to the user, the engine
+  writes `review.accepted` from `nexus` with the text "accepted by Nexus: a clean merge without a model, and every
+  check passed" (`acceptedByNexus`, `packages/protocol/src/checks.ts`). The orchestrator gets no review notice for such
+  a step; it learns of it from the run-finished notice. At level 1, and when the queue has no check at all (the summary
+  then ends "No check ran: the merge is untested."), the step goes to its review at its level.
+- **Restart (M11).** The merge is made within one look of the engine, so a drain or a Pause does not fall between its
+  start and its done; a Pause takes effect at the review, as during the checks, and a setup run inside the check set
+  ends with a Stop like a check. A server that stopped between the two leaves the step `running` from `nexus` with no
+  `step.done` after its start: when the run goes on, the engine runs `git merge --abort` where `MERGE_HEAD` exists,
+  closes the open round, and runs the step again from its start (a merge already committed is found as nothing to
+  merge).
 
-**The setup again after a change of its inputs (M7, M8).** `git.yaml` `setup` gets `sha`: the HEAD on which the setup
+**The setup again after a change of its inputs (M7, M8).** `git.yaml` `setup` has `sha`: the HEAD on which the setup
 last succeeded (the first setup: the worktree's base commit), and `reason` (why it ran last: "first setup",
-"package-lock.json changed"). A new project-only setting, `defaults.worktree_setup_inputs` (a list of paths or globs
-relative to the worktree's root), names the files whose change makes the setup run again; by default
-`**/package-lock.json`, `**/npm-shrinkwrap.json`, `**/yarn.lock`, `**/pnpm-lock.yaml`, `**/bun.lockb`, `**/bun.lock`.
-In a worktree with a recorded `setup`, when `git diff --name-only <setup.sha> HEAD` names one of them:
+"package-lock.json changed"). The project-only setting `defaults.worktree_setup_inputs` (a list of paths or globs
+relative to the worktree's root: `**` any folders, `*` and `?` within a name) names the files whose change makes the
+setup run again; by default (`WORKTREE_SETUP_INPUTS`) `**/package-lock.json`, `**/npm-shrinkwrap.json`, `**/yarn.lock`,
+`**/pnpm-lock.yaml`, `**/bun.lockb`, `**/bun.lock`. In a worktree whose setup has succeeded once, when `git diff
+--name-only <setup.sha, else base.sha> HEAD` names one of them:
 
-- before a check set (any step's), the setup runs first within the set's grant, recorded on the set (`setup`:
-  `command`, `reason`, `runs` as a check's, `ok`); it fails like a check (run once more; failing twice the set is
-  `failed`, its checks not run, and the check-fix round's text names the setup);
-- after a merge at a step boundary (below), before the step opens, under the capacity coordinator; a failure halts
-  the run as a first setup's does today.
+- before a check set (any step's), the setup runs first within the set's grant, recorded on the set (`setup`: `name`
+  "worktree setup", `command`, `reason`, `runs` as a check's, logs `checks/<step>/r<round>f<fix>-0-setup.<run>.log`,
+  `ok`, `flaky`); it fails like a check (run once more; failing twice the set is `failed`, its checks are not run, and
+  the check-fix round's text begins "The worktree setup (<command>) ran first, because <reason>, and failed twice; the
+  checks did not run."). Passing, `setup.sha` becomes HEAD;
+- after a merge at a step boundary (below), before the step opens: `setup` loses its `done_at` and gets the reason, so
+  the engine runs it as a first setup (a failure halts the run, and it runs again when the run goes on).
 
-**Merging the base at a step boundary (M9, M10).** In a queue with an integration step, before the engine opens one of
-the queue's own steps or its closing step (`mode: start`, never the integration step), it merges the base when: the
-worktree has no uncommitted changes to tracked files, `integrationContext` names a base branch, and the base's commit
-is not already in HEAD. It tests the merge first (`git merge-tree --write-tree --name-only HEAD <base>`; without
-support, a real merge aborted on a conflict). Clean: `git merge --no-edit <base>`, then the setup when its inputs
-changed. A conflict: no merge. Either way `git.yaml` records it under `pulls` (oldest first): `at`, `before` (the step
-about to open), `base` (the branch), `sha` (its commit), `from` (HEAD before), `to` (HEAD after; absent on a conflict),
-`conflicts` (the files; only on a conflict), `setup` (true when it ran). The step's opening then says "Before this step
-Nexus merged main (<sha>) into this branch: <n> commits, <files>." or "main (<sha>) conflicts with this branch in
-<files>; Nexus did not merge it, the integration step will." `nexus status` and the queue on the dashboard show the
-last conflicting one. With the pulls:
+**Merging the base at a step boundary (M9, M10).** In a queue with an integration step, when the engine is about to
+open the next step after another (one of the queue's own steps, or the closing step; never the integration step, and
+never the same step going on), it merges the base when the worktree has no uncommitted changes to tracked files,
+`integrationContext` names a base branch, and the base's commit is not already in HEAD. It tests the merge first (as
+above); clean: `git merge --no-edit <sha>`, then the setup when its inputs changed. A conflict: no merge. `git.yaml`
+records it under `pulls` (oldest first; a conflict only once per base commit and step): `at`, `before` (the step about
+to open), `base` (the branch), `sha` (its commit), `from` (HEAD before), `to` (HEAD after; absent on a conflict),
+`conflicts` (the files; only on a conflict), `setup` (true when the setup was to run again). The step's opening then
+says "Before this step Nexus merged main (<sha>) into this branch: <n> commits, changing <files>." or "main (<sha>)
+conflicts with this branch in <files>; Nexus did not merge it. Do not resolve it here: the queue's integration step
+will." The pulls are not shown on the dashboard or in `nexus status` yet. With the pulls:
 
-- the closing step's commit range starts at the last `pulls[].sha` merged in (`to` present), else as above;
+- the closing step's commit range starts at the last `pulls[].sha` merged in (`to` present), and ends at the latest of
+  the own steps' round ends and that pull's `to`; else as above;
 - a disputed check's base run uses that same commit, else `base.sha`.
 
 ## Notes: `notes/<step-id>/<note-id>.md`
@@ -686,7 +703,7 @@ Written only by the server's queue engine; agents never touch them.
 
 | File | What |
 |---|---|
-| `queues/<id>/git.yaml` | The HEAD of the queue's checkout around each step's work (`src/gitinfo.ts`): `base` (an auto worktree's: `ref`, the branch or commit it was made from, its `sha`, `at`), `base.branch` (whether `ref` names a branch: only a branch can be merged back into), `merged` (`at`, `into`, `path`, `sha`, `fast_forward`, `by`: `nexus` or `user`, absent on older records), `cleaned` (`at`, `path`, `branch`), `cleanup` (Nexus's cleanup of a done survey run's worktree could not go: `waiting` (`reason`, `since`, `files` (what is left, at most 20), `more`); see "Cleaning up a survey's worktree"), `merge` (Nexus merging back by itself: `waiting` (`reason`, `since`: what keeps it, told to the user and the orchestrator; `released`: the queues whose runs Nexus held for this merge back and let go on when it could not go), `reintegrations` (runs of the integration step again since the user's last Merge back), `reintegrating` (when the last was asked for, until the step opens), `queued` (`since`: back from a wait, it could go but another queue holds its base; it waits its turn in the merge train, ordered by when its wait began; see "The merge train")), `setup` (the worktree setup command for the worktree Nexus made: `command` (the last one run), `at` (when the worktree was made), `done_at` (once it succeeded), `failed` (`at`, `reason`: its last failure)), `steps.<step>` (rounds, oldest first: `session`, `start` (HEAD when the step opened, or when a send-back reopened it), `started_at`, `end` (HEAD at the end of the turn in which the step got its outcome: done, review, failed or stopped), `ended_at`; a sha is null outside a git repository). A continued step keeps its open round. One writer: the server. See "Git on the dashboard" |
+| `queues/<id>/git.yaml` | The HEAD of the queue's checkout around each step's work (`src/gitinfo.ts`): `base` (an auto worktree's: `ref`, the branch or commit it was made from, its `sha`, `at`), `base.branch` (whether `ref` names a branch: only a branch can be merged back into), `merged` (`at`, `into`, `path`, `sha`, `fast_forward`, `by`: `nexus` or `user`, absent on older records), `cleaned` (`at`, `path`, `branch`), `cleanup` (Nexus's cleanup of a done survey run's worktree could not go: `waiting` (`reason`, `since`, `files` (what is left, at most 20), `more`); see "Cleaning up a survey's worktree"), `merge` (Nexus merging back by itself: `waiting` (`reason`, `since`: what keeps it, told to the user and the orchestrator; `released`: the queues whose runs Nexus held for this merge back and let go on when it could not go), `reintegrations` (runs of the integration step again since the user's last Merge back), `reintegrating` (when the last was asked for, until the step opens), `queued` (`since`: back from a wait, it could go but another queue holds its base; it waits its turn in the merge train, ordered by when its wait began; see "The merge train")), `setup` (the worktree setup command for the worktree Nexus made: `command` (the last one run), `at` (when the worktree was made), `done_at` (once it succeeded), `failed` (`at`, `reason`: its last failure), `sha` (the HEAD it last succeeded on), `reason` (why it ran last)), `pulls` (the base merged into the queue's branch at step boundaries: `at`, `before`, `base`, `sha`, `from`, `to`, `conflicts`, `setup`; see "Without a model"), `steps.<step>` (rounds, oldest first: `session`, `start` (HEAD when the step opened, or when a send-back reopened it), `started_at`, `end` (HEAD at the end of the turn in which the step got its outcome: done, review, failed or stopped), `ended_at`; a sha is null outside a git repository). A continued step keeps its open round. One writer: the server. See "Git on the dashboard" |
 | `queues/<id>/checks.yaml` | The checks Nexus runs after each `step.done` (`by` per step, its sets of checks with their runs, a dispute and its base run, the fix queue of an accepted failure); the logs under `queues/<id>/checks/<step>/`. One writer: the server's engine. See "Checks run by Nexus" |
 | `queues/<id>/push.yaml` | Pushing what was accepted: `review` (per step, the HEAD of the checkout when it entered review: `sha` or null, `finished_at`, `at`), `steps` (per accepted step: `acceptance`, `sha`, `result` (`pushed`, `failed`, `skipped`, `held`), `text`, `at`, `held_by?`), `pushed` (the last success: `sha`, `step`, `at`, `remote`, `branch`), `error` (the last failure until a success). One writer: the server. See "Pushing what was accepted" |
 | `queues/<id>/plan.yaml` | The queue's place in the plan (see "The plan"): `by`, `reason?`, `after` (the queues it waits for, each with `queue`, `by`, `at`, `reason?`), `created_at`, `updated_at`, `started_at?`, `proposal?`, `decisions`. One writer: the server; it stays after the queue starts (marked `started_at`), and taking the queue out of the plan removes it |
@@ -730,8 +747,10 @@ engine runs the command through the shell in the worktree before the run's first
 runs, at most 30 minutes) and records `done_at`. A failure (an exit code other than 0, or the time limit) halts the run
 with the reason, `the worktree setup command (<command>) failed: exit code <n>; its output ends: <output>`, and records
 it under `failed`; when the run goes on (Continue, resume), the project's command as it is then runs again in the same
-worktree. A worktree the queue names by path, an existing one, and the project's own checkout get no setup. When the
-setup runs again (a change of its inputs, queue MI): "The integration step", "Without a model".
+worktree. A worktree the queue names by path, an existing one, and the project's own checkout get no setup. A success
+records the commit it ran on (`sha`); a change of its inputs (`defaults.worktree_setup_inputs`) since then runs it again
+before a check set or after a merge of the base at a step boundary (queue MI): "The integration step", "Without a
+model".
 
 **Merging back by itself and resolving conflicts** (`defaults.merge_back`, `defaults.resolve_conflicts`; global, with a
 project override; both off by default, so a new project merges back only by the user's hand until the user turns
@@ -773,7 +792,9 @@ the reason, `rejected: <step>`). Nothing is reverted.
 
 ### Review
 
-Every step is reviewed when it is done; there is no level without review. A step's **review level** says who:
+Every step is reviewed when it is done; there is no level without review, with one exception: the integration step
+Nexus ran without a model, every check passed, at level 2 or 3, is accepted by Nexus itself (queue MI; "The integration
+step", "Without a model"). A step's **review level** says who:
 
 - `1`: the user reviews. The step is held in `review` for the user; the queue is `waiting`.
 - `2`: the orchestrator reviews what can be checked; what is the user's (the look, the feel, what the project's rules
@@ -1206,6 +1227,9 @@ With `defaults.push_accepted` on, an accepted step's work is pushed by the serve
 The server keeps one session with id `user` and role `user` for what the user does in the dashboard. Its event log
 holds the user's answers (`answer.given`). Like an orchestrator, it may write the events workers may not.
 
+The server keeps one more, id `nexus` and role `nexus`, for the steps the engine runs itself without a model (the
+integration step, queue MI): see "The integration step", "Without a model".
+
 ## Inbox: `sessions/<id>/inbox.jsonl`
 
 Written by the server, read by the session's adapter or hook. A `message` may name the `queue` and `step` it is
@@ -1233,7 +1257,7 @@ each entry it has seen with `message.read`; `nexus status` shows the unread ones
 protocol: 1
 id: 01JD...
 project: honeycomb
-role: worker                           # worker | orchestrator | conversation | user
+role: worker                           # worker | orchestrator | conversation | user | nexus
 runtime: claude                        # claude | codex | external
 native_id: 6f1c...                     # Claude session uuid / Codex thread id
 cwd: C:/Code/GameDev/ProjectHoneycomb
@@ -1457,6 +1481,8 @@ steps:
           decided: { verdict: accept, reason: ..., at: ..., event: ... }   # the orchestrator's, when it was not runnable
           outcome: accepted        # accepted, or fix
         fix_queue: { id: CI, created: true }   # an accepted failure's fix queue (created, or an open one it joined)
+        setup:                     # the worktree setup, run first because its inputs changed (queue MI)
+          { name: worktree setup, command: npm ci, reason: package-lock.json changed, runs: [...], ok: true }
 ```
 
 A run's `tail` is the output's last 80 lines, at most 6000 characters, and `failed_tests` the failing tests' names where

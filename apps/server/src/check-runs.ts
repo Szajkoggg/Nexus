@@ -16,12 +16,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import {
-  applyDraft, checkSetOf, fillTemplate, lastDone, latestCheckSet, now, readTemplates, reviewRound, stepChecks,
+  NEXUS_SESSION, applyDraft, checkSetOf, fillTemplate, lastDone, latestCheckSet, now, readTemplates, reviewRound, stepChecks,
   type CheckAttempt, type CheckDispute, type CheckRun, type CheckSet, type ChecksFile, type Event, type InboxEntry, type ProjectState,
   type ProjectStore, type QueueView, type RunFile, type StepView,
 } from "@nexus/protocol";
 import type { Capacity, Grant, HeavyProcess, Ticket } from "./capacity.ts";
 import { checkoutOf, git } from "./gitinfo.ts";
+import { lastPulled } from "./integration.ts";
+import { recordSetup, setupStale } from "./worktree.ts";
+
+/** The worktree setup, as a check-fix round's text and a set's failure name it. */
+const SETUP_NAME = "worktree setup";
 
 /** A check running longer is ended and counts as failed (EC1's P10). */
 const CHECK_LIMIT_MS = 60 * 60_000;
@@ -78,6 +83,11 @@ export interface CheckHost {
   ended(queue: string): void;
   /** The step's check-fix rounds are used up: the run halts for the orchestrator. */
   halt(queue: string, reason: string): void;
+  /**
+   * What a check-fix round's text begins with, for a step the worker has not opened yet (the integration step Nexus ran
+   * without a model, queue MI): what Nexus did, and what the step asks.
+   */
+  fixPreface?(queue: string, step: string): string | undefined;
 }
 
 /** A queue's checks in hand: the request, then the grant and the process running; `lastBase`: a base run's result. */
@@ -218,6 +228,12 @@ export class CheckRunner {
       if (a.stopped) return;
       this.update(queue, step, done, (s) => { s.state = "running"; s.granted_at = now(); });
       this.host.ended(queue);
+      // The worktree setup first, when its inputs changed since it last ran (queue MI, M7): failing twice, the set
+      // fails without its checks, which would fail for it.
+      if (!(await this.setupFirst(a, queue, step, done, cwd))) {
+        if (a.stopped) { this.update(queue, step, done, (s) => { s.state = "interrupted"; s.ended_at = now(); }); return; }
+        return this.finishSet(queue, step, done, state, [SETUP_NAME]);
+      }
       const set = checkSetOf(this.read(queue), step, done)!;
       const failed: string[] = [];
       for (const [i, c] of set.checks.entries()) {
@@ -239,6 +255,38 @@ export class CheckRunner {
     } finally {
       this.release(grant, queue);
     }
+  }
+
+  /**
+   * The worktree setup, run first in the set's grant when its inputs changed since the commit it last ran on: like a
+   * check, once more after a failure. Whether it passed (or did not need to run).
+   */
+  private async setupFirst(a: Active, queue: string, step: string, done: string, cwd: string): Promise<boolean> {
+    const stale = setupStale(this.store, this.store.readQueue(queue));
+    const grant = a.grant;
+    if (!stale || !grant) return true;
+    this.update(queue, step, done, (s) => { s.setup = { name: SETUP_NAME, command: stale.command, reason: stale.reason, runs: [] }; });
+    const set = checkSetOf(this.read(queue), step, done)!;
+    for (const n of [1, 2]) {
+      if (a.stopped) return false;
+      const rel = `checks/${step}/r${set.round}f${set.fix}-0-setup.${n}.log`;
+      const attempt: CheckAttempt = { started_at: now(), log: rel };
+      this.update(queue, step, done, (s) => { s.setup!.runs.push(attempt); });
+      const result = await this.execute(a, grant, stale.command, cwd, join(this.store.queueDir(queue), rel));
+      this.update(queue, step, done, (s) => {
+        const ended: CheckAttempt = {
+          ...attempt, ended_at: now(), duration: seconds(attempt.started_at, now()), exit_code: result.code,
+          ...(result.timedOut ? { timed_out: true } : {}), ...(a.stopped ? { interrupted: true } : {}),
+          ...(result.ok ? {} : { tail: tailOf(result.output) }),
+        };
+        s.setup!.runs[s.setup!.runs.length - 1] = ended;
+        if (a.stopped) return;
+        if (result.ok) { s.setup!.ok = true; if (n > 1) s.setup!.flaky = true; }
+        else if (n > 1) s.setup!.ok = false;
+      });
+      if (result.ok) { recordSetup(this.store, queue, stale.command, undefined, git(cwd, ["rev-parse", "HEAD"]), stale.reason); return true; }
+    }
+    return false;
   }
 
   /** One run of a check; whether it passed. Its state is written before it starts and after its tree has ended. */
@@ -434,13 +482,16 @@ export class CheckRunner {
     this.write(queue, file);
   }
 
+  /** The worker of the step's fix rounds: its own, or, for a step Nexus ran without a model, the run's session. */
   private session(state: ProjectState, queue: string, step: string): string | undefined {
     const q = state.queues.find((x) => x.id === queue);
-    return q?.steps.find((s) => s.id === step)?.session ?? q?.run?.session;
+    const own = q?.steps.find((s) => s.id === step)?.session;
+    return own && own !== NEXUS_SESSION ? own : q?.run?.session;
   }
 
   private appendFix(session: string, queue: string, step: string, set: CheckSet, text: string, id: string): void {
-    const entry: InboxEntry = { v: 1, id, at: now(), from: "nexus", type: "check_failed", ref: set.done, queue, step, fix: set.fix + 1, text };
+    const preface = this.host.fixPreface?.(queue, step);
+    const entry: InboxEntry = { v: 1, id, at: now(), from: "nexus", type: "check_failed", ref: set.done, queue, step, fix: set.fix + 1, text: preface ? `${preface}\n${text}` : text };
     this.store.appendInbox(session, entry);
   }
 
@@ -456,7 +507,7 @@ export class CheckRunner {
       let changed = false;
       for (const entry of Object.values(file.steps)) for (const s of entry.sets) {
         if (s.state === "queued" || s.state === "running") { s.state = "interrupted"; changed = true; }
-        for (const c of s.checks) for (const r of c.runs) if (!r.ended_at) { r.ended_at = now(); r.interrupted = true; changed = true; }
+        for (const c of [...s.checks, ...(s.setup ? [s.setup] : [])]) for (const r of c.runs) if (!r.ended_at) { r.ended_at = now(); r.interrupted = true; changed = true; }
         if (s.dispute?.base?.state === "running") { s.dispute.base = { state: "queued" }; changed = true; }
       }
       if (changed) this.write(queue, file);
@@ -465,11 +516,14 @@ export class CheckRunner {
 }
 
 /**
- * The queue's base commit, where a disputed check runs (P6): the commit its worktree was made from, else the HEAD of
- * its checkout when its first step opened.
+ * The queue's base commit, where a disputed check runs (P6): the last base commit merged into its branch at a step
+ * boundary (queue MI, M10), else the commit its worktree was made from, else the HEAD of its checkout when its first
+ * step opened.
  */
 function baseCommit(store: ProjectStore, q: Pick<QueueView, "id">): string | undefined {
   const g = store.readGit(q.id);
+  const pulled = lastPulled(g);
+  if (pulled) return pulled.sha;
   if (g?.base?.sha) return g.base.sha;
   const starts = Object.values(g?.steps ?? {}).flatMap((rounds) => rounds.filter((r) => r.start).map((r) => ({ sha: r.start!, at: r.started_at })));
   return starts.sort((a, b) => a.at.localeCompare(b.at))[0]?.sha;
@@ -477,11 +531,12 @@ function baseCommit(store: ProjectStore, q: Pick<QueueView, "id">): string | und
 
 /** What failed, for the worker: each check's failing tests, the end of its output and its log's full path. */
 function failureText(store: ProjectStore, queue: string, set: CheckSet): string {
-  const failed = set.checks.filter((c) => c.ok === false);
+  const failed = [...(set.setup?.ok === false ? [set.setup] : []), ...set.checks.filter((c) => c.ok === false)];
   return failed.map((c) => {
     const last = c.runs.at(-1)!;
     return [
-      `Check "${c.name}" failed twice${last.timed_out ? " (ended at its time limit)" : ` (exit code ${last.exit_code ?? "none"})`}.`,
+      c === set.setup ? `The worktree setup (${c.command}) ran first, because ${set.setup.reason}, and failed twice; the checks did not run.` : "",
+      c === set.setup ? "" : `Check "${c.name}" failed twice${last.timed_out ? " (ended at its time limit)" : ` (exit code ${last.exit_code ?? "none"})`}.`,
       last.failed_tests?.length ? `Failing tests:\n${last.failed_tests.map((t) => `- ${t}`).join("\n")}` : "",
       `Full log: ${join(store.queueDir(queue), last.log)}`,
       last.tail ? `The end of its output:\n${last.tail}` : "",

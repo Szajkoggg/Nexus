@@ -51,6 +51,17 @@ export function latestCheckSet(q: Pick<QueueView, "check_runs">, st: Pick<StepVi
 }
 
 /**
+ * The integration step ran without a model (queue MI, M6): its checks all passed and its review level is 2 or 3, so
+ * Nexus accepts it itself, and nobody is asked to review it. Not at level 1 (the user's), not when the review was handed
+ * to the user, and not without any check (the merge is untested then).
+ */
+export function acceptedByNexus(q: Pick<QueueView, "check_runs">, st: Pick<StepView, "id" | "timeline" | "model_free" | "status" | "level" | "asked_user">): boolean {
+  if (!st.model_free || st.status !== "review" || st.level === 1 || st.asked_user) return false;
+  const set = latestCheckSet(q, st);
+  return set?.state === "passed" && set.checks.length > 0;
+}
+
+/**
  * Reads the engine's checks of the step into the derived step (after its events): their results among the step's
  * checks and metrics, and its status where the latest step.done's checks have not passed. `limit`: the project's
  * `defaults.check_fix_limit`, given to a step in a check-fix round.

@@ -532,7 +532,11 @@ test("the orchestrator's briefing and notices on parallel worktrees and merging 
     "give a queue a worktree of its own (worktree: auto) when its work is independent",
     "queues that touch the same code run one after another (put them in the plan in order), never side by side",
     "id <queue>.integrate, review level 2",
-    "it resolves a conflict only where the project's resolve_conflicts setting allows it",
+    "a worker is started only for a conflict the project's resolve_conflicts setting lets it resolve, or for a failing check",
+    // Queue MI: the integration step without a model, the report's writer, and the checks it rests on.
+    "without a model when the merge is clean, and accepts the step itself when every check passes",
+    "The queue's report is written by the step before the integration step",
+    "give such a queue checks that cover the typecheck, the tests and, where the work touches it, the build",
     "Merging the queue back into main is Nexus's own only where the project's merge_back setting is on",
     "with the setting off it is the user's (Merge back in the dashboard). Never merge, rebase or move main yourself.",
   ]) assert.ok(orch.includes(part), `the orchestrator's briefing has ${JSON.stringify(part)}`);

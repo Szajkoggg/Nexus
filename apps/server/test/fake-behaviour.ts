@@ -391,7 +391,7 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
     // The queue's last step done: the report, written where the prompt says (refused under a denied folder, as
     // Claude Code refuses a Write its --disallowedTools rule covers), then registered with nexus report.
     const report = /`nexus report (\S+) --file (\S+) --summary/.exec(text);
-    if (report && (behaviour === "done" || behaviour === "untracked" || (behaviour === "merge" && !stoppedIntegration))) {
+    if (report && (["done", "untracked", "slow", "commit"].includes(behaviour) || (behaviour === "merge" && !stoppedIntegration))) {
       const path = resolve(report[2]!);
       if (!writeDenied(path)) {
         mkdirSync(dirname(path), { recursive: true });

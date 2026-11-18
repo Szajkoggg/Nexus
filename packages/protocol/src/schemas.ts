@@ -61,9 +61,12 @@ export type StepStatus = z.infer<typeof StepStatus>;
  * `user` is the one session the server keeps for what the user does in the dashboard (answers, for now).
  * `conversation` is a thinking partner the user talks with about the project (design, ideas): it reads the project
  * and writes only in the project's notes folder; it starts no work.
+ * `nexus` is the one session the server keeps for the steps the engine runs itself, without a model (the integration
+ * step without a model, queue MI): its events are written only by the server; it has no process and no inbox.
  */
-export const Role = z.enum(["worker", "orchestrator", "user", "conversation"]);
+export const Role = z.enum(["worker", "orchestrator", "user", "conversation", "nexus"]);
 export const USER_SESSION = "user";
+export const NEXUS_SESSION = "nexus";
 export type Role = z.infer<typeof Role>;
 
 export const Runtime = z.enum(["claude", "codex", "external"]);
@@ -301,6 +304,13 @@ export const ProjectFile = z.object({
      */
     worktree_setup: z.string().optional(),
     /**
+     * The files whose change makes the worktree setup run again (project only; paths or globs relative to the
+     * worktree's root, `**` for any folders): before a check set, and after a merge of the base at a step boundary,
+     * when one differs between the commit the setup last ran on and HEAD. Default: the common lockfiles
+     * (WORKTREE_SETUP_INPUTS).
+     */
+    worktree_setup_inputs: z.array(z.string()).optional(),
+    /**
      * The project's checks (project only): run in every step of every queue, before the queue's own checks (a check
      * both name runs once). A run fixes them when it starts (`checks` in run.yaml), so a change reaches a queue at its
      * next run. Empty (the default): only the queue's checks.
@@ -393,6 +403,7 @@ export const StoredProject = z.object({
     check_fix_limit: own(z.number().int().min(0)),
     worktree_dir: z.string().optional(),
     worktree_setup: z.string().optional(),
+    worktree_setup_inputs: z.array(z.string()).optional(),
     checks: z.array(z.string()).optional(),
   })).prefault({}),
   runtimes: z.object({
@@ -969,12 +980,24 @@ export const GitFile = z.object({
   /**
    * The project's worktree setup command for the worktree Nexus made (`at`): `done_at` once it succeeded; until then
    * it runs again before the next step opens. `failed`: its last failure (`reason`: the exit code and the output's
-   * end).
+   * end). `sha`: the HEAD on which it last succeeded (the first setup: the worktree's base commit); `reason`: why it
+   * ran last ("first setup", "package-lock.json changed"). A change of its inputs since `sha` runs it again (queue MI).
    */
   setup: z.object({
     command: z.string(), at: Time, done_at: Time.optional(),
     failed: z.object({ at: Time, reason: z.string() }).optional(),
+    sha: z.string().optional(),
+    reason: z.string().optional(),
   }).optional(),
+  /**
+   * The base merged into the queue's branch at a step boundary (queue MI), oldest first: `before` the step about to
+   * open, `base` the branch, `sha` its commit, `from` HEAD before, `to` HEAD after (absent: not merged, it conflicts in
+   * `conflicts`), `setup` when the setup ran after it.
+   */
+  pulls: z.array(z.object({
+    at: Time, before: z.string(), base: z.string(), sha: z.string(), from: z.string(),
+    to: z.string().optional(), conflicts: z.array(z.string()).optional(), setup: z.boolean().optional(),
+  })).optional(),
   steps: z.record(z.string(), z.array(z.object({
     session: Id,
     start: z.string().nullable(), started_at: Time,
@@ -1360,6 +1383,12 @@ const CheckSet = z.object({
   dispute: CheckDispute.optional(),
   /** The fix queue an accepted failure went to: `created` by it, or one open for the same tests it was added to. */
   fix_queue: z.object({ id: z.string(), created: z.boolean() }).optional(),
+  /**
+   * The worktree setup, run first in the set's grant because its inputs changed since it last ran (queue MI): like a
+   * check (run once more after a failure; failing twice, the set fails and its checks do not run); `reason`: what
+   * changed.
+   */
+  setup: CheckRun.extend({ reason: z.string() }).optional(),
 });
 export type CheckSet = z.infer<typeof CheckSet>;
 

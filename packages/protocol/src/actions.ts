@@ -2,7 +2,7 @@
 // writer of queue definitions, notes and inboxes (docs/PROTOCOL.md, "Rules").
 import { existsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import { ProjectFile, QueueFile, USER_SESSION, type GlobalSettings, effortIssue, type StatusChange, type InboxEntry, ReviewLevel, type RunFile, type SessionFile } from "./schemas.ts";
+import { NEXUS_SESSION, ProjectFile, QueueFile, USER_SESSION, type GlobalSettings, effortIssue, type StatusChange, type InboxEntry, ReviewLevel, type RunFile, type SessionFile } from "./schemas.ts";
 import { ProjectStore, countWrite, newId, now, readGlobalSettings, revisionHash, writeGlobalSettings } from "./store.ts";
 import { OVERRIDABLE, changedGlobal, settingKey } from "./settings.ts";
 import { reviewedByOrchestrator, runGoing } from "./status-rules.ts";
@@ -43,6 +43,21 @@ export function ensureUserSession(store: ProjectStore): SessionFile {
   const p = store.readProject();
   const s: SessionFile = {
     protocol: 1, id: USER_SESSION, project: p.id, role: "user", runtime: "external", title: "You (dashboard)",
+    cwd: p.root, launched_by: "nexus", created_at: now(),
+  };
+  store.writeSession(s);
+  return s;
+}
+
+/**
+ * The session of the steps the engine runs itself, without a model (queue MI): its events are the server's only; it has
+ * no process and no inbox.
+ */
+export function ensureNexusSession(store: ProjectStore): SessionFile {
+  try { return store.readSession(NEXUS_SESSION); } catch { /* create it */ }
+  const p = store.readProject();
+  const s: SessionFile = {
+    protocol: 1, id: NEXUS_SESSION, project: p.id, role: "nexus", runtime: "external", title: "Nexus (without a model)",
     cwd: p.root, launched_by: "nexus", created_at: now(),
   };
   store.writeSession(s);

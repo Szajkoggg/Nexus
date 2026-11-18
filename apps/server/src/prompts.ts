@@ -99,6 +99,8 @@ export function stepOpening(o: {
   integration?: IntegrationContext;
   /** Nexus runs the step's checks after its `nexus step done` (PROTOCOL.md, "Checks run by Nexus"). */
   checksByNexus?: boolean;
+  /** Nexus merged the base into the queue's branch right before this step, or found it conflicting (queue MI). */
+  pull?: PullText;
 }): string {
   const { q, step, mode, why, projectStopConditions, notes, answers, last, report, languages, closing, integration } = o;
   const index = q.steps.findIndex((s) => s.id === step.id);
@@ -109,6 +111,7 @@ export function stepOpening(o: {
     step.goal ? `\nGoal:\n${step.goal}` : "",
     step.acceptance.length ? `\nAcceptance:\n${step.acceptance.map((a) => `- ${a}`).join("\n")}` : "",
     tagsText(step.tags) ? `\nTags as planned: ${tagsText(step.tags)}. At the end name what you actually did with \`nexus step done --activities\`.` : "",
+    o.pull ? pullText(o.pull) : "",
     closing ? closingText(closing, !!o.checksByNexus) : "",
     integration ? integrationText(step.id, integration, !!o.checksByNexus) : "",
     checks.length ? `\nChecks for every step:\n${checks.map((c) => `- ${c}`).join("\n")}${o.checksByNexus ? `\n${CHECKS_BY_NEXUS}` : ""}` : "",
@@ -118,9 +121,31 @@ export function stepOpening(o: {
     answers.length ? `\nAnswers to your questions about this step:\n${answers.map((x) => `- "${x.text}": ${x.answers.at(-1)?.text}`).join("\n")}` : "",
     languages ? `\n${languages}` : "",
     `\nBegin with \`nexus step start ${step.id}\`${mode === "continue" ? " (again is fine)" : ""}. End with \`nexus step done ${step.id} --summary "…"\`, \`nexus step failed\` or \`nexus stop\`, then write \`nexus context\` and end your turn. Do not start another step.`,
-    last ? `\nThis is the queue's last step. After it is done, write a short report of the whole queue (what each step achieved against its acceptance, checks, review material, open questions, a proposed next step) to ${report} (a folder for reports outside the working tree and any repository: never write it into the working tree, it would block the cleanup of a worktree) and register it with \`nexus report ${q.id} --file ${report} --summary "…"${q.maintenance ? " --findings <the number of findings>" : ""}\`, which copies it into the queue's folder and removes it from there.${q.maintenance ? ` This is a maintenance queue (${q.maintenance}): give the number of findings with --findings (0 when there were none); Nexus tells the orchestrator only when there are some.` : ""}` : "",
+    last ? `\nThis is the queue's last step${!step.integration && q.steps.some((x) => x.integration) ? " before its integration step, which Nexus runs after it (without a model when the merge is clean)" : ""}. After it is done, write a short report of the whole queue (what each step achieved against its acceptance, checks, review material, open questions, a proposed next step) to ${report} (a folder for reports outside the working tree and any repository: never write it into the working tree, it would block the cleanup of a worktree) and register it with \`nexus report ${q.id} --file ${report} --summary "…"${q.maintenance ? " --findings <the number of findings>" : ""}\`, which copies it into the queue's folder and removes it from there.${q.maintenance ? ` This is a maintenance queue (${q.maintenance}): give the number of findings with --findings (0 when there were none); Nexus tells the orchestrator only when there are some.` : ""}` : "",
     q.maintenance === "survey" ? "\nThis is a survey: change nothing and commit nothing. When a step ends, Nexus checks that it left no commit and no changed tracked file, and stops the queue otherwise." : "",
   ].filter(Boolean).join("\n");
+}
+
+/** A merge of the base at a step boundary, as the next step's opening tells it (queue MI). */
+export interface PullText { base: string; sha: string; merged?: { commits: number; files: string[] }; conflicts?: string[] }
+
+function pullText(p: PullText): string {
+  const sha = p.sha.slice(0, 12);
+  if (p.merged) return `\nBefore this step Nexus merged ${p.base} (${sha}) into this branch: ${p.merged.commits} commit${p.merged.commits === 1 ? "" : "s"}${p.merged.files.length ? `, changing ${shortList(p.merged.files)}` : ""}.`;
+  return `\n${p.base} (${sha}) conflicts with this branch in ${shortList(p.conflicts ?? [])}; Nexus did not merge it. Do not resolve it here: the queue's integration step will.`;
+}
+
+const shortList = (files: readonly string[], most = 8) => (files.length > most ? `${files.slice(0, most).join(", ")} and ${files.length - most} more` : files.join(", "));
+
+/**
+ * The beginning of a check-fix round for the integration step Nexus ran without a model (queue MI): the worker has not
+ * opened the step, so it is told what the step is and what Nexus did.
+ */
+export function modelFreeFixPreface(q: Pick<QueueView, "id">, step: string, c: IntegrationContext, head: string | undefined): string {
+  return [
+    `This is queue ${q.id}'s integration step (${step}), kept by Nexus. Nexus merged ${c.base ?? "the base"}${c.sha ? ` (${c.sha.slice(0, 12)})` : ""} into ${c.branch ? `the queue's branch ${c.branch}` : "the queue's branch"} in this worktree without a model${head ? ` (HEAD ${head.slice(0, 12)})` : ""}, and the checks failed on the result: the step is yours now.`,
+    `Fix on this branch what the two sides break together, in small commits that say why. Never rebase, never push, and change neither the base branch nor any other checkout: the base moves forward to this step's result later, by Nexus or the user.`,
+  ].join("\n");
 }
 
 /**
@@ -158,6 +183,7 @@ function integrationText(step: string, c: IntegrationContext, byNexus: boolean):
   }
   return [
     intro,
+    c.conflicts?.length ? `Nexus tried the merge first: ${shortList(c.conflicts)} conflict${c.conflicts.length === 1 ? "s" : ""}.` : "",
     `Merge the base into it: git merge --no-edit ${c.base} (the base branch ${c.base} is at ${c.sha} now). Never rebase, never push, and change neither the base branch nor any other checkout: the base moves forward to this step's result later, by Nexus or the user.`,
     byNexus
       ? `Nexus runs the checks on the result after your \`nexus step done\`, and sends you their output only if one fails: then fix what the two sides do together on this branch, in small commits that say why, and end with \`nexus step done\` again.`
@@ -169,7 +195,7 @@ function integrationText(step: string, c: IntegrationContext, byNexus: boolean):
       ? `- A conflict: resolve it (the project lets you: its resolve_conflicts setting is on). Keep what both sides meant, commit the merge, ${byNexus ? "run the tests of the files that conflicted" : "run the checks"}, and say in the summary which files conflicted and how you resolved each; the step's review judges it. If you cannot resolve one with confidence (the two sides want different things, and choosing is the user's), abort the merge (git merge --abort) and stop: ${stop}`
       : `- A conflict: do not resolve it (the project's resolve_conflicts setting is off). Abort the merge (git merge --abort), so the branch is as it was, and stop: ${stop}`,
     `After such a stop the queue waits for the user, who resolves the conflict (in this worktree, or with a new revision) and goes on with Continue; this step then runs again.`,
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 }
 
 /**
@@ -446,7 +472,7 @@ The default level follows from the step's acceptance criteria: criteria that can
 
 The closing refactoring step: set coding: true on every queue that contains coding, that is, a step that writes or changes code (tests and scripts count; a queue that only plans, measures, documents or reviews does not). Nexus then ends the queue with a step of its own, outside your list of steps: id <queue>.refactor, review level 2, its goal and acceptance Nexus's standard text (refactor what the queue changed and the code closely tied to it; behaviour unchanged, the checks pass before and after; small commits; the project's AGENTS.md "Refactoring" section applies if there is one). It always runs last, also after steps a later revision adds (once it has run, it runs again after them), in a fresh session given the queue's commit range; it writes the queue's report (unless an integration step follows it, below). Do not draft such a step yourself, and do not use its id. Review it as any level-2 step; a "nothing worth refactoring" with its reasons is a valid outcome. You cannot skip it, and nexus queue set finished waits for it; only the user may skip it, with Continue on a stopped queue or with the approval of a stopped queue's new revision (nexus status then shows it skipped, with the reason). Once the queue has started, coding: true stays (a draft cannot take it back).
 
-Parallel work and merging back: give a queue a worktree of its own (worktree: auto) when its work is independent of the queues running or planned beside it (another part of the code), so they can run side by side; queues that touch the same code run one after another (put them in the plan in order), never side by side. A queue with a worktree of its own ends with a second step of Nexus's, after the closing step: id <queue>.integrate, review level 2. In the queue's worktree its worker merges the current main into the queue's branch and runs the checks there; it resolves a conflict only where the project's resolve_conflicts setting allows it, and one it does not resolve stops the queue for the user (only the user's Continue goes on). It writes the queue's report. Do not draft such a step, do not use its id, and you cannot skip it; review it on the merge and the checks. Merging the queue back into main is Nexus's own only where the project's merge_back setting is on: then main moves forward to the integrated commit by a fast-forward once every step is accepted, and you are told when that waits (a dirty checkout, failed checks, main moving on again) and when it is done; with the setting off it is the user's (Merge back in the dashboard). Never merge, rebase or move main yourself. With merge_back on, such queues integrate one at a time (the merge train): a queue whose next step is its integration step waits before it while another queue integrates or waits for its fast-forward, in the order they got there, and goes on by itself in its turn (nexus status: "waits to integrate after <queue>"); its own steps before never wait, and one whose fast-forward waits lets the next go.
+Parallel work and merging back: give a queue a worktree of its own (worktree: auto) when its work is independent of the queues running or planned beside it (another part of the code), so they can run side by side; queues that touch the same code run one after another (put them in the plan in order), never side by side. A queue with a worktree of its own ends with a second step of Nexus's, after the closing step: id <queue>.integrate, review level 2. In the queue's worktree Nexus merges the current main into the queue's branch and runs the checks there, without a model when the merge is clean, and accepts the step itself when every check passes (at review level 1, or with no checks, it goes to its review as any step); a worker is started only for a conflict the project's resolve_conflicts setting lets it resolve, or for a failing check. A conflict not resolved stops the queue for the user (only the user's Continue goes on). At each step boundary before it, Nexus also merges main into the branch when it merges cleanly, so conflicts show up early. The queue's report is written by the step before the integration step (the closing step, else the queue's last own step). A merge without a model is exactly as safe as the queue's checks: give such a queue checks that cover the typecheck, the tests and, where the work touches it, the build. Do not draft such a step, do not use its id, and you cannot skip it; review it, when it comes to you, on the merge and the checks. Merging the queue back into main is Nexus's own only where the project's merge_back setting is on: then main moves forward to the integrated commit by a fast-forward once every step is accepted, and you are told when that waits (a dirty checkout, failed checks, main moving on again) and when it is done; with the setting off it is the user's (Merge back in the dashboard). Never merge, rebase or move main yourself. With merge_back on, such queues integrate one at a time (the merge train): a queue whose next step is its integration step waits before it while another queue integrates or waits for its fast-forward, in the order they got there, and goes on by itself in its turn (nexus status: "waits to integrate after <queue>"); its own steps before never wait, and one whose fast-forward waits lets the next go.
 
 Review material follows Nexus's standard, \`nexus help review\` (read it before you write a review.prepare): every picture has a view key (subject, state, window width: waiting-tab@492) and a role (before, mockup, after, variant-a, variant-b, result); only the same key pairs, and Nexus refuses a wrong pair. In review.prepare name the views with their keys and roles, and what each is compared with (the old screen: before; a design: mockup; a new screen: result). The project's own conventions (its AGENTS.md) come on top.
 
@@ -841,7 +867,15 @@ export function pausedNotice(q: QueueView, r: { step?: string }): Notice {
 export function runEndNotice(q: QueueView, r: { state: string; step?: string; reason?: string }): Notice {
   return r.state === "halted"
     ? { fact: `The run of queue ${q.id} halted ${r.step ? `at step ${r.step}` : "before it opened a step"}: ${r.reason ?? "no reason given"}.`, todo: "Tell the user briefly, with what you propose." }
-    : { fact: `Queue ${q.id} finished.${q.report ? ` Report: ${q.report.summary}` : ""}`, todo: "Tell the user briefly, with what you propose next." };
+    : { fact: `Queue ${q.id} finished.${q.report ? ` Report: ${q.report.summary}` : " It has no report."}${integrationLine(q)}`, todo: "Tell the user briefly, with what you propose next." };
+}
+
+/** The integration step's outcome, after the report (its summary; whether Nexus ran it without a model and accepted it). */
+function integrationLine(q: QueueView): string {
+  const st = q.steps.find((s) => s.integration);
+  if (!st?.summary || st.status !== "done") return "";
+  const nexus = st.model_free ? " (run and accepted by Nexus, without a model)" : "";
+  return ` Integration${nexus}: ${st.summary}`;
 }
 
 /**
