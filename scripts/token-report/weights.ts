@@ -253,11 +253,16 @@ function estimate(runtime: string, window: string, method: WindowEstimate["metho
   return e;
 }
 
+/** The turns that ended in the period (since inclusive, until exclusive). */
+export function turnsIn(all: readonly TurnRecord[], since?: string, until?: string): TurnRecord[] {
+  const from = since ? Date.parse(since) : -Infinity;
+  const to = until ? Date.parse(until) : Infinity;
+  return all.filter((t) => { const at = Date.parse(t.at); return at >= from && at < to; });
+}
+
 /** Every runtime's windows, by both methods, over the turns in the period (all projects: the windows are the account's). */
 export function weightEstimates(all: readonly TurnRecord[], o: { since?: string; until?: string; minMinutes?: number }): WindowEstimate[] {
-  const from = o.since ? Date.parse(o.since) : -Infinity;
-  const to = o.until ? Date.parse(o.until) : Infinity;
-  const turns = all.filter((t) => { const at = Date.parse(t.at); return at >= from && at < to; });
+  const turns = turnsIn(all, o.since, o.until);
   const out: WindowEstimate[] = [];
   for (const runtime of ["claude", "codex"]) {
     for (const window of windowNames(turns, runtime)) {

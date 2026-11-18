@@ -19,7 +19,7 @@ import type { TurnRecord } from "@nexus/protocol";
 import { sinceTime } from "@nexus/protocol/stats";
 import { analyze, inside, render, type EventLine, type Report, type SessionInfo } from "./token-report/analysis.ts";
 import { parseClaude, parseCodex, type Transcript } from "./token-report/transcripts.ts";
-import { renderWeights, weightEstimates } from "./token-report/weights.ts";
+import { renderWeights, turnsIn, weightEstimates } from "./token-report/weights.ts";
 
 export interface Options {
   since?: string; until?: string; projects?: string[]; top?: number;
@@ -171,8 +171,7 @@ function main(): void {
     const minMinutes = values["stretch-minutes"] === undefined ? 60 : Number(values["stretch-minutes"]);
     if (!(minMinutes > 0)) { console.error(`--stretch-minutes: not a positive number: ${values["stretch-minutes"]}`); process.exit(2); }
     const turns = jsonLines<TurnRecord>(join(nexusHome, "turns.jsonl"));
-    const inPeriod = turns.filter((t) => (!since || t.at >= since) && (!until || t.at < until)).length;
-    text = renderWeights(weightEstimates(turns, { since, until, minMinutes }), { since, until, minMinutes, turns: inPeriod });
+    text = renderWeights(weightEstimates(turns, { since, until, minMinutes }), { since, until, minMinutes, turns: turnsIn(turns, since, until).length });
   } else {
     const { report, sources } = load({
       since, until, projects: values.project, top, nexusHome,
