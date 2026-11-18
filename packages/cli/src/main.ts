@@ -15,7 +15,7 @@ import {
   TemplateError, fillTemplate, filledTemplateYaml, parseEvery, MaintenanceMode, readTemplates, templateQueueId, unusableTemplate, type MergedTemplates,
   type PictureRole, type ReviewItem, type Role, type Runtime, type SessionFile,
   noteRefIssue, parseNoteRef, readNotes, ideaMatches, ideaLinks, ideaStatuses, reportSourceHash,
-  capacityLines, readCapacity,
+  capacityLines, latestCheckSet, readCapacity,
 } from "@nexus/protocol";
 import { checkRules, describeRules } from "@nexus/protocol/rules";
 import { importMarkdownQueues } from "./import-md.ts";
@@ -220,9 +220,9 @@ function checkUnrelated(): void {
   if (!evidence) throw new UsageError("--evidence says what shows the failure is not your work's (for example: it fails on the base too)");
   const queue = queueFor(st, s, step);
   checkStep(st, queue, step);
-  const view = loadProjectState(st).queues.find((q) => q.id === queue)?.steps.find((x) => x.id === step);
-  const done = view?.timeline.findLast((e) => e.type === "step.done");
-  const set = done && st.readChecks(queue)?.steps[step]?.sets.find((x) => x.done === done.id);
+  const q = loadProjectState(st).queues.find((x) => x.id === queue);
+  const view = q?.steps.find((x) => x.id === step);
+  const set = q && view && latestCheckSet(q, view);
   if (view?.checks_by !== "nexus" || view.status !== "running" || !set || set.state !== "failed") {
     throw new UsageError(`step ${step} has no failed checks of Nexus's to dispute now (it is ${view?.status ?? "unknown"}): --unrelated is for a check-fix round`);
   }

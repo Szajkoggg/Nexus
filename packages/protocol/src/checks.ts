@@ -40,8 +40,14 @@ function checkRunSummary(c: CheckRun): string {
 }
 
 /** The latest step.done event of a step. */
-function lastDone(st: Pick<StepView, "timeline">): StepDone | undefined {
+export function lastDone(st: Pick<StepView, "timeline">): StepDone | undefined {
   return st.timeline.findLast((e): e is StepDone => e.type === "step.done");
+}
+
+/** The set of checks Nexus ran (or runs) for the step's latest step.done, if any. */
+export function latestCheckSet(q: Pick<QueueView, "check_runs">, st: Pick<StepView, "id" | "timeline">): CheckSet | undefined {
+  const done = lastDone(st);
+  return done && checkSetOf(q.check_runs, st.id, done.id);
 }
 
 /**

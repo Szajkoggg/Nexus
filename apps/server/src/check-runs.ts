@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import {
-  applyDraft, checkSetOf, fillTemplate, now, readTemplates, reviewRound, stepChecks,
+  applyDraft, checkSetOf, fillTemplate, lastDone, latestCheckSet, now, readTemplates, reviewRound, stepChecks,
   type CheckAttempt, type CheckDispute, type CheckRun, type CheckSet, type ChecksFile, type Event, type InboxEntry, type ProjectState,
   type ProjectStore, type QueueView, type RunFile, type StepView,
 } from "@nexus/protocol";
@@ -121,7 +121,7 @@ export class CheckRunner {
    */
   step(run: RunFile, q: QueueView, st: StepView, state: ProjectState): boolean {
     if (st.checks_by !== "nexus" || this.closed) return false;
-    const done = st.timeline.findLast((e): e is StepDone => e.type === "step.done");
+    const done = lastDone(st);
     if (!done) return false;
     if (st.status === "checking") {
       if (this.active.has(q.id) || this.holding) return true;
@@ -142,8 +142,7 @@ export class CheckRunner {
    */
   fixRound(q: QueueView, st: StepView, session: string, state: ProjectState): boolean {
     if (st.checks_by !== "nexus" || st.status !== "running" || !st.check_fix) return false;
-    const done = st.timeline.findLast((e): e is StepDone => e.type === "step.done");
-    const set = done && checkSetOf(q.check_runs, st.id, done.id);
+    const set = latestCheckSet(q, st);
     if (!set || set.state !== "failed") return false;
     const inbox = state.sessions.find((x) => x.id === session)?.inbox ?? [];
     const ids = [`check-failed-${set.done}`, `check-failed-${set.done}-base`, `check-failed-${set.done}-decided`];

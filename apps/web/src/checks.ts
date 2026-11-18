@@ -2,9 +2,8 @@
 // dashboard says them: a step's word while they wait for the machine or run, its check-fix round apart from its review
 // (send-back) rounds, and the latest set's checks one by one. Pure; the step's status itself is the derivation's
 // (packages/protocol/src/checks.ts).
-import { checkSetOf } from "@nexus/protocol/checks";
 import type { CheckSet } from "@nexus/protocol";
-import type { QueueView, StepView } from "./api.ts";
+import type { StepView } from "./api.ts";
 import { formatClock, t } from "./i18n.ts";
 
 type CheckStep = Pick<StepView, "status" | "checking" | "check_fix" | "check_fix_limit" | "check_limit">;
@@ -47,12 +46,6 @@ export function checkLine(step: CheckStep, now = new Date()): string | undefined
     case "base": return t("checks.line.base", { check: c.check ?? t("checks.disputed"), time });
     case "decision": return t("checks.line.decision");
   }
-}
-
-/** The set of checks for the step's latest `nexus step done`, if Nexus runs its checks. */
-export function latestSet(queue: Pick<QueueView, "check_runs">, step: Pick<StepView, "id" | "timeline">): CheckSet | undefined {
-  const done = step.timeline.findLast((e) => e.type === "step.done");
-  return done ? checkSetOf(queue.check_runs, step.id, done.id) : undefined;
 }
 
 export type CheckRowState = "passed" | "flaky" | "failed" | "running" | "waiting" | "interrupted";

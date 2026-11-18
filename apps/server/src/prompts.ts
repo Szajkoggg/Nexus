@@ -4,7 +4,7 @@
 // (src/conversations.ts). Agents rely on them (a change to one carries an `Agents:` line in its commit), so each is
 // covered by a snapshot test: test/prompts.test.ts compares what the agents' processes receive with golden files.
 import {
-  INTEGRATION_CONDITION, formatClock, reviewRound, openPlan, formatSeconds, isCheckMetric, languageName, levelNow, metricValueText, releasedText, runIsOlder, stepChecks, type CheckSet, type MetricValue, type AwayNow, type PlanDecision, type ConversationWeb, type InboxView, type LanguageCode, type ProjectFile, type ProjectState, type QuestionView, type QueueView, type SessionView, type StepView, type TagProposal, tagsText,
+  INTEGRATION_CONDITION, formatClock, latestCheckSet, reviewRound, openPlan, formatSeconds, isCheckMetric, languageName, levelNow, metricValueText, releasedText, runIsOlder, stepChecks, type CheckSet, type MetricValue, type AwayNow, type PlanDecision, type ConversationWeb, type InboxView, type LanguageCode, type ProjectFile, type ProjectState, type QuestionView, type QueueView, type SessionView, type StepView, type TagProposal, tagsText,
 } from "@nexus/protocol";
 import type { ClosingContext } from "./closing.ts";
 import type { IntegrationContext } from "./integration.ts";
@@ -873,8 +873,8 @@ function reviewBrief(q: QueueView, st: StepView, away: AwayNow = { on: false }):
   const round = reviewRound(q, st);
   const checks = st.checks.filter((c) => c.at >= since);
   // A failure of Nexus's checks accepted this round (it fails on the base too, or the orchestrator accepted it).
-  const lastDone = st.timeline.findLast((e) => e.type === "step.done");
-  const accepted = lastDone && q.check_runs?.steps[st.id]?.sets.find((x) => x.done === lastDone.id && x.state === "accepted");
+  const latest = latestCheckSet(q, st);
+  const accepted = latest?.state === "accepted" ? latest : undefined;
   const missing = stepChecks(q.run?.checks, q.checks).filter((name) => !checks.some((c) => c.name === name));
   const items = st.review_items.filter((i) => i.at >= since);
   const metrics = st.metrics.filter((m) => m.at >= since && !isCheckMetric(m.name));

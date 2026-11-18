@@ -18,8 +18,9 @@ import { StepCommits } from "./git.tsx";
 import { Fold, PictureBadges } from "./review.tsx";
 import { usePage } from "../../page.ts";
 import { metricValueText } from "@nexus/protocol/metrics";
+import { latestCheckSet } from "@nexus/protocol/checks";
 import { stepMetrics } from "../../metrics.ts";
-import { checkRows, latestSet, type CheckRowState } from "../../checks.ts";
+import { checkRows, type CheckRowState } from "../../checks.ts";
 
 type Pairs = ReturnType<typeof stepPictures>["pairs"];
 interface StepProps { step: StepView }
@@ -48,7 +49,7 @@ const ROW: Record<CheckRowState, { mark: string; tone: string }> = {
  * (said apart from the review rounds: a fix round is no send-back), with the latest set's checks one by one.
  */
 export function CheckRunBox({ queue, step }: InQueue) {
-  const set = latestSet(queue, step);
+  const set = latestCheckSet(queue, step);
   const c = step.checking;
   const fixing = step.status === "running" && !!step.check_fix;
   if (!c && !fixing) return null;
