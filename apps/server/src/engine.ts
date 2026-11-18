@@ -2,7 +2,7 @@
 // messages and answers to live sessions, and records what the agent does. See docs/DESIGN.md, "Nexus drives the
 // queue, step by step". All of its state is in files (run.yaml, runtime.json, delivered.jsonl, activity.jsonl);
 // the processes are the only thing a restart loses, and a restart pauses the runs that had one.
-import { checkoutOf, git as gitRead, recordStepEnd, recordStepStart } from "./gitinfo.ts";
+import { changedFiles, checkoutOf, git as gitRead, ownWorktree, recordStepEnd, recordStepStart } from "./gitinfo.ts";
 import { AcceptedPusher } from "./accepted.ts";
 import type { GitRunner } from "./deploy.ts";
 import type { ChildProcess } from "node:child_process";
@@ -10,7 +10,7 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import {
   runCounted, runHoldsCheckout, runEnded, runGoing,
-  ActionError, INTEGRATION_CONDITION, NEXUS_SESSION, ProjectStore, USER_SESSION, acceptedByNexus, ensureNexusSession, ensureUserSession, lastDone, stepChecks, liftByContinue, loadProjectState, openPlanFile, releaseOrphanedSteps, stepClosed, reportFile, ensureReportFolder, newId, normPath, now, readUsage,
+  ActionError, INTEGRATION_CONDITION, NEXUS_SESSION, ProjectStore, USER_SESSION, acceptedByNexus, ensureNexusSession, fileList, ensureUserSession, lastDone, stepChecks, liftByContinue, loadProjectState, openPlanFile, releaseOrphanedSteps, stepClosed, reportFile, ensureReportFolder, newId, normPath, now, readUsage,
   RETRY_LIMIT, START_KEYS, chooseRoute, effortIssue, formatClock, kindDefaults, overThreshold, routeStep, runStart, type Effort, type Routed, type ProjectFile, type StartValues, type ProjectState, type QueueView, type RunFile, type SessionFile,
   type SessionView, type StepView, type PlanBy,
   addNote,
@@ -31,7 +31,7 @@ import { Recurrer, type RecurringSet } from "./recurring.ts";
 import { StaticReminder } from "./static-reminder.ts";
 import { gitBranch, recordSetup, runSetup, setupPending, worktreeFor } from "./worktree.ts";
 import { closingContext } from "./closing.ts";
-import { cleanCheckout, fileList, integrationContext, mergeBase, mergeConflicts, mergedText, pullBase, pullBefore } from "./integration.ts";
+import { cleanCheckout, integrationContext, mergeBase, mergeConflicts, mergedText, pullBase, pullBefore, type IntegrationContext } from "./integration.ts";
 import { Coordinator, bringsBack, refusalText, waitingText, type Member } from "./coordinator.ts";
 import type { Capacity } from "./capacity.ts";
 import { CHECK_DRAIN_WAIT_MS, CheckRunner } from "./check-runs.ts";
@@ -1247,9 +1247,8 @@ export class Engine implements Member {
    * before (a dirty worktree, a conflict to resolve, an engine without the checks).
    */
   private integrateWithoutModel(queueId: string, run: RunFile, state: ProjectState, q: QueueView, step: StepView): boolean {
-    if (!this.checks || !q.worktree || q.worktree === "auto") return false;
-    const cwd = normPath(q.worktree);
-    if (!cleanCheckout(cwd)) return false;
+    const cwd = ownWorktree(q);
+    if (!this.checks || !cwd || !cleanCheckout(cwd)) return false;
     const ctx = integrationContext(this.store, state, q);
     const conflicts = ctx.base ? mergeConflicts(cwd, ctx.base) : [];
     if (conflicts.length && ctx.resolve) return false;
@@ -1292,7 +1291,7 @@ export class Engine implements Member {
    * merge); else a worker opens it.
    */
   private integrateAgain(queueId: string, run: RunFile, state: ProjectState, q: QueueView, step: StepView): void {
-    const cwd = q.worktree && q.worktree !== "auto" ? normPath(q.worktree) : undefined;
+    const cwd = ownWorktree(q);
     if (cwd && gitRead(cwd, ["rev-parse", "-q", "--verify", "MERGE_HEAD"])) gitRead(cwd, ["merge", "--abort"]);
     const g = this.store.readGit(queueId);
     const last = g?.steps[step.id]?.at(-1);
@@ -1319,7 +1318,7 @@ export class Engine implements Member {
   }
 
   /** The integration step's context, with the files Nexus finds in conflict when the step opens anew (queue MI). */
-  private withConflicts(q: QueueView, ctx: ReturnType<typeof integrationContext>, mode: "start" | "continue"): ReturnType<typeof integrationContext> {
+  private withConflicts(q: QueueView, ctx: IntegrationContext, mode: "start" | "continue"): IntegrationContext {
     const cwd = checkoutOf(this.store, q);
     if (!this.checks || mode !== "start" || !ctx.base || !cwd) return ctx;
     const conflicts = mergeConflicts(cwd, ctx.base);
@@ -1333,8 +1332,7 @@ export class Engine implements Member {
     if (!p || !cwd) return undefined;
     if (!p.to) return { base: p.base, sha: p.sha, conflicts: p.conflicts ?? [] };
     const commits = Number(gitRead(cwd, ["rev-list", "--count", `${p.from}..${p.sha}`]) ?? 0);
-    const files = (gitRead(cwd, ["diff", "--name-only", p.from, p.to]) ?? "").split(/\r?\n/).filter(Boolean);
-    return { base: p.base, sha: p.sha, merged: { commits, files } };
+    return { base: p.base, sha: p.sha, merged: { commits, files: changedFiles(cwd, p.from, p.to) } };
   }
 
   /** Hands unread inbox entries to a live session: inside a running turn, or as a new turn when it is idle. */

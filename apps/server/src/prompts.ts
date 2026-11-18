@@ -4,7 +4,7 @@
 // (src/conversations.ts). Agents rely on them (a change to one carries an `Agents:` line in its commit), so each is
 // covered by a snapshot test: test/prompts.test.ts compares what the agents' processes receive with golden files.
 import {
-  INTEGRATION_CONDITION, formatClock, latestCheckSet, reviewRound, openPlan, formatSeconds, isCheckMetric, languageName, levelNow, metricValueText, releasedText, runIsOlder, stepChecks, type CheckSet, type MetricValue, type AwayNow, type PlanDecision, type ConversationWeb, type InboxView, type LanguageCode, type ProjectFile, type ProjectState, type QuestionView, type QueueView, type SessionView, type StepView, type TagProposal, tagsText,
+  INTEGRATION_CONDITION, fileList, formatClock, latestCheckSet, reviewRound, openPlan, formatSeconds, isCheckMetric, languageName, levelNow, metricValueText, releasedText, runIsOlder, stepChecks, type CheckSet, type MetricValue, type AwayNow, type PlanDecision, type ConversationWeb, type InboxView, type LanguageCode, type ProjectFile, type ProjectState, type QuestionView, type QueueView, type SessionView, type StepView, type TagProposal, tagsText,
 } from "@nexus/protocol";
 import type { ClosingContext } from "./closing.ts";
 import type { IntegrationContext } from "./integration.ts";
@@ -131,11 +131,14 @@ export interface PullText { base: string; sha: string; merged?: { commits: numbe
 
 function pullText(p: PullText): string {
   const sha = p.sha.slice(0, 12);
-  if (p.merged) return `\nBefore this step Nexus merged ${p.base} (${sha}) into this branch: ${p.merged.commits} commit${p.merged.commits === 1 ? "" : "s"}${p.merged.files.length ? `, changing ${shortList(p.merged.files)}` : ""}.`;
-  return `\n${p.base} (${sha}) conflicts with this branch in ${shortList(p.conflicts ?? [])}; Nexus did not merge it. Do not resolve it here: the queue's integration step will.`;
+  if (p.merged) return `\nBefore this step Nexus merged ${p.base} (${sha}) into this branch: ${p.merged.commits} commit${p.merged.commits === 1 ? "" : "s"}${p.merged.files.length ? `, changing ${fileList(p.merged.files)}` : ""}.`;
+  return `\n${p.base} (${sha}) conflicts with this branch in ${fileList(p.conflicts ?? [])}; Nexus did not merge it. Do not resolve it here: the queue's integration step will.`;
 }
 
-const shortList = (files: readonly string[], most = 8) => (files.length > most ? `${files.slice(0, most).join(", ")} and ${files.length - most} more` : files.join(", "));
+/** What the integration step may not do, in both its opening and a check-fix round of the step Nexus ran without a model. */
+const INTEGRATION_LIMITS = "Never rebase, never push, and change neither the base branch nor any other checkout: the base moves forward to this step's result later, by Nexus or the user.";
+
+const queueBranch = (c: IntegrationContext) => (c.branch ? `the queue's branch ${c.branch}` : "the queue's branch");
 
 /**
  * The beginning of a check-fix round for the integration step Nexus ran without a model (queue MI): the worker has not
@@ -143,8 +146,8 @@ const shortList = (files: readonly string[], most = 8) => (files.length > most ?
  */
 export function modelFreeFixPreface(q: Pick<QueueView, "id">, step: string, c: IntegrationContext, head: string | undefined): string {
   return [
-    `This is queue ${q.id}'s integration step (${step}), kept by Nexus. Nexus merged ${c.base ?? "the base"}${c.sha ? ` (${c.sha.slice(0, 12)})` : ""} into ${c.branch ? `the queue's branch ${c.branch}` : "the queue's branch"} in this worktree without a model${head ? ` (HEAD ${head.slice(0, 12)})` : ""}, and the checks failed on the result: the step is yours now.`,
-    `Fix on this branch what the two sides break together, in small commits that say why. Never rebase, never push, and change neither the base branch nor any other checkout: the base moves forward to this step's result later, by Nexus or the user.`,
+    `This is queue ${q.id}'s integration step (${step}), kept by Nexus. Nexus merged ${c.base ?? "the base"}${c.sha ? ` (${c.sha.slice(0, 12)})` : ""} into ${queueBranch(c)} in this worktree without a model${head ? ` (HEAD ${head.slice(0, 12)})` : ""}, and the checks failed on the result: the step is yours now.`,
+    `Fix on this branch what the two sides break together, in small commits that say why. ${INTEGRATION_LIMITS}`,
   ].join("\n");
 }
 
@@ -173,8 +176,7 @@ function closingText(c: ClosingContext, byNexus: boolean): string {
  */
 function integrationText(step: string, c: IntegrationContext, byNexus: boolean): string {
   const stop = `nexus stop ${step} --condition "${INTEGRATION_CONDITION}" --reason "<the conflicting files, and why they are not resolved>"`;
-  const branch = c.branch ? `the queue's branch ${c.branch}` : "the queue's branch";
-  const intro = `\nThis is the queue's integration step, kept by Nexus: it runs last, in the queue's worktree, on ${branch}.`;
+  const intro = `\nThis is the queue's integration step, kept by Nexus: it runs last, in the queue's worktree, on ${queueBranch(c)}.`;
   if (!c.base) {
     return [
       intro,
@@ -183,8 +185,8 @@ function integrationText(step: string, c: IntegrationContext, byNexus: boolean):
   }
   return [
     intro,
-    c.conflicts?.length ? `Nexus tried the merge first: ${shortList(c.conflicts)} conflict${c.conflicts.length === 1 ? "s" : ""}.` : "",
-    `Merge the base into it: git merge --no-edit ${c.base} (the base branch ${c.base} is at ${c.sha} now). Never rebase, never push, and change neither the base branch nor any other checkout: the base moves forward to this step's result later, by Nexus or the user.`,
+    c.conflicts?.length ? `Nexus tried the merge first: ${fileList(c.conflicts)} conflict${c.conflicts.length === 1 ? "s" : ""}.` : "",
+    `Merge the base into it: git merge --no-edit ${c.base} (the base branch ${c.base} is at ${c.sha} now). ${INTEGRATION_LIMITS}`,
     byNexus
       ? `Nexus runs the checks on the result after your \`nexus step done\`, and sends you their output only if one fails: then fix what the two sides do together on this branch, in small commits that say why, and end with \`nexus step done\` again.`
       : `Report the checks you run on the result with nexus check, one per check under its exact name in "Checks for every step" below (for example \`nexus check <step> "npm test" --ok …\`), never under a short name of your own; report the last run of each.`,

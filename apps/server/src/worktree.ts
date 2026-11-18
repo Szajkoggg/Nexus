@@ -4,8 +4,8 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { ActionError, normPath, now, type ProjectState, type ProjectStore, type QueueView } from "@nexus/protocol";
-import { git as gitRead, patchGit, recordBase } from "./gitinfo.ts";
+import { ActionError, fileList, normPath, now, type ProjectState, type ProjectStore, type QueueView } from "@nexus/protocol";
+import { changedFiles, ownWorktree, patchGit, recordBase } from "./gitinfo.ts";
 
 /** Two paths name the same folder (Windows: case does not matter, nor the kind of slash). */
 export const samePath = (a: string, b: string): boolean => normPath(a).toLowerCase() === normPath(b).toLowerCase();
@@ -101,8 +101,7 @@ function globPattern(glob: string): RegExp {
 /** The setup's inputs (the project's, else the default lockfiles) among the files changed from `from` to `to` in `cwd`. */
 export function setupInputsChanged(cwd: string, inputs: readonly string[] | undefined, from: string, to = "HEAD"): string[] {
   const patterns = (inputs ?? WORKTREE_SETUP_INPUTS).map(globPattern);
-  const changed = (gitRead(cwd, ["diff", "--name-only", from, to]) ?? "").split(/\r?\n/).filter(Boolean);
-  return changed.filter((f) => patterns.some((p) => p.test(f)));
+  return changedFiles(cwd, from, to).filter((f) => patterns.some((p) => p.test(f)));
 }
 
 /**
@@ -114,9 +113,10 @@ export function setupStale(store: ProjectStore, q: Pick<QueueView, "id" | "workt
   const project = store.readProject();
   const command = project.defaults.worktree_setup?.trim();
   const from = g?.setup?.sha ?? g?.base?.sha;
-  if (!command || !g?.setup?.done_at || !from || !q.worktree || q.worktree === "auto") return undefined;
-  const changed = setupInputsChanged(normPath(q.worktree), project.defaults.worktree_setup_inputs, from);
-  return changed.length ? { command, reason: `${changed.slice(0, 3).join(", ")}${changed.length > 3 ? ` and ${changed.length - 3} more` : ""} changed` } : undefined;
+  const cwd = ownWorktree(q);
+  if (!command || !g?.setup?.done_at || !from || !cwd) return undefined;
+  const changed = setupInputsChanged(cwd, project.defaults.worktree_setup_inputs, from);
+  return changed.length ? { command, reason: `${fileList(changed, 3)} changed` } : undefined;
 }
 
 /** How long the setup command may run before it counts as failed. */

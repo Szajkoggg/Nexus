@@ -7,8 +7,8 @@
 // when it is clean, and the base merged into the queue's branch at a step boundary when it merges cleanly. A merge is
 // tested first without touching the worktree (git merge-tree), and made only when clean.
 import { execFileSync } from "node:child_process";
-import { normPath, now, type GitFile, type ProjectState, type ProjectStore, type QueueView } from "@nexus/protocol";
-import { git } from "./gitinfo.ts";
+import { fileList, normPath, now, type BasePull, type GitFile, type ProjectState, type ProjectStore, type QueueView } from "@nexus/protocol";
+import { git, ownWorktree } from "./gitinfo.ts";
 import { gitBranch, setupInputsChanged } from "./worktree.ts";
 
 export interface IntegrationContext {
@@ -29,7 +29,7 @@ export function integrationContext(store: ProjectStore, state: Pick<ProjectState
   const recorded = store.readGit(q.id)?.base;
   const base = recorded?.branch ? recorded.ref : gitBranch(root) ?? undefined;
   const sha = base ? git(root, ["rev-parse", `refs/heads/${base}`]) : undefined;
-  const wt = q.worktree && q.worktree !== "auto" ? q.worktree : undefined;
+  const wt = ownWorktree(q);
   const branch = (wt ? gitBranch(wt) : null) ?? q.branch;
   return { base: sha ? base : undefined, sha, branch, resolve: state.project.defaults.resolve_conflicts };
 }
@@ -78,7 +78,7 @@ function identity(cwd: string): string[] {
 type MergeOutcome =
   | { result: "contained"; from: string; sha: string }
   | { result: "conflict"; from: string; sha: string; conflicts: string[] }
-  | { result: "merged"; from: string; sha: string; to: string; commits: number; files: string[]; shortstat: string };
+  | { result: "merged"; from: string; sha: string; to: string; commits: number; shortstat: string };
 
 /**
  * Merges `base` into HEAD in `cwd` (git merge --no-edit), only when it merges cleanly: a conflict leaves the branch as
@@ -99,22 +99,14 @@ export function mergeBase(cwd: string, base: string): MergeOutcome | undefined {
   }
   const to = git(cwd, ["rev-parse", "HEAD"]) ?? from;
   const commits = Number(git(cwd, ["rev-list", "--count", `${from}..${sha}`]) ?? 0);
-  const files = (git(cwd, ["diff", "--name-only", from, to]) ?? "").split(/\r?\n/).filter(Boolean);
   const shortstat = git(cwd, ["diff", "--shortstat", from, to]) ?? "";
-  return { result: "merged", from, sha, to, commits, files, shortstat };
+  return { result: "merged", from, sha, to, commits, shortstat };
 }
 
 /** "7 commits, 12 files changed, 340 insertions(+), 85 deletions(-)" */
 export function mergedText(m: Extract<MergeOutcome, { result: "merged" }>): string {
   return `${m.commits} commit${m.commits === 1 ? "" : "s"}${m.shortstat ? `, ${m.shortstat}` : ""}`;
 }
-
-/** A short list of files: the first few, and how many more. */
-export function fileList(files: readonly string[], most = 8): string {
-  return files.length > most ? `${files.slice(0, most).join(", ")} and ${files.length - most} more` : files.join(", ");
-}
-
-type Pull = NonNullable<GitFile["pulls"]>[number];
 
 /**
  * The base merged into the queue's branch at a step boundary, before `before` opens (queue MI, M9): only in a queue with
@@ -123,9 +115,9 @@ type Pull = NonNullable<GitFile["pulls"]>[number];
  * merge changed the setup's inputs, the setup is marked to run again (the engine runs it before the step opens).
  * Returns the record, or undefined when nothing was done.
  */
-export function pullBase(store: ProjectStore, state: Pick<ProjectState, "project">, q: Pick<QueueView, "id" | "worktree" | "branch" | "integration">, before: string): Pull | undefined {
-  if (!q.integration || !q.worktree || q.worktree === "auto") return undefined;
-  const cwd = normPath(q.worktree);
+export function pullBase(store: ProjectStore, state: Pick<ProjectState, "project">, q: Pick<QueueView, "id" | "worktree" | "branch" | "integration">, before: string): BasePull | undefined {
+  const cwd = ownWorktree(q);
+  if (!q.integration || !cwd) return undefined;
   const ctx = integrationContext(store, state, q);
   if (!ctx.base || !cleanCheckout(cwd)) return undefined;
   const m = mergeBase(cwd, ctx.base);
@@ -135,19 +127,19 @@ export function pullBase(store: ProjectStore, state: Pick<ProjectState, "project
   if (m.result === "conflict") {
     const last = pulls.at(-1);
     if (last && !last.to && last.before === before && last.sha === m.sha) return undefined;
-    const pull: Pull = { at: now(), before, base: ctx.base, sha: m.sha, from: m.from, conflicts: m.conflicts };
+    const pull: BasePull = { at: now(), before, base: ctx.base, sha: m.sha, from: m.from, conflicts: m.conflicts };
     store.writeGit(q.id, { ...g, pulls: [...pulls, pull] });
     return pull;
   }
   const changed = g.setup?.done_at ? setupInputsChanged(cwd, state.project.defaults.worktree_setup_inputs, m.from, m.to) : [];
-  const pull: Pull = { at: now(), before, base: ctx.base, sha: m.sha, from: m.from, to: m.to, ...(changed.length ? { setup: true } : {}) };
+  const pull: BasePull = { at: now(), before, base: ctx.base, sha: m.sha, from: m.from, to: m.to, ...(changed.length ? { setup: true } : {}) };
   const setup = changed.length && g.setup ? { ...g.setup, done_at: undefined, failed: undefined, reason: `${fileList(changed, 3)} changed (the merge of ${ctx.base})` } : g.setup;
   store.writeGit(q.id, { ...g, pulls: [...pulls, pull], ...(setup ? { setup } : {}) });
   return pull;
 }
 
 /** The pull made right before `step` opens now (the last one, naming it, after the step's last round began). */
-export function pullBefore(store: ProjectStore, queue: string, step: string): Pull | undefined {
+export function pullBefore(store: ProjectStore, queue: string, step: string): BasePull | undefined {
   const g = store.readGit(queue);
   const last = g?.pulls?.at(-1);
   if (!last || last.before !== step) return undefined;
@@ -156,6 +148,6 @@ export function pullBefore(store: ProjectStore, queue: string, step: string): Pu
 }
 
 /** The last base commit merged into the queue's branch at a step boundary, with the HEAD after it (queue MI, M10). */
-export function lastPulled(g: GitFile | undefined): Pull & { to: string } | undefined {
-  return g?.pulls?.findLast((p): p is Pull & { to: string } => !!p.to);
+export function lastPulled(g: GitFile | undefined): BasePull & { to: string } | undefined {
+  return g?.pulls?.findLast((p): p is BasePull & { to: string } => !!p.to);
 }

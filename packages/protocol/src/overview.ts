@@ -3,6 +3,7 @@
 import { stopPlace } from "./attention.ts";
 import { openPlan } from "./plan.ts";
 import { trainText } from "./train.ts";
+import type { BasePull } from "./schemas.ts";
 import type { ProjectState, QueueView } from "./state.ts";
 import { isOpenQuestion, runGoing } from "./status-rules.ts";
 import { stepValuesText } from "./steps.ts";
@@ -33,7 +34,7 @@ export function planLines(q: QueueView): string[] {
   else if (p || plan) out.push(`  now: ${(p?.waiting || plan?.waiting || "it may start")}${p?.held ? " (it starts by itself)" : ""}`);
   if (q.train) out.push(`  integration: ${trainText(q.train)}; it goes on by itself`);
   const pull = conflictingPull(q);
-  if (pull) out.push(`  base: ${pull.base} (${pull.sha.slice(0, 12)}) conflicts with the queue's branch in ${files(pull.conflicts ?? [])} (found before step ${pull.before}, ${pull.at.slice(0, 16).replace("T", " ")}); Nexus did not merge it, the integration step will`);
+  if (pull) out.push(`  base: ${pull.base} (${pull.sha.slice(0, 12)}) conflicts with the queue's branch in ${fileList(pull.conflicts ?? [], 5)} (found before step ${pull.before}, ${pull.at.slice(0, 16).replace("T", " ")}); Nexus did not merge it, the integration step will`);
   return out;
 }
 
@@ -41,12 +42,15 @@ export function planLines(q: QueueView): string[] {
  * The base Nexus did not merge into the queue's branch at its last step boundary because it conflicts (git.yaml
  * `pulls`, queue MI): the last pull, while it is a conflict and the queue is not over.
  */
-function conflictingPull(q: Pick<QueueView, "git" | "status">): NonNullable<NonNullable<QueueView["git"]>["pulls"]>[number] | undefined {
+function conflictingPull(q: Pick<QueueView, "git" | "status">): BasePull | undefined {
   const last = q.git?.pulls?.at(-1);
   return last && !last.to && q.status !== "done" && q.status !== "cancelled" ? last : undefined;
 }
 
-const files = (list: readonly string[]) => (list.length > 5 ? `${list.slice(0, 5).join(", ")} and ${list.length - 5} more` : list.join(", "));
+/** A short list of files: the first `most`, and how many more. */
+export function fileList(files: readonly string[], most = 8): string {
+  return files.length > most ? `${files.slice(0, most).join(", ")} and ${files.length - most} more` : files.join(", ");
+}
 
 /** A provisional acceptance in the overview: waiting for the user, confirmed, or sent to a fix. */
 function provisionalText(x: { provisional?: { confirmed?: string; fix?: { text: string } } }): string {

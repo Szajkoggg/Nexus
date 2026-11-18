@@ -1005,6 +1005,8 @@ export const GitFile = z.object({
   }))).default({}),
 });
 export type GitFile = z.infer<typeof GitFile>;
+/** One merge of the base at a step boundary, as git.yaml records it (`pulls`). */
+export type BasePull = NonNullable<GitFile["pulls"]>[number];
 
 export const PushFile = z.object({
   protocol: z.literal(1),
