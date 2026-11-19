@@ -243,7 +243,7 @@ function groupOf(key: string, xs: readonly StepStat[], by: StatDimension, across
 }
 
 /** The quality signals of one group of steps (SwitchReport). */
-export interface SwitchGroup {
+interface SwitchGroup {
   steps: number;
   /** Fewer than FEW_STEPS steps: read with care. */
   few: boolean;
