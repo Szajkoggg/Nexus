@@ -90,7 +90,7 @@ export function questionBarrier(questions: readonly {
 export const stepWorkedOn = (run: RunLike, step: { status: StepStatus | (string & {}) }): boolean => step.status === "running" && (!run || runGoing(run));
 
 /** The queue is at work now: `running` in the derivation and its run going (see stepWorkedOn). */
-export const queueWorkedOn = (q: { status: string; run?: RunLike }): boolean => q.status === "running" && (!q.run || runGoing(q.run));
+export const queueWorkedOn = (q: { status: string; run?: RunLike }): boolean => stepWorkedOn(q.run, q);
 
 /** The steps at work in a project's state (stepWorkedOn), each with its queue: what `nexus server status` lists. */
 export function stepsWorkedOn<Q extends { run?: RunLike; steps: readonly { status: StepStatus | (string & {}) }[] }>(queues: readonly Q[]): { queue: Q; step: Q["steps"][number] }[] {
