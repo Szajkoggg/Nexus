@@ -3158,6 +3158,10 @@ repository, `gpt-6-luna` twice declined to run it at all ("I can't run a chained
 Cost: about $0.021 of Claude usage (eleven haiku sessions); twelve Codex runs on the ChatGPT subscription (about 383k
 input tokens, 219k of them cached, 1k output; five of them the failed elevated runs).
 
+Decided by the user on 2026-11-19: the chain's form follows the shell, `git commit … && nexus step done …` in Bash and
+`git commit …; if ($?) { nexus step done … }` in PowerShell; a refused chain is run as separate commands (the one
+retry), and workers get no new permission (no `git commit` rule).
+
 ## Compacting a conversation (queue CC3)
 
 Decided by the user on 2026-11-15 (docs/ideas/chat-context.md): the Ideas conversations get a **Compact** action; the
