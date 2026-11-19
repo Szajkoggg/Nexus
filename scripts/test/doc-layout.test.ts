@@ -5,7 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { brokenLinks, contentsProblems, largeTopics, SPLITS, TOPIC_WARN_BYTES } from "../doc-layout.ts";
 import { differences } from "../check-doc-split.ts";
@@ -102,5 +102,5 @@ for (const s of SPLITS) {
 test("no relative link or anchor under docs/ is broken", () => {
   const files = new Map<string, string>();
   for (const path of markdownFiles("docs")) files.set(path, readFileSync(join(ROOT, path), "utf8"));
-  assert.deepEqual(brokenLinks(files, (p) => existsSync(join(ROOT, relative(".", p)))), []);
+  assert.deepEqual(brokenLinks(files, (p) => existsSync(join(ROOT, p))), []);
 });

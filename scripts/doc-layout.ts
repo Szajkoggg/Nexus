@@ -120,9 +120,10 @@ export function brokenLinks(files: ReadonlyMap<string, string>, exists: (path: s
  */
 export function contentsProblems(split: Split, index: string, topics: readonly string[]): string[] {
   const problems: string[] = [];
-  const at = proseLines(index).find(({ line }) => line === "## Contents");
-  if (!at) return [`${split.index} has no "## Contents" section`];
-  const rest = proseLines(index).filter(({ n }) => n > at.n);
+  const lines = proseLines(index);
+  const at = lines.findIndex(({ line }) => line === "## Contents");
+  if (at < 0) return [`${split.index} has no "## Contents" section`];
+  const rest = lines.slice(at + 1);
   const next = rest.findIndex(({ line }) => /^#{1,2} /.test(line));
   const listed = new Set<string>();
   const folder = split.dir.slice(dirOf(split.dir).length + 1);
