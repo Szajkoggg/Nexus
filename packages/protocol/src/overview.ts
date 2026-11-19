@@ -93,7 +93,7 @@ function closingSkipped(q: QueueView): string {
 export function orchestratorOverview(state: ProjectState): string {
   const out: string[] = [];
   // A session's size in tokens first (queue CT): the orchestrator continues one only under about REUSE_TOKENS.
-  const pct = (t?: number, w?: number) => (t ? `context ${tokenCount(t)} tokens${w ? ` (${Math.round((100 * t) / w)} % of ${tokenCount(w)})` : ""}` : "context unknown");
+  const context = (t?: number, w?: number) => (t ? `context ${tokenCount(t)} tokens${w ? ` (${Math.round((100 * t) / w)} % of ${tokenCount(w)})` : ""}` : "context unknown");
   const done = state.queues.filter((q) => q.status === "done" || q.status === "cancelled");
   out.push(`
 Queues (${state.queues.length - done.length} open; finished: ${done.map((q) => `${q.id}${closingSkipped(q) ? ` (${closingSkipped(q)})` : ""}`).join(", ") || "none"})`);
@@ -116,7 +116,7 @@ Open questions (${open.length})`);
 Worker sessions (${workers.length})`);
   for (const w of workers) {
     const busy = state.queues.find((q) => q.run?.session === w.id && runGoing(q.run));
-    out.push(`- ${w.id} "${w.title ?? ""}" ${w.runtime}${w.launched_by === "nexus" ? "" : " (external)"}, ${w.live?.state ?? "not live"}, ${w.live?.model ?? w.model ?? "model ?"}, ${pct(w.live?.context_tokens, w.live?.context_window)}${busy ? `, running queue ${busy.id}` : ", free"}`);
+    out.push(`- ${w.id} "${w.title ?? ""}" ${w.runtime}${w.launched_by === "nexus" ? "" : " (external)"}, ${w.live?.state ?? "not live"}, ${w.live?.model ?? w.model ?? "model ?"}, ${context(w.live?.context_tokens, w.live?.context_window)}${busy ? `, running queue ${busy.id}` : ", free"}`);
     if (w.context) out.push(`  knows: ${w.context.topics.join(", ") || "-"}; ${w.context.text.replace(/\s+/g, " ").slice(0, 300)}`);
   }
   const attention = state.attention.filter((a) => a.kind !== "question");

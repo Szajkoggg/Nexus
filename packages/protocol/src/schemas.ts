@@ -5,6 +5,7 @@ import { PICTURE_ROLES, VIEW_KEY } from "./pictures.ts";
 import { DEFAULT_WORKING_LANGUAGE, LANGUAGE_CODES } from "./languages.ts";
 import { TAG_KINDS, TAG_SIZES } from "./tags.ts";
 import { METRIC_SHOWS } from "./metrics.ts";
+import { DEFAULT_CONTEXT_REUSE_TOKENS, DEFAULT_ORCHESTRATOR_CONTEXT_TOKENS } from "./tokens.ts";
 
 
 const Id = z.string().min(1);
@@ -122,24 +123,6 @@ const WorkerRuntime = z.enum(["claude", "codex"]);
 const Fraction = z.number().min(0).max(1);
 /** A context threshold in tokens: a whole number from 1,000 to 10,000,000. */
 const ContextTokens = z.number().int().min(1_000).max(10_000_000);
-/** The workers' context threshold when nothing else is set (context_reuse_tokens). */
-export const DEFAULT_CONTEXT_REUSE_TOKENS = 300_000;
-/** The orchestrator's context threshold when nothing else is set (orchestrator.context_threshold_tokens). */
-export const DEFAULT_ORCHESTRATOR_CONTEXT_TOKENS = 500_000;
-/** The share of a model's context window a context threshold is capped at (contextLimit). */
-export const CONTEXT_WINDOW_CAP = 0.8;
-/**
- * The context threshold in use for a session (queue CT): the set number of tokens, but at most 80 % of the model's
- * context window, so a small window is never filled before a switch. An unknown window: undefined, no switch.
- */
-export function contextLimit(tokens: number, window: number | undefined): number | undefined {
-  return window && window > 0 ? Math.min(tokens, CONTEXT_WINDOW_CAP * window) : undefined;
-}
-/** Whether a session's context (`used` tokens of `window`) is beyond its threshold (contextLimit); unknown: no. */
-export function contextBeyond(used: number | undefined, window: number | undefined, tokens: number): boolean {
-  const limit = contextLimit(tokens, window);
-  return used !== undefined && limit !== undefined && used > limit;
-}
 /** One of the offered languages, by its code (languages.ts). */
 const Language = z.enum(LANGUAGE_CODES);
 
