@@ -576,8 +576,9 @@ it keeps its queue drafts), not only by instruction.
 
 ### Routine reviews by a helper (queue RH)
 
-**Status: designed in RH1, not built yet** (RH2 the helper's run and verdicts, RH3 the orchestrator's notices, the
-audit and the statistics, RH4 the dashboard). From the user's decision of 2026-11-17 (docs/ideas/token-costs.md,
+**Status: the helper's run and verdicts are built (RH2, `apps/server/src/review-helper.ts`); RH3 the orchestrator's
+notices, the audit and the statistics, RH4 the dashboard.** The user approved the proposals below but H12, which is
+left out. From the user's decision of 2026-11-17 (docs/ideas/token-costs.md,
 "Routine reviews leave the orchestrator's big chat" and "The review helper"). The formats are in PROTOCOL.md, "The
 review helper". Points marked **(H1)**…**(H17)** go beyond the decision: RH1's proposals, each for the user's approval.
 
@@ -665,11 +666,18 @@ effort), Nexus (the integration without a model) or the user **(H9)**, and the h
 **The random audit.** A lax helper is what the other signals miss: the user does not see most level-2 steps, and a
 laxer helper even lowers the send-back rate. So the orchestrator reviews again about one in ten of the helper's
 acceptances (`review_helper.audit_rate`, 0.1) and records whether it agrees. Which ones is decided by a hash of the
-acceptance's event id, so it needs no state, survives a restart, and a test can steer it by the id **(H11)**; the first
-five acceptances after the helper's model or effort changed are always audited **(H12)**. An audit rides with the next
-notice like the list above, with the packet's path, and the orchestrator answers with `nexus review audit`. A
+acceptance's event id, so it needs no state, survives a restart, and a test can steer it by the id **(H11)**; always
+auditing the first five acceptances after the helper's model or effort changed (**H12**) was left out by the user. An
+audit rides with the next notice like the list above, with the packet's path, and the orchestrator answers with `nexus review audit`. A
 disagreement does not reopen the step (later steps may build on it, as with a provisional acceptance's Fix it): it is
 counted, and when the work needs a fix the orchestrator drafts it as a revision.
+
+**Built in RH2: who starts it, and a race.** The helpers run inside the orchestrator's change handling, before its
+notices (`ReviewHelpers.onChange`, from `Orchestrator.changedState`): a decision of its own in the server's list would
+have kept their order in two places, and the many tests that build an orchestrator without helpers keep the old
+reviews. A test found the race this leaves: the orchestrator reads the state again after carrying out its requests,
+and a `step.done` written in between reached its notices before the helpers had seen it. So while helpers take
+reviews the orchestrator gets no notice for a step without a `helper` yet; the helpers take it at the next change.
 
 **Quality on three levels** (`nexus stats --reviews`, the Stats view) **(H16)**:
 

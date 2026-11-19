@@ -36,6 +36,11 @@ export const OVERRIDABLE: readonly { path: readonly string[]; none?: true }[] = 
     { path: ["kinds", k, "effort"], none: true as const },
     { path: ["kinds", k, "fallback"] },
   ]),
+  { path: ["review_helper", "enabled"] },
+  { path: ["review_helper", "runtime"] },
+  { path: ["review_helper", "model"], none: true },
+  { path: ["review_helper", "effort"], none: true },
+  { path: ["review_helper", "audit_rate"] },
 ] as const;
 
 /** A setting's path as written in PROTOCOL.md and in an update's `follow` list: `runtimes.claude.model`. */

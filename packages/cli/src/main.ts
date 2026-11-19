@@ -15,7 +15,7 @@ import {
   TemplateError, fillTemplate, filledTemplateYaml, parseEvery, MaintenanceMode, readTemplates, templateQueueId, unusableTemplate, type MergedTemplates,
   type PictureRole, type ReviewItem, type Role, type Runtime, type SessionFile,
   noteRefIssue, parseNoteRef, readNotes, ideaMatches, ideaLinks, ideaStatuses, reportSourceHash,
-  capacityLines, latestCheckSet, readCapacity,
+  capacityLines, latestCheckSet, readCapacity, helperAbout, helperText, NEXUS_PASS_ON, PassOnReason,
 } from "@nexus/protocol";
 import { checkRules, describeRules } from "@nexus/protocol/rules";
 import { importMarkdownQueues } from "./import-md.ts";
@@ -82,8 +82,11 @@ Agent commands (session from NEXUS_SESSION or --session):
                                       and the project's (nexus-templates/ in its repository); a project's replaces a
                                       global one of the same id, a global one Nexus's
   nexus template show <id>            a template's parameters and its YAML
-  nexus review accept <queue> <step> [--note <text>]             (orchestrator only) a step waiting for your review
-  nexus review send-back <queue> <step> <what to fix>             (orchestrator only) back to its worker
+  nexus review accept <queue> <step> [--note <text>]             (orchestrator, or the step's review helper at level 2)
+                                      a step waiting for your review
+  nexus review send-back <queue> <step> <what to fix>             (orchestrator, or the step's review helper) back to its worker
+  nexus review pass-on <queue> <step> --why <reasons> --findings <text>   (the step's review helper only) to the
+                                      orchestrator; reasons: criterion, deviation, question, limit, doubt, level
   nexus review ask-user <queue> <step> <why>                      (orchestrator only) hand the review to the user
   nexus review provisional <queue> <step> [--note <text>]        (orchestrator only) level 3: accept provisionally;
                                       the run goes on, the user confirms it or asks a fix on their return
@@ -157,7 +160,7 @@ const { values: o, positionals: args } = parseArgs({
     project: { type: "string" }, since: { type: "string" }, by: { type: "string" },
     unit: { type: "string" }, show: { type: "string" }, target: { type: "string" }, "warn-above": { type: "string" }, "warn-below": { type: "string" },
     set: { type: "string", multiple: true }, template: { type: "string" }, every: { type: "string" }, "after-queues": { type: "string" },
-    maintenance: { type: "string" }, findings: { type: "string" },
+    maintenance: { type: "string" }, findings: { type: "string" }, why: { type: "string" },
     help: { type: "boolean", short: "h" }, key: { type: "string" }, note: { type: "string" }, before: { type: "string" }, now: { type: "boolean" }, ref: { type: "string" },
   },
 });
@@ -289,13 +292,20 @@ function waitApplied(st: ProjectStore, session: string, event: string, ms = 15_0
  * level 3) accept it provisionally.
  */
 function reviewDecision(action: "accept" | "send-back" | "ask-user" | "provisional"): void {
-  const st = store(); const s = orchestrator(st);
+  const st = store(); const s = session(st);
+  // A review helper accepts and sends back the step it was started for; the rest is the orchestrator's (queue RH).
+  if (s.role === "helper" && action !== "accept" && action !== "send-back") throw new UsageError(`a review helper does not ${action}: accept, send back, or pass it on (nexus review pass-on)`);
+  if (s.role !== "helper" && s.role !== "orchestrator") throw new UsageError("only an orchestrator session may do this");
   const queue = need(args[2], "<queue>"); const step = need(args[3], "<step>");
   checkStep(st, queue, step);
   const state = loadProjectState(st);
   const view = state.queues.find((q) => q.id === queue)!.steps.find((x) => x.id === step)!;
   if (view.status !== "review") throw new UsageError(`step ${queue}/${step} is not waiting for review (it is ${view.status})`);
   if (view.review_with !== "orchestrator") throw new UsageError(`step ${queue}/${step} waits for the user's review, not yours`);
+  if (s.role === "helper") {
+    helperStep(state, s, queue, step);
+    if (action === "accept" && view.level !== 2) throw new UsageError(`step ${queue}/${step} is at review level ${view.level}: its judgement is the orchestrator's. Send it back if a criterion you can check fails, else pass it on: nexus review pass-on ${queue} ${step} --why level --findings "..."`);
+  }
   if (action === "accept") {
     emit(st, s, { type: "review.accepted", queue, step, text: o.note?.trim() || undefined });
     console.log(`ok: ${queue}/${step} accepted; the run goes on`);
@@ -312,6 +322,50 @@ function reviewDecision(action: "accept" | "send-back" | "ask-user" | "provision
   // The server carries out a send-back (the worker's inbox, or the user beyond the limit); this waits for its result.
   if (action === "send-back") report(waitApplied(st, s.id, e.id));
   else console.log(`ok: ${queue}/${step} waits for the user's review`);
+}
+
+/** A review helper decides only the step and round it was started for, while that review is still its own. */
+function helperStep(state: ReturnType<typeof loadProjectState>, s: SessionFile, queue: string, step: string): void {
+  const a = helperAbout(s);
+  if (!a || a.queue !== queue || a.step !== step) throw new UsageError(`you were started to review ${a ? `${a.queue}/${a.step}` : "no step"}, not ${queue}/${step}`);
+  const view = state.queues.find((q) => q.id === queue)!.steps.find((x) => x.id === step)!;
+  if (view.helper?.session !== s.id || view.helper.state !== "running") throw new UsageError(`the review of ${queue}/${step} is no longer yours (${view.helper?.state === "passed_on" ? "it was passed on" : "another review round or reviewer has it"})`);
+}
+
+/**
+ * `nexus review pass-on <queue> <step> --why <reasons> --findings <text>`: a review helper passes the step it reviews on
+ * to the orchestrator (review.passed_on), with why and what it found (PROTOCOL.md, "The review helper").
+ */
+function passOn(): void {
+  const st = store(); const s = session(st);
+  if (s.role !== "helper") throw new UsageError("only a review helper passes a step on (the orchestrator decides it: nexus review accept|send-back|ask-user|provisional)");
+  const queue = need(args[2], "<queue>"); const step = need(args[3], "<step>");
+  checkStep(st, queue, step);
+  const state = loadProjectState(st);
+  const view = state.queues.find((q) => q.id === queue)!.steps.find((x) => x.id === step)!;
+  if (view.status !== "review" || view.review_with !== "orchestrator") throw new UsageError(`step ${queue}/${step} is not waiting for the orchestrator's review`);
+  helperStep(state, s, queue, step);
+  const given = list(o.why);
+  const helperReasons = PassOnReason.options.filter((r) => !NEXUS_PASS_ON.has(r));
+  const bad = given.filter((r) => !helperReasons.includes(r as PassOnReason));
+  if (!given.length || bad.length) throw new UsageError(`--why takes one or more of ${helperReasons.join(", ")}, comma-separated${bad.length ? ` (not ${bad.join(", ")})` : ""}`);
+  const findings = need(o.findings?.trim(), "--findings: what you checked and what you could not");
+  emit(st, s, { type: "review.passed_on", queue, step, round: helperAbout(s)!.round, reasons: [...new Set(given)], text: findings });
+  console.log(`ok: ${queue}/${step} passed on to the orchestrator; end your turn now`);
+}
+
+/**
+ * A review helper's session runs only what reads and its own review commands (H15): the CLI refuses it every other
+ * command, so a helper reports a refusal in its verdict instead of asking or writing anything else.
+ */
+function helperGate(cmd: string): void {
+  const sid = o.session ?? process.env.NEXUS_SESSION;
+  if (!sid) return;
+  let role: string | undefined;
+  try { role = store().readSession(sid).role; } catch { return; }
+  if (role !== "helper") return;
+  if (cmd === "status" || cmd === "help" || (cmd === "review" && ["accept", "send-back", "pass-on"].includes(args[1] ?? ""))) return;
+  throw new UsageError(`a review helper only reads and decides its review (nexus status, nexus help, nexus review accept|send-back|pass-on), not nexus ${[cmd, args[1]].filter(Boolean).join(" ")}; pass the step on with --why doubt, naming what you could not do`);
 }
 
 function report(r: { ok: boolean; message: string } | undefined): void {
@@ -560,7 +614,7 @@ const commands: Record<string, () => void | Promise<void>> = {
       for (const step of q.steps) {
         const unread = step.notes.filter((n) => !n.read_at && n.to !== "orchestrator");
         const own = stepValuesText(step);
-        console.log(`  ${step.id.padEnd(5)} ${step.status.padEnd(8)} ${step.title}${own ? `  [on ${own}]` : ""}${unread.length ? `  (${unread.length} unread note${unread.length > 1 ? "s" : ""})` : ""}`);
+        console.log(`  ${step.id.padEnd(5)} ${step.status.padEnd(8)} ${step.title}${helperText(step)}${own ? `  [on ${own}]` : ""}${unread.length ? `  (${unread.length} unread note${unread.length > 1 ? "s" : ""})` : ""}`);
         const tags = tagsText(step.tags);
         if (tags) console.log(`        tags: ${tags}`);
         // The checks Nexus runs: where they are, and a fix round apart from the review rounds.
@@ -587,7 +641,7 @@ const commands: Record<string, () => void | Promise<void>> = {
       } else if (m.type === "check_failed") {
         console.log(`\n${m.queue}/${m.step}: the checks Nexus ran failed (check-fix round ${m.fix}):\n${m.text}`);
       } else if (m.type === "send_back") {
-        console.log(`\n${m.queue}/${m.step} sent back by the ${m.from} (round ${m.round}):\n${m.text}${m.from === "user" ? "\n(The user's words win over the step's acceptance criteria where they conflict.)" : ""}`);
+        console.log(`\n${m.queue}/${m.step} sent back by the ${m.from === "helper" ? "review helper" : m.from} (round ${m.round}):\n${m.text}${m.from === "user" ? "\n(The user's words win over the step's acceptance criteria where they conflict.)" : ""}`);
       } else {
         console.log(`\nSTOP requested by the ${m.from}${m.text ? `: ${m.text}` : ""}. Finish the current action, then stop and report.`);
       }
@@ -615,6 +669,7 @@ const commands: Record<string, () => void | Promise<void>> = {
 
   review() {
     if (args[1] === "accept" || args[1] === "send-back" || args[1] === "ask-user" || args[1] === "provisional") return reviewDecision(args[1]);
+    if (args[1] === "pass-on") return passOn();
     if (args[1] !== "add") throw new UsageError("nexus review add <step> <path|url>... (orchestrators: nexus review accept|send-back|ask-user|provisional <queue> <step>)");
     const st = store(); const s = session(st);
     const step = need(args[2], "<step>");
@@ -1180,6 +1235,7 @@ try {
   if (!cmd || o.help) { console.log(HELP); process.exit(0); }
   const run = commands[cmd];
   if (!run) throw new UsageError(`unknown command "${cmd}" (nexus --help)`);
+  helperGate(cmd);
   await run();
 } catch (e) {
   if (e instanceof UsageError) { console.error(`nexus: ${e.message}`); process.exit(2); }

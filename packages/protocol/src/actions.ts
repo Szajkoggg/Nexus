@@ -2,7 +2,7 @@
 // writer of queue definitions, notes and inboxes (docs/PROTOCOL.md, "Rules").
 import { existsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import { NEXUS_SESSION, ProjectFile, QueueFile, USER_SESSION, type GlobalSettings, effortIssue, type StatusChange, type InboxEntry, ReviewLevel, type RunFile, type SessionFile } from "./schemas.ts";
+import { NEXUS_SESSION, ProjectFile, QueueFile, USER_SESSION, type GlobalSettings, effortIssue, type Effort, type StatusChange, type InboxEntry, ReviewLevel, type RunFile, type SessionFile } from "./schemas.ts";
 import { ProjectStore, countWrite, newId, now, readGlobalSettings, revisionHash, writeGlobalSettings } from "./store.ts";
 import { OVERRIDABLE, changedGlobal, settingKey } from "./settings.ts";
 import { reviewedByOrchestrator, runGoing } from "./status-rules.ts";
@@ -316,12 +316,12 @@ export function routeSendBacks(store: ProjectStore, state: ProjectState = loadPr
 
 /**
  * Sends a step in review back to its worker with what to fix: the orchestrator's send-back (its review.sent_back
- * event, `event`, written by `nexus review send-back`), or the user's Fix it (written here, as the user's session; also
+ * event, `event`, written by `nexus review send-back`; a review helper's likewise), or the user's Fix it (written here, as the user's session; also
  * what picture comments become). The step reopens in the same session as the next round; on a paused or halted run
  * the message waits for the resume. Beyond `defaults.review_send_back_limit` the orchestrator's send-back hands the
  * step to the user instead. Returns what became of it.
  */
-export function sendBack(store: ProjectStore, req: { queue: string; step: string; from: "orchestrator" | "user"; text: unknown; event?: string }): string {
+export function sendBack(store: ProjectStore, req: { queue: string; step: string; from: "orchestrator" | "user" | "helper"; text: unknown; event?: string }): string {
   nonEmpty(req.text, req.from === "user" ? "what to fix" : "the send-back");
   const text = req.text as string; // recorded verbatim
   stepOf(store, req.queue, req.step);
@@ -335,7 +335,7 @@ export function sendBack(store: ProjectStore, req: { queue: string; step: string
     id = newId();
     store.appendEvent({ v: 1, id, at: now(), session: user.id, type: "review.sent_back", queue: req.queue, step: req.step, text });
   }
-  if (!id) throw new ActionError("an orchestrator's send-back is its review.sent_back event");
+  if (!id) throw new ActionError("an orchestrator's (or a review helper's) send-back is its review.sent_back event");
   routeSendBacks(store);
   const state = loadProjectState(store);
   const st = state.queues.find((q) => q.id === req.queue)!.steps.find((s) => s.id === req.step)!;
@@ -794,6 +794,8 @@ export function updateSettings(store: ProjectStore, patch: unknown): void {
     languages: merged(p.languages, b.languages),
     // Each kind's runtime, model, effort and fallback (a null model or effort: the project's for that runtime).
     kinds: Object.fromEntries(Object.entries(p.kinds).map(([k, d]) => [k, merged(d, b.kinds?.[k])])),
+    // The review helper (queue RH): whether it runs, its runtime, model, effort (null: the project's) and audit rate.
+    review_helper: merged(p.review_helper, b.review_helper),
     // The orchestrator's runtime, notices, model, effort and context threshold (its section is made here if the project
     // has had none yet).
     orchestrator: b.orchestrator === undefined
@@ -809,12 +811,18 @@ export function updateSettings(store: ProjectStore, patch: unknown): void {
   };
   const r = ProjectFile.safeParse(next);
   if (!r.success) throw new ActionError(r.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "));
-  const kinds = kindIssues(r.data.kinds);
+  const kinds = [...kindIssues(r.data.kinds), ...helperIssues(r.data.review_helper)];
   if (kinds.length) throw new ActionError(kinds.join("; "));
   r.data.defaults.checks = stepChecks(r.data.defaults.checks, []);
   const notes = r.data.conversations.notes_dir;
   if (notes !== undefined) r.data.conversations.notes_dir = notesDir(notes);
   store.updateProject(() => r.data, follow, own);
+}
+
+/** The review helper's settings that cannot run: an effort its runtime does not take (queue RH). */
+function helperIssues(h: { runtime: "claude" | "codex"; effort?: Effort }): string[] {
+  const issue = effortIssue(h.runtime, h.effort);
+  return issue ? [`review_helper.effort: ${issue}`] : [];
 }
 
 /** Changes the global settings (written only by the server: <NEXUS_HOME>/settings.yaml); every following project at once. */
@@ -825,7 +833,7 @@ export function updateGlobalSettings(patch: unknown): GlobalSettings {
     const issues = (e as { issues?: { path: (string | number)[]; message: string }[] }).issues;
     throw new ActionError(issues ? issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") : (e as Error).message);
   }
-  const kinds = kindIssues(next.kinds);
+  const kinds = [...kindIssues(next.kinds), ...helperIssues(next.review_helper)];
   if (kinds.length) throw new ActionError(kinds.join("; "));
   writeGlobalSettings(next);
   return next;

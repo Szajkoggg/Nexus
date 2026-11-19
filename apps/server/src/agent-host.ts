@@ -1,4 +1,4 @@
-// AgentHost: starts the agent processes of one role (workers, the orchestrator, thinking partners), one per session,
+// AgentHost: starts the agent processes of one role (workers, the orchestrator, thinking partners, review helpers), one per session,
 // and keeps what every role keeps the same way: the session's runtime record (sessions/<id>/runtime.json), the facts
 // read from the runtime's stream (the record, the runtime's own session id, the account's usage windows), and ending a
 // process so that the session's next message starts a new one. What a role does with its agent's texts, turns and
@@ -28,6 +28,7 @@ export const ROLE_RECORDS = {
   worker: { cost: true, workingFromModel: true, countTurns: true },
   orchestrator: { cost: true, workingFromModel: false, countTurns: false },
   conversation: { cost: false, workingFromModel: false, countTurns: false },
+  helper: { cost: true, workingFromModel: true, countTurns: true },
 } as const satisfies Record<string, RoleRecord>;
 
 /** A Claude Code session's briefing, in its session folder (ClaudeOptions.briefingFile). */

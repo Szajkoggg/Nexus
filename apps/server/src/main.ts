@@ -119,7 +119,8 @@ function refreshRegistry(): void {
     merger = new Merger(store, { start: (q) => void engine.start(q), release: (q, why) => engine.releaseHold(q, why), busy: () => engine.draining || lifecycle.busy, poke: () => changed(p.id) });
     // Through its usual notices it is told the outcome of an update it asked for (lifecycle.notice), and what changed
     // for agents in each deploy since its session began (deploy-changes.jsonl).
-    const orchestrator = new Orchestrator(store, engine, () => changed(p.id), { update: () => lifecycle.notice(), plan: () => planner.notices(), changes: readDeployChanges, push: ({ kind, ...n }) => void push(n, { kind }) });
+    // Its routine reviews go to short-lived review helpers (src/review-helper.ts) while review_helper.enabled is on.
+    const orchestrator = new Orchestrator(store, engine, () => changed(p.id), { update: () => lifecycle.notice(), plan: () => planner.notices(), changes: readDeployChanges, push: ({ kind, ...n }) => void push(n, { kind }) }, { helpers: {} });
     projects.set(p.id, { id: p.id, root: p.root, store, engine, orchestrator, merger, conversations: new Conversations(store, orchestrator, () => changed(p.id)) });
     watchProject(p.id, store.dir);
   }

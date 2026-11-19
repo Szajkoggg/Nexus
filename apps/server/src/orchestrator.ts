@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  ActionError, Effort, acceptedByNexus, effortIssue, type ProjectFile, reviewedByOrchestrator, runGoing, ProjectStore, applyDraft, defineMetric, inPlan, loadProjectState, metricDef, openPlan, orchestratorOverview, overThreshold, proposePlan, proposeTags, readAway, readUsage, orchestratorStatusChange, newId, now, sendBack, type Applied, type Event, type EventType, type NotifyKind, type ProjectState, type SessionFile, type SessionView,
+  ActionError, Effort, acceptedByNexus, effortIssue, type ProjectFile, reviewedByOrchestrator, runGoing, ProjectStore, applyDraft, defineMetric, inPlan, loadProjectState, metricDef, openPlan, orchestratorOverview, overThreshold, proposePlan, proposeTags, readAway, readUsage, orchestratorStatusChange, newId, now, sendBack, type Applied, type Event, type EventType, type NotifyKind, type ProjectState, type QueueView, type SessionFile, type SessionView, type StepView,
 } from "@nexus/protocol";
 import type { AgentProcess } from "./agent.ts";
 import type { CodexPermissions } from "./codex.ts";
@@ -22,6 +22,7 @@ import {
   carriedMessages, formatInbox, orchestratorFreshSeed, orchestratorRuntimeSeed, orchestratorSummaryRequest, summaryLists, questionNotice, rejectionNotice, restartedNotice, fixAskedNotice, levelToUserNotice, reviewNotice, awayOnNotice, awayEndNotice, awayStuckNotice, planDecisionNotice, planHeldNotice, runEndNotice, maintenanceFindingsNotice, staticAnalysisNotice, stepNoteNotice, tagDecisionNotice, fallbackNotice, metricNotice, userMessage, withdrawalNotice,
 } from "./prompts.ts";
 import { shellRules } from "./shell-rules.ts";
+import { ReviewHelpers, type HelperOptions } from "./review-helper.ts";
 
 // Agent (formerly Task) lets it call subagents; they run within these same read-only permissions.
 const READ_ONLY_TOOLS = [
@@ -103,15 +104,21 @@ export class Orchestrator {
    */
   private stopped = false;
   private readonly news: { update: () => UpdateNotice | undefined; plan: () => PlanNotice[]; changes: () => DeployChanges[]; push?: (n: UserNotice) => void };
+  /**
+   * The review helpers (queue RH, src/review-helper.ts), which take its routine reviews; they run before its notices.
+   * Without them (`host.helpers` not given, as in most tests) the orchestrator reviews every step itself.
+   */
+  private readonly helpers?: ReviewHelpers;
 
-  /** `host`: how its process is made (tests give a stand-in). */
-  constructor(store: ProjectStore, engine: Engine, changed: () => void, news: { update?: () => UpdateNotice | undefined; plan?: () => PlanNotice[]; changes?: () => DeployChanges[]; push?: (n: UserNotice) => void } = {}, host: AgentHostOptions & { nowMs?: () => number } = {}) {
+  /** `host`: how its process is made (tests give a stand-in); `helpers`: the review helpers' options, when they run. */
+  constructor(store: ProjectStore, engine: Engine, changed: () => void, news: { update?: () => UpdateNotice | undefined; plan?: () => PlanNotice[]; changes?: () => DeployChanges[]; push?: (n: UserNotice) => void } = {}, host: AgentHostOptions & { nowMs?: () => number; helpers?: HelperOptions } = {}) {
     this.store = store;
     this.engine = engine;
     this.changed = changed;
     this.news = { update: news.update ?? (() => undefined), plan: news.plan ?? (() => []), changes: news.changes ?? (() => []), push: news.push };
     this.host = new AgentHost(store, ROLE_RECORDS.orchestrator, host);
     this.nowMs = host.nowMs ?? Date.now;
+    if (host.helpers) this.helpers = new ReviewHelpers(store, changed, () => engine.draining, host.helpers);
   }
 
   /** The orchestrator's hosted process (one at a time): the latest one started, until it exits or Nexus ends it. */
@@ -273,11 +280,13 @@ export class Orchestrator {
   }
 
   private changedState(state: ProjectState): void {
+    // The review helpers first: a step one of them takes is not also told to the orchestrator (queue RH).
+    if (this.helpers?.onChange(state)) state = loadProjectState(this.store);
     let s = this.session();
     const notes = this.pendingNotes(state);
     if (!s) {
       // A step waiting for its review, or a note or rejection of the user's, starts it (after a reset, or before it ever ran).
-      if (this.engine.draining || (!notes.length && !state.queues.some((q) => q.steps.some((st) => reviewedByOrchestrator(st) && !acceptedByNexus(q, st))))) return;
+      if (this.engine.draining || (!notes.length && !state.queues.some((q) => q.steps.some((st) => this.forOrchestrator(state, q, st))))) return;
       s = this.ensure(false);
     }
     this.applyRequests(s);
@@ -388,10 +397,21 @@ ${n.text}` });
   }
 
   /** For good: an orchestrator shut down starts no process again (a late change, an agent's exit, may still come in). */
-  shutdown(): void { this.stopped = true; clearTimeout(this.heldTimer); this.host.shutdown(); }
+  shutdown(): void { this.stopped = true; clearTimeout(this.heldTimer); this.host.shutdown(); this.helpers?.shutdown(); }
 
-  /** Its process is still running (after shutdown: not yet exited). */
-  alive(): boolean { return !!this.proc && this.proc.state !== "exited"; }
+  /**
+   * A step whose review notice the orchestrator gets: waiting for its review, and not the integration step Nexus accepts
+   * itself (queue MI). With review helpers on (queue RH), only once the step is passed on: one a helper has, or will take
+   * at the next change (the state read here may be newer than the one the helpers saw), is not the orchestrator's yet.
+   */
+  private forOrchestrator(state: ProjectState, q: QueueView, st: StepView): boolean {
+    if (!reviewedByOrchestrator(st) || acceptedByNexus(q, st)) return false;
+    if (st.helper) return st.helper.state === "passed_on";
+    return !this.helpers?.takes(state);
+  }
+
+  /** Its process, or a review helper's, is still running (after shutdown: not yet exited). */
+  alive(): boolean { return (!!this.proc && this.proc.state !== "exited") || !!this.helpers?.alive(); }
 
   /** Not in the middle of a turn. */
   idle(): boolean { return !this.proc || this.proc.state !== "working"; }
@@ -872,8 +892,8 @@ ${n.text}` });
       // A step waiting for its review: told whenever it entered review (also to a session started after that), once
       // per round.
       for (const st of q.steps) {
-        // Not the integration step Nexus ran without a model and accepts itself (queue MI).
-        if (!reviewedByOrchestrator(st) || acceptedByNexus(q, st)) continue;
+        // Not the integration step Nexus ran without a model and accepts itself (queue MI), nor one a review helper has.
+        if (!this.forOrchestrator(state, q, st)) continue;
         items.push({ key: `notify:review:${q.id}:${st.id}:${st.finished_at}`, ...reviewNotice(q, st, state.away) });
       }
       // The checks Nexus ran (src/check-runs.ts): a failure accepted (and its fix queue), and a disputed failure that

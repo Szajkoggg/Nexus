@@ -62,6 +62,12 @@
 // replies "slow reply"; a stop (interrupt) ends it early. "FAKE-HOLD": waits for FAKE_RELEASE (as a slow worker does),
 // so a test can change usage during a chat turn. "FAKE-HISTORY": the reply lists every message the agent took in so
 // far ("history: a | b"): the turns' messages and those read inside a turn (Claude's `next`, Codex's steer).
+// As a review helper (its packet: "[Nexus] Review step S of queue Q, round R"), the step's goal steers it with
+// "FAKE-HELPER: <verdict>": accept (nexus review accept), sendback (nexus review send-back, every round), sendback1
+// (the first round only, accept after), passon:<reasons> (nexus review pass-on --why <reasons>), none (no verdict),
+// hang (no verdict, held by FAKE_RELEASE like a slow step), refused (an action its permissions refuse, then nexus ask,
+// which the CLI refuses a helper, then a pass-on with doubt naming both). Without one: accept at level 2, pass on
+// (level) at level 3. Each verdict's text starts "fake helper".
 // Claude's fake keeps the conversations it saved (fakeSaved below) and refuses, as Claude Code does, to resume one it
 // never saved or to start a saved one anew; FAKE_START_MS: it reads its input only after that long (Claude Code's
 // start-up), so a test can end it before it saved anything; FAKE_REFUSE: it refuses every start, each in its way.
@@ -256,6 +262,8 @@ function writeDenied(path: string): boolean {
  * `tool` reports a shell command it ran.
  */
 export async function respond(fake: Fake, text: string, tool: (command: string) => void, refused?: () => void): Promise<string | { fail: FakeFailure } | { exit: true } | { interrupted: true }> {
+  const helper = /^\[Nexus\] Review step (\S+) of queue (\S+), round (\d+)/.exec(text);
+  if (helper) return reviewAsHelper(text, helper[2]!, helper[1]!, Number(helper[3]), tool, refused);
   const m = /step (\S+) \(\d+ of \d+\)/.exec(text);
   if (/(^|\n)\[Nexus\] Queue/.test(text) && m) {
     const step = (fake.step = m[1]!);
@@ -474,4 +482,22 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
   const review = /\bStep (\S+) of queue (\S+) is done and waits for your review/.exec(text);
   if (review && process.env.FAKE_REVIEW_ACCEPT) return nexusOut(["review", "accept", review[2]!, review[1]!]);
   return "ok"; // a nudge, a message sent while idle, anything else
+}
+
+/** A review helper's turn (see the header): the verdict its step's goal asks for. */
+async function reviewAsHelper(text: string, queue: string, step: string, round: number, tool: (command: string) => void, refused?: () => void): Promise<string> {
+  const level3 = text.includes("Review level 3");
+  const verdict = /FAKE-HELPER: (\S+)/.exec(text)?.[1] ?? (level3 ? "passon:level" : "accept");
+  const run = (args: string[]) => { tool(`nexus ${args.join(" ")}`); return nexusOut(args); };
+  if (verdict === "none") return "fake helper: no verdict";
+  if (verdict === "hang") { await work(step); return "fake helper: no verdict after work"; }
+  if (verdict === "accept" || (verdict === "sendback1" && round > 1)) return run(["review", "accept", queue, step, "--note", `fake helper checked round ${round}`]);
+  if (verdict === "sendback" || verdict === "sendback1") return run(["review", "send-back", queue, step, `fake helper: fix round ${round}`]);
+  if (verdict.startsWith("passon:")) return run(["review", "pass-on", queue, step, "--why", verdict.slice(7), "--findings", `fake helper findings for ${step}`]);
+  if (verdict === "refused") {
+    refused?.();
+    const asked = run(["ask", "May I push?", "--step", step]);
+    return run(["review", "pass-on", queue, step, "--why", "doubt", "--findings", `fake helper: git push was refused; ${asked}`]);
+  }
+  return `fake helper: unknown verdict ${verdict}`;
 }

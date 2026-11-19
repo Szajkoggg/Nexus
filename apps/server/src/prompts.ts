@@ -4,7 +4,7 @@
 // (src/conversations.ts). Agents rely on them (a change to one carries an `Agents:` line in its commit), so each is
 // covered by a snapshot test: test/prompts.test.ts compares what the agents' processes receive with golden files.
 import {
-  INTEGRATION_CONDITION, fileList, formatClock, latestCheckSet, reviewRound, openPlan, formatSeconds, isCheckMetric, languageName, levelNow, metricValueText, releasedText, runIsOlder, stepChecks, type CheckSet, type MetricValue, type AwayNow, type PlanDecision, type ConversationWeb, type InboxView, type LanguageCode, type ProjectFile, type ProjectState, type QuestionView, type QueueView, type SessionView, type StepView, type TagProposal, tagsText,
+  INTEGRATION_CONDITION, fileList, formatClock, latestCheckSet, reviewRound, openPlan, formatSeconds, isCheckMetric, languageName, levelNow, metricValueText, releasedText, runIsOlder, stepChecks, type CheckSet, type MetricValue, type AwayNow, type PlanDecision, type ConversationWeb, type InboxView, type LanguageCode, type ProjectFile, type ProjectState, type QuestionView, type QueueView, type SessionView, type StepView, type PassOnReason, type TagProposal, tagsText,
 } from "@nexus/protocol";
 import type { ClosingContext } from "./closing.ts";
 import type { IntegrationContext } from "./integration.ts";
@@ -686,7 +686,106 @@ export function withdrawalNotice(q: QueueView, w: { revision: number; reason?: s
 
 /** A step waits for the orchestrator's review (`away`: the user's away mode now, which runs level 2 as 3). */
 export function reviewNotice(q: QueueView, st: StepView, away: AwayNow = { on: false }): Notice {
-  return { fact: `Step ${st.id} of queue ${q.id} is done and waits for your review: ${st.summary ?? st.title}`, todo: reviewBrief(q, st, away) };
+  const passed = st.helper?.state === "passed_on" ? `\n\n${passedOnText(st.helper)}` : "";
+  return { fact: `Step ${st.id} of queue ${q.id} is done and waits for your review: ${st.summary ?? st.title}`, todo: `${passed}${reviewBrief(q, st, away)}` };
+}
+
+/** Each reason a step is passed on to the orchestrator for, as its review notice says it (PROTOCOL.md, "The review helper"). */
+const PASS_ON_TEXT: Record<PassOnReason, string> = {
+  criterion: "a criterion it cannot settle from what the step left behind",
+  deviation: "the worker's summary reports a deviation from the plan",
+  question: "the worker asked a question during the step",
+  limit: "the step was sent back as often as the limit allows: one more send-back hands it to the user",
+  doubt: "it doubts its own verdict",
+  level: "review level 3: the checkable criteria are met, the judgement is yours",
+  no_verdict: "the review helper ended without a verdict",
+  unavailable: "the review helper could not run (its runtime is beyond the usage threshold, or failed)",
+};
+
+/**
+ * Why the step reached the orchestrator after all (queue RH): passed on by the review helper, with its findings, or by
+ * Nexus itself without one. It starts where the helper stopped: what the helper found is not checked again.
+ */
+function passedOnText(h: NonNullable<StepView["helper"]>): string {
+  const why = (h.reasons ?? []).map((r) => PASS_ON_TEXT[r]).join("; ");
+  if (h.by === "nexus") return `Nexus passed it to you without the review helper: ${why}.${h.findings ? ` ${h.findings}` : ""}`;
+  return `The review helper passed it to you: ${why}. Its findings (what it checked and what it could not; no need to check that again): ${h.findings?.trim() || "none given"}`;
+}
+
+// ---------------------------------------------------------------- the review helper
+
+/**
+ * The review helper's briefing (queue RH; PROTOCOL.md, "The review helper"): a short-lived session that reviews one step
+ * in the orchestrator's place, from the packet it gets as its one message, and ends with its verdict.
+ */
+export function helperBriefing(p: Pick<ProjectFile, "name" | "languages">): string {
+  const working = languageName(p.languages?.working ?? "en");
+  return `You are Nexus's review helper for the project "${p.name}": a short-lived session that reviews one step of a queue in the orchestrator's place, from the packet you get as your only message, and ends with your verdict. There is no chat and nobody to ask.
+
+What you may do:
+- Read the packet, the diff file it names, and the checkout (to check a criterion: a document that should say something, a test that should exist). Use read-only git (git log, git show, git diff, git status), nexus status and nexus help.
+- Never run a build, a test or a check: the packet has the results of the checks Nexus ran. Never change a file.
+- Decide exactly once, with one of the three commands the packet names: accept, send back, or pass on to the orchestrator. Then end your turn with a one-line reply.
+
+How to decide:
+- Judge the step against its acceptance criteria and review notes, one by one, from the packet and the checkout. Do not accept by default.
+- Send it back (nexus review send-back) when a criterion you can check is not met, saying exactly what to fix.
+- Pass it on (nexus review pass-on, --why with one or more reasons, comma-separated) when: a criterion cannot be settled from the packet and the checkout (the look, the feel, the user's judgement, a measurement nobody took): criterion; the worker's summary reports a deviation from the plan (in what it left out or what differs): deviation; the worker asked a question during the step: question; the send-back limit is reached: limit; you doubt your verdict: doubt; at review level 3, when the criteria you can check are met: level.
+- At review level 2, accept (nexus review accept, --note with your findings) when every criterion is checkable and met. At level 3 you never accept: the judgement is the orchestrator's.
+- Your findings (--note, --findings, or the send-back's text) say briefly what you checked and what you could not, in ${working}: the orchestrator starts from them and does not check again what you found.
+- When an action is refused, do not work around it through another tool or command that reaches the same end: pass the step on with doubt, naming what you could not do (nexus help refusals).`;
+}
+
+/** What the review helper reads besides the step: the diff's summary and file, and the check results of the round. */
+export interface HelperPacketContext {
+  /** git diff --stat of the step's whole change. */
+  stat: string;
+  /** The diff file's path. */
+  diff: string;
+  /** The commits the diff runs between, and the latest round's own range. */
+  range: { from: string; to: string; round?: { from: string; to: string } };
+  /** The queue's folder (check logs are relative to it). */
+  queueDir: string;
+}
+
+/**
+ * The review helper's packet (queue RH, H4): its first and only prompt, written to packet.md in its session folder too.
+ * The step's goal, acceptance and review notes; the checks of the round; its review material; the worker's summary; the
+ * earlier send-backs; the diff's summary and the path of the whole diff; and the verdicts open to it at the step's own
+ * review level.
+ */
+export function helperPacket(q: QueueView, st: StepView, c: HelperPacketContext): string {
+  const round = reviewRound(q, st);
+  const since = st.segments.at(-1)?.start ?? "";
+  const list = (xs: string[]) => (xs.length ? xs.map((x) => `- ${x}`).join("\n") : "- none");
+  const set = latestCheckSet(q, st);
+  const checks = set
+    ? set.checks.map((x) => {
+      const last = x.runs.at(-1);
+      const unrelated = set.state === "accepted" && set.dispute?.name === x.name ? " (failed, accepted as unrelated to this step: it fails on the queue's base too, or the orchestrator accepted it)" : "";
+      return `${x.name}: ${x.ok ? "passed" : "FAILED"}${x.flaky ? " (flaky: failed, then passed on the second run)" : ""}${unrelated}${last?.duration !== undefined ? `, ${formatSeconds(last.duration)}` : ""}${last?.log ? `; log: ${`${c.queueDir}/${last.log}`.replaceAll("\\", "/")}` : ""}`;
+    })
+    : st.checks.filter((x) => x.at >= since).map((x) => `${x.name}: ${x.ok ? "ok" : "FAILED"} (reported by the worker)${x.summary ? ` - ${x.summary}` : ""}`);
+  const items = st.review_items.filter((i) => i.at >= since)
+    .map((i) => `${i.label ?? i.kind ?? "item"}${i.key ? ` [${i.key}, ${i.role ?? "?"}]` : ""}: ${i.path ?? i.url ?? ""}`);
+  const range = c.range.round && (c.range.round.from !== c.range.from || c.range.round.to !== c.range.to)
+    ? ` (this round's own change: ${c.range.round.from}..${c.range.round.to})` : "";
+  const cmd = (x: string) => `nexus review ${x} ${q.id} ${st.id}`;
+  const decide = st.level === 3
+    ? `Review level 3: the judgement is the orchestrator's, and you never accept. When a criterion you can check fails: ${cmd("send-back")} "what to fix". Otherwise pass it on, with level among the reasons: ${cmd("pass-on")} --why level[,criterion,deviation,doubt] --findings "what you checked and what you could not".`
+    : `Review level 2. Every criterion checkable and met: ${cmd("accept")} --note "what you checked". A criterion you can check not met: ${cmd("send-back")} "what to fix". Otherwise: ${cmd("pass-on")} --why <reasons> --findings "what you checked and what you could not".`;
+  return [
+    `[Nexus] Review step ${st.id} of queue ${q.id}, round ${round}: "${st.title}".`,
+    `Goal:\n${st.goal.trim() || "(none)"}`,
+    `Acceptance:\n${list(st.acceptance)}`,
+    ...(st.review?.prepare ? [`Review notes:\n${st.review.prepare.trim()}`] : []),
+    `Checks ${set ? "Nexus ran" : "reported"} this round (final: run nothing yourself):\n${list(checks)}`,
+    `Review material:\n${list(items)}`,
+    `The worker's summary:\n${st.summary?.trim() || "(none)"}`,
+    ...(st.sent_back.length ? [`Sent back before:\n${list(st.sent_back.map((b) => `round ${b.round}, by the ${b.by === "helper" ? "review helper" : b.by}: ${b.text}`))}`] : []),
+    `The step's change, ${c.range.from}..${c.range.to}${range}:\n${c.stat.trim() || "(no change)"}\nThe whole diff: ${c.diff.replaceAll("\\", "/")} (read the parts you need).`,
+    decide,
+  ].join("\n\n");
 }
 
 /** The user turned away mode on (or moved its end). */

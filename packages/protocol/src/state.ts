@@ -1,7 +1,7 @@
 // Derives the dashboard's view of a project from its files. Pure apart from reading through the store;
 // nothing here is ever written back (state.json, if kept, is only a cache of this).
 import { applyCheckSets, reviewRound } from "./checks.ts";
-import { CONVERSATION_ONLY, NEXUS_SESSION, ORCHESTRATOR_ONLY, USER_ONLY, WORKER_ONLY, type MetricsFile, type StatusChange, type Event, type InboxEntry, type Note, type GitFile, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type RecurringFile, type ReviewItem, type ReviewLevel, type LegacyReviewPolicy, type AwayFile, type ChecksFile, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type PlanFile, type StepDef, type StepStatus, type TagProposal, type TagsFile } from "./schemas.ts";
+import { CONVERSATION_ONLY, NEXUS_PASS_ON, NEXUS_SESSION, ORCHESTRATOR_ONLY, type PassOnReason, USER_ONLY, WORKER_ONLY, type MetricsFile, type StatusChange, type Event, type InboxEntry, type Note, type GitFile, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type RecurringFile, type ReviewItem, type ReviewLevel, type LegacyReviewPolicy, type AwayFile, type ChecksFile, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type PlanFile, type StepDef, type StepStatus, type TagProposal, type TagsFile } from "./schemas.ts";
 import { ProjectStore, chainPlan, readAway, revisionHash } from "./store.ts";
 import { awayAt, awayNow, type AwayNow } from "./away.ts";
 import { formatClock, type Segment } from "./times.ts";
@@ -124,7 +124,18 @@ export interface StepView extends StepDef {
    * server delivered it to the worker (`delivered`); `to_user`: the orchestrator's beyond the limit, which handed the
    * step to the user instead.
    */
-  sent_back: { id: string; text: string; at: string; by: "orchestrator" | "user"; round: number; delivered: boolean; to_user?: boolean }[];
+  sent_back: { id: string; text: string; at: string; by: "orchestrator" | "user" | "helper"; round: number; delivered: boolean; to_user?: boolean }[];
+  /**
+   * Who accepted the step's review (queue RH, H17): the user, the orchestrator, a review helper, or Nexus (the
+   * integration without a model); `event` the review.accepted's id; for an agent its session and what it ran on.
+   */
+  accepted?: { by: "user" | "orchestrator" | "helper" | "nexus"; at: string; event: string; session?: string; runtime?: string; model?: string; effort?: string };
+  /**
+   * The review helper of the current review round (queue RH): `running` while it has the review (its session exists
+   * and gave no verdict yet), `passed_on` once it (or Nexus, `by: "nexus"`) passed the step on to the orchestrator,
+   * with the `reasons` and the helper's `findings`.
+   */
+  helper?: { session: string; round: number; state: "running" | "passed_on"; by?: "helper" | "nexus"; reasons?: PassOnReason[]; findings?: string };
   /** The round at work answers the user's Fix it: its review is the user's, whatever the policy. */
   user_fix?: boolean;
   review_items: (ReviewItem & { at: string; round?: number })[];
@@ -309,7 +320,11 @@ export function loadProjectState(store: ProjectStore): ProjectState {
       for (const e of r.entries) {
         if (e.session !== id) { warnings.push(`session ${id}: event ${e.id} claims session ${e.session}; ignored`); continue; }
         // The server's own session (queue MI) accepts the integration steps it ran without a model.
-        if (ORCHESTRATOR_ONLY.has(e.type) && s.role !== "orchestrator" && s.role !== "user" && !(s.role === "nexus" && e.type === "review.accepted")) {
+        // A review helper writes only its verdicts (queue RH); Nexus passes a step on too.
+        const verdict = e.type === "review.accepted" || e.type === "review.sent_back" || e.type === "review.passed_on";
+        if (s.role === "helper" && !verdict) { warnings.push(`session ${id}: ${e.type} is not a review helper's; ignored`); continue; }
+        if (e.type === "review.passed_on" && s.role !== "helper" && s.role !== "nexus") { warnings.push(`session ${id}: review.passed_on is a review helper's; ignored`); continue; }
+        if (ORCHESTRATOR_ONLY.has(e.type) && s.role !== "orchestrator" && s.role !== "user" && s.role !== "helper" && !(s.role === "nexus" && e.type === "review.accepted")) {
           warnings.push(`session ${id}: ${e.type} is for orchestrators; ignored`); continue;
         }
         if (USER_ONLY.has(e.type) && s.role !== "user") {
@@ -395,6 +410,14 @@ export function loadProjectState(store: ProjectStore): ProjectState {
   for (const q of queues.values()) for (const st of q.steps) {
     if (st.status !== "review") st.review_with = undefined;
     else if (st.review_with === "orchestrator" && !orchestrating) st.review_with = "user";
+  }
+  // A review helper started for the step's current round, with no verdict yet, has its review (queue RH).
+  for (const q of queues.values()) for (const st of q.steps) {
+    if (st.helper || !reviewedByOrchestrator(st)) continue;
+    const round = reviewRound(q, st);
+    const h = [...sessions.values()].filter((x) => { const a = helperAbout(x); return a?.queue === q.id && a.step === st.id && a.round === round; })
+      .sort((a, b) => a.created_at.localeCompare(b.created_at)).at(-1);
+    if (h) st.helper = { session: h.id, round, state: "running" };
   }
 
   for (const q of queues.values()) {
@@ -691,7 +714,7 @@ function apply(
       for (const kept of again) {
         if (kept && kept.status !== "pending" && kept.status !== "skipped") toPending(kept);
       }
-      st.status = "running"; st.started_at ??= e.at; st.session = e.session;
+      st.status = "running"; st.started_at ??= e.at; st.session = e.session; st.accepted = undefined;
       st.model_free = e.session === NEXUS_SESSION ? true : undefined;
       st.finished_at = undefined; st.reason = undefined;
       if (!TERMINAL_QUEUE.has(q.status)) { q.status = "running"; q.status_reason = undefined; }
@@ -746,7 +769,7 @@ function apply(
       // A step.done from before the project's review levels keeps its old meaning (legacyPolicy): `continue` went on
       // without review. After the user's Fix it, the round's review is the user's.
       const policy = project.review_levels_since && e.at < project.review_levels_since ? legacyPolicy(q, st) : undefined;
-      st.asked_user = undefined;
+      st.asked_user = undefined; st.helper = undefined;
       st.finished_at = e.at; st.summary = e.summary; st.commit = e.commit;
       if (e.activities) st.observed_activities = [...new Set([...(st.observed_activities ?? []), ...e.activities])];
       endSegment(st, e.at);
@@ -837,14 +860,19 @@ function apply(
       // user (Fix it) only what waits for the user.
       const q = queueOf(e.queue); const st = stepOf(q, e.step);
       if (!q || !st) return;
-      const by = s?.role === "user" ? "user" : "orchestrator";
-      if (st.status !== "review" || st.review_with !== by) { warnings.push(`event ${e.id}: step ${e.queue}/${e.step} is not waiting for the ${by}'s review; the send-back is ignored`); return; }
+      const by = s?.role === "user" ? "user" : s?.role === "helper" ? "helper" : "orchestrator";
+      const waits = by === "user" ? "user" : "orchestrator";
+      if (st.status !== "review" || st.review_with !== waits) { warnings.push(`event ${e.id}: step ${e.queue}/${e.step} is not waiting for the ${waits}'s review; the send-back is ignored`); return; }
+      const refused = by === "helper" ? helperRefusal(s!, q, st) : undefined;
+      if (refused) { warnings.push(`event ${e.id}: ${refused}; the review helper's send-back is ignored`); return; }
       const round = reviewRound(q, st) + 1;
       const limit = project.defaults.review_send_back_limit;
-      if (by === "orchestrator" && st.sent_back.filter((x) => x.by === "orchestrator" && !x.to_user).length >= limit) {
+      // The helper's send-backs count toward the limit with the orchestrator's (H7): it is about the step going round.
+      if (by !== "user" && st.sent_back.filter((x) => x.by !== "user" && !x.to_user).length >= limit) {
         st.sent_back.push({ id: e.id, text: e.text, at: e.at, by, round, delivered: false, to_user: true });
         st.review_with = "user";
-        st.asked_user = { text: `The orchestrator sent this step back ${limit} time${limit === 1 ? "" : "s"} already and would again: ${e.text}`, at: e.at };
+        const times = `${limit} time${limit === 1 ? "" : "s"}`;
+        st.asked_user = { text: by === "helper" ? `The review helper would send this step back again, and it was sent back ${times} already: ${e.text}` : `The orchestrator sent this step back ${times} already and would again: ${e.text}`, at: e.at };
         return;
       }
       const sent = delivered.has(e.id);
@@ -861,10 +889,31 @@ function apply(
       if (!q || !st || st.status !== "review") return;
       // The orchestrator accepts only what waits for it; what went to the user is the user's.
       if (s?.role === "orchestrator" && st.review_with !== "orchestrator") { warnings.push(`event ${e.id}: step ${e.queue}/${e.step} waits for the user's review; the orchestrator's acceptance is ignored`); return; }
+      if (s?.role === "helper") {
+        // A level-3 step's judgement stays the orchestrator's: the helper passes it on, never accepts it (H5).
+        const refused = helperRefusal(s, q, st) ?? (st.level !== 2 ? `step ${e.queue}/${e.step} is at review level ${st.level}: the review helper accepts only level 2` : undefined);
+        if (refused) { warnings.push(`event ${e.id}: ${refused}; the review helper's acceptance is ignored`); return; }
+      }
+      const by = s?.role === "user" || s?.role === "helper" || s?.role === "nexus" ? s.role : "orchestrator";
+      st.accepted = { by, at: e.at, event: e.id, ...(s && (by === "orchestrator" || by === "helper") ? { session: s.id, runtime: s.runtime, model: s.model, effort: s.effort } : {}) };
       st.review_with = undefined;
       st.status = "done";
       if (q.steps.every((x) => FINISHED_STEP.has(x.status))) q.status = "done";
       else if (q.status === "waiting" && !q.steps.some(stepWaits)) q.status = "running";
+      return;
+    }
+    case "review.passed_on": {
+      // A review helper's pass-on of the step it reviews, or Nexus's (queue RH): the step keeps waiting for the
+      // orchestrator's review, which now gets its notice with the reasons and the findings.
+      const q = queueOf(e.queue); const st = stepOf(q, e.step);
+      if (!q || !st || !s) return;
+      const refused = s.role === "helper" ? helperRefusal(s, q, st)
+        : !reviewedByOrchestrator(st) ? `step ${e.queue}/${e.step} is not waiting for the orchestrator's review`
+        : e.round !== reviewRound(q, st) ? `step ${e.queue}/${e.step} is at review round ${reviewRound(q, st)}, not ${e.round}`
+        : st.helper?.state === "passed_on" ? `step ${e.queue}/${e.step} was passed on already` : undefined;
+      if (refused) { warnings.push(`event ${e.id}: ${refused}; the pass-on is ignored`); return; }
+      const reasons = s.role === "helper" ? e.reasons.filter((r) => !NEXUS_PASS_ON.has(r)) : e.reasons;
+      st.helper = { session: s.id, round: reviewRound(q, st), state: "passed_on", by: s.role === "helper" ? "helper" : "nexus", reasons: reasons.length ? reasons : ["doubt"], findings: e.text };
       return;
     }
     case "review.provisional": {
@@ -972,8 +1021,29 @@ function applyChange(q: QueueView, c: StatusChange): void {
 }
 
 /** A step back to pending, to run again: nothing of its last round (its outcome, review, reason) shows on it. */
+/** A review helper's `about` (its step and round), or none for any other session. */
+export function helperAbout(s: Pick<SessionFile, "role" | "about">): { queue: string; step: string; round: number; level: ReviewLevel } | undefined {
+  const a = s.about;
+  return s.role === "helper" && a && "round" in a && a.round !== undefined && a.queue !== undefined ? { queue: a.queue, step: a.step, round: a.round, level: a.level } : undefined;
+}
+
+/**
+ * Why a review helper's verdict on the step does not count, or undefined when it does: only the helper started for the
+ * step's current round, while the step waits for the orchestrator's review and was not passed on yet (PROTOCOL.md, "The
+ * review helper").
+ */
+function helperRefusal(s: Pick<SessionFile, "role" | "about">, q: QueueView, st: StepView): string | undefined {
+  const a = helperAbout(s);
+  if (!a || a.queue !== q.id || a.step !== st.id) return `the review helper was not started for step ${q.id}/${st.id}`;
+  if (!reviewedByOrchestrator(st)) return `step ${q.id}/${st.id} is not waiting for the orchestrator's review`;
+  const round = reviewRound(q, st);
+  if (a.round !== round) return `the review helper was started for round ${a.round} of step ${q.id}/${st.id}, which is at round ${round}`;
+  if (st.helper?.state === "passed_on") return `step ${q.id}/${st.id} was passed on to the orchestrator already`;
+  return undefined;
+}
+
 function toPending(st: StepView): void {
-  st.status = "pending"; st.review_with = undefined; st.asked_user = undefined;
+  st.status = "pending"; st.review_with = undefined; st.asked_user = undefined; st.accepted = undefined; st.helper = undefined;
   st.finished_at = undefined; st.summary = undefined; st.commit = undefined; st.reason = undefined;
 }
 

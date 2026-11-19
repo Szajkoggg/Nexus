@@ -63,8 +63,23 @@ export type StepStatus = z.infer<typeof StepStatus>;
  * and writes only in the project's notes folder; it starts no work.
  * `nexus` is the one session the server keeps for the steps the engine runs itself, without a model (the integration
  * step without a model, queue MI): its events are written only by the server; it has no process and no inbox.
+ * `helper` is a review helper (queue RH): a short-lived session the server starts for one review round of one step, in
+ * the orchestrator's place. It reads, and decides with `nexus review accept|send-back|pass-on` (PROTOCOL.md, "The
+ * review helper").
  */
-export const Role = z.enum(["worker", "orchestrator", "user", "conversation", "nexus"]);
+/**
+ * Why a review helper passed a step on to the orchestrator (PROTOCOL.md, "The review helper"): `criterion` a criterion
+ * the packet cannot settle; `deviation` the worker's summary reports a deviation from the plan; `question` the worker
+ * asked during the step; `limit` the send-back limit is reached; `doubt` the helper doubts its own verdict (or an
+ * action it needed was refused); `level` a level-3 step whose checkable criteria are met; and from Nexus only,
+ * `no_verdict` (the helper ended without one) and `unavailable` (its runtime is beyond the usage threshold, or failed).
+ */
+export const PassOnReason = z.enum(["criterion", "deviation", "question", "limit", "doubt", "level", "no_verdict", "unavailable"]);
+export type PassOnReason = z.infer<typeof PassOnReason>;
+/** The reasons only Nexus gives (its `nexus` session), never a helper. */
+export const NEXUS_PASS_ON: ReadonlySet<PassOnReason> = new Set(["no_verdict", "unavailable"]);
+
+export const Role = z.enum(["worker", "orchestrator", "user", "conversation", "nexus", "helper"]);
 export const USER_SESSION = "user";
 export const NEXUS_SESSION = "nexus";
 export type Role = z.infer<typeof Role>;
@@ -257,6 +272,23 @@ const KindsSettings = z.object({
   design: kindOf("design"), research: kindOf("research"), docs: kindOf("docs"),
 });
 
+/**
+ * The review helper (queue RH; PROTOCOL.md, "The review helper"): whether it takes the orchestrator's routine reviews,
+ * the runtime, model and effort it runs on (a model or effort left out: the project's for that runtime), and the share
+ * of its acceptances the orchestrator audits.
+ */
+const ReviewHelperShape = z.object({
+  enabled: z.boolean().default(true),
+  runtime: WorkerRuntime.default("claude"),
+  model: z.string().min(1).optional(),
+  effort: Effort.optional(),
+  audit_rate: Fraction.default(0.1),
+});
+export type ReviewHelperSettings = z.infer<typeof ReviewHelperShape>;
+/** The review helper's settings as Nexus ships them (decided with RH1, H13): Claude Code's Sonnet at medium effort. */
+const SHIPPED_REVIEW_HELPER: ReviewHelperSettings = { enabled: true, runtime: "claude", model: "claude-sonnet-5-5", effort: "medium", audit_rate: 0.1 };
+const ReviewHelperSettings = ReviewHelperShape.prefault(SHIPPED_REVIEW_HELPER);
+
 const LanguageSettings = z.object({
   /**
    * The reader's language: what everything written to the user is in (chat, step summaries, questions, progress lines,
@@ -283,6 +315,7 @@ export const GlobalSettings = z.object({
   languages: LanguageSettings.prefault({}),
   /** Each kind's runtime, model, effort and fallback chain (routing.ts). */
   kinds: KindsSettings.prefault({}),
+  review_helper: ReviewHelperSettings,
 });
 export type GlobalSettings = z.infer<typeof GlobalSettings>;
 
@@ -353,6 +386,7 @@ export const ProjectFile = z.object({
     working: Language.default(DEFAULT_WORKING_LANGUAGE),
   }).prefault({}),
   kinds: KindsSettings.prefault({}),
+  review_helper: ReviewHelperSettings,
 });
 export type ProjectFile = z.infer<typeof ProjectFile>;
 
@@ -445,6 +479,13 @@ export const StoredProject = z.object({
   }).prefault({}),
   kinds: z.object({
     mechanical: OwnKind(), code: OwnKind(), debugging: OwnKind(), design: OwnKind(), research: OwnKind(), docs: OwnKind(),
+  }).optional(),
+  review_helper: z.object({
+    enabled: own(z.boolean()),
+    runtime: own(WorkerRuntime),
+    model: ownOrNone(z.string().min(1)),
+    effort: ownOrNone(Effort),
+    audit_rate: own(Fraction),
   }).optional(),
 });
 export type StoredProject = z.infer<typeof StoredProject>;
@@ -698,6 +739,13 @@ export const SessionFile = z.object({
    * it). `seeded`: the step's status when the partner last got its context (the seed, or a "since then" addition).
    */
   about: z.union([z.object({
+    /**
+     * A review helper's (role `helper`): the step and review round it reviews, and the step's own review level then
+     * (not the one away mode reads it at).
+     */
+    queue: Id, step: Id, round: z.number().int().positive(), level: ReviewLevel,
+    seeded: z.never().optional(), idea: z.never().optional(),
+  }), z.object({
     queue: Id, step: Id,
     seeded: z.object({ status: StepStatus, at: Time }).optional(),
     idea: z.never().optional(),
@@ -859,8 +907,15 @@ export const Event = z.discriminatedUnion("type", [
    * a note on it) or the orchestrator (told once, like a chat message of the user).
    */
   z.object({ ...base, type: z.literal("review.accepted"), ...qs, text: z.string().optional(), to: z.enum(["next", "orchestrator"]).optional() }),
-  /** The orchestrator (or the user) sends a step in review back to its worker with what to fix. */
+  /** The orchestrator (or the user, or a review helper) sends a step in review back to its worker with what to fix. */
   z.object({ ...base, type: z.literal("review.sent_back"), ...qs, text: z.string().min(1) }),
+  /**
+   * A review helper passes the step it reviews on to the orchestrator (`nexus review pass-on`), or Nexus does (the
+   * `nexus` session: the reasons it can tell without a model, or a helper without a verdict): `round` the review round,
+   * `reasons` why, `text` the helper's findings (what it checked and what it could not). The step keeps waiting for the
+   * orchestrator's review, and the orchestrator gets its review notice with both (PROTOCOL.md, "The review helper").
+   */
+  z.object({ ...base, type: z.literal("review.passed_on"), ...qs, round: z.number().int().positive(), reasons: z.array(PassOnReason).min(1), text: z.string() }),
   /**
    * The user rejects a step waiting for their review, with an optional reason: the step is marked rejected, the run
    * pauses, nothing is reverted; the orchestrator proposes what follows. User only.
@@ -1462,7 +1517,7 @@ export const TurnRecord = z.object({
   duration_ms: z.number().int().nonnegative().optional(),
   project: Id,
   session: Id,
-  role: z.enum(["worker", "orchestrator", "conversation"]),
+  role: z.enum(["worker", "orchestrator", "conversation", "helper"]),
   runtime: z.enum(["claude", "codex"]),
   model: z.string().optional(),
   effort: z.string().optional(),
@@ -1686,7 +1741,7 @@ export type MetricsFile = z.infer<typeof MetricsFile>;
 
 // ---------------------------------------------------------------- inbox (sessions/<id>/inbox.jsonl)
 
-const ibase = { v: z.literal(1), id: Id, at: Time, from: z.enum(["user", "orchestrator", "nexus"]) };
+const ibase = { v: z.literal(1), id: Id, at: Time, from: z.enum(["user", "orchestrator", "nexus", "helper"]) };
 
 export const InboxEntry = z.discriminatedUnion("type", [
   z.object({ ...ibase, type: z.literal("message"), text: z.string(), queue: Id.optional(), step: Id.optional() }),
