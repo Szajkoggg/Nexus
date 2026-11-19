@@ -21,8 +21,9 @@
 //   commit    commit a file named after the step in its working directory, then done
 //   commitstop  the same commit, then a stop condition
 //   untracked   write <step>-left.txt in its working directory, neither added nor committed, then done
-//   background  start work in the background (a command) and end the turn without an outcome; the work ends after
-//               FAKE_BG_MS (default 1500). Claude's fake then starts a turn by itself with the task's notification,
+//   background  start work in the background (a command) and end the turn without an outcome; the work ends when the
+//               file FAKE_BG_RELEASE names exists (the test lets it end once Nexus has taken the turn's end in), else
+//               after FAKE_BG_MS (default 1500). Claude's fake then starts a turn by itself with the task's notification,
 //               as Claude Code does; Codex's does not (Nexus nudges). Told of the end either way, it reports done.
 //   bgagent     the same with a sub-agent in the background
 //   bglong      the same command, running FAKE_BG_LONG_MS (default 600000): past the engine's limit in a test
@@ -105,10 +106,25 @@ export function contextTokens(window: number, fallback: number): number {
   return fill ? Math.round(Number(fill) * window) : fallback;
 }
 
+/** Background work a fake reports: it ends when the file `release` names exists, else after `ms`. */
+export interface Background { kind: "command" | "agent"; ms: number; release?: string }
+
+/**
+ * Calls `end` when background work ends: once its release file exists (polled; given up after 300 s), else after its
+ * time. A time alone raced the engine: under load Nexus took the turn's end in only after the work had ended (queue CI).
+ */
+export function onBackgroundEnd(bg: Background, end: () => void): void {
+  const release = bg.release;
+  if (!release) { setTimeout(end, bg.ms); return; }
+  const started = Date.now();
+  const look = (): void => { if (existsSync(release) || Date.now() - started > 300_000) end(); else setTimeout(look, 20); };
+  look();
+}
+
 export interface Fake {
   step?: string;
   /** Work this turn leaves running in the background, for the runtime's fake to report after the turn (see the header). */
-  background?: { kind: "command" | "agent"; ms: number };
+  background?: Background;
   /** This turn ran a sub-agent in the foreground (FAKE: subagent), for the runtime's fake to report its tokens. */
   subagent?: boolean;
   /** The step asked with FAKE: askslow: the answer's turn works before it reports the step done. */
@@ -405,7 +421,9 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
       else nexus("step", "failed", step, "--reason", "the uncommitted work is gone");
     }
     if (behaviour === "background" || behaviour === "bgagent" || behaviour === "bglong") {
-      fake.background = { kind: behaviour === "bgagent" ? "agent" : "command", ms: Number(behaviour === "bglong" ? process.env.FAKE_BG_LONG_MS ?? 600_000 : process.env.FAKE_BG_MS ?? 1500) };
+      fake.background = behaviour === "bglong"
+        ? { kind: "command", ms: Number(process.env.FAKE_BG_LONG_MS ?? 600_000) }
+        : { kind: behaviour === "bgagent" ? "agent" : "command", ms: Number(process.env.FAKE_BG_MS ?? 1500), release: process.env.FAKE_BG_RELEASE };
     }
     // The queue's last step done: the report, written where the prompt says (refused under a denied folder, as
     // Claude Code refuses a Write its --disallowedTools rule covers), then registered with nexus report.

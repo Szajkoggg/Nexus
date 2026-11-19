@@ -3,7 +3,7 @@
 // is recorded with priority "next", like Claude's mid-turn messages.
 import { randomUUID } from "node:crypto";
 import {
-  PARTIAL, actOnRead, contextTokens, contextWindow, fakeSaved, interrupt, record, recordArgs, respond, saveFakeConversation, type Fake, type FakeFailure,
+  PARTIAL, actOnRead, contextTokens, contextWindow, fakeSaved, interrupt, onBackgroundEnd, record, recordArgs, respond, saveFakeConversation, type Background, type Fake, type FakeFailure,
 } from "./fake-behaviour.ts";
 
 const out = (m: unknown) => process.stdout.write(JSON.stringify(m) + "\n");
@@ -61,11 +61,11 @@ async function runTurn(id: string, text: string): Promise<void> {
  * completes after its turn did; or a sub-agent (subAgentActivity "started"), whose own thread's turn reaches this
  * connection too, then its "completed" activity in the parent's thread. Codex starts no turn by itself after either.
  */
-function startBackground(turn: string, bg: { kind: "command" | "agent"; ms: number }): void {
+function startBackground(turn: string, bg: Background): void {
   if (bg.kind === "command") {
     const item = { type: "commandExecution", id: randomUUID(), command: `"powershell.exe" -Command 'Start-Sleep 25'`, status: "inProgress", source: "unifiedExecStartup" };
     notify("item/started", { threadId, turnId: turn, item });
-    setTimeout(() => notify("item/completed", { threadId, turnId: turn, item: { ...item, status: "completed", exitCode: 0 } }), bg.ms);
+    onBackgroundEnd(bg, () => notify("item/completed", { threadId, turnId: turn, item: { ...item, status: "completed", exitCode: 0 } }));
     return;
   }
   const child = randomUUID(), childTurn = randomUUID();
@@ -74,13 +74,13 @@ function startBackground(turn: string, bg: { kind: "command" | "agent"; ms: numb
   notify("item/started", { threadId, turnId: turn, item: a });
   notify("item/completed", { threadId, turnId: turn, item: a });
   notify("turn/started", { threadId: child, turn: { id: childTurn, status: "inProgress", items: [] } });
-  setTimeout(() => {
+  onBackgroundEnd(bg, () => {
     notify("item/completed", { threadId: child, turnId: childTurn, item: { type: "agentMessage", id: randomUUID(), text: "sub-agent reply" } });
     notify("turn/completed", { threadId: child, turn: { id: childTurn, status: "completed", items: [] } });
     const c = activity("completed");
     notify("item/started", { threadId, turnId: turn, item: c });
     notify("item/completed", { threadId, turnId: turn, item: c });
-  }, bg.ms);
+  });
 }
 
 /**

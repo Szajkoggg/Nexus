@@ -2,7 +2,7 @@
 // What it does is in fake-behaviour.ts.
 import { existsSync, readFileSync } from "node:fs";
 import {
-  BACKGROUND_NOTICE, PARTIAL, actOnRead, contextTokens, contextWindow, fakeSaved, interrupt, record, recordArgs, respond, saveFakeConversation, type Fake, type FakeFailure,
+  BACKGROUND_NOTICE, PARTIAL, actOnRead, contextTokens, contextWindow, fakeSaved, interrupt, onBackgroundEnd, record, recordArgs, respond, saveFakeConversation, type Background, type Fake, type FakeFailure,
 } from "./fake-behaviour.ts";
 
 // The briefing as the CLI reads it at its start (--append-system-prompt-file): the file is rewritten at the next start.
@@ -94,19 +94,19 @@ async function turn(text: string): Promise<void> {
  * left, and a turn the CLI starts by itself (system init) with the notification.
  */
 let tasks: { task_id: string; task_type: string; description: string }[] = [];
-function startBackground(bg: { kind: "command" | "agent"; ms: number }): void {
+function startBackground(bg: Background): void {
   const task = { task_id: `task-${tasks.length + 1}`, task_type: bg.kind === "agent" ? "local_agent" : "local_bash", description: bg.kind === "agent" ? "fake sub-agent" : "fake background command" };
   tasks = [...tasks, task];
   out({ type: "system", subtype: "background_tasks_changed", tasks, uuid: "u", session_id: "fake" });
   out({ type: "system", subtype: "task_started", task_id: task.task_id, description: task.description, is_backgrounded: true, task_type: task.task_type, uuid: "u", session_id: "fake" });
-  setTimeout(() => {
+  onBackgroundEnd(bg, () => {
     tasks = tasks.filter((t) => t !== task);
     out({ type: "system", subtype: "task_updated", task_id: task.task_id, patch: { status: "completed" }, uuid: "u", session_id: "fake" });
     out({ type: "system", subtype: "task_notification", task_id: task.task_id, status: "completed", summary: `${task.description} completed`, uuid: "u", session_id: "fake" });
     out({ type: "system", subtype: "background_tasks_changed", tasks, uuid: "u", session_id: "fake" });
     queue.push(`${BACKGROUND_NOTICE} ${task.description} completed`);
     void pump();
-  }, bg.ms);
+  });
 }
 
 /**
