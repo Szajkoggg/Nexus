@@ -4,7 +4,7 @@
 // (src/conversations.ts). Agents rely on them (a change to one carries an `Agents:` line in its commit), so each is
 // covered by a snapshot test: test/prompts.test.ts compares what the agents' processes receive with golden files.
 import {
-  DEFAULT_ORCHESTRATOR_CONTEXT_TOKENS, INTEGRATION_CONDITION, REUSE_TOKENS, fileList, tokenCount, formatClock, latestCheckSet, reviewRound, openPlan, formatSeconds, isCheckMetric, languageName, levelNow, metricValueText, releasedText, runIsOlder, stepChecks, type CheckSet, type MetricValue, type AwayNow, type PlanDecision, type ConversationWeb, type InboxView, type LanguageCode, type ProjectFile, type ProjectState, type QuestionView, type QueueView, type SessionView, type StepView, type PassOnReason, type TagProposal, tagsText,
+  DEFAULT_ORCHESTRATOR_CONTEXT_TOKENS, INTEGRATION_CONDITION, REUSE_TOKENS, fileList, tokenCount, formatClock, formatDuration, latestCheckSet, reviewRound, openPlan, formatSeconds, isCheckMetric, languageName, levelNow, metricValueText, releasedText, runIsOlder, stepChecks, type CheckSet, type MetricValue, type AwayNow, type PlanDecision, type ConversationWeb, type InboxView, type LanguageCode, type ProjectFile, type ProjectState, type QuestionView, type QueueView, type SessionView, type StepView, type PassOnReason, type TagProposal, tagsText,
 } from "@nexus/protocol";
 import type { ClosingContext } from "./closing.ts";
 import type { IntegrationContext } from "./integration.ts";
@@ -256,12 +256,6 @@ export function summaryReason(why: "context" | "runtime", next: string, runtime:
   return why === "runtime" ? `step ${next} runs on ${RUNTIME_NAME[runtime]}` : `this session's context holds ${tokenText(context!.tokens)} (${Math.round(context!.fill * 100)}% full)`;
 }
 
-/** Minutes as words: "75 min", "2 h 5 min". */
-function idleText(minutes: number): string {
-  const h = Math.floor(minutes / 60), m = minutes % 60;
-  return h ? `${h} h${m ? ` ${m} min` : ""}` : `${m} min`;
-}
-
 /** The step is over and the next runs in a fresh session (`because`, from summaryReason): the summary is asked for. */
 export function summaryRequest(done: string, because: string): string {
   return `[Nexus] Step ${done} is over, and ${because}: the next step runs in a fresh session. Before that, write your context summary with \`nexus context "<what a successor needs to know>" --topics a,b --files x,y\` by its standard (\`nexus help context\`: where the work stands, the decisions and why with the ways dropped, the traps, the important files, what comes next, what was asked or promised), then end your turn. Do not start anything else.`;
@@ -273,7 +267,7 @@ export function summaryRequest(done: string, because: string): string {
  */
 export function switchReason(why: "context" | "runtime" | "refactor" | "idle", next: string, runtime: keyof typeof RUNTIME_NAME, old: keyof typeof RUNTIME_NAME, context: ContextSize | undefined, idle?: number): string {
   if (why === "refactor") return `step ${next} is the queue's closing refactoring step, which reads the queue's work with fresh eyes`;
-  if (why === "idle") return `the session that ran the queue so far was idle for ${idleText(idle ?? 0)}, past the life of its prompt cache, and left a context summary`;
+  if (why === "idle") return `the session that ran the queue so far was idle for ${formatDuration((idle ?? 0) * 60_000)}, past the life of its prompt cache, and left a context summary`;
   return why === "runtime"
     ? `step ${next} runs on ${RUNTIME_NAME[runtime]}, and the session that ran the queue so far is a ${RUNTIME_NAME[old]} session`
     : `the session that ran the queue so far had ${tokenText(context!.tokens)} in its context (${Math.round(context!.fill * 100)}% full)`;

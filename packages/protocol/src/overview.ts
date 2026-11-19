@@ -2,6 +2,7 @@
 // what a fresh orchestrator session starts from (apps/server/src/orchestrator.ts). Pure: it reads a derived state.
 import { stopPlace } from "./attention.ts";
 import { openPlan } from "./plan.ts";
+import { formatDuration } from "./times.ts";
 import { trainText } from "./train.ts";
 import type { BasePull } from "./schemas.ts";
 import type { ProjectState, QueueView, SessionView, StepView } from "./state.ts";
@@ -26,17 +27,11 @@ export function switchLines(q: Pick<QueueView, "run">): string[] {
     const why = s.why === "runtime" ? "the step runs on another runtime"
       : s.why === "refactor" ? "the closing refactoring step reads the queue's work with fresh eyes"
       : s.why === "usage" ? "the old session's runtime was beyond the usage threshold"
-      : s.why === "idle" ? `the old session was idle for ${minutesText(s.idle_minutes ?? 60)}, past its cache's life`
+      : s.why === "idle" ? `the old session was idle for ${formatDuration((s.idle_minutes ?? 60) * 60_000)}, past its cache's life`
       : `the old session's context was full${s.tokens !== undefined ? ` (${tokenCount(s.tokens)} tokens${s.fill !== undefined ? `, ${Math.round(s.fill * 100)} %` : ""})` : ""}`;
     const seed = s.summary === "written" ? "seeded with its context summary" : s.summary === "asked" ? "seeded with the summary it wrote when asked" : "seeded with the queue's text and its steps' summaries";
     return `  fresh session ${s.to} from ${s.step} at ${s.at.slice(0, 16).replace("T", " ")}: ${why}; ${seed}`;
   });
-}
-
-/** Minutes as words: "45 min", "2 h", "2 h 5 min". */
-function minutesText(minutes: number): string {
-  const h = Math.floor(minutes / 60), m = minutes % 60;
-  return h ? `${h} h${m ? ` ${m} min` : ""}` : `${m} min`;
 }
 
 /**
