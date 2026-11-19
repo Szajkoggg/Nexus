@@ -17,8 +17,10 @@ import { Orchestrator } from "../src/orchestrator.ts";
 import { LONGER, WAIT_MS, holdWork, sleep, until as waitUntil } from "./wait.ts";
 
 process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
-// The orchestrator's fake accepts a step whose review notice it gets.
-process.env.FAKE_REVIEW_ACCEPT = "1";
+// Not FAKE_REVIEW_ACCEPT: a notice that comes in while the held turn runs is read inside that turn, where the fake acts
+// on nothing but FAKE-NEXUS; whether it comes in during the turn or after it depends on the machine's load. The test
+// accepts as the orchestrator itself once the notice reached it.
+delete process.env.FAKE_REVIEW_ACCEPT;
 
 function setup() {
   const root = mkdtempSync(join(tmpdir(), "nexus-notice-lost-"));
@@ -60,6 +62,8 @@ test("a pass-on while the orchestrator's turn works on something else reaches it
     assert.ok(x.orchestrator.view().state === "working", "the pass-on came while the orchestrator's turn ran");
     hold.release();
     await x.until("the orchestrator's review notice", () => x.orchestratorSaw().some(reviewFact("R", "R1")), LONGER.step);
+    // Its acceptance, as nexus review accept writes it from the orchestrator's session.
+    x.store.appendEvent({ v: 1, id: newId(), at: new Date().toISOString(), session: x.orchestrator.session()!.id, type: "review.accepted", queue: "R", step: "R1", text: "fine" } as Event);
     await x.until("the run to finish", () => x.state().queues.find((q) => q.id === "R")?.run?.state === "finished", LONGER.run);
     assert.equal(x.step("R", "R1").accepted?.by, "orchestrator");
   } finally { x.stop(); hold.done(); }
