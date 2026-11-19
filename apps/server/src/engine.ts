@@ -147,7 +147,7 @@ const RESTART_KILL_MS = 10_000;
  * Context care's idle switch (queue FI): a session idle this long at a step boundary has lost its prompt cache (it
  * lives an hour), so its next turn would write the whole context again.
  */
-export const IDLE_SWITCH_MS = 60 * 60_000;
+const IDLE_SWITCH_MS = 60 * 60_000;
 
 /**
  * How many minutes a session has been idle at `nowMs`, when that is beyond IDLE_SWITCH_MS and its context summary is

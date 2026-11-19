@@ -1267,10 +1267,8 @@ export const RunFile = z.object({
    * (the closing refactoring step, which reads the queue's work with fresh eyes) or `usage` (in the middle of a step:
    * the old session's runtime was beyond the usage threshold, and the step goes on on its fallback, or back) or `idle`
    * (context care: the old session was idle beyond the cache's life, IDLE_SWITCH_MS, and had a fresh summary; queue FI;
-   * `idle_minutes` how long). `step` is
-   * the first step of the new session, `fill` the old session's context fill (0 to 1) and `tokens` its context tokens
-   * when known (tokens: since queue CT), `summary` where the
-   * seed came from: `written` (the worker's own summary of the step), `asked` (written when Nexus asked for it),
+   * `idle_minutes` how long). `step` is the first step of the new session, `fill` the old session's context fill (0 to
+   * 1) and `tokens` its context tokens when known (tokens: since queue CT), `summary` where the seed came from: `written` (the worker's own summary of the step), `asked` (written when Nexus asked for it),
    * `fallback` (none: the queue's description and the finished steps' summaries).
    */
   switches: z.array(z.object({
