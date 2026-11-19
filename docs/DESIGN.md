@@ -3571,6 +3571,12 @@ The read-only `nexus ideas status` command gives agents the same effective state
 partner's and orchestrator's instructions now combine that state with dated note content. IC4 owns the controls,
 labels and filters; IC5 owns the new idea conversation and direct handoff workflow.
 
+Queue ND made its default a text summary: the JSON carries every entry's snapshot (its whole text and its queues'
+evidence), and on the Nexus project it had grown to 2,522,476 bytes (49 entries), which an agent read whole at every
+planning or hand-over. The summary (per note and entry: the reference, the effective decision, the linked queues, the
+problems) is 4,910 bytes there; one entry's JSON is `nexus ideas status <file>.md#<date>` (about 36 KB), its text
+`nexus doc <file>.md#<date>`, everything `--full`.
+
 ## Ideas correction controls (IC4)
 
 The overview and entry consume the same server `effective` state, never interpreting legacy `built` as a user

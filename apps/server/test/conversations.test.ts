@@ -192,7 +192,7 @@ test("the hand-over instruction keeps to this conversation's topics and asks for
     assert.ok(sent.includes("Summarize only the topics discussed in this conversation, unless the user asked you to include others."), "the scope rule");
     assert.ok(sent.includes("another topic in the notes folder, even a related one, is not part of this hand-over: name its file at most, as 'see also', without its content."));
     assert.ok(sent.includes("Name the dates of the Decided entries you cover."), "the dates rule");
-    assert.ok(sent.includes("Run nexus ideas status for the current effective state."));
+    assert.ok(sent.includes("Run nexus ideas status for the current effective state (a summary per entry; one entry's full JSON: nexus ideas status <file>.md#<date>), and read an entry with nexus doc <file>.md#<date>."));
     assert.ok(sent.includes("effective user dispositions and assessment invalidations in .nexus/idea-statuses.yaml"));
     assert.ok(sent.includes("Report conflicts; Open/Ideas remain undecided."));
     assert.ok(sent.includes("does not approve or start a queue."));

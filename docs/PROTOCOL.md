@@ -1482,7 +1482,9 @@ nexus template list | show <id>                # the queue templates in effect (
 nexus recurring list                           # the recurring queues and their state (see "Recurring queues")
 nexus static-analysis [status]                 # the stacks and static analysis Nexus sees, and the reminder's state (see "Static analysis reminder")
 # any session
-nexus ideas status                             # effective dispositions, implementation assessments, conflicts and history, as JSON (read only)
+nexus ideas status                             # a summary (read only): per note and dated entry the reference (#<date> under the note's path), the effective decision (disposition; implementation), the linked queues with their status, and the problems: stale (an invalid assessment), reference (a broken or missing one), conflict (note and decision differ), blocked / caveat (the linked work); then the user's decisions that name no entry
+nexus ideas status agent-standards.md#2026-11-14   # one entry's effective status as JSON (entries, history, invalidations narrowed to it; revision); a note's path alone gives all its entries; the notes folder may be left out; an unknown date is refused with the note's dates
+nexus ideas status --full                      # everything as JSON: effective dispositions, implementation assessments with every entry's snapshot (its text and its queues' evidence), conflicts and history (megabytes on a large project)
 nexus ideas matches                            # the suggestions for matching earlier queues to the notes' entries, and the user's decisions (read only; deciding is the user's, in the dashboard)
 nexus doc docs/DESIGN.md                       # a Markdown file's headings: one per line, indented by level, with its # marks and line number (read only; no session needed)
 nexus doc docs/DESIGN.md#Static analysis       # one section: from its heading to the next heading of the same or a higher level; named by the heading's text or its anchor (static-analysis), case ignored
@@ -2430,7 +2432,7 @@ issues. Cancelled work is retained and never counted finished. Notes exclude dro
 roll up the least assessment (unconfirmed before partial before full), and retain a separate attention count even
 when all dates are inactive. No dated entries: `worked_out`; no active dates: Dropped if any, otherwise Replaced.
 
-`nexus ideas status` prints the same effective statuses as JSON, read-only from files. There is no CLI status-write
+`nexus ideas status --full` prints the same effective statuses as JSON, read-only from files; without it, a short text summary (or, given a reference, that entry's JSON: see "The `nexus` CLI"). There is no CLI status-write
 operation. Partner/orchestrator briefings and conversation handoffs require this effective state together with the
 notes; they do not treat Markdown markers as the only authority or work completion as confirmation. IC4 supplies
 the new dashboard controls and renders these fields.

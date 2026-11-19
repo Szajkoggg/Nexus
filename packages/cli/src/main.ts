@@ -19,6 +19,7 @@ import {
 } from "@nexus/protocol";
 import { checkRules, describeRules } from "@nexus/protocol/rules";
 import { importMarkdownQueues } from "./import-md.ts";
+import { ideaStatusFor, ideaStatusSummary } from "./ideas-summary.ts";
 import { docHeadings, headingsText, pickHeadings, sectionOptions, sectionText } from "./doc.ts";
 import { CONTEXT_SUMMARY_WORDS, HELP_TOPICS, topicList } from "./help.ts";
 
@@ -61,7 +62,11 @@ Agent commands (session from NEXUS_SESSION or --session):
                     entries of the notes it passes on (the notes folder may be left out: tags.md#2026-11-14)
   nexus ideas matches                 the suggestions for matching earlier queues to the notes' entries, and the
                                       user's decisions (deciding is the user's, in the dashboard)
-  nexus ideas status                  effective dispositions, implementation assessments, conflicts and history (JSON; read only)
+  nexus ideas status [<file>.md[#<date>]] [--full]   (read only) a summary: per note and entry the reference, the
+                                      effective decision, the linked queues and the problems (stale, broken reference,
+                                      conflict, unfinished work); with a reference: that entry's (or note's) full JSON;
+                                      --full: everything as JSON (large: every entry's text and evidence). The notes
+                                      folder may be left out; an entry's text: nexus doc <file>.md#<date>
   nexus doc <file.md>[#<section>]     (any session; read only) a Markdown file's headings, with their levels and lines;
                                       with #<section>: that one section (to the next heading of its level or higher),
                                       named by its heading or its anchor, or a date (tags.md#2026-11-14: that dated
@@ -171,7 +176,7 @@ const { values: o, positionals: args } = parseArgs({
     unit: { type: "string" }, show: { type: "string" }, target: { type: "string" }, "warn-above": { type: "string" }, "warn-below": { type: "string" },
     set: { type: "string", multiple: true }, template: { type: "string" }, every: { type: "string" }, "after-queues": { type: "string" },
     maintenance: { type: "string" }, findings: { type: "string" }, why: { type: "string" },
-    help: { type: "boolean", short: "h" }, reviews: { type: "boolean" }, switches: { type: "boolean" }, key: { type: "string" }, note: { type: "string" }, before: { type: "string" }, now: { type: "boolean" }, ref: { type: "string" },
+    help: { type: "boolean", short: "h" }, full: { type: "boolean" }, reviews: { type: "boolean" }, switches: { type: "boolean" }, key: { type: "string" }, note: { type: "string" }, before: { type: "string" }, now: { type: "boolean" }, ref: { type: "string" },
   },
 });
 
@@ -829,7 +834,7 @@ const commands: Record<string, () => void | Promise<void>> = {
     if (sub === "accept" || sub === "reject") throw new UsageError("accepting or rejecting a match of a queue to a note is the user's, in the dashboard (Ideas, Overview, To match)");
     if (sub !== "matches" && sub !== "status") throw new UsageError("nexus ideas matches | status (user decisions are dashboard-only)");
     const st = store();
-    if (sub === "status") { console.log(JSON.stringify(ideaStatuses(st, loadProjectState(st)), null, 2)); return; }
+    if (sub === "status") { ideasStatus(st); return; }
     const items = ideaMatches(st, loadProjectState(st)).items;
     const open = items.filter((m) => !m.decision);
     console.log(`${items.length} suggestion(s) for ${new Set(items.map((m) => m.queue)).size} queue(s); ${open.length} wait for the user`);
@@ -1297,6 +1302,30 @@ function draftFromTemplate(): void {
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, filledTemplateYaml(t, queue, shown), "utf8");
   console.log(`ok: draft ${shown} from template ${t.id} (${t.layer}); complete it, then: nexus queue draft ${shown}`);
+}
+
+/**
+ * `nexus ideas status [<ref>] [--full]`: by default a short summary (per note and entry: the reference, the effective
+ * decision, the linked queues, the problems); with a reference (a note's entry, or a whole note; the notes folder may
+ * be left out) the JSON of its entries; with --full the whole JSON, every entry's snapshot included.
+ */
+function ideasStatus(st: ProjectStore): void {
+  const statuses = ideaStatuses(st, loadProjectState(st));
+  const given = args[2]?.replaceAll("\\", "/");
+  if (given !== undefined) {
+    if (o.full) throw new UsageError("give either a reference or --full");
+    const dir = st.readProject().conversations.notes_dir;
+    const ref = dir && !given.startsWith(`${dir}/`) ? `${dir}/${given}` : given;
+    const narrowed = ideaStatusFor(statuses, ref);
+    if (!narrowed.entries.length) {
+      const note = ref.includes("#") ? ref.slice(0, ref.lastIndexOf("#")) : ref;
+      const dates = statuses.entries.filter((e) => e.ref.startsWith(`${note}#`)).map((e) => e.ref.slice(note.length + 1));
+      throw new UsageError(dates.length ? `${note} has no Decided entry ${ref.slice(note.length)} (its dates: ${dates.join(", ")})` : `no note ${note} with Decided entries (nexus ideas status lists them)`);
+    }
+    console.log(JSON.stringify(narrowed, null, 2));
+    return;
+  }
+  console.log(o.full ? JSON.stringify(statuses, null, 2) : ideaStatusSummary(statuses));
 }
 
 /**
