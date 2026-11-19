@@ -3,8 +3,8 @@
 // entry, the reference, the effective decision, the linked queues and the problems, in a few lines each.
 import type { IdeaStatusesResponse, IdeaStatusView } from "@nexus/protocol";
 
-/** The note a reference belongs to (the part before the #). */
-const noteOf = (ref: string): string => ref.slice(0, ref.lastIndexOf("#"));
+/** The note a reference belongs to (the part before the #; a note's own path as it is). */
+export const noteOf = (ref: string): string => (ref.includes("#") ? ref.slice(0, ref.lastIndexOf("#")) : ref);
 
 /** An entry's effective decision: its disposition (with what replaces it) and the user's implementation assessment. */
 function decision(e: IdeaStatusView): string {
@@ -37,7 +37,7 @@ export function ideaStatusSummary(s: IdeaStatusesResponse): string {
     lines.push("", note);
     for (const e of entries) {
       const queues = e.work.queues.length ? `queues ${e.work.queues.map((q) => `${q.id} ${q.status}`).join(", ")}` : "no queue";
-      lines.push(`  #${e.ref.slice(e.ref.lastIndexOf("#") + 1)}  ${decision(e)}; ${queues}`);
+      lines.push(`  ${e.ref.slice(note.length)}  ${decision(e)}; ${queues}`);
       for (const p of problems(e)) lines.push(`    ${p}`);
     }
   }

@@ -19,7 +19,7 @@ import {
 } from "@nexus/protocol";
 import { checkRules, describeRules } from "@nexus/protocol/rules";
 import { importMarkdownQueues } from "./import-md.ts";
-import { ideaStatusFor, ideaStatusSummary } from "./ideas-summary.ts";
+import { ideaStatusFor, ideaStatusSummary, noteOf } from "./ideas-summary.ts";
 import { docHeadings, headingsText, pickHeadings, sectionOptions, sectionText } from "./doc.ts";
 import { CONTEXT_SUMMARY_WORDS, HELP_TOPICS, topicList } from "./help.ts";
 
@@ -1331,8 +1331,8 @@ function ideasStatus(st: ProjectStore): void {
     const ref = dir && !given.startsWith(`${dir}/`) ? `${dir}/${given}` : given;
     const narrowed = ideaStatusFor(statuses, ref);
     if (!narrowed.entries.length) {
-      const note = ref.includes("#") ? ref.slice(0, ref.lastIndexOf("#")) : ref;
-      const dates = statuses.entries.filter((e) => e.ref.startsWith(`${note}#`)).map((e) => e.ref.slice(note.length + 1));
+      const note = noteOf(ref);
+      const dates = statuses.entries.filter((e) => noteOf(e.ref) === note).map((e) => e.ref.slice(note.length + 1));
       throw new UsageError(dates.length ? `${note} has no Decided entry ${ref.slice(note.length)} (its dates: ${dates.join(", ")})` : `no note ${note} with Decided entries (nexus ideas status lists them)`);
     }
     console.log(JSON.stringify(narrowed, null, 2));
