@@ -676,18 +676,18 @@ re-reads the system time once a minute), so the server, a `nexus` call and git m
 | `review.added` | `queue`, `step`, `items: [{path or url, label, kind?, before?, key?, role?, size?}]`, `round?` | Review material, `kind` = image, sheet, doc, data, link; `before`: the path of the picture this one is compared with; `key` (a view key), `role` (before, mockup, after, variant-a, variant-b, result) and `size` (`width`, `height` in pixels): a keyed picture, always with its `round` (see "Review pictures") |
 | `review.marked` | `queue`, `step`, `path`, `accepted` | User only: a review picture marked accepted (or the mark taken back). A mark only: it does not accept the step |
 | `review.commented` | `queue`, `step`, `path`, `text`, `to` (`send_back`, `note`, `orchestrator`), `note_step?` | User only: a comment on a review picture, and where it went (see "Review pictures") |
-| `check.result` | `queue`, `step`, `name`, `ok`, `summary`, `duration`, `commit?` | One check's outcome; `duration`: how long it ran, in seconds (optional, non-negative), which is also the metric `check:<name>`; `commit`: the HEAD of the session's checkout when it was reported (see "Project metrics"). For a step whose checks Nexus runs, the CLI refuses it (see "Checks run by Nexus") |
+| `check.result` | `queue`, `step`, `name`, `ok`, `summary?`, `duration?`, `commit?` | One check's outcome; `duration`: how long it ran, in seconds (optional, non-negative), which is also the metric `check:<name>`; `commit`: the HEAD of the session's checkout when it was reported (see "Project metrics"). For a step whose checks Nexus runs, the CLI refuses it (see "Checks run by Nexus") |
 | `check.disputed` | `queue`, `step`, `name`, `evidence` | Worker only: a check Nexus ran fails not because of the worker's work, with its evidence (`nexus check <step> <name> --unrelated`); Nexus runs it on the queue's base commit (see "Checks run by Nexus") |
 | `check.decided` | `queue`, `step`, `verdict` (`accept`, `fix`), `reason` | Orchestrator only: its decision on a disputed check Nexus could not run on the base (`nexus check decide`) |
 | `step.done` | `queue`, `step`, `summary`, `commit?`, `warning?`, `activities?` | Acceptance met; the step's work is finished. `warning`: what `nexus step done` warned about at the step's end (see the CLI). `activities`: what the worker actually did (`--activities`), from the same lists as a draft (see "Tags") |
 | `step.failed` | `queue`, `step`, `reason` | The step cannot be finished as written |
-| `queue.stop` | `queue`, `step`, `condition`, `reason` | A stop condition was met; the engine halts the queue. `condition`: the condition met, as the queue words it; `reason`: what happened, short. The derived queue keeps them apart in `stop` (`{ condition, reason }`, until a lift) besides `status_reason` ("<condition>: <reason>"); the stopped waiting item's `text` is the reason and its `condition` the condition. A stop known only as one text (a queue imported as stopped) has no `stop`, and shows its `status_reason` |
+| `queue.stop` | `queue`, `step?`, `condition`, `reason` | A stop condition was met; the engine halts the queue. `condition`: the condition met, as the queue words it; `reason`: what happened, short. The derived queue keeps them apart in `stop` (`{ condition, reason }`, until a lift) besides `status_reason` ("<condition>: <reason>"); the stopped waiting item's `text` is the reason and its `condition` the condition. A stop known only as one text (a queue imported as stopped) has no `stop`, and shows its `status_reason` |
 | `question.asked` | `queue?`, `step?`, `qid`, `text`, `options?`, `recommended?`, `can_continue` | A question; `can_continue` says whether independent work remains; `recommended`: the asker's recommendation, one of `options` (the CLI refuses another; the state drops it with a warning) |
 | `question.withdrawn` | `qid`, `reason` | No longer needed |
-| `answer.given` | `qid`, `text`, `escalate?`, `recommended?` | Orchestrator only: an answer, or an escalation to the user with its framing. With `escalate`, `recommended` is the orchestrator's recommendation, one of the question's options; it replaces the asker's on the derived question (`QuestionView.recommended`, and the waiting item's `recommended`), whose button the dashboard marks |
+| `answer.given` | `qid`, `text`, `escalate?`, `continue?`, `recommended?` | Orchestrator only: an answer, or an escalation to the user with its framing. `continue`: `nexus answer --continue` writes true, `--wait` false, neither leaves it out (whether the asker goes on or waits for more). With `escalate`, `recommended` is the orchestrator's recommendation, one of the question's options; it replaces the asker's on the derived question (`QuestionView.recommended`, and the waiting item's `recommended`), whose button the dashboard marks |
 | `note.read` | `note` | A note was received |
 | `message.read` | `message` | An inbox message was received |
-| `context.summary` | `text`, `topics: []`, `files: []` | What a successor or continuation needs to know; written at the end of each step |
+| `context.summary` | `queue?`, `step?`, `text`, `topics: []`, `files: []` | What a successor or continuation needs to know; written at the end of each step |
 | `queue.report` | `queue`, `path`, `summary`, `source_hash?`, `findings?` | The worker's report of the whole queue, written when it ends (done or stopped). `path` is the copy in the queue's folder (`.nexus/queues/<queue>/report.md`), which `nexus report` writes. The CLI records `source_hash` (`sha256:<64 lowercase hex digits>`) from the exact registered bytes, without text normalization; older events may omit it. `findings`: a maintenance queue's number of findings (`--findings`, a whole number from 0; see "Recurring queues") |
 | `change.proposed` | `queue`, `patch`, `reason` | A proposed change to a queue definition (needs a new approval) |
 | `queue.drafted` | `queue`, `definition` | Orchestrator only: a new or changed draft queue |
@@ -698,6 +698,7 @@ re-reads the system time once a minute), so the server, a `nexus` call and git m
 | `static_analysis.declined` | `reason` | Orchestrator only: the user declined the `static-analysis` template (`nexus static-analysis decline`); the server notes it in `static-analysis.yaml`, rests the reminder for 90 days and answers in `applied.jsonl` (see "Static analysis reminder") |
 | `metric.defined` | `name`, `unit?`, `show?`, `target?`, `warn_above?`, `warn_below?` | Orchestrator only: defines one of the project's metrics, or changes it (the whole definition); the server checks it, writes `metrics.yaml` and answers in `applied.jsonl` (see "Project metrics") |
 | `metric.recorded` | `queue`, `step`, `name`, `value`, `unit`, `commit?` | Worker only (the loader ignores it from any other session): a value of one of the project's metrics for the step, with the metric's unit then and the HEAD of the worker's checkout (see "Project metrics") |
+| `review.accepted` | `queue`, `step`, `text?`, `to?` (`next` or `orchestrator`) | Orchestrator or user (and Nexus itself for a model-free integration it accepts): a step in review is accepted; `text` is the note, `to` where the note goes (see "Review") |
 | `review.sent_back` | `queue`, `step`, `text` | Orchestrator or user only: a step in review goes back to its worker with what to fix (see "Sending a step back") |
 | `review.rejected` | `queue`, `step`, `text?` | User only (the loader ignores it from any other session, the orchestrator's included): rejects a step waiting for the user's review (see "Reject") |
 | `review.asked_user` | `queue`, `step`, `text` | The orchestrator's: a step waiting for its review goes to the user, with why. Also the server's from the user's session, when the user sets such a step's level to 1 (see "The user's level"): then taken for a step in review whoever its level gives it to, and marked `by: user` |
@@ -1330,8 +1331,10 @@ nexus log "Retrying the probe" [--level info|warn|error]   # a line into the ses
 nexus template list | show <id>                # the queue templates in effect (see "Queue templates")
 nexus recurring list                           # the recurring queues and their state (see "Recurring queues")
 nexus static-analysis [status]                 # the stacks and static analysis Nexus sees, and the reminder's state (see "Static analysis reminder")
-# thinking partner only
+# any session
+nexus ideas status                             # effective dispositions, implementation assessments, conflicts and history, as JSON (read only)
 nexus ideas matches                            # the suggestions for matching earlier queues to the notes' entries, and the user's decisions (read only; deciding is the user's, in the dashboard)
+# thinking partner only
 nexus covers tags.md#2026-11-14 docs/ideas/plan.md#2026-11-15   # in a hand-over: the Decided entries it passes on (ideas.covered); the notes folder may be left out; each checked against the notes, a missing note or date refused with the note's dates
 # orchestrator only
 nexus queue draft <file.yaml|->                # a new queue, or a change to one: a new revision
@@ -1346,8 +1349,8 @@ nexus tags propose --area <name> | --activity <prefix:name> [--reason ...]   # a
 nexus tags rename <old> <new> [--reason ...]    # the user accepts it (see "Tags"); `nexus tags` lists them (any session)
 nexus metric define bundle-kb --unit KB [--show line|bar|number] [--target 400] [--warn-above 500 | --warn-below=-1]
                                                # a project metric, or a change to one (see "Project metrics")
-nexus attach                                   # register a hand-started session as external
-# setup (the user)
+# setup
+nexus attach                                   # register a hand-started session as external (no role: it sets up the session itself)
 nexus project list                             # the registered projects
 nexus project add <path> [--id] [--name]       # creates .nexus/ (self-ignoring), registers the project, prints the rules files' check;
                                                # a kept .nexus/ (a project removed from Nexus) brings it back under its id
@@ -1402,9 +1405,9 @@ alone prints the commands and the topics. The topics live in `packages/cli/src/h
 | `questions` | A question (`nexus ask`) in three parts: what it blocks; the options; the asker's recommendation |
 | `refusals` | A refused action: no workaround through another tool or command that reaches the same end; one retry in a simpler form at most; then report what was needed and why |
 | `commits` | A clean working tree at every step's end: everything the step did committed (its own files only) and named with `nexus step done --commit`, so every commit belongs to one step |
-| `tests` | Running tests while working: only the affected test files, stopping at the first failure (in Nexus's repository `npm run test:files -- <files>`); the whole suite once at the step's end, as the queue's checks; a test that fails now and then is fixed at its cause, not run again until it passes |
+| `tests` | Running tests while working: only the affected test files, stopping at the first failure (in Nexus's repository `npm run test:files -- <files>`); the whole suite once at the step's end, as the queue's checks (run by Nexus after `nexus step done` where the step's opening says so, else by the worker and reported with `nexus check`); a test that fails now and then is fixed at its cause, not run again until it passes |
 
-The briefings carry these in a few lines each with the pointer: the worker's all four; the orchestrator's the refusal
+The briefings carry these in a few lines each with the pointer: the worker's all six; the orchestrator's the refusal
 rule and the summary and question shapes as it reads them (and escalates in); the thinking partner's the refusal
 rule.
 
@@ -1418,18 +1421,22 @@ violation (with the reason on stderr).
 The engine opens each step with one message to the worker:
 
 ```
-[Nexus] Queue W (revision 3, approved 2026-11-12), step W3 of W1–W7: Support.
+[Nexus] Queue W "Title" (revision 3, approved), step W3 (3 of 7): Support.
 Goal: ...
 Acceptance: ...
-Checks: <project's checks, as the run fixed them> + <queue's own>, each once
+Tags as planned: ...
+Checks for every step:                            # the project's checks as the run fixed them, then the queue's own, each once
+- ...                                             # followed, where Nexus runs them, by the line saying so (see "Checks run by Nexus")
 Review to prepare: <review.prepare>               # only with one, followed by the pointer to `nexus help review`
-Stop conditions: <project defaults> + <queue's own>
-Notes for this step (2): ...
-Answers to your earlier questions: ...
-Report with `nexus`. End the step with `nexus step done`, `nexus step failed` or `nexus stop`.
+Stop conditions (meeting one ends the queue: ...): <the queue's own> + <project defaults>
+Notes from the user for this step: ...
+Answers to your questions about this step: ...
+Begin with `nexus step start W3`. End with `nexus step done`, `nexus step failed` or `nexus stop`, then write `nexus context`.
 ```
 
-The template is a project setting, so each project can phrase it in its own terms.
+The text is fixed (`stepOpening` in `apps/server/src/prompts.ts`; the golden files in `apps/server/test/golden/` show it
+whole): it is no project setting. A closing, integration or merged-base step adds its own part, a survey step says it is a
+survey, and the last step asks for the queue's report.
 
 ## Checks run by Nexus
 

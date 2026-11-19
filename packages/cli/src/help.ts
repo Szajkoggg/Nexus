@@ -160,8 +160,9 @@ When an action is refused:
     summary: "a clean working tree at every step's end; the commit nexus step done reports",
     text: `nexus help commits: a clean working tree at every step's end
 
-Every commit belongs to exactly one step: the user keeps or discards a stopped step's commits, and Nexus pushes the
-commit an accepted step was reviewed at. So:
+Every commit belongs to exactly one step: the user keeps or discards a stopped step's commits, and, where the
+project's push_accepted setting is on (off by default), Nexus pushes the commit an accepted step was reviewed at.
+You never push. So:
   - Commit what the step did before nexus step done, and name it: nexus step done <step> --commit <sha>
     (the last commit, when the step made several).
   - Leave the working tree clean at the step's end, as at a stop: no uncommitted changes to tracked files. What is
