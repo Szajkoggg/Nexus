@@ -2,7 +2,7 @@
 // dashboard says them: a step's word while they wait for the machine or run, its check-fix round apart from its review
 // (send-back) rounds, and the latest set's checks one by one. Pure; the step's status itself is the derivation's
 // (packages/protocol/src/checks.ts).
-import type { CheckSet } from "@nexus/protocol";
+import type { CapacityHolder, CapacityWait, CheckSet } from "@nexus/protocol";
 import type { StepView } from "./api.ts";
 import { formatClock, t } from "./i18n.ts";
 
@@ -48,7 +48,7 @@ export function checkLine(step: CheckStep, now = new Date()): string | undefined
   }
 }
 
-export type CheckRowState = "passed" | "flaky" | "failed" | "running" | "waiting" | "interrupted";
+export type CheckRowState = "passed" | "flaky" | "failed" | "running" | "waiting" | "interrupted" | "notCommand";
 
 /** One check of a set as a row: its state now, its time once it ended, the failing tests' names. */
 export interface CheckRow { name: string; state: CheckRowState; duration?: number; tests: readonly string[]; log?: string }
@@ -62,10 +62,30 @@ export function checkRows(set: CheckSet, names: readonly string[]): CheckRow[] {
   return all.map((name) => {
     const c = set.checks.find((x) => x.name === name);
     const last = c?.runs.at(-1);
+    if (c?.not_command) return { name, state: "notCommand", tests: [] };
     if (!c || !last) return { name, state: "waiting", tests: [] };
     if (!last.ended_at) return { name, state: "running", tests: [] };
     if (last.interrupted) return { name, state: "interrupted", tests: [] };
     const state: CheckRowState = c.ok ? (c.flaky ? "flaky" : "passed") : c.ok === false ? "failed" : "running";
     return { name, state, duration: last.duration, tests: last.failed_tests ?? [], log: state === "failed" ? last.log : undefined };
   });
+}
+
+/**
+ * What a step whose checks wait for the machine waits behind (queue EF), from the capacity coordinator's file: its
+ * place in line and what holds the slot (another queue's checks, named with its project when it is another one's) or
+ * a full test run outside Nexus. Undefined when the file does not have the step in line (granted since, or no file):
+ * the box then says only since when it waits.
+ */
+export function queuedText(wait: CapacityWait | undefined, project: string, since: string, now = new Date()): string | undefined {
+  if (!wait) return undefined;
+  const name = (h: CapacityHolder) => h.project === project ? t("checks.holder.own", { queue: h.queue, step: h.step }) : t("checks.holder.other", { queue: h.queue, step: h.step, project: h.project });
+  const behind = [
+    ...wait.held.map((h) => t("checks.holder.running", { what: name(h), time: formatClock(h.since, now) })),
+    ...(wait.outside ? [t("checks.holder.outside", { cwd: wait.outside.cwd, pid: wait.outside.pid })] : []),
+    ...wait.ahead.map(name),
+  ];
+  const place = t("checks.place", { position: wait.position, count: wait.waiting });
+  const time = formatClock(since, now);
+  return behind.length ? t("checks.queuedBehind", { time, place, behind: behind.join("; ") }) : t("checks.queuedNext", { time, place });
 }

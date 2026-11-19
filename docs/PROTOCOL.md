@@ -223,7 +223,7 @@ legacy_policies: { W1: continue }      # each step's review policy from before r
 stop_conditions:                       # in addition to the project defaults
   - The climb probe finds a way up a wall of two levels or more that two attempts within the step do not remove.
 checks:                                # run for every step
-  - Core tests (v1 fingerprints unchanged), rock tests, climb probe, bench pictures.
+  - npm test                         # a command only (see "Checks run by Nexus"); a check in words is refused
 steps:
   - id: W1
     title: Voronoi fracture
@@ -1450,7 +1450,22 @@ leaves them to the worker, as below for `by: worker`.
 entry in `checks.yaml` (`by: nexus`). A step opened before (by an older server) has no entry, and its worker reports the
 checks with `nexus check` until the step ends. Every check, the project's (`defaults.checks`, as the run fixed them)
 and the queue's own, each once (`stepChecks`), is a shell command run in the queue's checkout **(P1)**; what only an
-agent can verify goes into the acceptance or `review.prepare`. The step's opening says under "Checks for every step"
+agent can verify goes into the acceptance or `review.prepare`.
+
+**Only a command can be a check** (queue EF, P1; `packages/protocol/src/commands.ts`). A check looks like a command
+when its first word (after any leading `NAME=value` assignments, without quotes) can run: one of the few shell
+built-ins a check uses (`echo`, `exit`, `cd`, `pushd`, `call`, `set`, `export`, `true`, `false`, `:`, `.`, `source`,
+`env`), a file given as a path (relative to the project's root, or absolute), a file in the project's root by its name,
+or a program on the PATH (on Windows with the `PATHEXT` extensions; a word with a capital letter must match the file's
+name as written, so "Az összes teszt zöld" is no call of `az.cmd`). `queue.drafted` (`applyDraft`) refuses a draft
+with a check that does not, every check of it, also one an older queue already had, and says that the text belongs in
+a step's acceptance or its `review.prepare`. A check of a queue approved before the rule, run by Nexus, is looked at
+the same way in the queue's checkout before it would run: one that is no command is recorded with `not_command: true`
+and no runs, neither passed nor failed, so it starts no check-fix round and no fix queue, and the set goes on without
+it. The orchestrator is told once per queue and check (`notify:checknotcommand:<queue>:<check>`) to convert it with a
+revision. The step's checks show it as `not a command` (`CheckView.not_command`, `ok: true`).
+
+The step's opening says under "Checks for every step"
 that Nexus runs them after `nexus step done`, that the worker neither runs nor reports them, and runs only the tests
 of what it changes.
 
@@ -1503,6 +1518,9 @@ steps:
                   failed_tests: ["engine › halts after the fix limit"], tail: "..." }
               - { started_at: ..., ended_at: ..., exit_code: 1, duration: 205, log: checks/W3/r1f0-1-npm-test.2.log }
             ok: false              # its outcome in the set; flaky: true when it failed, then passed
+          - name: All tests green  # an older queue's check in words: not_command: true, no runs, neither ok nor failed
+            command: All tests green
+            not_command: true
         dispute:                   # the worker's word that a failure is not its work's (below)
           event: 01JD...           # its check.disputed
           name: npm test
@@ -1670,6 +1688,12 @@ machine DESKTOP-1234 (one heavy operation at a time, across projects):
   outside Nexus: a full test run in C:\Code\Other (pid 4242, since 09:58); nothing is granted until it ends
 ```
 
+**The dashboard** (queue EF) reads the same file through `GET /api/capacity` (the file as it is, or null when there is
+none); the server broadcasts a `server` change whenever the coordinator writes it. A step whose checks are queued says
+in its **Checks by Nexus** box what it waits behind (`capacityWait`, `packages/protocol/src/capacity.ts`): its place in
+line (`position` of `waiting`), the operations holding the slot (another queue's checks, named with their project when
+it is another one), a full test run outside Nexus (`outside`, its folder and pid), and the requests ahead of it.
+
 **The full-test lock** **(P11)**. `scripts/test-lock.ts` stays the guard of `npm test` and `npm run test:times` for
 every starter (by hand, an agent, and the engine's checks, inside their grant). It no longer starts a run without the
 lock after a time (`NEXUS_TEST_LOCK_MAX_MS` is gone): a waiting run keeps waiting, saying once a minute what for (`npm
@@ -1798,7 +1822,7 @@ Also `GET /api/projects/:id/sessions/:session/activity?queue=&step=&limit=`, `GE
 wherever in the chat it is; a fresh session has none; and `earlier`: the sessions it went on from by its context care,
 oldest first, each `{ session, created_at, chat, switch: { at, fill, summary } }`, its newest entries in what the 300
 leave over, at least 60, `fill` from 0 to 1 or null and `summary` its `{ text, topics, files, at }` or null; the
-dashboard shows them above the current chat, a "Fresh session" line at each switch), `GET /api/digest?since=` (below), `GET /api/usage` and `GET /api/models/:runtime`: the models a runtime offers, asked from the runtime itself
+dashboard shows them above the current chat, a "Fresh session" line at each switch), `GET /api/digest?since=` (below), `GET /api/usage`, `GET /api/capacity` (the capacity coordinator's file, see "The capacity coordinator") and `GET /api/models/:runtime`: the models a runtime offers, asked from the runtime itself
 (Claude Code: an `initialize` control request on its stream-json input; Codex: `model/list`), with each model's
 name, description and effort levels; the dashboard offers only these.
 
@@ -1944,7 +1968,11 @@ successor, `up` (`commit`, `subject`, `previous?`). It also gives `push_on_deplo
 running at once), `away` (the away mode now: `on`, `since?`, `until?`), `plan` (the planned deploy, as in
 `deploy-plan.json`, with `waiting?`: what it waits for, in a sentence; null when none) and `running`: the steps running
 now, per project (`project`, `name`, `steps`: `queue`, `step`, `title`, `session`, `run`), which `nexus server status`
-prints. `POST /api/server/update` (`now?`, `ref?`, `by?`) and `POST /api/server/cancel` start and cancel an update.
+prints. A step is running now when the derivation says `running` and its queue's run is going, or it has none (a session Nexus did not start works on it) (`stepWorkedOn`,
+status-rules.ts; queue EF): a run the user stopped (paused, "stopped by the user") keeps its step `running` in the
+derivation, as the step it goes on with at Resume, and its queue `running` too, but no agent works on it, so it is
+not listed here, an update neither holds nor waits for it, and `GET /api/projects` does not count it in `running`
+(`queueWorkedOn`); the dashboard shows such a queue as paused, and `nexus status` prints its `run:` line. `POST /api/server/update` (`now?`, `ref?`, `by?`) and `POST /api/server/cancel` start and cancel an update.
 `by` is sent by `nexus server update` run in an orchestrator session (from `NEXUS_SESSION` and its project); the
 server keeps it only for an orchestrator session of a registered project. The dashboard sends none. `POST
 /api/server/plan` (`after`: `project`, `queue`, `step?`; or `at` and `deadline?`: "HH:MM" (its next occurrence; a

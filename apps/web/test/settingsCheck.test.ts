@@ -2,7 +2,7 @@
 // a whole number) cannot be saved; only the settings being saved are looked at.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { SEND_BACKS, STOPS, conditionList, savedConditions, settingsProblem } from "../src/settingsCheck.ts";
+import { FIX_LIMIT, SEND_BACKS, STOPS, conditionList, savedConditions, settingsProblem } from "../src/settingsCheck.ts";
 
 const keys = [STOPS, SEND_BACKS];
 
@@ -28,4 +28,11 @@ test("only the settings being saved are looked at (a following setting is not th
 test("the list as held and as saved: texts, trimmed on save", () => {
   assert.deepEqual(conditionList(undefined), []);
   assert.deepEqual(savedConditions(["  Stop before a schema change. "]), ["Stop before a schema change."]);
+});
+
+test("the check-fix limit (queue EF): a whole number of zero or more is saved; anything else is refused with its own text", () => {
+  assert.equal(settingsProblem({ [FIX_LIMIT]: 0 }, [FIX_LIMIT]), undefined);
+  assert.equal(settingsProblem({ [FIX_LIMIT]: 5 }, [FIX_LIMIT]), undefined);
+  for (const n of [-1, 1.5, "", undefined]) assert.deepEqual(settingsProblem({ [FIX_LIMIT]: n }, [FIX_LIMIT]), { kind: "badFixLimit" }, String(n));
+  assert.equal(settingsProblem({ [FIX_LIMIT]: -1 }, ["defaults.review_level"]), undefined, "a following limit is not the project's to save");
 });

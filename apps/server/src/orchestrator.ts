@@ -18,7 +18,7 @@ import type { UpdateNotice } from "./lifecycle.ts";
 import { describeDeployChanges, type DeployChanges } from "./deploy.ts";
 import type { PlanNotice } from "./deploy-plan.ts";
 import {
-  acceptedNoteNotice, approvalNotice, checkAcceptedNotice, checkDecisionNotice, cleanupWaitNotice, discardNotice, liftNotice, mergedNotice, mergeWaitNotice, missedStartNotice, noticeText, orchestratorBriefing, pausedNotice,
+  acceptedNoteNotice, approvalNotice, checkAcceptedNotice, checkDecisionNotice, checkNotCommandNotice, cleanupWaitNotice, discardNotice, liftNotice, mergedNotice, mergeWaitNotice, missedStartNotice, noticeText, orchestratorBriefing, pausedNotice,
   carriedMessages, formatInbox, orchestratorFreshSeed, orchestratorRuntimeSeed, orchestratorSummaryRequest, summaryLists, questionNotice, rejectionNotice, restartedNotice, fixAskedNotice, levelToUserNotice, reviewNotice, awayOnNotice, awayEndNotice, awayStuckNotice, planDecisionNotice, planHeldNotice, runEndNotice, maintenanceFindingsNotice, staticAnalysisNotice, stepNoteNotice, tagDecisionNotice, fallbackNotice, metricNotice, userMessage, withdrawalNotice,
 } from "./prompts.ts";
 import { shellRules } from "./shell-rules.ts";
@@ -882,6 +882,11 @@ ${n.text}` });
         const st = q.steps.find((x) => x.id === step);
         if (!st) continue;
         for (const set of entry.sets) {
+          // A check that is no command (queue EF): told once per queue and check, to convert it.
+          for (const c of set.checks) {
+            if (!c.not_command || (set.ended_at ?? set.requested_at) < since) continue;
+            items.push({ key: `notify:checknotcommand:${q.id}:${c.name}`, ...checkNotCommandNotice(q, st, c.name) });
+          }
           const d = set.dispute;
           if (!d || d.at < since) continue;
           if (set.state === "accepted") items.push({ key: `notify:checkaccepted:${q.id}:${step}:${set.done}`, ...checkAcceptedNotice(q, st, set) });

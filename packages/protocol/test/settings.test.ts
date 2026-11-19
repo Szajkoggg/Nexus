@@ -416,3 +416,21 @@ test("the stop conditions and the send-back limit (the settings panel, queue MX)
   assert.throws(() => updateSettings(store, { defaults: { review_send_back_limit: -1 }, own: ["defaults.review_send_back_limit"] }), (e: Error) => e instanceof ActionError && /review_send_back_limit/.test(e.message));
   assert.equal(effective().review_send_back_limit, 2);
 });
+
+test("the check-fix limit (the settings panel, queue EF): 3 built in, saved globally, a project's own, following again", () => {
+  const base = mkdtempSync(join(tmpdir(), "nexus-settings-"));
+  process.env.NEXUS_HOME = join(base, "home");
+  const store = ProjectStore.init(join(base, "p"), { id: "p", name: "P", root: join(base, "p") });
+  const limit = () => store.readProject().defaults.check_fix_limit;
+  assert.equal(limit(), 3, "built in");
+  updateGlobalSettings({ defaults: { check_fix_limit: 5 } });
+  assert.deepEqual([readGlobalSettings().defaults.check_fix_limit, limit()], [5, 5], "the global value reaches a following project");
+  updateSettings(store, { defaults: { check_fix_limit: 0 }, own: ["defaults.check_fix_limit"] });
+  assert.equal(store.readStoredProject().defaults.check_fix_limit, 0);
+  assert.ok(ownKeys(store.readStoredProject()).includes("defaults.check_fix_limit"));
+  updateGlobalSettings({ defaults: { check_fix_limit: 4 } });
+  assert.equal(limit(), 0, "a global change does not move the project's own");
+  updateSettings(store, { follow: ["defaults.check_fix_limit"] });
+  assert.equal(limit(), 4, "following again");
+  for (const n of [-1, 1.5]) assert.throws(() => updateGlobalSettings({ defaults: { check_fix_limit: n } }), (e: Error) => e instanceof ActionError && /check_fix_limit/.test(e.message));
+});

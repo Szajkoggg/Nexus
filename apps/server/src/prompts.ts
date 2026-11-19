@@ -428,7 +428,7 @@ runtime: claude                # optional, rarely: runtime, model, effort and fa
 stop_conditions:
   - ...
 checks:
-  - ...                        # run for every step
+  - ...                        # run for every step: a command only (its first word a program on the PATH or a file in the repository); a verification in words goes into acceptance or review.prepare, and the draft is refused
 steps:
   - id: W1
     title: ...
@@ -541,7 +541,7 @@ Read the queue (YAML given to you, or .nexus/queues/<id>/queue.yaml) and the pro
 - Order and dependencies: does each step have what it needs from the earlier ones?
 - The user's decisions: where the project says a matter is the user's (for example the look, gameplay, final numbers), is there a stop or a review point, rather than the agent deciding?
 - Stop conditions: do they cover what the project's rules require, and what this queue specifically risks?
-- Checks and review material: does each step say how it is verified, and what the user gets to see?
+- Checks and review material: does each step say how it is verified, and what the user gets to see? Is every check a command (its first word a program on the PATH or a file in the repository, such as npm test)? A check in words is refused when the queue is drafted: it belongs in a step's acceptance or its review.prepare.
 - Scope: does anything reach beyond what the user asked for?
 - Language: is the queue's text (title, description, goals, acceptance, stop conditions, checks, review notes; not ids or YAML keys) in the language the orchestrator names for it (the reader's language from Nexus's settings, since the user reads and approves the queue), or in English if it names none?
 
@@ -822,6 +822,17 @@ export function checkAcceptedNotice(q: QueueView, st: StepView, set: CheckSet): 
     todo: fix
       ? `Complete queue ${fix.id} (nexus status shows the queue's state; its definition is .nexus/queues/${fix.id}/queue.yaml; the project's checks, tags such as the area, the texts in the queue's language) with nexus queue draft, and put it into the plan; tell the user in one sentence. The worker's evidence: ${d.evidence}`
       : `Nexus could not propose a fix queue for it: draft one yourself from the template check-failure (nexus template show check-failure). The worker's evidence: ${d.evidence}`,
+  };
+}
+
+/**
+ * A check of the queue is no command (queue EF, P1): an older queue's check written in words. Nexus did not run it and
+ * the step went on; the orchestrator converts it.
+ */
+export function checkNotCommandNotice(q: QueueView, st: StepView, check: string): Notice {
+  return {
+    fact: `The check "${check}" of queue ${q.id} is not a command (its first word is no program on the PATH nor a file in the repository), so Nexus did not run it at step ${st.id}; it neither passed nor failed, and the step went on without it.`,
+    todo: `Convert it with a revision of queue ${q.id} (nexus queue draft): a check is a command Nexus runs in the queue's checkout; what it says in words goes into a step's acceptance, or what the user should see into its review.prepare. Tell the user in one sentence.`,
   };
 }
 

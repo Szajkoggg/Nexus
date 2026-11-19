@@ -10,10 +10,10 @@ import chokidar, { type FSWatcher } from "chokidar";
 import type { Server } from "node:http";
 import {
   ActionError, Effort, ProjectStore, addNote, closingToSkip, closingToSkipAtApproval, updateSettings, answerAsUser, approveQueue, deleteNote, loadProjectState, nexusHome, withdrawApproval, addAllowRule,
-  ensureGlobalSettings, readGlobalSettings, updateGlobalSettings, MaxRunning, ownKeys, OVERRIDABLE, settingKey, readRegistry, readUsage, readTurns, commentOnPicture, markPicture, routeAnswers, routeSendBacks, sendBack, sendMessage, setQueueSettings, setStepLevel, confirmProvisional, type ProjectState,
+  ensureGlobalSettings, readGlobalSettings, updateGlobalSettings, MaxRunning, ownKeys, OVERRIDABLE, settingKey, readRegistry, readCapacity, readUsage, readTurns, commentOnPicture, markPicture, routeAnswers, routeSendBacks, sendBack, sendMessage, setQueueSettings, setStepLevel, confirmProvisional, type ProjectState,
   readAway, writeAway, awayNow, awayUntil, turnAway, expireAway, acceptPlanProposal, declinePlanProposal, handBackPlan, acceptTagProposal, declineTagProposal,
   STAT_DIMENSIONS, STAT_FILTERS, projectMetrics, sinceTime, statDimension, statsReport, stepStats, usageDays, type ProjectMetrics, type StatsReport, type UsageDays,
-  SearchError, parseSearch, MIN_SAMPLES, queueEstimate, stepSamples, isOpenQuestion, writeCount, type EstimatesResponse, type LeftView, type TemplatesResponse, readTemplates, type ProjectSummary, type RemovalView,
+  SearchError, parseSearch, MIN_SAMPLES, queueEstimate, stepSamples, isOpenQuestion, queueWorkedOn, stepsWorkedOn, writeCount, type EstimatesResponse, type LeftView, type TemplatesResponse, readTemplates, type ProjectSummary, type RemovalView,
   projectIdeas, ideaMatches, ideaLinks, changeIdeaLinks, decideIdeaMatches, ideaStatuses, changeIdeaStatus, reconcileIdeaStatuses, readNotes, type IdeasResponse, type IdeaMatchesResponse,
   previewIdeaHandoff, sendIdeaHandoff, retryIdeaHandoff,
 } from "@nexus/protocol";
@@ -98,7 +98,7 @@ let capacity: Capacity | undefined;
 
 function refreshRegistry(): void {
   if (!active) return;
-  capacity ??= new Capacity();
+  capacity ??= new Capacity({ onChange: () => broadcast({ type: "server" }) });
   // Global settings (PROTOCOL.md): the file exists from the first start on, with the built-in defaults; each project's
   // project.yaml from before them is migrated once, before anything reads it (effective values unchanged).
   ensureGlobalSettings();
@@ -333,9 +333,11 @@ app.get("/api/projects", (c) => {
   const list: ProjectSummary[] = [...projects.values()].map((e) => {
     const s = stateOf(e);
     const count = (st: string) => s?.queues.filter((q) => q.status === st).length ?? 0;
+    // Running: at work now; a queue whose run the user stopped is not (queue EF, queueWorkedOn).
+    const running = s?.queues.filter(queueWorkedOn).length ?? 0;
     return {
       id: e.id, root: e.root, name: s?.project.name ?? e.id, error: e.error,
-      running: count("running"), waiting: count("waiting"), stopped: count("stopped"),
+      running, waiting: count("waiting"), stopped: count("stopped"),
       open_questions: s?.questions.filter(isOpenQuestion).length ?? 0,
       attention: s?.attention ?? [],
     };
@@ -797,6 +799,8 @@ app.get("/api/digest", (c) => {
 });
 
 app.get("/api/usage", (c) => c.json(readUsage() ?? null));
+// The workstation's heavy slot (<NEXUS_HOME>/capacity.yaml): what a step whose checks are queued waits behind.
+app.get("/api/capacity", (c) => c.json(readCapacity() ?? null));
 
 // Nexus itself: its version, and updating it without cutting off running work (src/lifecycle.ts).
 // `local`: whether this request comes straight from this machine (src/remote.ts isLocal), so the dashboard shows what
@@ -843,8 +847,10 @@ app.post("/api/server/away", async (c) => {
 function runningSteps() {
   return [...projects.values()].flatMap((e) => {
     const s = stateOf(e);
-    const steps = (s?.queues ?? []).flatMap((q) => q.steps.filter((x) => x.status === "running")
-      .map((x) => ({ queue: q.id, step: x.id, title: x.title, session: q.run?.session ?? null, run: q.run?.state ?? null })));
+    // Only steps whose run is going: a run the user stopped leaves its step "running" in the derivation, with no agent
+    // at work on it and nothing an update waits for (queue EF, stepWorkedOn).
+    const steps = stepsWorkedOn(s?.queues ?? [])
+      .map(({ queue: q, step: x }) => ({ queue: q.id, step: x.id, title: x.title, session: q.run?.session ?? null, run: q.run?.state ?? null }));
     return steps.length ? [{ project: e.id, name: s?.project.name ?? e.id, steps }] : [];
   });
 }

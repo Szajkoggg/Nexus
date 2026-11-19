@@ -1,8 +1,8 @@
 // The parts of a step's panel, each drawn from the step (StepDetail.tsx puts them in order: one order while the step
 // waits for the user's review, another otherwise).
 import { useState } from "react";
-import { latestChecks, stepChecks } from "@nexus/protocol/steps";
-import { act, enc, fileUrl, type QueueView, type SessionView, type StepView } from "../../api.ts";
+import { latestChecks, stepChecks, type CheckView } from "@nexus/protocol/steps";
+import { act, enc, fileUrl, useQuery, type QueueView, type SessionView, type StepView } from "../../api.ts";
 import { describe, isImage, type stepPictures } from "../../details.ts";
 import { draftKey } from "../../drafts.ts";
 import { fileHref } from "../../hash.ts";
@@ -20,7 +20,9 @@ import { usePage } from "../../page.ts";
 import { metricValueText } from "@nexus/protocol/metrics";
 import { latestCheckSet } from "@nexus/protocol/checks";
 import { stepMetrics } from "../../metrics.ts";
-import { checkRows, type CheckRowState } from "../../checks.ts";
+import { checkRows, queuedText, type CheckRowState } from "../../checks.ts";
+import { capacityWait } from "@nexus/protocol/capacity";
+import type { CapacityFile } from "@nexus/protocol";
 
 type Pairs = ReturnType<typeof stepPictures>["pairs"];
 interface StepProps { step: StepView }
@@ -41,21 +43,27 @@ export function RetryLine({ queue, step }: InQueue) {
 const ROW: Record<CheckRowState, { mark: string; tone: string }> = {
   passed: { mark: "✓", tone: "text-ok" }, flaky: { mark: "✓", tone: "text-warn" }, failed: { mark: "✗", tone: "text-danger" },
   running: { mark: "●", tone: "text-accent" }, waiting: { mark: "○", tone: "text-fg-3" }, interrupted: { mark: "–", tone: "text-fg-3" },
+  notCommand: { mark: "–", tone: "text-warn" },
 };
+
+/** A reported check outcome's mark and tone, as the rows of a check set show them. */
+const checkMark = (c: CheckView) => ROW[c.not_command ? "notCommand" : c.ok ? "passed" : "failed"];
 
 /**
  * The checks Nexus runs after the step's done (docs/PROTOCOL.md, "Checks run by Nexus"), while they decide the step:
  * waiting for the machine, running, on the queue's base commit, a dispute for the orchestrator, or a check-fix round
  * (said apart from the review rounds: a fix round is no send-back), with the latest set's checks one by one.
  */
-export function CheckRunBox({ queue, step }: InQueue) {
+export function CheckRunBox({ project, queue, step }: InQueue & { project: string }) {
   const set = latestCheckSet(queue, step);
   const c = step.checking;
+  // While they wait for the machine: what they wait behind, from the capacity coordinator's file (queue EF).
+  const capacity = useQuery<CapacityFile | null>(c?.phase === "queued" ? "/api/capacity" : undefined, usePage().all).data;
   const fixing = step.status === "running" && !!step.check_fix;
   if (!c && !fixing) return null;
   const disputed = set?.dispute;
   const time = c && formatClock(c.since, new Date());
-  const text = c?.phase === "queued" ? t("checks.queued", { time: time! })
+  const text = c?.phase === "queued" ? queuedText(capacityWait(capacity, project, queue.id, step.id), project, c.since) ?? t("checks.queued", { time: time! })
     : c?.phase === "running" ? t("checks.running", { time: time! })
     : c?.phase === "base" ? t("checks.base", { check: c.check ?? disputed?.name ?? t("checks.disputed"), evidence: disputed?.evidence ?? "…", time: time! })
     : c?.phase === "decision" ? t("checks.decision", { check: disputed?.name ?? t("checks.disputed"), evidence: disputed?.evidence ?? "…" })
@@ -248,7 +256,7 @@ export function StepChecks({ step }: StepProps) {
       <ul className="space-y-1 text-sm">
         {step.checks.map((c, i) => (
           <li key={i} className="flex gap-2">
-            <span className={c.ok ? "text-ok" : "text-danger"}>{c.ok ? "✓" : "✗"}</span>
+            <span className={checkMark(c).tone}>{checkMark(c).mark}</span>
             <span className="text-fg">{c.name}</span>
             {c.duration !== undefined && <span className="tabular-nums text-fg-2">{formatSeconds(c.duration)}</span>}
             {c.summary && <span className="text-fg-3">{c.summary}</span>}
@@ -412,7 +420,7 @@ export function ReviewPictures({ project, queue, step, pairs, orchestratorAsks }
         </div>
       )}
       <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-        {latestChecks(step.checks).map((c, i) => <span key={i} title={c.summary} className={c.ok ? "text-ok" : "text-danger"}>{c.ok ? "✓" : "✗"} {c.name}{c.duration !== undefined && <span className="tabular-nums text-fg-3"> {formatSeconds(c.duration)}</span>}</span>)}
+        {latestChecks(step.checks).map((c, i) => <span key={i} title={c.summary} className={checkMark(c).tone}>{checkMark(c).mark} {c.name}{c.duration !== undefined && <span className="tabular-nums text-fg-3"> {formatSeconds(c.duration)}</span>}</span>)}
         {(step.goal || step.acceptance.length > 0 || step.review?.prepare) && <Fold label={t("details.goalAcceptance")} open={!!fold.goal} onToggle={() => setFold((f) => ({ ...f, goal: !f.goal }))} />}
         <StepCommits project={project} queue={queue.id} step={step.id} toggle={{ open: !!fold.commits, onToggle: () => setFold((f) => ({ ...f, commits: !f.commits })) }} />
         {step.timeline.length > 0 && <Fold label={t("details.timeline")} open={!!fold.timeline} onToggle={() => setFold((f) => ({ ...f, timeline: !f.timeline }))} />}

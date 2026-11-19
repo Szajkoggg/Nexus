@@ -6,7 +6,8 @@
 // worktree setup before the checks; at a step boundary a base that merges cleanly is merged into the queue's branch, one
 // that conflicts is not, and `nexus status` says so. A server that stopped between the step's start and its done runs it
 // again from its start (a half-done merge aborted, a merge already made found as nothing to merge); an update's drain
-// waits for a running setup.
+// waits for a running setup. A check running when the server stops (Job Objects) is interrupted and runs again at
+// Resume after a plain restart, at once after an update, and leaves the machine's slot free (queue EF, EF4).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -15,7 +16,7 @@ import { orchestratorOverview } from "@nexus/protocol";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { INTEGRATION_CONDITION, NEXUS_SESSION, ProjectStore, approveQueue, loadProjectState, routeAnswers, setStepLevel, updateSettings, type StepDef } from "@nexus/protocol";
+import { INTEGRATION_CONDITION, NEXUS_SESSION, ProjectStore, approveQueue, loadProjectState, readCapacity, routeAnswers, setStepLevel, updateSettings, type StepDef } from "@nexus/protocol";
 import { Capacity } from "../src/capacity.ts";
 import { Engine } from "../src/engine.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
@@ -361,4 +362,80 @@ test("an update's drain waits for the setup that runs before the checks, and for
     assert.equal(x.integ().status, "done");
     assert.equal(x.runs().filter((r) => r === "setup").length, 4, "the setup ran again after the restart");
   } finally { hold.release(); hold.done(); x.stop(); }
+});
+
+// ---------------------------------------------------------------- a check running when the server stops (queue EF, EF4)
+
+/**
+ * Q1 done and its check passed, the integration step merged without a model and its check's first run still running
+ * (60 s): `unit` has run twice. The capacity coordinator's file is where the machine's slot is held.
+ */
+async function integrationCheckRunning(x: ReturnType<typeof setup>, hold: ReturnType<typeof holdWork>) {
+  x.engine.start("Q", { runtime: "claude" });
+  await x.until("Q1 at work", () => x.queue().steps[0]!.status === "running");
+  x.onMain("main.txt", "from main\n");
+  x.plan("unit", [0, "60000ms:0", 0]);
+  hold.release();
+  await x.until("the integration step's check to run", () => checkSets(x)[0]?.state === "running" && units(x) === 2);
+}
+const checkSets = (x: ReturnType<typeof setup>) => x.store.readChecks("Q")?.steps["Q.integrate"]?.sets ?? [];
+const units = (x: ReturnType<typeof setup>) => x.runs().filter((r) => r === "unit").length;
+/** The machine's slot is free: nothing held or waiting in the coordinator's file. */
+const slotFree = () => { const c = readCapacity(); return !c || (!c.held.length && !c.waiting.length); };
+
+test("a server that stopped while the integration step's check ran: interrupted, run again at Resume (not before), the slot free after (EC1 P9)", async () => {
+  const hold = holdWork();
+  // With Job Objects, as on the user's machine: ending the server ends the check's whole tree.
+  const x = setup([step("Q1", "slow")], { jobs: true });
+  try {
+    await integrationCheckRunning(x, hold);
+    assert.ok(!slotFree(), "the check holds the slot");
+    x.restart();
+    assert.equal(checkSets(x)[0]!.state, "interrupted", "what the old server ran is interrupted, not failed");
+    assert.equal(x.queue().run?.state, "paused", "a plain restart brings the run back paused");
+    assert.equal(x.integ().status, "checking");
+    assert.ok(slotFree(), "the new server's coordinator holds nothing for the old server's check");
+    // P9: after a plain restart the check runs again when the run goes on, not by itself.
+    await new Promise((r) => setTimeout(r, 1500));
+    assert.equal(units(x), 2, "not run again before Resume");
+    x.engine.resume("Q");
+    await x.until("the check run again and the step in its review", () => units(x) === 3 && ["review", "done"].includes(x.integ().status));
+    assert.deepEqual(checkSets(x).map((s) => s.state), ["passed"], "the same set, run again from its start");
+    await x.until("the slot free", slotFree);
+  } finally { hold.done(); x.stop(); }
+});
+
+test("a server that stopped while the integration step's check ran, its done and merge not recorded: the merge is aborted, the step and its check run again at Resume", async () => {
+  const hold = holdWork();
+  const x = setup([step("Q1", "slow")], { jobs: true });
+  try {
+    await integrationCheckRunning(x, hold);
+    x.stop();
+    // As if the server had stopped earlier still, in the middle of its merge (the M11 case, with a check running).
+    const start = x.crashBeforeDone();
+    x.git(x.wt(), "reset", "-q", "--hard", start);
+    x.git(x.wt(), "merge", "--no-commit", "--no-ff", "main");
+    x.restart();
+    assert.equal(x.integ().status, "running");
+    x.engine.resume("Q");
+    const started = () => x.integ().timeline.filter((e) => e.type === "step.started" && e.session === NEXUS_SESSION).length;
+    await x.until("the step run again, and its check", () => started() === 2 && units(x) === 3 && ["review", "done"].includes(x.integ().status));
+    assert.deepEqual(checkSets(x).map((s) => s.state), ["interrupted", "passed"], "the old done's set stays interrupted; the new done's passed");
+    await x.until("the slot free", slotFree);
+  } finally { hold.done(); x.stop(); }
+});
+
+test("an update while the integration step's check ran: the drain ends it, and the next server runs it again at once (EC1 P9)", async () => {
+  const hold = holdWork();
+  const x = setup([step("Q1", "slow")], { jobs: true });
+  try {
+    await integrationCheckRunning(x, hold);
+    x.engine.drainForUpdate(false);
+    await x.until("the drain to end the check", () => x.engine.idle() && checkSets(x)[0]!.state === "interrupted");
+    assert.equal(x.queue().run?.resume_after_restart, true);
+    x.restart(); // the successor resumes the held run by itself
+    await x.until("the check run again and the step in its review", () => units(x) === 3 && ["review", "done"].includes(x.integ().status));
+    assert.deepEqual(checkSets(x).map((s) => s.state), ["passed"]);
+    await x.until("the slot free", slotFree);
+  } finally { hold.done(); x.stop(); }
 });

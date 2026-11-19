@@ -1348,6 +1348,12 @@ const CheckRun = z.object({
   /** Its outcome in the set: passed on the first run or the second (then also `flaky`). */
   ok: z.boolean().optional(),
   flaky: z.boolean().optional(),
+  /**
+   * Not a command (queue EF, P1): its first word is no program on the PATH nor a file in the checkout (commands.ts), as
+   * a check of an older queue written in words. Not run, neither passed nor failed: the set goes on without it, and the
+   * orchestrator is told to convert the queue's check.
+   */
+  not_command: z.boolean().optional(),
 });
 export type CheckRun = z.infer<typeof CheckRun>;
 

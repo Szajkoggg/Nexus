@@ -15,7 +15,7 @@ import { levelTitle } from "./Levels.tsx";
 import { ProjectTags } from "./Tags.tsx";
 import { DangerZone } from "./DangerZone.tsx";
 import { PlannedDeployCard, type PlannedDeploy } from "./DeployPlan.tsx";
-import { SEND_BACKS, STOPS, conditionList, savedConditions, settingsProblem, type SettingsProblem } from "../settingsCheck.ts";
+import { FIX_LIMIT, SEND_BACKS, STOPS, conditionList, savedConditions, settingsProblem, type SettingsProblem } from "../settingsCheck.ts";
 import { usePage } from "../page.ts";
 import { NotifySettingsRows } from "./NotifySettings.tsx";
 
@@ -104,7 +104,7 @@ const WEB_HINT: Record<string, Key> = { off: "settings.web.offHint", search: "se
 const SETTING_KEYS = [
   "defaults.stop_conditions", "defaults.review_level", "defaults.review_send_back_limit", "defaults.context_reuse_threshold",
   "defaults.context_care", "defaults.protect_nexus", "defaults.push_accepted", "defaults.provisional_counts", "defaults.merge_back", "defaults.resolve_conflicts", "defaults.usage_pause_threshold",
-  "defaults.max_running",
+  "defaults.max_running", "defaults.check_fix_limit",
   "runtimes.default", "runtimes.claude.model", "runtimes.claude.effort", "runtimes.claude.permission_mode",
   "runtimes.codex.model", "runtimes.codex.effort", "runtimes.codex.sandbox", "runtimes.codex.approval_policy", "runtimes.codex.approvals_reviewer",
   "conversations.runtime", "conversations.model", "conversations.effort", "conversations.web",
@@ -312,6 +312,12 @@ function SettingRows({ form, project }: { form: Form; project?: { values: Record
               onChange={(e) => f.set(SEND_BACKS, e.target.value === "" ? "" : Number(e.target.value))} className={`${field} w-24`} />
           )}
         </Setting>
+        <Setting form={f} keys={[FIX_LIMIT]} label={t("settings.checkFixLimit")} hint={t("settings.checkFixLimitHint")}>
+          {(d) => (
+            <input type="number" min={0} step={1} disabled={d} value={f.get(FIX_LIMIT)} aria-label={t("settings.checkFixLimit")}
+              onChange={(e) => f.set(FIX_LIMIT, e.target.value === "" ? "" : Number(e.target.value))} className={`${field} w-24`} />
+          )}
+        </Setting>
         <Setting form={f} keys={[STOPS]} label={t("settings.stops")} hint={t("settings.stopsHint")}>
           {(d) => <ConditionList value={f.list(STOPS)} onChange={(v) => f.set(STOPS, v)} disabled={d} />}
         </Setting>
@@ -418,7 +424,7 @@ function ConditionList({ value, onChange, disabled }: { value: string[]; onChang
 }
 
 /** What stops a save, in a sentence for the save row. */
-const problemText = (p: SettingsProblem) => (p.kind === "emptyCondition" ? t("settings.problem.emptyCondition", { n: p.n }) : t("settings.problem.badLimit"));
+const problemText = (p: SettingsProblem) => (p.kind === "emptyCondition" ? t("settings.problem.emptyCondition", { n: p.n }) : t(p.kind === "badFixLimit" ? "settings.problem.badFixLimit" : "settings.problem.badLimit"));
 
 /**
  * Save, and beside it what stops a save (the button is off then) or how the last one went. The same on the project's

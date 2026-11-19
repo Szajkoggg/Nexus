@@ -82,7 +82,7 @@ runtime: claude                # optional, rarely: runtime, model, effort and fa
 stop_conditions:
   - ...
 checks:
-  - ...                        # run for every step
+  - ...                        # run for every step: a command only (its first word a program on the PATH or a file in the repository); a verification in words goes into acceptance or review.prepare, and the draft is refused
 steps:
   - id: W1
     title: ...
