@@ -2,7 +2,7 @@
 // messages and answers to live sessions, and records what the agent does. See docs/DESIGN.md, "Nexus drives the
 // queue, step by step". All of its state is in files (run.yaml, runtime.json, delivered.jsonl, activity.jsonl);
 // the processes are the only thing a restart loses, and a restart pauses the runs that had one.
-import { changedFiles, checkoutOf, git as gitRead, ownWorktree, recordStepEnd, recordStepStart } from "./gitinfo.ts";
+import { changedFiles, checkoutOf, git as gitRead, ownWorktree, recordStepEnd, recordStepStart, recordTurn } from "./gitinfo.ts";
 import { AcceptedPusher } from "./accepted.ts";
 import type { GitRunner } from "./deploy.ts";
 import type { ChildProcess } from "node:child_process";
@@ -549,6 +549,7 @@ export class Engine implements Member {
     this.clearRestartKill(run.session);
     this.clearTimer(queueId);
     this.endBackgroundWait(queueId);
+    // Stamped after the step's last events (writeRun reads the session's log first).
     this.writeRun(queueId, toPausedByUser(run, "stopped at once by the user; uncommitted changes kept"));
     this.checks?.stop(queueId);
     if (run.step) {
@@ -1590,7 +1591,14 @@ export class Engine implements Member {
     // handlers run after it.
     return this.host.start(session, launch, {}, () => ({
       tag,
-      activity: (a) => this.store.appendActivity(session.id, { at: now(), ...a, ...tag() }),
+      activity: (a) => {
+        const t: { queue?: string; step?: string } = tag();
+        this.store.appendActivity(session.id, { at: now(), ...a, ...t });
+        // The HEAD around each turn of a step: which commits the step made (src/gitinfo.ts).
+        if ((a.kind === "turn_start" || a.kind === "turn_end") && t.queue && t.step) {
+          recordTurn(this.store, t.queue, t.step, a.kind === "turn_start" ? "start" : "end");
+        }
+      },
       refusal: (r) => {
         // One record per refusal, also across processes of the session (a resumed runtime may repeat its list).
         if (r.ref && this.store.readRefusals(session.id).entries.some((x) => x.ref === r.ref)) return;
@@ -1778,6 +1786,9 @@ export class Engine implements Member {
     // ended_at: set when the run stops going (finished, halted, paused), kept while it stays stopped, cleared when it
     // goes on, so the dashboard can show when it ended and how long it took.
     const old = this.store.readRun(queueId);
+    // A run that stops going is stamped after what its worker wrote last, even a line the watcher has not delivered
+    // yet: reading the session's log takes its times up (docs/DESIGN.md, "Clock steps").
+    if (runEnded(run) && !(old && runEnded(old)) && run.session) this.store.readEvents(run.session);
     const ended = runEnded(run)
       ? (old && runEnded(old) && old.ended_at ? old.ended_at : now())
       : undefined;

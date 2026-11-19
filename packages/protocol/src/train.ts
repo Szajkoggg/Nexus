@@ -7,6 +7,7 @@
 // and lets go the runs (src/merger.ts); here: the rule and the view.
 import type { ProjectFile } from "./schemas.ts";
 import { notMergedBack } from "./plan.ts";
+import { compareIds } from "./ids.ts";
 import { pendingProvisional, stepClosed, type QueueView } from "./state.ts";
 
 type TrainQueue = Pick<QueueView, "id" | "status" | "steps" | "run" | "git" | "rejection">;
@@ -76,7 +77,7 @@ export function trainsOf(project: TrainProject, queues: readonly TrainQueue[]): 
     t[s.kind].push([s.key, q.id]);
     found.set(base, t);
   }
-  const order = (xs: [string, string][]) => xs.sort((a, b) => a[0].localeCompare(b[0]) || a[1].localeCompare(b[1])).map((x) => x[1]);
+  const order = (xs: [string, string][]) => xs.sort((a, b) => a[0].localeCompare(b[0]) || compareIds(a[1], b[1])).map((x) => x[1]);
   for (const [base, t] of found) out.set(base, { base, active: order(t.active), line: order(t.line) });
   return out;
 }

@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import {
-  NEXUS_SESSION, applyDraft, checkSetOf, fillTemplate, lastDone, latestCheckSet, now, readTemplates, reviewRound, stepChecks,
+  NEXUS_SESSION, applyDraft, checkSetOf, fillTemplate, isCommand, lastDone, latestCheckSet, now, readTemplates, reviewRound, stepChecks,
   type CheckAttempt, type CheckDispute, type CheckRun, type CheckSet, type ChecksFile, type Event, type InboxEntry, type ProjectState,
   type ProjectStore, type QueueView, type RunFile, type StepView,
 } from "@nexus/protocol";
@@ -238,6 +238,12 @@ export class CheckRunner {
       const failed: string[] = [];
       for (const [i, c] of set.checks.entries()) {
         if (a.stopped) break;
+        // A check of an older queue written in words is no command (queue EF, P1): recorded as such, not run, and not
+        // failed; the orchestrator is told to convert it.
+        if (!isCommand(c.command, cwd, checkEnv())) {
+          this.update(queue, step, done, (s) => { s.checks[i]!.not_command = true; });
+          continue;
+        }
         if (!(await this.attempt(a, grant, queue, step, done, c, i, cwd, 1))) failed.push(c.name);
       }
       // Each failed check once more, in the same grant: the code has not changed (P3).

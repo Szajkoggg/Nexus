@@ -2,7 +2,7 @@
 // what waits in which order and behind what, and a full test run outside Nexus.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { capacityLines, type CapacityFile } from "../src/index.ts";
+import { capacityLines, capacityWait, type CapacityFile } from "../src/index.ts";
 
 const now = new Date(2026, 10, 18, 10, 30);
 const local = (h: number, m: number) => new Date(2026, 10, 18, h, m).toISOString();
@@ -37,4 +37,21 @@ test("a full test run outside Nexus is what the line waits behind", () => {
   ]);
   // A holder whose time cannot be read is shown as the lock says it.
   assert.match(capacityLines(file({ waiting: [req("a", "Q", "Q1", local(10, 3))], outside: { cwd: "?", pid: 0, since: "?" } }), now)[2]!, /since \?\)/);
+});
+
+test("where a step's checks wait (queue EF): its place in line, what holds the slot, what is ahead, a run outside Nexus", () => {
+  const c = file({
+    held: [req("demo", "CK", "CK1", local(10, 0), local(10, 1))],
+    waiting: [req("demo", "AB", "AB2", local(10, 5)), req("shop", "PAY", "PAY1", local(10, 6))],
+  });
+  assert.deepEqual(capacityWait(c, "shop", "PAY", "PAY1"), {
+    position: 2, waiting: 2,
+    held: [{ project: "demo", queue: "CK", step: "CK1", since: local(10, 1) }],
+    ahead: [{ project: "demo", queue: "AB", step: "AB2", since: local(10, 5) }],
+  });
+  assert.equal(capacityWait(c, "shop", "PAY", "PAY2"), undefined, "not in line");
+  assert.equal(capacityWait(undefined, "shop", "PAY", "PAY1"), undefined, "no file");
+  const outside = { cwd: "C:\Code\Nexus", pid: 4242, since: local(9, 58) };
+  assert.deepEqual(capacityWait(file({ waiting: [req("shop", "PAY", "PAY1", local(10, 6))], outside }), "shop", "PAY", "PAY1"),
+    { position: 1, waiting: 1, held: [], ahead: [], outside });
 });

@@ -71,6 +71,8 @@ export function applyCheckSets(q: QueueView, st: StepView, limit?: number): void
   if (!entry) return;
   st.checks_by = entry.by;
   for (const set of entry.sets) for (const c of set.checks) {
+    // Not a command (an older queue's check in words, queue EF): not run, and it holds nothing up.
+    if (c.not_command) { st.checks.push({ name: c.name, ok: true, not_command: true, summary: "not a command: not run", at: set.ended_at ?? set.requested_at, by: "nexus" }); continue; }
     const last = c.runs.at(-1);
     if (!last?.ended_at || last.interrupted || c.ok === undefined) continue;
     st.checks.push({ name: c.name, ok: c.ok, summary: checkRunSummary(c), duration: last.duration, at: last.ended_at, by: "nexus", ...(c.flaky ? { flaky: true } : {}) });

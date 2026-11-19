@@ -15,7 +15,7 @@
 // server panel; limits.json, where it was kept before, is its copy for an older server) and a project's own value of it
 // (its effective `defaults.max_running`: the global one when it has none of its own).
 import {
-  isOpenQuestion, runHoldsCheckout, runCounted, loadProjectState, readGlobalSettings,
+  compareIds, isOpenQuestion, runHoldsCheckout, runCounted, loadProjectState, readGlobalSettings,
   type ProjectState, type ProjectStore, type QueueView,
 } from "@nexus/protocol";
 import { checkoutPath, samePath } from "./worktree.ts";
@@ -213,7 +213,7 @@ export class Coordinator {
   private inOrder(of: (m: Member) => { queue: string; at: string }[], go: (m: Member, queue: string) => boolean): void {
     const all = [...this.members].filter((m) => m.accepting())
       .flatMap((m) => of(m).map((x) => ({ m, ...x })))
-      .sort((a, b) => a.at.localeCompare(b.at) || a.m.store.dir.localeCompare(b.m.store.dir) || a.queue.localeCompare(b.queue));
+      .sort((a, b) => a.at.localeCompare(b.at) || compareIds(a.m.store.dir, b.m.store.dir) || compareIds(a.queue, b.queue));
     for (const x of all) if (x.m.accepting() && go(x.m, x.queue)) this.cache = undefined;
   }
 }

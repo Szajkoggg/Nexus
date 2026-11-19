@@ -6,7 +6,7 @@ import { basename, dirname, extname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { execFileSync } from "node:child_process";
 import {
-  Event, isOpenQuestion, orchestratorOverview, planLines, stopLines, ProjectStore, checksLine, findNexusDir, inReportFolder, loadProjectState, stepValuesText, newId, normPath, now, readRegistry, writeRegistry,
+  Event, isOpenQuestion, runGoing, orchestratorOverview, planLines, stopLines, ProjectStore, checksLine, findNexusDir, inReportFolder, loadProjectState, stepValuesText, newId, normPath, now, readRegistry, writeRegistry,
   PICTURE_ROLES, REVIEW_HELP, checkPicture, levelNow, pictureSize, recommendedOption, stepDefs,
   NEXUS_ACTIVITIES, TAG_KINDS, TAG_ORIGINS, TAG_SIZES, tagIssues, tagProposalText, tagsText,
   STAT_DIMENSIONS, readTurns, sinceTime, statDimension, statsReport, statsText, stepStats,
@@ -187,7 +187,12 @@ function store(): ProjectStore {
 
 function session(st: ProjectStore): SessionFile {
   const id = need(o.session ?? process.env.NEXUS_SESSION, "session (NEXUS_SESSION or --session; `nexus attach` creates one)");
-  try { return st.readSession(id); } catch { throw new UsageError(`unknown session ${id}`); }
+  let s: SessionFile;
+  try { s = st.readSession(id); } catch { throw new UsageError(`unknown session ${id}`); }
+  // What this call writes is stamped after what its session wrote and was told, and after what the server had seen
+  // when it handed the agent its work (docs/DESIGN.md, "Clock steps"): reading them takes their times up.
+  st.readEvents(id); st.readInbox(id); st.observeClock();
+  return s;
 }
 
 /** The queue a step belongs to: --queue, else the session's queue, else the only queue with that step. */
@@ -631,7 +636,8 @@ const commands: Record<string, () => void | Promise<void>> = {
       console.log(`\nqueue ${q.id} [${q.status}] ${q.title}${q.approved ? "" : ` (needs approval: revision ${q.revision})`}`);
       if (q.status_reason) console.log(`  why: ${q.status_reason.slice(0, 300)}`);
       for (const line of stopLines(q)) console.log(line);
-      if (q.run && q.status !== "running") {
+      // A run that is not going shows too, also under a queue still "running" in the derivation (one the user stopped).
+      if (q.run && (q.status !== "running" || !runGoing(q.run))) {
         const why = q.run.reason ? ` (${q.run.reason.replace(/\s+/g, " ").slice(0, 200)})` : "";
         console.log(`  run: ${q.run.state}${q.run.step ? ` at ${q.run.step}` : ""}${why}`);
       }

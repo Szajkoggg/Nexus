@@ -12,7 +12,7 @@ import { EventEmitter } from "node:events";
 import { ProjectStore, approveQueue, loadProjectState, newId, routeAnswers, type Event } from "@nexus/protocol";
 import type { AgentEvents, AgentProcess } from "../src/agent.ts";
 import { Engine } from "../src/engine.ts";
-import { branchState, recordBase, recordStepEnd, recordStepStart, stepCommits } from "../src/gitinfo.ts";
+import { branchState, recordBase, recordStepEnd, recordStepStart, recordTurn, stepCommits } from "../src/gitinfo.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
 import { until, LONGER } from "./wait.ts";
 
@@ -117,9 +117,12 @@ test("in the main checkout, a commit outside the worker's turns on the step is f
   const now = Date.now();
   const at = (ms: number) => new Date(now + ms);
   recordStepStart(store, "Q", "Q1", session);
+  // As the engine does: the runtime's turn start and end in the activity, and the HEAD at each in git.yaml.
   store.appendActivity(session, { at: at(-60_000).toISOString(), kind: "turn_start", text: "turn started", queue: "Q", step: "Q1" });
+  recordTurn(store, "Q", "Q1", "start");
   const mine = commit(root, "mine", 3, at(-30_000));
   store.appendActivity(session, { at: at(-20_000).toISOString(), kind: "turn_end", text: "turn ended", queue: "Q", step: "Q1" });
+  recordTurn(store, "Q", "Q1", "end");
   const theirs = commit(root, "theirs", 2, at(-10_000)); // the user's, between turns
   recordStepEnd(store, "Q", "Q1");
   const view = () => loadProjectState(store).queues[0]!;

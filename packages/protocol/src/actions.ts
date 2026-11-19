@@ -10,6 +10,7 @@ import { commentTarget, isApproved, loadProjectState, pendingProvisional, type P
 import { validAllowRule } from "./refusals.ts";
 import { closingStepId, integrationStepId, stepDefs } from "./closing.ts";
 import { stepChecks } from "./steps.ts";
+import { checkCommandIssue } from "./commands.ts";
 import { inheritedTags, kindListIssue, tagIssues, type StepTags } from "./tags.ts";
 import { fallbackIssues, kindIssues } from "./routing.ts";
 import { importedFrom, noteRefIssue, noteRefs } from "./ideas.ts";
@@ -445,6 +446,11 @@ export function applyDraft(store: ProjectStore, definition: unknown): string {
   if (tagged.length) throw new ActionError(tagged.join("; "));
   const sourced = draftSourceIssues(store, draft, old);
   if (sourced.length) throw new ActionError(sourced.join("; "));
+  // Only a command can be a check (commands.ts): every check of the draft, also one an older queue had, so that a
+  // revision converts it.
+  const root = store.readProject().root;
+  const prose = draft.checks.flatMap((c) => checkCommandIssue(c, root) ?? []);
+  if (prose.length) throw new ActionError(prose.join("; "));
   const at = now();
   // A new step starts pending, or skipped (kept for the record); statuses change through nexus queue set only.
   const fresh = draft.steps.filter((s) => !old?.steps.some((o) => o.id === s.id) && s.status && s.status !== "skipped");

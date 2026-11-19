@@ -1065,6 +1065,12 @@ export const GitFile = z.object({
     session: Id,
     start: z.string().nullable(), started_at: Time,
     end: z.string().nullable().optional(), ended_at: Time.optional(),
+    /**
+     * The HEAD at the start and the end of each turn of the session on the step in this round (an open turn has no
+     * `end`): a commit of the round is the step's when it is in some turn's start..end, foreign when only between turns.
+     * Absent on rounds recorded before (queue FL): those keep the time windows (docs/DESIGN.md, "Clock steps").
+     */
+    turns: z.array(z.object({ start: z.string().nullable(), end: z.string().nullable().optional() })).optional(),
   }))).default({}),
 });
 export type GitFile = z.infer<typeof GitFile>;
@@ -1405,6 +1411,12 @@ const CheckRun = z.object({
   /** Its outcome in the set: passed on the first run or the second (then also `flaky`). */
   ok: z.boolean().optional(),
   flaky: z.boolean().optional(),
+  /**
+   * Not a command (queue EF, P1): its first word is no program on the PATH nor a file in the checkout (commands.ts), as
+   * a check of an older queue written in words. Not run, neither passed nor failed: the set goes on without it, and the
+   * orchestrator is told to convert the queue's check.
+   */
+  not_command: z.boolean().optional(),
 });
 export type CheckRun = z.infer<typeof CheckRun>;
 

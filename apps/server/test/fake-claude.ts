@@ -54,6 +54,14 @@ async function turn(text: string): Promise<void> {
   const reply = actOnRead(unread, first);
   unread = [];
   out({ type: "assistant", message: { content: [{ type: "text", text: reply }], usage: { input_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: contextTokens(1000, 100) - 10 } }, parent_tool_use_id: null });
+  // FAKE_LATE_NEXT: the process's first turn writes its result only once a message comes in after its reply, and that
+  // message, come too late to be read in the turn, runs as a turn of its own after it (as Claude Code runs a `next`
+  // message that reached it as its turn ended): Nexus sent it into a turn whose result it had not read yet (queue OF).
+  if (process.env.FAKE_LATE_NEXT && turns === 0) {
+    for (const t = Date.now(); !unread.length && Date.now() - t < 300_000;) await new Promise((r) => setTimeout(r, 20));
+    queue.unshift(...unread);
+    unread = [];
+  }
   // As Claude Code reports them (checked live): result.usage is this turn's, total_cost_usd runs on. Turn n of the
   // process: 10n input, 5n output, n cache-creation, 100n cache-read tokens, and, with FAKE_COST set, $0.01·n (other
   // tests' records expect a cost of 0).

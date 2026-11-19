@@ -21,3 +21,35 @@ export function capacityLines(c: CapacityFile | undefined, now: Date): string[] 
   }
   return lines;
 }
+
+/** One heavy operation as the dashboard names it: whose step it is. */
+export interface CapacityHolder { project: string; queue: string; step: string; since: string }
+
+/**
+ * Where a step's checks wait for the machine (queue EF): its place in line (1-based) of how many wait, and what keeps
+ * the slot: the operations holding it, or a full test run outside Nexus (`outside`). Undefined when the step does not
+ * wait in the file (it may have been granted since, or the file is not there).
+ */
+export interface CapacityWait {
+  position: number;
+  waiting: number;
+  /** The operations holding the slot now (another project's checks, or this one's other queue). */
+  held: CapacityHolder[];
+  /** The ones in line before it. */
+  ahead: CapacityHolder[];
+  outside?: { cwd: string; pid: number; since: string };
+}
+
+const holder = (r: CapacityRequest, granted: boolean): CapacityHolder => ({ project: r.project, queue: r.queue, step: r.step, since: (granted ? r.granted_at : undefined) ?? r.requested_at });
+
+/** The wait of the checks of `project`'s `queue`/`step` in the capacity file. */
+export function capacityWait(c: CapacityFile | undefined | null, project: string, queue: string, step: string): CapacityWait | undefined {
+  if (!c) return undefined;
+  const i = c.waiting.findIndex((r) => r.project === project && r.queue === queue && r.step === step);
+  if (i < 0) return undefined;
+  return {
+    position: i + 1, waiting: c.waiting.length,
+    held: c.held.map((r) => holder(r, true)), ahead: c.waiting.slice(0, i).map((r) => holder(r, false)),
+    ...(c.outside ? { outside: c.outside } : {}),
+  };
+}

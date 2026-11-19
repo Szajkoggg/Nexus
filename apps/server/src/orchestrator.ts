@@ -18,7 +18,7 @@ import type { UpdateNotice } from "./lifecycle.ts";
 import { describeDeployChanges, type DeployChanges } from "./deploy.ts";
 import type { PlanNotice } from "./deploy-plan.ts";
 import {
-  acceptedNoteNotice, approvalNotice, checkAcceptedNotice, checkDecisionNotice, cleanupWaitNotice, discardNotice, liftNotice, mergedNotice, mergeWaitNotice, missedStartNotice, noticeText, orchestratorBriefing, pausedNotice,
+  acceptedNoteNotice, approvalNotice, checkAcceptedNotice, checkDecisionNotice, checkNotCommandNotice, cleanupWaitNotice, discardNotice, liftNotice, mergedNotice, mergeWaitNotice, missedStartNotice, noticeText, orchestratorBriefing, pausedNotice,
   carriedMessages, formatInbox, orchestratorFreshSeed, orchestratorRuntimeSeed, orchestratorSummaryRequest, summaryLists, questionNotice, rejectionNotice, restartedNotice, fixAskedNotice, levelToUserNotice, reviewNotice, awayOnNotice, awayEndNotice, awayStuckNotice, planDecisionNotice, planHeldNotice, runEndNotice, maintenanceFindingsNotice, staticAnalysisNotice, stepNoteNotice, tagDecisionNotice, fallbackNotice, metricNotice, userMessage, withdrawalNotice,
 } from "./prompts.ts";
 import { shellRules } from "./shell-rules.ts";
@@ -619,6 +619,7 @@ ${n.text}` });
         this.store.appendActivity(s.id, { at: now(), ...a });
       },
       turnEnd: () => this.changed(),
+      settled: () => this.changed(),
       exit: () => this.changed(),
     }));
   }
@@ -658,10 +659,10 @@ ${n.text}` });
   /**
    * The orchestrator's context care (decided by the user on 2026-11-15, queue CC): it is not compacted; it goes on in a
    * fresh session started from a summary it writes on purpose. When its context is fuller than its threshold
-   * (orchestrator.context_threshold) at the end of a turn, its process idle, it is asked once for that summary (with
-   * `nexus context`); once that turn is over, a fresh session goes on from it (goOnFresh). Meanwhile notices, notes
-   * and the user's messages wait for the fresh session. A fresh session already that full at the end of its first turn
-   * is not switched again: another would be no emptier. True: what else this change would tell it waits.
+   * (orchestrator.context_threshold) at the end of a turn, its process idle and not settling, it is asked once for that
+   * summary (with `nexus context`); once that turn is over, a fresh session goes on from it (goOnFresh). Meanwhile
+   * notices, notes and the user's messages wait for the fresh session. A fresh session already that full at the end of
+   * its first turn is not switched again: another would be no emptier. True: what else this change would tell it waits.
    */
   private contextCare(state: ProjectState, s: SessionFile): boolean {
     const applied = this.store.readApplied(s.id).entries;
@@ -669,11 +670,12 @@ ${n.text}` });
     if (asked) {
       // Its summary turn runs; the fresh session's first turn waits while its runtime is beyond the usage threshold.
       const runtime = s.orchestrator_fallback?.target.runtime ?? runtimeOf(state.project);
-      if (!this.idle() || this.runtimeFull(state, runtime)) return true;
+      if (!this.idle() || this.proc?.settling || this.runtimeFull(state, runtime)) return true;
       this.goOnFresh(s, asked);
       return true;
     }
-    if (this.proc?.state !== "idle") return false;
+    // Between turns only: not while a turn of the runtime's own may still start (AgentProcess.settling).
+    if (this.proc?.state !== "idle" || this.proc.settling) return false;
     const live = this.store.readRuntime(s.id);
     const fill = live?.context_tokens && live.context_window ? live.context_tokens / live.context_window : undefined;
     if (fill === undefined) return false;
@@ -909,6 +911,11 @@ ${n.text}` });
         const st = q.steps.find((x) => x.id === step);
         if (!st) continue;
         for (const set of entry.sets) {
+          // A check that is no command (queue EF): told once per queue and check, to convert it.
+          for (const c of set.checks) {
+            if (!c.not_command || (set.ended_at ?? set.requested_at) < since) continue;
+            items.push({ key: `notify:checknotcommand:${q.id}:${c.name}`, ...checkNotCommandNotice(q, st, c.name) });
+          }
           const d = set.dispute;
           if (!d || d.at < since) continue;
           if (set.state === "accepted") items.push({ key: `notify:checkaccepted:${q.id}:${step}:${set.done}`, ...checkAcceptedNotice(q, st, set) });

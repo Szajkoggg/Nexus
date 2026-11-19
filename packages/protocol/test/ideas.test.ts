@@ -276,19 +276,19 @@ test("note references are pinned by the approval; a revision that changes them n
 test("an imported queue's source reads as a list of one, and its hash is the one it had before the list", () => {
   const { root, st } = project();
   const yaml = {
-    protocol: 1, id: "I", title: "Imported", revision: 1, status: "approved", stop_conditions: ["s"], checks: ["c"], steps,
+    protocol: 1, id: "I", title: "Imported", revision: 1, status: "approved", stop_conditions: ["s"], checks: ["node c"], steps,
     approvals: [], history: [], source: { path: "QUEUE.md", imported_at: "2026-11-12T00:00:00Z" },
   };
   const parsed = QueueFile.parse(yaml);
   assert.deepEqual(parsed.source, [{ path: "QUEUE.md", imported_at: "2026-11-12T00:00:00Z" }]);
-  const old = "sha256:" + createHash("sha256").update(JSON.stringify({ steps, stop_conditions: ["s"], checks: ["c"] })).digest("hex");
+  const old = "sha256:" + createHash("sha256").update(JSON.stringify({ steps, stop_conditions: ["s"], checks: ["node c"] })).digest("hex");
   assert.equal(revisionHash(parsed), old);
   // Written in the old form by hand and read through the store: the same.
   mkdirSync(join(root, ".nexus/queues/I"), { recursive: true });
   writeFileSync(join(root, ".nexus/queues/I/queue.yaml"), YAML.stringify(yaml));
   assert.equal(revisionHash(st.readQueue("I")), old);
   // A revision with a note reference keeps the import record before it.
-  applyDraft(st, { id: "I", title: "Imported", stop_conditions: ["s"], checks: ["c"], steps, source: ["docs/ideas/plan.md#2026-11-14"] });
+  applyDraft(st, { id: "I", title: "Imported", stop_conditions: ["s"], checks: ["node c"], steps, source: ["docs/ideas/plan.md#2026-11-14"] });
   assert.deepEqual(st.readQueue("I").source, [{ path: "QUEUE.md", imported_at: "2026-11-12T00:00:00Z" }, "docs/ideas/plan.md#2026-11-14"]);
 });
 

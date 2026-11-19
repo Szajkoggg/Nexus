@@ -189,8 +189,9 @@ for (const behaviours of [["slow"], ["slow", "done"]]) {
 
 test("an unapproved revision cannot start", () => {
   const { store, engine } = setup(["done"]);
-  const q = store.readQueue("Q");
-  store.writeQueue({ ...q, steps: [...q.steps, { id: "Q9", title: "Added", goal: "", acceptance: [] }] });
-  assert.throws(() => engine.start("Q"), /approve/);
-  engine.shutdown();
+  try {
+    const q = store.readQueue("Q");
+    store.writeQueue({ ...q, steps: [...q.steps, { id: "Q9", title: "Added", goal: "", acceptance: [] }] });
+    assert.throws(() => engine.start("Q"), /approve/);
+  } finally { engine.shutdown(); } // an engine left running keeps the file from exiting (queue FL1)
 });

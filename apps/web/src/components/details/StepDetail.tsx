@@ -53,7 +53,7 @@ export function StepDetail({ project, queue, step, onClose, of, qid }: PanelProp
   // The step's parts. While it waits for the user's review the summary and the pictures come first (UX proposals,
   // 13 and 14); otherwise the usual order.
   const chat = <StepChat project={id} queue={queue.id} step={step.id} />;
-  const retry = <><RetryLine queue={queue} step={step} /><CheckRunBox queue={queue} step={step} /></>;
+  const retry = <><RetryLine queue={queue} step={step} /><CheckRunBox project={id} queue={queue} step={step} /></>;
   const summary = <Summary queue={queue} step={step} />;
   const push = <PushLine project={id} queue={queue} step={step.id} />;
   const rejected = step.status === "rejected" && <Rejected step={step} holding={queue.rejection?.step === step.id} />;

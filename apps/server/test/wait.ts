@@ -43,6 +43,11 @@ export const LONGER = {
    * Work that starts many processes in a row and waits on them: a server's start (main.ts), an update's hand-over to a
    * successor process and its rollback (git, npm stand-ins), a run that commits in a worktree. In the full suite the
    * longest such wait took 12 s (a rollback); on a busy machine more (queue FU4 measured 14 s a step under load).
+   * Also the coordinator's chains of runs in worktrees of their own (coordinator.test.ts): one run's end and the next
+   * one's whole run, each through its integration step, so about six worker processes, each in its PowerShell job
+   * host, start or end one after another (and a step whose model differs restarts the process). Alone 6 s; under
+   * load-tests 18 to 26 s, past the 30 s of `run` in a full run (queue FL3, FL8; before FL8 the host reported each
+   * end 2.3 s late, alone 8 s).
    */
   processes: WAIT_MS * 6,
   /**

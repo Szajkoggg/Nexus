@@ -748,6 +748,11 @@ Decisions, building it:
 - Only between turns, with its process idle: a turn is never cut into, and a turn ending is the orchestrator's
   equivalent of a step's end. The request is a turn of its own and asked once (`context:asked` in `applied.jsonl`, a
   file, so a restart in between still switches); after that turn the switch comes with or without a summary.
+  A turn's result is not yet "between turns" when messages were sent into the turn (`next`): one written to Claude
+  Code just as its turn ended (Nexus had read the reply, not yet the result) was not read in it and runs as a turn of
+  its own, and nothing in the stream tells that from a turn that read them all until that turn starts. So the process
+  is *settling* (`AgentProcess.settling`) until a turn starts or 1.5 s pass, and context care waits for that (queue OF:
+  the request went out on that false idle in about 2 of 150 full test runs).
 - While the summary is written, nothing else goes to the old session: the user's message would land in a session that
   is about to end, so it waits in its inbox and is carried into the fresh session's first turn, as a worker's unread
   messages are. Notices are not carried: the fresh session is told them anew, as what no session of its line was told
@@ -2248,6 +2253,11 @@ Nexus keeps outside the queue's list of steps.
   to do, but it explains extra turns in the activity.
 - **A killed server takes its `claude` children with it** (their stdin closes). On restart, any session process still
   alive is ended before a resume, and running queues come back paused.
+- **Every write to a child's input needs an error listener** (queue CR). A process that has exited while the server
+  has not yet seen its exit (the server busy) fails the next write with EPIPE, also a short line on Windows, emitted as
+  an error event of its input; unheard, it ends the server. On 2026-11-18 the model list's `initialized` to a Codex
+  that had answered and exited did so. Once the exit is seen, Node has destroyed the input and a write fails only to
+  its callback; reading the output of an exited process ends it, no error.
 
 - **Codex has the same moves.** `turn/steer` reaches a running turn (checked live), `thread/resume` continues a
   thread with its context (checked: the agent recalled the previous queue), token usage and the context window
@@ -2687,6 +2697,122 @@ busy-loop processes on the user's 16 logical cores and 4 to 6 copies of the test
   cleanup comes. Its other failure was time: two steps and a report start about eight node processes, a step took 14 s
   under that load, and the 20 s wait was shorter than the work: now a named longer wait (see "The tests' waits").
 
+## Findings from the tests that failed or hung in full runs (queue FL)
+
+- **A failed test must not keep its file running** (limit-hold.test.ts). The suite runs with `--test-timeout=0`, so
+  a file ends only when nothing keeps Node up. A watcher's `setInterval` cleared only on the success path, or an
+  `Engine` never shut down (its startup timer arms the recurring and reminder timers, which re-arm forever; tried: a
+  file whose only test made one and passed did not exit in 40 s), held the whole run until someone killed it. Every
+  timer, engine or server a test starts is stopped on every path: `t.after`, or a `try` that begins right after it
+  with the stop in `finally`, and no assertion or `await` between the two.
+- **"Not yet" after a wait for something else races the code under test** (limit-hold.test.ts, "a queue back from
+  its answer"). The test waited for the held queue to go on, then asserted that the planned start had not started.
+  But a fake answer turn ends at once: under load the test looked 1.5 s late, the queue had already used its place
+  and gone to review, and the planned start had rightly taken the place it freed (9 of 12 load runs failed). The
+  engine kept the limit throughout. A test that asserts something has not happened yet holds the state it relies on:
+  the answer's turn now works until the test releases it (fake behaviour `askslow`).
+
+## Clock steps: ordering by what was seen, not by the wall clock (queue FL, plan FL4)
+
+**What breaks.** Nexus orders and compares wall-clock times written by different processes: the server's events,
+activity and run records, the `nexus` CLI's events (each agent call is a fresh process) and git's commit times. The
+clocks disagree after a clock step. On Windows V8 re-reads the system time only once a minute, so after an NTP step
+(4 minutes forward on this machine, minutes after an unlock) the long-lived server writes on the old base for up to a
+minute while every CLI call and git already use the new one; a backward step (a manual correction, a VM resume) skews
+every process at once. FL2 reproduced it (`FL2-cause.md`, a preload that makes the test process lag): a worker's
+`step.started` (CLI, new clock) sorts after the engine's `step.interrupted` (old clock), so the interrupted stretch
+never closes; a stopped step's commits (git, new clock) fall outside every turn window of the worker's activity
+(server, old clock), count as foreign, and the Keep/Discard choice is never offered (a Discard would revert nothing).
+
+**The rules** (built in FL5, see "As built" below; nothing changes a file that existed before in a way an older reader
+minds):
+
+1. **One file keeps the order it was written in.** Every file has one writer, so its lines are in causal order. A
+   reader that merges files never reorders the lines of one file: it sorts by an *effective* time, the line's `at`
+   raised to the previous line's effective time of the same file (`max(at, previous)`), then by id (`compareIds`). For
+   files written without a clock step this is the sort of today; for old files written across a backward step it
+   restores their order.
+2. **No writer writes a time earlier than one it has read** (a hybrid logical clock; the `at` format stays ISO 8601,
+   only its value is constrained). `stamp()` = `max(Date.now(), high-water + 1 ms)`, where the high-water mark is the
+   latest `at` the process has read or written in the project. The server raises it with every state it derives (it
+   reads every log) and every stamp it writes. A CLI call reads its own session's events and inbox, and a small file
+   the server keeps for it, `.nexus/clock.json` (`{ "at": … }`, the server's high-water mark; one writer: the server),
+   written before the server hands an agent anything to act on (a turn's prompt, an inbox message, a resume). So an
+   effect is stamped after its cause even when its writer's clock lags: the engine's `step.interrupted` comes after
+   the `step.started` it interrupts because the engine had read that event. The watcher may not have delivered a line
+   written a moment ago, so before the server writes a record about a step it raises the mark from that step's
+   session log (one read of a file it reads anyway). A missing `clock.json` (an older server)
+   leaves the CLI with its own files, as before. A time read more than `CLOCK_AHEAD_MS` (15 min) ahead of the
+   reader's wall clock is not taken up (see "As built").
+3. **A step's commits come from the HEADs around its turns, not from time windows.** The server records, per round in
+   `git.yaml`, the HEAD at the start and the end of every turn of the worker's session on the step (`turns: [{ start,
+   end }]`, a sha or null; an open turn has no `end` and uses the HEAD of now, as an open round does). A commit of the
+   round is the step's when it is in some turn's `start..end` (`git rev-list`), foreign when it is only between turns.
+   Someone else's commit in the main checkout *during* a turn still counts as the step's, as with the time windows.
+   Rounds recorded before (no `turns`) keep the time windows. A trailer in the commit message was rejected: agents
+   write their own messages, and one forgotten trailer would make a step's commit foreign.
+4. **A duration inside one process uses the monotonic clock** (`performance.now()`); wall-clock deadlines stay wall
+   clock (a time the user named, a provider's usage reset): they are meant in wall time.
+
+**Where the wall clock is compared today, and what each place becomes:**
+
+| Place | What it compares (writers) | After a clock step | Becomes |
+|---|---|---|---|
+| `state.ts` event order (`events.sort`) | `at` of every session's events (server, CLI) | an effect before its cause: the interrupted stretch stays open, a step stays running | rules 1 and 2 |
+| `state.ts`, status changes among events | queue.yaml `changes` (server) against events (CLI) | a lift or a back-to-pending applied on the wrong side of a stop | rule 2; `changes` keep their array order (rule 1) |
+| `state.ts`, `step.started` closing the previous stretch, `step.interrupted`, `endSegment` | the order of the step's events | as the event order | rules 1 and 2 |
+| `state.ts`, an ended run closing the open stretch (`open.start <= ended`) | run `ended_at` (server) against `step.started` (CLI) | FL2: the paused run ended "before" the stretch began, so it stays open | rule 2 (the server stamps `ended_at` after the start it has read) |
+| `state.ts`, rejection and lift proposal against approvals (`a.at > r.at`) | server against server | backward step only: an approval taken as older than the rejection it answers | rule 2 |
+| `state.ts`, an event's revision (`history.replaced_at > e.at`) | queue.yaml history (server) against events (CLI) | an event counted to the revision before or after the right one | rule 2 (the worker acts on a revision only after the server told it) |
+| `state.ts`, `review_levels_since` | a fixed cut-over date against events | none in practice (a date long past) | stays |
+| `status-rules.ts` `questionBarrier`, `accepted.ts` latest acceptance | answers and acceptances (server, orchestrator's CLI) | the wrong answer or acceptance taken as the latest | rule 2 |
+| `prompts.ts` `reviewBrief`, `mergeback.ts` `failedChecks` | checks, review items, metrics (server, CLI) at or after the round's `step.started` | a round's checks left out: "missing" checks, a wrong merge-back verdict | by order: the state derivation tags each check, item and metric with the stretch it came in (index in `segments`), the filters use the index; derived, nothing stored |
+| `mergeback.ts` `stillEnding` | `finished_at` (CLI) against the server's `Date.now()` | the round waits up to the step longer, or is taken as ended too early | the server's own monotonic time of when it saw the outcome (after a restart: settled) |
+| `engine.ts` context summary "fresh" | `context.summary` against the session's `step.started` (both the worker's CLI; fallback `run.started_at`, server) | an old summary taken as fresh, or a fresh one asked again | by order in the session's log (rule 1); the fallback by rule 2 |
+| `orchestrator.ts` `summaryWritten` | `context.summary` (CLI) at or after the ask (`applied`, server) | the summary ignored, Nexus asks again or waits | rule 2 (`clock.json` written before the ask is delivered) |
+| `orchestrator.ts` notices "since the last look" (`since`, deploy changes, plans, questions, metrics, merges, runs) | records of server and CLI against the server's `since` | a notice missed (backward) or told twice | rule 2 |
+| `stopwork.ts` `discardRecorded` | a Discard (queue.yaml, server) at or after the `queue.stop` (CLI) | the Discard not counted: the choice asked again | rule 2 |
+| `gitinfo.ts` `stepCommits` / `turnWindows`, `leftBehind` | commit time (git, `%ct`) against turn windows (activity, server) +-2 s | FL2: the stopped step's commits foreign, no Keep/Discard | rule 3 |
+| `closing.ts` `queueRange` | rounds' `started_at`/`ended_at` (server) | backward step only: the wrong first or last round | rule 2 |
+| `engine.ts` latest run, `conversations.ts`, `coordinator.ts` order | `updated_at`, `last_at`, a start's `at` (server) | a wrong pick or order, shown or tried once more | rule 2 |
+| `agent-host.ts` turn `duration_ms`, step and check durations in stats | two stamps of one process; segments | a negative (clamped to 0) or inflated duration | the turn's duration from `performance.now()` (rule 4); segments become monotonic by rule 2 |
+| Scheduler (planned starts, undo, `MISSED_MS`), deploy plan, recurring, away, usage resets, the background limit | wall-clock deadlines against `Date.now()` | fire up to the step early or late (`setTimeout` runs on the monotonic clock); a forward step over 15 min marks a planned start as missed | stay wall clock (rule 4); FL5 may re-check the due ones when it sees a step, not required |
+| Display sorts (`main.ts` lists, refusals, ideas, digest) | `at` | a line shown out of place | rule 2; nothing else |
+
+**Old data.** Events and other records keep their format; `at` keeps its meaning (a time, now never earlier than
+what its writer had read). Old logs read as today, with rule 1 repairing the order inside one file. `git.yaml`
+rounds gain an optional `turns`; rounds without it keep the time windows. `clock.json` is new and optional; an older
+server ignores it, an older CLI never reads it. An older server that rewrites `git.yaml` drops `turns` (its schema
+strips unknown keys), which only brings that round back to the time windows. PROTOCOL.md changes with FL5, in the
+same commits as the formats (`turns`, `clock.json`, the stamp rule, the reader's order).
+
+**As built (FL5).** `packages/protocol/src/clock.ts`: `now()` (re-exported by the store, so every `at: now()` is a
+stamp), `observe()`, `inFileOrder()` (a heap merge of the logs), `resetClock()`. The store observes what it reads of
+events, inbox and applied; the CLI reads its session's events and inbox and `clock.json` when it resolves its session;
+`AgentHost` writes `clock.json` before every `send` to a runtime (the server's file watcher ignores it); the engine
+reads the worker's log before it stamps a run that stops going (`writeRun`), so `ended_at` and the
+`step.interrupted` written right after come after the step's last event. `gitinfo.ts` `recordTurn` takes the HEAD at
+the runtime's turn start and end (the engine's activity handler); `inTurns` asks `git rev-list` once per run of turns
+with no commit between them. The turn record's `duration_ms` comes from `performance.now()`. Differences from the
+plan:
+
+- *A cap instead of a warning.* Times read more than 15 minutes ahead are not taken up (`CLOCK_AHEAD_MS`): with no
+  cap one record stamped by a clock set far ahead (by hand, or a test's fixture) would hold every later stamp of the
+  process there until the wall clock caught up. The steps Nexus meets are minutes.
+- *The "since" filters were left as they are* (`reviewBrief`, `failedChecks`, the context summary's freshness,
+  `summaryWritten`, `discardRecorded`, the orchestrator's notices): with rule 2 the records they compare are stamped
+  after their cause, which was the failure. `stillEnding` still compares an agent's `finished_at` with the server's
+  clock: after a forward step that the server sees late, a merge back may wait up to the step longer (no wrong state).
+- *A test that sets its clock back on purpose* (node:test's mock timers, each case starting at the same time) calls
+  `resetClock()`; Nexus itself never does.
+
+**Tests.** `apps/server/test/clock-steps.test.ts` runs stop-at-once.test.ts and stopwork.test.ts again in one process
+each (no isolation) with the preload `clock-lag.mjs`: the engine's clock 5 s and 240 s behind the system clock and
+60 s ahead, its children (CLI, fake runtimes, git) on the system clock. Without the fix 6 of 11 failed at 5 s
+behind (as at 240 s in FL2); with rules 1 and 2 alone, the two Keep/Discard tests still failed at 60 s ahead (a
+commit's time behind the turn windows), until rule 3. `packages/protocol/test/clock.test.ts` covers the stamps, the merge, and old logs (a
+worker's log across a backward step, an interruption between); stopwork.test.ts covers a round without `turns`.
+
 ## Findings from review levels (queue RL1)
 
 - **Every step is reviewed now, so the last step of every queue ends in review.** Before, `continue` ended a queue's
@@ -2816,6 +2942,12 @@ rules, and every rule an error (a warning nobody has to fix is noise):
 - `react-hooks/rules-of-hooks` and `react-hooks/exhaustive-deps` on the dashboard: a hook called conditionally breaks
   React's bookkeeping; a missing dependency leaves an effect working on stale values. Only these two of the plugin:
   its React Compiler rules are about a compiler Nexus does not use.
+- `no-restricted-syntax` against `localeCompare` on an id (a name `id`, `ids`, `event`, `queue`, `step`, `dir` or
+  ending in `Id`, on either side of the call): ids compare with `compareIds` (`packages/protocol/src/ids.ts`), by code
+  unit. Found in queue FL: Node and the browser take the machine's locale, and in hu-HU CS, GY, LY, NY, TY, ZS (and DZ,
+  DZS) are letters of their own, so `"…ZS"` sorts after `"…ZT"`; two monotonic ULIDs of one millisecond came out
+  reversed, and a step whose `step.started` sorted after its `step.done` stayed `running` (about 3 % of the step-chat
+  seed test's runs). Timestamps (`at`) may keep `localeCompare`: ISO times hold no letter pairs.
 - Unused `eslint-disable` comments are errors, so a suppression cannot outlive its reason.
 
 No `--cache`: ESLint's cache is per file, and with type information a change in one file (a function becoming async)

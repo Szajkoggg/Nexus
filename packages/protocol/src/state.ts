@@ -5,6 +5,7 @@ import { CONVERSATION_ONLY, HELPER_VERDICTS, NEXUS_PASS_ON, NEXUS_SESSION, ORCHE
 import { ProjectStore, chainPlan, readAway, revisionHash } from "./store.ts";
 import { awayAt, awayNow, type AwayNow } from "./away.ts";
 import { formatClock, type Segment } from "./times.ts";
+import { inFileOrder } from "./clock.ts";
 import { isOpenQuestion, questionBarrier, reviewedByOrchestrator, runEnded, runGoing, runHoldsCheckout, stepWaits, waitsForUserReview } from "./status-rules.ts";
 import { stopPlace } from "./attention.ts";
 import { closingStepId, integrationStepId, stepDefs } from "./closing.ts";
@@ -305,11 +306,14 @@ export function loadProjectState(store: ProjectStore): ProjectState {
 
   const sessions = new Map<string, SessionView>();
   const noteDeliveries = new Map<string, string>();
-  const events: Event[] = [];
+  // Each session's events, in the order its log has them (one writer per log).
+  const logs: Event[][] = [];
   for (const id of store.sessionIds()) {
     try {
       const s = store.readSession(id);
       const r = store.readEvents(id);
+      const own: Event[] = [];
+      logs.push(own);
       warnings.push(...r.errors);
       const inbox = store.readInbox(id);
       const delivered = store.readDelivered(id);
@@ -339,11 +343,13 @@ export function loadProjectState(store: ProjectStore): ProjectState {
         if (CONVERSATION_ONLY.has(e.type) && s.role !== "conversation") {
           warnings.push(`session ${id}: ${e.type} is for thinking partners; ignored`); continue;
         }
-        events.push(e);
+        own.push(e);
       }
     } catch (e) { warnings.push(`session ${id}: ${(e as Error).message}`); }
   }
-  events.sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id));
+  // By time, then id, but each log keeps the order it was written in, whatever its times say after a clock step
+  // (docs/DESIGN.md, "Clock steps").
+  const events = inFileOrder(logs, (e) => e.at, (e) => e.id);
 
   // Send-backs the server delivered to a worker, by the review.sent_back event they carry out.
   const delivered = new Set<string>();
@@ -355,15 +361,15 @@ export function loadProjectState(store: ProjectStore): ProjectState {
   }
 
   // Status changes made through Nexus come in among the events, by time; at the same time the event goes first.
-  const changes = [...queues.values()].flatMap((q) => q.changes.map((c) => ({ q, c })))
-    .sort((a, b) => a.c.at.localeCompare(b.c.at));
+  // Each queue's changes keep their order too (one writer: the server).
+  const changes = inFileOrder([...queues.values()].map((q) => q.changes.map((c) => ({ q, c }))), (x) => x.c.at, (x) => x.q.id);
   const questions = new Map<string, QuestionView>();
   let next = 0;
-  for (const e of events) {
-    while (next < changes.length && changes[next]!.c.at < e.at) { applyChange(changes[next]!.q, changes[next]!.c); next++; }
+  for (const { item: e, at } of events) {
+    while (next < changes.length && changes[next]!.at < at) { applyChange(changes[next]!.item.q, changes[next]!.item.c); next++; }
     apply(e, queues, sessions, questions, warnings, project, delivered, away);
   }
-  for (; next < changes.length; next++) applyChange(changes[next]!.q, changes[next]!.c);
+  for (; next < changes.length; next++) applyChange(changes[next]!.item.q, changes[next]!.item.c);
   // The checks Nexus ran: a step.done whose checks have not passed is no review yet (checks.ts).
   for (const q of queues.values()) for (const st of q.steps) applyCheckSets(q, st, project.defaults.check_fix_limit);
   // What the workers reported doing, as the names read now; where the run opened a step on its fallback.

@@ -221,11 +221,11 @@ finished steps before it and the steps after the next three are folded into one 
 **Checks run by Nexus.** When a worker reports a step done, Nexus runs the queue's checks itself (the project's and the
 queue's, one after another) before the step goes to its review; the worker does not run the whole suite. Meanwhile the
 step reads **checks running** (with the check and since when under it), or **checks queued** while another project's
-checks have the machine (one heavy operation at a time on the computer), and the queue says the same ("checks running ·
+checks have the machine (one heavy operation at a time on the computer; its box says what it waits behind: which project's queue and step holds the machine, or a full test run outside Nexus, and its place in line), and the queue says the same ("checks running ·
 SF3"). The step's panel has a **Checks by Nexus** box listing each check: passed, flaky (failed, then passed on its
 second run), failed, running, or waiting its turn. A check that fails twice goes back to the same worker with its
 output: the step reads **check fix 1 of 3**, a round of its own and no send-back, so the review round and its pictures
-keep their number. After the last round (`defaults.check_fix_limit` in the settings file, 3 by default) the run halts
+keep their number. After the last round (**Check-fix rounds** in Settings, under Defaults: global, or a project's own; 3 by default) the run halts
 for the orchestrator; Resume gives one more. A failure the worker says is not its work's is run on the queue's base
 commit: failing there too, the step goes to its review, and Nexus proposes a fix queue (CI) for the failing test. A step
 started by an older Nexus keeps having its checks run by its worker.
@@ -430,7 +430,9 @@ orchestrator.
 Queues run side by side only in worktrees of their own (the orchestrator gives independent work one, and runs queues
 that touch the same code one after another): never two in one checkout, and no more at once, across all
 projects, than "Queues running at once" in the settings panel's Nexus section (Global tab) (2 by default; a queue waiting for your
-review or an answer does not count). A project can have a limit of its own as well: "Queues running at once" in its
+review or an answer does not count, while a queue whose step's checks Nexus is running does). A queue that comes back from
+waiting (your answer, a send-back, its next step) takes a place first: with the limit full it stays running but is held,
+says "waits: N queues run, the limit is M" and goes on by itself once a place frees; do not resume or restart it. A project can have a limit of its own as well: "Queues running at once" in its
 settings (Defaults), switched from Global to Own. Both limits hold: with the global limit at 3 and a project's own at
 1, that project runs one queue at a time while other projects may start theirs. An older `limits.json` is taken over
 into the global setting at the first start. A queue paused or waiting keeps its checkout. Starting a queue whose checkout
@@ -883,10 +885,19 @@ per round; in the project's own checkout, a commit not made during its worker's 
 branch: how far ahead and behind of its base and of its remote-tracking branch, as last fetched (Nexus never fetches).
 
 **The integration step.** A queue with a worktree of its own ends with a step Nexus keeps (⇄ "Integration", by
-Nexus), after the closing refactoring step: its worker merges the current main into the queue's branch in the worktree
-and runs the checks there, so main only ever moves forward to a tested result. A conflict stops the queue for you,
+Nexus), after the closing refactoring step: Nexus merges the current main into the queue's branch in the worktree and runs
+the checks there, so main only ever moves forward to a tested result. A clean merge needs no model: Nexus makes it
+itself, and at review level 2 or 3, with the checks green, accepts it itself too (a level you set to 1 still comes to
+you). A worker is involved only for a conflict or a check-fix round. A conflict stops the queue for you,
 unless Settings → Merging back → "Conflicts" lets the worker resolve it (then the step's review judges the
 resolution); resolve it in the worktree, or with a new revision, and press Continue: the step runs again.
+
+**Main brought in between the steps.** When Nexus opens a step of a queue with an integration step, it first merges
+the current main into the queue's branch if that is clean (a conflict is only recorded, and the next step's opening
+names the conflicting files; the integration step resolves it), so the steps work on a current base. The step's
+opening says what came in. When a lockfile changed in the merge (or before a step's checks), the worktree's setup
+runs again; the files that count are the project's `defaults.worktree_setup_inputs` (paths or globs in the project's
+`.nexus/project.yaml`, by default the common lockfiles anywhere in the tree; not shown in the dashboard).
 
 **Merge back and clean up.** A finished queue that ran in a worktree of its own offers "Merge into <base>…" and
 "Clean up…". Each asks first. For a queue with an integration step, Merge moves main forward to the commit the

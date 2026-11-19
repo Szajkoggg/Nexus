@@ -95,6 +95,8 @@ export interface AgentEvents {
    * where the runtime says (Claude Code's compact_boundary does; Codex's contextCompaction item does not).
    */
   compacted: [{ before?: number; after?: number }];
+  /** The moment after a turn's end in which the runtime may still start a turn of its own is over (AgentProcess.settling). */
+  settled: [];
   exit: [number | null];
 }
 
@@ -109,6 +111,13 @@ export interface AgentProcess extends EventEmitter<AgentEvents> {
    * Optional: a stand-in without it has none.
    */
   readonly background?: readonly string[];
+  /**
+   * Idle, but the runtime may still start a turn of its own: messages were sent into the turn that just ended, and one
+   * that reached the runtime after its turn was over runs as a turn after it (Claude Code), with nothing in the stream
+   * to say which it was until that turn starts. `settled` is emitted when the moment is over without one. Optional: a
+   * stand-in without it never settles.
+   */
+  readonly settling?: boolean;
   /** No priority: a new turn (after the running one). `next`: into the running turn. `now`: interrupt it. */
   send(text: string, priority?: Priority): void;
   /**
