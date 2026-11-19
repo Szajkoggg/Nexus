@@ -61,9 +61,9 @@ test("commits: a clean tree at every step's end, the commit named, only the step
 test("tests: only the affected files while working, stopping at the first failure; the whole suite at the end", () => {
   const t = nexus("help", "tests");
   assert.match(t, /run only the tests that cover what you changed, and stop at the first failure/);
-  assert.match(t, /The whole suite runs once, at the step's end, as the queue's\nchecks, and who runs them depends/);
+  assert.match(t, /The whole suite runs once, at the step's end, as the queue's\s+checks, and who runs them depends/);
   assert.match(t, /Where it says Nexus runs the checks: do not run the whole suite and do not report it/);
-  assert.match(t, /Where it does not .*: you run the checks at the step's end and report\n\s+each with nexus check/);
+  assert.match(t, /Where it does not .*: you run the checks at the step's end and report\s+each with nexus check/);
   assert.match(t, /npm run test:files -- <test file>\.\.\./);
   assert.match(t, /A test that fails only now and then is not run again until it passes/);
 });
