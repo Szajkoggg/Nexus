@@ -3172,6 +3172,12 @@ scripts before a one-off node or python script, which is an exception and reads 
 reads, never two builds or test runs at once. The worker's, the orchestrator's and the thinking partner's briefings
 each get the form of their runtime (the worker's and the partner's Codex briefings now differ from Claude Code's).
 
+Also from queue BR (BR3), to spend fewer tokens and turns: the worker looks at a changed view itself at one width and
+only registers the other pictures for the review, without reading them back; it reports `nexus step progress` at a
+phase boundary only, not after every command. The orchestrator puts S-sized items of one area together into one
+queue, a step each (at most about five), when they are independent of the queues running or planned beside them and
+the user would keep or drop them together; items the user may want to keep apart stay apart.
+
 ## Compacting a conversation (queue CC3)
 
 Decided by the user on 2026-11-15 (docs/ideas/chat-context.md): the Ideas conversations get a **Compact** action; the

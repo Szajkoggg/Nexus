@@ -603,6 +603,17 @@ test("the three briefings, on each runtime, say how to read and how to run and c
   assert.ok(partner.endsWith("\n- When an action is refused, do not work around it through another tool or command that reaches the same end; retry once in a simpler form at most, otherwise tell the user what you needed and why (`nexus help refusals`)."));
 });
 
+test("the worker looks at one width and reports progress at phase boundaries; the orchestrator puts small items together (queue BR)", async () => {
+  const { workerBriefing, orchestratorBriefing } = await import("../src/prompts.ts");
+  for (const runtime of ["claude", "codex"] as const) {
+    const worker = workerBriefing({ working: "en" }, runtime);
+    assert.ok(worker.includes("Look at a changed view yourself at one width"), `the ${runtime} worker looks at one width`);
+    assert.ok(worker.includes("you only register for the review (nexus review add), without opening them again"));
+    assert.ok(worker.includes("at a phase boundary only"), `the ${runtime} worker reports progress at phase boundaries`);
+    assert.ok(orchestratorBriefing("Pilot", 60, undefined, 85, runtime).includes("go into one queue, each as a step of its own (at most about five steps)"), `the ${runtime} orchestrator puts small items together`);
+  }
+});
+
 test("the orchestrator's briefing and notices on parallel worktrees and merging back (queue PW)", async () => {
   const { orchestratorBriefing, mergeWaitNotice, mergedNotice } = await import("../src/prompts.ts");
   const orch = orchestratorBriefing("Pilot", 60);
