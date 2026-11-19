@@ -44,6 +44,34 @@ export function lastDone(st: Pick<StepView, "timeline">): StepDone | undefined {
   return st.timeline.findLast((e): e is StepDone => e.type === "step.done");
 }
 
+/**
+ * The latest step.done, when the step runs now for its check-fix round: the worker took it up (`nexus step start`
+ * while the done waited for its review, so with no verdict between: state.ts, fix_round_of), and Nexus's set for that
+ * done failed or was accepted. Not a step started again after a send-back, a rejection or an acceptance (queue NL).
+ */
+function takenUpDone(q: Pick<QueueView, "check_runs">, st: Pick<StepView, "id" | "status" | "timeline" | "fix_round_of">): { done: StepDone; set: CheckSet } | undefined {
+  if (st.status !== "running" || q.check_runs?.steps[st.id]?.by !== "nexus") return undefined;
+  const done = lastDone(st);
+  if (!done || st.fix_round_of !== done.id) return undefined;
+  const set = checkSetOf(q.check_runs, st.id, done.id);
+  return set?.state === "failed" || set?.state === "accepted" ? { done, set } : undefined;
+}
+
+/**
+ * A review verdict at `at` on a step whose check-fix round the worker took up and whose failure Nexus accepted before
+ * it: the step waits for its review since, as of its done, so the verdict is weighed against that review. The events
+ * are replayed with the step running for that round; without this, the helper's pass-on, the orchestrator's and the
+ * user's acceptances and every other verdict were dropped until applyCheckSets set the review after the replay
+ * (queue NL: ND/ND1, 2026-11-19).
+ */
+export function enterAcceptedReview(q: QueueView, st: StepView, at: string): void {
+  const taken = takenUpDone(q, st);
+  if (!taken || !reachedReview(q.check_runs, st.id, taken.done.id)) return;
+  if (taken.set.ended_at && at < taken.set.ended_at) return; // before Nexus accepted the failure
+  st.status = "review"; st.finished_at = taken.done.at;
+  if (q.status === "running") q.status = "waiting";
+}
+
 /** The set of checks Nexus ran (or runs) for the step's latest step.done, if any. */
 export function latestCheckSet(q: Pick<QueueView, "check_runs">, st: Pick<StepView, "id" | "timeline">): CheckSet | undefined {
   const done = lastDone(st);
@@ -86,7 +114,7 @@ export function applyCheckSets(q: QueueView, st: StepView, limit?: number): void
   // The worker took up its check-fix round (`nexus step start` after the failed set's done): the step runs in that
   // round, a dispute it says there is read as from the round's start, and an accepted one sends it to its review after
   // all (as of the done: the step.started kept the done's review_with).
-  const takenUp = st.status === "running" && (set?.state === "failed" || set?.state === "accepted");
+  const takenUp = !!takenUpDone(q, st);
   if (st.status !== "review" && !takenUp) return;
   const toReview = () => {
     if (!takenUp) return;

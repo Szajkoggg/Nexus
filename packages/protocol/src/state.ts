@@ -1,6 +1,6 @@
 // Derives the dashboard's view of a project from its files. Pure apart from reading through the store;
 // nothing here is ever written back (state.json, if kept, is only a cache of this).
-import { applyCheckSets, reviewRound } from "./checks.ts";
+import { applyCheckSets, enterAcceptedReview, reviewRound } from "./checks.ts";
 import { CONVERSATION_ONLY, HELPER_VERDICTS, NEXUS_PASS_ON, NEXUS_SESSION, ORCHESTRATOR_ONLY, type PassOnReason, USER_ONLY, WORKER_ONLY, type MetricsFile, type StatusChange, type Event, type InboxEntry, type Note, type GitFile, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type RecurringFile, type ReviewItem, type ReviewLevel, type LegacyReviewPolicy, type AwayFile, type ChecksFile, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type PlanFile, type StepDef, type StepStatus, type TagProposal, type TagsFile } from "./schemas.ts";
 import { ProjectStore, chainPlan, readAway, revisionHash } from "./store.ts";
 import { awayAt, awayNow, type AwayNow } from "./away.ts";
@@ -143,6 +143,11 @@ export interface StepView extends StepDef {
   helper?: { session: string; round: number; state: "running" | "passed_on"; by?: "helper" | "nexus"; reasons?: PassOnReason[]; findings?: string };
   /** The round at work answers the user's Fix it: its review is the user's, whatever the policy. */
   user_fix?: boolean;
+  /**
+   * The step.done whose check-fix round the step was started for: started while that done still waited (as the events
+   * read) for its review, so with no verdict between; the checks of that done decide whether it reached review (queue NL).
+   */
+  fix_round_of?: string;
   review_items: (ReviewItem & { at: string; round?: number })[];
   /**
    * The user's marks and comments on review pictures, by the picture's path: `accepted` with its time while marked;
@@ -261,6 +266,8 @@ export interface ProjectState {
 
 const FINISHED_STEP: ReadonlySet<StepStatus> = new Set(["done", "skipped", "failed"]);
 const TERMINAL_QUEUE: ReadonlySet<QueueStatus> = new Set(["done", "cancelled"]);
+/** The verdicts on a step's review (and the hand-over to the user), weighed against the step waiting for it. */
+const REVIEW_VERDICTS: ReadonlySet<Event["type"]> = new Set(["review.accepted", "review.sent_back", "review.rejected", "review.passed_on", "review.provisional", "review.asked_user"]);
 
 /**
  * A step that needs no more work: done or skipped, or rejected once the rejection no longer holds (a newer revision
@@ -702,6 +709,13 @@ function apply(
     return st;
   };
 
+  // A verdict on a step whose accepted check failure came out of a check-fix round the worker took up: its review
+  // began when Nexus accepted the failure, not after the replay (checks.ts, enterAcceptedReview).
+  if (REVIEW_VERDICTS.has(e.type) && "step" in e && e.queue !== undefined) {
+    const q = queues.get(e.queue); const st = q?.steps.find((x) => x.id === e.step);
+    if (q && st) enterAcceptedReview(q, st, e.at);
+  }
+
   switch (e.type) {
     case "step.started": {
       const q = queueOf(e.queue); const st = stepOf(q, e.step);
@@ -723,6 +737,7 @@ function apply(
       for (const kept of again) {
         if (kept && kept.status !== "pending" && kept.status !== "skipped") toPending(kept);
       }
+      st.fix_round_of = st.status === "review" ? st.timeline.findLast((x) => x.type === "step.done")?.id : undefined;
       st.status = "running"; st.started_at ??= e.at; st.session = e.session; st.accepted = undefined; st.audit = undefined;
       st.model_free = e.session === NEXUS_SESSION ? true : undefined;
       st.finished_at = undefined; st.reason = undefined;
@@ -887,7 +902,7 @@ function apply(
       const sent = delivered.has(e.id);
       st.sent_back.push({ id: e.id, text: e.text, at: e.at, by, round, delivered: sent });
       if (!sent) return; // waits for the server to deliver it
-      st.status = "running"; st.review_with = undefined; st.asked_user = undefined;
+      st.status = "running"; st.review_with = undefined; st.asked_user = undefined; st.fix_round_of = undefined;
       st.user_fix = by === "user" ? true : undefined;
       st.finished_at = undefined;
       if (q.status === "waiting" && !q.steps.some(stepWaits)) q.status = "running";
@@ -895,7 +910,8 @@ function apply(
     }
     case "review.accepted": {
       const q = queueOf(e.queue); const st = stepOf(q, e.step);
-      if (!q || !st || st.status !== "review") return;
+      if (!q || !st) return;
+      if (st.status !== "review") { warnings.push(`event ${e.id}: step ${e.queue}/${e.step} is not waiting for its review; the acceptance is ignored`); return; }
       // The orchestrator accepts only what waits for it; what went to the user is the user's.
       if (s?.role === "orchestrator" && st.review_with !== "orchestrator") { warnings.push(`event ${e.id}: step ${e.queue}/${e.step} waits for the user's review; the orchestrator's acceptance is ignored`); return; }
       if (s?.role === "helper") {
