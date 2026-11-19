@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  ActionError, Effort, acceptedByNexus, effortIssue, type ProjectFile, reviewedByOrchestrator, runGoing, ProjectStore, applyDraft, defineMetric, inPlan, loadProjectState, metricDef, openPlan, orchestratorOverview, overThreshold, proposePlan, proposeTags, readAway, readUsage, orchestratorStatusChange, newId, now, sendBack, type Applied, type Event, type EventType, type NotifyKind, type ProjectState, type QueueView, type SessionFile, type SessionView, type StepView,
+  ActionError, Effort, acceptedByNexus, normPath, effortIssue, type ProjectFile, reviewedByOrchestrator, runGoing, ProjectStore, applyDraft, defineMetric, inPlan, loadProjectState, metricDef, openPlan, orchestratorOverview, overThreshold, proposePlan, proposeTags, readAway, readUsage, orchestratorStatusChange, newId, now, sendBack, type Applied, type Event, type EventType, type NotifyKind, type ProjectState, type QueueView, type SessionFile, type SessionView, type StepView,
 } from "@nexus/protocol";
 import type { AgentProcess } from "./agent.ts";
 import type { CodexPermissions } from "./codex.ts";
@@ -22,7 +22,7 @@ import {
   carriedMessages, formatInbox, orchestratorFreshSeed, orchestratorRuntimeSeed, orchestratorSummaryRequest, summaryLists, questionNotice, rejectionNotice, restartedNotice, fixAskedNotice, levelToUserNotice, reviewNotice, awayOnNotice, awayEndNotice, awayStuckNotice, planDecisionNotice, planHeldNotice, runEndNotice, maintenanceFindingsNotice, staticAnalysisNotice, stepNoteNotice, tagDecisionNotice, fallbackNotice, metricNotice, userMessage, withdrawalNotice,
 } from "./prompts.ts";
 import { shellRules } from "./shell-rules.ts";
-import { ReviewHelpers, type HelperOptions } from "./review-helper.ts";
+import { ReviewHelpers, audited, type HelperOptions } from "./review-helper.ts";
 
 // Agent (formerly Task) lets it call subagents; they run within these same read-only permissions.
 const READ_ONLY_TOOLS = [
@@ -82,6 +82,13 @@ interface EarlierSession {
   created_at: string;
   chat: ReturnType<typeof chatView>["chat"];
   switch: { at: string; fill: number | null; summary: Summary | null };
+}
+
+/** Who accepted a step, as the orchestrator's notices list it (queue RH, H9). */
+function acceptedBy(a: NonNullable<StepView["accepted"]>): string {
+  if (a.by === "helper") return `accepted by the review helper (${[a.runtime === "codex" ? "Codex" : "Claude Code", a.model, a.effort].filter(Boolean).join(", ")})`;
+  if (a.by === "nexus") return "accepted by Nexus, a clean merge without a model";
+  return `accepted by the ${a.by}`;
 }
 
 /** A push notification for the user's devices (src/remote.ts `push`). */
@@ -983,14 +990,56 @@ ${n.text}` });
       return;
     }
     this.ensure();
+    // What rides with a notice told anyway (queue RH): the steps accepted since by others, the review helper's
+    // send-backs, its acceptances picked for an audit. With the last notice that has a fact; none starts a turn.
+    const riding = updateOnly ? undefined : this.riders(state, told, since);
+    const last = fresh.findLast((i) => !i.quiet);
     for (const i of fresh) {
       if (inbox.some((m) => m.id === held(i.key))) this.store.appendDelivered(s.id, { at: now(), kind: "inbox", id: held(i.key), via: "turn" });
+      const rides = riding && i === last ? riding : undefined;
       if (i.quiet) this.markTold(s, i.more!.keys);
-      else this.markTold(s, [i.key, ...(i.more?.keys ?? [])]);
+      else this.markTold(s, [i.key, ...(i.more?.keys ?? []), ...(rides?.keys ?? [])]);
       // The user sees the fact; the instruction after it, and any changes for agents, are for the orchestrator only.
       if (!i.quiet) this.store.appendChat(s.id, { at: now(), from: "nexus", text: i.fact });
-      this.deliver(noticeText(i, i.more?.text));
+      this.deliver(rides ? `${noticeText(i, i.more?.text)}\n\n${rides.text}` : noticeText(i, i.more?.text));
     }
+  }
+
+  /**
+   * What the orchestrator learns of reviews it did not do (queue RH, H9-H11), not told yet in this session's line: the
+   * steps accepted since by the review helper, Nexus or the user, and the helper's send-backs, oldest first; and the
+   * helper's acceptances picked for an audit (`audited`). Undefined when there is nothing.
+   */
+  private riders(state: ProjectState, told: ReadonlySet<string>, since: string): { text: string; keys: string[] } | undefined {
+    const role = (session: string) => state.sessions.find((x) => x.id === session)?.role;
+    const lines: { at: string; key: string; text: string }[] = [];
+    const audits: { key: string; text: string }[] = [];
+    const rate = state.project.review_helper.audit_rate;
+    for (const q of state.queues) for (const st of q.steps) {
+      const a = st.accepted;
+      if (a && a.by !== "orchestrator" && a.at >= since) {
+        const key = `notify:accepted:${a.event}`;
+        if (!told.has(key)) lines.push({ at: a.at, key, text: `step ${st.id} of queue ${q.id}: ${acceptedBy(a)}` });
+        const audit = `notify:audit:${a.event}`;
+        if (a.by === "helper" && !st.audit && !told.has(audit) && audited(a.event, rate)) {
+          const packet = a.session ? normPath(join(this.store.sessionDir(a.session), "packet.md")) : "(none)";
+          audits.push({ key: audit, text: `Audit: review again step ${st.id} of queue ${q.id}, which the review helper accepted (its packet: ${packet}; the step's work is in its queue's checkout). Judge it as you would review it, then answer: nexus review audit ${q.id} ${st.id} agree|disagree --reason "why". A disagreement does not reopen the step: if the work needs a fix, draft it as a revision.` });
+        }
+      }
+      for (const e of st.timeline) {
+        if (e.type !== "review.sent_back" || e.at < since || role(e.session) !== "helper") continue;
+        const b = st.sent_back.find((x) => x.id === e.id);
+        const key = `notify:helpersentback:${e.id}`;
+        if (b && !told.has(key)) lines.push({ at: e.at, key, text: `step ${st.id} of queue ${q.id}: sent back by the review helper${b.to_user ? ", which handed it to the user (the send-back limit)" : `, round ${b.round}`}: ${e.text.split("\n")[0]}` });
+      }
+    }
+    if (!lines.length && !audits.length) return undefined;
+    lines.sort((a, b) => a.at.localeCompare(b.at) || a.key.localeCompare(b.key));
+    const parts = [
+      ...(lines.length ? [`Since your last notice (for your overview; nothing to do):\n${lines.map((l) => `- ${l.text}`).join("\n")}`] : []),
+      ...audits.map((x) => x.text),
+    ];
+    return { text: parts.join("\n\n"), keys: [...lines.map((l) => l.key), ...audits.map((x) => x.key)] };
   }
 }
 

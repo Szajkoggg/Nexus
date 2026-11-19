@@ -135,6 +135,10 @@ export interface StepView extends StepDef {
    * and gave no verdict yet), `passed_on` once it (or Nexus, `by: "nexus"`) passed the step on to the orchestrator,
    * with the `reasons` and the helper's `findings`.
    */
+  /**
+   * The orchestrator's audit of the review helper's acceptance (queue RH): the acceptance's event, its verdict and why.
+   */
+  audit?: { accepted: string; verdict: "agree" | "disagree"; text: string; at: string; event: string };
   helper?: { session: string; round: number; state: "running" | "passed_on"; by?: "helper" | "nexus"; reasons?: PassOnReason[]; findings?: string };
   /** The round at work answers the user's Fix it: its review is the user's, whatever the policy. */
   user_fix?: boolean;
@@ -714,7 +718,7 @@ function apply(
       for (const kept of again) {
         if (kept && kept.status !== "pending" && kept.status !== "skipped") toPending(kept);
       }
-      st.status = "running"; st.started_at ??= e.at; st.session = e.session; st.accepted = undefined;
+      st.status = "running"; st.started_at ??= e.at; st.session = e.session; st.accepted = undefined; st.audit = undefined;
       st.model_free = e.session === NEXUS_SESSION ? true : undefined;
       st.finished_at = undefined; st.reason = undefined;
       if (!TERMINAL_QUEUE.has(q.status)) { q.status = "running"; q.status_reason = undefined; }
@@ -902,6 +906,14 @@ function apply(
       else if (q.status === "waiting" && !q.steps.some(stepWaits)) q.status = "running";
       return;
     }
+    case "review.audited": {
+      const st = stepOf(queueOf(e.queue), e.step);
+      if (!st) return;
+      if (st.accepted?.by !== "helper" || st.accepted.event !== e.accepted) { warnings.push(`event ${e.id}: step ${e.queue}/${e.step} has no acceptance ${e.accepted} of the review helper's; the audit is ignored`); return; }
+      if (st.audit) { warnings.push(`event ${e.id}: step ${e.queue}/${e.step} was audited already; ignored`); return; }
+      st.audit = { accepted: e.accepted, verdict: e.verdict, text: e.text, at: e.at, event: e.id };
+      return;
+    }
     case "review.passed_on": {
       // A review helper's pass-on of the step it reviews, or Nexus's (queue RH): the step keeps waiting for the
       // orchestrator's review, which now gets its notice with the reasons and the findings.
@@ -1043,7 +1055,7 @@ function helperRefusal(s: Pick<SessionFile, "role" | "about">, q: QueueView, st:
 }
 
 function toPending(st: StepView): void {
-  st.status = "pending"; st.review_with = undefined; st.asked_user = undefined; st.accepted = undefined; st.helper = undefined;
+  st.status = "pending"; st.review_with = undefined; st.asked_user = undefined; st.accepted = undefined; st.audit = undefined; st.helper = undefined;
   st.finished_at = undefined; st.summary = undefined; st.commit = undefined; st.reason = undefined;
 }
 

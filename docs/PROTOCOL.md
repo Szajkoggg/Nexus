@@ -685,6 +685,7 @@ Every line:
 | `metric.defined` | `name`, `unit?`, `show?`, `target?`, `warn_above?`, `warn_below?` | Orchestrator only: defines one of the project's metrics, or changes it (the whole definition); the server checks it, writes `metrics.yaml` and answers in `applied.jsonl` (see "Project metrics") |
 | `metric.recorded` | `queue`, `step`, `name`, `value`, `unit`, `commit?` | Worker only (the loader ignores it from any other session): a value of one of the project's metrics for the step, with the metric's unit then and the HEAD of the worker's checkout (see "Project metrics") |
 | `review.sent_back` | `queue`, `step`, `text` | Orchestrator, user or review helper only: a step in review goes back to its worker with what to fix (see "Sending a step back", "The review helper") |
+| `review.audited` | `queue`, `step`, `accepted`, `verdict` (`agree`, `disagree`), `text` | Orchestrator only: its audit of a review helper's acceptance (`accepted`: that review.accepted's id) it was given; it does not reopen the step (see "The review helper") |
 | `review.passed_on` | `queue`, `step`, `round`, `reasons`, `text` | Review helper or `nexus` only: the step goes on to the orchestrator's review, with why and the helper's findings (see "The review helper") |
 | `review.rejected` | `queue`, `step`, `text?` | User only (the loader ignores it from any other session, the orchestrator's included): rejects a step waiting for the user's review (see "Reject") |
 | `review.asked_user` | `queue`, `step`, `text` | The orchestrator's: a step waiting for its review goes to the user, with why. Also the server's from the user's session, when the user sets such a step's level to 1 (see "The user's level"): then taken for a step in review whoever its level gives it to, and marked `by: user` |
@@ -927,10 +928,9 @@ text verbatim (it must not be empty). Picture comments (N8.3) are a user's Fix i
 
 ### The review helper
 
-**Status: in effect since RH2** (queue RH): which reviews, the helper's session, packet, settings, rights, verdicts,
-what happens without one, the derived step and the review notice after a pass-on. **Designed, not built yet**: the
-"accepted since" list and the audit in the orchestrator's notices, `nexus review audit` (RH3), the statistics (RH3) and
-the dashboard (RH4). The reasons are in DESIGN.md, "Routine reviews by a helper". The marks **(H1)**…**(H17)** were
+**Status: in effect** (queue RH): which reviews, the helper's session, packet, settings, rights, verdicts, what happens
+without one, the derived step and the review notice after a pass-on (RH2); what rides with the orchestrator's notices,
+the audit and the statistics (RH3). **Not built yet**: the dashboard (RH4). The reasons are in DESIGN.md, "Routine reviews by a helper". The marks **(H1)**…**(H17)** were
 RH1's proposals beyond the user's decision of 2026-11-17; the user approved them all but **H12** (the first five
 acceptances after a change of the helper's model or effort always audited), which is left out.
 
@@ -1034,29 +1034,34 @@ step is in `accepted`, not in these lines, so what they show without helpers sta
   step left behind. Its findings (…; no need to check that again): …", or "Nexus passed it to you without the review
   helper: …"). A step a helper has, or one it will take at the next change, gets no notice (built in RH2). A helper's
   acceptance gives the orchestrator no notice, no turn and no chat line.
-- **Accepted since** **(H9, H10; RH3)**: every notice that is told anyway (a review, a question, a halt, the run's end, an
-  approval, …) starts with the steps accepted since by anyone but the orchestrator itself, oldest first, each with who
-  accepted it ("W2 of W: accepted by the review helper (Claude Code, claude-sonnet-5-5, medium)", "W4 of W: accepted
-  by Nexus, a clean merge without a model", "V1 of V: accepted by the user"), and the helper's send-backs since ("W3
-  of W: sent back by the review helper, round 2: <first line>"). Each is listed once per orchestrator session, key
-  `notify:accepted:<event id>` (`notify:helpersentback:<event id>`), recorded when the notice carrying it is told. None
-  of them starts a turn, and none is shown in the chat as a line of its own.
-- **Audits** **(H11; RH3)**: a helper's acceptance is audited when `hash(event id)` (the first 8 hexadecimal digits of
-  its SHA-256, read as a fraction of 2³²) is below `review_helper.audit_rate` (H12, always auditing the first five
-  acceptances after a change of the helper's model or effort, is left out by the user's decision). An audit rides with the next
-  notice like the list above (key `notify:audit:<event id>`): "Audit: review again step S of queue X, accepted by the
-  review helper: packet <path>". The orchestrator answers with `nexus review audit <queue> <step> agree|disagree
+- **Accepted since** **(H9, H10)**: the last notice of a batch that is told anyway (a review, a question, a halt, the
+  run's end, an approval, …; not one told while notices are off) ends with the steps accepted since by anyone but the
+  orchestrator itself, and the helper's send-backs since, oldest first, under "Since your last notice (for your
+  overview; nothing to do):": "step W2 of queue W: accepted by the review helper (Claude Code, claude-sonnet-5-5,
+  medium)", "…: accepted by Nexus, a clean merge without a model", "…: accepted by the user", "step W3 of queue W: sent
+  back by the review helper, round 2: <first line>" (or ", which handed it to the user (the send-back limit)"). At the
+  end, not the start as RH1 planned, so a notice still begins with its own fact. Only what happened since the first
+  session of the orchestrator's line (context care) began; each listed once per line, key `notify:accepted:<event id>`
+  (`notify:helpersentback:<event id>`), recorded when the notice carrying it is told. None of them starts a turn, and
+  none is shown in the chat. A batch held while the orchestrator's runtime is full carries none (they ride later).
+- **Audits** **(H11)**: a helper's acceptance (since the line's first session) is audited when `hash(event id)` (the
+  first 8 hexadecimal digits of its SHA-256, read as a fraction of 2³²; `audited` in `src/review-helper.ts`) is below
+  `review_helper.audit_rate` (H12, always auditing the first five acceptances after a change of the helper's model or
+  effort, is left out by the user's decision). An audit rides after the list above (key `notify:audit:<event id>`):
+  "Audit: review again step S of queue X, which the review helper accepted (its packet: <path>; …). Judge it as you
+  would review it, then answer: nexus review audit X S agree|disagree --reason "why". …". The orchestrator answers with `nexus review audit <queue> <step> agree|disagree
   --reason <text>`, which writes `review.audited` (`queue`, `step`, `accepted`: the acceptance's event id, `verdict`,
-  `text`); the CLI takes it only from an orchestrator, only for an audit it was given. A disagreement does not reopen
+  `text`); the CLI takes it only from an orchestrator, only for an audit it was given (its key in an orchestrator
+  session's `applied.jsonl`), once per acceptance; the derived step keeps it as `audit` (`accepted`, `verdict`,
+  `text`, `at`, `event`), and one for another acceptance, or a second one, is ignored with a warning. A disagreement does not reopen
   the step: the orchestrator drafts a fix as a revision when the work needs one, as after a provisional acceptance's
   Fix it.
 
-**The CLI**: `nexus review pass-on` (review helpers only) and `nexus review accept`/`send-back` from a helper are in "The
-`nexus` CLI". Designed for RH3: `nexus review audit <queue> <step> agree|disagree --reason "..."` (orchestrator only,
-for an audit it was given).
+**The CLI**: `nexus review pass-on` (review helpers only), `nexus review accept`/`send-back` from a helper, `nexus review
+audit` (orchestrator only) and `nexus stats --reviews` are in "The `nexus` CLI".
 
 **Records and statistics** **(H16)**. Each helper turn is a record in `turns.jsonl` with `role: helper`, its `queue`
-and `step` (built in RH2). Designed for RH3: `nexus stats --reviews` (and `reviews` in `GET /api/stats`) reports, for the range and project, grouped by
+and `step`. `nexus stats --reviews` (`reviewStats`, `packages/protocol/src/review-stats.ts`) (and `reviews` in `GET /api/stats`) reports, for the range and project, grouped by
 who reviewed (the helper by model and effort, the orchestrator, the user): the user's signals (Fix it, Reject,
 provisional acceptances returned); the cost signals (send-backs by who sent them, check-fix rounds, the helper's
 reviews passed on by reason and as a share, marked when above 25%); the audit (acceptances audited, disagreements,
@@ -1442,6 +1447,7 @@ nexus check W3 "npm test" --unrelated --evidence "it fails on main too"   # a ch
 nexus metric record bundle-kb 512 [--step W3]  # worker only: a value of a project metric for the step at work, with HEAD
 nexus metric list                              # the project's metrics (any session)
 nexus stats [--by model|effort|kind|activity|area|size|origin] [--project <id>] [--since <date>]   # see "Statistics"
+nexus stats --reviews [--project <id>] [--since <date>]   # the reviews' quality on three levels (see "The review helper")
 nexus step done W3 --summary "No floating body on any fixture" [--commit 1a2b3c] [--activities feature,test]   # warns at an unclean end; --activities: what was actually done (refused: a name on no list)
 nexus step failed W3 --reason "..."
 nexus stop W3 --condition "user decision" --reason "..."   # the condition as the queue words it; the reason short (shown first)
@@ -1465,6 +1471,7 @@ nexus queue draft <file.yaml|->                # a new queue, or a change to one
 nexus queue draft --template bugfix --set issue="..." --set area=engine [--id BF]   # writes .nexus/drafts/BF.yaml to complete and upload
 nexus recurring set weekly --template maintenance [--set scope=...] (--every "mon 03:00" | --after-queues 5) [--maintenance survey|fix_small] [--reason ...]   # through the server; the user approves it
 nexus static-analysis decline --reason "..."  # the user's no to the static-analysis template: no reminder for 90 days
+nexus review audit W W2 agree|disagree --reason "..."   # an audit of the review helper's acceptance a notice gave it
 nexus check decide W W3 accept|fix --reason "..."   # a disputed check Nexus could not run on the base (see "Checks run by Nexus")
 nexus answer <qid> "..." [--escalate [--recommend <option>]] [--continue|--wait]
                                                # --recommend only with --escalate: one of the question's options
@@ -1875,7 +1882,7 @@ from every agent session, and the others from every session but an orchestrator'
 | `POST /api/projects/:id/ideas/statuses` | `request_id`, `revision`, `ref`, `reason`, `operation`; optional fields below | Dashboard-only reasoned status action, returned in `result`. Same-origin JSON. Invalid input/target/blocker: 400; missing dated entry/action: 404; stale/concurrent save, newer entry action or conflicting request ID: 409. No queue, run, plan or note writes |
 | `GET /api/projects/:id/ideas` | | The ideas overview (`IdeasResponse`: `notes_dir`, null without a notes folder; `notes`, each with `file`, `title`, `summary?`, `area?`, `group?`, `area_from?` (`note` or `queues`), `open` and `questions` (its Open questions' text), `ideas`, `status` and `queues`, and its `entries`, each with `ref`, `date`, `headings`, `lead`, `decisions`, `dropped?`, `replaced_by?`, `status`, `queues` and `history`; `unknown_refs`, queues' references to nothing; `to_match`, the suggestions for earlier queues still to decide: `suggestions` and `queues`). Derived on each request from the notes, the queues and the hand-over records; the notes are only read (see "Conversations"). Unknown project: 404 |
 | `GET /api/projects/:id/metrics` | | The project's metrics and their values (`ProjectMetrics`: `metrics`, its own definitions and every check's time seen, `check:<name>`; `values`, oldest first, each a `StepView.metrics` entry with its `queue` and `step`); see "Project metrics". Unknown project: 404 |
-| `GET /api/stats?by=&project=&since=&kind=&activity=&area=&size=&origin=` | | The statistics (`StatsReport`, see "Statistics"): every registered project, or one (`project`; unknown: 404), grouped by `by` (`model`, `effort`, `kind`, `activity`, `area`, `size`, `origin`; default `model`; another: 400), the steps whose last outcome is at or after `since` (a date or a time; unreadable: 400), narrowed to the steps under each tag value given (`kind=code`, `area=p/engine` across projects; the value as the groups name it) |
+| `GET /api/stats?by=&project=&since=&kind=&activity=&area=&size=&origin=` | | The statistics (`StatsReport`, see "Statistics"): every registered project, or one (`project`; unknown: 404), grouped by `by` (`model`, `effort`, `kind`, `activity`, `area`, `size`, `origin`; default `model`; another: 400), the steps whose last outcome is at or after `since` (a date or a time; unreadable: 400), narrowed to the steps under each tag value given (`kind=code`, `area=p/engine` across projects; the value as the groups name it); with `reviews` (`ReviewStats`, see "The review helper"), for the same project and `since` |
 | `GET /api/usage/days?since=` | | The usage windows day by day for the global Stats view (`UsageDays`, see "Statistics") from `since` (a date or a time; default 30 days ago; unreadable: 400) to today, with `threshold`, the global `defaults.usage_pause_threshold` |
 | `POST /api/projects/:id/tags/:proposal` | `action` (`accept`, `decline`) | The user's decision on the orchestrator's proposal for the project's tag lists (see "Tags"); only the user: no CLI command or event does it (`{message}`) |
 | `GET /api/projects/:id/templates` | | The queue templates in effect for the project (`TemplatesResponse`: `templates`, each with `id`, `title`, `description?`, `layer`, `replaces`, `params` and a maintenance template's `maintenance`; `problems`, the files not used with why), for "New queue from template" (see "Queue templates") |

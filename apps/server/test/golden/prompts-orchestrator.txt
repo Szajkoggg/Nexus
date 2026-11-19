@@ -146,6 +146,10 @@ The run is paused and nothing was reverted. Propose what follows as queue revisi
 [Nexus] Queue QN revision 1 approved. If the plan puts it next, start it now; otherwise tell the user why not.
 -- to orchestrator 1
 [Nexus] Queue QO revision 1 approved. If the plan puts it next, start it now; otherwise tell the user why not.
+
+Since your last notice (for your overview; nothing to do):
+- step N1 of queue QN: accepted by the user
+- step N2 of queue QN: accepted by the user
 == the user's decisions on tag proposals: an area accepted, an activity declined, a rename accepted
 -- to orchestrator 1
 [Nexus] The user accepted your tag proposal: area engine is on the project's list. Drafts may use it now.

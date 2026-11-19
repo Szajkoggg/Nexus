@@ -783,7 +783,7 @@ export function helperPacket(q: QueueView, st: StepView, c: HelperPacketContext)
     `Review material:\n${list(items)}`,
     `The worker's summary:\n${st.summary?.trim() || "(none)"}`,
     ...(st.sent_back.length ? [`Sent back before:\n${list(st.sent_back.map((b) => `round ${b.round}, by the ${b.by === "helper" ? "review helper" : b.by}: ${b.text}`))}`] : []),
-    `The step's change, ${c.range.from}..${c.range.to}${range}:\n${c.stat.trim() || "(no change)"}\nThe whole diff: ${c.diff.replaceAll("\\", "/")} (read the parts you need).`,
+    `The step's change, ${c.range.from}..${c.range.to}${range}:\n${c.stat.trimEnd() || "(no change)"}\nThe whole diff: ${c.diff.replaceAll("\\", "/")} (read the parts you need).`,
     decide,
   ].join("\n\n");
 }

@@ -915,6 +915,12 @@ export const Event = z.discriminatedUnion("type", [
    * `reasons` why, `text` the helper's findings (what it checked and what it could not). The step keeps waiting for the
    * orchestrator's review, and the orchestrator gets its review notice with both (PROTOCOL.md, "The review helper").
    */
+  /**
+   * The orchestrator's audit of a review helper's acceptance (`nexus review audit`, queue RH): `accepted` the
+   * review.accepted event it reviewed again, `verdict` whether it agrees, `text` why. Orchestrator only, only for an
+   * audit it was given; a disagreement does not reopen the step.
+   */
+  z.object({ ...base, type: z.literal("review.audited"), ...qs, accepted: z.string().min(1), verdict: z.enum(["agree", "disagree"]), text: z.string().min(1) }),
   z.object({ ...base, type: z.literal("review.passed_on"), ...qs, round: z.number().int().positive(), reasons: z.array(PassOnReason).min(1), text: z.string() }),
   /**
    * The user rejects a step waiting for their review, with an optional reason: the step is marked rejected, the run
@@ -961,7 +967,7 @@ export type EventType = Event["type"];
 export const ORCHESTRATOR_ONLY: ReadonlySet<EventType> = new Set([
   "answer.given", "queue.drafted", "session.request", "review.accepted", "review.sent_back", "review.asked_user", "status.set",
   "review.provisional", "plan.proposed", "tags.proposed", "metric.defined", "recurring.set",
-  "static_analysis.declined", "check.decided",
+  "static_analysis.declined", "check.decided", "review.audited",
 ]);
 
 /** Event types only a worker session may write: a metric's value belongs to a step's work (metrics.ts). */

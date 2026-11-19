@@ -19,13 +19,13 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  ProjectStore, addNote, answerAsUser, approveQueue, ensureUserSession, loadProjectState, newId, now, reportFile, sendMessage,
+  ProjectStore, addNote, answerAsUser, approveQueue, ensureNexusSession, ensureUserSession, loadProjectState, newId, now, reportFile, sendMessage,
   type Event, type QueueFile, type SessionFile, type StepDef,
 } from "@nexus/protocol";
 import type { AgentEvents, AgentProcess, Priority } from "../src/agent.ts";
 import type { Launch } from "../src/agent-host.ts";
 import { Engine } from "../src/engine.ts";
-import { formatInbox, freshSessionSeed, midStepSeed, noOutcomeNudge, stepOpening, switchReason } from "../src/prompts.ts";
+import { formatInbox, freshSessionSeed, helperBriefing, helperPacket, midStepSeed, noOutcomeNudge, stepOpening, switchReason } from "../src/prompts.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { Conversations } from "../src/conversations.ts";
 import type { DeployChanges } from "../src/deploy.ts";
@@ -413,6 +413,73 @@ test("the orchestrator's texts: briefing, helpers and notices match the golden f
   tr.add(readFileSync(options.agentsFile, "utf8"));
 
   golden("orchestrator", tr.text([[orch, "<orchestrator session>"], [root, "<root>"]]));
+});
+
+test("the review helper's texts: its briefing, its packet, the notices after a pass-on, and what rides with a notice match the golden file", (t) => {
+  const { root, store, event, queue } = setup(t, "helper");
+  const p = store.readProject();
+  // Every acceptance of the helper audited (the rate decides it with the event id's hash; 1: all).
+  store.writeProject({ ...p, review_helper: { ...p.review_helper, audit_rate: 1 } });
+  const tr = new Transcript("orchestrator");
+  // Without helpers of its own: the helper sessions and their verdicts are written here, as their CLI would.
+  const orchestrator = new Orchestrator(store, { draining: false } as unknown as Engine, () => {}, {}, { spawn: tr.spawn });
+  t.after(() => orchestrator.shutdown());
+  const change = () => orchestrator.onChange(loadProjectState(store));
+  orchestrator.say("Hello.");
+  const orch = store.readProject().orchestrator!.session!;
+  queue({ id: "QH", review_level: 2, steps: [
+    { id: "H1", title: "Step H1", goal: "Goal of H1.", acceptance: ["H1 is done"] },
+    { id: "H2", title: "Step H2", goal: "Goal of H2.", acceptance: ["H2 is done", "The look is calm"], review: { prepare: "The calm look: compare with the mockup." } },
+    { id: "H3", title: "Step H3", goal: "Goal of H3.", acceptance: ["H3 is done"], review: { level: 3 } },
+  ] });
+  approveQueue(store, "QH");
+  store.writeSession({ protocol: 1, id: "w-h", project: "p", role: "worker", runtime: "claude", native_id: null, title: "w-h", cwd: root, launched_by: "nexus", created_at: now(), queue: "QH" });
+  const helper = (id: string, step: string, round: number, level: 2 | 3) => store.writeSession({
+    protocol: 1, id, project: "p", role: "helper", runtime: "claude", native_id: null, cwd: root, launched_by: "nexus", created_at: now(),
+    model: "claude-sonnet-5-5", effort: "medium", about: { queue: "QH", step, round, level },
+  });
+  const step = (id: string) => loadProjectState(store).queues.find((q) => q.id === "QH")!.steps.find((x) => x.id === id)!;
+
+  tr.section("H1: the worker sends it back after the helper's send-back, and the helper accepts round 2");
+  event("w-h", { type: "step.started", queue: "QH", step: "H1" });
+  event("w-h", { type: "step.done", queue: "QH", step: "H1", summary: "H1 in its first round.", commit: "aaa1111" });
+  helper("h-1", "H1", 1, 2);
+  event("h-1", { type: "review.sent_back", queue: "QH", step: "H1", text: "The test for the empty list is missing.\nAdd it beside the others." });
+  // The send-back delivered, as the server does (routeSendBacks): round 2 opens.
+  store.appendInbox("w-h", { v: 1, id: "send-back-x", at: now(), from: "helper", type: "send_back", ref: step("H1").sent_back[0]!.id, queue: "QH", step: "H1", text: "The test for the empty list is missing.", round: 2 });
+  event("w-h", { type: "step.started", queue: "QH", step: "H1" });
+  event("w-h", { type: "step.done", queue: "QH", step: "H1", summary: "H1 with the test.", commit: "aaa2222" });
+  helper("h-2", "H1", 2, 2);
+  event("h-2", { type: "review.accepted", queue: "QH", step: "H1", text: "Both criteria checked in the diff and the test file." });
+
+  tr.section("the review helper's briefing");
+  tr.add(helperBriefing(store.readProject()));
+
+  tr.section("H2: its packet, with the review notes, the checks reported and the diff's summary");
+  event("w-h", { type: "step.started", queue: "QH", step: "H2" });
+  event("w-h", { type: "check.result", queue: "QH", step: "H2", name: "npm test", ok: true, summary: "112 pass", duration: 95.2 });
+  event("w-h", { type: "step.done", queue: "QH", step: "H2", summary: "H2 done; the colours differ from the plan (left out: the dark theme).", commit: "bbb1111" });
+  const state = loadProjectState(store);
+  const qh = state.queues.find((q) => q.id === "QH")!;
+  tr.add(helperPacket(qh, step("H2"), {
+    stat: " src/a.ts | 4 ++--\n 1 file changed, 2 insertions(+), 2 deletions(-)", diff: join(root, "sessions", "h-3", "diff.patch"),
+    range: { from: "aaa2222", to: "bbb1111", round: { from: "aaa2222", to: "bbb1111" } }, queueDir: join(root, ".nexus", "queues", "QH"),
+  }));
+
+  tr.section("H2 passed on by the helper (a criterion, a deviation): the review notice, with H1's acceptance and its audit riding with it");
+  helper("h-3", "H2", 1, 2);
+  event("h-3", { type: "review.passed_on", queue: "QH", step: "H2", round: 1, reasons: ["criterion", "deviation"], text: "H2 is done: checked in the diff. The calm look cannot be judged from the packet; the summary leaves out the dark theme." });
+  change();
+
+  tr.section("H3 (level 3) passed on by Nexus without a helper: its runtime is beyond the usage threshold");
+  event(orch, { type: "review.accepted", queue: "QH", step: "H2" });
+  event("w-h", { type: "step.started", queue: "QH", step: "H3" });
+  event("w-h", { type: "step.done", queue: "QH", step: "H3", summary: "H3 done.", commit: "ccc1111" });
+  ensureNexusSession(store);
+  event("nexus", { type: "review.passed_on", queue: "QH", step: "H3", round: 1, reasons: ["unavailable"], text: "The review helper's runtime is beyond the usage threshold: five_hour at 95 %." });
+  change();
+
+  golden("helper", tr.text([[orch, "<orchestrator session>"], [root.replaceAll("\\", "/"), "<root>"], [root, "<root>"]]));
 });
 
 test("the orchestrator's context care: the summary request, the fresh session's first message and summary.md match the golden file", (t) => {

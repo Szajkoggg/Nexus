@@ -3,12 +3,14 @@
 // what it (or Nexus) passes on reaches the orchestrator with the reason; its send-backs count toward the limit; a
 // refused action comes back in its verdict, never as a question.
 import { test } from "node:test";
+import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ProjectStore, applyDraft, approveQueue, helperAbout, loadProjectState, routeAnswers, updateSettings, type StepDef } from "@nexus/protocol";
+import { ProjectStore, applyDraft, approveQueue, helperAbout, loadProjectState, reviewStats, reviewStatsText, routeAnswers, updateSettings, type StepDef } from "@nexus/protocol";
+import { audited } from "../src/review-helper.ts";
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { LONGER, WAIT_MS, until as waitUntil } from "./wait.ts";
@@ -124,6 +126,13 @@ test("every reason to pass a step on takes it to the orchestrator, with the reas
     assert.deepEqual(of("P5"), []);
     assert.deepEqual(of("P6"), [1]);
     assert.deepEqual(x.step("P", "P6").sent_back.map((b) => [b.by, b.round]), [["helper", 2]]);
+    // The statistics: 7 review rounds the helpers took (P6 twice), 6 passed on, each reason once; above a quarter.
+    const r = reviewStats([x.state()]);
+    assert.deepEqual([r.passed_on.reviews, r.passed_on.passed_on, r.passed_on.high], [7, 6, true]);
+    assert.deepEqual(r.passed_on.by_reason, { criterion: 1, deviation: 1, doubt: 1, no_verdict: 1, question: 1, limit: 1 });
+    assert.equal(r.sent_back.helper, 1);
+    assert.equal(r.accepted.orchestrator, 6);
+    assert.ok(reviewStatsText(r).includes("6 of 7 passed on to the orchestrator (86 %, above 25 %"), reviewStatsText(r));
   } finally { x.stop(); }
 });
 
@@ -196,4 +205,50 @@ test("a helper that cannot run passes the step on at once; with the helper off t
     assert.equal(x.step("V", "V1").helper, undefined);
     assert.equal(x.helpers().length, 0);
   } finally { x.stop(); }
+});
+
+test("the next notice lists what the helper accepted and sent back; an audit picked rides with it, and the orchestrator's disagreement is recorded and counted", async () => {
+  const x = setup({ helper: { audit_rate: 1 } });
+  try {
+    await x.run("D", [{ goal: "FAKE: done FAKE-HELPER: sendback1" }, { goal: "FAKE: done FAKE-HELPER: passon:criterion" }]);
+    await x.until("the run to finish", () => x.state().queues.find((q) => q.id === "D")?.run?.state === "finished", LONGER.run * 2);
+    const notice = x.orchestratorSaw().find(reviewFact("D", "D2"))!;
+    const list = notice.slice(notice.indexOf("Since your last notice"));
+    assert.ok(list.startsWith("Since your last notice (for your overview; nothing to do):\n- step D1 of queue D: sent back by the review helper, round 2: fake helper: fix round 1\n- step D1 of queue D: accepted by the review helper (Claude Code, claude-haiku-5-5, low)"), notice);
+    assert.ok(notice.includes("Audit: review again step D1 of queue D") && notice.includes("nexus review audit D D1 agree|disagree"), notice);
+    assert.ok(!x.orchestrator.view().chat.some((c) => c.text.includes("Since your last notice") || c.text.includes("Audit:")), "not in the chat");
+    // Told once: a later notice carries neither again.
+    for (const t of x.orchestratorSaw().slice(x.orchestratorSaw().indexOf(notice) + 1)) assert.ok(!t.includes("Since your last notice") && !t.includes("Audit:"), t);
+    x.orchestrator.say(`FAKE-NEXUS: ["review","audit","D","D1","disagree","--reason","The empty-list test checks nothing."]`);
+    await x.until("the audit", () => !!x.step("D", "D1").audit);
+    assert.deepEqual([x.step("D", "D1").audit?.verdict, x.step("D", "D1").audit?.text, x.step("D", "D1").status], ["disagree", "The empty-list test checks nothing.", "done"]);
+    const r = reviewStats([x.state()]);
+    assert.deepEqual(r.audit, [{ group: "review helper claude claude-haiku-5-5 low", acceptances: 1, audited: 1, disagreed: 1 }]);
+    assert.ok(reviewStatsText(r).includes("- review helper claude claude-haiku-5-5 low: 1 accepted, 1 audited, 1 disagreed (100 % of the audited)"), reviewStatsText(r));
+  } finally { x.stop(); }
+});
+
+test("with an audit rate of 0 nothing is audited, and the orchestrator cannot audit what it was not given", async () => {
+  const x = setup({ helper: { audit_rate: 0 } });
+  try {
+    await x.run("E", [{ goal: "FAKE: done FAKE-HELPER: accept" }, { goal: "FAKE: done FAKE-HELPER: passon:doubt" }]);
+    await x.until("the run to finish", () => x.state().queues.find((q) => q.id === "E")?.run?.state === "finished", LONGER.run);
+    const notice = x.orchestratorSaw().find(reviewFact("E", "E2"))!;
+    assert.ok(notice.includes("- step E1 of queue E: accepted by the review helper") && !notice.includes("Audit:"), notice);
+    x.orchestrator.say(`FAKE-NEXUS: ["review","audit","E","E1","agree","--reason","fine"]`);
+    await x.until("the refusal", () => x.orchestrator.view().chat.some((c) => c.text.includes("no audit of step E/E1 was given to you")));
+    assert.equal(x.step("E", "E1").audit, undefined);
+  } finally { x.stop(); }
+});
+
+test("which acceptances are audited is decided by the event id's hash: the same each time, about the rate's share", () => {
+  const ids = Array.from({ length: 2000 }, (_, i) => `01JEVENT${String(i).padStart(6, "0")}`);
+  const picked = ids.filter((id) => audited(id, 0.1));
+  assert.ok(picked.length > 140 && picked.length < 260, `${picked.length} of 2000`);
+  assert.deepEqual(ids.filter((id) => audited(id, 0.1)), picked, "deterministic");
+  assert.ok(ids.every((id) => audited(id, 1) && !audited(id, 0)));
+  // A known id: the first 8 hexadecimal digits of its SHA-256 decide it.
+  const first = Number.parseInt(createHash("sha256").update("01JEVENT000000").digest("hex").slice(0, 8), 16) / 2 ** 32;
+  assert.equal(audited("01JEVENT000000", first + 1e-9), true);
+  assert.equal(audited("01JEVENT000000", first), false);
 });

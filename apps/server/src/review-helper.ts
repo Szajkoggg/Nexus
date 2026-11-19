@@ -13,7 +13,7 @@
 // the three review commands, which the CLI takes from a helper only for its step and round; Codex with its session folder
 // as the working directory and only writable root (for the CLI's events). A refused action is recorded in its
 // refusals.jsonl, and its briefing asks it to pass on with `doubt`: nothing is ever asked.
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -25,6 +25,15 @@ import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Hosted, type Launc
 import { checkoutOf } from "./gitinfo.ts";
 import { helperBriefing, helperPacket } from "./prompts.ts";
 import { shellRules } from "./shell-rules.ts";
+
+/**
+ * Whether the orchestrator audits a review helper's acceptance (H11): the first 8 hexadecimal digits of the SHA-256 of
+ * the acceptance's event id, read as a fraction of 2^32, are below `rate` (review_helper.audit_rate). It needs no
+ * state, survives a restart, and a test steers it by the id (or the rate: 0 none, 1 all).
+ */
+export function audited(event: string, rate: number): boolean {
+  return Number.parseInt(createHash("sha256").update(event).digest("hex").slice(0, 8), 16) / 2 ** 32 < rate;
+}
 
 /** How long a helper may take before Nexus ends it and passes the step on (`no_verdict`, H8). */
 const HELPER_LIMIT_MS = 20 * 60_000;

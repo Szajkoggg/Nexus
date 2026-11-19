@@ -15,7 +15,7 @@ import {
   TemplateError, fillTemplate, filledTemplateYaml, parseEvery, MaintenanceMode, readTemplates, templateQueueId, unusableTemplate, type MergedTemplates,
   type PictureRole, type ReviewItem, type Role, type Runtime, type SessionFile,
   noteRefIssue, parseNoteRef, readNotes, ideaMatches, ideaLinks, ideaStatuses, reportSourceHash,
-  capacityLines, latestCheckSet, readCapacity, helperAbout, helperText, NEXUS_PASS_ON, PassOnReason,
+  capacityLines, latestCheckSet, readCapacity, reviewStats, reviewStatsText, helperAbout, helperText, NEXUS_PASS_ON, PassOnReason,
 } from "@nexus/protocol";
 import { checkRules, describeRules } from "@nexus/protocol/rules";
 import { importMarkdownQueues } from "./import-md.ts";
@@ -44,10 +44,12 @@ Agent commands (session from NEXUS_SESSION or --session):
   nexus metric record <name> <value> [--step <step>]   (worker only) a value of one of the project's metrics, for your
                     step at work, with the HEAD commit; a negative value goes after --: nexus metric record delta -- -5
   nexus metric list                   the project's metrics: unit, how shown, target, warning threshold
-  nexus stats [--project <id>] [--since <date>] [--by model|effort|kind|activity|area|size|origin]
+  nexus stats [--project <id>] [--since <date>] [--by model|effort|kind|activity|area|size|origin] [--reviews]
                                       how steps went, by group: steps, accepted in the first round, average rounds,
                                       stops and failures, median working time, estimated use of the usage windows
-                                      (default: every registered project, by model)
+                                      (default: every registered project, by model); --reviews instead: the reviews'
+                                      quality (the user's signals, send-backs, the review helper's passed-on share,
+                                      the audit)
   nexus stop <step> --condition <text> --reason <text>   the condition met, as the queue words it; the reason, short
   nexus ask <text> [--step <step>] [--option <text>]... [--recommend <option>] [--can-continue]
   nexus withdraw <qid> --reason <text>
@@ -85,6 +87,8 @@ Agent commands (session from NEXUS_SESSION or --session):
   nexus review accept <queue> <step> [--note <text>]             (orchestrator, or the step's review helper at level 2)
                                       a step waiting for your review
   nexus review send-back <queue> <step> <what to fix>             (orchestrator, or the step's review helper) back to its worker
+  nexus review audit <queue> <step> agree|disagree --reason <text>   (orchestrator only) an audit of the review
+                                      helper's acceptance a notice gave you; a disagreement does not reopen the step
   nexus review pass-on <queue> <step> --why <reasons> --findings <text>   (the step's review helper only) to the
                                       orchestrator; reasons: criterion, deviation, question, limit, doubt, level
   nexus review ask-user <queue> <step> <why>                      (orchestrator only) hand the review to the user
@@ -161,7 +165,7 @@ const { values: o, positionals: args } = parseArgs({
     unit: { type: "string" }, show: { type: "string" }, target: { type: "string" }, "warn-above": { type: "string" }, "warn-below": { type: "string" },
     set: { type: "string", multiple: true }, template: { type: "string" }, every: { type: "string" }, "after-queues": { type: "string" },
     maintenance: { type: "string" }, findings: { type: "string" }, why: { type: "string" },
-    help: { type: "boolean", short: "h" }, key: { type: "string" }, note: { type: "string" }, before: { type: "string" }, now: { type: "boolean" }, ref: { type: "string" },
+    help: { type: "boolean", short: "h" }, reviews: { type: "boolean" }, key: { type: "string" }, note: { type: "string" }, before: { type: "string" }, now: { type: "boolean" }, ref: { type: "string" },
   },
 });
 
@@ -352,6 +356,28 @@ function passOn(): void {
   const findings = need(o.findings?.trim(), "--findings: what you checked and what you could not");
   emit(st, s, { type: "review.passed_on", queue, step, round: helperAbout(s)!.round, reasons: [...new Set(given)], text: findings });
   console.log(`ok: ${queue}/${step} passed on to the orchestrator; end your turn now`);
+}
+
+/**
+ * `nexus review audit <queue> <step> agree|disagree --reason <text>`: the orchestrator's audit of a review helper's
+ * acceptance it was given in a notice (review.audited; PROTOCOL.md, "The review helper"). It does not reopen the step.
+ */
+function reviewAudit(): void {
+  const st = store(); const s = orchestrator(st);
+  const queue = need(args[2], "<queue>"); const step = need(args[3], "<step>"); const verdict = need(args[4], "agree|disagree");
+  if (verdict !== "agree" && verdict !== "disagree") throw new UsageError(`the verdict is agree or disagree, not ${verdict}`);
+  const reason = o.reason?.trim();
+  if (!reason) throw new UsageError("--reason says why (it is recorded with the audit)");
+  checkStep(st, queue, step);
+  const view = loadProjectState(st).queues.find((q) => q.id === queue)!.steps.find((x) => x.id === step)!;
+  const a = view.accepted;
+  if (a?.by !== "helper") throw new UsageError(`step ${queue}/${step} was not accepted by the review helper`);
+  if (view.audit) throw new UsageError(`step ${queue}/${step} was audited already (${view.audit.verdict})`);
+  const key = `notify:audit:${a.event}`;
+  const given = st.sessionIds().some((id) => { try { return st.readSession(id).role === "orchestrator" && st.readApplied(id).entries.some((x) => x.event === key); } catch { return false; } });
+  if (!given) throw new UsageError(`no audit of step ${queue}/${step} was given to you: Nexus picks the acceptances to audit and names them in a notice`);
+  emit(st, s, { type: "review.audited", queue, step, accepted: a.event, verdict, text: reason });
+  console.log(`ok: audit of ${queue}/${step} recorded (${verdict})${verdict === "disagree" ? "; the step stays accepted: if its work needs a fix, draft it as a revision" : ""}`);
 }
 
 /**
@@ -670,6 +696,7 @@ const commands: Record<string, () => void | Promise<void>> = {
   review() {
     if (args[1] === "accept" || args[1] === "send-back" || args[1] === "ask-user" || args[1] === "provisional") return reviewDecision(args[1]);
     if (args[1] === "pass-on") return passOn();
+    if (args[1] === "audit") return reviewAudit();
     if (args[1] !== "add") throw new UsageError("nexus review add <step> <path|url>... (orchestrators: nexus review accept|send-back|ask-user|provisional <queue> <step>)");
     const st = store(); const s = session(st);
     const step = need(args[2], "<step>");
@@ -989,7 +1016,7 @@ const commands: Record<string, () => void | Promise<void>> = {
    * runs in, if it is not registered) and <NEXUS_HOME>/turns.jsonl. Reads only.
    */
   stats() {
-    const by = statDimension(o.by);
+    const by = o.reviews ? "model" : statDimension(o.by);
     if (!by) throw new UsageError(`--by is one of ${STAT_DIMENSIONS.join(", ")}, not ${o.by}`);
     const since = o.since === undefined ? undefined : sinceTime(o.since);
     if (o.since !== undefined && !since) throw new UsageError(`--since takes a date (2026-11-14) or a time, not "${o.since}"`);
@@ -1000,6 +1027,8 @@ const commands: Record<string, () => void | Promise<void>> = {
     const states = [...stores].filter(([id]) => !o.project || id === o.project).flatMap(([id, st]) => {
       try { return [loadProjectState(st)]; } catch (e) { console.error(`nexus: project ${id} left out: ${(e as Error).message}`); return []; }
     });
+    // --reviews: the reviews' quality on three levels (queue RH), instead of the steps by a dimension.
+    if (o.reviews) return console.log(reviewStatsText(reviewStats(states, { project: o.project, since })));
     console.log(statsText(statsReport(stepStats(states, readTurns().entries), { by, project: o.project, since })));
   },
 

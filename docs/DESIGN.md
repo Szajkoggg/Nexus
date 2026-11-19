@@ -576,8 +576,8 @@ it keeps its queue drafts), not only by instruction.
 
 ### Routine reviews by a helper (queue RH)
 
-**Status: the helper's run and verdicts are built (RH2, `apps/server/src/review-helper.ts`); RH3 the orchestrator's
-notices, the audit and the statistics, RH4 the dashboard.** The user approved the proposals below but H12, which is
+**Status: built (RH2 the helper's run and verdicts, `apps/server/src/review-helper.ts`; RH3 the orchestrator's
+notices, the audit and the statistics); RH4 the dashboard.** The user approved the proposals below but H12, which is
 left out. From the user's decision of 2026-11-17 (docs/ideas/token-costs.md,
 "Routine reviews leave the orchestrator's big chat" and "The review helper"). The formats are in PROTOCOL.md, "The
 review helper". Points marked **(H1)**…**(H17)** go beyond the decision: RH1's proposals, each for the user's approval.
@@ -678,6 +678,10 @@ have kept their order in two places, and the many tests that build an orchestrat
 reviews. A test found the race this leaves: the orchestrator reads the state again after carrying out its requests,
 and a `step.done` written in between reached its notices before the helpers had seen it. So while helpers take
 reviews the orchestrator gets no notice for a step without a `helper` yet; the helpers take it at the next change.
+
+**Built in RH3: what rides goes last.** The list of acceptances and the audits end the notice instead of starting it,
+as planned: a notice's first line is what the user sees in the chat and what the orchestrator acts on; the list is for
+its overview. User acceptances are listed too (H9): the orchestrator learns of the user's reviews only this way.
 
 **Quality on three levels** (`nexus stats --reviews`, the Stats view) **(H16)**:
 

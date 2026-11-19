@@ -13,7 +13,7 @@ import {
   ActionError, Effort, ProjectStore, addNote, closingToSkip, closingToSkipAtApproval, updateSettings, answerAsUser, approveQueue, deleteNote, loadProjectState, nexusHome, withdrawApproval, addAllowRule,
   ensureGlobalSettings, readGlobalSettings, updateGlobalSettings, MaxRunning, ownKeys, OVERRIDABLE, settingKey, readRegistry, readUsage, readTurns, commentOnPicture, markPicture, routeAnswers, routeSendBacks, sendBack, sendMessage, setQueueSettings, setStepLevel, confirmProvisional, type ProjectState,
   readAway, writeAway, awayNow, awayUntil, turnAway, expireAway, acceptPlanProposal, declinePlanProposal, handBackPlan, acceptTagProposal, declineTagProposal,
-  STAT_DIMENSIONS, STAT_FILTERS, projectMetrics, sinceTime, statDimension, statsReport, stepStats, usageDays, type ProjectMetrics, type StatsReport, type UsageDays,
+  STAT_DIMENSIONS, STAT_FILTERS, projectMetrics, sinceTime, statDimension, statsReport, stepStats, reviewStats, type ReviewStats, usageDays, type ProjectMetrics, type StatsReport, type UsageDays,
   SearchError, parseSearch, MIN_SAMPLES, queueEstimate, stepSamples, isOpenQuestion, writeCount, type EstimatesResponse, type LeftView, type TemplatesResponse, readTemplates, type ProjectSummary, type RemovalView,
   projectIdeas, ideaMatches, ideaLinks, changeIdeaLinks, decideIdeaMatches, ideaStatuses, changeIdeaStatus, reconcileIdeaStatuses, readNotes, type IdeasResponse, type IdeaMatchesResponse,
   previewIdeaHandoff, sendIdeaHandoff, retryIdeaHandoff,
@@ -751,7 +751,9 @@ app.get("/api/stats", (c) => {
   if (project && !projects.has(project)) return c.json({ error: "unknown project" }, 404);
   const filter = Object.fromEntries(STAT_FILTERS.map((f) => [f, c.req.query(f) || undefined]).filter(([, v]) => v));
   const states = [...projects.values()].map(stateOf).filter((x): x is ProjectState => !!x);
-  return c.json(statsReport(stepStats(states, readTurns().entries), { by, project, since, filter }) satisfies StatsReport);
+  // `reviews`: the reviews' quality on three levels (queue RH), for the same project and range.
+  const report: StatsReport & { reviews: ReviewStats } = { ...statsReport(stepStats(states, readTurns().entries), { by, project, since, filter }), reviews: reviewStats(states, { project, since }) };
+  return c.json(report);
 });
 
 // The usage windows day by day for the global Stats view (UsageDays), from ?since= (a date or a time; default 30 days
