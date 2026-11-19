@@ -4,7 +4,7 @@
 // (src/conversations.ts). Agents rely on them (a change to one carries an `Agents:` line in its commit), so each is
 // covered by a snapshot test: test/prompts.test.ts compares what the agents' processes receive with golden files.
 import {
-  INTEGRATION_CONDITION, fileList, formatClock, latestCheckSet, reviewRound, openPlan, formatSeconds, isCheckMetric, languageName, levelNow, metricValueText, releasedText, runIsOlder, stepChecks, type CheckSet, type MetricValue, type AwayNow, type PlanDecision, type ConversationWeb, type InboxView, type LanguageCode, type ProjectFile, type ProjectState, type QuestionView, type QueueView, type SessionView, type StepView, type PassOnReason, type TagProposal, tagsText,
+  INTEGRATION_CONDITION, fileList, tokenCount, formatClock, latestCheckSet, reviewRound, openPlan, formatSeconds, isCheckMetric, languageName, levelNow, metricValueText, releasedText, runIsOlder, stepChecks, type CheckSet, type MetricValue, type AwayNow, type PlanDecision, type ConversationWeb, type InboxView, type LanguageCode, type ProjectFile, type ProjectState, type QuestionView, type QueueView, type SessionView, type StepView, type PassOnReason, type TagProposal, tagsText,
 } from "@nexus/protocol";
 import type { ClosingContext } from "./closing.ts";
 import type { IntegrationContext } from "./integration.ts";
@@ -213,8 +213,9 @@ export function noOutcomeNudge(step: string, background?: { finished: true } | {
 }
 
 /** Why the next step runs in a fresh session, as the request for the context summary says it. */
-export function summaryReason(why: "context" | "runtime", next: string, runtime: keyof typeof RUNTIME_NAME, fill: number | undefined): string {
-  return why === "runtime" ? `step ${next} runs on ${RUNTIME_NAME[runtime]}` : `this session's context is ${Math.round(fill! * 100)}% full`;
+export function summaryReason(why: "context" | "runtime", next: string, runtime: keyof typeof RUNTIME_NAME, fill: number | undefined, tokens?: number): string {
+  return why === "runtime" ? `step ${next} runs on ${RUNTIME_NAME[runtime]}` : tokens !== undefined
+    ? `this session's context holds ${tokenText(tokens)} (${Math.round(fill! * 100)}% full)` : `this session's context is ${Math.round(fill! * 100)}% full`;
 }
 
 /** The step is over and the next runs in a fresh session (`because`, from summaryReason): the summary is asked for. */
@@ -223,11 +224,13 @@ export function summaryRequest(done: string, because: string): string {
 }
 
 /** Why the queue goes on in a fresh session, as the fresh session's seed says it. */
-export function switchReason(why: "context" | "runtime" | "refactor", next: string, runtime: keyof typeof RUNTIME_NAME, old: keyof typeof RUNTIME_NAME, fill: number | undefined): string {
+export function switchReason(why: "context" | "runtime" | "refactor", next: string, runtime: keyof typeof RUNTIME_NAME, old: keyof typeof RUNTIME_NAME, fill: number | undefined, tokens?: number): string {
   if (why === "refactor") return `step ${next} is the queue's closing refactoring step, which reads the queue's work with fresh eyes`;
   return why === "runtime"
     ? `step ${next} runs on ${RUNTIME_NAME[runtime]}, and the session that ran the queue so far is a ${RUNTIME_NAME[old]} session`
-    : `the session that ran the queue so far had its context ${Math.round(fill! * 100)}% full`;
+    : tokens !== undefined
+      ? `the session that ran the queue so far had ${tokenText(tokens)} in its context (${Math.round(fill! * 100)}% full)`
+      : `the session that ran the queue so far had its context ${Math.round(fill! * 100)}% full`;
 }
 
 /**
@@ -278,7 +281,7 @@ export function summaryLists(summary: { topics: string[]; files: string[] }): st
 }
 
 /** A number of context tokens as the agents and the chat read it: "900 tokens", "204.8k tokens". */
-export const tokenText = (n: number) => (n < 1000 ? `${Math.round(n)} tokens` : `${Math.round(n / 100) / 10}k tokens`);
+export const tokenText = (n: number) => `${tokenCount(n)} tokens`;
 
 /** The orchestrator's context is beyond its threshold (both as text, "512k tokens"): the summary for a fresh session is asked for. */
 export function orchestratorSummaryRequest(used: string, threshold: string): string {

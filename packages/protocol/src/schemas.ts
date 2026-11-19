@@ -1283,12 +1283,14 @@ export const RunFile = z.object({
    * context was full; older records without `why` are this), `runtime` (the step runs on another runtime), `refactor`
    * (the closing refactoring step, which reads the queue's work with fresh eyes) or `usage` (in the middle of a step:
    * the old session's runtime was beyond the usage threshold, and the step goes on on its fallback, or back). `step` is
-   * the first step of the new session, `fill` the old session's context fill (0 to 1) when known, `summary` where the
+   * the first step of the new session, `fill` the old session's context fill (0 to 1) and `tokens` its context tokens
+   * when known (tokens: since queue CT), `summary` where the
    * seed came from: `written` (the worker's own summary of the step), `asked` (written when Nexus asked for it),
    * `fallback` (none: the queue's description and the finished steps' summaries).
    */
   switches: z.array(z.object({
     at: Time, from: Id, to: Id, step: Id, why: z.enum(["context", "runtime", "refactor", "usage"]).optional(), fill: z.number().optional(),
+    tokens: z.number().optional(),
     summary: z.enum(["written", "asked", "fallback"]),
   })).optional(),
   /**
@@ -1372,7 +1374,11 @@ export const RuntimeFile = z.object({
 export type RuntimeFile = z.infer<typeof RuntimeFile>;
 
 /** sessions/<orchestrator>/applied.jsonl: the server's result for each orchestrator request (queue.drafted, session.request). */
-export const Applied = z.object({ at: Time, event: Id, ok: z.boolean(), message: z.string() });
+export const Applied = z.object({
+  at: Time, event: Id, ok: z.boolean(), message: z.string(),
+  /** The orchestrator's context care (`context:asked`): its context tokens then (since queue CT). */
+  tokens: z.number().optional(),
+});
 export type Applied = z.infer<typeof Applied>;
 
 /** sessions/<orchestrator>/chat.jsonl: the conversation shown in the dashboard. */

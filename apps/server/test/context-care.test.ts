@@ -72,6 +72,7 @@ for (const runtime of ["claude", "codex"] as const) {
       assert.notEqual(first, second, "the second step ran in another session");
       assert.equal(q.run!.session, second, "run.yaml points to the new session");
       assert.deepEqual(q.run!.switches?.map((s) => [s.from, s.to, s.step, s.summary, s.fill]), [[first, second, "Q2", "written", 0.8]]);
+      assert.deepEqual(q.run!.switches?.map((s) => s.tokens), [800_000], "its context tokens then");
       assert.equal(asks(received()).length, 0, "a fresh summary needs no asking");
 
       const sessions = loadProjectState(store).sessions;
@@ -82,7 +83,7 @@ for (const runtime of ["claude", "codex"] as const) {
       assert.notEqual(fresh.native_id, old.native_id);
 
       const opening = received().find((m) => m.session === second)!;
-      assert.match(opening.text, /^\[Nexus\] You take over queue Q "Queue" in a fresh session[\s\S]*80% full/);
+      assert.match(opening.text, /^\[Nexus\] You take over queue Q "Queue" in a fresh session[\s\S]*had 800k tokens in its context \(80% full\)/);
       assert.match(opening.text, /context summary at the end of Q1:\nfake summary of Q1\nTopics: fake, context/);
       assert.match(opening.text, /The queue's own description: fracture the rock\./);
       assert.match(opening.text, /- Q1 Step 1: done\. fake finished Q1\n- Q2 Step 2: yours now/);

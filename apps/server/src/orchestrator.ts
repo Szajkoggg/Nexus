@@ -58,7 +58,8 @@ const REQUESTS: ReadonlySet<EventType> = new Set(["queue.drafted", "session.requ
 
 /**
  * The orchestrator's context care (contextCare), recorded in its session's applied.jsonl: the request for its summary
- * (the message: the context fill then, 0 to 1), and the fill of a fresh session at the end of its first turn.
+ * (the message: the context fill then, 0 to 1; `tokens`: its context tokens), and the context tokens of a fresh session
+ * at the end of its first turn.
  */
 const SUMMARY_ASKED = "context:asked";
 const FIRST_FILL = "context:first";
@@ -74,13 +75,14 @@ type Summary = NonNullable<SessionView["context"]>;
 
 /**
  * A session the current orchestrator session went on from (context care), as the chat view sends it: its newest
- * entries, and its switch to the next: when, its context fill then (0 to 1), and the summary it wrote (none: null).
+ * entries, and its switch to the next: when, its context fill then (0 to 1) and its tokens (unknown before queue CT: null),
+ * and the summary it wrote (none: null).
  */
 interface EarlierSession {
   session: string;
   created_at: string;
   chat: ReturnType<typeof chatView>["chat"];
-  switch: { at: string; fill: number | null; summary: Summary | null };
+  switch: { at: string; fill: number | null; tokens: number | null; summary: Summary | null };
 }
 
 /** Who accepted a step, as the orchestrator's notices list it (queue RH, H9). */
@@ -179,7 +181,7 @@ export class Orchestrator {
     const asked = this.summaryAsked(old);
     const summary = this.summaryWritten(old, asked) ?? null;
     const next = this.sessionFile(old.continued_by);
-    return { at: next?.created_at ?? asked?.at ?? old.created_at, fill: asked ? Number(asked.message) : null, summary };
+    return { at: next?.created_at ?? asked?.at ?? old.created_at, fill: asked ? Number(asked.message) : null, tokens: asked?.tokens ?? null, summary };
   }
 
   /** A message from the user in the chat. */
@@ -690,7 +692,7 @@ ${n.text}` });
     const firstUsed = first ? (Number(first.message) <= 1 ? Number(first.message) * window : Number(first.message)) : undefined;
     if (used <= limit || (firstUsed !== undefined && firstUsed > limit) || this.runtimeFull(state)) return false;
     const fill = used / window;
-    this.store.appendApplied(s.id, { at: now(), event: SUMMARY_ASKED, ok: true, message: String(fill) });
+    this.store.appendApplied(s.id, { at: now(), event: SUMMARY_ASKED, ok: true, message: String(fill), tokens: used });
     this.store.appendChat(s.id, { at: now(), from: "nexus", text: `The orchestrator's context is ${tokenText(used)} (${pct(fill)} % full; its threshold is ${tokenText(limit)}): Nexus asked it for a summary, and it goes on in a fresh session.` });
     this.deliver(orchestratorSummaryRequest(tokenText(used), tokenText(limit)));
     return true;

@@ -1034,7 +1034,7 @@ export class Engine implements Member {
       const fresh = !!done && !!old.context && old.context.at >= since;
       const asked = !!done && run.summary_asked === done.id;
       if (done && !fresh && !asked) {
-        const because = summaryReason(why, next.id, want.runtime, fill);
+        const because = summaryReason(why, next.id, want.runtime, fill, tokens);
         this.writeRun(queueId, { ...run, summary_asked: done.id });
         live.proc.send(summaryRequest(done.id, because));
         this.store.appendActivity(old.id, { at: now(), kind: "turn_start", text: `Nexus asked for the context summary of step ${done.id} (${because})`, queue: queueId, step: done.id });
@@ -1142,10 +1142,11 @@ export class Engine implements Member {
   /** Goes on with `next` in a fresh session (with `want`'s runtime, model and effort) that continues `old`. */
   private switchSession(queueId: string, run: RunFile, q: QueueView, old: SessionView, live: Live, done: StepView | undefined, next: StepView, want: StepValues, why: "context" | "runtime" | "refactor", fill: number | undefined, source: "written" | "asked" | "fallback"): void {
     const { fresh, unread } = this.forkSession(run, q, old, live, want);
-    const because = switchReason(why, next.id, want.runtime, old.runtime as "claude" | "codex", fill);
+    const tokens = fill !== undefined ? old.live?.context_tokens : undefined;
+    const because = switchReason(why, next.id, want.runtime, old.runtime as "claude" | "codex", fill, tokens);
     this.writeRun(queueId, {
       ...run, session: fresh.id, summary_asked: undefined,
-      switches: [...(run.switches ?? []), { at: now(), from: old.id, to: fresh.id, step: next.id, why, fill, summary: source }],
+      switches: [...(run.switches ?? []), { at: now(), from: old.id, to: fresh.id, step: next.id, why, fill, ...(tokens !== undefined ? { tokens } : {}), summary: source }],
     });
     this.store.appendActivity(old.id, { at: now(), kind: "turn_end", text: `Nexus goes on in a fresh session (${fresh.id}): ${because}`, queue: queueId, step: done?.id ?? next.id });
     const state = loadProjectState(this.store);

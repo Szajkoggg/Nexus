@@ -277,7 +277,7 @@ function SettingRows({ form, project }: { form: Form; project?: { values: Record
         <Setting form={f} keys={["orchestrator.notify"]} label={t("settings.tellIt")}>
           {(d) => <Check checked={f.bool("orchestrator.notify")} onChange={(v) => f.set("orchestrator.notify", v)} disabled={d}>{t("settings.tellItCheck")}</Check>}
         </Setting>
-        <Setting form={f} keys={["orchestrator.context_threshold_tokens"]} label={t("settings.orchestratorFresh")} hint={t("settings.orchestratorFreshHint")}>
+        <Setting form={f} keys={["orchestrator.context_threshold_tokens"]} label={t("settings.orchestratorFresh")} hint={<>{t("settings.orchestratorFreshHint")} {t("settings.tokensCap")}</>}>
           {(d) => <Tokens value={f.get("orchestrator.context_threshold_tokens")} onChange={(v) => f.set("orchestrator.context_threshold_tokens", v)} disabled={d} />}
         </Setting>
       </Section>
@@ -338,7 +338,7 @@ function SettingRows({ form, project }: { form: Form; project?: { values: Record
             {(d) => <span className="block w-24"><Select value={f.get(MAX_RUNNING)} onChange={(v) => f.set(MAX_RUNNING, Number(v))} disabled={d} options={limitChoices(f.get(MAX_RUNNING))} /></span>}
           </Setting>
         )}
-        <Setting form={f} keys={["defaults.context_reuse_tokens"]} label={t("settings.reuse")} hint={t("settings.reuseHint")}>
+        <Setting form={f} keys={["defaults.context_reuse_tokens"]} label={t("settings.reuse")} hint={<>{t("settings.reuseHint")} {t("settings.tokensCap")}</>}>
           {(d) => <Tokens value={f.get("defaults.context_reuse_tokens")} onChange={(v) => f.set("defaults.context_reuse_tokens", v)} disabled={d} />}
         </Setting>
         <Setting form={f} keys={["defaults.context_care"]} label={t("settings.care")} hint={t("settings.careHint")}>
@@ -487,7 +487,8 @@ function Percent({ value, onChange, disabled, min = 10 }: { value: string; onCha
 function Tokens({ value, onChange, disabled }: { value: string; onChange: (v: number) => void; disabled: boolean }) {
   return (
     <span className="flex items-center gap-2">
-      <input type="number" min={1} max={10_000} disabled={disabled} value={Math.round(Number(value) / 1000)} onChange={(e) => onChange(Number(e.target.value) * 1000)} className={`${field} w-24`} /> {t("settings.kTokens")}
+      <input type="number" min={1} max={10_000} step={10} disabled={disabled} value={Math.round(Number(value) / 1000)} onChange={(e) => onChange(Number(e.target.value) * 1000)} className={`${field} w-24`} />
+      <span className="whitespace-nowrap">{t("settings.kTokens")}</span>
     </span>
   );
 }

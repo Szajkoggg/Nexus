@@ -124,6 +124,7 @@ test("above its threshold, after an idle turn, it is asked once for a summary an
     assert.deepEqual(view.earlier.map((b) => b.session), [old.id]);
     assert.ok(view.earlier[0]!.chat.some((c) => c.from === "user" && c.text === "Hello"));
     assert.equal(view.earlier[0]!.switch.fill, 0.9);
+    assert.equal(view.earlier[0]!.switch.tokens, 900, "its context tokens then");
     assert.equal(view.earlier[0]!.switch.at, fresh.created_at);
     assert.deepEqual(view.earlier[0]!.switch.summary && { ...view.earlier[0]!.switch.summary, at: "" }, { text: "fake orchestrator summary", topics: ["plan", "promises"], files: ["docs/plan.md"], at: "" });
 

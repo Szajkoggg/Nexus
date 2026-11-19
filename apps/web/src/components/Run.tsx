@@ -1,6 +1,7 @@
 // Running queues through Nexus-launched sessions: controls, live activity, sessions and usage.
 import { useEffect, useState, type ReactNode } from "react";
 import { retryLine } from "@nexus/protocol/times";
+import { tokenCount } from "@nexus/protocol/tokens";
 import { questionBarrier, runGoing } from "@nexus/protocol/status-rules";
 import { QuestionWait } from "./QuestionWait.tsx";
 import { act, enc, projectUrl, useAction, useQuery, type ActivityEntry, type ProjectState, type QueueView, type SessionView, type Usage } from "../api.ts";
@@ -63,7 +64,9 @@ function SessionSwitches({ run, sessions }: { run: NonNullable<QueueView["run"]>
               step: <span key="step" className="font-mono">{s.step}</span>, time: formatClock(s.at, new Date()),
               why: s.why === "runtime"
                 ? t("run.switch.runtime", { runtime: RUNTIME_NAME[sessions.find((x) => x.id === s.to)?.runtime ?? ""] ?? t("run.switch.anotherRuntime") })
-                : s.fill === undefined ? t("run.switch.full") : t("run.switch.fill", { pct: Math.round(s.fill * 100) }),
+                : s.fill === undefined ? t("run.switch.full")
+                  : s.tokens !== undefined ? t("run.switch.tokens", { tokens: tokenCount(s.tokens), pct: Math.round(s.fill * 100) })
+                    : t("run.switch.fill", { pct: Math.round(s.fill * 100) }),
               seeded: SEEDED[s.summary] ? t(SEEDED[s.summary]!) : s.summary,
             })}
           </span>

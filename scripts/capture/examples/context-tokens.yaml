@@ -1,0 +1,38 @@
+# The context thresholds in tokens (queue CT): the two settings fields, a run's switch line and the orchestrator's
+# context line and fresh-session line, on the demo project of scripts/capture/seed-context-tokens.ts.
+#   node scripts/capture.ts scripts/capture/examples/context-tokens.yaml --step <queue>/<step>
+seed: scripts/capture/seed-context-tokens.ts
+views:
+  - key: settings-context-tokens@1440
+    route: "#/demo"
+    label: "Projektbeállítások: a session újrahasználásának küszöbe"
+    actions:
+      - click: { selector: "button[title='Project settings']" }
+      - wait: 800
+      - scroll: "Defaults"
+      - wait: 300
+  - key: settings-context-tokens@390
+    route: "#/demo"
+    label: "Projektbeállítások: a session újrahasználásának küszöbe, telefonon"
+    actions:
+      - click: { selector: "button[title='Project settings']" }
+      - wait: 800
+      - scroll: "Share of a usage window (Claude's 5 hours, Codex's windows) above which no new step starts."
+      - wait: 300
+  - key: settings-orchestrator-context-tokens@1440
+    route: "#/demo"
+    label: "Projektbeállítások: az orchestrator friss sessionjének küszöbe"
+    actions:
+      - click: { selector: "button[title='Project settings']" }
+      - wait: 800
+      - scroll: "Orchestrator"
+      - wait: 300
+  - key: run-context-switch@1440
+    route: "#/demo/Q"
+    label: "A run panel váltási sora"
+  - key: orchestrator-context-line@492
+    route: "#/demo"
+    label: "Az orchestrator chatje: a váltás sora és a kontextussor"
+    actions:
+      - click: Orchestrator
+      - wait: 600
