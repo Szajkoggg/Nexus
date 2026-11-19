@@ -1,6 +1,9 @@
 // `nexus help <topic>`: Nexus's standards, shipped with Nexus so every project has the current text after a deploy.
 // A project's own conventions stay in its AGENTS.md and in a step's review spec; these texts never name a project.
 
+/** The longest context summary the standard asks for, in words (nexus help context); nexus context warns beyond it. */
+export const CONTEXT_SUMMARY_WORDS = 2000;
+
 export const HELP_TOPICS: Record<string, { summary: string; text: string }> = {
   review: {
     summary: "review material: formats, view keys, roles, pairing, rounds, captures, the process",
@@ -116,6 +119,31 @@ Example:
   pinned to their neighbours (Runtime/Core/Rock/Support.cs). Verified: core tests 548 passed; 3 new tests; the
   fixture sheet shows no floating body. Left out: the overhang fixture (it needs W4's bevels). Next: W4 can use
   Support.Graph for its anchors."
+`,
+  },
+  context: {
+    summary: "the shape of a context summary (nexus context)",
+    text: `nexus help context: the shape of a context summary
+
+A context summary (nexus context) is what a fresh session starts from when it takes over your work: the next step
+after a switch, a queue continued in another session, or the orchestrator going on in a fresh session. It carries
+what only you know; the fresh session gets the queue's text, the steps' summaries, its briefing and nexus status
+anyway, so leave out what those say. Write it in six parts, in this order, each as long as it needs:
+  1. Where the work stands: the step, what is committed (the commits), what is not and why.
+  2. The decisions and why, with the ways tried and dropped, and why they were dropped.
+  3. The traps found: what failed or misled, and how to avoid it.
+  4. The important files, and why each matters.
+  5. What comes next: the next move, and what it waits for.
+  6. What the orchestrator or the user asked for or promised: constraints, answers, agreements still in force.
+About 1,000 to 2,000 words at most; nexus context says so when one is longer. Give its topics with --topics and its
+files with --files (nexus status shows them on the session's card); write in the working language.
+
+Example:
+  nexus context "Where: W3 done (1a2b3c4); nothing uncommitted. Decided: floating bodies are pinned to their
+  neighbours, not deleted (deleting broke fixture 7's arches); tried a flood fill first, too slow on 2M cells.
+  Traps: Support.Graph caches by chunk, so rebuild it after a bevel. Files: Runtime/Core/Rock/Support.cs (the graph),
+  Tests/Rock/SupportTests.cs (the fixtures). Next: W4's bevels, which need Support.Graph.Anchors. Agreed: the user
+  wants no overhang fixture until W4." --topics rock,support --files Runtime/Core/Rock/Support.cs
 `,
   },
   questions: {

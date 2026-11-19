@@ -19,7 +19,7 @@ import {
 } from "@nexus/protocol";
 import { checkRules, describeRules } from "@nexus/protocol/rules";
 import { importMarkdownQueues } from "./import-md.ts";
-import { HELP_TOPICS, topicList } from "./help.ts";
+import { CONTEXT_SUMMARY_WORDS, HELP_TOPICS, topicList } from "./help.ts";
 
 const HELP = `nexus — report to and manage Nexus (protocol 1)
 
@@ -784,7 +784,11 @@ const commands: Record<string, () => void | Promise<void>> = {
     let queue: string | undefined;
     try { queue = queueFor(st, s, o.step); } catch { queue = undefined; }
     emit(st, s, { type: "context.summary", queue, step: o.step, text, topics: list(o.topics), files: list(o.files) });
-    console.log("ok: context summary recorded");
+    // The standard's length (nexus help context): recorded anyway, with a word to shorten the next one.
+    const words = text.split(/\s+/).filter(Boolean).length;
+    console.log(words > CONTEXT_SUMMARY_WORDS
+      ? `ok: context summary recorded; warning: it is ${words} words, longer than the standard's ${CONTEXT_SUMMARY_WORDS} (nexus help context): keep what only you know, leave out what the queue, the steps' summaries and nexus status say`
+      : "ok: context summary recorded");
   },
 
   report() {

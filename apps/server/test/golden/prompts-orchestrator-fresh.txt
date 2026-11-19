@@ -3,7 +3,7 @@
 Hello.
 == its turn ended with its context 90 % full: the summary is asked for
 -- to orchestrator 1
-[Nexus] Your context holds 900 tokens (the threshold is 800 tokens): Nexus goes on with you in a fresh orchestrator session, which starts from your summary, your current briefing and `nexus status`. Write that summary now with `nexus context "<summary>" --topics a,b --files x,y`: the decisions made with the user and why, the open items, the plan (what runs, what comes next and what it waits for), and what you promised the user. Leave out what `nexus status` and the files show anyway. Then end your turn; do not start anything else.
+[Nexus] Your context holds 900 tokens (the threshold is 800 tokens): Nexus goes on with you in a fresh orchestrator session, which starts from your summary, your current briefing and `nexus status`. Write that summary now with `nexus context "<summary>" --topics a,b --files x,y` by its standard (`nexus help context`, about 1,000 to 2,000 words at most): the decisions made with the user and why, with the ways dropped, the open items, the traps found, the plan (what runs, what comes next and what it waits for), and what you promised the user. Leave out what `nexus status` and the files show anyway. Then end your turn; do not start anything else.
 == the user writes meanwhile: the message waits for the fresh session
 == the summary written, the turn over: the fresh session starts from it
 -- to orchestrator 2

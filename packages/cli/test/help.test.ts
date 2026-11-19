@@ -25,7 +25,7 @@ test("nexus help only reads: it writes nothing, so a thinking partner may run it
 
 test("nexus help lists the standards' topics", () => {
   const list = nexus("help");
-  for (const t of ["review", "summaries", "questions", "refusals", "commits", "tests"]) assert.match(list, new RegExp(`^  ${t} +[a-z]`, "m"), t);
+  for (const t of ["review", "summaries", "context", "questions", "refusals", "commits", "tests"]) assert.match(list, new RegExp(`^  ${t} +[a-z]`, "m"), t);
 });
 
 test("summaries: the four parts, in order, with an example", () => {
@@ -34,6 +34,14 @@ test("summaries: the four parts, in order, with an example", () => {
   assert.deepEqual(parts.map((p) => t.indexOf(p)).every((i, k, a) => i >= 0 && (k === 0 || i > a[k - 1]!)), true, "all four, in order");
   assert.match(t, /--commit/);
   assert.match(t, /Example:\n {2}nexus step done/);
+});
+
+test("context: the six parts, in order, the length and an example", () => {
+  const t = nexus("help", "context");
+  const parts = ["1. Where the work stands", "2. The decisions and why", "3. The traps found", "4. The important files", "5. What comes next", "6. What the orchestrator or the user asked for or promised"];
+  assert.deepEqual(parts.map((p) => t.indexOf(p)).every((i, k, a) => i >= 0 && (k === 0 || i > a[k - 1]!)), true, "all six, in order");
+  assert.match(t, /1,000 to 2,000 words/);
+  assert.match(t, /Example:\n {2}nexus context/);
 });
 
 test("questions: what it blocks, the options, the recommendation", () => {

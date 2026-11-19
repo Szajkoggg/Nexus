@@ -1461,7 +1461,7 @@ nexus review add W3 $TEMP/nexus-review/W3/cliff@1280.before.png --key cliff-lit@
 nexus review add W3 $TEMP/nexus-review/W3/cliff@1280.png --key cliff-lit@1280 --role after --label "Cliff, lit"   # pairs by key
 nexus review add W3 $TEMP/nexus-review/W3/lit.png --before $TEMP/nexus-review/W3/unlit.png --label "Lighting"   # older: no key
 nexus help review                              # the standard for review material (nexus help: the topics)
-nexus help summaries|questions|refusals|commits|tests   # the other standards
+nexus help summaries|context|questions|refusals|commits|tests   # the other standards
 nexus check W3 "npm test" --ok --summary "548 passed" --duration 190   # the name exactly as "Checks for every step" lists it (another counts as not reported); how long it ran, in seconds: the metric check:npm test. Refused where Nexus runs the step's checks
 nexus check W3 "npm test" --unrelated --evidence "it fails on main too"   # a check Nexus ran fails not because of your work: Nexus runs it on the queue's base commit (see "Checks run by Nexus")
 nexus metric record bundle-kb 512 [--step W3]  # worker only: a value of a project metric for the step at work, with HEAD
@@ -1473,7 +1473,7 @@ nexus step failed W3 --reason "..."
 nexus stop W3 --condition "user decision" --reason "..."   # the condition as the queue words it; the reason short (shown first)
 nexus ask "Canyon joints: vertical only, or also inclined?" [--option ...] [--recommend <option>] [--can-continue]
                                                # --recommend: one of the --option values, by text or number (1 = first)
-nexus context "summary text" --topics rock,support --files Runtime/Core/Rock/*   # the text as the argument, or - to read it from stdin (... <<< "text")
+nexus context "summary text" --topics rock,support --files Runtime/Core/Rock/*   # the text as the argument, or - to read it from stdin (... <<< "text"); its shape: nexus help context (beyond 2000 words it warns)
 nexus report W --file <temp>/nexus-reports/<project>/W.md --summary "..." [--findings 3]   # copied to .nexus/queues/W/report.md; --findings: a maintenance queue's
 nexus withdraw <qid> --reason "..."            # a question no longer needed (question.withdrawn)
 nexus log "Retrying the probe" [--level info|warn|error]   # a line into the session's own log
@@ -1555,6 +1555,7 @@ alone prints the commands and the topics. The topics live in `packages/cli/src/h
 |---|---|
 | `review` | Review material: formats, view keys, roles, pairing, rounds, captures, the process |
 | `summaries` | A step summary (`nexus step done --summary`) in four parts: what changed; how it was verified; what was left out or differs from the plan; what comes next, if anything |
+| `context` | A context summary (`nexus context`) in six parts: where the work stands (the step, committed, not committed); the decisions and why, with the ways tried and dropped; the traps found; the important files and why; what comes next; what the orchestrator or the user asked for or promised. It leaves out what a fresh session's seed gives anyway (the queue, the steps' summaries, the briefing, `nexus status`); about 1,000 to 2,000 words at most: `nexus context` records a longer one and prints a warning (`CONTEXT_SUMMARY_WORDS`, 2000 words) |
 | `questions` | A question (`nexus ask`) in three parts: what it blocks; the options; the asker's recommendation |
 | `refusals` | A refused action: no workaround through another tool or command that reaches the same end; one retry in a simpler form at most; then report what was needed and why |
 | `commits` | A clean working tree at every step's end: everything the step did committed (its own files only) and named with `nexus step done --commit`, so every commit belongs to one step |
