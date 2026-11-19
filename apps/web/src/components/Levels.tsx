@@ -83,6 +83,22 @@ export function LevelMark({ step, always }: { step: Pick<StepView, "level" | "le
   );
 }
 
+// ---------------------------------------------------------------- who accepted a step (queue RH)
+
+/**
+ * Who accepted the step, and on what (queue RH, H17): the user, the orchestrator, the review helper with its runtime,
+ * model and effort, or Nexus (an integration without a model); while the review helper reviews it, that. Undefined
+ * otherwise.
+ */
+export function acceptedWord(s: Pick<StepView, "status" | "accepted" | "helper">): { parts: string[]; title?: string } | undefined {
+  if (s.status === "review" && s.helper?.state === "running") return { parts: [t("accepted.helperReviews")] };
+  const a = s.accepted;
+  if (s.status !== "done" || !a) return undefined;
+  const on = [a.runtime === "codex" ? "Codex" : a.runtime === "claude" ? "Claude Code" : undefined, a.model, a.effort].filter((x): x is string => !!x);
+  const text = t(`accepted.by.${a.by}`);
+  return { parts: a.by === "helper" || (a.by === "orchestrator" && a.model) ? [text, ...on] : [text], title: t("accepted.title", { at: new Date(a.at).toLocaleString() }) };
+}
+
 // ---------------------------------------------------------------- provisional acceptances
 
 /** A provisional acceptance the user has not dealt with yet. */

@@ -111,6 +111,7 @@ const SETTING_KEYS = [
   "orchestrator.runtime", "orchestrator.model", "orchestrator.effort", "orchestrator.fallback", "orchestrator.notify", "orchestrator.context_threshold",
   "languages.reader",
   ...TAG_KINDS.flatMap((k) => [`kinds.${k}.runtime`, `kinds.${k}.model`, `kinds.${k}.effort`, `kinds.${k}.fallback`]),
+  "review_helper.enabled", "review_helper.runtime", "review_helper.model", "review_helper.effort", "review_helper.audit_rate",
 ];
 
 /**
@@ -281,6 +282,8 @@ function SettingRows({ form, project }: { form: Form; project?: { values: Record
         </Setting>
       </Section>
 
+      <ReviewHelperRows form={f} />
+
       <Section title={t("settings.ideas")}>
         {p && (
           <Row label={t("settings.notesFolder")} hint={t("settings.notesFolderHint")}>
@@ -367,6 +370,37 @@ function SettingRows({ form, project }: { form: Form; project?: { values: Record
 }
 
 /**
+ * The review helper (queue RH): whether it takes the orchestrator's routine reviews, the runtime, model and effort it
+ * runs on (one row, global or the project's own together, like a kind's), and the share of its acceptances audited.
+ */
+function ReviewHelperRows({ form: f }: { form: Form }) {
+  const key = (x: string) => `review_helper.${x}`;
+  const runtime = (f.get(key("runtime")) || "claude") as "claude" | "codex";
+  const model = f.get(key("model"));
+  const on = f.bool(key("enabled"));
+  return (
+    <Section title={t("settings.reviewHelper")}>
+      <p className="pb-1 text-xs text-fg-3" id="settings-review-helper">{t("settings.reviewHelperNote")}</p>
+      <Setting form={f} keys={[key("enabled")]} label={t("settings.reviewHelperUse")} hint={t(on ? "settings.reviewHelperOnHint" : "settings.reviewHelperOffHint")}>
+        {(d) => <Check checked={on} onChange={(v) => f.set(key("enabled"), v)} disabled={d}>{t("settings.reviewHelperCheck")}</Check>}
+      </Setting>
+      <Setting form={f} keys={["runtime", "model", "effort"].map(key)} label={t("settings.reviewHelperRunsOn")} hint={t("settings.reviewHelperRunsOnHint")}>
+        {(d) => (
+          <span className="flex flex-wrap items-center gap-1.5">
+            <Select value={runtime} disabled={d} onChange={(v) => { f.set(key("runtime"), v); f.set(key("model"), ""); f.set(key("effort"), ""); }} options={[["claude", "Claude Code"], ["codex", "Codex"]]} />
+            <ModelSelect runtime={runtime} value={model} onChange={(v) => f.set(key("model"), v)} disabled={d} defaultLabel={t("settings.kindModelDefault")} />
+            <EffortSelect runtime={runtime} model={model} value={f.get(key("effort"))} onChange={(v) => f.set(key("effort"), v)} disabled={d} defaultLabel={t("settings.kindEffortDefault")} />
+          </span>
+        )}
+      </Setting>
+      <Setting form={f} keys={[key("audit_rate")]} label={t("settings.reviewHelperAudit")} hint={t("settings.reviewHelperAuditHint")}>
+        {(d) => <Percent value={f.get(key("audit_rate"))} onChange={(v) => f.set(key("audit_rate"), v)} disabled={d} min={0} />}
+      </Setting>
+    </Section>
+  );
+}
+
+/**
  * One kind's defaults: runtime, model and effort on one line, the fallback chain under them. The four go together
  * (global or the project's own).
  */
@@ -435,10 +469,10 @@ function SaveRow({ busy, problem, msg, onSave }: { busy: boolean; problem?: Sett
 }
 
 /** A share (0 to 1) shown and typed as a percentage. */
-function Percent({ value, onChange, disabled }: { value: string; onChange: (v: number) => void; disabled: boolean }) {
+function Percent({ value, onChange, disabled, min = 10 }: { value: string; onChange: (v: number) => void; disabled: boolean; min?: number }) {
   return (
     <span className="flex items-center gap-2">
-      <input type="number" min={10} max={100} disabled={disabled} value={Math.round(Number(value) * 100)} onChange={(e) => onChange(Number(e.target.value) / 100)} className={`${field} w-24`} /> %
+      <input type="number" min={min} max={100} disabled={disabled} value={Math.round(Number(value) * 100)} onChange={(e) => onChange(Number(e.target.value) / 100)} className={`${field} w-24`} /> %
     </span>
   );
 }

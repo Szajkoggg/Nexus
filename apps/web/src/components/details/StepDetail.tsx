@@ -13,7 +13,7 @@ import { noteTargets } from "../../review.ts";
 import { StepChat } from "../Chat.tsx";
 import { QuestionWait } from "../QuestionWait.tsx";
 import { StepSwitches } from "../Fallback.tsx";
-import { LevelMark, LevelPicker, levelChangeable, levelShort, levelTitle, pendingProvisional, provisionalWord } from "../Levels.tsx";
+import { LevelMark, LevelPicker, acceptedWord, levelChangeable, levelShort, levelTitle, pendingProvisional, provisionalWord } from "../Levels.tsx";
 import { StepRefusals } from "../Refusals.tsx";
 import { Activity } from "../Run.tsx";
 import { stepMetrics } from "../../metrics.ts";
@@ -79,6 +79,7 @@ export function StepDetail({ project, queue, step, onClose, of, qid }: PanelProp
   const integration = step.integration ? <IntegrationBox project={project} queue={queue} step={step} /> : null;
   // Its metrics whose latest value is beyond the threshold: said in the header too, so a review sees it at once.
   const warned = stepMetrics(step.metrics).filter((m) => m.warn).length;
+  const accepted = acceptedWord(step);
   const body = reviewing ? (
     <>
       {integration}
@@ -119,6 +120,10 @@ export function StepDetail({ project, queue, step, onClose, of, qid }: PanelProp
                 <span>{levelShort(step.level)}{step.level_from === "user" ? ` · ${t("level.setByYou")}` : ""}{project.away.on && step.level === 2 ? ` · ${t("level.awayAs3")}` : ""}</span>
               </span>
             )}
+          {accepted && <span className="inline-flex max-w-full flex-wrap rounded bg-surface-3 px-1.5 py-0.5 text-fg" title={accepted.title} data-accepted-by={step.accepted?.by ?? "helper-reviewing"}>
+            {/* Each part whole (a model's name never breaks at its hyphens); the line wraps between them. */}
+            {accepted.parts.map((x, i) => <span key={i} className="whitespace-pre">{i ? ` · ${x}` : x}</span>)}
+          </span>}
           <StepTimes step={step} />
           {warned > 0 && <span className="font-medium text-warn">{t("details.metricsWarning", { count: warned })}</span>}
           {step.commit && <span className="font-mono">{step.commit}</span>}

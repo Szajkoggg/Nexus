@@ -1,0 +1,23 @@
+# Who accepted a step, and the review helper's settings (queue RH, RH4), on scripts/capture/seed-review-helper.ts.
+# New views: --no-before.
+#   node scripts/capture.ts scripts/capture/examples/review-helper.yaml --step RH/RH4 --no-before
+seed: scripts/capture/seed-review-helper.ts
+views:
+  - key: step-accepted-by@1440
+    route: "#/demo/RV/RV1"
+    label: "A segéd által elfogadott lépés: ki és milyen modellen fogadta el"
+    actions:
+      - wait: 800
+  - key: step-accepted-by@390
+    route: "#/demo/RV/RV1"
+    label: "A segéd által elfogadott lépés telefonon"
+    actions:
+      - wait: 800
+  - key: settings-review-helper@1440
+    route: "#/demo"
+    label: "A projekt segéd-beállítása: saját modell és effort a globális mellett"
+    actions:
+      - click: { selector: "button[title='Project settings']" }
+      - wait: 800
+      - scroll: "Review helper"
+      - wait: 300

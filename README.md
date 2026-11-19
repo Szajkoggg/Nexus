@@ -840,6 +840,22 @@ it, as a new revision (a queue that went on waits for your approval at its runni
 approved and started). Whether provisional work is pushed like accepted work is "Provisional work" in Settings (on by
 default; off, nothing built on unconfirmed provisional work is pushed until you confirm it).
 
+**The review helper.** The orchestrator's routine reviews (levels 2 and 3) go to a short-lived review helper on a
+cheaper model, so they stay out of the orchestrator's long chat. It reads the step's packet (its goal, criteria and
+review notes, the checks Nexus ran, the diff, the review material, the worker's summary), then accepts a level-2 step
+whose criteria it can check, sends back what fails (counted toward the same send-back limit), or passes the step on
+to the orchestrator with why (a criterion it cannot check, such as the look; a deviation the worker reported; a
+question; its own doubt; and always at level 3, whose judgement stays the orchestrator's). Levels, away mode and
+provisional acceptances work as above: what the helper passes on reaches the orchestrator as before, and only the
+orchestrator accepts provisionally. A step's panel says who accepted it: "accepted by the review helper · Claude Code ·
+claude-sonnet-5-5 · medium", "accepted by the orchestrator", "accepted by you" or "accepted by Nexus, without a model";
+while the helper reviews it, "the review helper reviews it". The orchestrator hears of the helper's acceptances with
+its next notice and reviews about one in ten again (an audit). Settings, "Review helper": whether routine reviews go to
+the helper (on by default), the runtime, model and effort it runs on (Claude Code, claude-sonnet-5-5, medium by
+default; a project may have its own, with Global · Own like the other settings) and the share audited (10 %).
+`nexus stats --reviews` shows how the reviews went: your Fix its, rejections and returned provisional acceptances,
+the send-backs by who sent them, how often the helper passed steps on, and what the audits found.
+
 **Away mode**: "Away…" at the foot of the sidebar (in Settings on a phone) turns it on until a time (08:00 by default,
 the next such time); "Away until 08:00" then shows there and at the top of the right rail (in the header on a phone),
 with Turn off. Meanwhile level-2 steps run as level 3, so the queues go on and what is yours waits in the batch;

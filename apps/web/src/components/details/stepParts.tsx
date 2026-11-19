@@ -139,7 +139,7 @@ export function SentBack({ step }: StepProps) {
         {step.sent_back.map((b) => (
           <li key={b.id} className="text-sm">
             <div className="text-xs text-fg-3">
-              {t(b.by === "user" ? "details.sentBack.you" : "details.sentBack.orchestrator")} · <TimeAgo at={b.at} /> · {b.to_user ? t("details.sentBack.toUser") : b.delivered ? t("review.round", { round: b.round }) : t("details.sentBack.onItsWay")}
+              {t(b.by === "user" ? "details.sentBack.you" : b.by === "helper" ? "details.sentBack.helper" : "details.sentBack.orchestrator")} · <TimeAgo at={b.at} /> · {b.to_user ? t("details.sentBack.toUser") : b.delivered ? t("review.round", { round: b.round }) : t("details.sentBack.onItsWay")}
             </div>
             <p className="whitespace-pre-wrap text-fg">{b.text}</p>
           </li>
