@@ -99,6 +99,10 @@
 {
   "context_tokens": 120,
   "context_window": 2000,
+  "last_turn": {
+    "ended_at": "2026-01-01T09:30:00.000Z",
+    "started_at": "2026-01-01T09:10:00.000Z"
+  },
   "model": "fake-codex-model",
   "pid": "<pid>",
   "state": "idle",
@@ -127,6 +131,10 @@
 {
   "context_tokens": 120,
   "context_window": 2000,
+  "last_turn": {
+    "ended_at": "2026-01-01T09:30:00.000Z",
+    "started_at": "2026-01-01T09:10:00.000Z"
+  },
   "model": "fake-codex-model",
   "pid": "<pid>",
   "state": "idle",
@@ -159,6 +167,10 @@
 {
   "context_tokens": 120,
   "context_window": 2000,
+  "last_turn": {
+    "ended_at": "2026-01-01T09:50:00.000Z",
+    "started_at": "2026-01-01T09:50:00.000Z"
+  },
   "model": "fake-codex-model",
   "pid": "<pid>",
   "state": "idle",
@@ -189,6 +201,10 @@
 {
   "context_tokens": 120,
   "context_window": 2000,
+  "last_turn": {
+    "ended_at": "2026-01-01T09:50:00.000Z",
+    "started_at": "2026-01-01T09:50:00.000Z"
+  },
   "model": "fake-codex-model",
   "pid": "<pid>",
   "state": "idle",
@@ -219,6 +235,10 @@
 {
   "context_tokens": 120,
   "context_window": 2000,
+  "last_turn": {
+    "ended_at": "2026-01-01T10:01:00.000Z",
+    "started_at": "2026-01-01T10:01:00.000Z"
+  },
   "model": "fake-codex-model",
   "pid": "<pid>",
   "state": "idle",
@@ -247,6 +267,10 @@
 {
   "context_tokens": 120,
   "context_window": 2000,
+  "last_turn": {
+    "ended_at": "2026-01-01T10:01:00.000Z",
+    "started_at": "2026-01-01T10:01:00.000Z"
+  },
   "model": "fake-codex-model",
   "pid": "<pid>",
   "state": "idle",
@@ -277,6 +301,10 @@
 {
   "context_tokens": 120,
   "context_window": 2000,
+  "last_turn": {
+    "ended_at": "2026-01-01T10:31:00.000Z",
+    "started_at": "2026-01-01T10:31:00.000Z"
+  },
   "model": "fake-codex-model",
   "pid": "<pid>",
   "state": "idle",
@@ -305,6 +333,10 @@
 {
   "context_tokens": 120,
   "context_window": 2000,
+  "last_turn": {
+    "ended_at": "2026-01-01T10:31:00.000Z",
+    "started_at": "2026-01-01T10:31:00.000Z"
+  },
   "model": "fake-codex-model",
   "pid": "<pid>",
   "state": "idle",
@@ -333,6 +365,10 @@
 {
   "context_tokens": 120,
   "context_window": 2000,
+  "last_turn": {
+    "ended_at": "2026-01-01T10:51:00.000Z",
+    "started_at": "2026-01-01T10:51:00.000Z"
+  },
   "model": "fake-codex-model",
   "pid": "<pid>",
   "state": "working",
@@ -361,6 +397,10 @@
 {
   "context_tokens": 120,
   "context_window": 2000,
+  "last_turn": {
+    "ended_at": "2026-01-01T10:51:00.000Z",
+    "started_at": "2026-01-01T10:51:00.000Z"
+  },
   "model": "fake-codex-model",
   "pid": "<pid>",
   "state": "exited",
@@ -391,6 +431,10 @@
 {
   "context_tokens": 120,
   "context_window": 2000,
+  "last_turn": {
+    "ended_at": "2026-01-01T10:51:00.000Z",
+    "started_at": "2026-01-01T10:51:00.000Z"
+  },
   "model": "fake-codex-model",
   "pid": "<pid>",
   "state": "exited",
@@ -419,6 +463,10 @@
 {
   "context_tokens": 120,
   "context_window": 2000,
+  "last_turn": {
+    "ended_at": "2026-01-01T10:51:00.000Z",
+    "started_at": "2026-01-01T10:51:00.000Z"
+  },
   "model": "fake-codex-model",
   "pid": "<pid>",
   "state": "idle",
@@ -448,6 +496,10 @@
 {
   "context_tokens": 120,
   "context_window": 2000,
+  "last_turn": {
+    "ended_at": "2026-01-01T11:31:00.000Z",
+    "started_at": "2026-01-01T11:31:00.000Z"
+  },
   "model": "fake-codex-model",
   "pid": "<pid>",
   "state": "exited",
