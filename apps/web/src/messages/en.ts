@@ -589,6 +589,8 @@ export const en = {
   "run.switch.runtime": "the step runs on {runtime}",
   "run.switch.anotherRuntime": "another runtime",
   "run.switch.full": "the previous one's context was full",
+  /** {duration}: how long the previous session was idle ("2 h 5 min"). */
+  "run.switch.idle": "the previous one was idle for {duration}, past its cache's life",
   "run.switch.fill": "the previous one's context was {pct}% full",
   "run.switch.tokens": "the previous one's context held {tokens} tokens ({pct}%)",
   "run.seeded.written": "seeded with its context summary",
@@ -1099,7 +1101,7 @@ export const en = {
   "settings.kTokens": "k tokens",
   "settings.tokensCap": "At most 80 % of the model's context window counts: on a 256k window, 204.8k. Where the window is unknown, there is no switch.",
   "settings.care": "Context care",
-  "settings.careHint": "Beyond that threshold at the end of a step, the next step runs in a fresh session, given the previous one's context summary, instead of the runtime compacting in the middle of a step.",
+  "settings.careHint": "Beyond that threshold at the end of a step, the next step runs in a fresh session, given the previous one's context summary, instead of the runtime compacting in the middle of a step. So it does after a session idle for over an hour (its cache gone) that left a summary in its last turn.",
   "settings.careCheck": "a fresh session when the context is full",
   "settings.merging": "Merging back",
   "settings.mergingNote": "For queues with a worktree of their own. Their last step, the integration step, merges the current main into the queue's branch and runs the checks; main then only moves forward to that result.",

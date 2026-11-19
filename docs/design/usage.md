@@ -36,10 +36,19 @@ the natural cut, and the worker's own summary is a better hand-over than an auto
   older one would miss the step's own work. A missing summary is asked for once; if the worker still writes none,
   the seed is the queue's description and the finished steps' summaries, which every worker writes anyway.
 - No known context window (a runtime that has not reported one yet) means no switch: Nexus does not guess.
+- After an idle hour (docs/ideas/token-costs.md, 2026-11-17; queue FI) the prompt cache is gone, so the next turn in
+  the old session writes its whole context again. A fresh session from the summary is cheaper, below the threshold
+  too, but only with a summary already there: asking for one is itself a turn that rewrites the cache. Fresh here
+  means written in the session's latest turn (at or after its start, `last_turn` in `runtime.json`), not only since
+  the step's start: a check-fix round or a send-back after the summary leaves work the summary does not cover.
+  Counted before building (2026-11-19, this project's sessions and turns.jsonl since 2026-11-14): of 152 worker step
+  boundaries 4 came after more than an hour idle, and all 4 had a summary written in the session's latest turn, so the
+  rule rarely fires but saves a full cache write when it does.
 - What the old session had not read yet (a message that came between its last turn and the switch) goes into the new
   session's first turn, after the step, and counts as delivered in the old session's `delivered.jsonl`.
 - The switch is recorded in `run.yaml` (`switches`) and on both `session.yaml` files (`continues`, `continued_by`),
-  and the run's panel lists it: from which step, how full the old context was, and where the seed came from.
+  and the run's panel and `nexus status` list it: from which step, why (how full the old context was, how long it was
+  idle), and where the seed came from.
 
 **The orchestrator's context care** (decided by the user on 2026-11-15, queue CC; docs/ideas/chat-context.md). The
 orchestrator's long chat is not compacted: when its context nears full, Nexus asks it for a summary and goes on in a

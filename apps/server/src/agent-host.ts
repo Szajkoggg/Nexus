@@ -190,8 +190,9 @@ export class AgentHost<E extends object = object> {
       if (a) this.asked.set(proc, { turn: a.next, next: [] });
       begin(false);
       this.recordTurn(session, open!, model, end);
+      const last = { started_at: open!.started, ended_at: now() };
       open = undefined;
-      this.write(session.id, this.record.countTurns ? { state: "idle", turns: (this.store.readRuntime(session.id)?.turns ?? 0) + 1 } : { state: "idle" });
+      this.write(session.id, this.record.countTurns ? { state: "idle", last_turn: last, turns: (this.store.readRuntime(session.id)?.turns ?? 0) + 1 } : { state: "idle", last_turn: last });
       if (this.afterTurn.has(proc)) { this.afterTurn.delete(proc); this.ended.add(proc); proc.kill(); this.forget(l); }
       on.turnEnd?.(end);
     });

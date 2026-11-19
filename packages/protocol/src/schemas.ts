@@ -1265,15 +1265,17 @@ export const RunFile = z.object({
    * Each time the run went on in a fresh session, oldest first. `why`: `context` (context care: the old session's
    * context was full; older records without `why` are this), `runtime` (the step runs on another runtime), `refactor`
    * (the closing refactoring step, which reads the queue's work with fresh eyes) or `usage` (in the middle of a step:
-   * the old session's runtime was beyond the usage threshold, and the step goes on on its fallback, or back). `step` is
+   * the old session's runtime was beyond the usage threshold, and the step goes on on its fallback, or back) or `idle`
+   * (context care: the old session was idle beyond the cache's life, IDLE_SWITCH_MS, and had a fresh summary; queue FI;
+   * `idle_minutes` how long). `step` is
    * the first step of the new session, `fill` the old session's context fill (0 to 1) and `tokens` its context tokens
    * when known (tokens: since queue CT), `summary` where the
    * seed came from: `written` (the worker's own summary of the step), `asked` (written when Nexus asked for it),
    * `fallback` (none: the queue's description and the finished steps' summaries).
    */
   switches: z.array(z.object({
-    at: Time, from: Id, to: Id, step: Id, why: z.enum(["context", "runtime", "refactor", "usage"]).optional(), fill: z.number().optional(),
-    tokens: z.number().optional(),
+    at: Time, from: Id, to: Id, step: Id, why: z.enum(["context", "runtime", "refactor", "usage", "idle"]).optional(), fill: z.number().optional(),
+    tokens: z.number().optional(), idle_minutes: z.number().int().nonnegative().optional(),
     summary: z.enum(["written", "asked", "fallback"]),
   })).optional(),
   /**
@@ -1352,6 +1354,12 @@ export const RuntimeFile = z.object({
    * the session unless it is false; a record without it (written before queue RN) is taken as saved.
    */
   conversation_saved: z.boolean().optional(),
+  /**
+   * The session's latest turn that ended: when it began and ended (queue FI). Context care reads it at a step boundary:
+   * idle beyond the cache's life since `ended_at`, with a context summary written at or after `started_at`, the next
+   * step runs in a fresh session. Absent before the first turn ended (and in records written before queue FI).
+   */
+  last_turn: z.object({ started_at: Time, ended_at: Time }).optional(),
   updated_at: Time,
 });
 export type RuntimeFile = z.infer<typeof RuntimeFile>;

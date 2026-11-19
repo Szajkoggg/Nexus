@@ -143,6 +143,23 @@ export interface EngineOptions {
 /** A process asked to end for a restart (another model or effort) is killed if it has not exited by then. */
 const RESTART_KILL_MS = 10_000;
 
+/**
+ * Context care's idle switch (queue FI): a session idle this long at a step boundary has lost its prompt cache (it
+ * lives an hour), so its next turn would write the whole context again.
+ */
+export const IDLE_SWITCH_MS = 60 * 60_000;
+
+/**
+ * How many minutes a session has been idle at `nowMs`, when that is beyond IDLE_SWITCH_MS and its context summary is
+ * fresh: written at or after the start of its latest turn (the summary covers everything the session did). Otherwise
+ * undefined: no idle switch.
+ */
+function idleMinutes(last: { started_at: string; ended_at: string } | undefined, summary: { at: string } | undefined, nowMs: number): number | undefined {
+  if (!last || !summary || summary.at < last.started_at) return undefined;
+  const idle = nowMs - Date.parse(last.ended_at);
+  return idle > IDLE_SWITCH_MS ? Math.floor(idle / 60_000) : undefined;
+}
+
 /** The runtime, model and effort a step runs on. */
 export interface StepValues { runtime: "claude" | "codex"; model?: string; effort?: Effort }
 
@@ -1043,6 +1060,14 @@ export class Engine implements Member {
       this.switchSession(queueId, run, q, old, live, done, next, want, why, context, fresh ?(asked ? "asked" : "written") : "fallback");
       return true;
     }
+    // Idle beyond the cache's life (queue FI): the next turn here would write the whole context to the cache again, so
+    // with a summary of the session's latest turn the next step runs in a fresh session, below the threshold too.
+    // Without one nothing is asked: asking is a turn in this session, which rewrites the cache all the same.
+    const idle = defaults.context_care && done ? idleMinutes(old.live?.last_turn, old.context, this.clock.now()) : undefined;
+    if (idle !== undefined) {
+      this.switchSession(queueId, run, q, old, live, done, next, want, "idle", context, "written", idle);
+      return true;
+    }
     // Settings the process was launched with (permission mode, allow rules, the .nexus protection, sandbox, approvals,
     // the briefing) changed since: a new process from this step on, resuming the session.
     // Its model and effort are not compared here: they change below (Codex per turn, Claude Code by a restart).
@@ -1139,13 +1164,16 @@ export class Engine implements Member {
     this.recordCarried(old.id, fresh.id, unread, sent);
   }
 
-  /** Goes on with `next` in a fresh session (with `want`'s runtime, model and effort) that continues `old`. */
-  private switchSession(queueId: string, run: RunFile, q: QueueView, old: SessionView, live: Live, done: StepView | undefined, next: StepView, want: StepValues, why: "context" | "runtime" | "refactor", context: ContextSize | undefined, source: "written" | "asked" | "fallback"): void {
+  /**
+   * Goes on with `next` in a fresh session (with `want`'s runtime, model and effort) that continues `old`; `idle`: how
+   * many minutes the old session was idle (why `idle`).
+   */
+  private switchSession(queueId: string, run: RunFile, q: QueueView, old: SessionView, live: Live, done: StepView | undefined, next: StepView, want: StepValues, why: "context" | "runtime" | "refactor" | "idle", context: ContextSize | undefined, source: "written" | "asked" | "fallback", idle?: number): void {
     const { fresh, unread } = this.forkSession(run, q, old, live, want);
-    const because = switchReason(why, next.id, want.runtime, old.runtime as "claude" | "codex", context);
+    const because = switchReason(why, next.id, want.runtime, old.runtime as "claude" | "codex", context, idle);
     this.writeRun(queueId, {
       ...run, session: fresh.id, summary_asked: undefined,
-      switches: [...(run.switches ?? []), { at: now(), from: old.id, to: fresh.id, step: next.id, why, fill: context?.fill, ...(context ? { tokens: context.tokens } : {}), summary: source }],
+      switches: [...(run.switches ?? []), { at: now(), from: old.id, to: fresh.id, step: next.id, why, fill: context?.fill, ...(context ? { tokens: context.tokens } : {}), ...(idle !== undefined ? { idle_minutes: idle } : {}), summary: source }],
     });
     this.store.appendActivity(old.id, { at: now(), kind: "turn_end", text: `Nexus goes on in a fresh session (${fresh.id}): ${because}`, queue: queueId, step: done?.id ?? next.id });
     const state = loadProjectState(this.store);

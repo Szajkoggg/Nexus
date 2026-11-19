@@ -18,6 +18,28 @@ export function stopLines(q: QueueView): string[] {
 }
 
 /**
+ * Each time the queue's run went on in a fresh session (run.yaml `switches`), as `nexus status` says it: the step, when,
+ * why, and what the fresh session started from; the dashboard's run panel says the same.
+ */
+export function switchLines(q: Pick<QueueView, "run">): string[] {
+  return (q.run?.switches ?? []).map((s) => {
+    const why = s.why === "runtime" ? "the step runs on another runtime"
+      : s.why === "refactor" ? "the closing refactoring step reads the queue's work with fresh eyes"
+      : s.why === "usage" ? "the old session's runtime was beyond the usage threshold"
+      : s.why === "idle" ? `the old session was idle for ${minutesText(s.idle_minutes ?? 60)}, past its cache's life`
+      : `the old session's context was full${s.tokens !== undefined ? ` (${tokenCount(s.tokens)} tokens${s.fill !== undefined ? `, ${Math.round(s.fill * 100)} %` : ""})` : ""}`;
+    const seed = s.summary === "written" ? "seeded with its context summary" : s.summary === "asked" ? "seeded with the summary it wrote when asked" : "seeded with the queue's text and its steps' summaries";
+    return `  fresh session ${s.to} from ${s.step} at ${s.at.slice(0, 16).replace("T", " ")}: ${why}; ${seed}`;
+  });
+}
+
+/** Minutes as words: "45 min", "2 h", "2 h 5 min". */
+function minutesText(minutes: number): string {
+  const h = Math.floor(minutes / 60), m = minutes % 60;
+  return h ? `${h} h${m ? ` ${m} min` : ""}` : `${m} min`;
+}
+
+/**
  * A queue's place in the plan: the queues it waits for (each with who set it and how it stands), a proposal waiting for
  * the user, its planned start, and why it has not started; and its place in the merge train (train.ts).
  */
@@ -138,6 +160,7 @@ Queues (${queues.length - done.length} open; finished: ${finished})`);
     if (q.status_reason && q.status !== "running") out.push(`  why: ${q.status_reason.replace(/\s+/g, " ").slice(0, 300)}`);
     for (const line of stopLines(q)) out.push(line);
     for (const line of planLines(q)) out.push(line);
+    for (const line of switchLines(q)) out.push(line);
   }
   const ofQueue = (queue: string | undefined) => opts.queue === undefined || queue === opts.queue;
   const open = state.questions.filter((x) => isOpenQuestion(x) && ofQueue(x.queue));

@@ -138,6 +138,17 @@ gets the default.) A fresh session for another
 runtime is made the same way, and so is one for the closing refactoring step (`why: refactor`: no summary is asked
 for, and the seed gives none; see ["The closing refactoring step"](queues.md#the-closing-refactoring-step)).
 
+**After an idle hour** (queue FI): with context care on, a step boundary where the session has been idle for more than
+an hour (`IDLE_SWITCH_MS`, the life of the runtime's prompt cache: the next turn would write the whole context to the
+cache again) goes on in a fresh session too, below the threshold, when the session's summary is fresh. Idle is the
+engine's clock at the boundary less `last_turn.ended_at` in `runtime.json`; fresh here is stricter than below: a
+`context.summary` of that session at or after `last_turn.started_at`, written in its latest turn, so a turn after it
+(a check-fix round, a send-back, a message) makes it old. Without a fresh summary nothing is asked (asking is a turn
+in the old session, which rewrites the cache all the same) and the step opens in the same session. The switch is
+recorded as `why: idle` with `idle_minutes` and `summary: written`; the seed says how long the session was idle. A
+switch for the threshold or another runtime comes first. The run's panel and `nexus status` (a line per switch under
+the queue, `switchLines` in `packages/protocol/src/overview.ts`) show every switch with its reason.
+
 1. It looks for a fresh summary: a `context.summary` from that session at or after its latest `step.started` of the
    step that ended. If there is none, it asks once with a turn ("… write your context summary with `nexus context`
    …, then end your turn") and records `summary_asked` in `run.yaml`; after that turn it goes on with or without one.
@@ -174,7 +185,7 @@ queue CT): of the steps with an outcome (in the range and project), those that o
 context switch (`switches` in the queue's current `run.yaml`, `why: context` or none) against those that opened in the
 session that ran the queue's step before them, each with the steps accepted in the first round (of those decided), the
 steps sent back at least once (of all; and the send-backs), and the check-fix rounds (failed check sets, all and per
-step). Steps that opened a session otherwise (a run's first step, a runtime switch, the closing refactoring step) are
+step). Steps that opened a session otherwise (a run's first step, a runtime switch, an idle switch, the closing refactoring step) are
 counted apart, in neither. A switch recorded in an archived run (`run.<time>.yaml`) is not read.
 
 ## How the engine runs a Codex session

@@ -6,7 +6,7 @@ import { questionBarrier, runGoing } from "@nexus/protocol/status-rules";
 import { QuestionWait } from "./QuestionWait.tsx";
 import { act, enc, projectUrl, useAction, useQuery, type ActivityEntry, type ProjectState, type QueueView, type SessionView, type Usage } from "../api.ts";
 import { Button, ReadError, RunTimes, Section, TimeAgo } from "./ui.tsx";
-import { formatClock, formatDateTime, formatTime, formatNumber, rich, t, type Key } from "../i18n.ts";
+import { formatClock, formatDateTime, formatDuration, formatTime, formatNumber, rich, t, type Key } from "../i18n.ts";
 import { EffortSelect, ModelSelect } from "./Settings.tsx";
 import { openPlan } from "../queueStatus.ts";
 import { usePage } from "../page.ts";
@@ -49,8 +49,8 @@ const SEEDED: Record<string, Key> = {
 };
 
 /**
- * Each time the run went on in a fresh session: the previous one's context was full (context care), or the step runs
- * on another runtime.
+ * Each time the run went on in a fresh session: the previous one's context was full, or it was idle past its cache's life
+ * with a summary (context care), or the step runs on another runtime.
  */
 function SessionSwitches({ run, sessions }: { run: NonNullable<QueueView["run"]>; sessions: SessionView[] }) {
   if (!run.switches?.length) return null;
@@ -64,6 +64,7 @@ function SessionSwitches({ run, sessions }: { run: NonNullable<QueueView["run"]>
               step: <span key="step" className="font-mono">{s.step}</span>, time: formatClock(s.at, new Date()),
               why: s.why === "runtime"
                 ? t("run.switch.runtime", { runtime: RUNTIME_NAME[sessions.find((x) => x.id === s.to)?.runtime ?? ""] ?? t("run.switch.anotherRuntime") })
+                : s.why === "idle" ? t("run.switch.idle", { duration: formatDuration((s.idle_minutes ?? 60) * 60_000) })
                 : s.fill === undefined ? t("run.switch.full")
                   : s.tokens !== undefined ? t("run.switch.tokens", { tokens: tokenCount(s.tokens), pct: Math.round(s.fill * 100) })
                     : t("run.switch.fill", { pct: Math.round(s.fill * 100) }),

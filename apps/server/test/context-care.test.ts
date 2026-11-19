@@ -1,7 +1,8 @@
 // Context care against the fake runtimes: at the end of a step whose session's context is beyond the project's
 // threshold (context_reuse_tokens, default 300k, at most 80 % of the window), the next step runs in a fresh session
 // seeded with the context summary. The fakes report the context fill FAKE_CONTEXT_FILL asks for of a window of
-// FAKE_CONTEXT_WINDOW tokens (fake-behaviour.ts); here 1M unless a test says otherwise.
+// FAKE_CONTEXT_WINDOW tokens (fake-behaviour.ts); here 1M unless a test says otherwise. Below the threshold, a session idle
+// for over an hour (its prompt cache gone) at a step boundary goes on in a fresh one too, if its summary is fresh (queue FI).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
@@ -9,7 +10,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ProjectStore, approveQueue, loadProjectState, routeAnswers, sendMessage, type StepDef } from "@nexus/protocol";
-import { Engine } from "../src/engine.ts";
+import { Engine, type Clock } from "../src/engine.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
 import { WAIT_MS, until as waitUntil, LONGER, holdWork } from "./wait.ts";
 
@@ -19,7 +20,14 @@ process.env.NEXUS_CODEX = join(here, "fake-codex.ts");
 
 interface Received { text: string; priority: string | null; busy: boolean; session: string | null }
 
-function setup(behaviours: string[], opts: { fill: number; window?: number; care?: boolean; noSummary?: boolean }) {
+/** The engine's clock, moved forward by hand (its timers run on the real one). */
+function movableClock(): Clock & { ahead: number } {
+  const c = { ahead: 0, now: () => Date.now() + c.ahead, setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms), clearTimeout: (h: unknown) => clearTimeout(h as NodeJS.Timeout) };
+  return c;
+}
+
+/** `clock`: the engine's; `hold`: steps wait in review until the test accepts them (accept()). */
+function setup(behaviours: string[], opts: { fill: number; window?: number; care?: boolean; noSummary?: boolean; clock?: Clock; hold?: boolean }) {
   const root = mkdtempSync(join(tmpdir(), "nexus-care-"));
   process.env.NEXUS_HOME = join(root, "home");
   process.env.FAKE_LOG = join(root, "fake.log");
@@ -33,12 +41,13 @@ function setup(behaviours: string[], opts: { fill: number; window?: number; care
     stop_conditions: [], checks: [], steps, approvals: [], withdrawals: [], history: [],
   });
   approveQueue(store, "Q");
-  const engine: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store); engine.onChange(loadProjectState(store)); }, { retryBaseMs: 30, usageMarginMs: 100 });
+  const engine: Engine = new Engine(store, () => { routeAnswers(store); if (!opts.hold) acceptReviews(store); engine.onChange(loadProjectState(store)); }, { retryBaseMs: 30, usageMarginMs: 100, ...(opts.clock ? { clock: opts.clock } : {}) });
   const queue = () => loadProjectState(store).queues.find((q) => q.id === "Q")!;
   const received = (): Received[] => (existsSync(process.env.FAKE_LOG!) ? readFileSync(process.env.FAKE_LOG!, "utf8").trim().split("\n").map((l) => JSON.parse(l) as Received) : []);
   const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms, () => `; run: ${JSON.stringify(queue().run)}; steps: ${queue().steps.map((s) => `${s.id}=${s.status}`).join(" ")}`);
   const done = () => { engine.shutdown(); delete process.env.FAKE_CONTEXT_FILL; delete process.env.FAKE_CONTEXT_WINDOW; delete process.env.FAKE_NO_SUMMARY; };
-  return { store, engine, queue, received, until, done };
+  const accept = () => { acceptReviews(store); engine.onChange(loadProjectState(store)); };
+  return { store, engine, queue, received, until, done, accept };
 }
 
 const asks = (r: Received[]) => r.filter((m) => m.text.includes("write your context summary"));
@@ -169,3 +178,59 @@ for (const runtime of ["claude", "codex"] as const) {
   });
 
 }
+
+const HOUR = 60 * 60_000;
+
+for (const runtime of ["claude", "codex"] as const) {
+  test(`${runtime}: idle for over an hour at a step boundary with a fresh summary, the next step runs in a fresh session`, async () => {
+    const clock = movableClock();
+    const { engine, queue, received, until, done, accept } = setup(["summary", "done"], { fill: 0.1, clock, hold: true });
+    try {
+      engine.start("Q", { runtime });
+      await until("Q1 in review", () => queue().steps[0]!.status === "review", LONGER.step);
+      clock.ahead = 2 * HOUR;
+      accept();
+      await until("Q2 in review", () => queue().steps[1]!.status === "review", LONGER.step);
+      accept();
+      await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
+      const q = queue();
+      const [first, second] = q.steps.map((s) => s.session!);
+      assert.notEqual(first, second, "the second step ran in a fresh session");
+      assert.deepEqual(q.run!.switches?.map((s) => [s.from, s.to, s.step, s.why, s.summary]), [[first, second, "Q2", "idle", "written"]]);
+      const idle = q.run!.switches![0]!.idle_minutes!;
+      assert.ok(idle >= 120 && idle < 125, `idle ${idle} min`);
+      assert.equal(asks(received()).length, 0, "nothing is asked");
+      const opening = received().find((m) => m.session === second)!;
+      assert.match(opening.text, /in a fresh session: the session that ran the queue so far was idle for 2 h( \d+ min)?, past the life of its prompt cache/);
+      assert.match(opening.text, /context summary at the end of Q1:\nfake summary of Q1/);
+    } finally { done(); }
+  });
+}
+
+test("no idle switch without a summary, within the hour, or with a summary older than the session's latest turn", async () => {
+  for (const c of [
+    { name: "idle 2 h without a summary", steps: ["done", "done"], idle: [2 * HOUR] },
+    { name: "idle 50 min with a fresh summary", steps: ["summary", "done"], idle: [50 * 60_000] },
+    // Q1's summary, then Q2's turn (no summary): at Q2's end the summary is older than the latest turn.
+    { name: "idle 2 h with an old summary", steps: ["summary", "done", "done"], idle: [0, 2 * HOUR] },
+  ]) {
+    const clock = movableClock();
+    const { engine, queue, received, until, done, accept } = setup(c.steps, { fill: 0.1, clock, hold: true });
+    try {
+      engine.start("Q", { runtime: "claude" });
+      for (const [i, ms] of c.idle.entries()) {
+        await until(`Q${i + 1} in review`, () => queue().steps[i]!.status === "review", LONGER.step);
+        clock.ahead += ms;
+        accept();
+      }
+      const last = c.steps.length - 1;
+      await until("the last step in review", () => queue().steps[last]!.status === "review", LONGER.step);
+      accept();
+      await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
+      const q = queue();
+      assert.equal(new Set(q.steps.map((s) => s.session)).size, 1, c.name);
+      assert.equal(q.run!.switches, undefined, c.name);
+      assert.equal(asks(received()).length, 0, c.name);
+    } finally { done(); }
+  }
+});

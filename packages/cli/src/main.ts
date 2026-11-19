@@ -6,7 +6,7 @@ import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path
 import { parseArgs } from "node:util";
 import { execFileSync } from "node:child_process";
 import {
-  Event, isOpenQuestion, runGoing, orchestratorOverview, planLines, stopLines, ProjectStore, checksLine, findNexusDir, inReportFolder, loadProjectState, stepValuesText, newId, normPath, now, readRegistry, writeRegistry,
+  Event, isOpenQuestion, runGoing, orchestratorOverview, planLines, stopLines, switchLines, ProjectStore, checksLine, findNexusDir, inReportFolder, loadProjectState, stepValuesText, newId, normPath, now, readRegistry, writeRegistry,
   PICTURE_ROLES, REVIEW_HELP, checkPicture, levelNow, pictureSize, recommendedOption, stepDefs,
   NEXUS_ACTIVITIES, TAG_KINDS, TAG_ORIGINS, TAG_SIZES, tagIssues, tagProposalText, tagsText,
   STAT_DIMENSIONS, readTurns, sinceTime, statDimension, statsReport, statsText, stepStats,
@@ -667,6 +667,7 @@ const commands: Record<string, () => void | Promise<void>> = {
       }
       // Its place in the plan, and why it has not started (also: waiting for its checkout or for a place under the limit).
       for (const line of planLines(q)) console.log(line);
+      for (const line of switchLines(q)) console.log(line);
       for (const step of q.steps) {
         const unread = step.notes.filter((n) => !n.read_at && n.to !== "orchestrator");
         const own = stepValuesText(step);
