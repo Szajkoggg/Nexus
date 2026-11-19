@@ -1,7 +1,7 @@
 // Derives the dashboard's view of a project from its files. Pure apart from reading through the store;
 // nothing here is ever written back (state.json, if kept, is only a cache of this).
 import { applyCheckSets, reviewRound } from "./checks.ts";
-import { CONVERSATION_ONLY, NEXUS_PASS_ON, NEXUS_SESSION, ORCHESTRATOR_ONLY, type PassOnReason, USER_ONLY, WORKER_ONLY, type MetricsFile, type StatusChange, type Event, type InboxEntry, type Note, type GitFile, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type RecurringFile, type ReviewItem, type ReviewLevel, type LegacyReviewPolicy, type AwayFile, type ChecksFile, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type PlanFile, type StepDef, type StepStatus, type TagProposal, type TagsFile } from "./schemas.ts";
+import { CONVERSATION_ONLY, HELPER_VERDICTS, NEXUS_PASS_ON, NEXUS_SESSION, ORCHESTRATOR_ONLY, type PassOnReason, USER_ONLY, WORKER_ONLY, type MetricsFile, type StatusChange, type Event, type InboxEntry, type Note, type GitFile, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type RecurringFile, type ReviewItem, type ReviewLevel, type LegacyReviewPolicy, type AwayFile, type ChecksFile, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type PlanFile, type StepDef, type StepStatus, type TagProposal, type TagsFile } from "./schemas.ts";
 import { ProjectStore, chainPlan, readAway, revisionHash } from "./store.ts";
 import { awayAt, awayNow, type AwayNow } from "./away.ts";
 import { formatClock, type Segment } from "./times.ts";
@@ -131,14 +131,14 @@ export interface StepView extends StepDef {
    */
   accepted?: { by: "user" | "orchestrator" | "helper" | "nexus"; at: string; event: string; session?: string; runtime?: string; model?: string; effort?: string };
   /**
+   * The orchestrator's audit of the review helper's acceptance (queue RH): the acceptance's event, its verdict and why.
+   */
+  audit?: { accepted: string; verdict: "agree" | "disagree"; text: string; at: string; event: string };
+  /**
    * The review helper of the current review round (queue RH): `running` while it has the review (its session exists
    * and gave no verdict yet), `passed_on` once it (or Nexus, `by: "nexus"`) passed the step on to the orchestrator,
    * with the `reasons` and the helper's `findings`.
    */
-  /**
-   * The orchestrator's audit of the review helper's acceptance (queue RH): the acceptance's event, its verdict and why.
-   */
-  audit?: { accepted: string; verdict: "agree" | "disagree"; text: string; at: string; event: string };
   helper?: { session: string; round: number; state: "running" | "passed_on"; by?: "helper" | "nexus"; reasons?: PassOnReason[]; findings?: string };
   /** The round at work answers the user's Fix it: its review is the user's, whatever the policy. */
   user_fix?: boolean;
@@ -325,8 +325,7 @@ export function loadProjectState(store: ProjectStore): ProjectState {
         if (e.session !== id) { warnings.push(`session ${id}: event ${e.id} claims session ${e.session}; ignored`); continue; }
         // The server's own session (queue MI) accepts the integration steps it ran without a model.
         // A review helper writes only its verdicts (queue RH); Nexus passes a step on too.
-        const verdict = e.type === "review.accepted" || e.type === "review.sent_back" || e.type === "review.passed_on";
-        if (s.role === "helper" && !verdict) { warnings.push(`session ${id}: ${e.type} is not a review helper's; ignored`); continue; }
+        if (s.role === "helper" && !HELPER_VERDICTS.has(e.type)) { warnings.push(`session ${id}: ${e.type} is not a review helper's; ignored`); continue; }
         if (e.type === "review.passed_on" && s.role !== "helper" && s.role !== "nexus") { warnings.push(`session ${id}: review.passed_on is a review helper's; ignored`); continue; }
         if (ORCHESTRATOR_ONLY.has(e.type) && s.role !== "orchestrator" && s.role !== "user" && s.role !== "helper" && !(s.role === "nexus" && e.type === "review.accepted")) {
           warnings.push(`session ${id}: ${e.type} is for orchestrators; ignored`); continue;
@@ -1032,7 +1031,6 @@ function applyChange(q: QueueView, c: StatusChange): void {
   }
 }
 
-/** A step back to pending, to run again: nothing of its last round (its outcome, review, reason) shows on it. */
 /** A review helper's `about` (its step and round), or none for any other session. */
 export function helperAbout(s: Pick<SessionFile, "role" | "about">): { queue: string; step: string; round: number; level: ReviewLevel } | undefined {
   const a = s.about;
@@ -1054,6 +1052,7 @@ function helperRefusal(s: Pick<SessionFile, "role" | "about">, q: QueueView, st:
   return undefined;
 }
 
+/** A step back to pending, to run again: nothing of its last round (its outcome, review, reason) shows on it. */
 function toPending(st: StepView): void {
   st.status = "pending"; st.review_with = undefined; st.asked_user = undefined; st.accepted = undefined; st.audit = undefined; st.helper = undefined;
   st.finished_at = undefined; st.summary = undefined; st.commit = undefined; st.reason = undefined;

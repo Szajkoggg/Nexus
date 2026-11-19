@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  ActionError, Effort, acceptedByNexus, normPath, effortIssue, type ProjectFile, reviewedByOrchestrator, runGoing, ProjectStore, applyDraft, defineMetric, inPlan, loadProjectState, metricDef, openPlan, orchestratorOverview, overThreshold, proposePlan, proposeTags, readAway, readUsage, orchestratorStatusChange, newId, now, sendBack, type Applied, type Event, type EventType, type NotifyKind, type ProjectState, type QueueView, type SessionFile, type SessionView, type StepView,
+  ActionError, Effort, acceptedByNexus, acceptedOn, normPath, effortIssue, type ProjectFile, reviewedByOrchestrator, runGoing, ProjectStore, applyDraft, defineMetric, inPlan, loadProjectState, metricDef, openPlan, orchestratorOverview, overThreshold, proposePlan, proposeTags, readAway, readUsage, orchestratorStatusChange, newId, now, sendBack, type Applied, type Event, type EventType, type NotifyKind, type ProjectState, type QueueView, type SessionFile, type SessionView, type StepView,
 } from "@nexus/protocol";
 import type { AgentProcess } from "./agent.ts";
 import type { CodexPermissions } from "./codex.ts";
@@ -86,7 +86,7 @@ interface EarlierSession {
 
 /** Who accepted a step, as the orchestrator's notices list it (queue RH, H9). */
 function acceptedBy(a: NonNullable<StepView["accepted"]>): string {
-  if (a.by === "helper") return `accepted by the review helper (${[a.runtime === "codex" ? "Codex" : "Claude Code", a.model, a.effort].filter(Boolean).join(", ")})`;
+  if (a.by === "helper") return `accepted by the review helper (${acceptedOn(a)})`;
   if (a.by === "nexus") return "accepted by Nexus, a clean merge without a model";
   return `accepted by the ${a.by}`;
 }

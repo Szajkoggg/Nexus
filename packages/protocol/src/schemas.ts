@@ -76,6 +76,8 @@ export type StepStatus = z.infer<typeof StepStatus>;
  */
 export const PassOnReason = z.enum(["criterion", "deviation", "question", "limit", "doubt", "level", "no_verdict", "unavailable"]);
 export type PassOnReason = z.infer<typeof PassOnReason>;
+/** The events that are a review helper's verdict: the only events a helper session writes. */
+export const HELPER_VERDICTS: ReadonlySet<string> = new Set(["review.accepted", "review.sent_back", "review.passed_on"]);
 /** The reasons only Nexus gives (its `nexus` session), never a helper. */
 export const NEXUS_PASS_ON: ReadonlySet<PassOnReason> = new Set(["no_verdict", "unavailable"]);
 
@@ -284,7 +286,7 @@ const ReviewHelperShape = z.object({
   effort: Effort.optional(),
   audit_rate: Fraction.default(0.1),
 });
-export type ReviewHelperSettings = z.infer<typeof ReviewHelperShape>;
+type ReviewHelperSettings = z.infer<typeof ReviewHelperShape>;
 /** The review helper's settings as Nexus ships them (decided with RH1, H13): Claude Code's Sonnet at medium effort. */
 const SHIPPED_REVIEW_HELPER: ReviewHelperSettings = { enabled: true, runtime: "claude", model: "claude-sonnet-5-5", effort: "medium", audit_rate: 0.1 };
 const ReviewHelperSettings = ReviewHelperShape.prefault(SHIPPED_REVIEW_HELPER);
@@ -910,17 +912,17 @@ export const Event = z.discriminatedUnion("type", [
   /** The orchestrator (or the user, or a review helper) sends a step in review back to its worker with what to fix. */
   z.object({ ...base, type: z.literal("review.sent_back"), ...qs, text: z.string().min(1) }),
   /**
-   * A review helper passes the step it reviews on to the orchestrator (`nexus review pass-on`), or Nexus does (the
-   * `nexus` session: the reasons it can tell without a model, or a helper without a verdict): `round` the review round,
-   * `reasons` why, `text` the helper's findings (what it checked and what it could not). The step keeps waiting for the
-   * orchestrator's review, and the orchestrator gets its review notice with both (PROTOCOL.md, "The review helper").
-   */
-  /**
    * The orchestrator's audit of a review helper's acceptance (`nexus review audit`, queue RH): `accepted` the
    * review.accepted event it reviewed again, `verdict` whether it agrees, `text` why. Orchestrator only, only for an
    * audit it was given; a disagreement does not reopen the step.
    */
   z.object({ ...base, type: z.literal("review.audited"), ...qs, accepted: z.string().min(1), verdict: z.enum(["agree", "disagree"]), text: z.string().min(1) }),
+  /**
+   * A review helper passes the step it reviews on to the orchestrator (`nexus review pass-on`), or Nexus does (the
+   * `nexus` session: the reasons it can tell without a model, or a helper without a verdict): `round` the review round,
+   * `reasons` why, `text` the helper's findings (what it checked and what it could not). The step keeps waiting for the
+   * orchestrator's review, and the orchestrator gets its review notice with both (PROTOCOL.md, "The review helper").
+   */
   z.object({ ...base, type: z.literal("review.passed_on"), ...qs, round: z.number().int().positive(), reasons: z.array(PassOnReason).min(1), text: z.string() }),
   /**
    * The user rejects a step waiting for their review, with an optional reason: the step is marked rejected, the run

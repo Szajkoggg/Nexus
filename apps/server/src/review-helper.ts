@@ -18,7 +18,7 @@ import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  NEXUS_SESSION, acceptedByNexus, effortIssue, ensureNexusSession, helperAbout, loadProjectState, newId, normPath, now, overThreshold, readUsage, reviewRound,
+  HELPER_VERDICTS, NEXUS_SESSION, acceptedByNexus, effortIssue, ensureNexusSession, helperAbout, loadProjectState, newId, normPath, now, overThreshold, readUsage, reviewRound,
   reviewedByOrchestrator, sendBack, type PassOnReason, type ProjectState, type ProjectStore, type QueueView, type SessionFile, type StepView,
 } from "@nexus/protocol";
 import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Hosted, type Launch } from "./agent-host.ts";
@@ -45,9 +45,6 @@ const HELPER_TOOLS = ["Read", "Grep", "Glob", ...shellRules([
 ])];
 /** Never a helper's, whatever a project allows its workers. */
 const HELPER_DENIED = ["Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch"];
-
-/** The events that are a helper's verdict. */
-const VERDICTS = new Set(["review.accepted", "review.sent_back", "review.passed_on"]);
 
 export interface HelperOptions extends AgentHostOptions {
   /** The time limit (HELPER_LIMIT_MS); tests give a short one. */
@@ -144,7 +141,7 @@ export class ReviewHelpers {
     const mine = state.sessions.filter((s) => { const a = helperAbout(s); return a?.queue === q.id && a.step === st.id && a.round === round; });
     if (mine.some((s) => this.host.running(s.id))) return false;
     // A verdict given and not carried out yet (a send-back on its way to the worker): nothing to start.
-    if (mine.some((s) => this.store.readEvents(s.id).entries.some((e) => VERDICTS.has(e.type)))) return false;
+    if (mine.some((s) => this.store.readEvents(s.id).entries.some((e) => HELPER_VERDICTS.has(e.type)))) return false;
     if (mine.length >= 2) return this.passOn(q, st, round, ["no_verdict"], "The review helper was started twice for this round (once again after a restart) and gave no verdict.");
     if (!mine.length) {
       const reason = this.atOnce(state, q, st);
@@ -241,7 +238,7 @@ export class ReviewHelpers {
    */
   private ended(id: string, l: Hosted<Extra>): void {
     if (this.stopped) return;
-    if (this.store.readEvents(id).entries.some((e) => VERDICTS.has(e.type))) return;
+    if (this.store.readEvents(id).entries.some((e) => HELPER_VERDICTS.has(e.type))) return;
     const state = loadProjectState(this.store);
     const a = helperAbout(this.store.readSession(id));
     const q = a && state.queues.find((x) => x.id === a.queue);

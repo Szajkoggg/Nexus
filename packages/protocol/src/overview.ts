@@ -52,7 +52,14 @@ export function fileList(files: readonly string[], most = 8): string {
   return files.length > most ? `${files.slice(0, most).join(", ")} and ${files.length - most} more` : files.join(", ");
 }
 
-/** A provisional acceptance in the overview: waiting for the user, confirmed, or sent to a fix. */
+/**
+ * What an agent's acceptance ran on, as the orchestrator and the CLI say it (queue RH): the runtime's name, model and
+ * effort, those recorded.
+ */
+export function acceptedOn(a: { runtime?: string; model?: string; effort?: string }): string {
+  return [a.runtime === "codex" ? "Codex" : "Claude Code", a.model, a.effort].filter(Boolean).join(", ");
+}
+
 /**
  * A review helper on the step (queue RH, H17): it reviews it now, or it accepted it (on which runtime, model and
  * effort). Empty otherwise, so what the orchestrator and the user saw before helpers stays as it was.
@@ -61,9 +68,10 @@ export function helperText(x: Pick<StepView, "status" | "helper" | "accepted">):
   if (x.status === "review" && x.helper?.state === "running") return " (the review helper reviews it)";
   const a = x.accepted;
   if (x.status !== "done" || a?.by !== "helper") return "";
-  return ` (accepted by the review helper, ${[a.runtime === "codex" ? "Codex" : "Claude Code", a.model, a.effort].filter(Boolean).join(", ")})`;
+  return ` (accepted by the review helper, ${acceptedOn(a)})`;
 }
 
+/** A provisional acceptance in the overview: waiting for the user, confirmed, or sent to a fix. */
 function provisionalText(x: { provisional?: { confirmed?: string; fix?: { text: string } } }): string {
   const p = x.provisional;
   if (!p) return "";
