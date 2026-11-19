@@ -3162,6 +3162,16 @@ Decided by the user on 2026-11-19: the chain's form follows the shell, `git comm
 `git commit …; if ($?) { nexus step done … }` in PowerShell; a refused chain is run as separate commands (the one
 retry), and workers get no new permission (no `git commit` rule).
 
+The briefings (queue BR2) carry it in `shellCommands(runtime)` in `apps/server/src/prompts.ts`, the successor of the
+SH text "on their own, one per call … no &&": a command that needs only the previous one's success is chained with it,
+short enough that the error shows which part failed, and independent commands go as separate calls (parallel ones
+when they only read). Beside it, `readingRules(runtime)`: independent reads in one response as parallel tool calls, a
+part of a file rather than all of it (Claude Code: Grep with `-C` and `head_limit`, Read with `offset` and `limit`;
+Codex: `rg` with `-C` and a limit, a line range by `Get-Content | Select-Object` or `sed -n`), the project's own
+scripts before a one-off node or python script, which is an exception and reads only; and parallel calls are for
+reads, never two builds or test runs at once. The worker's, the orchestrator's and the thinking partner's briefings
+each get the form of their runtime (the worker's and the partner's Codex briefings now differ from Claude Code's).
+
 ## Compacting a conversation (queue CC3)
 
 Decided by the user on 2026-11-15 (docs/ideas/chat-context.md): the Ideas conversations get a **Compact** action; the

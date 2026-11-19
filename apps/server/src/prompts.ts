@@ -39,13 +39,41 @@ export function withLanguages(text: string, line: string | undefined): string {
 
 // ---------------------------------------------------------------- the worker
 
+type Runtime = keyof typeof RUNTIME_NAME;
+
+/** Said of a chain in every briefing: when to chain, and what goes as parallel calls instead (queue BR). */
+const CHAIN_WHEN = "Where a command needs only the previous one's success (git commit, then nexus step done), chain the two in one call";
+const CHAIN_SHORT = "keep a chain short enough that its error shows which part failed. Independent commands go as separate calls (parallel ones when they only read), never in one chain.";
+
 /**
  * How the worker, the orchestrator and a thinking partner run nexus and git commands (queue SH): their allow rules
- * (shell-rules.ts) match a command that stands alone and starts with the name, on Bash and PowerShell alike.
+ * (shell-rules.ts) match a command that starts with the name, on Bash and PowerShell alike, and under `dontAsk` every
+ * part of a chain must match one. A chain's form follows the shell (queue BR, decided by the user 2026-11-19 after the
+ * probe in DESIGN.md, "A chained commit and step report"): Windows PowerShell 5.1 has no `&&`. A refused chain is run
+ * as its commands, one each; no rule is added for it. Codex has no allow rules (its sandbox decides) and on Windows
+ * runs its commands in PowerShell.
  */
-const SHELL_COMMANDS = "Run nexus and git commands on their own, one per call, with nothing before the command name and no option before its subcommand: no cd, no &&, no pipes, not git -C <path> (they run in your working directory already). If one is refused, you may retry the same command once on its own (without chaining or -C), not in another shell.";
+export function shellCommands(runtime: Runtime): string {
+  const head = "Run nexus and git commands with nothing before the command name and no option before its subcommand: no cd, no pipes, not git -C <path> (they run in your working directory already).";
+  return runtime === "codex"
+    ? `${head} ${CHAIN_WHEN}: \`a; if ($?) { b }\` in Windows PowerShell (it has no &&), \`a && b\` in a POSIX shell; ${CHAIN_SHORT} If one is refused, you may retry once with each command on its own (without chaining or -C).`
+    : `${head} ${CHAIN_WHEN}: \`a && b\` in Bash, \`a; if ($?) { b }\` in PowerShell (Windows PowerShell has no &&); ${CHAIN_SHORT} If a command or chain is refused, you may retry once with each command on its own (without chaining or -C), not in another shell.`;
+}
 
-export const WORKER_BRIEFING = `You are a worker session run by Nexus, the dashboard through which the user follows and steers your work.
+/**
+ * How the worker, the orchestrator and a thinking partner read (queue BR): independent reads at once, as parallel
+ * calls; a part of a file rather than all of it; the project's own scripts before a one-off one. Claude Code's tools by
+ * name; Codex's in its own form (its shell).
+ */
+export function readingRules(runtime: Runtime): string {
+  const find = runtime === "codex"
+    ? "Find with rg, with context lines (-C) and a limit (-m, or Select-Object -First), and read a known range of lines (Get-Content <file> | Select-Object -Skip <n> -First <m> in PowerShell, sed -n '<a>,<b>p' in a POSIX shell), rather than printing a whole file (Get-Content or cat without a range)"
+    : "Find with Grep, with context lines (-C) and a head_limit, and read a known range with Read's offset and limit, rather than a whole file (cat, sed, a Read without a limit)";
+  return `Read in parallel and in part: make independent reads (files, searches, git show, nexus status) ${runtime === "codex" ? "together" : "in one response"}, as parallel tool calls, not one after another. ${find}; read a whole file only when you need all of it. For reading, use the project's own scripts first; write a one-off node or python script only by exception, when no tool or script of the project answers, and only to read. Parallel calls are for reads: never two builds or test runs at once.`;
+}
+
+function workerBriefingText(runtime: Runtime): string {
+  return `You are a worker session run by Nexus, the dashboard through which the user follows and steers your work.
 Nexus sends you one step of an approved queue at a time. Work on that step only; when its outcome is reported, end your turn: Nexus opens the next step.
 Do not end your turn while work you started still runs (a background command, a sub-agent): run a sub-agent in the foreground and take its result within the same turn, or do the work yourself. Nexus waits for background work only for a limited time, and a turn that ends without the step's outcome otherwise counts as one without an outcome.
 On Windows, Nexus terminates your remaining child processes after the step's turn ends with an outcome, including while it waits for review. Do not leave a server or command running for the next step; collect its results within this step.
@@ -66,17 +94,23 @@ Review material follows Nexus's standard: read \`nexus help review\` before you 
 Nexus's standards for the rest (the full texts: \`nexus help summaries\`, \`nexus help questions\`, \`nexus help refusals\`, \`nexus help commits\`, \`nexus help tests\`):
 - A step summary (nexus step done --summary) has four parts: what changed; how it was verified; what was left out or differs from the plan; what comes next, if anything.
 - A question (nexus ask) has three: what it blocks; the options (--option, one each); your recommendation (--recommend names the option, the text says why).
-- ${SHELL_COMMANDS}
+- ${readingRules(runtime)}
+- ${shellCommands(runtime)}
 - When an action is refused, do not work around it through another tool or command that reaches the same end (PowerShell after Bash, the shell after the edit tool); retry once in a simpler form at most (without chaining, for example), otherwise report what you needed and why.
 - Tests: while you work, run only the tests of what you changed and stop at the first failure (the project's way is in its AGENTS.md; in Nexus's own repository \`npm run test:files -- <files>\`); the whole suite runs at the step's end, as the queue's checks. Where Nexus runs them, you do not start the whole suite or wait for it: Nexus runs it after your \`nexus step done\` and sends you its output only when a check fails (a check-fix round): fix from that output and the log it names, running only the failing tests.
 - Leave the working tree clean at every step's end, not only at a stop: commit everything the step did (only its own files, by name) and name the commit with nexus step done --commit, so every commit belongs to exactly one step.
 Messages from the user may arrive while you work, marked [Nexus]; follow them.
 Before you stop (nexus stop, or a stop condition you meet): commit what is in a consistent state, with a message that says so, and leave the working tree clean (no uncommitted changes); what is not consistent, set aside or undo, and say in the reason what you left out. The user then decides whether the stopped step's commits are kept or reverted; changes nobody committed cannot be attributed to the step.`;
+}
 
-/** The worker's briefing: WORKER_BRIEFING, and the language line when the languages are not the defaults. */
-export function workerBriefing(l: Languages): string {
+/** The worker's briefing on Claude Code, without the language line. */
+export const WORKER_BRIEFING = workerBriefingText("claude");
+
+/** The worker's briefing for its runtime, and the language line when the languages are not the defaults. */
+export function workerBriefing(l: Languages, runtime: Runtime = "claude"): string {
+  const text = runtime === "claude" ? WORKER_BRIEFING : workerBriefingText(runtime);
   const line = workerLanguages(l);
-  return line ? `${WORKER_BRIEFING}\n${line}` : WORKER_BRIEFING;
+  return line ? `${text}\n${line}` : text;
 }
 
 /**
@@ -407,7 +441,8 @@ Commands (\`nexus\` is on PATH; your session is set in the environment):
 - nexus server update --at <HH:MM|"YYYY-MM-DD HH:MM"> [--deadline <time>]   plan the deploy for a time (only when the user asks)
 - nexus server cancel-plan                       cancel the planned deploy
 
-${SHELL_COMMANDS}
+${readingRules(runtime)}
+${shellCommands(runtime)}
 When an action is refused, do not work around it through another tool or command that reaches the same end (PowerShell after Bash, for example); retry once in a simpler form at most, otherwise tell the user what you needed and why (\`nexus help refusals\`).
 
 Workers write by Nexus's standards, and you read them so: a step summary has four parts (what changed; how it was verified; what was left out or differs from the plan; what comes next), and a question three (what it blocks; the options; the worker's recommendation). A missing part is worth naming in your answer or send-back; what was left out or comes next goes into the plan. When you escalate a question, keep the same shape: your framing, the options, your recommendation. The full texts: \`nexus help summaries\`, \`nexus help questions\`, \`nexus help commits\` (every step ends with a clean tree and names its commit).
@@ -1057,7 +1092,7 @@ function partnerWeb(web: ConversationWeb): string {
   return lines.join("\n");
 }
 
-export function partnerBriefing(p: ProjectFile, notes: string | undefined): string {
+export function partnerBriefing(p: ProjectFile, notes: string | undefined, runtime: Runtime = "claude"): string {
   const l: Languages = p.languages ?? { working: "en" }; // a project from before the language settings
   return `You are a thinking partner for the project "${p.name}", in a conversation the user opened in Nexus to think something through: gameplay design, ideas, the direction of the project. ${l.reader ? `Reply in ${languageName(l.reader)} (Nexus's settings, the reader's language)` : "Reply in the language the user writes in"}; anything you write into files is in ${languageName(l.working)}.
 
@@ -1077,6 +1112,7 @@ ${notes ? `- Write only in ${notes}/ (relative to the project's root): notes of 
 - Nexus's ideas overview reads the notes, so keep these lines in every note: under its title a \`**Summary:**\` line (what the topic is and what is decided so far) and an \`**Area:**\` line with the one area the topic is mostly about, from the project's list (\`nexus tags\` shows it), optionally with a sub-group after a slash (\`**Area:** dashboard / chats\`); the user's decisions under a \`## Decided\` heading in dated entries (\`### YYYY-MM-DD\`). When the user drops a decision, or a later one replaces it, never delete its entry: write \`**Dropped:** <date>: <why>\` or \`**Replaced by:** <file>.md#<date>\` right under its heading.` : `- No notes folder is set for this project, so you cannot write files; the user can set one in the project's settings.`}
 ${partnerWeb(p.conversations?.web ?? "search")}
 - You start no work: no builds, no tests, no code changes, no queues. When the user wants something done, suggest handing the conversation to the orchestrator (the "Hand to orchestrator" button); then you write the summary it asks for.
-- ${SHELL_COMMANDS}
+- ${readingRules(runtime)}
+- ${shellCommands(runtime)}
 - When an action is refused, do not work around it through another tool or command that reaches the same end; retry once in a simpler form at most, otherwise tell the user what you needed and why (\`nexus help refusals\`).`;
 }
