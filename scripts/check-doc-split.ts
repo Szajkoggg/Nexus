@@ -9,9 +9,9 @@
 // "Contents" section. Every other line must be in both, as many times. Exit code 1 and the differing lines otherwise.
 import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-
-const TOPIC_DIR: Record<string, string> = { PROTOCOL: "protocol", DESIGN: "design" };
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { SPLITS } from "./doc-layout.ts";
 
 /**
  * Edits of a reference that a split had to make inside moved text (not a move): the original's text, then the new one.
@@ -35,7 +35,7 @@ function count(lines: string[], into: Map<string, number>, sign: 1 | -1): void {
 }
 
 /** The lines of an index file without its "Contents" section (up to the next level-2 heading). */
-export function withoutContents(text: string): string[] {
+function withoutContents(text: string): string[] {
   const out: string[] = [];
   let skipping = false;
   let fenced = false;
@@ -48,7 +48,7 @@ export function withoutContents(text: string): string[] {
 }
 
 /** The lines of a topic file without what a split adds: its title, the "Part of" line and the "See also:" lines. */
-export function withoutAdditions(text: string): string[] {
+function withoutAdditions(text: string): string[] {
   const lines = text.split("\n");
   return lines.slice(1).filter((l) => !/^Part of \[/.test(l) && !/^See also: /.test(l));
 }
@@ -61,17 +61,17 @@ export function differences(original: string, index: string, topics: string[]): 
   return [...seen].filter(([, n]) => n !== 0).map(([line, n]) => `${n > 0 ? "missing" : "added"} ${Math.abs(n)}x: ${line.slice(0, 160)}`);
 }
 
-if (process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, "/").split("/").pop() ?? "")) {
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [doc, base] = process.argv.slice(2);
-  const dir = doc ? TOPIC_DIR[doc] : undefined;
-  if (!doc || !base || !dir) {
+  const split = SPLITS.find((s) => s.index === `docs/${doc}.md`);
+  if (!doc || !base || !split) {
     console.error("usage: node scripts/check-doc-split.ts <PROTOCOL|DESIGN> <base commit>");
     process.exit(2);
   }
   const original = execFileSync("git", ["show", `${base}:docs/${doc}.md`], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 }).replace(/\r\n/g, "\n");
-  const index = readFileSync(`docs/${doc}.md`, "utf8");
-  const files = readdirSync(join("docs", dir)).filter((f) => f.endsWith(".md")).sort();
-  const topics = files.map((f) => readFileSync(join("docs", dir, f), "utf8"));
+  const index = readFileSync(split.index, "utf8");
+  const files = readdirSync(split.dir).filter((f) => f.endsWith(".md")).sort();
+  const topics = files.map((f) => readFileSync(join(split.dir, f), "utf8"));
   const rewritten = REFERENCE_REWRITES.reduce((text, [from, to]) => text.split(from).join(to), original);
   const diff = differences(rewritten, index, topics);
   if (diff.length) {
