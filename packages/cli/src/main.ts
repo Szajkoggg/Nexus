@@ -26,8 +26,13 @@ import { CONTEXT_SUMMARY_WORDS, HELP_TOPICS, topicList } from "./help.ts";
 const HELP = `nexus — report to and manage Nexus (protocol 1)
 
 Agent commands (session from NEXUS_SESSION or --session):
-  nexus status                                  current queue, step, notes and open questions (without a
-                                                session: the queues at work, then the approved ones not running)
+  nexus status [--all] [--queue <id>]           current queue, step, notes and open questions (without a
+                                                session: the queues at work, then the approved ones not running).
+                                                An orchestrator's: the open queues, the finished ones counted, the
+                                                live worker sessions, those of open queues and the 10 latest others
+                                                (cards cut short), what waits for the user, the machine; --all: every
+                                                queue and session, cards whole (to choose an older session to
+                                                continue); --queue: one queue, its sessions and what waits about it
   nexus step start <step>
   nexus step progress <step> <text> [--pct N]
   nexus step done <step> --summary <text> [--commit <sha>] [--activities a,b]   (what you actually did: nexus tags)
@@ -176,7 +181,7 @@ const { values: o, positionals: args } = parseArgs({
     unit: { type: "string" }, show: { type: "string" }, target: { type: "string" }, "warn-above": { type: "string" }, "warn-below": { type: "string" },
     set: { type: "string", multiple: true }, template: { type: "string" }, every: { type: "string" }, "after-queues": { type: "string" },
     maintenance: { type: "string" }, findings: { type: "string" }, why: { type: "string" },
-    help: { type: "boolean", short: "h" }, full: { type: "boolean" }, reviews: { type: "boolean" }, switches: { type: "boolean" }, key: { type: "string" }, note: { type: "string" }, before: { type: "string" }, now: { type: "boolean" }, ref: { type: "string" },
+    help: { type: "boolean", short: "h" }, full: { type: "boolean" }, all: { type: "boolean" }, reviews: { type: "boolean" }, switches: { type: "boolean" }, key: { type: "string" }, note: { type: "string" }, before: { type: "string" }, now: { type: "boolean" }, ref: { type: "string" },
   },
 });
 
@@ -636,7 +641,15 @@ const commands: Record<string, () => void | Promise<void>> = {
     const sid = o.session ?? process.env.NEXUS_SESSION;
     const s = sid ? state.sessions.find((x) => x.id === sid) : undefined;
     console.log(`project ${state.project.name} (${state.project.id})`);
-    if (s?.role === "orchestrator" || s?.role === "conversation") return console.log(orchestratorOverview(state));
+    // An orchestrator's (and a partner's) overview: short by default, everything with --all, one queue with --queue
+    // (queue ND); the machine's lines under it, as in every other session's status.
+    if (s?.role === "orchestrator" || s?.role === "conversation") {
+      if (o.queue !== undefined && !state.queues.some((q) => q.id === o.queue)) throw new UsageError(`unknown queue ${o.queue}`);
+      const machine = capacityLines(readCapacity(), new Date());
+      console.log(orchestratorOverview(state, { all: !!o.all, queue: o.queue }));
+      if (machine.length) console.log(`\n${machine.join("\n")}`);
+      return;
+    }
     if (s) console.log(`session ${s.id}: ${s.role}, ${s.runtime}, queue ${s.queue ?? "-"}`);
     // Without a queue of its own: the queues at work, then the approved ones not running (ready to start or resume).
     const queues = s?.queue ? state.queues.filter((q) => q.id === s.queue) : [

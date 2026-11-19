@@ -4,7 +4,7 @@ import { stopPlace } from "./attention.ts";
 import { openPlan } from "./plan.ts";
 import { trainText } from "./train.ts";
 import type { BasePull } from "./schemas.ts";
-import type { ProjectState, QueueView, StepView } from "./state.ts";
+import type { ProjectState, QueueView, SessionView, StepView } from "./state.ts";
 import { isOpenQuestion, runGoing } from "./status-rules.ts";
 import { stepValuesText } from "./steps.ts";
 import { tokenCount } from "./tokens.ts";
@@ -87,17 +87,36 @@ function closingSkipped(q: QueueView): string {
 }
 
 /**
- * What an orchestrator needs to see (`nexus status` in its session, and the first message of a fresh orchestrator
- * session): every queue, run, open question and worker session with its context card.
+ * How much of the project `orchestratorOverview` shows (queue ND). `all` (the default, what a fresh orchestrator session
+ * starts from, and `nexus status --all`): every queue and worker session, cards whole. Without it (`nexus status`): the
+ * open queues, the finished ones only counted, and of the worker sessions the live ones, those of open queues and the
+ * FREE_SESSIONS latest others, cards cut to CARD_CHARS. `queue`: that queue alone (open or finished), its sessions and
+ * what waits about it.
  */
-export function orchestratorOverview(state: ProjectState): string {
+export interface OverviewOptions { all?: boolean; queue?: string }
+
+/** How many free sessions besides the live and open queues' ones the short overview shows, and how long a card. */
+export const FREE_SESSIONS = 10;
+export const CARD_CHARS = 300;
+
+/**
+ * What an orchestrator needs to see (`nexus status` in its session, and the first message of a fresh orchestrator
+ * session): queues, runs, open questions and worker sessions with their context cards; how many, by `opts`.
+ */
+export function orchestratorOverview(state: ProjectState, opts: OverviewOptions = { all: true }): string {
   const out: string[] = [];
+  const all = opts.all || opts.queue !== undefined;
   // A session's size in tokens first (queue CT): the orchestrator continues one only under about REUSE_TOKENS.
   const context = (t?: number, w?: number) => (t ? `context ${tokenCount(t)} tokens${w ? ` (${Math.round((100 * t) / w)} % of ${tokenCount(w)})` : ""}` : "context unknown");
-  const done = state.queues.filter((q) => q.status === "done" || q.status === "cancelled");
+  const queues = opts.queue === undefined ? state.queues : state.queues.filter((q) => q.id === opts.queue);
+  const done = queues.filter((q) => q.status === "done" || q.status === "cancelled");
+  const finished = all
+    ? done.map((q) => `${q.id}${closingSkipped(q) ? ` (${closingSkipped(q)})` : ""}`).join(", ") || "none"
+    : `${done.length}; nexus status --all names them`;
   out.push(`
-Queues (${state.queues.length - done.length} open; finished: ${done.map((q) => `${q.id}${closingSkipped(q) ? ` (${closingSkipped(q)})` : ""}`).join(", ") || "none"})`);
-  for (const q of state.queues.filter((x) => !done.includes(x))) {
+Queues (${queues.length - done.length} open; finished: ${finished})`);
+  // A finished queue asked for by name shows as an open one does: its steps and how it ended.
+  for (const q of opts.queue === undefined ? queues.filter((x) => !done.includes(x)) : queues) {
     const run = q.run ? `; run ${q.run.state}${q.run.step ? ` at ${q.run.step}` : ""} in session ${q.run.session}${q.run.reason ? ` (${q.run.reason})` : ""}` : "";
     out.push(`- ${q.id} [${q.status}] ${q.title}: revision ${q.revision}, ${q.approved ? "approved" : "not approved"}${run}`);
     // A revision waiting for approval comes first: nothing runs and no planned start fires until the user approves it.
@@ -107,19 +126,31 @@ Queues (${state.queues.length - done.length} open; finished: ${done.map((q) => `
     for (const line of stopLines(q)) out.push(line);
     for (const line of planLines(q)) out.push(line);
   }
-  const open = state.questions.filter(isOpenQuestion);
+  const ofQueue = (queue: string | undefined) => opts.queue === undefined || queue === opts.queue;
+  const open = state.questions.filter((x) => isOpenQuestion(x) && ofQueue(x.queue));
   out.push(`
 Open questions (${open.length})`);
   for (const x of open) out.push(`- ${x.qid} [${x.state}] ${x.queue ?? ""}${x.step ? `/${x.step}` : ""}: ${x.text}`);
   const workers = state.sessions.filter((x) => x.role === "worker");
+  const busyWith = (w: SessionView) => state.queues.find((q) => q.run?.session === w.id && runGoing(q.run));
+  const openIds = new Set(state.queues.filter((q) => q.status !== "done" && q.status !== "cancelled").map((q) => q.id));
+  const shown = workers.filter((w) => opts.queue !== undefined ? w.queue === opts.queue || state.queues.some((q) => q.id === opts.queue && q.run?.session === w.id) : true);
+  // The short overview: the live sessions, those of open queues, and the latest few others (session ids are ULIDs).
+  const kept = all ? shown : (() => {
+    const first = shown.filter((w) => (w.live && w.live.state !== "exited") || busyWith(w) || (w.queue && openIds.has(w.queue)));
+    const rest = shown.filter((w) => !first.includes(w)).sort((a, b) => (a.id < b.id ? 1 : -1)).slice(0, FREE_SESSIONS);
+    return shown.filter((w) => first.includes(w) || rest.includes(w));
+  })();
   out.push(`
-Worker sessions (${workers.length})`);
-  for (const w of workers) {
-    const busy = state.queues.find((q) => q.run?.session === w.id && runGoing(q.run));
+Worker sessions (${opts.queue === undefined ? workers.length : `${shown.length} of queue ${opts.queue}`}${kept.length < shown.length ? `; shown: the ${kept.length} live, of open queues and latest, cards cut to ${CARD_CHARS} characters; nexus status --all shows every one whole` : ""})`);
+  for (const w of kept) {
+    const busy = busyWith(w);
     out.push(`- ${w.id} "${w.title ?? ""}" ${w.runtime}${w.launched_by === "nexus" ? "" : " (external)"}, ${w.live?.state ?? "not live"}, ${w.live?.model ?? w.model ?? "model ?"}, ${context(w.live?.context_tokens, w.live?.context_window)}${busy ? `, running queue ${busy.id}` : ", free"}`);
-    if (w.context) out.push(`  knows: ${w.context.topics.join(", ") || "-"}; ${w.context.text.replace(/\s+/g, " ").slice(0, 300)}`);
+    if (!w.context) continue;
+    const card = `  knows: ${w.context.topics.join(", ") || "-"}; ${w.context.text.replace(/\s+/g, " ").slice(0, 300)}`;
+    out.push(all || card.length <= CARD_CHARS ? card : `${card.slice(0, CARD_CHARS - 1)}…`);
   }
-  const attention = state.attention.filter((a) => a.kind !== "question");
+  const attention = state.attention.filter((a) => a.kind !== "question" && ofQueue(a.queue));
   if (attention.length) {
     out.push(`
 Waiting for the user`);

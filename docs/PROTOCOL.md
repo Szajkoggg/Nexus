@@ -1454,6 +1454,7 @@ arguments against the protocol and appends one event.
 
 ```
 nexus status                                   # the current queue, step, notes and unanswered questions, as text
+nexus status [--all] [--queue <id>]            # in an orchestrator's (or partner's) session: the open queues, the finished ones only counted, the open questions, of the worker sessions the live ones, those of open queues and the 10 latest others (cards cut to 300 characters), Waiting for the user, then the machine's lines; --all: every queue (the finished ones named, with a skipped closing step's reason) and every session, cards whole (what a fresh orchestrator session starts from); --queue <id>: that queue (finished too), its sessions, its questions and what waits about it; an unknown queue is refused
 nexus step start W3
 nexus step progress W3 "Support graph built; probing fixtures"
 nexus review add W3 $TEMP/nexus-review/W3/sheet.png --label "Sheet, round 1"   # copied into .nexus/queues/<q>/review/W3/
@@ -3524,7 +3525,7 @@ share of the window, `orchestrator.context_threshold`; reading ignores that key,
 4. **The fresh session's first message**: who it is and why (the old fill); the summary (text, topics, files) or the
    line that there was none; that its briefing (the system prompt, the current one) holds over the summary and the files
    are the truth; the messages carried over (`formatInbox`); and the project's state as `nexus status` shows it in an
-   orchestrator's session (`orchestratorOverview` in the protocol's `overview.ts`, which the CLI prints too).
+   orchestrator's session with --all (`orchestratorOverview` in the protocol's `overview.ts`, which the CLI prints too: every queue and session).
 5. **Afterwards** the fresh session is told what no session of its line was told, since the first of them (the
    `notify:…` keys of every session it continues); deploy changes only those after its own start. A fresh session
    whose context is beyond the threshold at the end of its first turn is not switched again (`context:first`): another

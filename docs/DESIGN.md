@@ -3577,6 +3577,14 @@ planning or hand-over. The summary (per note and entry: the reference, the effec
 problems) is 4,910 bytes there; one entry's JSON is `nexus ideas status <file>.md#<date>` (about 36 KB), its text
 `nexus doc <file>.md#<date>`, everything `--full`.
 
+The same queue shortened an orchestrator's `nexus status`: on the Nexus project it was 87,368 bytes (20 open and 113
+finished queues, 176 worker sessions, whose cards were 78.7 KB of it), run many times a day. By default it now names
+only the open queues, counts the finished ones, and shows of the worker sessions the live ones, those of open queues
+and the 10 latest others with cards cut to 300 characters: 13,498 bytes there. `--all` prints what it printed before,
+which is also what a fresh orchestrator session still starts from (its first message keeps every session, so it can
+choose one to continue without another command); `--queue <id>` one queue with its sessions and what waits about it.
+Both now end with the machine's lines, which the orchestrator's status had left out.
+
 ## Ideas correction controls (IC4)
 
 The overview and entry consume the same server `effective` state, never interpreting legacy `built` as a user
