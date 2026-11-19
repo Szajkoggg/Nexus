@@ -120,7 +120,8 @@ function headMismatch(u: Usage, h: string[]): string | undefined {
     if (bad.length) return `${bad.join(", ")} where "${u.text}" has ${want}`;
   }
   const rest = u.text.slice(u.text.indexOf(u.head.at(-1) ?? "nexus"));
-  const takesMore = (u.head.length > 0 && isPlaceholder(u.head.at(-1)!)) || /</.test(rest);
+  // A placeholder that is a flag's value (`[--queue <id>]`) is not a positional argument the usage takes.
+  const takesMore = (u.head.length > 0 && isPlaceholder(u.head.at(-1)!)) || /</.test(rest.replace(/--[\w-]+ <[^>]*>/g, ""));
   if (h.length > u.head.length && !takesMore) return `"${u.text}" takes no "${h.slice(u.head.length).join(" ")}"`;
   return undefined;
 }
