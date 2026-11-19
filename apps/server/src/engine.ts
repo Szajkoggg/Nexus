@@ -1534,7 +1534,7 @@ export class Engine implements Member {
         const codex = project.runtimes.codex;
         const inside = normPath(this.store.dir).toLowerCase().startsWith(normPath(session.cwd).toLowerCase() + "/");
         return { runtime: "codex", options: {
-          cwd: session.cwd, model: session.model ?? codex.model, effort: session.effort ?? codex.effort, instructions: workerBriefing(project.languages), env,
+          cwd: session.cwd, model: session.model ?? codex.model, effort: session.effort ?? codex.effort, instructions: workerBriefing(project.languages, "codex"), env,
           threadId: session.native_id, sandbox: codex.sandbox, approvalPolicy: codex.approval_policy, approvalsReviewer: codex.approvals_reviewer,
           // The folder for reports: the last step's report is written there (outside the working tree).
           writableRoots: [...(inside ? [] : [this.store.dir]), ...gitWritableRoots(session.cwd), ensureReportFolder(project.id)],

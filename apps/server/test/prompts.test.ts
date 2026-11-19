@@ -582,15 +582,36 @@ test("the briefings carry the review standard's essentials and point to nexus he
   }
 });
 
-test("the three briefings say to run nexus and git commands on their own, and keep the line against working around a refusal (queue SH)", async () => {
-  const { WORKER_BRIEFING, orchestratorBriefing, partnerBriefing } = await import("../src/prompts.ts");
-  const alone = "Run nexus and git commands on their own, one per call, with nothing before the command name and no option before its subcommand: no cd, no &&, no pipes, not git -C <path> (they run in your working directory already). If one is refused, you may retry the same command once on its own (without chaining or -C), not in another shell.";
-  const partner = partnerBriefing({ name: "P", root: "/p", languages: { working: "en" } } as unknown as Parameters<typeof partnerBriefing>[0], undefined);
+test("the three briefings, on each runtime, say how to read and how to run and chain nexus and git commands (queues SH, BR)", async () => {
+  const { WORKER_BRIEFING, orchestratorBriefing, partnerBriefing, workerBriefing, shellCommands, readingRules } = await import("../src/prompts.ts");
+  const project = { name: "P", root: "/p", languages: { working: "en" } } as unknown as Parameters<typeof partnerBriefing>[0];
+  for (const runtime of ["claude", "codex"] as const) {
+    const roles = { worker: workerBriefing({ working: "en" }, runtime), orchestrator: orchestratorBriefing("Pilot", 300_000, undefined, 500_000, runtime), partner: partnerBriefing(project, undefined, runtime) };
+    for (const [who, text] of Object.entries(roles)) {
+      for (const rule of [shellCommands(runtime), readingRules(runtime)]) assert.equal(text.split(rule).length, 2, `the ${who}'s briefing on ${runtime} says it once`);
+      for (const part of ["as parallel tool calls", "only by exception", "never two builds or test runs at once", "a; if ($?) { b }", "a && b", "never in one chain"]) {
+        assert.ok(text.includes(part), `the ${who}'s briefing on ${runtime} has ${JSON.stringify(part)}`);
+      }
+      assert.ok(text.includes(runtime === "codex" ? "Find with rg, with context lines (-C)" : "Find with Grep, with context lines (-C) and a head_limit, and read a known range with Read's offset and limit"), `the ${who}'s briefing reads in part on ${runtime}`);
+      assert.ok(!text.includes("no cd, no &&"), `the ${who}'s briefing on ${runtime} no longer forbids a chain`);
+    }
+  }
+  const partner = partnerBriefing(project, undefined);
   const briefings = { worker: WORKER_BRIEFING, orchestrator: orchestratorBriefing("Pilot", 300_000), partner };
-  for (const [who, text] of Object.entries(briefings)) assert.equal(text.split(alone).length, 2, `the ${who}'s briefing says it once`);
   assert.ok(WORKER_BRIEFING.includes("- When an action is refused, do not work around it through another tool or command that reaches the same end (PowerShell after Bash, the shell after the edit tool); retry once in a simpler form at most (without chaining, for example), otherwise report what you needed and why.\n"));
   assert.ok(briefings.orchestrator.includes("\nWhen an action is refused, do not work around it through another tool or command that reaches the same end (PowerShell after Bash, for example); retry once in a simpler form at most, otherwise tell the user what you needed and why (`nexus help refusals`).\n"));
   assert.ok(partner.endsWith("\n- When an action is refused, do not work around it through another tool or command that reaches the same end; retry once in a simpler form at most, otherwise tell the user what you needed and why (`nexus help refusals`)."));
+});
+
+test("the worker looks at one width and reports progress at phase boundaries; the orchestrator puts small items together (queue BR)", async () => {
+  const { workerBriefing, orchestratorBriefing } = await import("../src/prompts.ts");
+  for (const runtime of ["claude", "codex"] as const) {
+    const worker = workerBriefing({ working: "en" }, runtime);
+    assert.ok(worker.includes("Look at a changed view yourself at one width"), `the ${runtime} worker looks at one width`);
+    assert.ok(worker.includes("you only register for the review (nexus review add), without opening them again"));
+    assert.ok(worker.includes("at a phase boundary only"), `the ${runtime} worker reports progress at phase boundaries`);
+    assert.ok(orchestratorBriefing("Pilot", 300_000, undefined, 500_000, runtime).includes("go into one queue, each as a step of its own (at most about five steps)"), `the ${runtime} orchestrator puts small items together`);
+  }
 });
 
 test("the orchestrator's briefing and notices on parallel worktrees and merging back (queue PW)", async () => {

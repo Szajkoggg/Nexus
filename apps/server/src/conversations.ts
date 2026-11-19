@@ -350,7 +350,7 @@ ${text}`;
     const notes = p.conversations.notes_dir;
     const env = this.host.env(s.id);
     const web = p.conversations.web;
-    const instructions = partnerBriefing(p, notes);
+    const instructions = partnerBriefing(p, notes, s.runtime === "codex" ? "codex" : "claude");
     const { model, effort } = this.values(s);
     return (resume) => {
       if (s.runtime === "codex") {

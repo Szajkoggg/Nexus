@@ -2654,9 +2654,16 @@ user-message behaviour remain.
 - `.nexus/drafts/<queue>.yaml` holds the orchestrator's queue drafts; the orchestrator is its only writer. It writes a
   draft there, uploads it with `nexus queue draft .nexus/drafts/<queue>.yaml` (relative to the project's root, its
   working directory), and keeps the file to edit for later revisions. The server reads only the path it is given.
-  The briefing tells it to run `nexus` and git commands on their own, with nothing before the command name: a chained
-  command (`cd …`, `&&`, a pipe) or an option before the subcommand (`git -C <path> show`) does not match the rules
-  and is refused, on Bash and PowerShell alike. The workers' and the thinking partners' briefings say the same.
+  The briefing tells it to run `nexus` and git commands with nothing before the command name: `cd …`, a pipe or an
+  option before the subcommand (`git -C <path> show`) does not match the rules and is refused, on Bash and PowerShell
+  alike. A command that needs only the previous one's success may be chained with it in one call, in the shell's own
+  form (`a && b` in Bash, `a; if ($?) { b }` in PowerShell, which has no `&&`; on Codex the same for its shell), short
+  enough that the error shows which part failed; independent commands go as separate calls. Under `dontAsk` every
+  part of a chain must match a rule, and Claude Code refuses the PowerShell form even then: a refused chain is run as
+  its commands, one each (the one retry). The briefings also say how to read: independent reads as parallel tool calls
+  (never two builds or test runs at once), a part of a file (Grep with context and a limit, Read with a range; on
+  Codex `rg` and a line range) rather than all of it, and a one-off script only by exception and only to read. The
+  workers' and the thinking partners' briefings say the same.
 
 - `nexus queue draft <file|->` sends a queue definition (YAML) as `queue.drafted`. The server writes it: a new queue
   becomes `proposed` (or `draft`); a change to an existing queue's steps, checks or stop conditions makes a new

@@ -16,7 +16,7 @@ import {
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { Conversations } from "../src/conversations.ts";
-import { WORKER_BRIEFING } from "../src/prompts.ts";
+import { WORKER_BRIEFING, workerBriefing } from "../src/prompts.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
 import { WAIT_MS, until as waitUntil, LONGER, holdWork } from "./wait.ts";
 
@@ -113,7 +113,7 @@ test("codex worker: the developer instructions carry the languages", async () =>
     x.engine.start("Q", { runtime: "codex" });
     await until("the run to finish", () => x.queue().run?.state === "finished", LONGER.run);
     const start = x.args().find((a) => a.method === "thread/start")!;
-    assert.ok((start.instructions as string).startsWith(WORKER_BRIEFING));
+    assert.ok((start.instructions as string).startsWith(workerBriefing({ working: "en" }, "codex")), "the standing briefing, in its Codex form");
     assert.ok((start.instructions as string).includes("write what is meant for the user in Polish"));
     assert.ok(x.heard().find((t) => t.includes("step Q1 (1 of 1)"))!.includes("in Polish"));
   } finally { x.done(); }

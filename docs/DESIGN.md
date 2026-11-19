@@ -3128,6 +3128,63 @@ The rule's form, from Claude Code's permissions page ("PowerShell permission rul
 with `CLAUDE_CODE_USE_POWERSHELL_TOOL=0`, as on Linux or macOS without `pwsh`) did no harm: no warning, no error, and
 the Bash rule worked; so the rules are the same on every platform. Cost: about $0.013 (nine one-command sessions).
 
+### A chained commit and step report (queue BR1)
+
+Whether a worker may run `git commit … && nexus step done …` as one command was probed on 2026-11-19 (Claude Code
+2.1.318 with `haiku`; Codex 0.169.0 with `gpt-6-luna`), each case in a fresh temporary repository with a staged
+change and a harmless `nexus` stand-in first on PATH (it only logged its arguments), one session per command. Windows
+PowerShell 5.1 is the machine's only PowerShell: it has no `&&` (a parser error, "not a valid statement separator").
+
+Claude Code, `--tools Bash` or `--tools PowerShell`, the worker's rules (`Bash(nexus:*)`, `PowerShell(nexus:*)`):
+
+| Mode, extra rules | Command | Result |
+|---|---|---|
+| `dontAsk`, none | Bash `git commit && nexus …` | refused (git commit has no rule; alone it is refused too) |
+| `dontAsk`, none | PowerShell `git commit; if ($?) { nexus … }` | refused |
+| `dontAsk`, `git commit:*` on both shells | Bash `git commit && nexus …` | ran: committed, stand-in called |
+| `dontAsk`, `git commit:*` on both shells | PowerShell `git commit; if ($?) { nexus … }` | refused |
+| `dontAsk`, `git commit:*` on both shells | PowerShell `git commit && nexus …` | refused |
+| `dontAsk`, `git commit:*` on both shells | PowerShell `git commit; nexus …` | ran (but nexus runs even when the commit fails) |
+| `dontAsk`, none | `nexus …` alone, either shell | ran (control) |
+| `auto` (this project's setting), none | Bash `&&` and PowerShell `; if ($?) {}` | both ran |
+
+Under `dontAsk` every subcommand must match a rule, and the PowerShell conditional (`if ($?) { … }`) is refused even
+then; the refusal reads "Permission to use PowerShell has been denied because Claude Code is running in don't ask
+mode". Under `auto` the classifier let both forms through; its own usage is not in the session's cost.
+
+Codex, `workspace-write`, approval `never` and `on-request` with the `auto_review` reviewer: on this machine the
+`elevated` Windows sandbox (the user's config) started no process at all from inside a Claude Code worker
+("CryptUnprotectData failed: 2148073483", even `git status`, also in `codex sandbox` without a model), so the cases ran
+with `windows.sandbox = "unelevated"`. Codex runs commands through `powershell.exe -Command`. In a plain repository
+`git commit` failed in the sandbox (`.git/index.lock: Permission denied`, `.git` is kept read-only), chained or not, and
+`if ($?)` then kept the stand-in from running. In a linked worktree with the writable roots Nexus gives
+(`gitWritableRoots`), `git commit -m probe; if ($?) { nexus … }` committed and called the stand-in under both
+approval settings; the `&&` form failed as a PowerShell parser error, not a refusal. Given the `&&` form in a plain
+repository, `gpt-6-luna` twice declined to run it at all ("I can't run a chained command …"), a judgement of the model.
+
+Cost: about $0.021 of Claude usage (eleven haiku sessions); twelve Codex runs on the ChatGPT subscription (about 383k
+input tokens, 219k of them cached, 1k output; five of them the failed elevated runs).
+
+Decided by the user on 2026-11-19: the chain's form follows the shell, `git commit … && nexus step done …` in Bash and
+`git commit …; if ($?) { nexus step done … }` in PowerShell; a refused chain is run as separate commands (the one
+retry), and workers get no new permission (no `git commit` rule).
+
+The briefings (queue BR2) carry it in `shellCommands(runtime)` in `apps/server/src/prompts.ts`, the successor of the
+SH text "on their own, one per call … no &&": a command that needs only the previous one's success is chained with it,
+short enough that the error shows which part failed, and independent commands go as separate calls (parallel ones
+when they only read). Beside it, `readingRules(runtime)`: independent reads in one response as parallel tool calls, a
+part of a file rather than all of it (Claude Code: Grep with `-C` and `head_limit`, Read with `offset` and `limit`;
+Codex: `rg` with `-C` and a limit, a line range by `Get-Content | Select-Object` or `sed -n`), the project's own
+scripts before a one-off node or python script, which is an exception and reads only; and parallel calls are for
+reads, never two builds or test runs at once. The worker's, the orchestrator's and the thinking partner's briefings
+each get the form of their runtime (the worker's and the partner's Codex briefings now differ from Claude Code's).
+
+Also from queue BR (BR3), to spend fewer tokens and turns: the worker looks at a changed view itself at one width and
+only registers the other pictures for the review, without reading them back; it reports `nexus step progress` at a
+phase boundary only, not after every command. The orchestrator puts S-sized items of one area together into one
+queue, a step each (at most about five), when they are independent of the queues running or planned beside them and
+the user would keep or drop them together; items the user may want to keep apart stay apart.
+
 ## Compacting a conversation (queue CC3)
 
 Decided by the user on 2026-11-15 (docs/ideas/chat-context.md): the Ideas conversations get a **Compact** action; the
