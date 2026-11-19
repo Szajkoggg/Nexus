@@ -68,7 +68,12 @@ export function enterAcceptedReview(q: QueueView, st: StepView, at: string): voi
   const taken = takenUpDone(q, st);
   if (!taken || !reachedReview(q.check_runs, st.id, taken.done.id)) return;
   if (taken.set.ended_at && at < taken.set.ended_at) return; // before Nexus accepted the failure
-  st.status = "review"; st.finished_at = taken.done.at;
+  toReviewAsOf(q, st, taken.done);
+}
+
+/** A taken-up check-fix round's step back in its review, as of the done (the step.started kept its review_with). */
+function toReviewAsOf(q: QueueView, st: StepView, done: StepDone): void {
+  st.status = "review"; st.finished_at = done.at;
   if (q.status === "running") q.status = "waiting";
 }
 
@@ -116,11 +121,7 @@ export function applyCheckSets(q: QueueView, st: StepView, limit?: number): void
   // all (as of the done: the step.started kept the done's review_with).
   const takenUp = !!takenUpDone(q, st);
   if (st.status !== "review" && !takenUp) return;
-  const toReview = () => {
-    if (!takenUp) return;
-    st.status = "review"; st.finished_at = done.at;
-    if (q.status === "running") q.status = "waiting";
-  };
+  const toReview = () => { if (takenUp) toReviewAsOf(q, st, done); };
   const reopen = (status: "checking" | "running" | "waiting") => {
     st.status = status;
     st.review_with = undefined;
