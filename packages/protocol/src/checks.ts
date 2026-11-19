@@ -1,4 +1,4 @@
-// The checks Nexus runs after a worker's `nexus step done` (PROTOCOL.md, "Checks run by Nexus"; queue EC), as the
+// The checks Nexus runs after a worker's `nexus step done` (docs/protocol/checks.md, "Checks run by Nexus"; queue EC), as the
 // derivation reads them: the engine writes queues/<id>/checks.yaml (one writer), and a step's status follows it. A
 // step.done whose checks have not passed is no review yet: `checking` while they wait for the machine or run; a fix
 // round (`running`, its `check_fix`) when they failed twice; `waiting` while the orchestrator decides a disputed failure

@@ -1,6 +1,6 @@
 // Merging a worktree queue back into its base, and cleaning up after it, with local git only.
 //
-// A queue with an integration step (PROTOCOL.md, "The integration step") goes back one way only: its base moves
+// A queue with an integration step (docs/protocol/git.md, "The integration step") goes back one way only: its base moves
 // forward to the integrated commit (`git merge --ff-only`), never with a merge commit on the base. Nexus does it by
 // itself when the project's merge_back is on (src/merger.ts), the user with Merge back in the dashboard; both go
 // through judgeMerge and fastForward here, one at a time (a lock per queue). It judges in this order (queue FX): what

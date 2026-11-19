@@ -1,4 +1,4 @@
-// What a step runs on (routing.ts; PROTOCOL.md, "Kinds and their defaults"): every level of the precedence (step,
+// What a step runs on (routing.ts; docs/protocol/runtimes.md, "Kinds and their defaults"): every level of the precedence (step,
 // queue, the start's explicit values, the kind's project and global defaults, the project's defaults), a start with
 // --model X and a mechanical step, a kind on another runtime than an explicit start's, the fallback chain from the
 // strongest level, and bad fallback entries refused.

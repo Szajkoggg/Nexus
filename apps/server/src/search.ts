@@ -1,4 +1,4 @@
-// Searching a project's whole history (queue SR; docs/PROTOCOL.md, "Searching a project"): the server reads the
+// Searching a project's whole history (queue SR; docs/protocol/api.md, "Searching a project"): the server reads the
 // project's files as they are, without an index, and the protocol's pure functions (packages/protocol/src/search.ts)
 // decide what each entry offers and whether it is a hit. JSONL logs are read line by line in chunks (memory stays
 // small however long a log is), a line is parsed only when every word occurs in it raw, a file not changed since

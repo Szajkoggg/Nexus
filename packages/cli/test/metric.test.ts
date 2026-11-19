@@ -1,4 +1,4 @@
-// `nexus metric define|record|list` (queue ST2, PROTOCOL.md "Project metrics"): the orchestrator defines a metric
+// `nexus metric define|record|list` (queue ST2, docs/protocol/stats.md "Project metrics"): the orchestrator defines a metric
 // (unit, how it is shown, a target, one warning threshold), which the server writes into .nexus/metrics.yaml; a worker
 // records a value for its step at work, with the HEAD commit; bad input is refused before anything is written; a
 // worker cannot define and an orchestrator cannot record. The server's part is played here by a stand-in that applies

@@ -1,4 +1,4 @@
-// The `nexus` lines of docs/PROTOCOL.md's "The `nexus` CLI" block against the CLI itself (queue DOC): every command and
+// The `nexus` lines of docs/protocol/cli.md's "The `nexus` CLI" block against the CLI itself (queue DOC): every command and
 // subcommand there exists, and every flag a line uses belongs to that command. What the CLI knows is read from
 // `nexus help` (bin/nexus.js), as help.test.ts does: main.ts runs when it is loaded, so it is not imported.
 import { test } from "node:test";
@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI = join(HERE, "../bin/nexus.js");
-const PROTOCOL = join(HERE, "../../../docs/PROTOCOL.md");
+const PROTOCOL = join(HERE, "../../../docs/protocol/cli.md");
 
 /** Lines of the block allowed not to match the CLI, by their command, with the reason. None today. */
 const EXCEPTIONS: { line: RegExp; reason: string }[] = [];
@@ -154,7 +154,7 @@ function check(cli: Cli, cmd: string): string[] {
 function cliBlock(markdown: string): string[] {
   const lines = markdown.split(/\r?\n/);
   const at = lines.findIndex((l) => l === "## The `nexus` CLI");
-  assert.ok(at >= 0, 'PROTOCOL.md has a section "The `nexus` CLI"');
+  assert.ok(at >= 0, 'protocol/cli.md has a section "The `nexus` CLI"');
   const open = lines.findIndex((l, i) => i > at && l.startsWith("```"));
   const close = lines.findIndex((l, i) => i > open && l.startsWith("```"));
   assert.ok(open > at && close > open, "the section has a fenced block");
@@ -209,7 +209,7 @@ test("nexus help is read: its usages, the flags of all commands and the topics",
   assert.ok(review?.flags.has("--role") && review.flags.has("--before"), "nexus review add: flags of its continuation lines");
 });
 
-test("every nexus line of PROTOCOL.md's CLI block names a command, subcommand and flags the CLI has", () => {
+test("every nexus line of protocol/cli.md's CLI block names a command, subcommand and flags the CLI has", () => {
   const res = checkBlock(cli, cliBlock(readFileSync(PROTOCOL, "utf8")));
   assert.deepEqual(res.failures, [], `lines that do not match nexus help:\n${res.failures.join("\n")}`);
   assert.deepEqual(res.excepted, [], `lines excepted:\n${res.excepted.join("\n")}`);

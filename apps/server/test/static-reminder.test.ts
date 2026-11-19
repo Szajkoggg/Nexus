@@ -1,4 +1,4 @@
-// The static analysis reminder (PROTOCOL.md, "Static analysis reminder") against the fake runtimes, on a clock the test
+// The static analysis reminder (docs/protocol/planning.md, "Static analysis reminder") against the fake runtimes, on a clock the test
 // moves: a project without static analysis tells its orchestrator once a month; one with static analysis never; after
 // the user's no (`nexus static-analysis decline`, an event of the orchestrator's) nothing comes for 90 days.
 import { test } from "node:test";

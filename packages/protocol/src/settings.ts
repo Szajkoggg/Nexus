@@ -1,4 +1,4 @@
-// Global settings that projects follow, with a per-setting override (PROTOCOL.md, "Global settings"). Pure: the files
+// Global settings that projects follow, with a per-setting override (docs/protocol/settings.md, "Global settings"). Pure: the files
 // are read and written by the store (store.ts); the global file only by the server.
 import { GlobalSettings, ProjectFile, StoredProject } from "./schemas.ts";
 import { TAG_KINDS } from "./tags.ts";
@@ -43,7 +43,7 @@ export const OVERRIDABLE: readonly { path: readonly string[]; none?: true }[] = 
   { path: ["review_helper", "audit_rate"] },
 ] as const;
 
-/** A setting's path as written in PROTOCOL.md and in an update's `follow` list: `runtimes.claude.model`. */
+/** A setting's path as written in docs/protocol/settings.md and in an update's `follow` list: `runtimes.claude.model`. */
 export const settingKey = (path: readonly string[]) => path.join(".");
 
 type Tree = Record<string, unknown>;

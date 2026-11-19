@@ -1,4 +1,4 @@
-// Nexus merging worktree queues back by itself (PROTOCOL.md, "Merging back by itself"; docs/ideas/
+// Nexus merging worktree queues back by itself (docs/protocol/files.md, "Merging back by itself"; docs/ideas/
 // parallel-worktrees-and-merge-back.md). One per project, looking after every change: a finished queue with an
 // integration step, with the project's merge_back on, is judged (src/mergeback.ts, judgeMerge), in this order:
 //
@@ -17,7 +17,7 @@
 // checks, the limit, a run again that does not get through), the held runs go on at once, and the wait names them
 // (`merge.waiting.released`), so the user and the orchestrator are told. Nothing stays held.
 //
-// The merge train (protocol train.ts, PROTOCOL.md "The merge train"): the queues that go back into one base integrate
+// The merge train (protocol train.ts, docs/protocol/git.md "The merge train"): the queues that go back into one base integrate
 // one at a time. A queue whose next step is its integration step is held at the end of the step before while another
 // queue holds the base (its integration step runs, or it waits for its fast-forward) or is before it in line; its run
 // goes on when its turn comes. A fast-forward that waits (`merge.waiting`) lets the next queue go; once it could go

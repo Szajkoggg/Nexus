@@ -1,4 +1,4 @@
-// Recurring queues (PROTOCOL.md, "Recurring queues"): at each time of a recurring's schedule, while the user's standing
+// Recurring queues (docs/protocol/planning.md, "Recurring queues"): at each time of a recurring's schedule, while the user's standing
 // approval holds (its hash is the one approved), Nexus makes the queue from the template and starts it through the
 // plan, as an approved queue (its approval marked `standing`). The only writer of .nexus/recurring/<id>.yaml: the
 // orchestrator's `nexus recurring set` arrives here through the server, and so do the user's actions.

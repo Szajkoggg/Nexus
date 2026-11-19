@@ -1,4 +1,4 @@
-// What the closing refactoring step is given when it opens (PROTOCOL.md, "The closing refactoring step"): the queue's
+// What the closing refactoring step is given when it opens (docs/protocol/queues.md, "The closing refactoring step"): the queue's
 // work as a commit range from its git records (git.yaml: the first start of a round of its own steps to the last end),
 // with git's --stat summary, and whether the project's AGENTS.md has a "Refactoring" section to follow. The diff itself
 // is not put into the text: the worker reads it with git.

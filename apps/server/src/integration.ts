@@ -1,9 +1,9 @@
-// What the integration step is given when it opens (PROTOCOL.md, "The integration step"): the base branch to merge
+// What the integration step is given when it opens (docs/protocol/git.md, "The integration step"): the base branch to merge
 // into the queue's branch (the branch the queue's worktree was made from, as git.yaml recorded it; else the branch the
 // project's checkout is on), where that branch is now, the queue's branch, and whether the project lets the worker
 // resolve a conflict (defaults.resolve_conflicts).
 //
-// And the merges Nexus makes itself, without a model (queue MI; PROTOCOL.md, "Without a model"): the integration step's
+// And the merges Nexus makes itself, without a model (queue MI; docs/protocol/git.md, "Without a model"): the integration step's
 // when it is clean, and the base merged into the queue's branch at a step boundary when it merges cleanly. A merge is
 // tested first without touching the worktree (git merge-tree), and made only when clean.
 import { execFileSync } from "node:child_process";

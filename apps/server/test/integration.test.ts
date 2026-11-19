@@ -1,4 +1,4 @@
-// The integration step in the engine (PROTOCOL.md, "The integration step"), against the fake runtimes and temporary
+// The integration step in the engine (docs/protocol/git.md, "The integration step"), against the fake runtimes and temporary
 // git repositories: a queue with a worktree of its own ends with it (after the closing step, whatever `coding` says);
 // its worker merges the current base into the queue's branch in the worktree. A clean merge is done; a conflict is
 // resolved only when the project's resolve_conflicts allows it; one not resolved stops the queue for the user, whose

@@ -1,4 +1,4 @@
-// The steps Nexus keeps on the dashboard: the closing refactoring step (PROTOCOL.md, "The closing refactoring step"),
+// The steps Nexus keeps on the dashboard: the closing refactoring step (docs/protocol/queues.md, "The closing refactoring step"),
 // which Nexus keeps after a coding queue's own steps, and the integration step ("The integration step"), last in a
 // queue with a worktree of its own. Wherever steps are listed (the approval views, the queue's card and its step lines)
 // they show last, as the derived state already orders them, and set apart: a mark instead of the long reserved id, and

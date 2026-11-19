@@ -17,7 +17,7 @@ type Runtime = keyof typeof RUNTIME_NAME;
 // ---------------------------------------------------------------- languages
 
 /**
- * The languages from the project's effective settings (PROTOCOL.md, "Languages"): `reader`, what is written to the user
+ * The languages from the project's effective settings (docs/protocol/settings.md, "Languages"): `reader`, what is written to the user
  * (none: the language the user writes in); `working`, what the agents work in.
  */
 export interface Languages { reader?: LanguageCode; working: LanguageCode }
@@ -121,7 +121,7 @@ export function workerBriefing(l: Languages, runtime: Runtime = "claude"): strin
  * the step is the queue's closing refactoring step, and this is what it is given (src/closing.ts). `integration`: the
  * step is the queue's integration step, and this is what it is given (src/integration.ts).
  */
-/** Said under the checks of a step whose checks Nexus runs (PROTOCOL.md, "Checks run by Nexus"). */
+/** Said under the checks of a step whose checks Nexus runs (docs/protocol/checks.md, "Checks run by Nexus"). */
 const CHECKS_BY_NEXUS = "Nexus runs these itself after your `nexus step done` and sends you their output only if one fails; do not run or report them yourself (`nexus check` refuses them). While you work, run only the tests of what you change.";
 
 export function stepOpening(o: {
@@ -133,7 +133,7 @@ export function stepOpening(o: {
   languages?: string;
   closing?: ClosingContext;
   integration?: IntegrationContext;
-  /** Nexus runs the step's checks after its `nexus step done` (PROTOCOL.md, "Checks run by Nexus"). */
+  /** Nexus runs the step's checks after its `nexus step done` (docs/protocol/checks.md, "Checks run by Nexus"). */
   checksByNexus?: boolean;
   /** Nexus merged the base into the queue's branch right before this step, or found it conflicting (queue MI). */
   pull?: PullText;
@@ -735,7 +735,7 @@ export function reviewNotice(q: QueueView, st: StepView, away: AwayNow = { on: f
   return { fact: `Step ${st.id} of queue ${q.id} is done and waits for your review: ${st.summary ?? st.title}`, todo: `${passed}${reviewBrief(q, st, away)}` };
 }
 
-/** Each reason a step is passed on to the orchestrator for, as its review notice says it (PROTOCOL.md, "The review helper"). */
+/** Each reason a step is passed on to the orchestrator for, as its review notice says it (docs/protocol/review.md, "The review helper"). */
 const PASS_ON_TEXT: Record<PassOnReason, string> = {
   criterion: "a criterion it cannot settle from what the step left behind",
   deviation: "the worker's summary reports a deviation from the plan",
@@ -760,7 +760,7 @@ function passedOnText(h: NonNullable<StepView["helper"]>): string {
 // ---------------------------------------------------------------- the review helper
 
 /**
- * The review helper's briefing (queue RH; PROTOCOL.md, "The review helper"): a short-lived session that reviews one step
+ * The review helper's briefing (queue RH; docs/protocol/review.md, "The review helper"): a short-lived session that reviews one step
  * in the orchestrator's place, from the packet it gets as its one message, and ends with its verdict.
  */
 export function helperBriefing(p: Pick<ProjectFile, "name" | "languages">): string {

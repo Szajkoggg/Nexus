@@ -1,4 +1,4 @@
-// The plan as the Queues view shows it (PROTOCOL.md, "The plan"): what runs now, then what follows, in columns; lines
+// The plan as the Queues view shows it (docs/protocol/planning.md, "The plan"): what runs now, then what follows, in columns; lines
 // from each queue to those it waits for; on every queue what it waits for. Pure and unit tested; components/Plan.tsx
 // draws it (lanes on a desktop, an ordered list on the phone).
 import { runGoing } from "@nexus/protocol/status-rules";

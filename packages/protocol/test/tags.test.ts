@@ -1,4 +1,4 @@
-// Step tags (tags.ts; PROTOCOL.md, "Tags"): inheritance from the queue, the check of a draft against Nexus's lists and
+// Step tags (tags.ts; docs/protocol/stats.md, "Tags"): inheritance from the queue, the check of a draft against Nexus's lists and
 // the project's, a project activity usable only once the user accepted it, one kind per step, renames read through,
 // the hash of an approved queue without tags unchanged, and the tags in a TurnRecord.
 import { test } from "node:test";

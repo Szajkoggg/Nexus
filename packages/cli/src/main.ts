@@ -359,7 +359,7 @@ function helperStep(state: ReturnType<typeof loadProjectState>, s: SessionFile, 
 
 /**
  * `nexus review pass-on <queue> <step> --why <reasons> --findings <text>`: a review helper passes the step it reviews on
- * to the orchestrator (review.passed_on), with why and what it found (PROTOCOL.md, "The review helper").
+ * to the orchestrator (review.passed_on), with why and what it found (docs/protocol/review.md, "The review helper").
  */
 function passOn(): void {
   const st = store(); const s = session(st);
@@ -381,7 +381,7 @@ function passOn(): void {
 
 /**
  * `nexus review audit <queue> <step> agree|disagree --reason <text>`: the orchestrator's audit of a review helper's
- * acceptance it was given in a notice (review.audited; PROTOCOL.md, "The review helper"). It does not reopen the step.
+ * acceptance it was given in a notice (review.audited; docs/protocol/review.md, "The review helper"). It does not reopen the step.
  */
 function reviewAudit(): void {
   const st = store(); const s = orchestrator(st);
@@ -766,7 +766,7 @@ const commands: Record<string, () => void | Promise<void>> = {
     if (o.unrelated) return checkUnrelated();
     if (o.ok === o.fail) throw new UsageError("give exactly one of --ok or --fail");
     const name = need(args[2], "<name>");
-    // A check Nexus runs itself after the step's done is not the worker's to report (PROTOCOL.md, "Checks run by Nexus").
+    // A check Nexus runs itself after the step's done is not the worker's to report (docs/protocol/checks.md, "Checks run by Nexus").
     const st = store(); const step = need(args[1], "<step>");
     const queue = queueFor(st, session(st), step);
     if (st.readChecks(queue)?.steps[step]?.by === "nexus") {
@@ -881,7 +881,7 @@ const commands: Record<string, () => void | Promise<void>> = {
 
   /**
    * `nexus doc <file.md>[#<section>]` (any session, or none; read only): the file's headings, or one section of it
-   * (docs/PROTOCOL.md, "nexus doc"). The notes folder may be left out, as with nexus covers.
+   * (docs/protocol/cli.md, "The `nexus` CLI"). The notes folder may be left out, as with nexus covers.
    */
   doc() {
     const given = need(args[1], "<file.md>[#<section>] (nexus doc docs/DESIGN.md, nexus doc tags.md#2026-11-14)");

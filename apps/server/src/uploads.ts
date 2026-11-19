@@ -1,4 +1,4 @@
-// Pictures the user adds to a chat message (PROTOCOL.md, "Uploads"). Browsers do not reveal a file's path, so the
+// Pictures the user adds to a chat message (docs/protocol/api.md, "Uploads"). Browsers do not reveal a file's path, so the
 // dashboard sends the picture itself, base64 in a JSON body (writes stay JSON-only), and the server saves it under the
 // project's .nexus/uploads/; the message then carries the saved file's absolute path, which the agent opens.
 // The server is the folder's only writer. The type is judged from the bytes, never from a name or a declared type, and

@@ -1,6 +1,6 @@
 // The server's replies that the dashboard reads, as types only (this module has no code, so the browser may import it):
 // the server builds each reply as one of these and the dashboard reads it as the same, so a change on one side that
-// the other does not follow fails the typecheck. PROTOCOL.md ("Server API") describes the endpoints.
+// the other does not follow fails the typecheck. docs/protocol/api.md ("Server API") describes the endpoints.
 import type { AttentionItem } from "./state.ts";
 import type { MergedTemplates, TemplateLayer, TemplateProblem } from "./templates.ts";
 
@@ -58,7 +58,7 @@ export interface ModelInfo { value: string; label: string; description?: string;
 
 /**
  * GET /api/projects/:id/removal: whether the project may be removed from Nexus now, and what goes with it or stays
- * (PROTOCOL.md, "Removing a project"). Neither removal touches the project's own files.
+ * (docs/protocol/files.md, "Removing a project"). Neither removal touches the project's own files.
  */
 export interface RemovalView {
   /** The project's name: "Delete Nexus's data" asks for it to be typed, and the server checks it. */

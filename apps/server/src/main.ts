@@ -99,7 +99,7 @@ let capacity: Capacity | undefined;
 function refreshRegistry(): void {
   if (!active) return;
   capacity ??= new Capacity({ onChange: () => broadcast({ type: "server" }) });
-  // Global settings (PROTOCOL.md): the file exists from the first start on, with the built-in defaults; each project's
+  // Global settings (docs/protocol/settings.md, "Global settings"): the file exists from the first start on, with the built-in defaults; each project's
   // project.yaml from before them is migrated once, before anything reads it (effective values unchanged).
   ensureGlobalSettings();
   const reg = readRegistry();
@@ -108,7 +108,7 @@ function refreshRegistry(): void {
     const store = ProjectStore.forRoot(p.root);
     try { if (store.migrateProject()) console.log(`settings of project ${p.id}: migrated to follow the global settings where equal`); }
     catch (err) { console.error(`settings of project ${p.id}: not migrated: ${(err as Error).message}`); }
-    // Steps done before review levels keep the meaning they had (PROTOCOL.md, "Before review levels").
+    // Steps done before review levels keep the meaning they had (docs/protocol/review.md, "Before review levels").
     try { if (store.markReviewLevels()) console.log(`project ${p.id}: steps done from now on are reviewed by level`); }
     catch (err) { console.error(`project ${p.id}: review levels not marked: ${(err as Error).message}`); }
     // A deploy planned after a step or queue of this project holds the run at that step's end (src/deploy-plan.ts); so
@@ -404,7 +404,7 @@ app.get("/api/projects/:id/ideas/statuses", (c) => {
   return c.json(ideaStatuses(e.store, s));
 });
 
-// The queue templates in effect for the project (PROTOCOL.md, "Queue templates"), for "New queue from template".
+// The queue templates in effect for the project (docs/protocol/planning.md, "Queue templates"), for "New queue from template".
 app.get("/api/projects/:id/templates", (c) => {
   const e = c.get("entry");
   const { templates, problems } = readTemplates(e.root);
@@ -530,7 +530,7 @@ app.post("/api/projects/:id/queues/:queue/run", act((_st, b, p, e) => {
     default: throw new ActionError("action is start, pause, resume, stop, stop_at_once or cancel_start");
   }
 }));
-// The user's answers about the plan (PROTOCOL.md, "The plan"): accept or decline the orchestrator's proposal for the
+// The user's answers about the plan (docs/protocol/planning.md, "The plan"): accept or decline the orchestrator's proposal for the
 // queue, or hand a dependency they set back to the orchestrator (`after`: one predecessor; without it, all of them);
 // the user's reorder: `move` the queue after `after` (null: with no queue before it), as in a list; `add` a
 // predecessor (`after`) or `remove` one; and `undo` (`change`) a move, an add or a remove within its window. The three
@@ -560,7 +560,7 @@ app.post("/api/projects/:id/queues/:queue/plan", act((st, b, p, e) => {
     default: throw new ActionError("action is move, add, remove, undo, accept, decline or hand_back");
   }
 }));
-// The user's decision on the orchestrator's proposal for the project's tag lists (PROTOCOL.md, "Tags"): accept or
+// The user's decision on the orchestrator's proposal for the project's tag lists (docs/protocol/stats.md, "Tags"): accept or
 // decline. Only the user: there is no CLI command and no event for it.
 app.post("/api/projects/:id/tags/:proposal", act((st, b, p) => {
   switch (b.action) {
@@ -569,7 +569,7 @@ app.post("/api/projects/:id/tags/:proposal", act((st, b, p) => {
     default: throw new ActionError("action is accept or decline");
   }
 }));
-// The user's decisions on a recurring queue (PROTOCOL.md, "Recurring queues"): the standing approval, a pause and its
+// The user's decisions on a recurring queue (docs/protocol/planning.md, "Recurring queues"): the standing approval, a pause and its
 // end, the removal. Only the user: there is no CLI command and no event for them.
 app.post("/api/projects/:id/recurring/:rid", act((_st, b, p, e) => {
   switch (b.action) {
@@ -810,7 +810,7 @@ app.get("/api/capacity", (c) => c.json(readCapacity() ?? null));
 // only makes sense on the server machine ("Open in editor": a path on another device points nowhere).
 app.get("/api/server", async (c) => c.json({ ...(await version()), local: isLocal(c.env.incoming), update: lifecycle.status, plan: planner.view(), push_on_deploy: readDeploySettings().push_on_deploy, max_running: readGlobalSettings().defaults.max_running, running: runningSteps(), away: awayNow(readAway()) }));
 
-// ---------------------------------------------------------------- away mode (PROTOCOL.md, "Away mode")
+// ---------------------------------------------------------------- away mode (docs/protocol/review.md, "Away mode")
 
 let awayTimer: NodeJS.Timeout | undefined;
 
@@ -996,7 +996,7 @@ app.get("/api/projects/:id/settings", (c) => {
   const e = c.get("entry");
   return c.json({ own: ownKeys(e.store.readStoredProject()), global: readGlobalSettings() });
 });
-// The global settings, which every project follows where it has no value of its own (PROTOCOL.md, "Global settings").
+// The global settings, which every project follows where it has no value of its own (docs/protocol/settings.md, "Global settings").
 app.get("/api/settings", (c) => c.json({ global: readGlobalSettings(), keys: OVERRIDABLE.map((x) => settingKey(x.path)) }));
 app.patch("/api/settings", async (c) => {
   const b = (await c.req.json().catch(() => ({}))) as unknown;

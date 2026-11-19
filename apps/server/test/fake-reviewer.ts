@@ -1,4 +1,4 @@
-// Stands in for the reviewer in tests about something other than review. Every step is reviewed (PROTOCOL.md,
+// Stands in for the reviewer in tests about something other than review. Every step is reviewed (docs/protocol/review.md,
 // "Review"): a test project without an orchestrator gets its level-2 and level-3 steps for the user's review, so a
 // test that runs a queue through its steps calls this where it stands in for the server's file watcher (before the
 // engine's onChange), and each such step is accepted at once, as the user would in the dashboard. A level-1 step is

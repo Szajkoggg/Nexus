@@ -1241,7 +1241,7 @@ export class Engine implements Member {
   }
 
   /**
-   * The integration step without a model (queue MI; PROTOCOL.md, "Without a model"): when Nexus runs the step's checks,
+   * The integration step without a model (queue MI; docs/protocol/git.md, "Without a model"): when Nexus runs the step's checks,
    * the queue's worktree has no uncommitted changes to tracked files and the merge is plain, the engine merges the base
    * itself and reports the step done from its own session; the checks then run as after any done. No base branch, or a
    * conflict the project does not let a worker resolve: it stops the step itself. False: a worker opens the step as

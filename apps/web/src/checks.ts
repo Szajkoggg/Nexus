@@ -1,4 +1,4 @@
-// The checks Nexus runs after a worker's `nexus step done` (docs/PROTOCOL.md, "Checks run by Nexus"; queue EC), as the
+// The checks Nexus runs after a worker's `nexus step done` (docs/protocol/checks.md, "Checks run by Nexus"; queue EC), as the
 // dashboard says them: a step's word while they wait for the machine or run, its check-fix round apart from its review
 // (send-back) rounds, and the latest set's checks one by one. Pure; the step's status itself is the derivation's
 // (packages/protocol/src/checks.ts).

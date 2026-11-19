@@ -1,4 +1,4 @@
-// The closing refactoring step in the engine (PROTOCOL.md, "The closing refactoring step"), against the fake runtimes:
+// The closing refactoring step in the engine (docs/protocol/queues.md, "The closing refactoring step"), against the fake runtimes:
 // it runs after the queue's own steps, also after steps a revision added during the run and after a revision once it
 // has run; in a fresh session (a run switch `refactor`), given the queue's commit range from git.yaml and git's --stat,
 // and told whether the project's AGENTS.md has a "Refactoring" section. Its "nothing worth refactoring" closes the

@@ -1,0 +1,134 @@
+# The `nexus` CLI
+
+Part of [the protocol](../PROTOCOL.md).
+
+## The `nexus` CLI
+
+The only interface agents use. It finds its session from the `NEXUS_SESSION` and `NEXUS_DIR` environment variables
+(set by Nexus when it launches a session, or by `nexus attach` for a session started by hand), validates the
+arguments against the protocol and appends one event.
+
+```
+nexus status                                   # the current queue, step, notes and unanswered questions, as text
+nexus status [--all] [--queue <id>]            # in an orchestrator's (or partner's) session: the open queues, the finished ones only counted, the open questions, of the worker sessions the live ones, those of open queues and the 10 latest others (cards cut to 300 characters), Waiting for the user, then the machine's lines; --all: every queue (the finished ones named, with a skipped closing step's reason) and every session, cards whole (what a fresh orchestrator session starts from); --queue <id>: that queue (finished too), its sessions, its questions and what waits about it; an unknown queue is refused
+nexus step start W3
+nexus step progress W3 "Support graph built; probing fixtures"
+nexus review add W3 $TEMP/nexus-review/W3/sheet.png --label "Sheet, round 1"   # copied into .nexus/queues/<q>/review/W3/
+nexus review add W3 $TEMP/nexus-review/W3/cliff@1280.before.png --key cliff-lit@1280 --role before --label "Cliff, before"
+nexus review add W3 $TEMP/nexus-review/W3/cliff@1280.png --key cliff-lit@1280 --role after --label "Cliff, lit"   # pairs by key
+nexus review add W3 $TEMP/nexus-review/W3/lit.png --before $TEMP/nexus-review/W3/unlit.png --label "Lighting"   # older: no key
+nexus help review                              # the standard for review material (nexus help: the topics)
+nexus help summaries|context|questions|refusals|commits|tests   # the other standards
+nexus check W3 "npm test" --ok --summary "548 passed" --duration 190   # the name exactly as "Checks for every step" lists it (another counts as not reported); how long it ran, in seconds: the metric check:npm test. Refused where Nexus runs the step's checks
+nexus check W3 "npm test" --unrelated --evidence "it fails on main too"   # a check Nexus ran fails not because of your work: Nexus runs it on the queue's base commit (see "Checks run by Nexus")
+nexus metric record bundle-kb 512 [--step W3]  # worker only: a value of a project metric for the step at work, with HEAD
+nexus metric list                              # the project's metrics (any session)
+nexus stats [--by model|effort|kind|activity|area|size|origin] [--project <id>] [--since <date>]   # see "Statistics"
+nexus stats --reviews [--project <id>] [--since <date>]   # the reviews' quality on three levels (see "The review helper")
+nexus stats --switches [--project <id>] [--since <date>]  # steps after a context switch against those without one (see "Context care")
+nexus step done W3 --summary "No floating body on any fixture" [--commit 1a2b3c] [--activities feature,test]   # warns at an unclean end; --activities: what was actually done (refused: a name on no list)
+nexus step failed W3 --reason "..."
+nexus stop W3 --condition "user decision" --reason "..."   # the condition as the queue words it; the reason short (shown first)
+nexus ask "Canyon joints: vertical only, or also inclined?" [--option ...] [--recommend <option>] [--can-continue]
+                                               # --recommend: one of the --option values, by text or number (1 = first)
+nexus context "summary text" --topics rock,support --files Runtime/Core/Rock/*   # the text as the argument, or - to read it from stdin (... <<< "text"); its shape: nexus help context (beyond 2000 words it warns)
+nexus report W --file <temp>/nexus-reports/<project>/W.md --summary "..." [--findings 3]   # copied to .nexus/queues/W/report.md; --findings: a maintenance queue's
+nexus withdraw <qid> --reason "..."            # a question no longer needed (question.withdrawn)
+nexus log "Retrying the probe" [--level info|warn|error]   # a line into the session's own log
+nexus template list | show <id>                # the queue templates in effect (see "Queue templates")
+nexus recurring list                           # the recurring queues and their state (see "Recurring queues")
+nexus static-analysis [status]                 # the stacks and static analysis Nexus sees, and the reminder's state (see "Static analysis reminder")
+# any session
+nexus ideas status                             # a summary (read only): per note and dated entry the reference (#<date> under the note's path), the effective decision (disposition; implementation), the linked queues with their status, and the problems: stale (an invalid assessment), reference (a broken or missing one), conflict (note and decision differ), blocked / caveat (the linked work); then the user's decisions that name no entry
+nexus ideas status agent-standards.md#2026-11-14   # one entry's effective status as JSON (entries, history, invalidations narrowed to it; revision); a note's path alone gives all its entries; the notes folder may be left out; an unknown date is refused with the note's dates
+nexus ideas status --full                      # everything as JSON: effective dispositions, implementation assessments with every entry's snapshot (its text and its queues' evidence), conflicts and history (megabytes on a large project)
+nexus ideas matches                            # the suggestions for matching earlier queues to the notes' entries, and the user's decisions (read only; deciding is the user's, in the dashboard)
+nexus doc docs/DESIGN.md                       # a Markdown file's headings: one per line, indented by level, with its # marks and line number (read only; no session needed)
+nexus doc docs/DESIGN.md#Static analysis       # one section: from its heading to the next heading of the same or a higher level; named by the heading's text or its anchor (static-analysis), case ignored
+nexus doc agent-standards.md#2026-11-14        # a dated entry: every heading that begins with the date (### 2026-11-14 and ### 2026-11-14 (later): …); the path from the working directory, else the project's root, else the notes folder (as nexus covers); a `#` line in a fenced code block (``` or ~~~) is no heading; an unknown section is refused (exit 2) with the file's sections and dates
+# thinking partner only
+nexus covers tags.md#2026-11-14 docs/ideas/plan.md#2026-11-15   # in a hand-over: the Decided entries it passes on (ideas.covered); the notes folder may be left out; each checked against the notes, a missing note or date refused with the note's dates
+# review helper only (and nexus status, nexus help, nexus doc; every other command is refused a helper)
+nexus review accept W W3 --note "what it checked"   # level 2 only; send-back as the orchestrator's (below); both only for its own step
+nexus review pass-on W W3 --why criterion,doubt --findings "what it checked and what it could not"   # to the orchestrator; reasons: criterion, deviation, question, limit, doubt, level
+# orchestrator only
+nexus queue draft <file.yaml|->                # a new queue, or a change to one: a new revision
+nexus queue draft --template bugfix --set issue="..." --set area=engine [--id BF]   # writes .nexus/drafts/BF.yaml to complete and upload
+nexus recurring set weekly --template maintenance [--set scope=...] (--every "mon 03:00" | --after-queues 5) [--maintenance survey|fix_small] [--reason ...]   # through the server; the user approves it
+nexus static-analysis decline --reason "..."  # the user's no to the static-analysis template: no reminder for 90 days
+nexus review audit W W2 agree|disagree --reason "..."   # an audit of the review helper's acceptance a notice gave it
+nexus check decide W W3 accept|fix --reason "..."   # a disputed check Nexus could not run on the base (see "Checks run by Nexus")
+nexus answer <qid> "..." [--escalate [--recommend <option>]] [--continue|--wait]
+                                               # --recommend only with --escalate: one of the question's options
+nexus run <queue> start|pause|resume|stop --reason "..." [--use-session <id>] [--runtime claude|codex] [--model <m>] [--effort <e>] [--after <queue>... | --next | --at "YYYY-MM-DD HH:MM" | --at usage-reset]   # see "The orchestrator" and "The plan"
+nexus tags propose --area <name> | --activity <prefix:name> [--reason ...]   # a proposal for the project's tag lists
+nexus tags rename <old> <new> [--reason ...]    # the user accepts it (see "Tags"); `nexus tags` lists them (any session)
+nexus metric define bundle-kb --unit KB [--show line|bar|number] [--target 400] [--warn-above 500 | --warn-below=-1]
+                                               # a project metric, or a change to one (see "Project metrics")
+# setup
+nexus attach                                   # register a hand-started session as external (no role: it sets up the session itself)
+nexus project list                             # the registered projects
+nexus project add <path> [--id] [--name]       # creates .nexus/ (self-ignoring), registers the project, prints the rules files' check;
+                                               # a kept .nexus/ (a project removed from Nexus) brings it back under its id
+nexus import <file.md> [--prefix X]            # one-time import of queues written as Markdown tables
+nexus note <queue> <step> <text>               # until the dashboard can add notes
+nexus server away [on --until <8:00|ISO> | off]  # the user's away mode (refused from any agent session); no argument: its state
+nexus server update --after <queue>[/<step>] [--ref <ref>]   # plan a deploy for after a step or queue of this project (the user, or an orchestrator the user asked)
+nexus server update --at <HH:MM|"YYYY-MM-DD HH:MM"> [--deadline <time>] [--ref <ref>]   # plan a deploy for a time, with an optional deadline
+nexus server cancel-plan                       # cancel the planned deploy (and the drain it started)
+```
+
+`nexus status` prints each step of a queue on a line of its own (id, status, title); a step that names its own
+runtime, model or effort ends with them, `[on Codex · gpt-6-luna · low effort]` (what it leaves out is the run's).
+The orchestrator's overview adds the same after the step in its `steps:` line, where each step also shows its review
+level, `W1 pending (level 2)`, with `, set by the user` for a level the user set.
+A step with checks reported gets a line under it with the latest result of each check (a check run again replaces
+its earlier result) and its time when it was given: `checks: npm test ok (3 min 10 s), npm run typecheck ok (12 s)`.
+The dashboard shows each check's time on the step, and the orchestrator's review notice gives it with the check
+(`npm test: ok, 3 min 10 s (548 passed)`); the statistics will read the times from the `check.result` events.
+A queue with a planned start gets a line `planned start after A; now: <waiting>` (or `at <local time>`), ending in
+`(it starts by itself)` when the plan came due and waits for its checkout or for the limit (`held`); the
+orchestrator's overview shows a held schedule the same way (`its time came, now: <waiting>`).
+
+`nexus status`, run by a session with a queue, prints that queue's undelivered notes and records them as read
+(`note.read`): being shown to the agent is the delivery.
+Without a session (or with one that has no queue) it lists the queues at work (running, waiting, stopped), then the
+approved ones not running, each with its steps and, when it is not running, the run left behind (`run: halted at W3
+(...)`). An orchestrator or a thinking partner gets the overview of every queue instead.
+
+`nexus report <queue> --file <path> --summary <text>` copies the file into `.nexus/queues/<queue>/report.md` (the one
+writer of that file; a path that is already that file is left as it is) and records `queue.report` naming the copy, so
+the dashboard and the run digest read it there. Workers may not write under `.nexus` with their file tools
+(`protect_nexus`), and a report left in a working tree would block the cleanup of a worktree, so the last step's
+prompt asks for the report in the project's **folder for reports**, outside every working tree and repository:
+`<system temporary directory>/nexus-reports/<project>/<queue>.md` (`reportFile`; a Codex worker gets that folder as a
+writable root). Once copied, a source in that folder is removed; a source anywhere else is kept.
+
+`nexus step done` checks the step's end by the `commits` standard and **warns, never refuses**: in the session's
+working directory (when it is a git repository), tracked files with uncommitted changes (untracked files do not count,
+nor the thinking partners' notes folder, `conversations.notes_dir`, since the main checkout also holds the user's own
+notes), and a HEAD that moved since the step started (the round's `start` in `queues/<id>/git.yaml`) while no
+`--commit` is given. The warning names the files or the commits and says what to do; it is printed after `ok:` and
+recorded as `warning` on the `step.done` event (the session's own log). Nothing else changes: the step is done.
+
+`nexus help <topic>` prints one of Nexus's standards (needs no session or project, records nothing); `nexus help`
+alone prints the commands and the topics. The topics live in `packages/cli/src/help.ts`:
+
+| Topic | The standard |
+|---|---|
+| `review` | Review material: formats, view keys, roles, pairing, rounds, captures, the process |
+| `summaries` | A step summary (`nexus step done --summary`) in four parts: what changed; how it was verified; what was left out or differs from the plan; what comes next, if anything |
+| `context` | A context summary (`nexus context`) in six parts: where the work stands (the step, committed, not committed); the decisions and why, with the ways tried and dropped; the traps found; the important files and why; what comes next; what the orchestrator or the user asked for or promised. It leaves out what a fresh session's seed gives anyway (the queue, the steps' summaries, the briefing, `nexus status`); about 1,000 to 2,000 words at most: `nexus context` records a longer one and prints a warning (`CONTEXT_SUMMARY_WORDS`, 2000 words) |
+| `questions` | A question (`nexus ask`) in three parts: what it blocks; the options; the asker's recommendation |
+| `refusals` | A refused action: no workaround through another tool or command that reaches the same end; one retry in a simpler form at most; then report what was needed and why |
+| `commits` | A clean working tree at every step's end: everything the step did committed (its own files only) and named with `nexus step done --commit`, so every commit belongs to one step |
+| `tests` | Running tests while working: only the affected test files, stopping at the first failure (in Nexus's repository `npm run test:files -- <files>`); the whole suite once at the step's end, as the queue's checks (run by Nexus after `nexus step done` where the step's opening says so, else by the worker and reported with `nexus check`); a test that fails now and then is fixed at its cause, not run again until it passes |
+
+The briefings carry these in a few lines each with the pointer: the worker's all six; the orchestrator's the refusal
+rule and the summary and question shapes as it reads them (and escalates in); the thinking partner's the refusal
+rule.
+
+Step states also include `stopped` (the step a `queue.stop` named, when it was not finished).
+
+Output is short plain text so it reads well inside an agent's transcript. Exit code 0 on success, 2 on a protocol
+violation (with the reason on stderr).

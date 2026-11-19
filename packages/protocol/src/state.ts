@@ -157,7 +157,7 @@ export interface StepView extends StepDef {
   checks: CheckView[];
   /**
    * Who runs the step's checks (checks.yaml, fixed when the step opened): `nexus`, the engine after each
-   * `nexus step done`; `worker` (or absent), the worker reports them (PROTOCOL.md, "Checks run by Nexus").
+   * `nexus step done`; `worker` (or absent), the worker reports them (docs/protocol/checks.md, "Checks run by Nexus").
    */
   checks_by?: "nexus" | "worker";
   /**
@@ -1061,7 +1061,7 @@ export function helperAbout(s: Pick<SessionFile, "role" | "about">): { queue: st
 
 /**
  * Why a review helper's verdict on the step does not count, or undefined when it does: only the helper started for the
- * step's current round, while the step waits for the orchestrator's review and was not passed on yet (PROTOCOL.md, "The
+ * step's current round, while the step waits for the orchestrator's review and was not passed on yet (docs/protocol/review.md, "The
  * review helper").
  */
 function helperRefusal(s: Pick<SessionFile, "role" | "about">, q: QueueView, st: StepView): string | undefined {

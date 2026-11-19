@@ -1,4 +1,4 @@
-// The ideas overview over the API (PROTOCOL.md, "Conversations", the ideas overview): GET /api/projects/:id/ideas gives
+// The ideas overview over the API (docs/protocol/conversations.md, "Conversations", the ideas overview): GET /api/projects/:id/ideas gives
 // the project's notes with each entry's status and history, from a queue that names an entry and a partner's hand-over
 // record; an unknown project is 404. A real server process on a free port with a temporary NEXUS_HOME and one made-up
 // project; no runtime is started.

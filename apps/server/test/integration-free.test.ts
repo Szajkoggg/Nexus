@@ -1,4 +1,4 @@
-// The integration step without a model (queue MI; PROTOCOL.md, "The integration step", "Without a model"), against the
+// The integration step without a model (queue MI; docs/protocol/git.md, "The integration step", "Without a model"), against the
 // fake runtimes, temporary git repositories and stand-in checks that Nexus runs itself (the engine has a capacity
 // coordinator). A clean merge with green checks is done and accepted by Nexus without the worker's opening it; a
 // conflict the project lets a worker resolve opens the step for the worker, one it does not stops the queue without a

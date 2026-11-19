@@ -1,4 +1,4 @@
-// `nexus template list|show` and `nexus queue draft --template` (queue TQ, PROTOCOL.md "Queue templates"): the
+// `nexus template list|show` and `nexus queue draft --template` (queue TQ, docs/protocol/planning.md "Queue templates"): the
 // templates of the three layers, and a draft from one written into .nexus/drafts/, which the orchestrator then uploads
 // with `nexus queue draft <file>` as any other. The server's part of the upload is played here by a stand-in that
 // applies the orchestrator's queue.drafted events as the server does (applyDraft, then applied.jsonl).

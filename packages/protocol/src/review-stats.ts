@@ -1,4 +1,4 @@
-// The reviews' quality on three levels (queue RH, H16; PROTOCOL.md, "The review helper"): the user's signals (Fix it,
+// The reviews' quality on three levels (queue RH, H16; docs/protocol/review.md, "The review helper"): the user's signals (Fix it,
 // Reject, a provisional acceptance returned), the cost signals (send-backs by who sent them, check-fix rounds, the
 // review helper's reviews passed on to the orchestrator, by reason and as a share), and the audit (the helper's
 // acceptances the orchestrator reviewed again, and how many it disagreed with), by the helper's runtime, model and

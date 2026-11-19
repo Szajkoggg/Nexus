@@ -1,4 +1,4 @@
-// Files and commits the dashboard may show (PROTOCOL.md, "Files and commits"): the file viewer and the review material's
+// Files and commits the dashboard may show (docs/protocol/api.md, "Files and commits"): the file viewer and the review material's
 // links read files through GET /api/projects/:id/file, a commit's details come from GET /api/projects/:id/commits/:hash.
 //
 // A path is taken relative to the project's root (not the server's working folder), then must lie under one of the

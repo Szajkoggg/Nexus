@@ -1,5 +1,5 @@
 // Reading and writing a project's .nexus/ directory and the Nexus registry.
-// Rules (docs/PROTOCOL.md): one writer per file, JSONL is append-only, YAML is replaced atomically.
+// Rules (docs/protocol/files.md, "Rules"): one writer per file, JSONL is append-only, YAML is replaced atomically.
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";

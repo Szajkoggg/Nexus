@@ -1,4 +1,4 @@
-// The languages Nexus offers (PROTOCOL.md, "Languages"): for the reader's language (what agents write to the user in)
+// The languages Nexus offers (docs/protocol/settings.md, "Languages"): for the reader's language (what agents write to the user in)
 // and a project's working language (what its agents work in). The order is the user's list.
 
 /** Each offered language: its code (ISO 639-1, as stored), its name in English, and its own name. */

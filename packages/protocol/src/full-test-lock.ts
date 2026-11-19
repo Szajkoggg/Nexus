@@ -1,4 +1,4 @@
-// The machine's full-test lock, read (PROTOCOL.md, "Full-test lock and lifetime channel"). Its writer is
+// The machine's full-test lock, read (docs/protocol/runtimes.md, "Full-test lock and lifetime channel"). Its writer is
 // scripts/test-lock.ts, which takes it for `npm test`; the server's capacity coordinator reads it to tell a full run
 // outside Nexus, and grants no heavy operation while one holds it. One place for when a lock counts as held, so the
 // two never disagree: free when its holder is gone, or when it is stale (held, or unrenewed, longer than `staleMs`).

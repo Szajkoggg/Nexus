@@ -59,7 +59,7 @@ export function StepCommits({ project, queue, step, toggle }: {
 }
 
 /**
- * The integration step's box (PROTOCOL.md, "The integration step", "Merge back and clean up"): what it does, and how
+ * The integration step's box (docs/protocol/git.md, "The integration step", "Merge back and clean up"): what it does, and how
  * the merge back stands: done (by Nexus or you), waiting (and why), run again because the base moved on, or the user's
  * when the project's merge_back is off.
  */

@@ -1,4 +1,4 @@
-// Review levels, provisional acceptances and away mode in the dashboard (PROTOCOL.md, "Review"): the level picker of
+// Review levels, provisional acceptances and away mode in the dashboard (docs/protocol/review.md, "Review"): the level picker of
 // the approval view, a step's level and provisional mark on its line and panel, Confirm and Fix it on a provisional
 // acceptance (the return batch and the step), and the away-mode switch with its "until HH:MM" field and its sign.
 import { useState } from "react";

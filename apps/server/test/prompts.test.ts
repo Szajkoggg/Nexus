@@ -213,7 +213,7 @@ test("the worker's texts: briefing, step openings, inbox entries, seeds and nudg
   tr.add(byNexus({ range: { from: "1111111111111111111111111111111111111111", to: "2222222222222222222222222222222222222222" }, rules: true, checked: "2222222222222222222222222222222222222222" }));
   tr.add(byNexus({ rules: false }));
 
-  tr.section("checks run by Nexus (PROTOCOL.md, \"Checks run by Nexus\"): a step's opening, the integration step's (no conflict to resolve, one it may resolve)");
+  tr.section("checks run by Nexus (docs/protocol/checks.md, \"Checks run by Nexus\"): a step's opening, the integration step's (no conflict to resolve, one it may resolve)");
   const nq = loadProjectState(store).queues.find((x) => x.id === "Q")!;
   const opening = (integration?: Parameters<typeof stepOpening>[0]["integration"]) => stepOpening({
     q: nq, step: nq.steps[2]!, mode: "start", projectStopConditions: [], projectChecks: ["npm run lint", "npm test"], notes: [], answers: [], last: false,

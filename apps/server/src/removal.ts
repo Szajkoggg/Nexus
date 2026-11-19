@@ -1,4 +1,4 @@
-// Removing a project from Nexus (PROTOCOL.md, "Removing a project"), the user's only, from the dashboard: "Remove from
+// Removing a project from Nexus (docs/protocol/files.md, "Removing a project"), the user's only, from the dashboard: "Remove from
 // Nexus" takes it off the registry and leaves its .nexus folder, so `nexus project add` brings it back as it was;
 // "Delete Nexus's data" deletes that folder too. Either one only while nothing runs in the project, and neither
 // touches the project's own files, nor the worktrees and branches Nexus made (they belong to its git repository).

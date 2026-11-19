@@ -1,4 +1,4 @@
-// Step tags (docs/ideas/tags.md; PROTOCOL.md, "Tags"): facets that each answer one question about a step. `kind`:
+// Step tags (docs/ideas/tags.md; docs/protocol/stats.md, "Tags"): facets that each answer one question about a step. `kind`:
 // how hard the thinking is, exactly one per step, the dominant one (it will drive the runtime, model, effort and
 // fallback); `activities`: what the step does; `area`: which part of the project; `size`: S, M or L as planned;
 // `origin`: where the work came from. Nexus's own lists are here; each project keeps its areas and the activities it

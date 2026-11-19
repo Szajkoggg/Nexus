@@ -5,7 +5,7 @@ Claude Code and Codex sessions through them step by step, and carries notes, mes
 user, a per-project orchestrator agent and the working agents.
 
 - [docs/DESIGN.md](docs/DESIGN.md): concepts, architecture, decisions, phases
-- [docs/PROTOCOL.md](docs/PROTOCOL.md): the `.nexus/` files, events and the `nexus` CLI
+- [docs/PROTOCOL.md](docs/PROTOCOL.md): the `.nexus/` files, events and the `nexus` CLI (an index; the text is by topic in [docs/protocol/](docs/protocol/))
 
 **Ideas.** Beside the orchestrator, each project has conversations with a thinking partner (the bulb icon): one
 session per topic, for thinking something through (gameplay design, the look, what to build next) without starting
@@ -482,7 +482,7 @@ repository, versioned with it); a project's template replaces one of yours with 
 Nexus's. Pick one, fill in what it asks (a maintenance template also asks its mode) and add anything else; "Send to
 the orchestrator" sends it as your message, and the orchestrator drafts the queue and fills in the rest. You approve
 it as any queue. A template is a queue's YAML with a `template:` header, `params:` and `{{name}}` placeholders
-(docs/PROTOCOL.md, "Queue templates"); `nexus template list` shows the ones in effect.
+(docs/protocol/planning.md, "Queue templates"); `nexus template list` shows the ones in effect.
 
 **Maintenance templates.** Ten templates survey a project and report; none depends on a stack, the commands are
 parameters with Node and .NET/Unity examples. `dependencies` lists the outdated dependencies (minor and patch; in
@@ -669,7 +669,7 @@ it: when the shell or the command that ran `npm test` is killed (a background co
 terminal), the run's test processes end and its lock goes. `npm run test:files` never waits. `NEXUS_TEST_LOCK`
 names another lock file, `NEXUS_TEST_LOCK_STALE_MS` another age at which a lock is stale. The Nexus server reads the
 same lock: while a full run started outside Nexus holds it, Nexus starts no heavy operation of its own, and `nexus
-status` says so (the machine's line, "The capacity coordinator" in docs/PROTOCOL.md).
+status` says so (the machine's line, "The capacity coordinator" in docs/protocol/checks.md).
 
 The tests that run fake runtimes or servers wait 10 s for what they expect (`NEXUS_TEST_WAIT_MS` sets it, e.g. higher
 on a slow machine; `apps/server/test/wait.ts`), so a change that breaks many of them fails the suite in minutes.

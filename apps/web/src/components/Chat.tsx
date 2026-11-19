@@ -60,7 +60,7 @@ interface EarlierSession {
   switch: { at: string; fill: number | null; tokens?: number | null; summary: NonNullable<SessionView["context"]> | null };
 }
 
-/** Where the server keeps the orchestrator's latest summary for a fresh session (PROTOCOL.md, "Layout"). */
+/** Where the server keeps the orchestrator's latest summary for a fresh session (docs/protocol/files.md, "Layout"). */
 const SUMMARY_FILE = ".nexus/orchestrator/summary.md";
 
 /** A chat's search, open or not: its button is in the chat's header, or in the desktop column's for the orchestrator. */

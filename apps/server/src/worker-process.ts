@@ -1,5 +1,5 @@
 // A worker's Windows job host, with the same streams the runtime adapters already consume. Other agent roles
-// keep Node's ordinary child process. The control frames never enter a runtime's JSON stream (PROTOCOL.md).
+// keep Node's ordinary child process. The control frames never enter a runtime's JSON stream (docs/protocol/runtimes.md, "Windows worker process host (PT)").
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { PassThrough, Writable } from "node:stream";

@@ -3,7 +3,7 @@
 // A check looks like a command when its first word can run: a program or script on the PATH, a file in the project's
 // repository, or one of the few shell built-ins a check uses. The draft path refuses a check that does not
 // (applyDraft), and the engine records one of an older, approved queue as "not a command" instead of failing the step
-// (apps/server/src/check-runs.ts). PROTOCOL.md, "Checks run by Nexus".
+// (apps/server/src/check-runs.ts). docs/protocol/checks.md, "Checks run by Nexus".
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { delimiter, isAbsolute, join, resolve } from "node:path";
 

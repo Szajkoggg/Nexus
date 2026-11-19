@@ -1,4 +1,4 @@
-// Statistics (decided 2026-11-14, docs/ideas/statistics.md and tags.md; PROTOCOL.md, "Statistics"): how steps went, by
+// Statistics (decided 2026-11-14, docs/ideas/statistics.md and tags.md; docs/protocol/stats.md, "Statistics"): how steps went, by
 // model, effort or a tag facet, for the orchestrator choosing a model and effort and for the user watching the use of
 // the subscription. Raw numbers would mislead (hard work goes to strong models), so beside the counts: the share
 // accepted in the first round, the average rounds, stops and failures, the median working time, and the estimated use

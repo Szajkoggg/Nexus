@@ -1,4 +1,4 @@
-// Recurring queues against the fake runtimes, with a clock the test moves (PROTOCOL.md, "Recurring queues"): a
+// Recurring queues against the fake runtimes, with a clock the test moves (docs/protocol/planning.md, "Recurring queues"): a
 // recurring approved by the user runs at its times by itself; without the standing approval, after a change (the
 // orchestrator's set, a changed shipped or project template) or while its previous run is open it does not; a time
 // that passed while no server ran is made up for once at the start (the latest; the older are missed). The engine's

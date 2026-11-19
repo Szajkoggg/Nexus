@@ -50,7 +50,7 @@ const ROW: Record<CheckRowState, { mark: string; tone: string }> = {
 const checkMark = (c: CheckView) => ROW[c.not_command ? "notCommand" : c.ok ? "passed" : "failed"];
 
 /**
- * The checks Nexus runs after the step's done (docs/PROTOCOL.md, "Checks run by Nexus"), while they decide the step:
+ * The checks Nexus runs after the step's done (docs/protocol/checks.md, "Checks run by Nexus"), while they decide the step:
  * waiting for the machine, running, on the queue's base commit, a dispute for the orchestrator, or a check-fix round
  * (said apart from the review rounds: a fix round is no send-back), with the latest set's checks one by one.
  */

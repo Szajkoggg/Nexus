@@ -1,4 +1,4 @@
-// The capacity coordinator, first slice (DESIGN.md, "The capacity coordinator, first slice"; PROTOCOL.md, "The capacity
+// The capacity coordinator, first slice (DESIGN.md, "The capacity coordinator, first slice"; docs/protocol/checks.md, "The capacity
 // coordinator"). Decided 2026-11-16 (docs/ideas/worker-phases-and-resources.md) and 2026-11-17/18 (queue EC, EC1's
 // proposals P2, P11, P17): one heavy operation per workstation at a time, across projects; a request is granted
 // atomically or waits in line, in the order requests came; the line is shown (<NEXUS_HOME>/capacity.yaml, read by

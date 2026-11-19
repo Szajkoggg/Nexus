@@ -1,5 +1,5 @@
 // What the user does from the dashboard, as writes to a project's files. Run by the Nexus server, which is the
-// writer of queue definitions, notes and inboxes (docs/PROTOCOL.md, "Rules").
+// writer of queue definitions, notes and inboxes (docs/protocol/files.md, "Rules").
 import { existsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { NEXUS_SESSION, ProjectFile, QueueFile, USER_SESSION, type GlobalSettings, effortIssue, type Effort, type StatusChange, type InboxEntry, ReviewLevel, type RunFile, type SessionFile } from "./schemas.ts";

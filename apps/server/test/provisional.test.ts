@@ -1,4 +1,4 @@
-// Review level 3 against the fake `claude` (PROTOCOL.md, "Review"): the orchestrator accepts provisionally and the
+// Review level 3 against the fake `claude` (docs/protocol/review.md, "Review"): the orchestrator accepts provisionally and the
 // queue goes on; its send-backs end at the limit with the step waiting for the user; the provisional acceptances wait
 // in the user's return batch, where only the user confirms them; and the user's Fix it on one asks the orchestrator
 // for a revision, on a queue that went on and on a finished one. The pushes are in accepted.test.ts.

@@ -1,4 +1,4 @@
-// Templates and recurring queues on the Queues view (PROTOCOL.md, "Queue templates" and "Recurring queues"):
+// Templates and recurring queues on the Queues view (docs/protocol/planning.md, "Queue templates" and "Recurring queues"):
 // "New queue from template" (pick a template, fill in its parameters; the orchestrator gets it as the user's message and
 // drafts the queue, which the user approves as any), and the project's recurring queues with their state, schedule,
 // next and last run. Approving, pausing and removing a recurring queue are the user's: only here and in the waiting

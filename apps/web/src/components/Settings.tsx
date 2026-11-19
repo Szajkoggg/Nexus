@@ -1,5 +1,5 @@
 // Settings: the global ones every project follows, and a project's own (how its agents run, its defaults), each
-// setting with a global value switched between following it and the project's own value (PROTOCOL.md, "Global settings").
+// setting with a global value switched between following it and the project's own value (docs/protocol/settings.md, "Global settings").
 import { useState, type ReactNode } from "react";
 import type { GlobalSettings, ProjectFile, TagsFile } from "@nexus/protocol";
 import type { ModelInfo } from "@nexus/protocol/api";
@@ -100,7 +100,7 @@ function nested(values: Values, keys: readonly string[]): Values {
 /** The hint under the partners' web level: what each level lets them do, and for `fetch` its risk. */
 const WEB_HINT: Record<string, Key> = { off: "settings.web.offHint", search: "settings.web.searchHint", fetch: "settings.web.fetchHint" };
 
-/** Every setting with a global value, in the order of PROTOCOL.md's list. */
+/** Every setting with a global value, in the order of docs/protocol/settings.md's list. */
 const SETTING_KEYS = [
   "defaults.stop_conditions", "defaults.review_level", "defaults.review_send_back_limit", "defaults.context_reuse_tokens",
   "defaults.context_care", "defaults.protect_nexus", "defaults.push_accepted", "defaults.provisional_counts", "defaults.merge_back", "defaults.resolve_conflicts", "defaults.usage_pause_threshold",
@@ -699,9 +699,9 @@ export interface ServerInfo {
   push_on_deploy: boolean;
   /** How many queues may run at once, across all projects (the global `defaults.max_running`). */
   max_running?: number;
-  /** The user's away mode now (PROTOCOL.md, "Away mode"). */
+  /** The user's away mode now (docs/protocol/review.md, "Away mode"). */
   away?: { on: boolean; since?: string; until?: string };
-  /** The planned deploy, if any (PROTOCOL.md, "Planned deploys"). */
+  /** The planned deploy, if any (docs/protocol/api.md, "Planned deploys"). */
   plan?: PlannedDeploy | null;
 }
 

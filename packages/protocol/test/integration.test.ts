@@ -1,4 +1,4 @@
-// The integration step (PROTOCOL.md, "The integration step"): a queue with a worktree of its own (`worktree: auto`, or
+// The integration step (docs/protocol/git.md, "The integration step"): a queue with a worktree of its own (`worktree: auto`, or
 // the server's mark `integration`) ends with a step Nexus keeps, after the closing step, whatever `coding` says. Its
 // id is reserved, a draft cannot set the mark, agents cannot skip it, and any other step at work after it ran (the
 // closing step's run again included) makes it run again at the end. A queue that worked in a worktree before the step

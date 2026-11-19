@@ -1,4 +1,4 @@
-// Where a step ran and why, when its runtime's usage ran out (PROTOCOL.md, "Fallback when usage runs out"): a line per
+// Where a step ran and why, when its runtime's usage ran out (docs/protocol/runtimes.md, "Fallback when usage runs out"): a line per
 // switch of the step from its queue's run (run.yaml `fallbacks`), "On Codex (gpt-6-luna, low effort): Claude Code's
 // 5-hour window at 96 % (limit 90 %)", and the switch back. In the step's details and on the queue card.
 import type { QueueView } from "../api.ts";

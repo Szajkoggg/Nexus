@@ -1,4 +1,4 @@
-// Whether a project has static analysis (PROTOCOL.md, "Static analysis reminder"): its stacks (Node, .NET, Unity) and
+// Whether a project has static analysis (docs/protocol/planning.md, "Static analysis reminder"): its stacks (Node, .NET, Unity) and
 // what of a linter or analyzer it has set up. A project of a known stack with none of them is reminded, monthly, of
 // the shipped "static-analysis" template; one whose stack Nexus does not know is left alone. The detection is pure
 // (a list of the project's files and a reader); listing a folder is the last section.

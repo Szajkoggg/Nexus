@@ -1,4 +1,4 @@
-// The capacity coordinator's line as `nexus status` prints it (PROTOCOL.md, "The capacity coordinator"): what holds
+// The capacity coordinator's line as `nexus status` prints it (docs/protocol/checks.md, "The capacity coordinator"): what holds
 // the workstation's heavy slot, what waits for it in which order, and a full test run outside Nexus that keeps it. The
 // file is the server's (<NEXUS_HOME>/capacity.yaml); this only reads it, so every project's status shows the same line.
 import type { CapacityFile, CapacityRequest } from "./schemas.ts";

@@ -1,5 +1,5 @@
 // A commit's details, opened from a commit hash in a chat message (Refs.tsx): its subject, hash, author, date and the
-// files it changed with their lines added and removed (GET /api/projects/:id/commits/:hash, PROTOCOL.md "Files and
+// files it changed with their lines added and removed (GET /api/projects/:id/commits/:hash, docs/protocol/api.md "Files and
 // commits"). A layer in the history ("commit:<hash>"), shown in a drawer; the hash is checked when it opens, so a
 // hash-like word that is no commit says "not found" here.
 import { useEffect, useState } from "react";

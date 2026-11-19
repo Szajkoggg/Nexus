@@ -1,4 +1,4 @@
-// A seed for the capture tool: two test projects for the Danger zone of a project's settings (PROTOCOL.md, "Removing a
+// A seed for the capture tool: two test projects for the Danger zone of a project's settings (docs/protocol/files.md, "Removing a
 // project"). "demo" has nothing running, and what a removal lists: a planned start, a scheduled one, an open question
 // and a worktree Nexus made. "busy" has a stopped queue and a queue waiting to be merged back, so nothing can be
 // removed. Run by scripts/capture.ts as `node <this> <data dir>` with NEXUS_HOME set to the development instance's; it

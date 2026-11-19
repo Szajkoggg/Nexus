@@ -314,7 +314,7 @@ Stop conditions (meeting one ends the queue: report it with `nexus stop`):
 Begin with `nexus step start C.refactor`. End with `nexus step done C.refactor --summary "…"`, `nexus step failed` or `nexus stop`, then write `nexus context` and end your turn. Do not start another step.
 
 This is the queue's last step. After it is done, write a short report of the whole queue (what each step achieved against its acceptance, checks, review material, open questions, a proposed next step) to <report file> (a folder for reports outside the working tree and any repository: never write it into the working tree, it would block the cleanup of a worktree) and register it with `nexus report C --file <report file> --summary "…"`, which copies it into the queue's folder and removes it from there.
-== checks run by Nexus (PROTOCOL.md, "Checks run by Nexus"): a step's opening, the integration step's (no conflict to resolve, one it may resolve)
+== checks run by Nexus (docs/protocol/checks.md, "Checks run by Nexus"): a step's opening, the integration step's (no conflict to resolve, one it may resolve)
 [Nexus] Queue Q "Prompts under test" (revision 1, approved), step A3 (3 of 4): Third step.
 
 Acceptance:

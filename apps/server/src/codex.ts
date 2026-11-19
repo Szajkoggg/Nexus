@@ -612,7 +612,7 @@ export function webSearchText(it: Json): string {
 
 /**
  * A message's input items: its text, and each picture uploaded for a chat message (a line that is the absolute path of
- * a file under a `.nexus/uploads/` folder, PROTOCOL.md "Uploads") as a `localImage` item beside it. Codex does not
+ * a file under a `.nexus/uploads/` folder, docs/protocol/api.md "Uploads") as a `localImage` item beside it. Codex does not
  * open a picture from a path in the text (probed live, Codex 0.167.2 with gpt-6-luna, a partner's sandbox: "I can't
  * access that image path"); given the item, it sees the picture. The path stays in the text, so the chat and Claude
  * read the same message.

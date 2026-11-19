@@ -1,4 +1,4 @@
-// Recurring queues after every N queues, and maintenance runs (PROTOCOL.md, "Recurring queues"), against the fake
+// Recurring queues after every N queues, and maintenance runs (docs/protocol/planning.md, "Recurring queues"), against the fake
 // runtimes: an "after 5 queues" recurring runs once 5 of the project's queues are done (removed queues and recurring
 // runs not counted, so two of them never start each other); survey or fix_small is part of what the user approves; a
 // survey run that leaves a commit is stopped; a maintenance run with findings tells the orchestrator once, with the

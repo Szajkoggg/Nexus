@@ -1,4 +1,4 @@
-// The plan against the fake runtimes (PROTOCOL.md, "The plan"): several predecessors, approval, only planned queues
+// The plan against the fake runtimes (docs/protocol/planning.md, "The plan"): several predecessors, approval, only planned queues
 // start, a stopped predecessor, the chains of before the plan moved into it, and the orchestrator's part: it builds
 // around the user's dependencies, proposes changes to them, and is told the user's answers.
 import { test } from "node:test";

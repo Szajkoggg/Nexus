@@ -992,7 +992,7 @@ ${n.text}` });
     if (!fresh.length) return;
     // The orchestrator's own runtime beyond the usage threshold: nothing starts its turn. Each notice waits in its
     // inbox (once), not told yet; the reviews it would do (levels 2 and 3) wait with them. Told, all of them, at the
-    // first change once that runtime is free again (PROTOCOL.md, "Fallback when usage runs out").
+    // first change once that runtime is free again (docs/protocol/runtimes.md, "Fallback when usage runs out").
     const inbox = this.store.readInbox(s.id).entries;
     const held = (key: string) => `notice-${key}`;
     if (this.runtimeFull(state)) {

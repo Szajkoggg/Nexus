@@ -1,4 +1,4 @@
-// Fallback in the middle of a step (PROTOCOL.md, "Fallback when usage runs out"), against the fake runtimes: before
+// Fallback in the middle of a step (docs/protocol/runtimes.md, "Fallback when usage runs out"), against the fake runtimes: before
 // each kind of turn within a step (a nudge, a send-back, an answer, an inbox message) a runtime beyond the threshold
 // hands the step to a fresh session on its fallback, seeded with the step's goal, progress, commits and uncommitted
 // files, which stay in the checkout; a `wait` rule waits in the middle of the step; a turn that failed on the usage

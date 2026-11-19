@@ -2,7 +2,7 @@
 // thread. They read the whole project and write only in its notes folder; they start no work. A conversation can
 // be handed to the orchestrator: the partner writes a summary, which goes into the orchestrator's chat.
 //
-// The web: by `conversations.web` (claudeWeb, CODEX_WEB_SEARCH; PROTOCOL.md, "Conversations"). A Codex partner runs
+// The web: by `conversations.web` (claudeWeb, CODEX_WEB_SEARCH; docs/protocol/conversations.md, "Conversations"). A Codex partner runs
 // without the user's own Codex tools (MCP servers, plugins, apps), which run outside its sandbox.
 //
 // Writing only in the notes folder: Claude Code runs in `dontAsk` mode with `Edit(<notes>/**)` as the only write

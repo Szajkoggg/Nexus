@@ -1,5 +1,5 @@
 // The project's tag lists (.nexus/tags.yaml): the orchestrator's proposals and the user's decisions on them (tags.ts;
-// PROTOCOL.md, "Tags"). The server is the only writer of the file.
+// docs/protocol/stats.md, "Tags"). The server is the only writer of the file.
 import { ActionError } from "./actions.ts";
 import type { TagProposal, TagsFile } from "./schemas.ts";
 import { newId, now, type ProjectStore } from "./store.ts";

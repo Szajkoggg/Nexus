@@ -1,4 +1,4 @@
-// The Nexus file protocol, version 1. See docs/PROTOCOL.md.
+// The Nexus file protocol, version 1. See docs/PROTOCOL.md and docs/protocol/.
 import { z } from "zod";
 import { NOTE_REF } from "./ideas.ts";
 import { PICTURE_ROLES, VIEW_KEY } from "./pictures.ts";
@@ -12,7 +12,7 @@ const Id = z.string().min(1);
 const Time = z.string().min(1); // ISO 8601 UTC
 
 /**
- * How a step's result is reviewed when it is done (PROTOCOL.md, "Review levels"). There is no level without review.
+ * How a step's result is reviewed when it is done (docs/protocol/review.md, "Review"). There is no level without review.
  * 1. The user reviews; the queue waits for them.
  * 2. The orchestrator reviews what can be checked; what is the user's goes to the user, and the queue waits for them.
  * 3. The orchestrator judges everything and the queue goes on.
@@ -65,11 +65,11 @@ export type StepStatus = z.infer<typeof StepStatus>;
  * `nexus` is the one session the server keeps for the steps the engine runs itself, without a model (the integration
  * step without a model, queue MI): its events are written only by the server; it has no process and no inbox.
  * `helper` is a review helper (queue RH): a short-lived session the server starts for one review round of one step, in
- * the orchestrator's place. It reads, and decides with `nexus review accept|send-back|pass-on` (PROTOCOL.md, "The
+ * the orchestrator's place. It reads, and decides with `nexus review accept|send-back|pass-on` (docs/protocol/review.md, "The
  * review helper").
  */
 /**
- * Why a review helper passed a step on to the orchestrator (PROTOCOL.md, "The review helper"): `criterion` a criterion
+ * Why a review helper passed a step on to the orchestrator (docs/protocol/review.md, "The review helper"): `criterion` a criterion
  * the packet cannot settle; `deviation` the worker's summary reports a deviation from the plan; `question` the worker
  * asked during the step; `limit` the send-back limit is reached; `doubt` the helper doubts its own verdict (or an
  * action it needed was refused); `level` a level-3 step whose checkable criteria are met; and from Nexus only,
@@ -109,7 +109,7 @@ export type RegistryFile = z.infer<typeof RegistryFile>;
 
 // ---------------------------------------------------------------- project.yaml
 
-// The settings that are global with a project override (see "Global settings" in PROTOCOL.md): each field with its
+// The settings that are global with a project override (see "Global settings" in docs/protocol/settings.md): each field with its
 // built-in default. The global settings file holds them all; a project's effective settings are its own values
 // (overrides) where it has any, else the global ones.
 
@@ -185,7 +185,7 @@ const DefaultsShape = z.object({
    */
   max_running: MaxRunning.default(DEFAULT_MAX_RUNNING),
   /**
-   * How many check-fix rounds a step gets when the checks Nexus runs fail (PROTOCOL.md, "Checks run by Nexus"); after
+   * How many check-fix rounds a step gets when the checks Nexus runs fail (docs/protocol/checks.md, "Checks run by Nexus"); after
    * them the run halts for the orchestrator. Counted apart from the send-backs.
    */
   check_fix_limit: z.number().int().min(0).default(3),
@@ -208,7 +208,7 @@ const CodexSettings = z.object({
 /**
  * What the thinking partners may do on the web: `off` nothing; `search` a web search (Claude Code's WebSearch, Codex's
  * hosted search from its cache); `fetch` also reading any page (Claude Code's WebFetch, Codex's live search, which
- * opens pages). Local and internal addresses are refused in every level (PROTOCOL.md, "Conversations").
+ * opens pages). Local and internal addresses are refused in every level (docs/protocol/conversations.md, "Conversations").
  */
 export const ConversationWeb = z.enum(["off", "search", "fetch"]);
 export type ConversationWeb = z.infer<typeof ConversationWeb>;
@@ -241,7 +241,7 @@ const OrchestratorSettings = z.object({
   context_threshold_tokens: ContextTokens.default(DEFAULT_ORCHESTRATOR_CONTEXT_TOKENS),
 });
 /**
- * One entry of a fallback chain (routing.ts; PROTOCOL.md, "Kinds and their defaults"): a runtime with an optional model
+ * One entry of a fallback chain (routing.ts; docs/protocol/runtimes.md, "Kinds and their defaults"): a runtime with an optional model
  * and effort (left out: the project's for that runtime), or `wait` (wait for the usage window instead).
  */
 export const FallbackEntry = z.union([
@@ -284,7 +284,7 @@ const KindsSettings = z.object({
 });
 
 /**
- * The review helper (queue RH; PROTOCOL.md, "The review helper"): whether it takes the orchestrator's routine reviews,
+ * The review helper (queue RH; docs/protocol/review.md, "The review helper"): whether it takes the orchestrator's routine reviews,
  * the runtime, model and effort it runs on (a model or effort left out: the project's for that runtime), and the share
  * of its acceptances the orchestrator audits.
  */
@@ -383,7 +383,7 @@ export const ProjectFile = z.object({
   }).prefault({}),
   /**
    * When this project's steps began to be reviewed by level (set once by the server at its first start with review
-   * levels). A step.done from before it is derived by the old review policies (PROTOCOL.md, "Before review levels").
+   * levels). A step.done from before it is derived by the old review policies (docs/protocol/review.md, "Before review levels").
    * Absent: every step.done is derived by level.
    */
   review_levels_since: Time.optional(),
@@ -427,7 +427,7 @@ export const StoredProject = z.object({
   follows_global: z.literal(true).optional(),
   /**
    * When this project's steps began to be reviewed by level (set once by the server at its first start with review
-   * levels). A step.done from before it is derived by the old review policies (PROTOCOL.md, "Before review levels").
+   * levels). A step.done from before it is derived by the old review policies (docs/protocol/review.md, "Before review levels").
    * Absent: every step.done is derived by level.
    */
   review_levels_since: Time.optional(),
@@ -504,7 +504,7 @@ export type StoredProject = z.infer<typeof StoredProject>;
 // ---------------------------------------------------------------- queue.yaml
 
 /**
- * A step's tags (tags.ts; PROTOCOL.md, "Tags"), each optional so that older queues stay valid: `kind`, exactly one, the
+ * A step's tags (tags.ts; docs/protocol/stats.md, "Tags"), each optional so that older queues stay valid: `kind`, exactly one, the
  * dominant kind of work; `activities`, what the step does; `area`, the part of the project; `size`, S, M or L as
  * planned; `origin`, where the work came from. On a queue they are its steps' defaults: a step inherits each one it
  * does not set. The names are checked when a queue is drafted (Nexus's lists and the project's, .nexus/tags.yaml), not
@@ -598,7 +598,7 @@ export const StatusChange = z.object({
 export type StatusChange = z.infer<typeof StatusChange>;
 
 /**
- * A maintenance queue's modes (PROTOCOL.md, "Recurring queues"): `survey` only looks and reports, `fix_small` also fixes
+ * A maintenance queue's modes (docs/protocol/planning.md, "Recurring queues"): `survey` only looks and reports, `fix_small` also fixes
  * the small findings its template names.
  */
 export const MaintenanceMode = z.enum(["survey", "fix_small"]);
@@ -646,7 +646,7 @@ const QueueShape = z.object({
    */
   coding: z.boolean().optional(),
   /**
-   * A maintenance queue's mode (from its template, PROTOCOL.md "Recurring queues"): `survey` only looks and reports
+   * A maintenance queue's mode (from its template, docs/protocol/planning.md "Recurring queues"): `survey` only looks and reports
    * (Nexus stops a run that leaves a commit or a changed tracked file), `fix_small` also fixes the small findings its
    * template names. Part of what an approval pins when set.
    */
@@ -930,7 +930,7 @@ export const Event = z.discriminatedUnion("type", [
    * A review helper passes the step it reviews on to the orchestrator (`nexus review pass-on`), or Nexus does (the
    * `nexus` session: the reasons it can tell without a model, or a helper without a verdict): `round` the review round,
    * `reasons` why, `text` the helper's findings (what it checked and what it could not). The step keeps waiting for the
-   * orchestrator's review, and the orchestrator gets its review notice with both (PROTOCOL.md, "The review helper").
+   * orchestrator's review, and the orchestrator gets its review notice with both (docs/protocol/review.md, "The review helper").
    */
   z.object({ ...base, type: z.literal("review.passed_on"), ...qs, round: z.number().int().positive(), reasons: z.array(PassOnReason).min(1), text: z.string() }),
   /**
@@ -961,7 +961,7 @@ export const Event = z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("review.fix_asked"), ...qs, text: z.string().min(1) }),
   /**
    * The worker says a check Nexus ran fails not because of its work (`nexus check <step> <name> --unrelated`), with its
-   * evidence; it ends its turn without `nexus step done`. Nexus runs the check on the queue's base commit (PROTOCOL.md,
+   * evidence; it ends its turn without `nexus step done`. Nexus runs the check on the queue's base commit (docs/protocol/checks.md,
    * "An unrelated failure"). Worker only.
    */
   z.object({ ...base, type: z.literal("check.disputed"), ...qs, name: z.string().min(1), evidence: z.string().min(1) }),
@@ -1188,7 +1188,7 @@ export const PlanUndo = z.object({
 export type PlanUndo = z.infer<typeof PlanUndo>;
 
 /**
- * queues/<id>/plan.yaml: the queue's place in the plan (PROTOCOL.md, "The plan"). Written only by the server. Nexus
+ * queues/<id>/plan.yaml: the queue's place in the plan (docs/protocol/planning.md, "The plan"). Written only by the server. Nexus
  * starts a queue by the plan once every queue in `after` is done and its current revision is approved (and its
  * checkout and the limit allow); `after` empty: as soon as it may ("starts now"). `by`: who put it into the plan.
  * `started_at`: it started since (by the plan or directly): the plan is used and stays, for the view, until the queue
@@ -1233,7 +1233,7 @@ export const RunFile = z.object({
   /** Stopped only for a Nexus update: the server resumes it by itself when it starts again. */
   resume_after_restart: z.boolean().optional(),
   /**
-   * A running run held at the limit on queues running at once (PROTOCOL.md, "One queue per checkout, and a limit"): it
+   * A running run held at the limit on queues running at once (docs/protocol/git.md, "One queue per checkout, and a limit"): it
    * came back from waiting (an answer, a review) to open a new turn or its next step while as many queues ran as a
    * limit allows. It opens nothing and does not count; the coordinator lets it go on by itself once a place frees,
    * before any planned start, in the order the held runs became ready (`since`). `reason` (also the run's `reason`
@@ -1278,7 +1278,7 @@ export const RunFile = z.object({
   })).optional(),
   /**
    * Each step that opened on its fallback because its own runtime was beyond the usage threshold, and each that opened
-   * on its own values again after one did (`back`), oldest first (routing.ts, chooseRoute; PROTOCOL.md, "Fallback when
+   * on its own values again after one did (`back`), oldest first (routing.ts, chooseRoute; docs/protocol/runtimes.md, "Fallback when
    * usage runs out"). `runtime`, `model`, `effort`: what it opened on; `from`: its own values; `reason`: the full
    * window (for `back`: why it is free again).
    */
@@ -1386,7 +1386,7 @@ export const PinsFile = z.object({ pins: z.array(Pin).default([]) });
 export type PinsFile = z.infer<typeof PinsFile>;
 
 /**
- * <NEXUS_HOME>/away.yaml: the user's away mode, global (PROTOCOL.md, "Away mode"). Written only by the server, from
+ * <NEXUS_HOME>/away.yaml: the user's away mode, global (docs/protocol/review.md, "Away mode"). Written only by the server, from
  * the user's action. `current`: on since `since` until `until` (it ends by itself then, or when the user turns it
  * off); `past`: earlier periods, oldest first, with when each `ended` and `why` (`expired` at its time, `off` by the
  * user). The periods are kept because what happened during one (a provisional acceptance of a level-2 step) stays
@@ -1485,7 +1485,7 @@ const CheckSet = z.object({
 export type CheckSet = z.infer<typeof CheckSet>;
 
 /**
- * queues/<id>/checks.yaml: the checks Nexus runs after a worker's `nexus step done` (PROTOCOL.md, "Checks run by
+ * queues/<id>/checks.yaml: the checks Nexus runs after a worker's `nexus step done` (docs/protocol/checks.md, "Checks run by
  * Nexus"). Per step: `by`, fixed when the step opened (`nexus`: the engine runs them; `worker`: an older server opened
  * it, and the worker reports them); `sets`, one per step.done, oldest first. One writer: the server.
  */
@@ -1509,7 +1509,7 @@ const CapacityRequest = z.object({
 export type CapacityRequest = z.infer<typeof CapacityRequest>;
 
 /**
- * <NEXUS_HOME>/capacity.yaml: the capacity coordinator's state (PROTOCOL.md, "The capacity coordinator"). One slot,
+ * <NEXUS_HOME>/capacity.yaml: the capacity coordinator's state (docs/protocol/checks.md, "The capacity coordinator"). One slot,
  * `heavy`: one heavy operation on the workstation at a time, across projects. `held`: granted, until the operation's
  * processes have ended; `waiting`: in the order they came; `outside`: the machine's full-test lock held by a run
  * outside Nexus (scripts/test-lock.ts), which grants nothing meanwhile. Written only by the server, anew when it
@@ -1598,7 +1598,7 @@ export const TagProposal = z.object({
 export type TagProposal = z.infer<typeof TagProposal>;
 
 /**
- * .nexus/tags.yaml: the project's own tag lists (tags.ts; PROTOCOL.md, "Tags"). Written only by the server: a proposal
+ * .nexus/tags.yaml: the project's own tag lists (tags.ts; docs/protocol/stats.md, "Tags"). Written only by the server: a proposal
  * from the orchestrator's event, and the user's decision on it. `prefix`: what the project's own activities begin with
  * (`hc` for `hc:terrain`), fixed by the first one accepted. `renames`: accepted renames, oldest first; every reader
  * reads the old name as the new one (files that carry the old name are never rewritten). `proposals`: waiting for the
@@ -1703,7 +1703,7 @@ export const MetricDef = z.object({
 export type MetricDef = z.infer<typeof MetricDef>;
 
 /**
- * .nexus/recurring/<id>.yaml: a recurring queue (PROTOCOL.md, "Recurring queues"): a template with its parameters and a
+ * .nexus/recurring/<id>.yaml: a recurring queue (docs/protocol/planning.md, "Recurring queues"): a template with its parameters and a
  * schedule, which Nexus makes into a queue and starts at each time while the user's standing approval holds. Written
  * only by the server: `nexus recurring set` (the orchestrator) through the server, and the user's actions.
  */
@@ -1789,7 +1789,7 @@ export const InboxEntry = z.discriminatedUnion("type", [
    */
   z.object({ ...ibase, type: z.literal("send_back"), ref: Id, queue: Id, step: Id, text: z.string(), round: z.number().int().positive() }),
   /**
-   * The checks Nexus ran after the worker's `nexus step done` failed twice (PROTOCOL.md, "Checks run by Nexus"): `id` is
+   * The checks Nexus ran after the worker's `nexus step done` failed twice (docs/protocol/checks.md, "Checks run by Nexus"): `id` is
    * "check-failed-" + the step.done event's id (`ref`); `fix`: the check-fix round it opens; `text`: what failed (each
    * check's failing tests, the end of its output, its log's path), or the reason a disputed failure is the queue's.
    * Its being in the inbox reopens the step for the fix round. From Nexus.

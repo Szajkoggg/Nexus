@@ -1,4 +1,4 @@
-// The plan on the Queues view (PROTOCOL.md, "The plan"; layout in ../plan.ts): on a desktop, columns from the left
+// The plan on the Queues view (docs/protocol/planning.md, "The plan"; layout in ../plan.ts): on a desktop, columns from the left
 // (what runs now, then what follows; layout A of docs/ux/plan-view-options.md), with a line from each queue to those
 // that wait for it, routed at right angles around the cards, solid where the user set the dependency and dashed where
 // the orchestrator did; on the phone, the same queues as one ordered list. Every card has the queue's whole title and
@@ -35,7 +35,7 @@ const listText = (ids: readonly string[]) => (ids.length ? t("plan.after", { que
 
 /** A change of the user's to the plan that can still be undone: what it did, in words, and its line (lit meanwhile). */
 interface Change { change: string; queue: string; words: string; edge?: string; until: number }
-/** What the server answers a move, an add or a remove (PROTOCOL.md, "The plan"). */
+/** What the server answers a move, an add or a remove (docs/protocol/planning.md, "The plan"). */
 interface ChangeAnswer { message: string; undo: { change: string; until: string; queues: string[] } }
 
 /** The user's actions on the plan: each a POST to …/queues/:q/plan. A move, an add and a remove can be undone. */

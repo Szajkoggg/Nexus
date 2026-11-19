@@ -1,4 +1,4 @@
-// Recurring queues (PROTOCOL.md, "Recurring queues"): a template with its parameters and a schedule, run at each time
+// Recurring queues (docs/protocol/planning.md, "Recurring queues"): a template with its parameters and a schedule, run at each time
 // while the user's standing approval holds. Pure: the schedule's forms and its next time, the standing approval's hash,
 // a run's queue id, and what state a recurring is in. The server (apps/server/src/recurring.ts) acts on them.
 import { createHash } from "node:crypto";

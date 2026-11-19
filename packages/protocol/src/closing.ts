@@ -1,5 +1,5 @@
 // The steps Nexus keeps after a queue's own: the closing refactoring step, and the integration step (below).
-// The closing refactoring step (docs/ideas/refactor-step.md, PROTOCOL.md "The closing refactoring step"): every queue
+// The closing refactoring step (docs/ideas/refactor-step.md, docs/protocol/queues.md "The closing refactoring step"): every queue
 // that contains coding (`coding: true` in queue.yaml) ends with a step Nexus keeps, outside the queue's list of steps.
 // Derivation adds it after the steps (state.ts), so no step of the queue's own comes after it (only the integration
 // step does), and once it has run, a later step at work makes it run again at the end. Its id is reserved, its
@@ -43,12 +43,12 @@ function closingStep(q: Pick<QueueFile, "id" | "coding">): StepDef | undefined {
 
 // ---------------------------------------------------------------- the integration step
 
-// The integration step (docs/ideas/parallel-worktrees-and-merge-back.md, PROTOCOL.md "The integration step"): every
+// The integration step (docs/ideas/parallel-worktrees-and-merge-back.md, docs/protocol/git.md "The integration step"): every
 // queue with a worktree of its own ends with it, after the closing refactoring step, whatever `coding` says. In the
 // queue's worktree a worker merges the current base into the queue's branch and runs the checks there, so the base
 // later only moves forward to that result. Kept like the closing step: outside the list, a reserved id, Nexus's text.
 // A survey run (`maintenance: survey`) has none: it leaves no commit (Nexus stops one that does), so there is nothing
-// to merge back; its worktree is removed once it is done (src/merger.ts, PROTOCOL.md "Cleaning up a survey's worktree").
+// to merge back; its worktree is removed once it is done (src/merger.ts, docs/protocol/git.md "Cleaning up a survey's worktree").
 
 /** The integration step's review level: the merge and the checks can be judged, so the orchestrator reviews it. */
 const INTEGRATION_LEVEL: ReviewLevel = 2;

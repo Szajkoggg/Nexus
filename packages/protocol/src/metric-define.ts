@@ -1,4 +1,4 @@
-// The project's metrics (.nexus/metrics.yaml; metrics.ts, PROTOCOL.md "Project metrics"): the orchestrator's
+// The project's metrics (.nexus/metrics.yaml; metrics.ts, docs/protocol/stats.md "Project metrics"): the orchestrator's
 // definition, which the server carries out. The server is the only writer of the file.
 import { ActionError } from "./actions.ts";
 import { CHECK_UNIT, isCheckMetric, metricDefText, metricRequestIssues, type MetricRequest, type MetricShow } from "./metrics.ts";

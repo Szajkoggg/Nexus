@@ -5,7 +5,7 @@
 // as a table (fileview.ts), each with its source a click away; pictures open in the picture viewer. The step's review
 // material that is no picture opens here too.
 // It works on the phone and starts no program. The file is data: it is fetched as text and rendered by React, never
-// injected as HTML; the server sandboxes every file it serves (PROTOCOL.md, "Files and commits").
+// injected as HTML; the server sandboxes every file it serves (docs/protocol/api.md, "Files and commits").
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";

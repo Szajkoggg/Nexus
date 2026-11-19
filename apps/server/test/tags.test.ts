@@ -1,4 +1,4 @@
-// The project's tag lists against the fake orchestrator (PROTOCOL.md, "Tags"): its proposal goes into the user's
+// The project's tag lists against the fake orchestrator (docs/protocol/stats.md, "Tags"): its proposal goes into the user's
 // waiting list; until the user accepts it a draft that uses it is refused, afterwards it is accepted, and the
 // orchestrator is told the decision. No agent can accept: there is no command for it.
 import { test } from "node:test";
