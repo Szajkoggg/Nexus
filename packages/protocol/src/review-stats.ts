@@ -6,7 +6,7 @@
 import type { PassOnReason } from "./schemas.ts";
 import type { ProjectState, StepView } from "./state.ts";
 
-/** Above this share of passed-on reviews the packet probably lacks something (DESIGN.md, "Routine reviews by a helper"). */
+/** Above this share of passed-on reviews the packet probably lacks something (docs/design/review.md, "Routine reviews by a helper"). */
 const PASS_ON_HIGH = 0.25;
 
 /** The review helper's group: its runtime, model and effort, as a session recorded them. */

@@ -7,7 +7,7 @@ See also: [Full-test lock and lifetime channel (PT2)](runtimes.md#full-test-lock
 ## Checks run by Nexus
 
 **Status: built (queue EC, steps EC2 to EC4).** The reasons and the
-decisions are in DESIGN.md, "Nexus runs the checks"; the marks **(P1)**…**(P17)** are EC1's proposals, accepted by the
+decisions are in DESIGN.md, ["Nexus runs the checks"](../design/checks.md#nexus-runs-the-checks-queue-ec); the marks **(P1)**…**(P17)** are EC1's proposals, accepted by the
 user on 2026-11-18, with P3 and P6 as the user changed them. The engine runs the checks only with the server's
 capacity coordinator (`EngineOptions.capacity`; the server always gives it): an engine without one (older tests)
 leaves them to the worker, as below for `by: worker`.

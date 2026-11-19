@@ -3,7 +3,7 @@
 // meanwhile, by least squares. The question is the cache read's weight: the API's price ratio is 0.1 of an input token
 // (PRICE_WEIGHTS; Codex's TOKEN_WEIGHTS), and TB2 measured Claude Code's at about 0.02, which its TOKEN_WEIGHTS took
 // (queue TW); the less the windows weigh it, the more the number of calls matters against the context's size.
-// Pure: scripts/token-report.ts reads the file (--weights), the tests give made-up turns. Method: docs/DESIGN.md,
+// Pure: scripts/token-report.ts reads the file (--weights), the tests give made-up turns. Method: docs/design/usage.md,
 // "Measuring token use".
 import type { TokenCounts, TurnRecord } from "@nexus/protocol";
 import { tokenWeights, weighTokens } from "@nexus/protocol/usage-estimate";

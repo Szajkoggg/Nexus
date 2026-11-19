@@ -206,7 +206,7 @@ function session(st: ProjectStore): SessionFile {
   let s: SessionFile;
   try { s = st.readSession(id); } catch { throw new UsageError(`unknown session ${id}`); }
   // What this call writes is stamped after what its session wrote and was told, and after what the server had seen
-  // when it handed the agent its work (docs/DESIGN.md, "Clock steps"): reading them takes their times up.
+  // when it handed the agent its work (docs/design/state.md, "Clock steps"): reading them takes their times up.
   st.readEvents(id); st.readInbox(id); st.observeClock();
   return s;
 }

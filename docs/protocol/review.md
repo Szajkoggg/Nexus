@@ -134,7 +134,7 @@ text verbatim (it must not be empty). Picture comments (N8.3) are a user's Fix i
 
 **Status: in effect** (queue RH): which reviews, the helper's session, packet, settings, rights, verdicts, what happens
 without one, the derived step and the review notice after a pass-on (RH2); what rides with the orchestrator's notices,
-the audit and the statistics (RH3). **Not built yet**: the dashboard (RH4). The reasons are in DESIGN.md, "Routine reviews by a helper". The marks **(H1)**…**(H17)** were
+the audit and the statistics (RH3). **Not built yet**: the dashboard (RH4). The reasons are in DESIGN.md, ["Routine reviews by a helper"](../design/review.md#routine-reviews-by-a-helper-queue-rh). The marks **(H1)**…**(H17)** were
 RH1's proposals beyond the user's decision of 2026-11-17; the user approved them all but **H12** (the first five
 acceptances after a change of the helper's model or effort always audited), which is left out.
 

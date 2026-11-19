@@ -4,7 +4,7 @@ A local dashboard and orchestrator for AI-driven development. Nexus shows each p
 Claude Code and Codex sessions through them step by step, and carries notes, messages and questions between the
 user, a per-project orchestrator agent and the working agents.
 
-- [docs/DESIGN.md](docs/DESIGN.md): concepts, architecture, decisions, phases
+- [docs/DESIGN.md](docs/DESIGN.md): concepts, architecture, decisions, phases (an index; the text is by topic in [docs/design/](docs/design/))
 - [docs/PROTOCOL.md](docs/PROTOCOL.md): the `.nexus/` files, events and the `nexus` CLI (an index; the text is by topic in [docs/protocol/](docs/protocol/))
 
 **Ideas.** Beside the orchestrator, each project has conversations with a thinking partner (the bulb icon): one
@@ -690,7 +690,7 @@ the module boundaries (the protocol imports nothing from `apps/`, neither the da
 server). There are no style rules and no formatter. Fix a finding rather than silence it; a promise left alone on
 purpose takes `void`. `npm run knip` lists files nothing loads, exports nothing imports and dependencies nothing uses;
 a file loaded only by its path (a seed of `scripts/capture`, a fake runtime) is an entry in `knip.json`. The rules
-and their reasons: [docs/DESIGN.md](docs/DESIGN.md), "Static analysis".
+and their reasons: [docs/design/checks.md](docs/design/checks.md), "Static analysis".
 
 `NEXUS_PORT` and `NEXUS_HOST` change where the server listens (default `127.0.0.1:4317`, this machine only).
 
@@ -750,7 +750,7 @@ node scripts/layout-faults.ts "docs/ux/mockups/22-plan-layout.html?v=b" --width 
 node scripts/layout-faults.ts http://127.0.0.1:4318/#/nexus --click "All queues of Nexus" --lines "section[aria-label='The plan'] svg path"
 ```
 
-Exit code 1 when it finds a fault; the list says which line, box or text. Details: [docs/DESIGN.md](docs/DESIGN.md),
+Exit code 1 when it finds a fault; the list says which line, box or text. Details: [docs/design/dashboard.md](docs/design/dashboard.md),
 "Layout faults".
 
 ### Where the tokens went
@@ -777,7 +777,7 @@ lint, builds and waiting for the full-test lock, with the number of full `npm te
 `nexus step progress` calls; the files read most often; how many calls made several tool calls at once or only read;
 and the quality signals (Fix it, Reject, a provisional acceptance returned, send-backs, fix rounds after a failed
 check), by queue and step. It ends with what is missing (sessions without a transcript on this machine, transcripts no
-session names). How each figure is counted: [docs/DESIGN.md](docs/DESIGN.md), "Measuring token use".
+session names). How each figure is counted: [docs/design/usage.md](docs/design/usage.md), "Measuring token use".
 
 `--weights` answers another question from the same turn records: how much each kind of token weighs in your
 subscription's usage windows (Claude Code's 5-hour and weekly, Codex's), above all a cache read against an uncached

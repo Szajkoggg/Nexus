@@ -1,4 +1,4 @@
-// The merge train (docs/protocol/git.md, "The merge train"; docs/DESIGN.md, "Merging back"): with the project's merge_back on,
+// The merge train (docs/protocol/git.md, "The merge train"; docs/design/git.md, "Merging back"): with the project's merge_back on,
 // the queues in worktrees of their own that go back into one base integrate one at a time. One queue holds the base:
 // its integration step runs (or runs again), or it waits for its fast-forward. The others wait their turn before their
 // integration step, in the order they got there; their own steps before it never wait. A fast-forward that cannot go

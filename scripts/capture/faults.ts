@@ -1,4 +1,4 @@
-// Layout faults of a page, as the dashboard's design work checks for them (docs/DESIGN.md, "Layout faults"): a line
+// Layout faults of a page, as the dashboard's design work checks for them (docs/design/dashboard.md, "Layout faults"): a line
 // that runs through a box, boxes that overlap, and text cut short. The page side (collector) only gathers geometry:
 // the boxes' rectangles, each line sampled into points, and the elements whose content is wider than they are (or
 // taller, where the overflow is hidden). The judging is here, in plain functions, so it can be tested without a

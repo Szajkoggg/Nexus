@@ -1,4 +1,4 @@
-// The documents split by topic (docs/doc-split-plan.md): the index lists every topic file and only existing ones, no
+// The documents split by topic (docs/doc-split-plan.md; PROTOCOL.md and DESIGN.md): the index lists every topic file and only existing ones, no
 // relative link or anchor under docs/ is broken, and a topic file over about 40 KB is warned about (never failed). The
 // checks (scripts/doc-layout.ts) run on faulty examples first, then on the real files. The text-only-moved proof of a
 // split is scripts/check-doc-split.ts, against the commit the split began from.

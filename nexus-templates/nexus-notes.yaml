@@ -24,7 +24,7 @@ params:
     default: C:/Code/Nexus/docs/ideas
   - name: docs
     description: the project documents to check against the code (for example AGENTS.md, a design and a protocol document)
-    default: AGENTS.md, README.md, docs/DESIGN.md, docs/PROTOCOL.md and the topic files in docs/protocol/
+    default: AGENTS.md, README.md, docs/DESIGN.md, docs/PROTOCOL.md and the topic files in docs/design/ and docs/protocol/
   - name: code
     description: the code the documents describe (for example src/, or the project's API and command line)
     default: packages/ and apps/ (the CLI's commands, the schemas, the HTTP API, the briefings)

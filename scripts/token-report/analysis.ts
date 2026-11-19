@@ -1,7 +1,7 @@
 // The breakdowns of the token report (scripts/token-report.ts): where the tokens of a project's agents went, from the
 // runtimes' transcripts (per model call) and turns.jsonl (per turn), and the quality signals from the project's events,
 // over a period. Pure: the tests give made-up transcripts, turns and events. The method, and what each figure counts,
-// is in docs/DESIGN.md, "Measuring token use"; how to run it in README.md.
+// is in docs/design/usage.md, "Measuring token use"; how to run it in README.md.
 import { tokenWeights, weighTokens, weightedTokens } from "@nexus/protocol/usage-estimate";
 import type { TokenCounts, TurnRecord } from "@nexus/protocol";
 import { addTokens, weightsLine, zeroTokens } from "./tokens.ts";

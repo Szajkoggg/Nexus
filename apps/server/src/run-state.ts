@@ -1,4 +1,4 @@
-// The run's state transitions and the guards of starting and resuming a queue (DESIGN.md, "The run's state
+// The run's state transitions and the guards of starting and resuming a queue (docs/design/engine.md, "The run's state
 // transitions"). Every write of run.yaml that sets a state goes through one of the transitions here: each returns the
 // next run record and owns which fields it sets and clears. They are pure; the engine writes the result (adding
 // ended_at and updated_at) and keeps the side effects (timers, processes, messages to the agent).

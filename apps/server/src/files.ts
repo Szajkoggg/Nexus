@@ -14,7 +14,7 @@ import { Readable } from "node:stream";
 import type { CommitDetail } from "@nexus/protocol";
 import { git } from "./gitinfo.ts";
 
-/** Text longer than this is cut (DESIGN.md, the file viewer: files over 1 MB are cut with a note). */
+/** Text longer than this is cut (docs/design/dashboard.md, "The file viewer": files over 1 MB are cut with a note). */
 export const MAX_TEXT = 1024 * 1024;
 
 /**

@@ -14,7 +14,7 @@ import { withHeard } from "../voice.ts";
 // ---------------------------------------------------------------- status colours
 
 type Tone = { dot: string; text: string };
-// A status is a dot and a word in the status's colour, never a ring or a filled pill (docs/DESIGN.md, theme tokens).
+// A status is a dot and a word in the status's colour, never a ring or a filled pill (docs/design/dashboard.md, "Colours are theme tokens").
 // Written out in full so Tailwind sees every class.
 const TONES: Record<string, Tone> = {
   pending: { dot: "bg-fg-3", text: "text-fg-3" },

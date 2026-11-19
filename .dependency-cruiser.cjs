@@ -1,5 +1,5 @@
 // dependency-cruiser for Nexus: the module boundaries AGENTS.md describes, checked by a machine
-// (docs/DESIGN.md, "Static analysis"). Only boundaries; no style or "good practice" rules.
+// (docs/design/checks.md, "Static analysis"). Only boundaries; no style or "good practice" rules.
 /** @type {import('dependency-cruiser').IConfiguration} */
 module.exports = {
   forbidden: [

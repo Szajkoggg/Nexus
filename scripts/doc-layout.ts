@@ -9,7 +9,10 @@ export interface Split {
 }
 
 /** The documents split so far. */
-export const SPLITS: Split[] = [{ index: "docs/PROTOCOL.md", dir: "docs/protocol" }];
+export const SPLITS: Split[] = [
+  { index: "docs/PROTOCOL.md", dir: "docs/protocol" },
+  { index: "docs/DESIGN.md", dir: "docs/design" },
+];
 
 /** A topic file over this size gets a warning (never a failure): it should be split along its headings. */
 export const TOPIC_WARN_BYTES = 40 * 1024;

@@ -17,7 +17,7 @@ import { hasItem } from "./hash.ts";
  */
 export type Layer = string;
 /**
- * The view: the phone's tab (below 1024 px; "The phone" in DESIGN.md), or what a desktop's middle column shows (the
+ * The view: the phone's tab (below 1024 px; "The phone" in docs/design/dashboard.md), or what a desktop's middle column shows (the
  * chat, Ideas, the project's queues or its Stats; "Chat-first on a desktop"). It is not a layer: switching rewrites the entry it
  * is on and adds none, so Back closes sheets and layers, then leaves. Absent until one is picked (the layout's first).
  */

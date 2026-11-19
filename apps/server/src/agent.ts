@@ -21,7 +21,7 @@ export interface StreamFacts {
   /**
    * The runtime has saved the session's conversation (true), or says it has none (false). Claude Code saves it when it
    * reads the session's first message (probed 2026-11-15): its first turn's start shows that, and the CLI's refusal of
-   * a start names either case (DESIGN.md, "When Claude Code saves a conversation").
+   * a start names either case (docs/design/engine.md, "When Claude Code saves a conversation").
    */
   saved?: boolean;
   /** The process was replaced by a new one (a start Claude Code refused, tried again): its id. */
@@ -34,7 +34,7 @@ export interface ActivityItem { kind: "turn_start" | "text" | "tool" | "tool_err
 /**
  * Why a turn failed, read from the runtime's codes. `passing`: worth trying the turn again later (overloaded, a short
  * rate limit, the network). `lasting`: needs the user (authentication, an invalid request, a refusal, anything
- * unknown). `usage`: a subscription limit with a known reset time (`resetsAt`). See DESIGN.md, "Failures".
+ * unknown). `usage`: a subscription limit with a known reset time (`resetsAt`). See docs/design/engine.md, "Failures".
  */
 /**
  * One turn's tokens, the same four for both runtimes. `input` is the input not read from the cache (Claude Code's
@@ -85,7 +85,7 @@ export interface AgentEvents {
    * `tokens` and `costUsd`: this turn's alone (never a running total), when the runtime said; `costUsd` only where it
    * reports one (Claude Code), and not for the first turn of a resumed process (its running total starts with the
    * earlier turns'). `subagentTokens`: what its sub-agents used within the turn, apart from `tokens` (the main loop's);
-   * Claude Code only, and not for the first turn of a resumed process (DESIGN.md, "Sub-agent tokens").
+   * Claude Code only, and not for the first turn of a resumed process (docs/design/usage.md, "Sub-agent tokens").
    */
   turnEnd: [{ ok: boolean; text: string; failure?: TurnFailure; tokens?: TurnTokens; subagentTokens?: TurnTokens; costUsd?: number }];
   /** The work the agent left running in the background changed (see AgentProcess.background); emitted on every change. */
@@ -106,7 +106,7 @@ export interface AgentProcess extends EventEmitter<AgentEvents> {
   readonly pid?: number;
   /**
    * What the agent started that runs on outside its turns (a background command, a sub-agent), one short description
-   * each; empty when nothing does. Read live from the runtime's stream (DESIGN.md, "Background work"): Claude Code's
+   * each; empty when nothing does. Read live from the runtime's stream (docs/design/engine.md, "Background work"): Claude Code's
    * background_tasks_changed; Codex's command items still open after their turn and its sub-agents not yet completed.
    * Optional: a stand-in without it has none.
    */

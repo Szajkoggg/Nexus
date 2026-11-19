@@ -187,7 +187,7 @@ test("the worker's texts: briefing, step openings, inbox entries, seeds and nudg
   change();
   later(); engine.resume("Q");
 
-  tr.section("the nudges after background work (DESIGN.md, \"Background work\"; noOutcomeNudge): it has finished; it still runs after the limit");
+  tr.section("the nudges after background work (docs/design/engine.md, \"Background work\"; noOutcomeNudge): it has finished; it still runs after the limit");
   tr.add(noOutcomeNudge("A1", { finished: true }));
   tr.add(noOutcomeNudge("A1", { finished: false, minutes: 30, work: ["Run the e2e suite", "sub-agent /root/review"] }));
 

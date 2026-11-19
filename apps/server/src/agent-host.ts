@@ -139,7 +139,7 @@ export class AgentHost<E extends object = object> {
    * a runtime record) and its runtime saved its conversation: Claude Code saves it only when it reads the first
    * message, so a process that ended before left nothing to resume (`--resume` then fails with "No conversation
    * found"), and the session starts afresh with the same id. A record without the mark (`conversation_saved`, written
-   * before queue RN) is taken as saved: no conversation that may exist is dropped (DESIGN.md, "When Claude Code saves
+   * before queue RN) is taken as saved: no conversation that may exist is dropped (docs/design/engine.md, "When Claude Code saves
    * a conversation").
    */
   start(session: SessionFile, launch: (resume: boolean) => Launch, extra: E, handlers: (l: Hosted<E>) => HostHandlers): Hosted<E> {
@@ -150,7 +150,7 @@ export class AgentHost<E extends object = object> {
     const owned = { ...how, options: { ...how.options, ownProcesses: session.role === "worker" ? true : undefined } } as Launch;
     const proc = this.spawn(this.withBriefingFile(session.id, owned));
     // Whatever the agent is given to act on comes with the server's clock mark in .nexus/clock.json, so its `nexus`
-    // calls stamp their records after everything the server had seen (docs/DESIGN.md, "Clock steps").
+    // calls stamp their records after everything the server had seen (docs/design/state.md, "Clock steps").
     const send = proc.send.bind(proc);
     proc.send = (text, priority) => {
       try { this.store.writeClock(); } catch (e) { console.error(`clock.json: ${(e as Error).message}`); }

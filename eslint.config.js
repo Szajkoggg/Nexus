@@ -1,4 +1,4 @@
-// ESLint for Nexus: correctness rules only, no style rules (docs/DESIGN.md, "Static analysis").
+// ESLint for Nexus: correctness rules only, no style rules (docs/design/checks.md, "Static analysis").
 // Every rule here catches a bug a test may miss; formatting and taste are not checked.
 import tseslint from "typescript-eslint";
 import reactHooks from "eslint-plugin-react-hooks";

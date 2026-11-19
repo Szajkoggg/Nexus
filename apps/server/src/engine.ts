@@ -1,5 +1,5 @@
 // The queue engine: drives an approved queue step by step through a Nexus-launched session, delivers notes,
-// messages and answers to live sessions, and records what the agent does. See docs/DESIGN.md, "Nexus drives the
+// messages and answers to live sessions, and records what the agent does. See docs/design/overview.md, "Nexus drives the
 // queue, step by step". All of its state is in files (run.yaml, runtime.json, delivered.jsonl, activity.jsonl);
 // the processes are the only thing a restart loses, and a restart pauses the runs that had one.
 import { changedFiles, checkoutOf, git as gitRead, ownWorktree, recordStepEnd, recordStepStart, recordTurn } from "./gitinfo.ts";
@@ -76,7 +76,7 @@ const USAGE_MARGIN_MS = 60_000;
 
 /**
  * How long a turn's end without the step's outcome waits for the work the agent left running in the background (a
- * command, a sub-agent) before the usual rule (one nudge, then a halt) applies. DESIGN.md, "Background work".
+ * command, a sub-agent) before the usual rule (one nudge, then a halt) applies. docs/design/engine.md, "Background work".
  */
 const BACKGROUND_LIMIT_MS = 30 * 60_000;
 
@@ -966,7 +966,7 @@ export class Engine implements Member {
   }
 
   /**
-   * A turn of `step` ended without its outcome while `work` runs in the background (DESIGN.md, "Background work").
+   * A turn of `step` ended without its outcome while `work` runs in the background (docs/design/engine.md, "Background work").
    * `wait`: Nexus waits for it (the end of the work, or the limit, looks again); else the usual rule applies, with what
    * the nudge says about the background work: it has finished (Codex starts no turn of its own then), or it still runs
    * after the limit. Undefined: there was none.
@@ -1004,7 +1004,7 @@ export class Engine implements Member {
   /**
    * Makes the session fit the next step before it opens; returns whether it took the next move instead.
    *
-   * - Another runtime than the session's, or (context care, DESIGN.md "Context care between steps") a context beyond
+   * - Another runtime than the session's, or (context care, docs/design/usage.md "Context care between steps") a context beyond
    *   the project's threshold (context_reuse_tokens, at most 80 % of the model's window: contextLimit): the step runs in a fresh session with the step's runtime, model and effort,
    *   seeded with the ended step's context summary and the queue's text. A missing summary is asked for once; if it is
    *   still missing, the seed is the queue's description and its finished steps' summaries. Without a known context
@@ -1787,7 +1787,7 @@ export class Engine implements Member {
     // goes on, so the dashboard can show when it ended and how long it took.
     const old = this.store.readRun(queueId);
     // A run that stops going is stamped after what its worker wrote last, even a line the watcher has not delivered
-    // yet: reading the session's log takes its times up (docs/DESIGN.md, "Clock steps").
+    // yet: reading the session's log takes its times up (docs/design/state.md, "Clock steps").
     if (runEnded(run) && !(old && runEnded(old)) && run.session) this.store.readEvents(run.session);
     const ended = runEnded(run)
       ? (old && runEnded(old) && old.ended_at ? old.ended_at : now())

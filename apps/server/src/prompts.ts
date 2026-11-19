@@ -50,7 +50,7 @@ const CHAIN_SHORT = "keep a chain short enough that its error shows which part f
  * How the worker, the orchestrator and a thinking partner run nexus and git commands (queue SH): their allow rules
  * (shell-rules.ts) match a command that starts with the name, on Bash and PowerShell alike, and under `dontAsk` every
  * part of a chain must match one. A chain's form follows the shell (queue BR, decided by the user 2026-11-19 after the
- * probe in DESIGN.md, "A chained commit and step report"): Windows PowerShell 5.1 has no `&&`. A refused chain is run
+ * probe in docs/design/engine.md, "A chained commit and step report"): Windows PowerShell 5.1 has no `&&`. A refused chain is run
  * as its commands, one each; no rule is added for it. Codex has no allow rules (its sandbox decides) and on Windows
  * runs its commands in PowerShell.
  */
@@ -238,7 +238,7 @@ function integrationText(step: string, c: IntegrationContext, byNexus: boolean):
 
 /**
  * The turn ended and the step has no outcome: asked once. `background`: the turn had left work running in the
- * background and Nexus waited for it (DESIGN.md, "Background work"): it has `finished`, or it still runs after
+ * background and Nexus waited for it (docs/design/engine.md, "Background work"): it has `finished`, or it still runs after
  * `minutes` and Nexus waits no longer.
  */
 export function noOutcomeNudge(step: string, background?: { finished: true } | { finished: false; minutes: number; work: readonly string[] }): string {

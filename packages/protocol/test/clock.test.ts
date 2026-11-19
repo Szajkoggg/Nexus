@@ -1,4 +1,4 @@
-// The stamps Nexus writes and the order it reads logs in, across clock steps (docs/DESIGN.md, "Clock steps"; queue FL).
+// The stamps Nexus writes and the order it reads logs in, across clock steps (docs/design/state.md, "Clock steps"; queue FL).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";

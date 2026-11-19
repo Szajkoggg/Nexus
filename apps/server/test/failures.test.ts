@@ -1,5 +1,5 @@
 // How the adapters tell a failed turn's reason from the runtimes' codes (src/claude.ts, src/codex.ts). The shapes are
-// the Agent SDK's sdk.d.ts (Claude Code) and `codex app-server generate-ts` (Codex); see DESIGN.md, "Failures".
+// the Agent SDK's sdk.d.ts (Claude Code) and `codex app-server generate-ts` (Codex); see docs/design/engine.md, "Failures".
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { classifyClaudeResult } from "../src/claude.ts";

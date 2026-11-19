@@ -1,4 +1,4 @@
-// The dashboard's translation layer (DESIGN.md, "The interface texts in one place"): every text the dashboard shows
+// The dashboard's translation layer (docs/design/dashboard.md, "The interface texts in one place"): every text the dashboard shows
 // is a key in a catalogue, English the source (messages/en.ts); t() looks a key up in the interface language, with
 // parameters and plural forms, and falls back to English for a key a translation lacks. Dates, times and durations
 // are formatted here too, through Intl with the interface language's locale. Pure and unit tested; no React.

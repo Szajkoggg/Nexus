@@ -7,7 +7,7 @@
 // The commits of a step are those between. In the project's main checkout others may commit too (the user, another
 // queue): a commit made outside every turn of the worker's session on that step is marked foreign. Which turn a commit
 // was made in comes from the HEADs the server records at each turn's start and end (a round's `turns`), not from the
-// commit's time: git, the CLI and the server may disagree about the time after a clock step (docs/DESIGN.md, "Clock
+// commit's time: git, the CLI and the server may disagree about the time after a clock step (docs/design/state.md, "Clock
 // steps"). Rounds recorded before keep the time windows.
 import { execFileSync } from "node:child_process";
 import { normPath, now, type BranchView, type CommitView, type GitFile, type LeftBehind, type ProjectStore, type QueueView, type RoundView, type StepCommitsView } from "@nexus/protocol";

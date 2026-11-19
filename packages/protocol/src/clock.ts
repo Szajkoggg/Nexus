@@ -1,4 +1,4 @@
-// The time Nexus stamps on what it writes (docs/DESIGN.md, "Clock steps"): never earlier than a time this process has
+// The time Nexus stamps on what it writes (docs/design/state.md, "Clock steps"): never earlier than a time this process has
 // already read in another writer's records or stamped itself, so an effect is stamped after its cause even when this
 // process's clock lags (V8 on Windows re-reads the system time only once a minute: after an NTP step a long-lived
 // server writes on the old base while every `nexus` call already uses the new one) or the clock stepped back.
@@ -32,7 +32,7 @@ export function now(): string {
 export const clockMark = (): string | undefined => (mark ? new Date(mark).toISOString() : undefined);
 
 /**
- * Merges logs that each have one writer into one order (docs/DESIGN.md, "Clock steps"): a log's own lines keep the order
+ * Merges logs that each have one writer into one order (docs/design/state.md, "Clock steps"): a log's own lines keep the order
  * they were written in, whatever their times say. A line's effective time is its `at` raised to the previous line's
  * effective time in the same log; the logs are merged by effective time, then by `key` (compareIds order). For logs
  * written without a clock step this is the plain sort by (at, key); a log written across a backward step keeps its

@@ -1,4 +1,4 @@
-// A clock step between the server and its agents (docs/DESIGN.md, "Clock steps"; queue FL): the stop-at-once and the
+// A clock step between the server and its agents (docs/design/state.md, "Clock steps"; queue FL): the stop-at-once and the
 // stopped-work tests run again with the test process's clock (the engine's) 5 s and 240 s behind the system clock, as
 // after a forward NTP step that V8 sees up to a minute late, and 60 s ahead, as after a backward step. Their children
 // (the CLI, the fake runtimes, git) keep the system clock. Each must pass as it does without a step: the interrupted

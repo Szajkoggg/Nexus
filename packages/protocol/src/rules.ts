@@ -1,4 +1,4 @@
-// Where a project's rules live (DESIGN.md, "A project's rules: AGENTS.md, pulled into CLAUDE.md"). Codex reads
+// Where a project's rules live (docs/design/overview.md, "A project's rules: AGENTS.md, pulled into CLAUDE.md"). Codex reads
 // AGENTS.md; Claude Code reads CLAUDE.md and sees AGENTS.md only when CLAUDE.md pulls it in with a line `@AGENTS.md`.
 // Nexus's convention: the rules are in AGENTS.md, and CLAUDE.md pulls them in. This module is the pure check of a
 // project root's two files (their contents in, the result out) and the fix it offers, which keeps the files' line

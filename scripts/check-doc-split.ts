@@ -13,6 +13,12 @@ import { join } from "node:path";
 
 const TOPIC_DIR: Record<string, string> = { PROTOCOL: "protocol", DESIGN: "design" };
 
+/**
+ * Edits of a reference that a split had to make inside moved text (not a move): the original's text, then the new one.
+ * Applied to the original before the comparison, so the proof still holds for everything else.
+ */
+const REFERENCE_REWRITES: [string, string][] = [["nexus doc docs/DESIGN.md#Static analysis", "nexus doc docs/design/checks.md#Static analysis"]];
+
 function normalize(line: string): string {
   return line
     .replace(/\s+$/, "")
@@ -66,7 +72,8 @@ if (process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, "
   const index = readFileSync(`docs/${doc}.md`, "utf8");
   const files = readdirSync(join("docs", dir)).filter((f) => f.endsWith(".md")).sort();
   const topics = files.map((f) => readFileSync(join("docs", dir, f), "utf8"));
-  const diff = differences(original, index, topics);
+  const rewritten = REFERENCE_REWRITES.reduce((text, [from, to]) => text.split(from).join(to), original);
+  const diff = differences(rewritten, index, topics);
   if (diff.length) {
     console.log(diff.join("\n"));
     console.log(`${diff.length} line(s) differ from ${base}:docs/${doc}.md`);

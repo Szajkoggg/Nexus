@@ -1,4 +1,4 @@
-// The estimate of a turn's use of the usage windows (usage-estimate.ts; DESIGN.md, "Estimating a turn's use"), on a
+// The estimate of a turn's use of the usage windows (usage-estimate.ts; docs/design/usage.md, "Estimating a turn's use"), on a
 // made-up turns.jsonl read back as the server would read it: a turn alone, two overlapping turns with different tokens,
 // an overlapping Codex turn (Codex's windows are apart from Claude Code's), a window that reset during the turn, missing
 // window data, a partial overlap, sub-agent tokens, and a turn whose tokens are unknown; and the token weights by runtime.

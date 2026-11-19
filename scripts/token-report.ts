@@ -7,7 +7,7 @@
 // It only reads: ~/.claude/projects (every folder, sub-agents' transcripts too), ~/.codex/sessions, <NEXUS_HOME>
 // (projects.yaml, turns.jsonl) and each project's .nexus/sessions (session.yaml for the roles, events.jsonl for the
 // quality signals). The report holds totals only. The breakdowns are scripts/token-report/analysis.ts; the method is
-// docs/DESIGN.md, "Measuring token use"; the use, README.md.
+// docs/design/usage.md, "Measuring token use"; the use, README.md.
 import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";

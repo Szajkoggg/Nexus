@@ -1,4 +1,4 @@
-// The dashboard's texts in English, the source every translation follows (i18n.ts; DESIGN.md, "The interface texts
+// The dashboard's texts in English, the source every translation follows (i18n.ts; docs/design/dashboard.md, "The interface texts
 // in one place"). One flat object: a key names where the text is used ("rail.…", "notify.…"), its value is the text,
 // with {name} where a parameter goes, or one form per plural category ({ one, other }) chosen by the `count`
 // parameter. A translation is a catalogue with the same keys; what it lacks shows in English.

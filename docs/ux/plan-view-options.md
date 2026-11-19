@@ -9,7 +9,7 @@ seed `scripts/capture/seed-plan-nexus.ts` writes the same plan for the dashboard
 - Features on A (PL2): `mockups/23-plan-features.html?f=critical|blocked|line|drag|undo|lanes|time|folded`, and
   `?f=phone` at 390 px.
 - Both take `?theme=paper|honey`. They are drawn by `mockups/plan-mock.js` and `mockups/plan-features.js` and
-  measured by `scripts/layout-faults.ts` (see docs/DESIGN.md, "Layout faults").
+  measured by `scripts/layout-faults.ts` (see docs/design/dashboard.md, "Layout faults").
 
 **The user's choice (PL1 review, 2026-11-15): layout A**, at 1440 px and at 390 px.
 

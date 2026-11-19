@@ -1,4 +1,4 @@
-// The waits of the tests that run fake runtimes, servers or git (decided 2026-11-14, queue TS; DESIGN.md, "The tests'
+// The waits of the tests that run fake runtimes, servers or git (decided 2026-11-14, queue TS; docs/design/tests.md, "The tests'
 // waits"). A test waits for something the code under test does by itself (a run to finish, a reply, a server to
 // answer): short, so that a change that breaks many tests fails the suite in minutes rather than hours of 20-30 s
 // timeouts, and polled often, so that a passing test does not idle.

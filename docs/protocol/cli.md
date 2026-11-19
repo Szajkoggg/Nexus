@@ -44,7 +44,7 @@ nexus ideas status agent-standards.md#2026-11-14   # one entry's effective statu
 nexus ideas status --full                      # everything as JSON: effective dispositions, implementation assessments with every entry's snapshot (its text and its queues' evidence), conflicts and history (megabytes on a large project)
 nexus ideas matches                            # the suggestions for matching earlier queues to the notes' entries, and the user's decisions (read only; deciding is the user's, in the dashboard)
 nexus doc docs/DESIGN.md                       # a Markdown file's headings: one per line, indented by level, with its # marks and line number (read only; no session needed)
-nexus doc docs/DESIGN.md#Static analysis       # one section: from its heading to the next heading of the same or a higher level; named by the heading's text or its anchor (static-analysis), case ignored
+nexus doc docs/design/checks.md#Static analysis       # one section: from its heading to the next heading of the same or a higher level; named by the heading's text or its anchor (static-analysis), case ignored
 nexus doc agent-standards.md#2026-11-14        # a dated entry: every heading that begins with the date (### 2026-11-14 and ### 2026-11-14 (later): …); the path from the working directory, else the project's root, else the notes folder (as nexus covers); a `#` line in a fenced code block (``` or ~~~) is no heading; an unknown section is refused (exit 2) with the file's sections and dates
 # thinking partner only
 nexus covers tags.md#2026-11-14 docs/ideas/plan.md#2026-11-15   # in a hand-over: the Decided entries it passes on (ideas.covered); the notes folder may be left out; each checked against the notes, a missing note or date refused with the note's dates

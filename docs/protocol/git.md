@@ -45,7 +45,7 @@ new arises on the base itself.
 
 ### Without a model
 
-**Status: built (queue MI, step MI2).** The reasons are in DESIGN.md, "The integration step without a model"; the
+**Status: built (queue MI, step MI2).** The reasons are in DESIGN.md, ["The integration step without a model"](../design/git.md#the-integration-step-without-a-model-queue-mi); the
 marks **(M1)**…**(M13)** are MI1's proposals, which the user accepted on 2026-11-18 as written. The engine's part is in
 `apps/server/src/engine.ts` (`integrateWithoutModel`), the git part in `apps/server/src/integration.ts`.
 

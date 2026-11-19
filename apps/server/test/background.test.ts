@@ -1,5 +1,5 @@
 // A turn that ends while the agent's background work runs (a command, a sub-agent) is not a turn without an outcome:
-// the engine waits for the work's end, up to a limit, and then the usual rule applies (DESIGN.md, "Background work").
+// the engine waits for the work's end, up to a limit, and then the usual rule applies (docs/design/engine.md, "Background work").
 // Against the fake runtimes, which report background work as the probes of 2026-11-14 saw it: Claude Code starts a
 // turn by itself when the work ends, Codex does not.
 import { test } from "node:test";

@@ -1,4 +1,4 @@
-// Nexus runs the queue's checks (DESIGN.md, "Nexus runs the checks"; docs/protocol/checks.md, "Checks run by Nexus"; queue EC,
+// Nexus runs the queue's checks (docs/design/checks.md, "Nexus runs the checks"; docs/protocol/checks.md, "Checks run by Nexus"; queue EC,
 // decided 2026-11-17 and 2026-11-18). After a worker's `nexus step done`, the engine runs the project's and the queue's
 // checks itself, as one heavy operation of the workstation (src/capacity.ts), each a child process outside the event
 // loop with its output in a log under the queue's folder, its state written to queues/<id>/checks.yaml before it

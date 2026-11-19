@@ -147,7 +147,7 @@ function dropProject(e: Entry): { parts: Parameters<typeof stopProject>[0]; clos
 
 /**
  * The project's state, one snapshot passed on until this process writes (writeCount) or a change from outside clears it
- * (changed()): a rebuild reads the whole history, about 120 ms on a project of 70 queues (DESIGN.md, "The cost of
+ * (changed()): a rebuild reads the whole history, about 120 ms on a project of 70 queues (docs/design/state.md, "The cost of
  * rebuilding state").
  */
 function stateOf(e: Entry): ProjectState | undefined {

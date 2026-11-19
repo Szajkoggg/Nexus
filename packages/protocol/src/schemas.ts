@@ -1077,7 +1077,7 @@ export const GitFile = z.object({
     /**
      * The HEAD at the start and the end of each turn of the session on the step in this round (an open turn has no
      * `end`): a commit of the round is the step's when it is in some turn's start..end, foreign when only between turns.
-     * Absent on rounds recorded before (queue FL): those keep the time windows (docs/DESIGN.md, "Clock steps").
+     * Absent on rounds recorded before (queue FL): those keep the time windows (docs/design/state.md, "Clock steps").
      */
     turns: z.array(z.object({ start: z.string().nullable(), end: z.string().nullable().optional() })).optional(),
   }))).default({}),

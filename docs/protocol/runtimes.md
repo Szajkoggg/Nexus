@@ -206,7 +206,7 @@ It reads `turn/started` and `turn/completed` (the turn's status), `item/started`
 `thread/tokenUsage/updated` (the last request's input tokens are the context in use; `modelContextWindow`) and
 `account/rateLimits/updated` (stored as `codex_<window>` in `usage.json`, e.g. `codex_7d`). Only notifications of the
 session's own thread count: a sub-agent's thread sends its own turns and items over the same connection, and they are
-ignored. Background work (DESIGN.md, "Background work"): a `commandExecution` item still open when its turn has
+ignored. Background work (DESIGN.md, ["Background work"](../design/engine.md#background-work)): a `commandExecution` item still open when its turn has
 completed, and a sub-agent from its `subAgentActivity` `started` (or `interacted`) until its `completed` (or
 `interrupted`). Checked against Codex CLI 0.167.2.
 
@@ -234,7 +234,7 @@ From stdout it reads `system/init` (a turn starts), `assistant` (tool calls, tex
 of background tasks: a Bash command or a sub-agent started with `run_in_background`; when one ends, the CLI starts a
 turn by itself with its notification) and `result` (the turn ended; the context window from `modelUsage`). After a
 turn ends it decides the next move from the step's state: next step, wait (question, review, background work: see
-DESIGN.md, "Background work"), nudge once if the step has no outcome, or halt.
+DESIGN.md, ["Background work"](../design/engine.md#background-work)), nudge once if the step has no outcome, or halt.
 
 ### Windows worker process host (PT)
 
@@ -277,7 +277,7 @@ or a turn without an outcome keeps the existing background-work policy. Failures
 uncertain cleanup. Resume while cleanup is pending is deferred until its acknowledgement, including automatic
 resumes after a cancelled drain; a subsequent run change cancels that request. Resume while an immediate stop is
 still exiting remains 409. Orchestrator and thinking-partner process ownership is unchanged. The implementation is Windows
-only; its scope and the console-lifetime finding are documented in DESIGN.md, "Worker process ownership on Windows".
+only; its scope and the console-lifetime finding are documented in DESIGN.md, ["Worker process ownership on Windows"](../design/engine.md#worker-process-ownership-on-windows-queue-pt).
 
 ### Full-test lock and lifetime channel (PT2)
 

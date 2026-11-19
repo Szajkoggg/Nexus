@@ -4,7 +4,7 @@
  * Theme tokens. Every colour in the dashboard is one of these, used through Tailwind (`bg-surface`, `text-fg-2`,
  * `border-line`, `text-warn`, `bg-review/10`, …); Tailwind's own palette is switched off, so a class from that palette
  * produces nothing. The values below are the Graphite theme (docs/ux/mockups/mock.css), the default; Paper and Honey
- * set the same variables further down. The scheme is in docs/DESIGN.md.
+ * set the same variables further down. The scheme is in docs/design/dashboard.md, "Colours are theme tokens".
  */
 @theme {
   --color-*: initial;

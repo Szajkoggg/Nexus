@@ -12,7 +12,7 @@ Every line:
 
 **Times and order.** Clocks step (an NTP sync, a correction), and a long-lived process may see it late (V8 on Windows
 re-reads the system time once a minute), so the server, a `nexus` call and git may disagree for a while
-(docs/DESIGN.md, "Clock steps"). Two rules keep the order of what happened:
+(docs/DESIGN.md, ["Clock steps"](../design/state.md#clock-steps-ordering-by-what-was-seen-not-by-the-wall-clock-queue-fl-plan-fl4)). Two rules keep the order of what happened:
 
 - *A writer never stamps a time earlier than one it has read.* A record's `at` is the wall clock raised to the latest
   `at` the writing process has read in another writer's log (events, inbox, applied) or stamped itself. A time more

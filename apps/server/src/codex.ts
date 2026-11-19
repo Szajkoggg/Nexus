@@ -38,7 +38,7 @@ export interface CodexOptions extends AgentOptions {
    * `writableRoots` are then not sent, neither at thread/start nor in a turn's sandbox policy, since Codex lets the
    * older settings win over a profile. The orchestrator's (decided by the user 2026-11-16, queue OC): extends
    * `:read-only`, writes only its drafts folder and its own events.jsonl (a single file may be granted). Probed with
-   * Codex 0.167.2 on Windows (DESIGN.md, "An orchestrator on Codex can be kept to its drafts").
+   * Codex 0.167.2 on Windows (docs/design/runtimes.md, "An orchestrator on Codex can be kept to its drafts").
    */
   permissions?: CodexPermissions;
 }
@@ -318,7 +318,7 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
    * not at thread/start (probed 2026-11-15), so a process that ended between the two left a thread id with nothing
    * behind it, and thread/resume fails with "no rollout found for thread id <id>". Then there is no conversation to
    * lose: a new thread is started instead, its id recorded (facts `nativeId`), and the session's message goes into it
-   * (queue RN; DESIGN.md, "When Claude Code saves a conversation"). Any other failure stays a failure.
+   * (queue RN; docs/design/engine.md, "When Claude Code saves a conversation"). Any other failure stays a failure.
    */
   private async resumeThread(threadId: string, common: Json): Promise<Json> {
     try {

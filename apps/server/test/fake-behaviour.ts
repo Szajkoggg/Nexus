@@ -227,7 +227,7 @@ export function recordArgs(what: Record<string, unknown>): void {
  * The conversations Claude's fake saved, across its processes: one id per line in a file in the test's temporary
  * folder (beside FAKE_LOG, else in NEXUS_HOME, else the system's). Claude Code 2.1.323 saves a session's
  * conversation when it reads the session's first message, not at its start nor at the turn's end (probed
- * 2026-11-15, DESIGN.md, "When Claude Code saves a conversation"); a test may mark one saved itself (a session that
+ * 2026-11-15, docs/design/engine.md, "When Claude Code saves a conversation"); a test may mark one saved itself (a session that
  * ran before the test's files). Codex's fake keeps its threads the same way (fake-codex-saved.txt): Codex 0.167.2
  * saves a thread (its rollout file) when the thread's first turn starts, not at thread/start (probed 2026-11-15).
  */

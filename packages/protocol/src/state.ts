@@ -355,7 +355,7 @@ export function loadProjectState(store: ProjectStore): ProjectState {
     } catch (e) { warnings.push(`session ${id}: ${(e as Error).message}`); }
   }
   // By time, then id, but each log keeps the order it was written in, whatever its times say after a clock step
-  // (docs/DESIGN.md, "Clock steps").
+  // (docs/design/state.md, "Clock steps").
   const events = inFileOrder(logs, (e) => e.at, (e) => e.id);
 
   // Send-backs the server delivered to a worker, by the review.sent_back event they carry out.

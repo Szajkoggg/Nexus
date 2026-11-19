@@ -1,6 +1,6 @@
 // Reading Claude Code's and Codex's transcripts into one shape: the model calls, each with its tokens and the tool calls
 // it made (and what came back to them). Pure functions of a transcript's text, so the tests feed made-up transcripts;
-// scripts/token-report.ts finds the files. The method is in docs/DESIGN.md, "Measuring token use".
+// scripts/token-report.ts finds the files. The method is in docs/design/usage.md, "Measuring token use".
 import type { TokenCounts } from "@nexus/protocol";
 import { zeroTokens } from "./tokens.ts";
 

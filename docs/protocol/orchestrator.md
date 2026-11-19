@@ -23,7 +23,7 @@ sandbox settings: `thread/start` sends no `sandbox`, its `config` has `default_p
 `<.nexus>/sessions/<its session>/events.jsonl`, the one file the `nexus` CLI writes for it (Codex sandboxes every
 command, the CLI's too). No turn sends a `sandboxPolicy`. So it reads everything and can write neither the project's
 root, nor its own `session.yaml` (its role) or inbox, nor any other `.nexus` file, nor the user's (`away.yaml` lives
-in NEXUS_HOME); the internet is closed to it (this machine's own addresses are not: DESIGN.md, "An orchestrator on
+in NEXUS_HOME); the internet is closed to it (this machine's own addresses are not: [DESIGN.md](../design/runtimes.md#findings-from-building-phase-3), "An orchestrator on
 Codex can be kept to its drafts"). Before its process starts the server creates its `events.jsonl` empty, if missing,
 and the `.nexus/drafts` folder: the sandbox grants paths as they are when it starts, and cannot make them. A resumed
 thread (`thread/resume`) is sent the same `config` and no `sandbox`, and keeps the profile (probed). Approval policy `never`; web search `disabled`; the user's MCP servers,
@@ -175,7 +175,7 @@ fake-codex.ts).
 ## The orchestrator's context care
 
 The orchestrator is not compacted: it goes on in a fresh session started from a summary it writes on purpose (decided
-by the user on 2026-11-15; DESIGN.md, "The orchestrator's context care"). `orchestrator.context_threshold_tokens` (global
+by the user on 2026-11-15; DESIGN.md, ["The orchestrator's context care"](../design/usage.md#context-management)). `orchestrator.context_threshold_tokens` (global
 with a project override, default 500000) is the number of context tokens (`context_tokens` in its `runtime.json`)
 beyond which this happens, at most 80 % of its model's context window (`context_window`). (Before queue CT it was a
 share of the window, `orchestrator.context_threshold`; reading ignores that key, unconverted.)

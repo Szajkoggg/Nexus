@@ -1,4 +1,4 @@
-// The review helper (queue RH; DESIGN.md, "Routine reviews by a helper"; docs/protocol/review.md, "The review helper"): a
+// The review helper (queue RH; docs/design/review.md, "Routine reviews by a helper"; docs/protocol/review.md, "The review helper"): a
 // short-lived session that takes the orchestrator's routine review of one step, for one review round, on a model and
 // effort of its own (`review_helper`). It gets a fixed packet as its only message (packet.md, with the step's diff in
 // diff.patch beside it), reads, and decides with `nexus review accept|send-back|pass-on`; then its process ends. What

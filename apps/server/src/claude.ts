@@ -113,7 +113,7 @@ export interface ClaudeOptions {
   appendSystemPrompt?: string;
   /**
    * Where the briefing is written for the CLI to read (--append-system-prompt-file), anew at each start: AgentHost
-   * gives the session's own file. Not on the command line, which Windows limits to 32,767 characters in all (DESIGN.md,
+   * gives the session's own file. Not on the command line, which Windows limits to 32,767 characters in all (docs/design/engine.md,
    * "The orchestrator's briefing and the command line").
    */
   briefingFile?: string;
@@ -502,7 +502,7 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
         const total = typeof m.total_cost_usd === "number" ? m.total_cost_usd : undefined;
         const costUsd = total !== undefined && this.costSoFar !== undefined ? Math.max(0, Math.round((total - this.costSoFar) * 1e9) / 1e9) : undefined; // to a nano-dollar: no float residue
         if (total !== undefined) this.costSoFar = total;
-        // Sub-agents' tokens: in modelUsage's running total, not in result.usage (DESIGN.md, "Sub-agent tokens").
+        // Sub-agents' tokens: in modelUsage's running total, not in result.usage (docs/design/usage.md, "Sub-agent tokens").
         const tokens = claudeTurnTokens(m.usage);
         const modelTotal = claudeModelTotals(m.modelUsage);
         const sub = subagentTokens(modelTotal, this.modelSoFar, tokens);

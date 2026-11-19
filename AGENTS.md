@@ -41,7 +41,7 @@ Nexus is developed with Nexus. The agents working on this repository are run by 
   nothing. Agents never rebase and never push.
 - **Before every commit**: `npm run typecheck`, `npm run lint` and the tests of the files you changed pass
   (`npm run test:files -- <files>`). If the dashboard changed: `npm run build -w @nexus/web`. Fix a lint finding rather
-  than silence it (docs/DESIGN.md, "Static analysis"). The whole suite (`npm test`) is no commit's check: it runs at the
+  than silence it (docs/design/checks.md, "Static analysis"). The whole suite (`npm test`) is no commit's check: it runs at the
   end of a step, as the queue's checks, and Nexus runs them itself after the worker's `nexus step done`, waiting for the
   machine as long as another full run takes; the worker neither runs nor waits for them, and gets their output only when
   one fails (a check-fix round, docs/protocol/checks.md "Checks run by Nexus"). Only where a step's opening does not say Nexus
@@ -62,12 +62,12 @@ Nexus is developed with Nexus. The agents working on this repository are run by 
   with a small model (Claude: `haiku`; Codex: `gpt-6-luna`), in a temporary directory, and say what it cost.
 - **Documentation**: a change to a file format, event, API or CLI updates the protocol in the same commit; a design
   decision or a finding from building goes to the design; what the user does differently goes to README.md.
-  PROTOCOL.md (and, once it is split, DESIGN.md) is an index with a table of contents; the text is in topic files
+  PROTOCOL.md and DESIGN.md are indexes with a table of contents; the text is in topic files
   (docs/protocol/, docs/design/). New text goes into the topic file its section belongs to (find it in the contents,
-  or `nexus doc docs/PROTOCOL.md` and the file named there). A new topic goes into a new file, listed in the
+  or `nexus doc docs/DESIGN.md` or `nexus doc docs/PROTOCOL.md` and the file named there). A new topic goes into a new file, listed in the
   contents. A topic file that has grown past about 40 KB is split along its headings, and the contents with it.
   `scripts/test/doc-layout.test.ts` checks the contents and every relative link and anchor, and warns about a
-  large file. Cite a section as `docs/protocol/<file>.md, "Section"` or `<file>#anchor`, never by line number.
+  large file. Cite a section as `docs/protocol/<file>.md, "Section"` (or docs/design/) or `<file>#anchor`, never by line number.
 - **Agents: lines**: a commit that changes something agents rely on (a CLI command, a briefing, the protocol, or a
   file an agent reads or writes) carries a line `Agents: <what changed>` in its message, one per change, written for
   an orchestrator whose briefing is older. At a deploy, every project's orchestrator is told these lines.

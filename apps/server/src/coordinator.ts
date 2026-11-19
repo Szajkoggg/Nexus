@@ -1,4 +1,4 @@
-// Over the projects' engines, the two rules about queues running side by side (DESIGN.md, "Never two queues in one
+// Over the projects' engines, the two rules about queues running side by side (docs/design/git.md, "Never two queues in one
 // checkout"): a checkout (the project's own, or a queue's worktree) has one queue at work at a time, and at most
 // `max_running` queues run at once across all projects, and at most a project's own `max_running` of that project's
 // (both limits hold; decided 2026-11-15, queue OP). A direct start that would break any of them is refused with the
