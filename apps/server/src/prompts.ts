@@ -11,6 +11,9 @@ import type { IntegrationContext } from "./integration.ts";
 
 export const RUNTIME_NAME = { claude: "Claude Code", codex: "Codex" } as const;
 
+/** The runtime a briefing is written for: Claude Code's tools and shells, or Codex's. */
+type Runtime = keyof typeof RUNTIME_NAME;
+
 // ---------------------------------------------------------------- languages
 
 /**
@@ -39,8 +42,6 @@ export function withLanguages(text: string, line: string | undefined): string {
 
 // ---------------------------------------------------------------- the worker
 
-type Runtime = keyof typeof RUNTIME_NAME;
-
 /** Said of a chain in every briefing: when to chain, and what goes as parallel calls instead (queue BR). */
 const CHAIN_WHEN = "Where a command needs only the previous one's success (git commit, then nexus step done), chain the two in one call";
 const CHAIN_SHORT = "keep a chain short enough that its error shows which part failed. Independent commands go as separate calls (parallel ones when they only read), never in one chain.";
@@ -66,10 +67,10 @@ export function shellCommands(runtime: Runtime): string {
  * name; Codex's in its own form (its shell).
  */
 export function readingRules(runtime: Runtime): string {
-  const find = runtime === "codex"
-    ? "Find with rg, with context lines (-C) and a limit (-m, or Select-Object -First), and read a known range of lines (Get-Content <file> | Select-Object -Skip <n> -First <m> in PowerShell, sed -n '<a>,<b>p' in a POSIX shell), rather than printing a whole file (Get-Content or cat without a range)"
-    : "Find with Grep, with context lines (-C) and a head_limit, and read a known range with Read's offset and limit, rather than a whole file (cat, sed, a Read without a limit)";
-  return `Read in parallel and in part: make independent reads (files, searches, git show, nexus status) ${runtime === "codex" ? "together" : "in one response"}, as parallel tool calls, not one after another. ${find}; read a whole file only when you need all of it. For reading, use the project's own scripts first; write a one-off node or python script only by exception, when no tool or script of the project answers, and only to read. Parallel calls are for reads: never two builds or test runs at once.`;
+  const [together, find] = runtime === "codex"
+    ? ["together", "Find with rg, with context lines (-C) and a limit (-m, or Select-Object -First), and read a known range of lines (Get-Content <file> | Select-Object -Skip <n> -First <m> in PowerShell, sed -n '<a>,<b>p' in a POSIX shell), rather than printing a whole file (Get-Content or cat without a range)"]
+    : ["in one response", "Find with Grep, with context lines (-C) and a head_limit, and read a known range with Read's offset and limit, rather than a whole file (cat, sed, a Read without a limit)"];
+  return `Read in parallel and in part: make independent reads (files, searches, git show, nexus status) ${together}, as parallel tool calls, not one after another. ${find}; read a whole file only when you need all of it. For reading, use the project's own scripts first; write a one-off node or python script only by exception, when no tool or script of the project answers, and only to read. Parallel calls are for reads: never two builds or test runs at once.`;
 }
 
 function workerBriefingText(runtime: Runtime): string {
@@ -108,7 +109,7 @@ export const WORKER_BRIEFING = workerBriefingText("claude");
 
 /** The worker's briefing for its runtime, and the language line when the languages are not the defaults. */
 export function workerBriefing(l: Languages, runtime: Runtime = "claude"): string {
-  const text = runtime === "claude" ? WORKER_BRIEFING : workerBriefingText(runtime);
+  const text = workerBriefingText(runtime);
   const line = workerLanguages(l);
   return line ? `${text}\n${line}` : text;
 }
@@ -395,7 +396,7 @@ export function formatInbox(m: InboxView, state: ProjectState, released = false)
  * context threshold (%), at which it goes on in a fresh session. `runtime`: on Codex (queue OC) it has no helpers
  * (Claude Code's subagents) and does their work itself, and its sandbox, not permission rules, keeps it to its drafts.
  */
-export function orchestratorBriefing(project: string, threshold: number, l: Languages = { working: "en" }, own = 85, runtime: "claude" | "codex" = "claude"): string {
+export function orchestratorBriefing(project: string, threshold: number, l: Languages = { working: "en" }, own = 85, runtime: Runtime = "claude"): string {
   const codex = runtime === "codex";
   const working = languageName(l.working);
   // Queue text follows the reader's language; with none set, the working language (as before the settings).
