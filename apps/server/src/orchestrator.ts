@@ -632,10 +632,10 @@ ${n.text}` });
   /**
    * The orchestrator's context care (decided by the user on 2026-11-15, queue CC): it is not compacted; it goes on in a
    * fresh session started from a summary it writes on purpose. When its context is fuller than its threshold
-   * (orchestrator.context_threshold) at the end of a turn, its process idle (and not settling), it is asked once for that summary (with
-   * `nexus context`); once that turn is over, a fresh session goes on from it (goOnFresh). Meanwhile notices, notes
-   * and the user's messages wait for the fresh session. A fresh session already that full at the end of its first turn
-   * is not switched again: another would be no emptier. True: what else this change would tell it waits.
+   * (orchestrator.context_threshold) at the end of a turn, its process idle and not settling, it is asked once for that
+   * summary (with `nexus context`); once that turn is over, a fresh session goes on from it (goOnFresh). Meanwhile
+   * notices, notes and the user's messages wait for the fresh session. A fresh session already that full at the end of
+   * its first turn is not switched again: another would be no emptier. True: what else this change would tell it waits.
    */
   private contextCare(state: ProjectState, s: SessionFile): boolean {
     const applied = this.store.readApplied(s.id).entries;

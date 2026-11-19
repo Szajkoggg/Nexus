@@ -30,8 +30,9 @@ function setup() {
   const timer = setInterval(tick, 150);
   const fill = (x: number) => writeFileSync(join(root, "fill"), String(x));
   /** What reached the fake orchestrator (FAKE_LOG), with the session it reached. */
-  const log = (): { text: string; session: string; priority: string | null }[] => (existsSync(process.env.FAKE_LOG!)
-    ? readFileSync(process.env.FAKE_LOG!, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l) as { text: string; session: string; priority: string | null })
+  type Sent = { text: string; session: string; priority: string | null };
+  const log = (): Sent[] => (existsSync(process.env.FAKE_LOG!)
+    ? readFileSync(process.env.FAKE_LOG!, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l) as Sent)
     : []);
   const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms, () => `; chat: ${JSON.stringify(orchestrator.view().chat.slice(-4))}`);
   const replies = () => orchestrator.view().chat.filter((c) => c.from === "orchestrator").length;
