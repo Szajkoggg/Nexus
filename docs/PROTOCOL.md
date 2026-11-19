@@ -1468,6 +1468,7 @@ nexus metric record bundle-kb 512 [--step W3]  # worker only: a value of a proje
 nexus metric list                              # the project's metrics (any session)
 nexus stats [--by model|effort|kind|activity|area|size|origin] [--project <id>] [--since <date>]   # see "Statistics"
 nexus stats --reviews [--project <id>] [--since <date>]   # the reviews' quality on three levels (see "The review helper")
+nexus stats --switches [--project <id>] [--since <date>]  # steps after a context switch against those without one (see "Context care")
 nexus step done W3 --summary "No floating body on any fixture" [--commit 1a2b3c] [--activities feature,test]   # warns at an unclean end; --activities: what was actually done (refused: a name on no list)
 nexus step failed W3 --reason "..."
 nexus stop W3 --condition "user decision" --reason "..."   # the condition as the queue words it; the reason short (shown first)
@@ -3471,6 +3472,14 @@ Its steps:
 [Nexus] Queue W "Variant B made a system" (revision 3, approved), step W3 (3 of 7): Support.
 ...
 ```
+
+What a switch costs in quality is measured by `nexus stats --switches` (`switchReport`, `packages/protocol/src/stats.ts`;
+queue CT): of the steps with an outcome (in the range and project), those that opened in a fresh session after a
+context switch (`switches` in the queue's current `run.yaml`, `why: context` or none) against those that opened in the
+session that ran the queue's step before them, each with the steps accepted in the first round (of those decided), the
+steps sent back at least once (of all; and the send-backs), and the check-fix rounds (failed check sets, all and per
+step). Steps that opened a session otherwise (a run's first step, a runtime switch, the closing refactoring step) are
+counted apart, in neither. A switch recorded in an archived run (`run.<time>.yaml`) is not read.
 
 ## The orchestrator's context care
 

@@ -15,7 +15,7 @@ import {
   TemplateError, fillTemplate, filledTemplateYaml, parseEvery, MaintenanceMode, readTemplates, templateQueueId, unusableTemplate, type MergedTemplates,
   type PictureRole, type ReviewItem, type Role, type Runtime, type SessionFile,
   noteRefIssue, parseNoteRef, readNotes, ideaMatches, ideaLinks, ideaStatuses, reportSourceHash,
-  capacityLines, latestCheckSet, readCapacity, reviewStats, reviewStatsText, helperAbout, helperText, NEXUS_PASS_ON, PassOnReason,
+  capacityLines, latestCheckSet, readCapacity, reviewStats, reviewStatsText, switchReport, switchReportText, helperAbout, helperText, NEXUS_PASS_ON, PassOnReason,
 } from "@nexus/protocol";
 import { checkRules, describeRules } from "@nexus/protocol/rules";
 import { importMarkdownQueues } from "./import-md.ts";
@@ -44,12 +44,13 @@ Agent commands (session from NEXUS_SESSION or --session):
   nexus metric record <name> <value> [--step <step>]   (worker only) a value of one of the project's metrics, for your
                     step at work, with the HEAD commit; a negative value goes after --: nexus metric record delta -- -5
   nexus metric list                   the project's metrics: unit, how shown, target, warning threshold
-  nexus stats [--project <id>] [--since <date>] [--by model|effort|kind|activity|area|size|origin] [--reviews]
+  nexus stats [--project <id>] [--since <date>] [--by model|effort|kind|activity|area|size|origin] [--reviews] [--switches]
                                       how steps went, by group: steps, accepted in the first round, average rounds,
                                       stops and failures, median working time, estimated use of the usage windows
                                       (default: every registered project, by model); --reviews instead: the reviews'
                                       quality (the user's signals, send-backs, the review helper's passed-on share,
-                                      the audit)
+                                      the audit); --switches instead: the steps after a context switch
+                                      against those that went on in the same session
   nexus stop <step> --condition <text> --reason <text>   the condition met, as the queue words it; the reason, short
   nexus ask <text> [--step <step>] [--option <text>]... [--recommend <option>] [--can-continue]
   nexus withdraw <qid> --reason <text>
@@ -165,7 +166,7 @@ const { values: o, positionals: args } = parseArgs({
     unit: { type: "string" }, show: { type: "string" }, target: { type: "string" }, "warn-above": { type: "string" }, "warn-below": { type: "string" },
     set: { type: "string", multiple: true }, template: { type: "string" }, every: { type: "string" }, "after-queues": { type: "string" },
     maintenance: { type: "string" }, findings: { type: "string" }, why: { type: "string" },
-    help: { type: "boolean", short: "h" }, reviews: { type: "boolean" }, key: { type: "string" }, note: { type: "string" }, before: { type: "string" }, now: { type: "boolean" }, ref: { type: "string" },
+    help: { type: "boolean", short: "h" }, reviews: { type: "boolean" }, switches: { type: "boolean" }, key: { type: "string" }, note: { type: "string" }, before: { type: "string" }, now: { type: "boolean" }, ref: { type: "string" },
   },
 });
 
@@ -1039,6 +1040,8 @@ const commands: Record<string, () => void | Promise<void>> = {
     });
     // --reviews: the reviews' quality on three levels (queue RH), instead of the steps by a dimension.
     if (o.reviews) return console.log(reviewStatsText(reviewStats(states, { project: o.project, since })));
+    // --switches: the steps after context care's switch against those that went on in the same session (queue CT).
+    if (o.switches) return console.log(switchReportText(switchReport(stepStats(states, []), { project: o.project, since })));
     console.log(statsText(statsReport(stepStats(states, readTurns().entries), { by, project: o.project, since })));
   },
 

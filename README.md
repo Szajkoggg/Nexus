@@ -405,6 +405,8 @@ most 80 % of the model's context window; a share set before is ignored) at the e
 context summary; the run's panel lists each such switch.
 The orchestrator starts each queue in a new session; it continues one (`--use-session`) only when the new work builds
 directly on the same code and the session holds under about 150k tokens.
+`nexus stats --switches` compares the steps that ran in a fresh session after such a switch with those that went on in
+the same session: accepted in the first round, sent back, and check-fix rounds.
 A queue can be started when another one is done, at a time, or when the usage window resets: "When" in the start
 form (or the orchestrator's `nexus run B start --after A [--after C]`, `--at "2026-11-14 22:00"`, `--at usage-reset`).
 This is the plan, shown at the top of a project's queues: what runs now, then what follows, with a line from each queue
