@@ -316,6 +316,15 @@ apart from a send-back's round. The queue stays `running` and the run holds its 
   coordinator, and every check reads "queued".
 - **What a queued check waits behind is not on the dashboard yet**: the machine's line (`capacity.yaml`) is read by
   `nexus status` only; the step says it waits for the machine and since when.
+- **A check set's effect on the step must hold during the replay, not only after it** (queue NL, found on ND/ND1,
+  2026-11-19). `applyCheckSets` runs after every event is replayed. A step whose worker took up its check-fix round
+  (`step.started`) replays as `running` until then, so every review verdict after Nexus accepted the failure was
+  weighed against `running` and dropped: the helper's pass-on (so the helper counted as still running, and the
+  orchestrator never got the notice), the orchestrator's and the user's acceptances. Now a review verdict first puts
+  such a step in its review (`enterAcceptedReview`), and a take-up is recorded at the `step.started` (`fix_round_of`:
+  started while its done still waited for review), so a start after a send-back is not mistaken for one. The
+  notices themselves were never lost to a busy orchestrator: they are derived from the state at every change and told
+  once by key.
 
 #### The capacity coordinator, first slice
 
