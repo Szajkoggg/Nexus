@@ -159,6 +159,24 @@ export function countedQueues(r: Pick<RecurringFile, "baseline">, queues: readon
   return countable(queues).filter((id) => !before.has(id)).length;
 }
 
+/** What a count's start needs of a queue: besides counting, when it was done (its run's end, or its steps' latest finish). */
+export interface DatedQueue extends CountedQueue { run?: { ended_at?: string }; steps: readonly { finished_at?: string }[] }
+
+/**
+ * Where an "after N queues" count starts at an approval or a set. A recurring that has run counts from its last run
+ * (the queues done when the run was made, `last.baseline`; a file written before that was recorded: the countable
+ * queues whose finish is no later than the run's making, `last.at`, and a done queue with no finish time among them),
+ * so approving it again or changing it never throws away what was done since. One that never ran counts from now.
+ */
+export function countStart(r: Pick<RecurringFile, "last">, queues: readonly DatedQueue[]): string[] {
+  if (!r.last) return countable(queues);
+  if (r.last.baseline) return r.last.baseline;
+  const at = r.last.at;
+  const finished = (q: DatedQueue) => q.run?.ended_at ?? q.steps.map((s) => s.finished_at).filter((x): x is string => !!x).sort().at(-1);
+  const before = new Set(queues.filter((q) => { const f = finished(q); return f === undefined || f <= at; }).map((q) => q.id));
+  return countable(queues).filter((id) => before.has(id));
+}
+
 /** A recurring queue as the state shows it: its file, its state now, its hash, the template's title and the next time. */
 export interface RecurringView extends RecurringFile {
   status: RecurringStatus;

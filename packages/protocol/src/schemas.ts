@@ -1727,8 +1727,9 @@ export const RecurringFile = z.object({
   every: z.string().min(1).optional(),
   after_queues: z.number().int().min(1).max(1000).optional(),
   /**
-   * After N queues: the project's queues that were done at the last count's start (a run made, the approval, a set, a
-   * count that passed without a run); those done since are counted.
+   * After N queues: the project's queues that were done at the last count's start (a run made, a count that passed
+   * without a run, and the approval or a set: those keep the last run's start, `last.baseline`, once it has run); those
+   * done since are counted.
    */
   baseline: z.array(Id).optional(),
   /** The maintenance mode for this project, over the template's own (`maintenance:` in the template). */
@@ -1747,9 +1748,10 @@ export const RecurringFile = z.object({
   handled: Time.optional(),
   /**
    * The last queue it made: its id, when, and for which time. `caught_up`: the time (the same as `due`) passed while
-   * Nexus was not running, and the run was made up for it when Nexus started again.
+   * Nexus was not running, and the run was made up for it when Nexus started again. `baseline` (after N queues): the
+   * queues done when the run was made, where the count starts again at the approval or a set.
    */
-  last: z.object({ queue: Id, at: Time, due: Time, caught_up: Time.optional() }).optional(),
+  last: z.object({ queue: Id, at: Time, due: Time, caught_up: Time.optional(), baseline: z.array(Id).optional() }).optional(),
   /**
    * The last time that passed without a run, and why: `approval` (no standing approval, or its hash differs),
    * `previous` (the previous run had not closed), `missed` (Nexus was not running then), `template` (the template is
