@@ -14,7 +14,7 @@ import { WAIT_MS, until as waitUntil, untilAsync, sleep } from "./wait.ts";
 
 process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
 
-const ASKED = /^\[Nexus\] Your context is \d+ % full/;
+const ASKED = /^\[Nexus\] Your context holds /;
 const SEED = "[Nexus] You go on as the project's orchestrator in a fresh session";
 
 function setup() {
@@ -38,7 +38,7 @@ function setup() {
   const replies = () => orchestrator.view().chat.filter((c) => c.from === "orchestrator").length;
   const stop = () => {
     clearInterval(timer); engine.shutdown(); orchestrator.shutdown();
-    for (const k of ["FAKE_LOG", "FAKE_CONTEXT_FILL_FILE", "FAKE_NO_SUMMARY", "FAKE_CHAT_SLOW_MS", "FAKE_SUMMARY_MS", "FAKE_LATE_NEXT", "FAKE_RELEASE"]) delete process.env[k];
+    for (const k of ["FAKE_LOG", "FAKE_CONTEXT_FILL_FILE", "FAKE_CONTEXT_WINDOW", "FAKE_NO_SUMMARY", "FAKE_CHAT_SLOW_MS", "FAKE_SUMMARY_MS", "FAKE_LATE_NEXT", "FAKE_RELEASE"]) delete process.env[k];
   };
   return { root, store, orchestrator, fill, log, until, replies, stop };
 }
@@ -56,6 +56,25 @@ test("below its threshold the orchestrator's session goes on as it is", async ()
     assert.equal(x.orchestrator.session()!.id, first);
     assert.ok(!x.log().some((l) => ASKED.test(l.text)), "no summary asked for");
     assert.ok(!x.store.readApplied(first).entries.some((a) => a.event.startsWith("context:")));
+  } finally { x.stop(); }
+});
+
+test("with a 1M window its default threshold is 500k tokens: 490k goes on, 510k asks for the summary", async () => {
+  process.env.FAKE_CONTEXT_WINDOW = "1000000";
+  const x = setup();
+  try {
+    x.fill(0.49);
+    x.orchestrator.say("Hello");
+    await x.until("the reply", () => x.replies() === 1);
+    const first = x.orchestrator.session()!.id;
+    await sleep(700);
+    assert.ok(!x.log().some((l) => ASKED.test(l.text)), "490k: no summary asked for");
+    x.fill(0.51);
+    x.orchestrator.say("Again");
+    await untilAsync("the request", async () => x.log().some((l) => ASKED.test(l.text)), WAIT_MS);
+    const asked = x.log().find((l) => ASKED.test(l.text))!;
+    assert.equal(asked.session, first);
+    assert.match(asked.text, /holds 510k tokens \(the threshold is 500k tokens\)/);
   } finally { x.stop(); }
 });
 
@@ -81,9 +100,9 @@ test("above its threshold, after an idle turn, it is asked once for a summary an
     const asked = x.log().filter((l) => ASKED.test(l.text));
     assert.equal(asked.length, 1);
     assert.equal(asked[0]!.session, old.id);
-    assert.match(asked[0]!.text, /90 % full \(the threshold is 85 %\).*nexus context/);
+    assert.match(asked[0]!.text, /holds 900 tokens \(the threshold is 800 tokens\).*nexus context/);
     const oldChat = x.store.readChat(old.id).entries.filter((c) => c.from === "nexus").map((c) => c.text);
-    assert.ok(oldChat.some((t) => t.startsWith("The orchestrator's context is 90 % full (its threshold is 85 %)")), oldChat.join("\n"));
+    assert.ok(oldChat.some((t) => t.startsWith("The orchestrator's context is 900 tokens (90 % full; its threshold is 800 tokens)")), oldChat.join("\n"));
     assert.ok(oldChat.includes(`The orchestrator goes on in a fresh session (${fresh.id}).`));
 
     // The fresh session's first message: the summary, the instruction and the project's state as nexus status shows it.
@@ -154,16 +173,17 @@ test("it is not switched while it works: the request waits for the turn's end", 
   process.env.FAKE_CHAT_SLOW_MS = "2500";
   const x = setup();
   try {
-    // Over 85 % but under its own threshold of 95 %: nothing.
-    x.store.updateProject((p) => ({ ...p, orchestrator: { runtime: "claude", notify: true, session: null, ...p.orchestrator, context_threshold: 0.95 } }), [], ["orchestrator.context_threshold"]);
-    x.fill(0.9);
+    // A 1M-token window: 700k tokens are over the default 500k but under its own threshold of 750k: nothing.
+    process.env.FAKE_CONTEXT_WINDOW = "1000000";
+    x.store.updateProject((p) => ({ ...p, orchestrator: { runtime: "claude", notify: true, session: null, ...p.orchestrator, context_threshold_tokens: 750_000 } }), [], ["orchestrator.context_threshold_tokens"]);
+    x.fill(0.7);
     x.orchestrator.say("Hello");
     await x.until("the reply", () => x.replies() === 1);
     const old = x.orchestrator.session()!;
     // A slow turn; meanwhile the threshold drops below the fill: the running turn is not cut into.
     x.orchestrator.say("FAKE-SLOW");
     await x.until("the slow turn", () => x.orchestrator.view().state === "working");
-    x.store.updateProject((p) => ({ ...p, orchestrator: { runtime: "claude", notify: true, session: null, ...p.orchestrator, context_threshold: 0.85 } }), [], ["orchestrator.context_threshold"]);
+    x.store.updateProject((p) => ({ ...p, orchestrator: { runtime: "claude", notify: true, session: null, ...p.orchestrator, context_threshold_tokens: 600_000 } }), [], ["orchestrator.context_threshold_tokens"]);
     await sleep(1000);
     assert.equal(x.orchestrator.view().state, "working");
     assert.ok(!x.log().some((l) => ASKED.test(l.text)), "not asked while it works");

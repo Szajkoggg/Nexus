@@ -743,8 +743,13 @@ status` in its first message), so wrong beliefs it built up do not carry over. W
 detail. (The Ideas conversations, whose material is the conversation itself, get a "Compact" action instead.)
 Decisions, building it:
 
-- Its own threshold, `orchestrator.context_threshold` (global with a project override, default 0.85: "nears full"),
-  apart from the workers' `context_reuse_threshold`, which is about reusing a session for related work.
+- Its own threshold, `orchestrator.context_threshold_tokens` (global with a project override, default 500k tokens),
+  apart from the workers' `context_reuse_tokens` (default 300k), which is about reusing a session for related work.
+- Thresholds in tokens, not shares of the window (queue CT, decided by the user on 2026-11-19): what a long context
+  costs and how well a model works in it depends on the tokens, not on how big its window is; a share of a 1M window
+  let a session grow far past where it pays to start afresh. Each is capped at 80 % of the model's window, so a small
+  window is never filled before the switch; an unknown window switches nothing, as before. The old shares are
+  ignored, not converted: the new defaults are the point of the change.
 - Only between turns, with its process idle: a turn is never cut into, and a turn ending is the orchestrator's
   equivalent of a step's end. The request is a turn of its own and asked once (`context:asked` in `applied.jsonl`, a
   file, so a restart in between still switches); after that turn the switch comes with or without a summary.

@@ -277,9 +277,12 @@ export function summaryLists(summary: { topics: string[]; files: string[] }): st
   return [summary.topics.length ? `Topics: ${summary.topics.join(", ")}` : "", summary.files.length ? `Files: ${summary.files.join(", ")}` : ""].filter(Boolean);
 }
 
-/** The orchestrator's context is fuller than its threshold (both in %): the summary for a fresh session is asked for. */
-export function orchestratorSummaryRequest(fill: number, threshold: number): string {
-  return `[Nexus] Your context is ${fill} % full (the threshold is ${threshold} %): Nexus goes on with you in a fresh orchestrator session, which starts from your summary, your current briefing and \`nexus status\`. Write that summary now with \`nexus context "<summary>" --topics a,b --files x,y\`: the decisions made with the user and why, the open items, the plan (what runs, what comes next and what it waits for), and what you promised the user. Leave out what \`nexus status\` and the files show anyway. Then end your turn; do not start anything else.`;
+/** A number of context tokens as the agents and the chat read it: "900 tokens", "204.8k tokens". */
+export const tokenText = (n: number) => (n < 1000 ? `${Math.round(n)} tokens` : `${Math.round(n / 100) / 10}k tokens`);
+
+/** The orchestrator's context is beyond its threshold (both as text, "512k tokens"): the summary for a fresh session is asked for. */
+export function orchestratorSummaryRequest(used: string, threshold: string): string {
+  return `[Nexus] Your context holds ${used} (the threshold is ${threshold}): Nexus goes on with you in a fresh orchestrator session, which starts from your summary, your current briefing and \`nexus status\`. Write that summary now with \`nexus context "<summary>" --topics a,b --files x,y\`: the decisions made with the user and why, the open items, the plan (what runs, what comes next and what it waits for), and what you promised the user. Leave out what \`nexus status\` and the files show anyway. Then end your turn; do not start anything else.`;
 }
 
 /**
@@ -357,11 +360,11 @@ export function formatInbox(m: InboxView, state: ProjectState, released = false)
 // ---------------------------------------------------------------- the orchestrator
 
 /**
- * The orchestrator's briefing: `threshold`, the workers' context reuse threshold (%); `own`, the orchestrator's own
- * context threshold (%), at which it goes on in a fresh session. `runtime`: on Codex (queue OC) it has no helpers
+ * The orchestrator's briefing: `threshold`, the workers' context reuse threshold (tokens); `own`, the orchestrator's
+ * own context threshold (tokens), at which it goes on in a fresh session. Both are capped at 80 % of a model's window. `runtime`: on Codex (queue OC) it has no helpers
  * (Claude Code's subagents) and does their work itself, and its sandbox, not permission rules, keeps it to its drafts.
  */
-export function orchestratorBriefing(project: string, threshold: number, l: Languages = { working: "en" }, own = 85, runtime: "claude" | "codex" = "claude"): string {
+export function orchestratorBriefing(project: string, threshold: number, l: Languages = { working: "en" }, own = 500_000, runtime: "claude" | "codex" = "claude"): string {
   const codex = runtime === "codex";
   const working = languageName(l.working);
   // Queue text follows the reader's language; with none set, the working language (as before the settings).
@@ -482,9 +485,9 @@ A revision changes only what has not started: add, change, remove or reorder pen
 
 Choosing model and effort: a step's kind chooses them by default. Each kind has its runtime, model, effort and fallback in the settings (nexus tags lists the kinds; the user sets their values), so tag each step with its one dominant kind and usually name nothing else. What a step runs on, strongest first: the step's own runtime, model, effort and fallback in the YAML; the queue's; what you name when you start the run (--runtime, --model, --effort); the step's kind's; the project's defaults. So start runs without --model and --effort unless you mean to override every kind for that run, and say why when you do; to depart for one step, name its values in the YAML. Before you choose a model or effort other than the kind's (for a run or a step), or propose to the user changing a kind's values, look at nexus stats --by model and --by effort (with --by kind for the work at hand) and cite the figures you go by in your reason: accepted in the first round, rounds, failures, working time and use. A group marked few data is no evidence yet; say so rather than lean on it. Codex takes the levels its model lists (low up to ultra for most); Claude Code takes low to max. A step without values of its own runs on what this resolves to, not on the previous step's. Another runtime runs the step in a fresh session given the previous step's context summary; another model or effort keeps the session.
 
-Choosing a session for a run: \`nexus status\` shows each session's context card (topics, files, context fill). Continue a session (--use-session) when it worked on closely related things and its context is below ${threshold} %; otherwise start a fresh one and put what it needs into the queue's description and goals. Never give one session two running queues. With context care on (the project's default), a run whose session gets fuller than that at the end of a step goes on in a fresh session by itself, seeded with the step's context summary; \`nexus status\` shows the run's current session.
+Choosing a session for a run: \`nexus status\` shows each session's context card (topics, files, context fill). Continue a session (--use-session) when it worked on closely related things and its context holds less than ${tokenText(threshold)} (or 80 % of its model's context window, if that is less); otherwise start a fresh one and put what it needs into the queue's description and goals. Never give one session two running queues. With context care on (the project's default), a run whose session gets fuller than that at the end of a step goes on in a fresh session by itself, seeded with the step's context summary; \`nexus status\` shows the run's current session.
 
-Your own context: when it is fuller than ${own} % at the end of a turn, Nexus asks you, once, for a summary and then goes on in a fresh orchestrator session, which starts from that summary, your briefing as it is then, and \`nexus status\`. Write it with \`nexus context "<summary>" --topics a,b --files x,y\` (or \`nexus context -\` to read it from standard input): the decisions made with the user and why, the open items, the plan (what runs, what comes next and what it waits for), and what you promised the user; leave out what \`nexus status\` and the files show anyway. Then end your turn. The user can read it in .nexus/orchestrator/summary.md.
+Your own context: when it holds more than ${tokenText(own)} (or 80 % of your model's context window, if that is less) at the end of a turn, Nexus asks you, once, for a summary and then goes on in a fresh orchestrator session, which starts from that summary, your briefing as it is then, and \`nexus status\`. Write it with \`nexus context "<summary>" --topics a,b --files x,y\` (or \`nexus context -\` to read it from standard input): the decisions made with the user and why, the open items, the plan (what runs, what comes next and what it waits for), and what you promised the user; leave out what \`nexus status\` and the files show anyway. Then end your turn. The user can read it in .nexus/orchestrator/summary.md.
 
 ${codex ? codexOwnWork(defaultLanguages(l) ? undefined : queueLanguage) : `Helpers (subagents, through the Agent tool; they read only (you also write queue drafts), and keep long research out of your context):
 - queue-reviewer: before you propose a queue, have it review the draft${defaultLanguages(l) ? "" : ` (tell it the queue's text is to be in ${queueLanguage})`}; fix what it finds, then propose.

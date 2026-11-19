@@ -102,13 +102,13 @@ const WEB_HINT: Record<string, Key> = { off: "settings.web.offHint", search: "se
 
 /** Every setting with a global value, in the order of PROTOCOL.md's list. */
 const SETTING_KEYS = [
-  "defaults.stop_conditions", "defaults.review_level", "defaults.review_send_back_limit", "defaults.context_reuse_threshold",
+  "defaults.stop_conditions", "defaults.review_level", "defaults.review_send_back_limit", "defaults.context_reuse_tokens",
   "defaults.context_care", "defaults.protect_nexus", "defaults.push_accepted", "defaults.provisional_counts", "defaults.merge_back", "defaults.resolve_conflicts", "defaults.usage_pause_threshold",
   "defaults.max_running", "defaults.check_fix_limit",
   "runtimes.default", "runtimes.claude.model", "runtimes.claude.effort", "runtimes.claude.permission_mode",
   "runtimes.codex.model", "runtimes.codex.effort", "runtimes.codex.sandbox", "runtimes.codex.approval_policy", "runtimes.codex.approvals_reviewer",
   "conversations.runtime", "conversations.model", "conversations.effort", "conversations.web",
-  "orchestrator.runtime", "orchestrator.model", "orchestrator.effort", "orchestrator.fallback", "orchestrator.notify", "orchestrator.context_threshold",
+  "orchestrator.runtime", "orchestrator.model", "orchestrator.effort", "orchestrator.fallback", "orchestrator.notify", "orchestrator.context_threshold_tokens",
   "languages.reader",
   ...TAG_KINDS.flatMap((k) => [`kinds.${k}.runtime`, `kinds.${k}.model`, `kinds.${k}.effort`, `kinds.${k}.fallback`]),
   "review_helper.enabled", "review_helper.runtime", "review_helper.model", "review_helper.effort", "review_helper.audit_rate",
@@ -277,8 +277,8 @@ function SettingRows({ form, project }: { form: Form; project?: { values: Record
         <Setting form={f} keys={["orchestrator.notify"]} label={t("settings.tellIt")}>
           {(d) => <Check checked={f.bool("orchestrator.notify")} onChange={(v) => f.set("orchestrator.notify", v)} disabled={d}>{t("settings.tellItCheck")}</Check>}
         </Setting>
-        <Setting form={f} keys={["orchestrator.context_threshold"]} label={t("settings.orchestratorFresh")} hint={t("settings.orchestratorFreshHint")}>
-          {(d) => <Percent value={f.get("orchestrator.context_threshold")} onChange={(v) => f.set("orchestrator.context_threshold", v)} disabled={d} />}
+        <Setting form={f} keys={["orchestrator.context_threshold_tokens"]} label={t("settings.orchestratorFresh")} hint={t("settings.orchestratorFreshHint")}>
+          {(d) => <Tokens value={f.get("orchestrator.context_threshold_tokens")} onChange={(v) => f.set("orchestrator.context_threshold_tokens", v)} disabled={d} />}
         </Setting>
       </Section>
 
@@ -338,8 +338,8 @@ function SettingRows({ form, project }: { form: Form; project?: { values: Record
             {(d) => <span className="block w-24"><Select value={f.get(MAX_RUNNING)} onChange={(v) => f.set(MAX_RUNNING, Number(v))} disabled={d} options={limitChoices(f.get(MAX_RUNNING))} /></span>}
           </Setting>
         )}
-        <Setting form={f} keys={["defaults.context_reuse_threshold"]} label={t("settings.reuse")} hint={t("settings.reuseHint")}>
-          {(d) => <Percent value={f.get("defaults.context_reuse_threshold")} onChange={(v) => f.set("defaults.context_reuse_threshold", v)} disabled={d} />}
+        <Setting form={f} keys={["defaults.context_reuse_tokens"]} label={t("settings.reuse")} hint={t("settings.reuseHint")}>
+          {(d) => <Tokens value={f.get("defaults.context_reuse_tokens")} onChange={(v) => f.set("defaults.context_reuse_tokens", v)} disabled={d} />}
         </Setting>
         <Setting form={f} keys={["defaults.context_care"]} label={t("settings.care")} hint={t("settings.careHint")}>
           {(d) => <Check checked={f.bool("defaults.context_care")} onChange={(v) => f.set("defaults.context_care", v)} disabled={d}>{t("settings.careCheck")}</Check>}
@@ -479,6 +479,15 @@ function Percent({ value, onChange, disabled, min = 10 }: { value: string; onCha
   return (
     <span className="flex items-center gap-2">
       <input type="number" min={min} max={100} disabled={disabled} value={Math.round(Number(value) * 100)} onChange={(e) => onChange(Number(e.target.value) / 100)} className={`${field} w-24`} /> %
+    </span>
+  );
+}
+
+/** A number of context tokens shown and typed in thousands (300 for 300,000). */
+function Tokens({ value, onChange, disabled }: { value: string; onChange: (v: number) => void; disabled: boolean }) {
+  return (
+    <span className="flex items-center gap-2">
+      <input type="number" min={1} max={10_000} disabled={disabled} value={Math.round(Number(value) / 1000)} onChange={(e) => onChange(Number(e.target.value) * 1000)} className={`${field} w-24`} /> {t("settings.kTokens")}
     </span>
   );
 }

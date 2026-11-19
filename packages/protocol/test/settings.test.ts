@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import YAML from "yaml";
 import {
-  ActionError, ProjectFile, ProjectStore, builtInSettings, effectiveProject, ownKeys, readGlobalSettings, updateGlobalSettings, updateSettings, writeGlobalSettings,
+  ActionError, ProjectFile, ProjectStore, builtInSettings, contextBeyond, contextLimit, effectiveProject, ownKeys, readGlobalSettings, updateGlobalSettings, updateSettings, writeGlobalSettings,
   type GlobalSettings, type StoredProject,
 } from "../src/index.ts";
 
@@ -124,7 +124,7 @@ function legacy(shape: (root: string) => string) {
  */
 const meant = (text: string): ProjectFile => {
   const p = ProjectFile.parse(YAML.parse(text));
-  return p.orchestrator ? { ...p, orchestrator: { ...p.orchestrator, context_threshold: builtInSettings().orchestrator.context_threshold } } : p;
+  return p.orchestrator ? { ...p, orchestrator: { ...p.orchestrator, context_threshold_tokens: builtInSettings().orchestrator.context_threshold_tokens } } : p;
 };
 const globalWith = (change: (g: GlobalSettings) => void): GlobalSettings => { const g = builtInSettings(); change(g); return g; };
 
@@ -132,14 +132,14 @@ test("the effective value is the project's own where it has one, else the global
   const g = globalWith((x) => { x.defaults.review_level = 1; x.runtimes.claude.model = "opus"; x.runtimes.codex.model = "gpt-6-astra"; x.orchestrator.notify = false; });
   const stored: StoredProject = {
     protocol: 1, id: "p", name: "P", root: "C:/p", follows_global: true,
-    defaults: { context_reuse_threshold: 0.7, worktree_dir: "C:/w" },
+    defaults: { context_reuse_tokens: 200_000, worktree_dir: "C:/w" },
     runtimes: { claude: { effort: "high", allowed_tools: ["WebFetch"] }, codex: { model: null, mcp_servers: [] } },
     conversations: { notes_dir: "notes" },
     languages: {},
   };
   const p = effectiveProject(stored, g);
   assert.equal(p.defaults.review_level, 1, "follows the global value");
-  assert.equal(p.defaults.context_reuse_threshold, 0.7, "its own value");
+  assert.equal(p.defaults.context_reuse_tokens, 200_000, "its own value");
   assert.equal(p.defaults.worktree_dir, "C:/w", "project only");
   assert.equal(p.runtimes.claude.model, "opus");
   assert.equal(p.runtimes.claude.effort, "high");
@@ -275,8 +275,10 @@ for (const [name, shape] of [["Nexus", NEXUS_SHAPE], ["Project Honeycomb", HONEY
     assert.equal(s.runtimes.codex.sandbox, undefined);
     assert.equal(s.runtimes.claude.model, undefined);
     assert.equal(s.orchestrator!.notify, undefined);
+    // The share context_reuse_threshold (before queue CT) is dropped, not turned into tokens: the default follows.
+    assert.ok(!("context_reuse_threshold" in s.defaults));
+    assert.equal(s.defaults.context_reuse_tokens, undefined);
     // Different: its own.
-    assert.equal(s.defaults.context_reuse_threshold, 0.7);
     assert.equal(s.runtimes.claude.permission_mode, "auto");
     assert.equal(s.runtimes.codex.approval_policy, "on-request");
     assert.equal(s.runtimes.codex.approvals_reviewer, "auto_review");
@@ -301,12 +303,11 @@ for (const [name, shape] of [["Nexus", NEXUS_SHAPE], ["Project Honeycomb", HONEY
 test("migrating against global values that differ keeps the effective values: an unset model becomes the project's own 'none'", () => {
   const x = legacy(NEXUS_SHAPE);
   const before = meant(x.text);
-  writeGlobalSettings(globalWith((g) => { g.runtimes.claude.model = "opus"; g.defaults.review_level = 1; g.defaults.context_reuse_threshold = 0.7; }));
+  writeGlobalSettings(globalWith((g) => { g.runtimes.claude.model = "opus"; g.defaults.review_level = 1; }));
   assert.equal(x.store.migrateProject(), true);
   const s = x.stored();
   assert.equal(s.runtimes.claude.model, null, "it had none; the global one would change it");
   assert.equal(s.defaults.review_level, 2);
-  assert.equal(s.defaults.context_reuse_threshold, undefined, "now equal to the global value: follows");
   assert.deepEqual(x.store.readProject(), before);
   assert.equal(x.store.migrateProject(), false);
   assert.deepEqual(readGlobalSettings().runtimes.claude.model, "opus");
@@ -340,26 +341,61 @@ test("a change of the global settings: values replaced, null clears an optional 
   assert.deepEqual(ownKeys(store.readStoredProject()), []);
 });
 
-test("the orchestrator's context threshold: 0.85 by default, global with a project override; a section written without it keeps it", () => {
+test("the orchestrator's context threshold: 500k tokens by default, global with a project override; a section written without it keeps it", () => {
   const base = mkdtempSync(join(tmpdir(), "nexus-settings-"));
   process.env.NEXUS_HOME = join(base, "home");
   const store = ProjectStore.init(join(base, "p"), { id: "p", name: "P", root: join(base, "p") });
-  assert.equal(builtInSettings().orchestrator.context_threshold, 0.85);
+  assert.equal(builtInSettings().orchestrator.context_threshold_tokens, 500_000);
   // The orchestrator's section made from a literal that leaves the setting out (as the server makes it): it follows.
   store.updateProject((p) => ({ ...p, orchestrator: { runtime: "claude", notify: true, session: null, ...p.orchestrator } }));
-  assert.equal(store.readStoredProject().orchestrator?.context_threshold, undefined);
-  assert.equal(store.readProject().orchestrator?.context_threshold, 0.85);
-  writeGlobalSettings(globalWith((x) => { x.orchestrator.context_threshold = 0.8; }));
-  assert.equal(store.readProject().orchestrator?.context_threshold, 0.8);
-  updateSettings(store, { orchestrator: { context_threshold: 0.9 } });
-  assert.deepEqual([store.readStoredProject().orchestrator?.context_threshold, store.readProject().orchestrator?.context_threshold], [0.9, 0.9]);
-  assert.ok(ownKeys(store.readStoredProject()).includes("orchestrator.context_threshold"));
+  assert.equal(store.readStoredProject().orchestrator?.context_threshold_tokens, undefined);
+  assert.equal(store.readProject().orchestrator?.context_threshold_tokens, 500_000);
+  writeGlobalSettings(globalWith((x) => { x.orchestrator.context_threshold_tokens = 400_000; }));
+  assert.equal(store.readProject().orchestrator?.context_threshold_tokens, 400_000);
+  updateSettings(store, { orchestrator: { context_threshold_tokens: 600_000 } });
+  assert.deepEqual([store.readStoredProject().orchestrator?.context_threshold_tokens, store.readProject().orchestrator?.context_threshold_tokens], [600_000, 600_000]);
+  assert.ok(ownKeys(store.readStoredProject()).includes("orchestrator.context_threshold_tokens"));
   // Left out of a later write of the section, the project's own value stays.
   store.updateProject((p) => ({ ...p, orchestrator: { runtime: "claude", notify: true, session: "s1" } }));
-  assert.equal(store.readProject().orchestrator?.context_threshold, 0.9);
-  assert.throws(() => updateSettings(store, { orchestrator: { context_threshold: 1.5 } }));
-  updateSettings(store, { follow: ["orchestrator.context_threshold"] });
-  assert.equal(store.readProject().orchestrator?.context_threshold, 0.8);
+  assert.equal(store.readProject().orchestrator?.context_threshold_tokens, 600_000);
+  assert.throws(() => updateSettings(store, { orchestrator: { context_threshold_tokens: 0.85 } }), "a share is no number of tokens");
+  updateSettings(store, { follow: ["orchestrator.context_threshold_tokens"] });
+  assert.equal(store.readProject().orchestrator?.context_threshold_tokens, 400_000);
+});
+
+test("context thresholds in tokens (queue CT): the set value, at most 80 % of the window; an unknown window, no switch", () => {
+  const g = builtInSettings();
+  assert.equal(g.defaults.context_reuse_tokens, 300_000);
+  assert.equal(contextLimit(g.defaults.context_reuse_tokens, 1_000_000), 300_000, "a 1M window: 300k");
+  assert.equal(contextLimit(g.defaults.context_reuse_tokens, 256_000), 204_800, "a 256k window: 80 % of it");
+  assert.equal(contextLimit(g.orchestrator.context_threshold_tokens, 1_000_000), 500_000, "the orchestrator: 500k");
+  assert.equal(contextLimit(300_000, undefined), undefined);
+  assert.equal(contextLimit(300_000, 0), undefined);
+  assert.deepEqual([300_000, 300_001].map((t) => contextBeyond(t, 1_000_000, 300_000)), [false, true]);
+  assert.deepEqual([204_800, 204_801].map((t) => contextBeyond(t, 256_000, 300_000)), [false, true]);
+  assert.deepEqual([500_000, 500_001].map((t) => contextBeyond(t, 1_000_000, 500_000)), [false, true]);
+  assert.equal(contextBeyond(900_000, undefined, 300_000), false, "an unknown window: never");
+  assert.equal(contextBeyond(undefined, 1_000_000, 300_000), false);
+});
+
+test("an old share of the window in the settings is ignored: the new defaults hold, nothing is converted", () => {
+  const base = mkdtempSync(join(tmpdir(), "nexus-settings-"));
+  process.env.NEXUS_HOME = join(base, "home");
+  mkdirSync(process.env.NEXUS_HOME, { recursive: true });
+  writeFileSync(join(process.env.NEXUS_HOME, "settings.yaml"), YAML.stringify({ protocol: 1, defaults: { context_reuse_threshold: 0.4 }, orchestrator: { context_threshold: 0.7 } }));
+  const g = readGlobalSettings();
+  assert.equal(g.defaults.context_reuse_tokens, 300_000);
+  assert.equal(g.orchestrator.context_threshold_tokens, 500_000);
+  assert.ok(!("context_reuse_threshold" in g.defaults) && !("context_threshold" in g.orchestrator));
+  const root = join(base, "p");
+  const store = ProjectStore.init(root, { id: "p", name: "P", root });
+  const file = join(root, ".nexus", "project.yaml");
+  const raw = YAML.parse(readFileSync(file, "utf8")) as { defaults?: Record<string, unknown>; orchestrator?: Record<string, unknown> };
+  writeFileSync(file, YAML.stringify({ ...raw, defaults: { ...raw.defaults, context_reuse_threshold: 0.4 }, orchestrator: { session: null, context_threshold: 0.7 } }));
+  const p = store.readProject();
+  assert.equal(p.defaults.context_reuse_tokens, 300_000);
+  assert.equal(p.orchestrator?.context_threshold_tokens, 500_000);
+  assert.deepEqual(ownKeys(store.readStoredProject()), []);
 });
 
 test("the partners' web level: search by default, global with a project override, one of off, search and fetch", () => {

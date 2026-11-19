@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { WORKER_BRIEFING, orchestratorBriefing, partnerBriefing } from "../src/prompts.ts";
 
-const orchestrator = orchestratorBriefing("P", 60);
+const orchestrator = orchestratorBriefing("P", 300_000);
 const partner = partnerBriefing({ name: "P", root: "C:/p" } as Parameters<typeof partnerBriefing>[0], "Dev/Notes");
 const has = (text: string, ...parts: string[]) => { for (const p of parts) assert.ok(text.includes(p), `missing: ${p}`); };
 

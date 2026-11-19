@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  ActionError, Effort, acceptedByNexus, acceptedOn, normPath, effortIssue, type ProjectFile, reviewedByOrchestrator, runGoing, ProjectStore, applyDraft, defineMetric, inPlan, loadProjectState, metricDef, openPlan, orchestratorOverview, overThreshold, proposePlan, proposeTags, readAway, readUsage, orchestratorStatusChange, newId, now, sendBack, type Applied, type Event, type EventType, type NotifyKind, type ProjectState, type QueueView, type SessionFile, type SessionView, type StepView,
+  ActionError, DEFAULT_ORCHESTRATOR_CONTEXT_TOKENS, Effort, acceptedByNexus, contextLimit, acceptedOn, normPath, effortIssue, type ProjectFile, reviewedByOrchestrator, runGoing, ProjectStore, applyDraft, defineMetric, inPlan, loadProjectState, metricDef, openPlan, orchestratorOverview, overThreshold, proposePlan, proposeTags, readAway, readUsage, orchestratorStatusChange, newId, now, sendBack, type Applied, type Event, type EventType, type NotifyKind, type ProjectState, type QueueView, type SessionFile, type SessionView, type StepView,
 } from "@nexus/protocol";
 import type { AgentProcess } from "./agent.ts";
 import type { CodexPermissions } from "./codex.ts";
@@ -19,7 +19,7 @@ import { describeDeployChanges, type DeployChanges } from "./deploy.ts";
 import type { PlanNotice } from "./deploy-plan.ts";
 import {
   acceptedNoteNotice, approvalNotice, checkAcceptedNotice, checkDecisionNotice, checkNotCommandNotice, cleanupWaitNotice, discardNotice, liftNotice, mergedNotice, mergeWaitNotice, missedStartNotice, noticeText, orchestratorBriefing, pausedNotice,
-  carriedMessages, formatInbox, orchestratorFreshSeed, orchestratorRuntimeSeed, orchestratorSummaryRequest, summaryLists, questionNotice, rejectionNotice, restartedNotice, fixAskedNotice, levelToUserNotice, reviewNotice, awayOnNotice, awayEndNotice, awayStuckNotice, planDecisionNotice, planHeldNotice, runEndNotice, maintenanceFindingsNotice, staticAnalysisNotice, stepNoteNotice, tagDecisionNotice, fallbackNotice, metricNotice, userMessage, withdrawalNotice,
+  carriedMessages, formatInbox, orchestratorFreshSeed, orchestratorRuntimeSeed, orchestratorSummaryRequest, summaryLists, tokenText, questionNotice, rejectionNotice, restartedNotice, fixAskedNotice, levelToUserNotice, reviewNotice, awayOnNotice, awayEndNotice, awayStuckNotice, planDecisionNotice, planHeldNotice, runEndNotice, maintenanceFindingsNotice, staticAnalysisNotice, stepNoteNotice, tagDecisionNotice, fallbackNotice, metricNotice, userMessage, withdrawalNotice,
 } from "./prompts.ts";
 import { shellRules } from "./shell-rules.ts";
 import { ReviewHelpers, audited, type HelperOptions } from "./review-helper.ts";
@@ -63,7 +63,6 @@ const REQUESTS: ReadonlySet<EventType> = new Set(["queue.drafted", "session.requ
 const SUMMARY_ASKED = "context:asked";
 const FIRST_FILL = "context:first";
 /** The orchestrator's context threshold when the project has none (the setting's default). */
-const DEFAULT_CONTEXT_THRESHOLD = 0.85;
 const pct = (fill: number) => Math.round(fill * 100);
 /** How many chat entries the view sends: the current session's newest, and then the earlier sessions' of its line. */
 const VIEW_ENTRIES = 300;
@@ -572,7 +571,7 @@ ${n.text}` });
     const runtime: OrchestratorRuntime = s.runtime === "codex" ? "codex" : "claude";
     const { model, effort: wanted } = this.target(s);
     const effort = effortIssue(runtime, wanted) ? undefined : wanted;
-    const briefing = orchestratorBriefing(project.name, pct(project.defaults.context_reuse_threshold), project.languages, pct(o?.context_threshold ?? DEFAULT_CONTEXT_THRESHOLD), runtime);
+    const briefing = orchestratorBriefing(project.name, project.defaults.context_reuse_tokens, project.languages, o?.context_threshold_tokens ?? DEFAULT_ORCHESTRATOR_CONTEXT_TOKENS, runtime);
     const env = this.host.env(s.id);
     if (runtime === "codex") {
       // Its working directory is the project's root, which its sandbox keeps read-only (orchestratorPermissions). The
@@ -658,9 +657,10 @@ ${n.text}` });
 
   /**
    * The orchestrator's context care (decided by the user on 2026-11-15, queue CC): it is not compacted; it goes on in a
-   * fresh session started from a summary it writes on purpose. When its context is fuller than its threshold
-   * (orchestrator.context_threshold) at the end of a turn, its process idle and not settling, it is asked once for that
-   * summary (with `nexus context`); once that turn is over, a fresh session goes on from it (goOnFresh). Meanwhile
+   * fresh session started from a summary it writes on purpose. When its context is beyond its threshold
+   * (orchestrator.context_threshold_tokens, at most 80 % of its model's window: contextLimit; an unknown window, never)
+   * at the end of a turn, its process idle and not settling, it is asked once for that summary (with `nexus context`);
+   * once that turn is over, a fresh session goes on from it (goOnFresh). Meanwhile
    * notices, notes and the user's messages wait for the fresh session. A fresh session already that full at the end of
    * its first turn is not switched again: another would be no emptier. True: what else this change would tell it waits.
    */
@@ -677,18 +677,22 @@ ${n.text}` });
     // Between turns only: not while a turn of the runtime's own may still start (AgentProcess.settling).
     if (this.proc?.state !== "idle" || this.proc.settling) return false;
     const live = this.store.readRuntime(s.id);
-    const fill = live?.context_tokens && live.context_window ? live.context_tokens / live.context_window : undefined;
-    if (fill === undefined) return false;
+    const used = live?.context_tokens, window = live?.context_window;
+    const limit = contextLimit(state.project.orchestrator?.context_threshold_tokens ?? DEFAULT_ORCHESTRATOR_CONTEXT_TOKENS, window);
+    if (!used || !window || limit === undefined) return false;
+    // FIRST_FILL holds the tokens a continuing session had at the end of its first turn (before queue CT: its share of
+    // the window, a number up to 1).
     let first = applied.find((a) => a.event === FIRST_FILL);
     if (s.continues && !first) {
-      first = { at: now(), event: FIRST_FILL, ok: true, message: String(fill) };
+      first = { at: now(), event: FIRST_FILL, ok: true, message: String(used) };
       this.store.appendApplied(s.id, first);
     }
-    const threshold = state.project.orchestrator?.context_threshold ?? DEFAULT_CONTEXT_THRESHOLD;
-    if (fill <= threshold || (first && Number(first.message) > threshold) || this.runtimeFull(state)) return false;
+    const firstUsed = first ? (Number(first.message) <= 1 ? Number(first.message) * window : Number(first.message)) : undefined;
+    if (used <= limit || (firstUsed !== undefined && firstUsed > limit) || this.runtimeFull(state)) return false;
+    const fill = used / window;
     this.store.appendApplied(s.id, { at: now(), event: SUMMARY_ASKED, ok: true, message: String(fill) });
-    this.store.appendChat(s.id, { at: now(), from: "nexus", text: `The orchestrator's context is ${pct(fill)} % full (its threshold is ${pct(threshold)} %): Nexus asked it for a summary, and it goes on in a fresh session.` });
-    this.deliver(orchestratorSummaryRequest(pct(fill), pct(threshold)));
+    this.store.appendChat(s.id, { at: now(), from: "nexus", text: `The orchestrator's context is ${tokenText(used)} (${pct(fill)} % full; its threshold is ${tokenText(limit)}): Nexus asked it for a summary, and it goes on in a fresh session.` });
+    this.deliver(orchestratorSummaryRequest(tokenText(used), tokenText(limit)));
     return true;
   }
 

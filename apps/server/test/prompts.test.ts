@@ -95,7 +95,7 @@ function setup(t: TestContext, name: string) {
 test("the worker's texts: briefing, step openings, inbox entries, seeds and nudges match the golden file", (t) => {
   const { root, store, later, event, queue } = setup(t, "worker");
   const p = store.readProject();
-  store.writeProject({ ...p, defaults: { ...p.defaults, stop_conditions: ["The project's own stop condition."], context_care: true, context_reuse_threshold: 0.6,
+  store.writeProject({ ...p, defaults: { ...p.defaults, stop_conditions: ["The project's own stop condition."], context_care: true,
     checks: ["npm run lint", "npm test"] } }); // the project's checks: listed first, npm test once
   queue({
     id: "Q", title: "Prompts under test", description: "Context the worker needs.\nOn two lines.\n",
@@ -255,7 +255,7 @@ test("the worker's texts: briefing, step openings, inbox entries, seeds and nudg
 test("the orchestrator's texts: briefing, helpers and notices match the golden file", (t) => {
   const { root, store, later, event, queue } = setup(t, "orchestrator");
   const p = store.readProject();
-  store.writeProject({ ...p, defaults: { ...p.defaults, context_reuse_threshold: 0.55 } });
+  store.writeProject({ ...p, defaults: { ...p.defaults, context_reuse_tokens: 200_000 } });
   const tr = new Transcript("orchestrator");
   let deploys: DeployChanges[] = [];
   let update: UpdateNotice | undefined;
@@ -576,7 +576,7 @@ test("the briefings carry the review standard's essentials and point to nexus he
     "before (the old state), mockup (the design), after (the new state), variant-a / variant-b (alternatives), result", "fixed-viewport", "Nexus refuses a wrong pair"]) {
     assert.ok(WORKER_BRIEFING.includes(part), `the worker's briefing has ${JSON.stringify(part)}`);
   }
-  const orch = orchestratorBriefing("Pilot", 60);
+  const orch = orchestratorBriefing("Pilot", 300_000);
   for (const part of ["`nexus help review` (read it before you write a review.prepare)", "In review.prepare name the views with their keys and roles", "waiting-tab@492 before -> after"]) {
     assert.ok(orch.includes(part), `the orchestrator's briefing has ${JSON.stringify(part)}`);
   }
@@ -586,7 +586,7 @@ test("the three briefings say to run nexus and git commands on their own, and ke
   const { WORKER_BRIEFING, orchestratorBriefing, partnerBriefing } = await import("../src/prompts.ts");
   const alone = "Run nexus and git commands on their own, one per call, with nothing before the command name and no option before its subcommand: no cd, no &&, no pipes, not git -C <path> (they run in your working directory already). If one is refused, you may retry the same command once on its own (without chaining or -C), not in another shell.";
   const partner = partnerBriefing({ name: "P", root: "/p", languages: { working: "en" } } as unknown as Parameters<typeof partnerBriefing>[0], undefined);
-  const briefings = { worker: WORKER_BRIEFING, orchestrator: orchestratorBriefing("Pilot", 60), partner };
+  const briefings = { worker: WORKER_BRIEFING, orchestrator: orchestratorBriefing("Pilot", 300_000), partner };
   for (const [who, text] of Object.entries(briefings)) assert.equal(text.split(alone).length, 2, `the ${who}'s briefing says it once`);
   assert.ok(WORKER_BRIEFING.includes("- When an action is refused, do not work around it through another tool or command that reaches the same end (PowerShell after Bash, the shell after the edit tool); retry once in a simpler form at most (without chaining, for example), otherwise report what you needed and why.\n"));
   assert.ok(briefings.orchestrator.includes("\nWhen an action is refused, do not work around it through another tool or command that reaches the same end (PowerShell after Bash, for example); retry once in a simpler form at most, otherwise tell the user what you needed and why (`nexus help refusals`).\n"));
@@ -595,7 +595,7 @@ test("the three briefings say to run nexus and git commands on their own, and ke
 
 test("the orchestrator's briefing and notices on parallel worktrees and merging back (queue PW)", async () => {
   const { orchestratorBriefing, mergeWaitNotice, mergedNotice } = await import("../src/prompts.ts");
-  const orch = orchestratorBriefing("Pilot", 60);
+  const orch = orchestratorBriefing("Pilot", 300_000);
   for (const part of [
     "give a queue a worktree of its own (worktree: auto) when its work is independent",
     "queues that touch the same code run one after another (put them in the plan in order), never side by side",
@@ -621,7 +621,7 @@ test("the orchestrator's briefing and notices on parallel worktrees and merging 
 
 test("the static analysis reminder: the notice, the command and the recommended additions in the orchestrator's briefing (queue MT)", async () => {
   const { orchestratorBriefing, staticAnalysisNotice } = await import("../src/prompts.ts");
-  const orch = orchestratorBriefing("Pilot", 60);
+  const orch = orchestratorBriefing("Pilot", 300_000);
   for (const part of [
     "nexus static-analysis decline --reason \"...\"",
     "A maintenance report ends with \"Recommended additions\" (not findings)",
@@ -634,6 +634,6 @@ test("the static analysis reminder: the notice, the command and the recommended 
 
 test("the orchestrator offers the lifecycle template once a queue that touched the run control or lifecycle code is done (queue TP)", async () => {
   const { orchestratorBriefing } = await import("../src/prompts.ts");
-  const orch = orchestratorBriefing("Pilot", 60);
+  const orch = orchestratorBriefing("Pilot", 300_000);
   assert.ok(orch.includes("When a queue that touched the project's run control or lifecycle code (its AGENTS.md may name which code that is) is done, offer the user in one sentence the lifecycle template (nexus template show lifecycle)"), orch);
 });

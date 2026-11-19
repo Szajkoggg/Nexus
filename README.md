@@ -165,8 +165,9 @@ chats' tool calls. A click goes to the hit's place: a step's or queue's details,
 older orchestrator session's message only while the chat still shows it), a report in the file viewer. The search
 opens again with your last query.
 
-**A fresh orchestrator session.** The orchestrator's long chat is not compacted. When its context is fuller than its
-threshold (85 % by default: "Fresh session at" in the settings' Orchestrator section) at the end of a turn, Nexus asks
+**A fresh orchestrator session.** The orchestrator's long chat is not compacted. When its context holds more than its
+threshold (500k tokens by default, at most 80 % of its model's context window: "Fresh session at" in the settings'
+Orchestrator section) at the end of a turn, Nexus asks
 it for a summary of the decisions, open items, the plan and what it promised you, and goes on in a fresh session that
 starts from that summary, its current briefing and the project's state. You need do nothing: a message you send
 meanwhile waits for the fresh session. The chat stays one chat: the earlier session's messages stay above a **Fresh
@@ -368,7 +369,7 @@ commits what is consistent and leaves no uncommitted changes behind.
 
 The settings panel (the gear icon) has two tabs. **Global** holds the settings every project follows: the default
 runtime; for Claude Code workers the model, effort and permission mode; for Codex workers the model, effort, sandbox
-and what happens when an agent needs to leave the sandbox; the orchestrator's model, effort, notices and the context fill at which it goes on in a fresh session; the thinking
+and what happens when an agent needs to leave the sandbox; the orchestrator's model, effort, notices and the context size (in tokens) at which it goes on in a fresh session; the thinking
 partners' runtime, model and effort; the reader's language; and the defaults, among them the **stop conditions** every
 queue gets besides its own (a list: add, edit, remove; an empty one cannot be saved) and the **send-backs before you**
 (how many times the orchestrator may send a step back to its worker before the step goes to you; 0 or more). It
@@ -399,8 +400,8 @@ per line, as your Codex config names it). Plugins and apps stay off; thinking pa
 What was refused shows in each step's detail and, grouped by kind with counts, under "Refused actions" on the project
 page; from a Claude Code refusal, "Allow for this project…" adds a rule (prefilled, editable) to these settings.
 A run can override model and effort when it starts, and the orchestrator chooses them when it starts runs.
-With context care on (the default, under Defaults), a run whose session is fuller than "Reuse a session up to" at
-the end of a step goes on in a fresh session of the same runtime, model and effort, given the previous session's
+With context care on (the default, under Defaults), a run whose session holds more than "Reuse a session up to" (300k tokens by default, at
+most 80 % of the model's context window; a share set before is ignored) at the end of a step goes on in a fresh session of the same runtime, model and effort, given the previous session's
 context summary; the run's panel lists each such switch.
 A queue can be started when another one is done, at a time, or when the usage window resets: "When" in the start
 form (or the orchestrator's `nexus run B start --after A [--after C]`, `--at "2026-11-14 22:00"`, `--at usage-reset`).

@@ -99,7 +99,7 @@ for a project then. Same paths as in `project.yaml`:
 
 ```yaml
 protocol: 1
-defaults: { stop_conditions: [], review_level: 2, review_send_back_limit: 2, context_reuse_threshold: 0.6,
+defaults: { stop_conditions: [], review_level: 2, review_send_back_limit: 2, context_reuse_tokens: 300000,
             context_care: true, protect_nexus: true, push_accepted: false, provisional_counts: true,
             merge_back: false, resolve_conflicts: false, usage_pause_threshold: 0.9, max_running: 2 }
 runtimes:
@@ -107,7 +107,7 @@ runtimes:
   claude: { permission_mode: acceptEdits }            # model, effort: none (the runtime's default)
   codex:  { sandbox: workspace-write, approval_policy: never }   # model, effort, approvals_reviewer: none
 conversations: { runtime: claude, web: search }       # model, effort: none
-orchestrator: { runtime: claude, notify: true, context_threshold: 0.85 }   # model, effort: none
+orchestrator: { runtime: claude, notify: true, context_threshold_tokens: 500000 }   # model, effort: none
 languages: {}                                         # reader: none (the language the user writes in)
 kinds:                                                # each kind's runtime, model, effort and fallback (see "Kinds and their defaults")
   mechanical: { runtime: claude, model: claude-sonnet-5-5, effort: low, fallback: [{ runtime: codex, model: gpt-6-luna, effort: low }] }
@@ -153,7 +153,7 @@ one: `null`). The effective settings do not change. It writes only such a file, 
 
 | Kind | Settings |
 |---|---|
-| Global, with a project override | `defaults`: `stop_conditions`, `review_level`, `review_send_back_limit`, `context_reuse_threshold`, `context_care`, `protect_nexus`, `push_accepted`, `provisional_counts`, `merge_back`, `resolve_conflicts`, `usage_pause_threshold`, `max_running` (see "One queue per checkout, and a limit"), `check_fix_limit` (see "Checks run by Nexus"). `runtimes`: `default`; `claude`: `model`, `effort`, `permission_mode`; `codex`: `model`, `effort`, `sandbox`, `approval_policy`, `approvals_reviewer`. `conversations`: `runtime`, `model`, `effort`, `web`. `orchestrator`: `runtime`, `model`, `effort`, `fallback`, `notify`, `context_threshold`. `languages`: `reader`. `kinds.<kind>`: `runtime`, `model`, `effort` (a model or effort may be the project's own `null`: the project's for that runtime), `fallback`. `review_helper`: `enabled`, `runtime`, `model`, `effort` (likewise `null`), `audit_rate` (see "The review helper") |
+| Global, with a project override | `defaults`: `stop_conditions`, `review_level`, `review_send_back_limit`, `context_reuse_tokens`, `context_care`, `protect_nexus`, `push_accepted`, `provisional_counts`, `merge_back`, `resolve_conflicts`, `usage_pause_threshold`, `max_running` (see "One queue per checkout, and a limit"), `check_fix_limit` (see "Checks run by Nexus"). `runtimes`: `default`; `claude`: `model`, `effort`, `permission_mode`; `codex`: `model`, `effort`, `sandbox`, `approval_policy`, `approvals_reviewer`. `conversations`: `runtime`, `model`, `effort`, `web`. `orchestrator`: `runtime`, `model`, `effort`, `fallback`, `notify`, `context_threshold`. `languages`: `reader`. `kinds.<kind>`: `runtime`, `model`, `effort` (a model or effort may be the project's own `null`: the project's for that runtime), `fallback`. `review_helper`: `enabled`, `runtime`, `model`, `effort` (likewise `null`), `audit_rate` (see "The review helper") |
 | Project only | `name`, `defaults.worktree_dir`, `defaults.worktree_setup`, `defaults.worktree_setup_inputs` (see "Without a model"), `defaults.checks`, `runtimes.claude.allowed_tools` (the project's own allow rules), `runtimes.codex.mcp_servers` (the user's Codex MCP servers, by name, that Codex workers keep; empty by default), `conversations.notes_dir`, `languages.working` (`id` and `root` identify the project) |
 | Global only | Remote access (`<NEXUS_HOME>/auth.json`, `push.json`), the deploy push (`deploy.json`), the server; each stays in its own file |
 | State, not a setting | `orchestrator.session` |
@@ -738,7 +738,7 @@ Written only by the server's queue engine; agents never touch them.
 | `sessions/<id>/delivered.jsonl` | What the server handed to the session (notes put into a step turn, inbox entries injected or sent as a turn, or `carried` into the first turn of the session `to` that took over); counts as read |
 | `sessions/<id>/refusals.jsonl` | One line per action the agent wanted but was refused: `at`, `session`, `runtime`, `by` (`permissions`: Claude Code's permission mode or rules; `nexus`: Nexus declined a Codex approval request; `auto_review`: Codex's auto reviewer), `tool` (Claude Code's tool name; for Codex `command`, `file_change`, `network`, `mcp`, `permissions`, …), `input` in short (the command, path or host, at most 300 characters), `reason` when the runtime gave one, `ref` (the runtime's id for the call: one record per refusal), `queue`, `step` |
 | `sessions/<id>/activity.jsonl` | A condensed record of the agent's stream: turns, tool calls, texts (clipped to 600 characters), tool errors, exits, and retries (`retry`: the runtime's own and the engine's), tagged with queue and step |
-| `sessions/<orchestrator>/applied.jsonl` | The server's result for each orchestrator request (`queue.drafted`, `session.request`, `status.set`), and the notices it has sent the orchestrator; the CLI waits for the result and prints it. Its context care's records: `context:asked` (its summary asked for; `message`: the context fill then, 0 to 1) and `context:first` (a fresh session's fill at the end of its first turn); see "The orchestrator's context care" |
+| `sessions/<orchestrator>/applied.jsonl` | The server's result for each orchestrator request (`queue.drafted`, `session.request`, `status.set`), and the notices it has sent the orchestrator; the CLI waits for the result and prints it. Its context care's records: `context:asked` (its summary asked for; `message`: the context fill then, 0 to 1) and `context:first` (a fresh session's context tokens at the end of its first turn; before queue CT its fill, 0 to 1, read as that share of the window); see "The orchestrator's context care" |
 | `sessions/<orchestrator>/chat.jsonl` | The chat shown in the dashboard: the user's messages, the orchestrator's texts (whole, however long) and tool calls, Nexus notices. Append-only: an entry's **line** is the index from 0 of its line in the file (blank and broken lines counted, never shown), and stays its line for good |
 | `sessions/<orchestrator or conversation>/pins.json` | The chat's pinned messages: `{ pins: [{ line, at }] }`, `line` the message's line in that session's chat.jsonl, `at` when it was pinned; in chat order. A tool line cannot be pinned. A fresh session (a new orchestrator conversation) starts without pins; the old session's file stays with it. One writer: the server, on `POST …/sessions/:session/pins` from the dashboard |
 | `<NEXUS_HOME>/settings.yaml` | The global settings, which projects follow where they have no value of their own (see "Global settings") |
@@ -1961,7 +1961,7 @@ from every agent session, and the others from every session but an orchestrator'
 | `POST /api/projects/:id/orchestrator/reset` | | The next message starts a new orchestrator session |
 | `POST /api/projects/:id/orchestrator/stop` | | Stops the orchestrator's running turn (see "Stopping a chat agent's turn" under "The orchestrator"); refused (409) when it is not in a turn |
 | `POST /api/projects/:id/orchestrator/settings` | `model`, `effort` (empty: the default) | The orchestrator's model and effort, from its next message on |
-| `PATCH /api/projects/:id/settings` | `name`, `runtimes`, `defaults`, `conversations`, `languages` (`reader`, `working`), `orchestrator` (`runtime`, `notify`, `model`, `effort`, `fallback`, `context_threshold`) (an empty value clears a field), `own?`, `follow?` (lists of setting keys, `runtimes.claude.model`) | Project settings, checked against the schema (see "Global settings"): a setting given another value, or named in `own`, becomes the project's own (in `own` also when it equals the global value); one named in `follow` follows the global value again; naming one in both is refused |
+| `PATCH /api/projects/:id/settings` | `name`, `runtimes`, `defaults`, `conversations`, `languages` (`reader`, `working`), `orchestrator` (`runtime`, `notify`, `model`, `effort`, `fallback`, `context_threshold_tokens`) (an empty value clears a field), `own?`, `follow?` (lists of setting keys, `runtimes.claude.model`) | Project settings, checked against the schema (see "Global settings"): a setting given another value, or named in `own`, becomes the project's own (in `own` also when it equals the global value); one named in `follow` follows the global value again; naming one in both is refused |
 | `GET /api/projects/:id/settings` | | `own` (the keys of the settings the project has its own value of) and `global` (the global settings) |
 | `GET /api/settings`, `PATCH /api/settings` | the global settings, nested as in `settings.yaml` (null or empty clears an optional one) | The global settings (`global`; GET also `keys`, every setting with a global value). PATCH writes `<NEXUS_HOME>/settings.yaml`, checked against the schema; every project that follows a changed value has it at once |
 | `POST /api/projects/:id/uploads` | `data` (the picture, base64, optionally as a `data:` URL) | Saves a picture for a chat message under `.nexus/uploads/` and answers `{ ok, result: { path, type, bytes } }`: `path` absolute (forward slashes), `type` `png`, `jpeg`, `webp` or `gif`. See "Uploads" below |
@@ -2585,7 +2585,7 @@ durably queued **and visible**, not model acknowledgement. Runtime failure after
 No partner event log is written: delivered dated handoffs are read alongside legacy `ideas.covered` events by the
 Ideas history. Pure context-only handoffs without dates remain in note-level handoff history.
 
-`project.yaml` holds `orchestrator: { runtime, session, model?, effort?, fallback?, notify, context_threshold }` (`context_threshold`: see
+`project.yaml` holds `orchestrator: { runtime, session, model?, effort?, fallback?, notify, context_threshold_tokens }` (`context_threshold_tokens`: see
 "The orchestrator's context care"). It runs on `orchestrator.runtime`: `codex` starts it on Codex, any other value
 on Claude Code. On Claude Code the orchestrator is a session
 launched in the project's checkout with `--permission-mode dontAsk`, allowed only `Read`, `Grep`, `Glob`, `Agent`,
@@ -3429,9 +3429,14 @@ fit it:
 
 ## Context care
 
-With `defaults.context_care` on (the default), at the end of a step whose session's context fill (`context_tokens`
-/ `context_window` in `runtime.json`) is above `context_reuse_threshold`, and when a next step remains, the engine
-goes on in a fresh session. Without a known context window it goes on in the same session. A fresh session for another
+With `defaults.context_care` on (the default), at the end of a step whose session's context (`context_tokens` in
+`runtime.json`) is beyond its threshold, and when a next step remains, the engine goes on in a fresh session. The
+threshold in use is `defaults.context_reuse_tokens` (tokens, global with a project override, default 300000), but at
+most 80 % of the model's context window (`context_window` in `runtime.json`; `contextLimit` in
+`packages/protocol/src/schemas.ts`): a 1M window switches past 300k tokens, a 256k one past 204.8k. Without a known
+context window it goes on in the same session. (Before queue CT the threshold was a share of the window,
+`context_reuse_threshold`; reading ignores that key and nothing converts it: a project or global file that still has it
+gets the default.) A fresh session for another
 runtime is made the same way, and so is one for the closing refactoring step (`why: refactor`: no summary is asked
 for, and the seed gives none; see "The closing refactoring step").
 
@@ -3469,13 +3474,14 @@ Its steps:
 ## The orchestrator's context care
 
 The orchestrator is not compacted: it goes on in a fresh session started from a summary it writes on purpose (decided
-by the user on 2026-11-15; DESIGN.md, "The orchestrator's context care"). `orchestrator.context_threshold` (global
-with a project override, 0 to 1, default 0.85) is the fill (`context_tokens` / `context_window` in its
-`runtime.json`) at which this happens.
+by the user on 2026-11-15; DESIGN.md, "The orchestrator's context care"). `orchestrator.context_threshold_tokens` (global
+with a project override, default 500000) is the number of context tokens (`context_tokens` in its `runtime.json`)
+beyond which this happens, at most 80 % of its model's context window (`context_window`). (Before queue CT it was a
+share of the window, `orchestrator.context_threshold`; reading ignores that key, unconverted.)
 
 1. **The request.** When the server looks at a change (`Orchestrator.onChange`) and the orchestrator's process is idle
-   (between turns) with its fill above the threshold, it asks once, with a turn: "[Nexus] Your context is N % full (the
-   threshold is T %): Nexus goes on with you in a fresh orchestrator session … Write that summary now with `nexus
+   (between turns) with its context beyond the threshold, it asks once, with a turn: "[Nexus] Your context holds N tokens
+   (the threshold is T tokens): Nexus goes on with you in a fresh orchestrator session … Write that summary now with `nexus
    context …`: the decisions made with the user and why, the open items, the plan …, and what you promised the user
    … Then end your turn". It records `context:asked` in the session's `applied.jsonl` (the fill as its `message`), and
    the chat shows a Nexus line. Never while a turn runs; not while the orchestrator's runtime is beyond the usage
@@ -3496,7 +3502,7 @@ with a project override, 0 to 1, default 0.85) is the fill (`context_tokens` / `
    orchestrator's session (`orchestratorOverview` in the protocol's `overview.ts`, which the CLI prints too).
 5. **Afterwards** the fresh session is told what no session of its line was told, since the first of them (the
    `notify:…` keys of every session it continues); deploy changes only those after its own start. A fresh session
-   whose fill is above the threshold at the end of its first turn is not switched again (`context:first`): another
+   whose context is beyond the threshold at the end of its first turn is not switched again (`context:first`): another
    would be no emptier.
 
 ## How the engine runs a Codex session

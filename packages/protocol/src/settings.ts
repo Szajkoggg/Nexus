@@ -8,7 +8,7 @@ import { TAG_KINDS } from "./tags.ts";
  * `none`: the setting has no default, so a project's own "none" is stored as null.
  */
 export const OVERRIDABLE: readonly { path: readonly string[]; none?: true }[] = [
-  ...["stop_conditions", "review_level", "review_send_back_limit", "context_reuse_threshold", "context_care",
+  ...["stop_conditions", "review_level", "review_send_back_limit", "context_reuse_tokens", "context_care",
     "protect_nexus", "push_accepted", "provisional_counts", "merge_back", "resolve_conflicts", "usage_pause_threshold", "max_running", "check_fix_limit"].map((k) => ({ path: ["defaults", k] })),
   { path: ["runtimes", "default"] },
   { path: ["runtimes", "claude", "model"], none: true },
@@ -28,7 +28,7 @@ export const OVERRIDABLE: readonly { path: readonly string[]; none?: true }[] = 
   { path: ["orchestrator", "effort"], none: true },
   { path: ["orchestrator", "fallback"], none: true },
   { path: ["orchestrator", "notify"] },
-  { path: ["orchestrator", "context_threshold"] },
+  { path: ["orchestrator", "context_threshold_tokens"] },
   { path: ["languages", "reader"], none: true },
   ...TAG_KINDS.flatMap((k) => [
     { path: ["kinds", k, "runtime"] },

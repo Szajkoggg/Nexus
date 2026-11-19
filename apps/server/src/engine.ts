@@ -11,7 +11,7 @@ import { join } from "node:path";
 import {
   runCounted, runHoldsCheckout, runEnded, runGoing,
   ActionError, INTEGRATION_CONDITION, NEXUS_SESSION, ProjectStore, USER_SESSION, acceptedByNexus, ensureNexusSession, fileList, ensureUserSession, lastDone, stepChecks, liftByContinue, loadProjectState, openPlanFile, releaseOrphanedSteps, stepClosed, reportFile, ensureReportFolder, newId, normPath, now, readUsage,
-  RETRY_LIMIT, START_KEYS, chooseRoute, effortIssue, formatClock, kindDefaults, overThreshold, routeStep, runStart, type Effort, type Routed, type ProjectFile, type StartValues, type ProjectState, type QueueView, type RunFile, type SessionFile,
+  RETRY_LIMIT, START_KEYS, chooseRoute, contextBeyond, effortIssue, formatClock, kindDefaults, overThreshold, routeStep, runStart, type Effort, type Routed, type ProjectFile, type StartValues, type ProjectState, type QueueView, type RunFile, type SessionFile,
   type SessionView, type StepView, type PlanBy,
   addNote,
 } from "@nexus/protocol";
@@ -1004,8 +1004,8 @@ export class Engine implements Member {
   /**
    * Makes the session fit the next step before it opens; returns whether it took the next move instead.
    *
-   * - Another runtime than the session's, or (context care, DESIGN.md "Context care between steps") a context fuller
-   *   than the project's threshold: the step runs in a fresh session with the step's runtime, model and effort,
+   * - Another runtime than the session's, or (context care, DESIGN.md "Context care between steps") a context beyond
+   *   the project's threshold (context_reuse_tokens, at most 80 % of the model's window: contextLimit): the step runs in a fresh session with the step's runtime, model and effort,
    *   seeded with the ended step's context summary and the queue's text. A missing summary is asked for once; if it is
    *   still missing, the seed is the queue's description and its finished steps' summaries. Without a known context
    *   window the fill does not count.
@@ -1027,7 +1027,7 @@ export class Engine implements Member {
       return true;
     }
     const why = old.runtime !== want.runtime ? "runtime"
-      : defaults.context_care && fill !== undefined && fill > defaults.context_reuse_threshold ? "context" : undefined;
+      : defaults.context_care && contextBeyond(tokens, window, defaults.context_reuse_tokens) ? "context" : undefined;
     if (why) {
       // Fresh: written by this session at or after its latest start of the step that just ended.
       const since = done?.timeline.filter((e) => e.type === "step.started" && e.session === old.id).at(-1)?.at ?? run.started_at;

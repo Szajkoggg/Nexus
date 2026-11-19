@@ -812,7 +812,7 @@ export function updateSettings(store: ProjectStore, patch: unknown): void {
         ...("model" in b.orchestrator ? { model: b.orchestrator.model } : {}),
         ...("effort" in b.orchestrator ? { effort: b.orchestrator.effort } : {}),
         ...("fallback" in b.orchestrator ? { fallback: b.orchestrator.fallback } : {}),
-        ...(b.orchestrator.context_threshold !== undefined ? { context_threshold: b.orchestrator.context_threshold } : {}),
+        ...(b.orchestrator.context_threshold_tokens !== undefined ? { context_threshold_tokens: b.orchestrator.context_threshold_tokens } : {}),
       }),
   };
   const r = ProjectFile.safeParse(next);

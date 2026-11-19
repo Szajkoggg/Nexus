@@ -91,7 +91,8 @@ function closingSkipped(q: QueueView): string {
  */
 export function orchestratorOverview(state: ProjectState): string {
   const out: string[] = [];
-  const pct = (t?: number, w?: number) => (t && w ? `${Math.round((100 * t) / w)} % context` : "context unknown");
+  // The tokens too: the session's threshold is a number of tokens (context_reuse_tokens, queue CT).
+  const pct = (t?: number, w?: number) => (t && w ? `${Math.round((100 * t) / w)} % context (${Math.round(t / 1000)}k of ${Math.round(w / 1000)}k tokens)` : "context unknown");
   const done = state.queues.filter((q) => q.status === "done" || q.status === "cancelled");
   out.push(`
 Queues (${state.queues.length - done.length} open; finished: ${done.map((q) => `${q.id}${closingSkipped(q) ? ` (${closingSkipped(q)})` : ""}`).join(", ") || "none"})`);

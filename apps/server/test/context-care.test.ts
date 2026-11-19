@@ -1,6 +1,7 @@
-// Context care against the fake runtimes: at the end of a step whose session's context is fuller than the project's
-// threshold, the next step runs in a fresh session seeded with the context summary. The fakes report the context fill
-// FAKE_CONTEXT_FILL asks for (fake-behaviour.ts).
+// Context care against the fake runtimes: at the end of a step whose session's context is beyond the project's
+// threshold (context_reuse_tokens, default 300k, at most 80 % of the window), the next step runs in a fresh session
+// seeded with the context summary. The fakes report the context fill FAKE_CONTEXT_FILL asks for of a window of
+// FAKE_CONTEXT_WINDOW tokens (fake-behaviour.ts); here 1M unless a test says otherwise.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
@@ -18,13 +19,14 @@ process.env.NEXUS_CODEX = join(here, "fake-codex.ts");
 
 interface Received { text: string; priority: string | null; busy: boolean; session: string | null }
 
-function setup(behaviours: string[], opts: { fill: number; care?: boolean; noSummary?: boolean }) {
+function setup(behaviours: string[], opts: { fill: number; window?: number; care?: boolean; noSummary?: boolean }) {
   const root = mkdtempSync(join(tmpdir(), "nexus-care-"));
   process.env.NEXUS_HOME = join(root, "home");
   process.env.FAKE_LOG = join(root, "fake.log");
   process.env.FAKE_CONTEXT_FILL = String(opts.fill);
+  process.env.FAKE_CONTEXT_WINDOW = String(opts.window ?? 1_000_000);
   if (opts.noSummary) process.env.FAKE_NO_SUMMARY = "1"; else delete process.env.FAKE_NO_SUMMARY;
-  const store = ProjectStore.init(root, { id: "p", name: "P", root, defaults: { context_care: opts.care ?? true, context_reuse_threshold: 0.6 } });
+  const store = ProjectStore.init(root, { id: "p", name: "P", root, defaults: { context_care: opts.care ?? true } });
   const steps: StepDef[] = behaviours.map((b, i) => ({ id: `Q${i + 1}`, title: `Step ${i + 1}`, goal: `FAKE: ${b}`, acceptance: [] }));
   store.writeQueue({
     protocol: 1, id: "Q", title: "Queue", description: "The queue's own description: fracture the rock.", revision: 1, status: "proposed",
@@ -35,11 +37,28 @@ function setup(behaviours: string[], opts: { fill: number; care?: boolean; noSum
   const queue = () => loadProjectState(store).queues.find((q) => q.id === "Q")!;
   const received = (): Received[] => (existsSync(process.env.FAKE_LOG!) ? readFileSync(process.env.FAKE_LOG!, "utf8").trim().split("\n").map((l) => JSON.parse(l) as Received) : []);
   const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms, () => `; run: ${JSON.stringify(queue().run)}; steps: ${queue().steps.map((s) => `${s.id}=${s.status}`).join(" ")}`);
-  const done = () => { engine.shutdown(); delete process.env.FAKE_CONTEXT_FILL; delete process.env.FAKE_NO_SUMMARY; };
+  const done = () => { engine.shutdown(); delete process.env.FAKE_CONTEXT_FILL; delete process.env.FAKE_CONTEXT_WINDOW; delete process.env.FAKE_NO_SUMMARY; };
   return { store, engine, queue, received, until, done };
 }
 
 const asks = (r: Received[]) => r.filter((m) => m.text.includes("write your context summary"));
+
+test("the threshold in use is 300k tokens, at most 80 % of the window: a 1M window switches past 300k, a 256k one past 204.8k", async () => {
+  for (const c of [
+    { name: "310k of a 1M window", fill: 0.31, window: 1_000_000, switches: true },
+    { name: "202k of a 256k window", fill: 0.79, window: 256_000, switches: false },
+    { name: "207k of a 256k window", fill: 0.81, window: 256_000, switches: true },
+  ]) {
+    const { engine, queue, until, done } = setup(["summary", "done"], c);
+    try {
+      engine.start("Q", { runtime: "claude" });
+      await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
+      const q = queue();
+      assert.equal(q.steps[0]!.session !== q.steps[1]!.session, c.switches, c.name);
+      assert.deepEqual(q.run!.switches?.map((s) => s.why), c.switches ? ["context"] : undefined, c.name);
+    } finally { done(); }
+  }
+});
 
 for (const runtime of ["claude", "codex"] as const) {
   test(`${runtime}: above the threshold the next step runs in a fresh session seeded with the summary`, async () => {
@@ -74,7 +93,7 @@ for (const runtime of ["claude", "codex"] as const) {
 
   test(`${runtime}: below the threshold or with context care off, the next step stays in the same session`, async () => {
     for (const c of [
-      { name: "below the threshold", first: "summary", fill: 0.5, care: true },
+      { name: "below the threshold (290k of a 1M window)", first: "summary", fill: 0.29, care: true },
       { name: "context care off with a full session", first: "done", fill: 0.9, care: false },
     ]) {
       const { engine, queue, received, until, done } = setup([c.first, "done"], c);

@@ -120,6 +120,26 @@ const ApprovalPolicy = z.enum(["never", "on-request", "untrusted"]);
 const ApprovalsReviewer = z.enum(["user", "auto_review", "guardian_subagent"]);
 const WorkerRuntime = z.enum(["claude", "codex"]);
 const Fraction = z.number().min(0).max(1);
+/** A context threshold in tokens: a whole number from 1,000 to 10,000,000. */
+const ContextTokens = z.number().int().min(1_000).max(10_000_000);
+/** The workers' context threshold when nothing else is set (context_reuse_tokens). */
+export const DEFAULT_CONTEXT_REUSE_TOKENS = 300_000;
+/** The orchestrator's context threshold when nothing else is set (orchestrator.context_threshold_tokens). */
+export const DEFAULT_ORCHESTRATOR_CONTEXT_TOKENS = 500_000;
+/** The share of a model's context window a context threshold is capped at (contextLimit). */
+export const CONTEXT_WINDOW_CAP = 0.8;
+/**
+ * The context threshold in use for a session (queue CT): the set number of tokens, but at most 80 % of the model's
+ * context window, so a small window is never filled before a switch. An unknown window: undefined, no switch.
+ */
+export function contextLimit(tokens: number, window: number | undefined): number | undefined {
+  return window && window > 0 ? Math.min(tokens, CONTEXT_WINDOW_CAP * window) : undefined;
+}
+/** Whether a session's context (`used` tokens of `window`) is beyond its threshold (contextLimit); unknown: no. */
+export function contextBeyond(used: number | undefined, window: number | undefined, tokens: number): boolean {
+  const limit = contextLimit(tokens, window);
+  return used !== undefined && limit !== undefined && used > limit;
+}
 /** One of the offered languages, by its code (languages.ts). */
 const Language = z.enum(LANGUAGE_CODES);
 
@@ -137,10 +157,15 @@ const DefaultsShape = z.object({
    * The user's Fix it does not count.
    */
   review_send_back_limit: z.number().int().min(0).default(2),
-  context_reuse_threshold: Fraction.default(0.6),
   /**
-   * Context care: when a worker's context is fuller than context_reuse_threshold at the end of a step, the next step
-   * runs in a fresh session seeded with the context summary, instead of the runtime compacting mid-step.
+   * The workers' context threshold in tokens (queue CT): the orchestrator continues a session only below it, and with
+   * context care a run whose session is beyond it at the end of a step goes on in a fresh one. Capped at 80 % of the
+   * model's context window (contextLimit). It replaced the share context_reuse_threshold, which reading ignores.
+   */
+  context_reuse_tokens: ContextTokens.default(DEFAULT_CONTEXT_REUSE_TOKENS),
+  /**
+   * Context care: when a worker's context is beyond context_reuse_tokens at the end of a step, the next step runs in a
+   * fresh session seeded with the context summary, instead of the runtime compacting mid-step.
    */
   context_care: z.boolean().default(true),
   /**
@@ -226,10 +251,11 @@ const OrchestratorSettings = z.object({
   /** Tell the orchestrator when a worker asks, or a run halts or finishes (it starts if needed). */
   notify: z.boolean().default(true),
   /**
-   * The orchestrator's context care: when its context is fuller than this at the end of a turn, Nexus asks it for a
-   * summary and goes on in a fresh orchestrator session started from it (src/orchestrator.ts, contextCare).
+   * The orchestrator's context care: when its context is beyond this many tokens (at most 80 % of its model's window,
+   * contextLimit) at the end of a turn, Nexus asks it for a summary and goes on in a fresh orchestrator session started
+   * from it (src/orchestrator.ts, contextCare). It replaced the share context_threshold, which reading ignores.
    */
-  context_threshold: Fraction.default(0.85),
+  context_threshold_tokens: ContextTokens.default(DEFAULT_ORCHESTRATOR_CONTEXT_TOKENS),
 });
 /**
  * One entry of a fallback chain (routing.ts; PROTOCOL.md, "Kinds and their defaults"): a runtime with an optional model
@@ -381,7 +407,7 @@ export const ProjectFile = z.object({
   orchestrator: OrchestratorSettings.extend({
     session: Id.nullable().default(null),
     /** Always there in effective settings (the global value, else the project's own); optional for a literal's sake. */
-    context_threshold: Fraction.optional(),
+    context_threshold_tokens: ContextTokens.optional(),
   }).optional(),
   languages: LanguageSettings.extend({
     /** The working language (project only): files, code, comments, commits, context cards, notes. */
@@ -427,7 +453,7 @@ export const StoredProject = z.object({
     stop_conditions: own(z.array(z.string())),
     review_level: own(ReviewLevel),
     review_send_back_limit: own(z.number().int().min(0)),
-    context_reuse_threshold: own(Fraction),
+    context_reuse_tokens: own(ContextTokens),
     context_care: own(z.boolean()),
     protect_nexus: own(z.boolean()),
     push_accepted: own(z.boolean()),
@@ -473,7 +499,7 @@ export const StoredProject = z.object({
     model: ownOrNone(z.string()),
     effort: ownOrNone(Effort),
     notify: own(z.boolean()),
-    context_threshold: own(Fraction),
+    context_threshold_tokens: own(ContextTokens),
   }).optional(),
   languages: z.object({
     reader: ownOrNone(Language),

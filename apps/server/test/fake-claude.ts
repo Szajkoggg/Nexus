@@ -2,7 +2,7 @@
 // What it does is in fake-behaviour.ts.
 import { existsSync, readFileSync } from "node:fs";
 import {
-  BACKGROUND_NOTICE, PARTIAL, actOnRead, contextTokens, fakeSaved, interrupt, record, recordArgs, respond, saveFakeConversation, type Fake, type FakeFailure,
+  BACKGROUND_NOTICE, PARTIAL, actOnRead, contextTokens, contextWindow, fakeSaved, interrupt, record, recordArgs, respond, saveFakeConversation, type Fake, type FakeFailure,
 } from "./fake-behaviour.ts";
 
 // The briefing as the CLI reads it at its start (--append-system-prompt-file): the file is rewritten at the next start.
@@ -53,7 +53,7 @@ async function turn(text: string): Promise<void> {
   fake.history!.push(...unread);
   const reply = actOnRead(unread, first);
   unread = [];
-  out({ type: "assistant", message: { content: [{ type: "text", text: reply }], usage: { input_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: contextTokens(1000, 100) - 10 } }, parent_tool_use_id: null });
+  out({ type: "assistant", message: { content: [{ type: "text", text: reply }], usage: { input_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: contextTokens(contextWindow(1000), 100) - 10 } }, parent_tool_use_id: null });
   // FAKE_LATE_NEXT: the process's first turn writes its result only once a message comes in after its reply, and that
   // message, come too late to be read in the turn, runs as a turn of its own after it (as Claude Code runs a `next`
   // message that reached it as its turn ended): Nexus sent it into a turn whose result it had not read yet (queue OF).
@@ -85,7 +85,7 @@ async function turn(text: string): Promise<void> {
   totals.outputTokens += usage.output_tokens + (sub?.output_tokens ?? 0);
   totals.cacheReadInputTokens += usage.cache_read_input_tokens + (sub?.cache_read_input_tokens ?? 0);
   totals.cacheCreationInputTokens += usage.cache_creation_input_tokens + (sub?.cache_creation_input_tokens ?? 0);
-  out({ type: "result", subtype: "success", is_error: false, result: reply, num_turns: 1, total_cost_usd: totalCost, usage, modelUsage: { fake: { contextWindow: 1000, ...totals } }, permission_denials: denials });
+  out({ type: "result", subtype: "success", is_error: false, result: reply, num_turns: 1, total_cost_usd: totalCost, usage, modelUsage: { fake: { contextWindow: contextWindow(1000), ...totals } }, permission_denials: denials });
 }
 
 /**
@@ -146,10 +146,10 @@ function interrupted(): void {
  */
 function compact(): void {
   out({ type: "system", subtype: "status", status: "compacting", session_id: "fake" });
-  out({ type: "system", subtype: "compact_boundary", session_id: "fake", compact_metadata: { trigger: "manual", pre_tokens: contextTokens(1000, 100), post_tokens: 30 } });
+  out({ type: "system", subtype: "compact_boundary", session_id: "fake", compact_metadata: { trigger: "manual", pre_tokens: contextTokens(contextWindow(1000), 100), post_tokens: 30 } });
   out({ type: "user", message: { role: "user", content: "This session is being continued from a previous conversation. Summary: fake." }, isReplay: true, parent_tool_use_id: null });
   out({ type: "user", message: { role: "user", content: "<local-command-stdout>Compacted </local-command-stdout>" }, isReplay: true, parent_tool_use_id: null });
-  out({ type: "result", subtype: "success", is_error: false, result: "", num_turns: 0, total_cost_usd: totalCost, usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }, modelUsage: { fake: { contextWindow: 1000, ...totals } }, permission_denials: [] });
+  out({ type: "result", subtype: "success", is_error: false, result: "", num_turns: 0, total_cost_usd: totalCost, usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }, modelUsage: { fake: { contextWindow: contextWindow(1000), ...totals } }, permission_denials: [] });
 }
 
 /** Ends the process as a signal would, before the turn's result: the CLI killed, or closing by itself. */

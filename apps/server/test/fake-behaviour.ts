@@ -50,9 +50,9 @@
 // "refused": the agent tries actions that are refused (each fake writes them as its runtime does), then done.
 // "summary": done, then the step's context summary (`nexus context`); "summaryslow": the same, then it works (as
 // "slow") before the turn ends. Nexus asking for the summary ("[Nexus] … write your context summary") gets one, unless
-// FAKE_NO_SUMMARY is set; so does the orchestrator ("[Nexus] Your context is … full"), with "fake orchestrator
+// FAKE_NO_SUMMARY is set; so does the orchestrator ("[Nexus] Your context holds …"), with "fake orchestrator
 // summary" (topics plan, promises; file docs/plan.md), and with FAKE_SUMMARY_MS set it then works that long. FAKE_CONTEXT_FILL (0 to 1) is the context fill each turn reports
-// (default: claude 10 %, codex 6 %); FAKE_CONTEXT_FILL_FILE names a file whose content, while it exists, replaces it (a
+// (default: claude 10 %, codex 6 %) of the context window, FAKE_CONTEXT_WINDOW tokens (default: claude 1000, codex 2000); FAKE_CONTEXT_FILL_FILE names a file whose content, while it exists, replaces it (a
 // test changes the fill of a running process). A step turn may come after a seed (context care's first prompt of a fresh session): it is found at the
 // start of any line.
 // An answer ("[Nexus] Answer …") makes it report the current step done (also in a new process of the session: the
@@ -91,6 +91,11 @@ const nexusOut = (args: string[], input?: string): string => {
 /** Records what reached the agent and how, for the tests (FAKE_LOG, one JSON line each). */
 export function record(text: string, priority: string | null, busy: boolean): void {
   if (process.env.FAKE_LOG) appendFileSync(process.env.FAKE_LOG, JSON.stringify({ text, priority, busy, session: process.env.NEXUS_SESSION ?? null }) + "\n");
+}
+
+/** The context window a turn reports: FAKE_CONTEXT_WINDOW, else the runtime's own `fallback`. */
+export function contextWindow(fallback: number): number {
+  return Number(process.env.FAKE_CONTEXT_WINDOW) || fallback;
 }
 
 /** The context tokens a turn reports for a window of `window` tokens: FAKE_CONTEXT_FILL of it, else `fallback`. */
@@ -458,7 +463,7 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
     nexus("step", "done", back[1]!, "--summary", `fake finished ${back[1]} round ${back[2]}`);
     return `round ${back[2]}`;
   }
-  if (text.startsWith("[Nexus] Your context is") && text.includes("fresh orchestrator session")) {
+  if (text.startsWith("[Nexus] Your context holds") && text.includes("fresh orchestrator session")) {
     if (!process.env.FAKE_NO_SUMMARY) nexus("context", "fake orchestrator summary", "--topics", "plan,promises", "--files", "docs/plan.md");
     if (process.env.FAKE_SUMMARY_MS) await new Promise((r) => setTimeout(r, Number(process.env.FAKE_SUMMARY_MS)));
     return "summary written";
