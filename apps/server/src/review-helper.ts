@@ -40,7 +40,7 @@ const HELPER_LIMIT_MS = 20 * 60_000;
 
 /** What a helper may run besides reading (H15); each on every shell tool. */
 const HELPER_TOOLS = ["Read", "Grep", "Glob", ...shellRules([
-  "git log", "git status", "git diff", "git show", "nexus status", "nexus help",
+  "git log", "git status", "git diff", "git show", "nexus status", "nexus help", "nexus doc",
   "nexus review accept", "nexus review send-back", "nexus review pass-on",
 ])];
 /** Never a helper's, whatever a project allows its workers. */

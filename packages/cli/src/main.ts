@@ -2,7 +2,7 @@
 // Every agent-side command validates its input and appends one event to the session's own log.
 import { readFileSync, existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import YAML from "yaml";
-import { basename, dirname, extname, join, resolve } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { execFileSync } from "node:child_process";
 import {
@@ -19,6 +19,7 @@ import {
 } from "@nexus/protocol";
 import { checkRules, describeRules } from "@nexus/protocol/rules";
 import { importMarkdownQueues } from "./import-md.ts";
+import { docHeadings, headingsText, pickHeadings, sectionOptions, sectionText } from "./doc.ts";
 import { CONTEXT_SUMMARY_WORDS, HELP_TOPICS, topicList } from "./help.ts";
 
 const HELP = `nexus — report to and manage Nexus (protocol 1)
@@ -61,6 +62,10 @@ Agent commands (session from NEXUS_SESSION or --session):
   nexus ideas matches                 the suggestions for matching earlier queues to the notes' entries, and the
                                       user's decisions (deciding is the user's, in the dashboard)
   nexus ideas status                  effective dispositions, implementation assessments, conflicts and history (JSON; read only)
+  nexus doc <file.md>[#<section>]     (any session; read only) a Markdown file's headings, with their levels and lines;
+                                      with #<section>: that one section (to the next heading of its level or higher),
+                                      named by its heading or its anchor, or a date (tags.md#2026-11-14: that dated
+                                      entry); the notes folder may be left out; an unknown section lists the sections
   nexus log <text> [--level info|warn|error]
   nexus answer <qid> <text> [--escalate [--recommend <option>]] [--continue|--wait]     (orchestrator only)
   nexus queue draft <file.yaml|->                                 (orchestrator only) create or change a queue
@@ -396,8 +401,8 @@ function helperGate(cmd: string): void {
   let role: string | undefined;
   try { role = store().readSession(sid).role; } catch { return; }
   if (role !== "helper") return;
-  if (cmd === "status" || cmd === "help" || (cmd === "review" && ["accept", "send-back", "pass-on"].includes(args[1] ?? ""))) return;
-  throw new UsageError(`a review helper only reads and decides its review (nexus status, nexus help, nexus review accept|send-back|pass-on), not nexus ${[cmd, args[1]].filter(Boolean).join(" ")}; pass the step on with --why doubt, naming what you could not do`);
+  if (cmd === "status" || cmd === "help" || cmd === "doc" || (cmd === "review" && ["accept", "send-back", "pass-on"].includes(args[1] ?? ""))) return;
+  throw new UsageError(`a review helper only reads and decides its review (nexus status, nexus help, nexus doc, nexus review accept|send-back|pass-on), not nexus ${[cmd, args[1]].filter(Boolean).join(" ")}; pass the step on with --why doubt, naming what you could not do`);
 }
 
 function report(r: { ok: boolean; message: string } | undefined): void {
@@ -856,6 +861,35 @@ const commands: Record<string, () => void | Promise<void>> = {
     console.log(`ok: this hand-over covers ${refs.join(", ")}`);
   },
 
+  /**
+   * `nexus doc <file.md>[#<section>]` (any session, or none; read only): the file's headings, or one section of it
+   * (docs/PROTOCOL.md, "nexus doc"). The notes folder may be left out, as with nexus covers.
+   */
+  doc() {
+    const given = need(args[1], "<file.md>[#<section>] (nexus doc docs/DESIGN.md, nexus doc tags.md#2026-11-14)");
+    const at = given.indexOf("#");
+    const path = at < 0 ? given : given.slice(0, at);
+    const name = at < 0 ? undefined : given.slice(at + 1);
+    const file = docFile(need(path, "<file.md> before the #"));
+    const lines = readFileSync(file, "utf8").split("\n");
+    const hs = docHeadings(lines);
+    if (name === undefined) { console.log(hs.length ? headingsText(hs) : `${normPath(file)} has no headings`); return; }
+    if (!name.trim()) throw new UsageError(`no section named after the # (${sectionOptions(hs)})`);
+    let picked;
+    try { picked = pickHeadings(hs, name); } catch (e) { throw new UsageError(`${path}: ${(e as Error).message}`); }
+    if (!picked.length) throw new UsageError(`${path} has no section "${name}" (${sectionOptions(hs)})`);
+    // A picked heading inside a section already printed (a dated entry under another of its date) is not printed twice.
+    let until = 0;
+    const parts: string[] = [];
+    for (const h of picked) {
+      if (h.line <= until) continue;
+      const text = sectionText(lines, hs, h);
+      parts.push(text);
+      until = h.line + text.split("\n").length - 1;
+    }
+    console.log(parts.join("\n\n"));
+  },
+
   log() {
     const st = store(); const s = session(st);
     emit(st, s, { type: "log", level: (o.level ?? "info") as "info", text: need(args[1], "<text>") });
@@ -1263,6 +1297,31 @@ function draftFromTemplate(): void {
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, filledTemplateYaml(t, queue, shown), "utf8");
   console.log(`ok: draft ${shown} from template ${t.id} (${t.layer}); complete it, then: nexus queue draft ${shown}`);
+}
+
+/**
+ * The file `nexus doc` reads: an absolute path as given; otherwise the first that exists of the path from the working
+ * directory, from the project's root, and in the project's notes folder (tags.md for docs/ideas/tags.md).
+ */
+function docFile(path: string): string {
+  const p = path.replaceAll("\\", "/");
+  if (isAbsolute(p)) {
+    if (!existsSync(p)) throw new UsageError(`no such file: ${p}`);
+    return p;
+  }
+  const tried = [resolve(p)];
+  const dir = process.env.NEXUS_DIR ?? findNexusDir();
+  if (dir) {
+    try {
+      const project = new ProjectStore(dir).readProject();
+      tried.push(join(project.root, p));
+      const notes = project.conversations.notes_dir;
+      if (notes && !p.startsWith(`${notes}/`)) tried.push(join(project.root, notes, p));
+    } catch { /* no project here: the working directory only */ }
+  }
+  const found = tried.find((f) => existsSync(f) && statSync(f).isFile());
+  if (!found) throw new UsageError(`no such file: ${p} (looked at ${[...new Set(tried.map((f) => normPath(f)))].join(", ")})`);
+  return found;
 }
 
 function guessKind(p: string): ReviewItem["kind"] {

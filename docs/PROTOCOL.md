@@ -994,7 +994,7 @@ found anyway passes the step on (`unavailable`). `audit_rate` is a fraction from
 chain: the orchestrator is the fallback (H8).
 
 **Rights** **(H15)**. Claude Code: `--permission-mode dontAsk`, allowed `Read`, `Grep`, `Glob`, read-only git
-(`git log`, `git status`, `git diff`, `git show`), `nexus status`, `nexus help`, `nexus review accept`, `nexus review
+(`git log`, `git status`, `git diff`, `git show`), `nexus status`, `nexus help`, `nexus doc`, `nexus review accept`, `nexus review
 send-back` and `nexus review pass-on`, each on both shell tools (`Bash(nexus review accept:*)` and
 `PowerShell(nexus review accept:*)`, and so on); not the project's `runtimes.claude.allowed_tools`; `Edit` and `Write`
 never. Codex: its session folder as the working directory in a `workspace-write` sandbox whose only writable root it
@@ -1484,9 +1484,12 @@ nexus static-analysis [status]                 # the stacks and static analysis 
 # any session
 nexus ideas status                             # effective dispositions, implementation assessments, conflicts and history, as JSON (read only)
 nexus ideas matches                            # the suggestions for matching earlier queues to the notes' entries, and the user's decisions (read only; deciding is the user's, in the dashboard)
+nexus doc docs/DESIGN.md                       # a Markdown file's headings: one per line, indented by level, with its # marks and line number (read only; no session needed)
+nexus doc docs/DESIGN.md#Static analysis       # one section: from its heading to the next heading of the same or a higher level; named by the heading's text or its anchor (static-analysis), case ignored
+nexus doc agent-standards.md#2026-11-14        # a dated entry: every heading that begins with the date (### 2026-11-14 and ### 2026-11-14 (later): …); the path from the working directory, else the project's root, else the notes folder (as nexus covers); a `#` line in a fenced code block (``` or ~~~) is no heading; an unknown section is refused (exit 2) with the file's sections and dates
 # thinking partner only
 nexus covers tags.md#2026-11-14 docs/ideas/plan.md#2026-11-15   # in a hand-over: the Decided entries it passes on (ideas.covered); the notes folder may be left out; each checked against the notes, a missing note or date refused with the note's dates
-# review helper only (and nexus status, nexus help; every other command is refused a helper)
+# review helper only (and nexus status, nexus help, nexus doc; every other command is refused a helper)
 nexus review accept W W3 --note "what it checked"   # level 2 only; send-back as the orchestrator's (below); both only for its own step
 nexus review pass-on W W3 --why criterion,doubt --findings "what it checked and what it could not"   # to the orchestrator; reasons: criterion, deviation, question, limit, doubt, level
 # orchestrator only
@@ -2253,7 +2256,7 @@ hand-over's again: its reply goes to the orchestrator. Then `interrupted` is dro
 role `conversation`: a thinking partner the user talks with about the project, one session per topic, with its chat
 in `chat.jsonl` (`from: partner` for its replies, whole). It reads the whole project and writes only in `notes_dir`
 (relative to the root, checked to lie inside it): Claude Code runs it in `dontAsk` mode allowed `Read`, `Grep`,
-`Glob`, `nexus status`, `nexus help`, `nexus tags` and read-only git (`git log`, `git status`, `git diff`, `git show`) on both shell
+`Glob`, `nexus status`, `nexus help`, `nexus doc`, `nexus tags` and read-only git (`git log`, `git status`, `git diff`, `git show`) on both shell
 tools (`Bash(nexus status:*)` and `PowerShell(nexus status:*)`, and so on), and `Edit(<notes_dir>/**)` and `nexus covers`
 (which appends to its own events) only with a notes folder; Codex runs it
 with `notes_dir` as its working directory in a `workspace-write` sandbox whose one other writable root is its own session

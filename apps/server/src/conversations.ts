@@ -25,7 +25,7 @@ import { shellRules } from "./shell-rules.ts";
 
 // `nexus help` (decided 2026-11-15, queue OP): how Nexus works, its topics; it reads only. A Codex partner runs it in
 // its sandbox, which reads everywhere.
-const READ = ["Read", "Grep", "Glob", ...shellRules(["nexus status", "nexus ideas status", "nexus help", "nexus tags", "git log", "git status", "git diff", "git show"])];
+const READ = ["Read", "Grep", "Glob", ...shellRules(["nexus status", "nexus ideas status", "nexus help", "nexus doc", "nexus tags", "git log", "git status", "git diff", "git show"])];
 /** With a notes folder the partner also records what its hand-over covers (`nexus covers`, among its own events). */
 const COVERS = shellRules(["nexus covers"]);
 /** What a hand-over covers (decided 2026-11-14): this conversation's topics, and the dates of the decisions it passes on. */

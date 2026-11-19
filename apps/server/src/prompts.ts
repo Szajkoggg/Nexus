@@ -70,7 +70,7 @@ export function readingRules(runtime: Runtime): string {
   const [together, find] = runtime === "codex"
     ? ["together", "Find with rg, with context lines (-C) and a limit (-m, or Select-Object -First), and read a known range of lines (Get-Content <file> | Select-Object -Skip <n> -First <m> in PowerShell, sed -n '<a>,<b>p' in a POSIX shell), rather than printing a whole file (Get-Content or cat without a range)"]
     : ["in one response", "Find with Grep, with context lines (-C) and a head_limit, and read a known range with Read's offset and limit, rather than a whole file (cat, sed, a Read without a limit)"];
-  return `Read in parallel and in part: make independent reads (files, searches, git show, nexus status) ${together}, as parallel tool calls, not one after another. ${find}; read a whole file only when you need all of it. For reading, use the project's own scripts first; write a one-off node or python script only by exception, when no tool or script of the project answers, and only to read. Parallel calls are for reads: never two builds or test runs at once.`;
+  return `Read in parallel and in part: make independent reads (files, searches, git show, nexus status) ${together}, as parallel tool calls, not one after another. ${find}; read a whole file only when you need all of it. A long Markdown document: list its headings with nexus doc <file.md>, then print the one section you need with nexus doc <file.md#section> (by its heading, or a dated entry: notes.md#2026-11-14). For reading, use the project's own scripts first; write a one-off node or python script only by exception, when no tool or script of the project answers, and only to read. Parallel calls are for reads: never two builds or test runs at once.`;
 }
 
 function workerBriefingText(runtime: Runtime): string {
@@ -768,7 +768,7 @@ export function helperBriefing(p: Pick<ProjectFile, "name" | "languages">): stri
   return `You are Nexus's review helper for the project "${p.name}": a short-lived session that reviews one step of a queue in the orchestrator's place, from the packet you get as your only message, and ends with your verdict. There is no chat and nobody to ask.
 
 What you may do:
-- Read the packet, the diff file it names, and the checkout (to check a criterion: a document that should say something, a test that should exist). Use read-only git (git log, git show, git diff, git status), nexus status and nexus help.
+- Read the packet, the diff file it names, and the checkout (to check a criterion: a document that should say something, a test that should exist). Use read-only git (git log, git show, git diff, git status), nexus status, nexus help and nexus doc (a Markdown file's headings, or one section: nexus doc <file.md#section>).
 - Never run a build, a test or a check: the packet has the results of the checks Nexus ran. Never change a file.
 - Decide exactly once, with one of the three commands the packet names: accept, send back, or pass on to the orchestrator. Then end your turn with a one-line reply.
 

@@ -589,7 +589,7 @@ test("the three briefings, on each runtime, say how to read and how to run and c
     const roles = { worker: workerBriefing({ working: "en" }, runtime), orchestrator: orchestratorBriefing("Pilot", 300_000, undefined, 500_000, runtime), partner: partnerBriefing(project, undefined, runtime) };
     for (const [who, text] of Object.entries(roles)) {
       for (const rule of [shellCommands(runtime), readingRules(runtime)]) assert.equal(text.split(rule).length, 2, `the ${who}'s briefing on ${runtime} says it once`);
-      for (const part of ["as parallel tool calls", "only by exception", "never two builds or test runs at once", "a; if ($?) { b }", "a && b", "never in one chain"]) {
+      for (const part of ["as parallel tool calls", "nexus doc <file.md#section>", "only by exception", "never two builds or test runs at once", "a; if ($?) { b }", "a && b", "never in one chain"]) {
         assert.ok(text.includes(part), `the ${who}'s briefing on ${runtime} has ${JSON.stringify(part)}`);
       }
       assert.ok(text.includes(runtime === "codex" ? "Find with rg, with context lines (-C)" : "Find with Grep, with context lines (-C) and a head_limit, and read a known range with Read's offset and limit"), `the ${who}'s briefing reads in part on ${runtime}`);

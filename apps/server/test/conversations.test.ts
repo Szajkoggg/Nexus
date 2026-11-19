@@ -47,7 +47,7 @@ test("a Claude partner asks nothing and may write only in the notes folder", asy
     const allowed = argv.slice(argv.indexOf("--allowedTools") + 1);
     assert.deepEqual(allowed, [
       "Read", "Grep", "Glob",
-      ...["nexus status", "nexus ideas status", "nexus help", "nexus tags", "git log", "git status", "git diff", "git show"].flatMap((p) => [`Bash(${p}:*)`, `PowerShell(${p}:*)`]),
+      ...["nexus status", "nexus ideas status", "nexus help", "nexus doc", "nexus tags", "git log", "git status", "git diff", "git show"].flatMap((p) => [`Bash(${p}:*)`, `PowerShell(${p}:*)`]),
       "Edit(Dev/Concepts/Gameplay/**)", "Bash(nexus covers:*)", "PowerShell(nexus covers:*)", "WebSearch",
     ], "nexus status, nexus help (to read about Nexus), nexus tags (the areas for a note) and git's reading commands on Bash and PowerShell, writes only to the notes folder and, with nexus covers, its own events: no run can start, nothing else is writable");
     assert.equal(argv[argv.indexOf("--disallowedTools") + 1], "NotebookEdit,WebFetch", "no .nexus deny rules for a partner (those are the workers'); at the default web level no page fetching");
