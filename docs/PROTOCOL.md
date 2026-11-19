@@ -1458,8 +1458,7 @@ nexus static-analysis [status]                 # the stacks and static analysis 
 nexus ideas matches                            # the suggestions for matching earlier queues to the notes' entries, and the user's decisions (read only; deciding is the user's, in the dashboard)
 nexus covers tags.md#2026-11-14 docs/ideas/plan.md#2026-11-15   # in a hand-over: the Decided entries it passes on (ideas.covered); the notes folder may be left out; each checked against the notes, a missing note or date refused with the note's dates
 # review helper only (and nexus status, nexus help; every other command is refused a helper)
-nexus review accept W W3 --note "what it checked"   # level 2 only; also the orchestrator's
-nexus review send-back W W3 "what to fix"      # also the orchestrator's
+nexus review accept W W3 --note "what it checked"   # level 2 only; send-back as the orchestrator's (below); both only for its own step
 nexus review pass-on W W3 --why criterion,doubt --findings "what it checked and what it could not"   # to the orchestrator; reasons: criterion, deviation, question, limit, doubt, level
 # orchestrator only
 nexus queue draft <file.yaml|->                # a new queue, or a change to one: a new revision

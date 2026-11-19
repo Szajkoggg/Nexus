@@ -166,6 +166,8 @@ test("a refused action comes back in the helper's verdict, never as a question",
     await x.run("R", [{ goal: "FAKE: done FAKE-HELPER: refused" }]);
     await x.until("the orchestrator's review", () => x.orchestratorSaw().some(reviewFact("R", "R1")), LONGER.step);
     const h = x.helpers()[0]!;
+    // The Write's refusal comes with the turn's result, which may follow the pass-on.
+    await x.until("both refusals", () => x.store.readRefusals(h.id).entries.length === 2, LONGER.step);
     const refusals = x.store.readRefusals(h.id).entries;
     // As Claude Code reports them: a Bash call denied by its mode, a Write denied by its rules.
     assert.deepEqual(refusals.map((r) => [r.tool, r.queue, r.step]), [["Bash", "R", "R1"], ["Write", "R", "R1"]]);
