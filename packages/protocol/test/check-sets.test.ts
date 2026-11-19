@@ -12,11 +12,11 @@ process.env.NEXUS_HOME ??= mkdtempSync(join(tmpdir(), "nexus-checks-home-"));
 const T0 = Date.parse("2026-11-18T10:00:00Z");
 const at = (s: number) => new Date(T0 + s * 1000).toISOString();
 
-function setup() {
+function setup(level?: 1 | 2) {
   const root = mkdtempSync(join(tmpdir(), "nexus-checks-state-"));
   const store = ProjectStore.init(root, { id: "p", name: "P", root });
   store.writeSession({ protocol: 1, id: "w", project: "p", role: "worker", runtime: "claude", cwd: root, launched_by: "nexus", created_at: at(0), queue: "Q" });
-  store.writeQueue({ protocol: 1, id: "Q", title: "Q", revision: 1, status: "proposed", stop_conditions: [], checks: ["npm test"], steps: [{ id: "Q1", title: "One", goal: "", acceptance: [] }] });
+  store.writeQueue({ protocol: 1, id: "Q", title: "Q", revision: 1, status: "proposed", ...(level ? { review_level: level } : {}), stop_conditions: [], checks: ["npm test"], steps: [{ id: "Q1", title: "One", goal: "", acceptance: [] }] });
   approveQueue(store, "Q");
   const emit = (s: number, body: Record<string, unknown>) => { const e = { v: 1, id: newId(), at: at(s), session: "w", ...body } as Event; store.appendEvent(e); return e; };
   const done = (s: number) => emit(s, { type: "step.done", queue: "Q", step: "Q1", summary: "done" }).id;
@@ -108,4 +108,48 @@ test("a step started again after a passed set (a send-back) is no check-fix roun
   x.sets([x.set(d, { state: "passed" })]);
   x.emit(5, { type: "step.started", queue: "Q", step: "Q1" });
   assert.deepEqual([x.step().status, x.step().check_fix], ["running", undefined]);
+});
+
+// Queue NL (NL1): the verdicts on a step whose accepted check failure came out of a check-fix round the worker took up
+// (ND/ND1 on 2026-11-19). The derivation replays the events with the step "running" since that round's step.started,
+// and only after the replay does applyCheckSets send it to its review; every verdict in between is weighed against
+// "running" and dropped: the helper's pass-on (with a warning), the orchestrator's and the user's acceptances
+// (silently). NL2 fixes it and drops the todo.
+function acceptedAfterTakenUpRound(level: 1 | 2) {
+  const x = setup(level);
+  // An orchestrator to review it (else a level-2 review goes to the user).
+  if (level === 2) x.store.updateProject((p) => ({ ...p, orchestrator: { runtime: "claude", notify: true, session: null } }));
+  const d = x.done(1);
+  x.sets([x.set(d, { state: "failed", checks: [failedRun] })]);
+  x.emit(5, { type: "step.started", queue: "Q", step: "Q1" });
+  x.emit(6, { type: "check.disputed", queue: "Q", step: "Q1", name: "npm test", evidence: "fails on main" });
+  const dispute = { event: "e", name: "npm test", evidence: "fails on main", at: at(6) };
+  x.sets([x.set(d, { state: "accepted", checks: [failedRun], dispute: { ...dispute, base: { state: "failed" }, outcome: "accepted" } })]);
+  return x;
+}
+
+const FIX = "NL2: verdicts after an accepted check failure of a taken-up check-fix round are dropped";
+
+test("an accepted check failure of a taken-up round: the helper's pass-on and the orchestrator's acceptance count", { todo: FIX }, () => {
+  const x = acceptedAfterTakenUpRound(2);
+  const worker = x.store.readSession("w");
+  assert.deepEqual([x.step().status, x.step().review_with], ["review", "orchestrator"], "its review, the orchestrator's");
+  x.store.writeSession({ ...worker, id: "h", role: "helper", queue: undefined, created_at: at(7), about: { queue: "Q", step: "Q1", round: 1, level: 2 } });
+  assert.deepEqual(x.step().helper, { session: "h", round: 1, state: "running" }, "the helper has the review");
+  x.store.appendEvent({ v: 1, id: newId(), at: at(8), session: "h", type: "review.passed_on", queue: "Q", step: "Q1", round: 1, reasons: ["deviation"], text: "a deviation" } as Event);
+  const passed = loadProjectState(x.store);
+  assert.deepEqual(passed.warnings, [], "no event is dropped");
+  assert.equal(passed.queues[0]!.steps[0]!.helper?.state, "passed_on", "the pass-on counts: the orchestrator gets its notice");
+  x.store.writeSession({ ...worker, id: "o", role: "orchestrator", queue: undefined });
+  x.store.appendEvent({ v: 1, id: newId(), at: at(9), session: "o", type: "review.accepted", queue: "Q", step: "Q1", text: "fine" } as Event);
+  assert.deepEqual([x.step().status, x.step().accepted?.by], ["done", "orchestrator"], "the orchestrator's acceptance counts");
+});
+
+test("an accepted check failure of a taken-up round: the user's acceptance at level 1 counts", { todo: FIX }, () => {
+  const x = acceptedAfterTakenUpRound(1);
+  assert.deepEqual([x.step().status, x.step().review_with], ["review", "user"]);
+  const worker = x.store.readSession("w");
+  x.store.writeSession({ ...worker, id: "user", role: "user", queue: undefined });
+  x.store.appendEvent({ v: 1, id: newId(), at: at(9), session: "user", type: "review.accepted", queue: "Q", step: "Q1" } as Event);
+  assert.deepEqual([x.step().status, x.step().accepted?.by], ["done", "user"], "the user's acceptance counts");
 });
