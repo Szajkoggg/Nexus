@@ -4,7 +4,7 @@
 // (src/conversations.ts). Agents rely on them (a change to one carries an `Agents:` line in its commit), so each is
 // covered by a snapshot test: test/prompts.test.ts compares what the agents' processes receive with golden files.
 import {
-  INTEGRATION_CONDITION, REUSE_TOKENS, fileList, tokenCount, formatClock, latestCheckSet, reviewRound, openPlan, formatSeconds, isCheckMetric, languageName, levelNow, metricValueText, releasedText, runIsOlder, stepChecks, type CheckSet, type MetricValue, type AwayNow, type PlanDecision, type ConversationWeb, type InboxView, type LanguageCode, type ProjectFile, type ProjectState, type QuestionView, type QueueView, type SessionView, type StepView, type PassOnReason, type TagProposal, tagsText,
+  DEFAULT_ORCHESTRATOR_CONTEXT_TOKENS, INTEGRATION_CONDITION, REUSE_TOKENS, fileList, tokenCount, formatClock, latestCheckSet, reviewRound, openPlan, formatSeconds, isCheckMetric, languageName, levelNow, metricValueText, releasedText, runIsOlder, stepChecks, type CheckSet, type MetricValue, type AwayNow, type PlanDecision, type ConversationWeb, type InboxView, type LanguageCode, type ProjectFile, type ProjectState, type QuestionView, type QueueView, type SessionView, type StepView, type PassOnReason, type TagProposal, tagsText,
 } from "@nexus/protocol";
 import type { ClosingContext } from "./closing.ts";
 import type { IntegrationContext } from "./integration.ts";
@@ -213,10 +213,12 @@ export function noOutcomeNudge(step: string, background?: { finished: true } | {
   return `[Nexus] Your turn ended, but step ${step} has no outcome yet. Continue the step if work remains; otherwise ${report} Do not end your turn while work you started still runs: run a sub-agent in the foreground and take its result within the turn, or do the work yourself.`;
 }
 
-/** Why the next step runs in a fresh session, as the request for the context summary says it. */
-export function summaryReason(why: "context" | "runtime", next: string, runtime: keyof typeof RUNTIME_NAME, fill: number | undefined, tokens?: number): string {
-  return why === "runtime" ? `step ${next} runs on ${RUNTIME_NAME[runtime]}` : tokens !== undefined
-    ? `this session's context holds ${tokenText(tokens)} (${Math.round(fill! * 100)}% full)` : `this session's context is ${Math.round(fill! * 100)}% full`;
+/** A session's context when context care switches: its tokens and its fill of the window (0 to 1). */
+export interface ContextSize { tokens: number; fill: number }
+
+/** Why the next step runs in a fresh session, as the request for the context summary says it (`context`: known for a context switch). */
+export function summaryReason(why: "context" | "runtime", next: string, runtime: keyof typeof RUNTIME_NAME, context: ContextSize | undefined): string {
+  return why === "runtime" ? `step ${next} runs on ${RUNTIME_NAME[runtime]}` : `this session's context holds ${tokenText(context!.tokens)} (${Math.round(context!.fill * 100)}% full)`;
 }
 
 /** The step is over and the next runs in a fresh session (`because`, from summaryReason): the summary is asked for. */
@@ -224,14 +226,12 @@ export function summaryRequest(done: string, because: string): string {
   return `[Nexus] Step ${done} is over, and ${because}: the next step runs in a fresh session. Before that, write your context summary with \`nexus context "<what a successor needs to know>" --topics a,b --files x,y\` by its standard (\`nexus help context\`: where the work stands, the decisions and why with the ways dropped, the traps, the important files, what comes next, what was asked or promised), then end your turn. Do not start anything else.`;
 }
 
-/** Why the queue goes on in a fresh session, as the fresh session's seed says it. */
-export function switchReason(why: "context" | "runtime" | "refactor", next: string, runtime: keyof typeof RUNTIME_NAME, old: keyof typeof RUNTIME_NAME, fill: number | undefined, tokens?: number): string {
+/** Why the queue goes on in a fresh session, as the fresh session's seed says it (`context`: known for a context switch). */
+export function switchReason(why: "context" | "runtime" | "refactor", next: string, runtime: keyof typeof RUNTIME_NAME, old: keyof typeof RUNTIME_NAME, context: ContextSize | undefined): string {
   if (why === "refactor") return `step ${next} is the queue's closing refactoring step, which reads the queue's work with fresh eyes`;
   return why === "runtime"
     ? `step ${next} runs on ${RUNTIME_NAME[runtime]}, and the session that ran the queue so far is a ${RUNTIME_NAME[old]} session`
-    : tokens !== undefined
-      ? `the session that ran the queue so far had ${tokenText(tokens)} in its context (${Math.round(fill! * 100)}% full)`
-      : `the session that ran the queue so far had its context ${Math.round(fill! * 100)}% full`;
+    : `the session that ran the queue so far had ${tokenText(context!.tokens)} in its context (${Math.round(context!.fill * 100)}% full)`;
 }
 
 /**
@@ -368,7 +368,7 @@ export function formatInbox(m: InboxView, state: ProjectState, released = false)
  * own context threshold (tokens), at which it goes on in a fresh session. Both are capped at 80 % of a model's window. `runtime`: on Codex (queue OC) it has no helpers
  * (Claude Code's subagents) and does their work itself, and its sandbox, not permission rules, keeps it to its drafts.
  */
-export function orchestratorBriefing(project: string, threshold: number, l: Languages = { working: "en" }, own = 500_000, runtime: "claude" | "codex" = "claude"): string {
+export function orchestratorBriefing(project: string, threshold: number, l: Languages = { working: "en" }, own = DEFAULT_ORCHESTRATOR_CONTEXT_TOKENS, runtime: "claude" | "codex" = "claude"): string {
   const codex = runtime === "codex";
   const working = languageName(l.working);
   // Queue text follows the reader's language; with none set, the working language (as before the settings).

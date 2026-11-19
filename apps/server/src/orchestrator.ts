@@ -63,7 +63,7 @@ const REQUESTS: ReadonlySet<EventType> = new Set(["queue.drafted", "session.requ
  */
 const SUMMARY_ASKED = "context:asked";
 const FIRST_FILL = "context:first";
-/** The orchestrator's context threshold when the project has none (the setting's default). */
+/** A context fill (0 to 1) in whole percent. */
 const pct = (fill: number) => Math.round(fill * 100);
 /** How many chat entries the view sends: the current session's newest, and then the earlier sessions' of its line. */
 const VIEW_ENTRIES = 300;

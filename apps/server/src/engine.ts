@@ -20,7 +20,7 @@ import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Hosted, type Launc
 import { nexusDenyRules } from "./claude.ts";
 import {
   RUNTIME_NAME, carriedMessages, midStepSeed, formatInbox, withLanguages, workerBriefing, workerLanguages, freshSessionSeed, modelFreeFixPreface, noOutcomeNudge, stepOpening, summaryReason,
-  summaryRequest, switchReason, userStopNow, type PullText,
+  summaryRequest, switchReason, userStopNow, type ContextSize, type PullText,
 } from "./prompts.ts";
 import { shellRules } from "./shell-rules.ts";
 import { questionBarrier } from "@nexus/protocol/status-rules";
@@ -1019,11 +1019,11 @@ export class Engine implements Member {
     const old = state.sessions.find((x) => x.id === run.session);
     if (!old || old.runtime === "external") return false;
     const tokens = old.live?.context_tokens, window = old.live?.context_window;
-    const fill = tokens && window ? tokens / window : undefined;
+    const context = tokens && window ? { tokens, fill: tokens / window } : undefined;
     // The closing refactoring step reads the queue's work with fresh eyes: a session that has worked already (on the
     // queue's steps, or on another queue's) gives way to a fresh one, seeded with the queue's text and no summary.
     if (next.closing && old.event_count > 0) {
-      this.switchSession(queueId, run, q, old, live, done, next, want, "refactor", fill, "fallback");
+      this.switchSession(queueId, run, q, old, live, done, next, want, "refactor", context, "fallback");
       return true;
     }
     const why = old.runtime !== want.runtime ? "runtime"
@@ -1034,13 +1034,13 @@ export class Engine implements Member {
       const fresh = !!done && !!old.context && old.context.at >= since;
       const asked = !!done && run.summary_asked === done.id;
       if (done && !fresh && !asked) {
-        const because = summaryReason(why, next.id, want.runtime, fill, tokens);
+        const because = summaryReason(why, next.id, want.runtime, context);
         this.writeRun(queueId, { ...run, summary_asked: done.id });
         live.proc.send(summaryRequest(done.id, because));
         this.store.appendActivity(old.id, { at: now(), kind: "turn_start", text: `Nexus asked for the context summary of step ${done.id} (${because})`, queue: queueId, step: done.id });
         return true;
       }
-      this.switchSession(queueId, run, q, old, live, done, next, want, why, fill, fresh ? (asked ? "asked" : "written") : "fallback");
+      this.switchSession(queueId, run, q, old, live, done, next, want, why, context, fresh ?(asked ? "asked" : "written") : "fallback");
       return true;
     }
     // Settings the process was launched with (permission mode, allow rules, the .nexus protection, sandbox, approvals,
@@ -1140,13 +1140,12 @@ export class Engine implements Member {
   }
 
   /** Goes on with `next` in a fresh session (with `want`'s runtime, model and effort) that continues `old`. */
-  private switchSession(queueId: string, run: RunFile, q: QueueView, old: SessionView, live: Live, done: StepView | undefined, next: StepView, want: StepValues, why: "context" | "runtime" | "refactor", fill: number | undefined, source: "written" | "asked" | "fallback"): void {
+  private switchSession(queueId: string, run: RunFile, q: QueueView, old: SessionView, live: Live, done: StepView | undefined, next: StepView, want: StepValues, why: "context" | "runtime" | "refactor", context: ContextSize | undefined, source: "written" | "asked" | "fallback"): void {
     const { fresh, unread } = this.forkSession(run, q, old, live, want);
-    const tokens = fill !== undefined ? old.live?.context_tokens : undefined;
-    const because = switchReason(why, next.id, want.runtime, old.runtime as "claude" | "codex", fill, tokens);
+    const because = switchReason(why, next.id, want.runtime, old.runtime as "claude" | "codex", context);
     this.writeRun(queueId, {
       ...run, session: fresh.id, summary_asked: undefined,
-      switches: [...(run.switches ?? []), { at: now(), from: old.id, to: fresh.id, step: next.id, why, fill, ...(tokens !== undefined ? { tokens } : {}), summary: source }],
+      switches: [...(run.switches ?? []), { at: now(), from: old.id, to: fresh.id, step: next.id, why, fill: context?.fill, ...(context ? { tokens: context.tokens } : {}), summary: source }],
     });
     this.store.appendActivity(old.id, { at: now(), kind: "turn_end", text: `Nexus goes on in a fresh session (${fresh.id}): ${because}`, queue: queueId, step: done?.id ?? next.id });
     const state = loadProjectState(this.store);
