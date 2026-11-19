@@ -96,8 +96,21 @@ function closingSkipped(q: QueueView): string {
 export interface OverviewOptions { all?: boolean; queue?: string }
 
 /** How many free sessions besides the live and open queues' ones the short overview shows, and how long a card. */
-export const FREE_SESSIONS = 10;
-export const CARD_CHARS = 300;
+const FREE_SESSIONS = 10;
+const CARD_CHARS = 300;
+
+const isFinished = (q: QueueView): boolean => q.status === "done" || q.status === "cancelled";
+
+/**
+ * The worker sessions the short overview keeps, in their order: the live ones, those running a queue or of an open
+ * queue, and the FREE_SESSIONS latest others (session ids are ULIDs).
+ */
+function recentSessions(state: ProjectState, shown: SessionView[], busyWith: (w: SessionView) => QueueView | undefined): SessionView[] {
+  const openIds = new Set(state.queues.filter((q) => !isFinished(q)).map((q) => q.id));
+  const first = shown.filter((w) => (w.live && w.live.state !== "exited") || busyWith(w) || (w.queue && openIds.has(w.queue)));
+  const rest = shown.filter((w) => !first.includes(w)).sort((a, b) => (a.id < b.id ? 1 : -1)).slice(0, FREE_SESSIONS);
+  return shown.filter((w) => first.includes(w) || rest.includes(w));
+}
 
 /**
  * What an orchestrator needs to see (`nexus status` in its session, and the first message of a fresh orchestrator
@@ -109,7 +122,7 @@ export function orchestratorOverview(state: ProjectState, opts: OverviewOptions 
   // A session's size in tokens first (queue CT): the orchestrator continues one only under about REUSE_TOKENS.
   const context = (t?: number, w?: number) => (t ? `context ${tokenCount(t)} tokens${w ? ` (${Math.round((100 * t) / w)} % of ${tokenCount(w)})` : ""}` : "context unknown");
   const queues = opts.queue === undefined ? state.queues : state.queues.filter((q) => q.id === opts.queue);
-  const done = queues.filter((q) => q.status === "done" || q.status === "cancelled");
+  const done = queues.filter(isFinished);
   const finished = all
     ? done.map((q) => `${q.id}${closingSkipped(q) ? ` (${closingSkipped(q)})` : ""}`).join(", ") || "none"
     : `${done.length}; nexus status --all names them`;
@@ -133,14 +146,9 @@ Open questions (${open.length})`);
   for (const x of open) out.push(`- ${x.qid} [${x.state}] ${x.queue ?? ""}${x.step ? `/${x.step}` : ""}: ${x.text}`);
   const workers = state.sessions.filter((x) => x.role === "worker");
   const busyWith = (w: SessionView) => state.queues.find((q) => q.run?.session === w.id && runGoing(q.run));
-  const openIds = new Set(state.queues.filter((q) => q.status !== "done" && q.status !== "cancelled").map((q) => q.id));
-  const shown = workers.filter((w) => opts.queue !== undefined ? w.queue === opts.queue || state.queues.some((q) => q.id === opts.queue && q.run?.session === w.id) : true);
-  // The short overview: the live sessions, those of open queues, and the latest few others (session ids are ULIDs).
-  const kept = all ? shown : (() => {
-    const first = shown.filter((w) => (w.live && w.live.state !== "exited") || busyWith(w) || (w.queue && openIds.has(w.queue)));
-    const rest = shown.filter((w) => !first.includes(w)).sort((a, b) => (a.id < b.id ? 1 : -1)).slice(0, FREE_SESSIONS);
-    return shown.filter((w) => first.includes(w) || rest.includes(w));
-  })();
+  const shown = opts.queue === undefined ? workers
+    : workers.filter((w) => w.queue === opts.queue || state.queues.some((q) => q.id === opts.queue && q.run?.session === w.id));
+  const kept = all ? shown : recentSessions(state, shown, busyWith);
   out.push(`
 Worker sessions (${opts.queue === undefined ? workers.length : `${shown.length} of queue ${opts.queue}`}${kept.length < shown.length ? `; shown: the ${kept.length} live, of open queues and latest, cards cut to ${CARD_CHARS} characters; nexus status --all shows every one whole` : ""})`);
   for (const w of kept) {
