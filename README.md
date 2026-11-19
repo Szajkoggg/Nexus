@@ -400,9 +400,11 @@ per line, as your Codex config names it). Plugins and apps stay off; thinking pa
 What was refused shows in each step's detail and, grouped by kind with counts, under "Refused actions" on the project
 page; from a Claude Code refusal, "Allow for this project…" adds a rule (prefilled, editable) to these settings.
 A run can override model and effort when it starts, and the orchestrator chooses them when it starts runs.
-With context care on (the default, under Defaults), a run whose session holds more than "Reuse a session up to" (300k tokens by default, at
+With context care on (the default, under Defaults), a run whose session holds more than "Fresh session past" (300k tokens by default, at
 most 80 % of the model's context window; a share set before is ignored) at the end of a step goes on in a fresh session of the same runtime, model and effort, given the previous session's
 context summary; the run's panel lists each such switch.
+The orchestrator starts each queue in a new session; it continues one (`--use-session`) only when the new work builds
+directly on the same code and the session holds under about 150k tokens.
 A queue can be started when another one is done, at a time, or when the usage window resets: "When" in the start
 form (or the orchestrator's `nexus run B start --after A [--after C]`, `--at "2026-11-14 22:00"`, `--at usage-reset`).
 This is the plan, shown at the top of a project's queues: what runs now, then what follows, with a line from each queue

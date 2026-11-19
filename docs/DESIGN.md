@@ -18,8 +18,10 @@ The wire format (files, events, CLI) is in [PROTOCOL.md](PROTOCOL.md).
    and starts, resumes and stops sessions. The user does not need a terminal.
 4. **Generic.** Claude Code and Codex are both first-class. Nothing in the protocol is specific to one runtime or
    to one project's conventions; Project Honeycomb's queue practice is the first example, not the schema.
-5. **Reuse context.** A session that has built up relevant context is continued for the next related queue
-   rather than starting cold.
+5. **Reuse context, narrowly.** Each queue starts in a new session by default. A session is continued only for work
+   that builds directly on the same code it just worked on, and only while its context is small (about 150k tokens):
+   a long context costs more on every turn, and works less well, than reading the files again (queue CT, decided by
+   the user on 2026-11-19).
 6. **Later: remote access** to the dashboard from the user's phone while the PC is on.
 
 Non-goals for now: multiple users, cloud execution, running agents anywhere but this PC, replacing the projects'

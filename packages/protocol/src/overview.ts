@@ -7,6 +7,7 @@ import type { BasePull } from "./schemas.ts";
 import type { ProjectState, QueueView, StepView } from "./state.ts";
 import { isOpenQuestion, runGoing } from "./status-rules.ts";
 import { stepValuesText } from "./steps.ts";
+import { tokenCount } from "./tokens.ts";
 
 /** A stopped queue's ways out: where the stop is, how the user lifts it, and the orchestrator's proposal to lift it. */
 export function stopLines(q: QueueView): string[] {
@@ -91,8 +92,8 @@ function closingSkipped(q: QueueView): string {
  */
 export function orchestratorOverview(state: ProjectState): string {
   const out: string[] = [];
-  // The tokens too: the session's threshold is a number of tokens (context_reuse_tokens, queue CT).
-  const pct = (t?: number, w?: number) => (t && w ? `${Math.round((100 * t) / w)} % context (${Math.round(t / 1000)}k of ${Math.round(w / 1000)}k tokens)` : "context unknown");
+  // A session's size in tokens first (queue CT): the orchestrator continues one only under about REUSE_TOKENS.
+  const pct = (t?: number, w?: number) => (t ? `context ${tokenCount(t)} tokens${w ? ` (${Math.round((100 * t) / w)} % of ${tokenCount(w)})` : ""}` : "context unknown");
   const done = state.queues.filter((q) => q.status === "done" || q.status === "cancelled");
   out.push(`
 Queues (${state.queues.length - done.length} open; finished: ${done.map((q) => `${q.id}${closingSkipped(q) ? ` (${closingSkipped(q)})` : ""}`).join(", ") || "none"})`);
