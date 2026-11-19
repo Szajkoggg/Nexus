@@ -47,6 +47,8 @@ export interface HostHandlers {
   background?(work: readonly string[]): void;
   /** The runtime compacted the conversation's context (AgentProcess.compact). */
   compacted?(c: AgentEvents["compacted"][0]): void;
+  /** The process stopped settling after a turn's end with no turn of the runtime's own (AgentProcess.settling). */
+  settled?(): void;
   /** `byNexus`: the process was ended through AgentHost (retire, close, restartAfterTurn, shutdown). */
   exit?(code: number | null, byNexus: boolean): void;
   /** The queue and step a turn works on, for its record (a worker's run); asked when the turn begins. */
@@ -176,6 +178,7 @@ export class AgentHost<E extends object = object> {
     proc.on("refusal", (r) => on.refusal?.(r));
     proc.on("background", (w) => on.background?.(w));
     proc.on("compacted", (c) => on.compacted?.(c));
+    proc.on("settled", () => on.settled?.());
     proc.on("facts", (f) => {
       if (f.model) model = f.model;
       if (f.contextTokens !== undefined) begin();

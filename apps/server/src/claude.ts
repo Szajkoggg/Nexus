@@ -20,6 +20,11 @@ export interface ClaudeTurnSigns {
   refusal?: boolean;
 }
 
+/**
+ * How long after a turn's end a turn the CLI starts by itself, for `next` messages it had not read in the turn, may
+ * still begin: it follows within milliseconds (seen live after a stop, settleStop); this leaves room for a busy machine.
+ */
+const LATE_TURN_MS = 1500;
 const CLAUDE_PASSING = new Set(["overloaded", "server_error", "rate_limit", "connection"]);
 
 /**
@@ -152,6 +157,8 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
   private stops = 0;
   /** Messages sent into the running turn (`next`) since its start. */
   private nextInTurn = 0;
+  /** While settling (AgentProcess.settling): ends the moment after a turn that had `next` messages sent into it. */
+  private late?: NodeJS.Timeout;
   /**
    * The background work the CLI reports running (system background_tasks_changed: its whole list each time, seen with
    * Claude Code 2.1.323: a Bash command or a sub-agent started with run_in_background). When it ends, the CLI starts a
@@ -263,6 +270,7 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
     this.state = "exited";
     this.background = [];
     clearTimeout(this.settle);
+    this.stopSettling();
     this.exitCode = code;
     if (code && this.lastStderr.trim()) this.emit("activity", { kind: "error", text: this.lastStderr.trim().slice(-500) });
     this.emit("exit", code);
@@ -298,7 +306,7 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
     if (priority === "next" && this.state === "working") this.nextInTurn++;
     const msg = { type: "user", message: { role: "user", content: text }, parent_tool_use_id: null, ...(priority ? { priority } : {}) };
     this.write(JSON.stringify(msg) + "\n");
-    if (priority !== "next" || this.state === "idle") this.state = "working";
+    if (priority !== "next" || this.state === "idle") { this.state = "working"; this.stopSettling(); }
   }
 
   /**
@@ -335,7 +343,7 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
    */
   private settleStop(): void {
     clearTimeout(this.settle);
-    const wait = this.nextInTurn ? 1500 : 0;
+    const wait = this.nextInTurn ? LATE_TURN_MS : 0;
     this.nextInTurn = 0;
     this.settle = setTimeout(() => {
       if (this.state !== "idle") return; // a turn of the CLI's own runs (it is being interrupted): its result settles
@@ -344,6 +352,25 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
       this.held = [];
       for (const t of held) this.send(t);
     }, wait);
+  }
+
+  /** See AgentProcess.settling. */
+  get settling(): boolean { return this.late !== undefined; }
+
+  /**
+   * After a turn that had `next` messages sent into it: one written to the CLI just as its turn ended (before Nexus read
+   * the result) was not read in it and runs as a turn of its own, which starts within milliseconds (as after a stop,
+   * settleStop, seen live); nothing in the stream tells such a turn from one that read them all. Until that turn starts
+   * or LATE_TURN_MS pass, the process is settling (queue OF: a summary request sent in that moment, as if between turns).
+   */
+  private startSettling(): void {
+    this.stopSettling();
+    this.late = setTimeout(() => { this.late = undefined; if (this.state === "idle") this.emit("settled"); }, LATE_TURN_MS);
+  }
+
+  private stopSettling(): void {
+    clearTimeout(this.late);
+    this.late = undefined;
   }
 
   /** Ends the session after the running turn: closing stdin lets the CLI finish and exit. */
@@ -409,6 +436,7 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
         if (m.subtype === "init") {
           this.signs = {};
           this.state = "working";
+          this.stopSettling();
           // A turn the CLI starts by itself while a stop settles (unread messages of the stopped turn): stopped too.
           if (this.stopping) { clearTimeout(this.settle); this.interrupt(); }
           this.emit("facts", { model: m.model });
@@ -458,6 +486,8 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
       }
       case "result": {
         this.state = "idle";
+        // Settling before anything is emitted: the turn's end is acted on as it is emitted.
+        if (!this.stopping && this.nextInTurn) this.startSettling();
         const models = Object.values((m.modelUsage ?? {}) as Record<string, { contextWindow?: number }>);
         this.emit("facts", { contextWindow: models.find((x) => x.contextWindow)?.contextWindow, costUsd: m.total_cost_usd });
         // The authoritative list: anything the messages did not report (a hook's or a path rule's denial, for one).

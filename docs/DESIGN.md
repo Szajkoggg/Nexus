@@ -628,6 +628,11 @@ Decisions, building it:
 - Only between turns, with its process idle: a turn is never cut into, and a turn ending is the orchestrator's
   equivalent of a step's end. The request is a turn of its own and asked once (`context:asked` in `applied.jsonl`, a
   file, so a restart in between still switches); after that turn the switch comes with or without a summary.
+  A turn's result is not yet "between turns" when messages were sent into the turn (`next`): one written to Claude
+  Code just as its turn ended (Nexus had read the reply, not yet the result) was not read in it and runs as a turn of
+  its own, and nothing in the stream tells that from a turn that read them all until that turn starts. So the process
+  is *settling* (`AgentProcess.settling`) until a turn starts or 1.5 s pass, and context care waits for that (queue OF:
+  the request went out on that false idle in about 2 of 150 full test runs).
 - While the summary is written, nothing else goes to the old session: the user's message would land in a session that
   is about to end, so it waits in its inbox and is carried into the fresh session's first turn, as a worker's unread
   messages are. Notices are not carried: the fresh session is told them anew, as what no session of its line was told

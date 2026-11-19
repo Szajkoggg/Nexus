@@ -592,6 +592,7 @@ ${n.text}` });
         this.store.appendActivity(s.id, { at: now(), ...a });
       },
       turnEnd: () => this.changed(),
+      settled: () => this.changed(),
       exit: () => this.changed(),
     }));
   }
@@ -631,7 +632,7 @@ ${n.text}` });
   /**
    * The orchestrator's context care (decided by the user on 2026-11-15, queue CC): it is not compacted; it goes on in a
    * fresh session started from a summary it writes on purpose. When its context is fuller than its threshold
-   * (orchestrator.context_threshold) at the end of a turn, its process idle, it is asked once for that summary (with
+   * (orchestrator.context_threshold) at the end of a turn, its process idle (and not settling), it is asked once for that summary (with
    * `nexus context`); once that turn is over, a fresh session goes on from it (goOnFresh). Meanwhile notices, notes
    * and the user's messages wait for the fresh session. A fresh session already that full at the end of its first turn
    * is not switched again: another would be no emptier. True: what else this change would tell it waits.
@@ -642,11 +643,12 @@ ${n.text}` });
     if (asked) {
       // Its summary turn runs; the fresh session's first turn waits while its runtime is beyond the usage threshold.
       const runtime = s.orchestrator_fallback?.target.runtime ?? runtimeOf(state.project);
-      if (!this.idle() || this.runtimeFull(state, runtime)) return true;
+      if (!this.idle() || this.proc?.settling || this.runtimeFull(state, runtime)) return true;
       this.goOnFresh(s, asked);
       return true;
     }
-    if (this.proc?.state !== "idle") return false;
+    // Between turns only: not while a turn of the runtime's own may still start (AgentProcess.settling).
+    if (this.proc?.state !== "idle" || this.proc.settling) return false;
     const live = this.store.readRuntime(s.id);
     const fill = live?.context_tokens && live.context_window ? live.context_tokens / live.context_window : undefined;
     if (fill === undefined) return false;

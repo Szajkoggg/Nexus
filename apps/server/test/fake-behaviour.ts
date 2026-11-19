@@ -66,7 +66,8 @@
 // far ("history: a | b"): the turns' messages and those read inside a turn (Claude's `next`, Codex's steer).
 // Claude's fake keeps the conversations it saved (fakeSaved below) and refuses, as Claude Code does, to resume one it
 // never saved or to start a saved one anew; FAKE_START_MS: it reads its input only after that long (Claude Code's
-// start-up), so a test can end it before it saved anything; FAKE_REFUSE: it refuses every start, each in its way.
+// start-up), so a test can end it before it saved anything; FAKE_REFUSE: it refuses every start, each in its way;
+// FAKE_LATE_NEXT: its first turn's result waits for a message sent after its reply, which then runs as a turn of its own.
 import { execFileSync, spawn } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
