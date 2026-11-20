@@ -2,7 +2,7 @@
 // messages and answers to live sessions, and records what the agent does. See docs/design/overview.md, "Nexus drives the
 // queue, step by step". All of its state is in files (run.yaml, runtime.json, delivered.jsonl, activity.jsonl);
 // the processes are the only thing a restart loses, and a restart pauses the runs that had one.
-import { changedFiles, checkoutOf, git as gitRead, ownWorktree, recordStepEnd, recordStepStart, recordTurn } from "./gitinfo.ts";
+import { changedFiles, checkoutOf, checkoutStatus, git as gitRead, headOnce, ownWorktree, recordStepEnd, recordStepStart, recordTurn } from "./gitinfo.ts";
 import { AcceptedPusher } from "./accepted.ts";
 import type { GitRunner } from "./deploy.ts";
 import type { ChildProcess } from "node:child_process";
@@ -31,7 +31,7 @@ import { Recurrer, type RecurringSet } from "./recurring.ts";
 import { StaticReminder } from "./static-reminder.ts";
 import { gitBranch, recordSetup, runSetup, setupPending, worktreeFor } from "./worktree.ts";
 import { closingContext } from "./closing.ts";
-import { cleanCheckout, integrationContext, mergeBase, mergeConflicts, mergedText, pullBase, pullBefore, type IntegrationContext } from "./integration.ts";
+import { integrationContext, mergeBase, mergeConflicts, mergedText, pullBase, pullBefore, type IntegrationContext } from "./integration.ts";
 import { Coordinator, bringsBack, refusalText, waitingText, type Member } from "./coordinator.ts";
 import type { Capacity } from "./capacity.ts";
 import { CHECK_DRAIN_WAIT_MS, CheckRunner } from "./check-runs.ts";
@@ -1245,13 +1245,15 @@ export class Engine implements Member {
     // two on a busy machine, and a worker told first had committed meanwhile (seen in a full test run, queue TS1). The
     // step before ends its round here at the latest (its turn's end records it a moment later, after the CLI's last
     // events).
-    if (run.step && run.step !== step.id) recordStepEnd(this.store, queueId, run.step);
+    // The step before's end and this one's start read HEAD once: one synchronous go, nothing between (queue SV2B).
+    const headNow = headOnce(this.store, queueId);
+    if (run.step && run.step !== step.id) recordStepEnd(this.store, queueId, run.step, headNow);
     // The closing refactoring step is given the queue's commit range, read once the step before has ended its round.
     const closing = step.closing ? closingContext(this.store, q) : undefined;
     // The integration step is given the base to merge, where it is now, and whether it may resolve a conflict.
     const integration = step.integration ? this.withConflicts(q, integrationContext(this.store, state, q), mode) : undefined;
     const pull = mode === "start" ? this.pullOpening(q, step.id) : undefined;
-    recordStepStart(this.store, queueId, step.id, run.session);
+    recordStepStart(this.store, queueId, step.id, run.session, headNow);
     // A step this engine opens has its checks run by Nexus; one opened by an older server keeps the worker's.
     if (mode === "start") this.checks?.opened(queueId, step.id);
     const checksByNexus = !!this.checks && this.store.readChecks(queueId)?.steps[step.id]?.by === "nexus";
@@ -1277,15 +1279,20 @@ export class Engine implements Member {
    */
   private integrateWithoutModel(queueId: string, run: RunFile, state: ProjectState, q: QueueView, step: StepView): boolean {
     const cwd = ownWorktree(q);
-    if (!this.checks || !cwd || !cleanCheckout(cwd)) return false;
+    if (!this.checks || !cwd) return false;
+    // HEAD and the checkout's state from one git call, HEAD reused below for the records and the merge: everything up
+    // to the merge is one synchronous go, so nothing moves it meanwhile (queue SV2B).
+    const status = checkoutStatus(cwd);
+    if (!status?.clean) return false;
+    const before = () => status.head;
     const ctx = integrationContext(this.store, state, q);
     const conflicts = ctx.base ? mergeConflicts(cwd, ctx.base) : [];
     if (conflicts.length && ctx.resolve) return false;
     ensureNexusSession(this.store);
     const event = (e: Record<string, unknown>) => this.store.appendEvent({ v: 1, id: newId(), at: now(), session: NEXUS_SESSION, queue: queueId, step: step.id, ...e } as Parameters<ProjectStore["appendEvent"]>[0]);
     const say = (text: string) => this.store.appendActivity(NEXUS_SESSION, { at: now(), kind: "text", text, queue: queueId, step: step.id });
-    if (run.step && run.step !== step.id) recordStepEnd(this.store, queueId, run.step);
-    recordStepStart(this.store, queueId, step.id, NEXUS_SESSION);
+    if (run.step && run.step !== step.id) recordStepEnd(this.store, queueId, run.step, before);
+    recordStepStart(this.store, queueId, step.id, NEXUS_SESSION, before);
     this.checks.opened(queueId, step.id);
     this.writeRun(queueId, { ...run, step: step.id, nudged: false, retries: undefined, failure: undefined, summary_asked: undefined });
     event({ type: "step.started" });
@@ -1293,12 +1300,12 @@ export class Engine implements Member {
     const stop = (reason: string) => {
       event({ type: "queue.stop", condition: INTEGRATION_CONDITION, reason });
       say(`Nexus stopped the integration step: ${reason}`);
-      recordStepEnd(this.store, queueId, step.id);
+      recordStepEnd(this.store, queueId, step.id, before); // no merge made, or one aborted: HEAD is where it was
     };
     if (!ctx.base) { stop("no base branch to merge"); return true; }
     if (conflicts.length) { stop(`${fileList(conflicts)}: Nexus does not resolve conflicts (the project's resolve_conflicts setting is off)`); return true; }
     event({ type: "step.progress", text: `Nexus merges ${ctx.base} into ${branch} without a model` });
-    const m = mergeBase(cwd, ctx.base);
+    const m = mergeBase(cwd, ctx.base, { from: status.head ?? undefined, sha: ctx.sha, clean: true });
     if (!m) { stop(`git could not read ${ctx.base} or the branch`); return true; }
     if (m.result === "conflict") { stop(`${fileList(m.conflicts)}: the merge of ${ctx.base} conflicts`); return true; }
     const sha = m.sha.slice(0, 12);
@@ -1308,7 +1315,7 @@ export class Engine implements Member {
       : `${branch} already contains ${ctx.base} (${sha}): nothing to merge.${untested}`;
     event({ type: "step.done", summary, commit: m.result === "merged" ? m.to : m.from, activities: ["integration"] });
     say(summary);
-    recordStepEnd(this.store, queueId, step.id);
+    recordStepEnd(this.store, queueId, step.id, () => (m.result === "merged" ? m.to : m.from));
     this.changed();
     this.advanceUnlocked(queueId);
     return true;

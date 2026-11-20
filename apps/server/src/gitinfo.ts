@@ -57,6 +57,30 @@ function inMainCheckout(store: ProjectStore, q: Pick<QueueView, "worktree">): bo
 const head = (dir: string | undefined) => (dir ? git(dir, ["rev-parse", "HEAD"]) ?? null : null);
 const empty = (): GitFile => ({ protocol: 1, steps: {} });
 
+/**
+ * HEAD and whether the tracked files have uncommitted changes, from one git process (`git status --porcelain=v2
+ * --branch`) where two were run (rev-parse HEAD, status --porcelain): queue SV2B. `head` is null before the first
+ * commit; undefined when git cannot tell (not a repository).
+ */
+export function checkoutStatus(cwd: string): { head: string | null; clean: boolean } | undefined {
+  const out = git(cwd, ["status", "--porcelain=v2", "--branch", "--no-ahead-behind", "--untracked-files=no"]);
+  if (out === undefined) return undefined;
+  const lines = out.split(/\r?\n/).filter(Boolean);
+  const oid = lines.find((l) => l.startsWith("# branch.oid "))?.slice("# branch.oid ".length).trim();
+  return { head: oid && oid !== "(initial)" ? oid : null, clean: lines.every((l) => l.startsWith("#")) };
+}
+
+/**
+ * The HEAD of the queue's checkout, read once however often it is asked for: a step's end and the next step's start
+ * recorded in one synchronous go (the engine opening a step) share one git call (queue SV2B). Nothing of the server's
+ * runs between them, so the value is what a second read would give, unless another program commits within those
+ * milliseconds: then the rounds meet at the first read instead of leaving the commit to neither.
+ */
+export function headOnce(store: ProjectStore, queue: string): () => string | null {
+  let read: { sha: string | null } | undefined;
+  return () => (read ??= { sha: head(checkoutOf(store, store.readQueue(queue))) }).sha;
+}
+
 /** Sets fields of the queue's git.yaml (made when there is none yet); a field set to undefined is removed. */
 export function patchGit(store: ProjectStore, queue: string, patch: Partial<Omit<GitFile, "protocol" | "steps">>): void {
   store.writeGit(queue, { ...(store.readGit(queue) ?? empty()), ...patch });
@@ -65,24 +89,24 @@ export function patchGit(store: ProjectStore, queue: string, patch: Partial<Omit
 // ---------------------------------------------------------------- records
 
 /** A step opened (or a send-back reopened it): a new round starts, unless the last one has not ended (a continue). */
-export function recordStepStart(store: ProjectStore, queue: string, step: string, session: string): void {
+export function recordStepStart(store: ProjectStore, queue: string, step: string, session: string, headNow?: () => string | null): void {
   const q = store.readQueue(queue);
   const g = store.readGit(q.id) ?? empty();
   const rounds = g.steps[step] ?? [];
   const last = rounds.at(-1);
   if (last && last.end === undefined) return;
-  rounds.push({ session, start: head(checkoutOf(store, q)), started_at: now(), turns: [] });
+  rounds.push({ session, start: headNow ? headNow() : head(checkoutOf(store, q)), started_at: now(), turns: [] });
   g.steps[step] = rounds;
   store.writeGit(q.id, g);
 }
 
 /** The turn in which the step got its outcome ended: the round ends at the HEAD of now. */
-export function recordStepEnd(store: ProjectStore, queue: string, step: string): void {
+export function recordStepEnd(store: ProjectStore, queue: string, step: string, headNow?: () => string | null): void {
   const q = store.readQueue(queue);
   const g = store.readGit(q.id);
   const last = g?.steps[step]?.at(-1);
   if (!g || !last || last.end !== undefined) return;
-  last.end = head(checkoutOf(store, q));
+  last.end = headNow ? headNow() : head(checkoutOf(store, q));
   last.ended_at = now();
   const open = last.turns?.at(-1);
   if (open && open.end === undefined) open.end = last.end;

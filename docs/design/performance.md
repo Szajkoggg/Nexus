@@ -169,3 +169,55 @@ follows it (the queue's stop condition). They are described in the queue's stop 
   (`check-runs.ts`), Codex's git directories at its start (`codex.ts`), the review helper's diff (`review-helper.ts`).
 - Not the server's: `findNexusDir` in `packages/protocol/src/store.ts` (the CLI finding its project from a worktree;
   the server never calls it).
+
+## The engine's git calls: fewer, still synchronous (queue SV2B)
+
+The user decided (2026-11-20) that the engine's git calls stay synchronous, with no per-queue serial executor: they
+are made fewer, their order and atomicity as they were. What changed:
+
+- **A step's opening** (`engine.ts` `openStep`): the step before's round end and this step's round start read HEAD
+  once (`headOnce` in `gitinfo.ts`): one `rev-parse` where there were two. They are one synchronous go with only
+  reads between (the closing step's range, the integration context): a second read gives the same HEAD, unless another
+  program commits within those milliseconds, and then the rounds meet at the first read instead of leaving that commit
+  to neither.
+- **The base merged at a step boundary** (`integration.ts` `pullBase`, every step of a queue with a worktree of its
+  own): HEAD and the clean checkout from one `git status --porcelain=v2 --branch` (`checkoutStatus`), the base's commit
+  from the `rev-parse` of the base branch already made, the queue's branch no longer read (a pull does not name it),
+  and the "already contains the base" test by `rev-list --count HEAD..base` (0: contained), whose count the merge's
+  record uses too. Six git calls in the common case (nothing to bring) became three; a merge saves one more.
+- **The integration step without a model** (`integrateWithoutModel`): the clean checkout and HEAD from one call, that
+  HEAD for the round records and the merge's start, the base's commit from the context, the merge test (`merge-tree`)
+  made once instead of twice (a merge that conflicts after all is still caught by the merge and aborted), and the
+  step's round ends at the merge's result instead of reading HEAD again: 16 git calls became 10 on a clean merge.
+- **A check set's start** (`check-runs.ts` `startSet`): HEAD and the dirty flag from one `status` call.
+
+What stays as it was, and why:
+
+- `recordTurn` (each turn's start and end): one `rev-parse` each, already the least; each records its own moment.
+- `recordStepEnd` at a turn's end (after the settle time) and `recordStepStart` for a send-back or check-fix round
+  (`deliverInbox`): one read each, at a moment of its own; nothing to share.
+- `accepted.ts` `recordReviews`: one `rev-parse` per step entering review. The round's recorded end is not the same
+  moment (it is written after the turn's settle time, in no fixed order with the review's), so it is not reused.
+- A worktree's creation (`worktreeFor`, `recordBase`): once per queue. `recordBase`'s branch test could give the sha
+  too, but for a name both a tag and a branch git resolves the tag first: the recorded base would change.
+- The integration step's opening for a worker (`integrationContext`, `withConflicts`) and the hand-over to a fresh
+  session (`switchMidStep`): rare, and their reads differ (branch names, log, status, diff).
+- Merge back (`mergeback.ts`) and the planned deploy's check (`deploy-plan.ts`): user actions or a due plan, under the
+  merge lock; not on the path of every change. Codex's `gitWritableRoots` (one call per process start), the review
+  helper's diff (per review) and the survey's left work (once per step) likewise.
+
+**Before and after**, `node scripts/perf-load.ts --minutes 3`, the same load as SV2's (two queues in worktrees of
+their own, each step a boundary with a base pull):
+
+| | Before | After |
+|---|---|---|
+| Synchronous git: calls / time | 130 / 9.2 s | 106 / 6.5 s |
+| Steps accepted in 3 minutes | 16 | 22 |
+| Synchronous git calls per accepted step | 8.1 | 4.8 |
+| … by kind | rev-parse 92, status 18, branch 10, merge-base 8, worktree 2 | rev-parse 72, status 20, rev-list 10, branch 2, worktree 2 |
+| Event loop delay p50 / p99 / max | 19 ms / 3.9 s / 4.1 s | 18 ms / 2.6 s / 3.4 s |
+| Changes the server handled in 3 minutes | 286 | 356 |
+
+The engine's git was a small part of the loop's time already after SV2 (about 9 s of 180); the blocks left are the
+state rebuilds and the engine's decisions (SV1's items 2 and 3). The loop's percentiles vary between runs more than
+this change moves them.

@@ -12,7 +12,7 @@ import { EventEmitter } from "node:events";
 import { ProjectStore, approveQueue, loadProjectState, newId, routeAnswers, type Event } from "@nexus/protocol";
 import type { AgentEvents, AgentProcess } from "../src/agent.ts";
 import { Engine } from "../src/engine.ts";
-import { branchState, recordBase, recordStepEnd, recordStepStart, recordTurn, stepCommits } from "../src/gitinfo.ts";
+import { branchState, checkoutStatus, headOnce, recordBase, recordStepEnd, recordStepStart, recordTurn, stepCommits } from "../src/gitinfo.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
 import { until, LONGER } from "./wait.ts";
 
@@ -170,4 +170,41 @@ test("a project that is not a git repository shows nothing", async () => {
   const q = loadProjectState(store).queues[0]!;
   assert.equal(await stepCommits(store, q, "Q1"), undefined);
   assert.equal(await branchState(store, q), undefined);
+});
+
+test("checkoutStatus gives HEAD and whether tracked files changed from one git call; untracked files do not count", () => {
+  const { base, root, commit } = repo();
+  const head = git(root, ["rev-parse", "HEAD"]);
+  assert.deepEqual(checkoutStatus(root), { head, clean: true });
+  writeFileSync(join(root, "new.txt"), "untracked\n");
+  assert.deepEqual(checkoutStatus(root), { head, clean: true });
+  writeFileSync(join(root, "start.txt"), "changed\n");
+  assert.deepEqual(checkoutStatus(root), { head, clean: false });
+  const next = commit(root, "next");
+  assert.deepEqual(checkoutStatus(root), { head: next, clean: true });
+  const empty = join(base, "empty");
+  mkdirSync(empty);
+  git(empty, ["init", "-q"]);
+  assert.deepEqual(checkoutStatus(empty), { head: null, clean: true });
+  const plain = join(base, "plain");
+  mkdirSync(plain);
+  assert.equal(checkoutStatus(plain), undefined);
+});
+
+test("one HEAD read serves a step's end and the next step's start recorded in one go", () => {
+  const { root, store } = repo();
+  store.writeQueue({ protocol: 1, id: "Q", title: "Queue", revision: 1, status: "approved", stop_conditions: [], checks: [], approvals: [], history: [],
+    steps: [{ id: "Q1", title: "Step 1", goal: "", acceptance: [] }, { id: "Q2", title: "Step 2", goal: "", acceptance: [] }] });
+  recordStepStart(store, "Q", "Q1", "S1");
+  let reads = 0;
+  const once = headOnce(store, "Q");
+  const counted = () => { reads++; return once(); };
+  recordStepEnd(store, "Q", "Q1", counted);
+  recordStepStart(store, "Q", "Q2", "S1", counted);
+  const head = git(root, ["rev-parse", "HEAD"]);
+  const g = store.readGit("Q")!;
+  assert.equal(g.steps.Q1!.at(-1)!.end, head);
+  assert.equal(g.steps.Q2!.at(-1)!.start, head);
+  assert.equal(reads, 2);
+  assert.equal(once(), head);
 });

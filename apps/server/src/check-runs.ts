@@ -21,7 +21,7 @@ import {
   type ProjectStore, type QueueView, type RunFile, type StepView,
 } from "@nexus/protocol";
 import type { Capacity, Grant, HeavyProcess, Ticket } from "./capacity.ts";
-import { checkoutOf, git } from "./gitinfo.ts";
+import { checkoutOf, checkoutStatus, git } from "./gitinfo.ts";
 import { lastPulled } from "./integration.ts";
 import { recordSetup, setupStale } from "./worktree.ts";
 
@@ -205,8 +205,10 @@ export class CheckRunner {
     const file = this.read(q.id);
     const sets = file.steps[st.id]!.sets;
     const fix = sets.filter((s) => s.round === round && s.state === "failed" && s.done !== done.id).length;
-    const head = cwd ? git(cwd, ["rev-parse", "HEAD"]) : undefined;
-    const dirty = cwd ? !!git(cwd, ["status", "--porcelain", "--untracked-files=no"]) : false;
+    // HEAD and uncommitted changes to tracked files from one git call (queue SV2B).
+    const status = cwd ? checkoutStatus(cwd) : undefined;
+    const head = status?.head ?? undefined;
+    const dirty = status ? !status.clean : false;
     const set: CheckSet = {
       done: done.id, round, fix, commit: head ?? null, ...(dirty ? { dirty } : {}), requested_at: now(), state: "queued",
       checks: defs.map((name) => ({ name, command: name, runs: [] })),

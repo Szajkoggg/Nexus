@@ -8,7 +8,7 @@
 // tested first without touching the worktree (git merge-tree), and made only when clean.
 import { execFileSync } from "node:child_process";
 import { fileList, normPath, now, type BasePull, type GitFile, type ProjectState, type ProjectStore, type QueueView } from "@nexus/protocol";
-import { git, ownWorktree } from "./gitinfo.ts";
+import { checkoutStatus, git, ownWorktree } from "./gitinfo.ts";
 import { gitBranch, setupInputsChanged } from "./worktree.ts";
 import { gitLabel, perf } from "./perf.ts";
 
@@ -26,13 +26,19 @@ export interface IntegrationContext {
 }
 
 export function integrationContext(store: ProjectStore, state: Pick<ProjectState, "project">, q: Pick<QueueView, "id" | "worktree" | "branch">): IntegrationContext {
+  const { base, sha } = baseBranch(store, state, q);
+  const wt = ownWorktree(q);
+  const branch = (wt ? gitBranch(wt) : null) ?? q.branch;
+  return { base, sha, branch, resolve: state.project.defaults.resolve_conflicts };
+}
+
+/** The base branch to merge and its commit now (integrationContext without the queue's branch, which a pull needs not). */
+function baseBranch(store: ProjectStore, state: Pick<ProjectState, "project">, q: Pick<QueueView, "id">): { base?: string; sha?: string } {
   const root = normPath(state.project.root);
   const recorded = store.readGit(q.id)?.base;
   const base = recorded?.branch ? recorded.ref : gitBranch(root) ?? undefined;
   const sha = base ? git(root, ["rev-parse", `refs/heads/${base}`]) : undefined;
-  const wt = ownWorktree(q);
-  const branch = (wt ? gitBranch(wt) : null) ?? q.branch;
-  return { base: sha ? base : undefined, sha, branch, resolve: state.project.defaults.resolve_conflicts };
+  return { base: sha ? base : undefined, sha };
 }
 
 // ---------------------------------------------------------------- merges without a model (queue MI)
@@ -42,11 +48,6 @@ const GIT_TIMEOUT = 120_000;
 /** Runs git in `cwd`, its output trimmed; throws on a failure (with `status` and `stdout`, as execFileSync does). */
 function run(cwd: string, args: string[]): string {
   return perf.measure(gitLabel(args), () => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], windowsHide: true, timeout: GIT_TIMEOUT, maxBuffer: 8 * 1024 * 1024 })).trim();
-}
-
-/** The tracked files of the checkout have no uncommitted changes (untracked files do not count). */
-export function cleanCheckout(cwd: string): boolean {
-  return git(cwd, ["status", "--porcelain", "--untracked-files=no"]) === "";
 }
 
 /** The files a merge left unmerged. */
@@ -84,13 +85,23 @@ type MergeOutcome =
 /**
  * Merges `base` into HEAD in `cwd` (git merge --no-edit), only when it merges cleanly: a conflict leaves the branch as
  * it was. `contained`: HEAD has the base already. Undefined when git cannot read the refs.
+ *
+ * `known`: what the caller read already in the same synchronous go, so it is not asked of git again (queue SV2B):
+ * HEAD (`from`), the base's commit (`sha`), and that the merge was tested clean (`clean`, by mergeConflicts). A merge
+ * that conflicts after all is still caught by the merge itself and aborted.
  */
-export function mergeBase(cwd: string, base: string): MergeOutcome | undefined {
-  const from = git(cwd, ["rev-parse", "HEAD"]);
-  const sha = git(cwd, ["rev-parse", `${base}^{commit}`]);
+export function mergeBase(cwd: string, base: string, known: { from?: string; sha?: string; clean?: boolean } = {}): MergeOutcome | undefined {
+  let { from, sha } = known;
+  if (!from && !sha) [from, sha] = (git(cwd, ["rev-parse", "HEAD", `${base}^{commit}`]) ?? "").split(/\r?\n/);
+  from ||= git(cwd, ["rev-parse", "HEAD"]);
+  sha ||= git(cwd, ["rev-parse", `${base}^{commit}`]);
   if (!from || !sha) return undefined;
-  if (git(cwd, ["merge-base", "--is-ancestor", sha, from]) !== undefined) return { result: "contained", from, sha };
-  const conflicts = mergeConflicts(cwd, base);
+  // The base's commits HEAD lacks: none when HEAD contains the base; the count the record gives once merged.
+  const ahead = git(cwd, ["rev-list", "--count", `${from}..${sha}`]);
+  if (ahead === undefined) return undefined;
+  const commits = Number(ahead);
+  if (!commits) return { result: "contained", from, sha };
+  const conflicts = known.clean ? [] : mergeConflicts(cwd, base);
   if (conflicts.length) return { result: "conflict", from, sha, conflicts };
   try { run(cwd, [...identity(cwd), "merge", "--no-edit", sha]); }
   catch {
@@ -99,7 +110,6 @@ export function mergeBase(cwd: string, base: string): MergeOutcome | undefined {
     return { result: "conflict", from, sha, conflicts: files.length ? files : ["(the merge failed)"] };
   }
   const to = git(cwd, ["rev-parse", "HEAD"]) ?? from;
-  const commits = Number(git(cwd, ["rev-list", "--count", `${from}..${sha}`]) ?? 0);
   const shortstat = git(cwd, ["diff", "--shortstat", from, to]) ?? "";
   return { result: "merged", from, sha, to, commits, shortstat };
 }
@@ -119,9 +129,12 @@ export function mergedText(m: Extract<MergeOutcome, { result: "merged" }>): stri
 export function pullBase(store: ProjectStore, state: Pick<ProjectState, "project">, q: Pick<QueueView, "id" | "worktree" | "branch" | "integration">, before: string): BasePull | undefined {
   const cwd = ownWorktree(q);
   if (!q.integration || !cwd) return undefined;
-  const ctx = integrationContext(store, state, q);
-  if (!ctx.base || !cleanCheckout(cwd)) return undefined;
-  const m = mergeBase(cwd, ctx.base);
+  // HEAD and the checkout's state from one git call, the base's commit from another (queue SV2B).
+  const ctx = baseBranch(store, state, q);
+  if (!ctx.base) return undefined;
+  const status = checkoutStatus(cwd);
+  if (!status?.clean || !status.head) return undefined;
+  const m = mergeBase(cwd, ctx.base, { from: status.head, sha: ctx.sha });
   if (!m || m.result === "contained") return undefined;
   const g = store.readGit(q.id) ?? { protocol: 1 as const, steps: {} };
   const pulls = g.pulls ?? [];
