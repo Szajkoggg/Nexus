@@ -74,7 +74,10 @@ Decisions, building it:
   Code just as its turn ended (Nexus had read the reply, not yet the result) was not read in it and runs as a turn of
   its own, and nothing in the stream tells that from a turn that read them all until that turn starts. So the process
   is *settling* (`AgentProcess.settling`) until a turn starts or 1.5 s pass, and context care waits for that (queue OF:
-  the request went out on that false idle in about 2 of 150 full test runs).
+  the request went out on that false idle in about 2 of 150 full test runs). So does everything else that waits for
+  the orchestrator to be idle (`Orchestrator.idle`, queue KM): a runtime switch (the fallback's or the user's), and the
+  restart of a process whose settings changed, which a message during the settling leaves for the next message or the
+  settling's end.
 - While the summary is written, nothing else goes to the old session: the user's message would land in a session that
   is about to end, so it waits in its inbox and is carried into the fresh session's first turn, as a worker's unread
   messages are. Notices are not carried: the fresh session is told them anew, as what no session of its line was told

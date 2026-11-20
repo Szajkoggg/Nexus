@@ -421,8 +421,12 @@ ${n.text}` });
   /** Its process, or a review helper's, is still running (after shutdown: not yet exited). */
   alive(): boolean { return (!!this.proc && this.proc.state !== "exited") || !!this.helpers?.alive(); }
 
-  /** Not in the middle of a turn. */
-  idle(): boolean { return !this.proc || this.proc.state !== "working"; }
+  /**
+   * Not in the middle of a turn, nor in the moment after one in which the runtime may still start a turn of its own
+   * (AgentProcess.settling): what waits for its idleness (a runtime switch, a restart on changed settings) is looked at
+   * again on `settled`.
+   */
+  idle(): boolean { return !this.proc || (this.proc.state !== "working" && !this.proc.settling); }
 
   // ---------------------------------------------------------------- the session
 
@@ -439,9 +443,10 @@ ${n.text}` });
     if (!start) return s;
     // Settings it was started with changed since (its model or effort, global or the project's own; a threshold its
     // briefing names): a new process from this message on (a working one ends after its turn, and this message goes
-    // into that turn), resuming the conversation.
+    // into that turn), resuming the conversation. A settling one is not ended: a turn of its own may still start, and
+    // ending it would cut that off; this message goes to it, and the next one, or its settling's end, finds it stale.
     if (this.proc && this.proc.state !== "exited" && this.host.stale(s.id, this.launcher(s))) {
-      if (this.proc.state === "working") this.host.restartAfterTurn(s.id); else this.host.retire(s.id);
+      if (this.proc.state === "working") this.host.restartAfterTurn(s.id); else if (this.idle()) this.host.retire(s.id);
     }
     if (!this.proc || this.proc.state === "exited") this.spawn(s);
     return s;
@@ -597,6 +602,12 @@ ${n.text}` });
     } });
   }
 
+  /** Its settling over: a process started with other settings than the project's now ends (ensure skipped it then). */
+  private retireStale(): void {
+    const s = this.session();
+    if (s && this.proc && this.proc.state !== "exited" && this.idle() && this.host.stale(s.id, this.launcher(s))) this.host.retire(s.id);
+  }
+
   private spawn(s: SessionFile): void {
     // Its session records the model and effort it runs on (the project's effective ones).
     const o = this.target(s);
@@ -620,7 +631,7 @@ ${n.text}` });
         this.store.appendActivity(s.id, { at: now(), ...a });
       },
       turnEnd: () => this.changed(),
-      settled: () => this.changed(),
+      settled: () => { this.retireStale(); this.changed(); },
       exit: () => this.changed(),
     }));
   }
@@ -672,7 +683,7 @@ ${n.text}` });
     if (asked) {
       // Its summary turn runs; the fresh session's first turn waits while its runtime is beyond the usage threshold.
       const runtime = s.orchestrator_fallback?.target.runtime ?? runtimeOf(state.project);
-      if (!this.idle() || this.proc?.settling || this.runtimeFull(state, runtime)) return true;
+      if (!this.idle() || this.runtimeFull(state, runtime)) return true;
       this.goOnFresh(s, asked);
       return true;
     }

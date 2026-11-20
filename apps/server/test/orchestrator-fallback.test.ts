@@ -205,6 +205,30 @@ test("a manual runtime change after a summary waits on the destination quota, no
   } finally { x.stop(); }
 });
 
+test("a runtime change waits while a message sent as a turn ended may still run as a turn of its own (queue KM)", async () => {
+  // The fake holds the first turn's result until the next message comes, so that message is sent into the turn (`next`)
+  // but runs as a turn of its own after the result Nexus reads (FAKE_LATE_NEXT). The process is settling then, not idle:
+  // the runtime change made meanwhile waits for that turn's end.
+  process.env.FAKE_LATE_NEXT = "1";
+  const x = setup("claude");
+  try {
+    x.orchestrator.say("Hello");
+    const first = x.orchestrator.session()!;
+    await until("the first reply", () => x.orchestrator.view().chat.some((c) => c.from === "orchestrator"));
+    delete process.env.FAKE_LATE_NEXT; // for the Codex session's process
+    x.orchestrator.say("FAKE-HOLD");
+    updateSettings(x.store, { orchestrator: { runtime: "codex", model: null, effort: null } });
+    await until("the held turn", () => x.store.readChat(first.id).entries.some((c) => c.kind === "tool" && c.text.includes("FAKE-HOLD")), LONGER.step);
+    assert.equal(x.orchestrator.session()!.id, first.id, "not switched while the late turn runs");
+    x.release();
+    await until("the Codex session", () => x.orchestrator.session()?.runtime === "codex", LONGER.step);
+    const chat = x.store.readChat(first.id).entries;
+    const held = chat.findIndex((c) => c.from === "orchestrator" && c.text === "held reply");
+    assert.ok(held >= 0 && held < chat.findIndex((c) => c.from === "nexus" && c.text.startsWith("The orchestrator goes on on Codex")), "the held turn ended before the switch");
+    await x.idle();
+  } finally { delete process.env.FAKE_LATE_NEXT; x.stop(); }
+});
+
 test("restart carries an interrupted turn to the available fallback, with the seed first", async () => {
   const x = setup("claude", "codex");
   try {
