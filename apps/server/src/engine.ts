@@ -94,6 +94,10 @@ export const SURVEY_CONDITION = "Nexus: a survey run leaves no commit and no cha
 
 /** A step with one of these has its outcome: its round of commits ends with the turn that gave it. */
 const OUTCOME: ReadonlySet<string> = new Set(["done", "review", "checking", "failed", "stopped"]);
+/** A step past its work: its outcome, or skipped or rejected. A turn now is no turn of the step's (turnFailed). */
+const STEP_ENDED: ReadonlySet<string> = new Set([...OUTCOME, "skipped", "rejected"]);
+/** The usage window a runtime's failed turn fills (routing.ts, overThreshold: codex's start with `codex_`). */
+const limitWindow = (runtime: "claude" | "codex") => (runtime === "codex" ? "codex_limit" : "limit");
 
 export interface EngineOptions {
   /** The first retry's delay; each further one doubles it. Tests make it short. */
@@ -195,6 +199,21 @@ export class Engine implements Member {
   private stopped = false;
   /** Sessions whose process Nexus itself is ending: their exit is no failure. */
   private readonly ending = new Set<string>();
+  /**
+   * The usage limits turns failed on, by usage window (`limit`, `codex_limit`): full until the reset the failure named,
+   * at every route choice (usage.json records no rejection). In memory: after a restart a turn meets the limit again.
+   */
+  private readonly limitsMet: Record<string, { utilization: number; resets_at: string }> = {};
+  /**
+   * A late turn at a session switch (queue LF, F3). `injected`: the inbox entries sent into a session's running turn
+   * (`next`); at the turn's end they become `lastInjected`, which the runtime read in that turn unless it runs them as a
+   * turn of its own (AgentProcess.settling). `switchWaits`: sessions whose switch at a step boundary waits for that
+   * moment to pass. `carryOver`: entries of a late turn Nexus ended, for the fresh session's first turn.
+   */
+  private readonly injected = new Map<string, SessionView["inbox"]>();
+  private readonly lastInjected = new Map<string, SessionView["inbox"]>();
+  private readonly switchWaits = new Set<string>();
+  private readonly carryOver = new Map<string, SessionView["inbox"]>();
   /** A user's immediate stop is waiting for the old process to exit before Resume can open another. */
   private readonly stopping = new Set<string>();
   /** A boundary is not crossed until the worker's descendants have gone. Reset after every turn. */
@@ -1046,17 +1065,22 @@ export class Engine implements Member {
     const defaults = state.project.defaults;
     const old = state.sessions.find((x) => x.id === run.session);
     if (!old || old.runtime === "external") return false;
+    // A switch (or the summary asked before it) waits while the runtime may still run a message sent into the step's
+    // last turn as a turn of its own; it comes when that moment is over (settled), or that turn ends here (lateTurn).
+    const settling = () => { if (!live.proc.settling) return false; this.switchWaits.add(old.id); return true; };
     const tokens = old.live?.context_tokens, window = old.live?.context_window;
     const context = tokens && window ? { tokens, fill: tokens / window } : undefined;
     // The closing refactoring step reads the queue's work with fresh eyes: a session that has worked already (on the
     // queue's steps, or on another queue's) gives way to a fresh one, seeded with the queue's text and no summary.
     if (next.closing && old.event_count > 0) {
+      if (settling()) return true;
       this.switchSession(queueId, run, q, old, live, done, next, want, "refactor", context, "fallback");
       return true;
     }
     const why = old.runtime !== want.runtime ? "runtime"
       : defaults.context_care && contextBeyond(tokens, window, defaults.context_reuse_tokens) ? "context" : undefined;
     if (why) {
+      if (settling()) return true;
       // Fresh: written by this session at or after its latest start of the step that just ended.
       const since = done?.timeline.filter((e) => e.type === "step.started" && e.session === old.id).at(-1)?.at ?? run.started_at;
       const fresh = !!done && !!old.context && old.context.at >= since;
@@ -1076,6 +1100,7 @@ export class Engine implements Member {
     // Without one nothing is asked: asking is a turn in this session, which rewrites the cache all the same.
     const idle = defaults.context_care && done ? idleMinutes(old.live?.last_turn, old.context, this.clock.now()) : undefined;
     if (idle !== undefined) {
+      if (settling()) return true;
       this.switchSession(queueId, run, q, old, live, done, next, want, "idle", context, "written", idle);
       return true;
     }
@@ -1120,7 +1145,7 @@ export class Engine implements Member {
     if (!q || !step || !session || session.runtime === "external") return false;
     const current = session.runtime as "claude" | "codex";
     // A turn that failed on the limit: its runtime is full until the reset it names, whatever usage.json says.
-    const windows = { ...(readUsage()?.windows ?? {}), ...(failed ? { [current === "codex" ? "codex_limit" : "limit"]: { utilization: 1, resets_at: failed.until } } : {}) };
+    const windows = { ...this.usageWindows(), ...(failed ? { [limitWindow(current)]: { utilization: 1, resets_at: failed.until } } : {}) };
     const threshold = state.project.defaults.usage_pause_threshold;
     const nowMs = this.clock.now();
     const full = overThreshold(current, windows, threshold, nowMs);
@@ -1219,7 +1244,12 @@ export class Engine implements Member {
     };
     this.store.writeSession(fresh);
     this.store.writeSession({ ...oldFile, continued_by: fresh.id });
-    const unread = (loadProjectState(this.store).sessions.find((x) => x.id === old.id)?.inbox ?? []).filter((m) => !m.read_at);
+    const inbox = (loadProjectState(this.store).sessions.find((x) => x.id === old.id)?.inbox ?? []).filter((m) => !m.read_at);
+    // What a late turn Nexus ended had taken in (lateTurn): delivered to the old session, but never worked on there.
+    const late = (this.carryOver.get(old.id) ?? []).filter((m) => !inbox.some((x) => x.id === m.id));
+    this.carryOver.delete(old.id);
+    this.switchWaits.delete(old.id);
+    const unread = [...inbox, ...late];
     this.ending.add(old.id);
     live.proc.close();
     return { fresh, unread };
@@ -1426,7 +1456,7 @@ export class Engine implements Member {
       if (m.type !== "stop" && (questionsOpen || batch.includes(m) || (owner && (!idleAllowed || m.type === "answer")))) continue;
       const text = withLanguages(formatInbox(m, state), languages);
       if (m.type === "stop") l.proc.send(text, "now");
-      else if (l.proc.state === "working") l.proc.send(text, "next");
+      else if (l.proc.state === "working") { l.proc.send(text, "next"); this.injected.set(l.session, [...(this.injected.get(l.session) ?? []), m]); }
       else if (idleAllowed) l.proc.send(text);
       else continue; // a paused run: keep it for later
       if (m.type === "send_back" || m.type === "check_failed") recordStepStart(this.store, m.queue, m.step, l.session); // the next round
@@ -1523,7 +1553,14 @@ export class Engine implements Member {
     }
     if (f.kind === "lasting") return this.halt(queueId, `the turn failed (${what})`, f.code);
     if (f.kind === "usage" && f.resetsAt) {
-      // The step's fallback chain first: the runtime counts as full until the reset the failure names.
+      // The runtime counts as full until the reset the failure names, at this choice and at the next step's too.
+      const runtime = this.store.readSession(run.session).runtime;
+      if (runtime === "claude" || runtime === "codex") this.limitsMet[limitWindow(runtime)] = { utilization: 1, resets_at: f.resetsAt };
+      // A turn after the step's outcome (the context summary asked for at its boundary): the step is not taken up again
+      // on its fallback; the next step opens where the route says now, on the fallback or after a wait (queue LF, F2).
+      const step = run.step ? this.queue(loadProjectState(this.store), queueId).steps.find((s) => s.id === run.step) : undefined;
+      if (step && STEP_ENDED.has(step.status)) return this.advance(queueId);
+      // Within the step: its fallback chain first.
       const live = this.host.get(run.session);
       if (live && this.usageGate(queueId, loadProjectState(this.store), run, live, { until: f.resetsAt, reason: `the usage limit was reached (${what})` })) return;
       this.writeRun(queueId, toUsageWait(run, `the usage limit was reached (${what}); goes on when it resets`, f.resetsAt));
@@ -1608,6 +1645,25 @@ export class Engine implements Member {
     };
   }
 
+  /**
+   * The runtime starts a turn of its own with messages sent into the step's last turn while a switch waits (queue LF,
+   * F3): the turn is ended at its start, so the old session works no turn beside the fresh one, and those messages go
+   * to the fresh session's first turn (forkSession). Its process is ended as at a restart: the exit handler starts the
+   * session's process again, and the next look switches.
+   */
+  private lateTurn(session: string): void {
+    this.switchWaits.delete(session);
+    const live = this.host.get(session);
+    if (!live) return;
+    const late = this.lastInjected.get(session) ?? [];
+    this.lastInjected.delete(session);
+    this.carryOver.set(session, [...(this.carryOver.get(session) ?? []), ...late]);
+    this.store.appendActivity(session, { at: now(), kind: "turn_end", text: `Nexus ends the turn the runtime started by itself at the step's end: the session goes on in a fresh one, which gets ${late.length === 1 ? "the message" : "the messages"} sent into its last turn` });
+    this.restarting.add(session);
+    this.ending.add(session);
+    live.proc.kill();
+  }
+
   private ensureProcess(session: SessionFile): Live {
     const existing = this.host.running(session.id);
     if (existing) {
@@ -1638,6 +1694,7 @@ export class Engine implements Member {
     return this.host.start(session, launch, {}, () => ({
       tag,
       activity: (a) => {
+        if (a.kind === "turn_start" && this.switchWaits.has(session.id)) this.lateTurn(session.id);
         const t: { queue?: string; step?: string } = tag();
         this.store.appendActivity(session.id, { at: now(), ...a, ...t });
         // The HEAD around each turn of a step: which commits the step made (src/gitinfo.ts).
@@ -1663,7 +1720,16 @@ export class Engine implements Member {
           this.changed();
         }, BACKGROUND_SETTLE_MS));
       },
+      settled: () => {
+        // The messages sent into the last turn were read in it; a switch waiting for this moment comes now.
+        this.lastInjected.delete(session.id);
+        if (!this.switchWaits.delete(session.id)) return;
+        for (const q of runsOf()) this.advance(q);
+        this.changed();
+      },
       turnEnd: (end) => {
+        this.lastInjected.set(session.id, this.injected.get(session.id) ?? []);
+        this.injected.delete(session.id);
         const live = this.host.get(session.id);
         if (live && !this.stopping.has(session.id)) {
           this.cleaned.delete(live.proc);
@@ -1720,8 +1786,13 @@ export class Engine implements Member {
   // ---------------------------------------------------------------- usage limits
 
   /** Where a step opens given the account's usage windows now and the project's threshold (routing.ts, chooseRoute). */
+  /** The usage windows now: usage.json's, and the limits turns failed on (limitsMet). */
+  private usageWindows(): Record<string, { utilization: number; resets_at?: string }> {
+    return { ...(readUsage()?.windows ?? {}), ...this.limitsMet };
+  }
+
   private chooseFor(state: ProjectState, routed: Routed): ReturnType<typeof chooseRoute> {
-    return chooseRoute(routed, { windows: readUsage()?.windows ?? {}, threshold: state.project.defaults.usage_pause_threshold, nowMs: this.clock.now(), project: state.project });
+    return chooseRoute(routed, { windows: this.usageWindows(), threshold: state.project.defaults.usage_pause_threshold, nowMs: this.clock.now(), project: state.project });
   }
 
   /**

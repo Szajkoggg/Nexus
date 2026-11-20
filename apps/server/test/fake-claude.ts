@@ -40,6 +40,8 @@ let totalCost = 0;
 /** The running totals of every model call in the process, sub-agents' included, as result.modelUsage reports them. */
 const totals = { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 };
 const queue: string[] = [];
+/** Late turns still to start (FAKE_LATE_NEXT_MS): the CLI runs them before it exits, its input closed or not. */
+let lateTurns = 0;
 
 async function turn(text: string): Promise<void> {
   out({ type: "system", subtype: "init", model: "fake-model", session_id: "fake" });
@@ -59,7 +61,13 @@ async function turn(text: string): Promise<void> {
   // message that reached it as its turn ended): Nexus sent it into a turn whose result it had not read yet (queue OF).
   if (process.env.FAKE_LATE_NEXT && turns === 0) {
     for (const t = Date.now(); !unread.length && Date.now() - t < 300_000;) await new Promise((r) => setTimeout(r, 20));
-    queue.unshift(...unread);
+    // FAKE_LATE_NEXT_MS: that turn starts this long after the result (a busy machine), still within Nexus's settling.
+    const lateMs = Number(process.env.FAKE_LATE_NEXT_MS ?? 0);
+    if (lateMs) {
+      const late = unread;
+      lateTurns++;
+      setTimeout(() => { lateTurns--; queue.unshift(...late); void pump(); }, lateMs);
+    } else queue.unshift(...unread);
     unread = [];
   }
   // As Claude Code reports them (checked live): result.usage is this turn's, total_cost_usd runs on. Turn n of the
@@ -203,7 +211,7 @@ function listen(): void {
   process.stdin.setEncoding("utf8");
   process.stdin.on("data", read);
   // FAKE_EXIT_DELAY_MS: the process lingers that long after its input closed (a CLI flushing its transcript).
-  process.stdin.on("end", () => { const wait = () => (busy ? setTimeout(wait, 50) : setTimeout(() => process.exit(0), Number(process.env.FAKE_EXIT_DELAY_MS ?? 0))); wait(); });
+  process.stdin.on("end", () => { const wait = () => (busy || lateTurns ? setTimeout(wait, 50) : setTimeout(() => process.exit(0), Number(process.env.FAKE_EXIT_DELAY_MS ?? 0))); wait(); });
 }
 
 // FAKE_START_MS: the input is read only after that long, as Claude Code reads it once it has started.

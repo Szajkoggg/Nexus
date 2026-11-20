@@ -37,7 +37,11 @@ send-back, the message that was due); a carried send-back opens its round. At a 
 the run waits (`usage_wait`) in the middle of the step, its session kept, and continues it after the reset. A turn that is running is never cut off: an entry for a working session goes into its running
 turn as before, and the gate looks only when the session is idle. A turn that failed on the usage limit (a `usage`
 failure with its reset time) goes the same way: its runtime counts as full until that reset, and the step goes on on
-the next entry of its chain instead of waiting (`fallbacks[].reason`: "the usage limit was reached (…)").
+the next entry of its chain instead of waiting (`fallbacks[].reason`: "the usage limit was reached (…)"). The engine
+keeps that reset in memory (usage.json records no rejection), so the next step's route counts the runtime full too. A
+turn after the step's outcome (the context summary asked for at its boundary, see ["Context care"](#context-care)) is no
+turn of the step: the step is not continued on its fallback; the next step opens where its route says now, on the
+fallback in a fresh session or after a wait (queue LF, F2).
 
 **The words**: why a runtime counts as full is said one way everywhere (`windowReason`): "Claude Code's 7-day window at
 96 % (limit 90 %)", "Codex's 5-hour window at 100 % (limit 90 %)"; a run's `usage_wait` reason, a fallback's `reason`
@@ -149,6 +153,11 @@ recorded as `why: idle` with `idle_minutes` and `summary: written`; the seed say
 switch for the threshold or another runtime comes first. The run's panel and `nexus status` (a line per switch under
 the queue, `switchLines` in `packages/protocol/src/overview.ts`) show every switch with its reason.
 
+0. It waits while the old process is settling (queue LF, F3): a message sent into the step's last turn (`next`) that
+   reached the runtime as the turn ended runs as a turn of its own (Claude Code), so neither the summary request nor
+   the switch comes before that moment is over (`settled`). If such a turn starts meanwhile, Nexus ends it at its start
+   (the old process ends as at a restart, its activity says why), so the old session works no turn beside the new one,
+   and the entries sent into that last turn go to the new session's first turn with the unread ones (`carried`).
 1. It looks for a fresh summary: a `context.summary` from that session at or after its latest `step.started` of the
    step that ended. If there is none, it asks once with a turn ("… write your context summary with `nexus context`
    …, then end your turn") and records `summary_asked` in `run.yaml`; after that turn it goes on with or without one.

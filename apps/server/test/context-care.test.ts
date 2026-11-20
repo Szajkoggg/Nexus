@@ -179,6 +179,33 @@ for (const runtime of ["claude", "codex"] as const) {
 
 }
 
+test("claude: a message sent into the step's last turn that the runtime runs as a late turn of its own: the switch waits for that moment, the old session works no turn beside the fresh one, and the message goes to the fresh session (queue LF, F3)", async () => {
+  process.env.FAKE_LATE_NEXT = "1";
+  process.env.FAKE_LATE_NEXT_MS = "800"; // the late turn starts after the engine looked at the turn's end
+  const { store, engine, queue, received, until, done, accept } = setup(["summary", "done"], { fill: 0.8 });
+  try {
+    engine.start("Q", { runtime: "claude" });
+    // The step's turn has reported its done and summary, and holds its result for the message.
+    await until("Q1 in review in its turn", () => queue().steps[0]!.status === "review" && loadProjectState(store).sessions.find((s) => s.id === queue().run!.session)?.live?.state === "working", LONGER.step);
+    accept();
+    delete process.env.FAKE_LATE_NEXT; delete process.env.FAKE_LATE_NEXT_MS; // for the fresh session's process
+    const old = queue().run!.session;
+    sendMessage(store, old, "Use the grassland settings.", { queue: "Q", step: "Q1" });
+    engine.onChange(loadProjectState(store)); // delivered into the running turn (next)
+    await until("the message sent into the turn", () => received().some((m) => m.session === old && m.text.includes("grassland") && m.priority === "next"));
+    await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
+    const q = queue();
+    const fresh = q.steps[1]!.session!;
+    assert.notEqual(fresh, old);
+    assert.deepEqual(q.run!.switches?.map((s) => [s.step, s.why]), [["Q2", "context"]]);
+    const opening = received().find((m) => m.session === fresh)!;
+    assert.match(opening.text, /step Q2 \(2 of 2\)[\s\S]*Use the grassland settings\./, "the message goes to the fresh session");
+    const freshStart = store.readActivity(fresh).entries.find((e) => e.kind === "turn_start")!.at;
+    const beside = store.readActivity(old).entries.filter((e) => e.at >= freshStart && ["turn_start", "text", "tool", "turn_end"].includes(e.kind) && !/^Nexus /.test(e.text));
+    assert.deepEqual(beside.map((e) => `${e.kind}: ${e.text}`), [], "the old session worked no turn beside the fresh one");
+  } finally { done(); delete process.env.FAKE_LATE_NEXT; delete process.env.FAKE_LATE_NEXT_MS; }
+});
+
 const HOUR = 60 * 60_000;
 
 for (const runtime of ["claude", "codex"] as const) {

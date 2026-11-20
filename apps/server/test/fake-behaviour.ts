@@ -51,7 +51,7 @@
 // "refused": the agent tries actions that are refused (each fake writes them as its runtime does), then done.
 // "summary": done, then the step's context summary (`nexus context`); "summaryslow": the same, then it works (as
 // "slow") before the turn ends. Nexus asking for the summary ("[Nexus] … write your context summary") gets one, unless
-// FAKE_NO_SUMMARY is set; so does the orchestrator ("[Nexus] Your context holds …"), with "fake orchestrator
+// FAKE_NO_SUMMARY is set (with FAKE_SUMMARY_FAIL set, that turn fails as the failure kind it names); so does the orchestrator ("[Nexus] Your context holds …"), with "fake orchestrator
 // summary" (topics plan, promises; file docs/plan.md), and with FAKE_SUMMARY_MS set it then works that long. FAKE_CONTEXT_FILL (0 to 1) is the context fill each turn reports
 // (default: claude 10 %, codex 6 %) of the context window, FAKE_CONTEXT_WINDOW tokens (default: claude 1000, codex 2000); FAKE_CONTEXT_FILL_FILE names a file whose content, while it exists, replaces it (a
 // test changes the fill of a running process). A step turn may come after a seed (context care's first prompt of a fresh session): it is found at the
@@ -74,7 +74,8 @@
 // Claude's fake keeps the conversations it saved (fakeSaved below) and refuses, as Claude Code does, to resume one it
 // never saved or to start a saved one anew; FAKE_START_MS: it reads its input only after that long (Claude Code's
 // start-up), so a test can end it before it saved anything; FAKE_REFUSE: it refuses every start, each in its way;
-// FAKE_LATE_NEXT: its first turn's result waits for a message sent after its reply, which then runs as a turn of its own.
+// FAKE_LATE_NEXT: its first turn's result waits for a message sent after its reply, which then runs as a turn of its own
+// (FAKE_LATE_NEXT_MS after the result, when set; the process runs it before it exits, its input closed or not).
 import { execFileSync, spawn } from "node:child_process";
 import { appendFileSync, existsSync, linkSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -502,6 +503,8 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
     return "summary written";
   }
   if (text.includes("write your context summary")) {
+    // FAKE_SUMMARY_FAIL: the request's turn fails that way (a failure kind, as a step's behaviour names it).
+    if (process.env.FAKE_SUMMARY_FAIL) return { fail: process.env.FAKE_SUMMARY_FAIL as FakeFailure };
     if (!process.env.FAKE_NO_SUMMARY && fake.step) nexus("context", `fake summary of ${fake.step}, on request`, "--topics", "fake");
     return "summary";
   }
