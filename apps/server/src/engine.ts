@@ -405,6 +405,11 @@ export class Engine implements Member {
     const live = this.host.get(run.session);
     const cleanup = live && this.cleaning.get(live.proc);
     if (cleanup) {
+      // What refuses a resume whatever the cleanup does (a rejected step, a revision to approve, a stopped or
+      // finished queue) refuses it now, not later in a deferred call that halts the run with it. The cleanup takes
+      // longer since the worker's job runs below normal priority (queue SV3), which made the wait visible.
+      if (run.state === "finished") throw new ActionError("the run is finished", 409);
+      if (run.state !== "running") assertCanResume(this.queue(loadProjectState(this.store), queueId), run);
       // Automatic resumes (a cancelled drain, an approval) wait too. A later pause or other run change cancels
       // this request; cleanup failure already halts the run through cleanWorker.
       const before = JSON.stringify(run);
