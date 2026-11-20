@@ -104,7 +104,10 @@ test("Codex in a queue's own worktree may write the worktree's git paths, and no
   store.writeQueue({ ...store.readQueue("Q"), worktree: "auto" });
   try {
     engine.start("Q", { runtime: "codex" });
-    await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
+    // A run in a worktree of its own through its integration step and merge back, its worker in the job host: the
+    // `processes` wait. With `run` it took 27 to 29 s of 30 in full runs, and 32 to 34 s once the worker's job ran below
+    // normal priority beside a suite at normal (queue SV3); alone 7.6 s.
+    await until("the run to finish", () => queue().run?.state === "finished", LONGER.processes);
     const wt = store.readQueue("Q").worktree!;
     const gitDir = join(root, ".git"), mine = (p: string) => normalize(p).toLowerCase();
     const want = [store.dir, join(gitDir, "worktrees", "Q"), join(gitDir, "objects"), join(gitDir, "refs"), join(gitDir, "logs"), reportFolder("p")].map(mine);
