@@ -21,6 +21,7 @@ import { newestFirst, projectDigest, projectRunning, usageSince, type DigestEven
 import { Engine } from "./engine.ts";
 import { Coordinator } from "./coordinator.ts";
 import { Capacity } from "./capacity.ts";
+import { lowerOwnedProcesses } from "./worker-process.ts";
 import { branchState, leftBehind, stepCommits } from "./gitinfo.ts";
 import { cleanUp, mergeBack } from "./mergeback.ts";
 import { Merger } from "./merger.ts";
@@ -103,6 +104,8 @@ interface Entry { id: string; root: string; store: ProjectStore; engine: Engine;
 const projects = new Map<string, Entry>();
 /** Over every project's engine: one queue per checkout, and the limit on queues running at once (src/coordinator.ts). */
 const coordinator = new Coordinator();
+// The workers' and checks' processes run below normal priority: the server and the user's programs go first (queue SV3).
+lowerOwnedProcesses(true);
 /**
  * One heavy operation on the workstation at a time, across projects (src/capacity.ts). Made when this server becomes
  * active, which writes <NEXUS_HOME>/capacity.yaml anew: the grants of a server before it ended with its processes.

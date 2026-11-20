@@ -239,6 +239,12 @@ edge on Windows were weighed:
   do the user's own programs. Elsewhere (Linux, macOS) the server sets the nice value of the process it starts
   (`belowNormal`, `PRIORITY_BELOW_NORMAL`), which its children inherit.
 
+The server turns it on at its start (`lowerOwnedProcesses(true)` in `main.ts`), and the job host applies the limit only
+when told (`NEXUS_JOB_BELOW_NORMAL`). An engine made in a test process leaves it off: in the full suite the test
+files run the engine in-process, and their fake workers below normal fell behind the suite's other files at normal
+priority (a full run started in a terminal, or Nexus's checks before the change is deployed): three tests near their
+time limits failed in SV3's checks.
+
 What it changes for the rest of the machine: Nexus's tests and workers give way to every normal program. On a machine
 busy with something else they run slower than before (and a timing-sensitive test with them); on an otherwise idle
 machine a lower priority class changes nothing, the cores are free. A full `npm test` started in a terminal by the

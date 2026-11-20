@@ -9,12 +9,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { constants, tmpdir } from "node:os";
+import { constants, getPriority, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ProjectStore, readCapacity } from "@nexus/protocol";
 import { processAlive } from "@nexus/protocol/full-test-lock";
 import { Capacity, type Grant, type HeavyProcess } from "../src/capacity.ts";
+import { lowerOwnedProcesses } from "../src/worker-process.ts";
 
 const CLI = join(dirname(fileURLToPath(import.meta.url)), "../../../packages/cli/bin/nexus.js");
 process.env.NEXUS_HOME = mkdtempSync(join(tmpdir(), "nexus-capacity-home-"));
@@ -183,20 +184,27 @@ test("a starting server writes the file anew, a cancelled request leaves the lin
   assert.ok(!existsSync(lock) || readFileSync(lock, "utf8") === "", "the coordinator never takes the test lock itself");
 });
 
-test("a granted process and the children it starts run below normal priority (queue SV3)", async () => {
+test("as the server asks, a granted process and the children it starts run below normal priority; else as before (queue SV3)", async () => {
   const capacity = new Capacity({ testLock: lockFile() });
-  try {
-    const grant = await capacity.request({ kind: "checks", project: "a", queue: "SV", step: "SV3" }).granted;
-    const code = `const os = require("node:os");
+  const code = `const os = require("node:os");
 const child = require("node:child_process").spawnSync(process.execPath, ["-e", "console.log(require('node:os').getPriority())"], { encoding: "utf8", windowsHide: true });
 console.log("priority " + os.getPriority() + " " + child.stdout.trim());`;
+  const priorities = async (): Promise<string> => {
+    const grant = await capacity.request({ kind: "checks", project: "a", queue: "SV", step: "SV3" }).granted;
     const p = grant.spawn(process.execPath, ["-e", code], { cwd: tmpdir() });
     let out = "";
     p.child.stdout.on("data", (d: Buffer) => { out += d.toString(); });
     p.child.stderr.on("data", () => {});
     await p.done;
     grant.end();
+    return out;
+  };
+  try {
+    const own = getPriority();
+    assert.match(await priorities(), new RegExp(`priority ${own} ${own}`), "not asked: the test process's own");
+    lowerOwnedProcesses(true);
     const below = constants.priority.PRIORITY_BELOW_NORMAL;
+    const out = await priorities();
     assert.match(out, new RegExp(`priority ${below} ${below}`), out);
-  } finally { capacity.shutdown(); }
+  } finally { lowerOwnedProcesses(false); capacity.shutdown(); }
 });

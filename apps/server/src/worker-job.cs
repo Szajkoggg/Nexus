@@ -146,11 +146,16 @@ public static class NexusWorkerJob
         job = CreateJobObject(IntPtr.Zero, null);
         if (job == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
         var limits = new ExtendedLimits();
-        // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, no breakaway; and JOB_OBJECT_LIMIT_PRIORITY_CLASS: every process of the
-        // job (the runtime, the tests and builds it starts, Nexus's checks) runs below normal priority, so the Nexus
-        // server and the user's own programs go first on a busy machine (queue SV3). A member cannot raise its own.
-        limits.Basic.Flags = 0x2000 | 0x20;
-        limits.Basic.Priority = 0x4000; // BELOW_NORMAL_PRIORITY_CLASS
+        // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, no breakaway. When the server asks (NEXUS_JOB_BELOW_NORMAL=1), also
+        // JOB_OBJECT_LIMIT_PRIORITY_CLASS: every process of the job (the runtime, the tests and builds it starts,
+        // Nexus's checks) runs below normal priority, so the Nexus server and the user's own programs go first on a
+        // busy machine (queue SV3). A member cannot raise its own. The variable is not passed on to the runtime.
+        limits.Basic.Flags = 0x2000;
+        if (Environment.GetEnvironmentVariable("NEXUS_JOB_BELOW_NORMAL") == "1") {
+            limits.Basic.Flags |= 0x20;
+            limits.Basic.Priority = 0x4000; // BELOW_NORMAL_PRIORITY_CLASS
+        }
+        Environment.SetEnvironmentVariable("NEXUS_JOB_BELOW_NORMAL", null);
         int size = Marshal.SizeOf(limits);
         IntPtr data = Marshal.AllocHGlobal(size);
         try {

@@ -258,10 +258,12 @@ persisted PID; its old host owns the job and closes it when its server pipe clos
 The internal redirected-stdio control channel is line-based UTF-8, separate from the runtime's own protocol. The
 server writes two initial base64 lines: the UTF-8 executable path, then its Windows-quoted argument string. The
 helper inherits the worker environment and working directory. It creates a private hidden console and joins a
-kill-on-close Job Object before launching the runtime. The job also limits its members' priority class to below
-normal (`JOB_OBJECT_LIMIT_PRIORITY_CLASS`, queue SV3): the runtime and everything it starts, and the checks Nexus runs
-through the same host (docs/design/performance.md, "Below normal priority for tests and workers"). Elsewhere the
-server sets the process's nice value instead (`belowNormal` in `worker-process.ts`). Subsequent frames:
+kill-on-close Job Object before launching the runtime. When its environment has `NEXUS_JOB_BELOW_NORMAL=1`, the job
+also limits its members' priority class to below normal (`JOB_OBJECT_LIMIT_PRIORITY_CLASS`, queue SV3): the runtime
+and everything it starts, and the checks Nexus runs through the same host (docs/design/performance.md, "Below normal
+priority for tests and workers"). The helper removes the variable before the runtime starts. The server sets it once
+it has turned the lowering on at its start (`lowerOwnedProcesses` in `worker-process.ts`); elsewhere it sets the
+process's nice value instead. An engine in a test process leaves it off. Subsequent frames:
 
 | Direction | Frame | Meaning |
 |---|---|---|

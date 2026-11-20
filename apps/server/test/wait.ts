@@ -47,8 +47,7 @@ export const LONGER = {
    * one's whole run, each through its integration step, so about six worker processes, each in its PowerShell job
    * host, start or end one after another (and a step whose model differs restarts the process). Alone 6 s; under
    * load-tests 18 to 26 s, past the 30 s of `run` in a full run (queue FL3, FL8; before FL8 the host reported each
-   * end 2.3 s late, alone 8 s). Since queue SV3 a worker's job runs below normal priority, so beside a suite at normal
-   * priority (a full run started in a terminal) its processes wait longer still.
+   * end 2.3 s late, alone 8 s).
    */
   processes: WAIT_MS * 6,
   /**

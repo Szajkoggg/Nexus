@@ -28,11 +28,22 @@ export function spawnRuntimeChild(bin: string, args: string[], options: SpawnOpt
 }
 
 /**
- * A worker's or a check's process below normal priority, as the Windows job sets for its whole tree (worker-job.cs,
- * queue SV3): elsewhere a nice value its children inherit. Never fails a start: a process already gone stays as it is.
+ * Whether the workers' and checks' processes run below normal priority (queue SV3): the server turns it on at its start
+ * (main.ts), so it and the user's programs go first. Off by default: the tests run the engine inside a test process at
+ * whatever priority the suite has, and their fake workers must not fall behind the suite's other files.
+ */
+let lowered = false;
+export function lowerOwnedProcesses(on: boolean): void { lowered = on; }
+
+/** Tells the Windows job host to limit its job's priority class (worker-job.cs); it removes the variable before the runtime starts. */
+const JOB_PRIORITY = "NEXUS_JOB_BELOW_NORMAL";
+
+/**
+ * A worker's or a check's process below normal priority when the server asked for it, as the Windows job sets for its
+ * whole tree: elsewhere a nice value its children inherit. Never fails a start: a process already gone stays as it is.
  */
 export function belowNormal(pid: number | undefined): void {
-  if (pid === undefined) return;
+  if (!lowered || pid === undefined) return;
   try { setPriority(pid, constants.priority.PRIORITY_BELOW_NORMAL); } catch { /* ended already, or not allowed */ }
 }
 
@@ -53,7 +64,7 @@ class WorkerProcess extends EventEmitter implements RuntimeChild {
   constructor(bin: string, args: string[], options: SpawnOptions) {
     super();
     this.host = spawn("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", fileURLToPath(new URL("./worker-job.ps1", import.meta.url))], {
-      cwd: options.cwd, env: options.env, stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
+      cwd: options.cwd, env: { ...options.env, [JOB_PRIORITY]: lowered ? "1" : undefined }, stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
     });
     this.host.stdin.on("error", () => {});
     this.stdin = new Writable({
