@@ -127,6 +127,20 @@ The same holds once the worker took up its check-fix round with `nexus step star
 set's done): it stays in that round (`check_fix`), a dispute it says there runs on the base as above, and an accepted
 one sends the step to its review as of the done (its `finished_at` and `review_with` the done's).
 
+**An unreadable checks.yaml** (queue LF, F6): the state warns (`queue <id> checks: <error>`), the queue view carries
+`check_runs_error` (the error), and every step its events put in `review` is `checking` (`{ phase: queued, since: the
+done }`) instead: whether its checks passed is unknown, and it is not reviewed as if they had. The engine halts the
+run whose current step that is, with the reason (`queues/<id>/checks.yaml cannot be read (…): Nexus cannot tell
+whether the checks of step <step> passed …`). Repaired, the file is read again; moved aside, the step goes to its review
+without Nexus's checks.
+
+**Failures inside the checks' work** (queue LF, F1): a stop ends the grant, and nothing starts under it afterwards (the
+base run looks at the stop after its `git worktree add` too, and leaves its base run `queued`). Anything else that
+throws in a set's or a base run's chain (an unwritable checks.yaml, a failed spawn) is logged and halts the run (`step
+<step>: the checks Nexus runs failed: <error>`); a Resume runs the checks again. An accept the orchestrator decided
+whose outcome was not yet written (the server ended between the two writes, F5) is finished at the engine's next look;
+its fix queue gets the occurrence once.
+
 The review round (`reviewRound`) counts only the step.dones that reached review, so a check-fix round is no send-back
 round, and the review pictures keep their round **(P13)**. The engine's results join the step's `checks` (`by:
 "nexus"`, `flaky`; the summary "passed", "failed, then passed on the second run (flaky)", "exit code 1; 2 tests

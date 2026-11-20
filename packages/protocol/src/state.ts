@@ -221,6 +221,11 @@ export interface QueueView extends Omit<QueueFile, "steps"> {
   git?: GitFile;
   /** The checks Nexus ran for its steps (queues/<id>/checks.yaml). */
   check_runs?: ChecksFile;
+  /**
+   * Why checks.yaml cannot be read, when it cannot (the state warns too): nobody can tell then whether a step's checks
+   * passed, so a step waiting for its review is held as `checking` (checks.ts) and the engine halts its run (queue LF, F6).
+   */
+  check_runs_error?: string;
   /** The queue's next start as planned (queues/<id>/start.yaml): its options, a schedule; why it has not come yet. */
   start?: StartView;
   /** The queue's place in the plan (queues/<id>/plan.yaml): the queues it waits for, each as it stands. */
@@ -297,7 +302,7 @@ export function loadProjectState(store: ProjectStore): ProjectState {
       try { view.run = store.readRun(id); } catch (e) { warnings.push(`queue ${id} run: ${(e as Error).message}`); }
       try { view.push = store.readPush(id); } catch (e) { warnings.push(`queue ${id} push: ${(e as Error).message}`); }
       try { view.git = store.readGit(id); } catch (e) { warnings.push(`queue ${id} git: ${(e as Error).message}`); }
-      try { view.check_runs = store.readChecks(id); } catch (e) { warnings.push(`queue ${id} checks: ${(e as Error).message}`); }
+      try { view.check_runs = store.readChecks(id); } catch (e) { view.check_runs_error = (e as Error).message; warnings.push(`queue ${id} checks: ${view.check_runs_error}`); }
       try {
         const plan = store.readStart(id);
         if (plan) view.start = { ...plan, waiting: "", blocked: false };

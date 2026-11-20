@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ProjectStore, applyDraft, approveQueue, loadProjectState, routeAnswers, updateSettings, type ChecksFile } from "@nexus/protocol";
@@ -350,6 +350,86 @@ test("a disputed failure that cannot run on the base waits for the orchestrator:
     const [r1, r2] = x.sets("R");
     assert.deepEqual([r1!.state, r1!.dispute?.decided?.verdict, r1!.dispute?.decided?.reason, r1!.dispute?.outcome, r2!.state], ["failed", "fix", "it fails only with this queue's change", "fix", "passed"]);
   } finally { x.stop(); }
+});
+
+/** Rejections nobody handled while `body` ran (the server would have exited on one: queue LF, F1). */
+async function rejections(body: () => Promise<void>): Promise<unknown[]> {
+  const seen: unknown[] = [];
+  const listen = (reason: unknown) => { seen.push(reason); };
+  process.on("unhandledRejection", listen);
+  try { await body(); await new Promise((r) => setTimeout(r, 300)); }
+  finally { process.off("unhandledRejection", listen); }
+  return seen;
+}
+
+test("a Stop while the disputed check's base worktree is being added: the server goes on, the base run is asked for again and runs at Resume (queue LF, F1)", async () => {
+  const x = withOrchestrator(["Q"]);
+  x.plan("Q-unit", [1]); x.plan("Q-unit", [1], true);
+  const root = x.store.readProject().root;
+  // `git worktree add` runs the post-checkout hook: it marks the add's start and holds it long enough for the Stop.
+  const marker = join(root, "adding");
+  const hook = join(root, ".git", "hooks", "post-checkout");
+  writeFileSync(hook, `#!/bin/sh\necho started > "${marker.replaceAll("\\", "/")}"\nsleep 2\n`);
+  try {
+    await x.hello();
+    const seen = await rejections(async () => {
+      x.engine.start("Q", { runtime: "claude" });
+      await x.until("the base worktree to be added", () => existsSync(marker));
+      x.engine.stopNow("Q");
+      await x.until("the base run to be given up", () => x.sets("Q")[0]?.dispute?.base?.state === "queued" && x.engine.idle(), LONGER.step);
+    });
+    assert.deepEqual(seen.map(String), [], "no rejection nobody handled");
+    assert.deepEqual([x.queue("Q").run?.state, x.queue("Q").run?.reason], ["paused", "stopped by the user"]);
+    assert.deepEqual([x.queue("Q").steps[0]!.status, x.queue("Q").steps[0]!.checking?.phase], ["checking", "base"]);
+    assert.equal(x.runs().filter((r) => r.endsWith("@base")).length, 0, "the check did not start on the base");
+    const worktrees = () => execFileSync("git", ["worktree", "list", "--porcelain"], { cwd: root, encoding: "utf8" }).split("\n").filter((l) => l.startsWith("worktree ")).length;
+    assert.equal(worktrees(), 1, "the base worktree is removed");
+
+    rmSync(hook);
+    x.engine.resume("Q");
+    await x.until("Q to finish", () => x.queue("Q").run?.state === "finished");
+    assert.deepEqual([x.sets("Q")[0]!.state, x.sets("Q")[0]!.dispute?.base?.state], ["accepted", "failed"]);
+    assert.equal(x.runs().filter((r) => r.endsWith("@base")).length, 1);
+  } finally { x.stop(); }
+});
+
+test("an accept decided before a restart and not yet recorded as accepted is finished by the next look: the step goes to its review (queue LF, F5)", async () => {
+  const x = withOrchestrator(["Q"]);
+  x.plan("Q-unit", [1]); // no base plan: the stand-in cannot run there, the orchestrator decides
+  try {
+    await x.hello();
+    x.engine.start("Q", { runtime: "claude" });
+    await x.until("Q1 to wait for the decision", () => x.queue("Q").steps[0]!.checking?.phase === "decision");
+    // What a server killed between decide()'s write and accept()'s leaves: the decision recorded, no outcome.
+    const file = x.store.readChecks("Q")!;
+    const set = file.steps.Q1!.sets[0]!;
+    set.dispute!.decided = { verdict: "accept", reason: "the machine's network fails it", at: new Date().toISOString(), event: "e-decided" };
+    x.store.writeChecks("Q", file);
+    await x.until("Q to finish", () => x.queue("Q").run?.state === "finished");
+    const [accepted] = x.sets("Q");
+    assert.deepEqual([accepted!.state, accepted!.dispute?.outcome, accepted!.fix_queue?.created], ["accepted", "accepted", true]);
+  } finally { x.stop(); }
+});
+
+test("an unreadable checks.yaml while the checks run: the step does not go to its review, the run halts with the reason, and the check's end is no crash (queue LF, F6)", async () => {
+  const x = withChecks(["done"], ["unit"]);
+  x.plan("unit", ["1500ms:0"]);
+  try {
+    const seen = await rejections(async () => {
+      x.engine.start("Q", { runtime: "claude" });
+      await x.until("the check to run", () => x.sets()[0]?.state === "running" && x.runs().length === 1, LONGER.run);
+      writeFileSync(join(x.store.queueDir("Q"), "checks.yaml"), "protocol: 1\nsteps: [unclosed\n");
+      x.engine.onChange(loadProjectState(x.store)); // the server's watcher
+      await x.until("the run to halt", () => x.queue().run?.state === "halted", LONGER.step);
+      await x.until("the check to end", () => x.engine.idle(), LONGER.step);
+    });
+    assert.deepEqual(seen.map(String), [], "no rejection nobody handled");
+    assert.match(x.queue().run!.reason!, /queues\/Q\/checks\.yaml cannot be read/);
+    const state = loadProjectState(x.store);
+    assert.ok(state.warnings.some((w) => /queue Q checks:/.test(w)), "the state warns of the file");
+    assert.notEqual(x.queue().steps[0]!.status, "review", "not to its review as if its checks had run");
+    assert.equal(x.queue().steps[0]!.status, "checking");
+  } finally { x.engine.shutdown(); x.cap.shutdown(); }
 });
 
 test("the failing tests' names, from node:test's spec reporter and TAP; none from an unknown format", () => {

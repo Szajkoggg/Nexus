@@ -220,7 +220,7 @@ export class CheckRunner {
     a.ticket.granted.then((grant) => this.runSet(a, grant, q.id, st.id, done.id, cwd, state), () => {
       this.active.delete(q.id);
       this.update(q.id, st.id, done.id, (s) => { s.state = "interrupted"; });
-    });
+    }).catch((e: unknown) => this.failed(q.id, st.id, e));
   }
 
   private async runSet(a: Active, grant: Grant, queue: string, step: string, done: string, cwd: string, state: ProjectState): Promise<void> {
@@ -321,6 +321,8 @@ export class CheckRunner {
 
   /** Runs `command` under the grant in `cwd`, its output to `log`; the root's exit code, once its tree has ended. */
   private async execute(a: Active, grant: Grant, command: string, cwd: string, log: string): Promise<{ ok: boolean; code: number | null; output: string; timedOut: boolean }> {
+    // A stop ends the grant (the ticket's cancel): nothing starts under it after that, whichever caller missed the stop.
+    if (a.stopped) return { ok: false, code: null, output: "", timedOut: false };
     mkdirSync(join(log, ".."), { recursive: true });
     const out = createWriteStream(log);
     let tail = "";
@@ -376,7 +378,7 @@ export class CheckRunner {
     const a = this.ask(q.id, st.id);
     a.ticket.granted.then((grant) => this.runBase(a, grant, q.id, st.id, done.id, check, set.checks.indexOf(check), cwd, base, state), () => {
       this.active.delete(q.id); // withdrawn (a drain, a stop): asked again when the run goes on
-    });
+    }).catch((e: unknown) => this.failed(q.id, st.id, e));
   }
 
   /** The disputed check on the queue's base commit, in a worktree of its own, with the project's setup (P6). */
@@ -390,6 +392,8 @@ export class CheckRunner {
       this.host.ended(queue);
       try { await run("git", ["worktree", "add", "--detach", dir, base], { cwd, windowsHide: true }); added = true; }
       catch (e) { return this.endBase(queue, step, done, state, "unrunnable", `git worktree add of ${base} failed: ${String((e as Error).message).split("\n")[0]}`); }
+      // Stopped while the worktree was added (queue LF, F1): the grant has ended, nothing more runs under it.
+      if (a.stopped) return;
       const setup = state.project.defaults.worktree_setup?.trim();
       if (setup) {
         const r = await this.execute(a, grant, setup, dir, join(this.store.queueDir(queue), `checks/${step}/base-setup.log`));
@@ -405,7 +409,8 @@ export class CheckRunner {
     } finally {
       if (a.stopped && !this.closed) this.update(queue, step, done, (s) => { if (s.dispute?.base?.state === "running") s.dispute.base = { state: "queued" }; });
       if (added) await run("git", ["worktree", "remove", "--force", dir], { cwd, windowsHide: true }).catch(() => {});
-      rmSync(dir, { recursive: true, force: true });
+      try { rmSync(dir, { recursive: true, force: true }); }
+      catch (e) { console.error(`queue ${queue} step ${step}: the base run's folder ${dir} was not removed: ${(e as Error).message}`); }
       this.release(grant, queue);
     }
   }
@@ -429,7 +434,10 @@ export class CheckRunner {
   private decide(q: QueueView, st: StepView, done: StepDone, state: ProjectState): void {
     const set = checkSetOf(q.check_runs, st.id, done.id);
     const d = set?.dispute;
-    if (!set || !d || d.decided) return;
+    if (!set || !d || d.outcome) return;
+    // An accept recorded, its outcome not (the server ended between the two writes, queue LF, F5): the acceptance is
+    // finished now. (A fix verdict writes its outcome with the decision.)
+    if (d.decided) { if (d.decided.verdict === "accept") this.accept(q.id, st.id, done.id, state); return; }
     const ev = st.timeline.findLast((e): e is Decided => e.type === "check.decided" && e.at >= d.at);
     if (!ev) return;
     this.update(q.id, st.id, done.id, (s) => {
@@ -451,6 +459,20 @@ export class CheckRunner {
     catch (e) { console.error(`queue ${queue} step ${step}: the fix queue for the accepted failure was not proposed: ${(e as Error).message}`); }
     this.update(queue, step, done, (s) => { s.state = "accepted"; s.dispute!.outcome = "accepted"; if (fixQueue) s.fix_queue = fixQueue; });
     this.host.ended(queue);
+  }
+
+  /**
+   * Something the checks' chain did not expect threw (an unreadable or unwritable checks.yaml, a failed spawn): it is
+   * logged and the run halts with it, as an engine error halts a run, instead of a rejection nobody handles ending the
+   * server (queue LF, F1). The grant was released by the chain's own `finally`; a Resume runs the checks again.
+   */
+  private failed(queue: string, step: string, e: unknown): void {
+    const message = e instanceof Error ? e.message : String(e);
+    console.error(`queue ${queue} step ${step}: the checks Nexus runs failed: ${e instanceof Error ? e.stack : message}`);
+    this.active.delete(queue);
+    if (this.closed) return;
+    try { this.host.halt(queue, `step ${step}: the checks Nexus runs failed: ${message.split("\n")[0]}`); }
+    catch (err) { console.error(`queue ${queue}: the run was not halted: ${(err as Error).message}`); }
   }
 
   // ---------------------------------------------------------------- the machine
@@ -567,6 +589,12 @@ function proposeFixQueue(store: ProjectStore, state: ProjectState, queue: string
   const open = state.queues.find((x) => x.origin === "ci" && x.status !== "done" && x.status !== "cancelled" && keys.some((k) => (x.description ?? "").split("\n").includes(k)));
   if (open) {
     const q = store.readQueue(open.id);
+    // This occurrence is there already: the acceptance is finished after a restart (queue LF, F5). The queue was made for
+    // it when it is its only occurrence.
+    const lines = (q.description ?? "").split("\n");
+    if (lines.some((l) => l.includes(`: queue ${queue}, step ${step} (round ${set.round}, check-fix round ${set.fix + 1}),`))) {
+      return { id: open.id, created: lines.filter((l) => /^- \S+: queue /.test(l)).length === 1 };
+    }
     store.writeQueue({ ...q, description: `${(q.description ?? "").trimEnd()}\n${occurrence}\n` });
     return { id: open.id, created: false };
   }

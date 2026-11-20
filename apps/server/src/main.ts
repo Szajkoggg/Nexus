@@ -70,13 +70,19 @@ if (process.env.NEXUS_LOG) {
 }
 // An uncaught exception ends the server, as it always did: its stack goes to the log (or to stderr without one) and the
 // process exits with 1. It is also recorded in <NEXUS_HOME>/crash.json (src/crash.ts), which the next server shows on
-// the dashboard and tells every project's orchestrator. An unhandled rejection comes here too (Node's default, throw).
+// the dashboard and tells every project's orchestrator.
 process.on("uncaughtException", (err) => {
   const line = `${new Date().toISOString()} uncaught: ${err.stack ?? err}\n`;
   // Written at once: the stream's write would still be pending when the process exits.
   try { if (logFile) appendFileSync(logFile, line); else process.stderr.write(line); } catch { /* the record below still tells */ }
   recordCrash(err);
   process.exit(1);
+});
+// A rejected promise nobody handled is logged, and the server goes on (queue LF, F1): such a promise is a background
+// chain (a check, a timer's work) whose failure belongs to one run, not a reason to end every worker with the server.
+// The code handles its chains' failures where they belong (a halted run); this is the backstop that keeps them local.
+process.on("unhandledRejection", (reason) => {
+  console.error(`${new Date().toISOString()} unhandled rejection (the server goes on): ${reason instanceof Error ? reason.stack : String(reason)}`);
 });
 
 // A backstop: a hand-over folder that is not this NEXUS_HOME's is not ours. Refuse it before anything is written or

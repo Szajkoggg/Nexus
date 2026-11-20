@@ -77,6 +77,20 @@ function toReviewAsOf(q: QueueView, st: StepView, done: StepDone): void {
   if (q.status === "running") q.status = "waiting";
 }
 
+/**
+ * The queue's checks.yaml cannot be read (queue LF, F6): whether a step's latest done passed its checks is unknown, so a
+ * step its events put in review is held as `checking`, as its checks had not run, rather than reviewed as if they had
+ * passed. The state warns of the file, and the engine halts the run with the reason.
+ */
+function holdUnread(q: QueueView, st: StepView): void {
+  const done = lastDone(st);
+  if (st.status !== "review" || !done) return;
+  st.checking = { phase: "queued", since: done.at };
+  st.status = "checking";
+  st.review_with = undefined;
+  if (q.status === "waiting") q.status = "running";
+}
+
 /** The set of checks Nexus ran (or runs) for the step's latest step.done, if any. */
 export function latestCheckSet(q: Pick<QueueView, "check_runs">, st: Pick<StepView, "id" | "timeline">): CheckSet | undefined {
   const done = lastDone(st);
@@ -100,6 +114,7 @@ export function acceptedByNexus(q: Pick<QueueView, "check_runs">, st: Pick<StepV
  * `defaults.check_fix_limit`, given to a step in a check-fix round.
  */
 export function applyCheckSets(q: QueueView, st: StepView, limit?: number): void {
+  if (q.check_runs_error !== undefined) return holdUnread(q, st);
   const entry = q.check_runs?.steps[st.id];
   if (!entry) return;
   st.checks_by = entry.by;

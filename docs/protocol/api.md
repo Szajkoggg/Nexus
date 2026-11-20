@@ -271,7 +271,9 @@ spans that ended in it, `what` and `ms`; empty when nothing measured ran). The s
 and `error` (its first line), until the user closes its notice; null otherwise. `POST /api/server/crash/dismiss`
 (`at`: the crash's time) closes it in every dashboard, answering `crash` (null); 400 without `at`, 409 when that is no
 longer the latest crash. Every project's orchestrator session that ran before the crash is told it once
-(`notify:crash:<at>` in its `applied.jsonl`), whether or not the user closed the notice.
+(`notify:crash:<at>` in its `applied.jsonl`), whether or not the user closed the notice. A rejected promise nobody
+handled is no crash (queue LF, F1): it is logged (`unhandled rejection (the server goes on): <stack>`) and the server
+goes on, as one background chain's failure belongs to its run, not to every worker.
 
 **Planned deploys.** Instead of at once, a deploy can wait for a step or a queue of a project, or for a time (decided
 by the user on 2026-11-14, docs/ideas/deploy-timing.md). `nexus server update --after <queue>[/<step>]` plans it for a

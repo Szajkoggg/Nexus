@@ -784,6 +784,12 @@ export class Engine implements Member {
     if (this.restarting.has(run.session)) return; // the process restarts with another model or effort
     let live = this.host.get(run.session);
     const current = run.step ? q.steps.find((s) => s.id === run.step) : undefined;
+    // The checks file cannot be read: whether the step's checks passed is unknown, and the derivation holds it in
+    // `checking` (protocol checks.ts, holdUnread). Nothing here can run them or tell: the run halts with the reason
+    // (queue LF, F6).
+    if (current?.status === "checking" && q.check_runs_error !== undefined) {
+      return this.halt(queueId, `queues/${queueId}/checks.yaml cannot be read (${q.check_runs_error.split("\n")[0]}): Nexus cannot tell whether the checks of step ${current.id} passed. Repair the file, or move it aside (the step then goes to its review without Nexus's checks), and Resume`);
+    }
     // A survey step that reported its end is checked at once, while its turn may still be going and before its review.
     if (current && this.surveyLeftWork(queueId, q, current)) return;
     if ((!live || live.proc.state === "exited") && this.exitedAfterOutcome.has(run.session)) {

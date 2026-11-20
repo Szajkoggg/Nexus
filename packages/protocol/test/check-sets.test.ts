@@ -3,7 +3,7 @@
 // the base or waits for the orchestrator's decision; an accepted one goes to review.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ProjectStore, approveQueue, loadProjectState, newId, type CheckSet, type Event } from "../src/index.ts";
@@ -207,4 +207,16 @@ test("a verdict written before Nexus accepted the failure still does not count",
   assert.equal(x.step().status, "review", "the acceptance at 8 came before the failure was accepted at 20");
   verdict("user", 21, { type: "review.accepted" });
   assert.equal(x.step().status, "done");
+});
+
+test("an unreadable checks.yaml: a step waiting for its review is not taken as reviewed with its checks run; the state warns (queue LF, F6)", () => {
+  const x = setup();
+  const d = x.done(1);
+  x.sets([x.set(d, { state: "running", granted_at: at(2) })]);
+  writeFileSync(join(x.store.queueDir("Q"), "checks.yaml"), "protocol: 1\nsteps: [unclosed\n");
+  const state = loadProjectState(x.store);
+  assert.ok(state.warnings.some((w) => /^queue Q checks:/.test(w)), JSON.stringify(state.warnings));
+  const q = state.queues[0]!;
+  assert.match(q.check_runs_error ?? "", /./, "the queue says its checks file cannot be read");
+  assert.deepEqual([q.steps[0]!.status, q.steps[0]!.checking?.phase], ["checking", "queued"]);
 });
