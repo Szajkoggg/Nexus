@@ -35,6 +35,8 @@ interface Log {
   dirty: boolean;
 }
 type Parsed = { ok: true; value: unknown } | { ok: false; error: unknown };
+/** A log as before its first read: nothing read, from no file. */
+const unread = () => ({ read: { entries: [], lines: [], errors: [] }, pos: 0, lines: 0, seen: 0, guard: Buffer.alloc(0), ino: 0n, ahead: [] as string[] });
 
 /** Freezes a value read from a file and everything in it: a reader that changes it fails rather than changes it for all. */
 function freeze<T>(v: T): T {
@@ -121,8 +123,9 @@ export class FileCache implements Reader {
   /** Reads now what has grown in these logs, not waiting for the watcher (another process appends to them now). */
   sync(files: readonly string[]): void {
     for (const f of files) {
-      const log = this.logs.get(fileKey(f));
-      if (log && !log.dirty && this.grew(log)) { log.dirty = true; if (!this.logOnly(fileKey(f))) this.version++; }
+      const k = fileKey(f);
+      const log = this.logs.get(k);
+      if (log && !log.dirty) this.dirtyIfGrown(k, log);
     }
   }
 
@@ -152,9 +155,9 @@ export class FileCache implements Reader {
     const k = fileKey(file);
     let log = this.logs.get(k);
     if (log && log.schema !== schema) log = undefined;
-    if (log && !log.dirty && this.live?.(k) && this.grew(log)) { log.dirty = true; if (!this.logOnly(k)) this.version++; }
+    if (log && !log.dirty && this.live?.(k)) this.dirtyIfGrown(k, log);
     if (!log) {
-      log = { file, schema, read: { entries: [], lines: [], errors: [] }, pos: 0, lines: 0, seen: 0, guard: Buffer.alloc(0), ino: 0n, ahead: [], dirty: true };
+      log = { file, schema, ...unread(), dirty: true };
       this.logs.set(k, log);
     }
     if (log.dirty) this.readOn(log, o);
@@ -186,6 +189,13 @@ export class FileCache implements Reader {
     return l;
   }
 
+  /** The log is read on at its next read if its file grew (or is another): a change unless it is a log only. */
+  private dirtyIfGrown(k: string, log: Log): void {
+    if (!this.grew(log)) return;
+    log.dirty = true;
+    if (!this.logOnly(k)) this.version++;
+  }
+
   /** Whether the file has more than was read, or is not the file read (then it is read again whole). */
   private grew(log: Log): boolean {
     try {
@@ -203,8 +213,7 @@ export class FileCache implements Reader {
     let fd: number;
     try { fd = openSync(log.file, "r"); } catch {
       // Gone (or never there): nothing, as a read of a missing log gives.
-      if (log.pos > 0) this.resets++;
-      Object.assign(log, { read: { entries: [], lines: [], errors: [] }, pos: 0, lines: 0, seen: 0, guard: Buffer.alloc(0), ino: 0n, ahead: [] });
+      this.reset(log);
       return;
     }
     try {
@@ -219,8 +228,7 @@ export class FileCache implements Reader {
         if (!buf.subarray(0, log.pos - from).equals(log.guard)) fresh = true;
       }
       if (fresh) {
-        if (log.pos > 0) this.resets++;
-        Object.assign(log, { read: { entries: [], lines: [], errors: [] }, pos: 0, lines: 0, ahead: [] });
+        this.reset(log);
         buf = readAt(fd, 0, size);
       }
       const start = fresh ? 0 : log.pos - from;
@@ -244,6 +252,12 @@ export class FileCache implements Reader {
       log.ino = st.ino;
       log.seen = size;
     } finally { closeSync(fd); }
+  }
+
+  /** Forgets what was read of the log (counted as a reset when there was something). */
+  private reset(log: Log): void {
+    if (log.pos > 0) this.resets++;
+    Object.assign(log, unread());
   }
 }
 
