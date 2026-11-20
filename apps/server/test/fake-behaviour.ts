@@ -76,7 +76,7 @@
 // start-up), so a test can end it before it saved anything; FAKE_REFUSE: it refuses every start, each in its way;
 // FAKE_LATE_NEXT: its first turn's result waits for a message sent after its reply, which then runs as a turn of its own.
 import { execFileSync, spawn } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, linkSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -89,9 +89,24 @@ const nexusOut = (args: string[], input?: string): string => {
   catch (e) { return `nexus failed: ${String((e as { stderr?: string }).stderr ?? e).trim()}`; }
 };
 
+/**
+ * Appends a line to a log the tests read while the fakes write it. appendFileSync creates a new file and writes to it
+ * in two calls, and a test that saw the file exist could read it empty in between (queue KM: "Unexpected end of JSON
+ * input" in two full runs). So a new file comes into place with its first line in it (written beside it, then linked
+ * there); when another process made it meanwhile, the line is appended as usual.
+ */
+function appendLine(file: string, line: string): void {
+  if (!existsSync(file)) {
+    const part = `${file}.${process.pid}.part`;
+    writeFileSync(part, line);
+    try { linkSync(part, file); return; } catch { /* made meanwhile: append */ } finally { unlinkSync(part); }
+  }
+  appendFileSync(file, line);
+}
+
 /** Records what reached the agent and how, for the tests (FAKE_LOG, one JSON line each). */
 export function record(text: string, priority: string | null, busy: boolean): void {
-  if (process.env.FAKE_LOG) appendFileSync(process.env.FAKE_LOG, JSON.stringify({ text, priority, busy, session: process.env.NEXUS_SESSION ?? null }) + "\n");
+  if (process.env.FAKE_LOG) appendLine(process.env.FAKE_LOG, JSON.stringify({ text, priority, busy, session: process.env.NEXUS_SESSION ?? null }) + "\n");
 }
 
 /** The context window a turn reports: FAKE_CONTEXT_WINDOW, else the runtime's own `fallback`. */
@@ -220,7 +235,7 @@ export function longReply(label: string): string {
  * environment the tests check (`handover`: NEXUS_HANDOVER, which no runtime may inherit).
  */
 export function recordArgs(what: Record<string, unknown>): void {
-  if (process.env.FAKE_ARGS) appendFileSync(process.env.FAKE_ARGS, JSON.stringify({ ...what, handover: process.env.NEXUS_HANDOVER ?? null }) + "\n");
+  if (process.env.FAKE_ARGS) appendLine(process.env.FAKE_ARGS, JSON.stringify({ ...what, handover: process.env.NEXUS_HANDOVER ?? null }) + "\n");
 }
 
 /**

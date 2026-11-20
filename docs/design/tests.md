@@ -271,3 +271,31 @@ busy-loop processes on the user's 16 logical cores and 4 to 6 copies of the test
   and gone to review, and the planned start had rightly taken the place it freed (9 of 12 load runs failed). The
   engine kept the limit throughout. A test that asserts something has not happened yet holds the state it relies on:
   the answer's turn now works until the test releases it (fake behaviour `askslow`).
+
+## Findings from four tests that failed once in full runs (queue KM)
+
+- **A reply is not the end of its turn** (languages.test.ts, the thinking partner's reader's language). The test
+  changed the settings as soon as the first reply was in the chat, but the turn ends a moment later, with its result.
+  A message sent in between goes into that turn, to the process it runs in, and the new settings count from the
+  message after (as designed), so under load the second reply came from the old process (1 of 30 load runs). The test
+  now waits for the turn's end (`conversations.idle()`). The same race showed a fault in the product: the stale
+  process was restarted at the turn's end even while the message sent into the turn could still run as a turn of its
+  own (Claude Code runs a `next` message that came too late for the turn after it), and the kill took the message
+  with it: no reply, ever. AgentHost now waits for the settling moment (AgentProcess.settling) before such a restart,
+  and a settling partner gets the message without a restart (conversations.test.ts, FAKE_LATE_NEXT with FAKE-SLOW, so
+  the late turn takes a moment as the CLI's does; without that the fake's reply was already in the pipe at the kill).
+- **A log a fake creates must not be seen empty** (orchestrator.test.ts "the orchestrator gets Nexus's helper agents",
+  agent-changes.test.ts "the orchestrator that ran the update gets its outcome"). Both failed with "Unexpected end of
+  JSON input" on the first line of FAKE_ARGS or FAKE_LOG: the file existed but was empty. appendFileSync creates the
+  file and writes it in two calls, and a test that polls for the file can read it in between. Not reproduced: 78 and
+  30 load runs passed, and a probe (a writer creating 1200 files under 16 busy cores, a reader polling each) never saw
+  one empty; it needs the writer held between the two calls, as a full run's hundreds of processes do. Concurrent
+  appends of several fakes to one log are atomic (6 processes, 12000 lines, none torn). The fakes now bring a new
+  log into place with its first line in it (written beside it, then hard-linked; appended when another process made
+  it meanwhile).
+- **Not found: the partner not resumed after an update's hand-over** (chat-update.test.ts, "--now: …", twice in queue
+  AC). The successor resumed the worker and the orchestrator but sent the partner nothing within 60 s. Not reproduced
+  in about 55 load runs (alone and beside other files). Ruled out: lost appends, a record cleared before the hand-over
+  (only resumeCutOff clears it). The pattern fits an exception in the successor between the orchestrator's resume and
+  the partners' (activate runs them in turn), which would also end it. The test now gives the successor a log of its
+  own and, on a failure, prints its tail, the partner's chat and record, and the successor's crash.json (queue KM3).
