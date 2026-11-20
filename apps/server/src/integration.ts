@@ -132,10 +132,10 @@ export function pullBase(store: ProjectStore, state: Pick<ProjectState, "project
   const status = checkoutStatus(cwd);
   if (!status?.clean || !status.head || !ctx.sha) return undefined;
   // The intent first (queue LF, F4): a server ending in the middle of the merge leaves it for the next to abort.
-  const before0 = store.readGit(q.id) ?? { protocol: 1 as const, steps: {} };
-  store.writeGit(q.id, { ...before0, pulling: { at: now(), before, base: ctx.base, sha: ctx.sha, from: status.head } });
+  const prior = store.readGit(q.id) ?? { protocol: 1 as const, steps: {} };
+  store.writeGit(q.id, { ...prior, pulling: { at: now(), before, base: ctx.base, sha: ctx.sha, from: status.head } });
   const m = mergeBase(cwd, ctx.base, { from: status.head, sha: ctx.sha });
-  const g = { ...before0, pulling: undefined };
+  const g = { ...prior, pulling: undefined }; // written in every outcome below: the merge has ended
   if (!m || m.result === "contained") { store.writeGit(q.id, g); return undefined; }
   const pulls = g.pulls ?? [];
   if (m.result === "conflict") {

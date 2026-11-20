@@ -203,7 +203,7 @@ export class Engine implements Member {
    * The usage limits turns failed on, by usage window (`limit`, `codex_limit`): full until the reset the failure named,
    * at every route choice (usage.json records no rejection). In memory: after a restart a turn meets the limit again.
    */
-  private readonly limitsMet: Record<string, { utilization: number; resets_at: string }> = {};
+  private readonly limitsMet = new Map<string, { utilization: number; resets_at: string }>();
   /**
    * A late turn at a session switch (queue LF, F3). `injected`: the inbox entries sent into a session's running turn
    * (`next`); at the turn's end they become `lastInjected`, which the runtime read in that turn unless it runs them as a
@@ -461,7 +461,7 @@ export class Engine implements Member {
     this.clearTimer(queueId);
     // A usage wait resumed (by the user, or by itself at the reset): the limits turns met are not held against the next
     // choices; a turn that meets one again records it again (limitsMet).
-    if (run.state === "usage_wait") for (const k of Object.keys(this.limitsMet)) delete this.limitsMet[k];
+    if (run.state === "usage_wait") this.limitsMet.clear();
     this.writeRun(queueId, toResumed(run, q.revision));
     // A step left unfinished (stopped, failed, interrupted) is continued rather than skipped; one waiting for an
     // answer just waits on (the answer arrives through the inbox). A rejected step is never run again.
@@ -1565,7 +1565,7 @@ export class Engine implements Member {
     if (f.kind === "usage" && f.resetsAt) {
       // The runtime counts as full until the reset the failure names, at this choice and at the next step's too.
       const runtime = this.store.readSession(run.session).runtime;
-      if (runtime === "claude" || runtime === "codex") this.limitsMet[limitWindow(runtime)] = { utilization: 1, resets_at: f.resetsAt };
+      if (runtime === "claude" || runtime === "codex") this.limitsMet.set(limitWindow(runtime), { utilization: 1, resets_at: f.resetsAt });
       // A turn after the step's outcome (the context summary asked for at its boundary): the step is not taken up again
       // on its fallback; the next step opens where the route says now, on the fallback or after a wait (queue LF, F2).
       const step = run.step ? this.queue(loadProjectState(this.store), queueId).steps.find((s) => s.id === run.step) : undefined;
@@ -1795,12 +1795,12 @@ export class Engine implements Member {
 
   // ---------------------------------------------------------------- usage limits
 
-  /** Where a step opens given the account's usage windows now and the project's threshold (routing.ts, chooseRoute). */
   /** The usage windows now: usage.json's, and the limits turns failed on (limitsMet). */
   private usageWindows(): Record<string, { utilization: number; resets_at?: string }> {
-    return { ...(readUsage()?.windows ?? {}), ...this.limitsMet };
+    return { ...(readUsage()?.windows ?? {}), ...Object.fromEntries(this.limitsMet) };
   }
 
+  /** Where a step opens given the account's usage windows now and the project's threshold (routing.ts, chooseRoute). */
   private chooseFor(state: ProjectState, routed: Routed): ReturnType<typeof chooseRoute> {
     return chooseRoute(routed, { windows: this.usageWindows(), threshold: state.project.defaults.usage_pause_threshold, nowMs: this.clock.now(), project: state.project });
   }
