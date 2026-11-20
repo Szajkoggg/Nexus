@@ -1070,6 +1070,12 @@ export const GitFile = z.object({
     at: Time, before: z.string(), base: z.string(), sha: z.string(), from: z.string(),
     to: z.string().optional(), conflicts: z.array(z.string()).optional(), setup: z.boolean().optional(),
   })).optional(),
+  /**
+   * A merge of the base at a step boundary under way (queue LF, F4): written before `git merge` runs, removed once it
+   * ended. Still there, the server ended in the middle of it: the next boundary aborts that merge (its MERGE_HEAD the
+   * `sha`, HEAD still `from`) before anything else, and pulls again. A merge Nexus did not start is never aborted.
+   */
+  pulling: z.object({ at: Time, before: z.string(), base: z.string(), sha: z.string(), from: z.string() }).optional(),
   steps: z.record(z.string(), z.array(z.object({
     session: Id,
     start: z.string().nullable(), started_at: Time,

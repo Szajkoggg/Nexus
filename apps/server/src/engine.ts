@@ -31,7 +31,7 @@ import { Recurrer, type RecurringSet } from "./recurring.ts";
 import { StaticReminder } from "./static-reminder.ts";
 import { gitBranch, recordSetup, runSetup, setupPending, worktreeFor } from "./worktree.ts";
 import { closingContext } from "./closing.ts";
-import { integrationContext, mergeBase, mergeConflicts, mergedText, pullBase, pullBefore, type IntegrationContext } from "./integration.ts";
+import { integrationContext, mergeBase, mergeConflicts, mergedText, pullBase, pullBefore, recoverPull, type IntegrationContext } from "./integration.ts";
 import { Coordinator, bringsBack, refusalText, waitingText, type Member } from "./coordinator.ts";
 import type { Capacity } from "./capacity.ts";
 import { CHECK_DRAIN_WAIT_MS, CheckRunner } from "./check-runs.ts";
@@ -920,6 +920,8 @@ export class Engine implements Member {
     if (current && this.heldAtLimit(queueId, run, `step ${next.id}`)) return;
     // At a step boundary the base is merged into the queue's branch when it merges cleanly (queue MI); a change of the
     // setup's inputs makes the setup run again first (below).
+    // A merge of the base a server left half done here is aborted first; one Nexus did not start halts the run (F4).
+    if (current) { const left = recoverPull(this.store, q); if (left) return this.halt(queueId, left); }
     if (current && current.id !== next.id && !next.integration) pullBase(this.store, state, q, next.id);
     if (this.worktreeSetup(queueId, run, q)) return;
     // The integration step without a model, when the merge is plain (queue MI).

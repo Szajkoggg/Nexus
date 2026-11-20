@@ -305,6 +305,64 @@ test("a server that stopped in the middle of the merge: the half-done merge is a
   } finally { hold.done(); x.stop(); }
 });
 
+test("a server that stopped in the middle of the merge at a step boundary: the next server aborts it, keeps the user's own files, and opens the next step on a clean merge (queue LF, F4)", async () => {
+  const hold = holdWork();
+  const x = setup([step("Q1", "slow"), step("Q2", "slow")]);
+  // At level 1 Q1 waits for the user's review: a still point before the boundary at which the server is stopped.
+  setStepLevel(x.store, "Q", "Q1", 1);
+  try {
+    x.engine.start("Q", { runtime: "claude" });
+    await x.until("Q1 at work", () => x.queue().steps[0]!.status === "running");
+    const main = x.onMain("main.txt", "from main\n");
+    hold.release("Q1");
+    await x.until("Q1 in review", () => x.queue().steps[0]!.status === "review");
+    x.stop();
+    // What a server ending in the middle of the boundary's merge leaves: its intent recorded, the merge under way.
+    const from = x.git(x.wt(), "rev-parse", "HEAD");
+    x.store.writeGit("Q", { ...x.store.readGit("Q")!, pulling: { at: new Date().toISOString(), before: "Q2", base: "main", sha: main, from } });
+    x.git(x.wt(), "merge", "--no-commit", "--no-ff", main);
+    const mergeHead = () => existsSync(join(x.git(x.wt(), "rev-parse", "--absolute-git-dir"), "MERGE_HEAD"));
+    assert.ok(mergeHead(), "a merge under way");
+    writeFileSync(join(x.wt(), "notes.txt"), "the user's own notes\n"); // the user's, untracked
+    x.restart();
+    x.engine.resume("Q");
+    setStepLevel(x.store, "Q", "Q1", 2); // the review is the fake reviewer's now
+    acceptReviews(x.store);
+    x.engine.onChange(loadProjectState(x.store));
+    await x.until("Q2 at work", () => x.queue().steps[1]!.status === "running");
+    const opened = x.openings().find((o) => o.step === "Q2")!.text;
+    assert.ok(!mergeHead(), "the half-done merge was aborted before Q2 opened");
+    assert.equal(x.git(x.wt(), "status", "--porcelain", "--untracked-files=no"), "", "Q2 opened on a clean worktree");
+    assert.equal(readFileSync(join(x.wt(), "notes.txt"), "utf8"), "the user's own notes\n", "the user's file kept");
+    x.git(x.wt(), "merge-base", "--is-ancestor", main, "HEAD"); // merged again, cleanly
+    assert.match(opened, /Before this step Nexus merged main \(\w{12}\) into this branch: 1 commit/);
+    const g = x.store.readGit("Q")!;
+    assert.equal(g.pulling, undefined, "the intent is gone");
+    assert.deepEqual(g.pulls!.map((p) => [p.before, p.sha, !!p.to]), [["Q2", main, true]]);
+  } finally { hold.release(); hold.done(); x.stop(); }
+});
+
+test("a merge at a step boundary Nexus did not start (no intent recorded) is left alone: the next step does not open on it", async () => {
+  const hold = holdWork();
+  const x = setup([step("Q1", "slow"), step("Q2", "slow")]);
+  setStepLevel(x.store, "Q", "Q1", 1);
+  try {
+    x.engine.start("Q", { runtime: "claude" });
+    await x.until("Q1 at work", () => x.queue().steps[0]!.status === "running");
+    const main = x.onMain("main.txt", "from main\n");
+    hold.release("Q1");
+    await x.until("Q1 in review", () => x.queue().steps[0]!.status === "review");
+    x.git(x.wt(), "merge", "--no-commit", "--no-ff", main); // the user's own merge, under way
+    setStepLevel(x.store, "Q", "Q1", 2);
+    acceptReviews(x.store);
+    x.engine.onChange(loadProjectState(x.store));
+    await x.until("the run to halt", () => x.queue().run?.state === "halted");
+    assert.match(x.queue().run!.reason!, /a merge is under way in .+ that Nexus did not start/);
+    assert.ok(existsSync(join(x.git(x.wt(), "rev-parse", "--absolute-git-dir"), "MERGE_HEAD")), "left as it was");
+    assert.equal(x.queue().steps[1]!.status, "pending");
+  } finally { hold.release(); hold.done(); x.stop(); }
+});
+
 test("a server that stopped after the merge commit, before the step's done: the step runs again and finds nothing to merge", async () => {
   const hold = holdWork();
   const x = setup([step("Q1", "slow")]);

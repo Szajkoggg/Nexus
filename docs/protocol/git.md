@@ -132,7 +132,17 @@ says "Before this step Nexus merged main (<sha>) into this branch: <n> commits, 
 conflicts with this branch in <files>; Nexus did not merge it. Do not resolve it here: the queue's integration step
 will." While the last pull is a conflict and the queue is not done, `nexus status` (and the orchestrator's overview)
 shows it under the queue: "base: main (<sha>) conflicts with the queue's branch in <files> (found before step <step>,
-<time>); Nexus did not merge it, the integration step will". The dashboard does not show the pulls yet. With the pulls:
+<time>); Nexus did not merge it, the integration step will". The dashboard does not show the pulls yet.
+
+Before it runs `git merge`, Nexus records the intent in `git.yaml` as `pulling` (`at`, `before`, `base`, `sha`, `from`)
+and removes it once the merge ended (queue LF, F4). Before any step opens at a boundary, a `pulling` still there means
+a server ended in the middle of that merge: when MERGE_HEAD is its `sha` and HEAD its `from`, the merge is aborted
+(`git merge --abort`, as the integration step's half-done merge is; it keeps untracked files, and the merge began
+without changes to tracked files), the record goes, and the base is pulled again. A merge under way in the worktree
+that Nexus did not start (no such record) is left as it is, and the run halts ("a merge is under way in <path> that
+Nexus did not start …") rather than open the next step on it; so does a merge of its own that would not abort.
+
+With the pulls:
 
 - the closing step's commit range starts at the last `pulls[].sha` merged in (`to` present), and ends at the latest of
   the own steps' round ends and that pull's `to`; else as above;

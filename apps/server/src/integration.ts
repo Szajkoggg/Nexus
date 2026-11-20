@@ -130,14 +130,17 @@ export function pullBase(store: ProjectStore, state: Pick<ProjectState, "project
   const ctx = baseBranch(store, state, q);
   if (!ctx.base) return undefined;
   const status = checkoutStatus(cwd);
-  if (!status?.clean || !status.head) return undefined;
+  if (!status?.clean || !status.head || !ctx.sha) return undefined;
+  // The intent first (queue LF, F4): a server ending in the middle of the merge leaves it for the next to abort.
+  const before0 = store.readGit(q.id) ?? { protocol: 1 as const, steps: {} };
+  store.writeGit(q.id, { ...before0, pulling: { at: now(), before, base: ctx.base, sha: ctx.sha, from: status.head } });
   const m = mergeBase(cwd, ctx.base, { from: status.head, sha: ctx.sha });
-  if (!m || m.result === "contained") return undefined;
-  const g = store.readGit(q.id) ?? { protocol: 1 as const, steps: {} };
+  const g = { ...before0, pulling: undefined };
+  if (!m || m.result === "contained") { store.writeGit(q.id, g); return undefined; }
   const pulls = g.pulls ?? [];
   if (m.result === "conflict") {
     const last = pulls.at(-1);
-    if (last && !last.to && last.before === before && last.sha === m.sha) return undefined;
+    if (last && !last.to && last.before === before && last.sha === m.sha) { store.writeGit(q.id, g); return undefined; }
     const pull: BasePull = { at: now(), before, base: ctx.base, sha: m.sha, from: m.from, conflicts: m.conflicts };
     store.writeGit(q.id, { ...g, pulls: [...pulls, pull] });
     return pull;
@@ -147,6 +150,29 @@ export function pullBase(store: ProjectStore, state: Pick<ProjectState, "project
   const setup = changed.length && g.setup ? { ...g.setup, done_at: undefined, failed: undefined, reason: `${fileList(changed, 3)} changed (the merge of ${ctx.base})` } : g.setup;
   store.writeGit(q.id, { ...g, pulls: [...pulls, pull], ...(setup ? { setup } : {}) });
   return pull;
+}
+
+/**
+ * Before a step opens at a boundary (queue LF, F4), in a queue whose base is merged there: a merge of the base a server
+ * left half done (`pulling` still recorded, MERGE_HEAD its commit, HEAD where it began) is aborted, as the integration
+ * step's is when it runs again; the record goes. `git merge --abort` keeps what was not part of the merge (the user's
+ * untracked files, and the merge began on a checkout without changes to tracked files). Returns why the step must not
+ * open: a merge under way that Nexus did not start (left as it is), or one it could not abort.
+ */
+export function recoverPull(store: ProjectStore, q: Pick<QueueView, "id" | "worktree" | "integration">): string | undefined {
+  const cwd = ownWorktree(q);
+  if (!q.integration || !cwd) return undefined;
+  const g = store.readGit(q.id);
+  const p = g?.pulling;
+  const merging = () => git(cwd, ["rev-parse", "-q", "--verify", "MERGE_HEAD"]);
+  const ours = !!p && merging() === p.sha && git(cwd, ["rev-parse", "HEAD"]) === p.from;
+  if (ours) git(cwd, ["merge", "--abort"]);
+  if (p) store.writeGit(q.id, { ...g!, pulling: undefined });
+  const left = merging();
+  if (!left) return undefined;
+  return ours
+    ? `the merge of ${p!.base} (${p!.sha.slice(0, 12)}) a server left half done in ${cwd} could not be aborted: abort it (git merge --abort), then Resume`
+    : `a merge is under way in ${cwd} that Nexus did not start (MERGE_HEAD ${left.slice(0, 12)}): the next step does not open on it; finish or abort it, then Resume`;
 }
 
 /** The pull made right before `step` opens now (the last one, naming it, after the step's last round began). */
