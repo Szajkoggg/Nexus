@@ -188,7 +188,8 @@ rewrite (tokens, cost, model) may skip the decisions is a question for SM4's evi
 
 ## Today's readers
 
-The readers of the history in the server, what each reads now, and the step that moves it.
+The readers of the history in the server as SM1 found them, what each read then, and the step that moved it (all
+moved: "Built in SM3" and "Built in SM4" below).
 
 | Reader | Where | Reads now | Moves in |
 |---|---|---|---|
@@ -212,7 +213,7 @@ The readers of the history in the server, what each reads now, and the step that
 | Review helpers | `review-helper.ts` | fresh states; events, applied, refusals whole | SM4 |
 | Merger, merge back, deploy plan | `merger.ts` `onChange`, `mergeback.ts`, `deploy-plan.ts` | the snapshot; fresh states in merge back | SM4 |
 | Ideas | `GET …/ideas`, `…/matches`, `…/links`, `…/statuses`; `ideas-read.ts`; the reconciliation in `changed()` | the snapshot; every session's events (hand-overs); the notes folder | SM4 |
-| Search | `GET …/search` (`search.ts`) | the whole history, on request | SM4 (reads the model's events; logs by their files, off the loop) |
+| Search | `GET …/search` (`search.ts`) | the whole history, on request | SM4 (reads the model's events; chats by their files) |
 | The hand-over check | `handover.ts` | one state per project, before loading | stays (before the model exists) |
 | The CLI | `packages/cli` | the files | stays (another process) |
 
@@ -365,6 +366,17 @@ the orchestrator and the conversations and the engine's `state` option are gone:
   moves every model's version; the model also derives again by itself once the away period of the state it holds has
   ended, so no decision reads a passed away mode. The recurring queues' `next_at` is shown only (their decisions compute
   their own times).
+- **Templates**: while the project has recurring queues, the model derives again when a template file was added,
+  removed or edited (`templatesStamp`: a listing of the three template folders and a stat per file, at each read of
+  the state), so the recurring queues' views (their hash and status) are not older than the templates.
+- **The watcher**: each project's model is also fed by Node's own recursive watcher of its `.nexus`
+  (`ProjectModel.watched`; chokidar stays for the notes folder and as before). Chokidar on Windows dropped 7 of 40
+  atomic rewrites of one file made a few tens of milliseconds apart (Node's watcher none of 100): before the model a
+  dropped event only delayed a rebuild, but a model that misses one keeps the file's old copy until its next reported
+  change (ideas-api's last wait for a queue rewritten by the test timed out 1 in 5 at SM3's code). A folder's own
+  `change` report is skipped (its files report themselves), and the cache forgets what lies under a path only once the
+  path is gone. A write that makes a folder (the first `recurring/<id>.yaml`) now also makes the folder's existence be
+  asked again: since SM3 the cache kept the folder as missing until the watcher reported it.
 - **The search** reads the events from the model (they are in memory for the state anyway); the chats, which the model
   keeps only once opened, and the reports are read from their files on the request, as before.
 
@@ -387,6 +399,27 @@ The gate holds the decisions too: an event appended, then what every decision on
 decision, each queue's files, every session's files and logs, the ideas' hand-offs) reads that line and the 64 bytes
 before it and derives the state once, the same at 1x and 4x. A runtime record rewritten now reads that record and its
 session's events from their position (64 bytes).
+
+**SV1's measurement before and after** (`node scripts/perf-load.ts --minutes 3`, the same load as SM3's; before: the
+code at SM3's last commit, its source folders checked out into the tree and restored; after: SM4's):
+
+| | Before (SM3) | After (SM4) |
+|---|---|---|
+| Start until the first answer | 1.4 s | 1.1 s |
+| Event loop delay p50 / p99 / max | 15 ms / 1.0 s / 4.5 s | 16 ms / 0.37 s / 1.1 s |
+| The decisions on a change (`engine (big)`, count, mean, max) | 48, 309 ms, 1.0 s | 62, 40 ms, 0.31 s |
+| A derivation of the state (`state big`, count, mean) | 85, 64 ms | 89, 72 ms |
+| Notifications the dashboards got (each made them read 12 endpoints) | 748 | 1,142 |
+| What a dashboard waited for `state` (mean / p95) | 100 ms / 189 ms | 53 ms / 203 ms |
+| … for `server` (mean / p95) | 644 ms / 3.4 s | 394 ms / 1.0 s |
+| … for the queue's git (mean / p95) | 1.1 / 4.5 s | 0.69 / 1.7 s |
+| Steps accepted in 3 minutes | 18 | 18 |
+
+The decisions on a change cost an eighth of what they did: each read the state again from the files several times
+(the engine's own `loadProjectState`, the orchestrator's on every change, the coordinator's per member); now they share
+the one derivation. In the same three minutes the dashboards were answered 1.5 times as often, and the longest block
+of the loop fell from 4.5 s to 1.1 s. What is left in the longest blocks is the dashboards' git reads (SV2's item) and
+the derivation itself (about 70 ms here; a derivation per queue is the proposal below if it grows).
 
 ## Beyond the decision (proposals, not decided)
 
