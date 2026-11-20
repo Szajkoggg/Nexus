@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { constants, tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { until, LONGER } from "./wait.ts";
@@ -19,11 +19,11 @@ for (const how of ["pipe closed", "pipe closed during blocked input", "host kill
     const script = join(root, "runtime.mjs");
     writeFileSync(script, `import {spawn} from 'node:child_process';
 const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {stdio: 'ignore', windowsHide: true});
-console.log(JSON.stringify({root: process.pid, child: child.pid}));
+console.log(JSON.stringify({root: process.pid, child: child.pid, priority: (await import('node:os')).getPriority()}));
 setInterval(() => {}, 1000);
 `);
     const host = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", fileURLToPath(new URL("../src/worker-job.ps1", import.meta.url))], { cwd: root, stdio: "pipe", windowsHide: true });
-    let data = "", errors = "", family: { root: number; child: number } | undefined;
+    let data = "", errors = "", family: { root: number; child: number; priority: number } | undefined;
     host.stdin.on("error", () => {});
     host.stderr.on("data", (chunk: Buffer) => { errors += chunk.toString(); });
     host.stdout.on("data", (chunk: Buffer) => {
@@ -39,6 +39,8 @@ setInterval(() => {}, 1000);
     try {
       await until("runtime and child ready", () => !!family, LONGER.step, () => errors);
       assert.ok(alive(family!.root) && alive(family!.child));
+      // The job runs its whole tree below normal priority (queue SV3).
+      assert.equal(family!.priority, constants.priority.PRIORITY_BELOW_NORMAL);
       if (how === "host killed") host.kill();
       else host.stdin.end(how === "pipe closed during blocked input" ? `W ${encode("x".repeat(512_000))}\n` : undefined);
       await closed;

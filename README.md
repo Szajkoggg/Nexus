@@ -678,6 +678,10 @@ names another lock file, `NEXUS_TEST_LOCK_STALE_MS` another age at which a lock 
 same lock: while a full run started outside Nexus holds it, Nexus starts no heavy operation of its own, and `nexus
 status` says so (the machine's line, "The capacity coordinator" in docs/protocol/checks.md).
 
+The checks Nexus runs and everything a worker starts (its runtime, the tests and builds it runs) run below normal
+priority: in Task Manager they show "Below normal", and on a busy machine the Nexus server and your own programs go
+first. A full `npm test` you start yourself in a terminal runs at normal priority, as before.
+
 The tests that run fake runtimes or servers wait 10 s for what they expect (`NEXUS_TEST_WAIT_MS` sets it, e.g. higher
 on a slow machine; `apps/server/test/wait.ts`), so a change that breaks many of them fails the suite in minutes.
 A test that fails only now and then usually fails on a busy machine: `scripts/load-tests.mjs` runs the files given

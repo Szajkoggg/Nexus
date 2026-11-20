@@ -2,6 +2,7 @@
 // keep Node's ordinary child process. The control frames never enter a runtime's JSON stream (docs/protocol/runtimes.md, "Windows worker process host (PT)").
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
+import { constants, setPriority } from "node:os";
 import { PassThrough, Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
 
@@ -21,7 +22,18 @@ const encode = (text: string) => Buffer.from(text, "utf8").toString("base64");
 
 export function spawnRuntimeChild(bin: string, args: string[], options: SpawnOptions): RuntimeChild {
   if (options.owned && process.platform === "win32") return new WorkerProcess(bin, args, options);
-  return spawn(bin, args, { cwd: options.cwd, env: options.env, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+  const child = spawn(bin, args, { cwd: options.cwd, env: options.env, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+  if (options.owned) belowNormal(child.pid);
+  return child;
+}
+
+/**
+ * A worker's or a check's process below normal priority, as the Windows job sets for its whole tree (worker-job.cs,
+ * queue SV3): elsewhere a nice value its children inherit. Never fails a start: a process already gone stays as it is.
+ */
+export function belowNormal(pid: number | undefined): void {
+  if (pid === undefined) return;
+  try { setPriority(pid, constants.priority.PRIORITY_BELOW_NORMAL); } catch { /* ended already, or not allowed */ }
 }
 
 class WorkerProcess extends EventEmitter implements RuntimeChild {

@@ -13,7 +13,7 @@ import { spawn } from "node:child_process";
 import { hostname } from "node:os";
 import { newId, writeCapacity, type CapacityFile, type CapacityRequest } from "@nexus/protocol";
 import { fullTestHeld, fullTestLockFile, fullTestStaleMs } from "@nexus/protocol/full-test-lock";
-import { spawnRuntimeChild, type RuntimeChild } from "./worker-process.ts";
+import { belowNormal, spawnRuntimeChild, type RuntimeChild } from "./worker-process.ts";
 
 /** What asks for the heavy slot: a step's checks. */
 export type HeavyRequest = Pick<CapacityRequest, "kind" | "project" | "queue" | "step">;
@@ -225,6 +225,7 @@ function track(bin: string, args: string[], o: { cwd: string; env?: NodeJS.Proce
   // Elsewhere a process group of its own; on Windows without a job (tests), only the root is known.
   const windows = process.platform === "win32";
   const child = spawn(bin, args, { cwd: o.cwd, env, detached: !windows, windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
+  belowNormal(child.pid);
   child.stdin.end();
   const group = () => {
     if (windows) { if (child.exitCode === null && child.signalCode === null) child.kill(); return; }

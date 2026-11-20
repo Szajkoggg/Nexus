@@ -9,7 +9,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { constants, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ProjectStore, readCapacity } from "@nexus/protocol";
@@ -181,4 +181,22 @@ test("a starting server writes the file anew, a cancelled request leaves the lin
   } finally { next.shutdown(); }
   await assert.rejects(next.request({ kind: "checks", project: "d", queue: "T", step: "T1" }).granted, /stopped/);
   assert.ok(!existsSync(lock) || readFileSync(lock, "utf8") === "", "the coordinator never takes the test lock itself");
+});
+
+test("a granted process and the children it starts run below normal priority (queue SV3)", async () => {
+  const capacity = new Capacity({ testLock: lockFile() });
+  try {
+    const grant = await capacity.request({ kind: "checks", project: "a", queue: "SV", step: "SV3" }).granted;
+    const code = `const os = require("node:os");
+const child = require("node:child_process").spawnSync(process.execPath, ["-e", "console.log(require('node:os').getPriority())"], { encoding: "utf8", windowsHide: true });
+console.log("priority " + os.getPriority() + " " + child.stdout.trim());`;
+    const p = grant.spawn(process.execPath, ["-e", code], { cwd: tmpdir() });
+    let out = "";
+    p.child.stdout.on("data", (d: Buffer) => { out += d.toString(); });
+    p.child.stderr.on("data", () => {});
+    await p.done;
+    grant.end();
+    const below = constants.priority.PRIORITY_BELOW_NORMAL;
+    assert.match(out, new RegExp(`priority ${below} ${below}`), out);
+  } finally { capacity.shutdown(); }
 });

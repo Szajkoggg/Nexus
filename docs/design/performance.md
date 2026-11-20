@@ -221,3 +221,50 @@ their own, each step a boundary with a base pull):
 The engine's git was a small part of the loop's time already after SV2 (about 9 s of 180); the blocks left are the
 state rebuilds and the engine's decisions (SV1's items 2 and 3). The loop's percentiles vary between runs more than
 this change moves them.
+
+## Below normal priority for tests and workers (queue SV3)
+
+Beside the full test suite the server answered three to four times slower (SV1): the suite's processes take every
+core, and the server's one thread and its git processes wait their turn among them. Two ways to give the server the
+edge on Windows were weighed:
+
+- **The server above normal.** One process to change, but only its own thread gains: the git processes it starts
+  (380 ms each beside the suite) and the fake or real agents stay normal and keep waiting among the tests, and above
+  normal is not inherited on Windows. It would also put the server ahead of the user's own programs (an editor, a
+  browser), and the live instance would need a restart through its start scripts to get it.
+- **The tests below normal (chosen).** The checks Nexus runs and every worker's tree (the runtime, and the tests,
+  builds and tools it starts) run in the Windows job of `worker-job.cs`, which now limits its members' priority class
+  to below normal (`JOB_OBJECT_LIMIT_PRIORITY_CLASS`): every process of the job, whatever starts it, and none can
+  raise its own. The server, its git processes, the orchestrator and the conversations stay normal and go first; so
+  do the user's own programs. Elsewhere (Linux, macOS) the server sets the nice value of the process it starts
+  (`belowNormal`, `PRIORITY_BELOW_NORMAL`), which its children inherit.
+
+What it changes for the rest of the machine: Nexus's tests and workers give way to every normal program. On a machine
+busy with something else they run slower than before (and a timing-sensitive test with them); on an otherwise idle
+machine a lower priority class changes nothing, the cores are free. A full `npm test` started in a terminal by the
+user, and anything outside Nexus, runs as before. The test suite's parallelism is unchanged.
+`apps/server/test/capacity.test.ts` and `worker-job.test.ts` read the priority of a granted process, of its child and
+of a worker runtime: below normal.
+
+**Before and after**, `node scripts/perf-load.ts --minutes 3` beside a full `npm test`: before at normal priority,
+started in a terminal; after as a Nexus check runs it (the launcher of `check-runs.ts` in the job of `worker-job.cs`),
+its 32 test processes shown "BelowNormal". The fake agents of the measured instance run in such jobs too, so they
+were below normal in the second run as well.
+
+| | Before | After |
+|---|---|---|
+| Start until the first answer | 133 s | 82 s |
+| Event loop delay p50 / p99 / max | 0.50 / 12.9 / 13.4 s | 0.19 / 7.3 / 8.1 s |
+| A state rebuild (`state big`, mean) | 939 ms | 587 ms |
+| The engine's decision on a change (`engine (big)`, mean) | 781 ms | 486 ms |
+| A synchronous `git rev-parse` (mean) | 465 ms | 348 ms |
+| Changes the server handled in 3 minutes | 56 | 110 |
+| What a dashboard waited for `state` (mean / p95) | 3.8 / 12.6 s | 1.3 / 3.8 s |
+| … for `server` | 14.4 / 30.2 s | 7.4 / 16.9 s |
+| … for the queue's git | 27.4 / 43.6 s | 12.3 / 23.0 s |
+| The full suite itself | 813 s, 1425 passed | 820 s, 1426 passed |
+
+The server keeps up with twice the changes and answers in a third of the time, but it is still two to three times
+slower than on a quiet machine (a rebuild 587 ms against 260 ms): below normal gives way only where the processor
+has a choice, and the suite's disk and memory traffic and its git processes are not prioritised by it. The suite took
+as long as before: on this machine nothing else wanted the cores it gave way on.
