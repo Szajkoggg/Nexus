@@ -179,9 +179,11 @@ export class AgentHost<E extends object = object> {
     proc.on("refusal", (r) => on.refusal?.(r));
     proc.on("background", (w) => on.background?.(w));
     proc.on("compacted", (c) => on.compacted?.(c));
+    // A restart held for the end of a turn (restartAfterTurn): its process ends now, the next start makes a new one.
+    const endHeld = () => { this.afterTurn.delete(proc); this.ended.add(proc); proc.kill(); this.forget(l); };
     proc.on("settled", () => {
       // A restart held for the moment a turn of the runtime's own could still start (turnEnd below): none came.
-      if (this.afterTurn.has(proc) && proc.state === "idle") { this.afterTurn.delete(proc); this.ended.add(proc); proc.kill(); this.forget(l); }
+      if (this.afterTurn.has(proc) && proc.state === "idle") endHeld();
       on.settled?.();
     });
     proc.on("facts", (f) => {
@@ -200,7 +202,7 @@ export class AgentHost<E extends object = object> {
       // A restart after the turn: not while the runtime may still run a message sent into this turn as a turn of its
       // own (AgentProcess.settling, queue KM): killed now, the process would take that message with it. It ends after
       // that turn, or once the moment is over (settled).
-      if (this.afterTurn.has(proc) && !proc.settling) { this.afterTurn.delete(proc); this.ended.add(proc); proc.kill(); this.forget(l); }
+      if (this.afterTurn.has(proc) && !proc.settling) endHeld();
       on.turnEnd?.(end);
     });
     proc.on("exit", (code) => {
