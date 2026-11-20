@@ -209,8 +209,6 @@ export class Recurrer {
     const at = iso(this.now);
     // After N queues the count starts again from what is done now (the queue made here is a recurring run: not counted).
     const base: RecurringFile = { ...r, handled: iso(due), ...(r.after_queues !== undefined ? { baseline: this.doneNow() } : {}) };
-    // A run keeps that start with it: an approval or a set later counts from it again.
-    const runBaseline = base.baseline ? { baseline: base.baseline } : {};
     const pass = (kind: NonNullable<RecurringFile["skipped"]>["kind"], reason: string) => this.store.writeRecurring({ ...base, skipped: { due: iso(due), at, kind, reason } });
     if (r.paused) { this.store.writeRecurring(base); return; }
     const resolved = this.resolve(r);
@@ -236,11 +234,12 @@ export class Recurrer {
         ...q, status: "approved", updated_at: at,
         approvals: [{ revision: q.revision, at, hash: revisionHash(q), standing: { id: r.id, approved_at: r.approval.at, hash: r.approval.hash } }],
       });
-      this.store.writeRecurring({ ...base, last: { queue, at, due: iso(due), ...(how === "catch-up" ? { caught_up: iso(due) } : {}), ...runBaseline }, skipped: undefined });
+      // A run keeps its count's start with it (`last.baseline`): an approval or a set later counts from it again.
+      this.store.writeRecurring({ ...base, last: { queue, at, due: iso(due), ...(how === "catch-up" ? { caught_up: iso(due) } : {}), baseline: base.baseline }, skipped: undefined });
       this.deps.plan(queue, { after: [], by: "user", reason: `recurring ${r.id}: ${when} (standing approval of ${r.approval.at})` });
     } catch (e) {
       const made = queue && this.store.queueIds().includes(queue);
-      this.store.writeRecurring({ ...base, ...(made ? { last: { queue: queue!, at, due: iso(due), ...runBaseline } } : {}), skipped: { due: iso(due), at, kind: "failed", reason: (e as Error).message } });
+      this.store.writeRecurring({ ...base, ...(made ? { last: { queue: queue!, at, due: iso(due), baseline: base.baseline } } : {}), skipped: { due: iso(due), at, kind: "failed", reason: (e as Error).message } });
     }
   }
 }
