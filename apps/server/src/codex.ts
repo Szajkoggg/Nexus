@@ -66,6 +66,8 @@ type Json = Record<string, any>;
 
 /** thread/resume of a thread Codex never saved (0.167.2, probed 2026-11-15: JSON-RPC error -32600). */
 const NO_ROLLOUT = /no rollout found for thread id/i;
+/** How a request fails that the process's exit leaves unanswered (CodexSession.request). */
+const EXITED = "codex exited";
 
 /** CodexErrorInfo values worth trying again: overloaded, the server's own error, the network, a short rate limit. */
 const CODEX_PASSING = new Set([
@@ -120,6 +122,8 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
   private buffer = "";
   private nextId = 0;
   private readonly pending = new Map<number, { resolve: (v: Json) => void; reject: (e: Error) => void; method: string }>();
+  /** The process has exited, for good: `state` may still be set by a line read after the exit (stdout drains after it). */
+  private exited = false;
   private threadId?: string;
   private turnId?: string;
   /** Messages waiting for the running turn to end (or for the thread to be ready). */
@@ -183,9 +187,11 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
     this.proc.on("error", (err) => this.emit("activity", { kind: "error", text: `could not start codex: ${err.message}` }));
     this.proc.on("exit", (code) => {
       this.state = "exited";
+      this.exited = true;
       this.openCommands.clear();
       this.openAgents.clear();
-      for (const p of this.pending.values()) p.reject(new Error("codex exited"));
+      for (const p of this.pending.values()) p.reject(new Error(EXITED));
+      this.pending.clear();
       if (code && this.lastStderr.trim()) this.emit("activity", { kind: "error", text: this.lastStderr.trim().slice(-500) });
       this.emit("exit", code);
     });
@@ -231,6 +237,7 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
 
   private startCompact(): void {
     void this.request("thread/compact/start", { threadId: this.threadId }).catch((err) => {
+      if (this.exited) return; // its exit is the end, as turn/start's
       const text = (err as Error).message;
       this.emit("activity", { kind: "error", text: `thread/compact/start: ${text}` });
       this.state = "idle";
@@ -331,6 +338,7 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
   }
 
   private startTurn(text: string): void {
+    if (this.exited) return; // its exit is the end: no turn starts after it
     this.state = "working";
     const o = this.options;
     const sandboxPolicy = !o.permissions && o.sandbox === "workspace-write"
@@ -356,7 +364,13 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
       });
   }
 
+  /**
+   * A JSON-RPC request; settles with its response, or fails when the process exits first. One made after the exit (a
+   * line read after it, a continuation of an earlier response) fails at once: nothing would ever answer it, and its
+   * write to the closed input fails silently.
+   */
   private request(method: string, params: Json): Promise<Json> {
+    if (this.exited) return Promise.reject(new Error(EXITED));
     const id = ++this.nextId;
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject, method });

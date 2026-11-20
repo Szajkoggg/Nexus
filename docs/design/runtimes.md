@@ -36,6 +36,10 @@ Part of [the design](../DESIGN.md).
   an error event of its input; unheard, it ends the server. On 2026-11-18 the model list's `initialized` to a Codex
   that had answered and exited did so. Once the exit is seen, Node has destroyed the input and a write fails only to
   its callback; reading the output of an exited process ends it, no error.
+- **A Codex request after the exit fails at once** (queue KM). The exit fails the requests still waiting ("codex
+  exited"), but its output can drain after the exit event, and a line read then (a turn's end with a message waiting)
+  used to start a turn whose turn/start nothing would answer: the promise waited for ever and the session read as
+  working. `CodexSession` now fails a request made after the exit at once, and starts no turn after it.
 
 - **Codex has the same moves.** `turn/steer` reaches a running turn (checked live), `thread/resume` continues a
   thread with its context (checked: the agent recalled the previous queue), token usage and the context window
