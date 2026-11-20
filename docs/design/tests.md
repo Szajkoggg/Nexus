@@ -221,6 +221,12 @@ git dozens of times. In the full suite every core is busy, so each file takes ab
   starts). The server keeps the defaults; tests spread `QUICK_ENGINE` (wait.ts: 50 and 200 ms) into their options,
   `FAST` (engine-setup.ts) included. The fakes write their last events before the turn ends, so the shorter settle
   changes nothing they test.
+- **A moment the product measures from the runtime's event is the test's when its fake acts after the engine**
+  (`EngineOptions.lateTurnMs`, Claude's `lateTurnMs`, default 1.5 s: how long after a turn's result the CLI may still
+  start a turn of its own). The late-turn test (context-care.test.ts, queue LF, F3) starts that turn only once the
+  engine shows it waits, so the turn begins as long after the result as the engine takes to look: 0.5 s alone, 1.0 to
+  1.7 s under load, past the default (queue CI3). The test holds the moment open and its gate decides when the turn
+  starts; every other test keeps the default.
 - **"Nothing happens" waits are kept, shorter, sized to what would have happened**: twice the timer that would have
   acted (500 ms past `startupMs`, 200 ms past a retry or a nudge), and a push that would have started is waited for
   with `pusher.settled()` after twice the test's 150 ms look.

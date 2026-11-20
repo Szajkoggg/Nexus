@@ -119,6 +119,11 @@ export interface ClaudeOptions {
   briefingFile?: string;
   /** More settings for the session (--settings, as JSON): a thinking partner's WebFetch guard hook. */
   settings?: string;
+  /**
+   * How long after a turn's end a turn of the CLI's own may still begin (LATE_TURN_MS by default): the settling and a
+   * stop's settle last that long. Tests that start the late turn themselves, after Nexus looked, hold it open.
+   */
+  lateTurnMs?: number;
   env: Record<string, string>;
 }
 
@@ -343,7 +348,7 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
    */
   private settleStop(): void {
     clearTimeout(this.settle);
-    const wait = this.nextInTurn ? LATE_TURN_MS : 0;
+    const wait = this.nextInTurn ? this.lateTurnMs : 0;
     this.nextInTurn = 0;
     this.settle = setTimeout(() => {
       if (this.state !== "idle") return; // a turn of the CLI's own runs (it is being interrupted): its result settles
@@ -353,6 +358,8 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
       for (const t of held) this.send(t);
     }, wait);
   }
+
+  private get lateTurnMs(): number { return this.options.lateTurnMs ?? LATE_TURN_MS; }
 
   /** See AgentProcess.settling. */
   get settling(): boolean { return this.late !== undefined; }
@@ -365,7 +372,7 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
    */
   private startSettling(): void {
     this.stopSettling();
-    this.late = setTimeout(() => { this.late = undefined; if (this.state === "idle") this.emit("settled"); }, LATE_TURN_MS);
+    this.late = setTimeout(() => { this.late = undefined; if (this.state === "idle") this.emit("settled"); }, this.lateTurnMs);
   }
 
   private stopSettling(): void {

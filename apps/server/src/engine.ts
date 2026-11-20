@@ -108,6 +108,12 @@ export interface EngineOptions {
    * make it short: the fake runtimes write theirs before the turn ends.
    */
   turnSettleMs?: number;
+  /**
+   * How long after a Claude turn's end a turn of the CLI's own may still begin (ClaudeOptions.lateTurnMs: by default
+   * claude.ts's LATE_TURN_MS). A test whose fake starts that turn only after the engine looked holds the moment open,
+   * so how long the engine takes to look (under load, past the default) does not decide the test.
+   */
+  lateTurnMs?: number;
   /** After the engine starts, how long before it resumes held runs and looks at planned starts (STARTUP_MS); tests make it short. */
   startupMs?: number;
   /** How long a turn's end waits for background work (BACKGROUND_LIMIT_MS); tests make it short. */
@@ -226,6 +232,7 @@ export class Engine implements Member {
   private readonly retryBaseMs: number;
   private readonly usageMarginMs: number;
   private readonly turnSettleMs: number;
+  private readonly lateTurnMs: number | undefined;
   private readonly startupMs: number;
   private readonly backgroundLimitMs: number;
   private readonly boundary?: EngineOptions["boundary"];
@@ -257,6 +264,7 @@ export class Engine implements Member {
     this.retryBaseMs = options.retryBaseMs ?? RETRY_BASE_MS;
     this.usageMarginMs = options.usageMarginMs ?? USAGE_MARGIN_MS;
     this.turnSettleMs = options.turnSettleMs ?? TURN_SETTLE_MS;
+    this.lateTurnMs = options.lateTurnMs;
     this.startupMs = options.startupMs ?? STARTUP_MS;
     this.backgroundLimitMs = options.backgroundLimitMs ?? BACKGROUND_LIMIT_MS;
     this.boundary = options.boundary;
@@ -1644,6 +1652,7 @@ export class Engine implements Member {
         // path: the worker's cwd may be a worktree whose own .nexus does not exist.
         disallowedTools: project.defaults.protect_nexus ? nexusDenyRules(this.store.dir) : undefined,
         appendSystemPrompt: workerBriefing(project.languages),
+        ...(this.lateTurnMs !== undefined ? { lateTurnMs: this.lateTurnMs } : {}),
         env,
       } };
     };

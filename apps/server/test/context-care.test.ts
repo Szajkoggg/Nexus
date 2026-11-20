@@ -27,7 +27,7 @@ function movableClock(): Clock & { ahead: number } {
 }
 
 /** `clock`: the engine's; `hold`: steps wait in review until the test accepts them (accept()). */
-function setup(behaviours: string[], opts: { fill: number; window?: number; care?: boolean; noSummary?: boolean; clock?: Clock; hold?: boolean }) {
+function setup(behaviours: string[], opts: { fill: number; window?: number; care?: boolean; noSummary?: boolean; clock?: Clock; hold?: boolean; lateTurnMs?: number }) {
   const root = mkdtempSync(join(tmpdir(), "nexus-care-"));
   process.env.NEXUS_HOME = join(root, "home");
   process.env.FAKE_LOG = join(root, "fake.log");
@@ -41,7 +41,7 @@ function setup(behaviours: string[], opts: { fill: number; window?: number; care
     stop_conditions: [], checks: [], steps, approvals: [], withdrawals: [], history: [],
   });
   approveQueue(store, "Q");
-  const engine: Engine = new Engine(store, () => { routeAnswers(store); if (!opts.hold) acceptReviews(store); engine.onChange(loadProjectState(store)); }, { retryBaseMs: 30, usageMarginMs: 100, ...(opts.clock ? { clock: opts.clock } : {}) });
+  const engine: Engine = new Engine(store, () => { routeAnswers(store); if (!opts.hold) acceptReviews(store); engine.onChange(loadProjectState(store)); }, { retryBaseMs: 30, usageMarginMs: 100, ...(opts.clock ? { clock: opts.clock } : {}), ...(opts.lateTurnMs ? { lateTurnMs: opts.lateTurnMs } : {}) });
   const queue = () => loadProjectState(store).queues.find((q) => q.id === "Q")!;
   const received = (): Received[] => (existsSync(process.env.FAKE_LOG!) ? readFileSync(process.env.FAKE_LOG!, "utf8").trim().split("\n").map((l) => JSON.parse(l) as Received) : []);
   const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms, () => `; run: ${JSON.stringify(queue().run)}; steps: ${queue().steps.map((s) => `${s.id}=${s.status}`).join(" ")}`);
@@ -181,8 +181,11 @@ for (const runtime of ["claude", "codex"] as const) {
 
 test("claude: a message sent into the step's last turn that the runtime runs as a late turn of its own: the switch waits for that moment, the old session works no turn beside the fresh one, and the message goes to the fresh session (queue LF, F3)", async () => {
   process.env.FAKE_LATE_NEXT = "1";
-  const { store, engine, queue, received, until, done, accept } = setup(["summary", "done"], { fill: 0.8 });
-  // The late turn starts once this file exists: after the engine looked at the turn's end and the switch waits.
+  // The late turn starts once this file exists: after the engine looked at the turn's end and the switch waits. The
+  // moment in which the runtime may still start it is held open past the test's own waits (lateTurnMs), so the late
+  // turn the test starts falls inside it however long the engine takes to look: under load that took 1.0 to 1.7 s
+  // after the turn's result, past the default 1.5 s (queue CI3). The gate, not a time, decides when it starts.
+  const { store, engine, queue, received, until, done, accept } = setup(["summary", "done"], { fill: 0.8, lateTurnMs: 4 * LONGER.run });
   const gate = join(dirname(process.env.FAKE_LOG!), "late-gate");
   process.env.FAKE_LATE_GATE = gate;
   try {
